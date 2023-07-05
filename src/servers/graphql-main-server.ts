@@ -13,6 +13,8 @@ import { GALOY_API_PORT } from "@config"
 
 import { gqlMainSchema, mutationFields, queryFields } from "@graphql/main"
 
+import { startApolloServerForCombinedSchema } from "../services/ibex-plugin/servers/graphql-combined-server"
+
 import { isAuthenticated, startApolloServer } from "./graphql-server"
 import { walletIdMiddleware } from "./middlewares/wallet-id"
 import { startApolloServerForAdminSchema } from "./graphql-admin-server"
@@ -63,6 +65,7 @@ if (require.main === module) {
       await Promise.race([
         startApolloServerForCoreSchema(),
         startApolloServerForAdminSchema(),
+        startApolloServerForCombinedSchema(),
       ])
     })
     .catch((err) => graphqlLogger.error(err, "server error"))

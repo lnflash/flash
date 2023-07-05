@@ -39,6 +39,16 @@ export const defaultTestClientConfig = (
   }
 }
 
+export const defaultTestIbexConfig = (
+  authToken?: SessionToken,
+): ApolloTestClientConfig => {
+  return {
+    authToken,
+    graphqlUrl: `http://${OATHKEEPER_HOST}:${OATHKEEPER_PORT}/ibex/graphql`,
+    graphqlSubscriptionUrl: `ws://${OATHKEEPER_HOST}:${OATHKEEPER_PORT}/ibex/graphql`,
+  }
+}
+
 export const adminTestClientConfig = (
   authToken?: SessionToken,
 ): ApolloTestClientConfig => {

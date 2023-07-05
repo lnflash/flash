@@ -62,7 +62,16 @@ import { checkedToUserId } from "@domain/accounts"
 import { CouldNotFindAccountFromKratosIdError } from "@domain/errors"
 import { ValidationError, parseUnknownDomainErrorFromUnknown } from "@domain/shared"
 
+
+import resolvers from "../services/ibex-plugin/resolvers"
+import {
+  AuthenticationAPI,
+  ExternalWalletAPI,
+  BaseAPI,
+} from "../services/ibex-plugin/datasources"
+
 import { playgroundTabs } from "../graphql/playground"
+import { redis } from "../services/redis"
 
 import authRouter from "./middlewares/auth-router"
 import healthzHandler from "./middlewares/healthz"
@@ -72,6 +81,8 @@ import { idempotencyMiddleware } from "./middlewares/idempotency"
 const graphqlLogger = baseLogger.child({
   module: "graphql",
 })
+
+const baseAPI = new BaseAPI(redis)
 
 const apolloConfig = getApolloConfig()
 
@@ -255,6 +266,7 @@ export const startApolloServer = async ({
   const apolloServer = new ApolloServer({
     schema,
     cache: "bounded",
+    resolvers,
     introspection: apolloConfig.playground,
     plugins: apolloPlugins,
     context: (context) => {
@@ -279,6 +291,11 @@ export const startApolloServer = async ({
         throw mapError(parseUnknownDomainErrorFromUnknown(err))
       }
     },
+    dataSources: () => ({
+      authenticationAPI: new AuthenticationAPI(redis),
+      externalWalletAPI: new ExternalWalletAPI(baseAPI),
+      baseAPI: new BaseAPI(redis),
+    }),
   })
 
   app.use("/auth", authRouter)
@@ -580,7 +597,7 @@ export const startApolloServer = async ({
           `in dev mode, ${type} server should be accessed through oathkeeper reverse proxy at ${
             type === "admin"
               ? "http://localhost:4002/admin/graphql"
-              : "http://localhost:4002/graphql"
+              : "http://localhost:4002/ibex/graphql"
           }`,
         )
       }
