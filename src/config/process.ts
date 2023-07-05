@@ -13,6 +13,7 @@ export const GALOY_API_KEEPALIVE_TIMEOUT_MS = process.env.GALOY_API_KEEPALIVE_TI
   : (3600 + 600) * 1000 // 1 hour + 10 minutes
 export const GALOY_API_PORT = process.env.GALOY_API_PORT || 4012
 export const GALOY_ADMIN_PORT = process.env.GALOY_ADMIN_PORT || 4001
+export const GALOY_IBEX_PORT = process.env.GALOY_IBEX_PORT || 4003
 
 const jwtSecret = process.env.JWT_SECRET
 if (!jwtSecret) {
