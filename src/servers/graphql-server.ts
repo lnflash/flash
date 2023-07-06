@@ -62,7 +62,6 @@ import { checkedToUserId } from "@domain/accounts"
 import { CouldNotFindAccountFromKratosIdError } from "@domain/errors"
 import { ValidationError, parseUnknownDomainErrorFromUnknown } from "@domain/shared"
 
-
 import resolvers from "../services/ibex-plugin/resolvers"
 import {
   AuthenticationAPI,
