@@ -120,11 +120,11 @@ type ExternalWallet implements Wallet {
 }
 
 extend interface Account {
-    externalWallets: [ExternalWallet]
+    externalWallets: [ExternalWallet!]!
 }
 
 extend type ConsumerAccount {
-    externalWallets: [ExternalWallet]
+    externalWallets: [ExternalWallet!]!
   }
 `
 

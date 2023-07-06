@@ -1,6 +1,4 @@
 // import BusinessAccount from "./object/business-account"
-import IbexWallet from "../../services/ibex-plugin/types/object/ibex-wallet"
-
 import BtcWallet from "./object/btc-wallet"
 import ConsumerAccount from "./object/consumer-account"
 import UsdWallet from "./object/usd-wallet"
@@ -16,6 +14,5 @@ export const ALL_INTERFACE_TYPES = [
   // BusinessAccount,
   BtcWallet,
   UsdWallet,
-  IbexWallet,
   OneDayAccountLimit,
 ]
