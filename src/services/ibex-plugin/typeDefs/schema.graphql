@@ -298,6 +298,20 @@ type Currency {
   symbol: String!
 }
 
+type DepositFeesInformation {
+  minBankFee: String!
+
+  """
+  below this amount minBankFee will be charged
+  """
+  minBankFeeThreshold: String!
+
+  """
+  ratio to charge as basis points above minBankFeeThreshold amount
+  """
+  ratio: String!
+}
+
 input DeviceNotificationTokenCreateInput {
   deviceToken: String!
 }
@@ -407,10 +421,24 @@ type ExternalWalletSignInResponse {
 }
 
 """
+Feedback shared with our user
+"""
+scalar Feedback
+
+input FeedbackSubmitInput {
+  feedback: Feedback!
+}
+
+type FeesInformation {
+  deposit: DepositFeesInformation!
+}
+
+"""
 Provides global settings for the application which might have an impact for the user.
 """
 type Globals {
   buildInformation: BuildInformation!
+  feesInformation: FeesInformation!
 
   """
   The domain name for lightning addresses accepted by this Galoy instance
@@ -573,11 +601,6 @@ enum InvoicePaymentStatus {
   PENDING
 }
 
-type JwtPayload {
-  authToken: String
-  errors: [Error!]!
-}
-
 scalar Language
 
 type LnInvoice {
@@ -592,6 +615,11 @@ input LnInvoiceCreateInput {
   Amount in satoshis.
   """
   amount: SatAmount!
+
+  """
+  Optional invoice expiration time in minutes.
+  """
+  expiresIn: Minutes
 
   """
   Optional memo for the lightning invoice.
@@ -610,6 +638,11 @@ input LnInvoiceCreateOnBehalfOfRecipientInput {
   """
   amount: SatAmount!
   descriptionHash: Hex32Bytes
+
+  """
+  Optional invoice expiration time in minutes.
+  """
+  expiresIn: Minutes
 
   """
   Optional memo for the lightning invoice.
@@ -666,6 +699,11 @@ type LnNoAmountInvoice {
 
 input LnNoAmountInvoiceCreateInput {
   """
+  Optional invoice expiration time in minutes.
+  """
+  expiresIn: Minutes
+
+  """
   Optional memo for the lightning invoice.
   """
   memo: Memo
@@ -677,6 +715,11 @@ input LnNoAmountInvoiceCreateInput {
 }
 
 input LnNoAmountInvoiceCreateOnBehalfOfRecipientInput {
+  """
+  Optional invoice expiration time in minutes.
+  """
+  expiresIn: Minutes
+
   """
   Optional memo for the lightning invoice.
   """
@@ -771,6 +814,11 @@ input LnUsdInvoiceCreateInput {
   amount: CentAmount!
 
   """
+  Optional invoice expiration time in minutes.
+  """
+  expiresIn: Minutes
+
+  """
   Optional memo for the lightning invoice.
   """
   memo: Memo
@@ -787,6 +835,11 @@ input LnUsdInvoiceCreateOnBehalfOfRecipientInput {
   """
   amount: CentAmount!
   descriptionHash: Hex32Bytes
+
+  """
+  Optional invoice expiration time in minutes.
+  """
+  expiresIn: Minutes
 
   """
   Optional memo for the lightning invoice. Acts as a note to the recipient.
@@ -819,6 +872,11 @@ Text field in a lightning payment transaction
 """
 scalar Memo
 
+"""
+(Positive) amount of minutes
+"""
+scalar Minutes
+
 type MobileVersions {
   currentSupported: Int!
   minSupported: Int!
@@ -841,6 +899,7 @@ type Mutation {
   deviceNotificationTokenCreate(
     input: DeviceNotificationTokenCreateInput!
   ): SuccessPayload!
+  feedbackSubmit(input: FeedbackSubmitInput!): SuccessPayload!
   getExternalWalletToken(
     credentials: ExternalWalletCredentials!
   ): ExternalWalletSignInResponse!
@@ -862,14 +921,14 @@ type Mutation {
   """
   Returns a lightning invoice for an associated wallet.
   When invoice is paid the value will be credited to a BTC wallet.
-  Expires after 24 hours.
+  Expires after 'expiresIn' or 24 hours.
   """
   lnInvoiceCreate(input: LnInvoiceCreateInput!): LnInvoicePayload!
 
   """
   Returns a lightning invoice for an associated wallet.
   When invoice is paid the value will be credited to a BTC wallet.
-  Expires after 24 hours.
+  Expires after 'expiresIn' or 24 hours.
   """
   lnInvoiceCreateOnBehalfOfRecipient(
     input: LnInvoiceCreateOnBehalfOfRecipientInput!
@@ -886,14 +945,14 @@ type Mutation {
   """
   Returns a lightning invoice for an associated wallet.
   Can be used to receive any supported currency value (currently USD or BTC).
-  Expires after 24 hours.
+  Expires after 'expiresIn' or 24 hours for BTC invoices or 5 minutes for USD invoices.
   """
   lnNoAmountInvoiceCreate(input: LnNoAmountInvoiceCreateInput!): LnNoAmountInvoicePayload!
 
   """
   Returns a lightning invoice for an associated wallet.
   Can be used to receive any supported currency value (currently USD or BTC).
-  Expires after 24 hours.
+  Expires after 'expiresIn' or 24 hours for BTC invoices or 5 minutes for USD invoices.
   """
   lnNoAmountInvoiceCreateOnBehalfOfRecipient(
     input: LnNoAmountInvoiceCreateOnBehalfOfRecipientInput!
@@ -922,7 +981,7 @@ type Mutation {
   """
   Returns a lightning invoice denominated in satoshis for an associated wallet.
   When invoice is paid the equivalent value at invoice creation will be credited to a USD wallet.
-  Expires after 5 minutes (short expiry time because there is a USD/BTC exchange rate
+  Expires after 'expiresIn' or 5 minutes (short expiry time because there is a USD/BTC exchange rate
   associated with the amount).
   """
   lnUsdInvoiceCreate(input: LnUsdInvoiceCreateInput!): LnInvoicePayload!
@@ -930,7 +989,7 @@ type Mutation {
   """
   Returns a lightning invoice denominated in satoshis for an associated wallet.
   When invoice is paid the equivalent value at invoice creation will be credited to a USD wallet.
-  Expires after 5 minutes (short expiry time because there is a USD/BTC exchange rate
+  Expires after 'expiresIn' or 5 minutes (short expiry time because there is a USD/BTC exchange rate
     associated with the amount).
   """
   lnUsdInvoiceCreateOnBehalfOfRecipient(
@@ -951,7 +1010,6 @@ type Mutation {
     input: UserContactUpdateAliasInput!
   ): UserContactUpdateAliasPayload! @deprecated(reason: "will be moved to AccountContact")
   userLogin(input: UserLoginInput!): AuthTokenPayload!
-  userLoginDevice(input: UserLoginDeviceInput!): JwtPayload!
   userLoginUpgrade(input: UserLoginUpgradeInput!): UpgradePayload!
   userLogout(input: UserLogoutInput!): AuthTokenPayload!
   userQuizQuestionUpdateCompleted(
@@ -1647,10 +1705,6 @@ input UserContactUpdateAliasInput {
 type UserContactUpdateAliasPayload {
   contact: UserContact
   errors: [Error!]!
-}
-
-input UserLoginDeviceInput {
-  jwt: String
 }
 
 input UserLoginInput {

@@ -188,6 +188,68 @@ type GraphQLApplicationError implements Error {
   path: [String]
 }
 
+"""
+A wallet belonging to an account which contains a USD balance and a list of transactions.
+"""
+type IbexWallet implements Wallet {
+  accountId: ID!
+  balance: SignedAmount!
+  id: ID!
+
+  """
+  An unconfirmed incoming onchain balance.
+  """
+  pendingIncomingBalance: SignedAmount!
+  transactions(
+    """
+    Returns the items in the list that come after the specified cursor.
+    """
+    after: String
+
+    """
+    Returns the items in the list that come before the specified cursor.
+    """
+    before: String
+
+    """
+    Returns the first n items from the list.
+    """
+    first: Int
+
+    """
+    Returns the last n items from the list.
+    """
+    last: Int
+  ): TransactionConnection
+  transactionsByAddress(
+    """
+    Returns the items that include this address.
+    """
+    address: OnChainAddress!
+
+    """
+    Returns the items in the list that come after the specified cursor.
+    """
+    after: String
+
+    """
+    Returns the items in the list that come before the specified cursor.
+    """
+    before: String
+
+    """
+    Returns the first n items from the list.
+    """
+    first: Int
+
+    """
+    Returns the last n items from the list.
+    """
+    last: Int
+  ): TransactionConnection
+  walletCurrency: WalletCurrency!
+}
+
 union InitiationVia = InitiationViaIntraLedger | InitiationViaLn | InitiationViaOnChain
 
 type InitiationViaIntraLedger {

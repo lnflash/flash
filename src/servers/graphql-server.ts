@@ -63,6 +63,13 @@ import { CouldNotFindAccountFromKratosIdError } from "@domain/errors"
 import { ValidationError, parseUnknownDomainErrorFromUnknown } from "@domain/shared"
 
 import { playgroundTabs } from "../graphql/playground"
+import { redis } from "../services/redis"
+import resolvers from "../services/ibex-plugin/resolvers"
+import {
+  AuthenticationAPI,
+  ExternalWalletAPI,
+  BaseAPI,
+} from "../services/ibex-plugin/datasources"
 
 import authRouter from "./middlewares/auth-router"
 import healthzHandler from "./middlewares/healthz"
@@ -72,6 +79,8 @@ import { idempotencyMiddleware } from "./middlewares/idempotency"
 const graphqlLogger = baseLogger.child({
   module: "graphql",
 })
+
+const baseAPI = new BaseAPI(redis)
 
 const apolloConfig = getApolloConfig()
 
@@ -255,11 +264,17 @@ export const startApolloServer = async ({
   const apolloServer = new ApolloServer({
     schema,
     cache: "bounded",
+    resolvers,
     introspection: apolloConfig.playground,
     plugins: apolloPlugins,
     context: (context) => {
       return (context.req as RequestWithGqlContext).gqlContext
     },
+    dataSources:  () => ({
+      authenticationAPI: new AuthenticationAPI(redis),
+      externalWalletAPI: new ExternalWalletAPI(baseAPI),
+      baseAPI: new BaseAPI(redis),
+    }),
     formatError: (err) => {
       try {
         const reportErrorToClient =
