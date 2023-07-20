@@ -201,7 +201,7 @@ swap:
   feeAccountingEnabled: true
 apollo:
   playground: true
-  playgroundUrl: https://api.staging.galoy.io/graphql
+  playgroundUrl: http://100.87.129.37:4002/ibex/graphql
 userActivenessMonthlyVolumeThreshold: 100
 cronConfig:
   rebalanceEnabled: true
