@@ -3,21 +3,21 @@ import { EventEmitter } from "events"
 import { getWalletStatus } from "lightning"
 import { baseLogger } from "@services/logger"
 
-import { LND_HEALTH_REFRESH_TIME_MS } from "@config"
-
 import { lndsConnect } from "./auth"
 
 /*
 	Check the status of the wallet and emit current state
 */
 
-const intervals: NodeJS.Timer[] = []
+const intervals: NodeJS.Timeout[] = []
+
+const refreshTime = 20000
 
 const isUpLoop = async (param: LndConnect): Promise<void> => {
   await isUp(param)
   const interval = setInterval(async () => {
     await isUp(param)
-  }, LND_HEALTH_REFRESH_TIME_MS)
+  }, refreshTime)
   intervals.push(interval)
 }
 
@@ -50,6 +50,12 @@ export const isUp = isLndUp
 
 // launching a loop to update whether lnd are active or not
 export const activateLndHealthCheck = () => lndsConnect.forEach(isUpLoop)
+
+export const checkAllLndHealth = async () => {
+  for (const param of lndsConnect) {
+    await isLndUp(param)
+  }
+}
 
 export const stopLndHealthCheck = () => intervals.forEach(clearInterval)
 

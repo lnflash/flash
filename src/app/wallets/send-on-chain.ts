@@ -1,43 +1,44 @@
-import { BTC_NETWORK, getOnChainWalletConfig } from "@config"
+import { NETWORK, getOnChainWalletConfig } from "@config"
 
+import {
+  checkIntraledgerLimits,
+  checkTradeIntraAccountLimits,
+  checkWithdrawalLimits,
+  getPriceRatioForLimits,
+} from "@app/payments/helpers"
 import {
   btcFromUsdMidPriceFn,
   getCurrentPriceAsDisplayPriceRatio,
   usdFromBtcMidPriceFn,
 } from "@app/prices"
-import {
-  getPriceRatioForLimits,
-  checkIntraledgerLimits,
-  checkTradeIntraAccountLimits,
-  checkWithdrawalLimits,
-} from "@app/payments/helpers"
 import { removeDeviceTokens } from "@app/users/remove-device-tokens"
 
+import { AccountValidator } from "@domain/accounts"
+import { PaymentSendStatus } from "@domain/bitcoin/lightning"
+import { checkedToOnChainAddress } from "@domain/bitcoin/onchain"
+import { CouldNotFindError, InsufficientBalanceError } from "@domain/errors"
+import { displayAmountFromNumber } from "@domain/fiat"
+import { ResourceExpiredLockServiceError } from "@domain/lock"
+import { DeviceTokensNotRegisteredNotificationsServiceError } from "@domain/notifications"
 import {
   InvalidLightningPaymentFlowBuilderStateError,
   WalletPriceRatio,
 } from "@domain/payments"
-import { WalletCurrency } from "@domain/shared"
-import { displayAmountFromNumber } from "@domain/fiat"
-import { PaymentSendStatus } from "@domain/bitcoin/lightning"
-import { ResourceExpiredLockServiceError } from "@domain/lock"
-import { checkedToOnChainAddress } from "@domain/bitcoin/onchain"
-import { PaymentInputValidator, SettlementMethod } from "@domain/wallets"
-import { CouldNotFindError, InsufficientBalanceError } from "@domain/errors"
 import { OnChainPaymentFlowBuilder } from "@domain/payments/onchain-payment-flow-builder"
-import { DeviceTokensNotRegisteredNotificationsServiceError } from "@domain/notifications"
+import { WalletCurrency } from "@domain/shared"
+import { PaymentInputValidator, SettlementMethod } from "@domain/wallets"
 
 import * as LedgerFacade from "@services/ledger/facade"
 
+import { OnChainService } from "@services/bria"
 import { DealerPriceService } from "@services/dealer-price"
 import { LedgerService } from "@services/ledger"
-import { NewOnChainService } from "@services/bria"
 import { LockService } from "@services/lock"
 import { baseLogger } from "@services/logger"
 import {
   AccountsRepository,
-  WalletsRepository,
   UsersRepository,
+  WalletsRepository,
 } from "@services/mongoose"
 import { NotificationsService } from "@services/notifications"
 import { addAttributesToCurrentSpan } from "@services/tracing"
@@ -58,6 +59,11 @@ const payOnChainByWalletId = async <R extends WalletCurrency>({
   memo,
   sendAll,
 }: PayOnChainByWalletIdArgs): Promise<PayOnChainByWalletIdResult | ApplicationError> => {
+  const latestAccountState = await AccountsRepository().findById(senderAccount.id)
+  if (latestAccountState instanceof Error) return latestAccountState
+  const accountValidator = AccountValidator(latestAccountState)
+  if (accountValidator instanceof Error) return accountValidator
+
   const ledger = LedgerService()
 
   const amountToSendRaw = sendAll
@@ -91,7 +97,7 @@ const payOnChainByWalletId = async <R extends WalletCurrency>({
     sendAll,
   })
   const checkedAddress = checkedToOnChainAddress({
-    network: BTC_NETWORK,
+    network: NETWORK,
     value: address,
   })
   if (checkedAddress instanceof Error) return checkedAddress
@@ -266,6 +272,9 @@ const executePaymentViaIntraledger = async <
 
   const recipientAccount = await AccountsRepository().findById(recipientWallet.accountId)
   if (recipientAccount instanceof Error) return recipientAccount
+
+  const accountValidator = AccountValidator(recipientAccount)
+  if (accountValidator instanceof Error) return accountValidator
 
   // Limit check
   const priceRatioForLimits = await getPriceRatioForLimits(paymentFlow.paymentAmounts())
@@ -453,7 +462,7 @@ const executePaymentViaOnChain = async <
   const senderWalletDescriptor = await builder.senderWalletDescriptor()
   if (senderWalletDescriptor instanceof Error) return senderWalletDescriptor
 
-  const newOnChainService = NewOnChainService()
+  const newOnChainService = OnChainService()
 
   // Limit check
   const proposedAmounts = await builder.proposedAmounts()

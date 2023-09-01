@@ -17,11 +17,13 @@ import {
   bitcoindClient,
   bitcoindOutside,
   createMandatoryUsers,
-  createUserAndWalletFromUserRef,
-  getDefaultWalletIdByTestUserRef,
+  lndCreateOnChainAddress,
+  createUserAndWalletFromPhone,
+  getDefaultWalletIdByPhone,
   lnd1,
   mineBlockAndSyncAll,
   RANDOM_ADDRESS,
+  randomPhone,
   subscribeToBlocks,
   waitFor,
   waitUntilSyncAll,
@@ -32,18 +34,22 @@ let walletIdA: WalletId
 let walletIdD: WalletId
 let walletIdF: WalletId
 
+const phoneA = randomPhone()
+const phoneD = randomPhone()
+const phoneF = randomPhone()
+
 beforeAll(async () => {
   await createMandatoryUsers()
 
   await bitcoindClient.loadWallet({ filename: "outside" })
 
-  await createUserAndWalletFromUserRef("A")
-  await createUserAndWalletFromUserRef("D")
-  await createUserAndWalletFromUserRef("F")
+  await createUserAndWalletFromPhone(phoneA)
+  await createUserAndWalletFromPhone(phoneD)
+  await createUserAndWalletFromPhone(phoneF)
 
-  walletIdA = await getDefaultWalletIdByTestUserRef("A")
-  walletIdD = await getDefaultWalletIdByTestUserRef("D")
-  walletIdF = await getDefaultWalletIdByTestUserRef("F")
+  walletIdA = await getDefaultWalletIdByPhone(phoneA)
+  walletIdD = await getDefaultWalletIdByPhone(phoneD)
+  walletIdF = await getDefaultWalletIdByPhone(phoneF)
 })
 
 beforeEach(() => {
@@ -87,7 +93,10 @@ describe("onchainBlockEventHandler", () => {
     const scanDepth = (ONCHAIN_MIN_CONFIRMATIONS + 1) as ScanDepth
 
     await mineBlockAndSyncAll()
-    const result = await Wallets.updateOnChainReceipt({ scanDepth, logger: baseLogger })
+    const result = await Wallets.updateLegacyOnChainReceipt({
+      scanDepth,
+      logger: baseLogger,
+    })
     if (result instanceof Error) throw result
 
     const initialBlock = await bitcoindClient.getBlockCount()
@@ -102,19 +111,19 @@ describe("onchainBlockEventHandler", () => {
       isFinalBlock = lastHeight >= initialBlock + blocksToMine
     })
 
-    const address = await Wallets.lndCreateOnChainAddress(walletIdA)
+    const address = await lndCreateOnChainAddress(walletIdA)
     if (address instanceof Error) throw address
 
     const output0 = {}
     output0[address] = sat2btc(amount)
 
-    const address2 = await Wallets.lndCreateOnChainAddress(walletIdD)
+    const address2 = await lndCreateOnChainAddress(walletIdD)
     if (address2 instanceof Error) throw address2
 
     const output1 = {}
     output1[address2] = sat2btc(amount2)
 
-    const addressBria = await Wallets.createOnChainAddressForBtcWallet({
+    const addressBria = await Wallets.createOnChainAddress({
       walletId: walletIdF,
     })
     if (addressBria instanceof Error) throw addressBria

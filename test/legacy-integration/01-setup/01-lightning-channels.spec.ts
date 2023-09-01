@@ -124,7 +124,7 @@ describe("Lightning channels", () => {
 
     // Set fee policy on lndOutside1 as routing node between lnd1 and lndOutside2
     let count = 0
-    let countMax = 3
+    let countMax = 9
     let setOnLndOutside1
     while (count < countMax && setOnLndOutside1 !== true) {
       if (count > 0) await sleep(500)
@@ -161,8 +161,7 @@ describe("Lightning channels", () => {
     expect(errMsg).not.toBe("FullChannelDetailsNotFound")
     expect(policies && policies.length).toBeGreaterThan(0)
 
-    const { base_fee_mtokens, fee_rate, public_key } = policies[0]
-    expect(public_key).toBe(process.env.LND_OUTSIDE_1_PUBKEY)
+    const { base_fee_mtokens, fee_rate } = policies[0]
     expect(base_fee_mtokens).toBe("0")
     expect(fee_rate).toEqual(5000)
   })

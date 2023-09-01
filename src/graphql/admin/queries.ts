@@ -7,8 +7,10 @@ import TransactionByIdQuery from "./root/query/transaction-by-id"
 import TransactionsByHashQuery from "./root/query/transactions-by-hash"
 import AccountDetailsByUserPhoneQuery from "./root/query/account-details-by-phone"
 import AccountDetailsByUsernameQuery from "./root/query/account-details-by-username"
+import AccountDetailsByUserEmailQuery from "./root/query/account-details-by-email"
 import ListWalletIdsQuery from "./root/query/all-walletids"
 import WalletQuery from "./root/query/wallet"
+import AccountDetailsByAccountId from "./root/query/account-details-by-account-id"
 
 export const queryFields = {
   unauthed: {},
@@ -16,6 +18,8 @@ export const queryFields = {
     allLevels: AllLevelsQuery,
     accountDetailsByUserPhone: AccountDetailsByUserPhoneQuery,
     accountDetailsByUsername: AccountDetailsByUsernameQuery,
+    accountDetailsByEmail: AccountDetailsByUserEmailQuery,
+    accountDetailsByAccountId: AccountDetailsByAccountId,
     transactionById: TransactionByIdQuery,
     transactionsByHash: TransactionsByHashQuery,
     lightningInvoice: LightningInvoiceQuery,

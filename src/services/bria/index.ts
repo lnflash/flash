@@ -1,56 +1,56 @@
 import { Metadata, status } from "@grpc/grpc-js"
-import { Struct, Value, ListValue } from "google-protobuf/google/protobuf/struct_pb"
+import { ListValue, Struct, Value } from "google-protobuf/google/protobuf/struct_pb"
 
-import { getBriaConfig } from "@config"
+import { BRIA_API_KEY, getBriaConfig } from "@config"
 
 import {
   OnChainAddressAlreadyCreatedForRequestIdError,
   OnChainAddressNotFoundError,
-  PayoutNotFoundError,
   PayoutDestinationBlocked,
+  PayoutNotFoundError,
   UnknownOnChainServiceError,
 } from "@domain/bitcoin/onchain"
 import {
-  paymentAmountFromNumber,
   WalletCurrency,
   parseErrorMessageFromUnknown,
+  paymentAmountFromNumber,
 } from "@domain/shared"
 
 import { baseLogger } from "@services/logger"
-import { wrapAsyncToRunInSpan, wrapAsyncFunctionsToRunInSpan } from "@services/tracing"
+import { wrapAsyncFunctionsToRunInSpan, wrapAsyncToRunInSpan } from "@services/tracing"
 
 import { GrpcStreamClient } from "@utils"
 
+import { UnknownBriaEventError } from "./errors"
+import { eventDataHandler } from "./event-handler"
+import { BriaEventRepo } from "./event-repository"
 import {
   estimatePayoutFee,
-  findAddressByExternalId,
-  findPayoutByExternalId,
+  getAddress,
+  getPayout,
   getWalletBalanceSummary,
   newAddress,
   submitPayout,
   subscribeAll,
 } from "./grpc-client"
 import {
-  SubscribeAllRequest,
-  BriaEvent as RawBriaEvent,
-  NewAddressRequest,
-  GetWalletBalanceSummaryRequest,
-  FindAddressByExternalIdRequest,
-  SubmitPayoutRequest,
   EstimatePayoutFeeRequest,
-  FindPayoutByExternalIdRequest,
+  GetAddressRequest,
+  GetPayoutRequest,
+  GetWalletBalanceSummaryRequest,
+  NewAddressRequest,
+  BriaEvent as RawBriaEvent,
+  SubmitPayoutRequest,
+  SubscribeAllRequest,
 } from "./proto/bria_pb"
-import { UnknownBriaEventError } from "./errors"
 export { BriaPayloadType } from "./event-handler"
-import { BriaEventRepo } from "./event-repository"
-import { eventDataHandler } from "./event-handler"
 
 const briaConfig = getBriaConfig()
 const { streamBuilder, FibonacciBackoff } = GrpcStreamClient
 
 export const BriaSubscriber = () => {
   const metadata = new Metadata()
-  metadata.set("x-bria-api-key", briaConfig.apiKey)
+  metadata.set("x-bria-api-key", BRIA_API_KEY)
 
   const subscribeToAll = async (
     eventHandler: BriaEventHandler,
@@ -104,14 +104,14 @@ export const BriaSubscriber = () => {
 
 const queueNameForSpeed = (speed: PayoutSpeed): string => briaConfig.queueNames[speed]
 
-export const NewOnChainService = (): INewOnChainService => {
+export const OnChainService = (): IOnChainService => {
   const metadata = new Metadata()
-  metadata.set("x-bria-api-key", briaConfig.apiKey)
+  metadata.set("x-bria-api-key", BRIA_API_KEY)
 
-  const getBalance = async (): Promise<BtcPaymentAmount | OnChainServiceError> => {
+  const getHotBalance = async (): Promise<BtcPaymentAmount | OnChainServiceError> => {
     try {
       const request = new GetWalletBalanceSummaryRequest()
-      request.setWalletName(briaConfig.walletName)
+      request.setWalletName(briaConfig.hotWalletName)
 
       const response = await getWalletBalanceSummary(request, metadata)
 
@@ -124,7 +124,23 @@ export const NewOnChainService = (): INewOnChainService => {
     }
   }
 
-  const createOnChainAddress = async ({
+  const getColdBalance = async (): Promise<BtcPaymentAmount | OnChainServiceError> => {
+    const request = new GetWalletBalanceSummaryRequest()
+    request.setWalletName(briaConfig.coldStorage.walletName)
+
+    try {
+      const response = await getWalletBalanceSummary(request, metadata)
+
+      return paymentAmountFromNumber({
+        amount: response.getEffectiveSettled(),
+        currency: WalletCurrency.Btc,
+      })
+    } catch (error) {
+      return new UnknownOnChainServiceError(error)
+    }
+  }
+
+  const getAddressForWallet = async ({
     walletDescriptor,
     requestId,
   }: {
@@ -133,7 +149,7 @@ export const NewOnChainService = (): INewOnChainService => {
   }): Promise<OnChainAddressIdentifier | OnChainServiceError> => {
     try {
       const request = new NewAddressRequest()
-      request.setWalletName(briaConfig.walletName)
+      request.setWalletName(briaConfig.hotWalletName)
       request.setMetadata(
         constructMetadata({ galoy: { walletDetails: walletDescriptor } }),
       )
@@ -156,19 +172,39 @@ export const NewOnChainService = (): INewOnChainService => {
     }
   }
 
+  const getAddressForSwap = async (): Promise<OnChainAddress | OnChainServiceError> => {
+    try {
+      const request = new NewAddressRequest()
+      request.setWalletName(briaConfig.hotWalletName)
+      request.setMetadata(constructMetadata({ galoy: { swap: true } }))
+      const response = await newAddress(request, metadata)
+      return response.getAddress() as OnChainAddress
+    } catch (err) {
+      if (
+        err &&
+        typeof err === "object" &&
+        "code" in err &&
+        err?.code === status.ALREADY_EXISTS
+      ) {
+        return new OnChainAddressAlreadyCreatedForRequestIdError()
+      }
+      return new UnknownOnChainServiceError(err)
+    }
+  }
+
   const findAddressByRequestId = async (
     requestId: OnChainAddressRequestId,
   ): Promise<OnChainAddressIdentifier | OnChainServiceError> => {
     try {
-      const request = new FindAddressByExternalIdRequest()
+      const request = new GetAddressRequest()
       request.setExternalId(requestId)
 
-      const response = await findAddressByExternalId(request, metadata)
+      const response = await getAddress(request, metadata)
       const foundAddress = response.getAddress()
 
       if (foundAddress === undefined) return new OnChainAddressNotFoundError()
       return {
-        address: foundAddress.getAddress() as OnChainAddress,
+        address: foundAddress as OnChainAddress,
       }
     } catch (err) {
       if (
@@ -187,10 +223,10 @@ export const NewOnChainService = (): INewOnChainService => {
     journalId: LedgerJournalId,
   ): Promise<PayoutId | OnChainServiceError> => {
     try {
-      const request = new FindPayoutByExternalIdRequest()
+      const request = new GetPayoutRequest()
       request.setExternalId(journalId)
 
-      const response = await findPayoutByExternalId(request, metadata)
+      const response = await getPayout(request, metadata)
       const foundPayout = response.getPayout()
 
       if (foundPayout === undefined) return new PayoutNotFoundError()
@@ -217,7 +253,7 @@ export const NewOnChainService = (): INewOnChainService => {
   }: QueuePayoutToAddressArgs): Promise<PayoutId | OnChainServiceError> => {
     try {
       const request = new SubmitPayoutRequest()
-      request.setWalletName(briaConfig.walletName)
+      request.setWalletName(briaConfig.hotWalletName)
       request.setPayoutQueueName(queueNameForSpeed(speed))
       request.setOnchainAddress(address)
       request.setSatoshis(Number(amount.amount))
@@ -244,6 +280,26 @@ export const NewOnChainService = (): INewOnChainService => {
     }
   }
 
+  const rebalanceToColdWallet = async (
+    amount: BtcPaymentAmount,
+  ): Promise<PayoutId | OnChainServiceError> => {
+    const request = new SubmitPayoutRequest()
+    request.setWalletName(briaConfig.hotWalletName)
+    request.setPayoutQueueName(briaConfig.coldStorage.hotToColdRebalanceQueueName)
+    request.setDestinationWalletName(briaConfig.coldStorage.walletName)
+    request.setSatoshis(Number(amount.amount))
+    request.setMetadata(constructMetadata({ galoy: { rebalanceToColdWallet: true } }))
+
+    try {
+      const response = await submitPayout(request, metadata)
+
+      return response.getId() as PayoutId
+    } catch (err) {
+      const errMsg = parseErrorMessageFromUnknown(err)
+      return new UnknownOnChainServiceError(errMsg)
+    }
+  }
+
   const estimateFeeForPayout = async ({
     address,
     amount,
@@ -260,7 +316,7 @@ export const NewOnChainService = (): INewOnChainService => {
     }): Promise<BtcPaymentAmount | BriaEventError> => {
       try {
         const request = new EstimatePayoutFeeRequest()
-        request.setWalletName(briaConfig.walletName)
+        request.setWalletName(briaConfig.hotWalletName)
         request.setPayoutQueueName(queueNameForSpeed(speed))
         request.setOnchainAddress(address)
         request.setSatoshis(Number(amount.amount))
@@ -284,11 +340,14 @@ export const NewOnChainService = (): INewOnChainService => {
   return wrapAsyncFunctionsToRunInSpan({
     namespace: "services.bria.onchain",
     fns: {
-      getBalance,
-      createOnChainAddress,
+      getHotBalance,
+      getColdBalance,
+      getAddressForWallet,
+      getAddressForSwap,
       findAddressByRequestId,
       findPayoutByLedgerJournalId,
       queuePayoutToAddress,
+      rebalanceToColdWallet,
       estimateFeeForPayout,
     },
   })

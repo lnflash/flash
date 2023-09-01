@@ -1,10 +1,9 @@
 import express from "express"
-import sumBy from "lodash.sumby"
 import client, { register } from "prom-client"
 
-import { SECS_PER_5_MINS } from "@config"
+import { EXPORTER_PORT, SECS_PER_5_MINS } from "@config"
 
-import { ColdStorage, Lightning, OnChain } from "@app"
+import { Lightning, OnChain } from "@app"
 
 import { toSeconds } from "@domain/primitives"
 
@@ -12,7 +11,6 @@ import {
   asyncRunInSpan,
   addAttributesToCurrentSpan,
   wrapAsyncToRunInSpan,
-  recordExceptionInCurrentSpan,
 } from "@services/tracing"
 import {
   getBankOwnerWalletId,
@@ -142,10 +140,10 @@ const main = async () => {
   })
 
   createGauge({
-    name: "bria",
+    name: "bria_hot",
     description: "how much funds are onChain in bria managed wallets",
     collect: async () => {
-      const balance = await OnChain.getTotalBalance()
+      const balance = await OnChain.getHotBalance()
       if (balance instanceof Error) return 0
 
       return Number(balance.amount)
@@ -171,10 +169,7 @@ const main = async () => {
     createWalletGauge({ walletName: wallet.name, getId: wallet.getId })
   }
 
-  const coldStorageWallets = await getColdStorageWallets()
-  for (const walletName of coldStorageWallets) {
-    createColdStorageWalletGauge(walletName)
-  }
+  createColdStorageWalletGauge()
 
   const server = express()
   server.get("/metrics", async (req, res) =>
@@ -194,7 +189,7 @@ const main = async () => {
     }),
   )
 
-  const port = process.env.PORT || 3000
+  const port = EXPORTER_PORT
   server.listen(port, () => {
     logger.info(`Server listening to ${port}, metrics exposed on /metrics endpoint`)
   })
@@ -301,40 +296,19 @@ const getWalletBalance = async (walletId: WalletId): Promise<number> => {
   return walletBalance
 }
 
-const getColdStorageWallets = async (): Promise<string[]> => {
-  const coldStorageWallets = await ColdStorage.listWallets()
-  if (coldStorageWallets instanceof Error) {
-    recordExceptionInCurrentSpan({ error: coldStorageWallets })
-    return []
-  }
-
-  return coldStorageWallets
-}
-
-const getColdStorageBalance = async (): Promise<number> => {
-  const balances = await ColdStorage.getBalances()
-  if (balances instanceof Error) {
-    recordExceptionInCurrentSpan({ error: balances })
-    return 0
-  }
-
-  return sumBy(balances, "amount")
-}
-
-const createColdStorageWalletGauge = (walletName: string) => {
-  const walletNameSanitized = walletName.replace("/", "_")
-  const name = `bitcoind_${walletNameSanitized}`
-  const description = `amount in wallet ${walletNameSanitized}`
+const createColdStorageWalletGauge = () => {
+  const name = `bria_cold_storage`
+  const description = `amount in wallet ${name}`
   return createGauge({
     name,
     description,
     collect: async () => {
-      const balance = await ColdStorage.getBalance(walletName)
+      const balance = await OnChain.getColdBalance()
       if (balance instanceof Error) {
-        logger.error({ walletName }, "error getting bitcoind/specter balance")
+        logger.error(`error getting ${name} balance`)
         return 0
       }
-      return balance.amount
+      return Number(balance.amount)
     },
   })
 }
@@ -349,23 +323,24 @@ const getAssetsLiabilitiesDifference = async () => {
 }
 
 export const getBookingVersusRealWorldAssets = async () => {
-  const [lightning, bitcoin, onChain, lndBalance, bitcoind, briaBalance] =
+  const [lightning, bitcoin, onChain, lndBalance, coldStorage, hotBalance] =
     await Promise.all([
       ledgerAdmin.getLndBalance(),
       ledgerAdmin.getBitcoindBalance(),
       ledgerAdmin.getOnChainBalance(),
       Lightning.getTotalBalance(),
-      getColdStorageBalance(),
-      OnChain.getTotalBalance(),
+      OnChain.getColdBalance(),
+      OnChain.getHotBalance(),
     ])
 
   const lnd = lndBalance instanceof Error ? 0 : lndBalance
-  const bria = briaBalance instanceof Error ? 0 : Number(briaBalance.amount)
+  const briaHot = hotBalance instanceof Error ? 0 : Number(hotBalance.amount)
+  const briaCold = coldStorage instanceof Error ? 0 : Number(coldStorage.amount)
 
   return (
     lnd + // physical assets
-    bitcoind + // physical assets
-    bria + // physical assets
+    briaCold + // physical assets
+    briaHot + // physical assets
     (lightning + bitcoin + onChain) // value in accounting
   )
 }
@@ -374,11 +349,31 @@ createGauge({
   name: "totalPendingHtlcCount",
   description: "How many pending HTLCs there are in the channels of the active nodes",
   collect: async () => {
-    const lndService = LndService()
-    if (lndService instanceof Error) return NaN
-    const totalPendingHtlcCount = await lndService.getTotalPendingHtlcCount()
-    if (totalPendingHtlcCount instanceof Error) throw totalPendingHtlcCount
+    const totalPendingHtlcCount = await Lightning.getTotalPendingHtlcCount()
+    if (totalPendingHtlcCount instanceof Error) return NaN
     return totalPendingHtlcCount
+  },
+})
+
+createGauge({
+  name: "incomingPendingHtlcCount",
+  description:
+    "How many pending incoming HTLCs there are in the channels of the active nodes",
+  collect: async () => {
+    const incomingPendingHtlcCount = await Lightning.getIncomingPendingHtlcCount()
+    if (incomingPendingHtlcCount instanceof Error) return NaN
+    return incomingPendingHtlcCount
+  },
+})
+
+createGauge({
+  name: "outgoingPendingHtlcCount",
+  description:
+    "How many pending outgoing HTLCs there are in the channels of the active nodes",
+  collect: async () => {
+    const outgoingPendingHtlcCount = await Lightning.getOutgoingPendingHtlcCount()
+    if (outgoingPendingHtlcCount instanceof Error) return NaN
+    return outgoingPendingHtlcCount
   },
 })
 

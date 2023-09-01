@@ -67,6 +67,7 @@ interface WalletInvoiceRecord {
 
 interface AccountRecord {
   _id: ObjectId
+  id: string
   kratosUserId: string
 
   username: string | null
@@ -114,11 +115,11 @@ interface UserRecord {
   language?: string
   deviceTokens: string[]
   phoneMetadata?: TwilioObjectForUser
-  phone?: PhoneNumber
-  deletedPhone?: PhoneNumber
+  phone?: string
+  deletedPhones?: string[]
   createdAt: Date
   deviceId?: DeviceId
-  deletedDeviceId?: DeviceId
+  deletedEmails?: string[] | undefined
 }
 
 type PaymentFlowStateRecord = {

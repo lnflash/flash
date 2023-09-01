@@ -12,17 +12,21 @@ import {
   RouteFindingError,
   InvalidCoordinatesError,
   InvalidBusinessTitleLengthError,
-  PhoneCodeError,
+  VerificationCodeError,
   UsernameError,
   DealerOfflineError,
-  InsufficientLiquidityError,
   LndOfflineError,
-  OnChainPaymentError,
   PhoneProviderError,
   UnexpectedClientError,
   DealerError,
   PhoneAccountAlreadyExistsError,
   PhoneAccountAlreadyExistsNeedToSweepFundsError,
+  EmailUnverifiedError,
+  AccountAlreadyHasEmailError,
+  PhoneAlreadyExistsError,
+  EmailAlreadyExistsError,
+  SessionRefreshRequiredError,
+  CodeExpiredError,
 } from "@graphql/error"
 import { baseLogger } from "@services/logger"
 
@@ -62,6 +66,10 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = `Temporary failure when trying to pay, please try again later`
       return new LightningPaymentError({ message, logger: baseLogger })
 
+    case "PaymentRejectedByDestinationError":
+      message = `Payment was rejected by destination as invalid`
+      return new LightningPaymentError({ message, logger: baseLogger })
+
     case "InvoiceExpiredOrBadPaymentHashError":
       message = `Invoice already expired, or has bad payment hash`
       return new LightningPaymentError({ message, logger: baseLogger })
@@ -86,8 +94,16 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = `User does not exist for wallet-id ${error.message}`
       return new NotFoundError({ message, logger: baseLogger })
 
+    case "CouldNotFindUserFromEmailError":
+      message = `User does not exist for email`
+      return new NotFoundError({ message, logger: baseLogger })
+
     case "ContactNotExistentError":
       message = `Contact does not exist for account ${error.message}`
+      return new NotFoundError({ message, logger: baseLogger })
+
+    case "IdentifierNotFoundError":
+      message = `Identifier does not exist ${error.message}`
       return new NotFoundError({ message, logger: baseLogger })
 
     case "SelfPaymentError":
@@ -183,8 +199,8 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         "Too many onchain addresses creation, please wait for a while and try again."
       return new TooManyRequestError({ message, logger: baseLogger })
 
-    case "UserCodeAttemptPhoneRateLimiterExceededError":
-      message = "Too many phone code attempts, please wait for a while and try again."
+    case "UserCodeAttemptIdentifierRateLimiterExceededError":
+      message = "Too many request code attempts, please wait for a while and try again."
       return new TooManyRequestError({ message, logger: baseLogger })
 
     case "UserCodeAttemptIpRateLimiterExceededError":
@@ -198,19 +214,27 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       return new TooManyRequestError({ message, logger: baseLogger })
 
     case "PhoneCodeInvalidError":
-      message = "Invalid or incorrect phone code entered."
-      return new PhoneCodeError({ message, logger: baseLogger })
+      message = "Invalid or incorrect code entered."
+      return new VerificationCodeError({ message, logger: baseLogger })
+
+    case "EmailCodeInvalidError":
+      message = "Invalid or incorrect code entered."
+      return new VerificationCodeError({ message, logger: baseLogger })
 
     case "ExpiredOrNonExistentPhoneNumberError":
-      message = "Invalid or incorrect phone code entered."
-      return new PhoneCodeError({ message, logger: baseLogger })
+      message = "Invalid or incorrect phone entered."
+      return new VerificationCodeError({ message, logger: baseLogger })
 
     case "CouldNotFindAccountFromPhoneError":
       message = "Invalid or incorrect phone entered."
-      return new PhoneCodeError({ message, logger: baseLogger })
+      return new VerificationCodeError({ message, logger: baseLogger })
 
-    case "UserLoginPhoneRateLimiterExceededError":
+    case "UserLoginIdentifierRateLimiterExceededError":
       message = "Too many login attempts, please wait for a while and try again."
+      return new TooManyRequestError({ message, logger: baseLogger })
+
+    case "EmailValidationSubmittedTooOftenError":
+      message = "Too many attempts, please wait for a while and try again."
       return new TooManyRequestError({ message, logger: baseLogger })
 
     case "UserLoginIpRateLimiterExceededError":
@@ -268,20 +292,6 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = "Unable to find a route for payment."
       return new RouteFindingError({ message, logger: baseLogger })
 
-    case "InsufficientOnChainFundsError":
-      message =
-        "Onchain withdrawals halted while we replenish the hot wallet. Withdrawals will be resumed shortly, and Lightning withdrawals are still available."
-      return new InsufficientLiquidityError({ message, logger: baseLogger })
-
-    case "UnexpectedDustAmountError":
-      message = "Use lightning to very small dust amounts."
-      return new OnChainPaymentError({ message, logger: baseLogger })
-
-    case "CPFPAncestorLimitReachedError":
-      message =
-        "Onchain payments temporarily unavailable because of busy mempool queue. Withdraw via Lightning until queue is cleared."
-      return new OnChainPaymentError({ message, logger: baseLogger })
-
     case "PaymentInTransitionError":
       message = "Payment was sent and is still in transition."
       return new LightningPaymentError({ message, logger: baseLogger })
@@ -327,10 +337,9 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "OffChainServiceUnavailableError":
     case "OffChainServiceBusyError":
     case "OnChainServiceUnavailableError":
-    case "OnChainServiceBusyError":
       /* eslint-disable-next-line no-case-declarations */
       const serviceType = errorName.includes("OffChainService") ? "Offchain" : "Onchain"
-      message = `${serviceType} action failed, please try again in a few minutes. If the problem persists, please contact support.`
+      message = `${serviceType} action failed, please try again in a few minutes. If the problem persists, please contact support. If you are on regtest, it might because blocks need to be generated so that lnd can be considered active.`
       return new LndOfflineError({ message, logger: baseLogger })
 
     case "InactiveAccountError":
@@ -357,7 +366,7 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = "Invalid pagination arguments"
       return new ValidationInternalError({ message, logger: baseLogger })
 
-    case "UserWithPhoneAlreadyExistsError":
+    case "AccountHasPositiveBalanceError":
       message =
         "The phone is associated with an existing wallet that has a non zero balance. Sweep the funds and try again."
       return new ValidationInternalError({ message, logger: baseLogger })
@@ -382,6 +391,24 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         message,
         logger: baseLogger,
       })
+
+    case "EmailUnverifiedError":
+      return new EmailUnverifiedError({ logger: baseLogger })
+
+    case "AccountAlreadyHasEmailError":
+      return new AccountAlreadyHasEmailError({ logger: baseLogger })
+
+    case "PhoneAlreadyExistsError":
+      return new PhoneAlreadyExistsError({ logger: baseLogger })
+
+    case "EmailAlreadyExistsError":
+      return new EmailAlreadyExistsError({ logger: baseLogger })
+
+    case "CodeExpiredKratosError":
+      return new CodeExpiredError({ logger: baseLogger })
+
+    case "SessionRefreshRequiredError":
+      return new SessionRefreshRequiredError({ logger: baseLogger })
 
     // ----------
     // Unhandled below here
@@ -418,6 +445,7 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "InvalidIdentityPassword":
     case "InvalidIdentityUsername":
     case "InvalidPhoneNumber":
+    case "InvalidTotpCode":
     case "InvalidEmailAddress":
     case "InvalidTargetConfirmations":
     case "NoContactForUsernameError":
@@ -454,7 +482,6 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "OnChainAddressNotFoundError":
     case "PayoutNotFoundError":
     case "PayoutDestinationBlocked":
-    case "CouldNotFindOnChainTransactionError":
     case "NotificationsError":
     case "NotificationsServiceError":
     case "InvalidDeviceNotificationsServiceError":
@@ -475,7 +502,6 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "CacheNotAvailableError":
     case "CacheServiceError":
     case "CacheUndefinedError":
-    case "UserCodeAttemptPhoneMinIntervalRateLimiterExceededError":
     case "PhoneProviderServiceError":
     case "MissingPhoneMetadataError":
     case "InvalidPhoneMetadataTypeError":
@@ -495,11 +521,6 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "InvalidWithdrawFeeError":
     case "InvalidUsdCents":
     case "NonIntegerError":
-    case "ColdStorageError":
-    case "ColdStorageServiceError":
-    case "InvalidCurrentColdStorageWalletServiceError":
-    case "InsufficientBalanceForRebalanceError":
-    case "InvalidOrNonWalletTransactionError":
     case "FeeDifferenceError":
     case "NoTransactionToSettleError":
     case "CorruptLndDbError":
@@ -547,7 +568,6 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "AuthenticationError":
     case "LikelyNoUserWithThisPhoneExistError":
     case "LikelyUserAlreadyExistError":
-    case "PhoneIdentityDoesNotExistError":
     case "CouldNotUnsetPhoneFromUserError":
     case "NotificationsServiceUnreachableServerError":
     case "InvalidDeviceTokenError":
@@ -575,10 +595,18 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "MultipleCurrenciesForSingleCurrencyOperationError":
     case "MattermostError":
     case "CouldNotFindAccountIpError":
+    case "InvalidFlowId":
       message = `Unexpected error occurred, please try again or contact support if it persists (code: ${
         error.name
       }${error.message ? ": " + error.message : ""})`
       return new UnexpectedClientError({ message, logger: baseLogger })
+
+    case "AuthTokenUserIdMismatchError":
+      return new UnexpectedClientError({
+        message,
+        logger: baseLogger,
+        forwardToClient: false,
+      })
 
     // ----------
     // Unknown below here
@@ -608,12 +636,12 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "UnknownIpFetcherServiceError":
     case "UnknownCacheServiceError":
     case "UnknownPhoneProviderServiceError":
-    case "UnknownColdStorageServiceError":
     case "UnknownDealerPriceServiceError":
     case "UnknownPubSubError":
     case "UnknownBigIntConversionError":
     case "UnknownDomainError":
     case "UnknownBriaEventError":
+    case "CouldNotFindAccountError":
       message = `Unknown error occurred (code: ${error.name})`
       return new UnknownClientError({ message, logger: baseLogger })
 

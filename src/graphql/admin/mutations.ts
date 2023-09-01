@@ -1,18 +1,17 @@
 import { GT } from "@graphql/index"
 
-import UserRequestAuthCodeMutation from "@graphql/root/mutation/user-request-auth-code"
-import UserLoginMutation from "@graphql/root/mutation/user-login"
-import CaptchaRequestAuthCodeMutation from "@graphql/root/mutation/captcha-request-auth-code"
-import CaptchaCreateChallengeMutation from "@graphql/root/mutation/captcha-create-challenge"
+import UserRequestAuthCodeMutation from "@graphql/shared/root/mutation/user-request-auth-code"
+import UserLoginMutation from "@graphql/shared/root/mutation/user-login"
+import CaptchaRequestAuthCodeMutation from "@graphql/shared/root/mutation/captcha-request-auth-code"
+import CaptchaCreateChallengeMutation from "@graphql/shared/root/mutation/captcha-create-challenge"
 
 import AccountUpdateLevelMutation from "@graphql/admin/root/mutation/account-update-level"
 import AccountUpdateStatusMutation from "@graphql/admin/root/mutation/account-update-status"
 import BusinessUpdateMapInfoMutation from "@graphql/admin/root/mutation/business-update-map-info"
-import ColdStorageRebalanceToHotWalletMutation from "@graphql/admin/root/mutation/cold-storage-rebalance-to-hot-wallet"
 
 import UserUpdatePhoneMutation from "./root/mutation/user-update-phone"
-import AccountsAddUsdWalletMutation from "./root/mutation/account-add-usd-wallet"
 import BusinessDeleteMapInfoMutation from "./root/mutation/delete-business-map"
+import AdminPushNotificationSendMutation from "./root/mutation/admin-push-notification-send"
 
 export const mutationFields = {
   unauthed: {
@@ -26,10 +25,9 @@ export const mutationFields = {
     userUpdatePhone: UserUpdatePhoneMutation,
     accountUpdateLevel: AccountUpdateLevelMutation,
     accountUpdateStatus: AccountUpdateStatusMutation,
-    accountsAddUsdWallet: AccountsAddUsdWalletMutation,
     businessUpdateMapInfo: BusinessUpdateMapInfoMutation,
     businessDeleteMapInfo: BusinessDeleteMapInfoMutation,
-    coldStorageRebalanceToHotWallet: ColdStorageRebalanceToHotWalletMutation,
+    adminPushNotificationSend: AdminPushNotificationSendMutation,
   },
 }
 

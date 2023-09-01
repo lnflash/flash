@@ -2,16 +2,16 @@ type AccountError = import("./errors").AccountError
 
 type CurrencyRatio = number & { readonly brand: unique symbol }
 type AccountLevel =
-  typeof import("./index").AccountLevel[keyof typeof import("./index").AccountLevel]
+  (typeof import("./index").AccountLevel)[keyof typeof import("./index").AccountLevel]
 
 type AccountStatus =
-  typeof import("./index").AccountStatus[keyof typeof import("./index").AccountStatus]
+  (typeof import("./index").AccountStatus)[keyof typeof import("./index").AccountStatus]
 
 type AccountLimitsRange =
-  typeof import("./index").AccountLimitsRange[keyof typeof import("./index").AccountLimitsRange]
+  (typeof import("./index").AccountLimitsRange)[keyof typeof import("./index").AccountLimitsRange]
 
 type AccountLimitsType =
-  typeof import("./index").AccountLimitsType[keyof typeof import("./index").AccountLimitsType]
+  (typeof import("./index").AccountLimitsType)[keyof typeof import("./index").AccountLimitsType]
 
 type DepositFeeRatioAsBasisPoints = bigint & { readonly brand: unique symbol }
 
@@ -62,6 +62,7 @@ type AccountStatusHistory = Array<{
 
 type Account = {
   readonly id: AccountId
+  readonly uuid: AccountUUID
   readonly createdAt: Date
   username: Username
   defaultWalletId: WalletId
@@ -154,6 +155,7 @@ interface IAccountsRepository {
   listUnlockedAccounts(): AsyncGenerator<Account> | RepositoryError
   findById(accountId: AccountId): Promise<Account | RepositoryError>
   findByUserId(kratosUserId: UserId): Promise<Account | RepositoryError>
+  findByUuid(accountUuid: AccountUUID): Promise<Account | RepositoryError>
 
   persistNew(kratosUserId: UserId): Promise<Account | RepositoryError>
 
@@ -162,11 +164,15 @@ interface IAccountsRepository {
   update(account: Account): Promise<Account | RepositoryError>
 }
 
+type AdminRole = "dealer" | "funder" | "bankowner" | "editor"
+type AdminAccount = {
+  role: AdminRole
+  phone: PhoneNumber
+}
+
 type TestAccount = {
   phone: PhoneNumber
   code: PhoneCode
-  username: Username | undefined
-  role: string | undefined // FIXME
 }
 
 type TestAccountsChecker = (testAccounts: TestAccount[]) => {

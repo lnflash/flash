@@ -1,27 +1,28 @@
 import { once } from "events"
 
-import { Wallets, Payments } from "@app"
-import { getFeesConfig, getOnChainWalletConfig } from "@config"
+import { Wallets } from "@app"
+import { getOnChainWalletConfig } from "@config"
 import { sat2btc, toSats } from "@domain/bitcoin"
 import { LessThanDustThresholdError } from "@domain/errors"
 import { toCents } from "@domain/fiat"
 import { WalletCurrency, paymentAmountFromNumber } from "@domain/shared"
 import { PayoutSpeed } from "@domain/bitcoin/onchain"
 
-import { NewOnChainService } from "@services/bria"
 import { DealerPriceService } from "@services/dealer-price"
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import { baseLogger } from "@services/logger"
 import { getFunderWalletId } from "@services/ledger/caching"
 
 import {
+  lndCreateOnChainAddress,
   bitcoindClient,
   bitcoindOutside,
-  createUserAndWalletFromUserRef,
-  getAccountByTestUserRef,
-  getDefaultWalletIdByTestUserRef,
-  getUsdWalletIdByTestUserRef,
+  createUserAndWalletFromPhone,
+  getAccountByPhone,
+  getDefaultWalletIdByPhone,
+  getUsdWalletIdByPhone,
   lndonchain,
+  randomPhone,
   sendToAddressAndConfirm,
   subscribeToChainAddress,
   waitUntilBlockHeight,
@@ -39,21 +40,30 @@ let accountA: Account
 
 const dealerFns = DealerPriceService()
 
+const phoneA = randomPhone()
+const phoneB = randomPhone()
+
 beforeAll(async () => {
   await bitcoindClient.loadWallet({ filename: "outside" })
 
-  await createUserAndWalletFromUserRef("A")
-  await createUserAndWalletFromUserRef("B")
+  await createUserAndWalletFromPhone(phoneA)
+  await createUserAndWalletFromPhone(phoneB)
 
-  walletIdA = await getDefaultWalletIdByTestUserRef("A")
-  walletIdUsdA = await getUsdWalletIdByTestUserRef("A")
-  accountA = await getAccountByTestUserRef("A")
-  walletIdB = await getDefaultWalletIdByTestUserRef("B")
+  walletIdA = await getDefaultWalletIdByPhone(phoneA)
+  walletIdUsdA = await getUsdWalletIdByPhone(phoneA)
+  accountA = await getAccountByPhone(phoneA)
+  walletIdB = await getDefaultWalletIdByPhone(phoneB)
 
   // Fund walletIdA
   await sendToLndWalletTestWrapper({
     amountSats: toSats(defaultAmount * 5),
     walletId: walletIdA,
+  })
+
+  // Fund walletIdUsdA
+  await sendToLndWalletTestWrapper({
+    amountSats: toSats(defaultAmount * 5),
+    walletId: walletIdUsdA,
   })
 
   // Fund lnd
@@ -75,7 +85,7 @@ const sendToLndWalletTestWrapper = async ({
   amountSats: Satoshis
   walletId: WalletId
 }) => {
-  const address = await Wallets.lndCreateOnChainAddress(walletId)
+  const address = await lndCreateOnChainAddress(walletId)
   if (address instanceof Error) throw address
   expect(address.substring(0, 4)).toBe("bcrt")
 
@@ -98,7 +108,7 @@ const sendToLndWalletTestWrapper = async ({
 
   await waitUntilBlockHeight({ lnd: lndonchain })
 
-  const updated = await Wallets.updateOnChainReceipt({ logger: baseLogger })
+  const updated = await Wallets.updateLegacyOnChainReceipt({ logger: baseLogger })
   if (updated instanceof Error) throw updated
 
   return txId as OnChainTxHash
@@ -130,7 +140,7 @@ describe("UserWallet - getOnchainFee", () => {
     })
 
     it("returns zero for an on us address", async () => {
-      const address = await Wallets.createOnChainAddressForBtcWallet({
+      const address = await Wallets.createOnChainAddress({
         walletId: walletIdB,
       })
       if (address instanceof Error) throw address
@@ -209,8 +219,6 @@ describe("UserWallet - getOnchainFee", () => {
         it("returns a fee greater than zero for an external address", async () => {
           await testAmountCaseAmounts(dealerFns.getSatsFromCentsForImmediateSell)
 
-          const onChainService = NewOnChainService()
-
           const address = (await bitcoindOutside.getNewAddress()) as OnChainAddress
 
           const paymentAmount = paymentAmountFromNumber({
@@ -218,26 +226,6 @@ describe("UserWallet - getOnchainFee", () => {
             currency: WalletCurrency.Btc,
           })
           if (paymentAmount instanceof Error) throw paymentAmount
-
-          const minerFee = await onChainService.estimateFeeForPayout({
-            amount: paymentAmount,
-            address,
-            speed: PayoutSpeed.Fast,
-          })
-          if (minerFee instanceof Error) throw minerFee
-
-          const feeRates = getFeesConfig()
-          const feeSats = toSats(feeRates.withdrawDefaultMin + Number(minerFee.amount))
-
-          // Fund empty USD wallet
-          const payResult = await Payments.intraledgerPaymentSendWalletIdForBtcWallet({
-            recipientWalletId: walletIdUsdA,
-            memo: "",
-            amount: defaultAmount + feeSats,
-            senderWalletId: walletIdA,
-            senderAccount: accountA,
-          })
-          if (payResult instanceof Error) throw payResult
 
           const getFeeArgs = {
             walletId: walletIdUsdA,
@@ -271,7 +259,7 @@ describe("UserWallet - getOnchainFee", () => {
         })
 
         it("returns zero for an on us address", async () => {
-          const address = await Wallets.createOnChainAddressForBtcWallet({
+          const address = await Wallets.createOnChainAddress({
             walletId: walletIdB,
           })
           if (address instanceof Error) throw address

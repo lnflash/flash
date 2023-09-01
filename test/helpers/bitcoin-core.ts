@@ -1,12 +1,13 @@
 import { authenticatedBitcoind, createWallet, importDescriptors } from "bitcoin-cli-ts"
 
-import { Wallets } from "@app"
-import { getBitcoinCoreRPCConfig } from "@config"
-
 import { LedgerService } from "@services/ledger"
 
 import { toSats } from "@domain/bitcoin"
 import { parseErrorMessageFromUnknown } from "@domain/shared"
+
+import { updateLegacyOnChainReceipt } from "@app/wallets"
+
+import { baseLogger } from "@services/logger"
 
 import {
   BitcoindClient,
@@ -15,9 +16,8 @@ import {
   BitcoindWalletClient,
   getBitcoinCoreSignerRPCConfig,
 } from "./bitcoind"
-import { descriptors } from "./multisig-wallet"
 import { descriptors as signerDescriptors } from "./signer-wallet"
-import { checkIsBalanced } from "./check-is-balanced"
+import { lndCreateOnChainAddress } from "./wallet"
 import { waitUntilBlockHeight } from "./lightning"
 
 export const RANDOM_ADDRESS = "2N1AdXp9qihogpSmSBXSSfgeUFgTYyjVWqo"
@@ -110,7 +110,7 @@ export const fundWalletIdFromOnchain = async ({
   amountInBitcoin: number
   lnd: AuthenticatedLnd
 }): Promise<Satoshis> => {
-  const address = await Wallets.lndCreateOnChainAddress(walletId)
+  const address = await lndCreateOnChainAddress(walletId)
   if (address instanceof Error) throw address
 
   await sendToAddressAndConfirm({
@@ -120,30 +120,13 @@ export const fundWalletIdFromOnchain = async ({
   })
 
   await waitUntilBlockHeight({ lnd })
-  await checkIsBalanced()
+
+  await updateLegacyOnChainReceipt({ logger: baseLogger })
 
   const balance = await LedgerService().getWalletBalance(walletId)
   if (balance instanceof Error) throw balance
+
   return toSats(balance)
-}
-
-export const createColdStorageWallet = async (walletName: string) => {
-  const bitcoind = getBitcoindClient()
-  const wallet = await createWallet({
-    bitcoind,
-    wallet_name: walletName,
-    disable_private_keys: true,
-    descriptors: true,
-  })
-
-  const bitcoindWallet = getBitcoindClient(walletName)
-  const result = await importDescriptors({
-    bitcoind: bitcoindWallet,
-    requests: descriptors,
-  })
-  if (result.some((d) => !d.success)) throw new Error("Invalid descriptors")
-
-  return wallet
 }
 
 export const createSignerWallet = async (walletName: string) => {
@@ -163,30 +146,6 @@ export const createSignerWallet = async (walletName: string) => {
   if (result.some((d) => !d.success)) throw new Error("Invalid descriptors")
 
   return wallet
-}
-
-export const createRandomColdStorageWallet = async (walletName: string) => {
-  const bitcoind = getBitcoindClient()
-  const wallet = await createWallet({
-    bitcoind,
-    wallet_name: walletName,
-    disable_private_keys: true,
-    descriptors: true,
-  })
-  return wallet
-}
-
-const getBitcoindClient = (walletName?: string) => {
-  const { host, username, password, port, timeout } = getBitcoinCoreRPCConfig()
-  return authenticatedBitcoind({
-    protocol: "http",
-    host: host || "",
-    username,
-    password,
-    timeout,
-    port,
-    walletName,
-  })
 }
 
 const getBitcoindSignerClient = (walletName?: string) => {

@@ -308,6 +308,49 @@ export namespace SetSignerConfigResponse {
     }
 }
 
+export class SubmitSignedPsbtRequest extends jspb.Message { 
+    getBatchId(): string;
+    setBatchId(value: string): SubmitSignedPsbtRequest;
+    getXpubRef(): string;
+    setXpubRef(value: string): SubmitSignedPsbtRequest;
+    getSignedPsbt(): string;
+    setSignedPsbt(value: string): SubmitSignedPsbtRequest;
+
+    serializeBinary(): Uint8Array;
+    toObject(includeInstance?: boolean): SubmitSignedPsbtRequest.AsObject;
+    static toObject(includeInstance: boolean, msg: SubmitSignedPsbtRequest): SubmitSignedPsbtRequest.AsObject;
+    static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+    static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+    static serializeBinaryToWriter(message: SubmitSignedPsbtRequest, writer: jspb.BinaryWriter): void;
+    static deserializeBinary(bytes: Uint8Array): SubmitSignedPsbtRequest;
+    static deserializeBinaryFromReader(message: SubmitSignedPsbtRequest, reader: jspb.BinaryReader): SubmitSignedPsbtRequest;
+}
+
+export namespace SubmitSignedPsbtRequest {
+    export type AsObject = {
+        batchId: string,
+        xpubRef: string,
+        signedPsbt: string,
+    }
+}
+
+export class SubmitSignedPsbtResponse extends jspb.Message { 
+
+    serializeBinary(): Uint8Array;
+    toObject(includeInstance?: boolean): SubmitSignedPsbtResponse.AsObject;
+    static toObject(includeInstance: boolean, msg: SubmitSignedPsbtResponse): SubmitSignedPsbtResponse.AsObject;
+    static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+    static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+    static serializeBinaryToWriter(message: SubmitSignedPsbtResponse, writer: jspb.BinaryWriter): void;
+    static deserializeBinary(bytes: Uint8Array): SubmitSignedPsbtResponse;
+    static deserializeBinaryFromReader(message: SubmitSignedPsbtResponse, reader: jspb.BinaryReader): SubmitSignedPsbtResponse;
+}
+
+export namespace SubmitSignedPsbtResponse {
+    export type AsObject = {
+    }
+}
+
 export class KeychainConfig extends jspb.Message { 
 
     hasWpkh(): boolean;
@@ -319,6 +362,11 @@ export class KeychainConfig extends jspb.Message {
     clearDescriptors(): void;
     getDescriptors(): KeychainConfig.Descriptors | undefined;
     setDescriptors(value?: KeychainConfig.Descriptors): KeychainConfig;
+
+    hasSortedMultisig(): boolean;
+    clearSortedMultisig(): void;
+    getSortedMultisig(): KeychainConfig.SortedMultisig | undefined;
+    setSortedMultisig(value?: KeychainConfig.SortedMultisig): KeychainConfig;
 
     getConfigCase(): KeychainConfig.ConfigCase;
 
@@ -336,6 +384,7 @@ export namespace KeychainConfig {
     export type AsObject = {
         wpkh?: KeychainConfig.Wpkh.AsObject,
         descriptors?: KeychainConfig.Descriptors.AsObject,
+        sortedMultisig?: KeychainConfig.SortedMultisig.AsObject,
     }
 
 
@@ -388,11 +437,37 @@ export namespace KeychainConfig {
         }
     }
 
+    export class SortedMultisig extends jspb.Message { 
+        clearXpubsList(): void;
+        getXpubsList(): Array<string>;
+        setXpubsList(value: Array<string>): SortedMultisig;
+        addXpubs(value: string, index?: number): string;
+        getThreshold(): number;
+        setThreshold(value: number): SortedMultisig;
+
+        serializeBinary(): Uint8Array;
+        toObject(includeInstance?: boolean): SortedMultisig.AsObject;
+        static toObject(includeInstance: boolean, msg: SortedMultisig): SortedMultisig.AsObject;
+        static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+        static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+        static serializeBinaryToWriter(message: SortedMultisig, writer: jspb.BinaryWriter): void;
+        static deserializeBinary(bytes: Uint8Array): SortedMultisig;
+        static deserializeBinaryFromReader(message: SortedMultisig, reader: jspb.BinaryReader): SortedMultisig;
+    }
+
+    export namespace SortedMultisig {
+        export type AsObject = {
+            xpubsList: Array<string>,
+            threshold: number,
+        }
+    }
+
 
     export enum ConfigCase {
         CONFIG_NOT_SET = 0,
         WPKH = 1,
         DESCRIPTORS = 2,
+        SORTED_MULTISIG = 3,
     }
 
 }
@@ -711,52 +786,6 @@ export namespace WalletAddress {
         address: string,
         externalId: string,
         metadata?: google_protobuf_struct_pb.Struct.AsObject,
-    }
-}
-
-export class FindAddressByExternalIdRequest extends jspb.Message { 
-    getExternalId(): string;
-    setExternalId(value: string): FindAddressByExternalIdRequest;
-
-    serializeBinary(): Uint8Array;
-    toObject(includeInstance?: boolean): FindAddressByExternalIdRequest.AsObject;
-    static toObject(includeInstance: boolean, msg: FindAddressByExternalIdRequest): FindAddressByExternalIdRequest.AsObject;
-    static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
-    static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
-    static serializeBinaryToWriter(message: FindAddressByExternalIdRequest, writer: jspb.BinaryWriter): void;
-    static deserializeBinary(bytes: Uint8Array): FindAddressByExternalIdRequest;
-    static deserializeBinaryFromReader(message: FindAddressByExternalIdRequest, reader: jspb.BinaryReader): FindAddressByExternalIdRequest;
-}
-
-export namespace FindAddressByExternalIdRequest {
-    export type AsObject = {
-        externalId: string,
-    }
-}
-
-export class FindAddressByExternalIdResponse extends jspb.Message { 
-    getWalletId(): string;
-    setWalletId(value: string): FindAddressByExternalIdResponse;
-
-    hasAddress(): boolean;
-    clearAddress(): void;
-    getAddress(): WalletAddress | undefined;
-    setAddress(value?: WalletAddress): FindAddressByExternalIdResponse;
-
-    serializeBinary(): Uint8Array;
-    toObject(includeInstance?: boolean): FindAddressByExternalIdResponse.AsObject;
-    static toObject(includeInstance: boolean, msg: FindAddressByExternalIdResponse): FindAddressByExternalIdResponse.AsObject;
-    static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
-    static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
-    static serializeBinaryToWriter(message: FindAddressByExternalIdResponse, writer: jspb.BinaryWriter): void;
-    static deserializeBinary(bytes: Uint8Array): FindAddressByExternalIdResponse;
-    static deserializeBinaryFromReader(message: FindAddressByExternalIdResponse, reader: jspb.BinaryReader): FindAddressByExternalIdResponse;
-}
-
-export namespace FindAddressByExternalIdResponse {
-    export type AsObject = {
-        walletId: string,
-        address?: WalletAddress.AsObject,
     }
 }
 
@@ -1119,6 +1148,11 @@ export class PayoutQueueConfig extends jspb.Message {
     getConsolidateDeprecatedKeychains(): boolean;
     setConsolidateDeprecatedKeychains(value: boolean): PayoutQueueConfig;
 
+    hasManual(): boolean;
+    clearManual(): void;
+    getManual(): boolean;
+    setManual(value: boolean): PayoutQueueConfig;
+
     hasIntervalSecs(): boolean;
     clearIntervalSecs(): void;
     getIntervalSecs(): number;
@@ -1140,11 +1174,13 @@ export namespace PayoutQueueConfig {
     export type AsObject = {
         txPriority: TxPriority,
         consolidateDeprecatedKeychains: boolean,
+        manual: boolean,
         intervalSecs: number,
     }
 
     export enum TriggerCase {
         TRIGGER_NOT_SET = 0,
+        MANUAL = 4,
         INTERVAL_SECS = 5,
     }
 
@@ -1167,6 +1203,43 @@ export class CreatePayoutQueueResponse extends jspb.Message {
 export namespace CreatePayoutQueueResponse {
     export type AsObject = {
         id: string,
+    }
+}
+
+export class TriggerPayoutQueueRequest extends jspb.Message { 
+    getName(): string;
+    setName(value: string): TriggerPayoutQueueRequest;
+
+    serializeBinary(): Uint8Array;
+    toObject(includeInstance?: boolean): TriggerPayoutQueueRequest.AsObject;
+    static toObject(includeInstance: boolean, msg: TriggerPayoutQueueRequest): TriggerPayoutQueueRequest.AsObject;
+    static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+    static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+    static serializeBinaryToWriter(message: TriggerPayoutQueueRequest, writer: jspb.BinaryWriter): void;
+    static deserializeBinary(bytes: Uint8Array): TriggerPayoutQueueRequest;
+    static deserializeBinaryFromReader(message: TriggerPayoutQueueRequest, reader: jspb.BinaryReader): TriggerPayoutQueueRequest;
+}
+
+export namespace TriggerPayoutQueueRequest {
+    export type AsObject = {
+        name: string,
+    }
+}
+
+export class TriggerPayoutQueueResponse extends jspb.Message { 
+
+    serializeBinary(): Uint8Array;
+    toObject(includeInstance?: boolean): TriggerPayoutQueueResponse.AsObject;
+    static toObject(includeInstance: boolean, msg: TriggerPayoutQueueResponse): TriggerPayoutQueueResponse.AsObject;
+    static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+    static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+    static serializeBinaryToWriter(message: TriggerPayoutQueueResponse, writer: jspb.BinaryWriter): void;
+    static deserializeBinary(bytes: Uint8Array): TriggerPayoutQueueResponse;
+    static deserializeBinaryFromReader(message: TriggerPayoutQueueResponse, reader: jspb.BinaryReader): TriggerPayoutQueueResponse;
+}
+
+export namespace TriggerPayoutQueueResponse {
+    export type AsObject = {
     }
 }
 
@@ -1303,6 +1376,11 @@ export class EstimatePayoutFeeRequest extends jspb.Message {
     clearOnchainAddress(): void;
     getOnchainAddress(): string;
     setOnchainAddress(value: string): EstimatePayoutFeeRequest;
+
+    hasDestinationWalletName(): boolean;
+    clearDestinationWalletName(): void;
+    getDestinationWalletName(): string;
+    setDestinationWalletName(value: string): EstimatePayoutFeeRequest;
     getSatoshis(): number;
     setSatoshis(value: number): EstimatePayoutFeeRequest;
 
@@ -1323,12 +1401,14 @@ export namespace EstimatePayoutFeeRequest {
         walletName: string,
         payoutQueueName: string,
         onchainAddress: string,
+        destinationWalletName: string,
         satoshis: number,
     }
 
     export enum DestinationCase {
         DESTINATION_NOT_SET = 0,
         ONCHAIN_ADDRESS = 3,
+        DESTINATION_WALLET_NAME = 5,
     }
 
 }
@@ -1363,6 +1443,11 @@ export class SubmitPayoutRequest extends jspb.Message {
     clearOnchainAddress(): void;
     getOnchainAddress(): string;
     setOnchainAddress(value: string): SubmitPayoutRequest;
+
+    hasDestinationWalletName(): boolean;
+    clearDestinationWalletName(): void;
+    getDestinationWalletName(): string;
+    setDestinationWalletName(value: string): SubmitPayoutRequest;
     getSatoshis(): number;
     setSatoshis(value: number): SubmitPayoutRequest;
 
@@ -1393,6 +1478,7 @@ export namespace SubmitPayoutRequest {
         walletName: string,
         payoutQueueName: string,
         onchainAddress: string,
+        destinationWalletName: string,
         satoshis: number,
         externalId?: string,
         metadata?: google_protobuf_struct_pb.Struct.AsObject,
@@ -1401,6 +1487,7 @@ export namespace SubmitPayoutRequest {
     export enum DestinationCase {
         DESTINATION_NOT_SET = 0,
         ONCHAIN_ADDRESS = 3,
+        DESTINATION_WALLET_NAME = 7,
     }
 
 }
@@ -1408,6 +1495,11 @@ export namespace SubmitPayoutRequest {
 export class SubmitPayoutResponse extends jspb.Message { 
     getId(): string;
     setId(value: string): SubmitPayoutResponse;
+
+    hasBatchInclusionEstimatedAt(): boolean;
+    clearBatchInclusionEstimatedAt(): void;
+    getBatchInclusionEstimatedAt(): number | undefined;
+    setBatchInclusionEstimatedAt(value: number): SubmitPayoutResponse;
 
     serializeBinary(): Uint8Array;
     toObject(includeInstance?: boolean): SubmitPayoutResponse.AsObject;
@@ -1422,6 +1514,7 @@ export class SubmitPayoutResponse extends jspb.Message {
 export namespace SubmitPayoutResponse {
     export type AsObject = {
         id: string,
+        batchInclusionEstimatedAt?: number,
     }
 }
 
@@ -1445,6 +1538,29 @@ export namespace ListPayoutsRequest {
     }
 }
 
+export class BriaWalletDestination extends jspb.Message { 
+    getWalletId(): string;
+    setWalletId(value: string): BriaWalletDestination;
+    getAddress(): string;
+    setAddress(value: string): BriaWalletDestination;
+
+    serializeBinary(): Uint8Array;
+    toObject(includeInstance?: boolean): BriaWalletDestination.AsObject;
+    static toObject(includeInstance: boolean, msg: BriaWalletDestination): BriaWalletDestination.AsObject;
+    static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+    static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+    static serializeBinaryToWriter(message: BriaWalletDestination, writer: jspb.BinaryWriter): void;
+    static deserializeBinary(bytes: Uint8Array): BriaWalletDestination;
+    static deserializeBinaryFromReader(message: BriaWalletDestination, reader: jspb.BinaryReader): BriaWalletDestination;
+}
+
+export namespace BriaWalletDestination {
+    export type AsObject = {
+        walletId: string,
+        address: string,
+    }
+}
+
 export class Payout extends jspb.Message { 
     getId(): string;
     setId(value: string): Payout;
@@ -1464,6 +1580,13 @@ export class Payout extends jspb.Message {
     clearOnchainAddress(): void;
     getOnchainAddress(): string;
     setOnchainAddress(value: string): Payout;
+
+    hasWallet(): boolean;
+    clearWallet(): void;
+    getWallet(): BriaWalletDestination | undefined;
+    setWallet(value?: BriaWalletDestination): Payout;
+    getCancelled(): boolean;
+    setCancelled(value: boolean): Payout;
     getExternalId(): string;
     setExternalId(value: string): Payout;
 
@@ -1492,6 +1615,8 @@ export namespace Payout {
         batchId?: string,
         satoshis: number,
         onchainAddress: string,
+        wallet?: BriaWalletDestination.AsObject,
+        cancelled: boolean,
         externalId: string,
         metadata?: google_protobuf_struct_pb.Struct.AsObject,
     }
@@ -1499,6 +1624,7 @@ export namespace Payout {
     export enum DestinationCase {
         DESTINATION_NOT_SET = 0,
         ONCHAIN_ADDRESS = 6,
+        WALLET = 10,
     }
 
 }
@@ -1522,49 +1648,6 @@ export class ListPayoutsResponse extends jspb.Message {
 export namespace ListPayoutsResponse {
     export type AsObject = {
         payoutsList: Array<Payout.AsObject>,
-    }
-}
-
-export class FindPayoutByExternalIdRequest extends jspb.Message { 
-    getExternalId(): string;
-    setExternalId(value: string): FindPayoutByExternalIdRequest;
-
-    serializeBinary(): Uint8Array;
-    toObject(includeInstance?: boolean): FindPayoutByExternalIdRequest.AsObject;
-    static toObject(includeInstance: boolean, msg: FindPayoutByExternalIdRequest): FindPayoutByExternalIdRequest.AsObject;
-    static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
-    static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
-    static serializeBinaryToWriter(message: FindPayoutByExternalIdRequest, writer: jspb.BinaryWriter): void;
-    static deserializeBinary(bytes: Uint8Array): FindPayoutByExternalIdRequest;
-    static deserializeBinaryFromReader(message: FindPayoutByExternalIdRequest, reader: jspb.BinaryReader): FindPayoutByExternalIdRequest;
-}
-
-export namespace FindPayoutByExternalIdRequest {
-    export type AsObject = {
-        externalId: string,
-    }
-}
-
-export class FindPayoutByExternalIdResponse extends jspb.Message { 
-
-    hasPayout(): boolean;
-    clearPayout(): void;
-    getPayout(): Payout | undefined;
-    setPayout(value?: Payout): FindPayoutByExternalIdResponse;
-
-    serializeBinary(): Uint8Array;
-    toObject(includeInstance?: boolean): FindPayoutByExternalIdResponse.AsObject;
-    static toObject(includeInstance: boolean, msg: FindPayoutByExternalIdResponse): FindPayoutByExternalIdResponse.AsObject;
-    static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
-    static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
-    static serializeBinaryToWriter(message: FindPayoutByExternalIdResponse, writer: jspb.BinaryWriter): void;
-    static deserializeBinary(bytes: Uint8Array): FindPayoutByExternalIdResponse;
-    static deserializeBinaryFromReader(message: FindPayoutByExternalIdResponse, reader: jspb.BinaryReader): FindPayoutByExternalIdResponse;
-}
-
-export namespace FindPayoutByExternalIdResponse {
-    export type AsObject = {
-        payout?: Payout.AsObject,
     }
 }
 
@@ -1626,6 +1709,43 @@ export class GetPayoutResponse extends jspb.Message {
 export namespace GetPayoutResponse {
     export type AsObject = {
         payout?: Payout.AsObject,
+    }
+}
+
+export class CancelPayoutRequest extends jspb.Message { 
+    getId(): string;
+    setId(value: string): CancelPayoutRequest;
+
+    serializeBinary(): Uint8Array;
+    toObject(includeInstance?: boolean): CancelPayoutRequest.AsObject;
+    static toObject(includeInstance: boolean, msg: CancelPayoutRequest): CancelPayoutRequest.AsObject;
+    static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+    static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+    static serializeBinaryToWriter(message: CancelPayoutRequest, writer: jspb.BinaryWriter): void;
+    static deserializeBinary(bytes: Uint8Array): CancelPayoutRequest;
+    static deserializeBinaryFromReader(message: CancelPayoutRequest, reader: jspb.BinaryReader): CancelPayoutRequest;
+}
+
+export namespace CancelPayoutRequest {
+    export type AsObject = {
+        id: string,
+    }
+}
+
+export class CancelPayoutResponse extends jspb.Message { 
+
+    serializeBinary(): Uint8Array;
+    toObject(includeInstance?: boolean): CancelPayoutResponse.AsObject;
+    static toObject(includeInstance: boolean, msg: CancelPayoutResponse): CancelPayoutResponse.AsObject;
+    static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+    static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+    static serializeBinaryToWriter(message: CancelPayoutResponse, writer: jspb.BinaryWriter): void;
+    static deserializeBinary(bytes: Uint8Array): CancelPayoutResponse;
+    static deserializeBinaryFromReader(message: CancelPayoutResponse, reader: jspb.BinaryReader): CancelPayoutResponse;
+}
+
+export namespace CancelPayoutResponse {
+    export type AsObject = {
     }
 }
 
@@ -1730,6 +1850,11 @@ export class PayoutSummary extends jspb.Message {
     getOnchainAddress(): string;
     setOnchainAddress(value: string): PayoutSummary;
 
+    hasWallet(): boolean;
+    clearWallet(): void;
+    getWallet(): BriaWalletDestination | undefined;
+    setWallet(value?: BriaWalletDestination): PayoutSummary;
+
     getDestinationCase(): PayoutSummary.DestinationCase;
 
     serializeBinary(): Uint8Array;
@@ -1747,11 +1872,13 @@ export namespace PayoutSummary {
         id: string,
         satoshis: number,
         onchainAddress: string,
+        wallet?: BriaWalletDestination.AsObject,
     }
 
     export enum DestinationCase {
         DESTINATION_NOT_SET = 0,
         ONCHAIN_ADDRESS = 3,
+        WALLET = 4,
     }
 
 }
@@ -1925,6 +2052,11 @@ export class BriaEvent extends jspb.Message {
     getPayoutSubmitted(): PayoutSubmitted | undefined;
     setPayoutSubmitted(value?: PayoutSubmitted): BriaEvent;
 
+    hasPayoutCancelled(): boolean;
+    clearPayoutCancelled(): void;
+    getPayoutCancelled(): PayoutCancelled | undefined;
+    setPayoutCancelled(value?: PayoutCancelled): BriaEvent;
+
     hasPayoutCommitted(): boolean;
     clearPayoutCommitted(): void;
     getPayoutCommitted(): PayoutCommitted | undefined;
@@ -1961,6 +2093,7 @@ export namespace BriaEvent {
         utxoSettled?: UtxoSettled.AsObject,
         utxoDropped?: UtxoDropped.AsObject,
         payoutSubmitted?: PayoutSubmitted.AsObject,
+        payoutCancelled?: PayoutCancelled.AsObject,
         payoutCommitted?: PayoutCommitted.AsObject,
         payoutBroadcast?: PayoutBroadcast.AsObject,
         payoutSettled?: PayoutSettled.AsObject,
@@ -1972,6 +2105,7 @@ export namespace BriaEvent {
         UTXO_SETTLED = 5,
         UTXO_DROPPED = 10,
         PAYOUT_SUBMITTED = 6,
+        PAYOUT_CANCELLED = 11,
         PAYOUT_COMMITTED = 7,
         PAYOUT_BROADCAST = 8,
         PAYOUT_SETTLED = 9,
@@ -2125,6 +2259,11 @@ export class PayoutSubmitted extends jspb.Message {
     getOnchainAddress(): string;
     setOnchainAddress(value: string): PayoutSubmitted;
 
+    hasWallet(): boolean;
+    clearWallet(): void;
+    getWallet(): BriaWalletDestination | undefined;
+    setWallet(value?: BriaWalletDestination): PayoutSubmitted;
+
     getDestinationCase(): PayoutSubmitted.DestinationCase;
 
     serializeBinary(): Uint8Array;
@@ -2144,11 +2283,63 @@ export namespace PayoutSubmitted {
         payoutQueueId: string,
         satoshis: number,
         onchainAddress: string,
+        wallet?: BriaWalletDestination.AsObject,
     }
 
     export enum DestinationCase {
         DESTINATION_NOT_SET = 0,
         ONCHAIN_ADDRESS = 5,
+        WALLET = 6,
+    }
+
+}
+
+export class PayoutCancelled extends jspb.Message { 
+    getId(): string;
+    setId(value: string): PayoutCancelled;
+    getWalletId(): string;
+    setWalletId(value: string): PayoutCancelled;
+    getPayoutQueueId(): string;
+    setPayoutQueueId(value: string): PayoutCancelled;
+    getSatoshis(): number;
+    setSatoshis(value: number): PayoutCancelled;
+
+    hasOnchainAddress(): boolean;
+    clearOnchainAddress(): void;
+    getOnchainAddress(): string;
+    setOnchainAddress(value: string): PayoutCancelled;
+
+    hasWallet(): boolean;
+    clearWallet(): void;
+    getWallet(): BriaWalletDestination | undefined;
+    setWallet(value?: BriaWalletDestination): PayoutCancelled;
+
+    getDestinationCase(): PayoutCancelled.DestinationCase;
+
+    serializeBinary(): Uint8Array;
+    toObject(includeInstance?: boolean): PayoutCancelled.AsObject;
+    static toObject(includeInstance: boolean, msg: PayoutCancelled): PayoutCancelled.AsObject;
+    static extensions: {[key: number]: jspb.ExtensionFieldInfo<jspb.Message>};
+    static extensionsBinary: {[key: number]: jspb.ExtensionFieldBinaryInfo<jspb.Message>};
+    static serializeBinaryToWriter(message: PayoutCancelled, writer: jspb.BinaryWriter): void;
+    static deserializeBinary(bytes: Uint8Array): PayoutCancelled;
+    static deserializeBinaryFromReader(message: PayoutCancelled, reader: jspb.BinaryReader): PayoutCancelled;
+}
+
+export namespace PayoutCancelled {
+    export type AsObject = {
+        id: string,
+        walletId: string,
+        payoutQueueId: string,
+        satoshis: number,
+        onchainAddress: string,
+        wallet?: BriaWalletDestination.AsObject,
+    }
+
+    export enum DestinationCase {
+        DESTINATION_NOT_SET = 0,
+        ONCHAIN_ADDRESS = 5,
+        WALLET = 6,
     }
 
 }
@@ -2171,6 +2362,11 @@ export class PayoutCommitted extends jspb.Message {
     clearOnchainAddress(): void;
     getOnchainAddress(): string;
     setOnchainAddress(value: string): PayoutCommitted;
+
+    hasWallet(): boolean;
+    clearWallet(): void;
+    getWallet(): BriaWalletDestination | undefined;
+    setWallet(value?: BriaWalletDestination): PayoutCommitted;
     getProportionalFeeSats(): number;
     setProportionalFeeSats(value: number): PayoutCommitted;
 
@@ -2195,12 +2391,14 @@ export namespace PayoutCommitted {
         payoutQueueId: string,
         satoshis: number,
         onchainAddress: string,
+        wallet?: BriaWalletDestination.AsObject,
         proportionalFeeSats: number,
     }
 
     export enum DestinationCase {
         DESTINATION_NOT_SET = 0,
         ONCHAIN_ADDRESS = 7,
+        WALLET = 9,
     }
 
 }
@@ -2223,6 +2421,11 @@ export class PayoutBroadcast extends jspb.Message {
     clearOnchainAddress(): void;
     getOnchainAddress(): string;
     setOnchainAddress(value: string): PayoutBroadcast;
+
+    hasWallet(): boolean;
+    clearWallet(): void;
+    getWallet(): BriaWalletDestination | undefined;
+    setWallet(value?: BriaWalletDestination): PayoutBroadcast;
     getProportionalFeeSats(): number;
     setProportionalFeeSats(value: number): PayoutBroadcast;
 
@@ -2247,12 +2450,14 @@ export namespace PayoutBroadcast {
         payoutQueueId: string,
         satoshis: number,
         onchainAddress: string,
+        wallet?: BriaWalletDestination.AsObject,
         proportionalFeeSats: number,
     }
 
     export enum DestinationCase {
         DESTINATION_NOT_SET = 0,
         ONCHAIN_ADDRESS = 7,
+        WALLET = 9,
     }
 
 }
@@ -2275,6 +2480,11 @@ export class PayoutSettled extends jspb.Message {
     clearOnchainAddress(): void;
     getOnchainAddress(): string;
     setOnchainAddress(value: string): PayoutSettled;
+
+    hasWallet(): boolean;
+    clearWallet(): void;
+    getWallet(): BriaWalletDestination | undefined;
+    setWallet(value?: BriaWalletDestination): PayoutSettled;
     getProportionalFeeSats(): number;
     setProportionalFeeSats(value: number): PayoutSettled;
 
@@ -2299,12 +2509,14 @@ export namespace PayoutSettled {
         payoutQueueId: string,
         satoshis: number,
         onchainAddress: string,
+        wallet?: BriaWalletDestination.AsObject,
         proportionalFeeSats: number,
     }
 
     export enum DestinationCase {
         DESTINATION_NOT_SET = 0,
         ONCHAIN_ADDRESS = 7,
+        WALLET = 9,
     }
 
 }

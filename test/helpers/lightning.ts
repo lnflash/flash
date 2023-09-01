@@ -97,7 +97,8 @@ export const lndOutside3 = authenticatedLndGrpc({
   socket: `${process.env.LNDOUTSIDE3ADDR}:${process.env.LNDOUTSIDE3RPCPORT ?? 10009}`,
 }).lnd
 
-export const lnds = [lnd1, lnd2, lndOutside1, lndOutside2, lndOutside3]
+export const lndsIntegration = [lnd1, lnd2, lndOutside1, lndOutside2, lndOutside3]
+export const lndsE2e = [lnd1, lnd2, lndOutside1, lndOutside2]
 
 export const waitUntilBlockHeight = async ({ lnd, blockHeight = 0 }) => {
   let block = blockHeight
@@ -187,6 +188,57 @@ export const openChannelTesting = async ({
   return { lndNewChannel, lndPartnerNewChannel }
 }
 
+export const openChannelTestingNoAccounting = async ({
+  lnd,
+  lndPartner,
+  socket,
+  is_private = false,
+}) => {
+  await waitUntilSync({ lnds: [lnd, lndPartner] })
+
+  const local_tokens = 1000000
+  const { public_key: partner_public_key } = await getWalletInfo({ lnd: lndPartner })
+
+  const openChannelPromise = waitFor(async () => {
+    try {
+      return openChannel({
+        lnd,
+        local_tokens,
+        is_private,
+        partner_public_key,
+        partner_socket: socket,
+      })
+    } catch (error) {
+      baseLogger.warn({ error }, "openChannel failed. trying again.")
+      return Promise.resolve(null)
+    }
+  })
+
+  let lndNewChannel
+  const sub = subscribeToChannels({ lnd })
+  sub.once("channel_opened", (channel) => {
+    lndNewChannel = channel
+  })
+
+  let lndPartnerNewChannel
+  const subPartner = subscribeToChannels({ lnd: lndPartner })
+  subPartner.once("channel_opened", (channel) => {
+    lndPartnerNewChannel = channel
+  })
+
+  await Promise.all([once(sub, "channel_opening"), openChannelPromise])
+
+  await Promise.all([
+    waitFor(() => lndNewChannel && lndPartnerNewChannel),
+    mineBlockAndSync({ lnds: [lnd, lndPartner] }),
+  ])
+
+  sub.removeAllListeners()
+  subPartner.removeAllListeners()
+
+  return { lndNewChannel, lndPartnerNewChannel }
+}
+
 // all the following uses of bitcoind client that send/receive coin must be "outside"
 
 export const fundLnd = async (lnd, amount = 1) => {
@@ -198,10 +250,9 @@ export const fundLnd = async (lnd, amount = 1) => {
   await waitUntilBlockHeight({ lnd })
 }
 
-export const resetLnds = async () => {
+const resetLnds = async (lnds) => {
   const block = await bitcoindClient.getBlockCount()
   if (!block) return // skip if we are just getting started
-
   // just in case pending transactions
   await mineBlockAndSync({ lnds })
 
@@ -227,6 +278,9 @@ export const resetLnds = async () => {
 
   await mineBlockAndSync({ lnds })
 }
+
+export const resetIntegrationLnds = () => resetLnds(lndsIntegration)
+export const resetE2eLnds = () => resetLnds(lndsE2e)
 
 export const closeAllChannels = async ({ lnd }) => {
   let channels
@@ -304,9 +358,13 @@ export const mineBlockAndSync = async ({
   await Promise.all(promiseArray)
 }
 
-export const mineBlockAndSyncAll = (newBlock = 6) => mineBlockAndSync({ lnds, newBlock })
+export const mineBlockAndSyncAll = (newBlock = 6) =>
+  mineBlockAndSync({ lnds: lndsIntegration, newBlock })
+export const mineBlockAndSyncAllE2e = (newBlock = 6) =>
+  mineBlockAndSync({ lnds: lndsE2e, newBlock })
 
-export const waitUntilSyncAll = () => waitUntilSync({ lnds })
+export const waitUntilSyncAll = () => waitUntilSync({ lnds: lndsIntegration })
+export const waitUntilSyncAllE2e = () => waitUntilSync({ lnds: lndsE2e })
 
 export const waitUntilSync = async ({ lnds }: { lnds: Array<AuthenticatedLnd> }) => {
   const promiseArray: Array<Promise<void>> = []
@@ -316,13 +374,18 @@ export const waitUntilSync = async ({ lnds }: { lnds: Array<AuthenticatedLnd> })
   await Promise.all(promiseArray)
 }
 
-export const waitUntilChannelBalanceSyncAll = async () => {
+const waitUntilChannelBalanceSyncAll = async (lnds) => {
   const promiseArray: Array<Promise<void>> = []
   for (const lnd of lnds) {
     promiseArray.push(waitUntilChannelBalanceSync({ lnd }))
   }
   await Promise.all(promiseArray)
 }
+export const waitUntilChannelBalanceSyncIntegration = () =>
+  waitUntilChannelBalanceSyncAll(lndsIntegration)
+
+export const waitUntilChannelBalanceSyncE2e = () =>
+  waitUntilChannelBalanceSyncAll(lndsE2e)
 
 export const waitUntilChannelBalanceSync = ({ lnd }) =>
   waitFor(async () => {

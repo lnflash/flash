@@ -1,16 +1,14 @@
-import { BTC_NETWORK, SECS_PER_MIN } from "@config"
+import { SECS_PER_MIN } from "@config"
 
 import { toSats } from "@domain/bitcoin"
 import { CacheKeys } from "@domain/cache"
 import { ErrorLevel } from "@domain/shared"
-import { TxDecoder } from "@domain/bitcoin/onchain"
 
 import { LndService } from "@services/lnd"
-import { LocalCacheService } from "@services/cache"
-import { OnChainService } from "@services/lnd/onchain-service"
+import { RedisCacheService } from "@services/cache"
 import { recordExceptionInCurrentSpan } from "@services/tracing"
 
-const cache = LocalCacheService()
+const cache = RedisCacheService()
 
 export const getTotalBalance = async (): Promise<Satoshis | ApplicationError> => {
   const balances = await Promise.all([
@@ -118,20 +116,20 @@ export const getOnChainBalance = async (): Promise<Satoshis | ApplicationError> 
     key: CacheKeys.OnChainBalance,
     ttlSecs: SECS_PER_MIN,
     getForCaching: async () => {
-      const onChainService = OnChainService(TxDecoder(BTC_NETWORK))
-      if (onChainService instanceof Error) return onChainService
+      const offChainService = LndService()
+      if (offChainService instanceof Error) return offChainService
 
       const onChainBalances = await Promise.all(
-        onChainService
+        offChainService
           .listActivePubkeys()
-          .map((pubkey) => onChainService.getBalance(pubkey)),
+          .map((pubkey) => offChainService.getOnChainBalance(pubkey)),
       )
       const onChain = sumBalances(onChainBalances)
 
       const onChainPendingBalances = await Promise.all(
-        onChainService
+        offChainService
           .listActivePubkeys()
-          .map((pubkey) => onChainService.getPendingBalance(pubkey)),
+          .map((pubkey) => offChainService.getPendingOnChainBalance(pubkey)),
       )
       const onChainPending = sumBalances(onChainPendingBalances)
 

@@ -1,53 +1,32 @@
-import { BTC_NETWORK } from "@config"
-
-import { OnChainAddressNotFoundError, TxDecoder } from "@domain/bitcoin/onchain"
+import { AccountValidator } from "@domain/accounts"
+import { OnChainAddressNotFoundError } from "@domain/bitcoin/onchain"
 import { RateLimitConfig } from "@domain/rate-limit"
 import { RateLimiterExceededError } from "@domain/rate-limit/errors"
-import { WalletCurrency } from "@domain/shared"
 
-import { NewOnChainService } from "@services/bria"
-import { WalletOnChainAddressesRepository, WalletsRepository } from "@services/mongoose"
-import { OnChainService } from "@services/lnd/onchain-service"
+import { OnChainService } from "@services/bria"
+import {
+  AccountsRepository,
+  WalletOnChainAddressesRepository,
+  WalletsRepository,
+} from "@services/mongoose"
 import { consumeLimiter } from "@services/rate-limit"
 
-import { validateIsBtcWallet, validateIsUsdWallet } from "./validate"
-
-export const lndCreateOnChainAddress = async (
-  walletId: WalletId,
-): Promise<OnChainAddress | ApplicationError> => {
-  const wallet = await WalletsRepository().findById(walletId)
-  if (wallet instanceof Error) return wallet
-
-  const limitOk = await checkOnChainAddressAccountIdLimits(wallet.accountId)
-  if (limitOk instanceof Error) return limitOk
-
-  const onChainService = OnChainService(TxDecoder(BTC_NETWORK))
-  if (onChainService instanceof Error) return onChainService
-
-  const onChainAddress = await onChainService.createOnChainAddress()
-  if (onChainAddress instanceof Error) return onChainAddress
-
-  const onChainAddressesRepo = WalletOnChainAddressesRepository()
-  const savedOnChainAddress = await onChainAddressesRepo.persistNew({
-    walletId,
-    onChainAddress,
-  })
-  if (savedOnChainAddress instanceof Error) return savedOnChainAddress
-
-  return savedOnChainAddress.address
-}
-
-const createOnChainAddress = async ({
+export const createOnChainAddress = async ({
   walletId,
   requestId,
 }: {
   walletId: WalletId
   requestId?: OnChainAddressRequestId
 }) => {
-  const onChain = NewOnChainService()
-
   const wallet = await WalletsRepository().findById(walletId)
   if (wallet instanceof Error) return wallet
+  const account = await AccountsRepository().findById(wallet.accountId)
+  if (account instanceof Error) return account
+
+  const accountValidator = AccountValidator(account)
+  if (accountValidator instanceof Error) return accountValidator
+
+  const onChain = OnChainService()
 
   let onChainAddress: OnChainAddressIdentifier | undefined = undefined
   if (requestId) {
@@ -68,7 +47,7 @@ const createOnChainAddress = async ({
     const limitOk = await checkOnChainAddressAccountIdLimits(wallet.accountId)
     if (limitOk instanceof Error) return limitOk
 
-    const newOnChainAddress = await onChain.createOnChainAddress({
+    const newOnChainAddress = await onChain.getAddressForWallet({
       walletDescriptor: {
         id: wallet.id,
         currency: wallet.currency,
@@ -97,46 +76,6 @@ const createOnChainAddress = async ({
   }
 
   return onChainAddress.address
-}
-
-export const createOnChainAddressByWallet = async ({
-  wallet,
-  requestId,
-}: {
-  wallet: WalletDescriptor<WalletCurrency>
-  requestId?: OnChainAddressRequestId
-}): Promise<OnChainAddress | ApplicationError> => {
-  if (wallet.currency === WalletCurrency.Btc) {
-    return createOnChainAddressForBtcWallet({ walletId: wallet.id, requestId })
-  }
-
-  return createOnChainAddressForUsdWallet({ walletId: wallet.id, requestId })
-}
-
-export const createOnChainAddressForBtcWallet = async ({
-  walletId,
-  requestId,
-}: {
-  walletId: WalletId
-  requestId?: OnChainAddressRequestId
-}): Promise<OnChainAddress | ApplicationError> => {
-  const validated = await validateIsBtcWallet(walletId)
-  return validated instanceof Error
-    ? validated
-    : createOnChainAddress({ walletId, requestId })
-}
-
-export const createOnChainAddressForUsdWallet = async ({
-  walletId,
-  requestId,
-}: {
-  walletId: WalletId
-  requestId?: OnChainAddressRequestId
-}): Promise<OnChainAddress | ApplicationError> => {
-  const validated = await validateIsUsdWallet(walletId)
-  return validated instanceof Error
-    ? validated
-    : createOnChainAddress({ walletId, requestId })
 }
 
 const checkOnChainAddressAccountIdLimits = async (

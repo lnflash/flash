@@ -1,4 +1,3 @@
-name: Galoy Banking
 lightningAddressDomain: pay.domain.com
 lightningAddressDomainAliases:
   - pay1.domain.com
@@ -20,8 +19,7 @@ buildVersion:
     minBuildNumber: 362
     lastBuildNumber: 362
 rewards:
-  allowPhoneCountries:
-    - SV
+  allowPhoneCountries: []
   denyPhoneCountries: []
   allowIPCountries: []
   denyIPCountries: []
@@ -31,85 +29,29 @@ coldStorage:
   minOnChainHotWalletBalance: 1000000
   minRebalanceSize: 10000000
   maxHotWalletBalance: 200000000
-  walletPattern: specter
-  onChainWallet: specter/coldstorage
-  targetConfirmations: 6
 bria:
-  hotWalletName: dev
+  hotWalletName: dev-wallet
   queueNames:
-    fast: dev
+    fast: dev-queue
+  coldStorage:
+    walletName: cold
+    hotToColdRebalanceQueueName: dev-queue
 lndScbBackupBucketName: lnd-static-channel-backups
-test_accounts:
-  - ref: A
-    phone: "+16505554321"
-    code: "321321"
-    needUsdWallet: true
-  - ref: B
-    phone: "+16505554322"
-    code: "321432"
-    needUsdWallet: true
-    phoneMetadataCarrierType: mobile
-  - ref: C
-    phone: "+16505554323"
-    code: "321321"
-    title: business
-  - ref: D
-    phone: "+16505554324"
-    code: "321321"
-    needUsdWallet: true
-  - ref: E
-    phone: "+16505554332"
-    code: "321321"
-  - ref: F
-    phone: "+16505554333"
-    code: "321321"
-    needUsdWallet: true
-  - ref: G
-    phone: "+16505554335"
-    code: "321321"
-    username: user15
-  - ref: H
-    phone: "+19876543210"
-    code: "321321"
-    username: tester
-  - ref: I
+admin_accounts:
+  - role: dealer
+    phone: "+16505554327"
+  - role: funder
+    phone: "+16505554325"
+  - role: bankowner
+    phone: "+16505554334"
+  - role: editor
     phone: "+16505554336"
-    code: "321321"
-    role: editor
-    username: editor
-  - ref: J
-    phone: "+19876543211"
-    code: "321321"
-    username: tester2
-  - ref: K
-    phone: "+16505554328"
-    code: "321321"
-    username: alice
-  - ref: L
-    phone: "+198765432113"
-    code: "321321"
-    username: bob
-  - ref: M
-    phone: "+198765432114"
-    code: "321321"
-  - ref: "N"
-    phone: "+198765432115"
-    code: "321321"
-  - ref: O
-    phone: "+198765432116"
-    code: "321321"
-  - ref: P
-    phone: "+198765432117"
-    code: "321321"
+test_accounts: []
 rateLimits:
   requestCodePerLoginIdentifier:
     points: 4
     duration: 3600
     blockDuration: 10800
-  requestCodePerLoginIdentifierMinInterval:
-    points: 1
-    duration: 15
-    blockDuration: 15
   requestCodePerIp:
     points: 8
     duration: 3600
@@ -173,16 +115,6 @@ fees:
     defaultMin: 3000
     threshold: 1000000
     ratioAsBasisPoints: 30
-lnds:
-  - name: LND1
-    type:
-      - offchain
-      - onchain
-    priority: 2
-  - name: LND2
-    type:
-      - offchain
-    priority: 3
 onChainWallet:
   dustThreshold: 5000
   minConfirmations: 2
@@ -206,14 +138,6 @@ userActivenessMonthlyVolumeThreshold: 100
 cronConfig:
   rebalanceEnabled: true
   swapEnabled: true
-kratosConfig:
-  publicApi: http://localhost:4433
-  adminApi: http://localhost:4434
-  corsAllowedOrigins:
-    - http://localhost:3000
-oathkeeperConfig:
-  urlJkws: http://127.0.0.1:4456/.well-known/jwks.json
-  decisionsApi: http://127.0.0.1:4456/decisions/
 captcha:
   mandatory: false
 skipFeeProbeConfig:

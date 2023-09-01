@@ -1,7 +1,6 @@
-import { BTC_NETWORK, getSwapConfig } from "@config"
-import { TxDecoder } from "@domain/bitcoin/onchain"
+import { getSwapConfig } from "@config"
 import { NoOutboundLiquidityForSwapError, SwapServiceError } from "@domain/swap/errors"
-import { OnChainService } from "@services/lnd/onchain-service"
+import { OnChainService } from "@services/bria"
 import { SwapOutChecker } from "@domain/swap"
 import { baseLogger } from "@services/logger"
 import { LoopService } from "@services/loopd"
@@ -11,7 +10,6 @@ import { LndService } from "@services/lnd"
 import { WalletCurrency } from "@domain/shared"
 
 import { getActiveLoopd } from "./get-active-loopd"
-import { getSwapDestAddress } from "./get-swap-dest-address"
 
 const logger = baseLogger.child({ module: "swap" })
 
@@ -24,9 +22,9 @@ export const swapOut = async (): Promise<
   const activeLoopdConfig = getActiveLoopd()
   const swapService = LoopService(activeLoopdConfig)
   if (!swapService.healthCheck()) return new SwapServiceError("Failed health check")
-  const onChainService = OnChainService(TxDecoder(BTC_NETWORK))
+  const onChainService = OnChainService()
   if (onChainService instanceof Error) return onChainService
-  const onChainBalance = await onChainService.getBalance()
+  const onChainBalance = await onChainService.getHotBalance()
   if (onChainBalance instanceof Error) return onChainBalance
   const offChainService = LndService()
   if (offChainService instanceof Error) return offChainService
@@ -40,10 +38,7 @@ export const swapOut = async (): Promise<
     swapOutAmount: getSwapConfig().swapOutAmount,
   })
   const swapOutAmount = swapChecker.getSwapOutAmount({
-    currentOnChainHotWalletBalance: {
-      amount: BigInt(onChainBalance),
-      currency: WalletCurrency.Btc,
-    },
+    currentOnChainHotWalletBalance: onChainBalance,
     currentOutboundLiquidityBalance: {
       amount: BigInt(outbound),
       currency: WalletCurrency.Btc,
@@ -73,7 +68,7 @@ export const swapOut = async (): Promise<
   addAttributesToCurrentSpan({
     "swap.amount": Number(swapOutAmount.amount),
   })
-  const swapDestAddress = await getSwapDestAddress()
+  const swapDestAddress = await onChainService.getAddressForSwap()
   if (swapDestAddress instanceof Error) return swapDestAddress
   const swapResult = await swapService.swapOut({
     amount: swapOutAmount,

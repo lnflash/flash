@@ -1,13 +1,10 @@
 BIN_DIR=node_modules/.bin
 
 start-deps:
-	docker compose up e2e-deps -d
+	docker compose up bats-deps -d
 
 start-deps-integration:
 	docker compose up integration-deps -d
-
-start-deps-bats:
-	docker compose up bats-deps -d
 
 update-price-history:
 	docker compose run price-history node servers/history/cron.js
@@ -58,7 +55,6 @@ clean-deps:
 
 reset-deps: clean-deps start-deps
 reset-deps-integration: clean-deps start-deps-integration
-reset-deps-bats: clean-deps start-deps-bats
 
 test: unit legacy-integration integration
 
@@ -77,49 +73,8 @@ watch-unit:
 watch-compile:
 	$(BIN_DIR)/tsc --watch  --noEmit
 
-e2e-in-ci:
-	make create-tmp-env-ci && \
-	TMP_ENV_CI=tmp.env.ci docker compose -f docker-compose.yml up e2e-tests
-
-reset-e2e-in-ci-with-build: reset-deps e2e-in-ci-with-build
-
-e2e-in-ci-with-build:
-	yarn build && \
-	make create-tmp-env-ci && \
-	TMP_ENV_CI=tmp.env.ci docker compose -f docker-compose.yml run --name e2e-tests e2e-tests make execute-e2e-from-within-container-cached || \
-	docker rm `docker ps -q -f status=exited`
-
-e2e-in-ci-cached:
-	make create-tmp-env-ci && \
-	TMP_ENV_CI=tmp.env.ci docker compose -f docker-compose.yml run --name e2e-tests e2e-tests make execute-e2e-from-within-container-cached || \
-	docker rm `docker ps -q -f status=exited`
-
-delete-e2e:
-	docker container kill `docker ps -f name="e2e-tests" -q` && \
-	sleep 1 && \
-	docker container rm `docker ps -f name="e2e-tests" -q`
-
-main-in-ci-build:
-	yarn build && \
-	make create-tmp-env-ci && \
-	TMP_ENV_CI=tmp.env.ci docker compose -f docker-compose.yml -f docker-compose.override.yml run --name e2e-tests e2e-tests make start-main-ci || \
-	docker rm e2e-tests
-
-main-in-ci-cached:
-	make create-tmp-env-ci && \
-	TMP_ENV_CI=tmp.env.ci docker compose -f docker-compose.yml run --name e2e-tests e2e-tests make start-main-ci || \
-	docker rm e2e-tests
-
 del-containers:
 	docker compose rm -sfv
-
-execute-e2e-from-within-container:
-	yarn install && \
-	yarn build && \
-	NODE_ENV=test LOGLEVEL=error $(BIN_DIR)/jest --config ./test/e2e/jest.config.js --bail --runInBand --ci --reporters=default --reporters=jest-junit
-
-execute-e2e-from-within-container-cached:
-	NODE_ENV=test LOGLEVEL=error $(BIN_DIR)/jest --config ./test/e2e/jest.config.js --bail --runInBand --ci --reporters=default --reporters=jest-junit
 
 legacy-integration:
 	yarn build && \
@@ -128,30 +83,33 @@ legacy-integration:
 reset-legacy-integration: reset-deps-integration legacy-integration
 
 integration:
+	yarn build && \
 	yarn test:integration
 
 reset-integration: reset-deps-integration integration
-
-e2e:
-	yarn build && \
-	yarn test:e2e
-
-reset-e2e: reset-deps e2e
 
 bats:
 	yarn build && \
 	bats -t test/bats
 
-reset-bats: reset-deps-bats bats
+reset-bats: reset-deps bats
+
+execute-bats-from-within-container:
+	git config --global --add safe.directory /repo # otherwise bats complains
+	yarn install && \
+	yarn build && \
+	bats -t test/bats
 
 integration-in-ci:
 	make create-tmp-env-ci && \
-	TMP_ENV_CI=tmp.env.ci docker compose -f docker-compose.yml up integration-tests
+	TMP_ENV_CI=tmp.env.ci docker compose -f docker-compose.yml up integration-tests --attach integration-tests
 
 # NODE_OPTIONS line should be removed whenever we upgrade yarn.lock to see if
 # heap allocation issue has been resolved in dependencies (fails at 2048).
 execute-integration-from-within-container:
 	yarn install && \
+	SVIX_ENDPOINT= \
+	SVIX_SECRET= \
 	NODE_OPTIONS="--max-old-space-size=6144" \
 	NODE_ENV=test LOGLEVEL=error $(BIN_DIR)/jest --config ./test/legacy-integration/jest.config.js --bail --runInBand --ci --reporters=default --reporters=jest-junit && \
 	NODE_OPTIONS="--max-old-space-size=6144" \
@@ -168,6 +126,7 @@ check-code: check-implicit
 	yarn tsc-check
 	yarn eslint-check
 	yarn build
+	yarn check:sdl
 	yarn check-yaml
 	yarn madge-check
 
@@ -196,13 +155,8 @@ kill-graphql:
 redis-cli:
 	docker-compose exec redis redis-cli
 
-e2e-codegen:
-	yarn e2e-codegen
+codegen:
+	yarn write-sdl
 
 gen-test-jwt:
 	yarn gen-test-jwt
-
-reset-sleep-e2e:
-	make reset-deps
-	sleep 10
-	make e2e

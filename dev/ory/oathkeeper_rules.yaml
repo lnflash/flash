@@ -1,8 +1,8 @@
-- id: cookie-anonymous-routes
+- id: anonymous-rest-auth
   upstream:
-    url: "http://e2e-tests:4012"
+    url: "http://bats-tests:4012"
   match:
-    url: "<(http|https)>://<[a-zA-Z0-9-.:]+>/auth/<(clearCookies|login|logout)>"
+    url: "<(http|https)>://<[a-zA-Z0-9-.:]+>/auth/<(clearCookies|login|logout|email/code|email/login|totp/validate|email/login/cookie)>"
     methods: ["GET", "POST", "OPTIONS"]
   authenticators:
     - handler: anonymous
@@ -11,24 +11,9 @@
   mutators:
     - handler: noop
 
-- id: apollo-playground-ui
+- id: device-login
   upstream:
-    url: "http://e2e-tests:4012"
-  match:
-    url: "<(http|https)>://<[a-zA-Z0-9-.:]+>/graphql"
-    methods: ["GET", "OPTIONS"]
-  authenticators:
-    - handler: anonymous
-  authorizer:
-    handler: allow
-  mutators:
-    - handler: id_token
-      config:
-        claims: '{"sub": "{{ print .Subject }}"}'
-
-- id: device-login-routes
-  upstream:
-    url: "http://e2e-tests:4012"
+    url: "http://bats-tests:4012"
   match:
     url: "<(http|https)>://<[a-zA-Z0-9-.:]+>/auth/create/device-account"
     methods: ["POST"]
@@ -51,7 +36,7 @@
 
 - id: galoy-ws
   upstream:
-    url: "http://e2e-tests:4000/graphql"
+    url: "http://bats-tests:4000/graphql"
     strip_path: /graphqlws # ONLY FOR DEV, in prod should resolve to /graphql, like ws.blink.sv/graphql
   match:
     url: "<(http|https)>://<[a-zA-Z0-9-.:]+>/graphqlws" # ONLY FOR DEV, in prod should resolve to /graphql
@@ -65,10 +50,10 @@
 
 - id: galoy-backend
   upstream:
-    url: "http://e2e-tests:4012"
+    url: "http://apollo-router:4004"
   match:
     url: "<(http|https)>://<[a-zA-Z0-9-.:]+>/graphql"
-    methods: ["POST"]
+    methods: ["POST", "GET", "OPTIONS"]
   authenticators:
     - handler: cookie_session
       config:
@@ -92,38 +77,9 @@
       config:
         claims: '{"sub": "{{ print .Subject }}" }'
 
-- id: galoy-backend-middleware-routes
-  upstream:
-    url: "http://e2e-tests:4012"
-  match:
-    url: "<(http|https)>://<[a-zA-Z0-9-.:]+>/<(kratos|browser)(.*)>"
-    methods: ["GET", "POST", "OPTIONS"]
-  authenticators:
-    - handler: cookie_session
-      config:
-        check_session_url: http://kratos:4433/sessions/whoami
-        preserve_path: true
-        preserve_query: true
-        subject_from: identity.id
-        extra_from: identity.traits
-    - handler: bearer_token
-      config:
-        check_session_url: http://kratos:4433/sessions/whoami
-        preserve_path: true
-        preserve_query: true
-        subject_from: identity.id
-        extra_from: identity.traits
-    - handler: anonymous
-  authorizer:
-    handler: allow
-  mutators:
-    - handler: id_token
-      config:
-        claims: '{"sub": "{{ print .Subject }}"}'
-
 - id: admin-backend
   upstream:
-    url: "http://e2e-tests:4001"
+    url: "http://bats-tests:4001"
     strip_path: /admin
   match:
     url: "<(http|https)>://<.*><[0-9]+>/admin<.*>"

@@ -1,10 +1,12 @@
-import { Prices, Wallets } from "@app"
+import { Accounts, Prices, Wallets } from "@app"
 
 import { getAccountLimits, getOnChainWalletConfig, ONE_DAY } from "@config"
 
+import { AccountStatus } from "@domain/accounts"
 import { toSats } from "@domain/bitcoin"
 import { DisplayCurrency, toCents } from "@domain/fiat"
 import {
+  InactiveAccountError,
   InsufficientBalanceError,
   LessThanDustThresholdError,
   LimitsExceededError,
@@ -29,8 +31,8 @@ import { DealerPriceService } from "@services/dealer-price"
 
 import {
   createMandatoryUsers,
-  createRandomUserAndWallet,
-  createRandomUserAndUsdWallet,
+  createRandomUserAndBtcWallet,
+  createRandomUserAndWallets,
   recordReceiveLnPayment,
 } from "test/helpers"
 import { getBalanceHelper } from "test/helpers/wallet"
@@ -80,7 +82,7 @@ const randomOnChainMemo = () =>
 describe("onChainPay", () => {
   describe("common", () => {
     it("fails to send all from empty wallet", async () => {
-      const newWalletDescriptor = await createRandomUserAndWallet()
+      const newWalletDescriptor = await createRandomUserAndBtcWallet()
       const newAccount = await AccountsRepository().findById(
         newWalletDescriptor.accountId,
       )
@@ -100,7 +102,7 @@ describe("onChainPay", () => {
       expect(res instanceof Error && res.message).toEqual(`No balance left to send.`)
 
       // Restore system state
-      Transaction.deleteMany({ memo })
+      await Transaction.deleteMany({ memo })
     })
 
     it("fails if 'validatePaymentInput' fails", async () => {
@@ -108,7 +110,7 @@ describe("onChainPay", () => {
 
       const memo = randomOnChainMemo()
 
-      const newWalletDescriptor = await createRandomUserAndWallet()
+      const newWalletDescriptor = await createRandomUserAndBtcWallet()
       const newAccount = await AccountsRepository().findById(
         newWalletDescriptor.accountId,
       )
@@ -136,7 +138,7 @@ describe("onChainPay", () => {
       expect(result).toBeInstanceOf(InvalidBtcPaymentAmountError)
 
       // Restore system state
-      Transaction.deleteMany({ memo })
+      await Transaction.deleteMany({ memo })
     })
   })
 
@@ -144,7 +146,7 @@ describe("onChainPay", () => {
     it("fails if builder 'withConversion' step fails", async () => {
       const memo = randomOnChainMemo()
 
-      const newWalletDescriptor = await createRandomUserAndWallet()
+      const newWalletDescriptor = await createRandomUserAndBtcWallet()
       const newAccount = await AccountsRepository().findById(
         newWalletDescriptor.accountId,
       )
@@ -172,13 +174,13 @@ describe("onChainPay", () => {
       expect(result).toBeInstanceOf(LessThanDustThresholdError)
 
       // Restore system state
-      Transaction.deleteMany({ memo })
+      await Transaction.deleteMany({ memo })
     })
 
     it("fails if withdrawal limit hit", async () => {
       const memo = randomOnChainMemo()
 
-      const newWalletDescriptor = await createRandomUserAndWallet()
+      const newWalletDescriptor = await createRandomUserAndBtcWallet()
       const newAccount = await AccountsRepository().findById(
         newWalletDescriptor.accountId,
       )
@@ -229,13 +231,13 @@ describe("onChainPay", () => {
       expect(result).toBeInstanceOf(LimitsExceededError)
 
       // Restore system state
-      Transaction.deleteMany({ memo })
+      await Transaction.deleteMany({ memo })
     })
 
     it("fails if has insufficient balance for fee", async () => {
       const memo = randomOnChainMemo()
 
-      const newWalletDescriptor = await createRandomUserAndWallet()
+      const newWalletDescriptor = await createRandomUserAndBtcWallet()
       const newAccount = await AccountsRepository().findById(
         newWalletDescriptor.accountId,
       )
@@ -267,15 +269,13 @@ describe("onChainPay", () => {
       expect(result).toBeInstanceOf(InsufficientBalanceError)
 
       // Restore system state
-      Transaction.deleteMany({ memo })
+      await Transaction.deleteMany({ memo })
     })
-  })
 
-  describe("settles intraledger", () => {
-    it("fails if builder 'withRecipient' step fails", async () => {
+    it("fails if sender account is locked", async () => {
       const memo = randomOnChainMemo()
 
-      const newWalletDescriptor = await createRandomUserAndWallet()
+      const newWalletDescriptor = await createRandomUserAndBtcWallet()
       const newAccount = await AccountsRepository().findById(
         newWalletDescriptor.accountId,
       )
@@ -291,7 +291,53 @@ describe("onChainPay", () => {
       })
       if (receive instanceof Error) throw receive
 
-      const newWalletIdAddress = await Wallets.createOnChainAddressForBtcWallet({
+      // Lock sender account
+      const updatedAccount = await Accounts.updateAccountStatus({
+        id: newAccount.id,
+        status: AccountStatus.Locked,
+        updatedByUserId: newAccount.kratosUserId,
+      })
+      if (updatedAccount instanceof Error) throw updatedAccount
+      expect(updatedAccount.status).toEqual(AccountStatus.Locked)
+
+      // Attempt send payment
+      const res = await Wallets.payOnChainByWalletIdForBtcWallet({
+        senderWalletId: newWalletDescriptor.id,
+        senderAccount: newAccount,
+        amount,
+        address: outsideAddress,
+
+        speed: PayoutSpeed.Fast,
+        memo,
+      })
+      expect(res).toBeInstanceOf(InactiveAccountError)
+
+      // Restore system state
+      await Transaction.deleteMany({ memo })
+    })
+  })
+
+  describe("settles intraledger", () => {
+    it("fails if builder 'withRecipient' step fails", async () => {
+      const memo = randomOnChainMemo()
+
+      const newWalletDescriptor = await createRandomUserAndBtcWallet()
+      const newAccount = await AccountsRepository().findById(
+        newWalletDescriptor.accountId,
+      )
+      if (newAccount instanceof Error) throw newAccount
+
+      // Fund balance for send
+      const receive = await recordReceiveLnPayment({
+        walletDescriptor: newWalletDescriptor,
+        paymentAmount: receiveAmounts,
+        bankFee: receiveBankFee,
+        displayAmounts: receiveDisplayAmounts,
+        memo,
+      })
+      if (receive instanceof Error) throw receive
+
+      const newWalletIdAddress = await Wallets.createOnChainAddress({
         walletId: newWalletDescriptor.id,
       })
       if (newWalletIdAddress instanceof Error) throw newWalletIdAddress
@@ -308,19 +354,24 @@ describe("onChainPay", () => {
       expect(res).toBeInstanceOf(SelfPaymentError)
 
       // Restore system state
-      Transaction.deleteMany({ memo })
+      await Transaction.deleteMany({ memo })
     })
 
     it("fails if builder 'withConversion' step fails", async () => {
       const memo = randomOnChainMemo()
 
-      const newWalletDescriptor = await createRandomUserAndWallet()
+      const newWalletDescriptor = await createRandomUserAndBtcWallet()
       const newAccount = await AccountsRepository().findById(
         newWalletDescriptor.accountId,
       )
       if (newAccount instanceof Error) throw newAccount
 
-      const recipientUsdWalletDescriptor = await createRandomUserAndUsdWallet()
+      const { usdWalletDescriptor: recipientUsdWalletDescriptor } =
+        await createRandomUserAndWallets()
+      const recipientAccount = await AccountsRepository().findById(
+        recipientUsdWalletDescriptor.accountId,
+      )
+      if (recipientAccount instanceof Error) throw recipientAccount
 
       // Fund balance for send
       const receive = await recordReceiveLnPayment({
@@ -335,7 +386,7 @@ describe("onChainPay", () => {
       // Execute
       const btcSendAmount = toSats(10)
 
-      const recipientUsdWalletIdAddress = await Wallets.createOnChainAddressForUsdWallet({
+      const recipientUsdWalletIdAddress = await Wallets.createOnChainAddress({
         walletId: recipientUsdWalletDescriptor.id,
       })
       if (recipientUsdWalletIdAddress instanceof Error) throw recipientUsdWalletIdAddress
@@ -360,7 +411,62 @@ describe("onChainPay", () => {
       expect(res).toBeInstanceOf(InvalidZeroAmountPriceRatioInputError)
 
       // Restore system state
-      Transaction.deleteMany({ memo })
+      await Transaction.deleteMany({ memo })
+    })
+
+    it("fails if recipient account is locked", async () => {
+      const memo = randomOnChainMemo()
+
+      const newWalletDescriptor = await createRandomUserAndBtcWallet()
+      const newAccount = await AccountsRepository().findById(
+        newWalletDescriptor.accountId,
+      )
+      if (newAccount instanceof Error) throw newAccount
+
+      const recipientWalletDescriptor = await createRandomUserAndBtcWallet()
+      const recipientAccount = await AccountsRepository().findById(
+        recipientWalletDescriptor.accountId,
+      )
+      if (recipientAccount instanceof Error) throw recipientAccount
+
+      // Fund balance for send
+      const receive = await recordReceiveLnPayment({
+        walletDescriptor: newWalletDescriptor,
+        paymentAmount: receiveAmounts,
+        bankFee: receiveBankFee,
+        displayAmounts: receiveDisplayAmounts,
+        memo,
+      })
+      if (receive instanceof Error) throw receive
+
+      const recipientWalletIdAddress = await Wallets.createOnChainAddress({
+        walletId: recipientWalletDescriptor.id,
+      })
+      if (recipientWalletIdAddress instanceof Error) throw recipientWalletIdAddress
+
+      // Lock recipient account
+      const updatedAccount = await Accounts.updateAccountStatus({
+        id: recipientAccount.id,
+        status: AccountStatus.Locked,
+        updatedByUserId: recipientAccount.kratosUserId,
+      })
+      if (updatedAccount instanceof Error) throw updatedAccount
+      expect(updatedAccount.status).toEqual(AccountStatus.Locked)
+
+      // Attempt payment
+      const res = await Wallets.payOnChainByWalletIdForBtcWallet({
+        senderWalletId: newWalletDescriptor.id,
+        senderAccount: newAccount,
+        amount,
+        address: recipientWalletIdAddress,
+
+        speed: PayoutSpeed.Fast,
+        memo,
+      })
+      expect(res).toBeInstanceOf(InactiveAccountError)
+
+      // Restore system state
+      await Transaction.deleteMany({ memo })
     })
   })
 })

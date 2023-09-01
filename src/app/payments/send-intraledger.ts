@@ -1,4 +1,4 @@
-import { getValuesToSkipProbe } from "@config"
+import { getCallbackServiceConfig, getValuesToSkipProbe } from "@config"
 
 import {
   btcFromUsdMidPriceFn,
@@ -14,7 +14,7 @@ import {
   LightningPaymentFlowBuilder,
   ZeroAmountForUsdRecipientError,
 } from "@domain/payments"
-import { AccountValidator } from "@domain/accounts"
+import { AccountLevel, AccountValidator } from "@domain/accounts"
 import { displayAmountFromNumber } from "@domain/fiat"
 import { ErrorLevel, WalletCurrency } from "@domain/shared"
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
@@ -37,6 +37,10 @@ import {
 } from "@services/mongoose"
 import { NotificationsService } from "@services/notifications"
 
+import { CallbackService } from "@services/callback"
+
+import { CallbackEventType } from "@domain/callback"
+
 import {
   getPriceRatioForLimits,
   checkIntraledgerLimits,
@@ -56,7 +60,6 @@ const intraledgerPaymentSendWalletId = async ({
   const validatedPaymentInputs = await validateIntraledgerPaymentInputs({
     uncheckedSenderWalletId,
     uncheckedRecipientWalletId,
-    senderAccount,
   })
   if (validatedPaymentInputs instanceof Error) return validatedPaymentInputs
 
@@ -159,11 +162,9 @@ export const intraledgerPaymentSendWalletIdForUsdWallet = async (
 const validateIntraledgerPaymentInputs = async ({
   uncheckedSenderWalletId,
   uncheckedRecipientWalletId,
-  senderAccount,
 }: {
   uncheckedSenderWalletId: string
   uncheckedRecipientWalletId: string
-  senderAccount: Account
 }): Promise<
   | { senderWallet: Wallet; recipientWallet: Wallet; recipientAccount: Account }
   | ApplicationError
@@ -174,20 +175,23 @@ const validateIntraledgerPaymentInputs = async ({
   const senderWallet = await WalletsRepository().findById(senderWalletId)
   if (senderWallet instanceof Error) return senderWallet
 
-  const accountValidator = AccountValidator(senderAccount)
-  if (accountValidator instanceof Error) return accountValidator
-  const validateWallet = accountValidator.validateWalletForAccount(senderWallet)
-  if (validateWallet instanceof Error) return validateWallet
+  const senderAccount = await AccountsRepository().findById(senderWallet.accountId)
+  if (senderAccount instanceof Error) return senderAccount
+
+  const senderAccountValidator = AccountValidator(senderAccount)
+  if (senderAccountValidator instanceof Error) return senderAccountValidator
 
   const recipientWalletId = checkedToWalletId(uncheckedRecipientWalletId)
   if (recipientWalletId instanceof Error) return recipientWalletId
 
   const recipientWallet = await WalletsRepository().findById(recipientWalletId)
   if (recipientWallet instanceof Error) return recipientWallet
-  const { accountId: recipientAccountId } = recipientWallet
 
-  const recipientAccount = await AccountsRepository().findById(recipientAccountId)
+  const recipientAccount = await AccountsRepository().findById(recipientWallet.accountId)
   if (recipientAccount instanceof Error) return recipientAccount
+
+  const recipientAccountValidator = AccountValidator(recipientAccount)
+  if (recipientAccountValidator instanceof Error) return recipientAccountValidator
 
   addAttributesToCurrentSpan({
     "payment.intraLedger.senderWalletId": senderWalletId,
@@ -374,6 +378,21 @@ const executePaymentViaIntraledger = async <
 
     if (result instanceof DeviceTokensNotRegisteredNotificationsServiceError) {
       await removeDeviceTokens({ userId: recipientUser.id, deviceTokens: result.tokens })
+    }
+
+    if (
+      recipientAccount.level === AccountLevel.One ||
+      recipientAccount.level === AccountLevel.Two
+    ) {
+      const callbackService = CallbackService(getCallbackServiceConfig())
+      await callbackService.sendMessage({
+        accountUUID: recipientAccount.uuid,
+        eventType: CallbackEventType.ReceiveIntraledger,
+        payload: {
+          // FIXME: [0] might not be correct
+          txid: journal.transactionIds[0],
+        },
+      })
     }
 
     return PaymentSendStatus.Success

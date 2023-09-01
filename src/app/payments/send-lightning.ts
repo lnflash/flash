@@ -1,4 +1,4 @@
-import { AccountValidator } from "@domain/accounts"
+import { AccountLevel, AccountValidator } from "@domain/accounts"
 import {
   decodeInvoice,
   defaultTimeToExpiryInSeconds,
@@ -56,7 +56,9 @@ import { validateIsBtcWallet, validateIsUsdWallet } from "@app/wallets"
 import { ResourceExpiredLockServiceError } from "@domain/lock"
 import { DeviceTokensNotRegisteredNotificationsServiceError } from "@domain/notifications"
 
-import { reimburseFee } from "./reimburse-fee"
+import { CallbackService } from "@services/callback"
+import { getCallbackServiceConfig } from "@config"
+import { CallbackEventType } from "@domain/callback"
 
 import {
   constructPaymentFlowBuilder,
@@ -66,6 +68,8 @@ import {
   checkWithdrawalLimits,
   addContactsAfterSend,
 } from "./helpers"
+
+import { reimburseFee } from "./reimburse-fee"
 
 const dealer = DealerPriceService()
 const paymentFlowRepo = PaymentFlowStateRepository(defaultTimeToExpiryInSeconds)
@@ -83,7 +87,6 @@ export const payInvoiceByWalletId = async ({
   const validatedPaymentInputs = await validateInvoicePaymentInputs({
     uncheckedPaymentRequest,
     uncheckedSenderWalletId,
-    senderAccount,
   })
   if (validatedPaymentInputs instanceof AlreadyPaidError) {
     return PaymentSendStatus.AlreadyPaid
@@ -175,11 +178,9 @@ export const payNoAmountInvoiceByWalletIdForUsdWallet = async (
 const validateInvoicePaymentInputs = async ({
   uncheckedPaymentRequest,
   uncheckedSenderWalletId,
-  senderAccount,
 }: {
   uncheckedPaymentRequest: string
   uncheckedSenderWalletId: string
-  senderAccount: Account
 }): Promise<
   | {
       senderWallet: Wallet
@@ -209,6 +210,9 @@ const validateInvoicePaymentInputs = async ({
 
   const senderWallet = await WalletsRepository().findById(senderWalletId)
   if (senderWallet instanceof Error) return senderWallet
+
+  const senderAccount = await AccountsRepository().findById(senderWallet.accountId)
+  if (senderAccount instanceof Error) return senderAccount
 
   const accountValidator = AccountValidator(senderAccount)
   if (accountValidator instanceof Error) return accountValidator
@@ -379,6 +383,9 @@ const executePaymentViaIntraledger = async <
   const recipientAccount = await AccountsRepository().findById(recipientWallet.accountId)
   if (recipientAccount instanceof Error) return recipientAccount
 
+  const accountValidator = AccountValidator(recipientAccount)
+  if (accountValidator instanceof Error) return accountValidator
+
   const checkLimits =
     senderWallet.accountId === recipientWallet.accountId
       ? checkTradeIntraAccountLimits
@@ -537,6 +544,22 @@ const executePaymentViaIntraledger = async <
 
     if (result instanceof DeviceTokensNotRegisteredNotificationsServiceError) {
       await removeDeviceTokens({ userId: recipientUser.id, deviceTokens: result.tokens })
+    }
+
+    if (
+      recipientAccount.level === AccountLevel.One ||
+      recipientAccount.level === AccountLevel.Two
+    ) {
+      const callbackService = CallbackService(getCallbackServiceConfig())
+      await callbackService.sendMessage({
+        accountUUID: recipientAccount.uuid,
+        eventType: CallbackEventType.ReceiveIntraledger,
+        payload: {
+          // FIXME: [0] might not be correct
+          txid: journal.transactionIds[0],
+          paymentHash,
+        },
+      })
     }
 
     if (senderAccount.id !== recipientAccount.id) {

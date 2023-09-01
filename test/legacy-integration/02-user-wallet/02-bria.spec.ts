@@ -12,7 +12,9 @@ import {
   bitcoindOutside,
   checkIsBalanced,
   createMandatoryUsers,
-  getDefaultWalletIdByTestUserRef,
+  createUserAndWalletFromPhone,
+  getDefaultWalletIdByPhone,
+  randomPhone,
   sendToAddressAndConfirm,
 } from "test/helpers"
 
@@ -20,12 +22,15 @@ let walletIdA: WalletId
 
 const TIMEOUT_BRIA_EVENT = 60_000
 
+const phone = randomPhone()
+
 beforeAll(async () => {
   await createMandatoryUsers()
 
   await bitcoindClient.loadWallet({ filename: "outside" })
 
-  walletIdA = await getDefaultWalletIdByTestUserRef("A")
+  await createUserAndWalletFromPhone(phone)
+  walletIdA = await getDefaultWalletIdByPhone(phone)
 })
 
 afterEach(async () => {
@@ -44,7 +49,7 @@ describe("BriaSubscriber", () => {
     it("receives utxo events", async () => {
       const amountSats = toSats(5_000)
       // Receive onchain
-      const address = await Wallets.createOnChainAddressForBtcWallet({
+      const address = await Wallets.createOnChainAddress({
         walletId: walletIdA,
       })
       if (address instanceof Error) throw address
@@ -112,7 +117,7 @@ describe("BriaSubscriber", () => {
       const amountSats = toSats(5_000)
 
       // Receive onchain
-      const address = await Wallets.createOnChainAddressForBtcWallet({
+      const address = await Wallets.createOnChainAddress({
         walletId: walletIdA,
       })
       if (address instanceof Error) throw address

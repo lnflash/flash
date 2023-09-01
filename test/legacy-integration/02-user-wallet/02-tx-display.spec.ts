@@ -7,7 +7,7 @@ import {
 } from "@domain/bitcoin/lightning"
 import { sat2btc, toSats } from "@domain/bitcoin"
 import { LedgerTransactionType, UnknownLedgerError } from "@domain/ledger"
-import * as LnFeesImpl from "@domain/payments/ln-fees"
+import * as LnFeesImpl from "@domain/payments"
 import { paymentAmountFromNumber, WalletCurrency } from "@domain/shared"
 import { TxStatus } from "@domain/wallets"
 import { DisplayCurrency, displayAmountFromNumber } from "@domain/fiat"
@@ -36,14 +36,15 @@ import {
   bitcoindOutside,
   createChainAddress,
   createInvoice,
-  createUserAndWalletFromUserRef,
-  getAccountByTestUserRef,
-  getDefaultWalletIdByTestUserRef,
+  createUserAndWalletFromPhone,
+  getAccountByPhone,
+  getDefaultWalletIdByPhone,
   getTransactionsForWalletId,
-  getUsdWalletIdByTestUserRef,
+  getUsdWalletIdByPhone,
   lndOutside1,
   onceBriaSubscribe,
   RANDOM_ADDRESS,
+  randomPhone,
   safePay,
   sendToAddressAndConfirm,
 } from "test/helpers"
@@ -55,16 +56,19 @@ let walletIdB: WalletId
 let walletIdUsdB: WalletId
 let walletIdC: WalletId
 
+const phoneB = randomPhone()
+const phoneC = randomPhone()
+
 beforeAll(async () => {
-  await createUserAndWalletFromUserRef("B")
-  await createUserAndWalletFromUserRef("C")
+  await createUserAndWalletFromPhone(phoneB)
+  await createUserAndWalletFromPhone(phoneC)
 
-  accountB = await getAccountByTestUserRef("B")
-  accountC = await getAccountByTestUserRef("C")
+  accountB = await getAccountByPhone(phoneB)
+  accountC = await getAccountByPhone(phoneC)
 
-  walletIdB = await getDefaultWalletIdByTestUserRef("B")
-  walletIdUsdB = await getUsdWalletIdByTestUserRef("B")
-  walletIdC = await getDefaultWalletIdByTestUserRef("C")
+  walletIdB = await getDefaultWalletIdByPhone(phoneB)
+  walletIdUsdB = await getUsdWalletIdByPhone(phoneB)
+  walletIdC = await getDefaultWalletIdByPhone(phoneC)
 
   await bitcoindClient.loadWallet({ filename: "outside" })
 
@@ -566,19 +570,11 @@ describe("Display properties on transactions", () => {
       it("(LnFailedPaymentReceiveLedgerMetadata) pay zero amount invoice & revert txn when verifyMaxFee fails", async () => {
         // TxMetadata:
         // - LnFailedPaymentReceiveLedgerMetadata
-
-        const { LnFees: LnFeesOrig } = jest.requireActual("@domain/payments/ln-fees")
-        jest
-          .spyOn(LnFeesImpl, "LnFees")
-          // 1st call is in PaymentFlow
-          .mockReturnValueOnce({
-            ...LnFeesOrig(),
-          })
-          // 2nd call is in use-case at verifyMaxFee
-          .mockReturnValueOnce({
-            ...LnFeesOrig(),
-            verifyMaxFee: () => new MaxFeeTooLargeForRoutelessPaymentError(),
-          })
+        const { LnFees: LnFeesOrig } = jest.requireActual("@domain/payments")
+        const lndFeesSpy = jest.spyOn(LnFeesImpl, "LnFees").mockReturnValue({
+          ...LnFeesOrig(),
+          verifyMaxFee: () => new MaxFeeTooLargeForRoutelessPaymentError(),
+        })
 
         const senderWalletId = walletIdB
         const senderAccount = accountB
@@ -596,6 +592,8 @@ describe("Display properties on transactions", () => {
           senderAccount,
         })
         expect(paymentResult).toBeInstanceOf(MaxFeeTooLargeForRoutelessPaymentError)
+        // Restore system state
+        lndFeesSpy.mockReset()
 
         const txns = await getAllTransactionsByHash(paymentHash)
         if (txns instanceof Error) throw txns
@@ -652,7 +650,7 @@ describe("Display properties on transactions", () => {
       amountSats: Satoshis
       walletId: WalletId
     }) => {
-      const address = await Wallets.createOnChainAddressForBtcWallet({
+      const address = await Wallets.createOnChainAddress({
         walletId,
       })
       if (address instanceof Error) throw address
@@ -749,8 +747,7 @@ describe("Display properties on transactions", () => {
         const recipientWalletId = walletIdB
 
         // Execute receive
-
-        const address = await Wallets.createOnChainAddressForBtcWallet({
+        const address = await Wallets.createOnChainAddress({
           walletId: recipientWalletId,
         })
         if (address instanceof Error) throw address
@@ -846,7 +843,7 @@ describe("Display properties on transactions", () => {
         // Execute Send
         const memo = "invoiceMemo #" + (Math.random() * 1_000_000).toFixed()
 
-        const address = await Wallets.createOnChainAddressForBtcWallet({
+        const address = await Wallets.createOnChainAddress({
           walletId: recipientWalletId,
         })
         if (address instanceof Error) throw address
@@ -919,7 +916,7 @@ describe("Display properties on transactions", () => {
         // Execute Send
         const memo = "invoiceMemo #" + (Math.random() * 1_000_000).toFixed()
 
-        const address = await Wallets.createOnChainAddressForUsdWallet({
+        const address = await Wallets.createOnChainAddress({
           walletId: recipientWalletId,
         })
         if (address instanceof Error) throw address
@@ -996,10 +993,10 @@ describe("Display properties on transactions", () => {
         // TxMetadata:
         // - OnChainSendLedgerMetadata
 
-        const { NewOnChainService: NewOnChainServiceOrig } =
+        const { OnChainService: OnChainServiceOrig } =
           jest.requireActual("@services/bria")
-        const briaSpy = jest.spyOn(BriaImpl, "NewOnChainService").mockReturnValue({
-          ...NewOnChainServiceOrig(),
+        const briaSpy = jest.spyOn(BriaImpl, "OnChainService").mockReturnValue({
+          ...OnChainServiceOrig(),
           queuePayoutToAddress: async () => "payoutId" as PayoutId,
         })
 

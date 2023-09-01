@@ -1,38 +1,42 @@
 import {
+  GetChainTransactionsResult,
+  GetInvoiceResult,
+  GetInvoicesResult,
+  GetPaymentResult,
+  PayViaPaymentDetailsArgs,
+  PayViaPaymentDetailsResult,
+  PayViaRoutesResult,
   cancelHodlInvoice,
   createHodlInvoice,
+  deletePayment,
+  getChainBalance,
+  getChainTransactions,
   getChannelBalance,
+  getChannels,
   getClosedChannels,
   getFailedPayments,
   getInvoice,
-  GetInvoiceResult,
+  getInvoices,
   getPayment,
-  GetPaymentResult,
   getPayments,
+  getPendingChainBalance,
+  getPendingChannels,
   getPendingPayments,
   getWalletInfo,
   payViaPaymentDetails,
-  PayViaPaymentDetailsArgs,
-  PayViaPaymentDetailsResult,
   payViaRoutes,
-  PayViaRoutesResult,
-  deletePayment,
   settleHodlInvoice,
-  getInvoices,
-  GetInvoicesResult,
-  getPendingChannels,
-  getChannels,
 } from "lightning"
 import lnService from "ln-service"
 
-import { SECS_PER_5_MINS } from "@config"
+import { NETWORK, SECS_PER_5_MINS } from "@config"
 
 import { toMilliSatsFromString, toSats } from "@domain/bitcoin"
 import {
   BadPaymentDataError,
   CorruptLndDbError,
   CouldNotDecodeReturnedPaymentRequest,
-  decodeInvoice,
+  DestinationMissingDependentFeatureError,
   InsufficientBalanceForLnPaymentError,
   InsufficientBalanceForRoutingError,
   InvoiceExpiredOrBadPaymentHashError,
@@ -40,6 +44,8 @@ import {
   LightningServiceError,
   LnAlreadyPaidError,
   LnPaymentPendingError,
+  LookupPaymentTimedOutError,
+  OffChainServiceBusyError,
   OffChainServiceUnavailableError,
   PaymentAttemptsTimedOutError,
   PaymentInTransitionError,
@@ -48,22 +54,22 @@ import {
   ProbeForRouteTimedOutError,
   ProbeForRouteTimedOutFromApplicationError,
   RouteNotFoundError,
-  UnknownNextPeerError,
   SecretDoesNotMatchAnyExistingHodlInvoiceError,
   TemporaryChannelFailureError,
-  UnknownLightningServiceError,
-  UnknownRouteNotFoundError,
-  DestinationMissingDependentFeatureError,
-  LookupPaymentTimedOutError,
   TemporaryNodeFailureError,
-  OffChainServiceBusyError,
+  PaymentRejectedByDestinationError,
+  UnknownLightningServiceError,
+  UnknownNextPeerError,
+  UnknownRouteNotFoundError,
+  decodeInvoice,
 } from "@domain/bitcoin/lightning"
+import { IncomingOnChainTransaction } from "@domain/bitcoin/onchain"
 import { CacheKeys } from "@domain/cache"
 import { LnFees } from "@domain/payments"
 import {
+  WalletCurrency,
   parseErrorMessageFromUnknown,
   paymentAmountFromNumber,
-  WalletCurrency,
 } from "@domain/shared"
 
 import { LocalCacheService } from "@services/cache"
@@ -73,9 +79,16 @@ import { timeoutWithCancel } from "@utils"
 
 import sumBy from "lodash.sumby"
 
-import { TIMEOUT_PAYMENT } from "./auth"
-import { getActiveLnd, getLndFromPubkey, getLnds, parseLndErrorDetails } from "./utils"
 import { KnownLndErrorDetails } from "./errors"
+import {
+  getActiveLnd,
+  getActiveOnchainLnd,
+  getLndFromPubkey,
+  getLnds,
+  parseLndErrorDetails,
+} from "./utils"
+
+const TIMEOUT_PAYMENT = NETWORK !== "regtest" ? 45000 : 3000
 
 export const LndService = (): ILightningService | LightningServiceError => {
   const activeNode = getActiveLnd()
@@ -83,6 +96,11 @@ export const LndService = (): ILightningService | LightningServiceError => {
 
   const defaultLnd = activeNode.lnd
   const defaultPubkey = activeNode.pubkey as Pubkey
+
+  const activeOnchainNode = getActiveOnchainLnd()
+  if (activeOnchainNode instanceof Error) return activeOnchainNode
+
+  const defaultOnchainLnd = activeOnchainNode.lnd
 
   const isLocal = (pubkey: Pubkey): boolean | LightningServiceError =>
     getLnds({ type: "offchain" }).some((item) => item.pubkey === pubkey)
@@ -102,6 +120,73 @@ export const LndService = (): ILightningService | LightningServiceError => {
 
       const { channel_balance } = await getChannelBalance({ lnd })
       return toSats(channel_balance)
+    } catch (err) {
+      return handleCommonLightningServiceErrors(err)
+    }
+  }
+
+  const getOnChainBalance = async (
+    pubkey?: Pubkey,
+  ): Promise<Satoshis | LightningServiceError> => {
+    try {
+      const lndInstance = pubkey ? getLndFromPubkey({ pubkey }) : defaultOnchainLnd
+      if (lndInstance instanceof Error) return lndInstance
+
+      const { chain_balance } = await getChainBalance({ lnd: lndInstance })
+      return toSats(chain_balance)
+    } catch (err) {
+      return handleCommonLightningServiceErrors(err)
+    }
+  }
+
+  const getPendingOnChainBalance = async (
+    pubkey?: Pubkey,
+  ): Promise<Satoshis | LightningServiceError> => {
+    try {
+      const lndInstance = pubkey ? getLndFromPubkey({ pubkey }) : defaultOnchainLnd
+      if (lndInstance instanceof Error) return lndInstance
+
+      const { pending_chain_balance } = await getPendingChainBalance({ lnd: lndInstance })
+      return toSats(pending_chain_balance)
+    } catch (err) {
+      return handleCommonLightningServiceErrors(err)
+    }
+  }
+
+  const listIncomingOnChainTransactions = async ({
+    decoder,
+    scanDepth,
+  }: {
+    decoder: TxDecoder
+    scanDepth: ScanDepth
+  }): Promise<IncomingOnChainTransaction[] | LightningServiceError> => {
+    try {
+      let blockHeight = await LocalCacheService().get<number>({
+        key: CacheKeys.BlockHeight,
+      })
+      if (blockHeight instanceof Error) {
+        blockHeight = 0
+      }
+      if (!blockHeight) {
+        ;({ current_block_height: blockHeight } = await getWalletInfo({
+          lnd: defaultLnd,
+        }))
+        await LocalCacheService().set<number>({
+          key: CacheKeys.BlockHeight,
+          value: blockHeight,
+          ttlSecs: SECS_PER_5_MINS,
+        })
+      }
+
+      // this is necessary for tests, otherwise `after` may be negative
+      const after = Math.max(0, blockHeight - scanDepth)
+
+      const txs = await getChainTransactions({
+        lnd: defaultOnchainLnd,
+        after,
+      })
+
+      return extractIncomingOnChainTransactions({ decoder, txs })
     } catch (err) {
       return handleCommonLightningServiceErrors(err)
     }
@@ -217,9 +302,47 @@ export const LndService = (): ILightningService | LightningServiceError => {
       const lnd = pubkey ? getLndFromPubkey({ pubkey }) : defaultLnd
       if (lnd instanceof Error) return lnd
       const { channels } = await getChannels({ lnd })
-      const pendingHtlcCounts = channels.map((channel) => channel.pending_payments.length)
-      const totalPendingHtlcCount = pendingHtlcCounts.reduce((a, b) => a + b, 0)
-      return totalPendingHtlcCount
+
+      return channels.reduce(
+        (totalCount, channel) => totalCount + channel.pending_payments.length,
+        0,
+      )
+    } catch (err) {
+      return handleCommonLightningServiceErrors(err)
+    }
+  }
+
+  const getIncomingPendingHtlcCount = async (
+    pubkey?: Pubkey,
+  ): Promise<number | LightningServiceError> => {
+    try {
+      const lnd = pubkey ? getLndFromPubkey({ pubkey }) : defaultLnd
+      if (lnd instanceof Error) return lnd
+      const { channels } = await getChannels({ lnd })
+
+      return channels.reduce(
+        (totalCount, channel) =>
+          totalCount + channel.pending_payments.filter((p) => !p.is_outgoing).length,
+        0,
+      )
+    } catch (err) {
+      return handleCommonLightningServiceErrors(err)
+    }
+  }
+
+  const getOutgoingPendingHtlcCount = async (
+    pubkey?: Pubkey,
+  ): Promise<number | LightningServiceError> => {
+    try {
+      const lnd = pubkey ? getLndFromPubkey({ pubkey }) : defaultLnd
+      if (lnd instanceof Error) return lnd
+      const { channels } = await getChannels({ lnd })
+
+      return channels.reduce(
+        (totalCount, channel) =>
+          totalCount + channel.pending_payments.filter((p) => p.is_outgoing).length,
+        0,
+      )
     } catch (err) {
       return handleCommonLightningServiceErrors(err)
     }
@@ -732,10 +855,15 @@ export const LndService = (): ILightningService | LightningServiceError => {
       listActivePubkeys,
       listAllPubkeys,
       getBalance,
+      getOnChainBalance,
+      getPendingOnChainBalance,
+      listIncomingOnChainTransactions,
       getInboundOutboundBalance,
       getOpeningChannelsBalance,
       getClosingChannelsBalance,
       getTotalPendingHtlcCount,
+      getIncomingPendingHtlcCount,
+      getOutgoingPendingHtlcCount,
       getActiveChannels,
       getOfflineChannels,
       getPublicChannels,
@@ -939,6 +1067,26 @@ const resolvePaymentStatus = async ({
   return PaymentStatus.Pending
 }
 
+const extractIncomingOnChainTransactions = ({
+  decoder,
+  txs,
+}: {
+  decoder: TxDecoder
+  txs: GetChainTransactionsResult
+}): IncomingOnChainTransaction[] => {
+  return txs.transactions
+    .filter((tx) => !tx.is_outgoing && !!tx.transaction)
+    .map(
+      (tx): IncomingOnChainTransaction =>
+        IncomingOnChainTransaction({
+          confirmations: tx.confirmation_count || 0,
+          rawTx: decoder.decode(tx.transaction as string),
+          fee: toSats(tx.fee || 0),
+          createdAt: new Date(tx.created_at),
+        }),
+    )
+}
+
 const handleSendPaymentLndErrors = ({
   err,
   paymentHash,
@@ -956,6 +1104,7 @@ const handleSendPaymentLndErrors = ({
     case match(KnownLndErrorDetails.UnknownNextPeer):
       return new UnknownNextPeerError()
     case match(KnownLndErrorDetails.PaymentRejectedByDestination):
+      return new PaymentRejectedByDestinationError(paymentHash)
     case match(KnownLndErrorDetails.UnknownPaymentHash):
       return new InvoiceExpiredOrBadPaymentHashError(paymentHash)
     case match(KnownLndErrorDetails.PaymentAttemptsTimedOut):

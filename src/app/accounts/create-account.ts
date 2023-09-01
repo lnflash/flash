@@ -1,12 +1,11 @@
 import {
   ConfigError,
+  TWILIO_ACCOUNT_SID,
+  getAdminAccounts,
   getDefaultAccountsConfig,
-  getTestAccounts,
-  getTwilioConfig,
   isRunningJest,
 } from "@config"
 import { AccountLevel } from "@domain/accounts"
-import { WalletCurrency } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
 import { baseLogger } from "@services/logger"
 import {
@@ -14,7 +13,7 @@ import {
   WalletsRepository,
   UsersRepository,
 } from "@services/mongoose"
-import { TwilioClient } from "@services/twilio"
+import { TWILIO_ACCOUNT_TEST, TwilioClient } from "@services/twilio"
 
 const initializeCreatedAccount = async ({
   account,
@@ -50,9 +49,13 @@ const initializeCreatedAccount = async ({
   }
   account.defaultWalletId = defaultWalletId
 
-  // FIXME: to remove when Casbin is been introduced
-  const role = getTestAccounts().find(({ phone: phoneTest }) => phoneTest === phone)?.role
+  // TODO: improve bootstrap process
+  // the script below is to dynamically attribute the editor account at runtime
+  // this is only if editor is set in the config - typically only in test env
+  const role = getAdminAccounts().find(({ phone: phone2 }) => phone2 === phone)?.role
   account.role = role || "user"
+  // end TODO
+
   account.contactEnabled = account.role === "user" || account.role === "editor"
 
   account.statusHistory = [{ status: config.initialStatus, comment: "Initial Status" }]
@@ -99,7 +102,7 @@ export const createAccountWithPhoneIdentifier = async ({
   // the server is been launched as a sub process,
   // so it's not been mocked by jest
   if (
-    getTwilioConfig().accountSid !== "AC_twilio_id" ||
+    TWILIO_ACCOUNT_SID !== TWILIO_ACCOUNT_TEST ||
     isRunningJest /* TwilioClient will be mocked */
   ) {
     phoneMetadata = await TwilioClient().getCarrier(phone)

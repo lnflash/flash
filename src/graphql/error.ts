@@ -209,7 +209,7 @@ export class InvoiceDecodeError extends CustomApolloError {
   }
 }
 
-export class PhoneCodeError extends CustomApolloError {
+export class VerificationCodeError extends CustomApolloError {
   constructor(errData: CustomApolloErrorData) {
     super({
       message: "Incorrect phone code",
@@ -309,6 +309,40 @@ export class PhoneAccountAlreadyExistsError extends CustomApolloError {
   }
 }
 
+export class EmailAlreadyExistsError extends CustomApolloError {
+  constructor(errData: CustomApolloErrorData) {
+    super({
+      message:
+        "Email account already exists. Please logout and log back in with your email account",
+      forwardToClient: true,
+      code: "EMAIL_ACCOUNT_ALREADY_EXISTS_ERROR",
+      ...errData,
+    })
+  }
+}
+
+export class CodeExpiredError extends CustomApolloError {
+  constructor(errData: CustomApolloErrorData) {
+    super({
+      message: "Code has expired. please ask for a new code and try again",
+      forwardToClient: true,
+      code: "CODE_EXPIRED_ERROR",
+      ...errData,
+    })
+  }
+}
+
+export class SessionRefreshRequiredError extends CustomApolloError {
+  constructor(errData: CustomApolloErrorData) {
+    super({
+      message: "Session refresh required.",
+      forwardToClient: true,
+      code: "SESSION_REFRESH_REQUIRED_ERROR",
+      ...errData,
+    })
+  }
+}
+
 export class PhoneAccountAlreadyExistsNeedToSweepFundsError extends CustomApolloError {
   constructor(errData: CustomApolloErrorData) {
     super({
@@ -316,6 +350,41 @@ export class PhoneAccountAlreadyExistsNeedToSweepFundsError extends CustomApollo
         "Error phone account already exists. You need to manually sweep funds to your phone account",
       forwardToClient: true,
       code: "PHONE_ACCOUNT_ALREADY_EXISTS_NEED_TO_SWEEP_FUNDS_ERROR",
+      ...errData,
+    })
+  }
+}
+
+export class EmailUnverifiedError extends CustomApolloError {
+  constructor(errData: CustomApolloErrorData) {
+    super({
+      message: "Email is not verified. Please verify your email and try again",
+      forwardToClient: true,
+      code: "EMAIL_NOT_VERIFIED_ERROR",
+      ...errData,
+    })
+  }
+}
+
+export class AccountAlreadyHasEmailError extends CustomApolloError {
+  constructor(errData: CustomApolloErrorData) {
+    super({
+      message:
+        "An email is already attached to this account. It's only possible to attach one email per account",
+      forwardToClient: true,
+      code: "EMAIL_ALREADY_ATTACHED_ERROR",
+      ...errData,
+    })
+  }
+}
+
+export class PhoneAlreadyExistsError extends CustomApolloError {
+  constructor(errData: CustomApolloErrorData) {
+    super({
+      message:
+        "A phone is already attached to this account. It's only possible to attach one phone per account",
+      forwardToClient: true,
+      code: "PHONE_ALREADY_ATTACHED_ERROR",
       ...errData,
     })
   }

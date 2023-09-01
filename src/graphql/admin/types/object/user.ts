@@ -1,14 +1,29 @@
+import { mapError } from "@graphql/error-map"
 import { GT } from "@graphql/index"
-import Language from "@graphql/types/scalar/language"
-import Phone from "@graphql/types/scalar/phone"
-import Timestamp from "@graphql/types/scalar/timestamp"
+import GraphQLEmail from "@graphql/shared/types/object/email"
+import Language from "@graphql/shared/types/scalar/language"
+import Phone from "@graphql/shared/types/scalar/phone"
+import Timestamp from "@graphql/shared/types/scalar/timestamp"
 
-const User = GT.Object<IdentityPhone>({
-  name: "User",
+// FIXME should not use service
+import { IdentityRepository } from "@services/kratos"
+
+const User = GT.Object<User>({
+  name: "AuditedUser",
 
   fields: () => ({
     id: { type: GT.NonNullID },
-    phone: { type: GT.NonNull(Phone) },
+    phone: { type: Phone },
+
+    email: {
+      type: GraphQLEmail,
+      description: "Email address",
+      resolve: async (source) => {
+        const identity = await IdentityRepository().getIdentity(source.id)
+        if (identity instanceof Error) throw mapError(identity)
+        return { address: identity.email, verified: identity.emailVerified }
+      },
+    },
     language: { type: GT.NonNull(Language) },
     createdAt: {
       type: GT.NonNull(Timestamp),

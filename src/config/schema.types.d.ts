@@ -17,7 +17,6 @@ type AccountLimitsConfig = {
 }
 
 type YamlSchema = {
-  PROXY_CHECK_APIKEY: string
   name: string
   lightningAddressDomain: string
   lightningAddressDomainAliases: string[]
@@ -49,31 +48,28 @@ type YamlSchema = {
     minOnChainHotWalletBalance: number
     minRebalanceSize: number
     maxHotWalletBalance: number
-    walletPattern: string
-    onChainWallet: string
-    targetConfirmations: number
   }
   bria: {
     hotWalletName: string
     queueNames: {
       fast: string
     }
+    coldStorage: {
+      walletName: string
+      hotToColdRebalanceQueueName: string
+    }
   }
   lndScbBackupBucketName: string
+  admin_accounts: {
+    role: string
+    phone: string
+  }[]
   test_accounts: {
-    ref: string
     phone: string
     code: string
-    needUsdWallet?: boolean
-    username?: string
-    phoneMetadataCarrierType?: string
-    title?: string
-    role?: string
-    currency?: string
   }[]
   rateLimits: {
     requestCodePerLoginIdentifier: RateLimitInput
-    requestCodePerLoginIdentifierMinInterval: RateLimitInput
     requestCodePerIp: RateLimitInput
     failedLoginAttemptPerLoginIdentifier: RateLimitInput
     failedLoginAttemptPerIp: RateLimitInput
@@ -114,11 +110,6 @@ type YamlSchema = {
       defaultMin: number
     }
   }
-  lnds: {
-    name: string
-    type: string[]
-    priority: number
-  }[]
   onChainWallet: {
     dustThreshold: number
     minConfirmations: number
@@ -136,23 +127,10 @@ type YamlSchema = {
     swapProviders: Array<SwapProvider>
     feeAccountingEnabled: boolean
   }
-  apollo: {
-    playground: boolean
-    playgroundUrl: string
-  }
   userActivenessMonthlyVolumeThreshold: number
   cronConfig: {
     rebalanceEnabled: boolean
     swapEnabled: boolean
-  }
-  kratosConfig: {
-    publicApi: string
-    adminApi: string
-    corsAllowedOrigins: string[]
-  }
-  oathkeeperConfig: {
-    urlJkws: string
-    decisionsApi: string
   }
   captcha: {
     mandatory: boolean
@@ -160,9 +138,4 @@ type YamlSchema = {
   skipFeeProbeConfig: { pubkey: string[]; chanId: string[] }
   smsAuthUnsupportedCountries: string[]
   whatsAppAuthUnsupportedCountries: string[]
-  appcheckConfig: {
-    audience: string
-    issuer: string
-    jwksUri: string
-  }
 }

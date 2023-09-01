@@ -132,6 +132,15 @@ export const Wallet = mongoose.model<WalletRecord>("Wallet", WalletSchema)
 
 const AccountSchema = new Schema<AccountRecord>(
   {
+    id: {
+      type: String,
+      index: true,
+      unique: true,
+      sparse: true,
+      required: true,
+      default: () => crypto.randomUUID(),
+    },
+
     withdrawFee: {
       type: Number,
       default: feesConfig.withdrawDefaultMin,
@@ -348,11 +357,15 @@ const UserSchema = new Schema(
       unique: true,
       sparse: true,
     },
-    deletedPhone: { type: String },
+    deletedPhones: {
+      type: [String],
+    },
     deviceId: {
       type: String,
     },
-    deletedDeviceId: { type: String },
+    deletedEmail: {
+      type: [String],
+    },
   },
   { id: false },
 )

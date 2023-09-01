@@ -1,4 +1,5 @@
 import { LedgerService } from "@services/ledger"
+import { baseLogger } from "@services/logger"
 import { createObjectCsvStringifier, createObjectCsvWriter } from "csv-writer"
 
 const headers_field = [
@@ -23,6 +24,9 @@ const headers_field = [
   "feeKnownInAdvance",
   "address",
   "txHash",
+  "displayAmount",
+  "displayFee",
+  "displayCurrency",
 ]
 
 const header = headers_field.map((item) => ({ id: item, title: item }))
@@ -56,7 +60,7 @@ export class CsvWalletsExport {
     })
 
     await csvWriter.writeRecords(this.entries)
-    console.log("saving complete")
+    baseLogger.info("saving complete")
   }
 
   async addWallet(walletId: WalletId): Promise<void | ApplicationError> {

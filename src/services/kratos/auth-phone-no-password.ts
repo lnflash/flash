@@ -1,8 +1,8 @@
+import { CreateIdentityBody, UpdateIdentityBody } from "@ory/client"
 import libCookie from "cookie"
 import setCookie from "set-cookie-parser"
-import { CreateIdentityBody, UpdateIdentityBody, Identity } from "@ory/client"
 
-import { getKratosPasswords } from "@config"
+import { KRATOS_MASTER_USER_PASSWORD } from "@config"
 
 import {
   LikelyNoUserWithThisPhoneExistError,
@@ -18,11 +18,12 @@ import {
   UnknownKratosError,
 } from "./errors"
 import { kratosAdmin, kratosPublic, toDomainIdentityPhone } from "./private"
+import { SchemaIdType } from "./schema"
 
 // login with phone
 
 export const AuthWithPhonePasswordlessService = (): IAuthWithPhonePasswordlessService => {
-  const password = getKratosPasswords().masterUserPassword
+  const password = KRATOS_MASTER_USER_PASSWORD
 
   const loginToken = async ({
     phone,
@@ -42,12 +43,12 @@ export const AuthWithPhonePasswordlessService = (): IAuthWithPhonePasswordlessSe
           password,
         },
       })
-      const sessionToken = result.data.session_token as SessionToken
+      const authToken = result.data.session_token as AuthToken
 
-      // note: this only works when whoami: required_aal = aal1
-      const kratosUserId = result.data.session.identity.id as UserId
+      // identity is only defined when identity has not enabled totp
+      const kratosUserId = result.data.session.identity?.id as UserId | undefined
 
-      return { sessionToken, kratosUserId }
+      return { authToken, kratosUserId }
     } catch (err) {
       if (err instanceof Error && err.message === "Request failed with status code 400") {
         return new LikelyNoUserWithThisPhoneExistError(err.message || err)
@@ -110,7 +111,7 @@ export const AuthWithPhonePasswordlessService = (): IAuthWithPhonePasswordlessSe
   const logoutToken = async ({
     token,
   }: {
-    token: SessionToken
+    token: AuthToken
   }): Promise<void | KratosError> => {
     try {
       await kratosPublic.performNativeLogout({
@@ -129,14 +130,13 @@ export const AuthWithPhonePasswordlessService = (): IAuthWithPhonePasswordlessSe
     cookie: SessionCookie
   }): Promise<void | KratosError> => {
     try {
-      const session = await kratosPublic.toSession({ cookie })
-      const sessionId = session.data.id
-      // * revoke token via admin api
-      //   there is no way to do it via cookies and the public api via the backend
-      //   I tried the kratosPublic.createBrowserLogoutFlow but it did not work
-      //   properly with cookies
-      await kratosAdmin.disableSession({
-        id: sessionId,
+      const flow = await kratosPublic.createBrowserLogoutFlow({
+        cookie,
+      })
+      const logoutToken = flow.data.logout_token
+      await kratosPublic.updateLogoutFlow({
+        token: logoutToken,
+        cookie,
       })
     } catch (err) {
       return new UnknownKratosError(err)
@@ -160,10 +160,10 @@ export const AuthWithPhonePasswordlessService = (): IAuthWithPhonePasswordlessSe
           password,
         },
       })
-      const sessionToken = result.data.session_token as SessionToken
+      const authToken = result.data.session_token as AuthToken
       const kratosUserId = result.data.identity.id as UserId
 
-      return { sessionToken, kratosUserId }
+      return { authToken, kratosUserId }
     } catch (err) {
       if (err instanceof Error && err.message === "Request failed with status code 400") {
         return new LikelyUserAlreadyExistError(err.message || err)
@@ -180,7 +180,7 @@ export const AuthWithPhonePasswordlessService = (): IAuthWithPhonePasswordlessSe
     phone: PhoneNumber
     userId: UserId
   }): Promise<IdentityPhone | KratosError> => {
-    let identity: Identity
+    let identity: KratosIdentity
 
     try {
       ;({ data: identity } = await kratosAdmin.getIdentity({ id: userId }))
@@ -193,7 +193,7 @@ export const AuthWithPhonePasswordlessService = (): IAuthWithPhonePasswordlessSe
     }
 
     if (identity.state === undefined)
-      throw new KratosError("state undefined, probably impossible state") // type issue
+      throw new UnknownKratosError("state undefined, probably impossible state") // type issue
 
     identity.traits = { phone }
 
@@ -201,7 +201,7 @@ export const AuthWithPhonePasswordlessService = (): IAuthWithPhonePasswordlessSe
       ...identity,
       credentials: { password: { config: { password } } },
       state: identity.state,
-      schema_id: "phone_no_password_v0",
+      schema_id: SchemaIdType.PhoneNoPasswordV0,
     }
 
     try {
@@ -267,7 +267,7 @@ export const AuthWithPhonePasswordlessService = (): IAuthWithPhonePasswordlessSe
     const adminIdentity: CreateIdentityBody = {
       credentials: { password: { config: { password } } },
       state: "active",
-      schema_id: "phone_no_password_v0",
+      schema_id: SchemaIdType.PhoneNoPasswordV0,
       traits: { phone },
     }
 
@@ -292,7 +292,7 @@ export const AuthWithPhonePasswordlessService = (): IAuthWithPhonePasswordlessSe
     kratosUserId: UserId
     phone: PhoneNumber
   }) => {
-    let identity: Identity
+    let identity: KratosIdentity
 
     try {
       ;({ data: identity } = await kratosAdmin.getIdentity({ id: kratosUserId }))

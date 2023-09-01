@@ -11,7 +11,7 @@ import { baseLogger } from "@services/logger"
 
 import { GALOY_API_PORT } from "@config"
 
-import { gqlMainSchema, mutationFields, queryFields } from "@graphql/main"
+import { gqlMainSchema, mutationFields, queryFields } from "@graphql/public"
 
 import { startApolloServerForCombinedSchema } from "../services/ibex-plugin/servers/graphql-combined-server"
 
@@ -52,7 +52,6 @@ export async function startApolloServerForCoreSchema() {
   return startApolloServer({
     schema,
     port: GALOY_API_PORT,
-    startSubscriptionServer: true,
     type: "main",
   })
 }
@@ -61,7 +60,10 @@ if (require.main === module) {
   setupMongoConnection(true)
     .then(async () => {
       activateLndHealthCheck()
-      await bootstrap()
+
+      const res = await bootstrap()
+      if (res instanceof Error) throw res
+
       await Promise.race([
         startApolloServerForCoreSchema(),
         startApolloServerForAdminSchema(),

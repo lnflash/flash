@@ -74,26 +74,9 @@ const rateLimitConfigSchema = {
   additionalProperties: false,
 }
 
-const lndConfig = {
-  type: "object",
-  properties: {
-    name: { type: "string" },
-    type: {
-      type: "array",
-      items: { enum: ["offchain", "onchain"] },
-      uniqueItems: true,
-    },
-    priority: { type: "integer" },
-  },
-  required: ["name", "type", "priority"],
-  additionalProperties: false,
-}
-
 export const configSchema = {
   type: "object",
   properties: {
-    PROXY_CHECK_APIKEY: { type: "string" }, // TODO: move out of yaml and to env
-    name: { type: "string", default: "Galoy Banking" },
     lightningAddressDomain: { type: "string", default: "pay.domain.com" },
     lightningAddressDomainAliases: {
       type: "array",
@@ -169,7 +152,7 @@ export const configSchema = {
       ],
       additionalProperties: false,
       default: {
-        allowPhoneCountries: ["SV"],
+        allowPhoneCountries: [],
         denyPhoneCountries: [],
         allowIPCountries: [],
         denyIPCountries: [],
@@ -183,27 +166,13 @@ export const configSchema = {
         minOnChainHotWalletBalance: { type: "integer" },
         minRebalanceSize: { type: "integer" },
         maxHotWalletBalance: { type: "integer" },
-        walletPattern: { type: "string" },
-        // TODO: confusing: 2 properties with the same name
-        onChainWallet: { type: "string" },
-        targetConfirmations: { type: "integer" },
       },
-      required: [
-        "minOnChainHotWalletBalance",
-        "minRebalanceSize",
-        "maxHotWalletBalance",
-        "walletPattern",
-        "targetConfirmations",
-      ],
+      required: ["minOnChainHotWalletBalance", "minRebalanceSize", "maxHotWalletBalance"],
       additionalProperties: false,
       default: {
         minOnChainHotWalletBalance: 1000000,
         minRebalanceSize: 10000000,
         maxHotWalletBalance: 200000000,
-        walletPattern: "specter",
-        // TODO: confusing: 2 properties with the same name
-        onChainWallet: "specter/coldstorage",
-        targetConfirmations: 6,
       },
     },
     bria: {
@@ -218,137 +187,78 @@ export const configSchema = {
           required: ["fast"],
           additionalProperties: false,
           default: {
-            fast: "dev",
+            fast: "dev-queue",
+          },
+        },
+        coldStorage: {
+          type: "object",
+          properties: {
+            walletName: { type: "string" },
+            hotToColdRebalanceQueueName: { type: "string" },
+          },
+          required: ["walletName", "hotToColdRebalanceQueueName"],
+          default: {
+            walletName: "cold",
+            hotToColdRebalanceQueueName: "dev-queue",
           },
         },
       },
-      required: ["hotWalletName", "queueNames"],
+      required: ["hotWalletName", "queueNames", "coldStorage"],
       additionalProperties: false,
       default: {
-        hotWalletName: "dev",
+        hotWalletName: "dev-wallet",
       },
     },
     lndScbBackupBucketName: { type: "string", default: "lnd-static-channel-backups" },
+    admin_accounts: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          role: { type: "string" },
+          phone: { type: "string" },
+        },
+        required: ["role", "phone"],
+        additionalProperties: false,
+      },
+      default: [
+        {
+          role: "dealer",
+          phone: "+16505554327",
+        },
+        {
+          role: "funder",
+          phone: "+16505554325",
+        },
+        {
+          role: "bankowner",
+          phone: "+16505554334",
+        },
+        {
+          role: "editor",
+          phone: "+16505554336",
+        },
+      ],
+      uniqueItems: true,
+    },
     test_accounts: {
       type: "array",
       items: {
         type: "object",
         properties: {
-          ref: { type: "string" },
           phone: { type: "string" },
           code: { type: "string" },
-          needUsdWallet: { type: "boolean" },
-          username: { type: "string" },
-          phoneMetadataCarrierType: { type: "string" },
-          title: { type: "string" },
-          role: { type: "string" },
-          currency: { type: "string" },
         },
-        required: ["ref", "phone", "code"],
+        required: ["phone", "code"],
         additionalProperties: false,
       },
-      default: [
-        {
-          ref: "A",
-          phone: "+16505554321",
-          code: "321321",
-          needUsdWallet: true,
-        },
-        {
-          ref: "B",
-          phone: "+16505554322",
-          code: "321432",
-          needUsdWallet: true,
-          phoneMetadataCarrierType: "mobile",
-        },
-        {
-          ref: "C",
-          phone: "+16505554323",
-          code: "321321",
-          title: "business",
-        },
-        {
-          ref: "D",
-          phone: "+16505554324",
-          code: "321321",
-          needUsdWallet: true,
-        },
-        {
-          ref: "E",
-          phone: "+16505554332",
-          code: "321321",
-        },
-        {
-          ref: "F",
-          phone: "+16505554333",
-          code: "321321",
-          needUsdWallet: true,
-        },
-        {
-          ref: "G",
-          phone: "+16505554335",
-          code: "321321",
-          username: "user15",
-        },
-        {
-          ref: "H",
-          phone: "+19876543210",
-          code: "321321",
-          username: "tester",
-        },
-        {
-          ref: "I",
-          phone: "+16505554336",
-          code: "321321",
-          role: "editor",
-          username: "editor",
-        },
-        {
-          ref: "J",
-          phone: "+19876543211",
-          code: "321321",
-          username: "tester2",
-        },
-        {
-          ref: "K",
-          phone: "+16505554328",
-          code: "321321",
-          username: "alice",
-        },
-        {
-          ref: "L",
-          phone: "+198765432113",
-          code: "321321",
-          username: "bob",
-        },
-        {
-          ref: "M",
-          phone: "+198765432114",
-          code: "321321",
-        },
-        {
-          ref: "N",
-          phone: "+198765432115",
-          code: "321321",
-        },
-        {
-          ref: "O",
-          phone: "+198765432116",
-          code: "321321",
-        },
-        {
-          ref: "P",
-          phone: "+198765432117",
-          code: "321321",
-        },
-      ],
+      default: [],
       uniqueItems: true,
     },
     rateLimits: {
       type: "object",
       properties: {
         requestCodePerLoginIdentifier: rateLimitConfigSchema,
-        requestCodePerLoginIdentifierMinInterval: rateLimitConfigSchema,
         requestCodePerIp: rateLimitConfigSchema,
         failedLoginAttemptPerLoginIdentifier: rateLimitConfigSchema,
         failedLoginAttemptPerIp: rateLimitConfigSchema,
@@ -358,7 +268,6 @@ export const configSchema = {
       },
       required: [
         "requestCodePerLoginIdentifier",
-        "requestCodePerLoginIdentifierMinInterval",
         "requestCodePerIp",
         "failedLoginAttemptPerLoginIdentifier",
         "failedLoginAttemptPerIp",
@@ -372,11 +281,6 @@ export const configSchema = {
           points: 4,
           duration: 3600,
           blockDuration: 10800,
-        },
-        requestCodePerLoginIdentifierMinInterval: {
-          points: 1,
-          duration: 15,
-          blockDuration: 15,
         },
         requestCodePerIp: {
           points: 8,
@@ -553,23 +457,6 @@ export const configSchema = {
         deposit: { defaultMin: 3000, threshold: 1000000, ratioAsBasisPoints: 30 },
       },
     },
-    lnds: {
-      type: "array",
-      items: lndConfig,
-      uniqueItems: true,
-      default: [
-        {
-          name: "LND1",
-          type: ["offchain", "onchain"],
-          priority: 2,
-        },
-        {
-          name: "LND2",
-          type: ["offchain"],
-          priority: 3,
-        },
-      ],
-    },
     onChainWallet: {
       type: "object",
       properties: {
@@ -622,23 +509,6 @@ export const configSchema = {
         feeAccountingEnabled: true,
       },
     },
-    apollo: {
-      type: "object",
-      properties: {
-        playground: { type: "boolean" },
-        playgroundUrl: { type: "string" },
-      },
-      required: ["playground"],
-      if: {
-        properties: { playground: { const: true } },
-      },
-      then: { required: ["playgroundUrl"] },
-      additionalProperties: false,
-      default: {
-        playground: true,
-        playgroundUrl: "https://api.staging.galoy.io/graphql",
-      },
-    },
     userActivenessMonthlyVolumeThreshold: { type: "integer", default: 100 },
     cronConfig: {
       type: "object",
@@ -651,42 +521,6 @@ export const configSchema = {
       default: {
         rebalanceEnabled: true,
         swapEnabled: true,
-      },
-    },
-    kratosConfig: {
-      type: "object",
-      properties: {
-        publicApi: { type: "string" },
-        adminApi: { type: "string" },
-        corsAllowedOrigins: {
-          type: "array",
-          items: { type: "string" },
-          uniqueItems: true,
-        },
-      },
-      required: ["publicApi", "adminApi", "corsAllowedOrigins"],
-      additionalProperties: false,
-      default: {
-        publicApi: "http://localhost:4433",
-        adminApi: "http://localhost:4434",
-        corsAllowedOrigins: ["http://localhost:3000"],
-      },
-    },
-    oathkeeperConfig: {
-      type: "object",
-      properties: {
-        urlJkws: { type: "string" },
-        decisionsApi: { type: "string" },
-      },
-      required: ["urlJkws", "decisionsApi"],
-      additionalProperties: false,
-      default: {
-        urlJkws: `http://${
-          process.env.OATHKEEPER_HOST ?? "oathkeeper"
-        }:4456/.well-known/jwks.json`,
-        decisionsApi: `http://${
-          process.env.OATHKEEPER_HOST ?? "oathkeeper"
-        }:4456/decisions/`,
       },
     },
     captcha: {
@@ -728,38 +562,34 @@ export const configSchema = {
       items: { type: "string" },
       default: [],
     },
-    appcheckConfig: {
-      type: "object",
-      properties: {
-        audience: { type: "string" },
-        issuer: { type: "string" },
-        jwksUri: { type: "string" },
-      },
-      required: ["audience", "issuer", "jwksUri"],
-      additionalProperties: false,
-      default: {
-        audience: process.env.APPCHECK_AUDIENCE,
-        issuer: process.env.APPCHECK_ISSUER,
-        jwksUri: process.env.APPCHECK_JWKSURI,
-      },
-    },
   },
   required: [
-    "name",
+    "lightningAddressDomain",
+    "lightningAddressDomainAliases",
+    "locale",
+    "displayCurrency",
+    "funder",
+    "dealer",
+    "ratioPrecision",
     "buildVersion",
+    "rewards",
     "coldStorage",
+    "bria",
     "lndScbBackupBucketName",
+    "admin_accounts",
+    "test_accounts",
     "rateLimits",
+    "accounts",
     "accountLimits",
     "spamLimits",
     "ipRecording",
     "fees",
-    "lnds",
     "onChainWallet",
+    "swap",
     "userActivenessMonthlyVolumeThreshold",
     "cronConfig",
-    "kratosConfig",
     "captcha",
+    "skipFeeProbeConfig",
     "smsAuthUnsupportedCountries",
     "whatsAppAuthUnsupportedCountries",
   ],

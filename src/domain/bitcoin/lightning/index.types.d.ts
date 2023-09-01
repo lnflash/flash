@@ -23,12 +23,12 @@ type RouteValidator = {
 }
 
 type PaymentStatus =
-  typeof import("./index").PaymentStatus[keyof typeof import("./index").PaymentStatus]
+  (typeof import("./index").PaymentStatus)[keyof typeof import("./index").PaymentStatus]
 
 type FailedPaymentStatus = typeof import("./index").PaymentStatus.Failed
 
 type PaymentSendStatus =
-  typeof import("./index").PaymentSendStatus[keyof typeof import("./index").PaymentSendStatus]
+  (typeof import("./index").PaymentSendStatus)[keyof typeof import("./index").PaymentSendStatus]
 
 type Hop = {
   baseFeeMTokens?: string
@@ -169,6 +169,17 @@ interface ILightningService {
   listAllPubkeys(): Pubkey[]
 
   getBalance(pubkey?: Pubkey): Promise<Satoshis | LightningServiceError>
+
+  getOnChainBalance(pubkey?: Pubkey): Promise<Satoshis | LightningServiceError>
+  getPendingOnChainBalance(pubkey?: Pubkey): Promise<Satoshis | LightningServiceError>
+  listIncomingOnChainTransactions({
+    decoder,
+    scanDepth,
+  }: {
+    decoder: TxDecoder
+    scanDepth: ScanDepth
+  }): Promise<IncomingOnChainTransaction[] | LightningServiceError>
+
   getInboundOutboundBalance(
     pubkey?: Pubkey,
   ): Promise<{ inbound: Satoshis; outbound: Satoshis } | LightningServiceError>
@@ -176,6 +187,8 @@ interface ILightningService {
   getClosingChannelsBalance(pubkey?: Pubkey): Promise<Satoshis | LightningServiceError>
 
   getTotalPendingHtlcCount(pubkey?: Pubkey): Promise<number | LightningServiceError>
+  getIncomingPendingHtlcCount(pubkey?: Pubkey): Promise<number | LightningServiceError>
+  getOutgoingPendingHtlcCount(pubkey?: Pubkey): Promise<number | LightningServiceError>
 
   getActiveChannels(pubkey?: Pubkey): Promise<number | LightningServiceError>
   getOfflineChannels(pubkey?: Pubkey): Promise<number | LightningServiceError>

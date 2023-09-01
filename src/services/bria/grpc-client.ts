@@ -2,15 +2,15 @@ import { promisify } from "util"
 
 import { credentials, Metadata } from "@grpc/grpc-js"
 
-import { getBriaConfig } from "@config"
+import { BRIA_HOST, BRIA_PORT } from "@config"
 
 import {
   EstimatePayoutFeeRequest,
   EstimatePayoutFeeResponse,
-  FindAddressByExternalIdRequest,
-  FindAddressByExternalIdResponse,
-  FindPayoutByExternalIdRequest,
-  FindPayoutByExternalIdResponse,
+  GetAddressRequest,
+  GetAddressResponse,
+  GetPayoutRequest,
+  GetPayoutResponse,
   GetWalletBalanceSummaryRequest,
   GetWalletBalanceSummaryResponse,
   NewAddressRequest,
@@ -20,10 +20,10 @@ import {
 } from "./proto/bria_pb"
 import { BriaServiceClient } from "./proto/bria_grpc_pb"
 
-const briaConfig = getBriaConfig()
+const briaEndpoint = `${BRIA_HOST}:${BRIA_PORT}`
 
 const bitcoinBridgeClient = new BriaServiceClient(
-  briaConfig.endpoint,
+  briaEndpoint,
   credentials.createInsecure(),
 )
 
@@ -31,17 +31,13 @@ export const newAddress = promisify<NewAddressRequest, Metadata, NewAddressRespo
   bitcoinBridgeClient.newAddress.bind(bitcoinBridgeClient),
 )
 
-export const findAddressByExternalId = promisify<
-  FindAddressByExternalIdRequest,
-  Metadata,
-  FindAddressByExternalIdResponse
->(bitcoinBridgeClient.findAddressByExternalId.bind(bitcoinBridgeClient))
+export const getAddress = promisify<GetAddressRequest, Metadata, GetAddressResponse>(
+  bitcoinBridgeClient.getAddress.bind(bitcoinBridgeClient),
+)
 
-export const findPayoutByExternalId = promisify<
-  FindPayoutByExternalIdRequest,
-  Metadata,
-  FindPayoutByExternalIdResponse
->(bitcoinBridgeClient.findPayoutByExternalId.bind(bitcoinBridgeClient))
+export const getPayout = promisify<GetPayoutRequest, Metadata, GetPayoutResponse>(
+  bitcoinBridgeClient.getPayout.bind(bitcoinBridgeClient),
+)
 
 export const getWalletBalanceSummary = promisify<
   GetWalletBalanceSummaryRequest,

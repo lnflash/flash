@@ -1,6 +1,6 @@
 import { btcFromUsdMidPriceFn, usdFromBtcMidPriceFn } from "@app/prices"
 
-import { BTC_NETWORK, getOnChainWalletConfig } from "@config"
+import { getOnChainWalletConfig, NETWORK } from "@config"
 
 import { checkedToOnChainAddress, PayoutSpeed } from "@domain/bitcoin/onchain"
 import { CouldNotFindError } from "@domain/errors"
@@ -17,7 +17,7 @@ import { LedgerService } from "@services/ledger"
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import { addAttributesToCurrentSpan } from "@services/tracing"
 
-import { NewOnChainService } from "@services/bria"
+import { OnChainService } from "@services/bria"
 
 import { validateIsBtcWallet, validateIsUsdWallet } from "./validate"
 
@@ -46,7 +46,7 @@ const getOnChainFee = async <S extends WalletCurrency, R extends WalletCurrency>
   if (senderWallet instanceof Error) return senderWallet
 
   const checkedAddress = checkedToOnChainAddress({
-    network: BTC_NETWORK,
+    network: NETWORK,
     value: address,
   })
   if (checkedAddress instanceof Error) return checkedAddress
@@ -155,7 +155,7 @@ export const getMinerFeeAndPaymentFlow = async <
   builder: OPFBWithConversion<S, R>
   speed: PayoutSpeed
 }): Promise<OnChainPaymentFlow<S, R> | ValidationError | DealerPriceServiceError> => {
-  const onChainService = NewOnChainService()
+  const onChainService = OnChainService()
 
   const proposedBtcAmount = await builder.btcProposedAmount()
   if (proposedBtcAmount instanceof Error) return proposedBtcAmount

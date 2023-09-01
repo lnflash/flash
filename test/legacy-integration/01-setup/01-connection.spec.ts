@@ -1,3 +1,4 @@
+import { OnChainService } from "@services/bria"
 import { redis } from "@services/redis"
 import { Account } from "@services/mongoose/schema"
 
@@ -9,9 +10,10 @@ import {
   lndOutside3,
   getWalletInfo,
   bitcoindClient,
-  resetLnds,
+  resetIntegrationLnds,
   getChannels,
   getChainBalance,
+  waitUntilBriaConnected,
 } from "test/helpers"
 
 it("connects to bitcoind", async () => {
@@ -21,7 +23,7 @@ it("connects to bitcoind", async () => {
 
 describe("connects to lnds", () => {
   beforeAll(async () => {
-    await resetLnds()
+    await resetIntegrationLnds()
   })
 
   const lnds = [lnd1, lnd2]
@@ -63,4 +65,15 @@ it("connects to redis", async () => {
   await redis.set("key", value)
   const result = await redis.get("key")
   expect(result).toBe(value)
+})
+
+describe("connects to bria", () => {
+  beforeAll(async () => {
+    await waitUntilBriaConnected()
+  })
+
+  it("receives a bria balance", async () => {
+    const res = await OnChainService().getHotBalance()
+    expect(res).not.toBeInstanceOf(Error)
+  })
 })

@@ -6,22 +6,47 @@ type IdentityUsername = string & { readonly brand: unique symbol }
 type IdentityPassword = string & { readonly brand: unique symbol }
 
 type UserId = string & { readonly brand: unique symbol }
-type SessionToken = string & { readonly brand: unique symbol }
+type AuthToken = string & { readonly brand: unique symbol }
 type SessionCookie = string & { readonly brand: unique symbol }
 
-type IdentityPhone = {
+type TotpSecret = string & { readonly brand: unique symbol }
+type TotpCode = string & { readonly brand: unique symbol }
+
+type IdentityBase = {
   id: UserId
-  phone: PhoneNumber
   createdAt: Date
+  schema: SchemaId
+  totpEnabled: boolean
 }
 
+type IdentityPhone = IdentityBase & {
+  phone: PhoneNumber
+  email: undefined
+  emailVerified: undefined
+}
+
+type IdentityEmail = IdentityBase & {
+  phone: undefined
+  email: EmailAddress
+  emailVerified: boolean
+}
+
+type IdentityPhoneEmail = IdentityBase & {
+  phone: PhoneNumber
+  email: EmailAddress
+  emailVerified: boolean
+}
+
+type AnyIdentity = IdentityPhone | IdentityEmail | IdentityPhoneEmail
+
 type Session = {
-  identity: IdentityPhone // | IdentityEmail // TODO
+  identity: AnyIdentity
   id: SessionId
+  expiresAt: Date
 }
 
 type WithSessionResponse = {
-  sessionToken: SessionToken
+  authToken: AuthToken
   kratosUserId: UserId
 }
 
@@ -30,8 +55,14 @@ type WithCookieResponse = {
   kratosUserId: UserId
 }
 
-type LoginWithPhoneNoPasswordSchemaResponse = WithSessionResponse
-type LoginWithPhoneCookieSchemaResponse = WithCookieResponse
+type LoginWithPhoneNoPasswordSchemaResponse = {
+  authToken: AuthToken
+  kratosUserId?: UserId
+}
+type LoginWithPhoneCookieSchemaResponse = {
+  cookiesToSendBackToClient: Array<SessionCookie>
+  kratosUserId?: UserId
+}
 type CreateKratosUserForPhoneNoPasswordSchemaResponse = WithSessionResponse
 type CreateKratosUserForPhoneNoPasswordSchemaCookieResponse = WithCookieResponse
 
@@ -42,7 +73,7 @@ interface IAuthWithPhonePasswordlessService {
   loginCookie(args: {
     phone: PhoneNumber
   }): Promise<LoginWithPhoneCookieSchemaResponse | AuthenticationError>
-  logoutToken(args: { token: SessionToken }): Promise<void | AuthenticationError>
+  logoutToken(args: { token: AuthToken }): Promise<void | AuthenticationError>
   logoutCookie(args: { cookie: SessionCookie }): Promise<void | AuthenticationError>
   createIdentityWithSession(args: {
     phone: PhoneNumber
@@ -65,15 +96,40 @@ interface IAuthWithPhonePasswordlessService {
   }): Promise<IdentityPhone | AuthenticationError>
 }
 
+type ValidateCodeResult = {
+  email: EmailAddress
+  kratosUserId: UserId
+  totpRequired: boolean
+}
+
 interface IAuthWithEmailPasswordlessService {
-  initiateEmailVerification(args: { email: EmailAddress }): Promise<string | KratosError>
-  validateEmailVerification(args: {
-    code: string
-    flow: string
-  }): Promise<true | KratosError>
-  login(args: {
+  removeEmailFromIdentity: (args: {
+    kratosUserId: UserId
+  }) => Promise<EmailAddress | AuthenticationError>
+  removePhoneFromIdentity: (args: {
+    kratosUserId: UserId
+  }) => Promise<PhoneNumber | AuthenticationError>
+  addPhoneToIdentity: (args: {
+    userId: UserId
+    phone: PhoneNumber
+  }) => Promise<IdentityPhoneEmail | AuthenticationError>
+  addUnverifiedEmailToIdentity(args: {
+    kratosUserId: UserId
+    email: EmailAddress
+  }): Promise<IdentityPhoneEmail | AuthenticationError>
+  sendEmailWithCode(args: { email: EmailAddress }): Promise<EmailFlowId | KratosError>
+  hasEmail(args: { kratosUserId: UserId }): Promise<boolean | KratosError>
+  isEmailVerified(args: { email: EmailAddress }): Promise<boolean | KratosError>
+  validateCode(args: {
+    code: EmailCode
+    emailFlowId: EmailFlowId
+  }): Promise<ValidateCodeResult | KratosError>
+  loginToken(args: {
     email: EmailAddress
   }): Promise<LoginWithPhoneNoPasswordSchemaResponse | KratosError>
+  loginCookie(args: {
+    email: EmailAddress
+  }): Promise<LoginWithPhoneCookieSchemaResponse | KratosError>
 }
 
 type CreateIdentityWithSessionResult = WithSessionResponse & {
@@ -92,10 +148,10 @@ interface IAuthWithUsernamePasswordDeviceIdService {
 }
 
 interface IIdentityRepository {
-  getIdentity(id: UserId): Promise<IdentityPhone | KratosError>
-  listIdentities(): Promise<IdentityPhone[] | KratosError>
-  slowFindByPhone(phone: PhoneNumber): Promise<IdentityPhone | KratosError>
+  getIdentity(id: UserId): Promise<AnyIdentity | KratosError>
+  listIdentities(): Promise<AnyIdentity[] | KratosError>
   deleteIdentity(id: UserId): Promise<void | KratosError>
+  getUserIdFromIdentifier(identifier: string): Promise<UserId | KratosError>
 }
 
 // CCA2 country code such as "US" or "FR"
@@ -105,3 +161,9 @@ type Country = {
   id: CountryCode
   supportedAuthChannels: ChannelType[]
 }
+
+type EmailRegistrationId = string & { readonly brand: unique symbol }
+type TotpRegistrationId = string & { readonly brand: unique symbol }
+type EmailLoginId = string & { readonly brand: unique symbol }
+
+type EmailFlowId = EmailRegistrationId | EmailLoginId
