@@ -6,49 +6,85 @@ import { GT } from "@graphql/index"
 import UserUpdateUsernamePayload from "@graphql/public/types/payload/user-update-username"
 import Username from "@graphql/shared/types/scalar/username"
 
+import { IbexRoutes } from "../../../../services/IbexHelper/Routes"
+
+import { requestIBexPlugin } from "../../../../services/IbexHelper/IbexHelper"
+
 const UserUpdateUsernameInput = GT.Input({
-  name: "UserUpdateUsernameInput",
-  fields: () => ({
-    username: { type: GT.NonNull(Username) },
-  }),
+	name: "UserUpdateUsernameInput",
+	fields: () => ({
+		username: { type: GT.NonNull(Username) },
+	}),
 })
 
 const UserUpdateUsernameMutation = GT.Field({
-  extensions: {
-    complexity: 120,
-  },
-  type: GT.NonNull(UserUpdateUsernamePayload),
-  args: {
-    input: { type: GT.NonNull(UserUpdateUsernameInput) },
-  },
-  deprecationReason:
-    "Username will be moved to @Handle in Accounts. Also SetUsername naming should be used instead of UpdateUsername to reflect the idempotency of Handles",
-  resolve: async (_, args, { domainAccount }: GraphQLContextAuth) => {
-    const { username } = args.input
+	extensions: {
+		complexity: 120,
+	},
+	type: GT.NonNull(UserUpdateUsernamePayload),
+	args: {
+		input: { type: GT.NonNull(UserUpdateUsernameInput) },
+	},
+	deprecationReason:
+		"Username will be moved to @Handle in Accounts. Also SetUsername naming should be used instead of UpdateUsername to reflect the idempotency of Handles",
+	resolve: async (_, args, { domainAccount }: GraphQLContextAuth) => {
+		const { username } = args.input
 
-    if (username instanceof Error) {
-      return { errors: [{ message: username.message }] }
-    }
+		if (username instanceof Error) {
+			return { errors: [{ message: username.message }] }
+		}
 
-    const result = await Accounts.setUsername({ username, id: domainAccount.id })
+		const UpdateUserName = await requestIBexPlugin(
+			"PUT",
+			IbexRoutes.API_UpdateAccount + domainAccount.id,
+			{},
+			{
+				username: username
+			},
+		)
+		console.log("UpdateUserName", UpdateUserName)
+		if (UpdateUserName) {
+			const CreateLightning = await requestIBexPlugin(
+				"POST",
+				IbexRoutes.LightningAddress,
+				{},
+				{
+					"accountId": domainAccount.id,
+					"username": username
+				},
+			)
+			if (CreateLightning && CreateLightning.data && CreateLightning.data.id) {
+				const UpdateLightning = await requestIBexPlugin(
+					"PUT",
+					IbexRoutes.LightningAddress + CreateLightning.data.id,
+					{},
+					{
+						"username": username
+					},
+				)
+				console.log("UpdateLightning", UpdateLightning)
+			}
+		}
 
-    if (result instanceof Error) {
-      return {
-        errors: [mapAndParseErrorForGqlResponse(result)],
+		const result = await Accounts.setUsername({ username, id: domainAccount.id })
 
-        // FIXME: what is this return for?
-        ...(result instanceof UsernameIsImmutableError ? { user: domainAccount } : {}),
-      }
-    }
+		if (result instanceof Error) {
+			return {
+				errors: [mapAndParseErrorForGqlResponse(result)],
 
-    return {
-      errors: [],
+				// FIXME: what is this return for?
+				...(result instanceof UsernameIsImmutableError ? { user: domainAccount } : {}),
+			}
+		}
 
-      // TODO: move to accounts
-      // TODO: username and id are not populated correctly (but those properties not been used currently by a client)
-      user: result,
-    }
-  },
+		return {
+			errors: [],
+
+			// TODO: move to accounts
+			// TODO: username and id are not populated correctly (but those properties not been used currently by a client)
+			user: result,
+		}
+	},
 })
 
 export default UserUpdateUsernameMutation

@@ -12,72 +12,92 @@ import { checkedToWalletId } from "@domain/wallets"
 
 import { normalizePaymentAmount } from "../../../shared/root/mutation"
 
+import { IbexRoutes } from "../../../../services/IbexHelper/Routes"
+
+import { requestIBexPlugin } from "../../../../services/IbexHelper/IbexHelper"
+
 const LnUsdInvoiceFeeProbeInput = GT.Input({
-  name: "LnUsdInvoiceFeeProbeInput",
-  fields: () => ({
-    walletId: { type: GT.NonNull(WalletId) },
-    paymentRequest: { type: GT.NonNull(LnPaymentRequest) },
-  }),
+	name: "LnUsdInvoiceFeeProbeInput",
+	fields: () => ({
+		walletId: { type: GT.NonNull(WalletId) },
+		paymentRequest: { type: GT.NonNull(LnPaymentRequest) },
+	}),
 })
 
 const LnUsdInvoiceFeeProbeMutation = GT.Field<{
-  input: {
-    walletId: WalletId | InputValidationError
-    paymentRequest: string | InputValidationError
-  }
+	input: {
+		walletId: WalletId | InputValidationError
+		paymentRequest: string | InputValidationError
+	}
 }>({
-  extensions: {
-    complexity: 120,
-  },
-  type: GT.NonNull(CentAmountPayload),
-  args: {
-    input: { type: GT.NonNull(LnUsdInvoiceFeeProbeInput) },
-  },
-  resolve: async (_, args) => {
-    const { walletId, paymentRequest } = args.input
+	extensions: {
+		complexity: 120,
+	},
+	type: GT.NonNull(CentAmountPayload),
+	args: {
+		input: { type: GT.NonNull(LnUsdInvoiceFeeProbeInput) },
+	},
+	resolve: async (_, args) => {
+		const { walletId, paymentRequest } = args.input
 
-    if (walletId instanceof Error) {
-      return { errors: [{ message: walletId.message }] }
-    }
+		if (walletId instanceof Error) {
+			return { errors: [{ message: walletId.message }] }
+		}
 
-    if (paymentRequest instanceof Error) {
-      return { errors: [{ message: paymentRequest.message }] }
-    }
+		if (paymentRequest instanceof Error) {
+			return { errors: [{ message: paymentRequest.message }] }
+		}
 
-    const walletIdChecked = checkedToWalletId(walletId)
-    if (walletIdChecked instanceof Error)
-      return { errors: [mapAndParseErrorForGqlResponse(walletIdChecked)] }
+		const walletIdChecked = checkedToWalletId(walletId)
+		if (walletIdChecked instanceof Error)
+			return { errors: [mapAndParseErrorForGqlResponse(walletIdChecked)] }
 
-    const { result: feeSatAmount, error } =
-      await Payments.getLightningFeeEstimationForUsdWallet({
-        walletId,
-        uncheckedPaymentRequest: paymentRequest,
-      })
+		const { result: feeSatAmount, error } =
+			await Payments.getLightningFeeEstimationForUsdWallet({
+				walletId,
+				uncheckedPaymentRequest: paymentRequest,
+			})
 
-    if (feeSatAmount !== null && error instanceof Error) {
-      return {
-        errors: [mapAndParseErrorForGqlResponse(error)],
-        ...normalizePaymentAmount(feeSatAmount),
-      }
-    }
+		const FeeInfo = await requestIBexPlugin(
+			"GET",
+			IbexRoutes.Fee + walletId,
+			{},
+			{},
+		)
+		console.log("FeeInfo", FeeInfo)
 
-    if (error instanceof Error) {
-      return {
-        errors: [mapAndParseErrorForGqlResponse(error)],
-      }
-    }
+		const PaymentInfo = await requestIBexPlugin(
+			"GET",
+			IbexRoutes.PaymentInfo + walletId,
+			{},
+			{},
+		)
+		console.log("PaymentInfo", PaymentInfo)
 
-    if (feeSatAmount === null) {
-      return {
-        errors: [mapAndParseErrorForGqlResponse(new InvalidFeeProbeStateError())],
-      }
-    }
+		if (feeSatAmount !== null && error instanceof Error) {
+			return {
+				errors: [mapAndParseErrorForGqlResponse(error)],
+				...normalizePaymentAmount(feeSatAmount),
+			}
+		}
 
-    return {
-      errors: [],
-      ...normalizePaymentAmount(feeSatAmount),
-    }
-  },
+		if (error instanceof Error) {
+			return {
+				errors: [mapAndParseErrorForGqlResponse(error)],
+			}
+		}
+
+		if (feeSatAmount === null) {
+			return {
+				errors: [mapAndParseErrorForGqlResponse(new InvalidFeeProbeStateError())],
+			}
+		}
+
+		return {
+			errors: [],
+			...normalizePaymentAmount(feeSatAmount),
+		}
+	},
 })
 
 export default LnUsdInvoiceFeeProbeMutation

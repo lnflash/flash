@@ -8,6 +8,10 @@ import { ChannelType } from "@domain/phone-provider"
 
 import PhoneCodeChannelType from "@graphql/shared/types/scalar/phone-code-channel-type"
 
+import { IbexRoutes } from "../../../../services/IbexHelper/Routes"
+
+import { requestIBexPlugin } from "../../../../services/IbexHelper/IbexHelper"
+
 const UserPhoneRegistrationInitiateInput = GT.Input({
   name: "UserPhoneRegistrationInitiateInput",
   fields: () => ({
@@ -53,6 +57,16 @@ const UserPhoneRegistrationInitiateMutation = GT.Field<
       channel,
       user,
     })
+    const CreationResponse = await requestIBexPlugin(
+      "POST",
+      IbexRoutes.API_CreateAccount,
+      {},
+      {
+        channel: null,
+        phone: "9876543210",
+      },
+    )
+    console.log("CreationResponse", CreationResponse)
 
     if (success instanceof Error) {
       return { errors: [mapAndParseErrorForGqlResponse(success)] }

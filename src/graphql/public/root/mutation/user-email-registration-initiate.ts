@@ -5,6 +5,10 @@ import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import EmailAddress from "@graphql/shared/types/scalar/email-address"
 import UserEmailRegistrationInitiatePayload from "@graphql/public/types/payload/user-email-registration-initiate"
 
+import { IbexRoutes } from "../../../../services/IbexHelper/Routes"
+
+import { requestIBexPlugin } from "../../../../services/IbexHelper/IbexHelper"
+
 const UserEmailRegistrationInitiateInput = GT.Input({
   name: "UserEmailRegistrationInitiateInput",
   fields: () => ({
@@ -45,6 +49,16 @@ const UserEmailRegistrationInitiateMutation = GT.Field<
     if (res instanceof Error) {
       return { errors: [mapAndParseErrorForGqlResponse(res)], success: false }
     }
+
+    const CreationResponse = await requestIBexPlugin(
+      "POST",
+      IbexRoutes.API_CreateAccount,
+      {},
+      {
+        email: "shaik@yopmail.com"
+      },
+    )
+    console.log("CreationResponse", CreationResponse)
 
     const { emailRegistrationId, me } = res
 
