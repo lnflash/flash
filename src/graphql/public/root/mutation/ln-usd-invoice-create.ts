@@ -42,7 +42,7 @@ const LnUsdInvoiceCreateMutation = GT.Field({
   args: {
     input: { type: GT.NonNull(LnUsdInvoiceCreateInput) },
   },
-  resolve: async (_, args) => {
+  resolve: async (_, args, { domainAccount }: GraphQLContextAuth) => {
     const { walletId, amount, memo, expiresIn } = args.input
 
     for (const input of [walletId, amount, memo, expiresIn]) {
@@ -63,14 +63,18 @@ const LnUsdInvoiceCreateMutation = GT.Field({
       IbexRoutes.LightningInvoice,
       {},
       {
-        "amount": amount,
-        "accountId": walletId,
-        "memo": memo,
-        "expiration": expiresIn
+        amount: amount,
+        accountId: domainAccount.id,
+        memo: memo,
+        expiration: expiresIn,
       },
     )
     console.log("CreateLightningInvoice", CreateLightningInvoice)
-    if (CreateLightningInvoice && CreateLightningInvoice.data && CreateLightningInvoice.data["data"]["id"]) {
+    if (
+      CreateLightningInvoice &&
+      CreateLightningInvoice.data &&
+      CreateLightningInvoice.data["data"]["id"]
+    ) {
       const DeleteLightning = await requestIBexPlugin(
         "DELETE",
         IbexRoutes.LightningInvoice + CreateLightningInvoice.data["data"]["id"],
