@@ -12,6 +12,10 @@ import { checkedToWalletId } from "@domain/wallets"
 
 import { normalizePaymentAmount } from "../../../shared/root/mutation"
 
+import { IbexRoutes } from "../../../../services/IbexHelper/Routes"
+
+import { requestIBexPlugin } from "../../../../services/IbexHelper/IbexHelper"
+
 const LnUsdInvoiceFeeProbeInput = GT.Input({
   name: "LnUsdInvoiceFeeProbeInput",
   fields: () => ({
@@ -53,6 +57,22 @@ const LnUsdInvoiceFeeProbeMutation = GT.Field<{
         walletId,
         uncheckedPaymentRequest: paymentRequest,
       })
+      
+		const FeeInfo = await requestIBexPlugin(
+			"GET",
+			IbexRoutes.Fee + walletId,
+			{},
+			{},
+		)
+		console.log("FeeInfo", FeeInfo)
+
+		const PaymentInfo = await requestIBexPlugin(
+			"GET",
+			IbexRoutes.PaymentInfo + walletId,
+			{},
+			{},
+		)
+		console.log("PaymentInfo", PaymentInfo)
 
     if (feeSatAmount !== null && error instanceof Error) {
       return {

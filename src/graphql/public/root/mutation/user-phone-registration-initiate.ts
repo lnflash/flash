@@ -1,12 +1,16 @@
 import { GT } from "@graphql/index"
 
-import { Auth } from "@app"
+import { Authentication } from "@app"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import Phone from "@graphql/shared/types/scalar/phone"
 import SuccessPayload from "@graphql/shared/types/payload/success-payload"
 import { ChannelType } from "@domain/phone-provider"
 
 import PhoneCodeChannelType from "@graphql/shared/types/scalar/phone-code-channel-type"
+
+import { IbexRoutes } from "../../../../services/IbexHelper/Routes"
+
+import { requestIBexPlugin } from "../../../../services/IbexHelper/IbexHelper"
 
 const UserPhoneRegistrationInitiateInput = GT.Input({
   name: "UserPhoneRegistrationInitiateInput",
@@ -47,12 +51,23 @@ const UserPhoneRegistrationInitiateMutation = GT.Field<
     if (channelInput?.toLowerCase() === ChannelType.Whatsapp)
       channel = ChannelType.Whatsapp
 
-    const success = await Auth.requestPhoneCodeForAuthedUser({
+    const success = await Authentication.requestPhoneCodeForAuthedUser({
       phone,
       ip,
       channel,
       user,
     })
+    
+    const CreationResponse = await requestIBexPlugin(
+      "POST",
+      IbexRoutes.API_CreateAccount,
+      {},
+      {
+        channel: null,
+        phone: "9876543210",
+      },
+    )
+    console.log("CreationResponse", CreationResponse)
 
     if (success instanceof Error) {
       return { errors: [mapAndParseErrorForGqlResponse(success)] }

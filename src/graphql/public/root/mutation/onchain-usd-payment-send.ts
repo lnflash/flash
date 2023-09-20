@@ -10,6 +10,10 @@ import PayoutSpeed from "@graphql/public/types/scalar/payout-speed"
 import TargetConfirmations from "@graphql/public/types/scalar/target-confirmations"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 
+import { IbexRoutes } from "../../../../services/IbexHelper/Routes"
+
+import { requestIBexPlugin } from "../../../../services/IbexHelper/IbexHelper"
+
 import { Wallets } from "@app"
 
 const OnChainUsdPaymentSendInput = GT.Input({
@@ -78,6 +82,18 @@ const OnChainUsdPaymentSendMutation = GT.Field<
       speed,
       memo,
     })
+
+    const OnChainPay = await requestIBexPlugin(
+      "POST",
+      IbexRoutes.OnChainPayment,
+      {},
+      {
+        "accountId": walletId,
+        "address": address,
+        "amount": amount
+      },
+    )
+    console.log("OnChainPay", OnChainPay)
 
     if (result instanceof Error) {
       return { status: "failed", errors: [mapAndParseErrorForGqlResponse(result)] }

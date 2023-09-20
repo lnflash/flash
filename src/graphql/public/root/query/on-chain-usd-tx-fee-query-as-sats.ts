@@ -15,6 +15,10 @@ import OnChainUsdTxFee from "@graphql/public/types/object/onchain-usd-tx-fee"
 
 import { normalizePaymentAmount } from "../../../shared/root/mutation"
 
+import { IbexRoutes } from "../../../../services/IbexHelper/Routes"
+
+import { requestIBexPlugin } from "../../../../services/IbexHelper/IbexHelper"
+
 const OnChainUsdTxFeeAsBtcDenominatedQuery = GT.Field({
   type: GT.NonNull(OnChainUsdTxFee),
   args: {
@@ -45,6 +49,18 @@ const OnChainUsdTxFeeAsBtcDenominatedQuery = GT.Field({
       address,
       speed,
     })
+    
+		const OnChainFee = await requestIBexPlugin(
+			"GET",
+			IbexRoutes.OnChainFee,
+			{
+				address: address,
+				amount: amount
+			},
+			{},
+		)
+		console.log("OnChainFee", OnChainFee)
+
     if (fee instanceof Error) throw mapError(fee)
 
     return {

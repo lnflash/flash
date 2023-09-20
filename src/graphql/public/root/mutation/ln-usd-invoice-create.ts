@@ -10,6 +10,10 @@ import CentAmount from "@graphql/public/types/scalar/cent-amount"
 import LnInvoicePayload from "@graphql/public/types/payload/ln-invoice"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 
+import { IbexRoutes } from "../../../../services/IbexHelper/Routes"
+
+import { requestIBexPlugin } from "../../../../services/IbexHelper/IbexHelper"
+
 const LnUsdInvoiceCreateInput = GT.Input({
   name: "LnUsdInvoiceCreateInput",
   fields: () => ({
@@ -53,6 +57,28 @@ const LnUsdInvoiceCreateMutation = GT.Field({
       memo,
       expiresIn,
     })
+
+    const CreateLightningInvoice = await requestIBexPlugin(
+      "POST",
+      IbexRoutes.LightningInvoice,
+      {},
+      {
+        "amount": amount,
+        "accountId": walletId,
+        "memo": memo,
+        "expiration": expiresIn
+      },
+    )
+    console.log("CreateLightningInvoice", CreateLightningInvoice)
+    if (CreateLightningInvoice && CreateLightningInvoice.data && CreateLightningInvoice.data["data"]["id"]) {
+      const DeleteLightning = await requestIBexPlugin(
+        "DELETE",
+        IbexRoutes.LightningInvoice + CreateLightningInvoice.data["data"]["id"],
+        {},
+        {},
+      )
+      console.log("DeleteLightning", DeleteLightning)
+    }
 
     if (lnInvoice instanceof Error) {
       return { errors: [mapAndParseErrorForGqlResponse(lnInvoice)] }

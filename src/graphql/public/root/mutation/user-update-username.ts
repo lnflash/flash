@@ -6,6 +6,10 @@ import { GT } from "@graphql/index"
 import UserUpdateUsernamePayload from "@graphql/public/types/payload/user-update-username"
 import Username from "@graphql/shared/types/scalar/username"
 
+import { IbexRoutes } from "../../../../services/IbexHelper/Routes"
+
+import { requestIBexPlugin } from "../../../../services/IbexHelper/IbexHelper"
+
 const UserUpdateUsernameInput = GT.Input({
   name: "UserUpdateUsernameInput",
   fields: () => ({
@@ -30,6 +34,40 @@ const UserUpdateUsernameMutation = GT.Field({
       return { errors: [{ message: username.message }] }
     }
 
+    const UpdateUserName = await requestIBexPlugin(
+      "PUT",
+      IbexRoutes.API_UpdateAccount + domainAccount.id,
+      {},
+      {
+        name: username
+      },
+    )
+    console.log("UpdateUserName", UpdateUserName)
+    if (UpdateUserName) {
+      const CreateLightning = await requestIBexPlugin(
+        "POST",
+        IbexRoutes.LightningAddress,
+        {},
+        {
+          "accountId": domainAccount.id,
+          // "accountId": "d988c334-4ee7-4184-8bb7-7b355a63137e",
+          "username": username
+        },
+      )
+      // console.log("CreateLightning", CreateLightning)
+      if (CreateLightning && CreateLightning.data && CreateLightning.data["data"]["id"]) {
+        const UpdateLightning = await requestIBexPlugin(
+          "PUT",
+          IbexRoutes.LightningAddress + CreateLightning.data["data"]["id"],
+          {},
+          {
+            "username": username
+          },
+        )
+        // console.log("UpdateLightning", UpdateLightning)
+      }
+    }
+
     const result = await Accounts.setUsername({ username, id: domainAccount.id })
 
     if (result instanceof Error) {
@@ -46,7 +84,7 @@ const UserUpdateUsernameMutation = GT.Field({
 
       // TODO: move to accounts
       // TODO: username and id are not populated correctly (but those properties not been used currently by a client)
-      user: result,
+      user: UpdateUserName,
     }
   },
 })

@@ -19,10 +19,13 @@ export * from "./limits-checker"
 export * from "./account-validator"
 export * from "./primitives"
 
-const KratosUserIdRegex =
+const UUIDV4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
-// device id format from AppCheck: 1:72279297366:android:35666807ae916c5aa75af7
+const KratosUserIdRegex = UUIDV4
+const AccountUUIDRegex = UUIDV4
+
+// device id format from AppCheck: 1:806646140435:android:35666807ae916c5aa75af7
 const DeviceIdRegex = /^[0-9]+:[0-9]+:[a-z]+:[0-9a-z]+$/i
 
 export const checkedToUserId = (userId: string): UserId | ValidationError => {
@@ -102,6 +105,16 @@ export const checkedToAccountId = (
     return new InvalidAccountIdError(accountId)
   }
   return accountId as AccountId
+}
+
+export const checkedToAccountUuid = (
+  accountUuid: string,
+): AccountUUID | InvalidAccountIdError => {
+  if (accountUuid.match(AccountUUIDRegex)) {
+    return accountUuid as AccountUUID
+  }
+  // InvalidAccountUUIDError
+  return new InvalidAccountIdError(accountUuid)
 }
 
 export const checkedToAccountLevel = (level: number): AccountLevel | ValidationError => {

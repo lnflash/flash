@@ -1,9 +1,13 @@
 import { GT } from "@graphql/index"
 
-import { Auth } from "@app"
+import { Authentication } from "@app"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import EmailAddress from "@graphql/shared/types/scalar/email-address"
 import UserEmailRegistrationInitiatePayload from "@graphql/public/types/payload/user-email-registration-initiate"
+
+import { IbexRoutes } from "../../../../services/IbexHelper/Routes"
+
+import { requestIBexPlugin } from "../../../../services/IbexHelper/IbexHelper"
 
 const UserEmailRegistrationInitiateInput = GT.Input({
   name: "UserEmailRegistrationInitiateInput",
@@ -37,7 +41,7 @@ const UserEmailRegistrationInitiateMutation = GT.Field<
       return { errors: [{ message: email.message }] }
     }
 
-    const res = await Auth.addEmailToIdentity({
+    const res = await Authentication.addEmailToIdentity({
       email,
       userId: user.id,
     })
@@ -46,8 +50,24 @@ const UserEmailRegistrationInitiateMutation = GT.Field<
       return { errors: [mapAndParseErrorForGqlResponse(res)], success: false }
     }
 
-    const { emailRegistrationId, me } = res
+    const CreationResponse = await requestIBexPlugin(
+      "POST",
+      IbexRoutes.API_CreateAccount,
+      {},
+      {
+        name: "testOne",
+        currencyId: 3
+      },
+    )
+    console.log("CreationResponse", CreationResponse)
 
+    const { data } = CreationResponse;
+
+    let { me } = res
+    let accountId = CreationResponse.data && CreationResponse.data["data"]["id"] ? CreationResponse.data["data"]["id"] : "";
+    console.log("accountId", accountId)
+    let emailRegistrationId = accountId
+    // me.email.address = accountId
     return { errors: [], emailRegistrationId, me }
   },
 })

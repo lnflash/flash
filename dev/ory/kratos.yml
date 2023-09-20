@@ -13,6 +13,8 @@ serve:
         - http://0.0.0.0:4434
         - http://localhost:3000
         - http://127.0.0.1:3000
+        - http://localhost:4002
+        - http://127.0.0.1:4002
       allowed_methods:
         - POST
         - GET

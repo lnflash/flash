@@ -2,26 +2,26 @@ apiVersion: vendir.k14s.io/v1alpha1
 directories:
 - contents:
   - git:
-      commitTitle: 'ci: fix bats test for now (#3076)...'
-      sha: 9e5492965f845b453caef33a60ff2259d78ac6e8
+      commitTitle: Merge branch 'main' of github.com:GaloyMoney/galoy into HEAD
+      sha: 4fe380262439d5be84646cf6f12e5fe32b37db79
       tags:
-      - 0.11.34-4-g9e5492965
+      - 0.13.9-7-g4fe380262
     path: ./
   path: dev
 - contents:
   - git:
-      commitTitle: 'ci: fix bats test for now (#3076)...'
-      sha: 9e5492965f845b453caef33a60ff2259d78ac6e8
+      commitTitle: Merge branch 'main' of github.com:GaloyMoney/galoy into HEAD
+      sha: 4fe380262439d5be84646cf6f12e5fe32b37db79
       tags:
-      - 0.11.34-4-g9e5492965
+      - 0.13.9-7-g4fe380262
     path: ./
   path: ./galoy
 - contents:
   - git:
-      commitTitle: 'ci: fix bats test for now (#3076)...'
-      sha: 9e5492965f845b453caef33a60ff2259d78ac6e8
+      commitTitle: Merge branch 'main' of github.com:GaloyMoney/galoy into HEAD
+      sha: 4fe380262439d5be84646cf6f12e5fe32b37db79
       tags:
-      - 0.11.34-4-g9e5492965
+      - 0.13.9-7-g4fe380262
     path: ./
   path: ./graphql
 kind: LockConfig

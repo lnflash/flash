@@ -26,6 +26,7 @@ import {
   PhoneAlreadyExistsError,
   EmailAlreadyExistsError,
   SessionRefreshRequiredError,
+  CodeExpiredError,
 } from "@graphql/error"
 import { baseLogger } from "@services/logger"
 
@@ -338,7 +339,7 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "OnChainServiceUnavailableError":
       /* eslint-disable-next-line no-case-declarations */
       const serviceType = errorName.includes("OffChainService") ? "Offchain" : "Onchain"
-      message = `${serviceType} action failed, please try again in a few minutes. If the problem persists, please contact support.`
+      message = `${serviceType} action failed, please try again in a few minutes. If the problem persists, please contact support. If you are on regtest, it might because blocks need to be generated so that lnd can be considered active.`
       return new LndOfflineError({ message, logger: baseLogger })
 
     case "InactiveAccountError":
@@ -402,6 +403,9 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
 
     case "EmailAlreadyExistsError":
       return new EmailAlreadyExistsError({ logger: baseLogger })
+
+    case "CodeExpiredKratosError":
+      return new CodeExpiredError({ logger: baseLogger })
 
     case "SessionRefreshRequiredError":
       return new SessionRefreshRequiredError({ logger: baseLogger })
@@ -637,6 +641,7 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "UnknownBigIntConversionError":
     case "UnknownDomainError":
     case "UnknownBriaEventError":
+    case "CouldNotFindAccountError":
       message = `Unknown error occurred (code: ${error.name})`
       return new UnknownClientError({ message, logger: baseLogger })
 

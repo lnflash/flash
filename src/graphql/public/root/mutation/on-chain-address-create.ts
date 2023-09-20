@@ -4,6 +4,10 @@ import OnChainAddressPayload from "@graphql/public/types/payload/on-chain-addres
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 
+import { IbexRoutes } from "../../../../services/IbexHelper/Routes"
+
+import { requestIBexPlugin } from "../../../../services/IbexHelper/IbexHelper"
+
 const OnChainAddressCreateInput = GT.Input({
   name: "OnChainAddressCreateInput",
   fields: () => ({
@@ -26,6 +30,17 @@ const OnChainAddressCreateMutation = GT.Field({
     }
 
     const address = await Wallets.createOnChainAddress({ walletId })
+
+    const CreateOnChain = await requestIBexPlugin(
+      "POST",
+      IbexRoutes.OnChain,
+      {},
+      {
+        "accountId": walletId
+      },
+    )
+    console.log("CreateOnChain", CreateOnChain)
+
     if (address instanceof Error) {
       return { errors: [mapAndParseErrorForGqlResponse(address)] }
     }
