@@ -21,6 +21,9 @@ import { IbexRoutes } from "../../services/IbexHelper/Routes"
 import { requestIBexPlugin } from "../../services/IbexHelper/IbexHelper"
 
 import { authRouter } from "./router"
+import { checkedToDeviceId } from "@domain/users"
+
+import { createAccountForDeviceAccount } from "@app/accounts/create-account"
 
 authRouter.post(
   "/create/device-account",
@@ -45,31 +48,48 @@ authRouter.post(
 
       const username = user.name
       const password = user.pass
-      const deviceId = username
+      const deviceIdRaw: string = username
+
+      const deviceId = checkedToDeviceId(deviceIdRaw)
+      if (deviceId instanceof Error) return deviceId
 
       try {
         const authToken = await Authentication.loginWithDevice({
           username,
           password,
           ip,
-          deviceId,
+          deviceId: deviceIdRaw,
         })
         if (authToken instanceof Error) {
           recordExceptionInCurrentSpan({ error: authToken })
           return res.status(500).send({ error: authToken.message })
         }
-        addAttributesToCurrentSpan({ "login.deviceAccount": deviceId })
+        addAttributesToCurrentSpan({ "login.deviceAccount": deviceIdRaw })
 
-				const DeviceCreationResponse = await requestIBexPlugin(
-					"POST",
-					IbexRoutes.API_CreateAccount,
-					{},
-					{
-						name: username,
-						currencyId: 3,
-					},
-				)
-				console.log("DeviceCreationResponse", DeviceCreationResponse)
+        const DeviceCreationResponse = await requestIBexPlugin(
+          "POST",
+          IbexRoutes.API_CreateAccount,
+          {},
+          {
+            name: username,
+            currencyId: 3,
+          },
+        )
+        console.log("DeviceCreationResponse", DeviceCreationResponse)
+        if (!DeviceCreationResponse.data) {
+          return res.status(500).send({ error: "unable to get DeviceCreationResponse" })
+        }
+        if (
+          !DeviceCreationResponse ||
+          !DeviceCreationResponse.data ||
+          !DeviceCreationResponse.data["data"]["id"]
+        ) {
+          return res.status(500).send({ error: "unable to get DeviceCreationResponse" })
+        }
+        await createAccountForDeviceAccount({
+          userId: DeviceCreationResponse.data["data"]["id"],
+          deviceId,
+        })
 
         return res.status(200).send({
           result: authToken,
