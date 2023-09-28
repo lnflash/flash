@@ -19,7 +19,7 @@ export const toDomainSession = (session: KratosSession): Session => {
   // is throw ok? this should not happen I (nb) believe but the type say it can
   // this may probably be a type issue in kratos SDK
   if (!session.expires_at) throw new MissingExpiredAtKratosError()
-
+  if (!session.identity) throw new MissingExpiredAtKratosError()
   return {
     id: session.id as SessionId,
     identity: toDomainIdentity(session.identity),

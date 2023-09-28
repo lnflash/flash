@@ -55,6 +55,9 @@ export const AuthWithUsernamePasswordDeviceIdService =
         })
         const authToken = result.data.session_token as AuthToken
 
+        if (!result.data.session.identity) {
+          return new UnknownKratosError(`Impossible to get identity from Kratos`)
+        }
         // note: this only works when whoami: required_aal = aal1
         const kratosUserId = result.data.session.identity.id as UserId
 

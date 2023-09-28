@@ -94,6 +94,10 @@ export const AuthWithPhonePasswordlessService = (): IAuthWithPhonePasswordlessSe
         },
       })
       const cookiesToSendBackToClient: Array<SessionCookie> = result.headers["set-cookie"]
+
+      if (!result.data.session.identity) {
+        return new AuthenticationKratosError(`no identity found`)
+      }
       // note: this only works when whoami: required_aal = aal1
       const kratosUserId = result.data.session.identity.id as UserId
       return { cookiesToSendBackToClient, kratosUserId }
@@ -249,6 +253,9 @@ export const AuthWithPhonePasswordlessService = (): IAuthWithPhonePasswordlessSe
         },
       })
       const cookiesToSendBackToClient: Array<SessionCookie> = result.headers["set-cookie"]
+      if (!result.data.identity) {
+        return new AuthenticationKratosError(`no identity found`)
+      }
       const kratosUserId = result.data.identity.id as UserId
       return { cookiesToSendBackToClient, kratosUserId }
     } catch (err) {
