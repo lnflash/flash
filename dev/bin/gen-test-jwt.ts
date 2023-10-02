@@ -9,9 +9,9 @@ import jwksRsa from "jwks-rsa"
 
 const jwksFilePath = "./dev/ory/jwks.json"
 const jwksUri = "https://firebaseappcheck.googleapis.com/v1beta/jwks"
-const sub = "1:72279297366:android:TESTE2EACCOUNT5aa75af7"
-const aud = ["projects/72279297366", "projects/galoyapp"]
-const iss = "https://firebaseappcheck.googleapis.com/72279297366"
+const sub = "1:806646140435:android:TESTE2EACCOUNT5aa75af7"
+const aud = ["projects/806646140435", "projects/galoyapp"]
+const iss = "https://firebaseappcheck.googleapis.com/806646140435"
 const jwksFile = fs.readFileSync(jwksFilePath, "utf-8")
 const jwks = JSON.parse(jwksFile)
 const jwk = jwks.keys[0]

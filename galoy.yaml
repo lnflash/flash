@@ -164,6 +164,6 @@ skipFeeProbeConfig:
 smsAuthUnsupportedCountries: []
 whatsAppAuthUnsupportedCountries: []
 appcheckConfig:
-  audience: projects/72279297366
-  issuer: https://firebaseappcheck.googleapis.com/72279297366
+  audience: projects/806646140435
+  issuer: https://firebaseappcheck.googleapis.com/806646140435
   jwksUri: https://firebaseappcheck.googleapis.com/v1beta/jwks
