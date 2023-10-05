@@ -106,6 +106,7 @@ export const startApolloServer = async ({
   app.use("/kratos", kratosCallback)
 
   // FLASH FORK: add IBEX webhook endpoint
+  // UNUSED. Either update webhookURL here, or remove
   app.post("/ibex-endpoint", (req, res) => {
     console.log("Received webhook payload:", req.body)
     const signature = req.headers["signature"] // Assuming the service sends a signature header

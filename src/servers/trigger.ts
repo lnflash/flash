@@ -60,6 +60,7 @@ import { recordExceptionInCurrentSpan, wrapAsyncToRunInSpan } from "@services/tr
 import { SubscriptionInterruptedError } from "./errors"
 import { briaEventHandler } from "./event-handlers/bria"
 import healthzHandler from "./middlewares/healthz"
+import { IbexApiError } from "@services/ibex/errors"
 
 const redisCache = RedisCacheService()
 const logger = baseLogger.child({ module: "trigger" })
@@ -479,26 +480,40 @@ const listenerBria = async () => {
   baseLogger.info("bria listener started")
 }
 
+import { startServer } from "@services/ibex"
+const ibexListener = async () => {
+  startServer()
+
+  // const callback = (event) => baseLogger.info(event, "Ibex event received")
+  // const ibexEventHandler = wrapAsyncToRunInSpan({
+  //   namespace: "servers.trigger",
+  //   fn: callback // (event: IbexEvent) => baseLogger.info(event, "Ibex event received"),
+  // })
+}
+
 const main = () => {
-  listenerBria()
+  logger.info("Setting subscribers:")
 
-  lndStatusEvent.on("started", ({ lnd, pubkey, socket, type }: LndConnect) => {
-    baseLogger.info({ socket }, "lnd started")
+  ibexListener()
+  // listenerBria()
 
-    if (type.indexOf("onchain") !== -1) {
-      listenerOnchain(lnd)
-    }
+  // lndStatusEvent.on("started", ({ lnd, pubkey, socket, type }: LndConnect) => {
+  //   baseLogger.info({ socket }, "lnd started")
 
-    if (type.indexOf("offchain") !== -1) {
-      listenerOffchain({ lnd, pubkey })
-    }
-  })
+  //   if (type.indexOf("onchain") !== -1) {
+  //     listenerOnchain(lnd)
+  //   }
 
-  lndStatusEvent.on("stopped", ({ socket }) => {
-    baseLogger.info({ socket }, "lnd stopped")
-  })
+  //   if (type.indexOf("offchain") !== -1) {
+  //     listenerOffchain({ lnd, pubkey })
+  //   }
+  // })
 
-  activateLndHealthCheck()
+  // lndStatusEvent.on("stopped", ({ socket }) => {
+  //   baseLogger.info({ socket }, "lnd stopped")
+  // })
+
+  // activateLndHealthCheck()
   publishCurrentPrice()
 
   if (getSwapConfig().feeAccountingEnabled) listenerSwapMonitor()
@@ -520,6 +535,8 @@ const healthCheck = () => {
   )
   app.listen(port, () => logger.info(`Health check listening on port ${port}!`))
 }
+
+
 
 // only execute if it is the main module
 if (require.main === module) {

@@ -1,0 +1,46 @@
+@baseurl = http://localhost:8889
+
+### Test server endpoint
+GET {{baseurl}}/ibex HTTP/1.1
+
+### Webhook. TODO: use ngrok for integrated testing when running locally
+POST {{baseurl}}/invoice/status HTTP/1.1
+Content-Type: application/json
+Accept: application/json
+
+{
+    "webhookSecret": "secret",
+    "transaction": {
+        "id": "string",
+        "createdAt": "string",
+        "accountId": "string",
+        "amount": 100,
+        "networkFee": 1,
+        "exchangeRateCurrencySats": 2100,
+        "currencyID": 3,
+        "transactionTypeId": 1,
+        "payment": {
+            "bolt11": "string",
+            "hash": "lnbc220n1pjea6ydpp5y99755qk7k5jrlc93uugteytgfvqnztuln5j5pxyqs24k9826ydsdqj23jhxapqvdex2ct5v5cqzzsxqzuysp54qdu284dz5s84eaa3z3k0vd92fum4mz30fu23lsedg8me66myefs9qyyssqqr7jkv7xfsgj0erryunr66wfajc965g24vvvvesup66ny9fcs7qrljx4jzyw20px2vr42x5ap9877mwtepvy04x06a0lkf7u7wxqufqphcjy2h",
+            "preImage": "string",
+            "memo": "string",
+            "amountMsat": 100000,
+            "feeMsat": 1000,
+            "paidMsat": 100000,
+            "creationDateUtc": "string",
+            "settleDateUtc": "string",
+            "statusId": 1,
+            "failureId": 0,
+            "failureReason": {
+                "id": 0,
+                "name": "string",
+                "description": "string"
+            }
+        }
+    },
+    "status": {
+        "id": 1,
+        "name": "COMPLETE",
+        "description": "get this from ibex"
+    }
+}

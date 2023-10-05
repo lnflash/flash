@@ -86,6 +86,11 @@ To start the GraphQL server and its dependencies:
 $ make start
 ```
 
+To run in debug mode:
+```
+DEBUG=* make start
+```
+
 After running `make start-deps` or `make reset-deps`, the lightning network - running on regtest - will not have any channel, and the mongodb database - that includes some mandatory accounts for Galoy to work - will be empty.
 
 You can then login with the following credentials to get an account with an existing balance: `phone: +16505554328`, `code: 000000`
