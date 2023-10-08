@@ -25,8 +25,30 @@ export const WalletsRepository = (): IWalletsRepository => {
     const account = await AccountsRepository().findById(accountId)
     // verify that the account exist
     if (account instanceof Error) return account
-
     try {
+      // FLASH FORK: create IBEX account if currency is USD
+      let ibexAccountId = ""
+      if (currency === "USD") {
+        const IbexAccountCreationResponse = await requestIBexPlugin(
+          "POST",
+          IbexRoutes.API_CreateAccount,
+          {},
+          {
+            name: accountId,
+            currencyId: 3,
+          },
+        )
+        if (
+          !IbexAccountCreationResponse ||
+          !IbexAccountCreationResponse.data ||
+          !IbexAccountCreationResponse.data["data"]["id"]
+        ) {
+          console.error({ error: "unable to get IbexAccountCreationResponse" })
+        } else {
+          ibexAccountId = IbexAccountCreationResponse.data["data"]["id"]
+        }
+      }
+
       const wallet = new Wallet({
         accountId,
         type,
