@@ -1,4 +1,3 @@
-// import { Payments } from "@app"
 import { InputValidationError } from "@graphql/error"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { GT } from "@graphql/index"
@@ -10,10 +9,11 @@ import dedent from "dedent"
 
 // FLASH FORK: import ibex dependencies
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
-
-import { IbexRoutes } from "../../../../services/IbexHelper/Routes"
-
-import { requestIBexPlugin } from "../../../../services/IbexHelper/IbexHelper"
+import Ibex from "@services/ibex"
+import { IbexEventError } from "@services/ibex/errors"
+import { Payments } from "@app"
+// import { IbexRoutes } from "../../../../services/ibex/Routes"
+// import { requestIBexPlugin } from "../../../../services/ibex/IbexHelper"
 
 const LnInvoicePaymentInput = GT.Input({
   name: "LnInvoicePaymentInput",
@@ -74,77 +74,127 @@ const LnInvoicePaymentSendMutation = GT.Field<
     //   memo: memo ?? null,
     //   senderAccount: domainAccount,
     // })
+    // export const PaymentSendStatus = {
+//   Success: { value: "success" },
+//   Failure: { value: "failed" },
+//   Pending: { value: "pending" },
+//   AlreadyPaid: { value: "already_paid" },
+// } as const
 
     if (!domainAccount) throw new Error("Authentication required")
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let status: PaymentSendStatus | undefined = undefined
-    const PayLightningInvoice = await requestIBexPlugin(
-      "POST",
-      IbexRoutes.LightningInvoicePayment,
-      {},
-      {
-        bolt11: paymentRequest,
-        accountId: walletId,
-      },
-    )
+
+    const PayLightningInvoice = await Ibex.payInvoiceV2({
+      bolt11: paymentRequest,
+      accountId: walletId,
+    })
+
+    // integrate with mapAndParseErrorForGqlResponse
+    // if (PayLightningInvoice instanceof IbexRateLimitError) {
+    //   return {
+    //     status: "failed",
+    //     errors: [
+    //       {
+    //         message:
+    //           "Daily transaction limit has been exceeded. Please try again tomorrow.",
+    //       },
+    //     ],
+    //   }
+    // }
+
+    if (PayLightningInvoice instanceof IbexEventError) {
+      return { 
+        status: "failed", 
+        errors: [{ message: "An unexpected error occurred. Please try again later." }],
+        // errors: [mapAndParseErrorForGqlResponse(PayLightningInvoice)] }
+      }
+    }
+    
+    let status: PaymentSendStatus = PaymentSendStatus.Pending
+    switch(PayLightningInvoice.transaction?.payment?.status?.id) {
+      case 1: 
+        status = PaymentSendStatus.Pending
+        break;
+      case 2: 
+        status = PaymentSendStatus.Success
+        break;
+      case 3: 
+        status = PaymentSendStatus.Failure
+        break;
+    }
+
+    return {
+      errors: [],
+      status: status.value
+    }
+
+    // let status: PaymentSendStatus | undefined = undefined
+    // const PayLightningInvoice = await requestIBexPlugin(
+    //   "POST",
+    //   IbexRoutes.LightningInvoicePayment,
+    //   {},
+    //   {
+        // bolt11: paymentRequest,
+        // accountId: walletId,
+    //   },
+    // )
 
     // Check for the specific error and handle it
-    if (
-      PayLightningInvoice &&
-      PayLightningInvoice.data &&
-      PayLightningInvoice.data["error"] == "'daily limit exceeded'"
-    ) {
-      return {
-        status: "failed",
-        errors: [
-          {
-            message:
-              "Daily transaction limit has been exceeded. Please try again tomorrow.",
-          },
-        ],
-      }
-    }
-    if (
-      PayLightningInvoice &&
-      PayLightningInvoice.data &&
-      PayLightningInvoice.data["data"]["transaction"] &&
-      PayLightningInvoice.data["data"]["transaction"]["payment"] &&
-      PayLightningInvoice.data["data"]["transaction"]["payment"]["status"]
-    ) {
-      switch (
-        PayLightningInvoice.data["data"]["transaction"]["payment"]["status"]["id"]
-      ) {
-        case 1:
-          status = PaymentSendStatus.Pending
-          break
-        case 2:
-          status = PaymentSendStatus.Success
-          break
-        case 3:
-          status = PaymentSendStatus.Failure
-          break
-        default:
-          status = PaymentSendStatus.Pending
-          break
-      }
-      if (status instanceof Error) {
-        return { status: "failed", errors: [mapAndParseErrorForGqlResponse(status)] }
-      }
-      return {
-        errors: [
-          {
-            message:
-              "Daily transaction limit has been exceeded. Please try again tomorrow.",
-          },
-        ],
-        status: status.value,
-      }
-    }
-    // Fallback error if no conditions met
-    return {
-      status: "failed",
-      errors: [{ message: "An unexpected error occurred. Please try again later." }],
-    }
+    // if (
+    //   PayLightningInvoice &&
+    //   PayLightningInvoice.error == "'daily limit exceeded'"
+    // ) {
+    //   return {
+    //     status: "failed",
+    //     errors: [
+    //       {
+    //         message:
+    //           "Daily transaction limit has been exceeded. Please try again tomorrow.",
+    //       },
+    //     ],
+    //   }
+    // }
+    // if (
+    //   PayLightningInvoice &&
+    //   PayLightningInvoice.data &&
+    //   PayLightningInvoice.data["data"]["transaction"] &&
+    //   PayLightningInvoice.data["data"]["transaction"]["payment"] &&
+    //   PayLightningInvoice.data["data"]["transaction"]["payment"]["status"]
+    // ) {
+    //   switch (
+    //     PayLightningInvoice.data["data"]["transaction"]["payment"]["status"]["id"]
+    //   ) {
+    //     case 1:
+    //       status = PaymentSendStatus.Pending
+    //       break
+    //     case 2:
+    //       status = PaymentSendStatus.Success
+    //       break
+    //     case 3:
+    //       status = PaymentSendStatus.Failure
+    //       break
+    //     default:
+    //       status = PaymentSendStatus.Pending
+    //       break
+    //   }
+    //   if (status instanceof Error) {
+    //     return { status: "failed", errors: [mapAndParseErrorForGqlResponse(status)] }
+    //   }
+    //   return {
+    //     errors: [
+    //       {
+    //         message:
+    //           "Daily transaction limit has been exceeded. Please try again tomorrow.",
+    //       },
+    //     ],
+    //     status: status.value,
+    //   }
+    // }
+    // // Fallback error if no conditions met
+    // return {
+    //   status: "failed",
+    //   errors: [{ message: "An unexpected error occurred. Please try again later." }],
+    // }
   },
 })
 

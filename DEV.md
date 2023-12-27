@@ -67,6 +67,8 @@ Everytime the dependencies are re-started the environment must be reloaded via `
 
 ## Development
 
+Make sure to add the Ibex email and password to the `.env` file.
+ 
 To start the GraphQL server and its dependencies:
 ```
 $ make start
