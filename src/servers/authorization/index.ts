@@ -509,4 +509,38 @@ authRouter.post("/phone/login", async (req: Request, res: Response) => {
   })
 })
 
+// FLASK FORK: This is a new endpoint to retrieve the greenlight partner cert and key for Breez SDK to use
+authRouter.get("/getCertKey", async (req: Request, res: Response) => {
+  const reqCookie = req.headers?.cookie
+  if (!reqCookie) {
+    return res.status(500).send({ error: "Missing csrf or ory_kratos_session cookie" })
+  }
+  try {
+    // Logic to retrieve cert and key
+    const cert = await getCertificate() // Implement this function
+    const key = await getKey() // Implement this function
+
+    // Check if cert and key are available
+    if (!cert || !key) {
+      return res.status(404).json({ error: "Greenlight Cert or Key not found" })
+    }
+
+    res.json({ cert, key })
+  } catch (error) {
+    recordExceptionInCurrentSpan({ error })
+    return res.status(500).json({ error: "Internal Server Error" })
+  }
+})
+
+// Implement or import these functions based on your application's logic
+const getCertificate = async () => {
+  // Retrieve the certificate data
+  return process.env.GL_CUSTOM_NOBODY_CERT
+}
+
+const getKey = async () => {
+  // Retrieve the key data
+  return process.env.GL_CUSTOM_NOBODY_KEY
+}
+
 export default authRouter

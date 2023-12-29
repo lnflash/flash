@@ -1,7 +1,7 @@
-lightningAddressDomain: pay.api-development.flashapp.me
+lightningAddressDomain: pay.development.flashapp.me
 lightningAddressDomainAliases:
-  - pay1.api-development.flashapp.me
-  - pay2.api-development.flashapp.me
+  - pay1.development.flashapp.me
+  - pay2.development.flashapp.me
 locale: en
 displayCurrency:
   code: USD
