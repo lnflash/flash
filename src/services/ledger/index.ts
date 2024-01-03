@@ -31,8 +31,9 @@ import {
 } from "@services/tracing"
 
 // FLASH FORK: import ibex dependencies
-import { IbexRoutes } from "../IbexHelper/Routes"
-import { requestIBexPlugin } from "../IbexHelper/IbexHelper"
+// import { IbexRoutes } from "../ibex/Routes"
+// import { requestIBexPlugin } from "../ibex/IbexHelper"
+import Ibex from "@services/ibex"
 
 import { admin } from "./admin"
 import * as adminLegacy from "./admin-legacy"
@@ -42,6 +43,7 @@ import * as caching from "./caching"
 import { TransactionsMetadataRepository } from "./services"
 import { send } from "./send"
 import { volume } from "./volume"
+import { IbexEventError } from "@services/ibex/errors"
 
 export { getNonEndUserWalletIds } from "./caching"
 export { translateToLedgerJournal } from "./helpers"
@@ -304,19 +306,23 @@ export const LedgerService = (): ILedgerService => {
           })
         }
       }
-      const GetIbexWalletBalance = await requestIBexPlugin(
-        "GET",
-        `${IbexRoutes.API_GetAccount}${walletId}`,
-        {},
-        {},
-      )
-      if (
-        GetIbexWalletBalance &&
-        GetIbexWalletBalance.data &&
-        GetIbexWalletBalance.data["data"]["balance"]
-      ) {
-        balance = GetIbexWalletBalance.data["data"]["balance"] * 100
-      }
+
+      const resp = await Ibex.getAccountDetails({ accountId: walletId })
+      if (resp instanceof IbexEventError || !resp.balance) console.error("Failed to get wallet balance")
+      else balance = resp.balance
+      // const GetIbexWalletBalance = await requestIBexPlugin(
+      //   "GET",
+      //   `${IbexRoutes.API_GetAccount}${walletId}`,
+      //   {},
+      //   {},
+      // )
+      // if (
+      //   GetIbexWalletBalance &&
+      //   GetIbexWalletBalance.data &&
+      //   GetIbexWalletBalance.data["data"]["balance"]
+      // ) {
+      //   balance = GetIbexWalletBalance.data["data"]["balance"] * 100
+      // }
       return toSats(balance)
     } catch (err) {
       return new UnknownLedgerError(err)

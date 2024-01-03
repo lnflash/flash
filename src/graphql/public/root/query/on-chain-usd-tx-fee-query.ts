@@ -17,9 +17,9 @@ import { normalizePaymentAmount } from "../../../shared/root/mutation"
 
 // FLASH FORK: import ibex dependencies
 
-import { IbexRoutes } from "../../../../services/IbexHelper/Routes"
+import { IbexRoutes } from "../../../../services/ibex/Routes"
 
-import { requestIBexPlugin } from "../../../../services/IbexHelper/IbexHelper"
+import { requestIBexPlugin } from "../../../../services/ibex/IbexHelper"
 
 const OnChainUsdTxFeeQuery = GT.Field<null, GraphQLPublicContextAuth>({
   type: GT.NonNull(OnChainUsdTxFee),

@@ -5,9 +5,9 @@ import OnChainAddressPayload from "@graphql/public/types/payload/on-chain-addres
 // import { Wallets } from "@app"
 
 // FLASH FORK: import ibex dependencies
-import { IbexRoutes } from "../../../../services/IbexHelper/Routes"
+import { IbexRoutes } from "../../../../services/ibex/Routes"
 
-import { requestIBexPlugin } from "../../../../services/IbexHelper/IbexHelper"
+import { requestIBexPlugin } from "../../../../services/ibex/IbexHelper"
 
 const OnChainAddressCurrentInput = GT.Input({
   name: "OnChainAddressCurrentInput",

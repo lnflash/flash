@@ -1,14 +1,14 @@
-// import { AccountValidator } from "@domain/accounts"
+import { AccountValidator } from "@domain/accounts"
 // import { OnChainAddressNotFoundError } from "@domain/bitcoin/onchain"
 // import { RateLimitConfig } from "@domain/rate-limit"
 // import { RateLimiterExceededError } from "@domain/rate-limit/errors"
 
 // import { OnChainService } from "@services/bria"
-// import {
-//   AccountsRepository,
-//   WalletOnChainAddressesRepository,
-//   WalletsRepository,
-// } from "@services/mongoose"
+import {
+  AccountsRepository,
+  // WalletOnChainAddressesRepository,
+  WalletsRepository,
+} from "@services/mongoose"
 // import { consumeLimiter } from "@services/rate-limit"
 
 // export const createOnChainAddress = async ({
@@ -87,9 +87,11 @@
 //   })
 
 // FLASH FORK
-import { IbexRoutes } from "@services/IbexHelper/Routes"
-import { requestIBexPlugin } from "@services/IbexHelper/IbexHelper"
-import { IbexEventError } from "@services/IbexHelper/errors"
+// import { IbexRoutes } from "@services/IbexHelper/Routes"
+// import { requestIBexPlugin } from "@services/IbexHelper/IbexHelper"
+// import { IbexEventError } from "@services/IbexHelper/errors"
+import Ibex from "@services/ibex"
+import { IbexEventError } from "@services/ibex/errors"
 
 export const createOnChainAddress = async ({
     walletId,
@@ -98,35 +100,15 @@ export const createOnChainAddress = async ({
     walletId: WalletId
     requestId?: OnChainAddressRequestId
   }) => {
-    // TODO: reintroduce + test validation occuring here
-    //   const wallet = await WalletsRepository().findById(walletId)
-    //   if (wallet instanceof Error) return wallet
-    //   const account = await AccountsRepository().findById(wallet.accountId)
-    //   if (account instanceof Error) return account
-
-    //   const accountValidator = AccountValidator(account)
-    //   if (accountValidator instanceof Error) return accountValidator
+    const wallet = await WalletsRepository().findById(walletId)
+    if (wallet instanceof Error) return wallet
+    const account = await AccountsRepository().findById(wallet.accountId)
+    if (account instanceof Error) return account
+    const accountValidator = AccountValidator(account)
+    if (accountValidator instanceof Error) return accountValidator
     
-    /* 
-    TODO- Define return types 
-        e.g Promise<{
-            status: number;
-            data: null;
-            error: string;
-        } | IbexEventError>
-    */
-    const CreateOnChain: any = await requestIBexPlugin(
-        "POST",
-        IbexRoutes.OnChain,
-        {},
-        {
-          accountId: walletId,
-        },
-    )
-
-    if (!CreateOnChain || !CreateOnChain.data || !CreateOnChain.data["data"]) {
-        return new IbexEventError("unable to get CreateOnChain")
-    } else {
-        return CreateOnChain.data["data"] // type: address
-    }
+    const resp = await Ibex.generateBitcoinAddress({ accountId: walletId })
+    if (resp instanceof IbexEventError) return resp
+    else if (!resp.address) return new IbexEventError("Address not returned")
+    else return resp.address
   }

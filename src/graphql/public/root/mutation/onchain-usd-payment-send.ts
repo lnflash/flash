@@ -12,9 +12,9 @@ import WalletId from "@graphql/shared/types/scalar/wallet-id"
 // import { Wallets } from "@app"
 
 // FLASH FORK: import ibex dependencies
-import { IbexRoutes } from "../../../../services/IbexHelper/Routes"
+import { IbexRoutes } from "../../../../services/ibex/Routes"
 
-import { requestIBexPlugin } from "../../../../services/IbexHelper/IbexHelper"
+import { requestIBexPlugin } from "../../../../services/ibex/IbexHelper"
 
 const OnChainUsdPaymentSendInput = GT.Input({
   name: "OnChainUsdPaymentSendInput",

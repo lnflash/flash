@@ -14,9 +14,9 @@ import WalletId from "@graphql/shared/types/scalar/wallet-id"
 // FLASH FORK: import ibex dependencies
 import { toCents } from "@domain/fiat"
 
-import { IbexRoutes } from "../../../../services/IbexHelper/Routes"
+import { IbexRoutes } from "../../../../services/ibex/Routes"
 
-import { requestIBexPlugin } from "../../../../services/IbexHelper/IbexHelper"
+import { requestIBexPlugin } from "../../../../services/ibex/IbexHelper"
 
 const OnChainUsdPaymentSendAsBtcDenominatedInput = GT.Input({
   name: "OnChainUsdPaymentSendAsBtcDenominatedInput",
