@@ -87,9 +87,6 @@ import {
 //   })
 
 // FLASH FORK
-// import { IbexRoutes } from "@services/IbexHelper/Routes"
-// import { requestIBexPlugin } from "@services/IbexHelper/IbexHelper"
-// import { IbexEventError } from "@services/IbexHelper/errors"
 import Ibex from "@services/ibex"
 import { IbexEventError } from "@services/ibex/errors"
 
@@ -107,6 +104,7 @@ export const createOnChainAddress = async ({
     const accountValidator = AccountValidator(account)
     if (accountValidator instanceof Error) return accountValidator
     
+    // FLASH FORK: use IBEX to create on-chain address
     const resp = await Ibex.generateBitcoinAddress({ accountId: walletId })
     if (resp instanceof IbexEventError) return resp
     else if (!resp.address) return new IbexEventError("Address not returned")

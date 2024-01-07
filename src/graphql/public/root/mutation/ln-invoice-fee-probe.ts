@@ -1,7 +1,5 @@
 import { InvalidFeeProbeStateError } from "@domain/bitcoin/lightning"
 
-import { Payments } from "@app"
-
 import { GT } from "@graphql/index"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import SatAmountPayload from "@graphql/public/types/payload/sat-amount"
@@ -13,8 +11,6 @@ import { normalizePaymentAmount } from "../../../shared/root/mutation"
 // FLASH FORK: import ibex dependencies
 import Ibex from "@services/ibex"
 import { IbexEventError } from "@services/ibex/errors"
-// import { IbexRoutes } from "../../../../services/ibex/Routes"
-// import { requestIBexPlugin } from "../../../../services/ibex/IbexHelper"
 
 const LnInvoiceFeeProbeInput = GT.Input({
   name: "LnInvoiceFeeProbeInput",
@@ -50,6 +46,7 @@ const LnInvoiceFeeProbeMutation = GT.Field<
       return { errors: [{ message: paymentRequest.message }] }
 
     // FLASH FORK: create IBEX fee estimation instead of Galoy fee estimation
+    // TODO: Move Ibex call behind payments
     // const { result: feeSatAmount, error } =
     //   await Payments.getLightningFeeEstimationForBtcWallet({
     //     walletId,

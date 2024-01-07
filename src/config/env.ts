@@ -230,9 +230,6 @@ export const env = createEnv({
     SVIX_SECRET: process.env.SVIX_SECRET,
     SVIX_ENDPOINT: process.env.SVIX_ENDPOINT,
 
-    // IBEX_TOKEN: process.env.IBEX_TOKEN,
-    // IBEX_PLUGIN_BASE_URL: process.env.IBEX_PLUGIN_BASE_URL,
-
     IBEX_URL: process.env.IBEX_URL,
     IBEX_EMAIL: process.env.IBEX_EMAIL,
     IBEX_PASSWORD: process.env.IBEX_PASSWORD,

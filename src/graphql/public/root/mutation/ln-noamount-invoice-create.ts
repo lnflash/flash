@@ -1,7 +1,4 @@
 import dedent from "dedent"
-
-// import { Wallets } from "@app"
-
 import { GT } from "@graphql/index"
 import Memo from "@graphql/shared/types/scalar/memo"
 import Minutes from "@graphql/public/types/scalar/minutes"
@@ -13,8 +10,6 @@ import LnNoAmountInvoicePayload from "@graphql/public/types/payload/ln-noamount-
 import { decodeInvoice } from "@domain/bitcoin/lightning"
 import Ibex from "@services/ibex"
 import { IbexEventError, UnexpectedResponseError } from "@services/ibex/errors"
-// import { IbexRoutes } from "../../../../services/ibex/Routes"
-// import { requestIBexPlugin } from "../../../../services/ibex/IbexHelper"
 
 const LnNoAmountInvoiceCreateInput = GT.Input({
   name: "LnNoAmountInvoiceCreateInput",
@@ -53,11 +48,6 @@ const LnNoAmountInvoiceCreateMutation = GT.Field({
     }
 
     // FLASH FORK: create IBEX invoice instead of Galoy invoice
-    // const lnInvoice = await Wallets.addInvoiceNoAmountForSelf({
-    //   walletId,
-    //   memo,
-    //   expiresIn,
-    // })
 
     // TODO: move this into Wallets.addInvoiceNoAmountForSelf
     const resp = await Ibex.addInvoice({

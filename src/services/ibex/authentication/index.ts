@@ -23,12 +23,12 @@ const storeTokens = async (signInResp: SignInResponse200): Promise<void> => {
     if (!refreshToken) return Promise.reject(new IbexEventError("No refresh token found in Ibex response body"))
     const rtResp = await Redis.setRefreshToken(refreshToken, refreshTokenExpiresAt)
     
-    if (atResp instanceof CacheServiceError) log.warn(`Failed to write accessToken to redis cache: ${atResp.message}`)
-    if (rtResp instanceof CacheServiceError) log.warn(`Failed to write refreshToken to redis cache: ${rtResp.message}`)
+    if (atResp instanceof CacheServiceError) log.warn(`IBEX: Failed to write accessToken to redis cache: ${atResp.message}`)
+    if (rtResp instanceof CacheServiceError) log.warn(`IBEX: Failed to write refreshToken to redis cache: ${rtResp.message}`)
 }
 
 const signIn = async (): Promise<void | IbexApiError> => {
-    log.info("Signing in...")
+    log.info("IBEX: Signing in...")
     return IbexSDK.signIn({ email: IBEX_EMAIL, password: IBEX_PASSWORD })
         .then(_ => _.data)
         .then(_ => storeTokens(_))
@@ -37,9 +37,10 @@ const signIn = async (): Promise<void | IbexApiError> => {
 }
 
 const refreshAccessToken = async (): Promise<void | IbexAuthenticationError> => {
+    log.info("IBEX: Refreshing token...")
     const tokenOrErr = await Redis.getRefreshToken()
     if (tokenOrErr instanceof CacheUndefinedError) {
-        log.info("Refresh token not found.")
+        log.info("IBEX: Refresh token not found.")
         return await signIn().catch((e: IbexApiError) => new IbexAuthenticationError(e))
     }
     if (tokenOrErr instanceof CacheServiceError) return new IbexAuthenticationError(tokenOrErr)
@@ -59,7 +60,7 @@ export const withAuth = async <S, T>(apiCall: () => Promise<FetchResponse<S, T>>
     const atResp = await Redis.getAccessToken()
 
     if (atResp instanceof CacheUndefinedError) {
-        log.info("Access token not found. Refreshing token...")
+        log.info("IBEX: Access token not found.")
         const refreshResp = await refreshAccessToken()
         if (refreshResp instanceof IbexAuthenticationError) return refreshResp
     } else if (atResp instanceof CacheServiceError) return new IbexAuthenticationError(atResp)
@@ -69,7 +70,7 @@ export const withAuth = async <S, T>(apiCall: () => Promise<FetchResponse<S, T>>
         return (await apiCall()).data
     } catch (err: any) {
         if (err.status === 401) {
-            log.info("Access token unauthorized. Refreshing token...")
+            log.info("IBEX: Access token unauthorized.")
             const refreshResp = await refreshAccessToken()
             if (refreshResp instanceof IbexAuthenticationError) return refreshResp
             return (await apiCall()).data

@@ -29,12 +29,6 @@ import {
   recordExceptionInCurrentSpan,
   wrapAsyncFunctionsToRunInSpan,
 } from "@services/tracing"
-
-// FLASH FORK: import ibex dependencies
-// import { IbexRoutes } from "../ibex/Routes"
-// import { requestIBexPlugin } from "../ibex/IbexHelper"
-import Ibex from "@services/ibex"
-
 import { admin } from "./admin"
 import * as adminLegacy from "./admin-legacy"
 import { MainBook, Transaction } from "./books"
@@ -43,6 +37,9 @@ import * as caching from "./caching"
 import { TransactionsMetadataRepository } from "./services"
 import { send } from "./send"
 import { volume } from "./volume"
+
+// FLASH FORK: import ibex dependencies
+import Ibex from "@services/ibex"
 import { IbexApiError, IbexAuthenticationError, IbexEventError } from "@services/ibex/errors"
 
 export { getNonEndUserWalletIds } from "./caching"

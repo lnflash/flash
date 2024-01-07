@@ -1,5 +1,4 @@
 import { DomainError, ErrorLevel } from "@domain/shared"
-// import { baseLogger } from "@services/logger";
 
 export class IbexEventError extends DomainError {}
 
@@ -18,9 +17,3 @@ export class IbexAuthenticationError extends IbexEventError {}
 export class UnexpectedResponseError extends IbexEventError {
     level = ErrorLevel.Warn
 }
-
-
-// export const logErrors = e => {
-//     if (e instanceof IbexEventError) baseLogger.error(e)
-//     return e
-// }

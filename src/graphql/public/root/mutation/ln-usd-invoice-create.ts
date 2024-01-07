@@ -15,8 +15,6 @@ import { decodeInvoice } from "@domain/bitcoin/lightning"
 
 import Ibex from "@services/ibex"
 import { IbexEventError, UnexpectedResponseError } from "@services/ibex/errors"
-// import { IbexRoutes } from "../../../../services/ibex/Routes"
-// import { requestIBexPlugin } from "../../../../services/ibex/IbexHelper"
 
 const LnUsdInvoiceCreateInput = GT.Input({
   name: "LnUsdInvoiceCreateInput",
@@ -56,14 +54,6 @@ const LnUsdInvoiceCreateMutation = GT.Field({
     }
 
     // FLASH FORK: create IBEX invoice instead of Galoy invoice
-    //
-    // const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
-    //   walletId,
-    //   amount,
-    //   memo,
-    //   expiresIn,
-    // })
-
     const resp = await Ibex.addInvoice({
       amount: amount / 100,
       accountId: walletId,
