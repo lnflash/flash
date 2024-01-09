@@ -33,18 +33,20 @@ export const WalletsRepository = (): IWalletsRepository => {
     const account = await AccountsRepository().findById(accountId)
     // verify that the account exist
     if (account instanceof Error) return account
+    let ibexAccountId
     try {
       // FLASH FORK: create IBEX account if currency is USD
-      const resp = await Ibex.createAccount({
-        name: accountId,
-        currencyId: 3,
-      })
-      if (resp instanceof IbexEventError) return resp
-      const ibexAccountId = resp.id 
-
+      if (currency === "USD") {
+        const resp = await Ibex.createAccount({
+          name: accountId,
+          currencyId: 3,
+        })
+        if (resp instanceof IbexEventError) return resp
+        ibexAccountId = resp.id
+      }
       const wallet = new Wallet({
         _accountId: toObjectId<AccountId>(accountId),
-        id: currency === "USD" && !!ibexAccountId ? ibexAccountId : crypto.randomUUID(),
+        id: ibexAccountId || crypto.randomUUID(),
         type,
         currency,
       })

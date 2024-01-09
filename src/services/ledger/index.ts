@@ -40,7 +40,11 @@ import { volume } from "./volume"
 
 // FLASH FORK: import ibex dependencies
 import Ibex from "@services/ibex"
-import { IbexApiError, IbexAuthenticationError, IbexEventError } from "@services/ibex/errors"
+import {
+  IbexApiError,
+  IbexAuthenticationError,
+  IbexEventError,
+} from "@services/ibex/errors"
 
 export { getNonEndUserWalletIds } from "./caching"
 export { translateToLedgerJournal } from "./helpers"
@@ -305,9 +309,9 @@ export const LedgerService = (): ILedgerService => {
       }
 
       const resp = await Ibex.getAccountDetails({ accountId: walletId })
-      if (resp instanceof IbexApiError ) {
+      if (resp instanceof IbexApiError) {
         console.error(`Ibex Call failed with ${resp.code}: ${resp.message}`)
-        // if (resp.code === 403) return toSats(0) // this is a hack for requests to Ibex with accountIds it doesn't recognize
+        if (resp.code === 403) return toSats(0) // this is a hack for requests to Ibex with accountIds it doesn't recognize
         return resp
       }
       if (resp instanceof IbexAuthenticationError) {
@@ -315,7 +319,7 @@ export const LedgerService = (): ILedgerService => {
         return resp
       }
       if (resp.balance === undefined) return new IbexEventError("Balance not found")
-    
+
       return toSats(resp.balance * 100)
     } catch (err) {
       return new UnknownLedgerError(err)

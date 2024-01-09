@@ -80,7 +80,6 @@ rateLimits:
 accounts:
   initialStatus: active
   initialWallets:
-    - BTC
     - USD
   enablePhoneCheck: false
   enableIpCheck: false

@@ -69,13 +69,19 @@ const LnUsdInvoiceCreateMutation = GT.Field({
 
     const invoiceString: string | undefined = resp.invoice?.bolt11
     if (!invoiceString) {
-      return { errors: [mapAndParseErrorForGqlResponse(new UnexpectedResponseError("Could not find invoice."))] }
+      return {
+        errors: [
+          mapAndParseErrorForGqlResponse(
+            new UnexpectedResponseError("Could not find invoice."),
+          ),
+        ],
+      }
     }
     const decodedInvoice = decodeInvoice(invoiceString)
     if (decodedInvoice instanceof Error) {
       return { errors: [mapAndParseErrorForGqlResponse(decodedInvoice)] }
     }
-    
+
     return {
       errors: [],
       invoice: {
