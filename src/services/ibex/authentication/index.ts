@@ -5,7 +5,7 @@ import Redis from "./redis-datastore";
 import { FetchResponse } from "api/dist/core";
 import { CacheServiceError, CacheUndefinedError } from "@domain/cache";
 import { baseLogger as log } from "@services/logger";
-import { logErrors } from "../errors/logger";
+import { logResponse } from "../errors/logger";
 
 // TODO: Divide this into setAccessToken and setRefreshToken which take Partial<SignInResponse200>
 const storeTokens = async (signInResp: SignInResponse200): Promise<void> => {
@@ -33,7 +33,7 @@ const signIn = async (): Promise<void | IbexApiError> => {
         .then(_ => _.data)
         .then(_ => storeTokens(_))
         .catch(e => new IbexApiError(e.status, e.data))      
-        .then(logErrors)      
+        .then(logResponse)      
 }
 
 const refreshAccessToken = async (): Promise<void | IbexAuthenticationError> => {

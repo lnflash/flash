@@ -307,7 +307,7 @@ export const LedgerService = (): ILedgerService => {
       const resp = await Ibex.getAccountDetails({ accountId: walletId })
       if (resp instanceof IbexApiError ) {
         console.error(`Ibex Call failed with ${resp.code}: ${resp.message}`)
-        // if (resp.code === 403) return toSats(0) // this is a hack for requests to Ibex with accountIds it doesn't recognize
+        if (resp.code === 403) return toSats(0) // this is a hack for requests to Ibex with accountIds it doesn't recognize
         return resp
       }
       if (resp instanceof IbexAuthenticationError) {

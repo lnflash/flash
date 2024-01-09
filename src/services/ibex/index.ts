@@ -2,7 +2,7 @@
 import IbexSDK, { AddInvoiceBodyParam, AddInvoiceResponse201, CreateAccountBodyParam, CreateAccountResponse201, EstimateFeeCopyMetadataParam, EstimateFeeCopyResponse200, GMetadataParam, GResponse200, GResponse400, GenerateBitcoinAddressBodyParam, GenerateBitcoinAddressResponse201, GetAccountDetailsMetadataParam, GetAccountDetailsResponse200, GetFeeEstimationMetadataParam, GetFeeEstimationResponse200, PayInvoiceV2BodyParam, PayInvoiceV2Response200, RefreshAccessTokenBodyParam, SendToAddressCopyBodyParam, SendToAddressCopyResponse200, SignInResponse200 } from "./.api/apis/sing-in" // TODO: @sing-in@<uuid>
 import { IbexEventError, IbexAuthenticationError, IbexApiError } from "./errors"
 import { withAuth } from "./authentication";
-import { logErrors } from "./errors/logger"
+import { logRequest, logResponse } from "./errors/logger"
 
 // This is a wrapper around the Ibex api that handles authentication
 class Ibex {
@@ -17,60 +17,69 @@ class Ibex {
     }
 
     async getAccountTransactions(metadata: GMetadataParam): Promise<GResponse200 | IbexAuthenticationError | IbexApiError> {
+        logRequest("getAccountTransactions", metadata)
         return withAuth(() => IbexSDK.g(metadata))
             .catch(_ => new IbexApiError(_.status, _.data))
-            .then(logErrors)
+            .then(logResponse)
     }
 
     async createAccount(body: CreateAccountBodyParam): Promise<CreateAccountResponse201 | IbexAuthenticationError | IbexApiError> {
+        logRequest("createAccount", body)
         return withAuth(() => IbexSDK.createAccount(body))
             .catch(_ => new IbexApiError(_.status, _.data))
-            .then(logErrors)
+            .then(logResponse)
     }
 
     async getAccountDetails(metadata: GetAccountDetailsMetadataParam): Promise<GetAccountDetailsResponse200 | IbexAuthenticationError | IbexApiError> {
+        logRequest("getAccountDetails", metadata)
         return withAuth(() => IbexSDK.getAccountDetails(metadata))
             .catch(_ => new IbexApiError(_.status, _.data))
-            .then(logErrors)
+            .then(logResponse)
     }
 
     async generateBitcoinAddress(body: GenerateBitcoinAddressBodyParam): Promise<GenerateBitcoinAddressResponse201 | IbexAuthenticationError | IbexApiError> {
+        logRequest("generateBitcoinAddress", body)
         return withAuth(() => IbexSDK.generateBitcoinAddress(body))
             .catch(_ => new IbexApiError(_.status, _.data))
-            .then(logErrors) 
+            .then(logResponse) 
     }
 
     async addInvoice(body: AddInvoiceBodyParam): Promise<AddInvoiceResponse201 | IbexAuthenticationError | IbexApiError> {
+        logRequest("addInvoice", body)
         return withAuth(() => IbexSDK.addInvoice(body))
             .catch(_ => new IbexApiError(_.status, _.data))
-            .then(logErrors)
+            .then(logResponse)
     }
 
     // LN fee estimation
     // GetFeeEstimationResponse200 not defined
     async getFeeEstimation(metadata: GetFeeEstimationMetadataParam): Promise<GetFeeEstimationResponse200 | IbexAuthenticationError | IbexApiError> {
+        logRequest("getFeeEstimation", metadata)
         return withAuth(() => IbexSDK.getFeeEstimation(metadata))
             .catch(_ => new IbexApiError(_.status, _.data))
-            .then(logErrors)
+            .then(logResponse)
     }
 
     async payInvoiceV2(body: PayInvoiceV2BodyParam): Promise<PayInvoiceV2Response200 | IbexAuthenticationError | IbexApiError> {
+        logRequest("payInvoiceV2", body)
         return withAuth(() => IbexSDK.payInvoiceV2(body))
             .catch(_ => new IbexApiError(_.status, _.data))
-            .then(logErrors)
+            .then(logResponse)
     }
 
     async sendToAddressV2(body: SendToAddressCopyBodyParam): Promise<SendToAddressCopyResponse200 | IbexAuthenticationError | IbexApiError> {
+        logRequest("sendToAddressV2", body)
         return withAuth(() => IbexSDK.sendToAddressCopy(body))
             .catch(_ => new IbexApiError(_.status, _.data))
-            .then(logErrors)
+            .then(logResponse)
     }
 
     // onchain fee estimation
     async estimateFeeV2(metadata: EstimateFeeCopyMetadataParam): Promise<EstimateFeeCopyResponse200 | IbexAuthenticationError | IbexApiError> {
+        logRequest("estimateFeeV2", metadata)
         return withAuth(() => IbexSDK.estimateFeeCopy(metadata))
             .catch(_ => new IbexApiError(_.status, _.data))
-            .then(logErrors)
+            .then(logResponse)
     }
 }
 
