@@ -18,6 +18,7 @@ import SignedAmount from "../scalar/signed-amount"
 import OnChainAddress from "../scalar/on-chain-address"
 
 import { TransactionConnection } from "./transaction"
+import { baseLogger } from "@services/logger"
 
 const UsdWallet = GT.Object<Wallet>({
   name: "UsdWallet",
@@ -77,7 +78,7 @@ const UsdWallet = GT.Object<Wallet>({
         // Non-null signal to type checker; consider fixing in PartialResult type
         if (!result?.slice) throw error
 
-        return connectionFromPaginatedArray<BaseWalletTransaction>(
+        return connectionFromPaginatedArray<WalletTransaction>(
           result.slice,
           result.total,
           paginationArgs,

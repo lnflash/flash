@@ -17,7 +17,7 @@ export const getTransactionsForWallets = async ({
 }: {
   wallets: Wallet[]
   paginationArgs?: PaginationArgs
-}): Promise<PartialResult<PaginatedArray<BaseWalletTransaction>>> => {
+}): Promise<PartialResult<PaginatedArray<WalletTransaction>>> => {
   const walletIds = wallets.map((wallet) => wallet.id)
 
   // Flash fork: return history from Ibex
@@ -80,12 +80,12 @@ export const getTransactionsForWallets = async ({
 }
 
 
-const toWalletTransactions = (ibexResp: GResponse200): BaseWalletTransaction[] => {
+const toWalletTransactions = (ibexResp: GResponse200): WalletTransaction[] => {
   return ibexResp.map(trx => {
     const currency = (trx.currencyId === 3 ? "USD" : "BTC") as WalletCurrency // WalletCurrency: "USD" | "BTC",
 
     const settlementDisplayPrice: WalletMinorUnitDisplayPrice<WalletCurrency, DisplayCurrency> = {
-      base: trx.exchangeRateCurrencySats ? BigInt(trx.exchangeRateCurrencySats) : 0n,
+      base: trx.exchangeRateCurrencySats ? BigInt(Math.floor(trx.exchangeRateCurrencySats)) : 0n,
       offset: 0n, // what is this?
       displayCurrency: "USD" as DisplayCurrency,
       walletCurrency: currency
@@ -101,7 +101,9 @@ const toWalletTransactions = (ibexResp: GResponse200): BaseWalletTransaction[] =
       createdAt: trx.createdAt ? new Date(trx.createdAt) : new Date(), // should always return
       id: trx.id || "null", // "LedgerTransactionId", // this can probably be removed
       status: "success" as TxStatus, // assuming Ibex returns on completed
-      memo: null, // not provided
-    } as BaseWalletTransaction
+      memo: null, // not provided by Ibex
+      initiationVia: { type: "lightning", paymentHash: "", pubkey: "" },
+      settlementVia: { type: "lightning", revealedPreImage: undefined }
+    } as WalletLnSettledTransaction
   })
 }
