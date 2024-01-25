@@ -1,4 +1,3 @@
-import { Payments } from "@app"
 import { InputValidationError } from "@graphql/error"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { GT } from "@graphql/index"
@@ -7,6 +6,11 @@ import LnPaymentRequest from "@graphql/shared/types/scalar/ln-payment-request"
 import Memo from "@graphql/shared/types/scalar/memo"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import dedent from "dedent"
+
+// FLASH FORK: import ibex dependencies
+import { PaymentSendStatus } from "@domain/bitcoin/lightning"
+import Ibex from "@services/ibex"
+import { IbexEventError } from "@services/ibex/errors"
 
 const LnInvoicePaymentInput = GT.Input({
   name: "LnInvoicePaymentInput",
@@ -60,20 +64,58 @@ const LnInvoicePaymentSendMutation = GT.Field<
       return { errors: [{ message: memo.message }] }
     }
 
-    const status = await Payments.payInvoiceByWalletId({
-      senderWalletId: walletId,
-      uncheckedPaymentRequest: paymentRequest,
-      memo: memo ?? null,
-      senderAccount: domainAccount,
+    // FLASH FORK: create IBEX invoice instead of Galoy invoice
+    /* Todo: reintroduce Payments.payInvoiceByWalletId
+    * const status = await Payments.payInvoiceByWalletId({
+    *   senderWalletId: walletId,
+    *   uncheckedPaymentRequest: paymentRequest,
+    *   memo: memo ?? null,
+    *   senderAccount: domainAccount,
+    */
+
+    if (!domainAccount) throw new Error("Authentication required")
+    const PayLightningInvoice = await Ibex.payInvoiceV2({
+      bolt11: paymentRequest,
+      accountId: walletId,
     })
 
-    if (status instanceof Error) {
-      return { status: "failed", errors: [mapAndParseErrorForGqlResponse(status)] }
+    // TODO: Reintroduce following code by adding to mapAndParseErrorForGqlResponse
+    // if (PayLightningInvoice instanceof IbexRateLimitError) {
+    //   return {
+    //     status: "failed",
+    //     errors: [
+    //       {
+    //         message:
+    //           "Daily transaction limit has been exceeded. Please try again tomorrow.",
+    //       },
+    //     ],
+    //   }
+    // }
+
+    if (PayLightningInvoice instanceof IbexEventError) {
+      return { 
+        status: "failed", 
+        errors: [{ message: "An unexpected error occurred. Please try again later." }],
+        // errors: [mapAndParseErrorForGqlResponse(PayLightningInvoice)] }
+      }
+    }
+    
+    let status: PaymentSendStatus = PaymentSendStatus.Pending
+    switch(PayLightningInvoice.transaction?.payment?.status?.id) {
+      case 1: 
+        status = PaymentSendStatus.Pending
+        break;
+      case 2: 
+        status = PaymentSendStatus.Success
+        break;
+      case 3: 
+        status = PaymentSendStatus.Failure
+        break;
     }
 
     return {
       errors: [],
-      status: status.value,
+      status: status.value
     }
   },
 })

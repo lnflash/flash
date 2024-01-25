@@ -1,6 +1,6 @@
 import { InvalidFeeProbeStateError } from "@domain/bitcoin/lightning"
 
-import { Payments } from "@app"
+// import { Payments } from "@app"
 
 import { GT } from "@graphql/index"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
@@ -11,6 +11,12 @@ import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { checkedToWalletId } from "@domain/wallets"
 
 import { normalizePaymentAmount } from "../../../shared/root/mutation"
+
+// FLASH FORK: import ibex dependencies
+import Ibex from "@services/ibex"
+import { IbexEventError } from "@services/ibex/errors"
+// import { IbexRoutes } from "../../../../services/ibex/Routes"
+// import { requestIBexPlugin } from "../../../../services/ibex/IbexHelper"
 
 const LnUsdInvoiceFeeProbeInput = GT.Input({
   name: "LnUsdInvoiceFeeProbeInput",
@@ -52,11 +58,31 @@ const LnUsdInvoiceFeeProbeMutation = GT.Field<
     if (walletIdChecked instanceof Error)
       return { errors: [mapAndParseErrorForGqlResponse(walletIdChecked)] }
 
-    const { result: feeSatAmount, error } =
-      await Payments.getLightningFeeEstimationForUsdWallet({
-        walletId,
-        uncheckedPaymentRequest: paymentRequest,
-      })
+    // FLASH FORK: create IBEX fee estimation instead of Galoy fee estimation
+    // const { result: feeSatAmount, error } =
+    //   await Payments.getLightningFeeEstimationForUsdWallet({
+    //     walletId,
+    //     uncheckedPaymentRequest: paymentRequest,
+    //   })
+
+    const resp: any | IbexEventError = await Ibex.getFeeEstimation({
+      // walletId, // we are not checking internal payment flow
+      bolt11: paymentRequest,
+    })
+
+    const error: Error | null = resp instanceof IbexEventError 
+      ? resp
+      : null
+
+    const feeSatAmount: PaymentAmount<WalletCurrency> = (!(resp instanceof IbexEventError) && resp.amount) 
+      ? {
+        amount: BigInt(Math.round(resp.amount / 1000)),
+        currency: "BTC", // USD?????
+      }
+      : {
+        amount: BigInt(0),
+        currency: "BTC",
+      }
 
     if (feeSatAmount !== null && error instanceof Error) {
       return {

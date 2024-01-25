@@ -2,7 +2,7 @@
  * an accounting reminder:
  * https://en.wikipedia.org/wiki/Double-entry_bookkeeping
  */
-
+import { Types } from "mongoose"
 import { toSats } from "@domain/bitcoin"
 import { toCents } from "@domain/fiat"
 import {
@@ -29,7 +29,6 @@ import {
   recordExceptionInCurrentSpan,
   wrapAsyncFunctionsToRunInSpan,
 } from "@services/tracing"
-
 import { admin } from "./admin"
 import * as adminLegacy from "./admin-legacy"
 import { MainBook, Transaction } from "./books"
@@ -38,6 +37,10 @@ import * as caching from "./caching"
 import { TransactionsMetadataRepository } from "./services"
 import { send } from "./send"
 import { volume } from "./volume"
+
+// FLASH FORK: import ibex dependencies
+import Ibex from "@services/ibex"
+import { IbexApiError, IbexAuthenticationError, IbexEventError } from "@services/ibex/errors"
 
 export { getNonEndUserWalletIds } from "./caching"
 export { translateToLedgerJournal } from "./helpers"
@@ -114,6 +117,47 @@ export const LedgerService = (): ILedgerService => {
     }
   }
 
+  // const transactionTypeMapping: Record<number, LedgerTransactionType> = {
+  //   1: "invoice",
+  //   2: "payment",
+  //   3: "onchain_receipt",
+  //   4: "onchain_payment",
+  // }
+
+  // function convertToILedgerTransaction(
+  //   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  //   apiData: any,
+  // ): ILedgerTransaction[] {
+  //   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  //   return apiData.data.map((transaction: any) => ({
+  //     _id: new Types.ObjectId(),
+  //     credit: [1, 3].includes(transaction.transactionTypeId) ? transaction.amount : 0,
+  //     debit: [2, 4].includes(transaction.transactionTypeId) ? transaction.amount : 0,
+  //     datetime: new Date(transaction.createdAt),
+  //     account_path: [], // No corresponding data in the given API response.
+  //     accounts: transaction.accountId,
+  //     book: "", // No corresponding data in the given API response.
+  //     memo: "", // No corresponding data in the given API response.
+  //     _journal: new Types.ObjectId(),
+  //     timestamp: new Date(transaction.settledAt),
+  //     type: transactionTypeMapping[transaction.transactionTypeId] || "fee",
+  //     pending: false, // Assuming transactions are not pending; modify as needed.
+  //     currency: transaction.currencyId === 3 ? "USD" : "BTC", // Assuming 3 represents BTC; modify as needed.
+  //     satsAmount: transaction.amount * transaction.exchangeRateCurrencySats, // Example; adjust if incorrect.
+  //     centsAmount: transaction.amount * 100, // Convert to cents; adjust if needed.
+  //     satsFee: transaction.networkFee * transaction.exchangeRateCurrencySats, // Example; adjust if incorrect.
+  //     centsFee: transaction.networkFee * 100, // Convert to cents; adjust if needed.
+  //     displayAmount: transaction.amount,
+  //     displayFee: transaction.networkFee,
+  //     displayCurrency: "USD", // Assuming USD; replace as needed.
+  //     fee: transaction.networkFee,
+  //     usd: transaction.amount, // Assuming amount is in USD; adjust if needed.
+  //     feeUsd: transaction.networkFee, // Assuming networkFee is in USD; adjust if needed.
+  //     paymentHash: [1, 3].includes(transaction.transactionTypeId) ? "" : "",
+  //     // Fill in other fields as required or based on your data.
+  //   }))
+  // }
+
   const getTransactionsByWalletIds = async ({
     walletIds,
     paginationArgs = {} as PaginationArgs,
@@ -123,24 +167,40 @@ export const LedgerService = (): ILedgerService => {
   }): Promise<PaginatedArray<LedgerTransaction<WalletCurrency>> | LedgerError> => {
     const liabilitiesWalletIds = walletIds.map(toLiabilitiesWalletId)
     try {
+      // FLASH FORK: replace USD walletId transactions with IBex walletId transactions
       const ledgerResp = await paginatedLedger({
         query: { account: liabilitiesWalletIds },
         paginationArgs,
       })
-
+      // const endPoint = `${IbexRoutes.Transactions}${walletIds[1]}`
+      // const GetTransactions = await requestIBexPlugin("GET", endPoint, {}, {})
+      // if (GetTransactions && GetTransactions.data && GetTransactions.data["data"]) {
+      //   const ibexConvertedTransactions = convertToILedgerTransaction(
+      //     GetTransactions.data,
+      //   )
+      //   console.log(
+      //     "ibexConvertedTransactions",
+      //     JSON.stringify(ibexConvertedTransactions, null, 2),
+      //   )
       if (ledgerResp instanceof Error) {
         return ledgerResp
       }
 
+      // ledgerResp.slice = ibexConvertedTransactions
+      // ledgerResp.total = ibexConvertedTransactions.length
+
+      // Overwrite ledgerResp's slice with ibexConvertedTransactions
       const { slice, total } = ledgerResp
 
       return {
         slice: slice.map((tx) => translateToLedgerTx(tx)),
         total,
       }
+      // }
     } catch (err) {
       return new UnknownLedgerError(err)
     }
+    // return new LedgerError("Failed to fetch transactions.")
   }
 
   const getTransactionsByWalletIdAndContactUsername = async ({
@@ -223,10 +283,10 @@ export const LedgerService = (): ILedgerService => {
 
   const getWalletBalance = async (
     walletId: WalletId,
-  ): Promise<Satoshis | LedgerError> => {
+  ): Promise<Satoshis | LedgerError | IbexEventError> => {
     const liabilitiesWalletId = toLiabilitiesWalletId(walletId)
     try {
-      const { balance } = await MainBook.balance({
+      let { balance } = await MainBook.balance({
         account: liabilitiesWalletId,
       })
       if (balance < 0) {
@@ -243,7 +303,20 @@ export const LedgerService = (): ILedgerService => {
           })
         }
       }
-      return toSats(balance)
+
+      const resp = await Ibex.getAccountDetails({ accountId: walletId })
+      if (resp instanceof IbexApiError ) {
+        console.error(`Ibex Call failed with ${resp.code}: ${resp.message}`)
+        if (resp.code === 403) return toSats(0) // this is a hack for requests to Ibex with accountIds it doesn't recognize
+        return resp
+      }
+      if (resp instanceof IbexAuthenticationError) {
+        console.error("Failed to get wallet balance.")
+        return resp
+      }
+      if (resp.balance === undefined) return new IbexEventError("Balance not found")
+    
+      return toSats(resp.balance * 100)
     } catch (err) {
       return new UnknownLedgerError(err)
     }

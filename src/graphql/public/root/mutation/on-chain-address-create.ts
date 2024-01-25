@@ -29,7 +29,6 @@ const OnChainAddressCreateMutation = GT.Field({
     if (address instanceof Error) {
       return { errors: [mapAndParseErrorForGqlResponse(address)] }
     }
-
     return {
       errors: [],
       address,

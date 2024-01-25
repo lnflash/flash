@@ -9,7 +9,12 @@ import PayoutSpeed from "@graphql/public/types/scalar/payout-speed"
 import SatsAmount from "@graphql/shared/types/scalar/sat-amount"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 
-import { Wallets } from "@app"
+// import { Wallets } from "@app"
+
+// FLASH FORK: import ibex dependencies
+import { toCents } from "@domain/fiat"
+import Ibex from "@services/ibex"
+import { IbexEventError } from "@services/ibex/errors"
 
 const OnChainUsdPaymentSendAsBtcDenominatedInput = GT.Input({
   name: "OnChainUsdPaymentSendAsBtcDenominatedInput",
@@ -64,22 +69,30 @@ const OnChainUsdPaymentSendAsBtcDenominatedMutation = GT.Field<
       return { errors: [{ message: speed.message }] }
     }
 
-    const result = await Wallets.payOnChainByWalletIdForUsdWalletAndBtcAmount({
-      senderAccount: domainAccount,
-      senderWalletId: walletId,
-      amount,
+    // FLASH FORK: use IBEX to send on-chain payment
+    // const result = await Wallets.payOnChainByWalletIdForUsdWalletAndBtcAmount({
+    //   senderAccount: domainAccount,
+    //   senderWalletId: walletId,
+    //   amount,
+    //   address,
+    //   speed,
+    //   memo,
+    // })
+    if (!domainAccount) throw new Error("Authentication required")
+
+    const resp = await Ibex.sendToAddressV2({
+      accountId: walletId,
       address,
-      speed,
-      memo,
+      amount: toCents(amount),
     })
 
-    if (result instanceof Error) {
-      return { status: "failed", errors: [mapAndParseErrorForGqlResponse(result)] }
+    if (resp instanceof IbexEventError) {
+      return { status: "failed", errors: [mapAndParseErrorForGqlResponse(resp)] }
     }
 
     return {
       errors: [],
-      status: result.status.value,
+      status: resp.status, // UI expecting type PaymentSendStatus
     }
   },
 })

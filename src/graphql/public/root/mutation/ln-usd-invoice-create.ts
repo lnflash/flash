@@ -1,6 +1,6 @@
 import dedent from "dedent"
 
-import { Wallets } from "@app"
+// import { Wallets } from "@app"
 
 import { GT } from "@graphql/index"
 import Memo from "@graphql/shared/types/scalar/memo"
@@ -9,6 +9,12 @@ import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import CentAmount from "@graphql/public/types/scalar/cent-amount"
 import LnInvoicePayload from "@graphql/public/types/payload/ln-invoice"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
+
+// FLASH FORK: import ibex dependencies
+import { decodeInvoice } from "@domain/bitcoin/lightning"
+
+import Ibex from "@services/ibex"
+import { IbexEventError, UnexpectedResponseError } from "@services/ibex/errors"
 
 const LnUsdInvoiceCreateInput = GT.Input({
   name: "LnUsdInvoiceCreateInput",
@@ -47,20 +53,46 @@ const LnUsdInvoiceCreateMutation = GT.Field({
       }
     }
 
-    const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
-      walletId,
-      amount,
+    // FLASH FORK: create IBEX invoice instead of Galoy invoice
+    const resp = await Ibex.addInvoice({
+      amount: amount / 100,
+      accountId: walletId,
       memo,
-      expiresIn,
+      expiration: expiresIn,
+      // webhookUrl: "http://development.flashapp.me:4002/ibex-endpoint", // TODO: get from env
+      // webhookSecret: "secret",
     })
 
-    if (lnInvoice instanceof Error) {
-      return { errors: [mapAndParseErrorForGqlResponse(lnInvoice)] }
+    if (resp instanceof IbexEventError) {
+      return { errors: [mapAndParseErrorForGqlResponse(resp)] }
     }
 
+    const invoiceString: string | undefined = resp.invoice?.bolt11
+    if (!invoiceString) {
+      return { errors: [mapAndParseErrorForGqlResponse(new UnexpectedResponseError("Could not find invoice."))] }
+    }
+    const decodedInvoice = decodeInvoice(invoiceString)
+    if (decodedInvoice instanceof Error) {
+      return { errors: [mapAndParseErrorForGqlResponse(decodedInvoice)] }
+    }
+    
     return {
       errors: [],
-      invoice: lnInvoice,
+      invoice: {
+        destination: decodedInvoice.destination,
+        paymentHash: decodedInvoice.paymentHash,
+        paymentRequest: decodedInvoice.paymentRequest,
+        paymentSecret: decodedInvoice.paymentSecret,
+        milliSatsAmount: decodedInvoice.milliSatsAmount,
+        description: decodedInvoice.description,
+        cltvDelta: decodedInvoice.cltvDelta,
+        amount: null,
+        paymentAmount: null,
+        routeHints: decodedInvoice.routeHints,
+        features: decodedInvoice.features,
+        expiresAt: decodedInvoice.expiresAt,
+        isExpired: decodedInvoice.isExpired,
+      },
     }
   },
 })
