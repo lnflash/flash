@@ -83,8 +83,8 @@ authRouter.post("/create/device-account", async (req: Request, res: Response) =>
 
   const username = user.name
   const password = user.pass
-
   const deviceId = checkedToDeviceId(username)
+
   if (deviceId instanceof Error) {
     return res.status(422).send({ error: `Device ID error, ${deviceId.message}` })
   }
