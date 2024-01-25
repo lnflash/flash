@@ -51,3 +51,5 @@ junit.xml
 .gitattributes
 .yarn/
 .yarnrc.yml
+
+.env
