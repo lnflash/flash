@@ -46,7 +46,6 @@ junit.xml
 
 .env.local
 
-<<<<<<< HEAD
 # Buck
 /buck-out/
 
@@ -65,9 +64,9 @@ target
 #pnpm
 .pnpm-store
 .novu-api-key
-=======
 .editorconfig
 .gitattributes
 .yarn/
 .yarnrc.yml
->>>>>>> b937df79c (Merge ibex-integrated (#19))
+
+.env
