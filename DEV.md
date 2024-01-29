@@ -53,7 +53,7 @@ $ cd galoy
 
 ### Set the Environment
 
-Create a `.envrc.local` to add local environment overrides. For the Flash project, the IBEX_PASSWORD is required. E.g: 
+Create a `.env.local` to add local environment overrides. For the Flash project, the IBEX_PASSWORD is required. E.g: 
 
  `echo "export IBEX_PASSWORD='<insert-password>'" >> .env.local`
 
