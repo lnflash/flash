@@ -50,14 +50,29 @@ Clone the repo and install dependencies:
 ```
 $ git clone git@github.com:GaloyMoney/galoy.git
 $ cd galoy
+```
+
+### Set the Environment
+
+Create a `.env.local` to add local environment overrides. For the Flash project, the IBEX_PASSWORD is required. E.g:
+
+`echo "export IBEX_PASSWORD='<insert-password>'" >> .env.local`
+
+Make sure to allow direnv and reload:
+
+```
 $ direnv allow
-direnv reload
-direnv: direnv: loading ~/projects/GaloyMoney/galoy/.envrc
+$ direnv reload
 (...)
+```
+
+### Install dependencies
+
+```
 $ yarn install
 ```
 
-### Runtime dependencies
+### Start the runtime dependencies
 
 ```bash
 $ make start-deps
@@ -67,8 +82,6 @@ Every time the dependencies are re-started the environment must be reloaded via 
 
 ## Development
 
-Copy the `.env.sample` to `.env` and then add the Ibex email and password to newly created `.env` file.
- 
 To start the GraphQL server and its dependencies:
 
 ```
