@@ -81,6 +81,14 @@ class Ibex {
             .catch(_ => new IbexApiError(_.status, _.data))
             .then(logResponse)
     }
+
+
+    async createLnurlPay(body: types.CreateLnurlPayBodyParam): Promise<types.CreateLnurlPayResponse201 | IbexAuthenticationError | IbexApiError> {
+        logRequest("createLnurlPay", body)
+        return withAuth(() => IbexSDK.createLnurlPay(body))
+            .catch(_ => new IbexApiError(_.status, _.data))
+            .then(logResponse)
+    }
 }
 
 // TODO: Change to static class

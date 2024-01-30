@@ -114,6 +114,7 @@ export const AccountsRepository = (): IAccountsRepository => {
     contacts,
     title,
     username,
+    lnurlp,
     defaultWalletId,
     withdrawFee,
     kratosUserId,
@@ -131,6 +132,7 @@ export const AccountsRepository = (): IAccountsRepository => {
           coordinates,
           title,
           username,
+          lnurlp,
           contactEnabled,
           contacts: contacts.map(
             ({ username, alias, transactionsCount }: AccountContact) => ({
@@ -205,6 +207,7 @@ const translateToAccount = (result: AccountRecord): Account => ({
   createdAt: new Date(result.created_at),
   defaultWalletId: result.defaultWalletId as WalletId,
   username: result.username as Username,
+  lnurlp: result.lnurlp,
   level: result.level as AccountLevel,
   status: result.statusHistory.slice(-1)[0].status,
   statusHistory: (result.statusHistory || []) as AccountStatusHistory,

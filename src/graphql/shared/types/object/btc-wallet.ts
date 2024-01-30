@@ -18,6 +18,7 @@ import WalletCurrency from "../scalar/wallet-currency"
 import OnChainAddress from "../scalar/on-chain-address"
 
 import { TransactionConnection } from "./transaction"
+import Lnurl from "../scalar/lnurl"
 
 const BtcWallet = GT.Object<Wallet>({
   name: "BTCWallet",
@@ -35,6 +36,10 @@ const BtcWallet = GT.Object<Wallet>({
     walletCurrency: {
       type: GT.NonNull(WalletCurrency),
       resolve: (source) => source.currency,
+    },
+    lnurlp: {
+      type: GT.NonNull(Lnurl),
+      resolve: (source) => source.lnurlp,
     },
     balance: {
       type: GT.NonNull(SignedAmount),

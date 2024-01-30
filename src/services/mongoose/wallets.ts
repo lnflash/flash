@@ -15,6 +15,7 @@ import { IbexEventError } from "@services/ibex/errors"
 import { toObjectId, fromObjectId, parseRepositoryError } from "./utils"
 import { Wallet } from "./schema"
 import { AccountsRepository } from "./accounts"
+import { baseLogger } from "@services/logger"
 
 export interface WalletRecord {
   id: string
@@ -22,6 +23,7 @@ export interface WalletRecord {
   type: string
   currency: string
   onchain: OnChainMongooseType[]
+  lnurlp: string
 }
 
 export const WalletsRepository = (): IWalletsRepository => {
@@ -44,11 +46,20 @@ export const WalletsRepository = (): IWalletsRepository => {
         if (resp instanceof IbexEventError) return resp
         ibexAccountId = resp.id 
       }
+ 
+      let lnurlp: string | undefined
+      if (ibexAccountId !== undefined) {
+        const lnurlResp = await Ibex.createLnurlPay({ accountId: ibexAccountId })
+        if (lnurlResp instanceof IbexEventError) baseLogger.error(lnurlResp, `Failed to create lnurl-pay address for ibex account with id ${ibexAccountId}`)
+        else lnurlp = lnurlResp.lnurl
+      }
+      
       const wallet = new Wallet({
         _accountId: toObjectId<AccountId>(accountId),
-        id: ibexAccountId || crypto.randomUUID(), 
+        id: ibexAccountId || crypto.randomUUID(), // Why are we creating a random id rather than failing? 
         type,
         currency,
+        lnurlp
       })
       await wallet.save()
       return resultToWallet(wallet)
@@ -147,6 +158,7 @@ const resultToWallet = (result: WalletRecord): Wallet => {
   const accountId = fromObjectId<AccountId>(result._accountId)
   const type = result.type as WalletType
   const currency = result.currency as WalletCurrency
+  const lnurlp = result.lnurlp as Lnurl
   const onChain = result.onchain || []
   const onChainAddressIdentifiers = onChain.map(({ pubkey, address }) => {
     return {
@@ -163,5 +175,6 @@ const resultToWallet = (result: WalletRecord): Wallet => {
     onChainAddressIdentifiers,
     onChainAddresses,
     currency,
+    lnurlp,
   }
 }

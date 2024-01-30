@@ -19,6 +19,7 @@ import OnChainAddress from "../scalar/on-chain-address"
 
 import { TransactionConnection } from "./transaction"
 import { baseLogger } from "@services/logger"
+import Lnurl from "../scalar/lnurl"
 
 const UsdWallet = GT.Object<Wallet>({
   name: "UsdWallet",
@@ -37,6 +38,12 @@ const UsdWallet = GT.Object<Wallet>({
       type: GT.NonNull(WalletCurrency),
       resolve: (source) => source.currency,
     },
+    
+    lnurlp: {
+      type: GT.NonNull(Lnurl),
+      resolve: (source) => source.lnurlp,
+    },
+    
     balance: {
       type: GT.NonNull(SignedAmount),
       resolve: async (source) => {

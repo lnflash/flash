@@ -19,7 +19,7 @@ import Phone from "../../../shared/types/scalar/phone"
 import Timestamp from "../../../shared/types/scalar/timestamp"
 
 import Username from "../../../shared/types/scalar/username"
-
+import Lnurl from "../../../shared/types/scalar/lnurl"
 import GraphQLEmail from "../../../shared/types/object/email"
 
 import AccountContact from "./account-contact"
@@ -69,6 +69,14 @@ const GraphQLUser = GT.Object<User, GraphQLPublicContextAuth>({
         return domainAccount?.username
       },
       deprecationReason: "will be moved to @Handle in Account and Wallet",
+    },
+    
+    lnurlp: {
+      type: Lnurl,
+      description: "Static lnurl payment address (see LUD-06).",
+      resolve: async (source, args, { domainAccount }) => {
+        return domainAccount?.lnurlp
+      },
     },
 
     language: {
