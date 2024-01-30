@@ -44,30 +44,42 @@ To use the correct node version, you can install nvm and run `nvm use 20`. Then 
 We use [direnv](https://direnv.net) to load environment variables needed for running the integration tests.
 Don't forget to add the [direnv hook](https://direnv.net/docs/hook.html) to your `shell.rc` file.
 
-Clone the repo and install dependencies:
+### Clone the repo:
+
 ```
 $ git clone git@github.com:GaloyMoney/galoy.git
 $ cd galoy
+```
+
+### Set the Environment
+
+Create a `.env.local` to add local environment overrides. For the Flash project, the IBEX_PASSWORD is required. E.g: 
+
+ `echo "export IBEX_PASSWORD='<insert-password>'" >> .env.local`
+
+Make sure to allow direnv and reload:
+
+```
 $ direnv allow
-direnv reload
-direnv: direnv: loading ~/projects/GaloyMoney/galoy/.envrc
+$ direnv reload
 (...)
+```
+
+### Install dependencies
+```
 $ yarn install
 ```
 
-### Runtime dependencies
+### Start the runtime dependencies
 
 ```bash
 $ make start-deps
-
 # or
 $ make reset-deps
 ```
 Everytime the dependencies are re-started the environment must be reloaded via `direnv reload`. When using the [make command](../Makefile) this will happen automatically.
 
 ## Development
-
-Copy the `.env.sample` to `.env` and then add the Ibex email and password to newly created `.env` file.
  
 To start the GraphQL server and its dependencies:
 ```
