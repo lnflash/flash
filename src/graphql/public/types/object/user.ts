@@ -71,14 +71,6 @@ const GraphQLUser = GT.Object<User, GraphQLPublicContextAuth>({
       deprecationReason: "will be moved to @Handle in Account and Wallet",
     },
     
-    lnurlp: {
-      type: Lnurl,
-      description: "Static lnurl payment address (see LUD-06).",
-      resolve: async (source, args, { domainAccount }) => {
-        return domainAccount?.lnurlp
-      },
-    },
-
     language: {
       type: GT.NonNull(Language),
       description: dedent`Preferred language for user.

@@ -38,7 +38,7 @@ const BtcWallet = GT.Object<Wallet>({
       resolve: (source) => source.currency,
     },
     lnurlp: {
-      type: GT.NonNull(Lnurl),
+      type: Lnurl,
       resolve: (source) => source.lnurlp,
     },
     balance: {

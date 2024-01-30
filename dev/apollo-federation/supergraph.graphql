@@ -178,7 +178,7 @@ type BTCWallet implements Wallet
   """A balance stored in BTC."""
   balance: SignedAmount!
   id: ID!
-  lnurlp: Lnurl!
+  lnurlp: Lnurl
 
   """An unconfirmed incoming onchain balance."""
   pendingIncomingBalance: SignedAmount!
@@ -1563,7 +1563,7 @@ type UsdWallet implements Wallet
   accountId: ID!
   balance: SignedAmount!
   id: ID!
-  lnurlp: Lnurl!
+  lnurlp: Lnurl
 
   """An unconfirmed incoming onchain balance."""
   pendingIncomingBalance: SignedAmount!
@@ -1625,9 +1625,6 @@ type User
   When value is 'default' the intent is to use preferred language from OS settings.
   """
   language: Language!
-
-  """Static lnurl payment address (see LUD-06)."""
-  lnurlp: Lnurl
 
   """Phone number with international calling code."""
   phone: Phone
@@ -1879,7 +1876,7 @@ interface Wallet
   accountId: ID!
   balance: SignedAmount!
   id: ID!
-  lnurlp: Lnurl!
+  lnurlp: Lnurl
   pendingIncomingBalance: SignedAmount!
 
   """

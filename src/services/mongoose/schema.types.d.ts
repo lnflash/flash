@@ -71,7 +71,6 @@ interface AccountRecord {
   kratosUserId: string
 
   username: string | null
-  lnurlp: string | undefined
   role: string
 
   level?: number // ?: enum [1, 2]

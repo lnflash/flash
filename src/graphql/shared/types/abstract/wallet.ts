@@ -23,7 +23,7 @@ const IWallet = GT.Interface({
       type: GT.NonNull(WalletCurrency),
     },
     lnurlp: {
-      type: GT.NonNull(Lnurl),
+      type: Lnurl,
     },
     balance: {
       type: GT.NonNull(SignedAmount),

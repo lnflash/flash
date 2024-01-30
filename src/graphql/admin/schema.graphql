@@ -88,7 +88,7 @@ type BTCWallet implements Wallet {
   """A balance stored in BTC."""
   balance: SignedAmount!
   id: ID!
-  lnurlp: Lnurl!
+  lnurlp: Lnurl
 
   """An unconfirmed incoming onchain balance."""
   pendingIncomingBalance: SignedAmount!
@@ -442,7 +442,7 @@ type UsdWallet implements Wallet {
   accountId: ID!
   balance: SignedAmount!
   id: ID!
-  lnurlp: Lnurl!
+  lnurlp: Lnurl
 
   """An unconfirmed incoming onchain balance."""
   pendingIncomingBalance: SignedAmount!
@@ -498,7 +498,7 @@ interface Wallet {
   accountId: ID!
   balance: SignedAmount!
   id: ID!
-  lnurlp: Lnurl!
+  lnurlp: Lnurl
   pendingIncomingBalance: SignedAmount!
 
   """
