@@ -1279,7 +1279,7 @@ type PublicWallet
   @join__type(graph: PUBLIC)
 {
   id: ID!
-  lnurlp: Lnurl!
+  lnurlp: Lnurl
   walletCurrency: WalletCurrency!
 }
 

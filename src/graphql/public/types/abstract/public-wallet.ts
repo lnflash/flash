@@ -17,7 +17,7 @@ const IPublicWallet = GT.Object<Wallet>({
     },
 
     lnurlp: {
-      type: GT.NonNull(Lnurl),
+      type: Lnurl,
       resolve: (source) => source.lnurlp,
     },
   }),

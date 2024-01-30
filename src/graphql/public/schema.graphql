@@ -1000,7 +1000,7 @@ A public view of a generic wallet which stores value in one of our supported cur
 """
 type PublicWallet {
   id: ID!
-  lnurlp: Lnurl!
+  lnurlp: Lnurl
   walletCurrency: WalletCurrency!
 }
 
