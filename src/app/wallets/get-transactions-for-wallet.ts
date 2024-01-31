@@ -10,6 +10,7 @@ import { WalletOnChainPendingReceiveRepository } from "@services/mongoose"
 import Ibex from "@services/ibex"
 import { IbexApiError, IbexEventError } from "@services/ibex/errors"
 import { GResponse200 } from "@services/ibex/.api/apis/sing-in/types"
+import { baseLogger } from "@services/logger"
 
 export const getTransactionsForWallets = async ({
   wallets,
@@ -21,52 +22,12 @@ export const getTransactionsForWallets = async ({
   const walletIds = wallets.map((wallet) => wallet.id)
 
   // Flash fork: return history from Ibex
-
-  // let pendingHistory = await WalletOnChainPendingReceiveRepository().listByWalletIds({
-  //   walletIds,
-  // })
-  // if (pendingHistory instanceof Error) {
-  //   if (pendingHistory instanceof CouldNotFindError) {
-  //     pendingHistory = []
-  //   } else {
-  //     return PartialResult.err(pendingHistory)
-  //   }
-  // }
-
-
-  /* Get transactions for wallet Ids then map to ConfirmedTransactionsHistory (below) */
-  // const confirmedLedgerTxns = await LedgerService().getTransactionsByWalletIds({
-  //   walletIds,
-  //   paginationArgs,
-  // })
-
-  // if (confirmedLedgerTxns instanceof LedgerError) {
-  //   return PartialResult.partial(
-  //     { slice: pendingHistory, total: pendingHistory.length },
-  //     confirmedLedgerTxns,
-  //   )
-  // }
-
-  // ConfirmedTransactionsHistory => WalletTransaction[] 
-  // type WalletTransaction =
-  // | IntraLedgerTransaction
-  // | WalletOnChainTransaction
-  // | WalletLnTransaction
-  // const confirmedHistory = WalletTransactionHistory.fromLedger({
-  //   ledgerTransactions: confirmedLedgerTxns.slice,
-  //   nonEndUserWalletIds: Object.values(await getNonEndUserWalletIds()),
-  //   memoSharingConfig,
-  // })
-
-  
-    // })
-    
   const ibexCalls = await Promise.all(walletIds
     .map(id => Ibex.getAccountTransactions({ 
       account_id: id,
     }))
   )
-  
+
   const transactions = ibexCalls.flatMap(resp => {
     if (resp instanceof IbexEventError) return [] 
     else return toWalletTransactions(resp)
@@ -75,10 +36,8 @@ export const getTransactionsForWallets = async ({
   return PartialResult.ok({
     slice: transactions,
     total: transactions.length
-    // total: confirmedLedgerTxns.total + pendingHistory.length,
   })
 }
-
 
 const toWalletTransactions = (ibexResp: GResponse200): WalletTransaction[] => {
   return ibexResp.map(trx => {
@@ -90,11 +49,12 @@ const toWalletTransactions = (ibexResp: GResponse200): WalletTransaction[] => {
       displayCurrency: "USD" as DisplayCurrency,
       walletCurrency: currency
     }
+
     return {
       walletId: (trx.accountId || "") as WalletId, // WalletId | undefined
-      settlementAmount: trx.currencyId === 3 ? trx.amount as UsdCents : trx.amount as Satoshis,
-      settlementFee: trx.currencyId === 3 ? trx.networkFee as UsdCents : trx.networkFee as Satoshis,
-      settlementCurrency: currency, // WalletCurrency: "USD" | "BTC",
+      settlementAmount: toSettlementAmount(trx.amount, trx.transactionTypeId, currency),
+      settlementFee: asCurrency(trx.networkFee, currency),
+      settlementCurrency: currency, 
       settlementDisplayAmount: `${trx.amount}`, // what should this be?
       settlementDisplayFee: `${trx.networkFee}`, // what should this be?
       settlementDisplayPrice: settlementDisplayPrice,
@@ -106,4 +66,23 @@ const toWalletTransactions = (ibexResp: GResponse200): WalletTransaction[] => {
       settlementVia: { type: "lightning", revealedPreImage: undefined }
     } as WalletLnSettledTransaction
   })
+}
+
+const asCurrency = (amount: number | undefined, currency: WalletCurrency): Satoshis | UsdCents => {
+  return currency === "USD" ? amount as UsdCents : amount as Satoshis
+}
+
+const toSettlementAmount = (
+  ibexAmount: number | undefined, 
+  transactionTypeId: number | undefined, 
+  currency: WalletCurrency
+): Satoshis | UsdCents => {
+  if (ibexAmount === undefined) {
+    baseLogger.warn("Ibex did not return transaction amount")
+    return asCurrency(ibexAmount, currency) 
+  }
+  const amt = (transactionTypeId === 2 || transactionTypeId === 4) 
+    ? -1 * ibexAmount 
+    : ibexAmount
+  return asCurrency(amt, currency)
 }
