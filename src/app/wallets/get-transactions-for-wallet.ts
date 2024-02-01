@@ -39,7 +39,7 @@ export const getTransactionsForWallets = async ({
   })
 }
 
-const toWalletTransactions = (ibexResp: GResponse200): WalletTransaction[] => {
+export const toWalletTransactions = (ibexResp: GResponse200): WalletTransaction[] => {
   return ibexResp.map(trx => {
     const currency = (trx.currencyId === 3 ? "USD" : "BTC") as WalletCurrency // WalletCurrency: "USD" | "BTC",
 
