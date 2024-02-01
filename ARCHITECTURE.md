@@ -63,6 +63,7 @@ To achieve strong consistency, it's currently setup in the following way:
 
 The accounting part is being done by [medici](https://github.com/flash-oss/medici/commits/master).
 
+*this is a concern*
 There is no transaction used yet (the main inconsistency if this were to happen would be between the journal entries and the transaction entries). A [contribution on this](https://github.com/flash-oss/medici/issues/23) is welcome. It has not been a focus yet because there hasn't been any issue on this yet.
 
 ### Redis

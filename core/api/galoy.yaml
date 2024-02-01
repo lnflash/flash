@@ -1,4 +1,4 @@
-lightningAddressDomain: pay.api-development.flashapp.me
+lightningAddressDomain: pay.staging.flashapp.me
 lightningAddressDomainAliases:
   - pay1.api-development.flashapp.me
   - pay2.api-development.flashapp.me

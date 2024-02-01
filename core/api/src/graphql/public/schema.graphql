@@ -1200,7 +1200,12 @@ A public view of a generic wallet which stores value in one of our supported cur
 type PublicWallet {
   currency: WalletCurrency!
   id: ID!
+<<<<<<< HEAD:core/api/src/graphql/public/schema.graphql
   walletCurrency: WalletCurrency! @deprecated(reason: "Shifting property to 'currency'")
+=======
+  walletCurrency: WalletCurrency!
+  lnurlp: Lnurl
+>>>>>>> 7dfa79d4d (Add static Lnurl-pay addresses (#28)):quickstart/graphql/public/schema.graphql
 }
 
 type Query {
