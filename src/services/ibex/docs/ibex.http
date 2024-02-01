@@ -4,9 +4,11 @@
 @baseurl = https://api-sandbox.poweredbyibex.io
 @email = mail2michaelennis@gmail.com
 @password = <>
-@accessToken = <>
+@accessToken = eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDY1NTU4MTksImp0aSI6IjA4MzEzOWJlLTY0YzctNGVjYi04ZTQzLWNhOWZkMmI4YzNhNiIsImlhdCI6MTcwNjU1MjIxOSwiaXNzIjoiSUJFWF9IVUIiLCJzdWIiOiI2OWQ2NTAyYy01YTlkLTQ4M2MtOTRhMi1jMzQ5MWVlMGJhZjEiLCJ0cGUiOiJhY2Nlc3MiLCJwcm0iOnsiYWNjIjoxNSwiY3VyIjoxNSwibG5hIjoxNSwibG5wIjoxNSwibG5yIjoxNSwibG5zIjoxNSwibG53IjoxNSwibWV0IjoxNSwib25yIjoxNSwib25zIjoxNSwidHhzIjoxNSwidXNyIjoxNX19.i3y6jiOE-zk4TRqjpBY-9V5NHEgLh2eRw4ygogaqWg9jgMB0KyqNYVriKN7Cu6KLz-3qtMQoOsYwAWmmYte9VWM1EPM_Cmxiw4M5fTOapO317KOf_YIFd8nH2_aL6InjbhZQC0P18MHb4y9K1mWL2LSFj4cqGMsVY88WTYB0dWEAZb70Cf6yV7GTtVmuyeP2Cm5kduwT4-ceF1Y0-bolHd-n0phEK4l0MWnVF-dMeLOGZN5bvPAuJh7gL1v7rnsVwt8epCAq_wVK-LaCVM19G8_g6T2hNIWEKiOpsFF_TIvjOapUxx5MGe1QfFR2znY1Yb4u1-6kbgcyAVMjboSqP9IVy5Kr3oTlkysYUh7AG1MYqQWm1SBFS9XOFLZOKbjzYxegjzzoMlaTCzKu6yExGqaIjZMW9rsXqkh2iFJw6gGlU8gIjwsGNQiV2muRnu0H_gIeH74kipHIB3VbrteKQOI72ddBEah-pgLld_mw9khDslVJ_E4NLLwbY6WHsz-kWcqA60NGPjWN1eP2_R2Qs9GC63UmLsW5izc2IztAjYW35yIS7FaXNSMSsomRCjQROucSvYkqXqojaqJrPcbBsAVUf3BudYWvVzIo47922PjzLtnNUOBX1RT0PwGarl78vwocH6zMRdng41Ei2upNELLr7qgoG8X7NGQHcwo-pxE 
 @refreshToken = <>
+# @walletId = 37d1ba6a-016d-48c2-b13f-4a251abe4bee
 @walletId = c593736e-5a58-42e4-93fa-dc895856c1f1
+
 ### Sign in
 POST {{baseurl}}/auth/signin HTTP/1.1
 Content-Type: application/json
@@ -56,7 +58,7 @@ Accept: application/json
 }
 
 ### getAccountDetails
-GET {{baseurl}}/v2/account/3d4b7ad7-34d5-4c2e-8fa2-3701cc4a579a HTTP/1.1
+GET {{baseurl}}/v2/account/37d1ba6a-016d-48c2-b13f-4a251abe4bee HTTP/1.1
 Accept: application/json
 Authorization: {{accessToken}}
 
@@ -66,7 +68,7 @@ Accept: application/json
 Authorization: {{accessToken}}
 
 ### getTransactionDetails
-@transactionId = <>
+@transactionId = 4b791d2c-0f61-4192-9bab-4d6ffdee918f
 GET {{baseurl}}/v2/transaction/{{transactionId}} HTTP/1.1
 Accept: application/json
 Authorization: {{accessToken}}
@@ -76,3 +78,25 @@ Authorization: {{accessToken}}
 GET {{baseurl}}/payment/from-bolt11/{{bolt11}} HTTP/1.1
 Accept: application/json
 Authorization: {{accessToken}}
+
+### getPayment from payment hash
+@hash =     eb252f581b0fbf3fd6d91642f51cf19c6424d8f901ef7842e9d69824aa533133 
+GET {{baseurl}}/invoice/from-hash/{{hash}} HTTP/1.1
+Accept: application/json
+Authorization: {{accessToken}}
+
+### get Invoice requirements (lnurl-pay)
+@k1 = 267f9b5dbfa1fd6c73d446ff76dcd537afd86d2b2ac94029be407a154e972f45
+GET {{baseurl}}/lnurl/pay/invoice-requirements?k1={{k1}} HTTP/1.1
+Accept: application/json
+Authorization: {{accessToken}}
+
+### Create LNURL-pay
+POST {{baseurl}}/lnurl/pay HTTP/1.1
+Content-Type: application/json
+Accept: application/json
+Authorization: {{accessToken}}
+
+{
+    "accountId": "{{walletId}}"
+}

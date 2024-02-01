@@ -167,6 +167,7 @@ type Wallet = NewWalletInfo & {
   readonly id: WalletId
   readonly onChainAddressIdentifiers: OnChainAddressIdentifier[]
   onChainAddresses(): OnChainAddress[]
+  readonly lnurlp: Lnurl
 }
 
 interface IWalletsRepository {

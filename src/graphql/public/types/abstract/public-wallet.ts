@@ -1,6 +1,7 @@
 import { GT } from "@graphql/index"
 
 import WalletCurrency from "../../../shared/types/scalar/wallet-currency"
+import Lnurl from "@graphql/shared/types/scalar/lnurl"
 
 const IPublicWallet = GT.Object<Wallet>({
   name: "PublicWallet",
@@ -13,6 +14,11 @@ const IPublicWallet = GT.Object<Wallet>({
     walletCurrency: {
       type: GT.NonNull(WalletCurrency),
       resolve: (source) => source.currency,
+    },
+
+    lnurlp: {
+      type: Lnurl,
+      resolve: (source) => source.lnurlp,
     },
   }),
 })

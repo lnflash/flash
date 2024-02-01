@@ -88,6 +88,7 @@ type BTCWallet implements Wallet {
   """A balance stored in BTC."""
   balance: SignedAmount!
   id: ID!
+  lnurlp: Lnurl
 
   """An unconfirmed incoming onchain balance."""
   pendingIncomingBalance: SignedAmount!
@@ -237,6 +238,11 @@ enum LnPaymentStatus {
 }
 
 scalar LnPubkey
+
+"""
+A bech32-encoded HTTPS/Onion URL that can be interacted with automatically by a WALLET in a standard way such that a SERVICE can provide extra services or a better experience for the user. Ref: https://github.com/lnurl/luds/blob/luds/01.md 
+"""
+scalar Lnurl
 
 """Text field in a lightning payment transaction"""
 scalar Memo
@@ -436,6 +442,7 @@ type UsdWallet implements Wallet {
   accountId: ID!
   balance: SignedAmount!
   id: ID!
+  lnurlp: Lnurl
 
   """An unconfirmed incoming onchain balance."""
   pendingIncomingBalance: SignedAmount!
@@ -491,6 +498,7 @@ interface Wallet {
   accountId: ID!
   balance: SignedAmount!
   id: ID!
+  lnurlp: Lnurl
   pendingIncomingBalance: SignedAmount!
 
   """

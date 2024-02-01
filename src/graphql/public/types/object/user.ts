@@ -19,7 +19,7 @@ import Phone from "../../../shared/types/scalar/phone"
 import Timestamp from "../../../shared/types/scalar/timestamp"
 
 import Username from "../../../shared/types/scalar/username"
-
+import Lnurl from "../../../shared/types/scalar/lnurl"
 import GraphQLEmail from "../../../shared/types/object/email"
 
 import AccountContact from "./account-contact"
@@ -70,7 +70,7 @@ const GraphQLUser = GT.Object<User, GraphQLPublicContextAuth>({
       },
       deprecationReason: "will be moved to @Handle in Account and Wallet",
     },
-
+    
     language: {
       type: GT.NonNull(Language),
       description: dedent`Preferred language for user.

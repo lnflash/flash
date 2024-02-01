@@ -126,6 +126,9 @@ const WalletSchema = new Schema<WalletRecord>({
     ],
     default: [],
   },
+  lnurlp: {
+    type: String,
+  }
 })
 
 export const Wallet = mongoose.model<WalletRecord>("Wallet", WalletSchema)

@@ -7,6 +7,7 @@ import { TransactionConnection } from "../object/transaction"
 import WalletCurrency from "../scalar/wallet-currency"
 import SignedAmount from "../scalar/signed-amount"
 import OnChainAddress from "../scalar/on-chain-address"
+import Lnurl from "../scalar/lnurl"
 
 const IWallet = GT.Interface({
   name: "Wallet",
@@ -20,6 +21,9 @@ const IWallet = GT.Interface({
     },
     walletCurrency: {
       type: GT.NonNull(WalletCurrency),
+    },
+    lnurlp: {
+      type: Lnurl,
     },
     balance: {
       type: GT.NonNull(SignedAmount),
