@@ -42,10 +42,6 @@ import { volume } from "./volume"
 import Ibex from "@services/ibex"
 import { IbexApiError, IbexAuthenticationError, IbexEventError } from "@services/ibex/errors"
 
-// FLASH FORK: import ibex dependencies
-import Ibex from "@services/ibex"
-import { IbexApiError, IbexAuthenticationError, IbexEventError } from "@services/ibex/errors"
-
 export { getNonEndUserWalletIds } from "./caching"
 export { translateToLedgerJournal } from "./helpers"
 

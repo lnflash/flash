@@ -1,13 +1,53 @@
+// . TODO: use ngrok for integrated testing when running locally
+
 @baseurl = http://localhost:8889
 
 ### Test server endpoint
 GET {{baseurl}}/ibex HTTP/1.1
 
-### Webhook. TODO: use ngrok for integrated testing when running locally
-POST {{baseurl}}/invoice/status HTTP/1.1
+### Webhook for addInvoiceV2 (receive payment)
+POST {{baseurl}}/invoice/receive/status HTTP/1.1
 Content-Type: application/json
 Accept: application/json
 
+{
+  "hash": "string",
+  "settledAtUtc": "string",
+  "receivedMsat": "int",
+  "webhookSecret": "string",
+  "transaction": {
+    "id": "trx_id",
+    "createdAt": "string",
+    "accountId": "string",
+    "amount": 100,
+    "networkFee": 1,
+    "exchangeRateCurrencySats": 2000,
+    "currencyID": 1,
+    "transactionTypeId": 2,
+    "invoice": {
+        "hash": "payment_hash",
+      "bolt11": "lnbc220n1pjea6ydpp5y99755qk7k5jrlc93uugteytgfvqnztuln5j5pxyqs24k9826ydsdqj23jhxapqvdex2ct5v5cqzzsxqzuysp54qdu284dz5s84eaa3z3k0vd92fum4mz30fu23lsedg8me66myefs9qyyssqqr7jkv7xfsgj0erryunr66wfajc965g24vvvvesup66ny9fcs7qrljx4jzyw20px2vr42x5ap9877mwtepvy04x06a0lkf7u7wxqufqphcjy2h",
+      "preImage": "string",
+      "memo": "string",
+      "creationDateUtc": "string",
+      "expiryDateUtc": "string",
+      "settleDateUtc": "string",
+      "amountMsat": 2000000,
+      "receiveMsat": 2000000,
+      "stateId": 1,
+      "state": {
+        "id": 1,
+        "name": "sting",
+        "description": "string"
+      }
+    }
+  }
+}
+
+### Webhook for payInvoiceV2 (payment sent)
+POST {{baseurl}}/invoice/pay/status HTTP/1.1
+Content-Type: application/json
+Accept: application/json
 {
     "webhookSecret": "secret",
     "transaction": {
@@ -21,7 +61,7 @@ Accept: application/json
         "transactionTypeId": 1,
         "payment": {
             "bolt11": "string",
-            "hash": "lnbc220n1pjea6ydpp5y99755qk7k5jrlc93uugteytgfvqnztuln5j5pxyqs24k9826ydsdqj23jhxapqvdex2ct5v5cqzzsxqzuysp54qdu284dz5s84eaa3z3k0vd92fum4mz30fu23lsedg8me66myefs9qyyssqqr7jkv7xfsgj0erryunr66wfajc965g24vvvvesup66ny9fcs7qrljx4jzyw20px2vr42x5ap9877mwtepvy04x06a0lkf7u7wxqufqphcjy2h",
+            "hash": "26ydsdqj23jhxapqvdex2ct5v5cqzzsxqzuysp54qdu284dz5s84eaa3z3k0vd92fum4mz30fu23lsedg8me66myefs9qyyssqqr7jkv7xfsgj0erryunr66wfajc965g24vvvvesup66ny9fcs7qrljx4jzyw20px2vr42x5ap9877mwtepvy04x06a0lkf7u7wxqufqphcjy2h",
             "preImage": "string",
             "memo": "string",
             "amountMsat": 100000,
