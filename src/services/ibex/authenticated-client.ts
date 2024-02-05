@@ -23,6 +23,13 @@ class AuthenticatedIbexClient {
             .then(logResponse)
     }
 
+    async getTransactionDetails(metadata: types.GetTransactionDetails1MetadataParam): Promise<types.GetTransactionDetails1Response200 | IbexAuthenticationError | IbexApiError> {
+        logRequest("getTransactionDetails", metadata)
+        return withAuth(() => IbexSDK.getTransactionDetails1(metadata))
+            .catch(_ => new IbexApiError(_.status, _.data))
+            .then(logResponse)
+    }
+
     async createAccount(body: types.CreateAccountBodyParam): Promise<types.CreateAccountResponse201 | IbexAuthenticationError | IbexApiError> {
         logRequest("createAccount", body)
         return withAuth(() => IbexSDK.createAccount(body))
@@ -52,6 +59,13 @@ class AuthenticatedIbexClient {
         } as types.AddInvoiceBodyParam
         logRequest("addInvoice", body)
         return withAuth(() => IbexSDK.addInvoice(bodyWithHooks))
+            .catch(_ => new IbexApiError(_.status, _.data))
+            .then(logResponse)
+    }
+
+    async invoiceFromHash(metadata: types.InvoiceFromHashMetadataParam): Promise<types.InvoiceFromHashResponse200 | IbexAuthenticationError | IbexApiError> {
+        logRequest("invoiceFromHash", metadata)
+        return withAuth(() => IbexSDK.invoiceFromHash(metadata))
             .catch(_ => new IbexApiError(_.status, _.data))
             .then(logResponse)
     }

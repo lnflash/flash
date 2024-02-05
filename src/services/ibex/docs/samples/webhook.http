@@ -14,7 +14,7 @@ Accept: application/json
   "hash": "string",
   "settledAtUtc": "string",
   "receivedMsat": "int",
-  "webhookSecret": "string",
+  "webhookSecret": "secret",
   "transaction": {
     "id": "trx_id",
     "createdAt": "string",
@@ -25,8 +25,8 @@ Accept: application/json
     "currencyID": 1,
     "transactionTypeId": 2,
     "invoice": {
-        "hash": "payment_hash",
-      "bolt11": "lnbc220n1pjea6ydpp5y99755qk7k5jrlc93uugteytgfvqnztuln5j5pxyqs24k9826ydsdqj23jhxapqvdex2ct5v5cqzzsxqzuysp54qdu284dz5s84eaa3z3k0vd92fum4mz30fu23lsedg8me66myefs9qyyssqqr7jkv7xfsgj0erryunr66wfajc965g24vvvvesup66ny9fcs7qrljx4jzyw20px2vr42x5ap9877mwtepvy04x06a0lkf7u7wxqufqphcjy2h",
+      "hash": "137f1279565063e32c7e3ed87117b38577a6859fe758359ff2cfe718e5c28344",
+      "bolt11": "lnbc2350n1pjuz0qdpp5zdl3y72k2p37xtr78mv8z9ans4m6dpvluavrt8ljeln33ewzsdzqdq823jhxaqcqzzsxqzuysp53ykwz05mps467vu99hh3q4tsggll6xcqzm4pmf0yfq0kerkcgsuq9qyyssqhlcruakrjph583797dh7cx9qv5r2ptkt68n976ep0u3yhnc7su5haepp68pcv0s9psjv5nnh7ygtp88lp5ujnvta73jx7s3egtw2tucqhpggqh",
       "preImage": "string",
       "memo": "string",
       "creationDateUtc": "string",
