@@ -1,14 +1,13 @@
-# Galoy
+# Flash 
 
-[![Mattermost](https://img.shields.io/badge/chat-on%20mattermost-blue?style=social&logo=mattermost)](https://chat.galoy.io)
-[![GitHub Repo stars](https://img.shields.io/github/stars/GaloyMoney/galoy?style=social)](https://github.com/GaloyMoney/galoy/stargazers)
-[![Twitter Follow](https://img.shields.io/twitter/follow/GaloyMoney?style=social)](https://twitter.com/GaloyMoney)
+[![Twitter Follow](https://img.shields.io/twitter/follow/LNFlash?style=social)](https://twitter.com/LNFlash)
+[![GitHub Repo stars](https://img.shields.io/github/stars/lnflash/flash?style=social)](https://github.com/lnflash/flash/stargazers)
 ### 💡 Get help
 [Q&A](https://github.com/GaloyMoney/galoy/discussions) or [Mattermost 💬](https://chat.galoy.io)
 
 ### TLDR
 
-Galoy is an opinionated bitcoin banking platform.
+Flash is an opinionated bitcoin banking platform forked from Galoy.
 
 This repo represents the main api that brings all functionality together.
 Take a look at the [Quickstart](./quickstart) if you want to take it for a spin.
