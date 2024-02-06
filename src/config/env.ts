@@ -132,6 +132,13 @@ export const env = createEnv({
     IBEX_URL: z.string(),
     IBEX_EMAIL: z.string(),
     IBEX_PASSWORD: z.string(),
+    IBEX_LISTENER_HOST: z.string().min(1), // .default("ibex-listener"),
+    IBEX_LISTENER_PORT: z
+      .number()
+      .min(1)
+      .or(z.string())
+      .pipe(z.coerce.number())
+      .default(50053),
   },
 
   runtimeEnvStrict: {
@@ -233,5 +240,7 @@ export const env = createEnv({
     IBEX_URL: process.env.IBEX_URL,
     IBEX_EMAIL: process.env.IBEX_EMAIL,
     IBEX_PASSWORD: process.env.IBEX_PASSWORD,
+    IBEX_LISTENER_HOST: process.env.IBEX_LISTENER_HOST,
+    IBEX_LISTENER_PORT: process.env.IBEX_LISTENER_PORT,
   },
 })

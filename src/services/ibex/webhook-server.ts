@@ -1,19 +1,23 @@
 import express, { Request, Response } from "express"
 import { baseLogger as log } from "@services/logger"
 import { NotificationsService } from "@services/notifications"
+import { IBEX_LISTENER_HOST, IBEX_LISTENER_PORT } from "@config"
+
+export const EXTERNAL_URI = `http://${IBEX_LISTENER_HOST}:${IBEX_LISTENER_PORT}/` 
 
 export const startServer = () => {
     const app = express()
-    const port = 8889
 
     // Middleware to parse JSON requests
     app.use(express.json());
 
+    log.info(`HOST = ${IBEX_LISTENER_HOST}`)
+    log.info(`PORT = ${IBEX_LISTENER_PORT}`)
     // Routes
     app.get("/ibex", sayHi)
     app.post("/invoice/receive/status", authenticate, receiveInvoiceStatus)
     app.post("/invoice/pay/status", authenticate, payInvoiceStatus)
-    app.listen(port, () => log.info(`Listening for ibex events on port ${port}!`))
+    app.listen(IBEX_LISTENER_PORT, IBEX_LISTENER_HOST, () => log.info(`Listening for ibex events at http://${IBEX_LISTENER_HOST}:${IBEX_LISTENER_PORT}/!`))
 }
 
 const authenticate = (req: Request, resp: Response, next) => {

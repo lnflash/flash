@@ -492,8 +492,6 @@ const ibexListener = async () => {
 }
 
 const main = () => {
-  logger.info("Setting subscribers:")
-
   ibexListener()
   // listenerBria()
 
