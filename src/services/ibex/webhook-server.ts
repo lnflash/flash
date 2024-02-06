@@ -1,9 +1,15 @@
 import express, { Request, Response } from "express"
 import { baseLogger as log } from "@services/logger"
 import { NotificationsService } from "@services/notifications"
-import { IBEX_LISTENER_HOST, IBEX_LISTENER_PORT } from "@config"
+import { IBEX_LISTENER_HOST, IBEX_LISTENER_PORT, IBEX_WEBHOOK_SECRET } from "@config"
 
-export const EXTERNAL_URI = `http://${IBEX_LISTENER_HOST}:${IBEX_LISTENER_PORT}/` 
+const WEBHOOK_URI = `http://${IBEX_LISTENER_HOST}:${IBEX_LISTENER_PORT}/` 
+const RECEIVE_PAYMENT_URL_PATH = "/invoice/receive/status"
+const SENT_PAYMENT_URL_PATH = "/invoice/pay/status"
+
+export const RECEIVE_PAYMENT_URL = WEBHOOK_URI + RECEIVE_PAYMENT_URL_PATH
+export const SENT_PAYMENT_URL = WEBHOOK_URI + SENT_PAYMENT_URL_PATH
+export const WEBHOOK_SECRET = IBEX_WEBHOOK_SECRET
 
 export const startServer = () => {
     const app = express()
@@ -11,12 +17,10 @@ export const startServer = () => {
     // Middleware to parse JSON requests
     app.use(express.json());
 
-    log.info(`HOST = ${IBEX_LISTENER_HOST}`)
-    log.info(`PORT = ${IBEX_LISTENER_PORT}`)
     // Routes
     app.get("/ibex", sayHi)
-    app.post("/invoice/receive/status", authenticate, receiveInvoiceStatus)
-    app.post("/invoice/pay/status", authenticate, payInvoiceStatus)
+    app.post(RECEIVE_PAYMENT_URL_PATH, authenticate, receiveInvoiceStatus)
+    app.post(SENT_PAYMENT_URL_PATH, authenticate, payInvoiceStatus)
     app.listen(IBEX_LISTENER_PORT, IBEX_LISTENER_HOST, () => log.info(`Listening for ibex events at http://${IBEX_LISTENER_HOST}:${IBEX_LISTENER_PORT}/!`))
 }
 
