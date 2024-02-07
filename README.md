@@ -1,10 +1,11 @@
-# Galoy
+# Flash
 
 [![Mattermost](https://img.shields.io/badge/chat-on%20mattermost-blue?style=social&logo=mattermost)](https://chat.galoy.io)
 [![GitHub Repo stars](https://img.shields.io/github/stars/GaloyMoney/galoy?style=social)](https://github.com/GaloyMoney/galoy/stargazers)
 [![Twitter Follow](https://img.shields.io/twitter/follow/GaloyMoney?style=social)](https://twitter.com/GaloyMoney)
 
 ## 💡 Get help
+
 [Q&A](https://github.com/GaloyMoney/galoy/discussions) or [Mattermost 💬](https://chat.galoy.io)
 
 ## TLDR
@@ -16,7 +17,7 @@ This repo represents the main API that brings all functionality together.
 ## Responsible Disclosure
 
 Found critical bugs/vulnerabilities?
-Please contact our team by email at security@galoy.io . 
+Please contact our team by email at security@galoy.io .
 
 ## Get Started
 
@@ -143,7 +144,7 @@ _Please note: you may notice a large download of dependencies when entering the 
 
 We use [**buck2**](https://github.com/facebook/buck2) to run the stack, run and build individual services and libraries, perform lints and tests, etc.
 
-_Before continuing, you should stop any locally running services to avoid conflicting ports with the stack.
+\_Before continuing, you should stop any locally running services to avoid conflicting ports with the stack.
 Some of the services that will run include, but are not limited to the following: PostgreSQL, OpenTelemetry, MongoDB.
 
 Check if you are ready to run the stack before continuing.
