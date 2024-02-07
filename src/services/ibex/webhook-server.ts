@@ -1,4 +1,4 @@
-import express, { Request, Response } from "express"
+import express, { NextFunction, Request, Response } from "express"
 import { baseLogger as log } from "@services/logger"
 import { NotificationsService } from "@services/notifications"
 import { IBEX_LISTENER_HOST, IBEX_LISTENER_PORT, IBEX_WEBHOOK_SECRET } from "@config"
@@ -18,18 +18,18 @@ export const startServer = () => {
     app.use(express.json());
 
     // Routes
-    app.get("/ibex", sayHi)
+    app.get("/ibex/health", healthCheck)
     app.post(RECEIVE_PAYMENT_URL_PATH, authenticate, receiveInvoiceStatus)
     app.post(SENT_PAYMENT_URL_PATH, authenticate, payInvoiceStatus)
     app.listen(IBEX_LISTENER_PORT, IBEX_LISTENER_HOST, () => log.info(`Listening for ibex events at http://${IBEX_LISTENER_HOST}:${IBEX_LISTENER_PORT}/!`))
 }
 
-const authenticate = (req: Request, resp: Response, next) => {
+const authenticate = (req: Request, resp: Response, next: NextFunction) => {
   if (req.body.webhookSecret !== "secret") return resp.status(401).end("Invalid secret")
   next();
 };
 
-const sayHi = (req, resp) => {
+const healthCheck = (req: Request, resp: Response) => {
     log.info("Ibex Server: Hello")
     resp.send("Ibex server is running")
 }
