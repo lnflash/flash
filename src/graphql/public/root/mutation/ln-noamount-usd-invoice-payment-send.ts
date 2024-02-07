@@ -12,8 +12,8 @@ import dedent from "dedent"
 // FLASH FORK: import ibex dependencies
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 
-import Ibex from "@services/ibex"
-import { IbexEventError } from "@services/ibex/errors"
+import { client as Ibex } from "@services/ibex"
+import { IbexClientError } from "@services/ibex/client/errors"
 
 const LnNoAmountUsdInvoicePaymentInput = GT.Input({
   name: "LnNoAmountUsdInvoicePaymentInput",
@@ -90,7 +90,7 @@ const LnNoAmountUsdInvoicePaymentSendMutation = GT.Field<
       amount: amount / 100,
     })
 
-    if (PayLightningInvoice instanceof IbexEventError) {
+    if (PayLightningInvoice instanceof IbexClientError) {
       return { 
         status: "failed", 
         errors: [{ message: "An unexpected error occurred. Please try again later." }],
