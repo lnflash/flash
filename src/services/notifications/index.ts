@@ -23,11 +23,9 @@ export const NotificationsService = (): INotificationsService => {
   const pushNotification = PushNotificationsService()
 
   const ibexTxReceived = async ({
-    // paymentAmount,
     paymentHash,
   }: any): Promise<true | NotificationsServiceError> => {
     try {
-      // Notify public subscribers (via GraphQL subscription if any)
       const lnPaymentStatusTrigger = customPubSubTrigger({
         event: PubSubDefaultTriggers.LnPaymentStatus,
         suffix: paymentHash,
@@ -40,48 +38,7 @@ export const NotificationsService = (): INotificationsService => {
         log.error("Failed to publish")
         return new NotificationsServiceError(psResp) 
       }
-      log.info(lnPaymentStatusTrigger, "Message published.")
-      // Notify the recipient (via GraphQL subscription if any)
-      // const accountUpdatedTrigger = customPubSubTrigger({
-      //   event: PubSubDefaultTriggers.AccountUpdate,
-      //   suffix: recipientAccountId,
-      // })
-      // pubsub.publish({
-      //   trigger: accountUpdatedTrigger,
-      //   payload: {
-      //     invoice: {
-      //       walletId: recipientWalletId,
-      //       paymentHash,
-      //       status: "PAID",
-      //     },
-      //   },
-      // })
-
-      // if (recipientDeviceTokens && recipientDeviceTokens.length > 0) {
-      //   const notificationCategory = GaloyNotificationCategories.Payments
-
-      //   const { title, body } = createPushNotificationContent({
-      //     type: NotificationType.LnInvoicePaid,
-      //     userLanguage: recipientLanguage,
-      //     amount: paymentAmount,
-      //     displayAmount: displayPaymentAmount,
-      //   })
-
-      //   const result = await pushNotification.sendFilteredNotification({
-      //     deviceTokens: recipientDeviceTokens,
-      //     title,
-      //     body,
-      //     notificationCategory,
-      //     notificationSettings: recipientNotificationSettings,
-      //   })
-
-      //   if (result instanceof NotificationsServiceError) {
-      //     return result
-      //   }
-
-      //   return true
-      // }
-
+      // ACCOUNT AND DEVICE NOTIFCATIONS LEFT OUT
       return true
     } catch (err) {
       return handleCommonNotificationErrors(err)
