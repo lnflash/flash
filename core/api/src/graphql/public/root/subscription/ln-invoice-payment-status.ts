@@ -62,6 +62,8 @@ const LnInvoicePaymentStatusSubscription = {
   },
 
   subscribe: async (_source: unknown, args: LnInvoicePaymentSubscribeArgs) => {
+    baseLogger.info("Running subscribe: ln-invoice-payment-status")
+
     const { paymentRequest } = args.input
     if (paymentRequest instanceof Error) throw paymentRequest
 

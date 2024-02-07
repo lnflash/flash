@@ -59,8 +59,6 @@ const LnUsdInvoiceCreateMutation = GT.Field({
       accountId: walletId,
       memo,
       expiration: expiresIn,
-      // webhookUrl: "http://development.flashapp.me:4002/ibex-endpoint", // TODO: get from env
-      // webhookSecret: "secret",
     })
 
     if (resp instanceof IbexEventError) {
