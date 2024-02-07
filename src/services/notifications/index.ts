@@ -1,7 +1,7 @@
 import { toSats } from "@domain/bitcoin"
 import { WalletCurrency } from "@domain/shared"
 import { toCents, UsdDisplayCurrency } from "@domain/fiat"
-import { customPubSubTrigger, PubSubDefaultTriggers } from "@domain/pubsub"
+import { customPubSubTrigger, PubSubDefaultTriggers, PubSubServiceError } from "@domain/pubsub"
 import {
   GaloyNotificationCategories,
   NotificationsServiceError,
@@ -16,10 +16,34 @@ import {
   PushNotificationsService,
 } from "./push-notifications"
 import { createPushNotificationContent } from "./create-push-notification-content"
+import { baseLogger as log } from "@services/logger"
 
 export const NotificationsService = (): INotificationsService => {
   const pubsub = PubSubService()
   const pushNotification = PushNotificationsService()
+
+  const ibexTxReceived = async ({
+    paymentHash,
+  }: any): Promise<true | NotificationsServiceError> => {
+    try {
+      const lnPaymentStatusTrigger = customPubSubTrigger({
+        event: PubSubDefaultTriggers.LnPaymentStatus,
+        suffix: paymentHash,
+      })
+      const psResp = await pubsub.publish({
+        trigger: lnPaymentStatusTrigger,
+        payload: { status: "PAID" },
+      })
+      if (psResp instanceof PubSubServiceError) {
+        log.error("Failed to publish")
+        return new NotificationsServiceError(psResp) 
+      }
+      // ACCOUNT AND DEVICE NOTIFCATIONS LEFT OUT
+      return true
+    } catch (err) {
+      return handleCommonNotificationErrors(err)
+    }
+  }
 
   const lightningTxReceived = async ({
     recipientAccountId,
@@ -432,6 +456,7 @@ export const NotificationsService = (): INotificationsService => {
     ...wrapAsyncFunctionsToRunInSpan({
       namespace: "services.notifications",
       fns: {
+        ibexTxReceived,
         lightningTxReceived,
         intraLedgerTxReceived,
         onChainTxReceived,

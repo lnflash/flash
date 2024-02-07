@@ -54,6 +54,8 @@ type PriceUpdateArgs<C extends DisplayCurrency> = {
 }
 
 interface INotificationsService {
+  ibexTxReceived: (args: any) => Promise<true | NotificationsServiceError>
+
   lightningTxReceived: (
     args: LightningTxReceivedArgs,
   ) => Promise<true | NotificationsServiceError>
