@@ -643,7 +643,7 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "InvalidCarrierTypeForPhoneMetadataError":
     case "InvalidCountryCodeForPhoneMetadataError":
     // FLASH ERRORS
-    case "IbexEventError":
+    case "IbexClientError":
     case "IbexAuthenticationError":
     case "NotImplementedError":
     case "UnexpectedResponseError":

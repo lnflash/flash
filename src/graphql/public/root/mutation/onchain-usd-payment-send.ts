@@ -12,8 +12,8 @@ import WalletId from "@graphql/shared/types/scalar/wallet-id"
 // import { Wallets } from "@app"
 
 // FLASH FORK: import ibex dependencies
-import Ibex from "@services/ibex"
-import { IbexEventError } from "@services/ibex/errors"
+import { client as Ibex } from "@services/ibex"
+import { IbexClientError } from "@services/ibex/client/errors"
 
 const OnChainUsdPaymentSendInput = GT.Input({
   name: "OnChainUsdPaymentSendInput",
@@ -85,7 +85,7 @@ const OnChainUsdPaymentSendMutation = GT.Field<
       amount: amount / 100,
     })
 
-    if (resp instanceof IbexEventError) {
+    if (resp instanceof IbexClientError) {
       return { status: "failed", errors: [mapAndParseErrorForGqlResponse(resp)] }
     }
 

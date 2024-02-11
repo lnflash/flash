@@ -39,8 +39,8 @@ import { send } from "./send"
 import { volume } from "./volume"
 
 // FLASH FORK: import ibex dependencies
-import Ibex from "@services/ibex"
-import { IbexApiError, IbexAuthenticationError, IbexEventError } from "@services/ibex/errors"
+import { client as Ibex } from "@services/ibex"
+import { IbexApiError, IbexAuthenticationError, IbexClientError } from "@services/ibex/client/errors"
 
 export { getNonEndUserWalletIds } from "./caching"
 export { translateToLedgerJournal } from "./helpers"
@@ -283,7 +283,7 @@ export const LedgerService = (): ILedgerService => {
 
   const getWalletBalance = async (
     walletId: WalletId,
-  ): Promise<Satoshis | LedgerError | IbexEventError> => {
+  ): Promise<Satoshis | LedgerError | IbexClientError> => {
     const liabilitiesWalletId = toLiabilitiesWalletId(walletId)
     try {
       let { balance } = await MainBook.balance({
@@ -314,7 +314,7 @@ export const LedgerService = (): ILedgerService => {
         console.error("Failed to get wallet balance.")
         return resp
       }
-      if (resp.balance === undefined) return new IbexEventError("Balance not found")
+      if (resp.balance === undefined) return new IbexClientError("Balance not found")
     
       return toSats(resp.balance * 100)
     } catch (err) {

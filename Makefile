@@ -28,11 +28,15 @@ start-ws:
 	. ./.env && yarn tsnd --respawn --files -r tsconfig-paths/register -r src/services/tracing.ts \
 		src/servers/ws-server.ts | yarn pino-pretty -c -l
 
+start-ibex-wh:
+	. ./.env && yarn tsnd --respawn --files -r tsconfig-paths/register -r src/services/tracing.ts \
+		src/servers/ibex-webhook-server.ts | yarn pino-pretty -c -l
+
 start-loopd:
 	./dev/bin/start-loopd.sh
 
 start: start-deps
-	make start-main & make start-trigger & make start-ws
+	make start-main & make start-trigger & make start-ws & make start-ibex-wh
 
 start-main-ci:
 	node lib/servers/graphql-main-server.js

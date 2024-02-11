@@ -5,8 +5,8 @@ import OnChainAddressPayload from "@graphql/public/types/payload/on-chain-addres
 // import { Wallets } from "@app"
 
 // FLASH FORK: import ibex dependencies
-import Ibex from "@services/ibex"
-import { IbexEventError } from "@services/ibex/errors"
+import { client as Ibex } from "@services/ibex"
+import { IbexClientError } from "@services/ibex/client/errors"
 
 const OnChainAddressCurrentInput = GT.Input({
   name: "OnChainAddressCurrentInput",
@@ -37,7 +37,7 @@ const OnChainAddressCurrentMutation = GT.Field({
       accountId: walletId,
     })
 
-    if (resp instanceof IbexEventError) {
+    if (resp instanceof IbexClientError) {
       return { errors: [mapAndParseErrorForGqlResponse(resp)] } 
     }
     
