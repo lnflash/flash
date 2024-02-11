@@ -19,7 +19,7 @@ const start = () => {
 }
 
 export default {
-  start,
+  start, 
   endpoints: {
     onReceive: EXTERNAL_URI + onReceive.path,
     onPay: EXTERNAL_URI + onPay.path,

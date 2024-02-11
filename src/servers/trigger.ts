@@ -60,7 +60,6 @@ import { recordExceptionInCurrentSpan, wrapAsyncToRunInSpan } from "@services/tr
 import { SubscriptionInterruptedError } from "./errors"
 import { briaEventHandler } from "./event-handlers/bria"
 import healthzHandler from "./middlewares/healthz"
-import { IbexApiError } from "@services/ibex/client/errors"
 
 const redisCache = RedisCacheService()
 const logger = baseLogger.child({ module: "trigger" })
@@ -480,10 +479,7 @@ const listenerBria = async () => {
   baseLogger.info("bria listener started")
 }
 
-import { webhookServer as IbexWebhookServer } from "@services/ibex"
-
 const main = () => {
-  IbexWebhookServer.start()
   // listenerBria()
 
   // lndStatusEvent.on("started", ({ lnd, pubkey, socket, type }: LndConnect) => {
