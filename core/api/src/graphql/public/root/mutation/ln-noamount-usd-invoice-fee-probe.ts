@@ -12,8 +12,8 @@ import LnPaymentRequest from "@/graphql/shared/types/scalar/ln-payment-request"
 import { mapAndParseErrorForGqlResponse } from "@/graphql/error-map"
 
 // FLASH FORK: import ibex dependencies
-import Ibex from "@services/ibex"
-import { IbexEventError } from "@services/ibex/errors"
+import { client as Ibex } from "@services/ibex"
+import { IbexClientError } from "@services/ibex/client/errors"
 
 const LnNoAmountUsdInvoiceFeeProbeInput = GT.Input({
   name: "LnNoAmountUsdInvoiceFeeProbeInput",
@@ -50,13 +50,13 @@ const LnNoAmountUsdInvoiceFeeProbeMutation = GT.Field({
     //   })
 
     // TODO: Move Ibex call to Payments interface
-    const resp: any | IbexEventError = await Ibex.getFeeEstimation({
+    const resp: any | IbexClientError = await Ibex.getFeeEstimation({
       bolt11: paymentRequest,
       amount: String(amount / 100),
       currencyId: "3",
     })
 
-    if (resp instanceof IbexEventError) {
+    if (resp instanceof IbexClientError) {
       return {
         errors: [mapAndParseErrorForGqlResponse(resp)],
       }

@@ -25,7 +25,7 @@ import * as KratosErrors from "@services/kratos/errors"
 import * as BriaEventErrors from "@services/bria/errors"
 import * as SvixErrors from "@services/svix/errors"
 
-import * as IbexEventErrors from "@services/ibex/errors"
+import * as IbexEventErrors from "@services/ibex/client/errors"
 
 export const ApplicationErrors = {
   ...SharedErrors,

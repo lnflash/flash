@@ -1,5 +1,6 @@
 import { normalizePaymentAmount } from "../../../shared/root/mutation"
 
+<<<<<<< HEAD:core/api/src/graphql/public/root/mutation/ln-invoice-fee-probe.ts
 import { InvalidFeeProbeStateError } from "@/domain/bitcoin/lightning"
 
 import { Payments } from "@/app"
@@ -13,6 +14,11 @@ import { mapAndParseErrorForGqlResponse } from "@/graphql/error-map"
 // FLASH FORK: import ibex dependencies
 import Ibex from "@services/ibex"
 import { IbexEventError } from "@services/ibex/errors"
+=======
+// FLASH FORK: import { client as Ibex } dependencies
+import { client as Ibex } from "@services/ibex"
+import { IbexClientError } from "@services/ibex/client/errors"
+>>>>>>> 0d0e35dcc (Refactor Ibex client & webhook-server (#33)):src/graphql/public/root/mutation/ln-invoice-fee-probe.ts
 
 const LnInvoiceFeeProbeInput = GT.Input({
   name: "LnInvoiceFeeProbeInput",
@@ -54,6 +60,7 @@ const LnInvoiceFeeProbeMutation = GT.Field<
     //     walletId,
     //     uncheckedPaymentRequest: paymentRequest,
     //   })
+<<<<<<< HEAD:core/api/src/graphql/public/root/mutation/ln-invoice-fee-probe.ts
     const resp: any | IbexEventError = await Ibex.getFeeEstimation({
       // walletId, // we are not checking internal payment flow
       bolt11: paymentRequest,
@@ -71,6 +78,26 @@ const LnInvoiceFeeProbeMutation = GT.Field<
             amount: BigInt(0),
             currency: "BTC",
           }
+=======
+    const resp: any | IbexClientError = await Ibex.getFeeEstimation({
+        // walletId, // we are not checking internal payment flow
+        bolt11: paymentRequest,
+    })
+
+    const error: Error | null = resp instanceof IbexClientError 
+      ? resp
+      : null
+
+    const feeSatAmount: PaymentAmount<WalletCurrency> = (!(resp instanceof IbexClientError) && resp.amount) 
+      ? {
+        amount: BigInt(Math.round(resp.amount / 1000)),
+        currency: "BTC",
+      }
+      : {
+        amount: BigInt(0),
+        currency: "BTC",
+      }
+>>>>>>> 0d0e35dcc (Refactor Ibex client & webhook-server (#33)):src/graphql/public/root/mutation/ln-invoice-fee-probe.ts
 
     if (feeSatAmount !== null && error instanceof Error) {
       return {

@@ -15,8 +15,8 @@ import WalletId from "@/graphql/shared/types/scalar/wallet-id"
 import OnChainUsdTxFee from "@/graphql/public/types/object/onchain-usd-tx-fee"
 
 // FLASH FORK: import ibex dependencies
-import Ibex from "@services/ibex"
-import { IbexEventError, UnexpectedResponseError } from "@services/ibex/errors"
+import { client as Ibex } from "@services/ibex"
+import { IbexClientError, UnexpectedResponseError } from "@services/ibex/client/errors"
 
 const OnChainUsdTxFeeQuery = GT.Field<null, GraphQLPublicContextAuth>({
   type: GT.NonNull(OnChainUsdTxFee),
@@ -50,7 +50,7 @@ const OnChainUsdTxFeeQuery = GT.Field<null, GraphQLPublicContextAuth>({
       "amount": amount / 100,
     })
 
-    if (resp instanceof IbexEventError) return resp
+    if (resp instanceof IbexClientError) return resp
     if (resp.fee === undefined) return new UnexpectedResponseError("Missing fee field")
 
     const fee: PaymentAmount<WalletCurrency> = {

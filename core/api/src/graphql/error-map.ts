@@ -708,7 +708,7 @@ export const mapError = (error: ApplicationError): CustomGraphQLError => {
     case "InvalidCountryCodeForPhoneMetadataError":
     case "MultipleWalletsFoundForAccountIdAndCurrency":
     // FLASH ERRORS
-    case "IbexEventError":
+    case "IbexClientError":
     case "IbexAuthenticationError":
     case "NotImplementedError":
     case "UnexpectedResponseError":

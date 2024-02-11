@@ -13,8 +13,8 @@ import { mapAndParseErrorForGqlResponse } from "@/graphql/error-map"
 // FLASH FORK: import ibex dependencies
 import { decodeInvoice } from "@domain/bitcoin/lightning"
 
-import Ibex from "@services/ibex"
-import { IbexEventError, UnexpectedResponseError } from "@services/ibex/errors"
+import { client as Ibex } from "@services/ibex"
+import { IbexClientError, UnexpectedResponseError } from "@services/ibex/client/errors"
 
 const LnUsdInvoiceCreateInput = GT.Input({
   name: "LnUsdInvoiceCreateInput",
@@ -61,7 +61,7 @@ const LnUsdInvoiceCreateMutation = GT.Field({
       expiration: expiresIn,
     })
 
-    if (resp instanceof IbexEventError) {
+    if (resp instanceof IbexClientError) {
       return { errors: [mapAndParseErrorForGqlResponse(resp)] }
     }
 

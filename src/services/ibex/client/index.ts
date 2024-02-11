@@ -1,9 +1,9 @@
 // Ibex SDK API registry: https://dash.readme.com/api/v1/api-registry/cpd51bloegfhl2
 import IbexSDK, * as types from "./.api/apis/sing-in" // TODO: @sing-in@<uuid>
-import { IbexEventError, IbexAuthenticationError, IbexApiError } from "./errors"
+import { IbexClientError, IbexAuthenticationError, IbexApiError } from "./errors"
 import { withAuth } from "./authentication";
 import { logRequest, logResponse } from "./errors/logger"
-import { RECEIVE_PAYMENT_URL, SENT_PAYMENT_URL, WEBHOOK_SECRET } from "./webhook-server"
+import WebhookServer from "../webhook-server"
 
 // This is a wrapper around the Ibex api that handles authentication
 class AuthenticatedIbexClient {
@@ -55,8 +55,8 @@ class AuthenticatedIbexClient {
     async addInvoice(body: types.AddInvoiceBodyParam): Promise<types.AddInvoiceResponse201 | IbexAuthenticationError | IbexApiError> {
         const bodyWithHooks = { 
             ...body,
-            webhookUrl: RECEIVE_PAYMENT_URL,
-            webhookSecret: WEBHOOK_SECRET, 
+            webhookUrl: WebhookServer.endpoints.onReceive,
+            webhookSecret: WebhookServer.secret, 
         } as types.AddInvoiceBodyParam
         logRequest("addInvoice", body)
         return withAuth(() => IbexSDK.addInvoice(bodyWithHooks))
@@ -83,8 +83,8 @@ class AuthenticatedIbexClient {
     async payInvoiceV2(body: types.PayInvoiceV2BodyParam): Promise<types.PayInvoiceV2Response200 | IbexAuthenticationError | IbexApiError> {
         const bodyWithHooks = { 
             ...body,
-            webhookUrl: SENT_PAYMENT_URL,
-            webhookSecret: WEBHOOK_SECRET,
+            webhookUrl: WebhookServer.endpoints.onPay,
+            webhookSecret: WebhookServer.secret, 
         } as types.PayInvoiceV2BodyParam
         logRequest("payInvoiceV2", bodyWithHooks)
         return withAuth(() => IbexSDK.payInvoiceV2(bodyWithHooks))

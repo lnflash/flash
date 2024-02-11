@@ -9,8 +9,8 @@ import LnNoAmountInvoicePayload from "@/graphql/public/types/payload/ln-noamount
 
 // FLASH FORK: import ibex dependencies
 import { decodeInvoice } from "@domain/bitcoin/lightning"
-import Ibex from "@services/ibex"
-import { IbexEventError, UnexpectedResponseError } from "@services/ibex/errors"
+import { client as Ibex } from "@services/ibex"
+import { IbexClientError, UnexpectedResponseError } from "@services/ibex/client/errors"
 
 const LnNoAmountInvoiceCreateInput = GT.Input({
   name: "LnNoAmountInvoiceCreateInput",
@@ -60,7 +60,7 @@ const LnNoAmountInvoiceCreateMutation = GT.Field({
       // webhookSecret: "secret",
     })
 
-    if (resp instanceof IbexEventError) {
+    if (resp instanceof IbexClientError) {
       return { errors: [mapAndParseErrorForGqlResponse(resp)] }
     }
 

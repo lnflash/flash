@@ -19,8 +19,8 @@ import {
 import { Types } from "mongoose"
 
 // FLASH FORK: import IBEX routes and helper
-import Ibex from "@services/ibex"
-import { IbexEventError } from "@services/ibex/errors"
+import { client as Ibex } from "@services/ibex"
+import { IbexClientError } from "@services/ibex/client/errors"
 
 import { toObjectId, fromObjectId, parseRepositoryError } from "./utils"
 import { Wallet } from "./schema"
@@ -53,14 +53,19 @@ export const WalletsRepository = (): IWalletsRepository => {
           name: accountId,
           currencyId: 3,
         })
+<<<<<<< HEAD:core/api/src/services/mongoose/wallets.ts
         if (resp instanceof IbexEventError) return resp
         ibexAccountId = resp.id
+=======
+        if (resp instanceof IbexClientError) return resp
+        ibexAccountId = resp.id 
+>>>>>>> 0d0e35dcc (Refactor Ibex client & webhook-server (#33)):src/services/mongoose/wallets.ts
       }
  
       let lnurlp: string | undefined
       if (ibexAccountId !== undefined) {
         const lnurlResp = await Ibex.createLnurlPay({ accountId: ibexAccountId })
-        if (lnurlResp instanceof IbexEventError) baseLogger.error(lnurlResp, `Failed to create lnurl-pay address for ibex account with id ${ibexAccountId}`)
+        if (lnurlResp instanceof IbexClientError) baseLogger.error(lnurlResp, `Failed to create lnurl-pay address for ibex account with id ${ibexAccountId}`)
         else lnurlp = lnurlResp.lnurl
       }
       

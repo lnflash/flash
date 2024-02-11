@@ -1,6 +1,6 @@
 import IbexSDK, { SignInResponse200 } from "../.api/apis/sing-in";
 import { IBEX_EMAIL, IBEX_PASSWORD } from "@config"
-import { IbexApiError, IbexAuthenticationError, IbexEventError } from "../errors"
+import { IbexApiError, IbexAuthenticationError, IbexClientError } from "../errors"
 import Redis from "./redis-datastore";
 import { FetchResponse } from "api/dist/core";
 import { CacheServiceError, CacheUndefinedError } from "@domain/cache";
@@ -16,11 +16,11 @@ const storeTokens = async (signInResp: SignInResponse200): Promise<void> => {
         refreshTokenExpiresAt
     } = signInResp
 
-    if (!accessToken) return Promise.reject(new IbexEventError("No access token found in Ibex response body"))
+    if (!accessToken) return Promise.reject(new IbexClientError("No access token found in Ibex response body"))
     const atResp = await Redis.setAccessToken(accessToken, accessTokenExpiresAt)
     IbexSDK.auth(accessToken)
 
-    if (!refreshToken) return Promise.reject(new IbexEventError("No refresh token found in Ibex response body"))
+    if (!refreshToken) return Promise.reject(new IbexClientError("No refresh token found in Ibex response body"))
     const rtResp = await Redis.setRefreshToken(refreshToken, refreshTokenExpiresAt)
     
     if (atResp instanceof CacheServiceError) log.warn(`IBEX: Failed to write accessToken to redis cache: ${atResp.message}`)

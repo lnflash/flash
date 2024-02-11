@@ -141,7 +141,7 @@ export const env = createEnv({
       .min(1)
       .or(z.string())
       .pipe(z.coerce.number())
-      .default(50053),
+      .default(4008),
     IBEX_WEBHOOK_SECRET: z.string(),
   },
 
