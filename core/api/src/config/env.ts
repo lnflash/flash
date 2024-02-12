@@ -141,6 +141,7 @@ export const env = createEnv({
       .or(z.string())
       .pipe(z.coerce.number())
       .default(4008),
+    IBEX_EXTERNAL_URI: z.string(),
     IBEX_WEBHOOK_SECRET: z.string(),
   },
 
@@ -242,6 +243,7 @@ export const env = createEnv({
     IBEX_EMAIL: process.env.IBEX_EMAIL,
     IBEX_PASSWORD: process.env.IBEX_PASSWORD,
     IBEX_LISTENER_PORT: process.env.IBEX_LISTENER_PORT,
+    IBEX_EXTERNAL_URI: process.env.IBEX_EXTERNAL_URI,
     IBEX_WEBHOOK_SECRET: process.env.IBEX_WEBHOOK_SECRET,
   },
 })

@@ -1,9 +1,7 @@
 import express, { Request, Response } from "express"
-import { IBEX_LISTENER_PORT, IBEX_WEBHOOK_SECRET } from "@config"
+import { IBEX_LISTENER_PORT, IBEX_EXTERNAL_URI, IBEX_WEBHOOK_SECRET } from "@config"
 import { baseLogger as logger } from "@services/logger"
 import { onPay, onReceive } from "./routes"
-
-const EXTERNAL_URI = "https://ibex.staging.flashapp.me"
 
 const start = () => {
     const app = express()
@@ -21,8 +19,8 @@ const start = () => {
 export default {
   start, 
   endpoints: {
-    onReceive: EXTERNAL_URI + onReceive.path,
-    onPay: EXTERNAL_URI + onPay.path,
+    onReceive: IBEX_EXTERNAL_URI + onReceive.path,
+    onPay: IBEX_EXTERNAL_URI + onPay.path,
   },
   secret: IBEX_WEBHOOK_SECRET,
 }
