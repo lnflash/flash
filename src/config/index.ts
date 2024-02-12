@@ -194,4 +194,5 @@ export const IBEX_URL = env.IBEX_URL
 export const IBEX_EMAIL = env.IBEX_EMAIL
 export const IBEX_PASSWORD = env.IBEX_PASSWORD
 export const IBEX_LISTENER_PORT = env.IBEX_LISTENER_PORT
+export const IBEX_EXTERNAL_URI = env.IBEX_EXTERNAL_URI
 export const IBEX_WEBHOOK_SECRET = env.IBEX_WEBHOOK_SECRET
