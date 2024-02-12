@@ -58,7 +58,7 @@ class AuthenticatedIbexClient {
             webhookUrl: WebhookServer.endpoints.onReceive,
             webhookSecret: WebhookServer.secret, 
         } as types.AddInvoiceBodyParam
-        logRequest("addInvoice", body)
+        logRequest("addInvoice", bodyWithHooks)
         return withAuth(() => IbexSDK.addInvoice(bodyWithHooks))
             .catch(_ => new IbexApiError(_.status, _.data))
             .then(logResponse)

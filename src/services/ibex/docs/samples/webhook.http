@@ -1,9 +1,10 @@
 // . TODO: use ngrok for integrated testing when running locally
 
-@baseurl = http://localhost:4008
+// @baseurl = http://localhost:4008
+@baseurl = https://ibex.staging.flashapp.me:8080
 
 ### Test server endpoint
-GET {{baseurl}}/ibex HTTP/1.1
+GET {{baseurl}}/health HTTP/1.1
 
 ### Webhook for addInvoiceV2 (receive payment)
 POST {{baseurl}}/invoice/receive HTTP/1.1
@@ -25,7 +26,7 @@ Accept: application/json
     "currencyID": 1,
     "transactionTypeId": 2,
     "invoice": {
-      "hash": "28f9318b14daf1d2853d122820c36c093459bb9fbbb60f58e3d0c12bb46f345b",
+      "hash": "8e92392b7a05ee59d80046c1cc61ec533d5d9e4c2300116e40296ca800050b0e",
       "bolt11": "lnbc2350n1pjuz0qdpp5zdl3y72k2p37xtr78mv8z9ans4m6dpvluavrt8ljeln33ewzsdzqdq823jhxaqcqzzsxqzuysp53ykwz05mps467vu99hh3q4tsggll6xcqzm4pmf0yfq0kerkcgsuq9qyyssqhlcruakrjph583797dh7cx9qv5r2ptkt68n976ep0u3yhnc7su5haepp68pcv0s9psjv5nnh7ygtp88lp5ujnvta73jx7s3egtw2tucqhpggqh",
       "preImage": "string",
       "memo": "string",

@@ -16,7 +16,8 @@ BigInt.prototype.toJSON = function () {
 };
 
 const wsLink = new GraphQLWsLink(createClient({
-  url: 'ws://localhost:4000/graphql',
+  url: 'wss://ws.staging.flashapp.me:8080/graphql',
+  // url: 'ws://localhost:4000/graphql',
   webSocketImpl: WebSocket,
   // connectionParams: {
   //  authToken: user.authToken,
