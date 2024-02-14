@@ -2,21 +2,16 @@ const { GraphQLWsLink } = require('@apollo/client/link/subscriptions');
 const { createClient } = require('graphql-ws');
 const { ApolloClient, InMemoryCache, gql } = require('@apollo/client');
 const WebSocket = require('ws');
-
-const paymentRequest = process.argv[2]
-// typescript
-// declare global {
-  //interface BigInt {
-    //toJSON(): string;
-  //}
-// }
+const { invoiceStatusGql } = require('./subscriptions/invoice-status');
+const { priceUpdatesGql } = require('./subscriptions/price')
 
 BigInt.prototype.toJSON = function () {
   return this.toString();
 };
 
 const wsLink = new GraphQLWsLink(createClient({
-  url: 'ws://localhost:4000/graphql',
+  url: 'wss://ws.staging.flashapp.me:8080/graphql',
+  // url: 'ws://localhost:4000/graphql',
   webSocketImpl: WebSocket,
   // connectionParams: {
   //  authToken: user.authToken,
@@ -28,25 +23,16 @@ const client = new ApolloClient({
   cache: new InMemoryCache(),
 });
 
-const SUBSCRIPTION_QUERY = gql`
-subscription Subscription($input: LnInvoicePaymentStatusInput!) {
-  	lnInvoicePaymentStatus(input: $input) {
-    		errors {
-      		message
-    	}
-    		status
-  	}
+const subType = process.argv[2]
+var subscription
+if (subType === 'invoice') {
+  const paymentRequest = process.argv[3]
+  subscription = client.subscribe(invoiceStatusGql(paymentRequest));
+} else if (subType === 'price') { 
+  subscription = client.subscribe(priceUpdatesGql(paymentRequest));
+} else {
+  throw Error("Invalid argument.")
 }
-`;
-
-var subscription = client.subscribe({
-    query: SUBSCRIPTION_QUERY,
-    variables: {
-        input: {
-            "paymentRequest": paymentRequest
-        }
-    }
-});
 
 subscription.subscribe({
     next: function (data) {
