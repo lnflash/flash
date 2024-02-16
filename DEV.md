@@ -41,9 +41,6 @@ Docker Compose version 2.0.0
 
 To use the correct node version, you can install nvm and run `nvm use 20`. Then enable and inititialize yarn using the [yarn docs](https://yarnpkg.com/getting-started/install)
 
-We use [direnv](https://direnv.net) to load environment variables needed for running the integration tests.
-Don't forget to add the [direnv hook](https://direnv.net/docs/hook.html) to your `shell.rc` file.
-
 ### Clone the repo:
 
 ```
@@ -52,6 +49,8 @@ $ cd galoy
 ```
 
 ### Set the Environment
+
+[direnv](https://direnv.net) is required to load environment variables. Make sure it is installed and that the [direnv hook](https://direnv.net/docs/hook.html) is added to your `shell.rc` file.
 
 Create a `.env.local` to add local environment overrides. For the Flash project, the IBEX_PASSWORD is required. E.g: 
 
