@@ -19,7 +19,7 @@ Accept: application/json
   "transaction": {
     "id": "trx_id",
     "createdAt": "string",
-    "accountId": "string",
+    "accountId": "12406785-dbc1-4193-898d-ab03575a8f13",
     "amount": 100,
     "networkFee": 1,
     "exchangeRateCurrencySats": 2000,

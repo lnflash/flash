@@ -9,13 +9,16 @@ BigInt.prototype.toJSON = function () {
   return this.toString();
 };
 
+const localUrl = "ws://localhost:4000/graphql"
+const stagingUrl = "wss://ws.staging.flashapp.me:8080/graphql"
+const authToken = process.env.AUTH_TOKEN // "ory_st_b7tAbBulgb8MDPcbwrsoPAnUWauozPhI"
+
 const wsLink = new GraphQLWsLink(createClient({
-  url: 'wss://ws.staging.flashapp.me:8080/graphql',
-  // url: 'ws://localhost:4000/graphql',
+  url: localUrl,
+  connectionParams: {
+    Authorization: `Bearer ${authToken}`,
+  },
   webSocketImpl: WebSocket,
-  // connectionParams: {
-  //  authToken: user.authToken,
-  // },
 }));
 
 const client = new ApolloClient({

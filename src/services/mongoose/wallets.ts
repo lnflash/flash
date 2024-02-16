@@ -70,12 +70,14 @@ export const WalletsRepository = (): IWalletsRepository => {
 
   const findById = async (walletId: WalletId): Promise<Wallet | RepositoryError> => {
     try {
+      baseLogger.info(walletId, "walletId")
       const result: WalletRecord | null = await Wallet.findOne({ id: walletId })
       if (!result) {
         return new CouldNotFindWalletFromIdError()
       }
       return resultToWallet(result)
     } catch (err) {
+      baseLogger.error(err, "MongooseErr")
       return parseRepositoryError(err)
     }
   }
