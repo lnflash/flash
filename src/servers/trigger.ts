@@ -514,7 +514,7 @@ const healthCheck = () => {
     healthzHandler({
       checkDbConnectionStatus: true,
       checkRedisStatus: true,
-      checkLndsStatus: true,
+      checkLndsStatus: false,
       checkBriaStatus: false,
     }),
   )
