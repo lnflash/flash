@@ -22,29 +22,6 @@ export const NotificationsService = (): INotificationsService => {
   const pubsub = PubSubService()
   const pushNotification = PushNotificationsService()
 
-  const ibexTxReceived = async ({
-    paymentHash,
-  }: any): Promise<true | NotificationsServiceError> => {
-    try {
-      const lnPaymentStatusTrigger = customPubSubTrigger({
-        event: PubSubDefaultTriggers.LnPaymentStatus,
-        suffix: paymentHash,
-      })
-      const psResp = await pubsub.publish({
-        trigger: lnPaymentStatusTrigger,
-        payload: { status: "PAID" },
-      })
-      if (psResp instanceof PubSubServiceError) {
-        log.error("Failed to publish")
-        return new NotificationsServiceError(psResp) 
-      }
-      // ACCOUNT AND DEVICE NOTIFCATIONS LEFT OUT
-      return true
-    } catch (err) {
-      return handleCommonNotificationErrors(err)
-    }
-  }
-
   const lightningTxReceived = async ({
     recipientAccountId,
     recipientWalletId,
@@ -456,7 +433,6 @@ export const NotificationsService = (): INotificationsService => {
     ...wrapAsyncFunctionsToRunInSpan({
       namespace: "services.notifications",
       fns: {
-        ibexTxReceived,
         lightningTxReceived,
         intraLedgerTxReceived,
         onChainTxReceived,

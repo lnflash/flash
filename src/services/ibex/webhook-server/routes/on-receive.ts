@@ -47,12 +47,7 @@ router.post(
             recipientAccountId: recipientAccountId,
             recipientWalletId,
             paymentAmount: req.body.transaction.amount,
-            displayPaymentAmount: undefined,
-            // { // DisplayAmount<DisplayCurrency>
-            //     amountInMinor: bigint
-            //     displayCurrency,
-            //     displayInMajor: DisplayCurrencyMajorAmount
-            // } as DisplayAmount<UsdCents>,
+            displayPaymentAmount: undefined, // DisplayAmount<DisplayCurrency>
             paymentHash: req.body.transaction.invoice.hash,
             recipientDeviceTokens: recipientUser.deviceTokens,
             recipientNotificationSettings: recipientAccount.notificationSettings,
