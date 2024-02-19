@@ -2,6 +2,7 @@
 
 @baseurlLocal = http://localhost:4008
 @baseurlStaging = https://ibex.staging.flashapp.me:8080
+@baseurlDevelopment = https://ibex.development.flashapp.me:8080
 
 ### Test server endpoint
 GET {{baseurlLocal}}/health HTTP/1.1
