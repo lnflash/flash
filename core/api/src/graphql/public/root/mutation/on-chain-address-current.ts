@@ -1,12 +1,12 @@
-import { GT } from "@graphql/index"
-import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
-import WalletId from "@graphql/shared/types/scalar/wallet-id"
-import OnChainAddressPayload from "@graphql/public/types/payload/on-chain-address"
+import { GT } from "@/graphql/index"
+import { mapAndParseErrorForGqlResponse } from "@/graphql/error-map"
+import WalletId from "@/graphql/shared/types/scalar/wallet-id"
+import OnChainAddressPayload from "@/graphql/public/types/payload/on-chain-address"
 // import { Wallets } from "@app"
 
 // FLASH FORK: import ibex dependencies
-import { client as Ibex } from "@services/ibex"
-import { IbexClientError } from "@services/ibex/client/errors"
+import { client as Ibex } from "@/services/ibex"
+import { IbexClientError } from "@/services/ibex/client/errors"
 
 const OnChainAddressCurrentInput = GT.Input({
   name: "OnChainAddressCurrentInput",
@@ -37,13 +37,8 @@ const OnChainAddressCurrentMutation = GT.Field({
       accountId: walletId,
     })
 
-<<<<<<< HEAD:core/api/src/graphql/public/root/mutation/on-chain-address-current.ts
-    if (resp instanceof IbexEventError) {
-      return { errors: [mapAndParseErrorForGqlResponse(resp)] }
-=======
     if (resp instanceof IbexClientError) {
-      return { errors: [mapAndParseErrorForGqlResponse(resp)] } 
->>>>>>> 0d0e35dcc (Refactor Ibex client & webhook-server (#33)):src/graphql/public/root/mutation/on-chain-address-current.ts
+      return { errors: [mapAndParseErrorForGqlResponse(resp)] }
     }
 
     return {

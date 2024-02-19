@@ -1,31 +1,21 @@
-import { AccountsRepository } from "./accounts"
-
-import { Wallet } from "./schema"
-
-import { parseRepositoryError } from "./utils"
-
-import { WalletCurrency } from "@/domain/shared"
-import { toWalletDescriptor } from "@/domain/wallets"
 import {
-  CouldNotFindWalletFromAccountIdAndCurrencyError,
   CouldNotFindWalletFromIdError,
   CouldNotFindWalletFromOnChainAddressError,
   CouldNotFindWalletFromOnChainAddressesError,
   CouldNotListWalletsFromAccountIdError,
   CouldNotListWalletsFromWalletCurrencyError,
-  MultipleWalletsFoundForAccountIdAndCurrency,
   RepositoryError,
-} from "@domain/errors"
+} from "@/domain/errors"
 import { Types } from "mongoose"
 
 // FLASH FORK: import IBEX routes and helper
-import { client as Ibex } from "@services/ibex"
-import { IbexClientError } from "@services/ibex/client/errors"
+import { client as Ibex } from "@/services/ibex"
+import { IbexClientError } from "@/services/ibex/client/errors"
 
 import { toObjectId, fromObjectId, parseRepositoryError } from "./utils"
 import { Wallet } from "./schema"
 import { AccountsRepository } from "./accounts"
-import { baseLogger } from "@services/logger"
+import { baseLogger } from "@/services/logger"
 
 export interface WalletRecord {
   id: string
@@ -53,32 +43,27 @@ export const WalletsRepository = (): IWalletsRepository => {
           name: accountId,
           currencyId: 3,
         })
-<<<<<<< HEAD:core/api/src/services/mongoose/wallets.ts
-        if (resp instanceof IbexEventError) return resp
-        ibexAccountId = resp.id
-=======
         if (resp instanceof IbexClientError) return resp
-        ibexAccountId = resp.id 
->>>>>>> 0d0e35dcc (Refactor Ibex client & webhook-server (#33)):src/services/mongoose/wallets.ts
+        ibexAccountId = resp.id
       }
- 
+
       let lnurlp: string | undefined
       if (ibexAccountId !== undefined) {
         const lnurlResp = await Ibex.createLnurlPay({ accountId: ibexAccountId })
-        if (lnurlResp instanceof IbexClientError) baseLogger.error(lnurlResp, `Failed to create lnurl-pay address for ibex account with id ${ibexAccountId}`)
+        if (lnurlResp instanceof IbexClientError)
+          baseLogger.error(
+            lnurlResp,
+            `Failed to create lnurl-pay address for ibex account with id ${ibexAccountId}`,
+          )
         else lnurlp = lnurlResp.lnurl
       }
-      
+
       const wallet = new Wallet({
         _accountId: toObjectId<AccountId>(accountId),
-<<<<<<< HEAD:core/api/src/services/mongoose/wallets.ts
-        id: ibexAccountId || crypto.randomUUID(),
-=======
-        id: ibexAccountId || crypto.randomUUID(), // Why are we creating a random id rather than failing? 
->>>>>>> 7dfa79d4d (Add static Lnurl-pay addresses (#28)):src/services/mongoose/wallets.ts
+        id: ibexAccountId || crypto.randomUUID(), // Why are we creating a random id rather than failing?
         type,
         currency,
-        lnurlp
+        lnurlp,
       })
       await wallet.save()
       return resultToWallet(wallet)
@@ -99,70 +84,19 @@ export const WalletsRepository = (): IWalletsRepository => {
     }
   }
 
-  const findForAccountById = async ({
-    accountId,
-    walletId,
-  }: {
-    accountId: AccountId
-    walletId: WalletId
-  }): Promise<Wallet | RepositoryError> => {
-    try {
-      const result: WalletRecord | null = await Wallet.findOne({
-        id: walletId,
-        accountId,
-      })
-      if (!result) {
-        return new CouldNotFindWalletFromIdError()
-      }
-      return resultToWallet(result)
-    } catch (err) {
-      return parseRepositoryError(err)
-    }
-  }
-
   const listByAccountId = async (
     accountId: AccountId,
   ): Promise<Wallet[] | RepositoryError> => {
     try {
       const result: WalletRecord[] = await Wallet.find({
-        accountId,
+        _accountId: toObjectId<AccountId>(accountId),
       })
       if (!result || result.length === 0) {
-        return new CouldNotListWalletsFromAccountIdError(`AccountId: ${accountId}}`)
+        return new CouldNotListWalletsFromAccountIdError(`accountId: ${accountId}}`)
       }
       return result.map(resultToWallet)
     } catch (err) {
       return parseRepositoryError(err)
-    }
-  }
-
-  const findAccountWalletsByAccountId = async (
-    accountId: AccountId,
-  ): Promise<AccountWalletDescriptors | RepositoryError> => {
-    const wallets = await listByAccountId(accountId)
-    if (wallets instanceof Error) return wallets
-
-    const btcWallets = wallets.filter((wallet) => wallet.currency === WalletCurrency.Btc)
-    if (btcWallets.length === 0) {
-      return new CouldNotFindWalletFromAccountIdAndCurrencyError(WalletCurrency.Btc)
-    }
-    if (btcWallets.length > 1) {
-      return new MultipleWalletsFoundForAccountIdAndCurrency(WalletCurrency.Btc)
-    }
-    const btcWallet = btcWallets[0]
-
-    const usdWallets = wallets.filter((wallet) => wallet.currency === WalletCurrency.Usd)
-    if (usdWallets.length === 0) {
-      return new CouldNotFindWalletFromAccountIdAndCurrencyError(WalletCurrency.Usd)
-    }
-    if (usdWallets.length > 1) {
-      return new MultipleWalletsFoundForAccountIdAndCurrency(WalletCurrency.Usd)
-    }
-    const usdWallet = usdWallets[0]
-
-    return {
-      [WalletCurrency.Btc]: toWalletDescriptor(btcWallet),
-      [WalletCurrency.Usd]: toWalletDescriptor(usdWallet),
     }
   }
 
@@ -215,9 +149,7 @@ export const WalletsRepository = (): IWalletsRepository => {
 
   return {
     findById,
-    findForAccountById,
     listByAccountId,
-    findAccountWalletsByAccountId,
     findByAddress,
     listByAddresses,
     persistNew,
@@ -227,7 +159,7 @@ export const WalletsRepository = (): IWalletsRepository => {
 
 const resultToWallet = (result: WalletRecord): Wallet => {
   const id = result.id as WalletId
-  const accountId = result.accountId as AccountId
+  const accountId = fromObjectId<AccountId>(result._accountId)
   const type = result.type as WalletType
   const currency = result.currency as WalletCurrency
   const lnurlp = result.lnurlp as Lnurl

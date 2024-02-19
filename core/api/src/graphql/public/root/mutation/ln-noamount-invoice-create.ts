@@ -8,9 +8,9 @@ import { mapAndParseErrorForGqlResponse } from "@/graphql/error-map"
 import LnNoAmountInvoicePayload from "@/graphql/public/types/payload/ln-noamount-invoice"
 
 // FLASH FORK: import ibex dependencies
-import { decodeInvoice } from "@domain/bitcoin/lightning"
-import { client as Ibex } from "@services/ibex"
-import { IbexClientError, UnexpectedResponseError } from "@services/ibex/client/errors"
+import { decodeInvoice } from "@/domain/bitcoin/lightning"
+import { client as Ibex } from "@/services/ibex"
+import { IbexClientError, UnexpectedResponseError } from "@/services/ibex/client/errors"
 
 const LnNoAmountInvoiceCreateInput = GT.Input({
   name: "LnNoAmountInvoiceCreateInput",

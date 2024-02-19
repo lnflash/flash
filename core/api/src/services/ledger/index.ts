@@ -45,17 +45,12 @@ import {
 } from "@/services/tracing"
 
 // FLASH FORK: import ibex dependencies
-<<<<<<< HEAD:core/api/src/services/ledger/index.ts
-import Ibex from "@services/ibex"
+import { client as Ibex } from "@/services/ibex"
 import {
   IbexApiError,
   IbexAuthenticationError,
-  IbexEventError,
-} from "@services/ibex/errors"
-=======
-import { client as Ibex } from "@services/ibex"
-import { IbexApiError, IbexAuthenticationError, IbexClientError } from "@services/ibex/client/errors"
->>>>>>> 0d0e35dcc (Refactor Ibex client & webhook-server (#33)):src/services/ledger/index.ts
+  IbexClientError,
+} from "@/services/ibex/client/errors"
 
 export { getNonEndUserWalletIds } from "./caching"
 export { translateToLedgerJournal } from "./helpers"
@@ -392,13 +387,8 @@ export const LedgerService = (): ILedgerService => {
         console.error("Failed to get wallet balance.")
         return resp
       }
-<<<<<<< HEAD:core/api/src/services/ledger/index.ts
-      if (resp.balance === undefined) return new IbexEventError("Balance not found")
-
-=======
       if (resp.balance === undefined) return new IbexClientError("Balance not found")
-    
->>>>>>> 0d0e35dcc (Refactor Ibex client & webhook-server (#33)):src/services/ledger/index.ts
+
       return toSats(resp.balance * 100)
     } catch (err) {
       return new UnknownLedgerError(err)
@@ -574,7 +564,7 @@ export const LedgerService = (): ILedgerService => {
       getTransactionsForWalletByPaymentHash,
       getTransactionsByWalletId,
       getTransactionsByWalletIds,
-      getTransactionsByWalletIdsAndAddresses,
+      // getTransactionsByWalletIdsAndAddresses,
       getTransactionsByWalletIdAndContactUsername,
       listPendingPayments,
       listAllPaymentHashes,

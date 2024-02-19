@@ -6,10 +6,10 @@ import {
   AccountsRepository,
   WalletOnChainAddressesRepository,
   WalletsRepository,
-} from "@services/mongoose"
+} from "@/services/mongoose"
 
 import { createOnChainAddress } from "./create-on-chain-address"
-import { IbexClientError } from "@services/ibex/client/errors"
+import { IbexClientError } from "@/services/ibex/client/errors"
 
 export const getLastOnChainAddress = async (
   walletId: WalletId,

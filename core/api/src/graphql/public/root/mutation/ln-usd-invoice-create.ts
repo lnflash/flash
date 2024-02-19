@@ -11,10 +11,10 @@ import LnInvoicePayload from "@/graphql/public/types/payload/ln-invoice"
 import { mapAndParseErrorForGqlResponse } from "@/graphql/error-map"
 
 // FLASH FORK: import ibex dependencies
-import { decodeInvoice } from "@domain/bitcoin/lightning"
+import { decodeInvoice } from "@/domain/bitcoin/lightning"
 
-import { client as Ibex } from "@services/ibex"
-import { IbexClientError, UnexpectedResponseError } from "@services/ibex/client/errors"
+import { client as Ibex } from "@/services/ibex"
+import { IbexClientError, UnexpectedResponseError } from "@/services/ibex/client/errors"
 
 const LnUsdInvoiceCreateInput = GT.Input({
   name: "LnUsdInvoiceCreateInput",

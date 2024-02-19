@@ -12,8 +12,8 @@ import LnPaymentRequest from "@/graphql/shared/types/scalar/ln-payment-request"
 import { mapAndParseErrorForGqlResponse } from "@/graphql/error-map"
 
 // FLASH FORK: import ibex dependencies
-import { client as Ibex } from "@services/ibex"
-import { IbexClientError } from "@services/ibex/client/errors"
+import { client as Ibex } from "@/services/ibex"
+import { IbexClientError } from "@/services/ibex/client/errors"
 
 const LnNoAmountUsdInvoiceFeeProbeInput = GT.Input({
   name: "LnNoAmountUsdInvoiceFeeProbeInput",

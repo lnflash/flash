@@ -13,8 +13,8 @@ import { mapAndParseErrorForGqlResponse } from "@/graphql/error-map"
 import { checkedToWalletId } from "@/domain/wallets"
 
 // FLASH FORK: import ibex dependencies
-import { client as Ibex } from "@services/ibex"
-import { IbexClientError } from "@services/ibex/client/errors"
+import { client as Ibex } from "@/services/ibex"
+import { IbexClientError } from "@/services/ibex/client/errors"
 // import { IbexRoutes } from "../../../../services/ibex/Routes"
 // import { requestIBexPlugin } from "../../../../services/ibex/IbexHelper"
 
@@ -70,11 +70,10 @@ const LnUsdInvoiceFeeProbeMutation = GT.Field<
       bolt11: paymentRequest,
     })
 
-<<<<<<< HEAD:core/api/src/graphql/public/root/mutation/ln-usd-invoice-fee-probe.ts
-    const error: Error | null = resp instanceof IbexEventError ? resp : null
+    const error: Error | null = resp instanceof IbexClientError ? resp : null
 
     const feeSatAmount: PaymentAmount<WalletCurrency> =
-      !(resp instanceof IbexEventError) && resp.amount
+      !(resp instanceof IbexClientError) && resp.amount
         ? {
             amount: BigInt(Math.round(resp.amount / 1000)),
             currency: "BTC", // USD?????
@@ -83,21 +82,6 @@ const LnUsdInvoiceFeeProbeMutation = GT.Field<
             amount: BigInt(0),
             currency: "BTC",
           }
-=======
-    const error: Error | null = resp instanceof IbexClientError 
-      ? resp
-      : null
-
-    const feeSatAmount: PaymentAmount<WalletCurrency> = (!(resp instanceof IbexClientError) && resp.amount) 
-      ? {
-        amount: BigInt(Math.round(resp.amount / 1000)),
-        currency: "BTC", // USD?????
-      }
-      : {
-        amount: BigInt(0),
-        currency: "BTC",
-      }
->>>>>>> 0d0e35dcc (Refactor Ibex client & webhook-server (#33)):src/graphql/public/root/mutation/ln-usd-invoice-fee-probe.ts
 
     if (feeSatAmount !== null && error instanceof Error) {
       return {

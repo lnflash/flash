@@ -15,8 +15,8 @@ import WalletId from "@/graphql/shared/types/scalar/wallet-id"
 import OnChainUsdTxFee from "@/graphql/public/types/object/onchain-usd-tx-fee"
 
 // FLASH FORK: import ibex dependencies
-import { client as Ibex } from "@services/ibex"
-import { IbexClientError, UnexpectedResponseError } from "@services/ibex/client/errors"
+import { client as Ibex } from "@/services/ibex"
+import { IbexClientError, UnexpectedResponseError } from "@/services/ibex/client/errors"
 
 const OnChainUsdTxFeeQuery = GT.Field<null, GraphQLPublicContextAuth>({
   type: GT.NonNull(OnChainUsdTxFee),

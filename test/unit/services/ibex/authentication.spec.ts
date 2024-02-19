@@ -1,6 +1,6 @@
 // import axios from "axios"
 // // import MockAdapter from "axios-mock-adapter"
-// import Ibex from "@services/IbexHelper"
+// import Ibex from "@/services/IbexHelper"
 
 // // let mock
 
@@ -11,7 +11,6 @@
 // // afterEach(() => {
 // //   mock.reset()
 // // })
-
 
 // // mocked Ibex call
 // function callIbex401(): Promise<any> {

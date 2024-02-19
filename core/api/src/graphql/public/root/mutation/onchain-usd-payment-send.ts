@@ -13,8 +13,8 @@ import WalletId from "@/graphql/shared/types/scalar/wallet-id"
 // import { Wallets } from "@app"
 
 // FLASH FORK: import ibex dependencies
-import { client as Ibex } from "@services/ibex"
-import { IbexClientError } from "@services/ibex/client/errors"
+import { client as Ibex } from "@/services/ibex"
+import { IbexClientError } from "@/services/ibex/client/errors"
 
 const OnChainUsdPaymentSendInput = GT.Input({
   name: "OnChainUsdPaymentSendInput",

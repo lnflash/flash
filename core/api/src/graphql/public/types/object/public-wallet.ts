@@ -1,5 +1,5 @@
 import WalletCurrency from "../../../shared/types/scalar/wallet-currency"
-import Lnurl from "@graphql/shared/types/scalar/lnurl"
+import Lnurl from "@/graphql/shared/types/scalar/lnurl"
 
 import { GT } from "@/graphql/index"
 

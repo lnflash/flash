@@ -10,9 +10,9 @@ import Memo from "@/graphql/shared/types/scalar/memo"
 import WalletId from "@/graphql/shared/types/scalar/wallet-id"
 
 // FLASH FORK: import ibex dependencies
-import { PaymentSendStatus } from "@domain/bitcoin/lightning"
-import { client as Ibex } from "@services/ibex"
-import { IbexClientError } from "@services/ibex/client/errors"
+import { PaymentSendStatus } from "@/domain/bitcoin/lightning"
+import { client as Ibex } from "@/services/ibex"
+import { IbexClientError } from "@/services/ibex/client/errors"
 
 const LnInvoicePaymentInput = GT.Input({
   name: "LnInvoicePaymentInput",
@@ -94,15 +94,9 @@ const LnInvoicePaymentSendMutation = GT.Field<
     //   }
     // }
 
-<<<<<<< HEAD:core/api/src/graphql/public/root/mutation/ln-invoice-payment-send.ts
-    if (PayLightningInvoice instanceof IbexEventError) {
+    if (PayLightningInvoice instanceof IbexClientError) {
       return {
         status: "failed",
-=======
-    if (PayLightningInvoice instanceof IbexClientError) {
-      return { 
-        status: "failed", 
->>>>>>> 0d0e35dcc (Refactor Ibex client & webhook-server (#33)):src/graphql/public/root/mutation/ln-invoice-payment-send.ts
         errors: [{ message: "An unexpected error occurred. Please try again later." }],
         // errors: [mapAndParseErrorForGqlResponse(PayLightningInvoice)] }
       }

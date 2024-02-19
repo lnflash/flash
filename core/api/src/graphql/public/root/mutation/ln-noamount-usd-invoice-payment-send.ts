@@ -11,10 +11,10 @@ import { InputValidationError } from "@/graphql/error"
 import CentAmount from "@/graphql/public/types/scalar/cent-amount"
 
 // FLASH FORK: import ibex dependencies
-import { PaymentSendStatus } from "@domain/bitcoin/lightning"
+import { PaymentSendStatus } from "@/domain/bitcoin/lightning"
 
-import { client as Ibex } from "@services/ibex"
-import { IbexClientError } from "@services/ibex/client/errors"
+import { client as Ibex } from "@/services/ibex"
+import { IbexClientError } from "@/services/ibex/client/errors"
 
 const LnNoAmountUsdInvoicePaymentInput = GT.Input({
   name: "LnNoAmountUsdInvoicePaymentInput",
@@ -91,15 +91,9 @@ const LnNoAmountUsdInvoicePaymentSendMutation = GT.Field<
       amount: amount / 100,
     })
 
-<<<<<<< HEAD:core/api/src/graphql/public/root/mutation/ln-noamount-usd-invoice-payment-send.ts
-    if (PayLightningInvoice instanceof IbexEventError) {
+    if (PayLightningInvoice instanceof IbexClientError) {
       return {
         status: "failed",
-=======
-    if (PayLightningInvoice instanceof IbexClientError) {
-      return { 
-        status: "failed", 
->>>>>>> 0d0e35dcc (Refactor Ibex client & webhook-server (#33)):src/graphql/public/root/mutation/ln-noamount-usd-invoice-payment-send.ts
         errors: [{ message: "An unexpected error occurred. Please try again later." }],
         // errors: [mapAndParseErrorForGqlResponse(PayLightningInvoice)] }
       }
