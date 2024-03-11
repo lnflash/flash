@@ -28,42 +28,42 @@ services:
   postgres-price-history:
     ports:
       - "5432:5432"
-  bitcoind:
-    ports:
-      - "18443:18443"
-  bitcoind-signer:
-    ports:
-      - "18543:18443"
-  lnd1:
-    ports:
-      - "10009:10009"
-  lnd2:
-    ports:
-      - "10010:10009"
-  lnd-outside-1:
-    ports:
-      - "10012:10009"
-  lnd-outside-2:
-    ports:
-      - "10013:10009"
-  stablesats:
-    ports:
-      - "3325:3325"
-  bria:
-    ports:
-      - "2743:2743"
-      - "2742:2742"
-  loopserver:
-    ports:
-      - "11009:11009"
-  loopd1:
-    ports:
-      - "8081:8081"
-      - "11010:11010"
-  loopd2:
-    ports:
-      - "8082:8081"
-      - "11011:11010"
+  # bitcoind:
+  #   ports:
+  #     - "18443:18443"
+  # bitcoind-signer:
+  #   ports:
+  #     - "18543:18443"
+  # lnd1:
+  #   ports:
+  #     - "10009:10009"
+  # lnd2:
+  #   ports:
+  #     - "10010:10009"
+  # lnd-outside-1:
+  #   ports:
+  #     - "10012:10009"
+  # lnd-outside-2:
+  #   ports:
+  #     - "10013:10009"
+  # stablesats:
+  #   ports:
+  #     - "3325:3325"
+  # bria:
+  #   ports:
+  #     - "2743:2743"
+  #     - "2742:2742"
+  # loopserver:
+  #   ports:
+  #     - "11009:11009"
+  # loopd1:
+  #   ports:
+  #     - "8081:8081"
+  #     - "11010:11010"
+  # loopd2:
+  #   ports:
+  #     - "8082:8081"
+  #     - "11011:11010"
   oathkeeper:
     extra_hosts:
       - "bats-tests:host-gateway"
@@ -88,9 +88,9 @@ services:
   kratos-pg:
     ports:
       - "5433:5432"
-  fulcrum:
-    ports:
-      - "50001:50001"
+  # fulcrum:
+  #   ports:
+  #     - "50001:50001"
   svix:
     ports:
       - "8071:8071"

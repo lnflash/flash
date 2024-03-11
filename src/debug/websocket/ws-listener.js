@@ -10,13 +10,13 @@ BigInt.prototype.toJSON = function () {
 }
 
 const localUrl = "ws://localhost:4000/graphql"
-const stagingUrl = "wss://ws.staging.flashapp.me:8080/graphql"
+const stagingUrl = "wss://ws.staging.flashapp.me/graphql"
 const developmentUrl = "wss://ws.development.flashapp.me:8080/graphql"
 const authToken = process.env.AUTH_TOKEN
 
 const wsLink = new GraphQLWsLink(
   createClient({
-    url: localUrl,
+    url: stagingUrl,
     connectionParams: {
       Authorization: `Bearer ${authToken}`,
     },
