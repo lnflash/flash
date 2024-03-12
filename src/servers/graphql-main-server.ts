@@ -101,7 +101,7 @@ export async function startApolloServerForCoreSchema() {
 if (require.main === module) {
   setupMongoConnection(true)
     .then(async () => {
-      activateLndHealthCheck()
+      // activateLndHealthCheck() // 
 
       const res = await bootstrap()
       if (res instanceof Error) throw res
