@@ -184,7 +184,7 @@ const main = async () => {
     healthzHandler({
       checkDbConnectionStatus: true,
       checkRedisStatus: false,
-      checkLndsStatus: true,
+      checkLndsStatus: false,
       checkBriaStatus: false,
     }),
   )
@@ -193,7 +193,7 @@ const main = async () => {
   server.listen(port, () => {
     logger.info(`Server listening to ${port}, metrics exposed on /metrics endpoint`)
   })
-  activateLndHealthCheck()
+  // activateLndHealthCheck()
 }
 
 setupMongoConnection()
