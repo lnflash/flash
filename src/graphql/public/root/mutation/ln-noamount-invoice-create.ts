@@ -50,7 +50,7 @@ const LnNoAmountInvoiceCreateMutation = GT.Field({
     // FLASH FORK: create IBEX invoice instead of Galoy invoice
 
     // TODO: move this into Wallets.addInvoiceNoAmountForSelf
-    const resp = await Ibex.addInvoice({
+    const resp = await Ibex().addInvoice({
       amount: 0,
       accountId: walletId,
       memo,

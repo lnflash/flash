@@ -39,7 +39,7 @@ export const WalletsRepository = (): IWalletsRepository => {
       // FLASH FORK: create IBEX account if currency is USD
       let ibexAccountId: string | undefined
       if (currency === "USD") {
-        const resp = await Ibex.createAccount({
+        const resp = await Ibex().createAccount({
           name: accountId,
           currencyId: 3,
         })
@@ -49,7 +49,7 @@ export const WalletsRepository = (): IWalletsRepository => {
  
       let lnurlp: string | undefined
       if (ibexAccountId !== undefined) {
-        const lnurlResp = await Ibex.createLnurlPay({ accountId: ibexAccountId })
+        const lnurlResp = await Ibex().createLnurlPay({ accountId: ibexAccountId })
         if (lnurlResp instanceof IbexClientError) baseLogger.error(lnurlResp, `Failed to create lnurl-pay address for ibex account with id ${ibexAccountId}`)
         else lnurlp = lnurlResp.lnurl
       }

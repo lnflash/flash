@@ -52,7 +52,7 @@ const LnInvoiceFeeProbeMutation = GT.Field<
     //     walletId,
     //     uncheckedPaymentRequest: paymentRequest,
     //   })
-    const resp: any | IbexClientError = await Ibex.getFeeEstimation({
+    const resp: any | IbexClientError = await Ibex().getFeeEstimation({
         // walletId, // we are not checking internal payment flow
         bolt11: paymentRequest,
     })

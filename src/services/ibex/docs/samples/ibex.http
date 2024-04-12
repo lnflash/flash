@@ -86,10 +86,10 @@ Accept: application/json
 Authorization: {{accessToken}}
 
 ### get Invoice requirements (lnurl-pay)
-@k1 = 267f9b5dbfa1fd6c73d446ff76dcd537afd86d2b2ac94029be407a154e972f45
+@k1 = 65d31dc0729a26c192db51562f0fdf4d51f9a20e0e541188639e53214081d945
 GET {{baseurl}}/lnurl/pay/invoice-requirements?k1={{k1}} HTTP/1.1
 Accept: application/json
-Authorization: {{accessToken}}
+# Authorization: {{accessToken}}
 
 ### Create LNURL-pay
 POST {{baseurl}}/lnurl/pay HTTP/1.1

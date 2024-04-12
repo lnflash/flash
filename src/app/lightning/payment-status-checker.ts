@@ -14,7 +14,7 @@ export const PaymentStatusChecker = async (uncheckedPaymentRequest: string) => {
     isExpired,
     // invoiceIsPaid should have no awareness of Ibex. TODO: add to Wallets interface
     invoiceIsPaid: async (): Promise<boolean | IbexClientError> => {
-      const ibexResp = await Ibex.invoiceFromHash({ invoice_hash: paymentHash })
+      const ibexResp = await Ibex().invoiceFromHash({ invoice_hash: paymentHash })
       if (ibexResp instanceof IbexClientError) return ibexResp
       baseLogger.info(ibexResp.status)
       return ibexResp.state?.id === 1 // Invoice states: https://docs.ibexmercado.com/reference/flow#invoice-states-table

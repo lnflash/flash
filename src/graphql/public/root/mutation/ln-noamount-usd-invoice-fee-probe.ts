@@ -50,7 +50,7 @@ const LnNoAmountUsdInvoiceFeeProbeMutation = GT.Field({
     //   })
 
     // TODO: Move Ibex call to Payments interface
-    const resp: any | IbexClientError = await Ibex.getFeeEstimation({
+    const resp: any | IbexClientError = await Ibex().getFeeEstimation({
       bolt11: paymentRequest,
       amount: String(amount / 100),
       currencyId: "3"

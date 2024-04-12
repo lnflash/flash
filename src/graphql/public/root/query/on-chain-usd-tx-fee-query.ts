@@ -45,7 +45,7 @@ const OnChainUsdTxFeeQuery = GT.Field<null, GraphQLPublicContextAuth>({
     //   speed,
     // })
 
-    const resp = await Ibex.estimateFeeV2({
+    const resp = await Ibex().estimateFeeV2({
       "currency-id": "3", // ref/create USD enum/constant
       address: address,
       amount: amount / 100,
