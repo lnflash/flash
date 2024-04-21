@@ -18,11 +18,11 @@ const feesConfig = getFeesConfig()
 const GlobalsQuery = GT.Field({
   type: Globals,
   resolve: async () => {
-    let nodesIds = await Lightning.listNodesPubkeys()
-    if (nodesIds instanceof Error) nodesIds = []
+    // let nodesIds = await Lightning.listNodesPubkeys()
+    // if (nodesIds instanceof Error) nodesIds = []
 
     return {
-      nodesIds,
+      nodesIds: [],
       network: NETWORK,
       lightningAddressDomain: getLightningAddressDomain(),
       lightningAddressDomainAliases: getLightningAddressDomainAliases(),
