@@ -79,7 +79,7 @@ const OnChainUsdPaymentSendMutation = GT.Field<
     // })
     if (!domainAccount) throw new Error("Authentication required")
 
-    const resp = await Ibex.sendToAddressV2({
+    const resp = await Ibex().sendToAddressV2({
       accountId: walletId,
       address,
       amount: amount / 100,

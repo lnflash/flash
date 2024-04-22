@@ -33,7 +33,7 @@ const OnChainAddressCurrentMutation = GT.Field({
     // const address = await Wallets.getLastOnChainAddress(walletId)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
 
-    const resp = await Ibex.generateBitcoinAddress({
+    const resp = await Ibex().generateBitcoinAddress({
       accountId: walletId,
     })
 

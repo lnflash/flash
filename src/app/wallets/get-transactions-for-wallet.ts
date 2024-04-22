@@ -23,7 +23,7 @@ export const getTransactionsForWallets = async ({
 
   // Flash fork: return history from Ibex
   const ibexCalls = await Promise.all(walletIds
-    .map(id => Ibex.getAccountTransactions({ 
+    .map(id => Ibex().getAccountTransactions({ 
       account_id: id,
     }))
   )

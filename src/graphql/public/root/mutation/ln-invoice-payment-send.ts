@@ -74,7 +74,7 @@ const LnInvoicePaymentSendMutation = GT.Field<
     */
 
     if (!domainAccount) throw new Error("Authentication required")
-    const PayLightningInvoice = await Ibex.payInvoiceV2({
+    const PayLightningInvoice = await Ibex().payInvoiceV2({
       bolt11: paymentRequest,
       accountId: walletId,
     })

@@ -25,7 +25,7 @@ export const createOnChainAddress = async ({
     const accountValidator = AccountValidator(account)
     if (accountValidator instanceof Error) return accountValidator
     
-    const resp = await Ibex.generateBitcoinAddress({ accountId: walletId })
+    const resp = await Ibex().generateBitcoinAddress({ accountId: walletId })
     if (resp instanceof IbexClientError) return resp
     else if (!resp.address) return new IbexClientError("Address not returned")
     else return resp.address
