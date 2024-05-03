@@ -17,6 +17,10 @@ import {
 } from "@services/mongoose"
 
 import { validateIsBtcWallet, validateIsUsdWallet } from "./validate"
+import { client as Ibex } from "@services/ibex"
+import { IbexClientError, UnexpectedResponseError } from "@services/ibex/client/errors"
+import { decodeInvoice } from "@domain/bitcoin/lightning/ln-invoice"
+import { AddInvoiceResponse201 } from "@services/ibex/client/.api/apis/sing-in"
 
 const defaultBtcExpiration = DEFAULT_EXPIRATIONS["BTC"].delayMinutes
 const defaultUsdExpiration = DEFAULT_EXPIRATIONS["USD"].delayMinutes
@@ -26,21 +30,28 @@ const addInvoiceForSelf = async ({
   amount,
   memo = "",
   expiresIn,
-}: AddInvoiceForSelfArgs): Promise<LnInvoice | ApplicationError> =>
-  addInvoice({
-    walletId,
-    limitCheckFn: checkSelfWalletIdRateLimits,
-    buildWIBWithAmountFn: ({
-      walletInvoiceBuilder,
-      recipientWalletDescriptor,
-    }: BuildWIBWithAmountFnArgs) =>
-      walletInvoiceBuilder
-        .withDescription({ description: memo })
-        .generatedForSelf()
-        .withRecipientWallet(recipientWalletDescriptor)
-        .withExpiration(expiresIn)
-        .withAmount(amount),
+}: AddInvoiceForSelfArgs): Promise<LnInvoice | ApplicationError> => {
+  const wallet = await WalletsRepository().findById(walletId)
+  if (wallet instanceof Error) return wallet
+  
+  const account = await AccountsRepository().findById(wallet.accountId)
+  if (account instanceof Error) return account
+
+  const accountValidator = AccountValidator(account)
+  if (accountValidator instanceof Error) return accountValidator
+
+  const limitOk = await checkSelfWalletIdRateLimits(wallet.accountId)
+  if (limitOk instanceof Error) return limitOk
+ 
+  const resp = await Ibex().addInvoice({
+    amount: amount / 100, // this is USD logic. Will not work for BTC
+    accountId: walletId,
+    memo,
+    expiration: expiresIn ? expiresIn * 60 : undefined, 
   })
+  if (resp instanceof IbexClientError) return resp
+  return toDomainInvoice(resp)
+}
 
 export const addInvoiceForSelfForBtcWallet = async (
   args: AddInvoiceForSelfForBtcWalletArgs,
@@ -109,21 +120,29 @@ const addInvoiceForRecipient = async ({
   memo = "",
   descriptionHash,
   expiresIn,
-}: AddInvoiceForRecipientArgs): Promise<LnInvoice | ApplicationError> =>
-  addInvoice({
-    walletId: recipientWalletId,
-    limitCheckFn: checkRecipientWalletIdRateLimits,
-    buildWIBWithAmountFn: ({
-      walletInvoiceBuilder,
-      recipientWalletDescriptor,
-    }: BuildWIBWithAmountFnArgs) =>
-      walletInvoiceBuilder
-        .withDescription({ description: memo, descriptionHash })
-        .generatedForRecipient()
-        .withRecipientWallet(recipientWalletDescriptor)
-        .withExpiration(expiresIn)
-        .withAmount(amount),
+}: AddInvoiceForRecipientArgs): Promise<LnInvoice | ApplicationError> => {
+  const wallet = await WalletsRepository().findById(recipientWalletId)
+  if (wallet instanceof Error) return wallet
+  
+  const account = await AccountsRepository().findById(wallet.accountId)
+  if (account instanceof Error) return account
+
+  const accountValidator = AccountValidator(account)
+  if (accountValidator instanceof Error) return accountValidator
+
+  const limitOk = await checkRecipientWalletIdRateLimits(wallet.accountId)
+  if (limitOk instanceof Error) return limitOk
+
+  const resp = await Ibex().addInvoice({
+    amount: amount / 100,
+    accountId: recipientWalletId,
+    memo,
+    expiration: expiresIn ? expiresIn * 60 : undefined,
   })
+  if (resp instanceof IbexClientError) return resp
+
+  return toDomainInvoice(resp)
+}
 
 export const addInvoiceForRecipientForBtcWallet = async (
   args: AddInvoiceForRecipientForBtcWalletArgs,
@@ -150,6 +169,8 @@ export const addInvoiceForRecipientForUsdWallet = async (
 
   const validated = await validateIsUsdWallet(recipientWalletId)
   if (validated instanceof Error) return validated
+
+
   return addInvoiceForRecipient({ ...args, recipientWalletId, expiresIn })
 }
 
@@ -244,3 +265,28 @@ const checkRecipientWalletIdRateLimits = async (
     rateLimitConfig: RateLimitConfig.invoiceCreateForRecipient,
     keyToConsume: accountId,
   })
+
+// Takes a successful Ibex Response and returns a domain 'LnInvoice' or error
+const toDomainInvoice = (ibex: AddInvoiceResponse201): (LnInvoice | ApplicationError) => {
+  const invoiceString: string | undefined = ibex.invoice?.bolt11
+  if (!invoiceString) return new UnexpectedResponseError("Could not find invoice.")
+  
+  const decodedInvoice = decodeInvoice(invoiceString)
+  if (decodedInvoice instanceof Error) return decodedInvoice 
+
+  return {
+    destination: decodedInvoice.destination,
+    paymentHash: decodedInvoice.paymentHash,
+    paymentRequest: decodedInvoice.paymentRequest,
+    paymentSecret: decodedInvoice.paymentSecret,
+    milliSatsAmount: decodedInvoice.milliSatsAmount,
+    description: decodedInvoice.description,
+    cltvDelta: decodedInvoice.cltvDelta,
+    amount: null,
+    paymentAmount: null,
+    routeHints: decodedInvoice.routeHints,
+    features: decodedInvoice.features,
+    expiresAt: decodedInvoice.expiresAt,
+    isExpired: decodedInvoice.isExpired,
+  }
+}
