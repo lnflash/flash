@@ -251,7 +251,7 @@ if (require.main === module) {
     .then(async () => {
       // TODO: handle disposition on SIGTERM
       server()
-      console.log(`🚀 websocket server ready at http://localhost:${port}${path}`)
+      console.log(`🚀 websocket server ready at ws://localhost:${port}${path}`)
     })
     .catch((err) => baseLogger.error(err, "ws server error"))
 }

@@ -15,6 +15,7 @@ import { decodeInvoice } from "@domain/bitcoin/lightning"
 
 import { client as Ibex } from "@services/ibex"
 import { IbexClientError, UnexpectedResponseError } from "@services/ibex/client/errors"
+import { Wallets } from "@app/index"
 
 const LnUsdInvoiceCreateInput = GT.Input({
   name: "LnUsdInvoiceCreateInput",
@@ -53,44 +54,20 @@ const LnUsdInvoiceCreateMutation = GT.Field({
       }
     }
 
-    // FLASH FORK: create IBEX invoice instead of Galoy invoice
-    const resp = await Ibex().addInvoice({
-      amount: amount / 100,
-      accountId: walletId,
+    const invoice = await Wallets.addInvoiceForSelfForUsdWallet({
+      walletId,
+      amount,
       memo,
-      expiration: expiresIn,
+      expiresIn,
     })
 
-    if (resp instanceof IbexClientError) {
-      return { errors: [mapAndParseErrorForGqlResponse(resp)] }
+    if (invoice instanceof Error) {
+      return { errors: [mapAndParseErrorForGqlResponse(invoice)] }
     }
 
-    const invoiceString: string | undefined = resp.invoice?.bolt11
-    if (!invoiceString) {
-      return { errors: [mapAndParseErrorForGqlResponse(new UnexpectedResponseError("Could not find invoice."))] }
-    }
-    const decodedInvoice = decodeInvoice(invoiceString)
-    if (decodedInvoice instanceof Error) {
-      return { errors: [mapAndParseErrorForGqlResponse(decodedInvoice)] }
-    }
-    
     return {
       errors: [],
-      invoice: {
-        destination: decodedInvoice.destination,
-        paymentHash: decodedInvoice.paymentHash,
-        paymentRequest: decodedInvoice.paymentRequest,
-        paymentSecret: decodedInvoice.paymentSecret,
-        milliSatsAmount: decodedInvoice.milliSatsAmount,
-        description: decodedInvoice.description,
-        cltvDelta: decodedInvoice.cltvDelta,
-        amount: null,
-        paymentAmount: null,
-        routeHints: decodedInvoice.routeHints,
-        features: decodedInvoice.features,
-        expiresAt: decodedInvoice.expiresAt,
-        isExpired: decodedInvoice.isExpired,
-      },
+      invoice,
     }
   },
 })
