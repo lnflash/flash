@@ -1,3 +1,6 @@
+### This is a template of a Concourse pipeline. The values are populated using
+### the ytt templating engine. 
+
 #@ load("@ytt:data", "data")
 
 #@ load("vendor/pipeline-fragments.lib.yml",

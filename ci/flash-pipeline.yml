@@ -1,0 +1,86 @@
+
+
+#@ def flash_image():
+#@   return data.values.docker_registry + "/flash-dev"
+#@ end
+
+resources:
+  ### -  #@ repo_resource(True)
+  - name: repo # CHANGED FROM 'repo-out'
+    type: git
+    source:
+      fetch_tags: true
+      uri: https://github.com/lnflash/flash.git # git@github.com:lnflash/flash.git #@ data.values.git_uri
+      branch: main #@ data.values.git_branch
+      ### private_key: #@ data.values.github_private_key
+      ###  -  #@ pipeline_tasks_resource()
+
+        ###-  #@ nodejs_deps_resource(True)
+        ###-  #@ deps_version_resource()
+        ###-  #@ bundled_deps_resource()
+        ###### -  #@ slack_resource()
+
+  ### Define Docker registry
+  - name: edge-image
+    type: registry-image
+    source:
+      tag: edge
+      username: ((docker-creds.username)) #@ data.values.docker_registry_user
+      password: ((docker-creds.password)) #@ data.values.docker_registry_password
+      repository: docker.io/brh28/flash-dev ## #@ flash_image()
+
+  - name: pipeline-tasks
+    type: git
+    source:
+      paths: [ci/vendor/*, ci/tasks/*, ci/config/*, Makefile]
+      uri: https://github.com/lnflash/flash.git # git@github.com:lnflash/flash.git #@ data.values.git_uri
+      branch: main #@ data.values.git_branch
+      # private_key: #@ data.values.github_private_key
+
+jobs:
+- name: build-edge-image
+  serial: true
+  plan:
+    # - in_parallel:
+    #     - { get: repo, trigger: true }
+    #     - { get: pipeline-tasks }
+    - get: repo
+      trigger: true
+    - get: pipeline-tasks
+    - task: prepare-docker-build
+      config:
+        platform: linux
+        # image_resource: #@ nodejs_task_image_config()
+        image_resource: 
+          type: registry-image
+          source:
+            # username: ((docker-creds.username))
+            # password: ((docker-creds.password))
+            repository: us.gcr.io/galoy-org/nodejs-concourse # #@ nodejs_concourse_image()
+        inputs:
+          - name: pipeline-tasks
+          - name: repo
+        outputs:
+          - name: repo
+        run:
+          path: pipeline-tasks/ci/tasks/prepare-docker-build.sh
+    - task: build
+      privileged: true
+      config:
+        platform: linux
+        image_resource:
+          type: registry-image
+          source:
+            repository: vito/oci-build-task
+        inputs:
+          - name: repo
+        outputs:
+          - name: image
+        params:
+          CONTEXT: repo
+          BUILD_ARGS_FILE: repo/.build-args
+        run:
+          path: build
+    - put: edge-image
+      params:
+        image: image/image.tar
