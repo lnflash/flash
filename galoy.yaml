@@ -1,3 +1,6 @@
+### THIS FILE IS ONLY A SAMPLE. THE DEFAULT VALUES ARE IN src/config/schema.ts
+### TO SET OVERRIDES, SEE THE DEV.md
+
 lightningAddressDomain: pay.development.flashapp.me
 lightningAddressDomainAliases:
   - pay1.development.flashapp.me
@@ -80,7 +83,7 @@ rateLimits:
 accounts:
   initialStatus: active
   initialWallets:
-    - BTC
+    - BTC 
     - USD
   enablePhoneCheck: false
   enableIpCheck: false

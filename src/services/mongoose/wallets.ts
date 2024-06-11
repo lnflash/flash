@@ -5,6 +5,7 @@ import {
   CouldNotListWalletsFromAccountIdError,
   CouldNotListWalletsFromWalletCurrencyError,
   RepositoryError,
+  UnsupportedCurrencyError,
 } from "@domain/errors"
 import { Types } from "mongoose"
 
@@ -15,7 +16,8 @@ import { IbexClientError } from "@services/ibex/client/errors"
 import { toObjectId, fromObjectId, parseRepositoryError } from "./utils"
 import { Wallet } from "./schema"
 import { AccountsRepository } from "./accounts"
-import { baseLogger } from "@services/logger"
+import { recordExceptionInCurrentSpan } from "@services/tracing"
+import { ErrorLevel, WalletCurrency } from "@domain/shared"
 
 export interface WalletRecord {
   id: string
@@ -33,30 +35,42 @@ export const WalletsRepository = (): IWalletsRepository => {
     currency,
   }: NewWalletInfo): Promise<Wallet | RepositoryError> => {
     const account = await AccountsRepository().findById(accountId)
-    // verify that the account exist
     if (account instanceof Error) return account
+    
     try {
-      // FLASH FORK: create IBEX account if currency is USD
-      let ibexAccountId: string | undefined
-      if (currency === "USD") {
-        const resp = await Ibex().createAccount({
-          name: accountId,
-          currencyId: 3,
-        })
-        if (resp instanceof IbexClientError) return resp
-        ibexAccountId = resp.id 
-      }
+      // FLASH FORK: create IBEX account
+      
+      // See https://docs.ibexmercado.com/reference/get-all for Ibex currencies
+      let currencyId: number
+      if (currency === WalletCurrency.Usd) currencyId = 3
+      else return new UnsupportedCurrencyError(`Cannot create wallet for currency ${currency}`)
+
+      const resp = await Ibex().createAccount({
+        name: accountId,
+        currencyId,
+      })
+      if (resp instanceof IbexClientError) return resp
+      const ibexAccountId = resp.id 
  
       let lnurlp: string | undefined
       if (ibexAccountId !== undefined) {
         const lnurlResp = await Ibex().createLnurlPay({ accountId: ibexAccountId })
-        if (lnurlResp instanceof IbexClientError) baseLogger.error(lnurlResp, `Failed to create lnurl-pay address for ibex account with id ${ibexAccountId}`)
+
+        if (lnurlResp instanceof IbexClientError) {
+          recordExceptionInCurrentSpan({
+            error: lnurlResp,
+            level: ErrorLevel.Warn,
+            attributes: {
+              ibexAccountId,
+            },
+          })
+        }
         else lnurlp = lnurlResp.lnurl
       }
       
       const wallet = new Wallet({
         _accountId: toObjectId<AccountId>(accountId),
-        id: ibexAccountId || crypto.randomUUID(), // Why are we creating a random id rather than failing? 
+        id: ibexAccountId,
         type,
         currency,
         lnurlp

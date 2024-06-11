@@ -82,8 +82,8 @@ export const bootstrap = async () => {
 
     const wallet = await WalletsRepository().findById(account.defaultWalletId)
     if (wallet instanceof Error) return wallet
-    // if (wallet.currency !== WalletCurrency.Btc) {
-    //   return new Error("Expected BTC-currency default wallet")
-    // }
+    if (wallet.currency !== WalletCurrency.Usd) {
+      return new Error("Expected USD-currency default wallet")
+    }
   }
 }
