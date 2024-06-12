@@ -9,7 +9,7 @@ export const getCSVForAccount = async (
 
   const csv = new CsvWalletsExport()
 
-  await csv.addWallet(wallets)
+  await csv.addWallets(wallets)
 
   return csv.getBase64()
 }

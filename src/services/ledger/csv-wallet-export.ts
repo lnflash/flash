@@ -50,7 +50,7 @@ export class CsvWalletsExport {
     baseLogger.info("saving complete")
   }
 
-  async addWallet(wallets: Wallet[]): Promise<void | ApplicationError> {
+  async addWallets(wallets: Wallet[]): Promise<void | ApplicationError> {
     // TODO: interface could be improved by returning self, so that it's
     // possible to run csv.addWallet(wallet).getBase64()
 
