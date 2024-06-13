@@ -8,8 +8,8 @@ export const getCSVForAccount = async (
   if (wallets instanceof Error) return wallets
 
   const csv = new CsvWalletsExport()
-  for (const wallet of wallets) {
-    await csv.addWallet(wallet.id)
-  }
+
+  await csv.addWallets(wallets)
+
   return csv.getBase64()
 }

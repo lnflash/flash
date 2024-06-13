@@ -1,35 +1,22 @@
-import { LedgerService } from "@services/ledger"
+import { getTransactionsForWallets } from "@app/wallets"
+import { txDirectionValues } from "@graphql/shared/types/scalar/tx-direction"
 import { baseLogger } from "@services/logger"
 import { createObjectCsvStringifier, createObjectCsvWriter } from "csv-writer"
 
-const headers_field = [
-  "id",
-  "walletId",
-  "type",
-  "credit",
-  "debit",
-  "fee",
-  "currency",
-  "timestamp",
-  "pendingConfirmation",
-  "journalId",
-  "lnMemo",
-  "usd",
-  "feeUsd",
-  "recipientWalletId",
-  "username",
-  "memoFromPayer",
-  "paymentHash",
-  "pubkey",
-  "feeKnownInAdvance",
-  "address",
-  "txHash",
-  "displayAmount",
-  "displayFee",
-  "displayCurrency",
+const header = [
+  { id: "id", title: "Id" },
+  { id: "walletId", title: " Wallet Id" },
+  { id: "type", title: " Type" },
+  { id: "direction", title: " Direction" },
+  { id: "amount", title: " Amount" },
+  { id: "displayAmount", title: " Display Amount" },
+  { id: "fee", title: " Fee" },
+  { id: "displayFee", title: " Display Fee" },
+  { id: "currency", title: " Currency" },
+  { id: "timestamp", title: " Timestamp" },
+  { id: "status", title: " Status" },
+  { id: "memo", title: " Memo" },
 ]
-
-const header = headers_field.map((item) => ({ id: item, title: item }))
 
 export class CsvWalletsExport {
   entries: LedgerTransaction<WalletCurrency>[] = []
@@ -63,12 +50,41 @@ export class CsvWalletsExport {
     baseLogger.info("saving complete")
   }
 
-  async addWallet(walletId: WalletId): Promise<void | ApplicationError> {
+  async addWallets(wallets: Wallet[]): Promise<void | ApplicationError> {
     // TODO: interface could be improved by returning self, so that it's
     // possible to run csv.addWallet(wallet).getBase64()
-    const txs = await LedgerService().getTransactionsByWalletId(walletId)
-    if (txs instanceof Error) return txs
 
-    this.entries.push(...txs)
+    const response = await getTransactionsForWallets({
+      wallets,
+    })
+
+    const txs = await this.formatTxs(response.result?.slice)
+
+    if (!(txs instanceof Error)) {
+      // @ts-ignore-next-line no-implicit-any error
+      this.entries.push(...txs)
+    }
+  }
+
+  async formatTxs(txs?: WalletTransaction[]) {
+    const result = txs?.map((el) => {
+      return {
+        id: el.id,
+        walletId: el.walletId,
+        type: el.initiationVia.type,
+        direction:
+          el.settlementAmount > 0 ? txDirectionValues.RECEIVE : txDirectionValues.SEND,
+        amount: el.settlementAmount,
+        displayAmount: el.settlementDisplayAmount,
+        fee: el.settlementFee,
+        displayFee: el.settlementDisplayFee,
+        currency: el.settlementCurrency,
+        timestamp: el.createdAt,
+        status: el.status, // status
+        memo: el.memo,
+      }
+    })
+
+    return result
   }
 }
