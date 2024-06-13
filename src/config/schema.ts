@@ -377,7 +377,7 @@ export const configSchema = {
       additionalProperties: false,
       default: {
         initialStatus: "active",
-        initialWallets: ["BTC", "USD"],
+        initialWallets: ["USD"],
         enablePhoneCheck: false,
         enableIpCheck: false,
         enableIpProxyCheck: false,

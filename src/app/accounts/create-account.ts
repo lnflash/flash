@@ -9,6 +9,10 @@ import {
   WalletsRepository,
 } from "@services/mongoose"
 
+import { recordExceptionInCurrentSpan } from "@services/tracing"
+import { ErrorLevel } from "@domain/shared"
+import { RepositoryError } from "@domain/errors"
+
 const initializeCreatedAccount = async ({
   account,
   config,
@@ -31,12 +35,18 @@ const initializeCreatedAccount = async ({
   const enabledWallets: Partial<Record<WalletCurrency, Wallet>> = {}
   for (const currency of walletsEnabledConfig) {
     const wallet = await newWallet(currency)
-    if (wallet instanceof Error) return wallet
-    enabledWallets[currency] = wallet
+    if (wallet instanceof RepositoryError) {
+      recordExceptionInCurrentSpan({
+        error: wallet,
+        level: ErrorLevel.Critical,
+        attributes: { accountId: account.id }
+      })
+    }
+    else enabledWallets[currency] = wallet
   }
 
-  // FLASH FORK: Set default wallet as 2nd element in walletsEnabledConfig array.
-  const defaultWalletId = enabledWallets[walletsEnabledConfig[1]]?.id
+  // Set default wallet to USD
+  const defaultWalletId = enabledWallets[walletsEnabledConfig[0]]?.id
 
   if (defaultWalletId === undefined) {
     return new ConfigError("NoWalletsEnabledInConfigError")

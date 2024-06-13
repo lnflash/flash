@@ -139,6 +139,7 @@ export class LnRouteValidationError extends ValidationError {}
 export class BadAmountForRouteError extends LnRouteValidationError {}
 
 export class MismatchedCurrencyForWalletError extends ValidationError {}
+export class UnsupportedCurrencyError extends RepositoryError {}
 
 export class InvalidAccountStatusError extends ValidationError {}
 export class InactiveAccountError extends InvalidAccountStatusError {}

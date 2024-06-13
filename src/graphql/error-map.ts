@@ -335,6 +335,9 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = "Unsupported operation for wallet's currency."
       return new ValidationInternalError({ message, logger: baseLogger })
 
+    case "UnsupportedCurrencyError":
+      return new ValidationInternalError({ logger: baseLogger })
+
     case "InsufficientBalanceError":
       message = error.message
       return new InsufficientBalanceError({ message, logger: baseLogger })
