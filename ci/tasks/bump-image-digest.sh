@@ -8,19 +8,19 @@ export websocket_digest=$(cat ./websocket-edge-image/digest)
 export ref=$(cat ./repo/.git/short_ref)
 export app_version=$(cat version/version)
 
-mkdir -p charts-repo/charts/galoy/apollo-router
-cp ./repo/dev/apollo-federation/supergraph.graphql ./charts-repo/charts/galoy/apollo-router/supergraph.graphql
+mkdir -p charts-repo/charts/flash/apollo-router
+cp ./repo/dev/apollo-federation/supergraph.graphql ./charts-repo/charts/flash/apollo-router/supergraph.graphql
 
 pushd charts-repo
 
-yq -i e '.galoy.images.app.digest = strenv(digest)' ./charts/galoy/values.yaml
-yq -i e '.galoy.images.app.git_ref = strenv(ref)' ./charts/galoy/values.yaml
-yq -i e '.galoy.images.mongodbMigrate.digest = strenv(migrate_digest)' ./charts/galoy/values.yaml
-yq -i e '.galoy.images.websocket.digest = strenv(websocket_digest)' ./charts/galoy/values.yaml
-yq -i e '.appVersion = strenv(app_version)' ./charts/galoy/Chart.yaml
+yq -i e '.galoy.images.app.digest = strenv(digest)' ./charts/flash/values.yaml
+yq -i e '.galoy.images.app.git_ref = strenv(ref)' ./charts/flash/values.yaml
+yq -i e '.galoy.images.mongodbMigrate.digest = strenv(migrate_digest)' ./charts/flash/values.yaml
+yq -i e '.galoy.images.websocket.digest = strenv(websocket_digest)' ./charts/flash/values.yaml
+yq -i e '.appVersion = strenv(app_version)' ./charts/flash/Chart.yaml
 
 if [[ -z $(git config --global user.email) ]]; then
-  git config --global user.email "bot@galoy.io"
+  git config --global user.email "bot@flash.io"
 fi
 if [[ -z $(git config --global user.name) ]]; then
   git config --global user.name "CI Bot"
@@ -31,5 +31,5 @@ fi
   git merge --no-edit ${BRANCH}
   git add -A
   git status
-  git commit -m "chore(deps): bump galoy image to '${digest}'"
+  git commit -m "chore(deps): bump flash image to '${digest}'"
 )
