@@ -7,8 +7,12 @@ if [[ $(which ytt) == "" ]]; then
   exit 1
 fi
 
+
+## Script requires a FLY_TARGET (e.g flash-ci) and PIPELINE_VALUES (e.g "/path/to/flash-values.yml) as env variables
 target="${FLY_TARGET:-local}"
 team=main # dev
+pipeline="${PIPELINE_NAME:-flash-app}"
+values="${PIPELINE_VALUES}"
 
 TMPDIR=""
 TMPDIR=$(mktemp -d -t repipe.XXXXXX)
@@ -18,5 +22,5 @@ ytt -f ci > ${TMPDIR}/pipeline.yml
 
 echo "Updating pipeline @ ${target}"
 
-fly -t ${target} set-pipeline --team=${team} -p test-flash-app -c ${TMPDIR}/pipeline.yml -l ${FLASH}/brh28/secrets/flash-ci.yml
-fly -t ${target} unpause-pipeline --team=${team} -p test-flash-app
+fly -t ${target} set-pipeline --team=${team} -p flash-app -c ${TMPDIR}/pipeline.yml -l ${values}
+fly -t ${target} unpause-pipeline --team=${team} -p flash-app
