@@ -8,14 +8,14 @@ export websocket_digest=$(cat ./websocket-edge-image/digest)
 
 pushd charts-repo
 
-ref=$(yq e '.galoy.images.app.git_ref' charts/galoy/values.yaml)
+ref=$(yq e '.galoy.images.app.git_ref' charts/flash/values.yaml)
 git checkout ${BRANCH}
-old_ref=$(yq e '.galoy.images.app.git_ref' charts/galoy/values.yaml)
+old_ref=$(yq e '.galoy.images.app.git_ref' charts/flash/values.yaml)
 
 cat <<EOF >> ../body.md
-# Bump galoy image
+# Bump flash image
 
-The galoy image will be bumped to digest:
+The flash image will be bumped to digest:
 \`\`\`
 ${digest}
 \`\`\`
@@ -32,14 +32,22 @@ ${websocket_digest}
 
 Code diff contained in this image:
 
-https://github.com/GaloyMoney/galoy/compare/${old_ref}...${ref}
+https://github.com/lnflash/flash/compare/${old_ref}...${ref}
 EOF
 
 pushd ../repo
   git cliff --config ../pipeline-tasks/ci/vendor/config/git-cliff.toml ${old_ref}..${ref} > ../charts-repo/release_notes.md
 popd
 
-export GH_TOKEN="$(ghtoken generate -b "${GH_APP_PRIVATE_KEY}" -i "${GH_APP_ID}" | jq -r '.token')"
+#! "$(ghtoken generate -b "${GH_APP_PRIVATE_KEY}" -i "${GH_APP_ID}" | jq -r '.token')"
+export GH_TOKEN=${AUTH_TOKEN}
+gh auth setup-git
+
+gh repo set-default ${GH_ORG}/charts
+git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
+
+export ref=$(cat ./repo/.git/short_ref)
+git checkout ${ref}
 
 breaking=""
 if [[ $(cat release_notes.md | grep breaking) != '' ]]; then
@@ -48,9 +56,9 @@ fi
 
 gh pr close ${BOT_BRANCH} || true
 gh pr create \
-  --title "chore(deps): bump-galoy-image-${ref}" \
+  --title "chore(deps): bump-flash-image-${ref}" \
   --body-file ../body.md \
   --base ${BRANCH} \
   --head ${BOT_BRANCH} \
-  --label galoybot \
-  --label galoy ${breaking}
+  --label flashbot \
+  --label flash ${breaking}

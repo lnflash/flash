@@ -1,33 +1,34 @@
 #@data/values
 ---
-git_uri: git@github.com:lnflash/flash.git 
-git_branch: main
-git_charts_uri: git@github.com:lnflash/charts.git 
-# git_stablesats_uri: git@github.com:GaloyMoney/stablesats-rs.git
-git_price_uri: git@github.com:lnflash/price.git 
-# git_bria_uri: git@github.com:GaloyMoney/bria.git
+git_uri: https://github.com/brh28/flash.git
+git_branch: ci #! main
+git_charts_uri: https://github.com/brh28/charts.git
+git_price_uri: https://github.com/brh28/price.git
 git_charts_branch: main
-git_charts_bot_branch: bot-bump-galoy-image
-# git_stablesats_proto_bot_branch: bot-bump-stablesats-proto
+git_charts_bot_branch: bot-bump-flash-image
 git_price_history_proto_bot_branch: bot-bump-price-history-proto
 git_price_realtime_proto_bot_branch: bot-bump-price-realtime-proto
-# git_bria_api_proto_bot_branch: bot-bump-bria-api-proto
-github_private_key: ((github.private_key))
-github_token: ((github.api_token))
-github_app_id: ((github.github_app_id))
-github_app_private_key: ((github.github_app_private_key))
-docker_registry: docker.io/lnflash
-docker_registry_user: ((docker-creds.username))
-docker_registry_password: ((docker-creds.password))
-docker_host_ip: ((staging-ssh.docker_host_ip))
-artifacts_bucket_name: ((staging-gcp-creds.bucket_name))
-staging_inception_creds: ((staging-gcp-creds.creds_json))
-staging_ssh_private_key: ((staging-ssh.ssh_private_key))
-staging_ssh_pub_key: ((staging-ssh.ssh_public_key))
-git_version_branch: version
-gh_org: lnflash
-gh_repository: flash
 
-# slack_channel: galoy-main-github
-# slack_username: concourse
-# slack_webhook_url: ((galoy-main-slack.api_url))
+gh_org: brh28
+gh_repository: flash
+gh_user: ((github.username)) 
+gh_password: ((github.api_token)) 
+github_token: ((github.api_token))
+#! github_app_id: ((github.github_app_id))
+#! github_app_private_key: ((github.github_app_private_key))
+
+docker_registry: ((docker.registry)) 
+docker_registry_user: ((docker.username))
+docker_registry_password: ((docker.password))
+#! docker_host_ip: ((staging-ssh.docker_host_ip))
+
+#! artifacts_bucket_name: ((staging-gcp-creds.bucket_name))
+#! staging_inception_creds: ((staging-gcp-creds.creds_json))
+gcs_creds: ((gcs.sa_creds))
+
+#! staging_ssh_private_key: ((staging-ssh.private_key))
+#! staging_ssh_pub_key: ((staging-ssh.public_key))
+
+#! slack_channel: galoy-main-github
+#! slack_username: concourse
+#! slack_webhook_url: ((galoy-main-slack.api_url))

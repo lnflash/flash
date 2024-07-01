@@ -1,62 +1,251 @@
+#! This line is a comment for a ytt file
+#! This file is a template of a Concourse pipeline. The values are populated using
+#! the ytt templating engine.
+#! Run the repipe script to deploy changes
 
+#@ load("@ytt:data", "data")
+
+#@ load("vendor/pipeline-fragments.lib.yml",
+#@   "nodejs_task_image_config",
+#@   "nodejs_concourse_image",
+#@   "install_yarn_deps",
+#@   "nodejs_check_code",
+#@   "nodejs_audit",
+
+#! UNUSED RESOURCES
+#! @   "bundled_deps_resource"
+#! #@   "slack_failure_notification",
+#! ##@   "test_on_docker_host",
+#! ##@   "docker_host_pool",
+#! ##@   "nodejs_deps_resource",
+#! ##@   "deps_version_resource",
+#! ##@   "repo_resource",
+#! ##@   "pipeline_tasks_resource",
+#! ##@   "slack_resource",
+#! ##@   "gcr_resource_type",
+#! ##@   "slack_resource_type")
+#@ )
 
 #@ def flash_image():
-#@   return data.values.docker_registry + "/flash-dev"
+#@   return data.values.docker_registry + "/flash-app"
+#@ end
+
+#@ def migrate_galoy_image():
+#@   return data.values.docker_registry + "/galoy-app-migrate"
+#@ end
+
+#@ def websocket_galoy_image():
+#@   return data.values.docker_registry + "/galoy-app-websocket"
+#@ end
+
+#@ def release_pipeline_image():
+#@   return data.values.docker_registry + "/release-pipeline"
+#@ end
+
+#@ def release_task_image_config():
+type: registry-image
+source:
+  #! username: #@ data.values.docker_registry_user
+  #! password: #@ data.values.docker_registry_password
+  repository: us.gcr.io/galoy-org/release-pipeline #! #@ release_pipeline_image()
 #@ end
 
 resources:
-  ### -  #@ repo_resource(True)
-  - name: repo # CHANGED FROM 'repo-out'
+  #! -  #@ repo_resource(True)
+  - name: repo #! CHANGED FROM 'repo-out'
     type: git
     source:
       fetch_tags: true
-      uri: https://github.com/lnflash/flash.git # git@github.com:lnflash/flash.git #@ data.values.git_uri
-      branch: main #@ data.values.git_branch
-      ### private_key: #@ data.values.github_private_key
-      ###  -  #@ pipeline_tasks_resource()
+      uri: #@ data.values.git_uri 
+      branch: #@ data.values.git_branch
+      username: #@ data.values.gh_user
+      password: #@ data.values.gh_password
 
-        ###-  #@ nodejs_deps_resource(True)
-        ###-  #@ deps_version_resource()
-        ###-  #@ bundled_deps_resource()
-        ###### -  #@ slack_resource()
+  - name: charts-repo
+    type: git
+    source:
+      uri: #@ data.values.git_charts_uri
+      branch: #@ data.values.git_charts_branch
+      username: #@ data.values.gh_user
+      password: #@ data.values.gh_password
 
-  ### Define Docker registry
+  - name: charts-repo-bot-branch
+    type: git
+    source:
+      uri: #@ data.values.git_charts_uri
+      branch: #@ data.values.git_charts_bot_branch
+      username: #@ data.values.gh_user
+      password: #@ data.values.gh_password 
+      #! skip_ssl_verification: true #! tried and failed
+
+ #!       ###-  #@ nodejs_deps_resource(True)
+  #!      ###-  #@ deps_version_resource()
+   #!     ###-  #@ bundled_deps_resource()
+    #!    ###### -  #@ slack_resource()
+
+  #! Define Docker registry
   - name: edge-image
     type: registry-image
     source:
       tag: edge
-      username: ((docker-creds.username)) #@ data.values.docker_registry_user
-      password: ((docker-creds.password)) #@ data.values.docker_registry_password
-      repository: docker.io/brh28/flash-dev ## #@ flash_image()
+      username: #@ data.values.docker_registry_user
+      password: #@ data.values.docker_registry_password
+      repository: #@ flash_image()
 
+  #! COPIED FROM #@ pipeline_tasks_resource()
   - name: pipeline-tasks
     type: git
     source:
       paths: [ci/vendor/*, ci/tasks/*, ci/config/*, Makefile]
-      uri: https://github.com/lnflash/flash.git # git@github.com:lnflash/flash.git #@ data.values.git_uri
-      branch: main #@ data.values.git_branch
-      # private_key: #@ data.values.github_private_key
+      uri: #@ data.values.git_uri
+      branch: #@ data.values.git_branch
+      username: #@ data.values.gh_user
+      password: #@ data.values.gh_password 
+
+  - name: version
+    type: semver
+    source:
+      initial_version: 0.0.0
+      driver: gcs
+      bucket: flash-concourse
+      key: app-version
+      json_key: #@ data.values.gcs_creds 
+
+  - name: versioned-image
+    type: registry-image
+    source:
+      username: #@ data.values.docker_registry_user
+      password: #@ data.values.docker_registry_password
+      repository: #@ flash_image()
+
+  - name: versioned-migrate-image
+    type: registry-image
+    source:
+      username: #@ data.values.docker_registry_user
+      password: #@ data.values.docker_registry_password
+      repository: #@ migrate_galoy_image()
+
+  - name: websocket-edge-image
+    type: registry-image
+    source:
+      tag: edge
+      username: #@ data.values.docker_registry_user
+      password: #@ data.values.docker_registry_password
+      repository: #@ websocket_galoy_image()
+
+  - name: migrate-edge-image
+    type: registry-image
+    source:
+      tag: edge
+      username: #@ data.values.docker_registry_user
+      password: #@ data.values.docker_registry_password
+      repository: #@ migrate_galoy_image()
+
+  - name: gh-release
+    type: github-release
+    source:
+      owner: #@ data.values.gh_org
+      repository: #@ data.values.gh_repository
+      access_token: #@ data.values.github_token
 
 jobs:
+#! - #@ install_yarn_deps()
+#! - #@ nodejs_check_code()
+#! - #@ nodejs_audit()
 - name: build-edge-image
   serial: true
   plan:
-    # - in_parallel:
-    #     - { get: repo, trigger: true }
-    #     - { get: pipeline-tasks }
+    #! - in_parallel:
+    #!     - { get: repo, trigger: true }
+    #!     - { get: pipeline-tasks }
     - get: repo
       trigger: true
+    
+    - get: pipeline-tasks
+    
+    - task: prepare-docker-build
+      config:
+        platform: linux
+        image_resource: #@ nodejs_task_image_config()
+        inputs:
+          - name: pipeline-tasks
+          - name: repo
+        outputs:
+          - name: repo
+        run:
+          path: pipeline-tasks/ci/tasks/prepare-docker-build.sh
+    
+    - task: build
+      privileged: true
+      config:
+        platform: linux
+        image_resource:
+          type: registry-image
+          source:
+            repository: vito/oci-build-task
+        inputs:
+          - name: repo
+        outputs:
+          - name: image
+        params:
+          CONTEXT: repo
+          BUILD_ARGS_FILE: repo/.build-args
+        run:
+          path: build
+    
+    - put: edge-image
+      params:
+        image: image/image.tar
+   
+- name: build-migrate-edge-image
+  serial: true
+  plan:
+    - { get: repo, trigger: true }
+    
     - get: pipeline-tasks
     - task: prepare-docker-build
       config:
         platform: linux
-        # image_resource: #@ nodejs_task_image_config()
-        image_resource: 
+        image_resource: #@ nodejs_task_image_config()
+        inputs:
+          - name: pipeline-tasks
+          - name: repo
+        outputs:
+          - name: repo
+        run:
+          path: pipeline-tasks/ci/tasks/prepare-docker-build.sh
+    
+    - task: build
+      privileged: true
+      config:
+        platform: linux
+        image_resource:
           type: registry-image
           source:
-            # username: ((docker-creds.username))
-            # password: ((docker-creds.password))
-            repository: us.gcr.io/galoy-org/nodejs-concourse # #@ nodejs_concourse_image()
+            repository: vito/oci-build-task
+        inputs:
+          - name: repo
+        outputs:
+          - name: image
+        params:
+          CONTEXT: repo
+          BUILD_ARGS_FILE: repo/.build-args
+          DOCKERFILE: "repo/Dockerfile-migrate"
+        run:
+          path: build  
+    - put: migrate-edge-image
+      params:
+        image: image/image.tar
+
+- name: build-websocket-edge-image
+  serial: true
+  plan:
+    - { get: repo, trigger: true }
+    - get: pipeline-tasks
+    - task: prepare-docker-build
+      config:
+        platform: linux
+        image_resource: #@ nodejs_task_image_config()
         inputs:
           - name: pipeline-tasks
           - name: repo
@@ -79,8 +268,146 @@ jobs:
         params:
           CONTEXT: repo
           BUILD_ARGS_FILE: repo/.build-args
+          DOCKERFILE: "repo/Dockerfile-websocket"
         run:
           path: build
-    - put: edge-image
+    - put: websocket-edge-image
       params:
         image: image/image.tar
+
+- name: release
+  plan:
+    - in_parallel:
+      - get: repo
+        trigger: true
+        passed:
+        #! - check-code
+        #! - audit
+        #! - test-unit
+        #! - integration-tests
+        #! - bats-tests
+        #! - build-debug-edge-image
+        - build-migrate-edge-image
+        - build-edge-image
+        - build-websocket-edge-image
+      - get: pipeline-tasks
+      - get: edge-image
+        passed: [build-edge-image]
+        params:
+          format: oci
+      - get: migrate-edge-image
+        passed: [build-migrate-edge-image]
+        params:
+          format: oci
+      - get: websocket-edge-image
+        passed: [build-websocket-edge-image]
+        params:
+          format: oci
+      - get: version
+  
+    - task: prep-release
+      config:
+        platform: linux
+        image_resource: #@ release_task_image_config()
+        inputs:
+          - name: repo
+          - name: edge-image
+          - name: pipeline-tasks
+          - name: version
+        outputs:
+          - name: version
+          - name: artifacts
+        params:
+          CHART: galoy #! what's this used for?
+        run:
+          path: pipeline-tasks/ci/tasks/vendor/prep-release-src.sh
+  
+    - in_parallel:
+      - put: versioned-image
+        params:
+          image: edge-image/image.tar
+          additional_tags: artifacts/gh-release-tag
+      - put: versioned-migrate-image
+        params:
+          image: migrate-edge-image/image.tar
+          additional_tags: artifacts/gh-release-tag
+      - put: gh-release
+        params:
+          name: artifacts/gh-release-name
+          tag: artifacts/gh-release-tag
+          body: artifacts/gh-release-notes.md
+      - put: version
+        params:
+          file: version/version
+    #!on_failure: #@ slack_failure_notification()
+
+- name: bump-image-in-chart
+  plan:
+    - in_parallel:
+        - get: edge-image
+          passed: [release]
+          params: { skip_download: true }
+        - get: migrate-edge-image
+          passed: [release]
+          params: { skip_download: true }
+        - get: websocket-edge-image
+          passed: [release]
+          params: { skip_download: true }
+        - get: repo
+          trigger: true
+          passed:
+            - release
+        - get: version
+          passed: [release]
+        - get: charts-repo
+          params: { skip_download: true }
+        - get: pipeline-tasks
+    - task: bump-image-digest-in-values
+      config:
+        platform: linux
+        image_resource: #@ nodejs_task_image_config()
+        inputs:
+          - name: repo
+          - name: edge-image
+          - name: migrate-edge-image
+          - name: websocket-edge-image
+          - name: pipeline-tasks
+          - name: charts-repo
+          - name: version
+        outputs:
+          - name: charts-repo
+        params:
+          BRANCH: #@ data.values.git_charts_branch
+        run:
+          path: pipeline-tasks/ci/tasks/bump-image-digest.sh 
+    - put: charts-repo-bot-branch
+      params:
+        repository: charts-repo
+        force: true
+    - task: open-charts-pr
+      config:
+        platform: linux
+        image_resource: #@ release_task_image_config()
+        inputs:
+          - name: repo
+          - name: pipeline-tasks
+          - name: edge-image
+          - name: migrate-edge-image
+          - name: websocket-edge-image
+          - name: charts-repo
+        params:
+          GH_ORG: #@ data.values.gh_org
+          AUTH_TOKEN: #@ data.values.github_token
+          BRANCH: #@ data.values.git_charts_branch
+          BOT_BRANCH: #@ data.values.git_charts_bot_branch
+
+          #! INPUTS FOR GALOY'S DOWNSTREAM SCRIPT
+          #! GH_APP_ID: #@ data.values.github_app_id
+          #! GH_APP_PRIVATE_KEY: #@ data.values.github_app_private_key
+          #! APP: #@ app
+          #! BRANCH: #@ data.values.git_charts_branch
+          #! BOT_BRANCH: #@ "bump-" + app + "-app"
+          #! YAML_PATH: #@ app_lookup[app]["YAML_PATH"]
+          #! CHART: #@ app_lookup[app]["CHART"]
+        run:
+          path: pipeline-tasks/ci/tasks/open-charts-pr.sh
