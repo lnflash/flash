@@ -92,6 +92,16 @@ export default () => {
             .catch(e => new IbexApiError(e.status, e.data))
     }
 
+    const decodeLnurl = async (lnurl: types.DecodeLnurlMetadataParam): Promise<types.DecodeLnurlResponse200 | IbexAuthenticationError | IbexApiError> => {
+        return withAuth(() => IbexSDK.decodeLnurl(lnurl))
+            .catch(e => new IbexApiError(e.status, e.data))
+    }
+    
+    const payToLnurl = async (body: types.PayToALnurlPayBodyParam): Promise<types.PayToALnurlPayResponse201 | IbexAuthenticationError | IbexApiError> => {
+        return withAuth(() => IbexSDK.payToALnurlPay(body))
+            .catch(e => new IbexApiError(e.status, e.data))
+    }
+
     return wrapAsyncFunctionsToRunInSpan({
         namespace: "services.ibex.client",
         fns: { 
@@ -106,7 +116,9 @@ export default () => {
             payInvoiceV2, 
             sendToAddressV2, 
             estimateFeeV2, 
-            createLnurlPay 
+            createLnurlPay,
+            decodeLnurl,
+            payToLnurl
         },
     })
 }
