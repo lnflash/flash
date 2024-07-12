@@ -64,3 +64,11 @@ export const getUsernameFromWalletId = async (
   if (account instanceof Error) return account
   return account.username
 }
+
+export const getLnurlpFromWalletId = async (
+  walletId: WalletId,
+): Promise<Lnurl | ApplicationError> => {
+  const wallet = await WalletsRepository().findById(walletId)
+  if (wallet instanceof Error) return wallet
+  return wallet.lnurlp
+}

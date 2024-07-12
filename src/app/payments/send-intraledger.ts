@@ -47,6 +47,9 @@ import {
   addContactsAfterSend,
 } from "./helpers"
 
+import { client as Ibex } from "@services/ibex"
+import { UnexpectedResponseError } from "@services/ibex/client/errors"
+
 const dealer = DealerPriceService()
 
 const intraledgerPaymentSendWalletId = async ({
@@ -71,68 +74,38 @@ const intraledgerPaymentSendWalletId = async ({
     kratosUserId: recipientUserId,
   } = recipientAccount
 
-  const paymentBuilder = LightningPaymentFlowBuilder({
-    localNodeIds: [],
-    skipProbe: getValuesToSkipProbe(),
-  })
-  const builderWithInvoice = paymentBuilder.withoutInvoice({
-    uncheckedAmount,
-    description: memo || "",
-  })
 
-  const builderWithSenderWallet = builderWithInvoice.withSenderWallet(senderWallet)
+  const invoiceResp = await Ibex().addInvoice({ 
+    accountId: recipientWalletId,
+    memo: memo || undefined,
+    amount: uncheckedAmount / 100, // convert cents to dollars for Ibex api
+  })
+  if (invoiceResp instanceof Error) return invoiceResp
+  if (invoiceResp.invoice?.bolt11 === undefined) return new UnexpectedResponseError("Bolt11 field not found.")
 
-  const wallets = await WalletsRepository().listByAccountId(recipientAccountId)
-  if (wallets instanceof Error) return wallets
-  const recipientArgsForBuilder = {
-    recipientWalletDescriptor: {
-      id: recipientWalletId,
-      currency: recipientWalletCurrency,
-      accountId: recipientAccountId,
-    },
-    recipientWalletDescriptorsForAccount: wallets,
-    username: recipientUsername,
-    userId: recipientUserId,
-    pubkey: undefined,
-    usdPaymentAmount: undefined,
+  const payResp = await Ibex().payInvoiceV2({
+    accountId: uncheckedSenderWalletId,
+    bolt11: invoiceResp.invoice.bolt11,
+  })
+  if (payResp instanceof Error) return payResp
+
+  // https://docs.ibexmercado.com/reference/flow-1#payment-status
+  let paymentSendStatus: PaymentSendStatus 
+  switch(payResp.status) {
+    case 1:
+      paymentSendStatus = PaymentSendStatus.Pending 
+      break;
+    case 2:
+      paymentSendStatus = PaymentSendStatus.Success 
+      break;
+    case 3:
+      paymentSendStatus = PaymentSendStatus.Failure
+      break;
+    case 0: 
+      return new UnexpectedResponseError("Invoice already paid")
+    default:
+      return new UnexpectedResponseError(`StatusId (${payResp.status}) not in documenation`)
   }
-
-  const builderAfterRecipientStep = builderWithSenderWallet.withRecipientWallet(
-    recipientArgsForBuilder,
-  )
-
-  const builderWithConversion = builderAfterRecipientStep.withConversion({
-    mid: { usdFromBtc: usdFromBtcMidPriceFn, btcFromUsd: btcFromUsdMidPriceFn },
-    hedgeBuyUsd: {
-      usdFromBtc: dealer.getCentsFromSatsForImmediateBuy,
-      btcFromUsd: dealer.getSatsFromCentsForImmediateBuy,
-    },
-    hedgeSellUsd: {
-      usdFromBtc: dealer.getCentsFromSatsForImmediateSell,
-      btcFromUsd: dealer.getSatsFromCentsForImmediateSell,
-    },
-  })
-  if (builderWithConversion instanceof Error) return builderWithConversion
-
-  const paymentFlow = await builderWithConversion.withoutRoute()
-  if (paymentFlow instanceof Error) return paymentFlow
-
-  addAttributesToCurrentSpan({
-    "payment.intraLedger.inputAmount": paymentFlow.inputAmount.toString(),
-    "payment.intraLedger.hash": paymentFlow.intraLedgerHash,
-    "payment.intraLedger.description": memo || "",
-    "payment.finalRecipient": JSON.stringify(paymentFlow.recipientWalletDescriptor()),
-  })
-
-  const paymentSendStatus = await executePaymentViaIntraledger({
-    paymentFlow,
-    senderAccount,
-    senderWallet,
-    recipientAccount,
-    recipientWallet,
-    memo,
-  })
-  if (paymentSendStatus instanceof Error) return paymentSendStatus
 
   if (senderAccount.id !== recipientAccount.id) {
     const addContactResult = await addContactsAfterSend({
