@@ -13,7 +13,7 @@ const start = () => {
     app.get("/health", (_: Request, resp: Response) => resp.send("Ibex server is running"))
     app.use(onReceive.router)
     app.use(onPay.router)
-    app.listen(IBEX_LISTENER_PORT, () => logger.info(`Listening for ibex events on port ${IBEX_LISTENER_PORT}`))
+    app.listen(IBEX_LISTENER_PORT, () => logger.info(`Listening for ibex events on port ${IBEX_LISTENER_PORT}. External Uri set to ${IBEX_EXTERNAL_URI}`))
 }
 
 export default {
