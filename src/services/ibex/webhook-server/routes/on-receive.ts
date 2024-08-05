@@ -4,13 +4,7 @@ import { NotificationsService } from "@services/notifications"
 import { authenticate, logRequest } from "../middleware"
 import { AccountsRepository, UsersRepository, WalletsRepository } from "@services/mongoose"
 import { RepositoryError } from "@domain/errors"
-// import {
-//   displayAmountFromWalletAmount,
-//   priceAmountFromDisplayPriceRatio,
-// } from ""
-import { from } from "form-data"
-import { getCurrentPriceAsDisplayPriceRatio } from "@app/prices"
-import { DisplayAmountsConverter } from "@domain/fiat"
+import { displayAmountFromWalletAmount } from "@domain/fiat"
 
 const path = "/invoice/receive"
 
@@ -21,7 +15,6 @@ router.post(
     logRequest, 
     async (req: Request, resp: Response) => {
         const { transaction } = req.body
-        const paymentAmount = transaction.amount
         const recipientWalletId = transaction.accountId
         
         const receiverWallet = await WalletsRepository().findById(recipientWalletId)
@@ -43,12 +36,13 @@ router.post(
             return resp.sendStatus(500)
         }
 
+        const paymentAmount = { amount: transaction.amount, currency: receiverWallet.currency }
         const nsResp = await NotificationsService().lightningTxReceived({
             recipientAccountId: recipientAccountId,
             recipientWalletId,
-            paymentAmount: req.body.transaction.amount,
-            displayPaymentAmount: undefined, // DisplayAmount<DisplayCurrency>
-            paymentHash: req.body.transaction.invoice.hash,
+            paymentAmount,
+            displayPaymentAmount: displayAmountFromWalletAmount(paymentAmount),
+            paymentHash: transaction.invoice.hash,
             recipientDeviceTokens: recipientUser.deviceTokens,
             recipientNotificationSettings: recipientAccount.notificationSettings,
             recipientLanguage: recipientUser.language,
