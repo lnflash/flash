@@ -68,7 +68,6 @@ export const NotificationsService = (): INotificationsService => {
           amount: paymentAmount,
           displayAmount: displayPaymentAmount,
         })
-
         const result = await pushNotification.sendFilteredNotification({
           deviceTokens: recipientDeviceTokens,
           title,
