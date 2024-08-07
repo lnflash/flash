@@ -64,6 +64,19 @@ $ direnv reload
 (...)
 ```
 
+To test the ibex-webhook, you'll need a web gateway that forwards traffic to your local server (default http://localhost:4008). This can be done with Ngrok. After installing the ngrok cli and creating an account, do the following:
+
+1. Start ngrok tunnel:
+```
+ngrok http http://localhost:4008
+```
+2. Copy the provided URL ("forwarding" field)
+3. Add the URL to your `IBEX_EXTERNAL_URI` environment variable. E.g
+```
+export IBEX_EXTERNAL_URI="https://1911-104-129-24-147.ngrok-free.app"
+``` 
+
+
 ### Install dependencies
 ```
 $ yarn install

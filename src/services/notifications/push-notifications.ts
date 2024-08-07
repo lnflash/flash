@@ -41,20 +41,30 @@ const sendToDevice = async (
     notification: NotificationMessagePayload
   },
 ) => {
+  logger.info({ tokens, ...message })
   try {
     if (!messaging) {
-      baseLogger.info("messaging module not loaded")
+      baseLogger.info("Firebase messaging module not loaded")
       // FIXME: should return an error?
       return true
     }
 
-    const response = await messaging.sendToDevice(tokens, message)
-    logger.info({ response, tokens, message }, "notification was sent successfully")
+
+    // data?: {  COMES FROM MessagingPayload 
+    //     [key: string]: string;
+    // };
+    // notification?: Notification;
+    // android?: AndroidConfig;
+    // webpush?: WebpushConfig;
+    // apns?: ApnsConfig;
+    // fcmOptions?: FcmOptions;
+    const response = await messaging.sendEachForMulticast({ tokens, ...message }, false)
+    logger.info({ response })
 
     const invalidTokens: DeviceToken[] = []
-    response.results.forEach((item, index: number) => {
+    response.responses.forEach((item, index: number) => {
       if (
-        response.results.length === tokens.length &&
+        response.responses.length === tokens.length &&
         item?.error?.code === "messaging/registration-token-not-registered"
       ) {
         invalidTokens.push(tokens[index])
@@ -70,7 +80,6 @@ const sendToDevice = async (
     addAttributesToCurrentSpan({
       failureCount: response.failureCount,
       successCount: response.successCount,
-      canonicalRegistrationTokenCount: response.canonicalRegistrationTokenCount,
     })
 
     if (invalidTokens.length > 0) {

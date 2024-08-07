@@ -5,6 +5,7 @@ import { authenticate, logRequest } from "../middleware"
 import { AccountsRepository, UsersRepository, WalletsRepository } from "@services/mongoose"
 import { RepositoryError } from "@domain/errors"
 import { displayAmountFromWalletAmount } from "@domain/fiat"
+import { WalletCurrency } from "@domain/shared"
 
 const path = "/invoice/receive"
 
@@ -36,7 +37,10 @@ router.post(
             return resp.sendStatus(500)
         }
 
-        const paymentAmount = { amount: transaction.amount, currency: receiverWallet.currency }
+        let amount
+        if (receiverWallet.currency === WalletCurrency.Usd) amount = (transaction.amount * 100) as any
+        const paymentAmount = { amount, currency: receiverWallet.currency }
+
         const nsResp = await NotificationsService().lightningTxReceived({
             recipientAccountId: recipientAccountId,
             recipientWalletId,
