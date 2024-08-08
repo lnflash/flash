@@ -54,7 +54,10 @@ export const WalletsRepository = (): IWalletsRepository => {
  
       let lnurlp: string | undefined
       if (ibexAccountId !== undefined) {
-        const lnurlResp = await Ibex().createLnurlPay({ accountId: ibexAccountId })
+        const lnurlResp = await Ibex().createLnurlPay({ 
+          accountId: ibexAccountId,
+          currencyId,
+        })
 
         if (lnurlResp instanceof IbexClientError) {
           recordExceptionInCurrentSpan({

@@ -32,18 +32,23 @@ export default () => {
     }
 
     const generateBitcoinAddress = async (body: types.GenerateBitcoinAddressBodyParam): Promise<types.GenerateBitcoinAddressResponse201 | IbexAuthenticationError | IbexApiError> => {
-        addAttributesToCurrentSpan({ "request.params": JSON.stringify(body) })
-        return withAuth(() => IbexSDK.generateBitcoinAddress(body))
+        const bodyWithHooks = { 
+            ...body,
+            webhookUrl: WebhookServer.endpoints.onReceive.onchain,
+            webhookSecret: WebhookServer.secret, 
+        } as types.GenerateBitcoinAddressBodyParam
+        addAttributesToCurrentSpan({ "request.params": JSON.stringify(bodyWithHooks) })
+        return withAuth(() => IbexSDK.generateBitcoinAddress(bodyWithHooks))
             .catch(e => new IbexApiError(e.status, e.data))
     }
 
     const addInvoice = async (body: types.AddInvoiceBodyParam): Promise<types.AddInvoiceResponse201 | IbexAuthenticationError | IbexApiError> => {
         const bodyWithHooks = { 
             ...body,
-            webhookUrl: WebhookServer.endpoints.onReceive,
+            webhookUrl: WebhookServer.endpoints.onReceive.invoice,
             webhookSecret: WebhookServer.secret, 
         } as types.AddInvoiceBodyParam
-        addAttributesToCurrentSpan({ "request.params": JSON.stringify(body) })
+        addAttributesToCurrentSpan({ "request.params": JSON.stringify(bodyWithHooks) })
         return withAuth(() => IbexSDK.addInvoice(bodyWithHooks))
             .catch(e => new IbexApiError(e.status, e.data))
     }
@@ -65,17 +70,22 @@ export default () => {
     const payInvoiceV2 = async (body: types.PayInvoiceV2BodyParam): Promise<types.PayInvoiceV2Response200 | IbexAuthenticationError | IbexApiError> => {
         const bodyWithHooks = { 
             ...body,
-            webhookUrl: WebhookServer.endpoints.onPay,
+            webhookUrl: WebhookServer.endpoints.onPay.invoice,
             webhookSecret: WebhookServer.secret, 
         } as types.PayInvoiceV2BodyParam
-        addAttributesToCurrentSpan({ "request.params": JSON.stringify(body) })
+        addAttributesToCurrentSpan({ "request.params": JSON.stringify(bodyWithHooks) })
         return withAuth(() => IbexSDK.payInvoiceV2(bodyWithHooks))
             .catch(e => new IbexApiError(e.status, e.data))
     }
 
     const sendToAddressV2 = async (body: types.SendToAddressCopyBodyParam): Promise<types.SendToAddressCopyResponse200 | IbexAuthenticationError | IbexApiError> => {
-        addAttributesToCurrentSpan({ "request.params": JSON.stringify(body) })
-        return withAuth(() => IbexSDK.sendToAddressCopy(body))
+        const bodyWithHooks = { 
+            ...body,
+            webhookUrl: WebhookServer.endpoints.onPay.onchain,
+            webhookSecret: WebhookServer.secret, 
+        } as types.SendToAddressCopyBodyParam
+        addAttributesToCurrentSpan({ "request.params": JSON.stringify(bodyWithHooks) })
+        return withAuth(() => IbexSDK.sendToAddressCopy(bodyWithHooks))
             .catch(e => new IbexApiError(e.status, e.data))
     }
 
@@ -87,8 +97,13 @@ export default () => {
     }
     
     const createLnurlPay = async (body: types.CreateLnurlPayBodyParam): Promise<types.CreateLnurlPayResponse201 | IbexAuthenticationError | IbexApiError> => {
-        addAttributesToCurrentSpan({ "request.params": JSON.stringify(body) })
-        return withAuth(() => IbexSDK.createLnurlPay(body))
+        const bodyWithHooks = { 
+            ...body,
+            webhookUrl: WebhookServer.endpoints.onReceive.lnurl,
+            webhookSecret: WebhookServer.secret, 
+        } as types.CreateLnurlPayBodyParam
+        addAttributesToCurrentSpan({ "request.params": JSON.stringify(bodyWithHooks) })
+        return withAuth(() => IbexSDK.createLnurlPay(bodyWithHooks))
             .catch(e => new IbexApiError(e.status, e.data))
     }
 
@@ -98,7 +113,12 @@ export default () => {
     }
     
     const payToLnurl = async (body: types.PayToALnurlPayBodyParam): Promise<types.PayToALnurlPayResponse201 | IbexAuthenticationError | IbexApiError> => {
-        return withAuth(() => IbexSDK.payToALnurlPay(body))
+        const bodyWithHooks = { 
+            ...body,
+            webhookUrl: WebhookServer.endpoints.onPay.lnurl,
+            webhookSecret: WebhookServer.secret, 
+        } as types.PayToALnurlPayBodyParam
+        return withAuth(() => IbexSDK.payToALnurlPay(bodyWithHooks))
             .catch(e => new IbexApiError(e.status, e.data))
     }
 
