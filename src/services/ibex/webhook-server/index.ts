@@ -19,8 +19,16 @@ const start = () => {
 export default {
   start, 
   endpoints: {
-    onReceive: IBEX_EXTERNAL_URI + onReceive.path,
-    onPay: IBEX_EXTERNAL_URI + onPay.path,
+    onReceive: {
+      invoice: IBEX_EXTERNAL_URI + onReceive.paths.invoice,
+      lnurl: IBEX_EXTERNAL_URI + onReceive.paths.lnurl,
+      onchain: IBEX_EXTERNAL_URI + onReceive.paths.onchain,
+    },
+    onPay: {
+      invoice: IBEX_EXTERNAL_URI + onPay.paths.invoice,
+      lnurl: IBEX_EXTERNAL_URI + onPay.paths.lnurl,
+      onchain: IBEX_EXTERNAL_URI + onPay.paths.onchain,
+    }
   },
   secret: IBEX_WEBHOOK_SECRET,
 }
