@@ -4,6 +4,11 @@ import { IbexAuthenticationError, IbexApiError } from "./errors"
 import { withAuth } from "./authentication";
 import WebhookServer from "../webhook-server"
 import { addAttributesToCurrentSpan, wrapAsyncFunctionsToRunInSpan } from "@services/tracing"
+import { IBEX_URL } from "@config";
+import { baseLogger } from "@services/logger";
+
+IbexSDK.server(IBEX_URL)
+baseLogger.info(`IbexSDK pointed to ${IBEX_URL}`);
 
 // This is a wrapper around the Ibex api that adds tracing & authentication
 export default () => {
