@@ -6,7 +6,8 @@
   },
   "servers": [
     {
-      "url": "https://api-sandbox.poweredbyibex.io"
+      "url": "https://api-sandbox.poweredbyibex.io",
+      "description": "Sandbox environment"
     }
   ],
   "components": {
