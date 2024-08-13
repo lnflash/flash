@@ -8,7 +8,7 @@ class SDK {
   spec: Oas;
   core: APICore;
 
-  constructor(url) {
+  constructor(url: string) {
     this.spec = Oas.init({ ...definition, servers: [{
       url
     }] });
