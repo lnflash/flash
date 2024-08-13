@@ -36,7 +36,7 @@ import {
 } from "@graphql/error"
 import { baseLogger } from "@services/logger"
 
-const assertUnreachable = (x: never): never => {
+const assertUnreachable = (x: any): never => {
   throw new Error(`This should never compile with ${x}`)
 }
 
@@ -645,10 +645,8 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "InvalidCarrierForPhoneMetadataError":
     case "InvalidCarrierTypeForPhoneMetadataError":
     case "InvalidCountryCodeForPhoneMetadataError":
-    // FLASH ERRORS
     case "IbexClientError":
     case "IbexAuthenticationError":
-    case "NotImplementedError":
     case "UnexpectedResponseError":
     case "IbexApiError":
       message = `Unexpected error occurred, please try again or contact support if it persists (code: ${

@@ -38,6 +38,8 @@ type ContactObjectForUser = {
   transactionsCount: number
 }
 
+type CoordinateRecord = [longitude: number, latitude: number]
+
 type CoordinateObjectForUser = {
   latitude: number
   longitude: number
@@ -92,6 +94,32 @@ interface AccountRecord {
 
   // mongoose in-built functions
   save: () => Promise<AccountRecord>
+}
+
+interface LocationRecord {
+  type: "Point"
+  coordinates: CoordinateRecord
+}
+
+interface MerchantRecord {
+  id: string
+  username: string
+  title: string
+  createdAt: Date
+  location: LocationRecord
+  validated: boolean
+}
+
+interface QuizCompletedRecord {
+  accountId: string
+  quizId: string
+  createdAt: Date
+}
+
+interface SupportChatRecord {
+  accountId: string
+  supportChatId: string
+  createdAt: Date
 }
 
 interface AccountIpsRecord {

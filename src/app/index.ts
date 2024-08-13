@@ -12,6 +12,7 @@ import * as TransactionsMod from "./transactions"
 import * as UsersMod from "./users"
 import * as WalletsMod from "./wallets"
 import * as PaymentsMod from "./payments"
+import * as MerchantsMod from "./merchants"
 import * as SwapMod from "./swap"
 
 const allFunctions = {
@@ -27,6 +28,7 @@ const allFunctions = {
   Users: { ...UsersMod },
   Wallets: { ...WalletsMod },
   Payments: { ...PaymentsMod },
+  Merchants: { ...MerchantsMod },
   Swap: { ...SwapMod },
 } as const
 
@@ -56,5 +58,6 @@ export const {
   Users,
   Wallets,
   Payments,
+  Merchants,
   Swap,
 } = allFunctions
