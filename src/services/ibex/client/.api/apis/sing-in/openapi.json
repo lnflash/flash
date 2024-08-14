@@ -5,10 +5,6 @@
     "version": "1.0"
   },
   "servers": [
-    {
-      "url": "https://api-sandbox.poweredbyibex.io",
-      "description": "Sandbox environment"
-    }
   ],
   "components": {
     "securitySchemes": {

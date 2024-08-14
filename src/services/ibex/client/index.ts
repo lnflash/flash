@@ -37,7 +37,10 @@ const signIn = wrapAsyncToRunInSpan({
         return Ibex.signIn({ email: IBEX_EMAIL, password: IBEX_PASSWORD })
             .then(_ => _.data)
             .then(_ => storeTokens(_))
-            .catch(e => new IbexApiError(e.status, e.data))      
+            .catch(e => {
+                baseLogger.error(e)
+                return new IbexApiError(e.status, e.data)
+            })      
     }
 })    
 
