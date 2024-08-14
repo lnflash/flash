@@ -842,6 +842,40 @@ type MapMarker
 scalar Memo
   @join__type(graph: PUBLIC)
 
+type Merchant
+  @join__type(graph: PUBLIC)
+{
+  """
+  GPS coordinates for the merchant that can be used to place the related business on a map
+  """
+  coordinates: Coordinates!
+  createdAt: Timestamp!
+  id: ID!
+  title: String!
+
+  """The username of the merchant"""
+  username: Username!
+
+  """Whether the merchant has been validated"""
+  validated: Boolean!
+}
+
+input MerchantMapSuggestInput
+  @join__type(graph: PUBLIC)
+{
+  latitude: Float!
+  longitude: Float!
+  title: String!
+  username: Username!
+}
+
+type MerchantPayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error!]!
+  merchant: Merchant
+}
+
 """(Positive) amount of minutes"""
 scalar Minutes
   @join__type(graph: PUBLIC)
@@ -879,9 +913,11 @@ type Mutation
   intraLedgerPaymentSend(input: IntraLedgerPaymentSendInput!): PaymentSendPayload!
 
   """
-  Actions a payment which is internal to the ledger e.g. it does
+  Galoy: Actions a payment which is internal to the ledger e.g. it does
   not use onchain/lightning. Returns payment status (success,
   failed, pending, already_paid).
+  
+  Flash: We do not currently have an internal ledger. Consequently, intraledger payments have been updated to call Ibex instead.
   """
   intraLedgerUsdPaymentSend(input: IntraLedgerUsdPaymentSendInput!): PaymentSendPayload!
 
@@ -953,6 +989,7 @@ type Mutation
   """
   lnUsdInvoiceCreateOnBehalfOfRecipient(input: LnUsdInvoiceCreateOnBehalfOfRecipientInput!): LnInvoicePayload!
   lnUsdInvoiceFeeProbe(input: LnUsdInvoiceFeeProbeInput!): SatAmountPayload!
+  merchantMapSuggest(input: MerchantMapSuggestInput!): MerchantPayload!
   onChainAddressCreate(input: OnChainAddressCreateInput!): OnChainAddressPayload!
   onChainAddressCurrent(input: OnChainAddressCurrentInput!): OnChainAddressPayload!
   onChainPaymentSend(input: OnChainPaymentSendInput!): PaymentSendPayload!
@@ -1289,7 +1326,7 @@ type Query
   accountDefaultWallet(username: Username!, walletCurrency: WalletCurrency): PublicWallet!
   btcPrice(currency: DisplayCurrency! = "USD"): Price @deprecated(reason: "Deprecated in favor of realtimePrice")
   btcPriceList(range: PriceGraphRange!): [PricePoint]
-  businessMapMarkers: [MapMarker]
+  businessMapMarkers: [MapMarker!]!
   currencyList: [Currency!]!
   globals: Globals
   lnInvoicePaymentStatus(input: LnInvoicePaymentStatusInput!): LnInvoicePaymentStatusPayload!
