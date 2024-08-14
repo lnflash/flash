@@ -11,6 +11,7 @@ import AccountDetailsByUserEmailQuery from "./root/query/account-details-by-emai
 import ListWalletIdsQuery from "./root/query/all-walletids"
 import WalletQuery from "./root/query/wallet"
 import AccountDetailsByAccountId from "./root/query/account-details-by-account-id"
+import MerchantsPendingApprovalQuery from "./root/query/merchants-pending-approval-listing"
 
 export const queryFields = {
   unauthed: {},
@@ -26,6 +27,7 @@ export const queryFields = {
     lightningPayment: LightningPaymentQuery,
     listWalletIds: ListWalletIdsQuery,
     wallet: WalletQuery,
+    merchantsPendingApproval: MerchantsPendingApprovalQuery,
   },
 }
 
