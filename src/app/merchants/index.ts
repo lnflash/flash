@@ -8,15 +8,21 @@ export * from "./approve-merchant-map"
 
 const merchants = MerchantsRepository()
 
-export const getMerchantsMapMarkers = async () => {
+export const getMerchantsMapMarkers = async (): Promise<
+  BusinessMapMarker[] | RepositoryError
+> => {
   return merchants.listForMap()
 }
 
-export const getMerchantsPendingApproval = async () => {
+export const getMerchantsPendingApproval = async (): Promise<
+  BusinessMapMarker[] | RepositoryError
+> => {
   return merchants.listPendingApproval()
 }
 
-export const getMerchantsByUsername = async (username: string) => {
+export const getMerchantsByUsername = async (
+  username: string,
+): Promise<BusinessMapMarker[] | ApplicationError> => {
   const usernameValidated = checkedToUsername(username)
   if (usernameValidated instanceof Error) {
     return usernameValidated

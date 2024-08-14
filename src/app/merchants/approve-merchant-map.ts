@@ -5,9 +5,10 @@ export const approveMerchantById = async (
 ): Promise<BusinessMapMarker | ApplicationError> => {
   const merchantsRepo = MerchantsRepository()
 
-  const merchant = await merchantsRepo.findById(id)
-  if (merchant instanceof Error) return merchant
+  const updatedMerchant = await merchantsRepo.findOneAndUpdate({
+    id,
+    updates: { validated: true },
+  })
 
-  merchant.validated = true
-  return merchantsRepo.update(merchant)
+  return updatedMerchant
 }

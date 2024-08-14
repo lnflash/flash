@@ -25,8 +25,6 @@ export const deleteMerchantByUsername = async ({
   const merchants = await merchantsRepo.findByUsername(usernameChecked)
   if (merchants instanceof Error) return merchants
 
-  if (merchants.length === 0) return true
-
   for (const merchant of merchants) {
     const result = await merchantsRepo.remove(merchant.id)
     if (result instanceof Error) return result

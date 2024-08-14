@@ -24,6 +24,15 @@ interface IMerchantRepository {
     username: Username
     validated: boolean
   }): Promise<BusinessMapMarker | RepositoryError>
+  findOneAndUpdate(args: {
+    id: MerchantId
+    updates: Partial<{
+      coordinates: Coordinates
+      title: BusinessMapTitle
+      username: Username
+      validated: boolean
+    }>
+  }): Promise<BusinessMapMarker | RepositoryError>
   remove(id: MerchantId): Promise<void | RepositoryError>
 }
 
@@ -126,6 +135,33 @@ export const MerchantsRepository = (): IMerchantRepository => {
     return translateToMerchant(result)
   }
 
+  const findOneAndUpdate = async ({
+    id,
+    updates,
+  }: {
+    id: MerchantId
+    updates: Partial<{
+      coordinates: Coordinates
+      title: BusinessMapTitle
+      username: Username
+      validated: boolean
+    }>
+  }): Promise<BusinessMapMarker | RepositoryError> => {
+    try {
+      const result = await Merchant.findOneAndUpdate(
+        { id },
+        { $set: updates },
+        { new: true },
+      )
+      if (!result) {
+        return new CouldNotFindMerchantFromIdError(id)
+      }
+      return translateToMerchant(result)
+    } catch (err) {
+      return parseRepositoryError(err)
+    }
+  }
+
   const remove = async (id: MerchantId): Promise<void | RepositoryError> => {
     try {
       const result = await Merchant.deleteOne({ id })
@@ -161,6 +197,7 @@ export const MerchantsRepository = (): IMerchantRepository => {
     findByUsername,
     create,
     update,
+    findOneAndUpdate,
     remove,
   }
 }
