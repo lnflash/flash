@@ -14,7 +14,9 @@ import { normalizePaymentAmount } from "../../../shared/root/mutation"
 
 // FLASH FORK: import ibex dependencies
 import { client as Ibex } from "@services/ibex"
-import { IbexClientError } from "@services/ibex/client/errors"
+import { IbexApiError, IbexAuthenticationError, IbexClientError, UnexpectedResponseError } from "@services/ibex/client/errors"
+import { GetFeeEstimationResponse200 } from "@services/ibex/client/.api/apis/sing-in/types"
+import { WalletCurrency } from "@domain/shared"
 // import { IbexRoutes } from "../../../../services/ibex/Routes"
 // import { requestIBexPlugin } from "../../../../services/ibex/IbexHelper"
 
@@ -65,47 +67,19 @@ const LnUsdInvoiceFeeProbeMutation = GT.Field<
     //     uncheckedPaymentRequest: paymentRequest,
     //   })
 
-    const resp: any | IbexClientError = await Ibex().getFeeEstimation({
-      // walletId, // we are not checking internal payment flow
+    const resp: any = await Ibex().getFeeEstimation({
       bolt11: paymentRequest,
+      currencyId: "3", 
     })
-
-    const error: Error | null = resp instanceof IbexClientError 
-      ? resp
-      : null
-
-    const feeSatAmount: PaymentAmount<WalletCurrency> = (!(resp instanceof IbexClientError) && resp.amount) 
-      ? {
-        amount: BigInt(Math.round(resp.amount / 1000)),
-        currency: "BTC", // USD?????
-      }
-      : {
-        amount: BigInt(0),
-        currency: "BTC",
-      }
-
-    if (feeSatAmount !== null && error instanceof Error) {
-      return {
-        errors: [mapAndParseErrorForGqlResponse(error)],
-        ...normalizePaymentAmount(feeSatAmount),
-      }
-    }
-
-    if (error instanceof Error) {
-      return {
-        errors: [mapAndParseErrorForGqlResponse(error)],
-      }
-    }
-
-    if (feeSatAmount === null) {
-      return {
-        errors: [mapAndParseErrorForGqlResponse(new InvalidFeeProbeStateError())],
-      }
-    }
+    if (resp instanceof IbexClientError) return { errors: [mapAndParseErrorForGqlResponse(resp)] }     
+    if (!resp.amount) return { errors: [mapAndParseErrorForGqlResponse(new UnexpectedResponseError("Amount field not found."))] }
 
     return {
       errors: [],
-      ...normalizePaymentAmount(feeSatAmount),
+      ...normalizePaymentAmount({
+        amount: BigInt(Math.round(resp.amount * 100)),
+        currency: WalletCurrency.Usd, 
+      }),
     }
   },
 })
