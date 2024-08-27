@@ -22,6 +22,7 @@ const Account: GraphQLObjectType<Account> = GT.Object<Account>({
     id: { type: GT.NonNullID },
     uuid: { type: GT.NonNull(GT.String) },
     username: { type: Username },
+    npub: { type: GT.String },
     level: { type: GT.NonNull(AccountLevel) },
     status: { type: GT.NonNull(AccountStatus) },
     title: { type: GT.String },

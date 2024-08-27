@@ -16,6 +16,7 @@ import BusinessMapMarkersQuery from "@graphql/public/root/query/business-map-mar
 import AccountDefaultWalletQuery from "@graphql/public/root/query/account-default-wallet"
 import AccountDefaultWalletIdQuery from "@graphql/public/root/query/account-default-wallet-id"
 import LnInvoicePaymentStatusQuery from "@graphql/public/root/query/ln-invoice-payment-status"
+import IsFlashNpubQuery from "./root/query/is-flash-npub-query"
 
 export const queryFields = {
   unauthed: {
@@ -31,6 +32,7 @@ export const queryFields = {
     realtimePrice: RealtimePriceQuery,
     btcPriceList: BtcPriceListQuery,
     lnInvoicePaymentStatus: LnInvoicePaymentStatusQuery,
+    isFlashNpub: IsFlashNpubQuery,
   },
   authed: {
     atAccountLevel: {

@@ -76,6 +76,52 @@ export const AccountsRepository = (): IAccountsRepository => {
     }
   }
 
+  const findByNpub = async (
+    npub: `npub1${string}`,
+  ): Promise<Account | RepositoryError> => {
+    try {
+      const result = await Account.findOne({ npub: caseInsensitiveRegex(npub) })
+      if (!result) {
+        return new CouldNotFindAccountFromUsernameError(npub)
+      }
+      console.log("inside findByNpub", result)
+      let account = translateToAccount(result)
+      console.log("inside findby npub account", account)
+      return translateToAccount(result)
+    } catch (err) {
+      return parseRepositoryError(err)
+    }
+  }
+
+  // FIXME: could be in a different file? does not return an Account
+  const listBusinessesForMap = async (): Promise<
+    BusinessMapMarker[] | RepositoryError
+  > => {
+    try {
+      const accounts = await Account.find(
+        {
+          title: { $exists: true, $ne: undefined },
+          coordinates: { $exists: true, $ne: undefined },
+        },
+        { username: 1, title: 1, coordinates: 1 },
+      )
+
+      if (!accounts) {
+        return new CouldNotFindAccountError()
+      }
+
+      return accounts.map((account) => ({
+        username: account.username as Username,
+        mapInfo: {
+          title: account.title as BusinessMapTitle,
+          coordinates: account.coordinates as Coordinates,
+        },
+      }))
+    } catch (err) {
+      return parseRepositoryError(err)
+    }
+  }
+
   const update = async ({
     id,
     level,
@@ -165,6 +211,8 @@ export const AccountsRepository = (): IAccountsRepository => {
     findById,
     findByUuid,
     findByUsername,
+    findByNpub,
+    listBusinessesForMap,
     update,
   }
 }
@@ -175,6 +223,7 @@ const translateToAccount = (result: AccountRecord): Account => ({
   createdAt: new Date(result.created_at),
   defaultWalletId: result.defaultWalletId as WalletId,
   username: result.username as Username,
+  npub: result.npub as `npub1${string}`,
   level: result.level as AccountLevel,
   status: result.statusHistory.slice(-1)[0].status,
   statusHistory: (result.statusHistory || []) as AccountStatusHistory,

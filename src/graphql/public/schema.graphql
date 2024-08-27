@@ -1042,6 +1042,7 @@ type Query {
   businessMapMarkers: [MapMarker!]!
   currencyList: [Currency!]!
   globals: Globals
+  isFlashNpub(npub: String): Boolean
   lnInvoicePaymentStatus(input: LnInvoicePaymentStatusInput!): LnInvoicePaymentStatusPayload!
   me: User
   mobileVersions: [MobileVersions]
