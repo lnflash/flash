@@ -12,6 +12,9 @@ import UserUpdatePhoneMutation from "./root/mutation/user-update-phone"
 import BusinessDeleteMapInfoMutation from "./root/mutation/delete-business-map"
 import AdminPushNotificationSendMutation from "./root/mutation/admin-push-notification-send"
 
+import MerchantMapDeleteMutation from "./root/mutation/merchant-map-delete"
+import MerchantMapValidateMutation from "./root/mutation/merchant-map-validate"
+
 export const mutationFields = {
   unauthed: {
     userLogin: UserLoginMutation,
@@ -23,6 +26,8 @@ export const mutationFields = {
     userUpdatePhone: UserUpdatePhoneMutation,
     accountUpdateLevel: AccountUpdateLevelMutation,
     accountUpdateStatus: AccountUpdateStatusMutation,
+    merchantMapValidate: MerchantMapValidateMutation,
+    merchantMapDelete: MerchantMapDeleteMutation,
     businessUpdateMapInfo: BusinessUpdateMapInfoMutation,
     businessDeleteMapInfo: BusinessDeleteMapInfoMutation,
     adminPushNotificationSend: AdminPushNotificationSendMutation,

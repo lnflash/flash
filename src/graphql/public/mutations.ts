@@ -47,6 +47,8 @@ import UserPhoneRegistrationInitiateMutation from "@graphql/public/root/mutation
 import UserPhoneRegistrationValidateMutation from "@graphql/public/root/mutation/user-phone-registration-validate"
 import UserTotpDeleteMutation from "@graphql/public/root/mutation/user-totp-delete"
 
+import MerchantMapSuggestMutation from "@graphql/public/root/mutation/merchant-map-suggest"
+
 import CallbackEndpointAdd from "./root/mutation/callback-endpoint-add"
 import CallbackEndpointDelete from "./root/mutation/callback-endpoint-delete"
 import AccountEnableNotificationCategoryMutation from "./root/mutation/account-enable-notification-category-for-channel"
@@ -66,6 +68,8 @@ export const mutationFields = {
     lnUsdInvoiceCreateOnBehalfOfRecipient: LnUsdInvoiceCreateOnBehalfOfRecipientMutation,
     lnNoAmountInvoiceCreateOnBehalfOfRecipient:
       LnNoAmountInvoiceCreateOnBehalfOfRecipientMutation,
+
+    merchantMapSuggest: MerchantMapSuggestMutation,
   },
 
   authed: {

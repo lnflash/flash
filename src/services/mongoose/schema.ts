@@ -128,7 +128,7 @@ const WalletSchema = new Schema<WalletRecord>({
   },
   lnurlp: {
     type: String,
-  }
+  },
 })
 
 export const Wallet = mongoose.model<WalletRecord>("Wallet", WalletSchema)
@@ -295,6 +295,96 @@ AccountSchema.index({
 })
 
 export const Account = mongoose.model<AccountRecord>("Account", AccountSchema)
+
+const QuizSchema = new Schema<QuizCompletedRecord>({
+  accountId: {
+    type: String,
+    ref: "Account",
+    required: true,
+  },
+  quizId: {
+    type: String,
+    required: true,
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now,
+  },
+})
+
+QuizSchema.index({ accountId: 1, quizId: 1 }, { unique: true })
+
+export const Quiz = mongoose.model<QuizCompletedRecord>("Quiz", QuizSchema)
+
+const SupportChatSchema = new Schema<SupportChatRecord>({
+  accountId: {
+    type: String,
+    ref: "Account",
+    required: true,
+  },
+  supportChatId: {
+    type: String,
+    required: true,
+    unique: true,
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now,
+  },
+})
+
+export const SupportChat = mongoose.model<SupportChatRecord>(
+  "SupportChat",
+  SupportChatSchema,
+)
+
+const pointSchema = new Schema<LocationRecord>({
+  type: {
+    type: String,
+    enum: ["Point"],
+    required: true,
+  },
+  coordinates: {
+    type: [Number],
+    required: true,
+  },
+})
+
+const MerchantSchema = new Schema<MerchantRecord>({
+  id: {
+    type: String,
+    index: true,
+    unique: true,
+    sparse: true,
+    required: true,
+    default: () => crypto.randomUUID(),
+  },
+  username: {
+    type: String,
+    required: true,
+    index: true,
+  },
+  title: {
+    type: String,
+    required: true,
+  },
+  location: {
+    type: pointSchema,
+    index: "2dsphere",
+    required: true,
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now,
+  },
+  validated: {
+    type: Boolean,
+    default: false,
+    index: true,
+  },
+})
+
+export const Merchant = mongoose.model<MerchantRecord>("Merchant", MerchantSchema)
 
 const AccountIpsSchema = new Schema<AccountIpsRecord>({
   ip: {

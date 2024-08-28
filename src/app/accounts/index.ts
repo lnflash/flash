@@ -50,9 +50,9 @@ export const hasPermissions = async (
   return accountId === wallet.accountId
 }
 
-export const getBusinessMapMarkers = async () => {
-  return accounts.listBusinessesForMap()
-}
+// export const getBusinessMapMarkers = async () => {
+//   return accounts.listBusinessesForMap()
+// }
 
 export const getUsernameFromWalletId = async (
   walletId: WalletId,

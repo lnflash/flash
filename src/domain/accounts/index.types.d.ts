@@ -102,21 +102,21 @@ type Quiz = {
   readonly completed: boolean
 }
 
-type BusinessMapTitle = string & { readonly brand: unique symbol }
-type Coordinates = {
-  longitude: number
-  latitude: number
-}
+// type BusinessMapTitle = string & { readonly brand: unique symbol }
+// type Coordinates = {
+//   longitude: number
+//   latitude: number
+// }
 
-type BusinessMapInfo = {
-  title: BusinessMapTitle
-  coordinates: Coordinates
-}
+// type BusinessMapInfo = {
+//   title: BusinessMapTitle
+//   coordinates: Coordinates
+// }
 
-type BusinessMapMarker = {
-  username: Username
-  mapInfo: BusinessMapInfo
-}
+// type BusinessMapMarker = {
+//   username: Username
+//   mapInfo: BusinessMapInfo
+// }
 
 type LimiterCheckInputs = {
   amount: UsdPaymentAmount
@@ -161,7 +161,7 @@ interface IAccountsRepository {
   persistNew(kratosUserId: UserId): Promise<Account | RepositoryError>
 
   findByUsername(username: Username): Promise<Account | RepositoryError>
-  listBusinessesForMap(): Promise<BusinessMapMarker[] | RepositoryError>
+  // listBusinessesForMap(): Promise<BusinessMapMarker[] | RepositoryError>
   update(account: Account): Promise<Account | RepositoryError>
 }
 
