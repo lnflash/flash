@@ -1012,6 +1012,7 @@ type Mutation
   userTotpRegistrationInitiate(input: UserTotpRegistrationInitiateInput!): UserTotpRegistrationInitiatePayload!
   userTotpRegistrationValidate(input: UserTotpRegistrationValidateInput!): UserTotpRegistrationValidatePayload!
   userUpdateLanguage(input: UserUpdateLanguageInput!): UserUpdateLanguagePayload!
+  userUpdateNpub(input: UserUpdateNpubInput!): UserUpdateNpubPayload!
   userUpdateUsername(input: UserUpdateUsernameInput!): UserUpdateUsernamePayload! @deprecated(reason: "Username will be moved to @Handle in Accounts. Also SetUsername naming should be used instead of UpdateUsername to reflect the idempotency of Handles")
 }
 
@@ -1053,6 +1054,10 @@ type NotificationSettings
 {
   push: NotificationChannelSettings!
 }
+
+"""Nostr Identity public key"""
+scalar npub
+  @join__type(graph: PUBLIC)
 
 """An address for an on-chain bitcoin destination"""
 scalar OnChainAddress
@@ -1664,6 +1669,9 @@ type User
   """
   language: Language!
 
+  """Nostr public key"""
+  npub: npub
+
   """Phone number with international calling code."""
   phone: Phone
 
@@ -1886,6 +1894,19 @@ input UserUpdateLanguageInput
 }
 
 type UserUpdateLanguagePayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error!]!
+  user: User
+}
+
+input UserUpdateNpubInput
+  @join__type(graph: PUBLIC)
+{
+  npub: npub!
+}
+
+type UserUpdateNpubPayload
   @join__type(graph: PUBLIC)
 {
   errors: [Error!]!

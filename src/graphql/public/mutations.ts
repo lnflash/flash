@@ -55,6 +55,7 @@ import AccountEnableNotificationCategoryMutation from "./root/mutation/account-e
 import AccountDisableNotificationCategoryMutation from "./root/mutation/account-disable-notification-category-for-channel"
 import AccountEnableNotificationChannelMutation from "./root/mutation/account-enable-notification-channel"
 import AccountDisableNotificationChannelMutation from "./root/mutation/account-disable-notification-channel"
+import UserUpdateNpubMutation from "./root/mutation/user-update-npub"
 
 // TODO: // const fields: { [key: string]: GraphQLFieldConfig<any, GraphQLPublicContext> }
 export const mutationFields = {
@@ -91,6 +92,7 @@ export const mutationFields = {
 
       userUpdateLanguage: UserUpdateLanguageMutation,
       userUpdateUsername: UserUpdateUsernameMutation,
+      userUpdateNpub: UserUpdateNpubMutation,
       userContactUpdateAlias: UserContactUpdateAliasMutation,
       accountUpdateDefaultWalletId: AccountUpdateDefaultWalletIdMutation,
       accountUpdateDisplayCurrency: AccountUpdateDisplayCurrencyMutation,
