@@ -77,7 +77,7 @@ const LnUsdInvoiceFeeProbeMutation = GT.Field<
     return {
       errors: [],
       ...normalizePaymentAmount({
-        amount: BigInt(Math.round(resp.amount * 100)),
+        amount: BigInt(Math.ceil(resp.amount * 100)),
         currency: WalletCurrency.Usd, 
       }),
     }
