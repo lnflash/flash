@@ -140,7 +140,8 @@ export default () => {
     }
 
     // LN fee estimation
-    // GetFeeEstimationResponse200 not defined
+    // GetFeeEstimationResponse200 not defined in sdk
+    // Returns { amount: integer, invoiceAmount: integer }
     const getFeeEstimation = async (metadata: types.GetFeeEstimationMetadataParam): Promise<types.GetFeeEstimationResponse200 | IbexAuthenticationError | IbexApiError> => {
         addAttributesToCurrentSpan({ "request.params": JSON.stringify(metadata) })
         return withAuth(() => Ibex.getFeeEstimation(metadata))

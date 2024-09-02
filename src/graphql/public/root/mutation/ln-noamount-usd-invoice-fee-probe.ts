@@ -61,8 +61,9 @@ const LnNoAmountUsdInvoiceFeeProbeMutation = GT.Field({
         errors: [mapAndParseErrorForGqlResponse(resp)],
       } 
     }
+
     const feeSatAmount: PaymentAmount<WalletCurrency> = {
-      amount: BigInt(Math.round(resp.data["data"]["amount"] * 1000)),
+      amount: BigInt(Math.ceil(resp.amount * 100)),
       currency: "USD",
     }
 
