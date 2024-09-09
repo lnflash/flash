@@ -42,40 +42,42 @@ const Transaction = GT.Object<WalletTransaction>({
     settlementVia: {
       type: GT.NonNull(SettlementVia),
       description: "To which protocol the payment has settled on.",
-      resolve: async (source, _, { loaders }) => {
-        const { settlementVia } = source
 
-        // Filter out source.id as OnChainTxHash
-        if (
-          settlementVia.type === "onchain" &&
-          source.id ===
-            getUuidByString(`${settlementVia.transactionHash}:${settlementVia.vout}`) &&
-          // If not pending, we would like this to error in the next step with invalid source.id
-          source.status === DomainTxStatus.Pending
-        ) {
-          return settlementVia
-        }
+      // resolve: async (source, _, { loaders }) => {
+      //   const { settlementVia } = source
+      //   console.log(`settlementVia = ${JSON.stringify(settlementVia)}`)
+      //   // Filter out source.id as OnChainTxHash
+      //   if (
+      //     settlementVia.type === "onchain" &&
+      //     source.id ===
+      //       getUuidByString(`${settlementVia.transactionHash}:${settlementVia.vout}`) &&
+      //     // If not pending, we would like this to error in the next step with invalid source.id
+      //     source.status === DomainTxStatus.Pending
+      //   ) {
+      //     return settlementVia
+      //   }
 
-        let result: LedgerTransactionMetadata | undefined | RepositoryError
-        // Need try-catch because 'load' function throws any errors returned to it from loader function
-        try {
-          result = await loaders.txnMetadata.load(source.id)
-        } catch (err) {
-          result = parseErrorFromUnknown(err)
-        }
-        if (result instanceof Error || result === undefined) return settlementVia
+      //   let result: LedgerTransactionMetadata | undefined | RepositoryError
+      //   // Need try-catch because 'load' function throws any errors returned to it from loader function
+      //   try {
+      //     result = await loaders.txnMetadata.load(source.id)
+      //   } catch (err) {
+      //     console.log(`result = ${JSON.stringify(result)}`)
+      //     result = parseErrorFromUnknown(err)
+      //   }
+      //   if (result instanceof Error || result === undefined) return settlementVia
 
-        const updatedSettlementVia = { ...settlementVia }
-        for (const key of Object.keys(settlementVia)) {
-          /* eslint @typescript-eslint/ban-ts-comment: "off" */
-          // @ts-ignore-next-line no-implicit-any
-          updatedSettlementVia[key] =
-            // @ts-ignore-next-line no-implicit-any
-            result[key] !== undefined ? result[key] : settlementVia[key]
-        }
+      //   const updatedSettlementVia = { ...settlementVia }
+      //   for (const key of Object.keys(settlementVia)) {
+      //     /* eslint @typescript-eslint/ban-ts-comment: "off" */
+      //     // @ts-ignore-next-line no-implicit-any
+      //     updatedSettlementVia[key] =
+      //       // @ts-ignore-next-line no-implicit-any
+      //       result[key] !== undefined ? result[key] : settlementVia[key]
+      //   }
 
-        return updatedSettlementVia
-      },
+      //   return updatedSettlementVia
+      // },
     },
     settlementAmount: {
       type: GT.NonNull(SignedAmount),

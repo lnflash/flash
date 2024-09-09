@@ -18,7 +18,7 @@ export const getTransactionsForWallets = async ({
 }: {
   wallets: Wallet[]
   paginationArgs?: PaginationArgs
-}): Promise<PartialResult<PaginatedArray<WalletTransaction>>> => {
+}): Promise<PartialResult<PaginatedArray<IbexTransaction>>> => {
   const walletIds = wallets.map((wallet) => wallet.id)
 
   // Flash fork: return history from Ibex
@@ -39,7 +39,7 @@ export const getTransactionsForWallets = async ({
   })
 }
 
-export const toWalletTransactions = (ibexResp: GResponse200): WalletTransaction[] => {
+export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] => {
   return ibexResp.map(trx => {
     const currency = (trx.currencyId === 3 ? "USD" : "BTC") as WalletCurrency // WalletCurrency: "USD" | "BTC",
 
@@ -50,21 +50,47 @@ export const toWalletTransactions = (ibexResp: GResponse200): WalletTransaction[
       walletCurrency: currency
     }
 
-    return {
-      walletId: (trx.accountId || "") as WalletId, // WalletId | undefined
+    const baseTrx: BaseWalletTransaction = {
+      walletId: (trx.accountId || "") as WalletId, 
       settlementAmount: toSettlementAmount(trx.amount, trx.transactionTypeId, currency),
       settlementFee: asCurrency(trx.networkFee, currency),
       settlementCurrency: currency, 
-      settlementDisplayAmount: `${trx.amount}`, // what should this be?
-      settlementDisplayFee: `${trx.networkFee}`, // what should this be?
+      settlementDisplayAmount: `${trx.amount}`, 
+      settlementDisplayFee: `${trx.networkFee}`, 
       settlementDisplayPrice: settlementDisplayPrice,
       createdAt: trx.createdAt ? new Date(trx.createdAt) : new Date(), // should always return
-      id: trx.id || "null", // "LedgerTransactionId", // this can probably be removed
+      id: trx.id || "null", // "LedgerTransactionId" - this is likely unused 
       status: "success" as TxStatus, // assuming Ibex returns on completed
-      memo: null, // not provided by Ibex
-      initiationVia: { type: "lightning", paymentHash: "", pubkey: "" },
-      settlementVia: { type: "lightning", revealedPreImage: undefined }
-    } as WalletLnSettledTransaction
+      memo: null, // query transaction details
+    }
+
+    switch (trx.transactionTypeId) {
+      case 1:
+      case 2:
+        return {
+          ...baseTrx,
+          // Ibex does not provide paymentHash, pubkey and preimage in transactions endpoint. To get these fields,
+          // we need to query the transaction details for each trx individually. 
+          initiationVia: { type: 'lightning', paymentHash: "", pubkey: "" },
+          settlementVia: { type: 'lightning', revealedPreImage: undefined }
+        } as WalletLnSettledTransaction
+      case 3:
+      case 4:
+        return {
+          ...baseTrx,
+          // Ibex does not provide paymentHash, pubkey and preimage in transactions endpoint. To get these fields,
+          // we need to query the transaction details for each trx individually. 
+          initiationVia: { type: 'onchain', address: "" },
+          settlementVia: { type: 'onchain', transactionHash: '', vout: undefined }
+        } as WalletOnChainSettledTransaction // assuming Ibex only gives us settled
+      default:
+        baseLogger.error(`Failed to parse Ibex transaction type. { WalletId: ${baseTrx.walletId}, TransactionId: ${trx.id}, transactionTypeId: ${trx.transactionTypeId}`)
+        return { 
+          ...baseTrx,
+          initiationVia: { type: 'unknown' },
+          settlementVia: { type: 'unknown' }
+        } as UnknownTypeTransaction
+    }
   })
 }
 
@@ -81,6 +107,7 @@ const toSettlementAmount = (
     baseLogger.warn("Ibex did not return transaction amount")
     return asCurrency(ibexAmount, currency) 
   }
+  // When sending, make negative
   const amt = (transactionTypeId === 2 || transactionTypeId === 4) 
     ? -1 * ibexAmount 
     : ibexAmount

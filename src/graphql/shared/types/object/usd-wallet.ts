@@ -85,7 +85,7 @@ const UsdWallet = GT.Object<Wallet>({
         // Non-null signal to type checker; consider fixing in PartialResult type
         if (!result?.slice) throw error
 
-        return connectionFromPaginatedArray<WalletTransaction>(
+        return connectionFromPaginatedArray<IbexTransaction>(
           result.slice,
           result.total,
           paginationArgs,

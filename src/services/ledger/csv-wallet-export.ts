@@ -66,7 +66,7 @@ export class CsvWalletsExport {
     }
   }
 
-  async formatTxs(txs?: WalletTransaction[]) {
+  async formatTxs(txs?: IbexTransaction[]) {
     const result = txs?.map((el) => {
       return {
         id: el.id,

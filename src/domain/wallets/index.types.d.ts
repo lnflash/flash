@@ -130,6 +130,15 @@ type WalletLnSettledTransaction = BaseWalletTransaction & {
   readonly settlementVia: SettlementViaLn
 }
 
+type UnknownTypeTransaction = BaseWalletTransaction & {
+  readonly initiationVia: { 
+    readonly type: 'unknown'
+  } 
+  readonly settlementVia: { 
+    readonly type: 'unknown'
+  } 
+}
+
 type WalletOnChainTransaction =
   | WalletOnChainIntraledgerTransaction
   | WalletOnChainSettledTransaction
@@ -142,6 +151,11 @@ type WalletTransaction =
   | IntraLedgerTransaction
   | WalletOnChainTransaction
   | WalletLnTransaction
+
+type IbexTransaction =
+  | WalletOnChainTransaction
+  | WalletLnTransaction
+  | UnknownTypeTransaction
 
 type MemoSharingConfig = {
   memoSharingCentsThreshold: UsdCents
