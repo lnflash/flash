@@ -74,6 +74,7 @@ const UsdWallet = GT.Object<Wallet>({
           throw paginationArgs
         }
 
+        console.log('resolving transactions...')
         const { result, error } = await Wallets.getTransactionsForWallets({
           wallets: [source],
           paginationArgs,

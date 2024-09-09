@@ -44,7 +44,7 @@ const Transaction = GT.Object<WalletTransaction>({
       description: "To which protocol the payment has settled on.",
       resolve: async (source, _, { loaders }) => {
         const { settlementVia } = source
-
+        console.log(`settlementVia = ${JSON.stringify(settlementVia)}`)
         // Filter out source.id as OnChainTxHash
         if (
           settlementVia.type === "onchain" &&
@@ -61,6 +61,7 @@ const Transaction = GT.Object<WalletTransaction>({
         try {
           result = await loaders.txnMetadata.load(source.id)
         } catch (err) {
+          console.log(`result = ${JSON.stringify(result)}`)
           result = parseErrorFromUnknown(err)
         }
         if (result instanceof Error || result === undefined) return settlementVia

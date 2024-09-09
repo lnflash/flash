@@ -143,6 +143,11 @@ type WalletTransaction =
   | WalletOnChainTransaction
   | WalletLnTransaction
 
+type IbexTransaction =
+  | WalletOnChainTransaction
+  | WalletLnTransaction
+  | BaseWalletTransaction
+
 type MemoSharingConfig = {
   memoSharingCentsThreshold: UsdCents
   memoSharingSatsThreshold: Satoshis
