@@ -65,7 +65,8 @@ export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] 
     }
 
     switch (trx.transactionTypeId) {
-      case 1 || 2:
+      case 1:
+      case 2:
         return {
           ...baseTrx,
           // Ibex does not provide paymentHash, pubkey and preimage in transactions endpoint. To get these fields,
@@ -73,7 +74,8 @@ export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] 
           initiationVia: { type: 'lightning', paymentHash: "", pubkey: "" },
           settlementVia: { type: 'lightning', revealedPreImage: undefined }
         } as WalletLnSettledTransaction
-      case 3 || 4:
+      case 3:
+      case 4:
         return {
           ...baseTrx,
           // Ibex does not provide paymentHash, pubkey and preimage in transactions endpoint. To get these fields,
@@ -82,8 +84,12 @@ export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] 
           settlementVia: { type: 'onchain', transactionHash: '', vout: undefined }
         } as WalletOnChainSettledTransaction // assuming Ibex only gives us settled
       default:
-        baseLogger.warn(`Failed to parse Ibex transaction type. Id: ${baseTrx.walletId}`)
-        return baseTrx
+        baseLogger.error(`Failed to parse Ibex transaction type. { WalletId: ${baseTrx.walletId}, TransactionId: ${trx.id}, transactionTypeId: ${trx.transactionTypeId}`)
+        return { 
+          ...baseTrx,
+          initiationVia: { type: 'unknown' },
+          settlementVia: { type: 'unknown' }
+        } as UnknownTypeTransaction
     }
   })
 }
