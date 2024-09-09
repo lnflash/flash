@@ -6,6 +6,7 @@ import { AccountsRepository, UsersRepository, WalletsRepository } from "@service
 import { RepositoryError } from "@domain/errors"
 import { displayAmountFromWalletAmount } from "@domain/fiat"
 import { WalletCurrency } from "@domain/shared"
+import { NotificationsServiceError } from "@domain/notifications"
 
 const sendLightningNotification = async (req: Request, resp: Response) => {
     const { transaction } = req.body
@@ -44,7 +45,7 @@ const sendLightningNotification = async (req: Request, resp: Response) => {
         recipientNotificationSettings: recipientAccount.notificationSettings,
         recipientLanguage: recipientUser.language,
     })       
-    if (nsResp instanceof NotificationsService) {
+    if (nsResp instanceof NotificationsServiceError) {
         logger.error(nsResp)
     }
     return resp.status(200).end()

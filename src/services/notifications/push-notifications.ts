@@ -44,7 +44,7 @@ const sendToDevice = async (
   logger.info({ tokens, ...message })
   try {
     if (!messaging) {
-      baseLogger.info("Firebase messaging module not loaded")
+      baseLogger.error("Firebase messaging module not loaded")
       // FIXME: should return an error?
       return true
     }
@@ -59,7 +59,6 @@ const sendToDevice = async (
     // apns?: ApnsConfig;
     // fcmOptions?: FcmOptions;
     const response = await messaging.sendEachForMulticast({ tokens, ...message }, false)
-    logger.info({ response })
 
     const invalidTokens: DeviceToken[] = []
     response.responses.forEach((item, index: number) => {
@@ -72,7 +71,7 @@ const sendToDevice = async (
       if (item?.error?.message) {
         recordExceptionInCurrentSpan({
           error: new InvalidDeviceNotificationsServiceError(item.error.message),
-          level: ErrorLevel.Info,
+          level: ErrorLevel.Warn,
         })
       }
     })
