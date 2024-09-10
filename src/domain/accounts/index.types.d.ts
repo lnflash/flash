@@ -163,7 +163,7 @@ interface IAccountsRepository {
 
   findByUsername(username: Username): Promise<Account | RepositoryError>
   // listBusinessesForMap(): Promise<BusinessMapMarker[] | RepositoryError>
-  findByNpub(npub: `npub${string}`): Promise<Account | RepositoryError>
+  findByNpub(npub: Npub): Promise<Account | RepositoryError>
   update(account: Account): Promise<Account | RepositoryError>
 }
 
