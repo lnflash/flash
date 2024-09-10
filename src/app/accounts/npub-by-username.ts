@@ -10,9 +10,7 @@ export const npubByUsername = async (
   if (checkedUsername instanceof Error) return checkedUsername
 
   const accountsRepo = AccountsRepository()
-  console.log("Checked username is", checkedUsername)
   const account = await accountsRepo.findByUsername(checkedUsername)
-  console.log("Account found was", account)
   if (account instanceof RepositoryError) return new CouldNotFindAccountError()
   if (!account.npub) return new CouldNotFindAccountError()
   return { npub: account.npub, username: account.username }

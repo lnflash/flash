@@ -1,3 +1,4 @@
+import { checkValidNpub } from "@app/accounts"
 import { InputValidationError } from "@graphql/error"
 import { GT } from "@graphql/index"
 
@@ -7,22 +8,17 @@ const Npub = GT.Scalar({
   parseValue(value) {
     if (typeof value !== "string") {
       return new InputValidationError({ message: "Invalid type for Npub" })
-    }
-    return validNpubValue(value)
+    } else if (!checkValidNpub(value))
+      return new InputValidationError({ message: "Invalid value for Npub" })
+    return value.toString()
   },
   parseLiteral(ast) {
-    if (ast.kind === GT.Kind.STRING) {
-      return validNpubValue(ast.value)
-    }
-    return new InputValidationError({ message: "Invalid type for Npub" })
+    if (ast.kind !== GT.Kind.STRING)
+      return new InputValidationError({ message: "Invalid type for Npub" })
+    else if (!checkValidNpub(ast.value))
+      return new InputValidationError({ message: "Invalid value for Npub" })
+    else ast.value.toLowerCase()
   },
 })
-
-function validNpubValue(value: string) {
-  if (value.startsWith("npub1") && value.length === 63) {
-    return value.toLowerCase()
-  }
-  return new InputValidationError({ message: "Invalid value for Npub" })
-}
 
 export default Npub

@@ -22,19 +22,10 @@ const UserUpdateNpubMutation = GT.Field({
   },
   resolve: async (_, args, { domainAccount }: GraphQLPublicContextAuth) => {
     const { npub } = args.input
-    console.log(
-      "INSIDE NPUb UPDATE +________________________________________________________+",
-    )
-
     if (npub instanceof Error) {
       return { errors: [{ message: npub.message }] }
     }
-
     const result = await Accounts.setNpub({ npub, id: domainAccount.id })
-    console.info(
-      "RESULT OF NPUb UPDATE +________________________________________________________+",
-      result,
-    )
     if (result instanceof Error) {
       return {
         errors: [mapAndParseErrorForGqlResponse(result)],

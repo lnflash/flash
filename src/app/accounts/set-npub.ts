@@ -6,19 +6,18 @@ export const setNpub = async ({
   id,
   npub,
 }: {
-  id: string
+  id: AccountId
   npub: `npub1${string}`
 }): Promise<Account | ApplicationError> => {
   const accountsRepo = AccountsRepository()
   if (!checkValidNpub(npub))
     throw new ValidationError([{ message: "Invalid npub format" }])
-  const account = await accountsRepo.findById(id as AccountId)
+  const account = await accountsRepo.findById(id)
   if (account instanceof Error) return account
   account.npub = npub
   return accountsRepo.update(account)
 }
 
-const checkValidNpub = (npub: string): boolean => {
-  if (npub.startsWith("npub1") && npub.length === 63) return true
-  return false
+export const checkValidNpub = (npub: string): boolean => {
+  return npub.startsWith("npub1") && npub.length === 63
 }
