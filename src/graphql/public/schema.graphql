@@ -1043,10 +1043,10 @@ type Query {
   businessMapMarkers: [MapMarker!]!
   currencyList: [Currency!]!
   globals: Globals
-  isFlashNpub(npub: String): Boolean
   lnInvoicePaymentStatus(input: LnInvoicePaymentStatusInput!): LnInvoicePaymentStatusPayload!
   me: User
   mobileVersions: [MobileVersions]
+  npubByUsername(username: Username!): npubByUsername
   onChainTxFee(address: OnChainAddress!, amount: SatAmount!, speed: PayoutSpeed = FAST, walletId: WalletId!): OnChainTxFee!
   onChainUsdTxFee(address: OnChainAddress!, amount: CentAmount!, speed: PayoutSpeed = FAST, walletId: WalletId!): OnChainUsdTxFee!
   onChainUsdTxFeeAsBtcDenominated(address: OnChainAddress!, amount: SatAmount!, speed: PayoutSpeed = FAST, walletId: WalletId!): OnChainUsdTxFee!
@@ -1569,3 +1569,11 @@ scalar WalletId
 
 """Nostr Identity public key"""
 scalar npub
+
+type npubByUsername {
+  """Nostr public key"""
+  npub: npub
+
+  """Optional immutable user friendly identifier."""
+  username: Username @deprecated(reason: "will be moved to @Handle in Account and Wallet")
+}

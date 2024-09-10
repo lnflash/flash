@@ -136,7 +136,7 @@ export const AccountsRepository = (): IAccountsRepository => {
     kratosUserId,
     displayCurrency,
     notificationSettings,
-
+    npub,
     role,
   }: Account): Promise<Account | RepositoryError> => {
     try {
@@ -161,7 +161,7 @@ export const AccountsRepository = (): IAccountsRepository => {
           kratosUserId,
           displayCurrency,
           notificationSettings,
-
+          npub,
           role,
         },
         {
