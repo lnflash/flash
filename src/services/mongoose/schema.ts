@@ -196,11 +196,6 @@ const AccountSchema = new Schema<AccountRecord>(
       type: String,
       minlength: 63,
       maxlength: 63,
-      index: {
-        unique: true,
-        collation: { locale: "en", strength: 2 },
-        partialFilterExpression: { npub: { $type: "string" } },
-      },
     },
     contactEnabled: {
       type: Boolean,
