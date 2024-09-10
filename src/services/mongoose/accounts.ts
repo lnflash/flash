@@ -84,9 +84,7 @@ export const AccountsRepository = (): IAccountsRepository => {
       if (!result) {
         return new CouldNotFindAccountFromUsernameError(npub)
       }
-      console.log("inside findByNpub", result)
       let account = translateToAccount(result)
-      console.log("inside findby npub account", account)
       return translateToAccount(result)
     } catch (err) {
       return parseRepositoryError(err)
