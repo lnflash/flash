@@ -1,4 +1,5 @@
 import { AccountsRepository } from "@services/mongoose"
+import { checkValidNpub } from "@domain/nostr"
 
 import { ValidationError } from "ajv"
 
@@ -7,7 +8,7 @@ export const setNpub = async ({
   npub,
 }: {
   id: AccountId
-  npub: `npub1${string}`
+  npub: Npub
 }): Promise<Account | ApplicationError> => {
   const accountsRepo = AccountsRepository()
   if (!checkValidNpub(npub))
@@ -16,8 +17,4 @@ export const setNpub = async ({
   if (account instanceof Error) return account
   account.npub = npub
   return accountsRepo.update(account)
-}
-
-export const checkValidNpub = (npub: string): boolean => {
-  return npub.startsWith("npub1") && npub.length === 63
 }

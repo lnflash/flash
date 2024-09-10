@@ -15,13 +15,10 @@ const NpubByUserNameQuery = GT.Field({
   },
   resolve: async (_, args) => {
     const { username } = args
-    console.log("INSIIIIIIIDE")
     if (username instanceof Error) {
       throw username
     }
-    console.log("username error?", username)
     const output = await Accounts.npubByUsername(username)
-    console.log("output?", output)
     return output
   },
 })

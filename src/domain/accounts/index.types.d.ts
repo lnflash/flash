@@ -65,7 +65,7 @@ type Account = {
   readonly uuid: AccountUuid
   readonly createdAt: Date
   username: Username
-  npub: `npub1${string}`
+  npub: Npub
   defaultWalletId: WalletId
   withdrawFee: Satoshis // TODO: make it optional. only save when not default value from yaml
   level: AccountLevel

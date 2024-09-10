@@ -1,11 +1,10 @@
 import { checkedToUsername } from "@domain/accounts"
 import { CouldNotFindAccountError, RepositoryError } from "@domain/errors"
 import { AccountsRepository } from "@services/mongoose"
-import { Account } from "@services/mongoose/schema"
 
 export const npubByUsername = async (
   username: Username,
-): Promise<{ npub: string; username: string } | ApplicationError> => {
+): Promise<{ npub: Npub; username: Username } | ApplicationError> => {
   const checkedUsername = checkedToUsername(username)
   if (checkedUsername instanceof Error) return checkedUsername
 

@@ -76,9 +76,7 @@ export const AccountsRepository = (): IAccountsRepository => {
     }
   }
 
-  const findByNpub = async (
-    npub: `npub1${string}`,
-  ): Promise<Account | RepositoryError> => {
+  const findByNpub = async (npub: Npub): Promise<Account | RepositoryError> => {
     try {
       const result = await Account.findOne({ npub: caseInsensitiveRegex(npub) })
       if (!result) {
@@ -191,7 +189,7 @@ const translateToAccount = (result: AccountRecord): Account => ({
   createdAt: new Date(result.created_at),
   defaultWalletId: result.defaultWalletId as WalletId,
   username: result.username as Username,
-  npub: result.npub as `npub1${string}`,
+  npub: result.npub as Npub,
   level: result.level as AccountLevel,
   status: result.statusHistory.slice(-1)[0].status,
   statusHistory: (result.statusHistory || []) as AccountStatusHistory,
