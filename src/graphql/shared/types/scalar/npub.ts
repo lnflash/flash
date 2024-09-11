@@ -1,4 +1,4 @@
-import { checkValidNpub } from "@app/accounts"
+import { checkValidNpub } from "@domain/nostr"
 import { InputValidationError } from "@graphql/error"
 import { GT } from "@graphql/index"
 
