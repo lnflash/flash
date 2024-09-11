@@ -65,6 +65,7 @@ type Account = {
   readonly uuid: AccountUuid
   readonly createdAt: Date
   username: Username
+  npub: Npub
   defaultWalletId: WalletId
   withdrawFee: Satoshis // TODO: make it optional. only save when not default value from yaml
   level: AccountLevel
@@ -162,6 +163,7 @@ interface IAccountsRepository {
 
   findByUsername(username: Username): Promise<Account | RepositoryError>
   // listBusinessesForMap(): Promise<BusinessMapMarker[] | RepositoryError>
+  findByNpub(npub: Npub): Promise<Account | RepositoryError>
   update(account: Account): Promise<Account | RepositoryError>
 }
 

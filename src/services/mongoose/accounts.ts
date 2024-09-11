@@ -76,6 +76,19 @@ export const AccountsRepository = (): IAccountsRepository => {
     }
   }
 
+  const findByNpub = async (npub: Npub): Promise<Account | RepositoryError> => {
+    try {
+      const result = await Account.findOne({ npub: caseInsensitiveRegex(npub) })
+      if (!result) {
+        return new CouldNotFindAccountFromUsernameError(npub)
+      }
+      let account = translateToAccount(result)
+      return translateToAccount(result)
+    } catch (err) {
+      return parseRepositoryError(err)
+    }
+  }
+
   const update = async ({
     id,
     level,
@@ -90,7 +103,7 @@ export const AccountsRepository = (): IAccountsRepository => {
     kratosUserId,
     displayCurrency,
     notificationSettings,
-
+    npub,
     role,
   }: Account): Promise<Account | RepositoryError> => {
     try {
@@ -115,7 +128,7 @@ export const AccountsRepository = (): IAccountsRepository => {
           kratosUserId,
           displayCurrency,
           notificationSettings,
-
+          npub,
           role,
         },
         {
@@ -165,6 +178,7 @@ export const AccountsRepository = (): IAccountsRepository => {
     findById,
     findByUuid,
     findByUsername,
+    findByNpub,
     update,
   }
 }
@@ -175,6 +189,7 @@ const translateToAccount = (result: AccountRecord): Account => ({
   createdAt: new Date(result.created_at),
   defaultWalletId: result.defaultWalletId as WalletId,
   username: result.username as Username,
+  npub: result.npub as Npub,
   level: result.level as AccountLevel,
   status: result.statusHistory.slice(-1)[0].status,
   statusHistory: (result.statusHistory || []) as AccountStatusHistory,

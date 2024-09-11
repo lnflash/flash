@@ -160,7 +160,7 @@ redis-cli:
 	docker-compose exec redis redis-cli
 
 codegen:
-	yarn write-sdl
+	. ./.env && yarn write-sdl
 
 gen-test-jwt:
 	yarn gen-test-jwt

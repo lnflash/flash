@@ -192,6 +192,11 @@ const AccountSchema = new Schema<AccountRecord>(
         partialFilterExpression: { username: { $type: "string" } },
       },
     },
+    npub: {
+      type: String,
+      minlength: 63,
+      maxlength: 63,
+    },
     contactEnabled: {
       type: Boolean,
       default: true,

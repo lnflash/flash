@@ -24,6 +24,7 @@ import GraphQLEmail from "../../../shared/types/object/email"
 
 import AccountContact from "./account-contact"
 import UserQuizQuestion from "./user-quiz-question"
+import Npub from "@graphql/shared/types/scalar/npub"
 
 const GraphQLUser = GT.Object<User, GraphQLPublicContextAuth>({
   name: "User",
@@ -70,7 +71,7 @@ const GraphQLUser = GT.Object<User, GraphQLPublicContextAuth>({
       },
       deprecationReason: "will be moved to @Handle in Account and Wallet",
     },
-    
+
     language: {
       type: GT.NonNull(Language),
       description: dedent`Preferred language for user.
@@ -133,6 +134,13 @@ const GraphQLUser = GT.Object<User, GraphQLPublicContextAuth>({
       type: GT.NonNull(Account),
       resolve: async (source, args, { domainAccount }) => {
         return domainAccount
+      },
+    },
+    npub: {
+      type: Npub,
+      description: "Nostr public key",
+      resolve: async (source, args, { domainAccount }) => {
+        return domainAccount?.npub
       },
     },
 

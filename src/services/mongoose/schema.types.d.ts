@@ -73,6 +73,7 @@ interface AccountRecord {
   kratosUserId: string
 
   username: string | null
+  npub: Npub | null
   role: string
 
   level?: number // ?: enum [1, 2]
