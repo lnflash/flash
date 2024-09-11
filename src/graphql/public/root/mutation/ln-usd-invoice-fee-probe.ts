@@ -72,7 +72,7 @@ const LnUsdInvoiceFeeProbeMutation = GT.Field<
       currencyId: "3", 
     })
     if (resp instanceof IbexClientError) return { errors: [mapAndParseErrorForGqlResponse(resp)] }     
-    if (!resp.amount) return { errors: [mapAndParseErrorForGqlResponse(new UnexpectedResponseError("Amount field not found."))] }
+    if (resp.amount === null || resp.amount === undefined) return { errors: [mapAndParseErrorForGqlResponse(new UnexpectedResponseError("Amount field not found."))] }
 
     return {
       errors: [],
