@@ -68,7 +68,7 @@ export const checkedAccountStatus = (status: string) => {
 }
 
 // export const UsernameRegex = /(?!^(1|3|bc1|lnbc1))^[0-9a-z_]{3,50}$/i
-export const UsernameRegex = /^[\p{L}0-9_]+$/u
+export const UsernameRegex = /^(?!^(1|3|bc1|lnbc1))[\p{L}0-9_]{3,50}$/iu
 
 export const checkedToUsername = (username: string): Username | ValidationError => {
   if (!username.match(UsernameRegex)) {
