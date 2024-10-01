@@ -56,8 +56,14 @@ services:
     volumes:
       - ${HOST_PROJECT_PATH:-.}/dev/otel-agent-config.yaml:/etc/otel-agent-config.yaml
   price:
-    image: us.gcr.io/galoy-org/price@sha256:6e0fb096efb7ef5aa80e7dd8e9ffa3a97a5d3185d714f7a39d3ffc3c740e8a99
+    image: brh28/flash-price:latest
     ports: []
+    volumes:
+      - ./price-overrides.yaml:/var/yaml/custom.yaml
+    environment:
+      - IBEX_URL=${IBEX_URL}
+      - IBEX_EMAIL=${IBEX_EMAIL}
+      - IBEX_PASSWORD=${IBEX_PASSWORD}
   price-history:
     image: us.gcr.io/galoy-org/price-history:edge
     ports: []
