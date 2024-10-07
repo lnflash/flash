@@ -439,6 +439,10 @@ type FeesInformation
   deposit: DepositFeesInformation!
 }
 
+"""(Positive) Cent amount (1/100 of a dollar) as a float"""
+scalar FractionalCentAmount
+  @join__type(graph: PUBLIC)
+
 """
 Provides global settings for the application which might have an impact for the user.
 """
@@ -786,7 +790,7 @@ input LnUsdInvoiceCreateInput
   @join__type(graph: PUBLIC)
 {
   """Amount in USD cents."""
-  amount: CentAmount!
+  amount: FractionalCentAmount!
 
   """Optional invoice expiration time in minutes."""
   expiresIn: Minutes
@@ -1066,7 +1070,7 @@ type npubByUsername
   npub: npub
 
   """Optional immutable user friendly identifier."""
-  username: Username @deprecated(reason: "will be moved to @Handle in Account and Wallet")
+  username: Username
 }
 
 """An address for an on-chain bitcoin destination"""

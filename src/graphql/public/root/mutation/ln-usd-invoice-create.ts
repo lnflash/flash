@@ -6,16 +6,10 @@ import { GT } from "@graphql/index"
 import Memo from "@graphql/shared/types/scalar/memo"
 import Minutes from "@graphql/public/types/scalar/minutes"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
-import CentAmount from "@graphql/public/types/scalar/cent-amount"
 import LnInvoicePayload from "@graphql/public/types/payload/ln-invoice"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
-
-// FLASH FORK: import ibex dependencies
-import { decodeInvoice } from "@domain/bitcoin/lightning"
-
-import { client as Ibex } from "@services/ibex"
-import { IbexClientError, UnexpectedResponseError } from "@services/ibex/client/errors"
 import { Wallets } from "@app/index"
+import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 
 const LnUsdInvoiceCreateInput = GT.Input({
   name: "LnUsdInvoiceCreateInput",
@@ -24,7 +18,7 @@ const LnUsdInvoiceCreateInput = GT.Input({
       type: GT.NonNull(WalletId),
       description: "Wallet ID for a USD wallet belonging to the current user.",
     },
-    amount: { type: GT.NonNull(CentAmount), description: "Amount in USD cents." },
+    amount: { type: GT.NonNull(FractionalCentAmount), description: "Amount in USD cents." },
     memo: { type: Memo, description: "Optional memo for the lightning invoice." },
     expiresIn: {
       type: Minutes,
