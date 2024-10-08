@@ -554,6 +554,19 @@ enum InvoicePaymentStatus
   PENDING @join__enumValue(graph: PUBLIC)
 }
 
+input IsFlashNpubInput
+  @join__type(graph: PUBLIC)
+{
+  npub: npub!
+}
+
+type IsFlashNpubPayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error!]!
+  isFlashNpub: Boolean
+}
+
 scalar join__FieldSet
 
 enum join__Graph {
@@ -1066,7 +1079,7 @@ type npubByUsername
   npub: npub
 
   """Optional immutable user friendly identifier."""
-  username: Username @deprecated(reason: "will be moved to @Handle in Account and Wallet")
+  username: Username
 }
 
 """An address for an on-chain bitcoin destination"""
@@ -1344,6 +1357,7 @@ type Query
   businessMapMarkers: [MapMarker!]!
   currencyList: [Currency!]!
   globals: Globals
+  isFlashNpub(input: IsFlashNpubInput!): IsFlashNpubPayload
   lnInvoicePaymentStatus(input: LnInvoicePaymentStatusInput!): LnInvoicePaymentStatusPayload!
   me: User
   mobileVersions: [MobileVersions]

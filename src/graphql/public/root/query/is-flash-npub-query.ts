@@ -14,11 +14,14 @@ const IsFlashNpubQuery = GT.Field({
     },
   },
   resolve: async (_, args) => {
-    const { npub } = args
+    const {
+      input: { npub },
+    } = args
     if (npub instanceof Error) {
       throw npub
     }
     const output = await Accounts.findByNpub(npub)
+    console.log("output is", output)
     if (output instanceof Error) return { isFlashNpub: false }
     return {
       isFlashNpub: true,
