@@ -425,6 +425,15 @@ enum InvoicePaymentStatus {
   PENDING
 }
 
+input IsFlashNpubInput {
+  npub: npub!
+}
+
+type IsFlashNpubPayload {
+  errors: [Error!]!
+  isFlashNpub: Boolean
+}
+
 scalar Language
 
 type LnInvoice {
@@ -1046,6 +1055,7 @@ type Query {
   businessMapMarkers: [MapMarker!]!
   currencyList: [Currency!]!
   globals: Globals
+  isFlashNpub(input: IsFlashNpubInput!): IsFlashNpubPayload
   lnInvoicePaymentStatus(input: LnInvoicePaymentStatusInput!): LnInvoicePaymentStatusPayload!
   me: User
   mobileVersions: [MobileVersions]

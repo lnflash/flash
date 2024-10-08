@@ -36,6 +36,10 @@ export const getAccount = async (
   return accounts.findById(accountId)
 }
 
+export const findByNpub = async (npub: Npub): Promise<Account | RepositoryError> => {
+  return accounts.findByNpub(npub)
+}
+
 export const getAccountFromUserId = async (
   kratosUserId: UserId,
 ): Promise<Account | RepositoryError> => {
