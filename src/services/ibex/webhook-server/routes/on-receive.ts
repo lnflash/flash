@@ -1,5 +1,5 @@
 import express, { Request, Response } from "express"
-import { baseLogger as logger } from "@services/logger"
+import { baseLogger, baseLogger as logger } from "@services/logger"
 import { NotificationsService } from "@services/notifications"
 import { authenticate, logRequest } from "../middleware"
 import { AccountsRepository, UsersRepository, WalletsRepository } from "@services/mongoose"
@@ -7,10 +7,14 @@ import { RepositoryError } from "@domain/errors"
 import { displayAmountFromWalletAmount } from "@domain/fiat"
 import { WalletCurrency } from "@domain/shared"
 import { NotificationsServiceError } from "@domain/notifications"
+import { getCurrentPriceAsDisplayPriceRatio } from "@app/prices"
 
 const sendLightningNotification = async (req: Request, resp: Response) => {
-    const { transaction } = req.body
+    const { transaction, receivedMsat } = req.body
+    const receivedSat = receivedMsat / 1000 as Satoshis
     const recipientWalletId = transaction.accountId
+   
+    baseLogger.info(req.body, "transaction")
     
     const receiverWallet = await WalletsRepository().findById(recipientWalletId)
     if (receiverWallet instanceof RepositoryError) {
@@ -33,7 +37,15 @@ const sendLightningNotification = async (req: Request, resp: Response) => {
 
     let amount
     if (receiverWallet.currency === WalletCurrency.Usd) amount = (transaction.amount * 100) as any
-    const paymentAmount = { amount, currency: receiverWallet.currency }
+    const paymentAmount: PaymentAmount<WalletCurrency> = { amount, currency: receiverWallet.currency }
+
+    const displayPaymentAmount = { currency: recipientAccount.displayCurrency }
+    baseLogger.info(displayPaymentAmount, "displayPaymentAmount")
+    const displayCurrencyPrice = await getCurrentPriceAsDisplayPriceRatio({
+      currency: recipientAccount.displayCurrency,
+    })
+
+    baseLogger.info(displayCurrencyPrice, "displayCurrencyPrice")
 
     const nsResp = await NotificationsService().lightningTxReceived({
         recipientAccountId: recipientAccountId,
