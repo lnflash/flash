@@ -7,11 +7,15 @@ import { RepositoryError } from "@domain/errors"
 import { displayAmountFromWalletAmount } from "@domain/fiat"
 import { WalletCurrency } from "@domain/shared"
 import { NotificationsServiceError } from "@domain/notifications"
+import { getCurrentPriceAsDisplayPriceRatio } from "@app/prices"
+import { PriceService } from "@services/price"
+import { PriceServiceError } from "@domain/price"
 
 const sendLightningNotification = async (req: Request, resp: Response) => {
-    const { transaction } = req.body
+    const { transaction, receivedMsat } = req.body
+    const receivedSat = receivedMsat / 1000 as Satoshis
     const recipientWalletId = transaction.accountId
-    
+   
     const receiverWallet = await WalletsRepository().findById(recipientWalletId)
     if (receiverWallet instanceof RepositoryError) {
         logger.error(receiverWallet, `Failed to fetch wallet with id ${recipientWalletId}`)
@@ -31,15 +35,12 @@ const sendLightningNotification = async (req: Request, resp: Response) => {
         return resp.sendStatus(500)
     }
 
-    let amount
-    if (receiverWallet.currency === WalletCurrency.Usd) amount = (transaction.amount * 100) as any
-    const paymentAmount = { amount, currency: receiverWallet.currency }
 
     const nsResp = await NotificationsService().lightningTxReceived({
         recipientAccountId: recipientAccountId,
         recipientWalletId,
-        paymentAmount,
-        displayPaymentAmount: displayAmountFromWalletAmount(paymentAmount),
+        paymentAmount: toPaymentAmount(receiverWallet.currency)(transaction.amount),
+        displayPaymentAmount: await toDisplayAmount(recipientAccount.displayCurrency)(receivedSat),
         paymentHash: transaction.invoice.hash,
         recipientDeviceTokens: recipientUser.deviceTokens,
         recipientNotificationSettings: recipientAccount.notificationSettings,
@@ -82,4 +83,22 @@ router.post(
 export {
     paths,
     router,
+}
+
+
+const toPaymentAmount = (currency: WalletCurrency) => (dollarAmount: number) => {
+    let amount
+    if (currency === WalletCurrency.Usd) amount = (dollarAmount * 100) as any
+    return { amount, currency }
+}
+
+const toDisplayAmount = (currency: DisplayCurrency) => async (sats: Satoshis) => {
+    const displayCurrencyPrice = await getCurrentPriceAsDisplayPriceRatio({
+      currency: currency,
+    })
+    if (displayCurrencyPrice instanceof Error) {
+        logger.warn(displayCurrencyPrice, "displayCurrencyPrice") // move to otel
+        return undefined
+    }
+    return displayCurrencyPrice.convertFromWallet({ amount: BigInt(sats), currency: "BTC" })  
 }
