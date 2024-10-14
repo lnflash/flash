@@ -1,15 +1,15 @@
 #@data/values
 ---
-git_uri: https://github.com/brh28/flash.git
-git_branch: ci #! main
-git_charts_uri: https://github.com/brh28/charts.git
-git_price_uri: https://github.com/brh28/price.git
+git_uri: https://github.com/lnflash/flash.git
+git_branch: main #! main
+git_charts_uri: https://github.com/lnflash/charts.git
+git_price_uri: https://github.com/lnflash/price.git
 git_charts_branch: main
 git_charts_bot_branch: bot-bump-flash-image
 git_price_history_proto_bot_branch: bot-bump-price-history-proto
 git_price_realtime_proto_bot_branch: bot-bump-price-realtime-proto
 
-gh_org: brh28
+gh_org: lnflash
 gh_repository: flash
 gh_user: ((github.username)) 
 gh_password: ((github.api_token)) 
