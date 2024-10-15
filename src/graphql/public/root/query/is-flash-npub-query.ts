@@ -5,6 +5,7 @@ import {
   IsFlashNpubPayload,
 } from "@graphql/public/types/object/is-flash-npub"
 import Npub from "@graphql/shared/types/scalar/npub"
+import { RepositoryError } from "@domain/errors"
 
 const IsFlashNpubQuery = GT.Field({
   type: IsFlashNpubPayload,
@@ -21,8 +22,8 @@ const IsFlashNpubQuery = GT.Field({
       throw npub
     }
     const output = await Accounts.findByNpub(npub)
-    console.log("output is", output)
-    if (output instanceof Error) return { isFlashNpub: false }
+    if (output instanceof RepositoryError) return { isFlashNpub: false }
+    else if (output instanceof Error) throw output
     return {
       isFlashNpub: true,
     }
