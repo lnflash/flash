@@ -100,6 +100,5 @@ const toDisplayAmount = (currency: DisplayCurrency) => async (sats: Satoshis) =>
         logger.warn(displayCurrencyPrice, "displayCurrencyPrice") // move to otel
         return undefined
     }
-    const resp =displayCurrencyPrice.convertFromWallet({ amount: BigInt(sats), currency: "BTC" }) 
-    return resp 
+    return displayCurrencyPrice.convertFromWallet({ amount: BigInt(sats), currency: "BTC" })  
 }
