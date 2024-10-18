@@ -1,5 +1,5 @@
 import express, { Request, Response } from "express"
-import { baseLogger, baseLogger as logger } from "@services/logger"
+import { baseLogger as logger } from "@services/logger"
 import { NotificationsService } from "@services/notifications"
 import { authenticate, logRequest } from "../middleware"
 import { AccountsRepository, UsersRepository, WalletsRepository } from "@services/mongoose"
@@ -16,8 +16,6 @@ const sendLightningNotification = async (req: Request, resp: Response) => {
     const receivedSat = receivedMsat / 1000 as Satoshis
     const recipientWalletId = transaction.accountId
    
-    baseLogger.info(req.body, "transaction")
-    
     const receiverWallet = await WalletsRepository().findById(recipientWalletId)
     if (receiverWallet instanceof RepositoryError) {
         logger.error(receiverWallet, `Failed to fetch wallet with id ${recipientWalletId}`)
@@ -99,10 +97,9 @@ const toDisplayAmount = (currency: DisplayCurrency) => async (sats: Satoshis) =>
       currency: currency,
     })
     if (displayCurrencyPrice instanceof Error) {
-        baseLogger.warn(displayCurrencyPrice, "displayCurrencyPrice") // move to otel
+        logger.warn(displayCurrencyPrice, "displayCurrencyPrice") // move to otel
         return undefined
     }
     const resp =displayCurrencyPrice.convertFromWallet({ amount: BigInt(sats), currency: "BTC" }) 
-    baseLogger.info(resp, "resp")
     return resp 
 }
