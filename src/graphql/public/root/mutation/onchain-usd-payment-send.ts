@@ -3,12 +3,12 @@ import { PayoutSpeed as DomainPayoutSpeed } from "@domain/bitcoin/onchain"
 import { GT } from "@graphql/index"
 import Memo from "@graphql/shared/types/scalar/memo"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
-import CentAmount from "@graphql/public/types/scalar/cent-amount"
+// import CentAmount from "@graphql/public/types/scalar/cent-amount"
 import OnChainAddress from "@graphql/shared/types/scalar/on-chain-address"
 import PaymentSendPayload from "@graphql/public/types/payload/payment-send"
 import PayoutSpeed from "@graphql/public/types/scalar/payout-speed"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
-
+import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 // import { Wallets } from "@app"
 
 // FLASH FORK: import ibex dependencies
@@ -20,7 +20,7 @@ const OnChainUsdPaymentSendInput = GT.Input({
   fields: () => ({
     walletId: { type: GT.NonNull(WalletId) },
     address: { type: GT.NonNull(OnChainAddress) },
-    amount: { type: GT.NonNull(CentAmount) },
+    amount: { type: GT.NonNull(FractionalCentAmount) },
     speed: {
       type: PayoutSpeed,
       defaultValue: DomainPayoutSpeed.Fast,
@@ -104,23 +104,23 @@ const OnChainUsdPaymentSendMutation = GT.Field<
     //     amount: amount / 100,
     //   },
     // )
-      // const result: PayOnChainByWalletIdResult = {
-      //   status: {
-      //     value:
-      //       PayOnChainAddress.data["data"]["status"] === "INITIATED"
-      //         ? "pending"
-      //         : PayOnChainAddress.data["data"]["status"] === "MEMPOOL"
-      //         ? "pending"
-      //         : PayOnChainAddress.data["data"]["status"] === "BLOCKCHAIN"
-      //         ? "pending"
-      //         : PayOnChainAddress.data["data"]["status"] === "CONFIRMED"
-      //         ? "success"
-      //         : PayOnChainAddress.data["data"]["status"] === "FAILED"
-      //         ? "failed"
-      //         : "pending",
-      //   },
-      //   payoutId: PayOnChainAddress.data["data"]["transactionHub"]["id"],
-      // }
+    // const result: PayOnChainByWalletIdResult = {
+    //   status: {
+    //     value:
+    //       PayOnChainAddress.data["data"]["status"] === "INITIATED"
+    //         ? "pending"
+    //         : PayOnChainAddress.data["data"]["status"] === "MEMPOOL"
+    //         ? "pending"
+    //         : PayOnChainAddress.data["data"]["status"] === "BLOCKCHAIN"
+    //         ? "pending"
+    //         : PayOnChainAddress.data["data"]["status"] === "CONFIRMED"
+    //         ? "success"
+    //         : PayOnChainAddress.data["data"]["status"] === "FAILED"
+    //         ? "failed"
+    //         : "pending",
+    //   },
+    //   payoutId: PayOnChainAddress.data["data"]["transactionHub"]["id"],
+    // }
   },
 })
 
