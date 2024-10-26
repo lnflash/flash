@@ -4,10 +4,11 @@ import { checkedToWalletId } from "@domain/wallets"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { GT } from "@graphql/index"
 import PaymentSendPayload from "@graphql/public/types/payload/payment-send"
-import CentAmount from "@graphql/public/types/scalar/cent-amount"
+// import CentAmount from "@graphql/public/types/scalar/cent-amount"
 import Memo from "@graphql/shared/types/scalar/memo"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import dedent from "dedent"
+import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 // import { RequestInit, Response } from 'node-fetch'
 
 const IntraLedgerUsdPaymentSendInput = GT.Input({
@@ -15,7 +16,7 @@ const IntraLedgerUsdPaymentSendInput = GT.Input({
   fields: () => ({
     walletId: { type: GT.NonNull(WalletId), description: "The wallet ID of the sender." }, // TODO: rename senderWalletId
     recipientWalletId: { type: GT.NonNull(WalletId) },
-    amount: { type: GT.NonNull(CentAmount), description: "Amount in cents." },
+    amount: { type: GT.NonNull(FractionalCentAmount), description: "Amount in cents." },
     memo: { type: Memo, description: "Optional memo to be attached to the payment." },
   }),
 })
