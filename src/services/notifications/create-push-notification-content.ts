@@ -1,6 +1,6 @@
 import { getI18nInstance } from "@config"
 
-import { getCurrencyMajorExponent, MajorExponent } from "@domain/fiat"
+import { CurrencyFormatter, MajorExponent } from "@domain/fiat"
 import { WalletCurrency } from "@domain/shared"
 import { getLanguageOrDefault } from "@domain/locale"
 
@@ -65,23 +65,10 @@ export const createPushNotificationContent = <T extends DisplayCurrency>({
     displayAmount.amountInMinor > 0n &&
     displayAmount.currency !== baseCurrency
   ) {
-    // const exponent = getCurrencyMajorExponent(displayAmount.currency)
-    // const displayCurrencyAmount = customToLocaleString(
-    //   Number(displayAmount.displayInMajor),
-    //   locale,
-    //   {
-    //     minimumFractionDigits: 0,
-    //     maximumFractionDigits: exponent,
-    //     currency: displayAmount.currency,
-    //     style: "currency",
-    //     currencyDisplay: "narrowSymbol",
-    //   },
-    // )
-    const displayCurrencyAmount: string = new CurrencyFormatter(displayAmount.currency).toString(displayAmount.displayInMajor)
     body = i18n.__(
       { phrase: `notification.${notificationType}.bodyDisplayCurrency`, locale },
       {
-        displayCurrencyAmount,
+        displayCurrencyAmount: new CurrencyFormatter(displayAmount).toString(),
         baseCurrencyAmount,
         baseCurrencyName: baseCurrencyName ? ` ${baseCurrencyName}` : "",
       },
@@ -89,62 +76,4 @@ export const createPushNotificationContent = <T extends DisplayCurrency>({
   }
 
   return { title, body }
-}
-
-
-
-class CurrencyFormatter {
-  // exponent: CurrencyMajorExponent
-  // amountInMajorUnits,
-  // symbol: string
-  // isApproximate,
-  // fractionDigits,
-  // withSign = true,
-  // currencyCode,
-
-  constructor(private currency: DisplayCurrency) {}
-
-  // Ideally, currency list would be static and not require loading
-  toString(amount: DisplayCurrencyMajorAmount): string {
-    const exponent = getCurrencyMajorExponent(this.currency) 
-    // const priceServerResp = await listCurrencies()
-    // (priceServerResp typeof PriceCurrency) ? priceServerResp[this.currency] : "",
-    return formatCurrencyHelper({
-      amountInMajorUnits: amount,
-      // symbol:
-      isApproximate: true,
-      fractionDigits: exponent,
-      withSign: true,
-      currencyCode: this.currency,
-    })
-  }
-}
-
-// This function is copied and modified from flash-mobile: https://github.com/lnflash/flash-mobile/blob/6f500537ea8a286d07060b796d38a251b557e990/app/hooks/use-display-currency.ts#L57
-const formatCurrencyHelper = ({
-  amountInMajorUnits,
-  symbol,
-  isApproximate,
-  fractionDigits,
-  withSign = true,
-  currencyCode,
-}: {
-  amountInMajorUnits: number | string
-  isApproximate?: boolean
-  symbol?: string
-  fractionDigits: number
-  currencyCode?: string
-  withSign?: boolean
-}) => {
-  const isNegative = Number(amountInMajorUnits) < 0
-  const decimalPlaces = fractionDigits
-  const amountStr = Intl.NumberFormat("en-US", {
-    minimumFractionDigits: decimalPlaces,
-    maximumFractionDigits: decimalPlaces,
-    // FIXME this workaround of using .format and not .formatNumber is
-    // because hermes haven't fully implemented Intl.NumberFormat yet
-  }).format(Math.abs(Math.floor(Number(amountInMajorUnits) * 100) / 100))
-  return `${isApproximate ? "~" : ""}${
-    isNegative && withSign ? "-" : ""
-  }${symbol || ""}${amountStr}${currencyCode ? ` ${currencyCode}` : ""}`
 }

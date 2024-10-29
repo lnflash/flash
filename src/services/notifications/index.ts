@@ -62,7 +62,7 @@ export const NotificationsService = (): INotificationsService => {
       if (recipientDeviceTokens && recipientDeviceTokens.length > 0) {
         const notificationCategory = GaloyNotificationCategories.Payments
 
-        const { title, body } = await createPushNotificationContent({
+        const { title, body } = createPushNotificationContent({
           type: NotificationType.LnInvoicePaid,
           userLanguage: recipientLanguage,
           amount: paymentAmount,
@@ -132,7 +132,7 @@ export const NotificationsService = (): INotificationsService => {
       if (recipientDeviceTokens && recipientDeviceTokens.length > 0) {
         const notificationCategory = GaloyNotificationCategories.Payments
 
-        const { title, body } = await createPushNotificationContent({
+        const { title, body } = createPushNotificationContent({
           type: NotificationType.IntraLedgerReceipt,
           userLanguage: recipientLanguage,
           amount: paymentAmount,
@@ -210,7 +210,7 @@ export const NotificationsService = (): INotificationsService => {
       if (deviceTokens.length > 0) {
         const notificationCategory = GaloyNotificationCategories.Payments
 
-        const { title, body } = await createPushNotificationContent({
+        const { title, body } = createPushNotificationContent({
           type,
           userLanguage: language,
           amount: paymentAmount,
@@ -349,7 +349,7 @@ export const NotificationsService = (): INotificationsService => {
     try {
       const notificationCategory = GaloyNotificationCategories.Payments
 
-      const { title, body } = await createPushNotificationContent({
+      const { title, body } = createPushNotificationContent({
         type: "balance",
         userLanguage: recipientLanguage,
         amount: balanceAmount,
