@@ -126,3 +126,50 @@ export const priceAmountFromDisplayPriceRatio = <
     displayCurrency: displayPriceRatio.displayCurrency,
     walletCurrency: displayPriceRatio.walletCurrency,
   })
+
+// TODO: GET currency symbols from Price server (listCurrencies)
+export class CurrencyFormatter<T extends DisplayCurrency> {
+  constructor(private displayAmount: DisplayAmount<T>) {}
+
+  // Ideally, currency list would be static and not require loading
+  toString(): string {
+    const exponent = getCurrencyMajorExponent(this.displayAmount.currency) 
+    return formatCurrencyHelper({
+      amountInMajorUnits: this.displayAmount.displayInMajor,
+      // symbol:
+      isApproximate: true,
+      fractionDigits: exponent,
+      withSign: true,
+      currencyCode: this.displayAmount.currency,
+    })
+  }
+}
+
+// This function is copied and modified from flash-mobile: https://github.com/lnflash/flash-mobile/blob/6f500537ea8a286d07060b796d38a251b557e990/app/hooks/use-display-currency.ts#L57
+const formatCurrencyHelper = ({
+  amountInMajorUnits,
+  symbol,
+  isApproximate,
+  fractionDigits,
+  withSign = true,
+  currencyCode,
+}: {
+  amountInMajorUnits: number | string
+  isApproximate?: boolean
+  symbol?: string
+  fractionDigits: number
+  currencyCode?: string
+  withSign?: boolean
+}) => {
+  const isNegative = Number(amountInMajorUnits) < 0
+  const decimalPlaces = fractionDigits
+  const amountStr = Intl.NumberFormat("en-US", {
+    minimumFractionDigits: decimalPlaces,
+    maximumFractionDigits: decimalPlaces,
+    // FIXME this workaround of using .format and not .formatNumber is
+    // because hermes haven't fully implemented Intl.NumberFormat yet
+  }).format(Math.abs(Math.floor(Number(amountInMajorUnits) * 100) / 100))
+  return `${isApproximate ? "~" : ""}${
+    isNegative && withSign ? "-" : ""
+  }${symbol || ""}${amountStr}${currencyCode ? ` ${currencyCode}` : ""}`
+}

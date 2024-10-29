@@ -1,6 +1,6 @@
 import { getI18nInstance } from "@config"
 
-import { getCurrencyMajorExponent, MajorExponent } from "@domain/fiat"
+import { CurrencyFormatter, MajorExponent } from "@domain/fiat"
 import { WalletCurrency } from "@domain/shared"
 import { getLanguageOrDefault } from "@domain/locale"
 
@@ -65,22 +65,10 @@ export const createPushNotificationContent = <T extends DisplayCurrency>({
     displayAmount.amountInMinor > 0n &&
     displayAmount.currency !== baseCurrency
   ) {
-    const exponent = getCurrencyMajorExponent(displayAmount.currency)
-    const displayCurrencyAmount = customToLocaleString(
-      Number(displayAmount.displayInMajor),
-      locale,
-      {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: exponent,
-        currency: displayAmount.currency,
-        style: "currency",
-        currencyDisplay: "narrowSymbol",
-      },
-    )
     body = i18n.__(
       { phrase: `notification.${notificationType}.bodyDisplayCurrency`, locale },
       {
-        displayCurrencyAmount,
+        displayCurrencyAmount: new CurrencyFormatter(displayAmount).toString(),
         baseCurrencyAmount,
         baseCurrencyName: baseCurrencyName ? ` ${baseCurrencyName}` : "",
       },

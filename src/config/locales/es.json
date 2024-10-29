@@ -2,38 +2,38 @@
   "notification": {
     "balance": {
       "body": "Su balance es {{baseCurrencyAmount}}{{baseCurrencyName}}",
-      "bodyDisplayCurrency": "Su balance es +{{baseCurrencyAmount}}{{baseCurrencyName}} (~{{displayCurrencyAmount}})",
+      "bodyDisplayCurrency": "Su balance es +{{baseCurrencyAmount}}{{baseCurrencyName}} ({{displayCurrencyAmount}})",
       "title": "Balance {{walletCurrency}}"
     },
     "transaction": {
       "intra_ledger_payment": {
         "body": "Pago enviado por {{baseCurrencyAmount}}{{baseCurrencyName}}",
-        "bodyDisplayCurrency": "Pago enviado por +{{baseCurrencyAmount}}{{baseCurrencyName}} (~{{displayCurrencyAmount}})",
+        "bodyDisplayCurrency": "Pago enviado por +{{baseCurrencyAmount}}{{baseCurrencyName}} ({{displayCurrencyAmount}})",
         "title": "Transacción {{walletCurrency}}"
       },
       "intra_ledger_receipt": {
         "body": "+{{baseCurrencyAmount}}{{baseCurrencyName}}",
-        "bodyDisplayCurrency": "+{{baseCurrencyAmount}}{{baseCurrencyName}} (~{{displayCurrencyAmount}})",
+        "bodyDisplayCurrency": "+{{baseCurrencyAmount}}{{baseCurrencyName}} ({{displayCurrencyAmount}})",
         "title": "Transacción {{walletCurrency}}"
       },
       "onchain_payment": {
         "body": "Pago onchain por {{baseCurrencyAmount}}{{baseCurrencyName}} confirmado",
-        "bodyDisplayCurrency": "Pago onchain por +{{baseCurrencyAmount}}{{baseCurrencyName}} (~{{displayCurrencyAmount}}) confirmado",
+        "bodyDisplayCurrency": "Pago onchain por +{{baseCurrencyAmount}}{{baseCurrencyName}} ({{displayCurrencyAmount}}) confirmado",
         "title": "Transacción {{walletCurrency}}"
       },
       "onchain_receipt": {
         "body": "+{{baseCurrencyAmount}}{{baseCurrencyName}}",
-        "bodyDisplayCurrency": "+{{baseCurrencyAmount}}{{baseCurrencyName}} (~{{displayCurrencyAmount}})",
+        "bodyDisplayCurrency": "+{{baseCurrencyAmount}}{{baseCurrencyName}} ({{displayCurrencyAmount}})",
         "title": "Transacción {{walletCurrency}}"
       },
       "onchain_receipt_pending": {
         "body": "pendiente +{{baseCurrencyAmount}}{{baseCurrencyName}}",
-        "bodyDisplayCurrency": "pendiente +{{baseCurrencyAmount}}{{baseCurrencyName}} (~{{displayCurrencyAmount}})",
+        "bodyDisplayCurrency": "pendiente +{{baseCurrencyAmount}}{{baseCurrencyName}} ({{displayCurrencyAmount}})",
         "title": "Transacción {{walletCurrency}} | Pendiente por confirmar"
       },
       "paid-invoice": {
         "body": "+{{baseCurrencyAmount}}{{baseCurrencyName}}",
-        "bodyDisplayCurrency": "+{{baseCurrencyAmount}}{{baseCurrencyName}} (~{{displayCurrencyAmount}})",
+        "bodyDisplayCurrency": "+{{baseCurrencyAmount}}{{baseCurrencyName}} ({{displayCurrencyAmount}})",
         "title": "Transacción {{walletCurrency}}"
       }
     }
