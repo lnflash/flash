@@ -7,7 +7,8 @@ import Memo from "@graphql/shared/types/scalar/memo"
 import Minutes from "@graphql/public/types/scalar/minutes"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import Hex32Bytes from "@graphql/public/types/scalar/hex32bytes"
-import CentAmount from "@graphql/public/types/scalar/cent-amount"
+// import CentAmount from "@graphql/public/types/scalar/cent-amount"
+import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 import LnInvoicePayload from "@graphql/public/types/payload/ln-invoice"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 
@@ -18,7 +19,10 @@ const LnUsdInvoiceCreateOnBehalfOfRecipientInput = GT.Input({
       type: GT.NonNull(WalletId),
       description: "Wallet ID for a USD wallet which belongs to the account of any user.",
     },
-    amount: { type: GT.NonNull(CentAmount), description: "Amount in USD cents." },
+    amount: {
+      type: GT.NonNull(FractionalCentAmount),
+      description: "Amount in USD cents.",
+    },
     memo: {
       type: Memo,
       description:

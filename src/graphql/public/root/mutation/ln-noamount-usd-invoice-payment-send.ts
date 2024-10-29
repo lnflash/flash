@@ -6,8 +6,9 @@ import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import PaymentSendPayload from "@graphql/public/types/payload/payment-send"
 import LnIPaymentRequest from "@graphql/shared/types/scalar/ln-payment-request"
 import { InputValidationError } from "@graphql/error"
-import CentAmount from "@graphql/public/types/scalar/cent-amount"
+// import CentAmount from "@graphql/public/types/scalar/cent-amount"
 import dedent from "dedent"
+import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 
 // FLASH FORK: import ibex dependencies
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
@@ -27,7 +28,10 @@ const LnNoAmountUsdInvoicePaymentInput = GT.Input({
       type: GT.NonNull(LnIPaymentRequest),
       description: "Payment request representing the invoice which is being paid.",
     },
-    amount: { type: GT.NonNull(CentAmount), description: "Amount to pay in USD cents." },
+    amount: {
+      type: GT.NonNull(FractionalCentAmount),
+      description: "Amount to pay in USD cents.",
+    },
     memo: {
       type: Memo,
       description: "Optional memo to associate with the lightning invoice.",
@@ -83,7 +87,7 @@ const LnNoAmountUsdInvoicePaymentSendMutation = GT.Field<
     // })
     if (!domainAccount) throw new Error("Authentication required")
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    
+
     const PayLightningInvoice = await Ibex().payInvoiceV2({
       bolt11: paymentRequest,
       accountId: walletId,
@@ -91,29 +95,29 @@ const LnNoAmountUsdInvoicePaymentSendMutation = GT.Field<
     })
 
     if (PayLightningInvoice instanceof IbexClientError) {
-      return { 
-        status: "failed", 
+      return {
+        status: "failed",
         errors: [{ message: "An unexpected error occurred. Please try again later." }],
         // errors: [mapAndParseErrorForGqlResponse(PayLightningInvoice)] }
       }
     }
-    
+
     let status: PaymentSendStatus = PaymentSendStatus.Pending
-    switch(PayLightningInvoice.transaction?.payment?.status?.id) {
-      case 1: 
+    switch (PayLightningInvoice.transaction?.payment?.status?.id) {
+      case 1:
         status = PaymentSendStatus.Pending
-        break;
-      case 2: 
+        break
+      case 2:
         status = PaymentSendStatus.Success
-        break;
-      case 3: 
+        break
+      case 3:
         status = PaymentSendStatus.Failure
-        break;
+        break
     }
 
     return {
       errors: [],
-      status: status.value
+      status: status.value,
     }
   },
 })

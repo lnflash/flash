@@ -558,6 +558,19 @@ enum InvoicePaymentStatus
   PENDING @join__enumValue(graph: PUBLIC)
 }
 
+input IsFlashNpubInput
+  @join__type(graph: PUBLIC)
+{
+  npub: npub!
+}
+
+type IsFlashNpubPayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error!]!
+  isFlashNpub: Boolean
+}
+
 scalar join__FieldSet
 
 enum join__Graph {
@@ -1348,6 +1361,7 @@ type Query
   businessMapMarkers: [MapMarker!]!
   currencyList: [Currency!]!
   globals: Globals
+  isFlashNpub(input: IsFlashNpubInput!): IsFlashNpubPayload
   lnInvoicePaymentStatus(input: LnInvoicePaymentStatusInput!): LnInvoicePaymentStatusPayload!
   me: User
   mobileVersions: [MobileVersions]
