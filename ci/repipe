@@ -7,9 +7,37 @@ if [[ $(which ytt) == "" ]]; then
   exit 1
 fi
 
+if [[ -n "$FLY_TARGET" ]]; then
+    target="$FLY_TARGET"
+else
+    # Run `fly targets`, get only the "name" field from each line, and store it in an array
+    mapfile -t target_names < <(fly targets | awk '{print $1}')
 
-## Script requires a FLY_TARGET (e.g flash-ci) and PIPELINE_VALUES (e.g "/path/to/flash-values.yml) as env variables
-target="${FLY_TARGET:-local}"
+    # Check if there are any target names
+    if [ ${#target_names[@]} -eq 0 ]; then
+        echo "No targets found."
+        exit 1
+    fi
+
+    # Display target names and let the user select one
+    echo "Select a target (run 'fly targets' for more info):"
+    for i in "${!target_names[@]}"; do
+        echo "$((i + 1)). ${target_names[$i]}"
+    done
+
+    read -p "Enter the number of the target: " selection
+
+    # Check if the selection is valid
+    if ! [[ "$selection" =~ ^[0-9]+$ ]] || (( selection < 1 || selection > ${#target_names[@]} )); then
+        echo "Invalid selection."
+        exit 1
+    fi
+
+    # Set selected_target to only the name field of the chosen target
+    target="${target_names[$((selection - 1))]}"
+fi
+echo "Targetting $target"
+
 team=main # dev
 pipeline="${PIPELINE_NAME:-flash-app}"
 values="${PIPELINE_VALUES}"
