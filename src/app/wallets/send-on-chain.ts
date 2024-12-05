@@ -46,6 +46,9 @@ import { addAttributesToCurrentSpan } from "@services/tracing"
 
 import { getMinerFeeAndPaymentFlow } from "./get-on-chain-fee"
 import { validateIsBtcWallet, validateIsUsdWallet } from "./validate"
+import { client as Ibex } from "@services/ibex"
+import { IbexClientError } from "@services/ibex/client/errors"
+import { SendToAddressCopyResponse200 } from "@services/ibex/client/.api/apis/sing-in"
 
 const { dustThreshold } = getOnChainWalletConfig()
 const dealer = DealerPriceService()
@@ -59,139 +62,166 @@ const payOnChainByWalletId = async <R extends WalletCurrency>({
   speed,
   memo,
   sendAll,
-}: PayOnChainByWalletIdArgs): Promise<PayOnChainByWalletIdResult | ApplicationError> => {
+}: PayOnChainByWalletIdArgs): Promise<PayOnChainByWalletIdResult | ApplicationError | IbexClientError> => {
   const latestAccountState = await AccountsRepository().findById(senderAccount.id)
   if (latestAccountState instanceof Error) return latestAccountState
   const accountValidator = AccountValidator(latestAccountState)
   if (accountValidator instanceof Error) return accountValidator
 
-  const ledger = LedgerService()
-
-  const amountToSendRaw = sendAll
-    ? await ledger.getWalletBalance(senderWalletId)
-    : amountRaw
-  if (amountToSendRaw instanceof Error) return amountToSendRaw
-
-  if (sendAll && amountToSendRaw === 0) {
-    return new InsufficientBalanceError(`No balance left to send.`)
-  }
-
-  const validator = PaymentInputValidator(WalletsRepository().findById)
-  const validationResult = await validator.validatePaymentInput({
-    amount: amountToSendRaw,
-    amountCurrency: amountCurrencyRaw,
-    senderAccount,
-    senderWalletId,
-  })
-  if (validationResult instanceof Error) return validationResult
-
-  const { amount, senderWallet } = validationResult
-
-  const onchainLogger = baseLogger.child({
-    topic: "payment",
-    protocol: "onchain",
-    transactionType: "payment",
+  // FLASH FORK
+  const resp = await Ibex().sendToAddressV2({
+    accountId: senderWalletId,
     address,
-    amount: Number(amount.amount), // separating here because BigInts don't always parse well
-    currencyForAmount: amount.currency,
-    memo,
-    sendAll,
+    amount: amountRaw / 100,
   })
-  const checkedAddress = checkedToOnChainAddress({
-    network: NETWORK,
-    value: address,
-  })
-  if (checkedAddress instanceof Error) return checkedAddress
 
-  const recipientWallet = await WalletsRepository().findByAddress(checkedAddress)
-  if (
-    recipientWallet instanceof Error &&
-    !(recipientWallet instanceof CouldNotFindError)
-  ) {
-    return recipientWallet
-  }
-
-  const isExternalAddress = async () => recipientWallet instanceof CouldNotFindError
-
-  const withSenderBuilder = OnChainPaymentFlowBuilder({
-    volumeLightningFn: LedgerService().lightningTxBaseVolumeSince,
-    volumeOnChainFn: LedgerService().onChainTxBaseVolumeSince,
-    isExternalAddress,
-    sendAll,
-    dustThreshold,
-  })
-    .withAddress(checkedAddress)
-    .withSenderWalletAndAccount({
-      wallet: senderWallet,
-      account: senderAccount,
-    })
-
-  const withConversionArgs = {
-    hedgeBuyUsd: {
-      usdFromBtc: dealer.getCentsFromSatsForImmediateBuy,
-      btcFromUsd: dealer.getSatsFromCentsForImmediateBuy,
-    },
-    hedgeSellUsd: {
-      usdFromBtc: dealer.getCentsFromSatsForImmediateSell,
-      btcFromUsd: dealer.getSatsFromCentsForImmediateSell,
-    },
-    mid: { usdFromBtc: usdFromBtcMidPriceFn, btcFromUsd: btcFromUsdMidPriceFn },
-  }
-
-  if (await withSenderBuilder.isIntraLedger()) {
-    if (recipientWallet instanceof CouldNotFindError) return recipientWallet
-
-    const recipientWalletDescriptor: WalletDescriptor<R> = {
-      id: recipientWallet.id,
-      currency: recipientWallet.currency as R,
-      accountId: recipientWallet.accountId,
+  if (resp instanceof IbexClientError) return resp
+  const toGqlStatus = (ibexStatus: string | undefined) => {
+    switch (ibexStatus) {
+      case 'INITIATED': 
+      case 'MEMPOOL':
+      case 'BLOCKCHAIN':
+        return PaymentSendStatus.Pending
+      case 'CONFIRMED':
+        return PaymentSendStatus.Success
+      case 'FAILED':
+        return PaymentSendStatus.Failure
+      default: 
+        return PaymentSendStatus.Pending
     }
-
-    addAttributesToCurrentSpan({
-      "payment.originalRecipient": JSON.stringify(recipientWalletDescriptor),
-    })
-
-    const wallets = await WalletsRepository().listByAccountId(recipientWallet.accountId)
-    if (wallets instanceof Error) return wallets
-
-    const recipientAccount = await AccountsRepository().findById(
-      recipientWallet.accountId,
-    )
-    if (recipientAccount instanceof Error) return recipientAccount
-
-    const builder = withSenderBuilder
-      .withRecipientWallet({
-        recipientWalletDescriptor,
-        recipientWalletDescriptorsForAccount: wallets,
-        userId: recipientAccount.kratosUserId,
-        username: recipientAccount.username,
-      })
-      .withAmount(amount)
-      .withConversion(withConversionArgs)
-
-    return executePaymentViaIntraledger({
-      builder,
-      senderWallet,
-      senderUsername: senderAccount.username,
-      senderDisplayCurrency: senderAccount.displayCurrency,
-      memo,
-      sendAll,
-    })
+  }
+  return {
+    status: toGqlStatus(resp.status), 
+    payoutId: resp.transactionHub?.id as PayoutId,
   }
 
-  const builder = withSenderBuilder
-    .withoutRecipientWallet()
-    .withAmount(amount)
-    .withConversion(withConversionArgs)
+  // const ledger = LedgerService()
 
-  return executePaymentViaOnChain({
-    builder,
-    senderDisplayCurrency: senderAccount.displayCurrency,
-    speed,
-    memo,
-    sendAll,
-    logger: onchainLogger,
-  })
+  // const amountToSendRaw = sendAll
+  //   ? await ledger.getWalletBalance(senderWalletId)
+  //   : amountRaw
+  // if (amountToSendRaw instanceof Error) return amountToSendRaw
+
+  // if (sendAll && amountToSendRaw === 0) {
+  //   return new InsufficientBalanceError(`No balance left to send.`)
+  // }
+
+  // const validator = PaymentInputValidator(WalletsRepository().findById)
+  // const validationResult = await validator.validatePaymentInput({
+  //   amount: amountToSendRaw,
+  //   amountCurrency: amountCurrencyRaw,
+  //   senderAccount,
+  //   senderWalletId,
+  // })
+  // if (validationResult instanceof Error) return validationResult
+
+  // const { amount, senderWallet } = validationResult
+
+  // const onchainLogger = baseLogger.child({
+  //   topic: "payment",
+  //   protocol: "onchain",
+  //   transactionType: "payment",
+  //   address,
+  //   amount: Number(amount.amount), // separating here because BigInts don't always parse well
+  //   currencyForAmount: amount.currency,
+  //   memo,
+  //   sendAll,
+  // })
+  // const checkedAddress = checkedToOnChainAddress({
+  //   network: NETWORK,
+  //   value: address,
+  // })
+  // if (checkedAddress instanceof Error) return checkedAddress
+
+  // const recipientWallet = await WalletsRepository().findByAddress(checkedAddress)
+  // if (
+  //   recipientWallet instanceof Error &&
+  //   !(recipientWallet instanceof CouldNotFindError)
+  // ) {
+  //   return recipientWallet
+  // }
+
+  // const isExternalAddress = async () => recipientWallet instanceof CouldNotFindError
+
+  // const withSenderBuilder = OnChainPaymentFlowBuilder({
+  //   volumeLightningFn: LedgerService().lightningTxBaseVolumeSince,
+  //   volumeOnChainFn: LedgerService().onChainTxBaseVolumeSince,
+  //   isExternalAddress,
+  //   sendAll,
+  //   dustThreshold,
+  // })
+  //   .withAddress(checkedAddress)
+  //   .withSenderWalletAndAccount({
+  //     wallet: senderWallet,
+  //     account: senderAccount,
+  //   })
+
+  // const withConversionArgs = {
+  //   hedgeBuyUsd: {
+  //     usdFromBtc: dealer.getCentsFromSatsForImmediateBuy,
+  //     btcFromUsd: dealer.getSatsFromCentsForImmediateBuy,
+  //   },
+  //   hedgeSellUsd: {
+  //     usdFromBtc: dealer.getCentsFromSatsForImmediateSell,
+  //     btcFromUsd: dealer.getSatsFromCentsForImmediateSell,
+  //   },
+  //   mid: { usdFromBtc: usdFromBtcMidPriceFn, btcFromUsd: btcFromUsdMidPriceFn },
+  // }
+
+  // if (await withSenderBuilder.isIntraLedger()) {
+  //   if (recipientWallet instanceof CouldNotFindError) return recipientWallet
+
+  //   const recipientWalletDescriptor: WalletDescriptor<R> = {
+  //     id: recipientWallet.id,
+  //     currency: recipientWallet.currency as R,
+  //     accountId: recipientWallet.accountId,
+  //   }
+
+  //   addAttributesToCurrentSpan({
+  //     "payment.originalRecipient": JSON.stringify(recipientWalletDescriptor),
+  //   })
+
+  //   const wallets = await WalletsRepository().listByAccountId(recipientWallet.accountId)
+  //   if (wallets instanceof Error) return wallets
+
+  //   const recipientAccount = await AccountsRepository().findById(
+  //     recipientWallet.accountId,
+  //   )
+  //   if (recipientAccount instanceof Error) return recipientAccount
+
+  //   const builder = withSenderBuilder
+  //     .withRecipientWallet({
+  //       recipientWalletDescriptor,
+  //       recipientWalletDescriptorsForAccount: wallets,
+  //       userId: recipientAccount.kratosUserId,
+  //       username: recipientAccount.username,
+  //     })
+  //     .withAmount(amount)
+  //     .withConversion(withConversionArgs)
+
+    // return executePaymentViaIntraledger({
+  //     builder,
+  //     senderWallet,
+  //     senderUsername: senderAccount.username,
+  //     senderDisplayCurrency: senderAccount.displayCurrency,
+  //     memo,
+  //     sendAll,
+  //   })
+  // }
+
+  // const builder = withSenderBuilder
+  //   .withoutRecipientWallet()
+  //   .withAmount(amount)
+  //   .withConversion(withConversionArgs)
+
+  // return executePaymentViaOnChain({
+  //   builder,
+  //   senderDisplayCurrency: senderAccount.displayCurrency,
+  //   speed,
+  //   memo,
+  //   sendAll,
+  //   logger: onchainLogger,
+  // })
 }
 
 export const payOnChainByWalletIdForBtcWallet = async (
