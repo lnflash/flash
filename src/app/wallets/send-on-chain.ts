@@ -46,7 +46,7 @@ import { addAttributesToCurrentSpan } from "@services/tracing"
 
 import { getMinerFeeAndPaymentFlow } from "./get-on-chain-fee"
 import { validateIsBtcWallet, validateIsUsdWallet } from "./validate"
-import { client as Ibex } from "@services/ibex"
+import { client as Ibex, OnchainStatus } from "@services/ibex"
 import { IbexClientError } from "@services/ibex/client/errors"
 import { SendToAddressCopyResponse200 } from "@services/ibex/client/.api/apis/sing-in"
 
@@ -78,13 +78,13 @@ const payOnChainByWalletId = async <R extends WalletCurrency>({
   if (resp instanceof IbexClientError) return resp
   const toGqlStatus = (ibexStatus: string | undefined) => {
     switch (ibexStatus) {
-      case 'INITIATED': 
-      case 'MEMPOOL':
-      case 'BLOCKCHAIN':
+      case OnchainStatus.Initiated.name: 
+      case OnchainStatus.Mempool.name:
+      case OnchainStatus.Blockchain.name:
         return PaymentSendStatus.Pending
-      case 'CONFIRMED':
+      case OnchainStatus.Confirmed.name:
         return PaymentSendStatus.Success
-      case 'FAILED':
+      case OnchainStatus.Failed.name:
         return PaymentSendStatus.Failure
       default: 
         return PaymentSendStatus.Pending
