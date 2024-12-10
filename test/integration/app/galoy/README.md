@@ -1,0 +1,1 @@
+These are tests from the legacy galoy code. They have been ignored using the `jest.config.js`. Moving forward, we want to migrate useful tests to the [flash](test/integration/app/flash) directory
