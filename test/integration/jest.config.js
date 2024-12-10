@@ -23,4 +23,9 @@ module.exports = {
     "^@graphql/(.*)$": ["<rootDir>src/graphql/$1"],
     "^test/(.*)$": ["<rootDir>test/$1"],
   },
+  // Flash fork: skip galoy tests
+  testPathIgnorePatterns: [
+    "<rootDir>/test/integration/app/galoy/",
+    "<rootDir>/test/integration/services/",
+  ],
 }

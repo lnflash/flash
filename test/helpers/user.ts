@@ -211,7 +211,7 @@ export const createRandomUserAndBtcWallet = async () => {
 
 export const createRandomUserAndWallets = async (): Promise<{
   usdWalletDescriptor: WalletDescriptor<"USD">
-  btcWalletDescriptor: WalletDescriptor<"BTC">
+  // btcWalletDescriptor: WalletDescriptor<"BTC">
 }> => {
   const phone = randomPhone()
   const btcWalletDescriptor = await createUserAndWallet(phone)
@@ -224,7 +224,7 @@ export const createRandomUserAndWallets = async (): Promise<{
   if (usdWallet instanceof Error) throw usdWallet
 
   return {
-    btcWalletDescriptor,
+    // btcWalletDescriptor,
     usdWalletDescriptor: {
       id: usdWallet.id,
       currency: WalletCurrency.Usd,
@@ -235,7 +235,7 @@ export const createRandomUserAndWallets = async (): Promise<{
 
 export const createUserAndWallet = async (
   phone: PhoneNumber,
-): Promise<WalletDescriptor<"BTC">> => {
+): Promise<WalletDescriptor<"USD">> => {
   let kratosUserId: UserId
 
   const user = await UsersRepository().findByPhone(phone)
@@ -294,8 +294,9 @@ export const createUserAndWallet = async (
 
   const wallet = await WalletsRepository().findById(account.defaultWalletId)
   if (wallet instanceof Error) throw wallet
-  if (wallet.currency !== WalletCurrency.Btc) {
-    throw new Error("Expected BTC-currency default wallet")
+  // Flash uses USD wallet as default
+  if (wallet.currency !== WalletCurrency.Usd) {
+    throw new Error("Expected USD-currency default wallet")
   }
 
   return {
