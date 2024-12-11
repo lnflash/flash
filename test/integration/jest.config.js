@@ -1,3 +1,4 @@
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 const swcConfig = require("../swc-config.json")
 
 module.exports = {
@@ -24,8 +25,5 @@ module.exports = {
     "^test/(.*)$": ["<rootDir>test/$1"],
   },
   // Flash fork: skip galoy tests
-  testPathIgnorePatterns: [
-    "<rootDir>/test/integration/app/galoy/",
-    "<rootDir>/test/integration/services/",
-  ],
+  testPathIgnorePatterns: ["<rootDir>/test/integration/galoy/"],
 }
