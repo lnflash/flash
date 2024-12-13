@@ -76,7 +76,9 @@ You'll need a web gateway that forwards traffic to your local server (default ht
    ```
    ngrok http http://localhost:4008
    ```
+
 2. Copy the provided URL ("forwarding" field)
+
 3. Add the URL to your `IBEX_EXTERNAL_URI` environment variable. E.g
    
    ```
@@ -267,8 +269,11 @@ When testing, to isolate just the current migration being worked on in local dev
   # 120 seconds
   $ JEST_TIMEOUT=120000 yarn test:integration
   ```
+
 * **Integration tests running slow**: we use docker to run dependencies (redis, mongodb, bitcoind and 4 lnds) so the entire test suite is disk-intensive.
+  
   * Please make sure that you are running docker containers in a solid state drive (SSD)
+  
   * Reduce lnd log disk usage: change debuglevel to critical
     
     ```
@@ -297,6 +302,4 @@ $ yarn prettier -w .
 
 ## Contributing
 
-When opening a PR please pay attention to having a [clean git history](https://medium.com/@catalinaturlea/clean-git-history-a-step-by-step-guide-eefc0ad8696d) with standard commit messages. We use the [conventional commits](https://www.conventionalcommits.org/en/v1.0.0/) format for our commits.
-
-It is the responsibility of the PR author to resolve merge conflicts before a merge can happen. If the PR is open for a long time a rebase may be requested.
+See the [CONTRIBUTING.md](./CONTRIBUTING.md)
