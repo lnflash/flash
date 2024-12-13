@@ -8,7 +8,7 @@ import {
   AccountsRepository,
   WalletsRepository,
 } from "@services/mongoose"
-import { client as Ibex } from "@services/ibex"
+import Ibex from "@services/ibex/client"
 import { IbexClientError } from "@services/ibex/client/errors"
 
 export const createOnChainAddress = async ({

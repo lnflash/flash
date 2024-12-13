@@ -12,7 +12,8 @@ import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fract
 // import { Wallets } from "@app"
 
 // FLASH FORK: import ibex dependencies
-import { client as Ibex } from "@services/ibex"
+import Ibex from "@services/ibex/client"
+
 import { IbexClientError } from "@services/ibex/client/errors"
 import { SendToAddressCopyResponse200 } from "@services/ibex/client/.api/apis/sing-in"
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"

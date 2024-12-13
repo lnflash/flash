@@ -13,7 +13,8 @@ import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fract
 // FLASH FORK: import ibex dependencies
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 
-import { client as Ibex } from "@services/ibex"
+import Ibex from "@services/ibex/client"
+
 import { IbexClientError } from "@services/ibex/client/errors"
 
 const LnNoAmountUsdInvoicePaymentInput = GT.Input({

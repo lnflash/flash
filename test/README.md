@@ -1,0 +1,1 @@
+Tests have been split between legacy Galoy code and newer Flash code. The `../package.json` has been updated to run the tests in the `./flash` directory. These tests should run on every merge to `main`. Moving forward, we want to continue migrating useful tests to the [flash](test/flash) directory

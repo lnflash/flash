@@ -1,10 +1,7 @@
-### THIS FILE IS ONLY A SAMPLE. THE DEFAULT VALUES ARE IN src/config/schema.ts
-### TO SET OVERRIDES, SEE THE DEV.md
-
-lightningAddressDomain: pay.development.flashapp.me
+lightningAddressDomain: pay.domain.com
 lightningAddressDomainAliases:
-  - pay1.development.flashapp.me
-  - pay2.development.flashapp.me
+  - pay1.domain.com
+  - pay2.domain.com
 locale: en
 displayCurrency:
   code: USD
@@ -22,7 +19,7 @@ buildVersion:
     minBuildNumber: 362
     lastBuildNumber: 362
 rewards:
-  enableIpProxyCheck: false
+  enableIpProxyCheck: true
   allowPhoneCountries: []
   denyPhoneCountries: []
   allowIPCountries: []
@@ -83,7 +80,6 @@ rateLimits:
 accounts:
   initialStatus: active
   initialWallets:
-    - BTC 
     - USD
   enablePhoneCheck: false
   enableIpCheck: false

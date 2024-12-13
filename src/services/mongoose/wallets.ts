@@ -10,7 +10,8 @@ import {
 import { Types } from "mongoose"
 
 // FLASH FORK: import IBEX routes and helper
-import { client as Ibex } from "@services/ibex"
+import Ibex from "@services/ibex/client"
+
 import { IbexClientError } from "@services/ibex/client/errors"
 
 import { toObjectId, fromObjectId, parseRepositoryError } from "./utils"

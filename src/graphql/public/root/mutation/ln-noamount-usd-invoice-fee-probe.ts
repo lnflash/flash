@@ -12,7 +12,8 @@ import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { normalizePaymentAmount } from "../../../shared/root/mutation"
 
 // FLASH FORK: import ibex dependencies
-import { client as Ibex } from "@services/ibex"
+import Ibex from "@services/ibex/client"
+
 import { IbexClientError } from "@services/ibex/client/errors"
 
 const LnNoAmountUsdInvoiceFeeProbeInput = GT.Input({

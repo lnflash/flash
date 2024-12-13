@@ -1,6 +1,6 @@
 import { decodeInvoice } from "@domain/bitcoin/lightning"
 import { baseLogger } from "@services/logger"
-import { client as Ibex } from "@services/ibex"
+import Ibex from "@services/ibex/client"
 import { IbexClientError } from "@services/ibex/client/errors"
 
 export const PaymentStatusChecker = async (uncheckedPaymentRequest: string) => {
