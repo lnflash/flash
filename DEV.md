@@ -24,6 +24,7 @@
 ## Setup
 
 This setup was last tested with the following tools:
+
 ```
 $ node --version
 v20.10.0
@@ -44,9 +45,11 @@ To use the correct node version, you can install nvm and run `nvm use 20`. Then 
 ### Clone the repo:
 
 ```
-$ git clone git@github.com:GaloyMoney/galoy.git
-$ cd galoy
+$ git clone git@github.com:lnflash/flash.git
+$ cd flash
 ```
+
+*Flash is a fork of [Blink](https://github.com/GaloyMoney/blink) at commit `0a52b0673` (tag: 0.13.92)*
 
 ### Set the Environment
 
@@ -64,23 +67,26 @@ $ direnv reload
 (...)
 ```
 
-#### Testing the ibex-webhook 
+#### Testing the ibex-webhook
+
 You'll need a web gateway that forwards traffic to your local server (default http://localhost:4008). This can be done with Ngrok. After installing the ngrok cli and creating an account, do the following:
 
 1. Start ngrok tunnel:
-```
-ngrok http http://localhost:4008
-```
+   
+   ```
+   ngrok http http://localhost:4008
+   ```
 2. Copy the provided URL ("forwarding" field)
 3. Add the URL to your `IBEX_EXTERNAL_URI` environment variable. E.g
-```
-export IBEX_EXTERNAL_URI="https://1911-104-129-24-147.ngrok-free.app"
-``` 
-Note: To avoid repeating steps 2 & 3 everytime you restart the web gateway, you can get a static domain (e.g [ngrok domains](https://dashboard.ngrok.com/cloud-edge/domains)) and then set the `IBEX_EXTERNAL_URI` in your `.env.local`
-
-
+   
+   ```
+   export IBEX_EXTERNAL_URI="https://1911-104-129-24-147.ngrok-free.app"
+   ```
+   
+   Note: To avoid repeating steps 2 & 3 everytime you restart the web gateway, you can get a static domain (e.g [ngrok domains](https://dashboard.ngrok.com/cloud-edge/domains)) and then set the `IBEX_EXTERNAL_URI` in your `.env.local`
 
 ### Install dependencies
+
 ```
 $ yarn install
 ```
@@ -92,16 +98,19 @@ $ make start-deps
 # or
 $ make reset-deps
 ```
+
 Everytime the dependencies are re-started the environment must be reloaded via `direnv reload`. When using the [make command](../Makefile) this will happen automatically.
 
 ## Development
- 
+
 To start the GraphQL server and its dependencies:
+
 ```
 $ make start
 ```
 
 To run in debug mode:
+
 ```
 DEBUG=* make start
 ```
@@ -111,6 +120,7 @@ After running `make start-deps` or `make reset-deps`, the lightning network - ru
 You can then login with the following credentials to get an account with an existing balance: `phone: +16505554328`, `code: 000000`
 
 ### Config
+
 There is a sample configuration file `galoy.yaml`. This is the applications default configuration and contains settings for  LND, test accounts, rate limits, fees and more.
 
 If you need to customize any of these settings you can create a `custom.yaml` file in the path `/var/yaml/custom.yaml`. This file will be merged with the default config. Here is an example of a custom.yaml file that configures fees:
@@ -154,6 +164,7 @@ To run the full test suite you can run:
 ```bash
 $ make test
 ```
+
 Executing the full test suite requires [runtime dependencies](#runtime-dependencies).
 
 ### Run unit tests
@@ -177,6 +188,7 @@ $ make integration
 ```
 
 The  integration tests are *not* fully idempotent (yet) so currently to re-run the tests, run:
+
 ```
 $ make reset-integration
 ```
@@ -194,6 +206,7 @@ $ TEST=utils yarn test:unit
 # or
 $ TEST=utils make unit
 ```
+
 where `utils` is the name of the file `utils.spec.ts`
 
 #### Integration
@@ -207,6 +220,7 @@ $ TEST=01-connection make integration
 ```
 
 if within a specific test suite you want to run/debug only a describe or it(test) block please use:
+
 * [describe.only](https://jestjs.io/docs/api#describeonlyname-fn): just for debug purposes
 * [it.only](https://jestjs.io/docs/api#testonlyname-fn-timeout): just for debug purposes
 * [it.skip](https://jestjs.io/docs/api#testskipname-fn): use it when a test is temporarily broken. Please don't commit commented test cases
@@ -217,6 +231,7 @@ if within a specific test suite you want to run/debug only a describe or it(test
 
 Migrations are stored in the `src/migrations` folder.
 When developing migrations the best way to test them on a clean database is:
+
 ```
 make test-migrate
 ```
@@ -231,6 +246,7 @@ npx migrate-mongo create <migration-name> \
 ```
 
 Write the migration in the newly created migration file and then test/run with the following:
+
 ```bash
 # Migrate
 npx migrate-mongo up \
@@ -246,6 +262,7 @@ When testing, to isolate just the current migration being worked on in local dev
 ### Known issues
 
 * **Test suite timeouts**: increase jest timeout value. Example:
+  
   ```bash
   # 120 seconds
   $ JEST_TIMEOUT=120000 yarn test:integration
@@ -253,6 +270,7 @@ When testing, to isolate just the current migration being worked on in local dev
 * **Integration tests running slow**: we use docker to run dependencies (redis, mongodb, bitcoind and 4 lnds) so the entire test suite is disk-intensive.
   * Please make sure that you are running docker containers in a solid state drive (SSD)
   * Reduce lnd log disk usage: change debuglevel to critical
+    
     ```
     # ./dev/lnd/lnd.conf
     debuglevel=critical
