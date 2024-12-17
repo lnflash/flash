@@ -8,7 +8,8 @@ import LnNoAmountInvoicePayload from "@graphql/public/types/payload/ln-noamount-
 
 // FLASH FORK: import ibex dependencies
 import { decodeInvoice } from "@domain/bitcoin/lightning"
-import { client as Ibex } from "@services/ibex"
+import Ibex from "@services/ibex/client"
+
 import { IbexClientError, UnexpectedResponseError } from "@services/ibex/client/errors"
 
 const LnNoAmountInvoiceCreateInput = GT.Input({

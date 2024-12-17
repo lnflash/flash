@@ -16,7 +16,8 @@ import OnChainUsdTxFee from "@graphql/public/types/object/onchain-usd-tx-fee"
 import { normalizePaymentAmount } from "../../../shared/root/mutation"
 
 // FLASH FORK: import ibex dependencies
-import { client as Ibex } from "@services/ibex"
+import Ibex from "@services/ibex/client"
+
 import { IbexClientError, UnexpectedResponseError } from "@services/ibex/client/errors"
 
 const OnChainUsdTxFeeQuery = GT.Field<null, GraphQLPublicContextAuth>({

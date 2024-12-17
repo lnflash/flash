@@ -17,7 +17,7 @@ import {
 } from "@services/mongoose"
 
 import { validateIsBtcWallet, validateIsUsdWallet } from "./validate"
-import { client as Ibex } from "@services/ibex"
+import Ibex from "@services/ibex/client"
 import { IbexClientError, UnexpectedResponseError } from "@services/ibex/client/errors"
 import { decodeInvoice } from "@domain/bitcoin/lightning/ln-invoice"
 import { AddInvoiceResponse201 } from "@services/ibex/client/.api/apis/sing-in"

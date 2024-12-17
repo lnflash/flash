@@ -13,7 +13,8 @@ import { checkedToWalletId } from "@domain/wallets"
 import { normalizePaymentAmount } from "../../../shared/root/mutation"
 
 // FLASH FORK: import ibex dependencies
-import { client as Ibex } from "@services/ibex"
+import Ibex from "@services/ibex/client"
+
 import { IbexApiError, IbexAuthenticationError, IbexClientError, UnexpectedResponseError } from "@services/ibex/client/errors"
 import { GetFeeEstimationResponse200 } from "@services/ibex/client/.api/apis/sing-in/types"
 import { WalletCurrency } from "@domain/shared"

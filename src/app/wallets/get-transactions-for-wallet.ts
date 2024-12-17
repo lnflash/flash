@@ -7,7 +7,7 @@ import { CouldNotFindError } from "@domain/errors"
 
 import { getNonEndUserWalletIds, LedgerService } from "@services/ledger"
 import { WalletOnChainPendingReceiveRepository } from "@services/mongoose"
-import { client as Ibex } from "@services/ibex"
+import Ibex from "@services/ibex/client"
 import { IbexApiError, IbexClientError } from "@services/ibex/client/errors"
 import { GResponse200 } from "@services/ibex/client/.api/apis/sing-in/types"
 import { baseLogger } from "@services/logger"

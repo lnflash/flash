@@ -47,7 +47,7 @@ import {
   addContactsAfterSend,
 } from "./helpers"
 
-import { client as Ibex } from "@services/ibex"
+import Ibex from "@services/ibex/client"
 import { UnexpectedResponseError } from "@services/ibex/client/errors"
 
 const dealer = DealerPriceService()

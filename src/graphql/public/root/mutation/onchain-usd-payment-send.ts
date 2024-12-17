@@ -12,8 +12,12 @@ import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fract
 // import { Wallets } from "@app"
 
 // FLASH FORK: import ibex dependencies
-import { client as Ibex } from "@services/ibex"
+import Ibex from "@services/ibex/client"
+
 import { IbexClientError } from "@services/ibex/client/errors"
+import { SendToAddressCopyResponse200 } from "@services/ibex/client/.api/apis/sing-in"
+import { PaymentSendStatus } from "@domain/bitcoin/lightning"
+import { Wallets } from "@app/index"
 
 const OnChainUsdPaymentSendInput = GT.Input({
   name: "OnChainUsdPaymentSendInput",
@@ -67,60 +71,23 @@ const OnChainUsdPaymentSendMutation = GT.Field<
     if (speed instanceof Error) {
       return { errors: [{ message: speed.message }] }
     }
-
-    // FLASH FORK: use IBEX to send on-chain payment
-    // const result = await Wallets.payOnChainByWalletIdForUsdWallet({
-    //   senderAccount: domainAccount,
-    //   senderWalletId: walletId,
-    //   amount,
-    //   address,
-    //   speed,
-    //   memo,
-    // })
     if (!domainAccount) throw new Error("Authentication required")
-
-    const resp = await Ibex().sendToAddressV2({
-      accountId: walletId,
+ 
+    const result = await Wallets.payOnChainByWalletIdForUsdWallet({
+      senderAccount: domainAccount,
+      senderWalletId: walletId,
+      amount,
       address,
-      amount: amount / 100,
+      speed,
+      memo,
     })
-
-    if (resp instanceof IbexClientError) {
-      return { status: "failed", errors: [mapAndParseErrorForGqlResponse(resp)] }
+    if (result instanceof IbexClientError) {
+      return { 
+        status: PaymentSendStatus.Failure, 
+        errors: [mapAndParseErrorForGqlResponse(result)] 
+      }
     }
-
-    return {
-      errors: [],
-      status: resp.status,
-    }
-
-    // const PayOnChainAddress = await requestIBexPlugin(
-    //   "POST",
-    //   IbexRoutes.OnChainPayment,
-    //   {},
-    //   {
-    //     accountId: walletId,
-    //     address,
-    //     amount: amount / 100,
-    //   },
-    // )
-    // const result: PayOnChainByWalletIdResult = {
-    //   status: {
-    //     value:
-    //       PayOnChainAddress.data["data"]["status"] === "INITIATED"
-    //         ? "pending"
-    //         : PayOnChainAddress.data["data"]["status"] === "MEMPOOL"
-    //         ? "pending"
-    //         : PayOnChainAddress.data["data"]["status"] === "BLOCKCHAIN"
-    //         ? "pending"
-    //         : PayOnChainAddress.data["data"]["status"] === "CONFIRMED"
-    //         ? "success"
-    //         : PayOnChainAddress.data["data"]["status"] === "FAILED"
-    //         ? "failed"
-    //         : "pending",
-    //   },
-    //   payoutId: PayOnChainAddress.data["data"]["transactionHub"]["id"],
-    // }
+    return result
   },
 })
 
