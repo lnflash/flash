@@ -26,7 +26,7 @@ import {
   toDisplayBaseAmount,
 } from "@domain/payments"
 import { OnChainPaymentFlowBuilder } from "@domain/payments/onchain-payment-flow-builder"
-import { WalletCurrency } from "@domain/shared"
+import { ErrorLevel, WalletCurrency } from "@domain/shared"
 import { PaymentInputValidator, SettlementMethod } from "@domain/wallets"
 
 import * as LedgerFacade from "@services/ledger/facade"
@@ -42,7 +42,7 @@ import {
   WalletsRepository,
 } from "@services/mongoose"
 import { NotificationsService } from "@services/notifications"
-import { addAttributesToCurrentSpan } from "@services/tracing"
+import { addAttributesToCurrentSpan, recordExceptionInCurrentSpan } from "@services/tracing"
 
 import { getMinerFeeAndPaymentFlow } from "./get-on-chain-fee"
 import { validateIsBtcWallet, validateIsUsdWallet } from "./validate"
@@ -127,12 +127,14 @@ const payOnChainByWalletId = async <R extends WalletCurrency>({
     address: checkedAddress,
     amount: amountRaw / 100,
   })
-
   if (resp instanceof IbexClientError) return resp
 
   let status = IbexAdaptor.toPaymentSendStatus(resp.status)
   if (status instanceof UnexpectedResponseError) {
-    // how write to otel?
+    recordExceptionInCurrentSpan({
+      error: status,
+      level: ErrorLevel.Warn,
+    }) 
     status = PaymentSendStatus.Pending
   }
   return {
