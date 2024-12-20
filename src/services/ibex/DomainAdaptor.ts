@@ -29,7 +29,7 @@ const toPaymentSendStatus = (
       return PaymentSendStatus.Failure
     default:
       return new UnexpectedResponseError(
-        `Could not parse ibexStatus with value ${ibexStatus}`,
+        `Could not parse ibexStatus with value "${ibexStatus}"`,
       )
   }
 }
