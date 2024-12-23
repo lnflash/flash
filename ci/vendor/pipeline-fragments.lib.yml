@@ -424,7 +424,9 @@ source:
   paths: [yarn.lock]
   uri: #@ data.values.git_uri
   branch: #@ data.values.git_branch
-  private_key: #@ data.values.github_private_key
+  #! private_key: #@ data.values.gh_password
+  username: #@ data.values.gh_user
+  password: #@ data.values.gh_password 
 #@ if webhook:
 webhook_token: ((webhook.secret))
 #@ end
@@ -436,8 +438,8 @@ type: semver
 source:
   initial_version: 0.1.0
   driver: gcs
-  bucket: ((staging-gcp-creds.bucket_name))
-  json_key: ((staging-gcp-creds.creds_json))
+  bucket: flash-concourse
+  json_key: #@ data.values.gcs_creds 
   key: #@ data.values.gh_repository + "-artifacts/versions/deps"
 #@ end
 
@@ -445,8 +447,10 @@ source:
 name: bundled-deps
 type: gcs-resource
 source:
-  bucket: ((staging-gcp-creds.bucket_name))
-  json_key: ((staging-gcp-creds.creds_json))
+  #! ((staging-gcp-creds.bucket_name))
+  bucket: flash-concourse
+  #! ((staging-gcp-creds.creds_json))
+  json_key: #@ data.values.gcs_creds 
   regexp: #@ data.values.gh_repository + "-artifacts/deps/bundled-deps-v(.*)-.*.tgz"
 #@ end
 

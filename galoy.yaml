@@ -1,6 +1,3 @@
-### THIS FILE IS ONLY A SAMPLE. THE DEFAULT VALUES ARE IN src/config/schema.ts
-### TO SET OVERRIDES, SEE THE DEV.md
-
 lightningAddressDomain: pay.domain.com
 lightningAddressDomainAliases:
   - pay1.domain.com

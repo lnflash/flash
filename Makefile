@@ -71,8 +71,8 @@ unit:
 	yarn test:unit
 
 watch-unit:
-	$(BIN_DIR)/jest --config ./test/unit/jest.config.js --clearCache
-	NODE_ENV=test LOGLEVEL=warn $(BIN_DIR)/jest --watch --config ./test/unit/jest.config.js
+	$(BIN_DIR)/jest --config ./test/flash/unit/jest.config.js --clearCache
+	NODE_ENV=test LOGLEVEL=warn $(BIN_DIR)/jest --watch --config ./test/flash/unit/jest.config.js
 
 watch-compile:
 	$(BIN_DIR)/tsc --watch  --noEmit
@@ -115,13 +115,13 @@ execute-integration-from-within-container:
 	SVIX_ENDPOINT= \
 	SVIX_SECRET= \
 	NODE_OPTIONS="--max-old-space-size=6144" \
-	NODE_ENV=test LOGLEVEL=error $(BIN_DIR)/jest --config ./test/legacy-integration/jest.config.js --bail --runInBand --ci --reporters=default --reporters=jest-junit && \
+	NODE_ENV=test LOGLEVEL=error $(BIN_DIR)/jest --config ./test/flash/legacy-integration/jest.config.js --bail --runInBand --ci --reporters=default --reporters=jest-junit && \
 	NODE_OPTIONS="--max-old-space-size=6144" \
-	NODE_ENV=test LOGLEVEL=error $(BIN_DIR)/jest --config ./test/integration/jest.config.js --bail --runInBand --ci --reporters=default --reporters=jest-junit
+	NODE_ENV=test LOGLEVEL=error $(BIN_DIR)/jest --config ./test/flash/integration/jest.config.js --bail --runInBand --ci --reporters=default --reporters=jest-junit
 
 unit-in-ci:
 	. ./.env && \
-		LOGLEVEL=warn $(BIN_DIR)/jest --config ./test/unit/jest.config.js --ci --bail --maxWorkers=50%
+		LOGLEVEL=warn $(BIN_DIR)/jest --config ./test/flash/unit/jest.config.js --ci --bail --maxWorkers=50%
 
 check-implicit:
 	yarn tsc-check-noimplicitany
