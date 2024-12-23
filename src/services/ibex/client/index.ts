@@ -2,7 +2,7 @@
 import ibexSDK, * as types from "./.api/apis/sing-in" // TODO: @sing-in@<uuid>
 import { IbexAuthenticationError, IbexApiError, IbexClientError } from "./errors"
 import WebhookServer from "../webhook-server"
-import { addAttributesToCurrentSpan, wrapAsyncFunctionsToRunInSpan, wrapAsyncToRunInSpan } from "@services/tracing"
+import { addAttributesToCurrentSpan, addEventToCurrentSpan, wrapAsyncFunctionsToRunInSpan, wrapAsyncToRunInSpan } from "@services/tracing"
 import { IBEX_EMAIL, IBEX_PASSWORD, IBEX_URL } from "@config";
 import { baseLogger } from "@services/logger";
 import { SignInResponse200 } from "./.api/apis/sing-in";
@@ -159,6 +159,8 @@ export default () => {
             .catch(e => new IbexApiError(e.status, e.data))
     }
 
+    // onchain transactions are typically high-value
+    // logging all Ibex responses until we have higher confidence & higher volume
     const sendToAddressV2 = async (body: types.SendToAddressCopyBodyParam): Promise<types.SendToAddressCopyResponse200 | IbexAuthenticationError | IbexApiError> => {
         const bodyWithHooks = { 
             ...body,
@@ -167,6 +169,10 @@ export default () => {
         } as types.SendToAddressCopyBodyParam
         addAttributesToCurrentSpan({ "request.params": JSON.stringify(bodyWithHooks) })
         return withAuth(() => Ibex.sendToAddressCopy(bodyWithHooks))
+            .then(r => {
+                addEventToCurrentSpan("IbexResponse", { response: JSON.stringify(r) })
+                return r
+            })
             .catch(e => new IbexApiError(e.status, e.data))
     }
 
