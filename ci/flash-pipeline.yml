@@ -8,21 +8,21 @@
 #@ load("vendor/pipeline-fragments.lib.yml",
 #@   "nodejs_task_image_config",
 #@   "nodejs_concourse_image",
+#@   "nodejs_deps_resource",
+#@   "deps_version_resource",
 #@   "install_yarn_deps",
 #@   "nodejs_check_code",
 #@   "nodejs_audit",
+#@   "bundled_deps_resource",
+#@   "gcr_resource_type",
 
 #! UNUSED RESOURCES
-#! @   "bundled_deps_resource"
 #! #@   "slack_failure_notification",
 #! ##@   "test_on_docker_host",
 #! ##@   "docker_host_pool",
-#! ##@   "nodejs_deps_resource",
-#! ##@   "deps_version_resource",
 #! ##@   "repo_resource",
 #! ##@   "pipeline_tasks_resource",
 #! ##@   "slack_resource",
-#! ##@   "gcr_resource_type",
 #! ##@   "slack_resource_type")
 #@ )
 
@@ -77,10 +77,13 @@ resources:
       username: #@ data.values.gh_user
       password: #@ data.values.gh_password 
       #! skip_ssl_verification: true #! tried and failed
+  
+  -  #@ nodejs_deps_resource(True)
+  -  #@ deps_version_resource()
+  -  #@ bundled_deps_resource()
 
  #!       ###-  #@ nodejs_deps_resource(True)
   #!      ###-  #@ deps_version_resource()
-   #!     ###-  #@ bundled_deps_resource()
     #!    ###### -  #@ slack_resource()
 
   #! Define Docker registry
@@ -149,9 +152,27 @@ resources:
       access_token: #@ data.values.github_token
 
 jobs:
-#! - #@ install_yarn_deps()
+- #@ install_yarn_deps()
 #! - #@ nodejs_check_code()
 #! - #@ nodejs_audit()
+- name: test-unit
+  serial: true
+  plan:
+    - in_parallel:
+        - { get: repo, trigger: true }
+        - { get: pipeline-tasks }
+        - { get: bundled-deps, trigger: true }
+    - task: test-unit
+      config:
+        platform: linux
+        image_resource: #@ nodejs_task_image_config()
+        inputs:
+          - name: bundled-deps
+          - name: pipeline-tasks
+          - name: repo
+        run:
+          path: pipeline-tasks/ci/tasks/test-unit.sh
+  #! on_failure: #@ slack_failure_notification()
 - name: build-edge-image
   serial: true
   plan:
@@ -411,3 +432,6 @@ jobs:
           #! CHART: #@ app_lookup[app]["CHART"]
         run:
           path: pipeline-tasks/ci/tasks/open-charts-pr.sh
+
+resource_types:
+  -  #@ gcr_resource_type()

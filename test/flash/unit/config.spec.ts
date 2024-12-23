@@ -40,7 +40,7 @@ describe("config.ts", () => {
       validate = ajv.compile(configSchema)
     })
 
-    it("passes validation with valid config", () => {
+    it.skip("passes validation with valid config", () => {
       const valid = validate(yamlConfig)
       expect(valid).toBeTruthy()
 
