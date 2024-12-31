@@ -81,13 +81,16 @@ const OnChainUsdPaymentSendMutation = GT.Field<
       speed,
       memo,
     })
-    if (result instanceof IbexClientError) {
+    if (result instanceof Error) {
       return { 
-        status: PaymentSendStatus.Failure, 
+        status: PaymentSendStatus.Failure.value, 
         errors: [mapAndParseErrorForGqlResponse(result)] 
       }
     }
-    return result
+    return {
+        status: result.status.value,
+        errors: [] 
+    }
   },
 })
 
