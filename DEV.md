@@ -40,8 +40,6 @@ $ docker compose version
 Docker Compose version 2.0.0
 ```
 
-To use the correct node version, you can install nvm and run `nvm use 20`. Then enable and inititialize yarn using the [yarn docs](https://yarnpkg.com/getting-started/install)
-
 ### Clone the repo:
 
 ```
