@@ -7,7 +7,7 @@ export const staticAccountIds = async () => {
   try {
     return {
       bankOwnerAccountId: toLedgerAccountId(await caching.getBankOwnerWalletId()),
-      dealerBtcAccountId: toLedgerAccountId(await caching.getDealerBtcWalletId()),
+      // dealerBtcAccountId: toLedgerAccountId(await caching.getDealerBtcWalletId()),
       dealerUsdAccountId: toLedgerAccountId(await caching.getDealerUsdWalletId()),
     }
   } catch (err) {

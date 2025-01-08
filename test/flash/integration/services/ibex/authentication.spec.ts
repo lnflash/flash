@@ -29,7 +29,8 @@
 //     });
 // }
 
-// describe("authentication flow", () => {
+describe.skip("Ibex", () => {
+  it("authentication", () => {
 //   it("returns proxy false when proxy is no", async () => {
 
 //     withAuth(callIbex401)
@@ -42,4 +43,6 @@
 //       }),
 //     )
 //   })
-// })
+
+  })
+})
