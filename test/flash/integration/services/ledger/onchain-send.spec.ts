@@ -47,6 +47,7 @@ describe("Ledger", () => {
       if (res instanceof Error) throw res
 
       const txns = await LedgerService().getTransactionsByWalletId(btcWalletDescriptor.id)
+      console.log(txns)
       if (txns instanceof Error) throw txns
       if (!(txns && txns.length)) throw new Error()
       const txn = txns[0]
