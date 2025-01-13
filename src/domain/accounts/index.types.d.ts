@@ -150,6 +150,8 @@ type AccountLimitsVolumes =
   | ValidationError
 
 type AccountValidator = {
+  isActive(): true | ValidationError
+  isLevel(accountLevel: number): true | ValidationError 
   validateWalletForAccount(wallet: Wallet): true | ValidationError
 }
 

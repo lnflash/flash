@@ -12,6 +12,10 @@ export const DEFAULT_EXPIRATIONS = {
     delay: defaultTimeToExpiryInSeconds,
     delayMinutes: (defaultTimeToExpiryInSeconds / SECS_PER_MIN) as Minutes,
   },
+  JMD: {
+    delay: defaultTimeToExpiryInSeconds,
+    delayMinutes: (defaultTimeToExpiryInSeconds / SECS_PER_MIN) as Minutes,
+  }
 }
 
 export const invoiceExpirationForCurrency = (

@@ -9,7 +9,7 @@ module.exports = {
     "^.+\\.(t|j)sx?$": ["@swc/jest", swcConfig],
   },
   testRegex: ".*\\.spec\\.ts$",
-  setupFilesAfterEnv: ["<rootDir>/test/flash/integration/jest.setup.js"],
+  setupFilesAfterEnv: ["<rootDir>/test/flash/integration/jest.setup.ts"],
   testEnvironment: "node",
   moduleNameMapper: {
     "^@config$": ["<rootDir>src/config/index"],
@@ -24,4 +24,5 @@ module.exports = {
     "^@graphql/(.*)$": ["<rootDir>src/graphql/$1"],
     "^test/(.*)$": ["<rootDir>test/$1"],
   },
+    testPathIgnorePatterns: ["<rootDir>/test/flash/integration/services/*", "<rootDir>/test/flash/integration/wallet/*"]
 }

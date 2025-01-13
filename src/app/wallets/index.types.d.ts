@@ -82,7 +82,7 @@ type GetOnChainFeeArgs = GetOnChainFeeWithoutCurrencyArgs & {
 
 type PaymentSendArgs = {
   senderWalletId: WalletId
-  senderAccount: Account
+  senderAccount?: Account
   memo: string | null
 }
 
