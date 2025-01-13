@@ -3,7 +3,7 @@ import { addWalletIfNonexistent } from "@app/accounts/add-wallet"
 import { getAdminAccounts, getDefaultAccountsConfig } from "@config"
 
 import { CouldNotFindAccountFromKratosIdError, CouldNotFindError } from "@domain/errors"
-import { WalletCurrency } from "@domain/shared"
+import { UsdWalletDescriptor, WalletCurrency } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
 
 import {
@@ -103,9 +103,12 @@ export const getAccountRecordByPhone = async (phone: PhoneNumber) => {
 export const createMandatoryUsers = async () => {
   const adminUsers = getAdminAccounts()
 
+  const adminWallets: WalletDescriptor<"USD">[] = Array(adminUsers.length)
   for (const user of adminUsers) {
-    await createUserAndWallet(user.phone)
+    adminWallets.push(await createUserAndWallet(user.phone))
   }
+  // return adminWallets
+  return adminUsers
 }
 
 export const createUserAndWalletFromPhone = async (
@@ -215,11 +218,14 @@ export type TestUser = {
 }
 export const createUser = async () => {
   const { usdWalletDescriptor } = await createRandomUserAndWallets()
-  const account = await AccountsRepository().findById(usdWalletDescriptor.accountId)
+  return getUser(usdWalletDescriptor)
+}
+export const getUser = async <T extends WalletCurrency>(walletD: WalletDescriptor<T>) => {
+  const account = await AccountsRepository().findById(walletD.accountId)
   if (account instanceof Error) throw account
   return {
     account,
-    usdWalletD: usdWalletDescriptor,
+    usdWalletD: walletD,
   }
 }
 

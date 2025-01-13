@@ -86,7 +86,7 @@ legacy-integration:
 
 reset-legacy-integration: reset-deps-integration legacy-integration
 
-integration:
+integration: reset-deps-integration
 	yarn build && \
 	yarn test:integration
 
