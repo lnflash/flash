@@ -8,7 +8,7 @@ import { safeBigInt } from "@domain/shared/safe"
 export * from "./errors"
 export * from "./activity-checker"
 
-export const liabilitiesMainAccount = "Liabilities"
+export const liabilitiesMainAccount = "Accounts Payable"
 
 export const toLiabilitiesWalletId = (walletId: WalletId): LiabilitiesWalletId =>
   `${liabilitiesMainAccount}:${walletId}` as LiabilitiesWalletId
@@ -29,6 +29,9 @@ export const toWalletId = (walletIdPath: LiabilitiesWalletId): WalletId | undefi
 }
 
 const ExternalLedgerTransactionType = {
+  Ibex_invoice: "ibex:invoice",
+  Ibex_onchain: "ibex:onchain",
+  JamaicanRtgs: "jamaican_rtgs",
   Invoice: "invoice",
   Payment: "payment",
   LnFeeReimbursement: "fee_reimbursement", // lightning
