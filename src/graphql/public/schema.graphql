@@ -204,6 +204,32 @@ input CaptchaRequestAuthCodeInput {
   validationCode: String!
 }
 
+type CashoutOffer {
+  """The price to convert USD -> Flash"""
+  exchangeRate: Float!
+
+  """The time at which this offer is no longer accepted by Flash"""
+  expiresAt: Timestamp!
+
+  """The amount that Flash is charging for it's services"""
+  flashFee: FractionalCentAmount!
+
+  """ID of the offer"""
+  offerId: ID!
+
+  """The amount Flash owes to the user denominated in JMD"""
+  receiveJmd: JmdAmount!
+
+  """The amount Flash owes to the user denominated in USD"""
+  receiveUsd: FractionalCentAmount!
+
+  """The amount the user is sending to flash"""
+  send: FractionalCentAmount!
+
+  """ID for the users USD wallet to send from"""
+  walletId: WalletId!
+}
+
 """(Positive) Cent amount (1/100 of a dollar)"""
 scalar CentAmount
 
@@ -373,6 +399,12 @@ type GraphQLApplicationError implements Error {
 """Hex-encoded string of 32 bytes"""
 scalar Hex32Bytes
 
+input InitiateCashoutInput {
+  """The id of the offer being executed."""
+  offerId: ID!
+  walletId: WalletId!
+}
+
 union InitiationVia = InitiationViaIntraLedger | InitiationViaLn | InitiationViaOnChain
 
 type InitiationViaIntraLedger {
@@ -434,6 +466,9 @@ type IsFlashNpubPayload {
   errors: [Error!]!
   isFlashNpub: Boolean
 }
+
+"""(Positive) Jamaican dollar amount"""
+scalar JmdAmount
 
 scalar Language
 
@@ -706,6 +741,12 @@ type Mutation {
   feedbackSubmit(input: FeedbackSubmitInput!): SuccessPayload!
 
   """
+  Start the Cashout process; 
+  User sends USD to Flash via Ibex and receives USD or JMD to bank account.
+  """
+  initiateCashout(input: InitiateCashoutInput!): SuccessPayload!
+
+  """
   Actions a payment which is internal to the ledger e.g. it does
   not use onchain/lightning. Returns payment status (success,
   failed, pending, already_paid).
@@ -797,6 +838,12 @@ type Mutation {
   onChainUsdPaymentSend(input: OnChainUsdPaymentSendInput!): PaymentSendPayload!
   onChainUsdPaymentSendAsBtcDenominated(input: OnChainUsdPaymentSendAsBtcDenominatedInput!): PaymentSendPayload!
   quizCompleted(input: QuizCompletedInput!): QuizCompletedPayload!
+
+  """
+  Returns an offer from Flash for a user to withdraw from their USD wallet (denominated in cents).
+  The user can review this offer and then execute the withdrawal by calling the initiateCashout mutation.
+  """
+  requestCashout(input: RequestCashoutInput!): RequestCashoutResponse!
   userContactUpdateAlias(input: UserContactUpdateAliasInput!): UserContactUpdateAliasPayload! @deprecated(reason: "will be moved to AccountContact")
   userEmailDelete: UserEmailDeletePayload!
   userEmailRegistrationInitiate(input: UserEmailRegistrationInitiateInput!): UserEmailRegistrationInitiatePayload!
@@ -1113,6 +1160,19 @@ input RealtimePriceInput {
 type RealtimePricePayload {
   errors: [Error!]!
   realtimePrice: RealtimePrice
+}
+
+input RequestCashoutInput {
+  """Amount in USD cents."""
+  usdAmount: FractionalCentAmount!
+
+  """ID for a USD wallet belonging to the current user."""
+  walletId: WalletId!
+}
+
+type RequestCashoutResponse {
+  errors: [Error!]!
+  offer: CashoutOffer
 }
 
 """

@@ -131,6 +131,26 @@ const payToLnurl = async (args: PayLnurlArgs): Promise<PayToALnurlPayResponse201
   }).then(errorHandler)
 }
 
+// const sendBetweenAccounts = async (
+//   sender: IbexAccount, 
+//   receiver: IbexAccount, 
+//   transfer: USDollars,
+//   memo: string = "Flash-to-Flash"
+// ): Promise<PayInvoiceV2Response200 | IbexClientError> => {
+//   const invoiceResp = await addInvoice({ 
+//     accountId: receiver.id,
+//     memo,
+//     amount: transfer, // convert cents to dollars for Ibex api
+//   })
+//   if (invoiceResp instanceof Error) return invoiceResp
+//   if (invoiceResp.invoice?.bolt11 === undefined) return new UnexpectedIbexResponse("Bolt11 field not found.")
+
+//   return await payInvoice({
+//     accountId: sender.id,
+//     invoice: invoiceResp.invoice.bolt11 as Bolt11,
+//   })
+// }
+
 export default wrapAsyncFunctionsToRunInSpan({
   namespace: "services.ibex.client",
   fns: { 
