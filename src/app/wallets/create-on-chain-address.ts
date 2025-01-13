@@ -22,7 +22,7 @@ export const createOnChainAddress = async ({
     if (wallet instanceof Error) return wallet
     const account = await AccountsRepository().findById(wallet.accountId)
     if (account instanceof Error) return account
-    const accountValidator = AccountValidator(account)
+    const accountValidator = AccountValidator(account).isActive()
     if (accountValidator instanceof Error) return accountValidator
     
     const resp = await Ibex.generateBitcoinAddress(walletId)

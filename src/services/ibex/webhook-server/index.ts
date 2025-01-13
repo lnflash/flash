@@ -23,6 +23,7 @@ export default {
       invoice: IBEX_EXTERNAL_URI + onReceive.paths.invoice,
       lnurl: IBEX_EXTERNAL_URI + onReceive.paths.lnurl,
       onchain: IBEX_EXTERNAL_URI + onReceive.paths.onchain,
+      cashout: IBEX_EXTERNAL_URI + onReceive.paths.cashout,
     },
     onPay: {
       invoice: IBEX_EXTERNAL_URI + onPay.paths.invoice,
