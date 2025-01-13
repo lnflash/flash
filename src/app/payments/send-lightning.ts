@@ -216,7 +216,8 @@ const validateInvoicePaymentInputs = async ({
   if (senderAccount instanceof Error) return senderAccount
 
   const accountValidator = AccountValidator(senderAccount)
-  if (accountValidator instanceof Error) return accountValidator
+  const isActive = accountValidator.isActive()
+  if (isActive instanceof Error) return isActive
   const validateWallet = accountValidator.validateWalletForAccount(senderWallet)
   if (validateWallet instanceof Error) return validateWallet
 
@@ -269,7 +270,8 @@ const validateNoAmountInvoicePaymentInputs = async <S extends WalletCurrency>({
   if (senderWallet instanceof Error) return senderWallet
 
   const accountValidator = AccountValidator(senderAccount)
-  if (accountValidator instanceof Error) return accountValidator
+  const isActive = accountValidator.isActive()
+  if (isActive instanceof Error) return isActive
   const validateWallet = accountValidator.validateWalletForAccount(senderWallet)
   if (validateWallet instanceof Error) return validateWallet
 
@@ -385,7 +387,7 @@ const executePaymentViaIntraledger = async <
   const recipientAccount = await AccountsRepository().findById(recipientWallet.accountId)
   if (recipientAccount instanceof Error) return recipientAccount
 
-  const accountValidator = AccountValidator(recipientAccount)
+  const accountValidator = AccountValidator(recipientAccount).isActive()
   if (accountValidator instanceof Error) return accountValidator
 
   const checkLimits =

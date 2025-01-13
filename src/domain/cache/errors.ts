@@ -8,3 +8,5 @@ export class CacheUndefinedError extends CacheServiceError {}
 export class UnknownCacheServiceError extends CacheServiceError {
   level = ErrorLevel.Critical
 }
+
+export class OfferNotFound extends CacheServiceError {}
