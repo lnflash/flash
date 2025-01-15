@@ -211,3 +211,48 @@ type PaginatedArray<T> = { slice: T[]; total: number }
 
 // The following is needed for src/services/ledger/paginated-ledger.ts
 declare module "medici/build/helper/parse/parseFilterQuery"
+
+// expect 0 transaction fee from Ibex, meaning sentAmt - receivedAmt = 0
+type IbexCashOutResp = {
+  sentAmt: UsdPaymentAmount,
+  receivedAmt: UsdPaymentAmount,
+  // transactionFee: UsdAmountsAndFees, 
+}
+type RecordCashOutArgs = {
+  userWalletD: WalletDescriptor<WalletCurrency> // Wallet Descriptor for the user withdrawing funds. We have a new liability to this user
+  paymentDetails: IbexCashOutResp
+  liability: Amount<"JMD"> | Amount<"USD">,
+}
+
+// Rtgs is Jamaican bank transfer
+type RtgsTransfer = {
+  transactionId: string,
+  senderAccountId: string, // sample
+  receiverAccountId: string, // sample
+  sent: Amount<"JMD"> | Amount<"USD">
+  fees?: number,
+}
+
+type RecordCashOutSettledArgs = {
+  ledgerTrxid: LedgerTransactionId,
+  paymentDetails: RtgsTransfer,
+}
+
+// type RecordFlashWithdrawFromIbex {
+//   description: string
+//   // accountId: // Flash Ibex account 
+//   // withdrawAmount: UsdPaymentAmount,
+//   // settleAmount: UsdPaymentAmount,
+//   bankFee?: {
+//     ibex: .6% expected
+//     // flash: 2% - ibex - record as an amount. This is gross revenue
+//     // usd: UsdPaymentAmount
+//     // btc: BtcPaymentAmount
+//   },
+
+// }
+
+// transfer into Jamaican bank 
+// type RecordWireTransfer {
+// would be nice to have for revenue tracking
+// }

@@ -2,7 +2,7 @@ import crypto from "crypto"
 
 import mongoose from "mongoose"
 
-import { WalletCurrency, ZERO_CENTS, ZERO_SATS } from "@domain/shared"
+import { paymentAmountFromNumber, WalletCurrency, ZERO_CENTS, ZERO_SATS } from "@domain/shared"
 import { toSats } from "@domain/bitcoin"
 import { LedgerTransactionType, toLiabilitiesWalletId } from "@domain/ledger"
 
@@ -678,37 +678,6 @@ export const recordColdStorageTxSend = async ({
   return translateToLedgerJournal(savedEntry)
 }
 
-export const recordCashOut = async <S extends WalletCurrency>({
-  walletDescriptor,
-  paymentAmount,
-  bankFee,
-  displayAmounts,
-}: RecordExternalTxTestArgs<S>) => {
-  const { metadata, debitAccountAdditionalMetadata, internalAccountsAdditionalMetadata } =
-    LedgerFacade.OnChainSendLedgerMetadata({
-      paymentAmounts: {
-        btcPaymentAmount: paymentAmount.btc,
-        usdPaymentAmount: paymentAmount.usd,
-        btcProtocolAndBankFee: bankFee.btc,
-        usdProtocolAndBankFee: bankFee.usd,
-      },
-
-      ...displayAmounts,
-
-      payeeAddresses: ["address1" as OnChainAddress],
-      sendAll: false,
-    })
-
-  return LedgerFacade.recordCashOut({
-    description: "sends bitcoin via onchain",
-    amountToDebitSender: paymentAmount,
-    senderWalletDescriptor: walletDescriptor,
-    bankFee,
-    metadata,
-    additionalDebitMetadata: debitAccountAdditionalMetadata,
-    additionalInternalMetadata: internalAccountsAdditionalMetadata,
-  })
-}
 
 // Rtgs refers to Jamaican bank transfer
 // export const recordRtgsPayment()

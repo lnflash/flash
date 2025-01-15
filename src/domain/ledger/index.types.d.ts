@@ -232,6 +232,12 @@ type IsOnChainReceiptTxRecordedForWalletResult = {
 }
 
 interface ILedgerService {
+  // Flash Fork
+  recordCashOut(args: RecordCashOutArgs): Promise<LedgerJournal | LedgerServiceError>
+  recordSettledCashOut(args: RecordCashOutSettledArgs): Promise<LedgerJournal | LedgerServiceError>
+  getAccountsPayable<T extends WalletCurrency>(currency: T): Promise<Amount<T>>
+  getTotalAccountsPayable(): Promise<Amount<"USD">>
+
   updateMetadataByHash(
     ledgerTxMetadata:
       | OnChainLedgerTransactionMetadataUpdate
