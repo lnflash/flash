@@ -84,7 +84,7 @@ const intraledgerPaymentSendWalletId = async ({
   if (invoiceResp.invoice?.bolt11 === undefined) return new UnexpectedResponseError("Bolt11 field not found.")
 
   const payResp = await Ibex().payInvoiceV2({
-    accountId: uncheckedSenderWalletId,
+    accountId: senderWallet.id,
     bolt11: invoiceResp.invoice.bolt11,
   })
   if (payResp instanceof Error) return payResp

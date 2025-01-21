@@ -71,7 +71,7 @@ export const recordSettledCashOut = async ({
 }: RecordCashOutSettledArgs) => {
   const ledgerTransaction = await LedgerService().getTransactionById(ledgerTrxid)
   if (ledgerTransaction instanceof LedgerError) return ledgerTransaction
-
+  
   const userWalletId = ledgerTransaction.walletId
   if (userWalletId === undefined) return new LedgerServiceError("Could not find wallet id for transaction.")
   if (paymentDetails.sent.currency !== ledgerTransaction.currency) return new LedgerServiceError("Settled currency does not match liability currency.")
@@ -89,7 +89,7 @@ export const recordSettledCashOut = async ({
     .debit(`Accounts Payable:${userWalletId}`, usdSent, metadata) 
     .credit("Cash", usdSent, metadata)
 
-  // Flash accounts for currency exchange rate volatility (e.g USD -> JMD) from cash out is issued to time rtgs transfer
+  // Flash is exposed to exchange rate volatility (e.g USD -> JMD) when there is not enough JMD to cover current liabilities
   const foreignExchangeChange = usdSent - (ledgerTransaction.usd || usdSent)
   if (foreignExchangeChange > 0) {
     entry

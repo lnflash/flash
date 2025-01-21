@@ -1,29 +1,23 @@
 import Ibex from "@services/ibex/client"
-
+import { alice, bob } from "./jest.setup"
 import { AccountsRepository } from "@services/mongoose"
 
 import { PayoutSpeed } from "@domain/bitcoin/onchain"
 import { Wallets } from "@app/index"
 
 import Mocks from "test/flash/mocks"
-import { createMandatoryUsers, createRandomUserAndWallets, createUser, createUserAndWallet, TestUser } from "test/galoy/helpers"
 import { ValidationError } from "@domain/shared"
 
 const randomOnChainMemo = () =>
   "this is my onchain memo #" + (Math.random() * 1_000_000).toFixed()
 
-jest.mock("@services/ibex/client")
 
-let alice: TestUser
-let bob: TestUser
 const memo = randomOnChainMemo()
 const regtestAddr = "bcrt1q6z64a43mjgkcq0ul2zaqusq3spghrlau9slefp" // taken from unit tests
 
+jest.mock("@services/ibex/client")
 let mockedIbex: jest.Mock
 beforeAll(async () => {
-  await createMandatoryUsers()
-  alice = await createUser()
-  bob = await createUser()
 
   // Mocking the http call would be more useful, but adds complexity to tests
   mockedIbex = Ibex as jest.Mock // move to beforeAll
