@@ -212,17 +212,11 @@ type PaginatedArray<T> = { slice: T[]; total: number }
 // The following is needed for src/services/ledger/paginated-ledger.ts
 declare module "medici/build/helper/parse/parseFilterQuery"
 
-// expect 0 transaction fee from Ibex, meaning sentAmt - receivedAmt = 0
-type IbexCashOutResp = {
-  sentAmt: UsdPaymentAmount,
-  receivedAmt: UsdPaymentAmount,
-  // transactionFee: UsdAmountsAndFees, 
-}
-type RecordCashOutArgs = {
-  userWalletD: WalletDescriptor<WalletCurrency> // Wallet Descriptor for the user withdrawing funds. We have a new liability to this user
-  paymentDetails: IbexCashOutResp
-  liability: Amount<"JMD"> | Amount<"USD">,
-}
+// type RecordCashOutArgs = {
+//   userWalletD: WalletDescriptor<WalletCurrency> // Wallet Descriptor for the user withdrawing funds. We have a new liability to this user
+//   transferred: UsdPaymentAmount, // transfer amount
+//   liability: Amount<"JMD"> | Amount<"USD">,
+// }
 
 // Rtgs is Jamaican bank transfer
 type RtgsTransfer = {

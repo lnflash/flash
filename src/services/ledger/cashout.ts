@@ -1,4 +1,5 @@
 import {
+  UsdPaymentAmount,
   WalletCurrency,
   ZERO_CENTS,
   ZERO_SATS,
@@ -12,6 +13,7 @@ import { LedgerError, LedgerServiceError, LedgerTransactionType } from "@domain/
 import { staticAccountIds } from "./facade/static-account-ids"
 import { getTransactionById } from "@app/wallets"
 import { LedgerService } from "."
+import Offer from "@app/offers/Offer"
 
 // See Foreign Exchange Rates: https://www.firstglobal-bank.com/
 const JMD_SELL_RATE = 159
@@ -24,44 +26,36 @@ const toUSD = (liability: Amount<"JMD"> | Amount<"USD">): number => {
   else return Number(liability.amount) / JMD_SELL_RATE
 }
 
-export const recordCashOut = async ({
-  userWalletD,
-  paymentDetails,
-  liability,
-}: RecordCashOutArgs): Promise<LedgerJournal | LedgerServiceError> => {
-  // TODO: move to calling function: const ibexFee = paymentDetails.sentAmt.amount - paymentDetails.receivedAmt.amount
-  const usdLiability = toUSD(liability) 
-  const flashFee = Number(paymentDetails.receivedAmt.amount) - usdLiability
-  // const accountIds = await staticAccountIds()
-  // if (accountIds instanceof Error) return accountIds
+export const recordCashOut = async (
+  offer: Offer
+): Promise<LedgerJournal | LedgerServiceError> => {
+  const usdLiability = offer.rtgsLiability.currency === "JMD" ? toUSD(offer.rtgsLiability) : Number(offer.rtgsLiability.amount)
 
   let entry = MainBook
-    .entry(`User cash out from wallet ${userWalletD.id}`)
-    .debit(`Cash`, Number(paymentDetails.receivedAmt.amount), { 
+    .entry(`User cash out from wallet ${offer.walletId}`)
+    .debit(`Cash`, Number(offer.ibexTransfer.amount), { 
       type: LedgerTransactionType.Ibex_invoice,
-      currency: paymentDetails.receivedAmt.currency,
+      currency: offer.ibexTransfer.currency,
       pending: false,
     }) 
     .credit(
-      `Accounts Payable:${userWalletD.id}`,  // should be an id that represents user - not wallet
+      `Accounts Payable:${offer.walletId}`,  // should be an id that represents user - not wallet
       usdLiability, 
       { 
         type: LedgerTransactionType.Ibex_invoice,
-        amount: liability.amount,
-        currency: liability.currency,
+        amount: offer.rtgsLiability.amount,
+        currency: offer.rtgsLiability.currency,
         pending: false, 
        }
     )
-    .credit("Revenue", Number(flashFee), { 
+    .credit("Revenue", Number(offer.flashFee.amount), { 
         type: LedgerTransactionType.Ibex_invoice,
-        currency: WalletCurrency.Usd,
+        currency: offer.flashFee.currency,
         pending: false, 
        }
     ) 
-    // .commit()
     return persistAndReturnEntry({ 
       entry, 
-      // hash: metadata.hash 
     })
 }
 
