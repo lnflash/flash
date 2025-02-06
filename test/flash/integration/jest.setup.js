@@ -1,17 +1,24 @@
 import { disconnectAll } from "@services/redis"
 import { setupMongoConnection } from "@services/mongodb"
 import { createMandatoryUsers, createRandomUserAndWallets, createUser, getUser, createUserAndWallet, TestUser, getUsdWalletDescriptorByPhone, getAccountByPhone } from "test/galoy/helpers"
+// import Ibex from "@services/ibex/client"
 
 let mongoose
-export let flash: TestUser
-export let alice: TestUser
-export let bob: TestUser
+export let flash // : TestUser
+export let alice // : TestUser
+export let bob //: TestUser
 
 // Mock prices
 jest.mock(
   "@app/prices/get-current-price",
   () => require("test/flash/mocks/get-current-price"),
 )
+
+// jest.mock(
+//   "@services/ibex/client",
+//   // () => require("test/flash/mocks/ibex"),
+// )
+// export let mockedIbex: jest.Mock
 
 beforeAll(async () => {
   mongoose = await setupMongoConnection(true)
@@ -24,6 +31,7 @@ beforeAll(async () => {
   }
   alice = await createUser()
   bob = await createUser()
+
 })
 
 // Would be nice to clean-up Ibex accounts, but Ibex API does not have delete

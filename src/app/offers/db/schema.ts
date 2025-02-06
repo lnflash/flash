@@ -1,6 +1,5 @@
 import { WalletCurrency } from "@domain/shared"
 import mongoose, { Schema } from "mongoose"
-import { CashoutDetails } from "../Offer";
 
 // export interface OfferRecord {
 //   // _id: Schema.Types.ObjectId,
@@ -13,9 +12,6 @@ import { CashoutDetails } from "../Offer";
 //   createdAt: Date
 //   expiresAt: Date
 // }
-export interface OfferRecord extends CashoutDetails {
-  _id: ObjectId,
-}
 
 const AmountSchema = new Schema({
   amount: {
@@ -59,6 +55,9 @@ const OfferSchema = new Schema<OfferRecord>({
   },
   flashFee: {
     type: AmountSchema,
+  },
+  exchangeRate: {
+    type: Number,
   },
   createdAt: {
     type: Date

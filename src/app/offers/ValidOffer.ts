@@ -5,11 +5,63 @@ import Offer from "./Offer"
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import PersistedOffer from "./db/PersistedOffer"
 import OffersRepository from "./db/OffersRepository"
+import { LedgerServiceError } from "@domain/ledger"
+
+import { RepositoryError } from "@domain/errors"
+
+import { AccountsRepository, WalletsRepository } from "@services/mongoose"
+import { AccountValidator } from "@domain/accounts"
+import { ValidationError } from "@domain/shared"
+import { getBalanceForWallet } from "@app/wallets"
+
+// import { offerConfig as config } from "@config"
+const config: ValidationConfig = {
+    minimum: {
+      amount: 0n, // 1000n, // $10
+      currency: "USD"
+    }
+}
 
 class ValidOffer extends Offer {
+  // Only way to construct a ValidOffer is using the validate function  
+  private constructor(o: CashoutDetails) {
+    super(o)
+  }
+
+  //  TODO Volume limits - withdrawal limit. 
+  static from = async (details: CashoutDetails): Promise<ValidOffer | Error> => {
+    const { walletId, ibexTransfer } = details
+
+    if (ibexTransfer.amount < config.minimum.amount)
+      return new ValidationError(`Minimum cashout is ${config.minimum.amount}`) 
+
+    const wallet = await WalletsRepository().findById(walletId)
+    if (wallet instanceof RepositoryError) return wallet
+    
+    if (wallet.currency !== "USD") 
+      return new ValidationError("Cash out only supports withdrawals from USD wallets")
   
-  constructor(o: Offer) {
-    super(o.details)
+    const balance = await getBalanceForWallet({ walletId })
+    if (balance instanceof Error) {
+      // TODO log error instead of failing
+      return balance
+    }
+    if (ibexTransfer.amount > balance.valueOf()) {
+      return new ValidationError("Transfer amount is greater than user balance.")
+    }
+
+    const account = await AccountsRepository().findById(wallet.accountId)
+    if (account instanceof RepositoryError) return account
+  
+    const accountValidator = AccountValidator(account)
+    if (accountValidator instanceof ValidationError) 
+      return accountValidator
+
+    const validateWallet = accountValidator.validateWalletForAccount(wallet)
+    if (validateWallet instanceof ValidationError) 
+      return validateWallet
+
+    return new ValidOffer(details)
   }
 
   async persist(): Promise<PersistedOffer | RepositoryError> {
@@ -28,7 +80,12 @@ class ValidOffer extends Offer {
     }) 
     if (ibexResp instanceof Error) return ibexResp 
 
-    const res = await LedgerService().recordCashOut(this)
+    const res = await LedgerService().recordCashOut(this.details)
+    if (res instanceof LedgerServiceError) {
+      return res // TODO: change to a log
+    }
+
+    // TODO: trigger notification to Flash support
 
     return PaymentSendStatus.Pending // awaiting rtgs transfer
   }

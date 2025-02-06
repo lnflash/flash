@@ -276,6 +276,34 @@ input CaptchaRequestAuthCodeInput
   validationCode: String!
 }
 
+type CashoutOffer
+  @join__type(graph: PUBLIC)
+{
+  """The price to convert USD -> Flash"""
+  exchangeRate: Int!
+
+  """The time at which this offer is no longer accepted by Flash"""
+  expiresAt: Timestamp!
+
+  """The amount that Flash is charging for it's services"""
+  flashFee: FractionalCentAmount!
+
+  """The amount the user is sending to flash"""
+  ibexTransfer: FractionalCentAmount!
+
+  """ID of the offer"""
+  id: ID!
+
+  """The amount Flash owes to the user denominated in JMD"""
+  jmdLiability: JmdAmount!
+
+  """The amount Flash owes to the user denominated in USD"""
+  usdLiability: FractionalCentAmount!
+
+  """ID for the users USD wallet to send from"""
+  walletId: WalletId!
+}
+
 """(Positive) Cent amount (1/100 of a dollar)"""
 scalar CentAmount
   @join__type(graph: PUBLIC)
@@ -540,7 +568,7 @@ input IntraLedgerUsdPaymentSendInput
   @join__type(graph: PUBLIC)
 {
   """Amount in cents."""
-  amount: CentAmount!
+  amount: FractionalCentAmount!
 
   """Optional memo to be attached to the payment."""
   memo: Memo
@@ -570,6 +598,10 @@ type IsFlashNpubPayload
   errors: [Error!]!
   isFlashNpub: Boolean
 }
+
+"""(Positive) Jamaican dollar amount"""
+scalar JmdAmount
+  @join__type(graph: PUBLIC)
 
 scalar join__FieldSet
 
@@ -761,7 +793,7 @@ input LnNoAmountUsdInvoicePaymentInput
   @join__type(graph: PUBLIC)
 {
   """Amount to pay in USD cents."""
-  amount: CentAmount!
+  amount: FractionalCentAmount!
 
   """Optional memo to associate with the lightning invoice."""
   memo: Memo
@@ -819,7 +851,7 @@ input LnUsdInvoiceCreateOnBehalfOfRecipientInput
   @join__type(graph: PUBLIC)
 {
   """Amount in USD cents."""
-  amount: CentAmount!
+  amount: FractionalCentAmount!
   descriptionHash: Hex32Bytes
 
   """Optional invoice expiration time in minutes."""
@@ -1014,6 +1046,12 @@ type Mutation
   onChainUsdPaymentSend(input: OnChainUsdPaymentSendInput!): PaymentSendPayload!
   onChainUsdPaymentSendAsBtcDenominated(input: OnChainUsdPaymentSendAsBtcDenominatedInput!): PaymentSendPayload!
   quizCompleted(input: QuizCompletedInput!): QuizCompletedPayload!
+
+  """
+  Returns an offer from Flash for a user to withdraw from their USD wallet (denominated in cents).
+  The user can review this offer and then execute the withdrawal by calling the initiateCashout mutation.
+  """
+  requestCashout(input: RequestCashoutInput!): RequestCashoutResponse!
   userContactUpdateAlias(input: UserContactUpdateAliasInput!): UserContactUpdateAliasPayload! @deprecated(reason: "will be moved to AccountContact")
   userEmailDelete: UserEmailDeletePayload!
   userEmailRegistrationInitiate(input: UserEmailRegistrationInitiateInput!): UserEmailRegistrationInitiatePayload!
@@ -1162,7 +1200,7 @@ input OnChainUsdPaymentSendInput
   @join__type(graph: PUBLIC)
 {
   address: OnChainAddress!
-  amount: CentAmount!
+  amount: FractionalCentAmount!
   memo: Memo
   speed: PayoutSpeed = FAST
   walletId: WalletId!
@@ -1432,6 +1470,23 @@ type RealtimePricePayload
 {
   errors: [Error!]!
   realtimePrice: RealtimePrice
+}
+
+input RequestCashoutInput
+  @join__type(graph: PUBLIC)
+{
+  """Amount in USD cents."""
+  amount: FractionalCentAmount!
+
+  """ID for a USD wallet belonging to the current user."""
+  walletId: WalletId!
+}
+
+type RequestCashoutResponse
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error!]!
+  offer: CashoutOffer
 }
 
 """

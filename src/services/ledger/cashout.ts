@@ -1,19 +1,10 @@
 import {
-  UsdPaymentAmount,
   WalletCurrency,
-  ZERO_CENTS,
-  ZERO_SATS,
 } from "@domain/shared"
-
 import { MainBook } from "./books"
-
 import { persistAndReturnEntry } from "./helpers"
-
 import { LedgerError, LedgerServiceError, LedgerTransactionType } from "@domain/ledger"
-import { staticAccountIds } from "./facade/static-account-ids"
-import { getTransactionById } from "@app/wallets"
 import { LedgerService } from "."
-import Offer from "@app/offers/Offer"
 
 // See Foreign Exchange Rates: https://www.firstglobal-bank.com/
 const JMD_SELL_RATE = 159
@@ -27,30 +18,30 @@ const toUSD = (liability: Amount<"JMD"> | Amount<"USD">): number => {
 }
 
 export const recordCashOut = async (
-  offer: Offer
+  args: CashoutDetails
 ): Promise<LedgerJournal | LedgerServiceError> => {
-  const usdLiability = offer.rtgsLiability.currency === "JMD" ? toUSD(offer.rtgsLiability) : Number(offer.rtgsLiability.amount)
+  const { walletId, ibexTransfer, usdLiability, jmdLiability, flashFee } = args 
 
   let entry = MainBook
-    .entry(`User cash out from wallet ${offer.walletId}`)
-    .debit(`Cash`, Number(offer.ibexTransfer.amount), { 
+    .entry(`User cash out from wallet ${walletId}`)
+    .debit(`Cash`, Number(ibexTransfer.amount), { 
       type: LedgerTransactionType.Ibex_invoice,
-      currency: offer.ibexTransfer.currency,
+      currency: ibexTransfer.currency,
       pending: false,
     }) 
     .credit(
-      `Accounts Payable:${offer.walletId}`,  // should be an id that represents user - not wallet
-      usdLiability, 
+      `Accounts Payable:${walletId}`,  // should be an id that represents user - not wallet
+      Number(usdLiability.amount), 
       { 
         type: LedgerTransactionType.Ibex_invoice,
-        amount: offer.rtgsLiability.amount,
-        currency: offer.rtgsLiability.currency,
+        amount: jmdLiability.amount,
+        currency: jmdLiability.currency,
         pending: false, 
        }
     )
-    .credit("Revenue", Number(offer.flashFee.amount), { 
+    .credit("Revenue", Number(flashFee.amount), { 
         type: LedgerTransactionType.Ibex_invoice,
-        currency: offer.flashFee.currency,
+        currency: flashFee.currency,
         pending: false, 
        }
     ) 

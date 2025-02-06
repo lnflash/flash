@@ -307,6 +307,7 @@ export const LedgerService = (): ILedgerService => {
       }
 
       const resp = await Ibex().getAccountDetails({ accountId: walletId })
+      console.log(`Ibex.account = ${JSON.stringify(resp)}`)
       if (resp instanceof IbexApiError) {
         if (resp.code === 404) return toSats(0)
         return resp

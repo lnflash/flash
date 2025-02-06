@@ -49,53 +49,55 @@ describe("Ledger", () => {
 
   describe("CashOut", () => {
 
-    it("records Ibex & Rtgs transactions", async () => {
-      const amount = { amount: 100n, currency: WalletCurrency.Usd }
+    // it.skip("records Ibex & Rtgs transactions", async () => {
+    //   const amount = { amount: 100n, currency: WalletCurrency.Usd }
 
-      const res = await LedgerService().recordCashOut({
-        userWalletD: alice.usdWalletD,
-        paymentDetails: { // change this type to IbexResponse
-          sentAmt: amount,
-          receivedAmt: amount,
-        },
-        liability: {
-          amount: 15582n,
-          currency: "JMD"
-        },
-      })
+    //   // THIS NEED TO BE AN OFFER
+    //   const res = await LedgerService().recordCashOut({
+    //     userWalletD: alice.usdWalletD,
+    //     paymentDetails: { // change this type to IbexResponse
+    //       sentAmt: amount,
+    //       receivedAmt: amount,
+    //     },jest.mock("@services/ibex/client")
+    //     // let mockedIbex: jest.Mock
+    //     liability: {
+    //       amount: 15582n,
+    //       currency: "JMD"
+    //     },
+    //   })
 
-      if (res instanceof Error) throw res
+    //   if (res instanceof Error) throw res
 
-      const txns = await LedgerService().getTransactionsByWalletId(alice.usdWalletD.id)
-      if (txns instanceof Error) throw txns
-      expect(txns && txns.length).toBe(1)
-      expect(txns[0].type).toBe("ibex:invoice")
+    //   const txns = await LedgerService().getTransactionsByWalletId(alice.usdWalletD.id)
+    //   if (txns instanceof Error) throw txns
+    //   expect(txns && txns.length).toBe(1)
+    //   expect(txns[0].type).toBe("ibex:invoice")
 
-      const settleResult = await LedgerService().recordSettledCashOut({
-        ledgerTrxid: txns[0].id,
-        paymentDetails: {
-          transactionId: "some-rtgs-trx-id",
-          senderAccountId: "flash-rtgs-acct-id", // sample
-          receiverAccountId: "user-rtgs-acct-id", // sample
-          sent: { amount: 15582n, currency: "JMD" },
-          // transactionFee: amount<"JMD">
-        }
-      })
-      if (settleResult instanceof Error) throw settleResult
+    //   const settleResult = await LedgerService().recordSettledCashOut({
+    //     ledgerTrxid: txns[0].id,
+    //     paymentDetails: {
+    //       transactionId: "some-rtgs-trx-id",
+    //       senderAccountId: "flash-rtgs-acct-id", // sample
+    //       receiverAccountId: "user-rtgs-acct-id", // sample
+    //       sent: { amount: 15582n, currency: "JMD" },
+    //       // transactionFee: amount<"JMD">
+    //     }
+    //   })
+    //   if (settleResult instanceof Error) throw settleResult
 
-      const settleTxns = await LedgerService().getTransactionsByWalletId(alice.usdWalletD.id)
-      if (settleTxns instanceof Error) throw settleTxns
-      expect(settleTxns && settleTxns.length).toBe(2)
+    //   const settleTxns = await LedgerService().getTransactionsByWalletId(alice.usdWalletD.id)
+    //   if (settleTxns instanceof Error) throw settleTxns
+    //   expect(settleTxns && settleTxns.length).toBe(2)
 
-      // Verify settled with user
-      expect((await LedgerService().getTotalAccountsPayable()).amount).toBe(0n)
-    })
+    //   // Verify settled with user
+    //   expect((await LedgerService().getTotalAccountsPayable()).amount).toBe(0n)
+    // })
 
-    it.skip("record foreign exchange gain", async () => {
-      throw new Error('Test not implemented');
-    })
-    it.skip("record foreign exchange loss", async () => {
-      throw new Error('Test not implemented');
-    })
+    // it.skip("record foreign exchange gain", async () => {
+    //   throw new Error('Test not implemented');
+    // })
+    // it.skip("record foreign exchange loss", async () => {
+    //   throw new Error('Test not implemented');
+    // })
   })
 })

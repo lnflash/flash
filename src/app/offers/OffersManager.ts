@@ -1,46 +1,40 @@
-import Offer from "./Offer"
 import { RepositoryError } from "@domain/errors"
-import PersistedOffer from "./db/PersistedOffer"
-import Currency from "@graphql/public/types/object/currency"
 import OffersRepository from "./db/OffersRepository"
-import { LedgerService } from "@services/ledger"
+import { IOffersManager } from "."
+import ValidOffer from "./ValidOffer"
 
-type CashoutConfig = {
-  feePercentage: number,
-  duration: Seconds,
-}
-
-class OffersManager implements IOffersManager {
+export class OffersManager implements IOffersManager {
   readonly config: CashoutConfig = {
     feePercentage: .02, // 2 percent total fee
     duration: 360 as Seconds,
   }
-  
+  // readonly Validator = new Validator(this.config)
+
   async makeCashoutOffer(
     walletId: WalletId, 
     flashSend: Amount<"USD">, 
-  ): Promise<CashoutOfferResponse | Error> {
+  ): Promise<CashoutOffer | Error> {
     const flashFee = {
-      amount: BigInt(this.config.feePercentage * Number(flashSend.amount)),
+      amount: BigInt(Math.round(this.config.feePercentage * Number(flashSend.amount))),
       currency: "USD",
     } as Amount<"USD"> 
-
-    const createdAt = new Date() // now
-    const expiresAt = new Date(createdAt.getTime() + this.config.duration * 1000)
 
     const usdLiability = {
       amount: flashSend.amount - flashFee.amount,
       currency: "USD",
     } as Amount<"USD">
   
-    const exchangeRate = 159 // await getPrice("JMD")
+    const exchangeRate: number = 1.59 // USDcents to JMD 
 
     const jmdLiability = {
-      amount: usdLiability.amount * BigInt(exchangeRate), 
+      amount: BigInt(Math.round(Number(usdLiability.amount) * exchangeRate)), 
       currency: "JMD",
     } as Amount<"JMD">
+    
+    const createdAt = new Date() // now
+    const expiresAt = new Date(createdAt.getTime() + this.config.duration * 1000)
 
-    const offer = await (new Offer({
+    const validated = await ValidOffer.from({
       walletId,
       ibexTransfer: flashSend,
       usdLiability,
@@ -49,35 +43,26 @@ class OffersManager implements IOffersManager {
       exchangeRate,
       createdAt,
       expiresAt,
-    }).validate())
-    if (offer instanceof Error) return offer
+    })
+    if (validated instanceof Error) return validated
 
-    const persistedOffer = await offer.persist()
+    const persistedOffer = await OffersRepository.upsert(validated)
     if (persistedOffer instanceof RepositoryError) return persistedOffer
-    
-    return toUser(persistedOffer)
+  
+    return {
+      ...persistedOffer.details,
+      id: persistedOffer.id
+    }
   }
 
   async executeOffer(id: OfferId): Promise<PaymentSendStatus | Error> {
     const offer = await OffersRepository.findById(id)
     if (offer instanceof RepositoryError) return offer
-
-    const validOffer = await offer.validate()
+    
+    const validOffer = await ValidOffer.from(offer.details)
     if (validOffer instanceof Error) return validOffer
 
     return validOffer.execute() 
-  }
-}
-
-const toUser = (o: PersistedOffer): CashoutOfferResponse => {
-  return { 
-    id: o.id,
-    sendFlash: o.details.ibexTransfer,
-    rtgsReceiveUSD: o.details.usdLiability,
-    rtgsReceiveJMD: o.details.jmdLiability,
-    flashFee: o.details.flashFee,
-    exchangeRate: o.details.exchangeRate,
-    expiresAt: o.details.expiresAt, 
   }
 }
 
