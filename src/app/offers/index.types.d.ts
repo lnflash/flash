@@ -25,6 +25,7 @@ type CashoutConfig = {
 
 type ValidationConfig = {
   minimum: Amount<"USD">
+  accountLevel: Number
 }
 
 // application does not have access to the user's RTGS bank account details, 

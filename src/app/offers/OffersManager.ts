@@ -1,21 +1,23 @@
 import { RepositoryError } from "@domain/errors"
 import OffersRepository from "./db/OffersRepository"
-import { IOffersManager } from "."
+// import { IOffersManager } from "."
 import ValidOffer from "./ValidOffer"
 
-export class OffersManager implements IOffersManager {
-  readonly config: CashoutConfig = {
-    feePercentage: .02, // 2 percent total fee
-    duration: 360 as Seconds,
-  }
-  // readonly Validator = new Validator(this.config)
+const config: CashoutConfig = {
+  feePercentage: .02, // 2 percent total fee
+  duration: 360 as Seconds,
+}
 
-  async makeCashoutOffer(
+class OffersManager {
+  // readonly Validator = new Validator(this.config)
+  private constructor() {}
+
+  static async makeCashoutOffer(
     walletId: WalletId, 
     flashSend: Amount<"USD">, 
   ): Promise<CashoutOffer | Error> {
     const flashFee = {
-      amount: BigInt(Math.round(this.config.feePercentage * Number(flashSend.amount))),
+      amount: BigInt(Math.round(config.feePercentage * Number(flashSend.amount))),
       currency: "USD",
     } as Amount<"USD"> 
 
@@ -32,7 +34,7 @@ export class OffersManager implements IOffersManager {
     } as Amount<"JMD">
     
     const createdAt = new Date() // now
-    const expiresAt = new Date(createdAt.getTime() + this.config.duration * 1000)
+    const expiresAt = new Date(createdAt.getTime() + config.duration * 1000)
 
     const validated = await ValidOffer.from({
       walletId,
@@ -55,7 +57,7 @@ export class OffersManager implements IOffersManager {
     }
   }
 
-  async executeOffer(id: OfferId): Promise<PaymentSendStatus | Error> {
+  static async executeOffer(id: OfferId): Promise<PaymentSendStatus | Error> {
     const offer = await OffersRepository.findById(id)
     if (offer instanceof RepositoryError) return offer
     

@@ -13,21 +13,39 @@ import mongoose, { Schema } from "mongoose"
 //   expiresAt: Date
 // }
 
-const AmountSchema = new Schema({
-  amount: {
-    type: BigInt,
-    required: true,
-    min: 0, 
+// const AmountField = {
+//   amount: {
+//     type: BigInt,
+//     required: true,
+//     min: 0, 
+//   },
+//   currency: {
+//     type: String,
+//     enum: Object.values(WalletCurrency),
+//     required: true,
+//     uppercase: true, 
+//     minlength: 3,
+//     maxlength: 3, 
+//   },
+// }
+const AmountSchema = new Schema(
+  {
+    amount: {
+      type: BigInt,
+      required: true,
+      min: 0, 
+    },
+    currency: {
+      type: String,
+      enum: Object.values(WalletCurrency),
+      required: true,
+      uppercase: true, 
+      minlength: 3,
+      maxlength: 3,
+    } 
   },
-  currency: {
-    type: String,
-    enum: Object.values(WalletCurrency),
-    required: true,
-    uppercase: true, 
-    minlength: 3,
-    maxlength: 3, 
-  },
-});
+  { _id: false }
+);
 
 const OfferSchema = new Schema<OfferRecord>({
   // _id: {

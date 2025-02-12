@@ -1,7 +1,6 @@
 import { disconnectAll } from "@services/redis"
 import { setupMongoConnection } from "@services/mongodb"
 import { createMandatoryUsers, createRandomUserAndWallets, createUser, getUser, createUserAndWallet, TestUser, getUsdWalletDescriptorByPhone, getAccountByPhone } from "test/galoy/helpers"
-// import Ibex from "@services/ibex/client"
 
 let mongoose
 export let flash // : TestUser
@@ -14,13 +13,23 @@ jest.mock(
   () => require("test/flash/mocks/get-current-price"),
 )
 
-// jest.mock(
-//   "@services/ibex/client",
-//   // () => require("test/flash/mocks/ibex"),
-// )
-// export let mockedIbex: jest.Mock
+import Ibex from "@services/ibex/client"
+jest.mock(
+  "@services/ibex/client",
+  // () => require("test/flash/mocks/ibex"),
+)
+let mockedIbex: jest.Mock
 
 beforeAll(async () => {
+
+  mockedIbex = Ibex as jest.Mock 
+  mockedIbex.mockReturnValue({
+    createAccount: jest.fn().mockResolvedValue(createAccount.response),
+
+    // addInvoice: jest.fn().mockResolvedValue(addInvoice.response),
+    // payInvoiceV2: jest.fn().mockResolvedValue(payInvoiceV2.response)
+  })
+
   mongoose = await setupMongoConnection(true)
   const admins = await createMandatoryUsers()
   const owner = admins.find(a => a.role === "bankowner")

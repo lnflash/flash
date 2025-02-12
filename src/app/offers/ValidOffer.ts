@@ -19,7 +19,8 @@ const config: ValidationConfig = {
     minimum: {
       amount: 0n, // 1000n, // $10
       currency: "USD"
-    }
+    },
+    accountLevel: 2
 }
 
 class ValidOffer extends Offer {
@@ -29,7 +30,7 @@ class ValidOffer extends Offer {
   }
 
   //  TODO Volume limits - withdrawal limit. 
-  static from = async (details: CashoutDetails): Promise<ValidOffer | Error> => {
+  static from = async (details: CashoutDetails): Promise<ValidOffer | ApplicationError> => {
     const { walletId, ibexTransfer } = details
 
     if (ibexTransfer.amount < config.minimum.amount)
@@ -57,9 +58,14 @@ class ValidOffer extends Offer {
     if (accountValidator instanceof ValidationError) 
       return accountValidator
 
-    const validateWallet = accountValidator.validateWalletForAccount(wallet)
-    if (validateWallet instanceof ValidationError) 
-      return validateWallet
+    const validWallet = accountValidator.validateWalletForAccount(wallet)
+    if (validWallet instanceof ValidationError) 
+      return validWallet
+
+    // TODO - Check
+    // const validLevel = accountValidator.isLevel(2)
+    // if (validLevel instanceof ValidationError) 
+    //   return validLevel
 
     return new ValidOffer(details)
   }

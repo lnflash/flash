@@ -15,7 +15,7 @@ class OffersRepository {
         { upsert: true, new: true }              // Returns the replaced document
       );
       if (!result) return new CouldNotFindError("Offer with Id not found")
-      return new PersistedOffer(result)
+      return PersistedOffer.from(result)
     } catch (err) {
       return parseRepositoryError(err)
     }
@@ -25,7 +25,7 @@ class OffersRepository {
     try {
       const result: OfferRecord | null = await OfferM.findOne({ _id: toObjectId(id) })
       if (!result) return new CouldNotFindWalletFromIdError()
-      else return new PersistedOffer(result)
+      else return PersistedOffer.from(result)
     } catch (err) {
       return parseRepositoryError(err)
     }

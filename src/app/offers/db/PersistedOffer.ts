@@ -1,22 +1,29 @@
 import { fromObjectId } from "@services/mongoose/utils";
 import Offer from "../Offer";
-import { OfferM } from "./schema";
-import { baseLogger } from "@services/logger";
 
-function offerKeys() {
-  return Object.keys({} as CashoutDetails) as (keyof CashoutDetails)[];
-}
 class PersistedOffer extends Offer {
   readonly id: OfferId
 
-  constructor(r: OfferRecord) {
-    // const schema = Object.keys(OfferM.schema.paths);
-    // const r2 = Object.fromEntries(
-    //   Object.entries(r).filter(([key]) => offerKeys().includes(key as keyof CashoutDetails))
-    // );
-    
-    super(r as CashoutDetails)
-    this.id = fromObjectId(r._id)
+  private constructor(record: OfferRecord) {
+    const { _id, ...r } = record
+    // const id = fromObjectId(r._id)
+    // delete r._id
+    super(r)
+    this.id = fromObjectId(_id)
+  }
+
+  static from(r: OfferRecord): PersistedOffer {
+    return new PersistedOffer({
+      walletId: r.walletId,
+      ibexTransfer: r.ibexTransfer,
+      usdLiability: r.usdLiability,
+      jmdLiability: r.jmdLiability,
+      exchangeRate: r.exchangeRate,
+      flashFee: r.flashFee,
+      createdAt: r.createdAt,
+      expiresAt: r.expiresAt,
+      _id: r._id
+    })
   }
 }
 

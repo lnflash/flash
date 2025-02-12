@@ -205,7 +205,7 @@ input CaptchaRequestAuthCodeInput {
 
 type CashoutOffer {
   """The price to convert USD -> Flash"""
-  exchangeRate: Int!
+  exchangeRate: Float!
 
   """The time at which this offer is no longer accepted by Flash"""
   expiresAt: Timestamp!
