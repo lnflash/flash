@@ -54,7 +54,6 @@ const dealer = DealerPriceService()
 
 const intraledgerPaymentSendWalletId = async ({
   recipientWalletId: uncheckedRecipientWalletId,
-  senderAccount,
   amount: uncheckedAmount,
   memo,
   senderWalletId: uncheckedSenderWalletId,
@@ -84,7 +83,7 @@ const intraledgerPaymentSendWalletId = async ({
   if (invoiceResp.invoice?.bolt11 === undefined) return new UnexpectedResponseError("Bolt11 field not found.")
 
   const payResp = await Ibex().payInvoiceV2({
-    accountId: uncheckedSenderWalletId,
+    accountId: senderWallet.id,
     bolt11: invoiceResp.invoice.bolt11,
   })
   if (payResp instanceof Error) return payResp
@@ -107,15 +106,16 @@ const intraledgerPaymentSendWalletId = async ({
       return new UnexpectedResponseError(`StatusId (${payResp.status}) not in documenation`)
   }
 
-  if (senderAccount.id !== recipientAccount.id) {
-    const addContactResult = await addContactsAfterSend({
-      senderAccount,
-      recipientAccount,
-    })
-    if (addContactResult instanceof Error) {
-      recordExceptionInCurrentSpan({ error: addContactResult, level: ErrorLevel.Warn })
-    }
-  }
+  // flash fork: no longer adding contact on payments
+  // if (senderAccount.id !== recipientAccount.id) {
+  //   const addContactResult = await addContactsAfterSend({
+  //     senderAccount,
+  //     recipientAccount,
+  //   })
+  //   if (addContactResult instanceof Error) {
+  //     recordExceptionInCurrentSpan({ error: addContactResult, level: ErrorLevel.Warn })
+  //   }
+  // }
 
   return paymentSendStatus
 }
