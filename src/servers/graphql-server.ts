@@ -178,7 +178,12 @@ export const startApolloServer = async ({
   apolloServer.applyMiddleware({
     app,
     path: "/graphql",
-    cors: { credentials: true, origin: true },
+    cors: {
+      origin: ["https://getflash.io", "http://localhost:3000"],
+      credentials: true,
+      methods: ["GET", "POST", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization"],
+    },
   })
 
   return new Promise((resolve, reject) => {
