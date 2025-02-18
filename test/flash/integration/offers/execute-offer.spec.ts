@@ -1,6 +1,6 @@
 import OffersManager from "@app/offers/OffersManager"
 import { alice } from "../jest.setup"
-import OffersRepository from "@app/offers/db/OffersRepository"
+import OffersRepository from "@app/offers/storage/Redis"
 import { RepositoryError } from "@domain/errors"
 // import { mockedIbex } from "../jest.setup"
 import * as Mocks from "test/flash/mocks/ibex"

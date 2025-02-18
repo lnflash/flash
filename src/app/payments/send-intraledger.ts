@@ -48,9 +48,10 @@ import {
 } from "./helpers"
 
 import Ibex from "@services/ibex/client"
-import { UnexpectedResponseError } from "@services/ibex/client/errors"
+import { IbexClientError, UnexpectedIbexResponse } from "@services/ibex/client/errors"
 
 const dealer = DealerPriceService()
+
 
 const intraledgerPaymentSendWalletId = async ({
   recipientWalletId: uncheckedRecipientWalletId,
@@ -73,14 +74,14 @@ const intraledgerPaymentSendWalletId = async ({
     kratosUserId: recipientUserId,
   } = recipientAccount
 
-
+  // TODO: use sendBetweenAccounts
   const invoiceResp = await Ibex().addInvoice({ 
     accountId: recipientWalletId,
     memo: memo || undefined,
     amount: uncheckedAmount / 100, // convert cents to dollars for Ibex api
   })
   if (invoiceResp instanceof Error) return invoiceResp
-  if (invoiceResp.invoice?.bolt11 === undefined) return new UnexpectedResponseError("Bolt11 field not found.")
+  if (invoiceResp.invoice?.bolt11 === undefined) return new UnexpectedIbexResponse("Bolt11 field not found.")
 
   const payResp = await Ibex().payInvoiceV2({
     accountId: senderWallet.id,
@@ -101,9 +102,9 @@ const intraledgerPaymentSendWalletId = async ({
       paymentSendStatus = PaymentSendStatus.Failure
       break;
     case 0: 
-      return new UnexpectedResponseError("Invoice already paid")
+      return new UnexpectedIbexResponse("Invoice already paid")
     default:
-      return new UnexpectedResponseError(`StatusId (${payResp.status}) not in documenation`)
+      return new UnexpectedIbexResponse(`StatusId (${payResp.status}) not in documenation`)
   }
 
   // flash fork: no longer adding contact on payments
@@ -153,7 +154,7 @@ const validateIntraledgerPaymentInputs = async ({
   const senderAccount = await AccountsRepository().findById(senderWallet.accountId)
   if (senderAccount instanceof Error) return senderAccount
 
-  const senderAccountValidator = AccountValidator(senderAccount)
+  const senderAccountValidator = AccountValidator(senderAccount).isActive()
   if (senderAccountValidator instanceof Error) return senderAccountValidator
 
   const recipientWalletId = checkedToWalletId(uncheckedRecipientWalletId)
@@ -165,7 +166,7 @@ const validateIntraledgerPaymentInputs = async ({
   const recipientAccount = await AccountsRepository().findById(recipientWallet.accountId)
   if (recipientAccount instanceof Error) return recipientAccount
 
-  const recipientAccountValidator = AccountValidator(recipientAccount)
+  const recipientAccountValidator = AccountValidator(recipientAccount).isActive()
   if (recipientAccountValidator instanceof Error) return recipientAccountValidator
 
   addAttributesToCurrentSpan({

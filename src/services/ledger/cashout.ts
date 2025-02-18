@@ -5,6 +5,8 @@ import { MainBook } from "./books"
 import { persistAndReturnEntry } from "./helpers"
 import { LedgerError, LedgerServiceError, LedgerTransactionType } from "@domain/ledger"
 import { LedgerService } from "."
+import { PayInvoiceV2Response200 } from "@services/ibex/client/.api/apis/sing-in"
+import IbexAccount from "@services/ibex/IbexAccount"
 
 // See Foreign Exchange Rates: https://www.firstglobal-bank.com/
 const JMD_SELL_RATE = 159
@@ -18,19 +20,23 @@ const toUSD = (liability: Amount<"JMD"> | Amount<"USD">): number => {
 }
 
 export const recordCashOut = async (
-  args: CashoutDetails
+  offer: CashoutDetails,
+  receiveAccount: WalletId
 ): Promise<LedgerJournal | LedgerServiceError> => {
-  const { walletId, ibexTransfer, usdLiability, jmdLiability, flashFee } = args 
+  const { walletId, ibexTransfer, usdLiability, jmdLiability, flashFee } = offer 
 
   let entry = MainBook
     .entry(`User cash out from wallet ${walletId}`)
-    .debit(`Cash`, Number(ibexTransfer.amount), { 
-      type: LedgerTransactionType.Ibex_invoice,
-      currency: ibexTransfer.currency,
-      pending: false,
-    }) 
+    .debit(["Ibex", receiveAccount], 
+      Number(ibexTransfer.amount), 
+      { 
+        type: LedgerTransactionType.Ibex_invoice,
+        currency: ibexTransfer.currency,
+        pending: false,
+      }
+    ) 
     .credit(
-      `Accounts Payable:${walletId}`,  // should be an id that represents user - not wallet
+      ["Accounts Payable", walletId],  // should be an id that represents user - not wallet
       Number(usdLiability.amount), 
       { 
         type: LedgerTransactionType.Ibex_invoice,
@@ -39,15 +45,18 @@ export const recordCashOut = async (
         pending: false, 
        }
     )
-    .credit("Revenue", Number(flashFee.amount), { 
+    .credit(["Revenue", "Service Fees"], 
+      Number(flashFee.amount), 
+      { 
         type: LedgerTransactionType.Ibex_invoice,
         currency: flashFee.currency,
         pending: false, 
-       }
-    ) 
-    return persistAndReturnEntry({ 
-      entry, 
-    })
+      }
+    )
+
+  return persistAndReturnEntry({ 
+    entry, 
+  })
 }
 
 export const recordSettledCashOut = async ({

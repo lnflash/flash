@@ -1,12 +1,7 @@
-// import PersistedOffer from "./db/PersistedOffer"
-
-
-
-
 type OfferId = string & { readonly brand: unique symbol }
 
 type CashoutDetails  = {
-  readonly walletId: WalletId,
+  readonly walletId: WalletId
   readonly ibexTransfer: Amount<"USD">
   readonly usdLiability: Amount<"USD">
   readonly jmdLiability: Amount<"JMD">
@@ -25,15 +20,12 @@ type CashoutConfig = {
 
 type ValidationConfig = {
   minimum: Amount<"USD">
-  accountLevel: Number
+  maximum: Amount<"USD">
+  accountLevel: AccountLevel
 }
 
-// application does not have access to the user's RTGS bank account details, 
-// so our offer must provide USD and JMD transfer
-// type CashoutOffer = CashoutDetails & {
-//   readonly id: OfferId
-// }
-
-// interface CashoutOffer extends CashoutDetails {
-//   readonly id: OfferId
-// }
+type ValidationInputs = CashoutDetails & {
+  wallet: Wallet,
+  account: Account
+}
+type ValidationFn = (inputs: ValidationInputs) => Promise<true | ValidationError>;

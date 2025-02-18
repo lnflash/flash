@@ -1,21 +1,22 @@
-import { RepositoryError } from "@domain/errors"
-import OffersRepository from "./db/OffersRepository"
-// import { IOffersManager } from "."
+import Storage from "./storage/Redis"
 import ValidOffer from "./ValidOffer"
+import { ValidationError } from "@domain/shared"
+import { CacheServiceError } from "@domain/cache"
 
 const config: CashoutConfig = {
   feePercentage: .02, // 2 percent total fee
-  duration: 360 as Seconds,
+  duration: 600 as Seconds, // 10 minutes
 }
 
-class OffersManager {
-  // readonly Validator = new Validator(this.config)
-  private constructor() {}
+// See Foreign Exchange Rates: https://www.firstglobal-bank.com/
+const JMD_SELL_RATE = 159
+const JMD_BUY_RATE = 151
 
-  static async makeCashoutOffer(
+const OffersManager = {
+  createCashoutOffer: async (
     walletId: WalletId, 
     flashSend: Amount<"USD">, 
-  ): Promise<CashoutOffer | Error> {
+  ): Promise<CashoutOffer | Error> => {
     const flashFee = {
       amount: BigInt(Math.round(config.feePercentage * Number(flashSend.amount))),
       currency: "USD",
@@ -46,26 +47,29 @@ class OffersManager {
       createdAt,
       expiresAt,
     })
-    if (validated instanceof Error) return validated
+    if (validated instanceof ValidationError) return validated
 
-    const persistedOffer = await OffersRepository.upsert(validated)
-    if (persistedOffer instanceof RepositoryError) return persistedOffer
+    const persistedOffer = await Storage.add(validated)
+    if (persistedOffer instanceof CacheServiceError) return persistedOffer
   
     return {
       ...persistedOffer.details,
       id: persistedOffer.id
     }
-  }
+  },
 
-  static async executeOffer(id: OfferId): Promise<PaymentSendStatus | Error> {
-    const offer = await OffersRepository.findById(id)
-    if (offer instanceof RepositoryError) return offer
-    
+  executeOffer: async (id: OfferId, walletId: WalletId): Promise<PaymentSendStatus | Error> => {
+    const offer = await Storage.get(id)
+    if (offer instanceof CacheServiceError) return offer
+  
+    if (walletId !== offer.details.walletId) return new ValidationError("Offer is not good for provided wallet.")
+
     const validOffer = await ValidOffer.from(offer.details)
     if (validOffer instanceof Error) return validOffer
 
     return validOffer.execute() 
-  }
+  },
+
 }
 
 export default OffersManager

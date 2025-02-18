@@ -4,7 +4,6 @@ abstract class Offer {
   constructor(details: CashoutDetails) {
     this.details = details
   }
-
 }
 
 export default Offer

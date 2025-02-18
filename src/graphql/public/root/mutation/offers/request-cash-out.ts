@@ -1,10 +1,11 @@
 import OffersManager from "@app/offers/OffersManager"
-import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
+import { mapToGqlErrorList } from "@graphql/error-map"
 import { GT } from "@graphql/index"
 import CashoutOffer from "@graphql/public/types/object/cashout-offer"
 import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 import IError from "@graphql/shared/types/abstract/error"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
+import { baseLogger } from "@services/logger"
 import dedent from "dedent"
 
 const RequestCashoutInput = GT.Input({
@@ -14,7 +15,10 @@ const RequestCashoutInput = GT.Input({
       type: GT.NonNull(WalletId),
       description: "ID for a USD wallet belonging to the current user.",
     },
-    amount: { type: GT.NonNull(FractionalCentAmount), description: "Amount in USD cents." },
+    usdAmount: { 
+      type: GT.NonNull(FractionalCentAmount), 
+      description: "Amount in USD cents." 
+    },
   }),
 })
 
@@ -41,21 +45,20 @@ const RequestCashoutMutation = GT.Field({
     complexity: 120,
   },
   resolve: async (_, args) => {
-    const { walletId, amount } = args.input
-    for (const input of [walletId, amount]) {
+    const { walletId, usdAmount } = args.input
+    for (const input of [walletId, usdAmount]) {
       if (input instanceof Error) {
         return { errors: [{ message: input.message }] }
       }
     }
 
-    const offer = await (OffersManager.makeCashoutOffer(
+    const offer = await (OffersManager.createCashoutOffer(
       walletId, 
-      { amount: BigInt(amount), currency: "USD" }
+      { amount: BigInt(usdAmount), currency: "USD" }
     ))
-    if (offer instanceof Error) {
-      return { errors: [mapAndParseErrorForGqlResponse(offer)] }
-    }
+    if (offer instanceof Error) return { errors: mapToGqlErrorList(offer) }
 
+    baseLogger.info(offer, "offer")
     return {
       errors: [],
       offer

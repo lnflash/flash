@@ -57,6 +57,7 @@ import AccountEnableNotificationChannelMutation from "./root/mutation/account-en
 import AccountDisableNotificationChannelMutation from "./root/mutation/account-disable-notification-channel"
 import UserUpdateNpubMutation from "./root/mutation/user-update-npub"
 import RequestCashoutMutation from "./root/mutation/offers/request-cash-out"
+import InitiateCashoutMutation from "./root/mutation/offers/initiate-cash-out"
 
 // TODO: // const fields: { [key: string]: GraphQLFieldConfig<any, GraphQLPublicContext> }
 export const mutationFields = {
@@ -134,7 +135,8 @@ export const mutationFields = {
         OnChainUsdPaymentSendAsBtcDenominatedMutation,
       onChainPaymentSendAll: OnChainPaymentSendAllMutation,
 
-      requestCashout: RequestCashoutMutation
+      requestCashout: RequestCashoutMutation,
+      initiateCashout: InitiateCashoutMutation,
     },
   },
 }

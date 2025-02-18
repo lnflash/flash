@@ -1,3 +1,4 @@
+import { ValidationError } from "@domain/shared"
 import {
   TransactionRestrictedError,
   LightningPaymentError,
@@ -453,6 +454,14 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "UnauthorizedIPMetadataCountryError":
       return new UnauthorizedIPMetadataCountryError({ logger: baseLogger })
 
+    case "ValidationError":
+      return new ValidationInternalError({ code: error.name, message: error.message, logger: baseLogger })
+    
+    case "OfferNotFound":
+      return new NotFoundError({ 
+        message: "Offer not available. Try again.", 
+        logger: baseLogger 
+      })
     // ----------
     // Unhandled below here
     // ----------
@@ -480,7 +489,6 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "DuplicateError":
     case "CouldNotFindError":
     case "CouldNotUpdateError":
-    case "ValidationError":
     case "LnRouteValidationError":
     case "BadAmountForRouteError":
     case "InvalidUsername":
@@ -655,7 +663,6 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "InvalidCountryCodeForPhoneMetadataError":
     case "IbexClientError":
     case "IbexAuthenticationError":
-    case "UnexpectedResponseError":
     case "IbexApiError":
       message = `Unexpected error occurred, please try again or contact support if it persists (code: ${
         error.name
@@ -718,6 +725,7 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
   }
 }
 
+// deprecated for external. Use `mapToGqlErrorList`
 export const mapAndParseErrorForGqlResponse = (err: ApplicationError): IError => {
   const mappedError = mapError(err)
   return {
@@ -725,4 +733,10 @@ export const mapAndParseErrorForGqlResponse = (err: ApplicationError): IError =>
     path: mappedError.path,
     code: mappedError.extensions.code,
   }
+}
+
+export const mapToGqlErrorList = (err: ApplicationError): IError[] => {
+  if (err instanceof ValidationError && err.errors) return err.errors.map(mapAndParseErrorForGqlResponse)
+  else return [mapAndParseErrorForGqlResponse(err)]
+
 }

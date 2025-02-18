@@ -398,6 +398,12 @@ type GraphQLApplicationError implements Error {
 """Hex-encoded string of 32 bytes"""
 scalar Hex32Bytes
 
+input InitiateCashoutInput {
+  """The id of the offer being executed."""
+  offerId: ID!
+  walletId: WalletId!
+}
+
 union InitiationVia = InitiationViaIntraLedger | InitiationViaLn | InitiationViaOnChain
 
 type InitiationViaIntraLedger {
@@ -732,6 +738,12 @@ type Mutation {
   captchaRequestAuthCode(input: CaptchaRequestAuthCodeInput!): SuccessPayload!
   deviceNotificationTokenCreate(input: DeviceNotificationTokenCreateInput!): SuccessPayload!
   feedbackSubmit(input: FeedbackSubmitInput!): SuccessPayload!
+
+  """
+  Start the Cashout process; 
+  User sends USD to Flash via Ibex and receives USD or JMD to bank account.
+  """
+  initiateCashout(input: InitiateCashoutInput!): SuccessPayload!
 
   """
   Actions a payment which is internal to the ledger e.g. it does
@@ -1151,7 +1163,7 @@ type RealtimePricePayload {
 
 input RequestCashoutInput {
   """Amount in USD cents."""
-  amount: FractionalCentAmount!
+  usdAmount: FractionalCentAmount!
 
   """ID for a USD wallet belonging to the current user."""
   walletId: WalletId!

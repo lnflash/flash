@@ -47,7 +47,7 @@ import { addAttributesToCurrentSpan, recordExceptionInCurrentSpan } from "@servi
 import { getMinerFeeAndPaymentFlow } from "./get-on-chain-fee"
 import { validateIsBtcWallet, validateIsUsdWallet } from "./validate"
 import Ibex from "@services/ibex"
-import { IbexClientError, UnexpectedResponseError } from "@services/ibex/client/errors"
+import { IbexClientError, UnexpectedIbexResponse } from "@services/ibex/client/errors"
 import { SendToAddressCopyResponse200 } from "@services/ibex/client/.api/apis/sing-in"
 import IbexAdaptor from "@services/ibex/DomainAdaptor"
 
@@ -67,7 +67,7 @@ const payOnChainByWalletId = async <R extends WalletCurrency>({
 }: PayOnChainByWalletIdArgs): Promise<PayOnChainByWalletIdResult | ApplicationError | IbexClientError> => {
   const latestAccountState = await AccountsRepository().findById(senderAccount.id)
   if (latestAccountState instanceof Error) return latestAccountState
-  const accountValidator = AccountValidator(latestAccountState)
+  const accountValidator = AccountValidator(latestAccountState).isActive()
   if (accountValidator instanceof Error) return accountValidator
 
   const ledger = LedgerService()
@@ -130,7 +130,7 @@ const payOnChainByWalletId = async <R extends WalletCurrency>({
   if (resp instanceof IbexClientError) return resp
 
   let status = IbexAdaptor.toPaymentSendStatus(resp.status)
-  if (status instanceof UnexpectedResponseError) {
+  if (status instanceof UnexpectedIbexResponse) {
     recordExceptionInCurrentSpan({
       error: status,
       level: ErrorLevel.Warn,
