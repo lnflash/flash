@@ -1,5 +1,5 @@
 import express, { Request, Response } from "express"
-import { baseLogger as logger } from "@services/logger"
+import { baseLogger, baseLogger as logger } from "@services/logger"
 import { NotificationsService } from "@services/notifications"
 import { authenticate, logRequest } from "../middleware"
 import { AccountsRepository, UsersRepository, WalletsRepository } from "@services/mongoose"
@@ -55,7 +55,8 @@ const sendLightningNotification = async (req: Request, resp: Response) => {
 const paths = {
     invoice: "/receive/invoice",
     lnurl: "/receive/lnurlp",
-    onchain: "/receive/onchain"
+    onchain: "/receive/onchain",
+    cashout: "/receive/cashout",
 }
 
 const router = express.Router() 
@@ -71,6 +72,16 @@ router.post(
     authenticate,
     logRequest, 
     sendLightningNotification 
+)
+
+router.post(
+    paths.cashout, 
+    authenticate,
+    logRequest, 
+    () => {
+        baseLogger.info("Received payment for cashout.")
+        // Ledger.recordCashout
+    } 
 )
 
 router.post(

@@ -18,7 +18,7 @@ import {
 
 import { validateIsBtcWallet, validateIsUsdWallet } from "./validate"
 import Ibex from "@services/ibex/client"
-import { IbexClientError, UnexpectedResponseError } from "@services/ibex/client/errors"
+import { IbexClientError, UnexpectedIbexResponse } from "@services/ibex/client/errors"
 import { decodeInvoice } from "@domain/bitcoin/lightning/ln-invoice"
 import { AddInvoiceResponse201 } from "@services/ibex/client/.api/apis/sing-in"
 
@@ -37,7 +37,7 @@ const addInvoiceForSelf = async ({
   const account = await AccountsRepository().findById(wallet.accountId)
   if (account instanceof Error) return account
 
-  const accountValidator = AccountValidator(account)
+  const accountValidator = AccountValidator(account).isActive()
   if (accountValidator instanceof Error) return accountValidator
 
   const limitOk = await checkSelfWalletIdRateLimits(wallet.accountId)
@@ -127,7 +127,7 @@ const addInvoiceForRecipient = async ({
   const account = await AccountsRepository().findById(wallet.accountId)
   if (account instanceof Error) return account
 
-  const accountValidator = AccountValidator(account)
+  const accountValidator = AccountValidator(account).isActive()
   if (accountValidator instanceof Error) return accountValidator
 
   const limitOk = await checkRecipientWalletIdRateLimits(wallet.accountId)
@@ -217,7 +217,7 @@ const addInvoice = async ({
   const account = await AccountsRepository().findById(wallet.accountId)
   if (account instanceof Error) return account
 
-  const accountValidator = AccountValidator(account)
+  const accountValidator = AccountValidator(account).isActive()
   if (accountValidator instanceof Error) return accountValidator
 
   const limitOk = await limitCheckFn(wallet.accountId)
@@ -269,7 +269,7 @@ const checkRecipientWalletIdRateLimits = async (
 // Takes a successful Ibex Response and returns a domain 'LnInvoice' or error
 const toDomainInvoice = (ibex: AddInvoiceResponse201): (LnInvoice | ApplicationError) => {
   const invoiceString: string | undefined = ibex.invoice?.bolt11
-  if (!invoiceString) return new UnexpectedResponseError("Could not find invoice.")
+  if (!invoiceString) return new UnexpectedIbexResponse("Could not find invoice.")
   
   const decodedInvoice = decodeInvoice(invoiceString)
   if (decodedInvoice instanceof Error) return decodedInvoice 

@@ -14,6 +14,6 @@ export class NotImplementedError extends IbexClientError {
     level = ErrorLevel.Critical
 }
 export class IbexAuthenticationError extends IbexClientError {}
-export class UnexpectedResponseError extends IbexClientError {
+export class UnexpectedIbexResponse extends IbexClientError {
     level = ErrorLevel.Warn
 }

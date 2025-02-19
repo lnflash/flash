@@ -18,7 +18,7 @@ import { normalizePaymentAmount } from "../../../shared/root/mutation"
 // FLASH FORK: import ibex dependencies
 import Ibex from "@services/ibex/client"
 
-import { IbexClientError, UnexpectedResponseError } from "@services/ibex/client/errors"
+import { IbexClientError, UnexpectedIbexResponse } from "@services/ibex/client/errors"
 
 const OnChainUsdTxFeeQuery = GT.Field<null, GraphQLPublicContextAuth>({
   type: GT.NonNull(OnChainUsdTxFee),
@@ -53,7 +53,7 @@ const OnChainUsdTxFeeQuery = GT.Field<null, GraphQLPublicContextAuth>({
     })
 
     if (resp instanceof IbexClientError) return resp
-    if (resp.fee === undefined) return new UnexpectedResponseError("Missing fee field")
+    if (resp.fee === undefined) return new UnexpectedIbexResponse("Missing fee field")
 
     const fee: PaymentAmount<WalletCurrency> = {
       amount: BigInt(Math.round(resp.fee * 100)),
