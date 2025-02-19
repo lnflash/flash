@@ -1,20 +1,32 @@
 type OfferId = string & { readonly brand: unique symbol }
 
-type CashoutDetails  = {
+type Bolt11 = string // Verify format
+
+type Liability<T extends WalletCurrency> = Amount<T> & {
+  exchangeRate: Amount<"USD"> // Exchange rate of USD->T
+}
+
+type CashoutDetails = {
+  readonly invoice: Bolt11,
+  readonly rtgs: {
+    readonly liability: {
+      usd: Liability<"USD">,
+      jmd: Liability<"JMD">,
+    }
+  },
+  readonly flashFee: Amount<"USD"> // BTC?
+}
+
+type IbexCashout = CashoutDetails & {
   readonly walletId: WalletId
-  readonly ibexTransfer: Amount<"USD">
-  readonly usdLiability: Amount<"USD">
-  readonly jmdLiability: Amount<"JMD">
-  readonly exchangeRate: number 
-  readonly flashFee: Amount<"USD">
-  readonly createdAt: Date
-  readonly expiresAt: Date
 }
 
 type CashoutOffer = CashoutDetails & { id: OfferId };
 
+type BasisPoints = BigInt
+
 type CashoutConfig = {
-  feePercentage: number,
+  fee: BasisPoints,
   duration: Seconds,
 }
 

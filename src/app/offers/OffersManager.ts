@@ -1,10 +1,14 @@
 import Storage from "./storage/Redis"
 import ValidOffer from "./ValidOffer"
-import { ValidationError } from "@domain/shared"
+import { AmountCalculator, ValidationError } from "@domain/shared"
 import { CacheServiceError } from "@domain/cache"
+import { getBankOwnerIbexAccount } from "@services/ledger/caching"
+import { UnexpectedIbexResponse } from "@services/ibex/client/errors"
+import Ibex from "@services/ibex/client"
+import webhookServer from "@services/ibex/webhook-server"
 
 const config: CashoutConfig = {
-  feePercentage: .02, // 2 percent total fee
+  fee: 200n as BasisPoints, // 2 percent total fee
   duration: 600 as Seconds, // 10 minutes
 }
 
@@ -15,37 +19,60 @@ const JMD_BUY_RATE = 151
 const OffersManager = {
   createCashoutOffer: async (
     walletId: WalletId, 
-    flashSend: Amount<"USD">, 
+    requested: Amount<"USD">, 
   ): Promise<CashoutOffer | Error> => {
-    const flashFee = {
-      amount: BigInt(Math.round(config.feePercentage * Number(flashSend.amount))),
-      currency: "USD",
-    } as Amount<"USD"> 
+    const flashWallet = await getBankOwnerIbexAccount()
+    if (flashWallet instanceof Error) return flashWallet
+
+    const invoiceResp = await Ibex().addInvoice({ 
+      accountId: flashWallet.id,
+      memo: "User withdraw to bank",
+      amount: Number(requested.amount) / 100, // convert cents to dollars for Ibex api
+      expiration: config.duration,
+      webhookUrl: webhookServer.endpoints.onReceive.cashout,
+      webhookSecret: webhookServer.secret,
+    })
+    if (invoiceResp instanceof Error) return invoiceResp
+    if (invoiceResp.invoice?.bolt11 === undefined) return new UnexpectedIbexResponse("Bolt11 field not found.")
+
+    const flashFee = AmountCalculator().mulBasisPoints(requested, config.fee as bigint)
+    // const flashFee = {
+    //   amount: BigInt(Math.round(config.feePercentage * Number(requested.amount))),
+    //   currency: "USD",
+    // } as Amount<"USD"> 
 
     const usdLiability = {
-      amount: flashSend.amount - flashFee.amount,
+      amount: requested.amount - flashFee.amount,
       currency: "USD",
-    } as Amount<"USD">
+      exchangeRate: {
+        amount: 1n,
+        currency: "USD",
+      }
+    } as Liability<"USD">
   
-    const exchangeRate: number = 1.59 // USDcents to JMD 
+    const exchangeRate: bigint = 159n // USDcents to JMD 
 
     const jmdLiability = {
-      amount: BigInt(Math.round(Number(usdLiability.amount) * exchangeRate)), 
+      amount: BigInt(usdLiability.amount * exchangeRate / 100n), 
       currency: "JMD",
-    } as Amount<"JMD">
+      exchangeRate: {
+        amount: 159n,
+        currency: "USD"
+      }
+    } as Liability<"JMD">
     
     const createdAt = new Date() // now
-    const expiresAt = new Date(createdAt.getTime() + config.duration * 1000)
+    // const expiresAt = new Date(createdAt.getTime() + config.duration * 1000)
 
+    
     const validated = await ValidOffer.from({
       walletId,
-      ibexTransfer: flashSend,
-      usdLiability,
-      jmdLiability,
+      invoice: invoiceResp.invoice.bolt11,
+      rtgs: {
+        usdLiability,
+        jmdLiability,
+      },
       flashFee,
-      exchangeRate,
-      createdAt,
-      expiresAt,
     })
     if (validated instanceof ValidationError) return validated
 

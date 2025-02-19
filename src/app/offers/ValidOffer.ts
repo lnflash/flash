@@ -22,7 +22,7 @@ class ValidOffer extends Offer {
     this.account = account
   }
 
-  static from = async (details: CashoutDetails): Promise<ValidOffer | ValidationError> => {
+  static from = async (details: IbexCashout): Promise<ValidOffer | ValidationError> => {
     const wallet = await WalletsRepository().findById(details.walletId)
     if (wallet instanceof RepositoryError) return new ValidationError(wallet)
     
@@ -47,9 +47,6 @@ class ValidOffer extends Offer {
   }
 
   async execute(): Promise<PaymentSendStatus | Error> {
-    const flashWallet = await getBankOwnerIbexAccount()
-    if (flashWallet instanceof Error) return flashWallet
-
     const ibexResp = await sendBetweenAccounts(
       IbexAccount.fromWallet(this.wallet), 
       flashWallet,
