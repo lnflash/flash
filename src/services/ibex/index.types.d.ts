@@ -1,7 +1,6 @@
 type IbexCurrencyId = number & { readonly brand: unique symbol }
 
 declare abstract class IbexCurrency {
-  // constructor(amount: number)
   readonly amount: number
   currencyId: IbexCurrencyId
 }
