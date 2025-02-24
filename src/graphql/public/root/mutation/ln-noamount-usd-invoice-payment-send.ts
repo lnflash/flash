@@ -15,7 +15,9 @@ import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 
 import Ibex from "@services/ibex/client"
 
-import { IbexClientError } from "@services/ibex/client/errors"
+import { IbexClientError } from "ibex-client"
+import { checkedToUsdPaymentAmount, paymentAmountFromNumber, ValidationError, WalletCurrency } from "@domain/shared"
+import USDollars from "@services/ibex/currencies/USDollars"
 
 const LnNoAmountUsdInvoicePaymentInput = GT.Input({
   name: "LnNoAmountUsdInvoicePaymentInput",
@@ -89,10 +91,13 @@ const LnNoAmountUsdInvoicePaymentSendMutation = GT.Field<
     if (!domainAccount) throw new Error("Authentication required")
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
 
-    const PayLightningInvoice = await Ibex().payInvoiceV2({
-      bolt11: paymentRequest,
+
+    const usCents = checkedToUsdPaymentAmount(amount)
+    if (usCents instanceof ValidationError) return usCents
+    const PayLightningInvoice = await Ibex.payInvoice({
+      invoice: paymentRequest as Bolt11,
       accountId: walletId,
-      amount: amount / 100,
+      send: USDollars.fromAmount(usCents),
     })
 
     if (PayLightningInvoice instanceof IbexClientError) {

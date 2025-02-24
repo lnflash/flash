@@ -9,6 +9,7 @@ import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import SatAmount from "@graphql/shared/types/scalar/sat-amount"
 import LnInvoicePayload from "@graphql/public/types/payload/ln-invoice"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
+import { NotImplementedError } from "@domain/errors"
 
 const LnInvoiceCreateInput = GT.Input({
   name: "LnInvoiceCreateInput",
@@ -38,29 +39,30 @@ const LnInvoiceCreateMutation = GT.Field({
     input: { type: GT.NonNull(LnInvoiceCreateInput) },
   },
   resolve: async (_, args) => {
-    const { walletId, amount, memo, expiresIn } = args.input
+    return new NotImplementedError("Flash does not support BTC wallets.")
+    // const { walletId, amount, memo, expiresIn } = args.input
 
-    for (const input of [walletId, amount, memo, expiresIn]) {
-      if (input instanceof Error) {
-        return { errors: [{ message: input.message }] }
-      }
-    }
+    // for (const input of [walletId, amount, memo, expiresIn]) {
+    //   if (input instanceof Error) {
+    //     return { errors: [{ message: input.message }] }
+    //   }
+    // }
 
-    const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
-      walletId,
-      amount,
-      memo,
-      expiresIn,
-    })
+    // const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+    //   walletId,
+    //   amount,
+    //   memo,
+    //   expiresIn,
+    // })
 
-    if (lnInvoice instanceof Error) {
-      return { errors: [mapAndParseErrorForGqlResponse(lnInvoice)] }
-    }
+    // if (lnInvoice instanceof Error) {
+    //   return { errors: [mapAndParseErrorForGqlResponse(lnInvoice)] }
+    // }
 
-    return {
-      errors: [],
-      invoice: lnInvoice,
-    }
+    // return {
+    //   errors: [],
+    //   invoice: lnInvoice,
+    // }
   },
 })
 

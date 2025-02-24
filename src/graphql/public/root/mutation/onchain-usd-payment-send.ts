@@ -9,13 +9,6 @@ import PaymentSendPayload from "@graphql/public/types/payload/payment-send"
 import PayoutSpeed from "@graphql/public/types/scalar/payout-speed"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
-// import { Wallets } from "@app"
-
-// FLASH FORK: import ibex dependencies
-import Ibex from "@services/ibex/client"
-
-import { IbexClientError } from "@services/ibex/client/errors"
-import { SendToAddressCopyResponse200 } from "@services/ibex/client/.api/apis/sing-in"
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { Wallets } from "@app/index"
 

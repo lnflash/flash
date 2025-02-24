@@ -33,6 +33,7 @@ import {
   UnauthorizedIPError,
   UnauthorizedIPMetadataProxyError,
   UnauthorizedIPMetadataCountryError,
+  IbexError,
 } from "@graphql/error"
 import { baseLogger } from "@services/logger"
 
@@ -453,6 +454,12 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "UnauthorizedIPMetadataCountryError":
       return new UnauthorizedIPMetadataCountryError({ logger: baseLogger })
 
+    case "IbexClientError":
+    case "UnexpectedResponseError":
+    // case "IbexAuthenticationError":
+    // case "IbexApiError":
+      return new IbexError(baseLogger)
+
     // ----------
     // Unhandled below here
     // ----------
@@ -653,10 +660,6 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "InvalidCarrierForPhoneMetadataError":
     case "InvalidCarrierTypeForPhoneMetadataError":
     case "InvalidCountryCodeForPhoneMetadataError":
-    case "IbexClientError":
-    case "IbexAuthenticationError":
-    case "UnexpectedResponseError":
-    case "IbexApiError":
       message = `Unexpected error occurred, please try again or contact support if it persists (code: ${
         error.name
       }${error.message ? ": " + error.message : ""})`
@@ -717,6 +720,7 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       return assertUnreachable(errorName)
   }
 }
+
 
 export const mapAndParseErrorForGqlResponse = (err: ApplicationError): IError => {
   const mappedError = mapError(err)

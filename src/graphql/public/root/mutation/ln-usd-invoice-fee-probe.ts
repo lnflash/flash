@@ -15,9 +15,9 @@ import { normalizePaymentAmount } from "../../../shared/root/mutation"
 // FLASH FORK: import ibex dependencies
 import Ibex from "@services/ibex/client"
 
-import { IbexApiError, IbexAuthenticationError, IbexClientError, UnexpectedResponseError } from "@services/ibex/client/errors"
-import { GetFeeEstimationResponse200 } from "@services/ibex/client/.api/apis/sing-in/types"
+import { IbexClientError, UnexpectedResponseError } from "ibex-client"
 import { WalletCurrency } from "@domain/shared"
+import USDollars from "@services/ibex/currencies/USDollars"
 // import { IbexRoutes } from "../../../../services/ibex/Routes"
 // import { requestIBexPlugin } from "../../../../services/ibex/IbexHelper"
 
@@ -68,9 +68,9 @@ const LnUsdInvoiceFeeProbeMutation = GT.Field<
     //     uncheckedPaymentRequest: paymentRequest,
     //   })
 
-    const resp: any = await Ibex().getFeeEstimation({
-      bolt11: paymentRequest,
-      currencyId: "3", 
+    const resp: any = await Ibex.getLnFeeEstimation({
+      invoice: paymentRequest as Bolt11,
+      send: { currencyId: USDollars.currencyId } 
     })
     if (resp instanceof IbexClientError) return { errors: [mapAndParseErrorForGqlResponse(resp)] }     
     if (resp.amount === null || resp.amount === undefined) return { errors: [mapAndParseErrorForGqlResponse(new UnexpectedResponseError("Amount field not found."))] }

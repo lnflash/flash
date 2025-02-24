@@ -74,3 +74,7 @@ type AmountCalculator = {
   min: <T extends WalletCurrency>(...args: PaymentAmount<T>[]) => PaymentAmount<T>
   max: <T extends WalletCurrency>(...args: PaymentAmount<T>[]) => PaymentAmount<T>
 }
+
+type FractionalCentAmount = number & {
+  readonly brand: unique symbol
+}

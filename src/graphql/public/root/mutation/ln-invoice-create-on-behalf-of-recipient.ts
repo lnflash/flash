@@ -10,6 +10,7 @@ import SatAmount from "@graphql/shared/types/scalar/sat-amount"
 import Hex32Bytes from "@graphql/public/types/scalar/hex32bytes"
 import LnInvoicePayload from "@graphql/public/types/payload/ln-invoice"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
+import { NotImplementedError } from "@domain/errors"
 
 const LnInvoiceCreateOnBehalfOfRecipientInput = GT.Input({
   name: "LnInvoiceCreateOnBehalfOfRecipientInput",
@@ -40,29 +41,30 @@ const LnInvoiceCreateOnBehalfOfRecipientMutation = GT.Field({
     input: { type: GT.NonNull(LnInvoiceCreateOnBehalfOfRecipientInput) },
   },
   resolve: async (_, args) => {
-    const { recipientWalletId, amount, memo, descriptionHash, expiresIn } = args.input
-    for (const input of [recipientWalletId, amount, memo, descriptionHash, expiresIn]) {
-      if (input instanceof Error) {
-        return { errors: [{ message: input.message }] }
-      }
-    }
+    return new NotImplementedError("Flash does not support BTC wallets.")
+    // const { recipientWalletId, amount, memo, descriptionHash, expiresIn } = args.input
+    // for (const input of [recipientWalletId, amount, memo, descriptionHash, expiresIn]) {
+    //   if (input instanceof Error) {
+    //     return { errors: [{ message: input.message }] }
+    //   }
+    // }
 
-    const invoice = await Wallets.addInvoiceForRecipientForBtcWallet({
-      recipientWalletId,
-      amount,
-      memo,
-      descriptionHash,
-      expiresIn,
-    })
+    // const invoice = await Wallets.addInvoiceForRecipientForBtcWallet({
+    //   recipientWalletId,
+    //   amount,
+    //   memo,
+    //   descriptionHash,
+    //   expiresIn,
+    // })
 
-    if (invoice instanceof Error) {
-      return { errors: [mapAndParseErrorForGqlResponse(invoice)] }
-    }
+    // if (invoice instanceof Error) {
+    //   return { errors: [mapAndParseErrorForGqlResponse(invoice)] }
+    // }
 
-    return {
-      errors: [],
-      invoice,
-    }
+    // return {
+    //   errors: [],
+    //   invoice,
+    // }
   },
 })
 

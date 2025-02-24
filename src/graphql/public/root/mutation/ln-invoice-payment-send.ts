@@ -10,7 +10,7 @@ import dedent from "dedent"
 // FLASH FORK: import ibex dependencies
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import Ibex from "@services/ibex/client"
-import { IbexClientError } from "@services/ibex/client/errors"
+import { IbexClientError } from "ibex-client"
 
 const LnInvoicePaymentInput = GT.Input({
   name: "LnInvoicePaymentInput",
@@ -74,8 +74,8 @@ const LnInvoicePaymentSendMutation = GT.Field<
     */
 
     if (!domainAccount) throw new Error("Authentication required")
-    const PayLightningInvoice = await Ibex().payInvoiceV2({
-      bolt11: paymentRequest,
+    const PayLightningInvoice = await Ibex.payInvoice({
+      invoice: paymentRequest as Bolt11,
       accountId: walletId,
     })
 

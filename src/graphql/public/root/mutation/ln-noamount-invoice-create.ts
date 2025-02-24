@@ -10,7 +10,7 @@ import LnNoAmountInvoicePayload from "@graphql/public/types/payload/ln-noamount-
 import { decodeInvoice } from "@domain/bitcoin/lightning"
 import Ibex from "@services/ibex/client"
 
-import { IbexClientError, UnexpectedResponseError } from "@services/ibex/client/errors"
+import { IbexClientError, UnexpectedResponseError } from "ibex-client"
 
 const LnNoAmountInvoiceCreateInput = GT.Input({
   name: "LnNoAmountInvoiceCreateInput",
@@ -51,13 +51,10 @@ const LnNoAmountInvoiceCreateMutation = GT.Field({
     // FLASH FORK: create IBEX invoice instead of Galoy invoice
 
     // TODO: move this into Wallets.addInvoiceNoAmountForSelf
-    const resp = await Ibex().addInvoice({
-      amount: 0,
+    const resp = await Ibex.addInvoice({
       accountId: walletId,
       memo,
-      expiration: expiresIn,
-      // webhookUrl: "http://development.flashapp.me:4002/ibex-endpoint", // TODO: get from env
-      // webhookSecret: "secret",
+      expiration: expiresIn * 60 as Seconds,
     })
 
     if (resp instanceof IbexClientError) {

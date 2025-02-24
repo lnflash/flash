@@ -41,7 +41,9 @@ import { volume } from "./volume"
 // FLASH FORK: import ibex dependencies
 import Ibex from "@services/ibex/client"
 
-import { IbexApiError, IbexAuthenticationError, IbexClientError } from "@services/ibex/client/errors"
+import { IbexClientError } from "@services/ibex/errors"
+import { ApiError, AuthenticationError } from "ibex-client"
+// import { ApiError, AuthenticationError } from "ibex-client"
 
 export { getNonEndUserWalletIds } from "./caching"
 export { translateToLedgerJournal } from "./helpers"
@@ -306,12 +308,12 @@ export const LedgerService = (): ILedgerService => {
         }
       }
 
-      const resp = await Ibex().getAccountDetails({ accountId: walletId })
-      if (resp instanceof IbexApiError) {
+      const resp = await Ibex.getAccountDetails(walletId)
+      if (resp instanceof ApiError) {
         if (resp.code === 404) return toSats(0)
         return resp
       }
-      if (resp instanceof IbexAuthenticationError) {
+      if (resp instanceof AuthenticationError) {
         return resp
       }
       if (resp.balance === undefined) return new IbexClientError("Balance not found")

@@ -139,3 +139,5 @@ export const balanceAmountFromNumber = <T extends WalletCurrency>({
     currency,
   }
 }
+
+export const toNumber = <T extends WalletCurrency>(amt: Amount<T>): number => Number(amt.amount)

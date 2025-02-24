@@ -14,7 +14,9 @@ import { normalizePaymentAmount } from "../../../shared/root/mutation"
 // FLASH FORK: import ibex dependencies
 import Ibex from "@services/ibex/client"
 
-import { IbexClientError } from "@services/ibex/client/errors"
+import { IbexClientError, GetFeeEstimateResponse200, UnexpectedResponseError } from "ibex-client"
+import { checkedToUsdPaymentAmount, ValidationError } from "@domain/shared"
+import USDollars from "@services/ibex/currencies/USDollars"
 
 const LnNoAmountUsdInvoiceFeeProbeInput = GT.Input({
   name: "LnNoAmountUsdInvoiceFeeProbeInput",
@@ -51,10 +53,9 @@ const LnNoAmountUsdInvoiceFeeProbeMutation = GT.Field({
     //   })
 
     // TODO: Move Ibex call to Payments interface
-    const resp: any | IbexClientError = await Ibex().getFeeEstimation({
-      bolt11: paymentRequest,
-      amount: String(amount / 100),
-      currencyId: "3"
+    const resp: GetFeeEstimateResponse200 | IbexClientError = await Ibex.getLnFeeEstimation({
+      invoice: paymentRequest as Bolt11,
+      send: USDollars.fromFractionalCents(amount as FractionalCentAmount)
     })
 
     if (resp instanceof IbexClientError) {
@@ -63,6 +64,7 @@ const LnNoAmountUsdInvoiceFeeProbeMutation = GT.Field({
       } 
     }
 
+    if (resp.amount === undefined) return new UnexpectedResponseError("Unable to parse fee.")
     const feeSatAmount: PaymentAmount<WalletCurrency> = {
       amount: BigInt(Math.ceil(resp.amount * 100)),
       currency: "USD",

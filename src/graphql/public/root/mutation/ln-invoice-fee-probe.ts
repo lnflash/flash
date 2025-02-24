@@ -10,7 +10,9 @@ import { normalizePaymentAmount } from "../../../shared/root/mutation"
 
 // FLASH FORK: import { client as Ibex } dependencies
 import Ibex from "@services/ibex/client"
-import { IbexClientError } from "@services/ibex/client/errors"
+import { GetFeeEstimateResponse200, IbexClientError } from "ibex-client"
+import USDollars from "@services/ibex/currencies/USDollars"
+import Sats from "@services/ibex/currencies/Sats"
 
 const LnInvoiceFeeProbeInput = GT.Input({
   name: "LnInvoiceFeeProbeInput",
@@ -52,9 +54,9 @@ const LnInvoiceFeeProbeMutation = GT.Field<
     //     walletId,
     //     uncheckedPaymentRequest: paymentRequest,
     //   })
-    const resp: any | IbexClientError = await Ibex().getFeeEstimation({
-        // walletId, // we are not checking internal payment flow
-        bolt11: paymentRequest,
+    const resp: GetFeeEstimateResponse200 | IbexClientError = await Ibex.getLnFeeEstimation({
+      invoice: paymentRequest as Bolt11,
+      send: { currencyId: Sats.currencyId },
     })
 
     const error: Error | null = resp instanceof IbexClientError 

@@ -3,7 +3,7 @@
  * Flash (Galoy) types
  */
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
-import { UnexpectedResponseError } from "./client/errors"
+import { UnexpectedResponseError } from "./errors"
 
 // https://docs.ibexmercado.com/reference/get-transaction-details
 // Would be nice to have this in the codegen sdk

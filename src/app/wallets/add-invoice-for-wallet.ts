@@ -18,9 +18,11 @@ import {
 
 import { validateIsBtcWallet, validateIsUsdWallet } from "./validate"
 import Ibex from "@services/ibex/client"
-import { IbexClientError, UnexpectedResponseError } from "@services/ibex/client/errors"
+import { IbexClientError, UnexpectedResponseError } from "@services/ibex/errors"
 import { decodeInvoice } from "@domain/bitcoin/lightning/ln-invoice"
-import { AddInvoiceResponse201 } from "@services/ibex/client/.api/apis/sing-in"
+import { checkedToUsdPaymentAmount, UsdPaymentAmount, ValidationError } from "@domain/shared"
+import USDollars from "@services/ibex/currencies/USDollars"
+import { AddInvoiceResponse201 } from "ibex-client/dist/.api/apis/sing-in"
 
 const defaultBtcExpiration = DEFAULT_EXPIRATIONS["BTC"].delayMinutes
 const defaultUsdExpiration = DEFAULT_EXPIRATIONS["USD"].delayMinutes
@@ -43,29 +45,30 @@ const addInvoiceForSelf = async ({
   const limitOk = await checkSelfWalletIdRateLimits(wallet.accountId)
   if (limitOk instanceof Error) return limitOk
  
-  const resp = await Ibex().addInvoice({
-    amount: amount / 100, // this is USD logic. Will not work for BTC
+  const resp = await Ibex.addInvoice({
+    amount: USDollars.fromFractionalCents(amount), // this is USD logic. Will not work for BTC
     accountId: walletId,
     memo,
-    expiration: expiresIn ? expiresIn * 60 : undefined, 
+    expiration: expiresIn * 60 as Seconds, 
   })
   if (resp instanceof IbexClientError) return resp
   return toDomainInvoice(resp)
 }
 
-export const addInvoiceForSelfForBtcWallet = async (
-  args: AddInvoiceForSelfForBtcWalletArgs,
-): Promise<LnInvoice | ApplicationError> => {
-  const walletId = checkedToWalletId(args.walletId)
-  if (walletId instanceof Error) return walletId
+// Flash fork: remove because not BTC Wallets
+// export const addInvoiceForSelfForBtcWallet = async (
+//   args: AddInvoiceForSelfForBtcWalletArgs,
+// ): Promise<LnInvoice | ApplicationError> => {
+//   const walletId = checkedToWalletId(args.walletId)
+//   if (walletId instanceof Error) return walletId
 
-  const expiresIn = checkedToMinutes(args.expiresIn || defaultBtcExpiration)
-  if (expiresIn instanceof Error) return expiresIn
+//   const expiresIn = checkedToMinutes(args.expiresIn || defaultBtcExpiration)
+//   if (expiresIn instanceof Error) return expiresIn
 
-  const validated = await validateIsBtcWallet(walletId)
-  if (validated instanceof Error) return validated
-  return addInvoiceForSelf({ ...args, walletId, expiresIn })
-}
+//   const validated = await validateIsBtcWallet(walletId)
+//   if (validated instanceof Error) return validated
+//   return addInvoiceForSelf({ ...args, walletId, expiresIn })
+// }
 
 export const addInvoiceForSelfForUsdWallet = async (
   args: AddInvoiceForSelfForUsdWalletArgs,
@@ -133,30 +136,30 @@ const addInvoiceForRecipient = async ({
   const limitOk = await checkRecipientWalletIdRateLimits(wallet.accountId)
   if (limitOk instanceof Error) return limitOk
 
-  const resp = await Ibex().addInvoice({
-    amount: amount / 100,
+  const resp = await Ibex.addInvoice({
+    amount: USDollars.fromFractionalCents(amount),
     accountId: recipientWalletId,
     memo,
-    expiration: expiresIn ? expiresIn * 60 : undefined,
+    expiration: expiresIn ? expiresIn * 60 as Seconds : undefined,
   })
   if (resp instanceof IbexClientError) return resp
 
   return toDomainInvoice(resp)
 }
 
-export const addInvoiceForRecipientForBtcWallet = async (
-  args: AddInvoiceForRecipientForBtcWalletArgs,
-): Promise<LnInvoice | ApplicationError> => {
-  const recipientWalletId = checkedToWalletId(args.recipientWalletId)
-  if (recipientWalletId instanceof Error) return recipientWalletId
+// export const addInvoiceForRecipientForBtcWallet = async (
+//   args: AddInvoiceForRecipientForBtcWalletArgs,
+// ): Promise<LnInvoice | ApplicationError> => {
+//   const recipientWalletId = checkedToWalletId(args.recipientWalletId)
+//   if (recipientWalletId instanceof Error) return recipientWalletId
 
-  const expiresIn = checkedToMinutes(args.expiresIn || defaultBtcExpiration)
-  if (expiresIn instanceof Error) return expiresIn
+//   const expiresIn = checkedToMinutes(args.expiresIn || defaultBtcExpiration)
+//   if (expiresIn instanceof Error) return expiresIn
 
-  const validated = await validateIsBtcWallet(recipientWalletId)
-  if (validated instanceof Error) return validated
-  return addInvoiceForRecipient({ ...args, recipientWalletId, expiresIn })
-}
+//   const validated = await validateIsBtcWallet(recipientWalletId)
+//   if (validated instanceof Error) return validated
+//   return addInvoiceForRecipient({ ...args, recipientWalletId, expiresIn })
+// }
 
 export const addInvoiceForRecipientForUsdWallet = async (
   args: AddInvoiceForRecipientForUsdWalletArgs,

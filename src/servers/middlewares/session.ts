@@ -11,6 +11,7 @@ import { checkedToUserId } from "@domain/accounts"
 import { ValidationError } from "@domain/shared"
 import { baseLogger } from "@services/logger"
 import { UsersRepository } from "@services/mongoose"
+import { IbexClientError } from "@services/ibex/errors"
 
 export const sessionPublicContext = async ({
   tokenPayload,
@@ -61,7 +62,13 @@ export const sessionPublicContext = async ({
       const txnMetadata = await Transactions.getTransactionsMetadataByIds(
         keys as LedgerTransactionId[],
       )
-      if (txnMetadata instanceof Error) {
+      if (txnMetadata instanceof IbexClientError) {
+        recordExceptionInCurrentSpan({
+          error: txnMetadata,
+        })
+        return keys.map(() => undefined)
+      }
+      else if (txnMetadata instanceof Error) {
         recordExceptionInCurrentSpan({
           error: txnMetadata,
           level: txnMetadata.level,

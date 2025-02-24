@@ -15,7 +15,7 @@ import {
 } from "@domain/payments"
 import { AccountLevel, AccountValidator } from "@domain/accounts"
 import { DisplayAmountsConverter } from "@domain/fiat"
-import { ErrorLevel, WalletCurrency } from "@domain/shared"
+import { checkedToUsdPaymentAmount, ErrorLevel, paymentAmountFromNumber, ValidationError, WalletCurrency } from "@domain/shared"
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { ResourceExpiredLockServiceError } from "@domain/lock"
 import { checkedToWalletId, SettlementMethod } from "@domain/wallets"
@@ -48,7 +48,8 @@ import {
 } from "./helpers"
 
 import Ibex from "@services/ibex/client"
-import { UnexpectedResponseError } from "@services/ibex/client/errors"
+import USDollars from "@services/ibex/currencies/USDollars"
+import { UnexpectedResponseError } from "@services/ibex/errors"
 
 const dealer = DealerPriceService()
 
@@ -74,18 +75,19 @@ const intraledgerPaymentSendWalletId = async ({
     kratosUserId: recipientUserId,
   } = recipientAccount
 
-
-  const invoiceResp = await Ibex().addInvoice({ 
+  const amount = checkedToUsdPaymentAmount(uncheckedAmount) 
+  if (amount instanceof ValidationError) return amount
+  const invoiceResp = await Ibex.addInvoice({ 
     accountId: recipientWalletId,
-    memo: memo || undefined,
-    amount: uncheckedAmount / 100, // convert cents to dollars for Ibex api
+    amount: USDollars.fromAmount(amount), 
+    memo: memo || "flash-to-flash",
   })
   if (invoiceResp instanceof Error) return invoiceResp
   if (invoiceResp.invoice?.bolt11 === undefined) return new UnexpectedResponseError("Bolt11 field not found.")
 
-  const payResp = await Ibex().payInvoiceV2({
+  const payResp = await Ibex.payInvoice({
     accountId: uncheckedSenderWalletId,
-    bolt11: invoiceResp.invoice.bolt11,
+    invoice: invoiceResp.invoice.bolt11 as Bolt11,
   })
   if (payResp instanceof Error) return payResp
 

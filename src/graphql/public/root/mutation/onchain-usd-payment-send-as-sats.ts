@@ -15,7 +15,7 @@ import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import { toCents } from "@domain/fiat"
 import Ibex from "@services/ibex/client"
 
-import { IbexClientError } from "@services/ibex/client/errors"
+import { IbexClientError } from "@services/ibex/errors"
 
 const OnChainUsdPaymentSendAsBtcDenominatedInput = GT.Input({
   name: "OnChainUsdPaymentSendAsBtcDenominatedInput",
@@ -81,7 +81,7 @@ const OnChainUsdPaymentSendAsBtcDenominatedMutation = GT.Field<
     // })
     if (!domainAccount) throw new Error("Authentication required")
 
-    const resp = await Ibex().sendToAddressV2({
+    const resp = await Ibex.sendOnchain({
       accountId: walletId,
       address,
       amount: toCents(amount),
