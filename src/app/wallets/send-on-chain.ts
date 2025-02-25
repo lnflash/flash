@@ -47,7 +47,7 @@ import { addAttributesToCurrentSpan, recordExceptionInCurrentSpan } from "@servi
 import { getMinerFeeAndPaymentFlow } from "./get-on-chain-fee"
 import { validateIsBtcWallet, validateIsUsdWallet } from "./validate"
 import Ibex from "@services/ibex/client"
-import { IbexClientError, UnexpectedResponseError } from "@services/ibex/errors"
+import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
 import IbexAdaptor from "@services/ibex/DomainAdaptor"
 
 const { dustThreshold } = getOnChainWalletConfig()
@@ -63,7 +63,7 @@ const payOnChainByWalletId = async <R extends WalletCurrency>({
   speed,
   memo,
   sendAll,
-}: PayOnChainByWalletIdArgs): Promise<PayOnChainByWalletIdResult | ApplicationError | IbexClientError> => {
+}: PayOnChainByWalletIdArgs): Promise<PayOnChainByWalletIdResult | ApplicationError | IbexError> => {
   const latestAccountState = await AccountsRepository().findById(senderAccount.id)
   if (latestAccountState instanceof Error) return latestAccountState
   const accountValidator = AccountValidator(latestAccountState)
@@ -126,10 +126,10 @@ const payOnChainByWalletId = async <R extends WalletCurrency>({
     address: checkedAddress,
     amount: amountRaw / 100,
   })
-  if (resp instanceof IbexClientError) return resp
+  if (resp instanceof IbexError) return resp
 
   let status = IbexAdaptor.toPaymentSendStatus(resp.status)
-  if (status instanceof UnexpectedResponseError) {
+  if (status instanceof UnexpectedIbexResponse) {
     recordExceptionInCurrentSpan({
       error: status,
       level: ErrorLevel.Warn,

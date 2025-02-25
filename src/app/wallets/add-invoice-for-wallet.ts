@@ -18,7 +18,7 @@ import {
 
 import { validateIsBtcWallet, validateIsUsdWallet } from "./validate"
 import Ibex from "@services/ibex/client"
-import { IbexClientError, UnexpectedResponseError } from "@services/ibex/errors"
+import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
 import { decodeInvoice } from "@domain/bitcoin/lightning/ln-invoice"
 import { checkedToUsdPaymentAmount, UsdPaymentAmount, ValidationError } from "@domain/shared"
 import USDollars from "@services/ibex/currencies/USDollars"
@@ -51,7 +51,7 @@ const addInvoiceForSelf = async ({
     memo,
     expiration: expiresIn * 60 as Seconds, 
   })
-  if (resp instanceof IbexClientError) return resp
+  if (resp instanceof IbexError) return resp
   return toDomainInvoice(resp)
 }
 
@@ -142,7 +142,7 @@ const addInvoiceForRecipient = async ({
     memo,
     expiration: expiresIn ? expiresIn * 60 as Seconds : undefined,
   })
-  if (resp instanceof IbexClientError) return resp
+  if (resp instanceof IbexError) return resp
 
   return toDomainInvoice(resp)
 }
@@ -272,7 +272,7 @@ const checkRecipientWalletIdRateLimits = async (
 // Takes a successful Ibex Response and returns a domain 'LnInvoice' or error
 const toDomainInvoice = (ibex: AddInvoiceResponse201): (LnInvoice | ApplicationError) => {
   const invoiceString: string | undefined = ibex.invoice?.bolt11
-  if (!invoiceString) return new UnexpectedResponseError("Could not find invoice.")
+  if (!invoiceString) return new UnexpectedIbexResponse("Could not find invoice.")
   
   const decodedInvoice = decodeInvoice(invoiceString)
   if (decodedInvoice instanceof Error) return decodedInvoice 

@@ -15,7 +15,7 @@ import { normalizePaymentAmount } from "../../../shared/root/mutation"
 // FLASH FORK: import ibex dependencies
 import Ibex from "@services/ibex/client"
 
-import { IbexClientError, UnexpectedResponseError } from "ibex-client"
+import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
 import { WalletCurrency } from "@domain/shared"
 import USDollars from "@services/ibex/currencies/USDollars"
 // import { IbexRoutes } from "../../../../services/ibex/Routes"
@@ -72,8 +72,8 @@ const LnUsdInvoiceFeeProbeMutation = GT.Field<
       invoice: paymentRequest as Bolt11,
       send: { currencyId: USDollars.currencyId } 
     })
-    if (resp instanceof IbexClientError) return { errors: [mapAndParseErrorForGqlResponse(resp)] }     
-    if (resp.amount === null || resp.amount === undefined) return { errors: [mapAndParseErrorForGqlResponse(new UnexpectedResponseError("Amount field not found."))] }
+    if (resp instanceof IbexError) return { errors: [mapAndParseErrorForGqlResponse(resp)] }     
+    if (resp.amount === null || resp.amount === undefined) return { errors: [mapAndParseErrorForGqlResponse(new UnexpectedIbexResponse("Amount field not found."))] }
 
     return {
       errors: [],

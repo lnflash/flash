@@ -49,7 +49,7 @@ import {
 
 import Ibex from "@services/ibex/client"
 import USDollars from "@services/ibex/currencies/USDollars"
-import { UnexpectedResponseError } from "@services/ibex/errors"
+import { UnexpectedIbexResponse } from "@services/ibex/errors"
 
 const dealer = DealerPriceService()
 
@@ -83,7 +83,7 @@ const intraledgerPaymentSendWalletId = async ({
     memo: memo || "flash-to-flash",
   })
   if (invoiceResp instanceof Error) return invoiceResp
-  if (invoiceResp.invoice?.bolt11 === undefined) return new UnexpectedResponseError("Bolt11 field not found.")
+  if (invoiceResp.invoice?.bolt11 === undefined) return new UnexpectedIbexResponse("Bolt11 field not found.")
 
   const payResp = await Ibex.payInvoice({
     accountId: uncheckedSenderWalletId,
@@ -104,9 +104,9 @@ const intraledgerPaymentSendWalletId = async ({
       paymentSendStatus = PaymentSendStatus.Failure
       break;
     case 0: 
-      return new UnexpectedResponseError("Invoice already paid")
+      return new UnexpectedIbexResponse("Invoice already paid")
     default:
-      return new UnexpectedResponseError(`StatusId (${payResp.status}) not in documenation`)
+      return new UnexpectedIbexResponse(`StatusId (${payResp.status}) not in documenation`)
   }
 
   if (senderAccount.id !== recipientAccount.id) {

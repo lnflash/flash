@@ -8,7 +8,7 @@ import { CouldNotFindError } from "@domain/errors"
 import { getNonEndUserWalletIds, LedgerService } from "@services/ledger"
 import { WalletOnChainPendingReceiveRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
-import { IbexClientError } from "@services/ibex/errors"
+import { IbexError } from "@services/ibex/errors"
 import { baseLogger } from "@services/logger"
 import { GResponse200 } from "ibex-client/dist/.api/apis/sing-in"
 
@@ -29,7 +29,7 @@ export const getTransactionsForWallets = async ({
   )
 
   const transactions = ibexCalls.flatMap(resp => {
-    if (resp instanceof IbexClientError) return [] 
+    if (resp instanceof IbexError) return [] 
     else return toWalletTransactions(resp)
   })
 

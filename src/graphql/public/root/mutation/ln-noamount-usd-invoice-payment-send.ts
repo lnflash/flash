@@ -15,7 +15,7 @@ import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 
 import Ibex from "@services/ibex/client"
 
-import { IbexClientError } from "ibex-client"
+import { IbexError } from "@services/ibex/errors"
 import { checkedToUsdPaymentAmount, paymentAmountFromNumber, ValidationError, WalletCurrency } from "@domain/shared"
 import USDollars from "@services/ibex/currencies/USDollars"
 
@@ -100,7 +100,7 @@ const LnNoAmountUsdInvoicePaymentSendMutation = GT.Field<
       send: USDollars.fromAmount(usCents),
     })
 
-    if (PayLightningInvoice instanceof IbexClientError) {
+    if (PayLightningInvoice instanceof IbexError) {
       return {
         status: "failed",
         errors: [{ message: "An unexpected error occurred. Please try again later." }],

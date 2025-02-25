@@ -1,23 +1,31 @@
-// import { DomainError, ErrorLevel } from '@domain/shared';
-// import { IbexClientError } from 'ibex-client/dist/errors'
+import { DomainError, ErrorLevel } from '@domain/shared';
+import { baseLogger } from '@services/logger';
+import { IbexClientError, ApiError, AuthenticationError, UnexpectedResponseError } from 'ibex-client/dist/errors'
 
-// export class IbexError extends DomainError {
-//   readonly level: ErrorLevel
-//   constructor(err: IbexClientError | string, level: ErrorLevel = ErrorLevel.Critical) {
-//     super(err)
-//     this.level = level
-//   }
-// }
+export class IbexError extends DomainError {
+  readonly type: string
+  readonly level: ErrorLevel
+  readonly httpCode?: number
 
-// export class UnexpectedIbexResponse extends IbexError {
-//   constructor(message: string, level?: ErrorLevel) {
-//     super(message, level)
-//   }
-// }
+  constructor(err: Error, level: ErrorLevel = ErrorLevel.Critical) {
+    super(err)
+    this.type = err.name
+    this.level = level
+    this.httpCode = err instanceof ApiError ? err.code : undefined
+  }
+}
 
-export { 
-  IbexClientError,
-  // ApiError, 
-  // AuthenticationError, 
-  UnexpectedResponseError, 
-} from 'ibex-client/dist/errors'
+export class UnexpectedIbexResponse extends IbexError {
+  constructor(message: string, level?: ErrorLevel) {
+    super(new UnexpectedResponseError(message), level)
+  }
+}
+
+export const errorHandler = <T>(e: T | IbexClientError | AuthenticationError | ApiError): T | IbexError => { 
+  baseLogger.error(e)
+  if (e instanceof IbexClientError) return new IbexError(e)
+  if (e instanceof AuthenticationError) return new IbexError(e)
+  if (e instanceof ApiError) return new IbexError(e)
+  else return e
+}  
+

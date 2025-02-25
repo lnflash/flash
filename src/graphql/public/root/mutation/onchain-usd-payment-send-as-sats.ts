@@ -15,7 +15,7 @@ import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import { toCents } from "@domain/fiat"
 import Ibex from "@services/ibex/client"
 
-import { IbexClientError } from "@services/ibex/errors"
+import { IbexError } from "@services/ibex/errors"
 
 const OnChainUsdPaymentSendAsBtcDenominatedInput = GT.Input({
   name: "OnChainUsdPaymentSendAsBtcDenominatedInput",
@@ -87,7 +87,7 @@ const OnChainUsdPaymentSendAsBtcDenominatedMutation = GT.Field<
       amount: toCents(amount),
     })
 
-    if (resp instanceof IbexClientError) {
+    if (resp instanceof IbexError) {
       return { status: "failed", errors: [mapAndParseErrorForGqlResponse(resp)] }
     }
 

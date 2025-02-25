@@ -33,7 +33,7 @@ import { AccountsRepository } from "@services/mongoose"
 
 import { isAuthenticated, startApolloServer } from "./graphql-server"
 import { ErrorLevel } from "@domain/shared"
-import { IbexClientError } from "@services/ibex/errors"
+import { IbexError } from "@services/ibex/errors"
 
 export const isEditor = rule({ cache: "contextual" })((
   parent,
@@ -69,7 +69,7 @@ const setGqlAdminContext = async (
       const txnMetadata = await Transactions.getTransactionsMetadataByIds(
         keys as LedgerTransactionId[],
       )
-      if (txnMetadata instanceof IbexClientError) {
+      if (txnMetadata instanceof IbexError) {
         recordExceptionInCurrentSpan({
           error: txnMetadata,
         })

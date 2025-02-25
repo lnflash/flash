@@ -12,7 +12,7 @@ import { Types } from "mongoose"
 // FLASH FORK: import IBEX routes and helper
 import Ibex from "@services/ibex/client"
 
-import { IbexClientError } from "@services/ibex/errors"
+import { IbexError } from "@services/ibex/errors"
 
 import { toObjectId, fromObjectId, parseRepositoryError } from "./utils"
 import { Wallet } from "./schema"
@@ -44,7 +44,7 @@ export const WalletsRepository = (): IWalletsRepository => {
       if (currencyId instanceof UnsupportedCurrencyError) return currencyId
 
       const resp = await Ibex.createAccount(accountId, currencyId)
-      if (resp instanceof IbexClientError) return resp
+      if (resp instanceof IbexError) return resp
       const ibexAccountId = resp.id 
  
       let lnurlp: string | undefined
@@ -54,7 +54,7 @@ export const WalletsRepository = (): IWalletsRepository => {
           currencyId,
         })
 
-        if (lnurlResp instanceof IbexClientError) {
+        if (lnurlResp instanceof IbexError) {
           recordExceptionInCurrentSpan({
             error: lnurlResp,
             level: ErrorLevel.Warn,

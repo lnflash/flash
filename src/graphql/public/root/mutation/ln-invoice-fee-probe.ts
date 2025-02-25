@@ -10,8 +10,8 @@ import { normalizePaymentAmount } from "../../../shared/root/mutation"
 
 // FLASH FORK: import { client as Ibex } dependencies
 import Ibex from "@services/ibex/client"
-import { GetFeeEstimateResponse200, IbexClientError } from "ibex-client"
-import USDollars from "@services/ibex/currencies/USDollars"
+import { GetFeeEstimateResponse200 } from "ibex-client"
+import { IbexError } from "@services/ibex/errors" 
 import Sats from "@services/ibex/currencies/Sats"
 
 const LnInvoiceFeeProbeInput = GT.Input({
@@ -54,16 +54,16 @@ const LnInvoiceFeeProbeMutation = GT.Field<
     //     walletId,
     //     uncheckedPaymentRequest: paymentRequest,
     //   })
-    const resp: GetFeeEstimateResponse200 | IbexClientError = await Ibex.getLnFeeEstimation({
+    const resp: GetFeeEstimateResponse200 | IbexError = await Ibex.getLnFeeEstimation({
       invoice: paymentRequest as Bolt11,
       send: { currencyId: Sats.currencyId },
     })
 
-    const error: Error | null = resp instanceof IbexClientError 
+    const error: Error | null = resp instanceof IbexError 
       ? resp
       : null
 
-    const feeSatAmount: PaymentAmount<WalletCurrency> = (!(resp instanceof IbexClientError) && resp.amount) 
+    const feeSatAmount: PaymentAmount<WalletCurrency> = (!(resp instanceof IbexError) && resp.amount) 
       ? {
         amount: BigInt(Math.round(resp.amount / 1000)),
         currency: "BTC",

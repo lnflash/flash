@@ -3,7 +3,7 @@
  * Flash (Galoy) types
  */
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
-import { UnexpectedResponseError } from "./errors"
+import { UnexpectedIbexResponse } from "./errors"
 
 // https://docs.ibexmercado.com/reference/get-transaction-details
 // Would be nice to have this in the codegen sdk
@@ -17,7 +17,7 @@ const OnchainStatus = {
 
 const toPaymentSendStatus = (
   ibexStatus: string | undefined,
-): PaymentSendStatus | UnexpectedResponseError => {
+): PaymentSendStatus | UnexpectedIbexResponse => {
   switch (ibexStatus) {
     case OnchainStatus.Confirmed:
       return PaymentSendStatus.Success
@@ -28,7 +28,7 @@ const toPaymentSendStatus = (
     case OnchainStatus.Failed:
       return PaymentSendStatus.Failure
     default:
-      return new UnexpectedResponseError(
+      return new UnexpectedIbexResponse(
         `Could not parse ibexStatus with value "${ibexStatus}"`,
       )
   }

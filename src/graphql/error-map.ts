@@ -454,10 +454,8 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "UnauthorizedIPMetadataCountryError":
       return new UnauthorizedIPMetadataCountryError({ logger: baseLogger })
 
-    case "IbexClientError":
-    case "UnexpectedResponseError":
-    // case "IbexAuthenticationError":
-    // case "IbexApiError":
+    case "IbexError":
+    case "UnexpectedIbexResponse":
       return new IbexError(baseLogger)
 
     // ----------
