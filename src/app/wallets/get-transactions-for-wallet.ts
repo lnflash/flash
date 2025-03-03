@@ -10,7 +10,7 @@ import { WalletOnChainPendingReceiveRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
 import { IbexError } from "@services/ibex/errors"
 import { baseLogger } from "@services/logger"
-import { GResponse200 } from "ibex-client/dist/.api/apis/sing-in"
+import { GResponse200 } from "ibex-client"
 
 export const getTransactionsForWallets = async ({
   wallets,

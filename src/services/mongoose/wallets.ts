@@ -35,13 +35,14 @@ export const WalletsRepository = (): IWalletsRepository => {
     accountId,
     type,
     currency,
-  }: NewWalletInfo): Promise<Wallet | RepositoryError> => {
+  }: NewWalletInfo): Promise<Wallet | ApplicationError> => {
     const account = await AccountsRepository().findById(accountId)
     if (account instanceof Error) return account
     
     try {
       let currencyId = CurrencyMap.getCurrencyId(WalletCurrency.Usd)
       if (currencyId instanceof UnsupportedCurrencyError) return currencyId
+      console.log("currencyId = ", currencyId)
 
       const resp = await Ibex.createAccount(accountId, currencyId)
       if (resp instanceof IbexError) return resp

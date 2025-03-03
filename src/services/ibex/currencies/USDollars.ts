@@ -3,8 +3,8 @@ import { IbexCurrency } from "./IbexCurrency"
 
 // Ibex represents dollars as numbers with decimal to 2 places. e.g 1.25
 export default class USDollars extends IbexCurrency {
-  readonly currencyId = 3 as IbexCurrencyId
-  static currencyId: IbexCurrencyId  = this.currencyId 
+  static currencyId = 3 as IbexCurrencyId // this.currencyId 
+  readonly currencyId = this.currencyId as IbexCurrencyId// 3 as IbexCurrencyId
 
   private constructor(amount: number) {
     super(amount)

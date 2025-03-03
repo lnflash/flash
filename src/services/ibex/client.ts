@@ -1,7 +1,7 @@
 import IbexClient, { GetFeeEstimateResponse200 } from "ibex-client"
 import { errorHandler, IbexError } from "./errors"
 import { IBEX_EMAIL, IBEX_PASSWORD, IBEX_URL } from "@config";
-import { AddInvoiceBodyParam, AddInvoiceResponse201, CreateAccountResponse201, CreateLnurlPayBodyParam, CreateLnurlPayResponse201, DecodeLnurlMetadataParam, DecodeLnurlResponse200, EstimateFeeCopyMetadataParam, EstimateFeeCopyResponse200, GenerateBitcoinAddressBodyParam, GenerateBitcoinAddressResponse201, GetAccountDetailsMetadataParam, GetAccountDetailsResponse200, GetFeeEstimationMetadataParam, GetFeeEstimationResponse200, GetTransactionDetails1MetadataParam, GetTransactionDetails1Response200, GMetadataParam, GResponse200, InvoiceFromHashMetadataParam, InvoiceFromHashResponse200, PayInvoiceV2BodyParam, PayInvoiceV2Response200, PayToALnurlPayBodyParam, PayToALnurlPayResponse201, SendToAddressCopyBodyParam, SendToAddressCopyResponse200 } from "ibex-client/dist/.api/apis/sing-in";
+import { AddInvoiceBodyParam, AddInvoiceResponse201, CreateAccountResponse201, CreateLnurlPayBodyParam, CreateLnurlPayResponse201, DecodeLnurlMetadataParam, DecodeLnurlResponse200, EstimateFeeCopyMetadataParam, EstimateFeeCopyResponse200, GenerateBitcoinAddressBodyParam, GenerateBitcoinAddressResponse201, GetAccountDetailsMetadataParam, GetAccountDetailsResponse200, GetFeeEstimationMetadataParam, GetFeeEstimationResponse200, GetTransactionDetails1MetadataParam, GetTransactionDetails1Response200, GMetadataParam, GResponse200, InvoiceFromHashMetadataParam, InvoiceFromHashResponse200, PayInvoiceV2BodyParam, PayInvoiceV2Response200, PayToALnurlPayBodyParam, PayToALnurlPayResponse201, SendToAddressCopyBodyParam, SendToAddressCopyResponse200 } from "ibex-client";
 import { addAttributesToCurrentSpan, wrapAsyncFunctionsToRunInSpan } from "@services/tracing";
 import WebhookServer from "./webhook-server";
 import USDollars  from "./currencies/USDollars";
@@ -21,7 +21,7 @@ const getAccountDetails = async (accountId: IbexAccountId): Promise<GetAccountDe
   return Ibex.getAccountDetails({ accountId }).then(errorHandler)
 }
 
-const getAccountTransactions = async (params: GetIbexTransactionsArgs): Promise<TransactionResponse | IbexError> => {
+const getAccountTransactions = async (params: GMetadataParam): Promise<GResponse200 | IbexError> => {
   addAttributesToCurrentSpan({ "request.params": JSON.stringify(params) })
   return Ibex.getAccountTransactions(params).then(errorHandler)
 }

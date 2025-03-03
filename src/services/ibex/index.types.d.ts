@@ -1,21 +1,18 @@
 type IbexCurrencyId = number & { readonly brand: unique symbol }
 
-declare abstract class IbexCurrency {
+interface IbexCurrency {
   readonly amount: number
   currencyId: IbexCurrencyId
 }
 
 type IbexAccountId = WalletId
 
-type IbexInvoiceArgs = { // Omit<import("ibex-client/dist/.api/apis/sing-in/types").AddInvoiceBodyParam, 'amount'> & {
+type IbexInvoiceArgs = { 
   accountId: IbexAccountId,
   amount?: IbexCurrency;  
   memo: string
   expiration?: Seconds 
 };
-type AddInvoiceResponse = import("ibex-client/dist/.api/apis/sing-in/types").AddInvoiceResponse201 
-type GetIbexTransactionsArgs = import("ibex-client/dist/.api/apis/sing-in/types").GMetadataParam
-type TransactionResponse = import("ibex-client/dist/.api/apis/sing-in/types").GResponse200
 type AccountArgs = { name: string, currency: WalletCurrency }
 type IbexTransactionId = string & { readonly brand: unique symbol }
 type GetFeeEstimateArgs = {
@@ -25,7 +22,6 @@ type GetFeeEstimateArgs = {
     currencyId: IbexCurrencyId,
   }
 }
-// type GetFeeEstimateResponse = { amount?: number, invoiceAmount?: number }
 
 type PayInvoiceArgs = {
   accountId: IbexAccountId,

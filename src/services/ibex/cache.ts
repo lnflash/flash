@@ -1,12 +1,15 @@
-import { RedisCacheService } from "@services/cache"
-import { ICache, CacheSetArgs as IbexCacheArgs } from "ibex-client/dist/storage"
+import { redisCache } from "@services/redis"
+import { ICache, CacheSetArgs } from "ibex-client/dist/storage"
 
 // Map Ibex Cache interface to RedisCacheService defined in this repo
 export const Redis = {
-  get: <T>(key: string) => RedisCacheService().get<T>({ key }),
-  set: <T>(args: IbexCacheArgs<NonError<T>>) => RedisCacheService().set({
-    key: args.key,
-    value: args.value,
-    ttlSecs: args.ttlSecs as Seconds,
-  })
+  get: (key: string) => redisCache.getCache(key),
+  set: async <T>(args: CacheSetArgs<NonError<T>>) => {
+    const res = await redisCache.setCache(
+      args.key,
+      args.value,
+      args.ttlSecs as Seconds,
+    )
+    return res === "OK" 
+  },
 } as ICache

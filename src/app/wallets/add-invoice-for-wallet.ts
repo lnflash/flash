@@ -22,7 +22,7 @@ import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
 import { decodeInvoice } from "@domain/bitcoin/lightning/ln-invoice"
 import { checkedToUsdPaymentAmount, UsdPaymentAmount, ValidationError } from "@domain/shared"
 import USDollars from "@services/ibex/currencies/USDollars"
-import { AddInvoiceResponse201 } from "ibex-client/dist/.api/apis/sing-in"
+import { AddInvoiceResponse201 } from "ibex-client"
 
 const defaultBtcExpiration = DEFAULT_EXPIRATIONS["BTC"].delayMinutes
 const defaultUsdExpiration = DEFAULT_EXPIRATIONS["USD"].delayMinutes
