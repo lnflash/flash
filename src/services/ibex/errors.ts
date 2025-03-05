@@ -23,10 +23,10 @@ export class UnexpectedIbexResponse extends IbexError {
 }
 
 export const errorHandler = <T>(e: T | IbexClientError | AuthenticationError | ApiError): T | IbexError => { 
-  baseLogger.error(e)
-  // if (e instanceof AuthenticationError) return new IbexError(e)
-  // if (e instanceof ApiError) return new IbexError(e)
-  if (e instanceof IbexClientError) return new IbexError(e)
+  if (e instanceof IbexClientError) {
+    baseLogger.error(e)
+    return new IbexError(e)
+  }
   else return e
 }  
 

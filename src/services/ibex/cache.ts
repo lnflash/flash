@@ -1,7 +1,7 @@
 import { redisCache } from "@services/redis"
 import { ICache, CacheSetArgs } from "ibex-client/dist/storage"
 
-// Map Ibex Cache interface to RedisCacheService defined in this repo
+// Map Redis Interface to interface used in ibex-client 
 export const Redis = {
   get: (key: string) => redisCache.getCache(key),
   set: async <T>(args: CacheSetArgs<NonError<T>>) => {
@@ -11,5 +11,9 @@ export const Redis = {
       args.ttlSecs as Seconds,
     )
     return res === "OK" 
+  },
+  delete: (key: string) => {
+    redisCache.deleteCache(key)
+    return
   },
 } as ICache

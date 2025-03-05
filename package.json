@@ -86,7 +86,7 @@
     "graphql-ws": "^5.13.1",
     "gt3-server-node-express-sdk": "https://github.com/GaloyMoney/gt3-server-node-express-bypass#master",
     "i18n": "^0.15.1",
-    "ibex-client": "^2.0.1",
+    "ibex-client": "^2.1.0",
     "invoices": "^3.0.0",
     "ioredis": "^5.3.2",
     "ioredis-cache": "^2.0.0",
