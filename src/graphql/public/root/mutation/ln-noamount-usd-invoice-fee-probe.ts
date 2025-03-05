@@ -54,32 +54,35 @@ const LnNoAmountUsdInvoiceFeeProbeMutation = GT.Field({
     //   })
 
     // TODO: Move Ibex call to Payments interface
-    const resp: GetFeeEstimateResponse200 | IbexError = await Ibex.getLnFeeEstimation({
+    const resp: IbexFeeEstimation<USDollars> | IbexError = await Ibex.getLnFeeEstimation<USDollars>({
       invoice: paymentRequest as Bolt11,
       send: USDollars.fromFractionalCents(amount as FractionalCentAmount)
     })
+    if (resp instanceof IbexError) return { errors: [mapAndParseErrorForGqlResponse(resp)] }     
+    const fee = resp.fee.toCents()
+    if (fee instanceof ValidationError) return { errors: [mapAndParseErrorForGqlResponse(fee)] }
 
-    if (resp instanceof IbexError) {
-      return {
-        errors: [mapAndParseErrorForGqlResponse(resp)],
-      } 
-    }
+    // if (resp instanceof IbexError) {
+    //   return {
+    //     errors: [mapAndParseErrorForGqlResponse(resp)],
+    //   } 
+    // }
 
-    if (resp.amount === undefined) return new UnexpectedIbexResponse("Unable to parse fee.")
-    const feeSatAmount: PaymentAmount<WalletCurrency> = {
-      amount: BigInt(Math.ceil(resp.amount * 100)),
-      currency: "USD",
-    }
+    // if (resp.amount === undefined) return new UnexpectedIbexResponse("Unable to parse fee.")
+    // const feeSatAmount: PaymentAmount<WalletCurrency> = {
+    //   amount: BigInt(Math.ceil(resp.amount * 100)),
+    //   currency: "USD",
+    // }
 
-    if (feeSatAmount === null) {
-      return {
-        errors: [mapAndParseErrorForGqlResponse(new InvalidFeeProbeStateError())],
-      }
-    }
+    // if (feeSatAmount === null) {
+    //   return {
+    //     errors: [mapAndParseErrorForGqlResponse(new InvalidFeeProbeStateError())],
+    //   }
+    // }
 
     return {
       errors: [],
-      ...normalizePaymentAmount(feeSatAmount),
+      ...normalizePaymentAmount(fee),
     }
   },
 })

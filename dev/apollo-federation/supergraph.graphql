@@ -540,7 +540,7 @@ input IntraLedgerUsdPaymentSendInput
   @join__type(graph: PUBLIC)
 {
   """Amount in cents."""
-  amount: CentAmount!
+  amount: FractionalCentAmount!
 
   """Optional memo to be attached to the payment."""
   memo: Memo
@@ -761,7 +761,7 @@ input LnNoAmountUsdInvoicePaymentInput
   @join__type(graph: PUBLIC)
 {
   """Amount to pay in USD cents."""
-  amount: CentAmount!
+  amount: FractionalCentAmount!
 
   """Optional memo to associate with the lightning invoice."""
   memo: Memo
@@ -819,7 +819,7 @@ input LnUsdInvoiceCreateOnBehalfOfRecipientInput
   @join__type(graph: PUBLIC)
 {
   """Amount in USD cents."""
-  amount: CentAmount!
+  amount: FractionalCentAmount!
   descriptionHash: Hex32Bytes
 
   """Optional invoice expiration time in minutes."""
@@ -1005,7 +1005,7 @@ type Mutation
     associated with the amount).
   """
   lnUsdInvoiceCreateOnBehalfOfRecipient(input: LnUsdInvoiceCreateOnBehalfOfRecipientInput!): LnInvoicePayload!
-  lnUsdInvoiceFeeProbe(input: LnUsdInvoiceFeeProbeInput!): SatAmountPayload!
+  lnUsdInvoiceFeeProbe(input: LnUsdInvoiceFeeProbeInput!): CentAmountPayload!
   merchantMapSuggest(input: MerchantMapSuggestInput!): MerchantPayload!
   onChainAddressCreate(input: OnChainAddressCreateInput!): OnChainAddressPayload!
   onChainAddressCurrent(input: OnChainAddressCurrentInput!): OnChainAddressPayload!
@@ -1162,7 +1162,7 @@ input OnChainUsdPaymentSendInput
   @join__type(graph: PUBLIC)
 {
   address: OnChainAddress!
-  amount: CentAmount!
+  amount: FractionalCentAmount!
   memo: Memo
   speed: PayoutSpeed = FAST
   walletId: WalletId!

@@ -12,7 +12,9 @@ import { normalizePaymentAmount } from "../../../shared/root/mutation"
 import Ibex from "@services/ibex/client"
 import { GetFeeEstimateResponse200 } from "ibex-client"
 import { IbexError } from "@services/ibex/errors" 
-import Sats from "@services/ibex/currencies/Sats"
+import { MSats } from "@services/ibex/currencies"
+import { checkedToBtcPaymentAmount, paymentAmountFromNumber, ValidationError, ZERO_SATS } from "@domain/shared"
+import { Pay } from "twilio/lib/twiml/VoiceResponse"
 
 const LnInvoiceFeeProbeInput = GT.Input({
   name: "LnInvoiceFeeProbeInput",
@@ -47,31 +49,29 @@ const LnInvoiceFeeProbeMutation = GT.Field<
     if (paymentRequest instanceof Error)
       return { errors: [{ message: paymentRequest.message }] }
 
-    // FLASH FORK: create IBEX fee estimation instead of Galoy fee estimation
-    // TODO: Move Ibex call behind payments
-    // const { result: feeSatAmount, error } =
-    //   await Payments.getLightningFeeEstimationForBtcWallet({
-    //     walletId,
-    //     uncheckedPaymentRequest: paymentRequest,
-    //   })
-    const resp: GetFeeEstimateResponse200 | IbexError = await Ibex.getLnFeeEstimation({
+    const resp: IbexFeeEstimation<MSats> | IbexError = await Ibex.getLnFeeEstimation<MSats>({
       invoice: paymentRequest as Bolt11,
-      send: { currencyId: Sats.currencyId },
+      send: { currencyId: MSats.currencyId }, 
     })
 
     const error: Error | null = resp instanceof IbexError 
       ? resp
       : null
 
-    const feeSatAmount: PaymentAmount<WalletCurrency> = (!(resp instanceof IbexError) && resp.amount) 
-      ? {
-        amount: BigInt(Math.round(resp.amount / 1000)),
-        currency: "BTC",
-      }
-      : {
-        amount: BigInt(0),
-        currency: "BTC",
-      }
+    let feeSatAmount: BtcPaymentAmount
+    if (resp instanceof IbexError) feeSatAmount = ZERO_SATS
+    else {
+      const fee = resp.fee.toSats()
+      if (fee instanceof Error) feeSatAmount = ZERO_SATS
+      else feeSatAmount = fee
+    }
+    // const fee = resp.fee.toSats()
+    // const feeSatAmount: PaymentAmount<WalletCurrency> = (!(resp instanceof IbexError)) 
+      // ? 
+      // : {
+      //   amount: BigInt(0),
+      //   currency: "BTC",
+      // }
 
     if (feeSatAmount !== null && error instanceof Error) {
       return {

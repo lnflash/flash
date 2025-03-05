@@ -1,11 +1,14 @@
-import IbexClient, { GetFeeEstimateResponse200 } from "ibex-client"
-import { errorHandler, IbexError } from "./errors"
+import IbexClient, { GetFeeEstimateResponse200, IbexClientError } from "ibex-client"
+import { errorHandler, IbexError, UnexpectedIbexResponse } from "./errors"
 import { IBEX_EMAIL, IBEX_PASSWORD, IBEX_URL } from "@config";
 import { AddInvoiceBodyParam, AddInvoiceResponse201, CreateAccountResponse201, CreateLnurlPayBodyParam, CreateLnurlPayResponse201, DecodeLnurlMetadataParam, DecodeLnurlResponse200, EstimateFeeCopyMetadataParam, EstimateFeeCopyResponse200, GenerateBitcoinAddressBodyParam, GenerateBitcoinAddressResponse201, GetAccountDetailsMetadataParam, GetAccountDetailsResponse200, GetFeeEstimationMetadataParam, GetFeeEstimationResponse200, GetTransactionDetails1MetadataParam, GetTransactionDetails1Response200, GMetadataParam, GResponse200, InvoiceFromHashMetadataParam, InvoiceFromHashResponse200, PayInvoiceV2BodyParam, PayInvoiceV2Response200, PayToALnurlPayBodyParam, PayToALnurlPayResponse201, SendToAddressCopyBodyParam, SendToAddressCopyResponse200 } from "ibex-client";
 import { addAttributesToCurrentSpan, wrapAsyncFunctionsToRunInSpan } from "@services/tracing";
 import WebhookServer from "./webhook-server";
 import USDollars  from "./currencies/USDollars";
 import { Redis }  from "./cache"
+import { baseLogger } from "@services/logger";
+import CurrencyMap from "./currencies/CurrencyMap";
+import { IbexCurrency } from "./currencies/IbexCurrency";
 
 const Ibex = new IbexClient(
   IBEX_URL, 
@@ -53,12 +56,29 @@ const invoiceFromHash = async (invoice_hash: PaymentHash): Promise<InvoiceFromHa
   return Ibex.invoiceFromHash({ invoice_hash }).then(errorHandler)
 }
 
-const getLnFeeEstimation = async (args: GetFeeEstimateArgs): Promise<GetFeeEstimateResponse200 | IbexError> => {
-  return Ibex.getFeeEstimation({
-    bolt11: args.invoice,
-    amount: args.send.amount?.toString(),
-    currencyId: args.send.currencyId.toString(),
-  }).then(errorHandler) 
+const getLnFeeEstimation = async <T extends IbexCurrency>(args: GetFeeEstimateArgs<T>): Promise<IbexFeeEstimation<T> | IbexError> => {
+  const currencyId = args.send.currencyId
+  const amount = (args.send instanceof IbexCurrency) ? args.send.amount.toString() : undefined 
+ 
+  baseLogger.info({ 
+    bolt11: args.invoice as string,
+    amount, 
+    currencyId: currencyId.toString(),
+  }, "getLnFeeEstimation")
+  const resp = await Ibex.getFeeEstimation({
+    bolt11: args.invoice as string,
+    amount, 
+    currencyId: currencyId.toString(),
+  })
+  if (resp instanceof Error) return new IbexError(resp)
+  else if (!resp.amount) return new UnexpectedIbexResponse("Fee not found.")
+  else if (!resp.invoiceAmount) return new UnexpectedIbexResponse("invoiceAmount not found.")
+  else {
+    return {
+      fee: CurrencyMap.toIbexCurrency(resp.amount, currencyId) as T,
+      invoice: CurrencyMap.toIbexCurrency(resp.invoiceAmount, currencyId) as T,
+    }
+  }
 }
 
 const payInvoice = async (args: PayInvoiceArgs): Promise<PayInvoiceV2Response200 | IbexError> => {

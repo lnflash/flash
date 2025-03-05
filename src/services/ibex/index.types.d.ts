@@ -2,7 +2,7 @@ type IbexCurrencyId = number & { readonly brand: unique symbol }
 
 interface IbexCurrency {
   readonly amount: number
-  currencyId: IbexCurrencyId
+  readonly currencyId: IbexCurrencyId
 }
 
 type IbexAccountId = WalletId
@@ -15,12 +15,15 @@ type IbexInvoiceArgs = {
 };
 type AccountArgs = { name: string, currency: WalletCurrency }
 type IbexTransactionId = string & { readonly brand: unique symbol }
-type GetFeeEstimateArgs = {
+type GetFeeEstimateArgs<T extends IbexCurrency> = {
   invoice: Bolt11,
-  send: {
-    amount?: number, 
+  send: T | {
     currencyId: IbexCurrencyId,
   }
+}
+type IbexFeeEstimation<T extends IbexCurrency> = {
+  fee: T,
+  invoice: T,
 }
 
 type PayInvoiceArgs = {
@@ -36,7 +39,7 @@ type PayLnurlArgs = {
 }
 
 // Flash types
-type FeeEstimation = GetFeeEstimateArgs & {
-  fee: IbexCurrency,
-}
+// type FeeEstimation<T extends IbexCurrency>= GetFeeEstimateArgs<T> & {
+//   fee: T,
+// }
 type Bolt11 = string & { readonly brand: unique symbol }
