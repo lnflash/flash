@@ -455,3 +455,14 @@ export class PhoneAlreadyExistsError extends CustomApolloError {
     })
   }
 }
+
+export class IbexError extends CustomApolloError {
+  constructor(logger: Logger) {
+    super({
+      message: "An error occurred. Contact support if error persists.",
+      forwardToClient: true,
+      code: "IBEX_ERROR",
+      logger,
+    })
+  }
+}

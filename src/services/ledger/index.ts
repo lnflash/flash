@@ -41,7 +41,9 @@ import { volume } from "./volume"
 // FLASH FORK: import ibex dependencies
 import Ibex from "@services/ibex/client"
 
-import { IbexApiError, IbexAuthenticationError, IbexClientError } from "@services/ibex/client/errors"
+import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
+import { ApiError, AuthenticationError } from "ibex-client"
+// import { ApiError, AuthenticationError } from "ibex-client"
 
 export { getNonEndUserWalletIds } from "./caching"
 export { translateToLedgerJournal } from "./helpers"
@@ -285,7 +287,7 @@ export const LedgerService = (): ILedgerService => {
   // Modified to get balance from Ibex
   const getWalletBalance = async (
     walletId: WalletId,
-  ): Promise<Satoshis | LedgerError | IbexClientError> => {
+  ): Promise<Satoshis | LedgerError | IbexError> => {
     const liabilitiesWalletId = toLiabilitiesWalletId(walletId)
     try {
       let { balance } = await MainBook.balance({
@@ -306,15 +308,12 @@ export const LedgerService = (): ILedgerService => {
         }
       }
 
-      const resp = await Ibex().getAccountDetails({ accountId: walletId })
-      if (resp instanceof IbexApiError) {
-        if (resp.code === 404) return toSats(0)
+      const resp = await Ibex.getAccountDetails(walletId)
+      if (resp instanceof IbexError) {
+        if (resp.httpCode === 404) return toSats(0)
         return resp
       }
-      if (resp instanceof IbexAuthenticationError) {
-        return resp
-      }
-      if (resp.balance === undefined) return new IbexClientError("Balance not found")
+      if (resp.balance === undefined) return new UnexpectedIbexResponse("Balance not found")
       return toSats(resp.balance * 100)
     } catch (err) {
       return new UnknownLedgerError(err)

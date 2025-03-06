@@ -8,9 +8,9 @@ import { CouldNotFindError } from "@domain/errors"
 import { getNonEndUserWalletIds, LedgerService } from "@services/ledger"
 import { WalletOnChainPendingReceiveRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
-import { IbexApiError, IbexClientError } from "@services/ibex/client/errors"
-import { GResponse200 } from "@services/ibex/client/.api/apis/sing-in/types"
+import { IbexError } from "@services/ibex/errors"
 import { baseLogger } from "@services/logger"
+import { GResponse200 } from "ibex-client"
 
 export const getTransactionsForWallets = async ({
   wallets,
@@ -23,13 +23,13 @@ export const getTransactionsForWallets = async ({
 
   // Flash fork: return history from Ibex
   const ibexCalls = await Promise.all(walletIds
-    .map(id => Ibex().getAccountTransactions({ 
+    .map(id => Ibex.getAccountTransactions({ 
       account_id: id,
     }))
   )
 
   const transactions = ibexCalls.flatMap(resp => {
-    if (resp instanceof IbexClientError) return [] 
+    if (resp instanceof IbexError) return [] 
     else return toWalletTransactions(resp)
   })
 

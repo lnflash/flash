@@ -14,7 +14,10 @@ import { normalizePaymentAmount } from "../../../shared/root/mutation"
 // FLASH FORK: import ibex dependencies
 import Ibex from "@services/ibex/client"
 
-import { IbexClientError } from "@services/ibex/client/errors"
+import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
+import { GetFeeEstimateResponse200 } from "ibex-client"
+import { checkedToUsdPaymentAmount, ValidationError } from "@domain/shared"
+import USDollars from "@services/ibex/currencies/USDollars"
 
 const LnNoAmountUsdInvoiceFeeProbeInput = GT.Input({
   name: "LnNoAmountUsdInvoiceFeeProbeInput",
@@ -51,32 +54,35 @@ const LnNoAmountUsdInvoiceFeeProbeMutation = GT.Field({
     //   })
 
     // TODO: Move Ibex call to Payments interface
-    const resp: any | IbexClientError = await Ibex().getFeeEstimation({
-      bolt11: paymentRequest,
-      amount: String(amount / 100),
-      currencyId: "3"
+    const resp: IbexFeeEstimation<USDollars> | IbexError = await Ibex.getLnFeeEstimation<USDollars>({
+      invoice: paymentRequest as Bolt11,
+      send: USDollars.fromFractionalCents(amount as FractionalCentAmount)
     })
+    if (resp instanceof IbexError) return { errors: [mapAndParseErrorForGqlResponse(resp)] }     
+    const fee = resp.fee.toCents()
+    if (fee instanceof ValidationError) return { errors: [mapAndParseErrorForGqlResponse(fee)] }
 
-    if (resp instanceof IbexClientError) {
-      return {
-        errors: [mapAndParseErrorForGqlResponse(resp)],
-      } 
-    }
+    // if (resp instanceof IbexError) {
+    //   return {
+    //     errors: [mapAndParseErrorForGqlResponse(resp)],
+    //   } 
+    // }
 
-    const feeSatAmount: PaymentAmount<WalletCurrency> = {
-      amount: BigInt(Math.ceil(resp.amount * 100)),
-      currency: "USD",
-    }
+    // if (resp.amount === undefined) return new UnexpectedIbexResponse("Unable to parse fee.")
+    // const feeSatAmount: PaymentAmount<WalletCurrency> = {
+    //   amount: BigInt(Math.ceil(resp.amount * 100)),
+    //   currency: "USD",
+    // }
 
-    if (feeSatAmount === null) {
-      return {
-        errors: [mapAndParseErrorForGqlResponse(new InvalidFeeProbeStateError())],
-      }
-    }
+    // if (feeSatAmount === null) {
+    //   return {
+    //     errors: [mapAndParseErrorForGqlResponse(new InvalidFeeProbeStateError())],
+    //   }
+    // }
 
     return {
       errors: [],
-      ...normalizePaymentAmount(feeSatAmount),
+      ...normalizePaymentAmount(fee),
     }
   },
 })

@@ -1,18 +1,23 @@
 type AddInvoiceForSelfArgs = {
   walletId: WalletId
-  amount: number
+  amount: FractionalCentAmount // only supports USD for now
   memo?: string
   expiresIn: Minutes
 }
 
-type AddInvoiceForSelfForBtcWalletArgs = {
+// type AddInvoiceForSelfForBtcWalletArgs = {
+//   walletId: string
+//   amount: number
+//   memo?: string
+//   expiresIn?: number
+// }
+
+type AddInvoiceForSelfForUsdWalletArgs = {
   walletId: string
-  amount: number
+  amount: FractionalCentAmount
   memo?: string
   expiresIn?: number
 }
-
-type AddInvoiceForSelfForUsdWalletArgs = AddInvoiceForSelfForBtcWalletArgs
 
 type AddInvoiceNoAmountForSelfArgs = {
   walletId: string
@@ -22,7 +27,7 @@ type AddInvoiceNoAmountForSelfArgs = {
 
 type AddInvoiceForRecipientArgs = {
   recipientWalletId: WalletId
-  amount: number
+  amount: FractionalCentAmount // only supports USD for now
   memo?: string
   descriptionHash?: string
   expiresIn: Minutes
@@ -36,7 +41,13 @@ type AddInvoiceForRecipientForBtcWalletArgs = {
   expiresIn?: number
 }
 
-type AddInvoiceForRecipientForUsdWalletArgs = AddInvoiceForRecipientForBtcWalletArgs
+type AddInvoiceForRecipientForUsdWalletArgs = {
+  recipientWalletId: string
+  amount: FractionalCentAmount
+  memo?: string
+  descriptionHash?: string
+  expiresIn?: number
+}
 
 type AddInvoiceNoAmountForRecipientArgs = {
   recipientWalletId: string

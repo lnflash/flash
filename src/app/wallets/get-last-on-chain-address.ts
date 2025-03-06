@@ -7,11 +7,11 @@ import {
 } from "@services/mongoose"
 
 import { createOnChainAddress } from "./create-on-chain-address"
-import { IbexClientError } from "@services/ibex/client/errors"
+import { IbexError } from "@services/ibex/errors"
 
 export const getLastOnChainAddress = async (
   walletId: WalletId,
-): Promise<OnChainAddress | ApplicationError | IbexClientError> => {
+): Promise<OnChainAddress | ApplicationError | IbexError> => {
   const wallet = await WalletsRepository().findById(walletId)
   if (wallet instanceof Error) return wallet
   const account = await AccountsRepository().findById(wallet.accountId)

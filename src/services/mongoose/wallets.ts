@@ -12,13 +12,14 @@ import { Types } from "mongoose"
 // FLASH FORK: import IBEX routes and helper
 import Ibex from "@services/ibex/client"
 
-import { IbexClientError } from "@services/ibex/client/errors"
+import { IbexError } from "@services/ibex/errors"
 
 import { toObjectId, fromObjectId, parseRepositoryError } from "./utils"
 import { Wallet } from "./schema"
 import { AccountsRepository } from "./accounts"
 import { recordExceptionInCurrentSpan } from "@services/tracing"
 import { ErrorLevel, WalletCurrency } from "@domain/shared"
+import CurrencyMap from "@services/ibex/currencies/CurrencyMap"
 
 export interface WalletRecord {
   id: string
@@ -34,33 +35,27 @@ export const WalletsRepository = (): IWalletsRepository => {
     accountId,
     type,
     currency,
-  }: NewWalletInfo): Promise<Wallet | RepositoryError> => {
+  }: NewWalletInfo): Promise<Wallet | ApplicationError> => {
     const account = await AccountsRepository().findById(accountId)
     if (account instanceof Error) return account
     
     try {
-      // FLASH FORK: create IBEX account
-      
-      // See https://docs.ibexmercado.com/reference/get-all for Ibex currencies
-      let currencyId: number
-      if (currency === WalletCurrency.Usd) currencyId = 3
-      else return new UnsupportedCurrencyError(`Cannot create wallet for currency ${currency}`)
+      let currencyId = CurrencyMap.getCurrencyId(WalletCurrency.Usd)
+      if (currencyId instanceof UnsupportedCurrencyError) return currencyId
+      console.log("currencyId = ", currencyId)
 
-      const resp = await Ibex().createAccount({
-        name: accountId,
-        currencyId,
-      })
-      if (resp instanceof IbexClientError) return resp
+      const resp = await Ibex.createAccount(accountId, currencyId)
+      if (resp instanceof IbexError) return resp
       const ibexAccountId = resp.id 
  
       let lnurlp: string | undefined
       if (ibexAccountId !== undefined) {
-        const lnurlResp = await Ibex().createLnurlPay({ 
+        const lnurlResp = await Ibex.createLnurlPay({ 
           accountId: ibexAccountId,
           currencyId,
         })
 
-        if (lnurlResp instanceof IbexClientError) {
+        if (lnurlResp instanceof IbexError) {
           recordExceptionInCurrentSpan({
             error: lnurlResp,
             level: ErrorLevel.Warn,

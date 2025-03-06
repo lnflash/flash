@@ -9,7 +9,7 @@ import {
   WalletsRepository,
 } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
-import { IbexClientError } from "@services/ibex/client/errors"
+import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
 
 export const createOnChainAddress = async ({
     walletId,
@@ -25,8 +25,8 @@ export const createOnChainAddress = async ({
     const accountValidator = AccountValidator(account)
     if (accountValidator instanceof Error) return accountValidator
     
-    const resp = await Ibex().generateBitcoinAddress({ accountId: walletId })
-    if (resp instanceof IbexClientError) return resp
-    else if (!resp.address) return new IbexClientError("Address not returned")
+    const resp = await Ibex.generateBitcoinAddress(walletId)
+    if (resp instanceof IbexError) return resp
+    else if (!resp.address) return new UnexpectedIbexResponse("Address not returned")
     else return resp.address
   }

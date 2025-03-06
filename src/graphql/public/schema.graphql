@@ -409,7 +409,7 @@ type IntraLedgerUpdate {
 
 input IntraLedgerUsdPaymentSendInput {
   """Amount in cents."""
-  amount: CentAmount!
+  amount: FractionalCentAmount!
 
   """Optional memo to be attached to the payment."""
   memo: Memo
@@ -571,7 +571,7 @@ input LnNoAmountUsdInvoiceFeeProbeInput {
 
 input LnNoAmountUsdInvoicePaymentInput {
   """Amount to pay in USD cents."""
-  amount: CentAmount!
+  amount: FractionalCentAmount!
 
   """Optional memo to associate with the lightning invoice."""
   memo: Memo
@@ -614,7 +614,7 @@ input LnUsdInvoiceCreateInput {
 
 input LnUsdInvoiceCreateOnBehalfOfRecipientInput {
   """Amount in USD cents."""
-  amount: CentAmount!
+  amount: FractionalCentAmount!
   descriptionHash: Hex32Bytes
 
   """Optional invoice expiration time in minutes."""
@@ -787,7 +787,7 @@ type Mutation {
     associated with the amount).
   """
   lnUsdInvoiceCreateOnBehalfOfRecipient(input: LnUsdInvoiceCreateOnBehalfOfRecipientInput!): LnInvoicePayload!
-  lnUsdInvoiceFeeProbe(input: LnUsdInvoiceFeeProbeInput!): SatAmountPayload!
+  lnUsdInvoiceFeeProbe(input: LnUsdInvoiceFeeProbeInput!): CentAmountPayload!
   merchantMapSuggest(input: MerchantMapSuggestInput!): MerchantPayload!
   onChainAddressCreate(input: OnChainAddressCreateInput!): OnChainAddressPayload!
   onChainAddressCurrent(input: OnChainAddressCurrentInput!): OnChainAddressPayload!
@@ -899,7 +899,7 @@ input OnChainUsdPaymentSendAsBtcDenominatedInput {
 
 input OnChainUsdPaymentSendInput {
   address: OnChainAddress!
-  amount: CentAmount!
+  amount: FractionalCentAmount!
   memo: Memo
   speed: PayoutSpeed = FAST
   walletId: WalletId!
