@@ -1,4 +1,4 @@
-import { AmountCalculator, paymentAmountFromNumber, WalletCurrency } from "@domain/shared"
+import { AmountCalculator, paymentAmountFromNumber, toNumber, WalletCurrency } from "@domain/shared"
 import { IbexCurrency } from "./IbexCurrency"
 
 // Ibex represents dollars as numbers with decimal to 2 places. e.g 1.25
@@ -15,7 +15,7 @@ export default class USDollars extends IbexCurrency {
   }
 
   static fromAmount(a: Amount<"USD">): USDollars {
-    return new USDollars(Number(AmountCalculator().divRound(a, 100n)))
+    return new USDollars(toNumber(a) / 100)
   }
   
   static fromFractionalCents(cents: FractionalCentAmount): USDollars {
