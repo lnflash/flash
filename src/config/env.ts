@@ -130,8 +130,8 @@ export const env = createEnv({
     SVIX_ENDPOINT: z.union([z.string().url().nullish(), z.literal("")]), // optional url
 
     IBEX_URL: z.string(),
-    IBEX_EMAIL: z.string().optional(),
-    IBEX_PASSWORD: z.string().optional(),
+    IBEX_EMAIL: z.string(),
+    IBEX_PASSWORD: z.string(),
     IBEX_LISTENER_PORT: z
       .number()
       .min(1)
