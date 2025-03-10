@@ -16,7 +16,6 @@ import {
   PushNotificationsService,
 } from "./push-notifications"
 import { createPushNotificationContent } from "./create-push-notification-content"
-import { baseLogger as log } from "@services/logger"
 
 export const NotificationsService = (): INotificationsService => {
   const pubsub = PubSubService()
