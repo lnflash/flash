@@ -72,6 +72,10 @@ const sendToDevice = async (
         recordExceptionInCurrentSpan({
           error: new InvalidDeviceNotificationsServiceError(item.error.message),
           level: ErrorLevel.Warn,
+          attributes: {
+            code: item?.error?.code,  
+            token: tokens[index],  
+          },
         })
       }
     })

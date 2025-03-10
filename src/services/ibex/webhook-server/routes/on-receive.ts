@@ -6,10 +6,11 @@ import { AccountsRepository, UsersRepository, WalletsRepository } from "@service
 import { RepositoryError } from "@domain/errors"
 import { displayAmountFromWalletAmount } from "@domain/fiat"
 import { WalletCurrency } from "@domain/shared"
-import { NotificationsServiceError } from "@domain/notifications"
+import { DeviceTokensNotRegisteredNotificationsServiceError, NotificationsServiceError } from "@domain/notifications"
 import { getCurrentPriceAsDisplayPriceRatio } from "@app/prices"
 import { PriceService } from "@services/price"
 import { PriceServiceError } from "@domain/price"
+import { removeDeviceTokens } from "@app/users/remove-device-tokens"
 
 const sendLightningNotification = async (req: Request, resp: Response) => {
     const { transaction, receivedMsat } = req.body
@@ -46,7 +47,9 @@ const sendLightningNotification = async (req: Request, resp: Response) => {
         recipientNotificationSettings: recipientAccount.notificationSettings,
         recipientLanguage: recipientUser.language,
     })       
-    if (nsResp instanceof NotificationsServiceError) {
+    if (nsResp instanceof DeviceTokensNotRegisteredNotificationsServiceError) {
+      await removeDeviceTokens({ userId: recipientUser.id, deviceTokens: nsResp.tokens })
+    } else if (nsResp instanceof NotificationsServiceError) {
         logger.error(nsResp)
     }
     return resp.status(200).end()
