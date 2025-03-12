@@ -56,16 +56,21 @@ services:
     volumes:
       - ${HOST_PROJECT_PATH:-.}/dev/otel-agent-config.yaml:/etc/otel-agent-config.yaml
   price:
-    image: brh28/flash-price:latest
+    image: lnflash/price:edge
     ports: []
+    depends_on:
+      - redis
     volumes:
       - ./price-overrides.yaml:/var/yaml/custom.yaml
     environment:
+      - REDIS_0_DNS=redis
+      - REDIS_0_PORT=6379
       - IBEX_URL=${IBEX_URL}
       - IBEX_EMAIL=${IBEX_EMAIL}
       - IBEX_PASSWORD=${IBEX_PASSWORD}
   price-history:
-    image: us.gcr.io/galoy-org/price-history:edge
+    image: docker.io/lnflash/price-history:edge
+    # image: us.gcr.io/galoy-org/price-history:edge
     ports: []
     command: ./scripts/run-servers-dev.sh
     environment:
@@ -81,7 +86,8 @@ services:
       - postgres-price-history
       - price-history-migrate
   price-history-migrate:
-    image: us.gcr.io/galoy-org/price-history-migrate:edge
+    image: docker.io/lnflash/price-history-migrate:edge
+    # image: us.gcr.io/galoy-org/price-history-migrate:edge
     ports: []
     environment:
       - DB_HOST=postgres-price-history
