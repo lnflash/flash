@@ -1,6 +1,9 @@
+import { IbexError } from "@services/ibex/errors"
+
 let cacheDealerBtcWalletId: WalletId
 let cacheDealerUsdWalletId: WalletId
 let cacheBankOwnerWalletId: WalletId
+let cacheBankOwnerIbexAccount: WalletId
 let cacheFunderWalletId: WalletId
 
 const throwError = (wallet: string) => Promise.reject(`Invalid ${wallet}WalletPath`)
@@ -53,6 +56,20 @@ export const getBankOwnerWalletId = async () => {
   const bankOwnerId = await bankOwnerResolver()
   cacheBankOwnerWalletId = bankOwnerId
   return cacheBankOwnerWalletId
+}
+
+export const getBankOwnerIbexAccount = async () => {
+  if (cacheBankOwnerIbexAccount) {
+    return cacheBankOwnerIbexAccount
+  }
+
+  const bankOwnerWalletId = await getBankOwnerWalletId()
+
+  // const ibexAccount = await IbexAccount.fromWalletId(bankOwnerWalletId)
+  // if (ibexAccount instanceof IbexError) return ibexAccount
+  // cacheBankOwnerIbexAccount = ibexAccount
+  cacheBankOwnerIbexAccount = bankOwnerWalletId
+  return cacheBankOwnerIbexAccount
 }
 
 export const getFunderWalletId = async () => {

@@ -39,7 +39,7 @@ const addInvoiceForSelf = async ({
   const account = await AccountsRepository().findById(wallet.accountId)
   if (account instanceof Error) return account
 
-  const accountValidator = AccountValidator(account)
+  const accountValidator = AccountValidator(account).isActive()
   if (accountValidator instanceof Error) return accountValidator
 
   const limitOk = await checkSelfWalletIdRateLimits(wallet.accountId)
@@ -130,7 +130,7 @@ const addInvoiceForRecipient = async ({
   const account = await AccountsRepository().findById(wallet.accountId)
   if (account instanceof Error) return account
 
-  const accountValidator = AccountValidator(account)
+  const accountValidator = AccountValidator(account).isActive()
   if (accountValidator instanceof Error) return accountValidator
 
   const limitOk = await checkRecipientWalletIdRateLimits(wallet.accountId)
@@ -220,7 +220,7 @@ const addInvoice = async ({
   const account = await AccountsRepository().findById(wallet.accountId)
   if (account instanceof Error) return account
 
-  const accountValidator = AccountValidator(account)
+  const accountValidator = AccountValidator(account).isActive()
   if (accountValidator instanceof Error) return accountValidator
 
   const limitOk = await limitCheckFn(wallet.accountId)

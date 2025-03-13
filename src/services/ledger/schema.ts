@@ -1,6 +1,7 @@
 import mongoose from "mongoose"
 import { LedgerTransactionType } from "@domain/ledger"
 import { setTransactionSchema } from "medici"
+import { WalletCurrency } from "@domain/shared"
 
 // TODO migration:
 // rename type: on_us to intraledger
@@ -40,7 +41,7 @@ const transactionSchema = new Schema<ILedgerTransaction>(
 
     currency: {
       type: String,
-      enum: ["USD", "BTC"],
+      enum: WalletCurrency, // ["USD", "BTC"],
       required: true,
     },
 

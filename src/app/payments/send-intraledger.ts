@@ -53,9 +53,9 @@ import { UnexpectedIbexResponse } from "@services/ibex/errors"
 
 const dealer = DealerPriceService()
 
+
 const intraledgerPaymentSendWalletId = async ({
   recipientWalletId: uncheckedRecipientWalletId,
-  senderAccount,
   amount: uncheckedAmount,
   memo,
   senderWalletId: uncheckedSenderWalletId,
@@ -109,15 +109,16 @@ const intraledgerPaymentSendWalletId = async ({
       return new UnexpectedIbexResponse(`StatusId (${payResp.status}) not in documenation`)
   }
 
-  if (senderAccount.id !== recipientAccount.id) {
-    const addContactResult = await addContactsAfterSend({
-      senderAccount,
-      recipientAccount,
-    })
-    if (addContactResult instanceof Error) {
-      recordExceptionInCurrentSpan({ error: addContactResult, level: ErrorLevel.Warn })
-    }
-  }
+  // flash fork: no longer adding contact on payments
+  // if (senderAccount.id !== recipientAccount.id) {
+  //   const addContactResult = await addContactsAfterSend({
+  //     senderAccount,
+  //     recipientAccount,
+  //   })
+  //   if (addContactResult instanceof Error) {
+  //     recordExceptionInCurrentSpan({ error: addContactResult, level: ErrorLevel.Warn })
+  //   }
+  // }
 
   return paymentSendStatus
 }
@@ -155,7 +156,7 @@ const validateIntraledgerPaymentInputs = async ({
   const senderAccount = await AccountsRepository().findById(senderWallet.accountId)
   if (senderAccount instanceof Error) return senderAccount
 
-  const senderAccountValidator = AccountValidator(senderAccount)
+  const senderAccountValidator = AccountValidator(senderAccount).isActive()
   if (senderAccountValidator instanceof Error) return senderAccountValidator
 
   const recipientWalletId = checkedToWalletId(uncheckedRecipientWalletId)
@@ -167,7 +168,7 @@ const validateIntraledgerPaymentInputs = async ({
   const recipientAccount = await AccountsRepository().findById(recipientWallet.accountId)
   if (recipientAccount instanceof Error) return recipientAccount
 
-  const recipientAccountValidator = AccountValidator(recipientAccount)
+  const recipientAccountValidator = AccountValidator(recipientAccount).isActive()
   if (recipientAccountValidator instanceof Error) return recipientAccountValidator
 
   addAttributesToCurrentSpan({
