@@ -18,13 +18,14 @@ import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
 import { GetFeeEstimateResponse200 } from "ibex-client"
 import { checkedToUsdPaymentAmount, ValidationError } from "@domain/shared"
 import USDollars from "@services/ibex/currencies/USDollars"
+import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 
 const LnNoAmountUsdInvoiceFeeProbeInput = GT.Input({
   name: "LnNoAmountUsdInvoiceFeeProbeInput",
   fields: () => ({
     walletId: { type: GT.NonNull(WalletId) },
     paymentRequest: { type: GT.NonNull(LnPaymentRequest) },
-    amount: { type: GT.NonNull(CentAmount) },
+    amount: { type: GT.NonNull(FractionalCentAmount) },
   }),
 })
 
@@ -61,12 +62,6 @@ const LnNoAmountUsdInvoiceFeeProbeMutation = GT.Field({
     if (resp instanceof IbexError) return { errors: [mapAndParseErrorForGqlResponse(resp)] }     
     const fee = resp.fee.toCents()
     if (fee instanceof ValidationError) return { errors: [mapAndParseErrorForGqlResponse(fee)] }
-
-    // if (resp instanceof IbexError) {
-    //   return {
-    //     errors: [mapAndParseErrorForGqlResponse(resp)],
-    //   } 
-    // }
 
     // if (resp.amount === undefined) return new UnexpectedIbexResponse("Unable to parse fee.")
     // const feeSatAmount: PaymentAmount<WalletCurrency> = {

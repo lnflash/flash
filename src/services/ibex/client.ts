@@ -6,7 +6,6 @@ import { addAttributesToCurrentSpan, wrapAsyncFunctionsToRunInSpan } from "@serv
 import WebhookServer from "./webhook-server";
 import USDollars  from "./currencies/USDollars";
 import { Redis }  from "./cache"
-import { baseLogger } from "@services/logger";
 import CurrencyMap from "./currencies/CurrencyMap";
 import { IbexCurrency } from "./currencies/IbexCurrency";
 
@@ -60,11 +59,6 @@ const getLnFeeEstimation = async <T extends IbexCurrency>(args: GetFeeEstimateAr
   const currencyId = args.send.currencyId
   const amount = (args.send instanceof IbexCurrency) ? args.send.amount.toString() : undefined 
  
-  baseLogger.info({ 
-    bolt11: args.invoice as string,
-    amount, 
-    currencyId: currencyId.toString(),
-  }, "getLnFeeEstimation")
   const resp = await Ibex.getFeeEstimation({
     bolt11: args.invoice as string,
     amount, 

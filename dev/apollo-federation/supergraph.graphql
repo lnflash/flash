@@ -752,7 +752,7 @@ input LnNoAmountInvoicePaymentInput
 input LnNoAmountUsdInvoiceFeeProbeInput
   @join__type(graph: PUBLIC)
 {
-  amount: CentAmount!
+  amount: FractionalCentAmount!
   paymentRequest: LnPaymentRequest!
   walletId: WalletId!
 }
