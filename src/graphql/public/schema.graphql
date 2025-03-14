@@ -564,7 +564,7 @@ input LnNoAmountInvoicePaymentInput {
 }
 
 input LnNoAmountUsdInvoiceFeeProbeInput {
-  amount: CentAmount!
+  amount: FractionalCentAmount!
   paymentRequest: LnPaymentRequest!
   walletId: WalletId!
 }
