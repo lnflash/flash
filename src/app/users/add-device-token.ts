@@ -7,7 +7,7 @@ export const addDeviceToken = async ({
 }: AddDeviceTokenArgs): Promise<User | ApplicationError> => {
   const users = UsersRepository()
 
-  const deviceTokenChecked = checkedToDeviceToken(deviceToken)
+  const deviceTokenChecked = await checkedToDeviceToken(deviceToken)
   if (deviceTokenChecked instanceof Error) return deviceTokenChecked
 
   const user = await users.findById(userId)

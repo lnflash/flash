@@ -28,7 +28,8 @@ const DeviceNotificationTokenCreateMutation = GT.Field<
     const { deviceToken } = args.input
 
     try {
-      await Users.addDeviceToken({ userId: user.id, deviceToken })
+      const r = await Users.addDeviceToken({ userId: user.id, deviceToken })
+      if (r instanceof Error) throw r
     } catch (err) {
       return { errors: [{ message: parseErrorMessageFromUnknown(err) }] }
     }

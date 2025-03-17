@@ -19,3 +19,6 @@ export class UnknownNotificationsServiceError extends NotificationsError {
 }
 
 export class InvalidPushNotificationSettingError extends NotificationsError {}
+
+export class FirebaseError extends NotificationsServiceError {}
+export class FirebaseNotAvailable extends FirebaseError {}
