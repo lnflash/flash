@@ -1,5 +1,4 @@
-import { Accounts, Payments } from "@app"
-import { PaymentSendStatus } from "@domain/bitcoin/lightning"
+import { Payments } from "@app"
 import { checkedToWalletId } from "@domain/wallets"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { GT } from "@graphql/index"
@@ -10,6 +9,7 @@ import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import dedent from "dedent"
 import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 // import { RequestInit, Response } from 'node-fetch'
+import { EmailService } from "@services/email"
 
 const IntraLedgerUsdPaymentSendInput = GT.Input({
   name: "IntraLedgerUsdPaymentSendInput",
@@ -61,6 +61,23 @@ const IntraLedgerUsdPaymentSendMutation = GT.Field<null, GraphQLPublicContextAut
     })
     if (status instanceof Error) {
       return { status: "failed", errors: [mapAndParseErrorForGqlResponse(status)] }
+    }
+
+    // Send email notification for successful payment
+    if (status.value === "success") {
+      // For the sender (user triggering the mutation), use domainAccount
+      const senderUsername = domainAccount?.username || "Unknown User"
+      // Don't await this to avoid blocking the response
+      EmailService().sendLightningTransactionEmail({
+        senderWalletId: walletId,
+        recipientWalletId,
+        senderUsername,
+        recipientUsername: "Unknown User",
+        senderPhone: "Unknown Phone",
+        recipientPhone: "N/A",
+        amount,
+        memo,
+      })
     }
 
     return {
