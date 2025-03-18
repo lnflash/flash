@@ -16,24 +16,12 @@ import {
   recordExceptionInCurrentSpan,
   wrapAsyncToRunInSpan,
 } from "@services/tracing"
-import { Messaging } from "firebase-admin/lib/messaging/messaging"
-
-import { GOOGLE_APPLICATION_CREDENTIALS } from "@config"
+import { messaging } from "./firebase"
 
 const logger = baseLogger.child({ module: "notifications" })
 
 type MessagingPayload = admin.messaging.MessagingPayload
 type NotificationMessagePayload = admin.messaging.NotificationMessagePayload
-
-let messaging: Messaging
-
-if (GOOGLE_APPLICATION_CREDENTIALS) {
-  admin.initializeApp({
-    credential: admin.credential.applicationDefault(),
-  })
-
-  messaging = admin.messaging()
-}
 
 const sendToDevice = async (
   tokens: DeviceToken[],
