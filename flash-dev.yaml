@@ -1,0 +1,16 @@
+# See Foreign Exchange Rates: https://www.firstglobal-bank.com/
+exchangeRates:
+  USD:
+    JMD:
+      bid: 150
+      ask: 160
+cashout:
+  minimum: 
+    amount: 0
+    currency: USD
+  maximum: 
+    amount: 1000 # $10
+    currency: USD
+  accountLevel: 2
+  fee: 200 # basis points
+  duration: 600 # seconds

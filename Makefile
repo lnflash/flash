@@ -11,14 +11,14 @@ update-price-history:
 
 start-main:
 	. ./.env && yarn tsnd --respawn --files -r tsconfig-paths/register -r src/services/tracing.ts \
-		src/servers/graphql-main-server.ts | yarn pino-pretty -c -l
+		src/servers/graphql-main-server.ts flash-dev.yaml | yarn pino-pretty -c -l
 
 start-main-fast:
 	yarn run watch-main | yarn pino-pretty -c -l
 
 start-trigger:
 	. ./.env && yarn tsnd --respawn --files -r tsconfig-paths/register -r src/services/tracing.ts \
-		src/servers/trigger.ts | yarn pino-pretty -c -l
+		src/servers/trigger.ts flash-dev.yaml | yarn pino-pretty -c -l
 
 start-cron: start-deps
 	. ./.env && yarn tsnd --files -r tsconfig-paths/register -r src/services/tracing.ts \
@@ -26,11 +26,11 @@ start-cron: start-deps
 
 start-ws:
 	. ./.env && yarn tsnd --respawn --files -r tsconfig-paths/register -r src/services/tracing.ts \
-		src/servers/ws-server.ts | yarn pino-pretty -c -l
+		src/servers/ws-server.ts flash-dev.yaml | yarn pino-pretty -c -l
 
 start-ibex-wh:
 	. ./.env && yarn tsnd --respawn --files -r tsconfig-paths/register -r src/services/tracing.ts \
-		src/servers/ibex-webhook-server.ts | yarn pino-pretty -c -l
+		src/servers/ibex-webhook-server.ts flash-dev.yaml | yarn pino-pretty -c -l
 
 start-loopd:
 	./dev/bin/start-loopd.sh

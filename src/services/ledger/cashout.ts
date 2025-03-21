@@ -6,7 +6,7 @@ import { MainBook } from "./books"
 import { persistAndReturnEntry } from "./helpers"
 import { LedgerError, LedgerServiceError, LedgerTransactionType } from "@domain/ledger"
 import { LedgerService } from "."
-import { baseLogger } from "@services/logger"
+import { JmdPrice } from "@config"
 
 // Medici accounts
 const Accounts = {
@@ -19,11 +19,7 @@ const Accounts = {
   ForeignExchange: "Foreign Exchange"
 }
 
-
-// See Foreign Exchange Rates: https://www.firstglobal-bank.com/
-const JMD_SELL_RATE = 159
-const JMD_BUY_RATE = 151
-
+const JMD_SELL_RATE = JmdPrice.ask
 const toUSD = (liability: Amount<"JMD"> | Amount<"USD">): number => {
   const liabilityAmt = Number(liability.amount)
   if (liabilityAmt === 0) return 0 

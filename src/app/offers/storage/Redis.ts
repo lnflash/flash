@@ -36,9 +36,7 @@ const Redis = {
       value: OffersSerde.serialize(o.details),
       ttlSecs: 3600 as Seconds
     });
-    baseLogger.info(result, "result")
     if (result instanceof CacheServiceError) return result
-
     return new PersistedOffer(id, o.details)
   },
   

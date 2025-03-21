@@ -148,4 +148,31 @@ type YamlSchema = {
   skipFeeProbeConfig: { pubkey: string[]; chanId: string[] }
   smsAuthUnsupportedCountries: string[]
   whatsAppAuthUnsupportedCountries: string[]
+  exchangeRates: StaticRates
+  cashout: {
+    minimum: {
+      amount: number
+      currency: string
+    }
+    maximum: {
+      amount: number
+      currency: string
+    }
+    accountLevel: 0 | 1 | 2
+    fee: number
+    duration: number
+  }
+}
+
+type CurrencyCode = string
+
+type PriceSpread = {
+  bid: number,
+  ask: number,
+}
+
+type StaticRates = {
+  [key: CurrencyCode]: {
+    [key: CurrencyCode]: PriceSpread
+  }
 }
