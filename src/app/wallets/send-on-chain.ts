@@ -66,7 +66,7 @@ const payOnChainByWalletId = async <R extends WalletCurrency>({
 }: PayOnChainByWalletIdArgs): Promise<PayOnChainByWalletIdResult | ApplicationError | IbexError> => {
   const latestAccountState = await AccountsRepository().findById(senderAccount.id)
   if (latestAccountState instanceof Error) return latestAccountState
-  const accountValidator = AccountValidator(latestAccountState)
+  const accountValidator = AccountValidator(latestAccountState).isActive()
   if (accountValidator instanceof Error) return accountValidator
 
   const ledger = LedgerService()

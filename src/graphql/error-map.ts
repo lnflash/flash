@@ -1,3 +1,4 @@
+import { ValidationError } from "@domain/shared"
 import {
   TransactionRestrictedError,
   LightningPaymentError,
@@ -457,7 +458,11 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "IbexError":
     case "UnexpectedIbexResponse":
       return new IbexError(baseLogger)
-
+    case "OfferNotFound":
+      return new NotFoundError({ 
+        message: "Offer not available. Try again.", 
+        logger: baseLogger 
+      })
     // ----------
     // Unhandled below here
     // ----------
@@ -727,4 +732,10 @@ export const mapAndParseErrorForGqlResponse = (err: ApplicationError): IError =>
     path: mappedError.path,
     code: mappedError.extensions.code,
   }
+}
+
+export const mapToGqlErrorList = (err: ApplicationError): IError[] => {
+  if (err instanceof ValidationError && err.errors) return err.errors.map(mapAndParseErrorForGqlResponse)
+  else return [mapAndParseErrorForGqlResponse(err)]
+
 }
