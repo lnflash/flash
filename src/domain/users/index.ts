@@ -11,7 +11,7 @@ import Firebase from "@services/notifications/firebase"
 
 import { Languages } from "./languages"
 import { ValidationError } from "@domain/shared"
-import { FirebaseError } from "@domain/notifications"
+import { NotificationsServiceError } from "@domain/notifications"
 
 export * from "./phone-metadata-authorizer"
 export * from "./phone-metadata-validator"
@@ -53,7 +53,7 @@ export const checkedToLanguage = (
 
 export const checkedToDeviceToken = async (token: string): Promise<DeviceToken | ValidationError> => {
   const r = await Firebase.isDeviceTokenValid(token)
-  if (r instanceof FirebaseError) return new ValidationError(r)
+  if (r instanceof NotificationsServiceError) return new ValidationError(r)
   else if (!r) return new ValidationError("FCM token is not valid.")
   else return token as DeviceToken 
 }
