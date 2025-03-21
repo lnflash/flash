@@ -1,7 +1,7 @@
 import * as admin from "firebase-admin"
 import { Messaging } from "firebase-admin/lib/messaging/messaging"
 import { GOOGLE_APPLICATION_CREDENTIALS } from "@config"
-import { FirebaseError, FirebaseNotAvailable } from "@domain/notifications"
+import { FirebaseMessageError, FirebaseNotAvailable } from "@domain/notifications"
 import { baseLogger } from "@services/logger"
 
 
@@ -15,7 +15,7 @@ if (GOOGLE_APPLICATION_CREDENTIALS) {
   messaging = admin.messaging()
 }
 
-const isDeviceTokenValid = async (token: string): Promise<boolean | FirebaseError> => {
+const isDeviceTokenValid = async (token: string): Promise<boolean | NotificationsServiceError> => {
   if (!messaging) return new FirebaseNotAvailable()
   try {
     await messaging.send(
@@ -35,7 +35,7 @@ const isDeviceTokenValid = async (token: string): Promise<boolean | FirebaseErro
       return false
     } else {
       baseLogger.error(`Error checking device token: ${e.message}`);
-      return new FirebaseError(e.message)
+      return new FirebaseMessageError(e, token as DeviceToken)
     }
   }
 }

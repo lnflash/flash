@@ -12,7 +12,7 @@ import {
   subscribeToInvoices,
   SubscribeToInvoicesInvoiceUpdatedEvent,
   subscribeToPayments,
-  SubscribeToPaymentsPaymentEvent,
+  SubscribeToPastPaymentsPaymentEvent,
   subscribeToTransactions,
   SubscribeToTransactionsChainTransactionEvent,
 } from "lightning"
@@ -373,7 +373,7 @@ export const setupPaymentSubscribe = async ({
     root: true,
     namespace: "servers.trigger",
     fnName: "paymentUpdateEventHandler",
-    fn: async (payment: SubscribeToPaymentsPaymentEvent) => {
+    fn: async (payment: SubscribeToPastPaymentsPaymentEvent) => {
       logger.info({ payment }, "paymentUpdateEventHandler")
 
       const paymentHash = payment.id as PaymentHash

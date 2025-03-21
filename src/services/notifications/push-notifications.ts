@@ -2,6 +2,7 @@ import * as admin from "firebase-admin"
 
 import {
   DeviceTokensNotRegisteredNotificationsServiceError,
+  FirebaseMessageError,
   InvalidDeviceNotificationsServiceError,
   NotificationChannel,
   NotificationsServiceError,
@@ -17,6 +18,7 @@ import {
   wrapAsyncToRunInSpan,
 } from "@services/tracing"
 import { messaging } from "./firebase"
+import { FirebaseError } from "firebase-admin"
 
 const logger = baseLogger.child({ module: "notifications" })
 
@@ -37,41 +39,26 @@ const sendToDevice = async (
       return true
     }
 
-
-    // data?: {  COMES FROM MessagingPayload 
-    //     [key: string]: string;
-    // };
-    // notification?: Notification;
-    // android?: AndroidConfig;
-    // webpush?: WebpushConfig;
-    // apns?: ApnsConfig;
-    // fcmOptions?: FcmOptions;
-    const response = await messaging.sendEachForMulticast({ tokens, ...message }, false)
+    const batchResp = await messaging.sendEachForMulticast({ tokens, ...message }, false)
 
     const invalidTokens: DeviceToken[] = []
-    response.responses.forEach((item, index: number) => {
-      if (
-        response.responses.length === tokens.length &&
-        item?.error?.code === "messaging/registration-token-not-registered"
-      ) {
-        invalidTokens.push(tokens[index])
-      }
-      if (item?.error?.message) {
-        recordExceptionInCurrentSpan({
-          error: new InvalidDeviceNotificationsServiceError(item.error.message),
-          level: ErrorLevel.Warn,
-          attributes: {
-            code: item?.error?.code,  
-            token: tokens[index],  
-          },
-        })
-      }
-    })
+    batchResp.responses
+      .forEach((r, idx) => {
+        if (!r.success) {
+          recordExceptionInCurrentSpan({
+            error: new FirebaseMessageError(r.error as unknown as FirebaseError, tokens[idx]),
+            level: ErrorLevel.Warn,
+          })
+        }
+        if (r.error?.code === "messaging/registration-token-not-registered") {
+          invalidTokens.push(tokens[idx])
+        }
+      })
 
-    addAttributesToCurrentSpan({
-      failureCount: response.failureCount,
-      successCount: response.successCount,
-    })
+    // addAttributesToCurrentSpan({
+    //   failureCount: response.failureCount,
+    //   successCount: response.successCount,
+    // })
 
     if (invalidTokens.length > 0) {
       return new DeviceTokensNotRegisteredNotificationsServiceError(invalidTokens)
@@ -102,16 +89,15 @@ export const PushNotificationsService = (): IPushNotificationsService => {
       data: data || {},
     }
 
-    const tokens = deviceTokens.filter((token) => token.length === 163)
-    if (tokens.length <= 0) {
-      logger.info({ message, tokens }, "no token. skipping notification")
+    if (deviceTokens.length <= 0) {
+      logger.info({ message, deviceTokens }, "no token. skipping notification")
       return new InvalidDeviceNotificationsServiceError()
     }
 
     return wrapAsyncToRunInSpan({
       namespace: "app.notifications",
       fnName: "sendToDevice",
-      fn: () => sendToDevice(tokens, message),
+      fn: () => sendToDevice(deviceTokens, message),
     })()
   }
 

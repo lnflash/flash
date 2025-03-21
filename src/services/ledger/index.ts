@@ -471,7 +471,10 @@ export const LedgerService = (): ILedgerService => {
     }
 
     for await (const { _id } of transactions) {
-      yield toWalletId(_id)
+      const result = toWalletId(_id)
+      if (result) {
+        yield result
+      }
     }
   }
 
