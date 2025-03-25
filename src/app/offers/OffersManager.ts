@@ -4,19 +4,15 @@ import { AmountCalculator, ValidationError } from "@domain/shared"
 import { CacheServiceError } from "@domain/cache"
 import { getBankOwnerIbexAccount } from "@services/ledger/caching"
 import Ibex from "@services/ibex/client"
-import webhookServer from "@services/ibex/webhook-server"
 import { USDollars } from "@services/ibex/currencies"
 import { UnexpectedIbexResponse } from "@services/ibex/errors"
 import { decodeInvoice } from "@domain/bitcoin/lightning"
+import { Cashout, JmdPrice } from "@config"
 
-const config: CashoutConfig = {
-  fee: 200n as BasisPoints, // 2 percent total fee
-  duration: 600 as Seconds, // 10 minutes
+const config = { 
+  ...Cashout.OfferConfig,
+  JMD_Sell_Rate: BigInt(JmdPrice.ask),
 }
-
-// See Foreign Exchange Rates: https://www.firstglobal-bank.com/
-const JMD_SELL_RATE = 159
-const JMD_BUY_RATE = 151
 
 const OffersManager = {
   createCashoutOffer: async (
@@ -37,15 +33,16 @@ const OffersManager = {
     const invoice = decodeInvoice(invoiceResp.invoice.bolt11)
     if (invoice instanceof Error) return invoice
 
+    // flash fee is subtracted from liability
     const flashFee = AmountCalculator().mulBasisPoints(requested, config.fee)
 
     const usdLiability = AmountCalculator().sub(requested, flashFee)
-    const exchangeRate: bigint = 159n // USDcents to JMD 
+    const exchangeRate = config.JMD_Sell_Rate 
     const jmdLiability = {
-      amount: BigInt(usdLiability.amount * exchangeRate / 100n), 
+      amount: usdLiability.amount * exchangeRate / 100n, 
       currency: "JMD",
       exchangeRate: {
-        amount: 159n,
+        amount: exchangeRate,
         currency: "USD"
       }
     } as ExchangeAmount<"JMD">

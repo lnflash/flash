@@ -618,6 +618,13 @@ export const configSchema = {
       items: { type: "string" },
       default: [],
     },
+    exchangeRates: {
+      type: "object",
+    },
+    cashout: {
+      type: "object",
+      required: ["minimum", "maximum", "accountLevel"],
+    }
   },
   required: [
     "lightningAddressDomain",
@@ -629,8 +636,6 @@ export const configSchema = {
     "ratioPrecision",
     "buildVersion",
     "rewards",
-    "coldStorage",
-    "bria",
     "lndScbBackupBucketName",
     "admin_accounts",
     "test_accounts",
@@ -648,6 +653,8 @@ export const configSchema = {
     "skipFeeProbeConfig",
     "smsAuthUnsupportedCountries",
     "whatsAppAuthUnsupportedCountries",
+    "exchangeRates",
+    "cashout",
   ],
   additionalProperties: false,
 } as const
