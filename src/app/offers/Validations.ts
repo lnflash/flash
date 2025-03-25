@@ -1,18 +1,9 @@
 import { getBalanceForWallet } from "@app/wallets";
-import { AccountLevel, AccountValidator } from "@domain/accounts";
+import { Cashout } from "@config";
+import { AccountValidator } from "@domain/accounts";
 import { ValidationError } from "@domain/shared";
 
-const config: ValidationConfig = {
-    minimum: {
-      amount: 0n, // 1000n, // $10
-      currency: "USD"
-    },
-    maximum: {
-      amount: 10000000n, // get from Bitcoin withdrawal limit
-      currency: "USD"
-    },
-    accountLevel: AccountLevel.Two
-}
+const config = Cashout.validations
 
 export const isBeforeExpiry = async (o: ValidationInputs): Promise<true | ValidationError> => {
   const now = new Date()

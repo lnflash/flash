@@ -36,9 +36,9 @@ const configPath = providedPath ? path.resolve(providedPath) : DEFAULT_CONFIG_PA
 try {
   customContent = fs.readFileSync(configPath, "utf8")
   customConfig = yaml.load(customContent)
-  baseLogger.info("loading custom.yaml")
+  baseLogger.info(`loading ${configPath}`)
 } catch (err) {
-  baseLogger.debug({ err }, "no custom.yaml available. using default values")
+  baseLogger.debug({ err }, `no ${configPath} available. using default values`)
 }
 
 // TODO: fix errors
@@ -335,4 +335,27 @@ export const getSmsAuthUnsupportedCountries = (): CountryCode[] => {
 
 export const getWhatsAppAuthUnsupportedCountries = (): CountryCode[] => {
   return yamlConfig.whatsAppAuthUnsupportedCountries as CountryCode[]
+}
+
+export const JmdPrice = {
+  ...yamlConfig.exchangeRates["USD"]["JMD"]
+} as PriceSpread
+
+export const Cashout = {
+  OfferConfig: { 
+    fee: BigInt(yamlConfig.cashout.fee) as BasisPoints,
+    duration: yamlConfig.cashout.duration as Seconds,
+  } as CashoutConfig,
+  validations: {
+    minimum: {
+      amount: BigInt(yamlConfig.cashout.minimum.amount),
+      currency: yamlConfig.cashout.minimum.currency as WalletCurrency,  
+    },
+    maximum: {
+      amount: BigInt(yamlConfig.cashout.maximum.amount),
+      currency: yamlConfig.cashout.maximum.currency as WalletCurrency,  
+    },
+    accountLevel: yamlConfig.cashout.accountLevel as AccountLevel,
+  }
+
 }
