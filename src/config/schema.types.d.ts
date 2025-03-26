@@ -16,6 +16,12 @@ type AccountLimitsConfig = {
   }
 }
 
+type CashoutEmail = {
+  to: string
+  from: string
+  subject: string
+}
+
 type YamlSchema = {
   name: string
   lightningAddressDomain: string
@@ -161,6 +167,7 @@ type YamlSchema = {
     accountLevel: 0 | 1 | 2
     fee: number
     duration: number
+    email: CashoutEmail
   }
 }
 

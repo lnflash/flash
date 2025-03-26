@@ -356,6 +356,11 @@ export const Cashout = {
       currency: yamlConfig.cashout.maximum.currency as WalletCurrency,  
     },
     accountLevel: yamlConfig.cashout.accountLevel as AccountLevel,
+  },
+  Email: {
+    to: yamlConfig.cashout.email.to,
+    from: yamlConfig.cashout.email.from,
+    subject: yamlConfig.cashout.email.subject,
   }
 
 }
