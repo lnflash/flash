@@ -63,23 +63,6 @@ const IntraLedgerUsdPaymentSendMutation = GT.Field<null, GraphQLPublicContextAut
       return { status: "failed", errors: [mapAndParseErrorForGqlResponse(status)] }
     }
 
-    // Send email notification for successful payment
-    if (status.value === "success") {
-      // For the sender (user triggering the mutation), use domainAccount
-      const senderUsername = domainAccount?.username || "Unknown User"
-      // Don't await this to avoid blocking the response
-      EmailService().sendLightningTransactionEmail({
-        senderWalletId: walletId,
-        recipientWalletId,
-        senderUsername,
-        recipientUsername: "Unknown User",
-        senderPhone: "Unknown Phone",
-        recipientPhone: "N/A",
-        amount,
-        memo,
-      })
-    }
-
     return {
       errors: [],
       status: status.value,

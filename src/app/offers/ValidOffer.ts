@@ -9,6 +9,7 @@ import { accountLevel, isActiveAccount, isUsd, hasSufficientBalance, transferMin
 import { RepositoryError } from "@domain/errors"
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
+import { EmailService } from "@services/email"
 
 // Only way to construct a ValidOffer is using the static method which contains validations  
 class ValidOffer extends Offer {
@@ -68,7 +69,8 @@ class ValidOffer extends Offer {
       return ledgerResp // TODO: change to a log
     }
 
-    // TODO: trigger email notification to Flash support
+    // move to NotificationService?
+    EmailService.sendCashoutInitiatedEmail(this.account.username, this.details)
 
     return PaymentSendStatus.Pending // awaiting rtgs transfer
   }
