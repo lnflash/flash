@@ -55,9 +55,11 @@ const LnNoAmountUsdInvoiceFeeProbeMutation = GT.Field({
     //   })
 
     // TODO: Move Ibex call to Payments interface
+    const checkedAmount = USDollars.fromFractionalCents(amount as FractionalCentAmount)
+    if (checkedAmount instanceof ValidationError) return checkedAmount
     const resp: IbexFeeEstimation<USDollars> | IbexError = await Ibex.getLnFeeEstimation<USDollars>({
       invoice: paymentRequest as Bolt11,
-      send: USDollars.fromFractionalCents(amount as FractionalCentAmount)
+      send: checkedAmount,
     })
     if (resp instanceof IbexError) return { errors: [mapAndParseErrorForGqlResponse(resp)] }     
     const fee = resp.fee.toCents()

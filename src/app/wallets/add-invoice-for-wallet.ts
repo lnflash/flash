@@ -44,9 +44,11 @@ const addInvoiceForSelf = async ({
 
   const limitOk = await checkSelfWalletIdRateLimits(wallet.accountId)
   if (limitOk instanceof Error) return limitOk
- 
+
+  const checkedAmount = USDollars.fromFractionalCents(amount)
+  if (checkedAmount instanceof Error) return checkedAmount
   const resp = await Ibex.addInvoice({
-    amount: USDollars.fromFractionalCents(amount), // this is USD logic. Will not work for BTC
+    amount: checkedAmount, 
     accountId: walletId,
     memo,
     expiration: expiresIn * 60 as Seconds, 
@@ -136,8 +138,10 @@ const addInvoiceForRecipient = async ({
   const limitOk = await checkRecipientWalletIdRateLimits(wallet.accountId)
   if (limitOk instanceof Error) return limitOk
 
+  const checkedAmount = USDollars.fromFractionalCents(amount)
+  if (checkedAmount instanceof Error) return checkedAmount
   const resp = await Ibex.addInvoice({
-    amount: USDollars.fromFractionalCents(amount),
+    amount: checkedAmount,
     accountId: recipientWalletId,
     memo,
     expiration: expiresIn ? expiresIn * 60 as Seconds : undefined,

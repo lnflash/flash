@@ -75,11 +75,11 @@ const intraledgerPaymentSendWalletId = async ({
     kratosUserId: recipientUserId,
   } = recipientAccount
 
-  const amount = checkedToUsdPaymentAmount(uncheckedAmount) 
+  const amount = USDollars.fromFractionalCents(uncheckedAmount as FractionalCentAmount)
   if (amount instanceof ValidationError) return amount
   const invoiceResp = await Ibex.addInvoice({ 
     accountId: recipientWalletId,
-    amount: USDollars.fromAmount(amount), 
+    amount, 
     memo: memo || "flash-to-flash",
   })
   if (invoiceResp instanceof Error) return invoiceResp

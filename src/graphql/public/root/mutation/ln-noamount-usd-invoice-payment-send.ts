@@ -49,7 +49,7 @@ const LnNoAmountUsdInvoicePaymentSendMutation = GT.Field<
     input: {
       walletId: WalletId | InputValidationError
       paymentRequest: string | InputValidationError
-      amount: Satoshis | InputValidationError
+      amount: FractionalCentAmount | InputValidationError
       memo?: string | InputValidationError
     }
   }
@@ -92,19 +92,18 @@ const LnNoAmountUsdInvoicePaymentSendMutation = GT.Field<
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
 
 
-    const usCents = checkedToUsdPaymentAmount(amount)
+    const usCents = USDollars.fromFractionalCents(amount)
     if (usCents instanceof ValidationError) return usCents
     const PayLightningInvoice = await Ibex.payInvoice({
       invoice: paymentRequest as Bolt11,
       accountId: walletId,
-      send: USDollars.fromAmount(usCents),
+      send: usCents,
     })
 
     if (PayLightningInvoice instanceof IbexError) {
       return {
         status: "failed",
-        errors: [{ message: "An unexpected error occurred. Please try again later." }],
-        // errors: [mapAndParseErrorForGqlResponse(PayLightningInvoice)] }
+        errors: [mapAndParseErrorForGqlResponse(PayLightningInvoice)]
       }
     }
 

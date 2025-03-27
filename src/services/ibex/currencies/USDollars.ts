@@ -1,4 +1,4 @@
-import { AmountCalculator, paymentAmountFromNumber, toNumber, WalletCurrency } from "@domain/shared"
+import { AmountCalculator, InvalidUsdPaymentAmountError, MAX_CENTS, paymentAmountFromNumber, toNumber, UsdAmountTooLargeError, WalletCurrency } from "@domain/shared"
 import { IbexCurrency } from "./IbexCurrency"
 
 // Ibex represents dollars as numbers with decimal to 2 places. e.g 1.25
@@ -18,8 +18,10 @@ export default class USDollars extends IbexCurrency {
     return new USDollars(toNumber(a) / 100)
   }
   
-  static fromFractionalCents(cents: FractionalCentAmount): USDollars {
-    return new USDollars(cents / 100)
+  static fromFractionalCents(cents: FractionalCentAmount): USDollars | ValidationError {
+    if (cents > MAX_CENTS.amount) return new UsdAmountTooLargeError()
+    else if (!(cents && cents > 0)) return new InvalidUsdPaymentAmountError()
+    else return new USDollars(cents / 100)
   }
 
   toCents(): Amount<"USD"> | ValidationError{
