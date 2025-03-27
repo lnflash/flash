@@ -22,11 +22,14 @@ export class UnexpectedIbexResponse extends IbexError {
   }
 }
 
+export class InsufficientIbexBalance extends IbexError {}
+export class CompletedInvoice extends IbexError {}
+
 export const errorHandler = <T>(e: T | IbexClientError | AuthenticationError | ApiError): T | IbexError => { 
-  if (e instanceof IbexClientError) {
-    baseLogger.error(e)
-    return new IbexError(e)
-  }
+  if (e instanceof AuthenticationError) return new IbexError(e, ErrorLevel.Critical)
+  else if (e instanceof ApiError && e.message.includes("insufficient balance")) return new InsufficientIbexBalance(e, ErrorLevel.Info)
+  else if (e instanceof ApiError && e.message.includes("payment already prepared")) return new CompletedInvoice(e, ErrorLevel.Info)
+  else if (e instanceof IbexClientError) return new IbexError(e, ErrorLevel.Warn)
   else return e
 }  
 

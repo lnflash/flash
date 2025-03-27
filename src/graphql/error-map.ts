@@ -57,6 +57,7 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = error.message
       return new TransactionRestrictedError({ message, logger: baseLogger })
 
+    case "CompletedInvoice":
     case "AlreadyPaidError":
       message = "Invoice is already paid"
       return new LightningPaymentError({ message, logger: baseLogger })
@@ -348,6 +349,7 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       return new ValidationInternalError({ logger: baseLogger })
 
     case "InsufficientBalanceError":
+    case "InsufficientIbexBalance":
       message = error.message
       return new InsufficientBalanceError({ message, logger: baseLogger })
 
