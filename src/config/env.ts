@@ -140,6 +140,8 @@ export const env = createEnv({
       .default(4008),
     IBEX_EXTERNAL_URI: z.string().optional(),
     IBEX_WEBHOOK_SECRET: z.string().optional(),
+    MAILGUN_API_KEY: z.string(),
+    MAILGUN_DOMAIN: z.string(),
   },
 
   runtimeEnvStrict: {
@@ -244,5 +246,7 @@ export const env = createEnv({
     IBEX_LISTENER_PORT: process.env.IBEX_LISTENER_PORT,
     IBEX_EXTERNAL_URI: process.env.IBEX_EXTERNAL_URI,
     IBEX_WEBHOOK_SECRET: process.env.IBEX_WEBHOOK_SECRET,
+    MAILGUN_API_KEY: process.env.MAILGUN_API_KEY,
+    MAILGUN_DOMAIN: process.env.MAILGUN_DOMAIN,
   },
 })
