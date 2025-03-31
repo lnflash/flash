@@ -1,5 +1,4 @@
-import { Accounts, Payments } from "@app"
-import { PaymentSendStatus } from "@domain/bitcoin/lightning"
+import { Payments } from "@app"
 import { checkedToWalletId } from "@domain/wallets"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { GT } from "@graphql/index"
@@ -10,6 +9,7 @@ import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import dedent from "dedent"
 import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 // import { RequestInit, Response } from 'node-fetch'
+import { EmailService } from "@services/email"
 
 const IntraLedgerUsdPaymentSendInput = GT.Input({
   name: "IntraLedgerUsdPaymentSendInput",
