@@ -14,3 +14,7 @@ cashout:
   accountLevel: 2
   fee: 200 # basis points
   duration: 600 # seconds
+  email:
+    to: "transactions@getflash.io"
+    from: "notifications@getflash.io"
+    subject: "New Cashout"
