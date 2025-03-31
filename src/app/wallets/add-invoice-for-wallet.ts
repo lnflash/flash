@@ -45,7 +45,7 @@ const addInvoiceForSelf = async ({
   const limitOk = await checkSelfWalletIdRateLimits(wallet.accountId)
   if (limitOk instanceof Error) return limitOk
 
-  const checkedAmount = USDollars.fromFractionalCents(amount)
+  const checkedAmount = amount ? USDollars.fromFractionalCents(amount) : undefined 
   if (checkedAmount instanceof Error) return checkedAmount
   const resp = await Ibex.addInvoice({
     amount: checkedAmount, 
