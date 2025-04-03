@@ -618,12 +618,32 @@ export const configSchema = {
       items: { type: "string" },
       default: [],
     },
+    ibex: {
+      type: "object",
+      properties: {
+        url: { type: "string" },
+        email: { type: "string" },
+        password: { type: "string" },
+        webhook: {
+          type: "object",
+          properties: { 
+            port: { type: "integer" } , 
+            uri: { type: "string" } , 
+            secret: { type: "string" } , 
+          },
+        },
+      },
+    },
     exchangeRates: {
       type: "object",
     },
     cashout: {
       type: "object",
       required: ["minimum", "maximum", "accountLevel"],
+    },
+    mailgun: {
+      type: "object",
+      required: ["apiKey", "domain"]
     }
   },
   required: [
@@ -655,6 +675,7 @@ export const configSchema = {
     "whatsAppAuthUnsupportedCountries",
     "exchangeRates",
     "cashout",
+    "ibex",
   ],
   additionalProperties: false,
 } as const

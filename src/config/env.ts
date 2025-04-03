@@ -128,20 +128,6 @@ export const env = createEnv({
 
     SVIX_SECRET: z.string().optional(),
     SVIX_ENDPOINT: z.union([z.string().url().nullish(), z.literal("")]), // optional url
-
-    IBEX_URL: z.string(),
-    IBEX_EMAIL: z.string().default("fake-email@foo.com"), 
-    IBEX_PASSWORD: z.string().default("not-a-secret"),
-    IBEX_LISTENER_PORT: z
-      .number()
-      .min(1)
-      .or(z.string())
-      .pipe(z.coerce.number())
-      .default(4008),
-    IBEX_EXTERNAL_URI: z.string().optional(),
-    IBEX_WEBHOOK_SECRET: z.string().optional(),
-    MAILGUN_API_KEY: z.string(),
-    MAILGUN_DOMAIN: z.string(),
   },
 
   runtimeEnvStrict: {
@@ -239,14 +225,5 @@ export const env = createEnv({
 
     SVIX_SECRET: process.env.SVIX_SECRET,
     SVIX_ENDPOINT: process.env.SVIX_ENDPOINT,
-
-    IBEX_URL: process.env.IBEX_URL,
-    IBEX_EMAIL: process.env.IBEX_EMAIL,
-    IBEX_PASSWORD: process.env.IBEX_PASSWORD,
-    IBEX_LISTENER_PORT: process.env.IBEX_LISTENER_PORT,
-    IBEX_EXTERNAL_URI: process.env.IBEX_EXTERNAL_URI,
-    IBEX_WEBHOOK_SECRET: process.env.IBEX_WEBHOOK_SECRET,
-    MAILGUN_API_KEY: process.env.MAILGUN_API_KEY,
-    MAILGUN_DOMAIN: process.env.MAILGUN_DOMAIN,
   },
 })

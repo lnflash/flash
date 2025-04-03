@@ -2,11 +2,11 @@ import Mailgun from 'mailgun.js';
 import FormData from 'form-data'; // or built-in FormData
 import { MailgunMessageData } from 'mailgun.js/definitions';
 import { CashoutBody } from './templates/cashout';
-import { Cashout, MAILGUN_API_KEY, MAILGUN_DOMAIN } from '@config'
+import { Cashout, MailgunConfig } from '@config'
 import { baseLogger } from '@services/logger';
 
 const config = Cashout.Email
-const mailgun = new Mailgun(FormData).client({ username: 'api', key: MAILGUN_API_KEY })
+const mailgun = new Mailgun(FormData).client({ username: 'api', key: MailgunConfig.apiKey });
 
 class EmailService {
   sendCashoutInitiatedEmail = async (username: Username, offer: CashoutDetails) => {
@@ -34,7 +34,7 @@ class EmailService {
   // Mailgun send
   private sendEmail = async (msg: MailgunMessageData): Promise<void> => {
       try {
-        mailgun.messages.create(MAILGUN_DOMAIN, msg);
+        mailgun.messages.create(MailgunConfig.domain, msg);
       } catch (error) {
         baseLogger.error(error, "Failed to send email");
       }

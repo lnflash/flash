@@ -24,34 +24,45 @@ import mergeWith from "lodash.mergewith"
 import { configSchema } from "./schema"
 import { ConfigError } from "./error"
 
+// replaces array with override
 const merge = (defaultConfig: unknown, customConfig: unknown) =>
   mergeWith(defaultConfig, customConfig, (a, b) => (Array.isArray(b) ? b : undefined))
 
-let customContent: string, customConfig
+const mergeYamls = (filePaths: string[]): Record<string, unknown> => {
+  const mergedConfig: Record<string, unknown> = {};
+
+  filePaths.forEach((filePath) => {
+    try {
+      const resolvedPath = path.resolve(filePath);
+      const fileContent = fs.readFileSync(resolvedPath, "utf8");
+      const parsedConfig = yaml.load(fileContent) as Record<string, unknown>;
+
+      merge(mergedConfig, parsedConfig)
+
+      baseLogger.info(`Successfully loaded config from ${resolvedPath}`);
+    } catch (err) {
+      baseLogger.warn({ err, filePath }, `Failed to load config from ${filePath}`);
+    }
+  });
+
+  return mergedConfig;
+};
+
 
 const DEFAULT_CONFIG_PATH = "/var/yaml/custom.yaml"
-const providedPath = process.argv[2]
-const configPath = providedPath ? path.resolve(providedPath) : DEFAULT_CONFIG_PATH
-
-try {
-  customContent = fs.readFileSync(configPath, "utf8")
-  customConfig = yaml.load(customContent)
-  baseLogger.info(`loading ${configPath}`)
-} catch (err) {
-  baseLogger.debug({ err }, `no ${configPath} available. using default values`)
+const getYamlPaths = () => {
+  if (process.argv.length > 2)
+    return process.argv.slice(2).map(p => path.resolve(p))
+  else 
+    return [DEFAULT_CONFIG_PATH]
 }
+const paths = getYamlPaths()
+const yamlConfigInit = mergeYamls(paths) // merge(defaultConfig, customConfig)
 
 // TODO: fix errors
 // const ajv = new Ajv({ allErrors: true, strict: "log" })
 const ajv = new Ajv({ useDefaults: true })
-
-const defaultConfig = {}
 const validate = ajv.compile<YamlSchema>(configSchema)
-
-// validate is mutating defaultConfig - even thought it's a const -> it's changing its properties
-validate(defaultConfig)
-
-export const yamlConfigInit = merge(defaultConfig, customConfig)
 
 const valid = validate(yamlConfigInit)
 
@@ -342,18 +353,18 @@ export const JmdPrice = {
 } as PriceSpread
 
 export const Cashout = {
-  OfferConfig: { 
+  OfferConfig: {
     fee: BigInt(yamlConfig.cashout.fee) as BasisPoints,
     duration: yamlConfig.cashout.duration as Seconds,
   } as CashoutConfig,
   validations: {
     minimum: {
       amount: BigInt(yamlConfig.cashout.minimum.amount),
-      currency: yamlConfig.cashout.minimum.currency as WalletCurrency,  
+      currency: yamlConfig.cashout.minimum.currency as WalletCurrency,
     },
     maximum: {
       amount: BigInt(yamlConfig.cashout.maximum.amount),
-      currency: yamlConfig.cashout.maximum.currency as WalletCurrency,  
+      currency: yamlConfig.cashout.maximum.currency as WalletCurrency,
     },
     accountLevel: yamlConfig.cashout.accountLevel as AccountLevel,
   },
@@ -364,3 +375,7 @@ export const Cashout = {
   }
 
 }
+
+export const MailgunConfig = yamlConfig.mailgun as MailgunConfig
+
+export const IbexConfig = yamlConfig.ibex as IbexConfig

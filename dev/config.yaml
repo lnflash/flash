@@ -1,20 +1,31 @@
+
+ibex:
+  url: "https://api-sandbox.poweredbyibex.io"
+  email:
+  password: 
+  webhook:
+    uri: # external uri defined in overrides 
+    port: 4008
+    secret: "not-so-secret"
+
 # See Foreign Exchange Rates: https://www.firstglobal-bank.com/
 exchangeRates:
   USD:
     JMD:
       bid: 150
       ask: 160
+
 cashout:
   minimum: 
     amount: 0
     currency: USD
   maximum: 
-    amount: 1000 # $10
+    amount: 100 # $1
     currency: USD
   accountLevel: 2
   fee: 200 # basis points
   duration: 600 # seconds
   email:
-    to: "transactions@getflash.io"
+    to: # add to the overrides.yaml
     from: "notifications@getflash.io"
     subject: "New Cashout"
