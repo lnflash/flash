@@ -63,6 +63,7 @@ services:
     volumes:
       - ./price-overrides.yaml:/var/yaml/custom.yaml
     environment:
+      - REDIS_TYPE=standalone
       - REDIS_0_DNS=redis
       - REDIS_0_PORT=6379
       - IBEX_URL=${IBEX_URL}
