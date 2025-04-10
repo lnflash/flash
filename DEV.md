@@ -51,12 +51,13 @@ $ cd flash
 
 *Flash is a fork of [Blink](https://github.com/GaloyMoney/blink) at commit `0a52b0673` (tag: 0.13.92)*
 
-### Set the Environment
+### Set the Environment 
 
 [direnv](https://direnv.net) is required to load environment variables. Make sure it is installed and that the [direnv hook](https://direnv.net/docs/hook.html) is added to your `shell.rc` file.
 
 Create a `.env.local` to add local environment overrides. For the Flash project, the IBEX_PASSWORD is required. E.g: 
 
+ `echo "export IBEX_EMAIL='<insert-email>'" >> .env.local`
  `echo "export IBEX_PASSWORD='<insert-password>'" >> .env.local`
 
 Make sure to allow direnv and reload:
@@ -66,6 +67,18 @@ $ direnv allow
 $ direnv reload
 (...)
 ```
+
+### Configure the app
+
+A base configuration for development purposes is provided in the `./dev/config.yaml` file. This file does not include some values which are not in the source control (e.g secrets). To add these values:
+1. Copy the `overrides.template.yaml` to `overrides.yaml` 
+```
+cp ./dev/overrides.template.yaml ./dev/overrides.yaml
+```
+This file is already included in the gitignore and the startup script
+
+2. Add the values to the empty fields of the overrides.yaml
+
 
 #### Testing the ibex-webhook
 

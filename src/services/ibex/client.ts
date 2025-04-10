@@ -1,6 +1,6 @@
 import IbexClient, { GetFeeEstimateResponse200, IbexClientError } from "ibex-client"
 import { errorHandler, IbexError, UnexpectedIbexResponse } from "./errors"
-import { IBEX_EMAIL, IBEX_PASSWORD, IBEX_URL } from "@config";
+import { IbexConfig } from "@config";
 import { AddInvoiceBodyParam, AddInvoiceResponse201, CreateAccountResponse201, CreateLnurlPayBodyParam, CreateLnurlPayResponse201, DecodeLnurlMetadataParam, DecodeLnurlResponse200, EstimateFeeCopyMetadataParam, EstimateFeeCopyResponse200, GenerateBitcoinAddressBodyParam, GenerateBitcoinAddressResponse201, GetAccountDetailsMetadataParam, GetAccountDetailsResponse200, GetFeeEstimationMetadataParam, GetFeeEstimationResponse200, GetTransactionDetails1MetadataParam, GetTransactionDetails1Response200, GMetadataParam, GResponse200, InvoiceFromHashMetadataParam, InvoiceFromHashResponse200, PayInvoiceV2BodyParam, PayInvoiceV2Response200, PayToALnurlPayBodyParam, PayToALnurlPayResponse201, SendToAddressCopyBodyParam, SendToAddressCopyResponse200 } from "ibex-client";
 import { addAttributesToCurrentSpan, wrapAsyncFunctionsToRunInSpan } from "@services/tracing";
 import WebhookServer from "./webhook-server";
@@ -10,8 +10,8 @@ import CurrencyMap from "./currencies/CurrencyMap";
 import { IbexCurrency } from "./currencies/IbexCurrency";
 
 const Ibex = new IbexClient(
-  IBEX_URL, 
-  { email: IBEX_EMAIL, password: IBEX_PASSWORD }, 
+  IbexConfig.url, 
+  { email: IbexConfig.email, password: IbexConfig.password }, 
   Redis
 )
 
