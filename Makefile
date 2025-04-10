@@ -11,14 +11,14 @@ update-price-history:
 
 start-main:
 	. ./.env && yarn tsnd --respawn --files -r tsconfig-paths/register -r src/services/tracing.ts \
-		src/servers/graphql-main-server.ts --config ./dev/config.yaml ./dev/overrides.yaml | yarn pino-pretty -c -l
+		src/servers/graphql-main-server.ts --configPath ./dev/config.yaml ./dev/overrides.yaml | yarn pino-pretty -c -l
 
 start-main-fast:
 	yarn run watch-main | yarn pino-pretty -c -l
 
 start-trigger:
 	. ./.env && yarn tsnd --respawn --files -r tsconfig-paths/register -r src/services/tracing.ts \
-		src/servers/trigger.ts --config ./dev/config.yaml ./dev/overrides.yaml | yarn pino-pretty -c -l
+		src/servers/trigger.ts --configPath ./dev/config.yaml ./dev/overrides.yaml | yarn pino-pretty -c -l
 
 start-cron: start-deps
 	. ./.env && yarn tsnd --files -r tsconfig-paths/register -r src/services/tracing.ts \
@@ -26,7 +26,7 @@ start-cron: start-deps
 
 start-ws:
 	. ./.env && yarn tsnd --respawn --files -r tsconfig-paths/register -r src/services/tracing.ts \
-		src/servers/ws-server.ts --config ./dev/config.yaml ./dev/overrides.yaml | yarn pino-pretty -c -l
+		src/servers/ws-server.ts --configPath ./dev/config.yaml ./dev/overrides.yaml | yarn pino-pretty -c -l
 
 start-ibex-wh:
 	. ./.env && yarn tsnd --respawn --files -r tsconfig-paths/register -r src/services/tracing.ts \
