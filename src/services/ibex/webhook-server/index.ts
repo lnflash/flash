@@ -1,5 +1,5 @@
 import express, { Request, Response } from "express"
-import { IBEX_LISTENER_PORT, IBEX_EXTERNAL_URI, IBEX_WEBHOOK_SECRET } from "@config"
+import { IbexConfig } from "@config"
 import { baseLogger as logger } from "@services/logger"
 import { onPay, onReceive } from "./routes"
 
@@ -13,25 +13,25 @@ const start = () => {
     app.get("/health", (_: Request, resp: Response) => resp.send("Ibex server is running"))
     app.use(onReceive.router)
     app.use(onPay.router)
-    app.listen(IBEX_LISTENER_PORT, () => logger.info(`Listening for ibex events on port ${IBEX_LISTENER_PORT}. External Uri set to ${IBEX_EXTERNAL_URI}`))
+    app.listen(IbexConfig.webhook.port, () => logger.info(`Listening for ibex events on port ${IbexConfig.webhook.port}. Can be reached at ${IbexConfig.webhook.uri}`))
 }
 
 export default {
   start, 
   endpoints: {
     onReceive: {
-      invoice: IBEX_EXTERNAL_URI + onReceive.paths.invoice,
-      lnurl: IBEX_EXTERNAL_URI + onReceive.paths.lnurl,
-      onchain: IBEX_EXTERNAL_URI + onReceive.paths.onchain,
-      cashout: IBEX_EXTERNAL_URI + onReceive.paths.cashout,
+      invoice: IbexConfig.webhook.uri + onReceive.paths.invoice,
+      lnurl: IbexConfig.webhook.uri + onReceive.paths.lnurl,
+      onchain: IbexConfig.webhook.uri + onReceive.paths.onchain,
+      cashout: IbexConfig.webhook.uri + onReceive.paths.cashout,
     },
     onPay: {
-      invoice: IBEX_EXTERNAL_URI + onPay.paths.invoice,
-      lnurl: IBEX_EXTERNAL_URI + onPay.paths.lnurl,
-      onchain: IBEX_EXTERNAL_URI + onPay.paths.onchain,
+      invoice: IbexConfig.webhook.uri + onPay.paths.invoice,
+      lnurl: IbexConfig.webhook.uri + onPay.paths.lnurl,
+      onchain: IbexConfig.webhook.uri + onPay.paths.onchain,
     }
   },
-  secret: IBEX_WEBHOOK_SECRET,
+  secret: IbexConfig.webhook.secret,
 }
 
 
