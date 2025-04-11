@@ -24,11 +24,23 @@ import mergeWith from "lodash.mergewith"
 import { configSchema } from "./schema"
 import { ConfigError } from "./error"
 
+import yargs from "yargs";
+
+const argv: any = yargs(process.argv.slice(2))
+  .option("configPath", {
+    alias: "c",
+    type: "array",
+    description: "Paths to YAML configuration files",
+    demandOption: true,
+  })
+  // .help()
+  .argv;
+
 // replaces array with override
 const merge = (defaultConfig: unknown, customConfig: unknown) =>
   mergeWith(defaultConfig, customConfig, (a, b) => (Array.isArray(b) ? b : undefined))
 
-const mergeYamls = (filePaths: string[]): Record<string, unknown> => {
+export const mergeYamls = (filePaths: string[]): Record<string, unknown> => {
   const mergedConfig: Record<string, unknown> = {};
 
   filePaths.forEach((filePath) => {
@@ -48,11 +60,11 @@ const mergeYamls = (filePaths: string[]): Record<string, unknown> => {
   return mergedConfig;
 };
 
-
+// const DEFAULT_CONFIG_PATH = process.env.DEFAULT_CONFIG_PATH || "/var/yaml/custom.yaml"
 const DEFAULT_CONFIG_PATH = "/var/yaml/custom.yaml"
 const getYamlPaths = () => {
-  if (process.argv.length > 2)
-    return process.argv.slice(2).map(p => path.resolve(p))
+  if (argv.configPath.length > 0)
+    return argv.configPath.map((p: string) => path.resolve(p))
   else 
     return [DEFAULT_CONFIG_PATH]
 }
