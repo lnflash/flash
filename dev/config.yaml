@@ -1,3 +1,8 @@
+# future admins should be added via admin-api. 
+admin_accounts:
+  - role: "bankowner"
+    phone: "+16505554334"
+
 ibex:
   url: "https://api-sandbox.poweredbyibex.io"
   email:

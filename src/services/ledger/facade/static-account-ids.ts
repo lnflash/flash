@@ -24,23 +24,23 @@ export const initialStaticAccountIds = async () => {
     result["bankOwnerAccountId"] = err as Error
   }
 
-  try {
-    result["dealerBtcAccountId"] = toLedgerAccountId(await caching.getDealerBtcWalletId())
-  } catch (err) {
-    result["dealerBtcAccountId"] = err as Error
-  }
+  // try {
+  //   result["dealerBtcAccountId"] = toLedgerAccountId(await caching.getDealerBtcWalletId())
+  // } catch (err) {
+  //   result["dealerBtcAccountId"] = err as Error
+  // }
 
-  try {
-    result["dealerUsdAccountId"] = toLedgerAccountId(await caching.getDealerUsdWalletId())
-  } catch (err) {
-    result["dealerUsdAccountId"] = err as Error
-  }
+  // try {
+  //   result["dealerUsdAccountId"] = toLedgerAccountId(await caching.getDealerUsdWalletId())
+  // } catch (err) {
+  //   result["dealerUsdAccountId"] = err as Error
+  // }
 
-  try {
-    result["funderAccountId"] = toLedgerAccountId(await caching.getFunderWalletId())
-  } catch (err) {
-    result["funderAccountId"] = err as Error
-  }
+  // try {
+  //   result["funderAccountId"] = toLedgerAccountId(await caching.getFunderWalletId())
+  // } catch (err) {
+  //   result["funderAccountId"] = err as Error
+  // }
 
   return result
 }

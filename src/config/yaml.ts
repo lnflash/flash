@@ -68,7 +68,6 @@ const getYamlPaths = () => {
   else 
     return [DEFAULT_CONFIG_PATH]
 }
-console.log("configPath", argv.configPath)
 const paths = getYamlPaths()
 const yamlConfigInit = mergeYamls(paths) // merge(defaultConfig, customConfig)
 
