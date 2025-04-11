@@ -22,3 +22,11 @@ export const AccountLimitsType = {
   IntraLedger: "IntraLedger",
   SelfTrade: "TradeIntraAccount",
 } as const
+
+export const AccountRoles = {
+  dealer: "dealer", // deprecated. does not apply to flash
+  funder: "funder", // deprecated. does not apply to flash
+  bankowner: "bankowner",
+  user: "user",
+  editor: "editor",
+}
