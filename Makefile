@@ -30,7 +30,7 @@ start-ws:
 
 start-ibex-wh:
 	. ./.env && yarn tsnd --respawn --files -r tsconfig-paths/register -r src/services/tracing.ts \
-		src/servers/ibex-webhook-server.ts --config ./dev/config.yaml ./dev/overrides.yaml | yarn pino-pretty -c -l
+		src/servers/ibex-webhook-server.ts --configPath ./dev/config.yaml ./dev/overrides.yaml | yarn pino-pretty -c -l
 
 start-loopd:
 	./dev/bin/start-loopd.sh

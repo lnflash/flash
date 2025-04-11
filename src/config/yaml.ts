@@ -60,16 +60,8 @@ export const mergeYamls = (filePaths: string[]): Record<string, unknown> => {
   return mergedConfig;
 };
 
-// const DEFAULT_CONFIG_PATH = process.env.DEFAULT_CONFIG_PATH || "/var/yaml/custom.yaml"
-const DEFAULT_CONFIG_PATH = "/var/yaml/custom.yaml"
-const getYamlPaths = () => {
-  if (argv.configPath.length > 0)
-    return argv.configPath.map((p: string) => path.resolve(p))
-  else 
-    return [DEFAULT_CONFIG_PATH]
-}
-const paths = getYamlPaths()
-const yamlConfigInit = mergeYamls(paths) // merge(defaultConfig, customConfig)
+const paths = argv.configPath.map((p: string) => path.resolve(p))
+const yamlConfigInit = mergeYamls(paths) 
 
 // TODO: fix errors
 // const ajv = new Ajv({ allErrors: true, strict: "log" })
