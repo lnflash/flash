@@ -70,15 +70,14 @@ $ direnv reload
 
 ### Configure the app
 
-A base configuration for development purposes is provided in the `./dev/config.yaml` file. This file does not include some values which are not in the source control (e.g secrets). To add these values:
-1. Copy the `overrides.template.yaml` to `overrides.yaml` 
-```
-cp ./dev/overrides.template.yaml ./dev/overrides.yaml
-```
-This file is already included in the gitignore and the startup script
+A base configuration for development purposes is provided in the `./dev/defaults.yaml` file. This file does excludes some values which are kept out of source control (e.g secrets). To add these values, you can either:
 
-2. Add the values to the empty fields of the overrides.yaml
-
+1. Copy an existing overrides file to the `$CONFIG_PATH/dev-overrides.yaml`, or:
+2. Run the `set-overrides.sh` script which will generate the `dev-overrides.yaml` with user-defined values.
+```
+chmod +x ./dev/set-overrides.sh
+./dev/set-overrides.sh
+```
 
 #### Testing the ibex-webhook
 
@@ -92,13 +91,9 @@ You'll need a web gateway that forwards traffic to your local server (default ht
 
 2. Copy the provided URL ("forwarding" field)
 
-3. Add the URL to your `IBEX_EXTERNAL_URI` environment variable. E.g
+3. Add the URL to your `$CONFIG_PATH/dev-overrides.yaml` environment variable. E.g
    
-   ```
-   export IBEX_EXTERNAL_URI="https://1911-104-129-24-147.ngrok-free.app"
-   ```
-   
-   Note: To avoid repeating steps 2 & 3 everytime you restart the web gateway, you can get a static domain (e.g [ngrok domains](https://dashboard.ngrok.com/cloud-edge/domains)) and then set the `IBEX_EXTERNAL_URI` in your `.env.local`
+   Note: To avoid repeating steps 2 & 3 everytime you restart the web gateway, you can get a static domain (e.g [ngrok domains](https://dashboard.ngrok.com/cloud-edge/domains))
 
 ### Install dependencies
 
@@ -133,22 +128,6 @@ DEBUG=* make start
 After running `make start-deps` or `make reset-deps`, the lightning network - running on regtest - will not have any channel, and the mongodb database - that includes some mandatory accounts for Galoy to work - will be empty.
 
 You can then login with the following credentials to get an account with an existing balance: `phone: +16505554328`, `code: 000000`
-
-### Config
-
-There is a sample configuration file `galoy.yaml`. This is the applications default configuration and contains settings for  LND, test accounts, rate limits, fees and more.
-
-If you need to customize any of these settings you can create a `custom.yaml` file in the path `/var/yaml/custom.yaml`. This file will be merged with the default config. Here is an example of a custom.yaml file that configures fees:
-
-```
-fees:
-  withdraw:
-    method: flat
-    defaultMin: 2000
-    ratioAsBasisPoints: 50
-    threshold: 1000000
-    daysLookback: 30
-```
 
 ### Using GraphQL Playground
 
