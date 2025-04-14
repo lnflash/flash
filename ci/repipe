@@ -40,7 +40,7 @@ echo "Targetting $target"
 
 team=main # dev
 pipeline="${PIPELINE_NAME:-flash-app}"
-values="${PIPELINE_VALUES}"
+values="${CONFIG_PATH}/flash-ci.yaml"
 
 TMPDIR=""
 TMPDIR=$(mktemp -d -t repipe.XXXXXX)
