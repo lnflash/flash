@@ -1,3 +1,5 @@
+import { CashoutDetails } from "./types"
+
 abstract class Offer {
   readonly details: CashoutDetails
 

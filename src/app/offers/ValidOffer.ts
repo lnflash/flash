@@ -1,5 +1,4 @@
 import { LedgerService } from "@services/ledger"
-import { getBankOwnerIbexAccount } from "@services/ledger/caching"
 import Offer from "./Offer"
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { LedgerServiceError } from "@domain/ledger"
@@ -10,6 +9,7 @@ import { RepositoryError } from "@domain/errors"
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
 import { EmailService } from "@services/email"
+import { CashoutDetails, ValidationInputs } from "./types"
 
 // Only way to construct a ValidOffer is using the static method which contains validations  
 class ValidOffer extends Offer {
@@ -23,7 +23,6 @@ class ValidOffer extends Offer {
     this.account = account
   }
 
-  // todo: any -> type
   static from = async (details: CashoutDetails): Promise<ValidOffer | ValidationError> => {
     const wallet = await WalletsRepository().findById(details.ibexTrx.userAcct)
     if (wallet instanceof RepositoryError) return new ValidationError(wallet)

@@ -3,6 +3,7 @@ import { deleteMerchantByUsername } from "@app/merchants"
 import { getBalanceForWallet, listWalletsByAccountId } from "@app/wallets"
 import { AccountStatus } from "@domain/accounts"
 import { AccountHasPositiveBalanceError } from "@domain/authentication/errors"
+import { USDAmount } from "@domain/shared"
 import { IdentityRepository } from "@services/kratos"
 import { AccountsRepository, UsersRepository } from "@services/mongoose"
 import { addEventToCurrentSpan } from "@services/tracing"
@@ -26,7 +27,7 @@ export const markAccountForDeletion = async ({
   for (const wallet of wallets) {
     const balance = await getBalanceForWallet({ walletId: wallet.id })
     if (balance instanceof Error) return balance
-    if (balance > 0 && cancelIfPositiveBalance) {
+    if (balance.isGreaterThan(USDAmount.ZERO) && cancelIfPositiveBalance) {
       return new AccountHasPositiveBalanceError(
         `The new phone is associated with an account with a non empty wallet. walletId: ${wallet.id}, balance: ${balance}, accountId: ${account.id}, cancelIfPositiveBalance: ${cancelIfPositiveBalance}`,
       )
@@ -34,7 +35,7 @@ export const markAccountForDeletion = async ({
     addEventToCurrentSpan(`deleting_wallet`, {
       walletId: wallet.id,
       currency: wallet.currency,
-      balance,
+      balance: balance.asDollars(),
     })
   }
 

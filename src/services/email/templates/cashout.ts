@@ -1,12 +1,10 @@
+import { CashoutDetails } from "@app/offers"
+
 type CashoutBodyArgs = CashoutDetails & { username: Username, formattedDate: string }
 
 export const CashoutBody = (args: CashoutBodyArgs) => {
-  const usdString = `${Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(Number(args.liability.usd.amount) / 100)} USD`  
-  
-  const jmdString = `${args.liability.jmd.amount} JMD`
+  const usdString = `${args.flash.liability.usd.asDollars()} USD`  
+  const jmdString = `${args.flash.liability.jmd.asDollars()} JMD`
 
   return {
     html: `

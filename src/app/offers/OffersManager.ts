@@ -1,31 +1,30 @@
 import Storage from "./storage/Redis"
 import ValidOffer from "./ValidOffer"
-import { AmountCalculator, ValidationError } from "@domain/shared"
+import { USDAmount, ValidationError } from "@domain/shared"
 import { CacheServiceError } from "@domain/cache"
 import { getBankOwnerIbexAccount } from "@services/ledger/caching"
 import Ibex from "@services/ibex/client"
-import { USDollars } from "@services/ibex/currencies"
 import { UnexpectedIbexResponse } from "@services/ibex/errors"
 import { decodeInvoice } from "@domain/bitcoin/lightning"
-import { Cashout, JmdPrice } from "@config"
+import { Cashout, ExchangeRates } from "@config"
+import PersistedOffer from "./storage/PersistedOffer"
 
 const config = { 
   ...Cashout.OfferConfig,
-  JMD_Sell_Rate: BigInt(JmdPrice.ask),
+  ...ExchangeRates,
 }
 
 const OffersManager = {
   createCashoutOffer: async (
     walletId: WalletId, 
-    requested: PaymentAmount<"USD">, 
-  ): Promise<CashoutOffer | Error> => {
+    userPayment: USDAmount, 
+  ): Promise<PersistedOffer | Error> => {
     const flashWallet = await getBankOwnerIbexAccount()
-    // if (flashWallet instanceof Error) return flashWallet
 
     const invoiceResp = await Ibex.addInvoice({ 
       accountId: flashWallet,
       memo: "User withdraw to bank",
-      amount: USDollars.fromAmount(requested), 
+      amount: userPayment, 
       expiration: config.duration,
     })
     if (invoiceResp instanceof Error) return invoiceResp
@@ -33,48 +32,31 @@ const OffersManager = {
     const invoice = decodeInvoice(invoiceResp.invoice.bolt11)
     if (invoice instanceof Error) return invoice
 
-    // flash fee is subtracted from liability
-    const flashFee = AmountCalculator().mulBasisPoints(requested, config.fee)
+    const flashFee = userPayment.multiplyBips(config.fee)
+    const usdLiability = userPayment.subtract(flashFee)
+    const jmdLiability = usdLiability.convertAtRate(config.jmd.sell) 
 
-    const usdLiability = AmountCalculator().sub(requested, flashFee)
-    const exchangeRate = config.JMD_Sell_Rate 
-    const jmdLiability = {
-      amount: usdLiability.amount * exchangeRate / 100n, 
-      currency: "JMD",
-      exchangeRate: {
-        amount: exchangeRate,
-        currency: "USD"
-      }
-    } as ExchangeAmount<"JMD">
-    
     const validated = await ValidOffer.from({
       ibexTrx: {
         userAcct: walletId,
         flashAcct: flashWallet,
         invoice,
-        usdAmount: requested,
-        currency: "USD",
+        usd: userPayment,
+        // currency: "USD",
       },
-      liability: {
-        usd: usdLiability,
-        jmd: jmdLiability,
+      flash: {
+        liability: {
+          usd: usdLiability,
+          jmd: jmdLiability,
+        },
+        fee: flashFee,
       },
-      flashFee,
     })
     if (validated instanceof ValidationError) return validated
 
     const persistedOffer = await Storage.add(validated)
     if (persistedOffer instanceof CacheServiceError) return persistedOffer
-  
-    return {
-      offerId: persistedOffer.id,
-      walletId: persistedOffer.details.ibexTrx.userAcct,
-      send: persistedOffer.details.ibexTrx.usdAmount,
-      receiveUsd: persistedOffer.details.liability.usd,
-      receiveJmd: persistedOffer.details.liability.jmd,
-      flashFee: persistedOffer.details.flashFee,
-      expiresAt: persistedOffer.details.ibexTrx.invoice.expiresAt,
-    }
+    return persistedOffer
   },
 
   executeOffer: async (id: OfferId, walletId: WalletId): Promise<PaymentSendStatus | Error> => {
