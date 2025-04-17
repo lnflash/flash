@@ -279,9 +279,6 @@ input CaptchaRequestAuthCodeInput
 type CashoutOffer
   @join__type(graph: PUBLIC)
 {
-  """The price to convert USD -> Flash"""
-  exchangeRate: Float!
-
   """The time at which this offer is no longer accepted by Flash"""
   expiresAt: Timestamp!
 
@@ -1490,7 +1487,7 @@ input RequestCashoutInput
   @join__type(graph: PUBLIC)
 {
   """Amount in USD cents."""
-  usdAmount: FractionalCentAmount!
+  amount: USDCents!
 
   """ID for a USD wallet belonging to the current user."""
   walletId: WalletId!
@@ -1692,6 +1689,10 @@ type UpgradePayload
   errors: [Error!]!
   success: Boolean!
 }
+
+"""Amount in USD cents"""
+scalar USDCents
+  @join__type(graph: PUBLIC)
 
 """
 A wallet belonging to an account which contains a USD balance and a list of transactions.

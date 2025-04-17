@@ -4,6 +4,7 @@ import { MailgunMessageData } from 'mailgun.js/definitions';
 import { CashoutBody } from './templates/cashout';
 import { Cashout, MailgunConfig } from '@config'
 import { baseLogger } from '@services/logger';
+import { CashoutDetails } from '@app/offers';
 
 const config = Cashout.Email
 const mailgun = new Mailgun(FormData).client({ username: 'api', key: MailgunConfig.apiKey });

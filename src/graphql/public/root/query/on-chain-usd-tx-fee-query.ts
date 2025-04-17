@@ -1,5 +1,5 @@
 import { PayoutSpeed as DomainPayoutSpeed } from "@domain/bitcoin/onchain"
-import { paymentAmountFromNumber, ValidationError, WalletCurrency } from "@domain/shared"
+import { paymentAmountFromNumber, USDAmount, ValidationError, WalletCurrency } from "@domain/shared"
 
 // import { Wallets } from "@app"
 
@@ -18,7 +18,6 @@ import { normalizePaymentAmount } from "../../../shared/root/mutation"
 // FLASH FORK: import ibex dependencies
 import Ibex from "@services/ibex/client"
 
-import USDollars from "@services/ibex/currencies/USDollars"
 import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
 
 const OnChainUsdTxFeeQuery = GT.Field<null, GraphQLPublicContextAuth>({
@@ -47,9 +46,9 @@ const OnChainUsdTxFeeQuery = GT.Field<null, GraphQLPublicContextAuth>({
     //   speed,
     // })
 
-    const send = paymentAmountFromNumber( { amount, currency: WalletCurrency.Usd })
-    if (send instanceof ValidationError) return send
-    const resp = await Ibex.estimateOnchainFee(USDollars.fromAmount(send), address)
+    const send = USDAmount.cents(amount)
+    if (send instanceof Error) return send
+    const resp = await Ibex.estimateOnchainFee(send, address)
 
     if (resp instanceof IbexError) return resp
     if (resp.fee === undefined) return new UnexpectedIbexResponse("Missing fee field")

@@ -1,12 +1,30 @@
 import OffersManager from "@app/offers/OffersManager"
+import { USDAmount } from "@domain/shared"
 import { mapToGqlErrorList } from "@graphql/error-map"
 import { GT } from "@graphql/index"
 import CashoutOffer from "@graphql/public/types/object/cashout-offer"
-import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 import IError from "@graphql/shared/types/abstract/error"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
-import { baseLogger } from "@services/logger"
 import dedent from "dedent"
+
+const USDCentsScalar = GT.Scalar({
+    name: "USDCents",
+    description: "Amount in USD cents",
+    parseValue(value: unknown): USDAmount {
+      let amt = value as number | string 
+      const amount = USDAmount.cents(amt.toString())
+      if (amount instanceof Error) {
+          throw new Error(`Invalid USD amount: ${value}`)
+      }
+      return amount
+    },
+    serialize(value: unknown): number {
+        if (value instanceof USDAmount) {
+            return Number(value.asCents()) 
+        }
+        else throw new Error(`Failed to serialize USDAmount: ${value}`)
+    }
+})
 
 const RequestCashoutInput = GT.Input({
   name: "RequestCashoutInput",
@@ -15,8 +33,8 @@ const RequestCashoutInput = GT.Input({
       type: GT.NonNull(WalletId),
       description: "ID for a USD wallet belonging to the current user.",
     },
-    usdAmount: { 
-      type: GT.NonNull(FractionalCentAmount), 
+    amount: {
+      type: GT.NonNull(USDCentsScalar), 
       description: "Amount in USD cents." 
     },
   }),
@@ -45,20 +63,19 @@ const RequestCashoutMutation = GT.Field({
     complexity: 120,
   },
   resolve: async (_, args) => {
-    const { walletId, usdAmount } = args.input
-    for (const input of [walletId, usdAmount]) {
+    const { walletId, amount } = args.input
+    for (const input of [walletId, amount]) {
       if (input instanceof Error) {
         return { errors: [{ message: input.message }] }
       }
     }
 
     const offer = await (OffersManager.createCashoutOffer(
-      walletId, 
-      { amount: BigInt(usdAmount), currency: "USD" }
+      walletId,
+      amount, 
     ))
     if (offer instanceof Error) return { errors: mapToGqlErrorList(offer) }
 
-    baseLogger.info(offer, "offer")
     return {
       errors: [],
       offer

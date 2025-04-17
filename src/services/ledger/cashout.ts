@@ -1,12 +1,16 @@
 import {
-  toNumber,
-  WalletCurrency,
+  USDAmount,
 } from "@domain/shared"
 import { MainBook } from "./books"
 import { persistAndReturnEntry } from "./helpers"
 import { LedgerError, LedgerServiceError, LedgerTransactionType } from "@domain/ledger"
 import { LedgerService } from "."
-import { JmdPrice } from "@config"
+import { CashoutDetails, RtgsTransfer } from "@app/offers"
+
+export type RecordCashOutSettledArgs = {
+  ledgerTrxid: LedgerTransactionId,
+  paymentDetails: RtgsTransfer,
+}
 
 // Medici accounts
 const Accounts = {
@@ -14,49 +18,43 @@ const Accounts = {
   Revenue: {
     ServiceFees: ["Revenue", "Service Fees"],
   },
-  // Ibex: (_: IbexAccount) => [`Ibex (${_.currency})`, _.id],
   Ibex: (_: WalletId) => [`Ibex`, _],
   ForeignExchange: "Foreign Exchange"
 }
 
-const JMD_SELL_RATE = JmdPrice.ask
-const toUSD = (liability: Amount<"JMD"> | Amount<"USD">): number => {
-  const liabilityAmt = Number(liability.amount)
-  if (liabilityAmt === 0) return 0 
-  if (liability.currency === WalletCurrency.Usd) return Number(liability.amount)
-  else return Number(liability.amount) / JMD_SELL_RATE
-}
+const mediciNumber = (usd: USDAmount): number => Number(usd.asCents(2))
 
 export const recordCashOut = async (
   offer: CashoutDetails,
 ): Promise<LedgerJournal | LedgerServiceError> => {
-  const { ibexTrx, liability, flashFee } = offer 
+  const { ibexTrx, flash } = offer 
+  const { liability, fee: flashFee } = flash
 
   let entry = MainBook
     .entry(`User cash out from wallet ${ibexTrx.userAcct}`)
     .debit(Accounts.Ibex(ibexTrx.flashAcct), 
-      toNumber(ibexTrx.usdAmount), 
+      mediciNumber(ibexTrx.usd), 
       { 
         type: LedgerTransactionType.Ibex_invoice,
-        currency: ibexTrx.currency,
+        currency: ibexTrx.usd.currencyCode,
         pending: false,
       }
     ) 
     .credit(
       Accounts.Payable(ibexTrx.userAcct),  // should be an id that represents user - not wallet
-      toNumber(liability.usd), 
+      mediciNumber(liability.usd), 
       { 
         type: LedgerTransactionType.Ibex_invoice,
-        amount: liability.jmd.amount,
-        currency: liability.jmd.currency,
+        amount: liability.jmd.asCents(),
+        currency: liability.jmd.currencyCode,
         pending: false, 
        }
     )
     .credit(Accounts.Revenue.ServiceFees, 
-      toNumber(flashFee), 
+      mediciNumber(flashFee), 
       { 
         type: LedgerTransactionType.Ibex_invoice,
-        currency: flashFee.currency,
+        currency: flashFee.currencyCode,
         pending: false, 
       }
     )
@@ -75,14 +73,14 @@ export const recordSettledCashOut = async ({
   
   const userWalletId = ledgerTransaction.walletId
   if (userWalletId === undefined) return new LedgerServiceError("Could not find wallet id for transaction.")
-  if (paymentDetails.sent.currency !== ledgerTransaction.currency) return new LedgerServiceError("Settled currency does not match liability currency.")
+  if (paymentDetails.sent.currencyCode !== ledgerTransaction.currency) return new LedgerServiceError("Settled currency does not match liability currency.")
 
 
-  const usdSent = toUSD(paymentDetails.sent)
+  const usdSent = paymentDetails.sent.asCents()
   const metadata = { 
     type: LedgerTransactionType.JamaicanRtgs,
     transactionId: paymentDetails.transactionId,
-    currency: paymentDetails.sent.currency,
+    currency: paymentDetails.sent.currencyCode,
     pending: false, 
   }
   let entry = MainBook
@@ -91,16 +89,16 @@ export const recordSettledCashOut = async ({
     .credit("External Cash", usdSent, metadata)
 
   // Flash is exposed to exchange rate volatility (e.g USD -> JMD) when there is not enough JMD to cover current liabilities
-  const foreignExchangeChange = usdSent - (ledgerTransaction.usd || usdSent)
-  if (foreignExchangeChange > 0) {
-    entry
-      .debit("Foreign Exchange", foreignExchangeChange)
-      .credit(`Accounts Payable:${userWalletId}`, foreignExchangeChange)
-  } else if (foreignExchangeChange < 0) {
-    entry
-      .debit(`Accounts Payable:${userWalletId}`, foreignExchangeChange)
-      .credit("Foreign Exchange", foreignExchangeChange)
-  }
+  // const foreignExchangeChange = usdSent - (ledgerTransaction.usd || usdSent)
+  // if (foreignExchangeChange > 0) {
+  //   entry
+  //     .debit("Foreign Exchange", foreignExchangeChange)
+  //     .credit(`Accounts Payable:${userWalletId}`, foreignExchangeChange)
+  // } else if (foreignExchangeChange < 0) {
+  //   entry
+  //     .debit(`Accounts Payable:${userWalletId}`, foreignExchangeChange)
+  //     .credit("Foreign Exchange", foreignExchangeChange)
+  // }
 
   return persistAndReturnEntry({ 
     entry, 

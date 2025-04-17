@@ -5,10 +5,10 @@ admin_accounts:
 
 ibex:
   url: "https://api-sandbox.poweredbyibex.io"
-  email:
-  password:
+  email: ""
+  password: ""
   webhook:
-    uri: # external uri defined in overrides
+    uri: "" # external uri defined in overrides
     port: 4008
     secret: "not-so-secret"
 
@@ -30,6 +30,6 @@ cashout:
   fee: 200 # basis points
   duration: 600 # seconds
   email:
-    to: # add to the overrides.yaml
+    to: "" # add to the overrides.yaml
     from: "notifications@getflash.io"
     subject: "New Cashout"
