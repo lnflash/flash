@@ -15,7 +15,7 @@ import { WithdrawalFeePriceMethod } from "@domain/wallets"
 
 import { toDays, toSeconds } from "@domain/primitives"
 
-import { WalletCurrency } from "@domain/shared"
+import { BigIntConversionError, JMDAmount, WalletCurrency } from "@domain/shared"
 
 import { AccountLevel } from "@domain/accounts"
 
@@ -60,7 +60,7 @@ export const mergeYamls = (filePaths: string[]): Record<string, unknown> => {
   return mergedConfig;
 };
 
-const paths = argv.configPath.map((p: string) => path.resolve(p))
+const paths = argv.configPath.map((p: string) => path.resolve(p)) 
 const yamlConfigInit = mergeYamls(paths) 
 
 // TODO: fix errors
@@ -352,9 +352,12 @@ export const getWhatsAppAuthUnsupportedCountries = (): CountryCode[] => {
   return yamlConfig.whatsAppAuthUnsupportedCountries as CountryCode[]
 }
 
-export const JmdPrice = {
-  ...yamlConfig.exchangeRates["USD"]["JMD"]
-} as PriceSpread
+const { ask } = yamlConfig.exchangeRates["USD"]["JMD"]
+const sellRate = JMDAmount.dollars(ask)
+if (sellRate instanceof BigIntConversionError) throw sellRate
+export const ExchangeRates = {
+  jmd: { sell: sellRate }
+}
 
 export const Cashout = {
   OfferConfig: {

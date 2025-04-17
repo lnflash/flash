@@ -16,8 +16,7 @@ import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import Ibex from "@services/ibex/client"
 
 import { IbexError } from "@services/ibex/errors"
-import { checkedToUsdPaymentAmount, paymentAmountFromNumber, ValidationError, WalletCurrency } from "@domain/shared"
-import USDollars from "@services/ibex/currencies/USDollars"
+import { BigIntConversionError, checkedToUsdPaymentAmount, paymentAmountFromNumber, USDAmount, ValidationError, WalletCurrency } from "@domain/shared"
 
 const LnNoAmountUsdInvoicePaymentInput = GT.Input({
   name: "LnNoAmountUsdInvoicePaymentInput",
@@ -92,8 +91,8 @@ const LnNoAmountUsdInvoicePaymentSendMutation = GT.Field<
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
 
 
-    const usCents = USDollars.fromFractionalCents(amount)
-    if (usCents instanceof ValidationError) return usCents
+    const usCents = USDAmount.cents(amount.toString())
+    if (usCents instanceof BigIntConversionError) return usCents
     const PayLightningInvoice = await Ibex.payInvoice({
       invoice: paymentRequest as Bolt11,
       accountId: walletId,

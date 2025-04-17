@@ -17,7 +17,6 @@ import Ibex from "@services/ibex/client"
 
 import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
 import { ValidationError, WalletCurrency } from "@domain/shared"
-import USDollars from "@services/ibex/currencies/USDollars"
 import { baseLogger } from "@services/logger"
 // import { IbexRoutes } from "../../../../services/ibex/Routes"
 // import { requestIBexPlugin } from "../../../../services/ibex/IbexHelper"
@@ -69,17 +68,15 @@ const LnUsdInvoiceFeeProbeMutation = GT.Field<
     //     uncheckedPaymentRequest: paymentRequest,
     //   })
 
-    const resp = await Ibex.getLnFeeEstimation<USDollars>({
+    const resp = await Ibex.getLnFeeEstimation({
       invoice: paymentRequest as Bolt11,
-      send: { currencyId: USDollars.currencyId },
+      // send: { currencyId: USDollars.currencyId },
     })
     if (resp instanceof IbexError) return { errors: [mapAndParseErrorForGqlResponse(resp)] }     
-    const fee = resp.fee.toCents()
-    if (fee instanceof ValidationError) return { errors: [mapAndParseErrorForGqlResponse(fee)] }
     
     return {
       errors: [],
-      ...normalizePaymentAmount(fee),
+      ...resp.fee.gqlPayload(),
     }
   },
 })

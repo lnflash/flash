@@ -5,32 +5,23 @@ interface IbexCurrency {
   readonly currencyId: IbexCurrencyId
 }
 
+interface IbexAccount {
+  readonly currencyId: IbexCurrencyId
+  asIbexAmount(): number
+  // static fromIbexAmount(amount: string): this
+}
+
 type IbexAccountId = WalletId
 
-type IbexInvoiceArgs = { 
-  accountId: IbexAccountId,
-  amount?: IbexCurrency;  
-  memo: string
-  expiration?: Seconds 
-};
+// type IbexInvoiceArgs = { 
+//   accountId: IbexAccountId,
+//   amount?: IbexAmount
+//   memo: string
+//   expiration?: Seconds 
+// };
 type AccountArgs = { name: string, currency: WalletCurrency }
 type IbexTransactionId = string & { readonly brand: unique symbol }
-type GetFeeEstimateArgs<T extends IbexCurrency> = {
-  invoice: Bolt11,
-  send: T | {
-    currencyId: IbexCurrencyId,
-  }
-}
-type IbexFeeEstimation<T extends IbexCurrency> = {
-  fee: T,
-  invoice: T,
-}
 
-type PayInvoiceArgs = {
-  accountId: IbexAccountId,
-  invoice: Bolt11,
-  send?: IbexCurrency // must match currency of account
-}
 
 type PayLnurlArgs = {
   accountId: IbexAccountId,
@@ -43,3 +34,4 @@ type PayLnurlArgs = {
 //   fee: T,
 // }
 type Bolt11 = string & { readonly brand: unique symbol }
+

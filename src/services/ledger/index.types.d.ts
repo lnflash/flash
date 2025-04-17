@@ -218,19 +218,7 @@ declare module "medici/build/helper/parse/parseFilterQuery"
 //   liability: Amount<"JMD"> | Amount<"USD">,
 // }
 
-// Rtgs is Jamaican bank transfer
-type RtgsTransfer = {
-  transactionId: string,
-  senderAccountId: string, // sample
-  receiverAccountId: string, // sample
-  sent: Amount<"JMD"> | Amount<"USD">
-  fees?: number,
-}
 
-type RecordCashOutSettledArgs = {
-  ledgerTrxid: LedgerTransactionId,
-  paymentDetails: RtgsTransfer,
-}
 
 // type RecordFlashWithdrawFromIbex {
 //   description: string

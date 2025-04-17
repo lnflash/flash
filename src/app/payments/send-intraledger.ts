@@ -15,7 +15,7 @@ import {
 } from "@domain/payments"
 import { AccountLevel, AccountValidator } from "@domain/accounts"
 import { DisplayAmountsConverter } from "@domain/fiat"
-import { checkedToUsdPaymentAmount, ErrorLevel, paymentAmountFromNumber, ValidationError, WalletCurrency } from "@domain/shared"
+import { BigIntConversionError, checkedToUsdPaymentAmount, ErrorLevel, paymentAmountFromNumber, USDAmount, ValidationError, WalletCurrency } from "@domain/shared"
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { ResourceExpiredLockServiceError } from "@domain/lock"
 import { checkedToWalletId, SettlementMethod } from "@domain/wallets"
@@ -48,7 +48,6 @@ import {
 } from "./helpers"
 
 import Ibex from "@services/ibex/client"
-import USDollars from "@services/ibex/currencies/USDollars"
 import { UnexpectedIbexResponse } from "@services/ibex/errors"
 
 const dealer = DealerPriceService()
@@ -75,8 +74,8 @@ const intraledgerPaymentSendWalletId = async ({
     kratosUserId: recipientUserId,
   } = recipientAccount
 
-  const amount = USDollars.fromFractionalCents(uncheckedAmount as FractionalCentAmount)
-  if (amount instanceof ValidationError) return amount
+  const amount = USDAmount.cents(uncheckedAmount.toString())
+  if (amount instanceof BigIntConversionError) return amount
   const invoiceResp = await Ibex.addInvoice({ 
     accountId: recipientWalletId,
     amount, 

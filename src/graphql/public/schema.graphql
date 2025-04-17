@@ -205,9 +205,6 @@ input CaptchaRequestAuthCodeInput {
 }
 
 type CashoutOffer {
-  """The price to convert USD -> Flash"""
-  exchangeRate: Float!
-
   """The time at which this offer is no longer accepted by Flash"""
   expiresAt: Timestamp!
 
@@ -1164,7 +1161,7 @@ type RealtimePricePayload {
 
 input RequestCashoutInput {
   """Amount in USD cents."""
-  usdAmount: FractionalCentAmount!
+  amount: USDCents!
 
   """ID for a USD wallet belonging to the current user."""
   walletId: WalletId!
@@ -1318,6 +1315,9 @@ enum TxStatus {
   PENDING
   SUCCESS
 }
+
+"""Amount in USD cents"""
+scalar USDCents
 
 type UpgradePayload {
   authToken: AuthToken

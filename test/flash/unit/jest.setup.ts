@@ -4,7 +4,9 @@ jest.mock("yargs", () => {
   const yargsMock = {
     option: jest.fn().mockReturnThis(),
     argv: {
-      configPath: ["./dev/config.yaml", "./dev/overrides.yaml"],
+      configPath: [
+        "./dev/defaults.yaml", 
+      ],
     },
   };
   return jest.fn(() => yargsMock);

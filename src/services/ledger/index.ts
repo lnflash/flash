@@ -22,6 +22,7 @@ import {
   balanceAmountFromNumber,
   BigIntFloatConversionError,
   ErrorLevel,
+  USDAmount,
   WalletCurrency,
 } from "@domain/shared"
 import { fromObjectId, toObjectId } from "@services/mongoose/utils"
@@ -306,14 +307,15 @@ export const LedgerService = (): ILedgerService => {
           })
         }
       }
+      return balance as Satoshis
 
-      const resp = await Ibex.getAccountDetails(walletId)
-      if (resp instanceof IbexError) {
-        if (resp.httpCode === 404) return toSats(0)
-        return resp
-      }
-      if (resp.balance === undefined) return new UnexpectedIbexResponse("Balance not found")
-      return toSats(resp.balance * 100)
+    //   const resp = await Ibex.getAccountDetails(walletId)
+    //   if (resp instanceof IbexError) {
+    //     if (resp.httpCode === 404) return USDAmount.ZERO
+    //     return resp
+    //   }
+    //   if (resp.balance === undefined) return new UnexpectedIbexResponse("Balance not found")
+    //   return resp.balance
     } catch (err) {
       return new UnknownLedgerError(err)
     }

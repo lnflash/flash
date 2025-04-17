@@ -16,9 +16,9 @@ import Ibex from "@services/ibex/client"
 
 import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
 import { GetFeeEstimateResponse200 } from "ibex-client"
-import { checkedToUsdPaymentAmount, ValidationError } from "@domain/shared"
-import USDollars from "@services/ibex/currencies/USDollars"
+import { BigIntConversionError, checkedToUsdPaymentAmount, USDAmount, ValidationError } from "@domain/shared"
 import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
+import { IbexFeeEstimation } from "@services/ibex/types"
 
 const LnNoAmountUsdInvoiceFeeProbeInput = GT.Input({
   name: "LnNoAmountUsdInvoiceFeeProbeInput",
@@ -55,15 +55,13 @@ const LnNoAmountUsdInvoiceFeeProbeMutation = GT.Field({
     //   })
 
     // TODO: Move Ibex call to Payments interface
-    const checkedAmount = USDollars.fromFractionalCents(amount as FractionalCentAmount)
-    if (checkedAmount instanceof ValidationError) return checkedAmount
-    const resp: IbexFeeEstimation<USDollars> | IbexError = await Ibex.getLnFeeEstimation<USDollars>({
+    const checkedAmount = USDAmount.cents(amount.toString())
+    if (checkedAmount instanceof BigIntConversionError) return checkedAmount
+    const resp: IbexFeeEstimation | IbexError = await Ibex.getLnFeeEstimation({
       invoice: paymentRequest as Bolt11,
       send: checkedAmount,
     })
     if (resp instanceof IbexError) return { errors: [mapAndParseErrorForGqlResponse(resp)] }     
-    const fee = resp.fee.toCents()
-    if (fee instanceof ValidationError) return { errors: [mapAndParseErrorForGqlResponse(fee)] }
 
     // if (resp.amount === undefined) return new UnexpectedIbexResponse("Unable to parse fee.")
     // const feeSatAmount: PaymentAmount<WalletCurrency> = {
@@ -79,7 +77,7 @@ const LnNoAmountUsdInvoiceFeeProbeMutation = GT.Field({
 
     return {
       errors: [],
-      ...normalizePaymentAmount(fee),
+      ...resp.fee.gqlPayload(),
     }
   },
 })
