@@ -13,6 +13,7 @@ type DisplayCurrencyMajorAmount = string & {
   readonly brand?: unique symbol
 }
 
+// Deprecated use amounts with offset
 type Amount<T extends WalletCurrency> = {
   currency: T
   amount: bigint
@@ -75,6 +76,6 @@ type AmountCalculator = {
   max: <T extends WalletCurrency>(...args: PaymentAmount<T>[]) => PaymentAmount<T>
 }
 
-type FractionalCentAmount = number & {
+type FractionalCentAmount = (number | string) & {
   readonly brand: unique symbol
 }

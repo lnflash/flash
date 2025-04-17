@@ -33,6 +33,10 @@ export class UnknownDomainError extends DomainError {
   level = ErrorLevel.Critical
 }
 
+export class RedisParseError extends DomainError {
+  level = ErrorLevel.Critical
+}
+
 export class SafeWrapperError extends DomainError {
   level = ErrorLevel.Critical
 }

@@ -20,8 +20,7 @@ import { validateIsBtcWallet, validateIsUsdWallet } from "./validate"
 import Ibex from "@services/ibex/client"
 import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
 import { decodeInvoice } from "@domain/bitcoin/lightning/ln-invoice"
-import { checkedToUsdPaymentAmount, UsdPaymentAmount, ValidationError } from "@domain/shared"
-import USDollars from "@services/ibex/currencies/USDollars"
+import { checkedToUsdPaymentAmount, USDAmount, UsdPaymentAmount, ValidationError } from "@domain/shared"
 import { AddInvoiceResponse201 } from "ibex-client"
 
 const defaultBtcExpiration = DEFAULT_EXPIRATIONS["BTC"].delayMinutes
@@ -45,7 +44,7 @@ const addInvoiceForSelf = async ({
   const limitOk = await checkSelfWalletIdRateLimits(wallet.accountId)
   if (limitOk instanceof Error) return limitOk
 
-  const checkedAmount = amount ? USDollars.fromFractionalCents(amount) : undefined 
+  const checkedAmount = amount ? USDAmount.cents(amount.toString()) : undefined 
   if (checkedAmount instanceof Error) return checkedAmount
   const resp = await Ibex.addInvoice({
     amount: checkedAmount, 
@@ -138,7 +137,7 @@ const addInvoiceForRecipient = async ({
   const limitOk = await checkRecipientWalletIdRateLimits(wallet.accountId)
   if (limitOk instanceof Error) return limitOk
 
-  const checkedAmount = USDollars.fromFractionalCents(amount)
+  const checkedAmount = USDAmount.cents(amount.toString())
   if (checkedAmount instanceof Error) return checkedAmount
   const resp = await Ibex.addInvoice({
     amount: checkedAmount,

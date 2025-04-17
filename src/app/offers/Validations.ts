@@ -1,7 +1,8 @@
 import { getBalanceForWallet } from "@app/wallets";
 import { Cashout } from "@config";
 import { AccountValidator } from "@domain/accounts";
-import { ValidationError } from "@domain/shared";
+import { USDAmount, ValidationError } from "@domain/shared";
+import { ValidationFn, ValidationInputs } from "./types";
 
 const config = Cashout.validations
 
@@ -12,20 +13,24 @@ export const isBeforeExpiry = async (o: ValidationInputs): Promise<true | Valida
 }
 
 export const transferMin = async (o: ValidationInputs): Promise<true | ValidationError> => {
-  if (o.ibexTrx.usdAmount.amount < config.minimum.amount) 
-    return new ValidationError(`Minimum cashout is ${config.minimum.amount}`)
+  const min = USDAmount.cents(config.minimum.amount)
+  if (min instanceof Error) return new ValidationError(min)
+  if (o.ibexTrx.usd.isLesserThan(min)) 
+    return new ValidationError(`Minimum cashout is $${min.asDollars()}`)
   else return true 
 }
 
 export const transferMax = async (o: ValidationInputs): Promise<true | ValidationError> => {
-  if (o.ibexTrx.usdAmount.amount > config.maximum.amount) 
-    return new ValidationError(`Maximum cashout is ${config.maximum.amount}`)
+  const max = USDAmount.cents(config.maximum.amount)
+  if (max instanceof Error) return new ValidationError(max)
+  if (o.ibexTrx.usd.isGreaterThan(max) ) 
+    return new ValidationError(`Maximum cashout is $${max.asDollars()}`)
   else return true 
 }
 
 export const isUsd = async (o: ValidationInputs) => {
-  if (o.ibexTrx.currency !== "USD") 
-    return new ValidationError("Cash out only supports USD")
+  // if (o.ibexTrx.currency !== "USD") 
+  //   return new ValidationError("Cash out only supports USD")
   if (o.wallet.currency !== "USD") 
     return new ValidationError("Cash out only supports withdrawals from USD wallets")
   return true
@@ -35,7 +40,7 @@ export const hasSufficientBalance = async (o: ValidationInputs): Promise<true | 
   const balance = await getBalanceForWallet({ walletId: o.wallet.id })
   if (balance instanceof Error) 
     return new ValidationError(balance) 
-  else if (o.ibexTrx.usdAmount.amount > balance.valueOf()) 
+  else if (o.ibexTrx.usd.isGreaterThan(balance)) 
     return new ValidationError("Transfer amount is greater than wallet balance.")
   else return true
 }

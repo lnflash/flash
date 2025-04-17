@@ -12,9 +12,9 @@ import { normalizePaymentAmount } from "../../../shared/root/mutation"
 import Ibex from "@services/ibex/client"
 import { GetFeeEstimateResponse200 } from "ibex-client"
 import { IbexError } from "@services/ibex/errors" 
-import { MSats } from "@services/ibex/currencies"
 import { checkedToBtcPaymentAmount, paymentAmountFromNumber, ValidationError, ZERO_SATS } from "@domain/shared"
 import { Pay } from "twilio/lib/twiml/VoiceResponse"
+import { NotImplementedError } from "@domain/errors"
 
 const LnInvoiceFeeProbeInput = GT.Input({
   name: "LnInvoiceFeeProbeInput",
@@ -42,60 +42,62 @@ const LnInvoiceFeeProbeMutation = GT.Field<
     input: { type: GT.NonNull(LnInvoiceFeeProbeInput) },
   },
   resolve: async (_, args) => {
-    const { walletId, paymentRequest } = args.input
+    return new NotImplementedError("LnInvoiceFeeProbeMutation")
 
-    if (walletId instanceof Error) return { errors: [{ message: walletId.message }] }
+  //   const { walletId, paymentRequest } = args.input
 
-    if (paymentRequest instanceof Error)
-      return { errors: [{ message: paymentRequest.message }] }
+  //   if (walletId instanceof Error) return { errors: [{ message: walletId.message }] }
 
-    const resp: IbexFeeEstimation<MSats> | IbexError = await Ibex.getLnFeeEstimation<MSats>({
-      invoice: paymentRequest as Bolt11,
-      send: { currencyId: MSats.currencyId }, 
-    })
+  //   if (paymentRequest instanceof Error)
+  //     return { errors: [{ message: paymentRequest.message }] }
 
-    const error: Error | null = resp instanceof IbexError 
-      ? resp
-      : null
+  //   const resp: IbexFeeEstimation<MSats> | IbexError = await Ibex.getLnFeeEstimation<MSats>({
+  //     invoice: paymentRequest as Bolt11,
+  //     send: { currencyId: MSats.currencyId }, 
+  //   })
 
-    let feeSatAmount: BtcPaymentAmount
-    if (resp instanceof IbexError) feeSatAmount = ZERO_SATS
-    else {
-      const fee = resp.fee.toSats()
-      if (fee instanceof Error) feeSatAmount = ZERO_SATS
-      else feeSatAmount = fee
-    }
-    // const fee = resp.fee.toSats()
-    // const feeSatAmount: PaymentAmount<WalletCurrency> = (!(resp instanceof IbexError)) 
-      // ? 
-      // : {
-      //   amount: BigInt(0),
-      //   currency: "BTC",
-      // }
+  //   const error: Error | null = resp instanceof IbexError 
+  //     ? resp
+  //     : null
 
-    if (feeSatAmount !== null && error instanceof Error) {
-      return {
-        errors: [mapAndParseErrorForGqlResponse(error)],
-        ...normalizePaymentAmount(feeSatAmount),
-      }
-    }
+  //   let feeSatAmount: BtcPaymentAmount
+  //   if (resp instanceof IbexError) feeSatAmount = ZERO_SATS
+  //   else {
+  //     const fee = resp.fee.toSats()
+  //     if (fee instanceof Error) feeSatAmount = ZERO_SATS
+  //     else feeSatAmount = fee
+  //   }
+  //   // const fee = resp.fee.toSats()
+  //   // const feeSatAmount: PaymentAmount<WalletCurrency> = (!(resp instanceof IbexError)) 
+  //     // ? 
+  //     // : {
+  //     //   amount: BigInt(0),
+  //     //   currency: "BTC",
+  //     // }
 
-    if (error instanceof Error) {
-      return {
-        errors: [mapAndParseErrorForGqlResponse(error)],
-      }
-    }
+  //   if (feeSatAmount !== null && error instanceof Error) {
+  //     return {
+  //       errors: [mapAndParseErrorForGqlResponse(error)],
+  //       ...normalizePaymentAmount(feeSatAmount),
+  //     }
+  //   }
 
-    if (feeSatAmount === null) {
-      return {
-        errors: [mapAndParseErrorForGqlResponse(new InvalidFeeProbeStateError())],
-      }
-    }
+  //   if (error instanceof Error) {
+  //     return {
+  //       errors: [mapAndParseErrorForGqlResponse(error)],
+  //     }
+  //   }
 
-    return {
-      errors: [],
-      ...normalizePaymentAmount(feeSatAmount),
-    }
+  //   if (feeSatAmount === null) {
+  //     return {
+  //       errors: [mapAndParseErrorForGqlResponse(new InvalidFeeProbeStateError())],
+  //     }
+  //   }
+
+  //   return {
+  //     errors: [],
+  //     ...normalizePaymentAmount(feeSatAmount),
+  //   }
   },
 })
 

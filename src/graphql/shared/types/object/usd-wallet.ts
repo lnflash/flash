@@ -47,11 +47,11 @@ const UsdWallet = GT.Object<Wallet>({
     balance: {
       type: GT.NonNull(SignedAmount),
       resolve: async (source) => {
-        const balanceCents = await Wallets.getBalanceForWallet({ walletId: source.id })
-        if (balanceCents instanceof Error) {
-          throw mapError(balanceCents)
+        const balance = await Wallets.getBalanceForWallet({ walletId: source.id })
+        if (balance instanceof Error) {
+          throw mapError(balance)
         }
-        return Math.floor(balanceCents)
+        return Number(balance.asCents())
       },
     },
     pendingIncomingBalance: {

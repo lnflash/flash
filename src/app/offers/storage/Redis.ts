@@ -5,21 +5,29 @@ import { RedisCacheService } from "@services/cache"
 import { CacheServiceError, CacheUndefinedError, OfferNotFound } from "@domain/cache"
 import { baseLogger } from "@services/logger"
 import { randomUUID } from "crypto"
+import { JMDAmount, MoneyAmount, USDAmount } from "@domain/shared"
+import { CashoutDetails } from "../types"
 
 /**
- * Custom SerDe for BigInt
+ * Custom SerDe for CashoutDetails
  */
 const OffersSerde = {
-  serialize: (data: any): string => {
-    return JSON.stringify(data, (_, value) =>
-      typeof value === "bigint" ? value.toString() : value
-    );
+  serialize: (data: CashoutDetails): string => {
+    return JSON.stringify(data, (_, value) => {
+      if (value instanceof MoneyAmount) return value.toJson()
+      else if (typeof value === "bigint") return value.toString();
+      else return value
+    });
   },
 
+  // todo: Find better way to identify MoneyAmount
   deserialize: (json: string) => {
     return JSON.parse(
       json, 
       (key: string, value: any) => {
+        if (['usd', 'jmd', 'fee'].includes(key.toLowerCase()) && Array.isArray(value)) {
+          return MoneyAmount.fromJSON(value as [string, string])
+        }
         if (key.toLowerCase() === 'amount' && typeof value === 'string') {
             return BigInt(value);
         }
