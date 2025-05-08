@@ -7,6 +7,9 @@ module.exports = {
   transform: {
     "^.+\\.(t|j)sx?$": ["@swc/jest", swcConfig],
   },
+  transformIgnorePatterns: [
+    'node_modules/(?!(bigint-money)/)'
+  ],
   testRegex: ".*\\.spec\\.ts$",
   testEnvironment: "node",
   setupFilesAfterEnv: ["<rootDir>/test/flash/unit/jest.setup.ts"],

@@ -1,5 +1,5 @@
 export * from "./OffersManager"
-
+export * from "./types"
 // export interface IOffersManager {
 //   makeCashoutOffer(
 //     walletId: WalletId,

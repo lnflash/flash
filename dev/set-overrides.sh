@@ -18,7 +18,7 @@ declare -a yaml_paths=(
 # Function to write YAML paths to the output file
 write_yaml() {
   local path="$1"
-  local value="$2"
+  local value=$2
   local indent=""
   local IFS="."
 
@@ -33,7 +33,7 @@ write_yaml() {
 
     if ((i == ${#keys[@]} - 1)); then
       # Last key, write the value
-      echo "${indent}${key}: \"$value\"" >> "$OUTPUT_FILE"
+      echo "${indent}${key}: ${value}" >> "$OUTPUT_FILE"
     else
       # Intermediate key, write only if not already written
       if [[ ! " ${written_keys[@]} " =~ " ${current_path} " ]]; then
@@ -55,7 +55,7 @@ for entry in "${yaml_paths[@]}"; do
   read -r value
 
   # Write the path and value to the output YAML file
-  write_yaml "$path" "$value"
+  write_yaml "$path" $value
 done
 
 echo "YAML file has been written to $OUTPUT_FILE."
