@@ -1,5 +1,6 @@
 import { GT } from "@graphql/index"
 import IError from "@graphql/shared/types/abstract/error"
+import AuthToken from "@graphql/shared/types/scalar/auth-token"
 
 const ServiceTokenPayload = GT.Object({
   name: "ServiceTokenPayload",
@@ -8,7 +9,7 @@ const ServiceTokenPayload = GT.Object({
       type: GT.NonNullList(IError),
     },
     token: {
-      type: GT.Scalar({ name: "AuthToken" }),
+      type: AuthToken,
     },
   }),
 })

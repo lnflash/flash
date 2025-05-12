@@ -78,8 +78,7 @@ type AuditedUser {
   phone: Phone
 }
 
-"""An Opaque Bearer token"""
-scalar AuthToken
+# We're sharing the AuthToken scalar from shared/types/scalar/auth-token.ts
 
 type AuthTokenPayload {
   authToken: AuthToken
