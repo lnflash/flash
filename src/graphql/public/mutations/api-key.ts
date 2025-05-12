@@ -1,7 +1,7 @@
 import { GT } from "@graphql/index"
 import { ApiKeyService } from "@services/api-keys"
 import {
-  ApiKeyType,
+  ApiKeyObjectType,
   ApiKeyWithSecretType,
   CreateApiKeyInput,
   UpdateApiKeyInput,
@@ -73,7 +73,7 @@ export const createApiKey = GT.Field({
 })
 
 export const updateApiKey = GT.Field({
-  type: ApiKeyType,
+  type: ApiKeyObjectType,
   description: "Update an existing API key",
   args: {
     id: { type: GT.NonNullID },

@@ -41,16 +41,16 @@ export const API_KEY_PREFIX = {
 
 export type Scope = `${ScopeType}:${ResourceType}` | `${ScopeType}:${ResourceType}:${string}`
 
-export const ALL_SCOPES: Scope[] = Object.values(ResourceType).map(
-  (resource) => `${ScopeType.All}:${resource}`
+export const ALL_SCOPES = Object.values(ResourceType).map(
+  (resource): Scope => `${ScopeType.All}:${resource}` as Scope
 )
 
-export const READ_SCOPES: Scope[] = Object.values(ResourceType).map(
-  (resource) => `${ScopeType.Read}:${resource}`
+export const READ_SCOPES = Object.values(ResourceType).map(
+  (resource): Scope => `${ScopeType.Read}:${resource}` as Scope
 )
 
-export const WRITE_SCOPES: Scope[] = Object.values(ResourceType).map(
-  (resource) => `${ScopeType.Write}:${resource}`
+export const WRITE_SCOPES = Object.values(ResourceType).map(
+  (resource): Scope => `${ScopeType.Write}:${resource}` as Scope
 )
 
 export const COMMON_SCOPES: Scope[] = [

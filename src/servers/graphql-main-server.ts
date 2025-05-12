@@ -4,7 +4,7 @@ import { GALOY_API_PORT, UNSECURE_IP_FROM_REQUEST_OBJECT } from "@config"
 
 import { AuthorizationError } from "@graphql/error"
 import { gqlMainSchema, mutationFields, queryFields } from "@graphql/public"
-import { apiKeyPermissions } from "@graphql/public/permissions/api-key-permissions"
+import { apiKeyQueryRules, apiKeyMutationRules, apiKeySubscriptionRules } from "@graphql/public/permissions/api-key-permissions"
 import { getContextFromRequest } from "@graphql/public/context"
 
 import { bootstrap } from "@app/bootstrap"
@@ -91,21 +91,41 @@ export async function startApolloServerForCoreSchema() {
     authedMutationFields[key] = isAuthenticated
   }
 
-  // Combine normal JWT auth with API key auth using OR rule
+  // Create permission rules combining JWT auth with API key auth
+  const queryRules = {}
+  const mutationRules = {}
+
+  // Process query fields
+  for (const key of Object.keys({
+    ...queryFields.authed.atAccountLevel,
+    ...queryFields.authed.atWalletLevel,
+  })) {
+    // Only add OR rules for operations that have API key rules
+    if (apiKeyQueryRules[key]) {
+      queryRules[key] = or(isAuthenticated, apiKeyQueryRules[key])
+    } else {
+      queryRules[key] = isAuthenticated
+    }
+  }
+
+  // Process mutation fields
+  for (const key of Object.keys({
+    ...mutationFields.authed.atAccountLevel,
+    ...mutationFields.authed.atWalletLevel,
+  })) {
+    // Only add OR rules for operations that have API key rules
+    if (apiKeyMutationRules[key]) {
+      mutationRules[key] = or(isAuthenticated, apiKeyMutationRules[key])
+    } else {
+      mutationRules[key] = isAuthenticated
+    }
+  }
+
+  // Create combined permissions
   const combinedPermissions = shield(
     {
-      Query: Object.fromEntries(
-        Object.keys({
-          ...queryFields.authed.atAccountLevel,
-          ...queryFields.authed.atWalletLevel,
-        }).map(key => [key, or(isAuthenticated, apiKeyPermissions.Query[key])])
-      ),
-      Mutation: Object.fromEntries(
-        Object.keys({
-          ...mutationFields.authed.atAccountLevel,
-          ...mutationFields.authed.atWalletLevel,
-        }).map(key => [key, or(isAuthenticated, apiKeyPermissions.Mutation[key])])
-      ),
+      Query: queryRules,
+      Mutation: mutationRules,
     },
     {
       allowExternalErrors: true,

@@ -21,7 +21,7 @@ export const ApiKeyTypeType = GT.Enum({
   },
 })
 
-export const ApiKeyType = GT.Object({
+export const ApiKeyObjectType = GT.Object({
   name: "ApiKey",
   description: "API key for accessing the Flash API",
   fields: () => ({

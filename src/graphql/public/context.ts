@@ -2,6 +2,8 @@ import { Scope } from "@domain/api-keys"
 import { Request } from "express"
 import { ApiKeyService } from "@services/api-keys"
 
+// Using Express Request interface augmentation from global declarations in servers/index.files.d.ts
+
 export interface GraphQLPublicContext {
   domainAccount?: {
     id: string

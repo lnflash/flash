@@ -1,11 +1,11 @@
 import { GT } from "@graphql/index"
 import { ApiKeyService } from "@services/api-keys"
-import { ApiKeyType } from "../types/api-key"
+import { ApiKeyObjectType } from "../types/api-key"
 import { ApiKeyError } from "@domain/api-keys/errors"
 import { GraphQLPublicContext } from "../context"
 
 export const apiKey = GT.Field({
-  type: ApiKeyType,
+  type: ApiKeyObjectType,
   description: "Get an API key by ID",
   args: {
     id: { type: GT.NonNullID },
@@ -42,7 +42,7 @@ export const apiKey = GT.Field({
 })
 
 export const apiKeys = GT.Field({
-  type: GT.NonNullList(ApiKeyType),
+  type: GT.NonNullList(ApiKeyObjectType),
   description: "Get all API keys for the authenticated account",
   resolve: async (_, __, context: GraphQLPublicContext) => {
     // Check if user is authenticated

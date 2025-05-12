@@ -34,10 +34,12 @@ import {
 } from "@domain/api-keys/errors"
 import { createHash, createHmac, timingSafeEqual } from "crypto"
 
-import { ApiKeyLookupByKeyResult } from "@domain/api-keys/index.types"
+import { ApiKeyLookupByKeyResult } from "@domain/api-keys/types"
 
 // A service for managing API keys
 export class ApiKeyService {
+  // Expose scope validation function
+  static isScopeAllowed = isScopeAllowed
   // Creates a new API key
   static async create({
     name,

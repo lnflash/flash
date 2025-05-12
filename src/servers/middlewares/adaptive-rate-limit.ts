@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { AdaptiveRateLimiter } from "@services/rate-limit/adaptive-rate-limiter";
 import { baseLogger } from "@services/logger";
-import { ApiKeyService } from "@services/api-key";
+import { ApiKeyService } from "@services/api-keys";
 
 const logger = baseLogger.child({ module: "adaptive-rate-limit-middleware" });
 
@@ -22,15 +22,15 @@ export const adaptiveRateLimitMiddleware = async (
   }
   
   try {
-    // Get tier from API key metadata or default to "DEFAULT"
-    const tier = (req.apiKey.metadata?.tier as string) || "DEFAULT";
+    // Get tier from API key or default to "DEFAULT"
+    const tier = "DEFAULT";
     
     // Get operation name from path (simplified for demo)
     const operation = req.path.split("/").filter(Boolean).join("_") || "api_call";
     
     // Check rate limit with adaptive behavior
     const result = await adaptiveRateLimiter.consume(
-      req.apiKey.keyId,
+      req.apiKey.id,
       tier,
       operation
     );
@@ -56,7 +56,7 @@ export const adaptiveRateLimitMiddleware = async (
       // Log the rate limit event
       logger.warn({
         message: "API key rate limited by adaptive limiter",
-        keyId: req.apiKey.keyId,
+        keyId: req.apiKey.id,
         tier,
         ip: req.ip || req.socket.remoteAddress,
         adaptiveAction: result.adaptiveAction,
@@ -64,20 +64,17 @@ export const adaptiveRateLimitMiddleware = async (
       });
       
       // Add usage log for this rate limit event
-      const apiKeyService = ApiKeyService();
-      apiKeyService.addUsageLog(req.apiKey.keyId, {
-        timestamp: new Date(),
-        operation,
+      ApiKeyService.logUsage({
+        apiKeyId: req.apiKey.id,
+        endpoint: operation,
         ip: req.ip || req.socket.remoteAddress || "unknown",
-        userAgent: req.headers["user-agent"] as string || "unknown",
         success: false,
-        errorType: result.adaptiveAction === "throttled" 
-          ? "ADAPTIVE_THROTTLE" 
-          : "RATE_LIMIT_EXCEEDED"
+        responseTimeMs: 0,
+        statusCode: 429
       }).catch(error => {
         logger.error({
           message: "Failed to log rate limit in usage logs",
-          keyId: req.apiKey.keyId,
+          keyId: req.apiKey.id,
           error,
         });
       });
@@ -101,7 +98,7 @@ export const adaptiveRateLimitMiddleware = async (
   } catch (error) {
     logger.error({
       message: "Error in adaptive rate limit middleware",
-      keyId: req.apiKey?.keyId,
+      keyId: req.apiKey?.id,
       error,
     });
     
