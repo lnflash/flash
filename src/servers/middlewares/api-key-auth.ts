@@ -4,7 +4,7 @@ import { ApiKeyNotFoundError, ApiKeyInvalidError, ApiKeyRevokedError, ApiKeyExpi
 import { Scope } from "@domain/api-keys"
 import { AdaptiveRateLimiter } from "@services/rate-limit/adaptive-rate-limiter"
 import { RateLimitExceededError } from "@domain/api-keys/errors"
-import { RateLimitLevel } from "@services/rate-limit/adaptive-rate-limiter.types"
+import { RateLimitLevel, RATE_LIMIT_POINTS, RATE_LIMIT_DURATION } from "@services/rate-limit/adaptive-rate-limiter.types"
 
 // Headers for API key authentication
 const API_KEY_HEADER = "Authorization"
@@ -12,15 +12,7 @@ const API_KEY_QUERY_PARAM = "apiKey"
 const API_KEY_HEADER_PREFIX = "ApiKey "
 
 // Create rate limiter instance
-const apiKeyRateLimiter = new AdaptiveRateLimiter({
-  keyPrefix: "api_key_rate_limit",
-  defaultPointsPerPeriod: {
-    [RateLimitLevel.DEFAULT]: 100,
-    [RateLimitLevel.PREMIUM]: 1000,
-    [RateLimitLevel.UNLIMITED]: 10000,
-  },
-  defaultPeriod: 60, // 1 minute
-})
+const apiKeyRateLimiter = new AdaptiveRateLimiter()
 
 // Middleware for authenticating API keys
 export const apiKeyAuthMiddleware = (requiredScopes?: Scope[]) => {
@@ -59,11 +51,12 @@ export const apiKeyAuthMiddleware = (requiredScopes?: Scope[]) => {
         throw new RateLimitExceededError()
       }
       
-      // Set rate limit headers
-      res.setHeader("X-RateLimit-Limit", rateLimitResult.limit.toString())
-      res.setHeader("X-RateLimit-Remaining", rateLimitResult.remaining.toString())
-      res.setHeader("X-RateLimit-Reset", rateLimitResult.resetTime.toString())
-      res.setHeader("X-RateLimit-Used", (rateLimitResult.limit - rateLimitResult.remaining).toString())
+      // Set rate limit headers based on tier
+      const tierLimit = RATE_LIMIT_POINTS[apiKeyData.tier as RateLimitLevel] || RATE_LIMIT_POINTS.DEFAULT
+      res.setHeader("X-RateLimit-Limit", tierLimit.toString())
+      res.setHeader("X-RateLimit-Remaining", rateLimitResult.remainingPoints.toString())
+      res.setHeader("X-RateLimit-Reset", Math.floor(rateLimitResult.nextRefreshTime.getTime() / 1000).toString())
+      res.setHeader("X-RateLimit-Used", (tierLimit - rateLimitResult.remainingPoints).toString())
       
       // Set API key context in request
       req.apiKey = {
