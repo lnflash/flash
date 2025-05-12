@@ -9,8 +9,9 @@ import {
   ApiKeyWithHash,
   ApiKeyWithSecrets,
   generateApiKeyCredentials,
-  Scope,
+  Scope
 } from "@domain/api-keys"
+import { ApiKeyId, AccountId } from "@domain/api-keys/types"
 import {
   isApiKeyActive,
   isApiKeyExpired,
@@ -222,8 +223,8 @@ export class ApiKeyService {
     )
 
     return {
-      id: matchedKey.id,
-      accountId: matchedKey.accountId,
+      id: matchedKey.id as unknown as ApiKeyId,
+      accountId: matchedKey.accountId as unknown as AccountId,
       hashedKey: matchedKey.hashedKey,
       scopes: matchedKey.scopes as Scope[],
       status: matchedKey.status as ApiKeyStatus,

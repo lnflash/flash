@@ -12,7 +12,7 @@ import { activateLndHealthCheck } from "@services/lnd/health"
 import { baseLogger } from "@services/logger"
 import { setupMongoConnection } from "@services/mongodb"
 import { shield, or } from "graphql-shield"
-import { Rule } from "graphql-shield/typings/rules"
+import { Rule, RuleOr } from "graphql-shield/typings/rules"
 import {
   ACCOUNT_USERNAME,
   SemanticAttributes,
@@ -97,8 +97,8 @@ export async function startApolloServerForCoreSchema() {
   }
 
   // Create permission rules combining JWT auth with API key auth
-  const queryRules = {}
-  const mutationRules = {}
+  const queryRules: Record<string, Rule | RuleOr> = {}
+  const mutationRules: Record<string, Rule | RuleOr> = {}
 
   // Process query fields
   for (const key of Object.keys({
@@ -106,10 +106,12 @@ export async function startApolloServerForCoreSchema() {
     ...queryFields.authed.atWalletLevel,
   })) {
     // Only add OR rules for operations that have API key rules
-    if (apiKeyQueryRules[key]) {
-      queryRules[key] = or(isAuthenticated, apiKeyQueryRules[key])
+    if (Object.prototype.hasOwnProperty.call(apiKeyQueryRules, key)) {
+      // Type assertion needed for TypeScript
+      const typedKey = key as keyof typeof apiKeyQueryRules;
+      queryRules[key] = or(isAuthenticated, apiKeyQueryRules[typedKey]);
     } else {
-      queryRules[key] = isAuthenticated
+      queryRules[key] = isAuthenticated;
     }
   }
 
@@ -119,10 +121,12 @@ export async function startApolloServerForCoreSchema() {
     ...mutationFields.authed.atWalletLevel,
   })) {
     // Only add OR rules for operations that have API key rules
-    if (apiKeyMutationRules[key]) {
-      mutationRules[key] = or(isAuthenticated, apiKeyMutationRules[key])
+    if (Object.prototype.hasOwnProperty.call(apiKeyMutationRules, key)) {
+      // Type assertion needed for TypeScript
+      const typedKey = key as keyof typeof apiKeyMutationRules;
+      mutationRules[key] = or(isAuthenticated, apiKeyMutationRules[typedKey]);
     } else {
-      mutationRules[key] = isAuthenticated
+      mutationRules[key] = isAuthenticated;
     }
   }
 

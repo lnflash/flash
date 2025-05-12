@@ -22,7 +22,7 @@ export const adaptiveRateLimitMiddleware = async (
   }
 
   // Ensure API key is defined for null safety
-  const apiKey = req.apiKey;
+  const apiKey = req.apiKey!;
   
   try {
     // Get tier from API key or default to "DEFAULT"
@@ -38,8 +38,9 @@ export const adaptiveRateLimitMiddleware = async (
       operation
     );
     
-    // Add rate limit headers
-    res.setHeader("X-RateLimit-Limit", getEffectiveLimitForTier(tier, result.adaptiveAction));
+    // Add rate limit headers - handle null adaptiveAction by converting to string or undefined
+    const adaptiveActionStr = result.adaptiveAction === null ? undefined : String(result.adaptiveAction);
+    res.setHeader("X-RateLimit-Limit", getEffectiveLimitForTier(tier, adaptiveActionStr));
     res.setHeader("X-RateLimit-Remaining", result.remainingPoints);
     res.setHeader("X-RateLimit-Reset", Math.floor(result.nextRefreshTime.getTime() / 1000));
     
@@ -59,7 +60,7 @@ export const adaptiveRateLimitMiddleware = async (
       // Log the rate limit event
       logger.warn({
         message: "API key rate limited by adaptive limiter",
-        keyId: req.apiKey.id,
+        keyId: apiKey.id,
         tier,
         ip: req.ip || req.socket.remoteAddress,
         adaptiveAction: result.adaptiveAction,
@@ -68,7 +69,7 @@ export const adaptiveRateLimitMiddleware = async (
       
       // Add usage log for this rate limit event
       ApiKeyService.logUsage({
-        apiKeyId: req.apiKey.id,
+        apiKeyId: apiKey.id,
         endpoint: operation,
         ip: req.ip || req.socket.remoteAddress || "unknown",
         success: false,
@@ -77,7 +78,7 @@ export const adaptiveRateLimitMiddleware = async (
       }).catch(error => {
         logger.error({
           message: "Failed to log rate limit in usage logs",
-          keyId: req.apiKey.id,
+          keyId: apiKey.id,
           error,
         });
       });
@@ -101,7 +102,7 @@ export const adaptiveRateLimitMiddleware = async (
   } catch (error) {
     logger.error({
       message: "Error in adaptive rate limit middleware",
-      keyId: req.apiKey?.id,
+      keyId: req.apiKey ? req.apiKey.id : "unknown",
       error,
     });
     
