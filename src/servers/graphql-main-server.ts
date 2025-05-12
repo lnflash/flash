@@ -53,12 +53,14 @@ const setGqlContext = async (
   const apiKeyContext = await getContextFromRequest(req)
 
   // Combine contexts
-  const gqlContext = {
+  // Explicitly type and merge the contexts to ensure compatibility
+  const gqlContext: GraphQLPublicContext = {
     ...sessionContext,
-    ...apiKeyContext,
+    apiKey: apiKeyContext.apiKey,
   }
 
-  req.gqlContext = gqlContext
+  // Type assertion to help TypeScript understand this is valid
+  req.gqlContext = gqlContext as GraphQLPublicContext | GraphQLAdminContext
 
   return addAttributesToCurrentSpanAndPropagate(
     {
@@ -67,7 +69,10 @@ const setGqlContext = async (
       "token.expires_at": tokenPayload?.expires_at,
       [SemanticAttributes.HTTP_CLIENT_IP]: ip,
       [SemanticAttributes.HTTP_USER_AGENT]: req.headers["user-agent"],
-      [ACCOUNT_USERNAME]: gqlContext?.domainAccount?.username,
+      // Only include username if it's an actual Account object with username property
+      [ACCOUNT_USERNAME]: "username" in (gqlContext?.domainAccount || {})
+        ? (gqlContext?.domainAccount as any)?.username
+        : undefined,
       [SemanticAttributes.ENDUSER_ID]: tokenPayload?.sub,
     },
     next,
