@@ -2,6 +2,8 @@
 
 This document outlines the step-by-step implementation plan for adding a secure API key authentication system to Flash.
 
+> **Note**: This implementation plan was created as a guide. For details on the actual implementation, please refer to [API_KEY_IMPLEMENTATION_DETAILS.md](./API_KEY_IMPLEMENTATION_DETAILS.md).
+
 ## Table of Contents
 
 1. [Overview](#overview)
