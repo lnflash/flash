@@ -20,6 +20,9 @@ export const adaptiveRateLimitMiddleware = async (
   if (!req.apiKey) {
     return next();
   }
+
+  // Ensure API key is defined for null safety
+  const apiKey = req.apiKey;
   
   try {
     // Get tier from API key or default to "DEFAULT"
@@ -30,7 +33,7 @@ export const adaptiveRateLimitMiddleware = async (
     
     // Check rate limit with adaptive behavior
     const result = await adaptiveRateLimiter.consume(
-      req.apiKey.id,
+      apiKey.id,
       tier,
       operation
     );

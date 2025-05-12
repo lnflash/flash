@@ -1,5 +1,11 @@
 import { ValidationError } from "@domain/shared/errors"
-import { DomainError, ErrorLevel } from "@domain/shared/errors.types"
+import { ErrorLevel } from "@domain/shared"
+
+// Create a local DomainError for API key errors
+export class DomainError extends Error {
+  name = this.constructor.name
+  level: ErrorLevel = ErrorLevel.Critical
+}
 
 export const ApiKeyErrorMessage = {
   ApiKeyNotFound: "API key not found",
@@ -22,9 +28,12 @@ export const ApiKeyErrorMessage = {
 
 // API Key Errors
 export class ApiKeyError extends DomainError {
-  name = this.constructor.name
   level = ErrorLevel.Critical
-  message: string
+
+  constructor() {
+    super()
+    this.message = "API Key Error"
+  }
 }
 
 export class ApiKeyNotFoundError extends ApiKeyError {
