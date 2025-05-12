@@ -26,6 +26,7 @@ import authRouter from "./authorization"
 import kratosCallback from "./event-handlers/kratos"
 import healthzHandler from "./middlewares/healthz"
 import { idempotencyMiddleware } from "./middlewares/idempotency"
+import { apiKeyAuthMiddleware } from "./middlewares/api-key-auth"
 
 const graphqlLogger = baseLogger.child({
   module: "graphql",
@@ -160,12 +161,16 @@ export const startApolloServer = async ({
 
   app.use(idempotencyMiddleware) // TODO: only needed for public endpoint
 
+  // Add API key authentication middleware before JWT
+  app.use("/graphql", apiKeyAuthMiddleware())
+
+  // JWT auth is optional if API key auth succeeds
   app.use(
     "/graphql",
     expressjwt({
       secret,
       algorithms: jwtAlgorithms,
-      credentialsRequired: true,
+      credentialsRequired: false, // Allow requests to proceed without JWT if API key is provided
       requestProperty: "token",
       issuer: "galoy.io",
     }),

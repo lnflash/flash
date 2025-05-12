@@ -4,12 +4,14 @@ import { GALOY_API_PORT, UNSECURE_IP_FROM_REQUEST_OBJECT } from "@config"
 
 import { AuthorizationError } from "@graphql/error"
 import { gqlMainSchema, mutationFields, queryFields } from "@graphql/public"
+import { apiKeyPermissions } from "@graphql/public/permissions/api-key-permissions"
+import { getContextFromRequest } from "@graphql/public/context"
 
 import { bootstrap } from "@app/bootstrap"
 import { activateLndHealthCheck } from "@services/lnd/health"
 import { baseLogger } from "@services/logger"
 import { setupMongoConnection } from "@services/mongodb"
-import { shield } from "graphql-shield"
+import { shield, or } from "graphql-shield"
 import { Rule } from "graphql-shield/typings/rules"
 import {
   ACCOUNT_USERNAME,
@@ -24,6 +26,7 @@ import { parseIps } from "@domain/accounts-ips"
 import { startApolloServerForAdminSchema } from "./graphql-admin-server"
 import { isAuthenticated, startApolloServer } from "./graphql-server"
 import { walletIdMiddleware } from "./middlewares/wallet-id"
+import { apiKeyAuthMiddleware } from "./middlewares/api-key-auth"
 
 import { sessionPublicContext } from "./middlewares/session"
 
@@ -40,10 +43,20 @@ const setGqlContext = async (
 
   const ip = parseIps(ipString)
 
-  const gqlContext = await sessionPublicContext({
+  // Create context from session
+  const sessionContext = await sessionPublicContext({
     tokenPayload,
     ip,
   })
+
+  // Create context with API key info if present
+  const apiKeyContext = await getContextFromRequest(req)
+
+  // Combine contexts
+  const gqlContext = {
+    ...sessionContext,
+    ...apiKeyContext,
+  }
 
   req.gqlContext = gqlContext
 
@@ -78,10 +91,21 @@ export async function startApolloServerForCoreSchema() {
     authedMutationFields[key] = isAuthenticated
   }
 
-  const permissions = shield(
+  // Combine normal JWT auth with API key auth using OR rule
+  const combinedPermissions = shield(
     {
-      Query: authedQueryFields,
-      Mutation: authedMutationFields,
+      Query: Object.fromEntries(
+        Object.keys({
+          ...queryFields.authed.atAccountLevel,
+          ...queryFields.authed.atWalletLevel,
+        }).map(key => [key, or(isAuthenticated, apiKeyPermissions.Query[key])])
+      ),
+      Mutation: Object.fromEntries(
+        Object.keys({
+          ...mutationFields.authed.atAccountLevel,
+          ...mutationFields.authed.atWalletLevel,
+        }).map(key => [key, or(isAuthenticated, apiKeyPermissions.Mutation[key])])
+      ),
     },
     {
       allowExternalErrors: true,
@@ -89,7 +113,7 @@ export async function startApolloServerForCoreSchema() {
     },
   )
 
-  const schema = applyMiddleware(gqlMainSchema, permissions, walletIdMiddleware)
+  const schema = applyMiddleware(gqlMainSchema, combinedPermissions, walletIdMiddleware)
   return startApolloServer({
     schema,
     port: GALOY_API_PORT,
