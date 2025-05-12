@@ -211,3 +211,41 @@ type WalletOnChainPendingReceiveRecord = {
   displayPriceCurrency: string
   createdAt: Date
 }
+
+type ApiKeyUsageRecord = {
+  endpoint: string
+  ip: string
+  timestamp: Date
+  success: boolean
+  responseTimeMs: number
+  statusCode: number
+}
+
+type ApiKeyRotationRecord = {
+  originalKeyId: string
+  newKeyId: string
+  status: "pending" | "in_progress" | "completed" | "failed"
+  startedAt: Date
+  completedAt?: Date
+  transitionPeriod: number // in days
+  createdBy: string
+}
+
+type ApiKeyRecord = {
+  _id: ObjectId
+  id: string
+  name: string
+  accountId: string
+  hashedKey: string
+  type: string // ApiKeyType
+  scopes: string[]
+  createdAt: Date
+  expiresAt: Date | null
+  lastUsedAt: Date | null
+  status: string // ApiKeyStatus
+  tier: string
+  metadata: Record<string, unknown>
+  usageHistory: ApiKeyUsageRecord[]
+  privateKey: string // for webhook signatures
+  apiKeyRotation?: ApiKeyRotationRecord
+}
