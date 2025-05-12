@@ -171,6 +171,28 @@ export const AccountsRepository = (): IAccountsRepository => {
     }
   }
 
+  const updateIsServiceAccount = async ({
+    accountId,
+    isServiceAccount,
+  }: {
+    accountId: AccountId
+    isServiceAccount: boolean
+  }): Promise<Account | RepositoryError> => {
+    try {
+      const result = await Account.findOneAndUpdate(
+        { _id: toObjectId<AccountId>(accountId) },
+        { isServiceAccount },
+        { new: true },
+      )
+      if (!result) {
+        return new CouldNotFindAccountError()
+      }
+      return translateToAccount(result)
+    } catch (err) {
+      return parseRepositoryError(err)
+    }
+  }
+
   return {
     persistNew,
     findByUserId,
@@ -180,6 +202,7 @@ export const AccountsRepository = (): IAccountsRepository => {
     findByUsername,
     findByNpub,
     update,
+    updateIsServiceAccount,
   }
 }
 
@@ -212,6 +235,7 @@ const translateToAccount = (result: AccountRecord): Account => ({
   ),
   withdrawFee: result.withdrawFee as Satoshis,
   isEditor: result.role === "editor",
+  isServiceAccount: !!result.isServiceAccount, // Added for long-lived service tokens support
   notificationSettings: {
     push: {
       enabled: result.notificationSettings

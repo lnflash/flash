@@ -79,6 +79,9 @@ interface AccountRecord {
   level?: number // ?: enum [1, 2]
   statusHistory: AccountStatusHistory
 
+  // Service account flag for long-lived service tokens (FIP-07)
+  isServiceAccount: boolean
+
   withdrawFee?: number
   earn: string[]
   contactEnabled: boolean

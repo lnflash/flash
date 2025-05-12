@@ -466,3 +466,7 @@ export class IbexError extends CustomApolloError {
     })
   }
 }
+
+export const extractErrorMessageFromError = (error: Error): string => {
+  return error.message || "Unknown error"
+}

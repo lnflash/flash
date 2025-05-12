@@ -26,3 +26,12 @@ export class UnsupportedSchemaTypeError extends RegistrationPayloadValidationErr
 export class AuthTokenUserIdMismatchError extends AuthenticationError {
   level = ErrorLevel.Critical
 }
+
+export class ServiceTokenError extends AuthenticationError {
+  name = this.constructor.name
+
+  constructor(message?: string) {
+    super()
+    this.message = message || "Service token error"
+  }
+}

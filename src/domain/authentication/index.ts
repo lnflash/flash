@@ -1,6 +1,7 @@
 import { ChannelType, PhoneCodeInvalidError } from "@domain/phone-provider"
 
 import { EmailCodeInvalidError } from "./errors"
+export * from "./service-token"
 
 export const getSupportedCountries = ({
   allCountries,

@@ -27,6 +27,7 @@ export const sessionPublicContext = async ({
 
   const sessionId = tokenPayload?.session_id
   const expiresAt = tokenPayload?.expires_at
+  const tokenType = tokenPayload?.type
 
   // note: value should match (ie: "anon") if not an accountId
   // settings from dev/ory/oathkeeper.yml/authenticator/anonymous/config/subjet
@@ -39,16 +40,21 @@ export const sessionPublicContext = async ({
       throw mapError(account)
     } else {
       domainAccount = account
-      // not awaiting on purpose. just updating metadata
-      // TODO: look if this can be a source of memory leaks
-      Accounts.updateAccountIPsInfo({
-        accountId: account.id,
-        ip,
-        logger,
-      })
 
-      if (sessionId && expiresAt) {
-        maybeExtendSession({ sessionId, expiresAt })
+      // Don't update IP info for service token requests
+      if (tokenType !== "service") {
+        // not awaiting on purpose. just updating metadata
+        // TODO: look if this can be a source of memory leaks
+        Accounts.updateAccountIPsInfo({
+          accountId: account.id,
+          ip,
+          logger,
+        })
+
+        // Only extend session for regular tokens, not service tokens
+        if (sessionId && expiresAt) {
+          maybeExtendSession({ sessionId, expiresAt })
+        }
       }
 
       const userRes = await UsersRepository().findById(account.kratosUserId)

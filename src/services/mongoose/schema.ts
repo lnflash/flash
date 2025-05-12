@@ -181,6 +181,13 @@ const AccountSchema = new Schema<AccountRecord>(
       sparse: true,
     },
 
+    // Added for FIP-07: Long-lived service tokens
+    isServiceAccount: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
     username: {
       type: String,
       match: [UsernameRegex, "Username can only have alphabets, numbers and underscores"],

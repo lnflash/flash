@@ -76,6 +76,8 @@ type Account = {
   contactEnabled: boolean
   readonly contacts: AccountContact[]
   readonly isEditor: boolean
+  // Added for FIP-07: Long-lived service tokens
+  readonly isServiceAccount: boolean
   readonly quizQuestions: UserQuizQuestion[] // deprecated
   readonly quiz: Quiz[]
   notificationSettings: NotificationSettings
@@ -165,6 +167,10 @@ interface IAccountsRepository {
   // listBusinessesForMap(): Promise<BusinessMapMarker[] | RepositoryError>
   findByNpub(npub: Npub): Promise<Account | RepositoryError>
   update(account: Account): Promise<Account | RepositoryError>
+  updateIsServiceAccount(params: {
+    accountId: AccountId
+    isServiceAccount: boolean
+  }): Promise<Account | RepositoryError>
 }
 
 type AdminRole = "dealer" | "funder" | "bankowner" | "editor"
