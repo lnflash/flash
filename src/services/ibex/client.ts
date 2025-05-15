@@ -7,7 +7,6 @@ import WebhookServer from "./webhook-server";
 import { Redis }  from "./cache"
 import { GetFeeEstimateArgs, IbexAccountDetails, IbexFeeEstimation, IbexInvoiceArgs, PayInvoiceArgs } from "./types";
 import { USDAmount } from "@domain/shared";
-import { baseLogger } from "@services/logger";
 
 const Ibex = new IbexClient(
   IbexConfig.url, 

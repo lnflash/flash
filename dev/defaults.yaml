@@ -33,3 +33,7 @@ cashout:
     to: "" # add to the overrides.yaml
     from: "notifications@getflash.io"
     subject: "New Cashout"
+
+mailgun:
+  apiKey: "<replace>"
+  domain: ""
