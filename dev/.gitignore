@@ -10,5 +10,3 @@ lnd/loopserver/*
 # ignore bria data files
 .bria/*
 bin/.bria_profile_api_key
-
-overrides.yaml

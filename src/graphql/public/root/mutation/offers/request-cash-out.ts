@@ -1,30 +1,12 @@
 import OffersManager from "@app/offers/OffersManager"
-import { USDAmount } from "@domain/shared"
 import { mapToGqlErrorList } from "@graphql/error-map"
 import { GT } from "@graphql/index"
 import CashoutOffer from "@graphql/public/types/object/cashout-offer"
 import IError from "@graphql/shared/types/abstract/error"
+import USDCentsScalar from "@graphql/shared/types/scalar/usd-cents"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import dedent from "dedent"
 
-const USDCentsScalar = GT.Scalar({
-    name: "USDCents",
-    description: "Amount in USD cents",
-    parseValue(value: unknown): USDAmount {
-      let amt = value as number | string 
-      const amount = USDAmount.cents(amt.toString())
-      if (amount instanceof Error) {
-          throw new Error(`Invalid USD amount: ${value}`)
-      }
-      return amount
-    },
-    serialize(value: unknown): number {
-        if (value instanceof USDAmount) {
-            return Number(value.asCents()) 
-        }
-        else throw new Error(`Failed to serialize USDAmount: ${value}`)
-    }
-})
 
 const RequestCashoutInput = GT.Input({
   name: "RequestCashoutInput",
