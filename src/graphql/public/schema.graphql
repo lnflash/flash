@@ -209,19 +209,19 @@ type CashoutOffer {
   expiresAt: Timestamp!
 
   """The amount that Flash is charging for it's services"""
-  flashFee: FractionalCentAmount!
+  flashFee: USDCents!
 
   """ID of the offer"""
   offerId: ID!
 
-  """The amount Flash owes to the user denominated in JMD"""
-  receiveJmd: JmdAmount!
+  """The amount Flash owes to the user denominated in JMD as cents"""
+  receiveJmd: JMDCents!
 
-  """The amount Flash owes to the user denominated in USD"""
-  receiveUsd: FractionalCentAmount!
+  """The amount Flash owes to the user denominated in USD as cents"""
+  receiveUsd: USDCents!
 
   """The amount the user is sending to flash"""
-  send: FractionalCentAmount!
+  send: USDCents!
 
   """ID for the users USD wallet to send from"""
   walletId: WalletId!
@@ -464,8 +464,8 @@ type IsFlashNpubPayload {
   isFlashNpub: Boolean
 }
 
-"""(Positive) Jamaican dollar amount"""
-scalar JmdAmount
+"""Amount in Jamaican cents"""
+scalar JMDCents
 
 scalar Language
 
