@@ -29,7 +29,7 @@ export const MAX_LENGTH_FOR_FEEDBACK = 1024
 
 export const MIN_SATS_FOR_PRICE_RATIO_PRECISION = 5000n
 
-export const Levels: Levels = [0, 1, 2]
+export const Levels: Levels = [0, 1, 2, 3]
 
 export const getGaloyBuildInformation = () => {
   return {
