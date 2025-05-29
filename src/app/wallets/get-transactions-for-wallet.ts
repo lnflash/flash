@@ -1,16 +1,9 @@
-import { memoSharingConfig } from "@config"
 import { PartialResult } from "@app/partial-result"
-
-import { LedgerError } from "@domain/ledger"
-import { WalletTransactionHistory } from "@domain/wallets"
-import { CouldNotFindError } from "@domain/errors"
-
-import { getNonEndUserWalletIds, LedgerService } from "@services/ledger"
-import { WalletOnChainPendingReceiveRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
 import { IbexError } from "@services/ibex/errors"
 import { baseLogger } from "@services/logger"
 import { GResponse200 } from "ibex-client"
+import { ConnectionArguments, ConnectionCursor } from "graphql-relay"
 
 export const getTransactionsForWallets = async ({
   wallets,
@@ -20,11 +13,11 @@ export const getTransactionsForWallets = async ({
   paginationArgs?: PaginationArgs
 }): Promise<PartialResult<PaginatedArray<IbexTransaction>>> => {
   const walletIds = wallets.map((wallet) => wallet.id)
-
-  // Flash fork: return history from Ibex
+  
   const ibexCalls = await Promise.all(walletIds
     .map(id => Ibex.getAccountTransactions({ 
       account_id: id,
+      ...toIbexPaginationArgs(paginationArgs)
     }))
   )
 
@@ -112,4 +105,40 @@ const toSettlementAmount = (
     ? -1 * ibexAmount 
     : ibexAmount
   return asCurrency(amt, currency)
+}
+
+enum SortOrder {
+  RECENT = "settledAt",
+  OLDEST = "-settledAt"
+}
+
+type IbexPaginationArgs = {
+  page?: number | undefined; // ibex default (0) start at page 0
+  limit?: number | undefined; // ibex default (0) returns all
+  sort?: SortOrder | undefined; // defaults to SortOrder.RECENT
+}
+
+export function toIbexPaginationArgs(
+  args: ConnectionArguments | undefined
+): IbexPaginationArgs {
+  const DEFAULTS = {
+    page: 0, 
+    limit: 0, 
+    sort: SortOrder.RECENT, 
+  }
+
+  // Prefer 'first' over 'last')
+  if (args && args.first != null) {
+    return {
+      ...DEFAULTS,
+      limit: args.first,
+      sort: SortOrder.RECENT, 
+    }
+  } else if (args && args.last != null) {
+    return {
+      ...DEFAULTS,
+      limit: args.last,
+      sort: SortOrder.OLDEST, 
+    }
+  } else return DEFAULTS
 }
