@@ -1,6 +1,5 @@
 #@data/values
 ---
-version: "3"
 services:
   bats-deps:
     image: busybox
