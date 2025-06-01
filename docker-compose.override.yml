@@ -1,6 +1,5 @@
 #@data/values
 ---
-version: "3"
 services:
   apollo-router:
     ports:

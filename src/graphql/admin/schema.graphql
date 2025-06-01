@@ -5,6 +5,7 @@ type AccountDetailPayload {
 
 enum AccountLevel {
   ONE
+  THREE
   TWO
   ZERO
 }
