@@ -65,8 +65,8 @@ const getLnFeeEstimation = async <T extends IbexCurrency>(args: GetFeeEstimateAr
     currencyId: currencyId.toString(),
   })
   if (resp instanceof Error) return new IbexError(resp)
-  else if (!resp.amount) return new UnexpectedIbexResponse("Fee not found.")
-  else if (!resp.invoiceAmount) return new UnexpectedIbexResponse("invoiceAmount not found.")
+  else if (resp.amount === null || resp.amount === undefined) return new UnexpectedIbexResponse("Fee not found.")
+  else if (resp.invoiceAmount === null || resp.invoiceAmount === undefined) return new UnexpectedIbexResponse("invoiceAmount not found.")
   else {
     return {
       fee: CurrencyMap.toIbexCurrency(resp.amount, currencyId) as T,
