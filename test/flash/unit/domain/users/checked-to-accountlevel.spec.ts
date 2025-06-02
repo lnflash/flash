@@ -8,6 +8,6 @@ describe("account-level-check", () => {
   })
 
   it("Fails with invalid account level", () => {
-    expect(checkedToAccountLevel(3)).toBeInstanceOf(InvalidAccountLevelError)
+    expect(checkedToAccountLevel(4)).toBeInstanceOf(InvalidAccountLevelError)
   })
 })
