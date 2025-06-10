@@ -15,7 +15,7 @@ import {
 } from "@domain/payments"
 import { AccountLevel, AccountValidator } from "@domain/accounts"
 import { DisplayAmountsConverter } from "@domain/fiat"
-import { checkedToUsdPaymentAmount, ErrorLevel, paymentAmountFromNumber, ValidationError, WalletCurrency } from "@domain/shared"
+import { BigIntConversionError, checkedToUsdPaymentAmount, ErrorLevel, paymentAmountFromNumber, USDAmount, ValidationError, WalletCurrency } from "@domain/shared"
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { ResourceExpiredLockServiceError } from "@domain/lock"
 import { checkedToWalletId, SettlementMethod } from "@domain/wallets"
@@ -48,14 +48,13 @@ import {
 } from "./helpers"
 
 import Ibex from "@services/ibex/client"
-import USDollars from "@services/ibex/currencies/USDollars"
 import { UnexpectedIbexResponse } from "@services/ibex/errors"
 
 const dealer = DealerPriceService()
 
+
 const intraledgerPaymentSendWalletId = async ({
   recipientWalletId: uncheckedRecipientWalletId,
-  senderAccount,
   amount: uncheckedAmount,
   memo,
   senderWalletId: uncheckedSenderWalletId,
@@ -75,8 +74,8 @@ const intraledgerPaymentSendWalletId = async ({
     kratosUserId: recipientUserId,
   } = recipientAccount
 
-  const amount = USDollars.fromFractionalCents(uncheckedAmount as FractionalCentAmount)
-  if (amount instanceof ValidationError) return amount
+  const amount = USDAmount.cents(uncheckedAmount.toString())
+  if (amount instanceof BigIntConversionError) return amount
   const invoiceResp = await Ibex.addInvoice({ 
     accountId: recipientWalletId,
     amount, 
@@ -109,15 +108,16 @@ const intraledgerPaymentSendWalletId = async ({
       return new UnexpectedIbexResponse(`StatusId (${payResp.status}) not in documenation`)
   }
 
-  if (senderAccount.id !== recipientAccount.id) {
-    const addContactResult = await addContactsAfterSend({
-      senderAccount,
-      recipientAccount,
-    })
-    if (addContactResult instanceof Error) {
-      recordExceptionInCurrentSpan({ error: addContactResult, level: ErrorLevel.Warn })
-    }
-  }
+  // flash fork: no longer adding contact on payments
+  // if (senderAccount.id !== recipientAccount.id) {
+  //   const addContactResult = await addContactsAfterSend({
+  //     senderAccount,
+  //     recipientAccount,
+  //   })
+  //   if (addContactResult instanceof Error) {
+  //     recordExceptionInCurrentSpan({ error: addContactResult, level: ErrorLevel.Warn })
+  //   }
+  // }
 
   return paymentSendStatus
 }
@@ -155,7 +155,7 @@ const validateIntraledgerPaymentInputs = async ({
   const senderAccount = await AccountsRepository().findById(senderWallet.accountId)
   if (senderAccount instanceof Error) return senderAccount
 
-  const senderAccountValidator = AccountValidator(senderAccount)
+  const senderAccountValidator = AccountValidator(senderAccount).isActive()
   if (senderAccountValidator instanceof Error) return senderAccountValidator
 
   const recipientWalletId = checkedToWalletId(uncheckedRecipientWalletId)
@@ -167,7 +167,7 @@ const validateIntraledgerPaymentInputs = async ({
   const recipientAccount = await AccountsRepository().findById(recipientWallet.accountId)
   if (recipientAccount instanceof Error) return recipientAccount
 
-  const recipientAccountValidator = AccountValidator(recipientAccount)
+  const recipientAccountValidator = AccountValidator(recipientAccount).isActive()
   if (recipientAccountValidator instanceof Error) return recipientAccountValidator
 
   addAttributesToCurrentSpan({

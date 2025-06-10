@@ -8,20 +8,26 @@ import {
   MissingFunderAccountConfigError,
   MissingUsdDealerWalletConfigError,
   UnknownConfigError,
+  getAdminAccounts,
 } from "@config"
 import { WalletCurrency } from "@domain/shared"
 import { lazyLoadLedgerAdmin } from "@services/ledger"
-import { WalletsRepository } from "@services/mongoose"
+import { AccountsRepository, UsersRepository, WalletsRepository } from "@services/mongoose"
 import { fromObjectId } from "@services/mongoose/utils"
 
 import { baseLogger } from "../logger"
 import { Account } from "../mongoose/schema"
+import { AccountRoles, AccountStatus } from "@domain/accounts"
 
 export const ledgerAdmin = lazyLoadLedgerAdmin({
   bankOwnerWalletResolver: async () => {
-    const result = await Account.findOne({ role: "bankowner" }, { defaultWalletId: 1 })
-    if (!result) throw new MissingBankOwnerAccountConfigError()
-    return result.defaultWalletId
+    const ownersPhone = getAdminAccounts().filter(_ => _.role === AccountRoles.bankowner)[0].phone
+    const user = await UsersRepository().findByPhone(ownersPhone)
+    if (user instanceof Error) throw new MissingBankOwnerAccountConfigError(`Could not find admin user with phone ${ownersPhone}`)
+    const account = await AccountsRepository().findByUserId(user.id)
+    if (account instanceof Error) throw new MissingBankOwnerAccountConfigError(`Could not find admin account for userId ${user.id}`)
+    baseLogger.info(account.defaultWalletId, "bank owner wallet id")
+    return account.defaultWalletId
   },
   dealerBtcWalletResolver: async () => {
     const user: AccountRecord | null = await Account.findOne(

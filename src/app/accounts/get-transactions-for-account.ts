@@ -22,7 +22,8 @@ export const getTransactionsForAccountByWalletIds = async ({
     if (wallet instanceof RepositoryError) return PartialResult.err(wallet)
 
     const accountValidator = AccountValidator(account)
-    if (accountValidator instanceof Error) return PartialResult.err(accountValidator)
+    const isActive = accountValidator.isActive()
+    if (isActive instanceof Error) return PartialResult.err(isActive)
     const validateWallet = accountValidator.validateWalletForAccount(wallet)
     if (validateWallet instanceof Error) return PartialResult.err(validateWallet)
 

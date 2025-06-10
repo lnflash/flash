@@ -11,15 +11,29 @@ export const RankedErrorLevel = [ErrorLevel.Info, ErrorLevel.Warn, ErrorLevel.Cr
 export class DomainError extends Error {
   name: string
   level?: ErrorLevel
-  constructor(message?: string | unknown | Error) {
+  constructor(message?: string | unknown | Error ) {
     super(parseErrorMessageFromUnknown(message))
     this.name = this.constructor.name
     this.level = ErrorLevel.Info
   }
 }
 
-export class ValidationError extends DomainError {}
+export class ValidationError extends DomainError {
+  errors?: ValidationError[]
+  constructor(details?: string | Error | ValidationError[]) {
+    if (Array.isArray(details) && details.every(el => el instanceof ValidationError)) {
+      super(JSON.stringify(details))
+      this.errors = details
+    }
+    else super(details)
+  }
+}
+
 export class UnknownDomainError extends DomainError {
+  level = ErrorLevel.Critical
+}
+
+export class RedisParseError extends DomainError {
   level = ErrorLevel.Critical
 }
 

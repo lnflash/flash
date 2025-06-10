@@ -277,6 +277,31 @@ input CaptchaRequestAuthCodeInput
   validationCode: String!
 }
 
+type CashoutOffer
+  @join__type(graph: PUBLIC)
+{
+  """The time at which this offer is no longer accepted by Flash"""
+  expiresAt: Timestamp!
+
+  """The amount that Flash is charging for it's services"""
+  flashFee: USDCents!
+
+  """ID of the offer"""
+  offerId: ID!
+
+  """The amount Flash owes to the user denominated in JMD as cents"""
+  receiveJmd: JMDCents!
+
+  """The amount Flash owes to the user denominated in USD as cents"""
+  receiveUsd: USDCents!
+
+  """The amount the user is sending to flash"""
+  send: USDCents!
+
+  """ID for the users USD wallet to send from"""
+  walletId: WalletId!
+}
+
 """(Positive) Cent amount (1/100 of a dollar)"""
 scalar CentAmount
   @join__type(graph: PUBLIC)
@@ -487,6 +512,14 @@ type GraphQLApplicationError implements Error
 scalar Hex32Bytes
   @join__type(graph: PUBLIC)
 
+input InitiateCashoutInput
+  @join__type(graph: PUBLIC)
+{
+  """The id of the offer being executed."""
+  offerId: ID!
+  walletId: WalletId!
+}
+
 union InitiationVia
   @join__type(graph: PUBLIC)
   @join__unionMember(graph: PUBLIC, member: "InitiationViaIntraLedger")
@@ -571,6 +604,10 @@ type IsFlashNpubPayload
   errors: [Error!]!
   isFlashNpub: Boolean
 }
+
+"""Amount in Jamaican cents"""
+scalar JMDCents
+  @join__type(graph: PUBLIC)
 
 scalar join__FieldSet
 
@@ -924,6 +961,12 @@ type Mutation
   feedbackSubmit(input: FeedbackSubmitInput!): SuccessPayload!
 
   """
+  Start the Cashout process; 
+  User sends USD to Flash via Ibex and receives USD or JMD to bank account.
+  """
+  initiateCashout(input: InitiateCashoutInput!): SuccessPayload!
+
+  """
   Actions a payment which is internal to the ledger e.g. it does
   not use onchain/lightning. Returns payment status (success,
   failed, pending, already_paid).
@@ -1015,6 +1058,12 @@ type Mutation
   onChainUsdPaymentSend(input: OnChainUsdPaymentSendInput!): PaymentSendPayload!
   onChainUsdPaymentSendAsBtcDenominated(input: OnChainUsdPaymentSendAsBtcDenominatedInput!): PaymentSendPayload!
   quizCompleted(input: QuizCompletedInput!): QuizCompletedPayload!
+
+  """
+  Returns an offer from Flash for a user to withdraw from their USD wallet (denominated in cents).
+  The user can review this offer and then execute the withdrawal by calling the initiateCashout mutation.
+  """
+  requestCashout(input: RequestCashoutInput!): RequestCashoutResponse!
   userContactUpdateAlias(input: UserContactUpdateAliasInput!): UserContactUpdateAliasPayload! @deprecated(reason: "will be moved to AccountContact")
   userEmailDelete: UserEmailDeletePayload!
   userEmailRegistrationInitiate(input: UserEmailRegistrationInitiateInput!): UserEmailRegistrationInitiatePayload!
@@ -1435,6 +1484,23 @@ type RealtimePricePayload
   realtimePrice: RealtimePrice
 }
 
+input RequestCashoutInput
+  @join__type(graph: PUBLIC)
+{
+  """Amount in USD cents."""
+  amount: USDCents!
+
+  """ID for a USD wallet belonging to the current user."""
+  walletId: WalletId!
+}
+
+type RequestCashoutResponse
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error!]!
+  offer: CashoutOffer
+}
+
 """
 Non-fractional signed whole numeric value between -(2^53) + 1 and 2^53 - 1
 """
@@ -1624,6 +1690,10 @@ type UpgradePayload
   errors: [Error!]!
   success: Boolean!
 }
+
+"""Amount in USD cents"""
+scalar USDCents
+  @join__type(graph: PUBLIC)
 
 """
 A wallet belonging to an account which contains a USD balance and a list of transactions.

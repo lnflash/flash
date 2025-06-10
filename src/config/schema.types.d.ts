@@ -16,6 +16,30 @@ type AccountLimitsConfig = {
   }
 }
 
+type WebhookServer = {
+  uri: string
+  port: number
+  secret: string
+}
+
+type IbexConfig = {
+  url: string
+  email: string
+  password: string
+  webhook: WebhookServer
+}
+
+type CashoutEmail = {
+  to: string
+  from: string
+  subject: string
+}
+
+type MailgunConfig = {
+  apiKey: string
+  domain: string
+}
+
 type YamlSchema = {
   name: string
   lightningAddressDomain: string
@@ -148,4 +172,35 @@ type YamlSchema = {
   skipFeeProbeConfig: { pubkey: string[]; chanId: string[] }
   smsAuthUnsupportedCountries: string[]
   whatsAppAuthUnsupportedCountries: string[]
+  ibex: IbexConfig,
+  exchangeRates: StaticRates
+  cashout: {
+    enabled: boolean
+    minimum: {
+      amount: number
+      currency: string
+    }
+    maximum: {
+      amount: number
+      currency: string
+    }
+    accountLevel: 0 | 1 | 2
+    fee: number
+    duration: number
+    email: CashoutEmail
+  }
+  mailgun: MailgunConfig
+}
+
+type CurrencyCode = string
+
+type PriceSpread = {
+  bid: number,
+  ask: number,
+}
+
+type StaticRates = {
+  [key: CurrencyCode]: {
+    [key: CurrencyCode]: PriceSpread
+  }
 }

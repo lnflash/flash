@@ -104,7 +104,7 @@ if (require.main === module) {
       // activateLndHealthCheck() // 
 
       const res = await bootstrap()
-      if (res instanceof Error) throw res
+      // if (res instanceof Error) throw res
 
       await Promise.race([
         startApolloServerForCoreSchema(),

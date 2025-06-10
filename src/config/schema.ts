@@ -1,5 +1,6 @@
-import { AccountStatus } from "@domain/accounts/primitives"
+import { AccountRoles, AccountStatus } from "@domain/accounts/primitives"
 import { WalletCurrency } from "@domain/shared"
+
 
 const displayCurrencyConfigSchema = {
   type: "object",
@@ -223,23 +224,31 @@ export const configSchema = {
         required: ["role", "phone"],
         additionalProperties: false,
       },
+      contains: {
+        type: "object",
+        properties: {
+          role: {
+            const: AccountRoles.bankowner,
+          },
+        }
+      },
       default: [
-        {
-          role: "dealer",
-          phone: "+16505554327",
-        },
-        {
-          role: "funder",
-          phone: "+16505554325",
-        },
-        {
-          role: "bankowner",
-          phone: "+16505554334",
-        },
-        {
-          role: "editor",
-          phone: "+16505554336",
-        },
+        // {
+        //   role: "dealer",
+        //   phone: "+16505554327",
+        // },
+        // {
+        //   role: "funder",
+        //   phone: "+16505554325",
+        // },
+        // {
+        //   role: "bankowner",
+        //   phone: "+16505554334",
+        // },
+        // {
+        //   role: "editor",
+        //   phone: "+16505554336",
+        // },
       ],
       uniqueItems: true,
     },
@@ -618,6 +627,37 @@ export const configSchema = {
       items: { type: "string" },
       default: [],
     },
+    ibex: {
+      type: "object",
+      properties: {
+        url: { type: "string" },
+        email: { type: "string" },
+        password: { type: "string" },
+        webhook: {
+          type: "object",
+          properties: { 
+            port: { type: "integer" } , 
+            uri: { type: "string" } , 
+            secret: { type: "string" } , 
+          },
+        },
+      },
+    },
+    exchangeRates: {
+      type: "object",
+    },
+    cashout: {
+      type: "object",
+      properties: {
+        enabled: { type: "boolean" },
+      },
+      required: ["minimum", "maximum", "accountLevel"],
+      default: { enabled: true },
+    },
+    mailgun: {
+      type: "object",
+      required: ["apiKey", "domain"]
+    }
   },
   required: [
     "lightningAddressDomain",
@@ -629,8 +669,6 @@ export const configSchema = {
     "ratioPrecision",
     "buildVersion",
     "rewards",
-    "coldStorage",
-    "bria",
     "lndScbBackupBucketName",
     "admin_accounts",
     "test_accounts",
@@ -648,6 +686,9 @@ export const configSchema = {
     "skipFeeProbeConfig",
     "smsAuthUnsupportedCountries",
     "whatsAppAuthUnsupportedCountries",
+    "exchangeRates",
+    "cashout",
+    "ibex",
   ],
   additionalProperties: false,
 } as const

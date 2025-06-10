@@ -22,6 +22,7 @@ import {
   balanceAmountFromNumber,
   BigIntFloatConversionError,
   ErrorLevel,
+  USDAmount,
   WalletCurrency,
 } from "@domain/shared"
 import { fromObjectId, toObjectId } from "@services/mongoose/utils"
@@ -40,10 +41,9 @@ import { volume } from "./volume"
 
 // FLASH FORK: import ibex dependencies
 import Ibex from "@services/ibex/client"
-
 import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
 import { ApiError, AuthenticationError } from "ibex-client"
-// import { ApiError, AuthenticationError } from "ibex-client"
+import * as cashout from "./cashout"
 
 export { getNonEndUserWalletIds } from "./caching"
 export { translateToLedgerJournal } from "./helpers"
@@ -108,10 +108,10 @@ export const LedgerService = (): ILedgerService => {
   const getTransactionsByWalletId = async (
     walletId: WalletId,
   ): Promise<LedgerTransaction<WalletCurrency>[] | LedgerError> => {
-    const liabilitiesWalletId = toLiabilitiesWalletId(walletId)
+    // const liabilitiesWalletId = toLiabilitiesWalletId(walletId)
     try {
       const { results } = await MainBook.ledger({
-        account: liabilitiesWalletId,
+        account: ["Accounts Payable", "JMD", walletId]
       })
       // @ts-ignore-next-line no-implicit-any error
       return results.map((tx) => translateToLedgerTx(tx))
@@ -307,14 +307,15 @@ export const LedgerService = (): ILedgerService => {
           })
         }
       }
+      return balance as Satoshis
 
-      const resp = await Ibex.getAccountDetails(walletId)
-      if (resp instanceof IbexError) {
-        if (resp.httpCode === 404) return toSats(0)
-        return resp
-      }
-      if (resp.balance === undefined) return new UnexpectedIbexResponse("Balance not found")
-      return toSats(resp.balance * 100)
+    //   const resp = await Ibex.getAccountDetails(walletId)
+    //   if (resp instanceof IbexError) {
+    //     if (resp.httpCode === 404) return USDAmount.ZERO
+    //     return resp
+    //   }
+    //   if (resp.balance === undefined) return new UnexpectedIbexResponse("Balance not found")
+    //   return resp.balance
     } catch (err) {
       return new UnknownLedgerError(err)
     }
@@ -494,6 +495,7 @@ export const LedgerService = (): ILedgerService => {
       isLnTxRecorded,
       getWalletIdByTransactionHash,
       listWalletIdsWithPendingPayments,
+      ...cashout,
       ...admin,
       ...volume,
       ...send,
