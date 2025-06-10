@@ -1,10 +1,11 @@
 
 import OffersManager from "@app/offers/OffersManager"
+import { Cashout } from "@config"
+import { NotImplementedError } from "@domain/errors"
 import { mapToGqlErrorList } from "@graphql/error-map"
 import { GT } from "@graphql/index"
 import SuccessPayload from "@graphql/shared/types/payload/success-payload"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
-import { baseLogger } from "@services/logger"
 import dedent from "dedent"
 
 const InitiateCashoutInput = GT.Input({
@@ -29,6 +30,9 @@ const InitiateCashoutMutation = GT.Field({
     complexity: 60,
   },
   resolve: async (_, args) => {
+    if (!Cashout.Enabled)
+      return new NotImplementedError("Cashout feature is not enabled")
+
     const { offerId, walletId } = args.input
     // Parse for input errors
     for (const f of [offerId, walletId]) {

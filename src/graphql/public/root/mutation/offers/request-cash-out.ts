@@ -6,7 +6,8 @@ import IError from "@graphql/shared/types/abstract/error"
 import USDCentsScalar from "@graphql/shared/types/scalar/usd-cents"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import dedent from "dedent"
-
+import { Cashout } from "@config"
+import { NotImplementedError } from "@domain/errors"
 
 const RequestCashoutInput = GT.Input({
   name: "RequestCashoutInput",
@@ -45,6 +46,9 @@ const RequestCashoutMutation = GT.Field({
     complexity: 120,
   },
   resolve: async (_, args) => {
+    if (!Cashout.Enabled)
+      return new NotImplementedError("Cashout feature is not enabled")
+
     const { walletId, amount } = args.input
     for (const input of [walletId, amount]) {
       if (input instanceof Error) {

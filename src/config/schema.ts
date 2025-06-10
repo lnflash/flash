@@ -648,7 +648,11 @@ export const configSchema = {
     },
     cashout: {
       type: "object",
+      properties: {
+        enabled: { type: "boolean" },
+      },
       required: ["minimum", "maximum", "accountLevel"],
+      default: { enabled: true },
     },
     mailgun: {
       type: "object",

@@ -175,6 +175,7 @@ type YamlSchema = {
   ibex: IbexConfig,
   exchangeRates: StaticRates
   cashout: {
+    enabled: boolean
     minimum: {
       amount: number
       currency: string
