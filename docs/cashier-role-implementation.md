@@ -18,10 +18,10 @@ This document tracks the implementation of the Cashier Role feature for the Flas
 - [ ] Implement role-based access control (RBAC) middleware
 
 ### Phase 2: Core Features
-- [ ] Create cashier-specific GraphQL mutations and queries
+- [ ] Add cashier-specific GraphQL queries for viewing data
 - [ ] Implement cashier transaction logging and audit trail
 - [ ] Add cashier role management to admin interface
-- [ ] Create cashier-specific API endpoints and permissions
+- [ ] Extend existing API endpoints with cashier permissions
 
 ### Phase 3: Enhancement & Polish
 - [ ] Implement cashier session management with Redis

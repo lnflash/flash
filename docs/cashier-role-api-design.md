@@ -68,53 +68,18 @@ extend type Query {
 }
 ```
 
-### Cashier-Specific Mutations
+### Cashier-Specific Permissions
+
+Cashiers will have permissions to access existing mutations and queries with additional authorization checks:
 
 ```graphql
-extend type Mutation {
-  # Process cash deposit
-  cashierProcessDeposit(input: CashDepositInput!): CashDepositPayload! 
-    @requiresRole(role: CASHIER)
-    @requiresPermission(permission: PROCESS_DEPOSITS)
-  
-  # Process cash withdrawal
-  cashierProcessWithdrawal(input: CashWithdrawalInput!): CashWithdrawalPayload!
-    @requiresRole(role: CASHIER)
-    @requiresPermission(permission: PROCESS_WITHDRAWALS)
-  
-  # Generate transaction report
-  cashierGenerateReport(input: ReportInput!): ReportPayload!
-    @requiresRole(role: CASHIER)
-    @requiresPermission(permission: GENERATE_REPORTS)
-}
-
-input CashDepositInput {
-  userId: ID!
-  amount: SignedAmount!
-  reference: String!
-  notes: String
-}
-
-input CashWithdrawalInput {
-  userId: ID!
-  amount: SignedAmount!
-  reference: String!
-  verificationCode: String!
-  notes: String
-}
-
-type CashDepositPayload {
-  success: Boolean!
-  transaction: Transaction
-  errors: [Error!]!
-}
-
-type CashWithdrawalPayload {
-  success: Boolean!
-  transaction: Transaction
-  errors: [Error!]!
-}
+# Cashiers can use existing mutations with permission checks:
+# - Standard payment mutations with cashier context logging
+# - Transaction queries with extended filters
+# - Report generation through existing analytics endpoints
 ```
+
+The cashier role will be enforced at the resolver level using graphql-shield rules to ensure proper authorization and audit logging for all operations.
 
 ### Admin Mutations for Role Management
 
@@ -140,9 +105,7 @@ extend type Mutation {
 ## REST API Endpoints (Alternative/Supplementary)
 
 ### Cashier Operations
-- `POST /api/cashier/deposit` - Process cash deposit
-- `POST /api/cashier/withdrawal` - Process cash withdrawal
-- `GET /api/cashier/transactions/:userId` - View user transactions
+- `GET /api/cashier/transactions/:userId` - View user transactions (with permission check)
 - `GET /api/cashier/audit-log` - Get cashier's activity log
 
 ### Admin Operations
@@ -158,11 +121,10 @@ All cashier endpoints require:
 
 ## Rate Limiting
 
-Cashier endpoints have specific rate limits:
-- Deposits: 30 per minute
-- Withdrawals: 20 per minute
+Cashier operations have specific rate limits:
 - Transaction views: 100 per minute
 - Report generation: 5 per hour
+- All payment operations follow standard rate limits with cashier context
 
 ## Audit Requirements
 

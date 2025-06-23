@@ -23,24 +23,23 @@ describe("RoleAuthMiddleware", () => {
 })
 ```
 
-#### Cashier Operations Tests
+#### Cashier Authorization Tests
 ```typescript
-// Location: test/unit/app/cashier/process-deposit.spec.ts
-describe("CashierProcessDeposit", () => {
-  - process valid cash deposit
-  - handle invalid amounts
-  - verify audit log creation
-  - test transaction limits
-  - validate reference number uniqueness
+// Location: test/unit/app/cashier/cashier-permissions.spec.ts
+describe("CashierPermissions", () => {
+  - verify permission checks for viewing transactions
+  - test access control for user balance queries
+  - verify audit log creation for all actions
+  - validate role-based filtering
+  - test permission inheritance
 })
 
-// Location: test/unit/app/cashier/process-withdrawal.spec.ts
-describe("CashierProcessWithdrawal", () => {
-  - process valid withdrawal
-  - verify user balance checks
-  - validate verification codes
-  - test withdrawal limits
-  - handle insufficient funds
+// Location: test/unit/app/cashier/cashier-context.spec.ts
+describe("CashierContext", () => {
+  - verify cashier context in existing mutations
+  - test audit trail for standard operations
+  - validate cashier-specific rate limits
+  - ensure proper session tracking
 })
 ```
 
@@ -48,13 +47,13 @@ describe("CashierProcessWithdrawal", () => {
 
 #### GraphQL API Tests
 ```typescript
-// Location: test/integration/graphql/cashier-mutations.spec.ts
-describe("Cashier GraphQL Mutations", () => {
-  - test cashierProcessDeposit mutation
-  - test cashierProcessWithdrawal mutation
-  - verify role-based access control
-  - test audit trail generation
-  - validate error responses
+// Location: test/integration/graphql/cashier-authorization.spec.ts
+describe("Cashier GraphQL Authorization", () => {
+  - test cashier access to existing mutations
+  - verify permission-based filtering
+  - test audit trail generation for all operations
+  - validate cashier context in resolvers
+  - ensure proper error handling for unauthorized access
 })
 
 // Location: test/integration/graphql/cashier-queries.spec.ts
@@ -83,20 +82,20 @@ describe("Cashier Audit Service", () => {
 ```typescript
 // Location: test/e2e/cashier-workflows.spec.ts
 describe("Cashier Complete Workflows", () => {
-  scenario("Cash Deposit Flow", () => {
+  scenario("Cashier Transaction View Flow", () => {
     - login as cashier
     - search for user
-    - process deposit
-    - verify balance update
+    - view user transactions
+    - verify filtered results based on permissions
     - check audit log
   })
   
-  scenario("Cash Withdrawal Flow", () => {
+  scenario("Cashier Report Generation Flow", () => {
     - login as cashier
-    - verify user identity
-    - process withdrawal
-    - print receipt
-    - verify audit trail
+    - select report parameters
+    - generate transaction report
+    - verify data access limits
+    - confirm audit trail
   })
 })
 ```
@@ -134,26 +133,29 @@ export const testCashierAccount = {
   id: "test-cashier-001",
   role: UserRole.CASHIER,
   permissions: [
-    CashierPermission.PROCESS_DEPOSITS,
-    CashierPermission.VIEW_TRANSACTIONS
+    CashierPermission.VIEW_TRANSACTIONS,
+    CashierPermission.VIEW_USER_BALANCES,
+    CashierPermission.GENERATE_REPORTS
   ]
 }
 
-// test/fixtures/cashier-transactions.ts
-export const testDeposit = {
-  amount: 100_000, // sats
-  reference: "CASH-DEP-001",
-  userId: "test-user-001"
+// test/fixtures/cashier-audit-logs.ts
+export const testAuditLog = {
+  cashierId: "test-cashier-001",
+  action: "VIEW_USER_TRANSACTIONS",
+  targetUserId: "test-user-001",
+  timestamp: new Date()
 }
 ```
 
 ## Performance Tests
 
 ### Load Testing Scenarios
-- 100 concurrent cashiers processing deposits
-- 1000 transactions per minute throughput
+- 100 concurrent cashiers viewing transactions
+- 1000 query operations per minute throughput
 - Audit log write performance under load
 - Redis session management at scale
+- Permission checking performance with large permission sets
 
 ## Test Coverage Requirements
 - Unit test coverage: >= 90%
