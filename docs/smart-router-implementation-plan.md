@@ -4,6 +4,14 @@
 
 This document outlines the phased implementation approach for the Smart Router feature in Flash. The implementation is divided into manageable phases with clear deliverables and success criteria.
 
+### 📚 Implementation Approach Documents
+- **[Methodical Implementation Guide](./smart-router-methodical-implementation.md)** - Detailed 40+ milestone breakdown with small PRs
+- **[AI Implementation Guide](./smart-router-ai-implementation-guide.md)** - Step-by-step instructions for AI agents
+- **[Security Specification](./smart-router-security.md)** - Security requirements and threat model
+- **[Testing Strategy](./smart-router-testing.md)** - Comprehensive testing approach
+
+**Important**: The methodical implementation guide supersedes the timeline in this document. We will follow a slower, more deliberate approach with 200-300 line PRs for thorough review.
+
 ## Implementation Phases
 
 ### Phase 1: Foundation (Weeks 1-3)
