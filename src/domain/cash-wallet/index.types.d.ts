@@ -170,3 +170,150 @@ interface ECashBalance {
   /** Newest token timestamp */
   readonly newestToken?: Date
 }
+
+/**
+ * SMART_ROUTER: Route Type Enum
+ *
+ * Purpose: Categorizes payment routes for analytics and optimization
+ *
+ * @since smart-router-v1
+ */
+type RouteType =
+  (typeof import("./index").RouteType)[keyof typeof import("./index").RouteType]
+
+/**
+ * SMART_ROUTER: Payment Adapter Capabilities
+ *
+ * Purpose: Describes what operations an adapter supports for routing decisions
+ *
+ * Security: Capabilities affect which routes are considered safe/available
+ *
+ * @since smart-router-v1
+ */
+interface AdapterCapabilities {
+  /** Can operate without internet connection */
+  readonly supportsOffline: boolean
+
+  /** Can send/receive Lightning payments */
+  readonly supportsLightning: boolean
+
+  /** Can handle Cashu eCash tokens */
+  readonly supportsCashu: boolean
+
+  /** Can participate in split payments */
+  readonly supportsSplitPayments: boolean
+
+  /** Maximum amount this adapter can send (in satoshis) */
+  readonly maxSendAmount?: bigint
+
+  /** Minimum amount this adapter can send (in satoshis) */
+  readonly minSendAmount?: bigint
+
+  /** Average time to complete a payment (in milliseconds) */
+  readonly avgPaymentTime: number
+
+  /** Base fee for using this adapter (in satoshis) */
+  readonly baseFee: bigint
+
+  /** Fee rate as parts per million */
+  readonly feeRate: number
+}
+
+/**
+ * SMART_ROUTER: Fee Estimate
+ *
+ * Purpose: Estimated fees for a payment route
+ *
+ * Security: Fee calculations must be deterministic and auditable
+ *
+ * @since smart-router-v1
+ */
+interface FeeEstimate {
+  /** Base fee in satoshis */
+  readonly baseFee: bigint
+
+  /** Proportional fee in satoshis */
+  readonly proportionalFee: bigint
+
+  /** Total estimated fee */
+  readonly totalFee: bigint
+
+  /** Confidence level of estimate (0-1) */
+  readonly confidence: number
+
+  /** Timestamp when estimate was calculated */
+  readonly calculatedAt: Date
+}
+
+/**
+ * SMART_ROUTER: Payment Route
+ *
+ * Purpose: Represents a possible path for executing a payment
+ *
+ * Security: Routes must include all security metadata for validation
+ *
+ * @since smart-router-v1
+ */
+interface PaymentRoute {
+  /** Unique identifier for this route */
+  readonly id: RouteId
+
+  /** Type of route (single, split, swap) */
+  readonly type: RouteType
+
+  /** Adapters involved in this route */
+  readonly adapters: AdapterId[]
+
+  /** Payment amount in satoshis */
+  readonly amount: bigint
+
+  /** Estimated fees for this route */
+  readonly fees: FeeEstimate
+
+  /** Estimated completion time in milliseconds */
+  readonly estimatedTime: number
+
+  /** Route score for comparison (higher is better) */
+  readonly score: number
+
+  /** Whether this route requires internet connectivity */
+  readonly requiresOnline: boolean
+
+  /** Privacy level of this route (1-5, higher is more private) */
+  readonly privacyLevel: number
+
+  /** Additional metadata for route execution */
+  readonly metadata: Record<string, unknown>
+}
+
+/**
+ * SMART_ROUTER: Payment Recipient
+ *
+ * Purpose: Represents the destination for a payment with capabilities
+ *
+ * Security: Recipient validation is critical for preventing payment errors
+ *
+ * @since smart-router-v1
+ */
+interface PaymentRecipient {
+  /** Type of recipient (lightning_invoice, cashu_token, on_chain, etc.) */
+  readonly type: string
+
+  /** Recipient identifier (invoice, address, etc.) */
+  readonly identifier: string
+
+  /** Whether recipient supports split payments */
+  readonly supportsSplitPayments: boolean
+
+  /** Preferred payment methods in order of preference */
+  readonly preferredMethods: AdapterType[]
+
+  /** Amount if specified by recipient (e.g., in invoice) */
+  readonly amount?: bigint
+
+  /** Expiry time for time-sensitive recipients */
+  readonly expiresAt?: Date
+
+  /** Additional recipient metadata */
+  readonly metadata: Record<string, unknown>
+}
