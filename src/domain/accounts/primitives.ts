@@ -23,10 +23,24 @@ export const AccountLimitsType = {
   SelfTrade: "TradeIntraAccount",
 } as const
 
+/**
+ * CASHIER_ROLE: Updated AccountRoles enum
+ *
+ * Purpose: Extend existing roles to include cashier role for POS/teller operations.
+ * The cashier role enables restricted access to view transactions and generate reports.
+ *
+ * Security: Cashier role has limited read-only permissions by default.
+ * Specific permissions must be granted through cashierPermissions array.
+ *
+ * @modified cashier-role-v1
+ * @security-review pending
+ * @milestone 1
+ */
 export const AccountRoles = {
   dealer: "dealer", // deprecated. does not apply to flash
   funder: "funder", // deprecated. does not apply to flash
   bankowner: "bankowner",
   user: "user",
   editor: "editor",
+  cashier: "cashier", // NEW: Added for cashier role feature
 }

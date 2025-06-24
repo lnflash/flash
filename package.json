@@ -30,7 +30,7 @@
     "gen-test-jwt": "ts-node ./dev/bin/gen-test-jwt.ts"
   },
   "engines": {
-    "node": "20"
+    "node": "23"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.1.0",

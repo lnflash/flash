@@ -41,10 +41,9 @@ export const AccountRole = {
 
 enum CashierPermission {
   VIEW_TRANSACTIONS = "VIEW_TRANSACTIONS",
-  PROCESS_DEPOSITS = "PROCESS_DEPOSITS",
-  PROCESS_WITHDRAWALS = "PROCESS_WITHDRAWALS",
   VIEW_USER_BALANCES = "VIEW_USER_BALANCES",
-  GENERATE_REPORTS = "GENERATE_REPORTS"
+  GENERATE_REPORTS = "GENERATE_REPORTS",
+  ACCESS_AUDIT_LOGS = "ACCESS_AUDIT_LOGS"
 }
 ```
 
@@ -123,10 +122,9 @@ const AccountSchema = new Schema<AccountRecord>({
 ```typescript
 export const CashierPermission = {
   ViewTransactions: "VIEW_TRANSACTIONS",
-  ProcessDeposits: "PROCESS_DEPOSITS", 
-  ProcessWithdrawals: "PROCESS_WITHDRAWALS",
   ViewUserBalances: "VIEW_USER_BALANCES",
-  GenerateReports: "GENERATE_REPORTS"
+  GenerateReports: "GENERATE_REPORTS",
+  AccessAuditLogs: "ACCESS_AUDIT_LOGS"
 } as const
 
 export type CashierPermission = typeof CashierPermission[keyof typeof CashierPermission]

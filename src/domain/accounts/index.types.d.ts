@@ -83,6 +83,43 @@ type Account = {
   displayCurrency: DisplayCurrency
   // temp
   role?: string
+
+  /**
+   * CASHIER_ROLE: Cashier-specific authentication fields
+   *
+   * Purpose: Support PIN-based authentication and permission management for cashiers.
+   * These fields are only populated for accounts with cashier role.
+   *
+   * Security: PIN fields must never be exposed in API responses.
+   *
+   * @added cashier-role-v1
+   * @security-review pending
+   * @milestone 1
+   */
+
+  /** Bcrypt hash of cashier PIN - only for cashier role */
+  pinHash?: string
+
+  /** When the PIN was created */
+  pinCreatedAt?: Date
+
+  /** Last successful PIN usage */
+  pinLastUsedAt?: Date
+
+  /** Failed PIN attempts counter */
+  pinFailedAttempts?: number
+
+  /** Account locked until this time due to failed attempts */
+  pinLockedUntil?: Date
+
+  /** Last authentication method used */
+  lastLoginMethod?: "phone" | "email" | "pin"
+
+  /** Cashier permissions array - empty for non-cashier roles */
+  cashierPermissions?: CashierPermission[]
+
+  /** Terminal ID for location-bound sessions */
+  terminalId?: string
 }
 
 // deprecated
@@ -151,7 +188,7 @@ type AccountLimitsVolumes =
 
 type AccountValidator = {
   isActive(): true | ValidationError
-  isLevel(accountLevel: number): true | ValidationError 
+  isLevel(accountLevel: number): true | ValidationError
   validateWalletForAccount(wallet: Wallet): true | ValidationError
 }
 
@@ -169,7 +206,7 @@ interface IAccountsRepository {
   update(account: Account): Promise<Account | RepositoryError>
 }
 
-type AdminRole = "dealer" | "funder" | "bankowner" | "editor"
+type AdminRole = "dealer" | "funder" | "bankowner" | "editor" | "cashier"
 type AdminAccount = {
   role: AdminRole
   phone: PhoneNumber
