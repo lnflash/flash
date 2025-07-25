@@ -14,7 +14,8 @@ export type CashoutDetails = {
       readonly jmd: JMDAmount,
     }
     readonly fee: USDAmount 
-  }
+    readonly exchangeRate: JMDAmount,
+  },
 }
 
 // Offer sent to the user

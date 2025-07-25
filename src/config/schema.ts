@@ -651,7 +651,7 @@ export const configSchema = {
       properties: {
         enabled: { type: "boolean" },
       },
-      required: ["minimum", "maximum", "accountLevel"],
+      required: ["enabled", "minimum", "maximum", "accountLevel"],
       default: { enabled: true },
     },
     mailgun: {

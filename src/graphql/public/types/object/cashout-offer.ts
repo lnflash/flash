@@ -35,11 +35,11 @@ const CashoutOffer: GraphQLObjectType<PersistedOffer, GraphQLPublicContext> = GT
       description: "The amount Flash owes to the user denominated in JMD as cents",
       resolve: (o) => o.details.flash.liability.jmd,
     },
-    // exchangeRate: {
-    //   type: GT.NonNull(GT.Float), 
-    //   description: "The price to convert USD -> Flash",
-    //   resolve: (src: CashoutOffer) => src.receiveJmd.exchangeRate,
-    // },
+    exchangeRate: {
+      type: GT.NonNull(JMDCentsScalar), 
+      description: "The rate used when withdrawing to a JMD bank account",
+      resolve: (o) => o.details.flash.exchangeRate,
+    },
     flashFee: {
       type: GT.NonNull(USDCentsScalar), 
       description: "The amount that Flash is charging for it's services",
