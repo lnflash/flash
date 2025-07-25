@@ -72,7 +72,7 @@ export class USDAmount extends MoneyAmount {
   // convert dollars to cents
   static dollars(d: number | string): USDAmount | BigIntConversionError {
     try {
-      const dollarAmt = new Money(d, "USDollars", Round.HALF_TO_EVEN)
+      const dollarAmt = new Money(d.toString(), "USDollars", Round.HALF_TO_EVEN)
       const cents = USDAmount.cents(100n)
       if (cents instanceof BigIntConversionError) return cents // should never happen
       return new USDAmount(cents.money.multiply(dollarAmt).toFixed(2))

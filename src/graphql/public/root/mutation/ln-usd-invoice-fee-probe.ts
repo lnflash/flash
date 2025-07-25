@@ -18,6 +18,9 @@ import Ibex from "@services/ibex/client"
 import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
 import { ValidationError, WalletCurrency } from "@domain/shared"
 import { baseLogger } from "@services/logger"
+import IError from "@graphql/shared/types/abstract/error"
+import USDCentsScalar from "@graphql/shared/types/scalar/usd-cents"
+import CentAmount from "@graphql/public/types/scalar/cent-amount"
 // import { IbexRoutes } from "../../../../services/ibex/Routes"
 // import { requestIBexPlugin } from "../../../../services/ibex/IbexHelper"
 
@@ -26,6 +29,21 @@ const LnUsdInvoiceFeeProbeInput = GT.Input({
   fields: () => ({
     walletId: { type: GT.NonNull(WalletId) },
     paymentRequest: { type: GT.NonNull(LnPaymentRequest) },
+  }),
+})
+
+const UsdFeeProbeResponse = GT.Object({
+  name: "UsdInvoiceEstimate",
+  fields: () => ({
+    errors: {
+      type: GT.NonNullList(IError),
+    },
+    invoiceAmount: {
+      type: USDCentsScalar,
+    },
+    fee: {
+      type: USDCentsScalar,
+    },
   }),
 })
 
@@ -42,7 +60,7 @@ const LnUsdInvoiceFeeProbeMutation = GT.Field<
   extensions: {
     complexity: 120,
   },
-  type: GT.NonNull(CentAmountPayload),
+  type: GT.NonNull(UsdFeeProbeResponse),
   args: {
     input: { type: GT.NonNull(LnUsdInvoiceFeeProbeInput) },
   },
@@ -76,7 +94,8 @@ const LnUsdInvoiceFeeProbeMutation = GT.Field<
     
     return {
       errors: [],
-      ...resp.fee.gqlPayload(),
+      invoiceAmount: resp.invoice,
+      fee: resp.fee,
     }
   },
 })
