@@ -22,6 +22,8 @@ export class UnexpectedIbexResponse extends IbexError {
   }
 }
 
+export class ParseError extends IbexError {}
+
 export class InsufficientIbexBalance extends IbexError {}
 export class CompletedInvoice extends IbexError {}
 

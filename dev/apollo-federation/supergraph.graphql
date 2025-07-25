@@ -1049,7 +1049,7 @@ type Mutation
     associated with the amount).
   """
   lnUsdInvoiceCreateOnBehalfOfRecipient(input: LnUsdInvoiceCreateOnBehalfOfRecipientInput!): LnInvoicePayload!
-  lnUsdInvoiceFeeProbe(input: LnUsdInvoiceFeeProbeInput!): CentAmountPayload!
+  lnUsdInvoiceFeeProbe(input: LnUsdInvoiceFeeProbeInput!): UsdInvoiceEstimate!
   merchantMapSuggest(input: MerchantMapSuggestInput!): MerchantPayload!
   onChainAddressCreate(input: OnChainAddressCreateInput!): OnChainAddressPayload!
   onChainAddressCurrent(input: OnChainAddressCurrentInput!): OnChainAddressPayload!
@@ -1694,6 +1694,14 @@ type UpgradePayload
 """Amount in USD cents"""
 scalar USDCents
   @join__type(graph: PUBLIC)
+
+type UsdInvoiceEstimate
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error!]!
+  fee: USDCents
+  invoiceAmount: USDCents
+}
 
 """
 A wallet belonging to an account which contains a USD balance and a list of transactions.

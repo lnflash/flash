@@ -826,7 +826,7 @@ type Mutation {
     associated with the amount).
   """
   lnUsdInvoiceCreateOnBehalfOfRecipient(input: LnUsdInvoiceCreateOnBehalfOfRecipientInput!): LnInvoicePayload!
-  lnUsdInvoiceFeeProbe(input: LnUsdInvoiceFeeProbeInput!): CentAmountPayload!
+  lnUsdInvoiceFeeProbe(input: LnUsdInvoiceFeeProbeInput!): UsdInvoiceEstimate!
   merchantMapSuggest(input: MerchantMapSuggestInput!): MerchantPayload!
   onChainAddressCreate(input: OnChainAddressCreateInput!): OnChainAddressPayload!
   onChainAddressCurrent(input: OnChainAddressCurrentInput!): OnChainAddressPayload!
@@ -1323,6 +1323,12 @@ type UpgradePayload {
   authToken: AuthToken
   errors: [Error!]!
   success: Boolean!
+}
+
+type UsdInvoiceEstimate {
+  errors: [Error!]!
+  fee: USDCents
+  invoiceAmount: USDCents
 }
 
 """

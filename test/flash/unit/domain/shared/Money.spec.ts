@@ -70,6 +70,12 @@ describe("Money Amount", () => {
       expect(cents.asCents()).toBe('123')
     })
 
+    it("should get the cent amount from dollars", () => {
+      const cents = USDAmount.dollars(0.013717477287)
+      if (cents instanceof Error) throw cents
+      expect(cents.asCents(2)).toBe('1.37')
+    })
+
     it("should calculate the correct percentage using mulBasisPoints", () => {
       const amount = USDAmount.cents('10000') // $100.00
       if (amount instanceof Error) throw amount
