@@ -205,6 +205,9 @@ input CaptchaRequestAuthCodeInput {
 }
 
 type CashoutOffer {
+  """The rate used when withdrawing to a JMD bank account"""
+  exchangeRate: JMDCents!
+
   """The time at which this offer is no longer accepted by Flash"""
   expiresAt: Timestamp!
 

@@ -34,7 +34,8 @@ const OffersManager = {
 
     const flashFee = userPayment.multiplyBips(config.fee)
     const usdLiability = userPayment.subtract(flashFee)
-    const jmdLiability = usdLiability.convertAtRate(config.jmd.sell) 
+    const exchangeRate = config.jmd.sell // todo: get from price server
+    const jmdLiability = usdLiability.convertAtRate(exchangeRate) 
 
     const validated = await ValidOffer.from({
       ibexTrx: {
@@ -49,6 +50,7 @@ const OffersManager = {
           usd: usdLiability,
           jmd: jmdLiability,
         },
+        exchangeRate,
         fee: flashFee,
       },
     })
