@@ -312,8 +312,9 @@ scalar CentAmount
 type CentAmountPayload
   @join__type(graph: PUBLIC)
 {
-  amount: CentAmount
+  amount: USDCents
   errors: [Error!]!
+  invoiceAmount: USDCents
 }
 
 type ConsumerAccount implements Account
@@ -1052,7 +1053,7 @@ type Mutation
     associated with the amount).
   """
   lnUsdInvoiceCreateOnBehalfOfRecipient(input: LnUsdInvoiceCreateOnBehalfOfRecipientInput!): LnInvoicePayload!
-  lnUsdInvoiceFeeProbe(input: LnUsdInvoiceFeeProbeInput!): UsdInvoiceEstimate!
+  lnUsdInvoiceFeeProbe(input: LnUsdInvoiceFeeProbeInput!): CentAmountPayload!
   merchantMapSuggest(input: MerchantMapSuggestInput!): MerchantPayload!
   onChainAddressCreate(input: OnChainAddressCreateInput!): OnChainAddressPayload!
   onChainAddressCurrent(input: OnChainAddressCurrentInput!): OnChainAddressPayload!
@@ -1697,14 +1698,6 @@ type UpgradePayload
 """Amount in USD cents"""
 scalar USDCents
   @join__type(graph: PUBLIC)
-
-type UsdInvoiceEstimate
-  @join__type(graph: PUBLIC)
-{
-  errors: [Error!]!
-  fee: USDCents
-  invoiceAmount: USDCents
-}
 
 """
 A wallet belonging to an account which contains a USD balance and a list of transactions.
