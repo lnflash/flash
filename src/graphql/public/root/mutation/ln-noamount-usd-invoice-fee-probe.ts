@@ -77,7 +77,8 @@ const LnNoAmountUsdInvoiceFeeProbeMutation = GT.Field({
 
     return {
       errors: [],
-      ...resp.fee.gqlPayload(),
+      invoiceAmount: resp.invoice,
+      amount: resp.fee,
     }
   },
 })

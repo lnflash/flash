@@ -32,20 +32,20 @@ const LnUsdInvoiceFeeProbeInput = GT.Input({
   }),
 })
 
-const UsdFeeProbeResponse = GT.Object({
-  name: "UsdInvoiceEstimate",
-  fields: () => ({
-    errors: {
-      type: GT.NonNullList(IError),
-    },
-    invoiceAmount: {
-      type: USDCentsScalar,
-    },
-    fee: {
-      type: USDCentsScalar,
-    },
-  }),
-})
+// const UsdFeeProbeResponse = GT.Object({
+//   name: "UsdInvoiceEstimate",
+//   fields: () => ({
+//     errors: {
+//       type: GT.NonNullList(IError),
+//     },
+//     invoiceAmount: {
+//       type: USDCentsScalar,
+//     },
+//     fee: {
+//       type: USDCentsScalar,
+//     },
+//   }),
+// })
 
 const LnUsdInvoiceFeeProbeMutation = GT.Field<
   null,
@@ -60,7 +60,7 @@ const LnUsdInvoiceFeeProbeMutation = GT.Field<
   extensions: {
     complexity: 120,
   },
-  type: GT.NonNull(UsdFeeProbeResponse),
+  type: GT.NonNull(CentAmountPayload),
   args: {
     input: { type: GT.NonNull(LnUsdInvoiceFeeProbeInput) },
   },
@@ -95,7 +95,7 @@ const LnUsdInvoiceFeeProbeMutation = GT.Field<
     return {
       errors: [],
       invoiceAmount: resp.invoice,
-      fee: resp.fee,
+      amount: resp.fee,
     }
   },
 })

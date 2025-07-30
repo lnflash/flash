@@ -234,8 +234,9 @@ type CashoutOffer {
 scalar CentAmount
 
 type CentAmountPayload {
-  amount: CentAmount
+  amount: USDCents
   errors: [Error!]!
+  invoiceAmount: USDCents
 }
 
 type ConsumerAccount implements Account {
@@ -829,7 +830,7 @@ type Mutation {
     associated with the amount).
   """
   lnUsdInvoiceCreateOnBehalfOfRecipient(input: LnUsdInvoiceCreateOnBehalfOfRecipientInput!): LnInvoicePayload!
-  lnUsdInvoiceFeeProbe(input: LnUsdInvoiceFeeProbeInput!): UsdInvoiceEstimate!
+  lnUsdInvoiceFeeProbe(input: LnUsdInvoiceFeeProbeInput!): CentAmountPayload!
   merchantMapSuggest(input: MerchantMapSuggestInput!): MerchantPayload!
   onChainAddressCreate(input: OnChainAddressCreateInput!): OnChainAddressPayload!
   onChainAddressCurrent(input: OnChainAddressCurrentInput!): OnChainAddressPayload!
@@ -1326,12 +1327,6 @@ type UpgradePayload {
   authToken: AuthToken
   errors: [Error!]!
   success: Boolean!
-}
-
-type UsdInvoiceEstimate {
-  errors: [Error!]!
-  fee: USDCents
-  invoiceAmount: USDCents
 }
 
 """

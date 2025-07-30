@@ -103,17 +103,6 @@ export class USDAmount extends MoneyAmount {
     return rate.getInstance(converted)
   }
 
-  /**
-   * Create graphql Payload as done in normalizePaymentAmount 
-   * @returns 
-   */
-  gqlPayload(): PaymentAmountPayload<ExchangeCurrencyUnit> {
-    return {
-      amount: Number(this.asCents(0)),
-      currencyUnit: ExchangeCurrencyUnit.Usd, 
-    }
-  }
-  
   toIbex(): number {
     return Number(this.asDollars(8))
   }
