@@ -13,13 +13,83 @@ import { baseLogger } from "@services/logger"
 import { UsersRepository } from "@services/mongoose"
 import { IbexError } from "@services/ibex/errors"
 
-export const sessionPublicContext = async ({
-  tokenPayload,
-  ip,
-}: {
-  tokenPayload: jsonwebtoken.JwtPayload
-  ip: IpAddress | undefined
-}): Promise<GraphQLPublicContext> => {
+// Import API token authentication functions
+import { validateApiToken, getApiTokenAccountContext } from "./api-token-auth"
+
+// Helper function to create data loaders
+const createDataLoaders = () => {
+  const loaders = {
+    txnMetadata: new DataLoader(async (keys) => {
+      const txnMetadata = await Transactions.getTransactionsMetadataByIds(
+        keys as LedgerTransactionId[],
+      )
+      if (txnMetadata instanceof IbexError) {
+        recordExceptionInCurrentSpan({
+          error: txnMetadata,
+        })
+        return keys.map(() => undefined)
+      }
+      else if (txnMetadata instanceof Error) {
+        recordExceptionInCurrentSpan({
+          error: txnMetadata,
+          level: txnMetadata.level,
+        })
+
+        return keys.map(() => undefined)
+      }
+
+      return txnMetadata
+    }),
+  }
+  return loaders
+}
+
+export const sessionPublicContext = async (
+  params: {
+    tokenPayload?: jsonwebtoken.JwtPayload
+    ip: IpAddress | undefined
+    authHeader?: string // Add support for Authorization header
+  }
+): Promise<GraphQLPublicContext> => {
+  const { tokenPayload, ip, authHeader } = params
+  
+  // First, try API token authentication
+  if (authHeader) {
+    const apiTokenAuth = await validateApiToken(authHeader)
+    if (apiTokenAuth) {
+      const context = await getApiTokenAccountContext(apiTokenAuth)
+      if (context) {
+        const logger = baseLogger.child({ apiTokenId: apiTokenAuth.tokenId })
+        
+        // Return context with API token information
+        return {
+          logger,
+          loaders: createDataLoaders(),
+          user: undefined, // API tokens don't have user context
+          domainAccount: context.domainAccount,
+          ip,
+          sessionId: undefined,
+          isApiToken: true,
+          apiTokenScopes: context.apiTokenScopes,
+          apiTokenId: context.apiTokenId
+        }
+      }
+    }
+  }
+  
+  // Fall back to existing Kratos session authentication
+  if (!tokenPayload) {
+    // No authentication provided
+    return {
+      logger: baseLogger,
+      loaders: createDataLoaders(),
+      user: undefined,
+      domainAccount: undefined,
+      ip,
+      sessionId: undefined
+    }
+  }
+  
   const logger = baseLogger.child({ tokenPayload })
 
   let domainAccount: Account | undefined
@@ -57,33 +127,9 @@ export const sessionPublicContext = async ({
     }
   }
 
-  const loaders = {
-    txnMetadata: new DataLoader(async (keys) => {
-      const txnMetadata = await Transactions.getTransactionsMetadataByIds(
-        keys as LedgerTransactionId[],
-      )
-      if (txnMetadata instanceof IbexError) {
-        recordExceptionInCurrentSpan({
-          error: txnMetadata,
-        })
-        return keys.map(() => undefined)
-      }
-      else if (txnMetadata instanceof Error) {
-        recordExceptionInCurrentSpan({
-          error: txnMetadata,
-          level: txnMetadata.level,
-        })
-
-        return keys.map(() => undefined)
-      }
-
-      return txnMetadata
-    }),
-  }
-
   return {
     logger,
-    loaders,
+    loaders: createDataLoaders(),
     user,
     domainAccount,
     ip,
