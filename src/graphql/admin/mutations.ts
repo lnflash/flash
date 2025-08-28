@@ -1,9 +1,5 @@
 import { GT } from "@graphql/index"
 
-import UserLoginMutation from "@graphql/shared/root/mutation/user-login"
-import CaptchaRequestAuthCodeMutation from "@graphql/shared/root/mutation/captcha-request-auth-code"
-import CaptchaCreateChallengeMutation from "@graphql/shared/root/mutation/captcha-create-challenge"
-
 import AccountUpdateLevelMutation from "@graphql/admin/root/mutation/account-update-level"
 import AccountUpdateStatusMutation from "@graphql/admin/root/mutation/account-update-status"
 import BusinessUpdateMapInfoMutation from "@graphql/admin/root/mutation/business-update-map-info"
@@ -17,10 +13,6 @@ import MerchantMapValidateMutation from "./root/mutation/merchant-map-validate"
 
 export const mutationFields = {
   unauthed: {
-    userLogin: UserLoginMutation,
-
-    captchaCreateChallenge: CaptchaCreateChallengeMutation,
-    captchaRequestAuthCode: CaptchaRequestAuthCodeMutation,
   },
   authed: {
     userUpdatePhone: UserUpdatePhoneMutation,

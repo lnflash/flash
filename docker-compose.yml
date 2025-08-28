@@ -64,7 +64,7 @@ services:
     environment:
       - REDIS_TYPE=standalone
       - REDIS_0_DNS=redis
-      - REDIS_0_PORT=6379
+      - REDIS_0_PORT=6378
       - IBEX_URL=${IBEX_URL}
       - IBEX_EMAIL=${IBEX_EMAIL}
       - IBEX_PASSWORD=${IBEX_PASSWORD}

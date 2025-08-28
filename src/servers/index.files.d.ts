@@ -22,10 +22,11 @@ type GraphQLPublicContextAuth = Omit<GraphQLPublicContext, "user" | "domainAccou
 
 type GraphQLAdminContext = {
   logger: Logger
-  loaders: Loaders
-  auditorId: UserId
-  isEditor: boolean
-  ip: IpAddress
+  user: {
+    id: UserId,
+    roles: string[]
+    ip: IpAddress
+  }
 }
 
 // globally used types
