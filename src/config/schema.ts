@@ -657,6 +657,20 @@ export const configSchema = {
     mailgun: {
       type: "object",
       required: ["apiKey", "domain"]
+    },
+    apiTokens: {
+      type: "object",
+      properties: {
+        maxTokensPerAccount: { type: "integer", minimum: 1, maximum: 100, default: 10 },
+        defaultExpirationDays: { type: "integer", minimum: 1, maximum: 365, default: 90 },
+        tokenPrefix: { type: "string", default: "flash_" }
+      },
+      additionalProperties: false,
+      default: {
+        maxTokensPerAccount: 10,
+        defaultExpirationDays: 90,
+        tokenPrefix: "flash_"
+      }
     }
   },
   required: [

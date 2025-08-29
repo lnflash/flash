@@ -16,42 +16,50 @@ import { IbexError } from "@services/ibex/errors"
 // Import API token authentication functions
 import { validateApiToken, getApiTokenAccountContext } from "./api-token-auth"
 
+// Interface for sessionPublicContext parameters
+export interface SessionContextParams {
+  tokenPayload?: jsonwebtoken.JwtPayload
+  ip: IpAddress | undefined
+  authHeader?: string // Optional - for backward compatibility
+}
+
+// Helper function to create txnMetadata DataLoader
+const createTxnMetadataLoader = () => {
+  return new DataLoader(async (keys) => {
+    const txnMetadata = await Transactions.getTransactionsMetadataByIds(
+      keys as LedgerTransactionId[],
+    )
+    if (txnMetadata instanceof IbexError) {
+      recordExceptionInCurrentSpan({
+        error: txnMetadata,
+      })
+      return keys.map(() => undefined)
+    }
+    else if (txnMetadata instanceof Error) {
+      recordExceptionInCurrentSpan({
+        error: txnMetadata,
+        level: txnMetadata.level,
+      })
+
+      return keys.map(() => undefined)
+    }
+
+    return txnMetadata
+  })
+}
+
 // Helper function to create data loaders
 const createDataLoaders = () => {
   const loaders = {
-    txnMetadata: new DataLoader(async (keys) => {
-      const txnMetadata = await Transactions.getTransactionsMetadataByIds(
-        keys as LedgerTransactionId[],
-      )
-      if (txnMetadata instanceof IbexError) {
-        recordExceptionInCurrentSpan({
-          error: txnMetadata,
-        })
-        return keys.map(() => undefined)
-      }
-      else if (txnMetadata instanceof Error) {
-        recordExceptionInCurrentSpan({
-          error: txnMetadata,
-          level: txnMetadata.level,
-        })
-
-        return keys.map(() => undefined)
-      }
-
-      return txnMetadata
-    }),
+    txnMetadata: createTxnMetadataLoader(),
   }
   return loaders
 }
 
 export const sessionPublicContext = async (
-  params: {
-    tokenPayload?: jsonwebtoken.JwtPayload
-    ip: IpAddress | undefined
-    authHeader?: string // Add support for Authorization header
-  }
+  params: SessionContextParams
 ): Promise<GraphQLPublicContext> => {
-  const { tokenPayload, ip, authHeader } = params
+  const { tokenPayload, ip, authHeader = undefined } = params
   
   // First, try API token authentication
   if (authHeader) {
@@ -86,7 +94,10 @@ export const sessionPublicContext = async (
       user: undefined,
       domainAccount: undefined,
       ip,
-      sessionId: undefined
+      sessionId: undefined,
+      isApiToken: false,
+      apiTokenScopes: undefined,
+      apiTokenId: undefined
     }
   }
   
@@ -134,5 +145,8 @@ export const sessionPublicContext = async (
     domainAccount,
     ip,
     sessionId,
+    isApiToken: false,
+    apiTokenScopes: undefined,
+    apiTokenId: undefined
   }
 }

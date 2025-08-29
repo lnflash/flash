@@ -68,15 +68,14 @@ const ApiTokenCreateMutation = GT.Field({
     args, 
     { domainAccount }: GraphQLPublicContextAuth
   ) => {
-    // Ensure user is authenticated
-    if (!domainAccount) {
-      return {
-        errors: [{
-          message: "Authentication required to create API tokens"
-        }],
-        apiToken: null
-      }
-    }
+    // Note: Authentication is enforced by GraphQL Shield at the schema level
+    // This mutation is in the authed.atAccountLevel section, requiring valid authentication
+    // The GraphQLPublicContextAuth type guarantees domainAccount is present
+    
+    // Additional permission checks could be added here if needed:
+    // - Check account verification status
+    // - Check account level/tier
+    // - Check feature flags
     
     // Create the API token
     const result = await createApiToken({
@@ -100,7 +99,7 @@ const ApiTokenCreateMutation = GT.Field({
         name: result.name,
         token: result.token, // Only returned on creation
         scopes: result.scopes,
-        expiresAt: result.expiresAt?.toISOString() || null,
+        expiresAt: result.expiresAt ? result.expiresAt.toISOString() : null,
         warning: result.warning
       }
     }

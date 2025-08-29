@@ -36,8 +36,21 @@ ApiTokenSchema.index({ tokenHash: 1, active: 1 })
 
 const ApiTokenModel = model("ApiToken", ApiTokenSchema)
 
+// MongoDB Document interface
+interface ApiTokenDocument {
+  _id: any // Mongoose ObjectId type, could be Types.ObjectId if imported
+  accountId: string
+  name: string
+  tokenHash: string
+  scopes: string[]
+  lastUsed: Date | null
+  expiresAt: Date | null
+  active: boolean
+  createdAt: Date
+}
+
 // Translation functions
-const translateToApiToken = (doc: any): IApiToken => {
+const translateToApiToken = (doc: ApiTokenDocument): IApiToken => {
   return {
     id: toApiTokenId(fromObjectId(doc._id)),
     accountId: doc.accountId as AccountId,

@@ -104,6 +104,49 @@ type AccountUpdateNotificationSettingsPayload {
   errors: [Error!]!
 }
 
+input ApiTokenCreateInput {
+  """Optional expiration time in seconds. If not set, token doesn't expire."""
+  expiresIn: Int
+
+  """
+  A descriptive name for the API token (e.g., 'BTCPayServer Integration')
+  """
+  name: String!
+
+  """Permission scopes for the token. Defaults to read-only access."""
+  scopes: [ApiTokenScope!] = [read]
+}
+
+type ApiTokenCreatePayload {
+  apiToken: ApiTokenCreated
+  errors: [Error!]!
+}
+
+type ApiTokenCreated {
+  expiresAt: String
+  id: String!
+  name: String!
+  scopes: [ApiTokenScope!]!
+
+  """The actual API token. Store this securely as it won't be shown again."""
+  token: String!
+
+  """Important message about token security"""
+  warning: String!
+}
+
+"""Permission scopes for API tokens"""
+enum ApiTokenScope {
+  """Full administrative access"""
+  admin
+
+  """Read-only access to account data"""
+  read
+
+  """Read and write access to perform operations"""
+  write
+}
+
 """An Opaque Bearer token"""
 scalar AuthToken
 
@@ -734,6 +777,11 @@ type Mutation {
   accountEnableNotificationChannel(input: AccountEnableNotificationChannelInput!): AccountUpdateNotificationSettingsPayload!
   accountUpdateDefaultWalletId(input: AccountUpdateDefaultWalletIdInput!): AccountUpdateDefaultWalletIdPayload!
   accountUpdateDisplayCurrency(input: AccountUpdateDisplayCurrencyInput!): AccountUpdateDisplayCurrencyPayload!
+
+  """
+  Generate a new API token for external service authentication. The token is only shown once and cannot be retrieved later.
+  """
+  apiTokenCreate(input: ApiTokenCreateInput!): ApiTokenCreatePayload!
   callbackEndpointAdd(input: CallbackEndpointAddInput!): CallbackEndpointAddPayload!
   callbackEndpointDelete(input: CallbackEndpointDeleteInput!): SuccessPayload!
   captchaCreateChallenge: CaptchaCreateChallengePayload!

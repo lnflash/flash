@@ -4,6 +4,8 @@ import { ApiTokenScope, toApiTokenHash } from "@domain/api-tokens/index.types"
 import { ApiTokensRepository } from "@services/mongoose/api-tokens"
 import { addAttributesToCurrentSpan } from "@services/tracing"
 import { getAccount } from "@app/accounts"
+import { baseLogger } from "@services/logger"
+import { getApiTokenConfig } from "@config"
 
 export interface ApiTokenAuth {
   accountId: AccountId
@@ -19,15 +21,19 @@ export const validateApiToken = async (
   authHeader: string | undefined
 ): Promise<ApiTokenAuth | null> => {
   
-  // Check for Flash API token format: "Bearer flash_<token>"
-  if (!authHeader?.startsWith('Bearer flash_')) {
+  const config = getApiTokenConfig()
+  const tokenPrefix = config.tokenPrefix || "flash_"
+  
+  // Check for API token format: "Bearer <prefix><token>"
+  const expectedStart = `Bearer ${tokenPrefix}`
+  if (!authHeader?.startsWith(expectedStart)) {
     return null
   }
   
   try {
-    // Extract the token (remove "Bearer flash_" prefix)
-    const fullToken = authHeader.substring(7) // Remove "Bearer "
-    const rawToken = fullToken.substring(6) // Remove "flash_" prefix
+    // Extract the token (remove "Bearer " and prefix)
+    const rawToken = authHeader.substring(expectedStart.length)
+    
     
     // Hash the token for database lookup
     const tokenHash = createHash('sha256').update(rawToken).digest('hex')
@@ -65,10 +71,20 @@ export const validateApiToken = async (
       return null
     }
     
-    // Update last used timestamp asynchronously (don't wait for it)
-    apiTokensRepo.updateLastUsed(apiToken.id).catch((err) => {
-      console.error("Failed to update API token last used timestamp:", err)
-    })
+    // Update last used timestamp asynchronously with single try-catch (best effort)
+    (async () => {
+      try {
+        await apiTokensRepo.updateLastUsed(apiToken.id)
+      } catch (err) {
+        baseLogger.error(
+          { err, apiTokenId: apiToken.id },
+          "Failed to update API token last used timestamp"
+        )
+        addAttributesToCurrentSpan({
+          "auth.apiToken.updateLastUsedFailed": true
+        })
+      }
+    })()
     
     addAttributesToCurrentSpan({
       "auth.apiToken.success": true,
@@ -83,7 +99,7 @@ export const validateApiToken = async (
       tokenId: apiToken.id
     }
   } catch (err) {
-    console.error("Error validating API token:", err)
+    baseLogger.error(err, "Error validating API token")
     addAttributesToCurrentSpan({ 
       "auth.apiToken.error": true,
       "auth.apiToken.errorMessage": err instanceof Error ? err.message : "Unknown error"

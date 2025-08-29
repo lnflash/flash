@@ -9,6 +9,7 @@ import {
 import { ApiTokensRepository } from "@services/mongoose/api-tokens"
 import { addAttributesToCurrentSpan } from "@services/tracing"
 import { DomainError } from "@domain/shared"
+import { getApiTokenConfig } from "@config"
 
 export const createApiToken = async ({
   accountId,
@@ -39,23 +40,24 @@ export const createApiToken = async ({
     }
   }
   
+  // Get configuration
+  const config = getApiTokenConfig()
+  
   // Check token limit per account (prevent abuse)
   const apiTokensRepo = ApiTokensRepository()
   const existingTokens = await apiTokensRepo.findByAccountId(accountId)
   
   if (!(existingTokens instanceof Error)) {
-    const MAX_TOKENS_PER_ACCOUNT = 10
-    if (existingTokens.length >= MAX_TOKENS_PER_ACCOUNT) {
+    const maxTokensPerAccount = config.maxTokensPerAccount || 10
+    if (existingTokens.length >= maxTokensPerAccount) {
       return new DomainError(
-        `Maximum number of API tokens (${MAX_TOKENS_PER_ACCOUNT}) reached. Please revoke unused tokens.`
+        `Maximum number of API tokens (${maxTokensPerAccount}) reached. Please revoke unused tokens.`
       )
     }
   }
   
   // Generate secure random token with prefix for easy identification
-  const rawToken = randomBytes(32).toString('base64url')
-  const fullToken = `flash_${rawToken}`
-  const tokenHash = createHash('sha256').update(rawToken).digest('hex')
+  const tokenHash = createHash('sha256').update(fullToken).digest('hex')
   
   // Calculate expiration date
   const expiresAt = expiresIn 
