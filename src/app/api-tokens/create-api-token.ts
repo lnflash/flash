@@ -57,7 +57,10 @@ export const createApiToken = async ({
   }
   
   // Generate secure random token with prefix for easy identification
-  const tokenHash = createHash('sha256').update(fullToken).digest('hex')
+  const tokenPrefix = config.tokenPrefix || "flash_"
+  const rawToken = randomBytes(32).toString('base64url')
+  const fullToken = `${tokenPrefix}${rawToken}`
+  const tokenHash = createHash('sha256').update(rawToken).digest('hex')
   
   // Calculate expiration date
   const expiresAt = expiresIn 
