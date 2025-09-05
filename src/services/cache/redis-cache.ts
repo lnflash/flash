@@ -27,7 +27,7 @@ export const RedisCacheService = (): ICacheService => {
       const value = await redisCache.getCache(key)
       if (value === undefined) return new CacheUndefinedError()
 
-      return value
+      return value as T
     } catch (err) {
       return new UnknownCacheServiceError(err)
     }
