@@ -36,7 +36,6 @@ function parseAuthHeader(authHeader: string | undefined): JWTPayload {
   }
   try {
     const token = authHeader.slice(7);
-    console.info('ERPNEXT_JWT_SECRET:', ADMIN_CONFIG.ERPNEXT_JWT_SECRET);
     return jwt.verify(token, ADMIN_CONFIG.ERPNEXT_JWT_SECRET as string) as JWTPayload; // process.env.ERPNEXT_JWT_SECRET
   } catch (error) {
     throw new AuthenticationError({ message: 'Invalid Token', logger: graphqlLogger });
@@ -48,9 +47,8 @@ export const hasAdminUserRole = rule({ cache: "contextual" })((
   args,
   ctx: GraphQLAdminContext,
 ) => {
-  return ctx.user.roles.includes("Flash Admin") ? true : new AuthorizationError({ logger: graphqlLogger })
+  return ctx.user.roles.includes("Accounts Manager") ? true : new AuthorizationError({ logger: graphqlLogger })
 })
-
 
 //   // const ipString = UNSECURE_IP_FROM_REQUEST_OBJECT
 //   //   ? req.ip
@@ -192,7 +190,7 @@ const startAdminServer = async ({
   apolloServer.applyMiddleware({
     app,
     path: "/graphql",
-    cors: { credentials: true, origin: true }, // change to erpnext
+    // cors: { credentials: true, origin: true }, // change to erpnext
   })
 
   return new Promise((resolve, reject) => {
