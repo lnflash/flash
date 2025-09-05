@@ -72,7 +72,9 @@ export const AuthWithPhonePasswordlessService = (): IAuthWithPhonePasswordlessSe
     const method = "password"
     try {
       const flow = await kratosPublic.createBrowserLoginFlow()
-      const parsedCookies = setCookie.parse(flow.headers["set-cookie"])
+      const setCookieHeader = flow.headers["set-cookie"]
+      if (!setCookieHeader) return new KratosError("No set-cookie header in response")
+      const parsedCookies = setCookie.parse(setCookieHeader)
       const csrfCookie = parsedCookies?.find((c) => c.name.includes("csrf"))
       if (!csrfCookie) return new KratosError("Could not find csrf cookie")
 
@@ -94,7 +96,9 @@ export const AuthWithPhonePasswordlessService = (): IAuthWithPhonePasswordlessSe
           csrf_token: csrfCookie.value,
         },
       })
-      const cookiesToSendBackToClient: Array<SessionCookie> = result.headers["set-cookie"]
+      const resultSetCookieHeader = result.headers["set-cookie"]
+      if (!resultSetCookieHeader) return new KratosError("No set-cookie header in login response")
+      const cookiesToSendBackToClient: Array<SessionCookie> = resultSetCookieHeader as Array<SessionCookie>
 
       if (!result.data.session.identity) return new InvalidIdentitySessionKratosError()
       // note: this only works when whoami: required_aal = aal1
@@ -229,6 +233,7 @@ export const AuthWithPhonePasswordlessService = (): IAuthWithPhonePasswordlessSe
     try {
       const flow = await kratosPublic.createBrowserRegistrationFlow()
       const headers = flow.headers["set-cookie"]
+      if (!headers) return new KratosError("No set-cookie header in registration flow")
       const parsedCookies = setCookie.parse(headers)
       const csrfCookie = parsedCookies?.find((c) => c.name.includes("csrf"))
       if (!csrfCookie) return new KratosError("Could not find csrf cookie")
@@ -250,7 +255,9 @@ export const AuthWithPhonePasswordlessService = (): IAuthWithPhonePasswordlessSe
           csrf_token: csrfCookie.value,
         },
       })
-      const cookiesToSendBackToClient: Array<SessionCookie> = result.headers["set-cookie"]
+      const resultHeaders = result.headers["set-cookie"]
+      if (!resultHeaders) return new KratosError("No set-cookie header in registration response")
+      const cookiesToSendBackToClient: Array<SessionCookie> = resultHeaders as Array<SessionCookie>
       const kratosUserId = result.data.identity.id as UserId
       return { cookiesToSendBackToClient, kratosUserId }
     } catch (err) {
