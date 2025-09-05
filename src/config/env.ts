@@ -128,6 +128,8 @@ export const env = createEnv({
 
     SVIX_SECRET: z.string().optional(),
     SVIX_ENDPOINT: z.union([z.string().url().nullish(), z.literal("")]), // optional url
+
+    ERPNEXT_JWT_SECRET: z.string().min(1).optional(),
   },
 
   runtimeEnvStrict: {
@@ -225,5 +227,7 @@ export const env = createEnv({
 
     SVIX_SECRET: process.env.SVIX_SECRET,
     SVIX_ENDPOINT: process.env.SVIX_ENDPOINT,
+
+    ERPNEXT_JWT_SECRET: process.env.ERPNEXT_JWT_SECRET,
   },
 })

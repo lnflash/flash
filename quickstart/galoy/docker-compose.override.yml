@@ -19,7 +19,7 @@ services:
       - "50052:50052"
   redis:
     ports:
-      - "6379:6379"
+      - "6378:6379"
   mongodb:
     environment:
       - MONGODB_ADVERTISED_HOSTNAME=127.0.0.1

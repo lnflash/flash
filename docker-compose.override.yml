@@ -18,7 +18,7 @@ services:
       - "50052:50052"
   redis:
     ports:
-      - "6379:6379"
+      - "6378:6379"
   mongodb:
     environment:
       - MONGODB_ADVERTISED_HOSTNAME=127.0.0.1
@@ -66,6 +66,8 @@ services:
   oathkeeper:
     extra_hosts:
       - "bats-tests:host-gateway"
+      - "host.docker.internal:host-gateway"
+      - "flash.localhost:host-gateway"
     ports:
       - "4002:4455"
       - "4456:4456"
