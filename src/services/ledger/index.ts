@@ -111,7 +111,7 @@ export const LedgerService = (): ILedgerService => {
     // const liabilitiesWalletId = toLiabilitiesWalletId(walletId)
     try {
       const { results } = await MainBook.ledger({
-        account: ["Accounts Payable", "JMD", walletId]
+        account: ["Accounts Payable", "JMD", walletId],
       })
       // @ts-ignore-next-line no-implicit-any error
       return results.map((tx) => translateToLedgerTx(tx))
@@ -309,13 +309,13 @@ export const LedgerService = (): ILedgerService => {
       }
       return balance as Satoshis
 
-    //   const resp = await Ibex.getAccountDetails(walletId)
-    //   if (resp instanceof IbexError) {
-    //     if (resp.httpCode === 404) return USDAmount.ZERO
-    //     return resp
-    //   }
-    //   if (resp.balance === undefined) return new UnexpectedIbexResponse("Balance not found")
-    //   return resp.balance
+      //   const resp = await Ibex.getAccountDetails(walletId)
+      //   if (resp instanceof IbexError) {
+      //     if (resp.httpCode === 404) return USDAmount.ZERO
+      //     return resp
+      //   }
+      //   if (resp.balance === undefined) return new UnexpectedIbexResponse("Balance not found")
+      //   return resp.balance
     } catch (err) {
       return new UnknownLedgerError(err)
     }
@@ -472,7 +472,10 @@ export const LedgerService = (): ILedgerService => {
     }
 
     for await (const { _id } of transactions) {
-      yield toWalletId(_id)
+      const result = toWalletId(_id)
+      if (result) {
+        yield result
+      }
     }
   }
 
