@@ -8,6 +8,8 @@ import {
 } from "./yaml"
 import { env } from "./env"
 
+export { env }
+
 export * from "./error"
 export * from "./yaml"
 export * from "./schema"
