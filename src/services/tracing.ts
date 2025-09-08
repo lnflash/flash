@@ -375,7 +375,7 @@ const resolveFunctionSpanOptions = ({
   spanAttributes?: Attributes
   root?: boolean
 }): SpanOptions => {
-  const attributes = {
+  const attributes: Attributes = {
     [SemanticAttributes.CODE_FUNCTION]: functionName,
     [SemanticAttributes.CODE_NAMESPACE]: namespace,
     ...spanAttributes,
@@ -384,9 +384,9 @@ const resolveFunctionSpanOptions = ({
     const params =
       typeof functionArgs[0] === "object" ? functionArgs[0] : { "0": functionArgs[0] }
     for (const key in params) {
-      // @ts-ignore-next-line no-implicit-any error
+      // @ts-ignore no-implicit-any error
       const value = params[key]
-      attributes[`${SemanticAttributes.CODE_FUNCTION}.params.${key}`] = value
+      attributes[`${SemanticAttributes.CODE_FUNCTION}.params.${key}`] = value as AttributeValue
       attributes[`${SemanticAttributes.CODE_FUNCTION}.params.${key}.null`] =
         value === null
       attributes[`${SemanticAttributes.CODE_FUNCTION}.params.${key}.undefined`] =

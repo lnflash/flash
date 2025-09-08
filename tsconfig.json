@@ -11,6 +11,8 @@
     "allowJs": true,
     "moduleResolution": "node",
     "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "types": ["node", "jest"],
     "paths": {
       "@config": ["src/config/index"],
       "@core/*": ["src/core/*"],
