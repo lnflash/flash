@@ -3,15 +3,24 @@ import Offer from "./Offer"
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { LedgerServiceError } from "@domain/ledger"
 import { ValidationError } from "@domain/shared"
-import { accountLevel, isActiveAccount, isUsd, hasSufficientBalance, transferMin, validate, walletBelongsToAccount, transferMax, isBeforeExpiry } from "./Validations"
-// import { sendBetweenAccounts } from "@services/ibex/send-between-accounts"
+import {
+  accountLevel,
+  isActiveAccount,
+  isUsd,
+  hasSufficientBalance,
+  transferMin,
+  validate,
+  walletBelongsToAccount,
+  transferMax,
+  isBeforeExpiry,
+} from "./Validations"
 import { RepositoryError } from "@domain/errors"
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
 import { EmailService } from "@services/email"
 import { CashoutDetails, ValidationInputs } from "./types"
 
-// Only way to construct a ValidOffer is using the static method which contains validations  
+// Only way to construct a ValidOffer is using the static method which contains validations
 class ValidOffer extends Offer {
   readonly wallet: Wallet
   readonly account: Account
@@ -23,16 +32,18 @@ class ValidOffer extends Offer {
     this.account = account
   }
 
-  static from = async (details: CashoutDetails): Promise<ValidOffer | ValidationError> => {
+  static from = async (
+    details: CashoutDetails,
+  ): Promise<ValidOffer | ValidationError> => {
     const wallet = await WalletsRepository().findById(details.ibexTrx.userAcct)
     if (wallet instanceof RepositoryError) return new ValidationError(wallet)
-    
+
     const account = await AccountsRepository().findById(wallet.accountId)
     if (account instanceof RepositoryError) return new ValidationError(account)
 
     const inputs: ValidationInputs = { ...details, wallet, account }
     const validationErrs = await validate(inputs, [
-      isUsd, 
+      isUsd,
       transferMin,
       transferMax,
       isActiveAccount,
@@ -40,7 +51,7 @@ class ValidOffer extends Offer {
       walletBelongsToAccount,
       hasSufficientBalance,
       isBeforeExpiry,
-    //  TODO daily/weekly/monthly volume limits 
+      //  TODO daily/weekly/monthly volume limits
     ])
     if (validationErrs.length > 0) return new ValidationError(validationErrs)
 
@@ -49,19 +60,19 @@ class ValidOffer extends Offer {
 
   async execute(): Promise<PaymentSendStatus | Error> {
     const resp = await Ibex.payInvoice({
-      accountId: this.details.ibexTrx.userAcct, 
-      invoice: this.details.ibexTrx.invoice.paymentRequest as unknown as Bolt11
+      accountId: this.details.ibexTrx.userAcct,
+      invoice: this.details.ibexTrx.invoice.paymentRequest as unknown as Bolt11,
     })
-    if (resp instanceof Error) return resp 
+    if (resp instanceof Error) return resp
 
     // balance the diff
     // const ibexResp = await sendBetweenAccounts(
-    //   IbexAccount.fromWallet(this.wallet), 
+    //   IbexAccount.fromWallet(this.wallet),
     //   flashWallet,
     //   this.details.ibexTransfer,
     //   "Withdraw to bank",
-    // ) 
-    // if (ibexResp instanceof Error) return ibexResp 
+    // )
+    // if (ibexResp instanceof Error) return ibexResp
 
     const ledgerResp = await LedgerService().recordCashOut(this.details)
     if (ledgerResp instanceof LedgerServiceError) {
