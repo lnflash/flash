@@ -14,22 +14,21 @@ describe("NotificationService", () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
-    
+
     // Mock Twilio client
     twilioClientMock = {
       messages: {
-        create: jest.fn().mockResolvedValue({ sid: "test-message-id" })
-      }
+        create: jest.fn().mockResolvedValue({ sid: "test-message-id" }),
+      },
     }
-    
     ;(twilio as unknown as jest.Mock).mockReturnValue(twilioClientMock)
-    
+
     // Mock fetch for SendGrid API
     ;(global.fetch as jest.Mock).mockResolvedValue({
       ok: true,
-      text: jest.fn().mockResolvedValue("Success")
+      text: jest.fn().mockResolvedValue("Success"),
     })
-    
+
     // Reset environment variables
     process.env = { ...originalEnv }
     process.env.TWILIO_SENDGRID_API_KEY = "test-sendgrid-key"
@@ -50,7 +49,7 @@ describe("NotificationService", () => {
         NotificationMethod.EMAIL,
         "user@example.com",
         "Test Subject",
-        "<p>Test HTML Body</p>"
+        "<p>Test HTML Body</p>",
       )
 
       expect(result).toBe(true)
@@ -60,7 +59,7 @@ describe("NotificationService", () => {
           method: "POST",
           headers: {
             "Authorization": "Bearer test-sendgrid-key",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({
             personalizations: [{ to: [{ email: "user@example.com" }] }],
@@ -68,10 +67,10 @@ describe("NotificationService", () => {
             subject: "Test Subject",
             content: [
               { type: "text/plain", value: "Test Subject" },
-              { type: "text/html", value: "<p>Test HTML Body</p>" }
-            ]
-          })
-        })
+              { type: "text/html", value: "<p>Test HTML Body</p>" },
+            ],
+          }),
+        }),
       )
     })
 
@@ -79,13 +78,13 @@ describe("NotificationService", () => {
       ;(global.fetch as jest.Mock).mockResolvedValue({
         ok: false,
         status: 400,
-        text: jest.fn().mockResolvedValue("Bad request")
+        text: jest.fn().mockResolvedValue("Bad request"),
       })
 
       const result = await notificationService.sendNotification(
         NotificationMethod.EMAIL,
         "user@example.com",
-        "Test Subject"
+        "Test Subject",
       )
 
       expect(result).toBe(false)
@@ -98,14 +97,14 @@ describe("NotificationService", () => {
       await notificationService.sendNotification(
         NotificationMethod.EMAIL,
         "user@example.com",
-        "Test Subject"
+        "Test Subject",
       )
 
       expect(global.fetch).toHaveBeenCalledWith(
         "https://api.sendgrid.com/v3/mail/send",
         expect.objectContaining({
-          body: expect.stringContaining('"email":"noreply@flash.app"')
-        })
+          body: expect.stringContaining('"email":"noreply@getflash.io"'),
+        }),
       )
     })
 
@@ -115,11 +114,13 @@ describe("NotificationService", () => {
       const result = await notificationService.sendNotification(
         NotificationMethod.EMAIL,
         "user@example.com",
-        "Test Subject"
+        "Test Subject",
       )
 
       expect(result).toBe(false)
-      expect(baseLogger.error).toHaveBeenCalledWith("TWILIO_SENDGRID_API_KEY not configured")
+      expect(baseLogger.error).toHaveBeenCalledWith(
+        "TWILIO_SENDGRID_API_KEY not configured",
+      )
     })
   })
 
@@ -128,14 +129,14 @@ describe("NotificationService", () => {
       const result = await notificationService.sendNotification(
         NotificationMethod.SMS,
         "+1234567890",
-        "Test SMS message"
+        "Test SMS message",
       )
 
       expect(result).toBe(true)
       expect(twilioClientMock.messages.create).toHaveBeenCalledWith({
         body: "Test SMS message",
         from: "+1234567890",
-        to: "+1234567890"
+        to: "+1234567890",
       })
     })
 
@@ -145,7 +146,7 @@ describe("NotificationService", () => {
       const result = await notificationService.sendNotification(
         NotificationMethod.SMS,
         "+1234567890",
-        "Test SMS message"
+        "Test SMS message",
       )
 
       expect(result).toBe(false)
@@ -158,7 +159,7 @@ describe("NotificationService", () => {
       const result = await notificationService.sendNotification(
         NotificationMethod.SMS,
         "+1234567890",
-        "Test SMS message"
+        "Test SMS message",
       )
 
       expect(result).toBe(false)
@@ -171,14 +172,14 @@ describe("NotificationService", () => {
       const result = await notificationService.sendNotification(
         NotificationMethod.WHATSAPP,
         "+1234567890",
-        "Test WhatsApp message"
+        "Test WhatsApp message",
       )
 
       expect(result).toBe(true)
       expect(twilioClientMock.messages.create).toHaveBeenCalledWith({
         body: "Test WhatsApp message",
         from: "whatsapp:+19876543210",
-        to: "whatsapp:+1234567890"
+        to: "whatsapp:+1234567890",
       })
     })
 
@@ -186,14 +187,14 @@ describe("NotificationService", () => {
       const result = await notificationService.sendNotification(
         NotificationMethod.WHATSAPP,
         "whatsapp:+1234567890",
-        "Test WhatsApp message"
+        "Test WhatsApp message",
       )
 
       expect(result).toBe(true)
       expect(twilioClientMock.messages.create).toHaveBeenCalledWith({
         body: "Test WhatsApp message",
         from: "whatsapp:+19876543210",
-        to: "whatsapp:+1234567890"
+        to: "whatsapp:+1234567890",
       })
     })
 
@@ -203,14 +204,14 @@ describe("NotificationService", () => {
       const result = await notificationService.sendNotification(
         NotificationMethod.WHATSAPP,
         "+1234567890",
-        "Test WhatsApp message"
+        "Test WhatsApp message",
       )
 
       expect(result).toBe(true)
       expect(twilioClientMock.messages.create).toHaveBeenCalledWith({
         body: "Test WhatsApp message",
         from: "whatsapp:+19876543210",
-        to: "whatsapp:+1234567890"
+        to: "whatsapp:+1234567890",
       })
     })
 
@@ -220,7 +221,7 @@ describe("NotificationService", () => {
       const result = await notificationService.sendNotification(
         NotificationMethod.WHATSAPP,
         "+1234567890",
-        "Test WhatsApp message"
+        "Test WhatsApp message",
       )
 
       expect(result).toBe(false)
@@ -233,7 +234,7 @@ describe("NotificationService", () => {
       const result = await notificationService.sendNotification(
         NotificationMethod.WHATSAPP,
         "+1234567890",
-        "Test WhatsApp message"
+        "Test WhatsApp message",
       )
 
       expect(result).toBe(false)
@@ -251,13 +252,13 @@ describe("NotificationService", () => {
       const result = await notificationService.sendNotification(
         "UNKNOWN" as NotificationMethod,
         "test@example.com",
-        "Test message"
+        "Test message",
       )
 
       expect(result).toBe(false)
       expect(baseLogger.error).toHaveBeenCalledWith(
         { method: "UNKNOWN" },
-        "Unknown notification method"
+        "Unknown notification method",
       )
     })
   })

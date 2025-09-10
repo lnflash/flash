@@ -42,9 +42,9 @@ class NotificationServiceImpl implements NotificationService {
     try {
       if (MailgunConfig?.apiKey) {
         const mailgun = new Mailgun(FormData)
-        this.mailgunClient = mailgun.client({ 
-          username: "api", 
-          key: MailgunConfig.apiKey 
+        this.mailgunClient = mailgun.client({
+          username: "api",
+          key: MailgunConfig.apiKey,
         })
       }
     } catch (error) {
@@ -76,14 +76,18 @@ class NotificationServiceImpl implements NotificationService {
     }
   }
 
-  private async sendEmail(to: string, subject: string, htmlBody?: string): Promise<boolean> {
+  private async sendEmail(
+    to: string,
+    subject: string,
+    htmlBody?: string,
+  ): Promise<boolean> {
     if (!this.mailgunClient) {
       baseLogger.error("Mailgun client not configured")
       return false
     }
 
     // Use environment variable for from address, or default
-    const fromEmail = process.env.MAILGUN_FROM_EMAIL || "noreply@flash.app"
+    const fromEmail = process.env.MAILGUN_FROM_EMAIL || "noreply@getflash.io"
     const domain = MailgunConfig?.domain
 
     if (!domain) {
@@ -99,7 +103,7 @@ class NotificationServiceImpl implements NotificationService {
         text: subject,
         html: htmlBody || subject,
       })
-      
+
       baseLogger.info({ to }, "Email sent successfully via Mailgun")
       return true
     } catch (error) {

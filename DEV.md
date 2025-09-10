@@ -186,9 +186,9 @@ The invite feature uses the existing notification infrastructure:
 
 #### Optional - Dynamic Links:
 - `FIREBASE_DYNAMIC_LINK_DOMAIN`: Firebase Dynamic Links domain (e.g., `flash.page.link`)
-- `APP_INSTALL_URL`: App download URL (defaults to `https://flash.app/download`)
-- `ANDROID_PACKAGE_NAME`: Android app package name (e.g., `com.flash.app`)
-- `IOS_BUNDLE_ID`: iOS app bundle identifier (e.g., `com.flash.app`)
+- `APP_INSTALL_URL`: App download URL (defaults to `https://getflash.io/app`)
+- `ANDROID_PACKAGE_NAME`: Android app package name (e.g., `com.lnflash`)
+- `IOS_BUNDLE_ID`: iOS app bundle identifier (e.g., `com.lnflash`)
 
 ### Testing Invites
 

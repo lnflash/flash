@@ -1,7 +1,7 @@
 import { GT } from "@graphql/index"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { Invite, InviteStatus } from "@services/mongoose/models/invite"
-import { hashToken } from "@utils/hash"
+import { hashToken } from "@utils"
 import { baseLogger } from "@services/logger"
 import SuccessPayload from "@graphql/shared/types/payload/success-payload"
 

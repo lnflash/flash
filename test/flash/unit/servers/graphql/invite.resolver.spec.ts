@@ -16,30 +16,30 @@ jest.mock("@services/logger")
 describe("Invite Resolvers", () => {
   const mockUser = { id: "test-user-id" }
   const mockAccount = { _id: "account-id", kratosUserId: "test-user-id" }
-  
+
   beforeEach(() => {
     jest.clearAllMocks()
-    
+
     // Setup default mocks
     ;(Account.findOne as jest.Mock) = jest.fn().mockResolvedValue(mockAccount)
     ;(generateInviteToken as jest.Mock).mockReturnValue({
       token: "test-token-40-chars-1234567890abcdefghij",
-      tokenHash: "test-hash-64-chars-1234567890abcdefghijklmnopqrstuvwxyz123456"
+      tokenHash: "test-hash-64-chars-1234567890abcdefghijklmnopqrstuvwxyz123456",
     })
-    
+
     // Mock Redis client
     ;(redis.get as jest.Mock) = jest.fn().mockResolvedValue(null)
     ;(redis.incr as jest.Mock) = jest.fn().mockResolvedValue(1)
     ;(redis.expire as jest.Mock) = jest.fn().mockResolvedValue(true)
-    
+
     // Mock notification service
     ;(notificationService.sendNotification as jest.Mock).mockResolvedValue(true)
-    
+
     // Setup environment variables
     process.env.FIREBASE_DYNAMIC_LINK_DOMAIN = "test.page.link"
-    process.env.APP_INSTALL_URL = "https://flash.app/download"
-    process.env.ANDROID_PACKAGE_NAME = "com.flash.app"
-    process.env.IOS_BUNDLE_ID = "com.flash.app"
+    process.env.APP_INSTALL_URL = "https://getflash.io/app"
+    process.env.ANDROID_PACKAGE_NAME = "com.lnflash"
+    process.env.IOS_BUNDLE_ID = "com.lnflash"
   })
 
   describe("CreateInvite", () => {
@@ -51,14 +51,14 @@ describe("Invite Resolvers", () => {
         status: InviteStatus.PENDING,
         createdAt: new Date(),
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-        save: jest.fn().mockResolvedValue(true)
+        save: jest.fn().mockResolvedValue(true),
       }
-      
+
       ;(Invite as unknown as jest.Mock) = jest.fn().mockImplementation(() => mockInvite)
 
       const input = {
         contact: "test@example.com",
-        method: InviteMethod.EMAIL
+        method: InviteMethod.EMAIL,
       }
 
       // Simulate resolver logic
@@ -79,14 +79,14 @@ describe("Invite Resolvers", () => {
         status: InviteStatus.PENDING,
         createdAt: new Date(),
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-        save: jest.fn().mockResolvedValue(true)
+        save: jest.fn().mockResolvedValue(true),
       }
-      
+
       ;(Invite as unknown as jest.Mock) = jest.fn().mockImplementation(() => mockInvite)
 
       const input = {
         contact: "+1234567890",
-        method: InviteMethod.SMS
+        method: InviteMethod.SMS,
       }
 
       const result = await createInviteLogic(input, mockUser)
@@ -100,7 +100,7 @@ describe("Invite Resolvers", () => {
     it("should reject invalid email format", async () => {
       const input = {
         contact: "invalid-email",
-        method: InviteMethod.EMAIL
+        method: InviteMethod.EMAIL,
       }
 
       const result = await createInviteLogic(input, mockUser)
@@ -112,23 +112,26 @@ describe("Invite Resolvers", () => {
     it("should reject invalid phone number format", async () => {
       const input = {
         contact: "123456", // Not E.164 format
-        method: InviteMethod.SMS
+        method: InviteMethod.SMS,
       }
 
       const result = await createInviteLogic(input, mockUser)
 
-      expect(result.errors).toContain("Invalid phone number. Must be in E.164 format (e.g., +1234567890)")
+      expect(result.errors).toContain(
+        "Invalid phone number. Must be in E.164 format (e.g., +1234567890)",
+      )
       expect(result.invite).toBeNull()
     })
 
     it("should enforce rate limits per inviter", async () => {
-      ;(redis.get as jest.Mock) = jest.fn()
+      ;(redis.get as jest.Mock) = jest
+        .fn()
         .mockResolvedValueOnce("10") // Max invites reached for inviter
         .mockResolvedValueOnce("0")
 
       const input = {
         contact: "test@example.com",
-        method: InviteMethod.EMAIL
+        method: InviteMethod.EMAIL,
       }
 
       const result = await createInviteLogic(input, mockUser)
@@ -147,14 +150,14 @@ describe("Invite Resolvers", () => {
         status: InviteStatus.PENDING,
         createdAt: new Date(),
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-        save: jest.fn().mockResolvedValue(true)
+        save: jest.fn().mockResolvedValue(true),
       }
-      
+
       ;(Invite as unknown as jest.Mock) = jest.fn().mockImplementation(() => mockInvite)
 
       const input = {
         contact: "test@example.com",
-        method: InviteMethod.EMAIL
+        method: InviteMethod.EMAIL,
       }
 
       const result = await createInviteLogic(input, mockUser)
@@ -169,9 +172,11 @@ describe("Invite Resolvers", () => {
       const link = buildInviteLinkLogic(token)
 
       expect(link).toContain("https://test.page.link/")
-      expect(link).toContain(`link=${encodeURIComponent("https://flash.app/download?token=test-token")}`)
-      expect(link).toContain("apn=com.flash.app")
-      expect(link).toContain("ibi=com.flash.app")
+      expect(link).toContain(
+        `link=${encodeURIComponent("https://getflash.io/app?token=test-token")}`,
+      )
+      expect(link).toContain("apn=com.lnflash")
+      expect(link).toContain("ibi=com.lnflash")
     })
 
     it("should build fallback link when Firebase not configured", () => {
@@ -180,7 +185,7 @@ describe("Invite Resolvers", () => {
       const token = "test-token"
       const link = buildInviteLinkLogic(token)
 
-      expect(link).toBe("https://flash.app/invite?token=test-token")
+      expect(link).toBe("https://getflash.io/invite?token=test-token")
     })
   })
 
@@ -191,7 +196,7 @@ describe("Invite Resolvers", () => {
         tokenHash: "test-hash",
         status: InviteStatus.SENT,
         expiresAt: new Date(Date.now() + 1000000), // Future date
-        save: jest.fn().mockResolvedValue(true)
+        save: jest.fn().mockResolvedValue(true),
       }
 
       ;(Invite.findOne as jest.Mock).mockResolvedValue(mockInvite)
@@ -231,7 +236,7 @@ describe("Invite Resolvers", () => {
         tokenHash: "test-hash",
         status: InviteStatus.SENT,
         expiresAt: new Date(Date.now() - 1000000), // Past date
-        save: jest.fn().mockResolvedValue(true)
+        save: jest.fn().mockResolvedValue(true),
       }
 
       ;(Invite.findOne as jest.Mock).mockResolvedValue(mockInvite)
@@ -251,7 +256,7 @@ describe("Invite Resolvers", () => {
         tokenHash: "test-hash",
         status: InviteStatus.ACCEPTED,
         expiresAt: new Date(Date.now() + 1000000),
-        save: jest.fn()
+        save: jest.fn(),
       }
 
       ;(Invite.findOne as jest.Mock).mockResolvedValue(mockInvite)
@@ -288,7 +293,10 @@ async function createInviteLogic(input: any, user: any) {
   if (method === InviteMethod.SMS || method === InviteMethod.WHATSAPP) {
     const e164Regex = /^\+[1-9]\d{1,14}$/
     if (!e164Regex.test(contact)) {
-      return { errors: ["Invalid phone number. Must be in E.164 format (e.g., +1234567890)"], invite: null }
+      return {
+        errors: ["Invalid phone number. Must be in E.164 format (e.g., +1234567890)"],
+        invite: null,
+      }
     }
   }
 
@@ -296,7 +304,7 @@ async function createInviteLogic(input: any, user: any) {
   const today = new Date().toISOString().split("T")[0]
   const inviterKey = `invite:ratelimit:account-id:${today}`
   const inviterCount = await redis.get(inviterKey)
-  
+
   if (inviterCount && parseInt(inviterCount) >= 10) {
     return { errors: ["Rate limit exceeded. Please try again later."], invite: null }
   }
@@ -323,7 +331,7 @@ async function createInviteLogic(input: any, user: any) {
     method as any,
     contact,
     "Test message",
-    undefined
+    undefined,
   )
 
   if (sent) {
@@ -338,7 +346,7 @@ async function createInviteLogic(input: any, user: any) {
         status: invite.status,
         createdAt: invite.createdAt.toISOString(),
         expiresAt: invite.expiresAt.toISOString(),
-      }
+      },
     }
   }
 
@@ -377,9 +385,9 @@ async function redeemInviteLogic(input: any, user: any) {
 
 function buildInviteLinkLogic(token: string): string {
   const firebaseDomain = process.env.FIREBASE_DYNAMIC_LINK_DOMAIN
-  const appInstallUrl = process.env.APP_INSTALL_URL || "https://flash.app/download"
-  const androidPackage = process.env.ANDROID_PACKAGE_NAME || "com.flash.app"
-  const iosBundleId = process.env.IOS_BUNDLE_ID || "com.flash.app"
+  const appInstallUrl = process.env.APP_INSTALL_URL || "https://getflash.io/app"
+  const androidPackage = process.env.ANDROID_PACKAGE_NAME || "com.lnflash"
+  const iosBundleId = process.env.IOS_BUNDLE_ID || "com.lnflash"
 
   if (firebaseDomain) {
     const params = new URLSearchParams({
@@ -388,10 +396,10 @@ function buildInviteLinkLogic(token: string): string {
       ibi: iosBundleId,
       st: "Flash App Invite",
       sd: "You've been invited to join Flash App",
-      ofl: `https://flash.app/invite?token=${token}`,
+      ofl: `https://getflash.io/invite?token=${token}`,
     })
     return `https://${firebaseDomain}/?${params.toString()}`
   }
 
-  return `https://flash.app/invite?token=${token}`
+  return `https://getflash.io/invite?token=${token}`
 }

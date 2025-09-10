@@ -1,7 +1,7 @@
 import { GT } from "@graphql/index"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { Invite, InviteMethod, InviteStatus } from "@services/mongoose/models/invite"
-import { generateInviteToken } from "@utils/hash"
+import { generateInviteToken } from "@utils"
 import { notificationService, NotificationMethod } from "@services/notification"
 import { baseLogger } from "@services/logger"
 import { redis } from "@services/redis"
@@ -108,9 +108,9 @@ const checkRateLimit = async (
 
 const buildInviteLink = (token: string): string => {
   const firebaseDomain = process.env.FIREBASE_DYNAMIC_LINK_DOMAIN
-  const appInstallUrl = process.env.APP_INSTALL_URL || "https://flash.app/download"
-  const androidPackage = process.env.ANDROID_PACKAGE_NAME || "com.flash.app"
-  const iosBundleId = process.env.IOS_BUNDLE_ID || "com.flash.app"
+  const appInstallUrl = process.env.APP_INSTALL_URL || "https://getflash.io/app"
+  const androidPackage = process.env.ANDROID_PACKAGE_NAME || "com.lnflash"
+  const iosBundleId = process.env.IOS_BUNDLE_ID || "com.lnflash"
 
   if (firebaseDomain) {
     const params = new URLSearchParams({
@@ -119,12 +119,12 @@ const buildInviteLink = (token: string): string => {
       ibi: iosBundleId,
       st: "Flash App Invite",
       sd: "You've been invited to join Flash App",
-      ofl: `https://flash.app/invite?token=${token}`,
+      ofl: `https://getflash.io/invite?token=${token}`,
     })
     return `https://${firebaseDomain}/?${params.toString()}`
   }
 
-  return `https://flash.app/invite?token=${token}`
+  return `https://getflash.io/invite?token=${token}`
 }
 
 const CreateInviteMutation = GT.Field<null, GraphQLPublicContextAuth>({
@@ -149,7 +149,10 @@ const CreateInviteMutation = GT.Field<null, GraphQLPublicContextAuth>({
       }
     } else if (method === InviteMethod.SMS || method === InviteMethod.WHATSAPP) {
       if (!validateE164PhoneNumber(contact)) {
-        return { errors: ["Invalid phone number. Must be in E.164 format (e.g., +1234567890)"], invite: null }
+        return {
+          errors: ["Invalid phone number. Must be in E.164 format (e.g., +1234567890)"],
+          invite: null,
+        }
       }
     }
 
@@ -193,13 +196,20 @@ const CreateInviteMutation = GT.Field<null, GraphQLPublicContextAuth>({
       let messageBody: string
       let htmlBody: string | undefined
 
+      // Get the sender's username or use "A friend" as fallback
+      const senderName = account.username || "A friend"
+
       if (method === InviteMethod.EMAIL) {
-        messageBody = "You're Invited to Flash App"
+        messageBody = `${
+          senderName.charAt(0).toUpperCase() + senderName.slice(1)
+        } invited you to Flash`
         htmlBody = `
           <html>
             <body style="font-family: Arial, sans-serif;">
-              <h2>You're Invited to Flash App!</h2>
-              <p>A friend has invited you to join Flash App, the fastest way to send and receive Bitcoin.</p>
+              <h2>You're Invited to Flash!</h2>
+              <p>${
+                senderName.charAt(0).toUpperCase() + senderName.slice(1)
+              } has invited you to join Flash, your all-in-one wallet for fast, secure payments and rewards.</p>
               <p>Click the link below to get started:</p>
               <a href="${inviteLink}" style="display: inline-block; padding: 10px 20px; background-color: #4CAF50; color: white; text-decoration: none; border-radius: 5px;">Accept Invite</a>
               <p>Or copy this link: ${inviteLink}</p>
@@ -208,7 +218,7 @@ const CreateInviteMutation = GT.Field<null, GraphQLPublicContextAuth>({
           </html>
         `
       } else {
-        messageBody = `You're invited to Flash App! Join using this link: ${inviteLink}`
+        messageBody = `${senderName} invited you to Flash! Join using this link: ${inviteLink}`
       }
 
       // Send notification
@@ -240,7 +250,8 @@ const CreateInviteMutation = GT.Field<null, GraphQLPublicContextAuth>({
       }
     } catch (error) {
       baseLogger.error({ error }, "Failed to create invite")
-      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error occurred"
       return {
         errors: [errorMessage],
         invite: null,
