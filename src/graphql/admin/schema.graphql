@@ -29,6 +29,20 @@ input AccountUpdateStatusInput {
   uid: ID!
 }
 
+type AdminInvite {
+  contact: String!
+  createdAt: Timestamp!
+  expiresAt: Timestamp!
+  id: ID!
+  inviterAccountId: ID!
+  inviterUsername: Username
+  method: InviteMethod!
+  redeemedAt: Timestamp
+  redeemerAccountId: ID
+  redeemerUsername: Username
+  status: InviteStatus!
+}
+
 input AdminPushNotificationSendInput {
   accountId: String!
   body: String!
@@ -174,6 +188,68 @@ type InitiationViaOnChain {
   address: OnChainAddress!
 }
 
+input InviteExtendInput {
+  inviteId: ID!
+  newExpiresAt: Timestamp!
+}
+
+type InviteExtendPayload {
+  errors: [Error!]!
+  invite: AdminInvite
+}
+
+enum InviteMethod {
+  EMAIL
+  SMS
+  WHATSAPP
+}
+
+input InviteRateLimitResetInput {
+  accountId: ID!
+}
+
+input InviteRevokeInput {
+  inviteId: ID!
+  reason: String
+}
+
+type InviteRevokePayload {
+  errors: [Error!]!
+  invite: AdminInvite
+}
+
+type InviteStatistics {
+  redemptionRate: Float!
+  totalPending: Int!
+  totalRedeemed: Int!
+  totalSent: Int!
+}
+
+enum InviteStatus {
+  ACCEPTED
+  EXPIRED
+  PENDING
+  SENT
+}
+
+"""A connection to a list of items."""
+type InvitesConnection {
+  """A list of edges."""
+  edges: [InvitesEdge!]
+
+  """Information to aid in pagination."""
+  pageInfo: PageInfo!
+}
+
+"""An edge in a connection."""
+type InvitesEdge {
+  """A cursor for use in pagination"""
+  cursor: String!
+
+  """The item at the end of the edge"""
+  node: AdminInvite!
+}
+
 scalar Language
 
 type LightningInvoice {
@@ -256,6 +332,9 @@ type Mutation {
   adminPushNotificationSend(input: AdminPushNotificationSendInput!): AdminPushNotificationSendPayload!
   businessDeleteMapInfo(input: BusinessDeleteMapInfoInput!): AccountDetailPayload!
   businessUpdateMapInfo(input: BusinessUpdateMapInfoInput!): AccountDetailPayload!
+  inviteExtend(input: InviteExtendInput!): InviteExtendPayload!
+  inviteRateLimitReset(input: InviteRateLimitResetInput!): SuccessPayload!
+  inviteRevoke(input: InviteRevokeInput!): InviteRevokePayload!
   merchantMapDelete(input: MerchantMapDeleteInput!): MerchantPayload!
   merchantMapValidate(input: MerchantMapValidateInput!): MerchantPayload!
   userUpdatePhone(input: UserUpdatePhoneInput!): AccountDetailPayload!
@@ -312,6 +391,9 @@ type Query {
   accountDetailsByUserPhone(phone: Phone!): AuditedAccount!
   accountDetailsByUsername(username: Username!): AuditedAccount!
   allLevels: [AccountLevel!]!
+  inviteById(id: ID!): AdminInvite
+  inviteStatistics: InviteStatistics!
+  invitesList(after: String, first: Int, inviterId: ID, status: InviteStatus): InvitesConnection!
   lightningInvoice(hash: PaymentHash!): LightningInvoice!
   lightningPayment(hash: PaymentHash!): LightningPayment!
   listWalletIds(walletCurrency: WalletCurrency!): [WalletId!]!
@@ -356,6 +438,11 @@ scalar SignedAmount
 A string amount (of a currency) that can be negative (e.g. in a transaction)
 """
 scalar SignedDisplayMajorAmount
+
+type SuccessPayload {
+  errors: [Error!]!
+  success: Boolean
+}
 
 """
 Timestamp field, serialized as Unix time (the number of seconds since the Unix epoch)

@@ -21,6 +21,10 @@ export interface InviteRecord {
   status: InviteStatus
   createdAt: Date
   expiresAt: Date
+  redeemedAt?: Date
+  redeemedById?: mongoose.Types.ObjectId
+  revokedAt?: Date
+  revokeReason?: string
 }
 
 const InviteSchema = new Schema<InviteRecord>({
@@ -60,6 +64,19 @@ const InviteSchema = new Schema<InviteRecord>({
     type: Date,
     required: true,
     index: true,
+  },
+  redeemedAt: {
+    type: Date,
+  },
+  redeemedById: {
+    type: Schema.Types.ObjectId,
+    ref: "Account",
+  },
+  revokedAt: {
+    type: Date,
+  },
+  revokeReason: {
+    type: String,
   },
 })
 
