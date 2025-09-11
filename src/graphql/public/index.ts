@@ -1,6 +1,6 @@
 import { GraphQLSchema } from "graphql"
 
-import { ALL_INTERFACE_TYPES } from "@graphql/public/types"
+import { ALL_INTERFACE_TYPES } from "@graphql/public/types/index"
 
 import { QueryType } from "./queries"
 import { MutationType } from "./mutations"

@@ -33,6 +33,7 @@ const setGqlContext = async (
   next: NextFunction,
 ): Promise<void> => {
   const tokenPayload = req.token
+  const authHeader = req.headers.authorization
 
   const ipString = UNSECURE_IP_FROM_REQUEST_OBJECT
     ? req.ip
@@ -43,6 +44,7 @@ const setGqlContext = async (
   const gqlContext = await sessionPublicContext({
     tokenPayload,
     ip,
+    authHeader,
   })
 
   req.gqlContext = gqlContext

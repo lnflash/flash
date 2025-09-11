@@ -58,6 +58,7 @@ import AccountDisableNotificationChannelMutation from "./root/mutation/account-d
 import UserUpdateNpubMutation from "./root/mutation/user-update-npub"
 import RequestCashoutMutation from "./root/mutation/offers/request-cash-out"
 import InitiateCashoutMutation from "./root/mutation/offers/initiate-cash-out"
+import ApiTokenCreateMutation from "./root/mutation/api-token-create"
 
 // TODO: // const fields: { [key: string]: GraphQLFieldConfig<any, GraphQLPublicContext> }
 export const mutationFields = {
@@ -108,6 +109,8 @@ export const mutationFields = {
 
       callbackEndpointAdd: CallbackEndpointAdd,
       callbackEndpointDelete: CallbackEndpointDelete,
+      
+      apiTokenCreate: ApiTokenCreateMutation,
     },
 
     atWalletLevel: {

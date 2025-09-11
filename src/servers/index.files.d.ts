@@ -13,6 +13,9 @@ type GraphQLPublicContext = {
   domainAccount: Account | undefined
   ip: IpAddress | undefined
   sessionId: SessionId | undefined
+  isApiToken?: boolean
+  apiTokenScopes?: import("@domain/api-tokens/index.types").ApiTokenScope[]
+  apiTokenId?: string
 }
 
 type GraphQLPublicContextAuth = Omit<GraphQLPublicContext, "user" | "domainAccount"> & {

@@ -7,7 +7,7 @@ import { QueryType as QueryTypeAdmin } from "@graphql/admin/queries"
 import { MutationType as MutationTypeAdmin } from "@graphql/admin/mutations"
 import { ALL_INTERFACE_TYPES as ALL_INTERFACE_TYPES_ADMIN } from "@graphql/admin/types"
 
-import { ALL_INTERFACE_TYPES } from "@graphql/public/types"
+import { ALL_INTERFACE_TYPES } from "@graphql/public/types/index"
 
 import { QueryType } from "@graphql/public/queries"
 

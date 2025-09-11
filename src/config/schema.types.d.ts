@@ -190,6 +190,11 @@ type YamlSchema = {
     email: CashoutEmail
   }
   mailgun: MailgunConfig
+  apiTokens?: {
+    maxTokensPerAccount?: number
+    defaultExpirationDays?: number
+    tokenPrefix?: string
+  }
 }
 
 type CurrencyCode = string
