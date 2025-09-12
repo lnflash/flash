@@ -40,20 +40,26 @@ export const createInvite = async ({
     const dailyKey = `invite:daily:${accountId}`
     const targetKey = `invite:target:${contact}`
     
+    // Check current counts before incrementing
+    const currentDailyCount = await redis.get(dailyKey)
+    if (currentDailyCount && parseInt(currentDailyCount) >= DAILY_INVITE_LIMIT) {
+      return new ValidationError(`Daily invite limit (${DAILY_INVITE_LIMIT}) exceeded`)
+    }
+    
+    const currentTargetCount = await redis.get(targetKey)
+    if (currentTargetCount && parseInt(currentTargetCount) >= TARGET_INVITE_LIMIT) {
+      return new ValidationError(`This contact has already been invited by multiple users`)
+    }
+    
+    // Now increment the counters
     const dailyCount = await redis.incr(dailyKey)
     if (dailyCount === 1) {
       await redis.expire(dailyKey, 86400) // 24 hours
-    }
-    if (dailyCount > DAILY_INVITE_LIMIT) {
-      return new ValidationError(`Daily invite limit (${DAILY_INVITE_LIMIT}) exceeded`)
     }
     
     const targetCount = await redis.incr(targetKey)
     if (targetCount === 1) {
       await redis.expire(targetKey, 86400) // 24 hours
-    }
-    if (targetCount > TARGET_INVITE_LIMIT) {
-      return new ValidationError(`This contact has already been invited by multiple users`)
     }
 
     // Check for duplicate invite

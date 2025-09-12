@@ -2,7 +2,7 @@ import twilio from "twilio"
 import Mailgun from "mailgun.js"
 import FormData from "form-data"
 import { baseLogger } from "@services/logger"
-import { env, MailgunConfig } from "@config"
+import { env, MailgunConfig, TWILIO_FROM, TWILIO_WHATSAPP_FROM } from "@config"
 
 export enum NotificationMethod {
   EMAIL = "EMAIL",
@@ -118,8 +118,7 @@ class NotificationServiceImpl implements NotificationService {
       return false
     }
 
-    const twilioFrom = process.env.TWILIO_FROM
-    if (!twilioFrom) {
+    if (!TWILIO_FROM) {
       baseLogger.error("TWILIO_FROM not configured")
       return false
     }
@@ -127,7 +126,7 @@ class NotificationServiceImpl implements NotificationService {
     try {
       await this.twilioClient.messages.create({
         body,
-        from: twilioFrom,
+        from: TWILIO_FROM,
         to,
       })
       baseLogger.info({ to }, "SMS sent successfully via Twilio")
@@ -144,23 +143,39 @@ class NotificationServiceImpl implements NotificationService {
       return false
     }
 
-    const twilioWhatsAppFrom = process.env.TWILIO_WHATSAPP_FROM
-    if (!twilioWhatsAppFrom) {
+    if (!TWILIO_WHATSAPP_FROM) {
       baseLogger.error("TWILIO_WHATSAPP_FROM not configured")
       return false
     }
 
     const whatsappTo = to.startsWith("whatsapp:") ? to : `whatsapp:${to}`
-    const whatsappFrom = twilioWhatsAppFrom.startsWith("whatsapp:")
-      ? twilioWhatsAppFrom
-      : `whatsapp:${twilioWhatsAppFrom}`
+    const whatsappFrom = TWILIO_WHATSAPP_FROM.startsWith("whatsapp:")
+      ? TWILIO_WHATSAPP_FROM
+      : `whatsapp:${TWILIO_WHATSAPP_FROM}`
 
     try {
-      await this.twilioClient.messages.create({
-        body,
+      // Check if body contains template information
+      let messageOptions: any = {
         from: whatsappFrom,
         to: whatsappTo,
-      })
+      }
+
+      try {
+        const templateData = JSON.parse(body)
+        if (templateData.templateName && templateData.templateVariables) {
+          // Use WhatsApp template
+          messageOptions.contentSid = process.env.TWILIO_WHATSAPP_TEMPLATE_SID || ""
+          messageOptions.contentVariables = JSON.stringify(templateData.templateVariables)
+        } else {
+          // Regular message (for sandbox/testing)
+          messageOptions.body = body
+        }
+      } catch {
+        // Not JSON, use as regular message body
+        messageOptions.body = body
+      }
+
+      await this.twilioClient.messages.create(messageOptions)
       baseLogger.info({ to: whatsappTo }, "WhatsApp message sent successfully via Twilio")
       return true
     } catch (error) {

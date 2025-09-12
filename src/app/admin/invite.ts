@@ -200,11 +200,93 @@ export const extendInvite = async (inviteId: string, newExpiresAt: Date) => {
 
 export const resetInviteRateLimit = async (accountId: string) => {
   try {
-    // Clear rate limit keys for this account
+    // Clear all rate limit keys for this account
     const dailyKey = `invite:daily:${accountId}`
+    
+    // Delete the daily limit key
     await redis.del(dailyKey)
     
     return true
+  } catch (error) {
+    return new UnknownRepositoryError(error)
+  }
+}
+
+export const resetInviteTargetRateLimit = async (contact: string) => {
+  try {
+    // Clear the target rate limit key for this contact
+    const targetKey = `invite:target:${contact}`
+    
+    // Delete the target limit key
+    await redis.del(targetKey)
+    
+    return true
+  } catch (error) {
+    return new UnknownRepositoryError(error)
+  }
+}
+
+export const resetAllInviteRateLimits = async () => {
+  try {
+    // Get all invite-related rate limit keys (both old and new patterns)
+    const dailyKeys = await redis.keys(`invite:daily:*`)
+    const targetKeys = await redis.keys(`invite:target:*`)
+    const oldRateLimitKeys = await redis.keys(`invite:ratelimit:*`)
+    
+    // Delete all keys in batches
+    const allKeys = [...dailyKeys, ...targetKeys, ...oldRateLimitKeys]
+    
+    if (allKeys.length > 0) {
+      // Delete in batches of 100 to avoid overloading Redis
+      const batchSize = 100
+      for (let i = 0; i < allKeys.length; i += batchSize) {
+        const batch = allKeys.slice(i, i + batchSize)
+        await redis.del(...batch)
+      }
+    }
+    
+    return true
+  } catch (error) {
+    return new UnknownRepositoryError(error)
+  }
+}
+
+export const getInviteRateLimitStatus = async ({ accountId, contact }: { accountId?: string, contact?: string }) => {
+  try {
+    const DAILY_INVITE_LIMIT = 10
+    const TARGET_INVITE_LIMIT = 3
+    
+    let dailyCount: number | null = null
+    let dailyTtl: number | null = null
+    let targetCount: number | null = null
+    let targetTtl: number | null = null
+    
+    if (accountId) {
+      const dailyKey = `invite:daily:${accountId}`
+      const count = await redis.get(dailyKey)
+      dailyCount = count ? parseInt(count) : 0
+      const ttl = await redis.ttl(dailyKey)
+      dailyTtl = ttl > 0 ? ttl : null
+    }
+    
+    if (contact) {
+      const targetKey = `invite:target:${contact}`
+      const count = await redis.get(targetKey)
+      targetCount = count ? parseInt(count) : 0
+      const ttl = await redis.ttl(targetKey)
+      targetTtl = ttl > 0 ? ttl : null
+    }
+    
+    return {
+      accountId,
+      contact,
+      dailyCount,
+      dailyLimit: DAILY_INVITE_LIMIT,
+      targetCount,
+      targetLimit: TARGET_INVITE_LIMIT,
+      dailyTtl,
+      targetTtl,
+    }
   } catch (error) {
     return new UnknownRepositoryError(error)
   }

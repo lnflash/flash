@@ -217,7 +217,18 @@ const CreateInviteMutation = GT.Field<null, GraphQLPublicContextAuth>({
             </body>
           </html>
         `
+      } else if (method === InviteMethod.WHATSAPP) {
+        // For WhatsApp, we'll pass the template variables to the notification service
+        // The actual message body will be handled by the template
+        messageBody = JSON.stringify({
+          templateName: "flash_invite", // You'll need to use your actual template name
+          templateVariables: {
+            "1": senderName, // {{1}} maps to name
+            "2": token       // {{2}} maps to token (the actual token, not the link)
+          }
+        })
       } else {
+        // SMS
         messageBody = `${senderName} invited you to Flash! Join using this link: ${inviteLink}`
       }
 

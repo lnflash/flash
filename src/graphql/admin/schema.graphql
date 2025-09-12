@@ -232,6 +232,10 @@ enum InviteStatus {
   SENT
 }
 
+input InviteTargetRateLimitResetInput {
+  contact: String!
+}
+
 """A connection to a list of items."""
 type InvitesConnection {
   """A list of edges."""
@@ -333,8 +337,10 @@ type Mutation {
   businessDeleteMapInfo(input: BusinessDeleteMapInfoInput!): AccountDetailPayload!
   businessUpdateMapInfo(input: BusinessUpdateMapInfoInput!): AccountDetailPayload!
   inviteExtend(input: InviteExtendInput!): InviteExtendPayload!
+  inviteGlobalRateLimitReset: SuccessPayload!
   inviteRateLimitReset(input: InviteRateLimitResetInput!): SuccessPayload!
   inviteRevoke(input: InviteRevokeInput!): InviteRevokePayload!
+  inviteTargetRateLimitReset(input: InviteTargetRateLimitResetInput!): SuccessPayload!
   merchantMapDelete(input: MerchantMapDeleteInput!): MerchantPayload!
   merchantMapValidate(input: MerchantMapValidateInput!): MerchantPayload!
   userUpdatePhone(input: UserUpdatePhoneInput!): AccountDetailPayload!
