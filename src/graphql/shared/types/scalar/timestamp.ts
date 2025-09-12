@@ -18,14 +18,23 @@ const Timestamp = GT.Scalar<InternalDate | InputValidationError, ExternalDate>({
     return new InputValidationError({ message: "Invalid value for Date" })
   },
   parseValue(value) {
-    if (typeof value !== "string") {
-      return new InputValidationError({ message: "Invalid type for Date" })
+    if (typeof value === "string" || typeof value === "number") {
+      // Parse as Unix timestamp (seconds since epoch)
+      const timestamp = typeof value === "string" ? parseInt(value, 10) : value
+      if (isNaN(timestamp)) {
+        return new InputValidationError({ message: "Invalid timestamp value" })
+      }
+      return new Date(timestamp * 1000) // Convert seconds to milliseconds
     }
-    return new Date(value)
+    return new InputValidationError({ message: "Invalid type for Date" })
   },
   parseLiteral(ast) {
-    if (ast.kind === GT.Kind.STRING) {
-      return new Date(parseInt(ast.value, 10))
+    if (ast.kind === GT.Kind.STRING || ast.kind === GT.Kind.INT) {
+      const timestamp = parseInt(ast.value, 10)
+      if (isNaN(timestamp)) {
+        return new InputValidationError({ message: "Invalid timestamp value" })
+      }
+      return new Date(timestamp * 1000) // Convert seconds to milliseconds
     }
     return new InputValidationError({ message: "Invalid type for Date" })
   },

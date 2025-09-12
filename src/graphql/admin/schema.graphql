@@ -29,6 +29,20 @@ input AccountUpdateStatusInput {
   uid: ID!
 }
 
+type AdminInvite {
+  contact: String!
+  createdAt: Timestamp!
+  expiresAt: Timestamp!
+  id: ID!
+  inviterAccountId: ID!
+  inviterUsername: Username
+  method: InviteMethod!
+  redeemedAt: Timestamp
+  redeemerAccountId: ID
+  redeemerUsername: Username
+  status: InviteStatus!
+}
+
 input AdminPushNotificationSendInput {
   accountId: String!
   body: String!
@@ -71,15 +85,6 @@ type AuditedUser {
   id: ID!
   language: Language!
   phone: Phone
-}
-
-"""An Opaque Bearer token"""
-scalar AuthToken
-
-type AuthTokenPayload {
-  authToken: AuthToken
-  errors: [Error!]!
-  totpRequired: Boolean
 }
 
 """
@@ -140,26 +145,6 @@ input BusinessUpdateMapInfoInput {
   username: Username!
 }
 
-type CaptchaCreateChallengePayload {
-  errors: [Error!]!
-  result: CaptchaCreateChallengeResult
-}
-
-type CaptchaCreateChallengeResult {
-  challengeCode: String!
-  failbackMode: Boolean!
-  id: String!
-  newCaptcha: Boolean!
-}
-
-input CaptchaRequestAuthCodeInput {
-  challengeCode: String!
-  channel: PhoneCodeChannelType
-  phone: Phone!
-  secCode: String!
-  validationCode: String!
-}
-
 type Coordinates {
   latitude: Float!
   longitude: Float!
@@ -201,6 +186,72 @@ type InitiationViaLn {
 
 type InitiationViaOnChain {
   address: OnChainAddress!
+}
+
+input InviteExtendInput {
+  inviteId: ID!
+  newExpiresAt: Timestamp!
+}
+
+type InviteExtendPayload {
+  errors: [Error!]!
+  invite: AdminInvite
+}
+
+enum InviteMethod {
+  EMAIL
+  SMS
+  WHATSAPP
+}
+
+input InviteRateLimitResetInput {
+  accountId: ID!
+}
+
+input InviteRevokeInput {
+  inviteId: ID!
+  reason: String
+}
+
+type InviteRevokePayload {
+  errors: [Error!]!
+  invite: AdminInvite
+}
+
+type InviteStatistics {
+  redemptionRate: Float!
+  totalPending: Int!
+  totalRedeemed: Int!
+  totalSent: Int!
+}
+
+enum InviteStatus {
+  ACCEPTED
+  EXPIRED
+  PENDING
+  SENT
+}
+
+input InviteTargetRateLimitResetInput {
+  contact: String!
+}
+
+"""A connection to a list of items."""
+type InvitesConnection {
+  """A list of edges."""
+  edges: [InvitesEdge!]
+
+  """Information to aid in pagination."""
+  pageInfo: PageInfo!
+}
+
+"""An edge in a connection."""
+type InvitesEdge {
+  """A cursor for use in pagination"""
+  cursor: String!
+
+  """The item at the end of the edge"""
+  node: AdminInvite!
 }
 
 scalar Language
@@ -285,11 +336,13 @@ type Mutation {
   adminPushNotificationSend(input: AdminPushNotificationSendInput!): AdminPushNotificationSendPayload!
   businessDeleteMapInfo(input: BusinessDeleteMapInfoInput!): AccountDetailPayload!
   businessUpdateMapInfo(input: BusinessUpdateMapInfoInput!): AccountDetailPayload!
-  captchaCreateChallenge: CaptchaCreateChallengePayload!
-  captchaRequestAuthCode(input: CaptchaRequestAuthCodeInput!): SuccessPayload!
+  inviteExtend(input: InviteExtendInput!): InviteExtendPayload!
+  inviteGlobalRateLimitReset: SuccessPayload!
+  inviteRateLimitReset(input: InviteRateLimitResetInput!): SuccessPayload!
+  inviteRevoke(input: InviteRevokeInput!): InviteRevokePayload!
+  inviteTargetRateLimitReset(input: InviteTargetRateLimitResetInput!): SuccessPayload!
   merchantMapDelete(input: MerchantMapDeleteInput!): MerchantPayload!
   merchantMapValidate(input: MerchantMapValidateInput!): MerchantPayload!
-  userLogin(input: UserLoginInput!): AuthTokenPayload!
   userUpdatePhone(input: UserUpdatePhoneInput!): AccountDetailPayload!
 }
 
@@ -301,9 +354,6 @@ scalar Object
 scalar OnChainAddress
 
 scalar OnChainTxHash
-
-"""An authentication code valid for a single use"""
-scalar OneTimeAuthCode
 
 """Information about pagination in a connection."""
 type PageInfo {
@@ -324,11 +374,6 @@ scalar PaymentHash
 
 """Phone number which includes country code"""
 scalar Phone
-
-enum PhoneCodeChannelType {
-  SMS
-  WHATSAPP
-}
 
 interface PriceInterface {
   base: SafeInt!
@@ -352,6 +397,9 @@ type Query {
   accountDetailsByUserPhone(phone: Phone!): AuditedAccount!
   accountDetailsByUsername(username: Username!): AuditedAccount!
   allLevels: [AccountLevel!]!
+  inviteById(id: ID!): AdminInvite
+  inviteStatistics: InviteStatistics!
+  invitesList(after: String, first: Int, inviterId: ID, status: InviteStatus): InvitesConnection!
   lightningInvoice(hash: PaymentHash!): LightningInvoice!
   lightningPayment(hash: PaymentHash!): LightningPayment!
   listWalletIds(walletCurrency: WalletCurrency!): [WalletId!]!
@@ -511,11 +559,6 @@ type UsdWallet implements Wallet {
     last: Int
   ): TransactionConnection
   walletCurrency: WalletCurrency!
-}
-
-input UserLoginInput {
-  code: OneTimeAuthCode!
-  phone: Phone!
 }
 
 input UserUpdatePhoneInput {

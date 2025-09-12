@@ -21,6 +21,7 @@
       "@domain/*": ["src/domain/*"],
       "@services/*": ["src/services/*"],
       "@utils": ["src/utils/index"],
+      "@utils/*": ["src/utils/*"],
       "@graphql/*": ["src/graphql/*"],
       "@servers/*": ["src/servers/*"]
     }

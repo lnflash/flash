@@ -8,6 +8,9 @@
     - [Using GraphQL Playground](#using-graphql-playground)
     - [Honeycomb](#honeycomb)
     - [Docker compose](#docker-compose)
+  - [Invite Feature](#invite-feature)
+    - [Configuration](#invite-configuration)
+    - [Testing Invites](#testing-invites)
   - [Testing](#testing)
     - [Run unit tests](#run-unit-tests)
     - [Run integration tests](#run-integration-tests)
@@ -150,6 +153,122 @@ The docker compose files are split into `docker-compose.yml` and `docker-compose
 By default, with `docker compose up`, docker will merge both files. The `docker-compose.override.yml` will expose ports on your host machine to various containers.
 
 During CI testing we ignore the override file in order to contain tests within a docker network. This is achieved by specifically calling out the docker compose file to use ex: `docker compose -f docker-compose.yml up`.
+
+## Invite Feature
+
+### Configuration
+
+The invite feature uses the existing notification infrastructure:
+- **Twilio** for SMS and WhatsApp
+- **Mailgun** for Email (reuses existing email configuration)
+
+#### Required for all invite methods:
+- `TWILIO_ACCOUNT_SID`: Twilio account SID (already configured)
+- `TWILIO_AUTH_TOKEN`: Twilio authentication token (already configured)
+
+#### For SMS invites:
+- `TWILIO_FROM`: Phone number for sending SMS messages (e.g., `+1234567890`)
+
+#### For WhatsApp invites:
+- `TWILIO_WHATSAPP_FROM`: WhatsApp-enabled phone number (e.g., `+14155238886`)
+  - **Note**: For testing, use the Twilio WhatsApp Sandbox. Visit [Twilio Console](https://console.twilio.com/us1/develop/sms/try-it-out/whatsapp-learn) to set up the sandbox.
+  - Join the sandbox by sending "join <your-sandbox-keyword>" to the sandbox number
+
+#### For Email invites:
+- Uses existing Mailgun configuration from YAML config file
+- Configure in your `galoy.yaml` or environment-specific YAML:
+  ```yaml
+  mailgun:
+    apiKey: your-mailgun-api-key
+    domain: mg.yourdomain.com
+    from: invites@yourdomain.com
+  ```
+
+#### Optional - Dynamic Links:
+- `FIREBASE_DYNAMIC_LINK_DOMAIN`: Firebase Dynamic Links domain (e.g., `flash.page.link`)
+- `APP_INSTALL_URL`: App download URL (defaults to `https://getflash.io/app`)
+- `ANDROID_PACKAGE_NAME`: Android app package name (e.g., `com.lnflash`)
+- `IOS_BUNDLE_ID`: iOS app bundle identifier (e.g., `com.lnflash`)
+
+### Testing Invites
+
+#### Example GraphQL Mutations:
+
+**Create an invite (Email):**
+```graphql
+mutation CreateInvite {
+  createInvite(input: {
+    contact: "friend@example.com"
+    method: EMAIL
+  }) {
+    invite {
+      id
+      contact
+      method
+      status
+      createdAt
+      expiresAt
+    }
+    errors
+  }
+}
+```
+
+**Create an invite (SMS):**
+```graphql
+mutation CreateInvite {
+  createInvite(input: {
+    contact: "+1234567890"  # Must be E.164 format
+    method: SMS
+  }) {
+    invite {
+      id
+      status
+    }
+    errors
+  }
+}
+```
+
+**Create an invite (WhatsApp):**
+```graphql
+mutation CreateInvite {
+  createInvite(input: {
+    contact: "+1234567890"  # Must be E.164 format
+    method: WHATSAPP
+  }) {
+    invite {
+      id
+      status
+    }
+    errors
+  }
+}
+```
+
+**Redeem an invite:**
+```graphql
+mutation RedeemInvite {
+  redeemInvite(input: {
+    token: "40-character-hex-token-from-invite-link"
+  }) {
+    success
+    errors
+  }
+}
+```
+
+#### Local Testing with Twilio WhatsApp Sandbox:
+
+1. Go to [Twilio Console WhatsApp Sandbox](https://console.twilio.com/us1/develop/sms/try-it-out/whatsapp-learn)
+2. Follow the instructions to join the sandbox (send "join <sandbox-keyword>" to the sandbox number)
+3. Set `TWILIO_WHATSAPP_FROM` to the sandbox number (usually `+14155238886`)
+4. Test recipients must first join the sandbox before receiving messages
+
+#### Rate Limits:
+- Maximum 10 invites per user per day
+- Maximum 3 invites per target contact per day
+- Invites expire after 24 hours by default
 
 ## Testing
 
