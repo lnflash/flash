@@ -1,8 +1,7 @@
 import twilio from "twilio"
-import Mailgun from "mailgun.js"
-import FormData from "form-data"
+import sgMail from "@sendgrid/mail"
 import { baseLogger } from "@services/logger"
-import { env, MailgunConfig, TWILIO_FROM, TWILIO_WHATSAPP_FROM } from "@config"
+import { env, SendGridConfig, TWILIO_FROM, TWILIO_WHATSAPP_FROM } from "@config"
 
 export enum NotificationMethod {
   EMAIL = "EMAIL",
@@ -21,11 +20,10 @@ export interface NotificationService {
 
 class NotificationServiceImpl implements NotificationService {
   private twilioClient: twilio.Twilio | null = null
-  private mailgunClient: any = null
 
   constructor() {
     this.initializeTwilio()
-    this.initializeMailgun()
+    this.initializeSendGrid()
   }
 
   private initializeTwilio() {
@@ -38,17 +36,13 @@ class NotificationServiceImpl implements NotificationService {
     }
   }
 
-  private initializeMailgun() {
+  private initializeSendGrid() {
     try {
-      if (MailgunConfig?.apiKey) {
-        const mailgun = new Mailgun(FormData)
-        this.mailgunClient = mailgun.client({
-          username: "api",
-          key: MailgunConfig.apiKey,
-        })
+      if (SendGridConfig?.apiKey) {
+        sgMail.setApiKey(SendGridConfig.apiKey)
       }
     } catch (error) {
-      baseLogger.error({ error }, "Failed to initialize Mailgun client")
+      baseLogger.error({ error }, "Failed to initialize SendGrid client")
     }
   }
 
@@ -81,33 +75,27 @@ class NotificationServiceImpl implements NotificationService {
     subject: string,
     htmlBody?: string,
   ): Promise<boolean> {
-    if (!this.mailgunClient) {
-      baseLogger.error("Mailgun client not configured")
+    if (!SendGridConfig?.apiKey) {
+      baseLogger.error("SendGrid not configured")
       return false
     }
 
     // Use environment variable for from address, or default
-    const fromEmail = process.env.MAILGUN_FROM_EMAIL || "noreply@getflash.io"
-    const domain = MailgunConfig?.domain
-
-    if (!domain) {
-      baseLogger.error("Mailgun domain not configured")
-      return false
-    }
+    const fromEmail = process.env.SENDGRID_FROM_EMAIL || "noreply@getflash.io"
 
     try {
-      await this.mailgunClient.messages.create(domain, {
+      await sgMail.send({
+        to,
         from: fromEmail,
-        to: [to],
         subject: subject,
         text: subject,
         html: htmlBody || subject,
       })
 
-      baseLogger.info({ to }, "Email sent successfully via Mailgun")
+      baseLogger.info({ to }, "Email sent successfully via SendGrid")
       return true
     } catch (error) {
-      baseLogger.error({ error, to }, "Failed to send email via Mailgun")
+      baseLogger.error({ error, to }, "Failed to send email via SendGrid")
       return false
     }
   }

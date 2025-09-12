@@ -1,7 +1,6 @@
 import { AccountRoles, AccountStatus } from "@domain/accounts/primitives"
 import { WalletCurrency } from "@domain/shared"
 
-
 const displayCurrencyConfigSchema = {
   type: "object",
   properties: {
@@ -230,7 +229,7 @@ export const configSchema = {
           role: {
             const: AccountRoles.bankowner,
           },
-        }
+        },
       },
       default: [
         // {
@@ -635,10 +634,10 @@ export const configSchema = {
         password: { type: "string" },
         webhook: {
           type: "object",
-          properties: { 
-            port: { type: "integer" } , 
-            uri: { type: "string" } , 
-            secret: { type: "string" } , 
+          properties: {
+            port: { type: "integer" },
+            uri: { type: "string" },
+            secret: { type: "string" },
           },
         },
       },
@@ -654,10 +653,10 @@ export const configSchema = {
       required: ["enabled", "minimum", "maximum", "accountLevel"],
       default: { enabled: true },
     },
-    mailgun: {
+    sendgrid: {
       type: "object",
-      required: ["apiKey", "domain"]
-    }
+      required: ["apiKey"],
+    },
   },
   required: [
     "lightningAddressDomain",
