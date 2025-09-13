@@ -1,7 +1,12 @@
 import crypto from "crypto"
 
 import { InviteRepository } from "@services/mongoose/models/invite"
-import { InviteStatus, InviteMethod, INVITE_EXPIRY_HOURS } from "@domain/invite"
+import {
+  InviteStatus,
+  InviteMethod,
+  INVITE_EXPIRY_HOURS,
+  validateContactForMethod,
+} from "@domain/invite"
 import { AccountsRepository } from "@services/mongoose"
 import { UnknownRepositoryError } from "@domain/errors"
 import { ValidationError } from "@domain/shared"
@@ -11,16 +16,6 @@ import { sendInviteNotification } from "@services/notifications/invite"
 import { checkInviteCreateRateLimit, checkInviteTargetRateLimit } from "./rate-limits"
 
 export { getInviteById, listInvites, getInviteStatistics } from "./queries"
-
-const validateEmail = (email: string): boolean => {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-  return emailRegex.test(email)
-}
-
-const validatePhone = (phone: string): boolean => {
-  const phoneRegex = /^\+[1-9]\d{7,14}$/
-  return phoneRegex.test(phone)
-}
 
 export const createInvite = async ({
   accountId,
@@ -33,14 +28,9 @@ export const createInvite = async ({
 }) => {
   try {
     // Validate contact format
-    if (method === InviteMethod.EMAIL && !validateEmail(contact)) {
-      return new ValidationError("Invalid email format")
-    }
-    if (
-      (method === InviteMethod.SMS || method === InviteMethod.WHATSAPP) &&
-      !validatePhone(contact)
-    ) {
-      return new ValidationError("Invalid phone number format")
+    const contactValidation = validateContactForMethod(contact, method)
+    if (contactValidation instanceof ValidationError) {
+      return contactValidation
     }
 
     // Check rate limits

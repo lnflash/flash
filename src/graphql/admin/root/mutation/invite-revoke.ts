@@ -37,6 +37,10 @@ const InviteRevokeMutation = GT.Field<
     const { inviteId, reason } = args.input
 
     const checkedInviteId = checkedToInviteId(inviteId)
+    if (checkedInviteId instanceof Error) {
+      return { errors: [mapAndParseErrorForGqlResponse(checkedInviteId)] }
+    }
+
     const invite = await Admin.revokeInvite(checkedInviteId, reason)
 
     if (invite instanceof Error) {

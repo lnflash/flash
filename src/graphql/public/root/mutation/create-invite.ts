@@ -1,10 +1,10 @@
 import { GT } from "@graphql/index"
-import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import {
   InviteRepository,
   InviteMethod,
   InviteStatus,
 } from "@services/mongoose/models/invite"
+import { validateContactForMethod } from "@domain/invite"
 import { generateInviteToken } from "@utils"
 import { notificationService, NotificationMethod } from "@services/notification"
 import { baseLogger } from "@services/logger"
@@ -61,16 +61,6 @@ const CreateInvitePayload = GT.Object({
     errors: { type: GT.NonNull(GT.List(GT.NonNull(GT.String))) },
   }),
 })
-
-const validateE164PhoneNumber = (phone: string): boolean => {
-  const e164Regex = /^\+[1-9]\d{1,14}$/
-  return e164Regex.test(phone)
-}
-
-const validateEmail = (email: string): boolean => {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-  return emailRegex.test(email)
-}
 
 const checkRateLimit = async (
   inviterId: string,
@@ -147,17 +137,9 @@ const CreateInviteMutation = GT.Field<null, GraphQLPublicContextAuth>({
     }
 
     // Validate contact based on method
-    if (method === InviteMethod.EMAIL) {
-      if (!validateEmail(contact)) {
-        return { errors: ["Invalid email address"], invite: null }
-      }
-    } else if (method === InviteMethod.SMS || method === InviteMethod.WHATSAPP) {
-      if (!validateE164PhoneNumber(contact)) {
-        return {
-          errors: ["Invalid phone number. Must be in E.164 format (e.g., +1234567890)"],
-          invite: null,
-        }
-      }
+    const contactValidation = validateContactForMethod(contact, method)
+    if (contactValidation !== true) {
+      return { errors: [contactValidation.message], invite: null }
     }
 
     try {

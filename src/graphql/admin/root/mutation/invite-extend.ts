@@ -42,6 +42,10 @@ const InviteExtendMutation = GT.Field<
     }
 
     const checkedInviteId = checkedToInviteId(inviteId)
+    if (checkedInviteId instanceof Error) {
+      return { errors: [mapAndParseErrorForGqlResponse(checkedInviteId)] }
+    }
+
     const invite = await Admin.extendInvite(checkedInviteId, newExpiresAt)
 
     if (invite instanceof Error) {

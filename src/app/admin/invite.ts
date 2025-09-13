@@ -1,5 +1,10 @@
 import { InviteRepository } from "@services/mongoose/models/invite"
-import { InviteStatus, InviteId } from "@domain/invite"
+import {
+  InviteStatus,
+  InviteId,
+  InviteAlreadyAcceptedError,
+  InvalidExpirationDateError,
+} from "@domain/invite"
 import { redis } from "@services/redis"
 import { UnknownRepositoryError, CouldNotFindError } from "@domain/errors"
 
@@ -11,7 +16,7 @@ export const revokeInvite = async (inviteId: InviteId, reason?: string) => {
     }
 
     if (invite.status === InviteStatus.ACCEPTED) {
-      return new Error("Cannot revoke an already accepted invite")
+      return new InviteAlreadyAcceptedError("Cannot revoke an already accepted invite")
     }
 
     invite.status = InviteStatus.EXPIRED
@@ -41,12 +46,12 @@ export const extendInvite = async (inviteId: InviteId, newExpiresAt: Date) => {
     }
 
     if (invite.status === InviteStatus.ACCEPTED) {
-      return new Error("Cannot extend an already accepted invite")
+      return new InviteAlreadyAcceptedError("Cannot extend an already accepted invite")
     }
 
     // Validate new expiration is in the future
     if (newExpiresAt <= new Date()) {
-      return new Error("New expiration date must be in the future")
+      return new InvalidExpirationDateError("New expiration date must be in the future")
     }
 
     invite.expiresAt = newExpiresAt
@@ -97,13 +102,19 @@ export const resetInviteTargetRateLimit = async (contact: string) => {
 
 export const resetAllInviteRateLimits = async () => {
   try {
-    // Get all invite-related rate limit keys (both old and new patterns)
-    const dailyKeys = await redis.keys(`invite:daily:*`)
-    const targetKeys = await redis.keys(`invite:target:*`)
-    const oldRateLimitKeys = await redis.keys(`invite:ratelimit:*`)
+    // Use SCAN instead of KEYS for production safety
+    const patterns = [`invite:daily:*`, `invite:target:*`, `invite:ratelimit:*`]
+    const allKeys: string[] = []
 
-    // Delete all keys in batches
-    const allKeys = [...dailyKeys, ...targetKeys, ...oldRateLimitKeys]
+    for (const pattern of patterns) {
+      let cursor = "0"
+      do {
+        const result = await redis.scan(cursor, "MATCH", pattern, "COUNT", 100)
+        cursor = result[0]
+        const keys = result[1]
+        allKeys.push(...keys)
+      } while (cursor !== "0")
+    }
 
     if (allKeys.length > 0) {
       // Delete in batches of 100 to avoid overloading Redis

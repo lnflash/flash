@@ -18,5 +18,5 @@ export const checkInviteTargetRateLimit = async (
 ): Promise<true | InviteTargetRateLimiterExceededError> =>
   consumeLimiter({
     rateLimitConfig: RateLimitConfig.inviteTarget,
-    keyToConsume: contact as AccountId, // Contact used as key
+    keyToConsume: contact as IpAddress, // Contact string used as rate limit key
   })
