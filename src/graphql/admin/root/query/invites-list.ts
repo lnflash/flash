@@ -4,32 +4,51 @@ import { mapError } from "@graphql/error-map"
 import InvitesConnection from "@graphql/admin/types/object/invites-connection"
 import InviteStatus from "@graphql/shared/types/scalar/invite-status"
 import { checkedToAccountId } from "@domain/accounts"
+import {
+  connectionFromPaginatedArray,
+  connectionArgs,
+  checkedConnectionArgs,
+} from "@graphql/connections"
 
 const InvitesListQuery = GT.Field({
   type: GT.NonNull(InvitesConnection),
   args: {
-    first: { type: GT.Int },
-    skip: { type: GT.Int },
+    ...connectionArgs,
     status: { type: InviteStatus },
     inviterId: { type: GT.ID },
   },
   resolve: async (_, args) => {
-    const { first, skip, status, inviterId } = args
+    const checkedArgs = checkedConnectionArgs(args)
+    if (checkedArgs instanceof Error) {
+      throw mapError(checkedArgs)
+    }
 
     // Convert inviterId to branded type if provided
     let processedInviterId: AccountId | undefined
-    if (inviterId) {
-      const checkedInviterId = checkedToAccountId(inviterId)
+    if (args.inviterId) {
+      const checkedInviterId = checkedToAccountId(args.inviterId)
       if (checkedInviterId instanceof Error) {
         throw mapError(checkedInviterId)
       }
       processedInviterId = checkedInviterId
     }
 
+    // Calculate skip from cursor
+    let skip = 0
+    if (args.after) {
+      // For cursor-based pagination, we could store the last seen ID
+      // For now, we'll use a simple numeric approach
+      try {
+        skip = parseInt(args.after, 16) || 0
+      } catch {
+        skip = 0
+      }
+    }
+
     const invites = await Admin.listInvites({
-      first: first || 20,
-      skip: skip || 0,
-      status: status instanceof Error ? undefined : status,
+      first: args.first || 20,
+      skip,
+      status: args.status instanceof Error ? undefined : args.status,
       inviterId: processedInviterId,
     })
 
@@ -37,7 +56,10 @@ const InvitesListQuery = GT.Field({
       throw mapError(invites)
     }
 
-    return invites
+    const totalCount = invites.count?.[0]?.total || 0
+    const items = invites.data || []
+
+    return connectionFromPaginatedArray(items, totalCount, checkedArgs)
   },
 })
 
