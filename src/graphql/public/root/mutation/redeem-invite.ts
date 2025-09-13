@@ -1,6 +1,6 @@
 import { GT } from "@graphql/index"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
-import { Invite, InviteStatus } from "@services/mongoose/models/invite"
+import { InviteRepository, InviteStatus } from "@services/mongoose/models/invite"
 import { hashToken } from "@utils"
 import { baseLogger } from "@services/logger"
 import SuccessPayload from "@graphql/shared/types/payload/success-payload"
@@ -40,7 +40,7 @@ const RedeemInviteMutation = GT.Field<null, GraphQLPublicContext>({
       const tokenHash = hashToken(token)
 
       // Find the invite by tokenHash
-      const invite = await Invite.findOne({ tokenHash })
+      const invite = await InviteRepository.findOne({ tokenHash })
 
       if (!invite) {
         return { success: false, errors: ["Invalid or expired invitation"] }
@@ -65,7 +65,7 @@ const RedeemInviteMutation = GT.Field<null, GraphQLPublicContext>({
       // Log successful redemption
       baseLogger.info(
         { inviteId: invite._id, userId: user?.id },
-        "Invite successfully redeemed"
+        "Invite successfully redeemed",
       )
 
       // TODO: Additional logic for user creation or rewards can be added here
@@ -74,13 +74,17 @@ const RedeemInviteMutation = GT.Field<null, GraphQLPublicContext>({
       // - If user is logged in, apply any referral rewards
       // - Track analytics for the invitation
 
-      return { 
-        success: true, 
-        errors: [] 
+      return {
+        success: true,
+        errors: [],
       }
     } catch (error) {
-      baseLogger.error({ error, token: token.substring(0, 8) + "..." }, "Failed to redeem invite")
-      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
+      baseLogger.error(
+        { error, token: token.substring(0, 8) + "..." },
+        "Failed to redeem invite",
+      )
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error occurred"
       return {
         success: false,
         errors: [errorMessage],

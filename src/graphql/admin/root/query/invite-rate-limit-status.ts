@@ -2,6 +2,7 @@ import { GT } from "@graphql/index"
 import { Admin } from "@app"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import IError from "@graphql/shared/types/abstract/error"
+import { checkedToAccountId } from "@domain/accounts"
 
 const InviteRateLimitStatusInput = GT.Input({
   name: "InviteRateLimitStatusInput",
@@ -55,7 +56,25 @@ const InviteRateLimitStatusQuery = GT.Field<
     input: { type: InviteRateLimitStatusInput },
   },
   resolve: async (_, args) => {
-    const result = await Admin.getInviteRateLimitStatus(args.input || {})
+    const input = args.input || {}
+
+    // Convert accountId to branded type if provided
+    const processedInput: { accountId?: AccountId; contact?: string } = {
+      contact: input.contact,
+    }
+
+    if (input.accountId) {
+      const checkedAccountId = checkedToAccountId(input.accountId)
+      if (checkedAccountId instanceof Error) {
+        return {
+          errors: [mapAndParseErrorForGqlResponse(checkedAccountId)],
+          status: null,
+        }
+      }
+      processedInput.accountId = checkedAccountId
+    }
+
+    const result = await Admin.getInviteRateLimitStatus(processedInput)
 
     if (result instanceof Error) {
       return { errors: [mapAndParseErrorForGqlResponse(result)], status: null }

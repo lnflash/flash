@@ -18,6 +18,7 @@ import { toDays, toSeconds } from "@domain/primitives"
 import { BigIntConversionError, JMDAmount, WalletCurrency } from "@domain/shared"
 
 import { AccountLevel } from "@domain/accounts"
+import { DAILY_INVITE_LIMIT, TARGET_INVITE_LIMIT } from "@domain/invite"
 
 import mergeWith from "lodash.mergewith"
 
@@ -217,6 +218,18 @@ export const getInvoiceCreateForRecipientAttemptLimits = () =>
 export const getOnChainAddressCreateAttemptLimits = () =>
   getRateLimits(yamlConfig.rateLimits.onChainAddressCreateAttempt)
 
+export const getInviteCreateAttemptLimits = () => ({
+  points: DAILY_INVITE_LIMIT,
+  duration: toSeconds(86400), // 24 hours
+  blockDuration: toSeconds(86400), // 24 hours
+})
+
+export const getInviteTargetAttemptLimits = () => ({
+  points: TARGET_INVITE_LIMIT,
+  duration: toSeconds(86400), // 24 hours
+  blockDuration: toSeconds(86400), // 24 hours
+})
+
 export const getOnChainWalletConfig = () => ({
   dustThreshold: yamlConfig.onChainWallet.dustThreshold,
 })
@@ -355,7 +368,7 @@ const { ask } = yamlConfig.exchangeRates["USD"]["JMD"]
 const sellRate = JMDAmount.dollars(ask)
 if (sellRate instanceof BigIntConversionError) throw sellRate
 export const ExchangeRates = {
-  jmd: { sell: sellRate }
+  jmd: { sell: sellRate },
 }
 
 export const Cashout = {

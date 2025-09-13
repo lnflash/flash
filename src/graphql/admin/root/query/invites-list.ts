@@ -3,23 +3,34 @@ import { Admin } from "@app"
 import { mapError } from "@graphql/error-map"
 import InvitesConnection from "@graphql/admin/types/object/invites-connection"
 import InviteStatus from "@graphql/shared/types/scalar/invite-status"
+import { checkedToAccountId } from "@domain/accounts"
 
 const InvitesListQuery = GT.Field({
   type: GT.NonNull(InvitesConnection),
   args: {
     first: { type: GT.Int },
-    after: { type: GT.String },
+    skip: { type: GT.Int },
     status: { type: InviteStatus },
     inviterId: { type: GT.ID },
   },
   resolve: async (_, args) => {
-    const { first, after, status, inviterId } = args
+    const { first, skip, status, inviterId } = args
+
+    // Convert inviterId to branded type if provided
+    let processedInviterId: AccountId | undefined
+    if (inviterId) {
+      const checkedInviterId = checkedToAccountId(inviterId)
+      if (checkedInviterId instanceof Error) {
+        throw mapError(checkedInviterId)
+      }
+      processedInviterId = checkedInviterId
+    }
 
     const invites = await Admin.listInvites({
       first: first || 20,
-      after,
+      skip: skip || 0,
       status: status instanceof Error ? undefined : status,
-      inviterId,
+      inviterId: processedInviterId,
     })
 
     if (invites instanceof Error) {

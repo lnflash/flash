@@ -2,6 +2,7 @@ import { GT } from "@graphql/index"
 import { Admin } from "@app"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import SuccessPayload from "@graphql/shared/types/payload/success-payload"
+import { checkedToAccountId } from "@domain/accounts"
 
 const InviteRateLimitResetInput = GT.Input({
   name: "InviteRateLimitResetInput",
@@ -31,7 +32,12 @@ const InviteRateLimitResetMutation = GT.Field<
   resolve: async (_, args) => {
     const { accountId } = args.input
 
-    const result = await Admin.resetInviteRateLimit(accountId)
+    const checkedAccountId = checkedToAccountId(accountId)
+    if (checkedAccountId instanceof Error) {
+      return { errors: [mapAndParseErrorForGqlResponse(checkedAccountId)] }
+    }
+
+    const result = await Admin.resetInviteRateLimit(checkedAccountId)
 
     if (result instanceof Error) {
       return { errors: [mapAndParseErrorForGqlResponse(result)] }

@@ -1,6 +1,10 @@
 import { GT } from "@graphql/index"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
-import { Invite, InviteMethod, InviteStatus } from "@services/mongoose/models/invite"
+import {
+  InviteRepository,
+  InviteMethod,
+  InviteStatus,
+} from "@services/mongoose/models/invite"
 import { generateInviteToken } from "@utils"
 import { notificationService, NotificationMethod } from "@services/notification"
 import { baseLogger } from "@services/logger"
@@ -177,7 +181,7 @@ const CreateInviteMutation = GT.Field<null, GraphQLPublicContextAuth>({
       expiresAt.setHours(expiresAt.getHours() + INVITE_EXPIRY_HOURS)
 
       // Create invite record
-      const invite = new Invite({
+      const invite = new InviteRepository({
         contact,
         method,
         tokenHash,
@@ -224,8 +228,8 @@ const CreateInviteMutation = GT.Field<null, GraphQLPublicContextAuth>({
           templateName: "flash_invite", // You'll need to use your actual template name
           templateVariables: {
             "1": senderName, // {{1}} maps to name
-            "2": token       // {{2}} maps to token (the actual token, not the link)
-          }
+            "2": token, // {{2}} maps to token (the actual token, not the link)
+          },
         })
       } else {
         // SMS

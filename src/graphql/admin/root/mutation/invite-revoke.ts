@@ -2,6 +2,7 @@ import { GT } from "@graphql/index"
 import { Admin } from "@app"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import InviteRevokePayload from "@graphql/admin/types/payload/invite-revoke"
+import { checkedToInviteId } from "@domain/invite"
 
 const InviteRevokeInput = GT.Input({
   name: "InviteRevokeInput",
@@ -35,7 +36,8 @@ const InviteRevokeMutation = GT.Field<
   resolve: async (_, args) => {
     const { inviteId, reason } = args.input
 
-    const invite = await Admin.revokeInvite(inviteId, reason)
+    const checkedInviteId = checkedToInviteId(inviteId)
+    const invite = await Admin.revokeInvite(checkedInviteId, reason)
 
     if (invite instanceof Error) {
       return { errors: [mapAndParseErrorForGqlResponse(invite)] }

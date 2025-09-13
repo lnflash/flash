@@ -1,12 +1,16 @@
-import { Invite } from "@services/mongoose/models/invite"
-import { InviteStatus, InviteMethod, INVITE_EXPIRY_HOURS, DAILY_INVITE_LIMIT, TARGET_INVITE_LIMIT } from "@domain/invite"
+import crypto from "crypto"
+
+import { InviteRepository } from "@services/mongoose/models/invite"
+import { InviteStatus, InviteMethod, INVITE_EXPIRY_HOURS } from "@domain/invite"
 import { AccountsRepository } from "@services/mongoose"
-import { redis } from "@services/redis"
 import { UnknownRepositoryError } from "@domain/errors"
 import { ValidationError } from "@domain/shared"
 import { checkedToAccountId } from "@domain/accounts"
 import { sendInviteNotification } from "@services/notifications/invite"
-import crypto from "crypto"
+
+import { checkInviteCreateRateLimit, checkInviteTargetRateLimit } from "./rate-limits"
+
+export { getInviteById, listInvites, getInviteStatistics } from "./queries"
 
 const validateEmail = (email: string): boolean => {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -23,7 +27,7 @@ export const createInvite = async ({
   contact,
   method,
 }: {
-  accountId: string
+  accountId: AccountId
   contact: string
   method: InviteMethod
 }) => {
@@ -32,38 +36,28 @@ export const createInvite = async ({
     if (method === InviteMethod.EMAIL && !validateEmail(contact)) {
       return new ValidationError("Invalid email format")
     }
-    if ((method === InviteMethod.SMS || method === InviteMethod.WHATSAPP) && !validatePhone(contact)) {
+    if (
+      (method === InviteMethod.SMS || method === InviteMethod.WHATSAPP) &&
+      !validatePhone(contact)
+    ) {
       return new ValidationError("Invalid phone number format")
     }
 
     // Check rate limits
-    const dailyKey = `invite:daily:${accountId}`
-    const targetKey = `invite:target:${contact}`
-    
-    // Check current counts before incrementing
-    const currentDailyCount = await redis.get(dailyKey)
-    if (currentDailyCount && parseInt(currentDailyCount) >= DAILY_INVITE_LIMIT) {
-      return new ValidationError(`Daily invite limit (${DAILY_INVITE_LIMIT}) exceeded`)
+    const dailyLimitCheck = await checkInviteCreateRateLimit(accountId)
+    if (dailyLimitCheck instanceof Error) {
+      return new ValidationError("Daily invite limit exceeded")
     }
-    
-    const currentTargetCount = await redis.get(targetKey)
-    if (currentTargetCount && parseInt(currentTargetCount) >= TARGET_INVITE_LIMIT) {
-      return new ValidationError(`This contact has already been invited by multiple users`)
-    }
-    
-    // Now increment the counters
-    const dailyCount = await redis.incr(dailyKey)
-    if (dailyCount === 1) {
-      await redis.expire(dailyKey, 86400) // 24 hours
-    }
-    
-    const targetCount = await redis.incr(targetKey)
-    if (targetCount === 1) {
-      await redis.expire(targetKey, 86400) // 24 hours
+
+    const targetLimitCheck = await checkInviteTargetRateLimit(contact)
+    if (targetLimitCheck instanceof Error) {
+      return new ValidationError(
+        "This contact has already been invited by multiple users",
+      )
     }
 
     // Check for duplicate invite
-    const existingInvite = await Invite.findOne({
+    const existingInvite = await InviteRepository.findOne({
       inviterId: accountId,
       contact,
       status: { $in: [InviteStatus.PENDING, InviteStatus.SENT] },
@@ -76,7 +70,7 @@ export const createInvite = async ({
     const accounts = AccountsRepository()
     const inviterAccountId = checkedToAccountId(accountId)
     if (inviterAccountId instanceof Error) return inviterAccountId
-    
+
     const inviterAccount = await accounts.findById(inviterAccountId)
     if (inviterAccount instanceof Error) return inviterAccount
 
@@ -87,8 +81,8 @@ export const createInvite = async ({
     // Create invite
     const expiresAt = new Date()
     expiresAt.setHours(expiresAt.getHours() + INVITE_EXPIRY_HOURS)
-    
-    const invite = new Invite({
+
+    const invite = new InviteRepository({
       contact,
       method,
       tokenHash,
@@ -97,7 +91,7 @@ export const createInvite = async ({
       createdAt: new Date(),
       expiresAt,
     })
-    
+
     await invite.save()
 
     // Send notification with username

@@ -84,4 +84,4 @@ InviteSchema.index({ inviterId: 1, createdAt: -1 })
 InviteSchema.index({ contact: 1, createdAt: -1 })
 InviteSchema.index({ status: 1, expiresAt: 1 })
 
-export const Invite = mongoose.model<InviteRecord>("Invite", InviteSchema)
+export const InviteRepository = mongoose.model<InviteRecord>("Invite", InviteSchema)

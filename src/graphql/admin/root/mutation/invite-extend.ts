@@ -3,6 +3,7 @@ import { Admin } from "@app"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import InviteExtendPayload from "@graphql/admin/types/payload/invite-extend"
 import Timestamp from "@graphql/shared/types/scalar/timestamp"
+import { checkedToInviteId } from "@domain/invite"
 
 const InviteExtendInput = GT.Input({
   name: "InviteExtendInput",
@@ -40,7 +41,8 @@ const InviteExtendMutation = GT.Field<
       return { errors: [{ message: newExpiresAt.message }] }
     }
 
-    const invite = await Admin.extendInvite(inviteId, newExpiresAt)
+    const checkedInviteId = checkedToInviteId(inviteId)
+    const invite = await Admin.extendInvite(checkedInviteId, newExpiresAt)
 
     if (invite instanceof Error) {
       return { errors: [mapAndParseErrorForGqlResponse(invite)] }

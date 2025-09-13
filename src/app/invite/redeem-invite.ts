@@ -1,15 +1,16 @@
-import { Invite } from "@services/mongoose/models/invite"
+import crypto from "crypto"
+
+import mongoose from "mongoose"
+import { InviteRepository } from "@services/mongoose/models/invite"
 import { InviteStatus } from "@domain/invite"
 import { UnknownRepositoryError } from "@domain/errors"
 import { ValidationError } from "@domain/shared"
-import { checkedToAccountId } from "@domain/accounts"
-import crypto from "crypto"
 
 export const redeemInvite = async ({
   accountId,
   token,
 }: {
-  accountId: string
+  accountId: AccountId
   token: string
 }) => {
   try {
@@ -20,8 +21,8 @@ export const redeemInvite = async ({
 
     // Find invite by token hash
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex")
-    const invite = await Invite.findOne({ tokenHash })
-    
+    const invite = await InviteRepository.findOne({ tokenHash })
+
     if (!invite) {
       return new ValidationError("Invalid invitation token")
     }
@@ -46,7 +47,7 @@ export const redeemInvite = async ({
     // Mark as redeemed
     invite.status = InviteStatus.ACCEPTED
     invite.redeemedAt = new Date()
-    invite.redeemedById = accountId as any
+    invite.redeemedById = new mongoose.Types.ObjectId(accountId)
     await invite.save()
 
     // TODO: Award rewards to both inviter and invitee
