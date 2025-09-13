@@ -27,7 +27,8 @@
     "watch-main": ". ./.env && nodemon -V -e ts,graphql -w ./src --exec yarn run start-main",
     "start-main": ". ./.env && yarn run build && node --inspect -r ./lib/services/tracing.js ./lib/servers/graphql-main-server.js",
     "migrate-mongo-up": "migrate-mongo up -f './src/migrations/migrate-mongo-config.js'",
-    "gen-test-jwt": "ts-node ./dev/bin/gen-test-jwt.ts"
+    "gen-test-jwt": "ts-node ./dev/bin/gen-test-jwt.ts",
+    "gen-admin-jwt": "ts-node ./dev/bin/gen-admin-jwt.ts"
   },
   "engines": {
     "node": "20"
@@ -106,7 +107,7 @@
     "lodash.mergewith": "^4.6.2",
     "lodash.sortby": "^4.7.0",
     "lodash.sumby": "^4.6.0",
-    "mailgun.js": "^12.0.1",
+    "mailgun.js": "^12.0.3",
     "medici": "^6.2.0",
     "mongoose": "~7.5.1",
     "node-cache": "^5.1.2",

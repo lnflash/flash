@@ -208,6 +208,27 @@ input InviteRateLimitResetInput {
   accountId: ID!
 }
 
+type InviteRateLimitStatus {
+  accountId: String
+  contact: String
+  dailyCount: Int
+  dailyLimit: Int
+  dailyTtl: Int
+  targetCount: Int
+  targetLimit: Int
+  targetTtl: Int
+}
+
+input InviteRateLimitStatusInput {
+  accountId: String
+  contact: String
+}
+
+type InviteRateLimitStatusPayload {
+  errors: [Error!]!
+  status: InviteRateLimitStatus
+}
+
 input InviteRevokeInput {
   inviteId: ID!
   reason: String
@@ -398,6 +419,7 @@ type Query {
   accountDetailsByUsername(username: Username!): AuditedAccount!
   allLevels: [AccountLevel!]!
   inviteById(id: ID!): AdminInvite
+  inviteRateLimitStatus(input: InviteRateLimitStatusInput): InviteRateLimitStatusPayload!
   inviteStatistics: InviteStatistics!
   invitesList(after: String, first: Int, inviterId: ID, status: InviteStatus): InvitesConnection!
   lightningInvoice(hash: PaymentHash!): LightningInvoice!
