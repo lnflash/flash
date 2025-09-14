@@ -421,7 +421,21 @@ type Query {
   inviteById(id: ID!): AdminInvite
   inviteRateLimitStatus(input: InviteRateLimitStatusInput): InviteRateLimitStatusPayload!
   inviteStatistics: InviteStatistics!
-  invitesList(after: String, first: Int, inviterId: ID, status: InviteStatus): InvitesConnection!
+  invitesList(
+    """Returns the items in the list that come after the specified cursor."""
+    after: String
+
+    """Returns the items in the list that come before the specified cursor."""
+    before: String
+
+    """Returns the first n items from the list."""
+    first: Int
+    inviterId: ID
+
+    """Returns the last n items from the list."""
+    last: Int
+    status: InviteStatus
+  ): InvitesConnection!
   lightningInvoice(hash: PaymentHash!): LightningInvoice!
   lightningPayment(hash: PaymentHash!): LightningPayment!
   listWalletIds(walletCurrency: WalletCurrency!): [WalletId!]!

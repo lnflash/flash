@@ -18,6 +18,7 @@ import AccountDefaultWalletIdQuery from "@graphql/public/root/query/account-defa
 import LnInvoicePaymentStatusQuery from "@graphql/public/root/query/ln-invoice-payment-status"
 import NpubByUserNameQuery from "./root/query/username-npub-query"
 import IsFlashNpubQuery from "./root/query/is-flash-npub-query"
+import InvitePreviewQuery from "./root/query/invite-preview"
 
 export const queryFields = {
   unauthed: {
@@ -35,6 +36,7 @@ export const queryFields = {
     lnInvoicePaymentStatus: LnInvoicePaymentStatusQuery,
     npubByUsername: NpubByUserNameQuery,
     isFlashNpub: IsFlashNpubQuery,
+    invitePreview: InvitePreviewQuery,
   },
   authed: {
     atAccountLevel: {

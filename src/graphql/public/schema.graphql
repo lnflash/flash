@@ -478,6 +478,14 @@ enum InviteMethod {
   WHATSAPP
 }
 
+type InvitePreview {
+  contact: String!
+  expiresAt: String!
+  inviterUsername: String
+  isValid: Boolean!
+  method: String!
+}
+
 enum InviteStatus {
   ACCEPTED
   EXPIRED
@@ -1138,6 +1146,7 @@ type Query {
   businessMapMarkers: [MapMarker!]!
   currencyList: [Currency!]!
   globals: Globals
+  invitePreview(token: String!): InvitePreview
   isFlashNpub(input: IsFlashNpubInput!): IsFlashNpubPayload
   lnInvoicePaymentStatus(input: LnInvoicePaymentStatusInput!): LnInvoicePaymentStatusPayload!
   me: User
