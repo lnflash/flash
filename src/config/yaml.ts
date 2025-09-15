@@ -384,6 +384,6 @@ export const Cashout = {
 
 }
 
-export const MailgunConfig = yamlConfig.mailgun as MailgunConfig
+export const SendGridConfig = yamlConfig.sendgrid as SendGridConfig
 
 export const IbexConfig = yamlConfig.ibex as IbexConfig

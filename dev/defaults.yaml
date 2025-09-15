@@ -35,6 +35,5 @@ cashout:
     from: "notifications@getflash.io"
     subject: "New Cashout"
 
-mailgun:
+sendgrid:
   apiKey: "<replace>"
-  domain: ""
