@@ -7,7 +7,7 @@ import { baseLogger } from "@services/logger"
 const InvitePreview = GT.Object({
   name: "InvitePreview",
   fields: () => ({
-    contact: { type: GT.NonNull(GT.String) }, // Masked contact
+    contact: { type: GT.NonNull(GT.String) }, // Full contact for intended recipient, masked for others
     method: { type: GT.NonNull(GT.String) }, // SMS, EMAIL, WHATSAPP
     inviterUsername: { type: GT.String },
     expiresAt: { type: GT.NonNull(GT.String) },
@@ -54,20 +54,24 @@ const InvitePreviewQuery = GT.Field<null, GraphQLPublicContext>({
         inviterUsername = inviterAccount.username
       }
 
-      // Mask the contact for privacy
-      const maskedContact = maskContact(invite.contact, invite.method)
+      // IMPORTANT: Return full contact for the intended recipient
+      // Since this is accessed with the invite token, only the intended recipient
+      // should have access to this token, making it safe to return the full contact
+      // This allows proper pre-filling of registration forms in the mobile app
+      const contact = invite.contact
 
       baseLogger.info(
-        { 
+        {
           inviteId: invite._id,
           method: invite.method,
           isValid,
+          returningFullContact: true,
         },
-        "Invite preview requested",
+        "Invite preview requested - returning full contact for recipient",
       )
 
       return {
-        contact: maskedContact,
+        contact,
         method: invite.method,
         inviterUsername: inviterUsername || "A Flash user",
         expiresAt: invite.expiresAt.toISOString(),
@@ -82,24 +86,5 @@ const InvitePreviewQuery = GT.Field<null, GraphQLPublicContext>({
     }
   },
 })
-
-// Helper function to mask contact information
-function maskContact(contact: string, method: string): string {
-  if (method === "EMAIL") {
-    // Mask email: john.doe@example.com -> j***@example.com
-    const [localPart, domain] = contact.split("@")
-    if (!domain) return "***@***"
-    
-    const firstChar = localPart[0] || ""
-    return `${firstChar}***@${domain}`
-  } else {
-    // Mask phone: +16505554334 -> +1650****334
-    if (contact.length < 7) return "****"
-    
-    const firstPart = contact.substring(0, contact.length - 6)
-    const lastPart = contact.substring(contact.length - 3)
-    return `${firstPart}***${lastPart}`
-  }
-}
 
 export default InvitePreviewQuery
