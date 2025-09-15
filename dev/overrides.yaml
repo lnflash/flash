@@ -1,0 +1,9 @@
+# This file contains configuration overrides for the Flash backend
+
+sendgrid:
+  apiKey: "<YOUR_SENDGRID_API_KEY>" # Replace with your SendGrid API key
+
+# Cashout email configuration - where cashout notifications are sent
+cashout:
+  email:
+    to: "support@getflash.io" # Change this to your admin email
