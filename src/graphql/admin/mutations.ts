@@ -10,6 +10,11 @@ import AdminPushNotificationSendMutation from "./root/mutation/admin-push-notifi
 
 import MerchantMapDeleteMutation from "./root/mutation/merchant-map-delete"
 import MerchantMapValidateMutation from "./root/mutation/merchant-map-validate"
+import InviteRevokeMutation from "./root/mutation/invite-revoke"
+import InviteExtendMutation from "./root/mutation/invite-extend"
+import InviteRateLimitResetMutation from "./root/mutation/invite-rate-limit-reset"
+import InviteTargetRateLimitResetMutation from "./root/mutation/invite-target-rate-limit-reset"
+import InviteGlobalRateLimitResetMutation from "./root/mutation/invite-global-rate-limit-reset"
 
 export const mutationFields = {
   unauthed: {
@@ -23,6 +28,11 @@ export const mutationFields = {
     businessUpdateMapInfo: BusinessUpdateMapInfoMutation,
     businessDeleteMapInfo: BusinessDeleteMapInfoMutation,
     adminPushNotificationSend: AdminPushNotificationSendMutation,
+    inviteRevoke: InviteRevokeMutation,
+    inviteExtend: InviteExtendMutation,
+    inviteRateLimitReset: InviteRateLimitResetMutation,
+    inviteTargetRateLimitReset: InviteTargetRateLimitResetMutation,
+    inviteGlobalRateLimitReset: InviteGlobalRateLimitResetMutation,
   },
 }
 

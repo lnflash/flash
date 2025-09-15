@@ -10,8 +10,8 @@ declare -a yaml_paths=(
   "ibex.email, Email address to Ibex Account"
   "ibex.password, Password to Ibex Account"
   "ibex.webhook.uri, The URI where Ibex will send payment events"
-  "mailgun.apiKey, API key to Mailgun email service"
-  "mailgun.domain, Domain associated with the Mailgun account"
+  "sendgrid.apiKey, API key to sendgrid email service"
+  "sendgrid.domain, Domain associated with the sendgrid account"
   "cashout.email.to, Recipient email address for cashout notifications"
 )
 
