@@ -3,6 +3,11 @@ type NewAccountWithPhoneIdentifier = {
   phone: PhoneNumber
 }
 
+type NewAccountWithEmailIdentifier = {
+  kratosUserId: UserId
+  email: EmailAddress
+}
+
 type LoginDeviceUpgradeWithPhoneResult = {
   success: true
   authToken?: AuthToken

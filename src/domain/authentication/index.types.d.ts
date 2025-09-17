@@ -72,13 +72,15 @@ type CallbackSecretValidator = {
 
 type RegistrationPayload = {
   userId: UserId
-  phone: PhoneNumber
-  phoneMetadata: PhoneMetadata | undefined
+  phone?: PhoneNumber
+  email?: EmailAddress
+  phoneMetadata?: PhoneMetadata | undefined
 }
 type RegistrationPayloadValidator = {
   validate(rawBody: {
     identity_id?: string
     phone?: string
+    email?: string
     schema_id?: string
     transient_payload?: { phoneMetadata?: Record<string, Record<string, string>> }
   }): RegistrationPayload | ValidationError
@@ -136,6 +138,9 @@ interface IAuthWithEmailPasswordlessService {
     kratosUserId: UserId
     email: EmailAddress
   }): Promise<IdentityPhoneEmail | AuthenticationError>
+  createIdentityForEmailRegistration(args: {
+    email: EmailAddress
+  }): Promise<{ kratosUserId: UserId; flowId: EmailFlowId } | KratosError>
   sendEmailWithCode(args: { email: EmailAddress }): Promise<EmailFlowId | KratosError>
   hasEmail(args: { kratosUserId: UserId }): Promise<boolean | KratosError>
   isEmailVerified(args: { email: EmailAddress }): Promise<boolean | KratosError>

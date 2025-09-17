@@ -1132,6 +1132,8 @@ type Mutation
   lnUsdInvoiceCreateOnBehalfOfRecipient(input: LnUsdInvoiceCreateOnBehalfOfRecipientInput!): LnInvoicePayload!
   lnUsdInvoiceFeeProbe(input: LnUsdInvoiceFeeProbeInput!): CentAmountPayload!
   merchantMapSuggest(input: MerchantMapSuggestInput!): MerchantPayload!
+  newUserEmailRegistrationInitiate(input: NewUserEmailRegistrationInitiateInput!): NewUserEmailRegistrationInitiatePayload!
+  newUserEmailRegistrationValidate(input: NewUserEmailRegistrationValidateInput!): AuthTokenPayload!
   onChainAddressCreate(input: OnChainAddressCreateInput!): OnChainAddressPayload!
   onChainAddressCurrent(input: OnChainAddressCurrentInput!): OnChainAddressPayload!
   onChainPaymentSend(input: OnChainPaymentSendInput!): PaymentSendPayload!
@@ -1179,6 +1181,26 @@ enum Network
   regtest @join__enumValue(graph: PUBLIC)
   signet @join__enumValue(graph: PUBLIC)
   testnet @join__enumValue(graph: PUBLIC)
+}
+
+input NewUserEmailRegistrationInitiateInput
+  @join__type(graph: PUBLIC)
+{
+  email: EmailAddress!
+}
+
+type NewUserEmailRegistrationInitiatePayload
+  @join__type(graph: PUBLIC)
+{
+  emailFlowId: String
+  errors: [Error!]!
+}
+
+input NewUserEmailRegistrationValidateInput
+  @join__type(graph: PUBLIC)
+{
+  code: OneTimeAuthCode!
+  emailFlowId: String!
 }
 
 scalar NotificationCategory

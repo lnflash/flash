@@ -39,6 +39,8 @@ import AccountDeleteMutation from "@graphql/public/root/mutation/account-delete"
 import UserLoginUpgradeMutation from "@graphql/public/root/mutation/user-login-upgrade"
 import UserEmailRegistrationInitiateMutation from "@graphql/public/root/mutation/user-email-registration-initiate"
 import UserEmailRegistrationValidateMutation from "@graphql/public/root/mutation/user-email-registration-validate"
+import NewUserEmailRegistrationInitiateMutation from "@graphql/public/root/mutation/new-user-email-registration-initiate"
+import NewUserEmailRegistrationValidateMutation from "@graphql/public/root/mutation/new-user-email-registration-validate"
 import FeedbackSubmitMutation from "@graphql/public/root/mutation/feedback-submit"
 import UserEmailDeleteMutation from "@graphql/public/root/mutation/user-email-delete"
 import UserPhoneDeleteMutation from "@graphql/public/root/mutation/user-phone-delete"
@@ -67,6 +69,8 @@ export const mutationFields = {
     captchaCreateChallenge: CaptchaCreateChallengeMutation,
     captchaRequestAuthCode: CaptchaRequestAuthCodeMutation,
     userLogin: UserLoginMutation,
+    newUserEmailRegistrationInitiate: NewUserEmailRegistrationInitiateMutation,
+    newUserEmailRegistrationValidate: NewUserEmailRegistrationValidateMutation,
     userLogout: UserLogoutMutation,
 
     lnInvoiceCreateOnBehalfOfRecipient: LnInvoiceCreateOnBehalfOfRecipientMutation,

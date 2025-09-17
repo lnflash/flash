@@ -1,4 +1,4 @@
-import { CouldNotFindUserFromPhoneError, RepositoryError } from "@domain/errors"
+import { CouldNotFindUserFromPhoneError, CouldNotFindUserFromEmailError, RepositoryError } from "@domain/errors"
 
 import { User } from "./schema"
 
@@ -10,9 +10,10 @@ export const translateToUser = (user: UserRecord): User => {
   const phoneMetadata = user.phoneMetadata
   const phone = user.phone as PhoneNumber | undefined
   const deletedPhones = user.deletedPhones as PhoneNumber[] | undefined
+  const email = user.email as EmailAddress | undefined
+  const deletedEmails = user.deletedEmail as EmailAddress[] | undefined
   const createdAt = user.createdAt
   const deviceId = user.deviceId as DeviceId | undefined
-  const deletedEmails = user.deletedEmails as EmailAddress[] | undefined
 
   return {
     id: user.userId as UserId,
@@ -21,9 +22,10 @@ export const translateToUser = (user: UserRecord): User => {
     phoneMetadata,
     phone,
     deletedPhones,
+    email,
+    deletedEmails,
     createdAt,
     deviceId,
-    deletedEmails,
   }
 }
 
@@ -57,15 +59,27 @@ export const UsersRepository = (): IUsersRepository => {
     }
   }
 
+  const findByEmail = async (email: EmailAddress): Promise<User | RepositoryError> => {
+    try {
+      const result = await User.findOne({ email: email.toLowerCase() })
+      if (!result) return new CouldNotFindUserFromEmailError()
+
+      return translateToUser(result)
+    } catch (err) {
+      return parseRepositoryError(err)
+    }
+  }
+
   const update = async ({
     id,
     language,
     deviceTokens,
     phoneMetadata,
     phone,
+    email,
     deletedPhones,
-    deviceId,
     deletedEmails,
+    deviceId,
   }: UserUpdateInput): Promise<User | RepositoryError> => {
     const updateObject: Partial<UserUpdateInput> & {
       $unset?: { phone?: number; email?: number }
@@ -85,6 +99,14 @@ export const UsersRepository = (): IUsersRepository => {
       updateObject.phone = phone
     }
 
+    // If the new email is undefined, unset it from the document
+    if (email === undefined) {
+      if (!updateObject.$unset) updateObject.$unset = {}
+      updateObject.$unset.email = 1
+    } else {
+      updateObject.email = email?.toLowerCase() as EmailAddress
+    }
+
     try {
       const result = await User.findOneAndUpdate({ userId: id }, updateObject, {
         new: true,
@@ -102,6 +124,7 @@ export const UsersRepository = (): IUsersRepository => {
   return {
     findById,
     findByPhone,
+    findByEmail,
     update,
   }
 }

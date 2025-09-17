@@ -897,6 +897,8 @@ type Mutation {
   lnUsdInvoiceCreateOnBehalfOfRecipient(input: LnUsdInvoiceCreateOnBehalfOfRecipientInput!): LnInvoicePayload!
   lnUsdInvoiceFeeProbe(input: LnUsdInvoiceFeeProbeInput!): CentAmountPayload!
   merchantMapSuggest(input: MerchantMapSuggestInput!): MerchantPayload!
+  newUserEmailRegistrationInitiate(input: NewUserEmailRegistrationInitiateInput!): NewUserEmailRegistrationInitiatePayload!
+  newUserEmailRegistrationValidate(input: NewUserEmailRegistrationValidateInput!): AuthTokenPayload!
   onChainAddressCreate(input: OnChainAddressCreateInput!): OnChainAddressPayload!
   onChainAddressCurrent(input: OnChainAddressCurrentInput!): OnChainAddressPayload!
   onChainPaymentSend(input: OnChainPaymentSendInput!): PaymentSendPayload!
@@ -940,6 +942,20 @@ enum Network {
   regtest
   signet
   testnet
+}
+
+input NewUserEmailRegistrationInitiateInput {
+  email: EmailAddress!
+}
+
+type NewUserEmailRegistrationInitiatePayload {
+  emailFlowId: String
+  errors: [Error!]!
+}
+
+input NewUserEmailRegistrationValidateInput {
+  code: OneTimeAuthCode!
+  emailFlowId: String!
 }
 
 scalar NotificationCategory

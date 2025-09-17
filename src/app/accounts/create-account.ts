@@ -117,3 +117,25 @@ export const createAccountWithPhoneIdentifier = async ({
 
   return account
 }
+
+export const createAccountWithEmailIdentifier = async ({
+  newAccountInfo: { kratosUserId, email },
+  config,
+}: {
+  newAccountInfo: NewAccountWithEmailIdentifier
+  config: AccountsConfig
+}): Promise<Account | RepositoryError> => {
+  const user = await UsersRepository().update({ id: kratosUserId, email })
+  if (user instanceof Error) return user
+
+  const accountNew = await AccountsRepository().persistNew(kratosUserId)
+  if (accountNew instanceof Error) return accountNew
+
+  const account = await initializeCreatedAccount({
+    account: accountNew,
+    config,
+  })
+  if (account instanceof Error) return account
+
+  return account
+}

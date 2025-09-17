@@ -2,7 +2,7 @@ import { KRATOS_MASTER_USER_PASSWORD, KRATOS_PG_CON } from "@config"
 
 import { wrapAsyncFunctionsToRunInSpan } from "@services/tracing"
 
-import { isAxiosError } from "axios"
+import { isAxiosError, AxiosError } from "axios"
 
 import {
   EmailCodeInvalidError,
@@ -58,6 +58,55 @@ const getIdentityIdFromFlowId = async (flowId: string) => {
 
 export const AuthWithEmailPasswordlessService = (): IAuthWithEmailPasswordlessService => {
   const password = KRATOS_MASTER_USER_PASSWORD
+
+  // createIdentityForEmailRegistration creates a new identity with email
+  // and sends an OTP code via recovery flow
+  const createIdentityForEmailRegistration = async ({
+    email
+  }: {
+    email: EmailAddress
+  }): Promise<{ kratosUserId: UserId; flowId: EmailFlowId } | KratosError> => {
+    try {
+      let kratosUserId: UserId
+
+      // Check if identity already exists
+      const existingIdentities = await kratosAdmin.listIdentities({
+        credentialsIdentifier: email
+      })
+
+      if (existingIdentities.data.length > 0) {
+        kratosUserId = existingIdentities.data[0].id as UserId
+      } else {
+        // Create new identity with email
+        const createIdentityBody = {
+          credentials: { password: { config: { password } } },
+          state: "active" as const,
+          traits: { email },
+          schema_id: "email_no_password_v0",
+        }
+
+        const { data: identity } = await kratosAdmin.createIdentity({ createIdentityBody })
+        kratosUserId = identity.id as UserId
+      }
+
+      // Send OTP code via recovery flow
+      const { data: recoveryFlow } = await kratosPublic.createNativeRecoveryFlow()
+      await kratosPublic.updateRecoveryFlow({
+        flow: recoveryFlow.id,
+        updateRecoveryFlowBody: {
+          email,
+          method: "code",
+        },
+      })
+
+      return {
+        kratosUserId,
+        flowId: recoveryFlow.id as EmailFlowId
+      }
+    } catch (err) {
+      return new UnknownKratosError(err)
+    }
+  }
 
   // sendEmailWithCode return a flowId even if the user doesn't exist
   // this is to avoid account enumeration attacks
@@ -488,6 +537,7 @@ export const AuthWithEmailPasswordlessService = (): IAuthWithEmailPasswordlessSe
       removePhoneFromIdentity,
       addPhoneToIdentity,
       addUnverifiedEmailToIdentity,
+      createIdentityForEmailRegistration,
       sendEmailWithCode,
       validateCode,
       hasEmail,
