@@ -63,9 +63,10 @@ type User = {
   phoneMetadata: PhoneMetadata | undefined
   phone?: PhoneNumber | undefined
   deletedPhones?: PhoneNumber[]
+  email?: EmailAddress | undefined
+  deletedEmails?: EmailAddress[] | undefined
   createdAt: Date
   deviceId?: DeviceId | undefined
-  deletedEmails?: EmailAddress[] | undefined
 }
 
 type UserUpdateInput = Omit<Partial<User>, "language" | "createdAt"> & {
@@ -76,5 +77,6 @@ type UserUpdateInput = Omit<Partial<User>, "language" | "createdAt"> & {
 interface IUsersRepository {
   findById(id: UserId): Promise<User | RepositoryError>
   findByPhone(phone: PhoneNumber): Promise<User | RepositoryError>
+  findByEmail(email: EmailAddress): Promise<User | RepositoryError>
   update(user: UserUpdateInput): Promise<User | RepositoryError>
 }

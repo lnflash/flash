@@ -127,10 +127,12 @@ export const requestEmailCode = async ({
   }
 
   const authServiceEmail = AuthWithEmailPasswordlessService()
-  const flow = await authServiceEmail.sendEmailWithCode({ email })
-  if (flow instanceof Error) return flow
 
-  return flow
+  // Use createIdentityForEmailRegistration which handles both new and existing users
+  const result = await authServiceEmail.createIdentityForEmailRegistration({ email })
+  if (result instanceof Error) return result
+
+  return result.flowId
 }
 
 const checkRequestCodeAttemptPerIpLimits = async (
