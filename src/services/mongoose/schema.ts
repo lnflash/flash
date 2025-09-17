@@ -474,11 +474,18 @@ const UserSchema = new Schema(
     deletedPhones: {
       type: [String],
     },
-    deviceId: {
+    email: {
       type: String,
+      index: true,
+      unique: true,
+      sparse: true,
+      lowercase: true,
     },
     deletedEmail: {
       type: [String],
+    },
+    deviceId: {
+      type: String,
     },
   },
   { id: false },
@@ -557,4 +564,3 @@ export const WalletOnChainPendingReceive =
     "WalletOnChainPendingReceive",
     WalletOnChainPendingReceiveSchema,
   )
-  
