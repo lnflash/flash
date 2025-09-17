@@ -148,6 +148,8 @@ interface UserRecord {
   phoneMetadata?: TwilioObjectForUser
   phone?: string
   deletedPhones?: string[]
+  email?: string
+  deletedEmail?: string[]
   createdAt: Date
   deviceId?: DeviceId
   deletedEmails?: string[] | undefined
