@@ -25,11 +25,6 @@ const IbexTransactionDetailsFetchMutation = GT.Field({
   resolve: async (_, args) => {
     const { ibexTransactionId } = args.input
 
-    if (!ibexTransactionId) {
-      return {
-        errors: [{ message: "Transaction ID is required" }],
-      }
-    }
 
     try {
       const transactionDetails = await IbexClient.getTransactionDetails(
