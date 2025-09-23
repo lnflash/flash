@@ -5,6 +5,15 @@ import { baseLogger } from "@services/logger"
 import { CashoutDetails } from "@app/offers"
 
 import { CashoutBody } from "./templates/cashout"
+
+type EmailHeaders = {
+  to: string
+  from: string
+  subject: string
+  text: string
+  html?: string
+}
+
 const config = Cashout.Email
 sgMail.setApiKey(SendGridConfig.apiKey)
 
@@ -28,17 +37,11 @@ class EmailService {
       subject: config.subject,
       text: body.text,
       html: body.html,
-    })
+    } as EmailHeaders)
   }
 
   // SendGrid send
-  private sendEmail = async (msg: {
-    to: string
-    from: string
-    subject: string
-    text: string
-    html?: string
-  }): Promise<void> => {
+  private sendEmail = async (msg: EmailHeaders): Promise<void> => {
     try {
       await sgMail.send(msg)
       baseLogger.info({ to: msg.to }, "Email sent successfully via SendGrid")
