@@ -4,6 +4,8 @@ import { mapError } from "@graphql/error-map"
 import { IbexTransactionDetailsPayload } from "@graphql/public/types/payload/ibex-transaction-details"
 import { BlockchainService } from "@services/blockchain"
 
+const DEFAULT_CONFIRMED_BLOCKS = 6
+
 const IbexTransactionDetailsFetchInput = GT.Input({
   name: "IbexTransactionDetailsFetchInput",
   fields: () => ({
@@ -37,6 +39,7 @@ const IbexTransactionDetailsFetchMutation = GT.Field({
         }
       }
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const txDetails = transactionDetails as any
 
       // Parse currency
@@ -97,17 +100,19 @@ const IbexTransactionDetailsFetchMutation = GT.Field({
               confirmations = currentBlockHeight - txBlockHeight
             } else {
               // Fallback to status-based estimation if API call fails
-              confirmations = onchainData.status?.value === "CONFIRMED" ? 6 : 0
+              confirmations =
+                onchainData.status?.value === "CONFIRMED" ? DEFAULT_CONFIRMED_BLOCKS : 0
             }
           } catch (e) {
             // Fallback to status-based estimation
-            confirmations = onchainData.status?.value === "CONFIRMED" ? 6 : 0
+            confirmations =
+              onchainData.status?.value === "CONFIRMED" ? DEFAULT_CONFIRMED_BLOCKS : 0
           }
         } else {
           // Fallback if no blockheight available
           confirmations =
             onchainData.confirmations ||
-            (onchainData.status?.value === "CONFIRMED" ? 6 : 0) ||
+            (onchainData.status?.value === "CONFIRMED" ? DEFAULT_CONFIRMED_BLOCKS : 0) ||
             confirmations
         }
       }
