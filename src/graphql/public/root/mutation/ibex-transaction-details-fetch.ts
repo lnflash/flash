@@ -27,7 +27,6 @@ const IbexTransactionDetailsFetchMutation = GT.Field({
   resolve: async (_, args) => {
     const { ibexTransactionId } = args.input
 
-
     try {
       const transactionDetails = await IbexClient.getTransactionDetails(
         ibexTransactionId as IbexTransactionId,
@@ -140,8 +139,19 @@ const IbexTransactionDetailsFetchMutation = GT.Field({
         },
       }
     } catch (error) {
+      console.error("Error fetching Ibex transaction details:", {
+        ibexTransactionId,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      })
+
+      const errorMessage =
+        error instanceof Error
+          ? `Failed to fetch transaction details: ${error.message}`
+          : "Failed to fetch transaction details due to unknown error"
+
       return {
-        errors: [{ message: "Failed to fetch transaction details" }],
+        errors: [{ message: errorMessage }],
       }
     }
   },
