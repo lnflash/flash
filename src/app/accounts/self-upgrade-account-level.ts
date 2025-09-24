@@ -59,10 +59,11 @@ export const selfUpgradeAccountLevel = async ({
 
   // Reset validation flag to ensure one-time use
   // This creates an audit trail: admin validates → user upgrades → flag resets
-  await usersRepo.update({
+  const updatedUser = await usersRepo.update({
     ...user,
     validated: false,
   })
+  if (updatedUser instanceof Error) return updatedUser
 
   return updatedAccount
 }
