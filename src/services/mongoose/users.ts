@@ -13,6 +13,7 @@ export const translateToUser = (user: UserRecord): User => {
   const createdAt = user.createdAt
   const deviceId = user.deviceId as DeviceId | undefined
   const deletedEmails = user.deletedEmails as EmailAddress[] | undefined
+  const validated = user.validated ?? false
 
   return {
     id: user.userId as UserId,
@@ -24,6 +25,7 @@ export const translateToUser = (user: UserRecord): User => {
     createdAt,
     deviceId,
     deletedEmails,
+    validated,
   }
 }
 
@@ -66,6 +68,7 @@ export const UsersRepository = (): IUsersRepository => {
     deletedPhones,
     deviceId,
     deletedEmails,
+    validated,
   }: UserUpdateInput): Promise<User | RepositoryError> => {
     const updateObject: Partial<UserUpdateInput> & {
       $unset?: { phone?: number; email?: number }
@@ -76,6 +79,7 @@ export const UsersRepository = (): IUsersRepository => {
       deletedPhones,
       deletedEmails,
       deviceId,
+      validated,
     }
 
     // If the new phone is undefined, unset it from the document

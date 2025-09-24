@@ -148,6 +148,19 @@ type AccountUpdateDisplayCurrencyPayload
   errors: [Error!]!
 }
 
+input AccountUpdateLevelInput
+  @join__type(graph: PUBLIC)
+{
+  level: AccountLevel!
+}
+
+type AccountUpdateLevelPayload
+  @join__type(graph: PUBLIC)
+{
+  account: ConsumerAccount
+  errors: [Error!]!
+}
+
 type AccountUpdateNotificationSettingsPayload
   @join__type(graph: PUBLIC)
 {
@@ -957,6 +970,7 @@ type Mutation
   accountEnableNotificationChannel(input: AccountEnableNotificationChannelInput!): AccountUpdateNotificationSettingsPayload!
   accountUpdateDefaultWalletId(input: AccountUpdateDefaultWalletIdInput!): AccountUpdateDefaultWalletIdPayload!
   accountUpdateDisplayCurrency(input: AccountUpdateDisplayCurrencyInput!): AccountUpdateDisplayCurrencyPayload!
+  accountUpdateLevel(input: AccountUpdateLevelInput!): AccountUpdateLevelPayload!
   callbackEndpointAdd(input: CallbackEndpointAddInput!): CallbackEndpointAddPayload!
   callbackEndpointDelete(input: CallbackEndpointDeleteInput!): SuccessPayload!
   captchaCreateChallenge: CaptchaCreateChallengePayload!

@@ -480,6 +480,14 @@ const UserSchema = new Schema(
     deletedEmail: {
       type: [String],
     },
+    // Validation flag for account level upgrades
+    // Set to true by admin/system to allow one-time self-service level upgrade
+    // Automatically reset to false after each successful upgrade
+    validated: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
   },
   { id: false },
 )

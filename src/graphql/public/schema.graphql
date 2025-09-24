@@ -99,6 +99,15 @@ type AccountUpdateDisplayCurrencyPayload {
   errors: [Error!]!
 }
 
+input AccountUpdateLevelInput {
+  level: AccountLevel!
+}
+
+type AccountUpdateLevelPayload {
+  account: ConsumerAccount
+  errors: [Error!]!
+}
+
 type AccountUpdateNotificationSettingsPayload {
   account: ConsumerAccount
   errors: [Error!]!
@@ -734,6 +743,7 @@ type Mutation {
   accountEnableNotificationChannel(input: AccountEnableNotificationChannelInput!): AccountUpdateNotificationSettingsPayload!
   accountUpdateDefaultWalletId(input: AccountUpdateDefaultWalletIdInput!): AccountUpdateDefaultWalletIdPayload!
   accountUpdateDisplayCurrency(input: AccountUpdateDisplayCurrencyInput!): AccountUpdateDisplayCurrencyPayload!
+  accountUpdateLevel(input: AccountUpdateLevelInput!): AccountUpdateLevelPayload!
   callbackEndpointAdd(input: CallbackEndpointAddInput!): CallbackEndpointAddPayload!
   callbackEndpointDelete(input: CallbackEndpointDeleteInput!): SuccessPayload!
   captchaCreateChallenge: CaptchaCreateChallengePayload!
