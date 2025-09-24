@@ -387,3 +387,5 @@ export const Cashout = {
 export const MailgunConfig = yamlConfig.mailgun as MailgunConfig
 
 export const IbexConfig = yamlConfig.ibex as IbexConfig
+
+export const TopupConfig = yamlConfig.topup as TopupConfig

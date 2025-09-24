@@ -29,6 +29,26 @@ type IbexConfig = {
   webhook: WebhookServer
 }
 
+type TopupProviderConfig = {
+  enabled: boolean
+  webhook: {
+    secret?: string
+    path: string
+  }
+}
+
+type FygaroProviderConfig = TopupProviderConfig & {
+  paymentButtonId?: string
+}
+
+type TopupConfig = {
+  providers: {
+    fygaro?: FygaroProviderConfig
+    stripe?: TopupProviderConfig
+    paypal?: TopupProviderConfig
+  }
+}
+
 type CashoutEmail = {
   to: string
   from: string
@@ -173,6 +193,7 @@ type YamlSchema = {
   smsAuthUnsupportedCountries: string[]
   whatsAppAuthUnsupportedCountries: string[]
   ibex: IbexConfig,
+  topup: TopupConfig,
   exchangeRates: StaticRates
   cashout: {
     enabled: boolean

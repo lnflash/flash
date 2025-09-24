@@ -38,3 +38,22 @@ cashout:
 mailgun:
   apiKey: "<replace>"
   domain: ""
+
+topup:
+  providers:
+    fygaro:
+      enabled: true
+      webhook:
+        secret: "fygaro-webhook-secret-placeholder" # TODO: Replace with actual Fygaro webhook secret
+        path: "/webhooks/topup/fygaro"
+      paymentButtonId: "bd4a34c1-3d24-4315-a2b8-627518f70916"
+    stripe:
+      enabled: false
+      webhook:
+        secret: ""
+        path: "/webhooks/topup/stripe"
+    paypal:
+      enabled: false
+      webhook:
+        secret: ""
+        path: "/webhooks/topup/paypal"

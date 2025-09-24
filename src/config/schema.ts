@@ -635,10 +635,82 @@ export const configSchema = {
         password: { type: "string" },
         webhook: {
           type: "object",
-          properties: { 
-            port: { type: "integer" } , 
-            uri: { type: "string" } , 
-            secret: { type: "string" } , 
+          properties: {
+            port: { type: "integer" } ,
+            uri: { type: "string" } ,
+            secret: { type: "string" } ,
+          },
+        },
+      },
+    },
+    topup: {
+      type: "object",
+      properties: {
+        providers: {
+          type: "object",
+          properties: {
+            fygaro: {
+              type: "object",
+              properties: {
+                enabled: { type: "boolean", default: false },
+                webhook: {
+                  type: "object",
+                  properties: {
+                    secret: { type: "string" },
+                    path: { type: "string", default: "/webhooks/topup/fygaro" },
+                  },
+                },
+                paymentButtonId: { type: "string" },
+              },
+            },
+            stripe: {
+              type: "object",
+              properties: {
+                enabled: { type: "boolean", default: false },
+                webhook: {
+                  type: "object",
+                  properties: {
+                    secret: { type: "string" },
+                    path: { type: "string", default: "/webhooks/topup/stripe" },
+                  },
+                },
+              },
+            },
+            paypal: {
+              type: "object",
+              properties: {
+                enabled: { type: "boolean", default: false },
+                webhook: {
+                  type: "object",
+                  properties: {
+                    secret: { type: "string" },
+                    path: { type: "string", default: "/webhooks/topup/paypal" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      default: {
+        providers: {
+          fygaro: {
+            enabled: false,
+            webhook: {
+              path: "/webhooks/topup/fygaro",
+            },
+          },
+          stripe: {
+            enabled: false,
+            webhook: {
+              path: "/webhooks/topup/stripe",
+            },
+          },
+          paypal: {
+            enabled: false,
+            webhook: {
+              path: "/webhooks/topup/paypal",
+            },
           },
         },
       },
@@ -689,6 +761,7 @@ export const configSchema = {
     "exchangeRates",
     "cashout",
     "ibex",
+    "topup",
   ],
   additionalProperties: false,
 } as const
