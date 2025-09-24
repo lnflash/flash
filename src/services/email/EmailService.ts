@@ -1,13 +1,21 @@
-import Mailgun from 'mailgun.js';
-import FormData from 'form-data'; // or built-in FormData
-import { MailgunMessageData } from 'mailgun.js/definitions';
-import { CashoutBody } from './templates/cashout';
-import { Cashout, MailgunConfig } from '@config'
-import { baseLogger } from '@services/logger';
-import { CashoutDetails } from '@app/offers';
+import sgMail from "@sendgrid/mail"
+
+import { Cashout, SendGridConfig } from "@config"
+import { baseLogger } from "@services/logger"
+import { CashoutDetails } from "@app/offers"
+
+import { CashoutBody } from "./templates/cashout"
+
+type EmailHeaders = {
+  to: string
+  from: string
+  subject: string
+  text: string
+  html?: string
+}
 
 const config = Cashout.Email
-const mailgun = new Mailgun(FormData).client({ username: 'api', key: MailgunConfig.apiKey });
+sgMail.setApiKey(SendGridConfig.apiKey)
 
 class EmailService {
   sendCashoutInitiatedEmail = async (username: Username, offer: CashoutDetails) => {
@@ -21,24 +29,25 @@ class EmailService {
         hour: "numeric",
         minute: "numeric",
         hour12: true,
-      })
+      }),
     })
     this.sendEmail({
       to: config.to,
-      from: config.from, 
+      from: config.from,
       subject: config.subject,
       text: body.text,
       html: body.html,
-    })
+    } as EmailHeaders)
   }
 
-  // Mailgun send
-  private sendEmail = async (msg: MailgunMessageData): Promise<void> => {
-      try {
-        mailgun.messages.create(MailgunConfig.domain, msg);
-      } catch (error) {
-        baseLogger.error(error, "Failed to send email");
-      }
+  // SendGrid send
+  private sendEmail = async (msg: EmailHeaders): Promise<void> => {
+    try {
+      await sgMail.send(msg)
+      baseLogger.info({ to: msg.to }, "Email sent successfully via SendGrid")
+    } catch (error) {
+      baseLogger.error(error, "Failed to send email via SendGrid")
+    }
   }
 }
 

@@ -35,9 +35,8 @@ type CashoutEmail = {
   subject: string
 }
 
-type MailgunConfig = {
+type SendGridConfig = {
   apiKey: string
-  domain: string
 }
 
 type YamlSchema = {
@@ -189,7 +188,7 @@ type YamlSchema = {
     duration: number
     email: CashoutEmail
   }
-  mailgun: MailgunConfig
+  sendgrid: SendGridConfig
 }
 
 type CurrencyCode = string
