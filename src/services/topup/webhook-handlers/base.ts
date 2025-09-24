@@ -2,6 +2,11 @@ import { Request, Response } from "express"
 import { baseLogger as logger } from "@services/logger"
 import { WalletCurrency } from "@domain/shared"
 
+/**
+ * Common payload structure for all topup providers.
+ * Each provider-specific handler converts their webhook format to this structure.
+ * This allows us to process all providers uniformly in the base handler.
+ */
 export interface TopupWebhookPayload {
   provider: string
   transactionId: string
@@ -14,12 +19,16 @@ export interface TopupWebhookPayload {
   metadata?: Record<string, any>
 }
 
+/**
+ * Interface that all topup webhook handlers must implement.
+ * Each payment provider (Fygaro, Stripe, PayPal) has its own implementation.
+ */
 export interface TopupWebhookHandler {
   provider: string
-  verifySignature(req: Request): boolean
-  parsePayload(req: Request): TopupWebhookPayload | Error
-  process(payload: TopupWebhookPayload): Promise<void | Error>
-  handleWebhook(req: Request, resp: Response): Promise<void>
+  verifySignature(req: Request): boolean // Verify webhook authenticity
+  parsePayload(req: Request): TopupWebhookPayload | Error // Convert provider format to common format
+  process(payload: TopupWebhookPayload): Promise<void | Error> // Process the payment
+  handleWebhook(req: Request, resp: Response): Promise<void> // Main entry point
 }
 
 export abstract class BaseTopupWebhookHandler implements TopupWebhookHandler {
@@ -28,8 +37,19 @@ export abstract class BaseTopupWebhookHandler implements TopupWebhookHandler {
   abstract verifySignature(req: Request): boolean
   abstract parsePayload(req: Request): TopupWebhookPayload | Error
 
+  /**
+   * Core processing logic for topup webhooks.
+   * This method:
+   * 1. Validates the payment status
+   * 2. Identifies the user from the username in metadata
+   * 3. Determines which wallet (USD/BTC) to credit
+   * 4. Calculates the credit amount with currency conversion if needed
+   * 5. Credits the user's account via Ibex
+   * 6. Sends notification to the user
+   */
   async process(payload: TopupWebhookPayload): Promise<void | Error> {
     try {
+      // Only process successful payments - ignore pending or failed
       if (payload.status !== "succeeded") {
         logger.info(
           { provider: this.provider, status: payload.status },
@@ -40,6 +60,8 @@ export abstract class BaseTopupWebhookHandler implements TopupWebhookHandler {
 
       const { AccountsRepository, WalletsRepository } = await import("@services/mongoose")
 
+      // Find the user account by username from the payment metadata
+      // The username must be passed in the payment metadata (client_reference for Fygaro)
       const account = await AccountsRepository().findByUsername(
         payload.username as Username,
       )
@@ -57,6 +79,8 @@ export abstract class BaseTopupWebhookHandler implements TopupWebhookHandler {
         return wallets
       }
 
+      // Determine which wallet to credit based on user's selection
+      // walletType is passed in payment metadata (default: USD)
       const targetWallet = wallets.find((wallet) => {
         if (payload.walletType === "BTC") {
           return wallet.currency === WalletCurrency.Btc
@@ -121,6 +145,13 @@ export abstract class BaseTopupWebhookHandler implements TopupWebhookHandler {
     }
   }
 
+  /**
+   * Calculates the amount to credit based on payment currency and target wallet currency.
+   * Handles currency conversions:
+   * - USD to BTC: Uses dealer price service for current exchange rate
+   * - JMD to USD: Uses configured exchange rate
+   * - Direct currency matches: No conversion needed
+   */
   protected async calculateCreditAmount(
     payload: TopupWebhookPayload,
     targetCurrency: WalletCurrency,
@@ -175,6 +206,19 @@ export abstract class BaseTopupWebhookHandler implements TopupWebhookHandler {
     }
   }
 
+  /**
+   * Credits the user's account with the topup amount.
+   * This is the critical section that:
+   * 1. Checks for idempotency (prevents double credits)
+   * 2. Gets the bank owner wallet (source of funds)
+   * 3. Creates an invoice for the user's wallet
+   * 4. Pays the invoice from bank owner wallet (via Ibex)
+   * 5. Records the transaction in the ledger for accounting
+   *
+   * NOTE: This requires the bank owner wallet to be configured and funded.
+   * The bank owner wallet is Flash's operational wallet used for both
+   * cashouts (user → bank owner) and topups (bank owner → user).
+   */
   protected async creditAccount(params: {
     accountId: AccountId
     walletId: WalletId
@@ -190,7 +234,9 @@ export abstract class BaseTopupWebhookHandler implements TopupWebhookHandler {
     const { USDAmount } = await import("@domain/shared")
 
     try {
-      // 1. Check for idempotency - prevent double credits
+      // 1. IDEMPOTENCY CHECK - Critical for preventing double credits
+      // Each external transaction ID can only be processed once
+      // This protects against duplicate webhooks or replay attacks
       const existingTransaction = await getTopupTransactionByExternalId(
         params.transactionId,
         params.provider,
@@ -208,7 +254,10 @@ export abstract class BaseTopupWebhookHandler implements TopupWebhookHandler {
         return { transactionId: params.transactionId }
       }
 
-      // 2. Get the bank owner wallet (Flash's operational wallet)
+      // 2. GET BANK OWNER WALLET - This is Flash's central operational wallet
+      // Same wallet used for cashouts but in reverse:
+      // - Cashout: User wallet → Bank owner wallet → External bank
+      // - Topup: External payment → Bank owner wallet → User wallet
       let bankOwnerWalletId: WalletId
       try {
         const { getBankOwnerWalletId } = await import("@services/ledger/caching")
@@ -218,8 +267,10 @@ export abstract class BaseTopupWebhookHandler implements TopupWebhookHandler {
         return error instanceof Error ? error : new Error(String(error))
       }
 
-      // 3. Process the actual credit via Ibex
-      // Convert amount to USD for Ibex (assuming USD wallet for now)
+      // 3. PROCESS CREDIT VIA IBEX
+      // Ibex handles the actual Lightning Network transactions
+      // We create an invoice for the user and pay it from bank owner wallet
+      // TODO: Handle BTC wallets properly (currently assumes USD)
       const usdCents = params.amount as UsdCents
       const amount = USDAmount.cents(usdCents.toString())
       if (amount instanceof Error) {
@@ -254,7 +305,9 @@ export abstract class BaseTopupWebhookHandler implements TopupWebhookHandler {
         return paymentResult
       }
 
-      // 4. Record the transaction in the ledger
+      // 4. LEDGER RECORDING - Double-entry bookkeeping for accounting
+      // Records the flow: External Provider → Bank Owner → User Wallet
+      // This ensures proper financial tracking and reconciliation
       const ledgerResult = await recordTopup({
         recipientWalletId: params.walletId,
         bankOwnerWalletId,
@@ -266,7 +319,9 @@ export abstract class BaseTopupWebhookHandler implements TopupWebhookHandler {
 
       if (ledgerResult instanceof Error) {
         logger.error({ error: ledgerResult }, "Failed to record topup in ledger")
-        // Note: At this point the Ibex transaction succeeded but ledger failed
+        // CRITICAL: At this point the Ibex transaction succeeded but ledger failed
+        // This creates a reconciliation issue - money was moved but not recorded
+        // TODO: Implement proper error recovery or compensation transaction
         // In production, this should trigger an alert for manual reconciliation
       }
 
@@ -331,8 +386,18 @@ export abstract class BaseTopupWebhookHandler implements TopupWebhookHandler {
     }
   }
 
+  /**
+   * Main entry point for webhook processing.
+   * Handles the HTTP request/response cycle:
+   * 1. Verifies webhook signature (if provider supplies one)
+   * 2. Parses the webhook payload
+   * 3. Processes the payment
+   * 4. Returns appropriate HTTP response
+   */
   async handleWebhook(req: Request, resp: Response): Promise<void> {
     try {
+      // Security: Verify the webhook is from the claimed provider
+      // Some providers (like Fygaro) may not provide signatures
       if (!this.verifySignature(req)) {
         logger.warn({ provider: this.provider }, "Invalid webhook signature")
         resp.status(401).send("Unauthorized")
