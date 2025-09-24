@@ -37,6 +37,9 @@ const ExternalLedgerTransactionType = {
   LnFeeReimbursement: "fee_reimbursement", // lightning
   OnchainReceipt: "onchain_receipt",
   OnchainPayment: "onchain_payment",
+  TopupFygaro: "topup:fygaro",
+  TopupStripe: "topup:stripe",
+  TopupPaypal: "topup:paypal",
 } as const
 
 const InternalLedgerTransactionType = {
