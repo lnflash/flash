@@ -516,6 +516,81 @@ type GraphQLApplicationError implements Error
 scalar Hex32Bytes
   @join__type(graph: PUBLIC)
 
+type IbexTransactionDetails
+  @join__type(graph: PUBLIC)
+{
+  """Account ID associated with the transaction"""
+  accountId: String
+
+  """Bitcoin address for onchain transactions"""
+  address: String
+
+  """Transaction amount"""
+  amount: Float
+
+  """Number of confirmations for onchain transactions"""
+  confirmations: Int
+
+  """Transaction creation timestamp"""
+  createdAt: String
+
+  """Transaction currency"""
+  currency: String
+
+  """Transaction fee"""
+  fee: Float
+
+  """Transaction ID"""
+  id: String!
+
+  """Lightning invoice (bolt11)"""
+  invoice: String
+
+  """Transaction memo/description"""
+  memo: String
+
+  """Lightning payment hash"""
+  paymentHash: String
+
+  """Lightning payment preimage"""
+  paymentPreimage: String
+
+  """Transaction status"""
+  status: String
+
+  """Bitcoin transaction ID for onchain transactions"""
+  txid: String
+
+  """Transaction type (lightning/onchain)"""
+  type: String
+
+  """Transaction last update timestamp"""
+  updatedAt: String
+
+  """Output index for onchain transactions"""
+  vout: Int
+}
+
+type IbexTransactionDetailsError
+  @join__type(graph: PUBLIC)
+{
+  message: String!
+}
+
+input IbexTransactionDetailsFetchInput
+  @join__type(graph: PUBLIC)
+{
+  """Ibex transaction ID to fetch details for"""
+  ibexTransactionId: String!
+}
+
+type IbexTransactionDetailsPayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [IbexTransactionDetailsError!]!
+  transactionDetails: IbexTransactionDetails
+}
+
 input InitiateCashoutInput
   @join__type(graph: PUBLIC)
 {
@@ -963,6 +1038,7 @@ type Mutation
   captchaRequestAuthCode(input: CaptchaRequestAuthCodeInput!): SuccessPayload!
   deviceNotificationTokenCreate(input: DeviceNotificationTokenCreateInput!): SuccessPayload!
   feedbackSubmit(input: FeedbackSubmitInput!): SuccessPayload!
+  ibexTransactionDetailsFetch(input: IbexTransactionDetailsFetchInput!): IbexTransactionDetailsPayload!
 
   """
   Start the Cashout process; 

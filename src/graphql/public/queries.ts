@@ -18,6 +18,7 @@ import AccountDefaultWalletIdQuery from "@graphql/public/root/query/account-defa
 import LnInvoicePaymentStatusQuery from "@graphql/public/root/query/ln-invoice-payment-status"
 import NpubByUserNameQuery from "./root/query/username-npub-query"
 import IsFlashNpubQuery from "./root/query/is-flash-npub-query"
+import TransactionDetailsQuery from "./root/query/transaction-details"
 
 export const queryFields = {
   unauthed: {
@@ -39,6 +40,7 @@ export const queryFields = {
   authed: {
     atAccountLevel: {
       me: MeQuery,
+      transactionDetails: TransactionDetailsQuery,
     },
     atWalletLevel: {
       onChainTxFee: OnChainTxFeeQuery,
