@@ -1,7 +1,7 @@
 import { GT } from "@graphql/index"
 
-const IbexTransactionDetails = GT.Object({
-  name: "IbexTransactionDetails",
+const AdminTransactionDetails = GT.Object({
+  name: "AdminTransactionDetails",
   fields: () => ({
     id: {
       type: GT.NonNull(GT.String),
@@ -42,32 +42,32 @@ const IbexTransactionDetails = GT.Object({
     },
     paymentHash: {
       type: GT.String,
-      description: "Lightning payment hash",
+      description: "Payment hash for Lightning transactions",
     },
     paymentPreimage: {
       type: GT.String,
-      description: "Lightning payment preimage",
+      description: "Payment preimage for Lightning transactions",
     },
     memo: {
       type: GT.String,
       description: "Transaction memo/description",
     },
-    // Onchain specific fields
+    // On-chain specific fields
     address: {
       type: GT.String,
-      description: "Bitcoin address for onchain transactions",
+      description: "On-chain address",
     },
     txid: {
       type: GT.String,
-      description: "Bitcoin transaction ID for onchain transactions",
+      description: "On-chain transaction ID",
     },
     vout: {
       type: GT.Int,
-      description: "Output index for onchain transactions",
+      description: "Output index for on-chain transactions",
     },
     confirmations: {
       type: GT.Int,
-      description: "Number of confirmations for onchain transactions",
+      description: "Number of confirmations for on-chain transactions",
     },
     fee: {
       type: GT.Float,
@@ -76,4 +76,4 @@ const IbexTransactionDetails = GT.Object({
   }),
 })
 
-export { IbexTransactionDetails }
+export default AdminTransactionDetails

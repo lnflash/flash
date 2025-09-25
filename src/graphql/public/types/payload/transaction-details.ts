@@ -1,13 +1,13 @@
 import { GT } from "@graphql/index"
-import { IbexTransactionDetails } from "@graphql/public/types/object/ibex-transaction-details"
+import { TransactionDetails } from "@graphql/public/types/object/transaction-details"
 
-const IbexTransactionDetailsPayload = GT.Object({
-  name: "IbexTransactionDetailsPayload",
+const TransactionDetailsPayload = GT.Object({
+  name: "TransactionDetailsPayload",
   fields: () => ({
     errors: {
       type: GT.NonNullList(
         GT.Object({
-          name: "IbexTransactionDetailsError",
+          name: "TransactionDetailsError",
           fields: () => ({
             message: {
               type: GT.NonNull(GT.String),
@@ -17,9 +17,9 @@ const IbexTransactionDetailsPayload = GT.Object({
       ),
     },
     transactionDetails: {
-      type: IbexTransactionDetails,
+      type: TransactionDetails,
     },
   }),
 })
 
-export { IbexTransactionDetailsPayload }
+export { TransactionDetailsPayload }

@@ -1,35 +1,35 @@
 import { GT } from "@graphql/index"
 import IbexClient from "@services/ibex/client"
 import { mapError } from "@graphql/error-map"
-import { IbexTransactionDetailsPayload } from "@graphql/public/types/payload/ibex-transaction-details"
+import { TransactionDetailsPayload } from "@graphql/public/types/payload/transaction-details"
 import { BlockchainService } from "@services/blockchain"
 
 const DEFAULT_CONFIRMED_BLOCKS = 6
 
-const IbexTransactionDetailsFetchInput = GT.Input({
-  name: "IbexTransactionDetailsFetchInput",
+const TransactionDetailsInput = GT.Input({
+  name: "TransactionDetailsInput",
   fields: () => ({
-    ibexTransactionId: {
+    transactionId: {
       type: GT.NonNull(GT.String),
-      description: "Ibex transaction ID to fetch details for",
+      description: "Transaction ID to fetch details for",
     },
   }),
 })
 
-const IbexTransactionDetailsFetchMutation = GT.Field({
+const TransactionDetailsQuery = GT.Field({
   extensions: {
     complexity: 120,
   },
-  type: GT.NonNull(IbexTransactionDetailsPayload),
+  type: GT.NonNull(TransactionDetailsPayload),
   args: {
-    input: { type: GT.NonNull(IbexTransactionDetailsFetchInput) },
+    input: { type: GT.NonNull(TransactionDetailsInput) },
   },
   resolve: async (_, args) => {
-    const { ibexTransactionId } = args.input
+    const { transactionId } = args.input
 
     try {
       const transactionDetails = await IbexClient.getTransactionDetails(
-        ibexTransactionId as IbexTransactionId,
+        transactionId as IbexTransactionId,
       )
 
       if (transactionDetails instanceof Error) {
@@ -139,8 +139,8 @@ const IbexTransactionDetailsFetchMutation = GT.Field({
         },
       }
     } catch (error) {
-      console.error("Error fetching Ibex transaction details:", {
-        ibexTransactionId,
+      console.error("Error fetching transaction details:", {
+        transactionId,
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
       })
@@ -157,4 +157,4 @@ const IbexTransactionDetailsFetchMutation = GT.Field({
   },
 })
 
-export default IbexTransactionDetailsFetchMutation
+export default TransactionDetailsQuery

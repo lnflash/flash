@@ -48,7 +48,6 @@ import UserPhoneRegistrationValidateMutation from "@graphql/public/root/mutation
 import UserTotpDeleteMutation from "@graphql/public/root/mutation/user-totp-delete"
 
 import MerchantMapSuggestMutation from "@graphql/public/root/mutation/merchant-map-suggest"
-import IbexTransactionDetailsFetchMutation from "@graphql/public/root/mutation/ibex-transaction-details-fetch"
 
 import CallbackEndpointAdd from "./root/mutation/callback-endpoint-add"
 import CallbackEndpointDelete from "./root/mutation/callback-endpoint-delete"
@@ -109,8 +108,6 @@ export const mutationFields = {
 
       callbackEndpointAdd: CallbackEndpointAdd,
       callbackEndpointDelete: CallbackEndpointDelete,
-
-      ibexTransactionDetailsFetch: IbexTransactionDetailsFetchMutation,
     },
 
     atWalletLevel: {
