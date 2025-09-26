@@ -4,9 +4,11 @@
     "target": "es2022",
     "experimental": {
       "plugins": [["jest_workaround", {}]]
-    }
+    },
+    "target": "es2022"
   },
   "module": {
     "type": "commonjs"
-  }
+  },
+  "sourceMaps": "inline"
 }

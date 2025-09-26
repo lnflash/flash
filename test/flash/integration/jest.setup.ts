@@ -6,6 +6,7 @@ let mongoose
 export let flash // : TestUser
 export let alice // : TestUser
 export let bob //: TestUser
+export let mockedIbex: jest.Mock
 
 // Mock prices
 jest.mock(
@@ -14,17 +15,18 @@ jest.mock(
 )
 
 import Ibex from "@services/ibex/client"
+import * as Mocks from "test/flash/mocks/ibex"
+
 jest.mock(
   "@services/ibex/client",
   // () => require("test/flash/mocks/ibex"),
 )
-let mockedIbex: jest.Mock
 
 beforeAll(async () => {
 
   mockedIbex = Ibex as jest.Mock 
   mockedIbex.mockReturnValue({
-    createAccount: jest.fn().mockResolvedValue(createAccount.response),
+    createAccount: jest.fn().mockResolvedValue(Mocks.createAccount.response),
 
     // addInvoice: jest.fn().mockResolvedValue(addInvoice.response),
     // payInvoiceV2: jest.fn().mockResolvedValue(payInvoiceV2.response)
