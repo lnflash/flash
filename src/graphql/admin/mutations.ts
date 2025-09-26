@@ -12,8 +12,7 @@ import MerchantMapDeleteMutation from "./root/mutation/merchant-map-delete"
 import MerchantMapValidateMutation from "./root/mutation/merchant-map-validate"
 
 export const mutationFields = {
-  unauthed: {
-  },
+  unauthed: {},
   authed: {
     userUpdatePhone: UserUpdatePhoneMutation,
     accountUpdateLevel: AccountUpdateLevelMutation,

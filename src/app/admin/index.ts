@@ -1,5 +1,9 @@
 export * from "./update-user-phone"
 export * from "./send-admin-push-notification"
+export * from "./invite"
+
+// Re-export query functions from invite module for admin GraphQL compatibility
+export { getInviteById, listInvites } from "../invite/queries"
 
 import { checkedToAccountUuid, checkedToUsername } from "@domain/accounts"
 import { IdentityRepository } from "@services/kratos"
