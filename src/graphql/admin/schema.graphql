@@ -188,62 +188,10 @@ type InitiationViaOnChain {
   address: OnChainAddress!
 }
 
-input InviteExtendInput {
-  inviteId: ID!
-  newExpiresAt: Timestamp!
-}
-
-type InviteExtendPayload {
-  errors: [Error!]!
-  invite: AdminInvite
-}
-
 enum InviteMethod {
   EMAIL
   SMS
   WHATSAPP
-}
-
-input InviteRateLimitResetInput {
-  accountId: ID!
-}
-
-type InviteRateLimitStatus {
-  accountId: String
-  contact: String
-  dailyCount: Int
-  dailyLimit: Int
-  dailyTtl: Int
-  targetCount: Int
-  targetLimit: Int
-  targetTtl: Int
-}
-
-input InviteRateLimitStatusInput {
-  accountId: String
-  contact: String
-}
-
-type InviteRateLimitStatusPayload {
-  errors: [Error!]!
-  status: InviteRateLimitStatus
-}
-
-input InviteRevokeInput {
-  inviteId: ID!
-  reason: String
-}
-
-type InviteRevokePayload {
-  errors: [Error!]!
-  invite: AdminInvite
-}
-
-type InviteStatistics {
-  redemptionRate: Float!
-  totalPending: Int!
-  totalRedeemed: Int!
-  totalSent: Int!
 }
 
 enum InviteStatus {
@@ -251,10 +199,6 @@ enum InviteStatus {
   EXPIRED
   PENDING
   SENT
-}
-
-input InviteTargetRateLimitResetInput {
-  contact: String!
 }
 
 """A connection to a list of items."""
@@ -357,11 +301,6 @@ type Mutation {
   adminPushNotificationSend(input: AdminPushNotificationSendInput!): AdminPushNotificationSendPayload!
   businessDeleteMapInfo(input: BusinessDeleteMapInfoInput!): AccountDetailPayload!
   businessUpdateMapInfo(input: BusinessUpdateMapInfoInput!): AccountDetailPayload!
-  inviteExtend(input: InviteExtendInput!): InviteExtendPayload!
-  inviteGlobalRateLimitReset: SuccessPayload!
-  inviteRateLimitReset(input: InviteRateLimitResetInput!): SuccessPayload!
-  inviteRevoke(input: InviteRevokeInput!): InviteRevokePayload!
-  inviteTargetRateLimitReset(input: InviteTargetRateLimitResetInput!): SuccessPayload!
   merchantMapDelete(input: MerchantMapDeleteInput!): MerchantPayload!
   merchantMapValidate(input: MerchantMapValidateInput!): MerchantPayload!
   userUpdatePhone(input: UserUpdatePhoneInput!): AccountDetailPayload!
@@ -419,8 +358,6 @@ type Query {
   accountDetailsByUsername(username: Username!): AuditedAccount!
   allLevels: [AccountLevel!]!
   inviteById(id: ID!): AdminInvite
-  inviteRateLimitStatus(input: InviteRateLimitStatusInput): InviteRateLimitStatusPayload!
-  inviteStatistics: InviteStatistics!
   invitesList(
     """Returns the items in the list that come after the specified cursor."""
     after: String

@@ -14,8 +14,6 @@ import AccountDetailsByAccountId from "./root/query/account-details-by-account-i
 import MerchantsPendingApprovalQuery from "./root/query/merchants-pending-approval-listing"
 import InvitesListQuery from "./root/query/invites-list"
 import InviteByIdQuery from "./root/query/invite-by-id"
-import InviteStatisticsQuery from "./root/query/invite-statistics"
-import InviteRateLimitStatusQuery from "./root/query/invite-rate-limit-status"
 
 export const queryFields = {
   unauthed: {},
@@ -34,8 +32,6 @@ export const queryFields = {
     merchantsPendingApproval: MerchantsPendingApprovalQuery,
     invitesList: InvitesListQuery,
     inviteById: InviteByIdQuery,
-    inviteStatistics: InviteStatisticsQuery,
-    inviteRateLimitStatus: InviteRateLimitStatusQuery,
   },
 }
 

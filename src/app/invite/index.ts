@@ -15,7 +15,7 @@ import { sendInviteNotification } from "@services/notifications/invite"
 
 import { checkInviteCreateRateLimit, checkInviteTargetRateLimit } from "./rate-limits"
 
-export { getInviteById, listInvites, getInviteStatistics } from "./queries"
+export { getInviteById, listInvites } from "./queries"
 
 export const createInvite = async ({
   accountId,

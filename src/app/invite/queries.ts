@@ -105,26 +105,3 @@ export const listInvites = async ({
     return new UnknownRepositoryError(error)
   }
 }
-
-export const getInviteStatistics = async () => {
-  try {
-    const [totalSent, totalRedeemed, totalPending] = await Promise.all([
-      InviteRepository.countDocuments(),
-      InviteRepository.countDocuments({ status: InviteStatus.ACCEPTED }),
-      InviteRepository.countDocuments({
-        status: { $in: [InviteStatus.PENDING, InviteStatus.SENT] },
-      }),
-    ])
-
-    const redemptionRate = totalSent > 0 ? totalRedeemed / totalSent : 0
-
-    return {
-      totalSent,
-      totalRedeemed,
-      totalPending,
-      redemptionRate,
-    }
-  } catch (error) {
-    return new UnknownRepositoryError(error)
-  }
-}
