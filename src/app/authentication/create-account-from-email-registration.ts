@@ -3,7 +3,7 @@ import { KRATOS_CALLBACK_API_KEY, getDefaultAccountsConfig } from "@config"
 import { CallbackSecretValidator } from "@domain/authentication/secret-validator"
 import { RegistrationPayloadValidator } from "@domain/authentication/registration-payload-validator"
 import { ErrorLevel } from "@domain/shared"
-import { InvalidPhoneNumber, InvalidUserId } from "@domain/errors"
+import { InvalidEmailAddress, InvalidUserId } from "@domain/errors"
 
 import {
   addAttributesToCurrentSpan,
@@ -11,16 +11,16 @@ import {
 } from "@services/tracing"
 import { SchemaIdType } from "@services/kratos"
 
-import { createAccountWithPhoneIdentifier } from "@app/accounts"
+import { createAccountWithEmailIdentifier } from "@app/accounts"
 
-export const createAccountFromRegistrationPayload = async ({
+export const createAccountFromEmailRegistrationPayload = async ({
   secret,
   body,
 }: {
   secret: string | undefined
   body: {
     identity_id?: string
-    phone?: string
+    email?: string
     schema_id?: string
   }
 }): Promise<Account | ApplicationError> => {
@@ -33,30 +33,33 @@ export const createAccountFromRegistrationPayload = async ({
     return isValidKey
   }
 
-  const regPayloadValidator = RegistrationPayloadValidator(SchemaIdType.PhoneNoPasswordV0)
+  const regPayloadValidator = RegistrationPayloadValidator(SchemaIdType.EmailNoPasswordV0)
   const regPayload = regPayloadValidator.validate(body)
   if (regPayload instanceof Error) {
-    if (regPayload instanceof InvalidUserId || regPayload instanceof InvalidPhoneNumber) {
+    if (
+      regPayload instanceof InvalidUserId ||
+      regPayload instanceof InvalidEmailAddress
+    ) {
       recordExceptionInCurrentSpan({
         error: regPayload,
         level: ErrorLevel.Critical,
         attributes: {
           userIdRaw: body.identity_id,
-          phoneRaw: body.phone,
+          emailRaw: body.email,
         },
       })
     }
     return regPayload
   }
 
-  const { userId, phone, phoneMetadata } = regPayload
-  if (!phone) {
-    return new InvalidPhoneNumber("Phone is required for phone registration")
+  const { userId, email } = regPayload
+  if (!email) {
+    return new InvalidEmailAddress("Email is required for email registration")
   }
-  const account = await createAccountWithPhoneIdentifier({
-    newAccountInfo: { phone, kratosUserId: userId },
+
+  const account = await createAccountWithEmailIdentifier({
+    newAccountInfo: { email, kratosUserId: userId },
     config: getDefaultAccountsConfig(),
-    phoneMetadata,
   })
   if (account instanceof Error) {
     recordExceptionInCurrentSpan({
@@ -64,7 +67,7 @@ export const createAccountFromRegistrationPayload = async ({
       level: ErrorLevel.Critical,
       attributes: {
         userId,
-        phone,
+        email,
       },
     })
   }
