@@ -189,6 +189,26 @@ type YamlSchema = {
     email: CashoutEmail
   }
   sendgrid: SendGridConfig
+  frappe: FrappeConfig
+}
+
+type FrappeCredentials = {
+  apiKey: string
+  apiSecret: string
+}
+
+type FrappeConfig = {
+  url: string
+  credentials: FrappeCredentials
+  erpnext: {
+    accounts: {
+      ibex: {
+        operating: string
+      }
+      cashout: string
+      serviceFees: string
+    }
+  }
 }
 
 type CurrencyCode = string

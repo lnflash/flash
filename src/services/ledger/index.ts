@@ -43,7 +43,6 @@ import { volume } from "./volume"
 import Ibex from "@services/ibex/client"
 import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
 import { ApiError, AuthenticationError } from "ibex-client"
-import * as cashout from "./cashout"
 
 export { getNonEndUserWalletIds } from "./caching"
 export { translateToLedgerJournal } from "./helpers"
@@ -498,7 +497,6 @@ export const LedgerService = (): ILedgerService => {
       isLnTxRecorded,
       getWalletIdByTransactionHash,
       listWalletIdsWithPendingPayments,
-      ...cashout,
       ...admin,
       ...volume,
       ...send,
