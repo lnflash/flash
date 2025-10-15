@@ -83,7 +83,7 @@ chmod +x ./dev/set-overrides.sh
 
 Flash uses Frappe's ErpNext application for accounting purposes. 
 
-By default, the development configuration uses the Frappe Bench server running in the (Flash test environment)[https://erp.test.flashapp.me]. You may need to update your yaml config with proper credentials and account information.
+By default, the development configuration uses the Frappe Bench server running in the [Flash test environment](https://erp.test.flashapp.me). You may need to update your yaml config with proper credentials and account information.
 
 When testing and developing features, it is recommended to run the Frappe Bench server locally. [See here](https://github.com/frappe/bench) for installation instructions. Once the server is running, update your FrappeConfig set in the dev yamls. 
 
