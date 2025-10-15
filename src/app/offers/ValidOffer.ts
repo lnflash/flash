@@ -65,23 +65,25 @@ class ValidOffer extends Offer {
   async execute(): Promise<InitiatedCashout | Error> {
     const journal = await ErpNext.draftCashout(this)
     if (journal instanceof JournalEntryDraftError) return journal
-    const id = journal.journalId
 
     const resp = await Ibex.payInvoice({
       accountId: this.details.ibexTrx.userAcct,
       invoice: this.details.ibexTrx.invoice.paymentRequest as unknown as Bolt11,
     })
     if (resp instanceof IbexError) {
-      ErpNext.delete(id) // clean up accounting entry
+      ErpNext.delete(journal.journalId) // clean up accounting entry
       return resp
     }
 
-    const submitted = await ErpNext.submit(id)
+    const submitted = await ErpNext.submit(journal.journalId)
     if (submitted instanceof JournalEntrySubmitError) {
       baseLogger.error({ submitted }, "Failed to submit journal after payment sent")
     }
 
-    return new InitiatedCashout(this, id)
+    const initiatedCashout = new InitiatedCashout(this, journal.journalId)
+    EmailService.sendCashoutInitiatedEmail(initiatedCashout)
+
+    return initiatedCashout
   }
 }
 
