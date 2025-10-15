@@ -81,7 +81,7 @@ class ValidOffer extends Offer {
       baseLogger.error({ submitted }, "Failed to submit journal after payment sent")
     }
 
-    return new InitiatedCashout(this, id) 
+    return new InitiatedCashout(this, id)
   }
 }
 

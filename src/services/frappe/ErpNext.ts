@@ -49,7 +49,7 @@ class ErpNext {
           credit: erpUsd(liability.usd),
           exchange_rate: erpUsd(liability.usd) / Number(liability.jmd.asCents(2)),
           party_type: "Supplier",
-          party, 
+          party,
         },
         {
           account: FrappeConfig.erpnext.accounts.serviceFees,
