@@ -20,7 +20,8 @@ import Ibex from "@services/ibex/client"
 import { EmailService } from "@services/email"
 import { CashoutDetails, ValidationInputs } from "./types"
 import ErpNext from "@services/frappe/ErpNext"
-import { JournalEntryDraftError } from "@services/frappe/errors"
+import { JournalEntryDraftError, JournalEntrySubmitError } from "@services/frappe/errors"
+import { baseLogger } from "@services/logger"
 
 // Only way to construct a ValidOffer is using the static method which contains validations
 class ValidOffer extends Offer {
@@ -61,29 +62,23 @@ class ValidOffer extends Offer {
   }
 
   async execute(): Promise<PaymentSendStatus | Error> {
-    try {
-      const journal = await ErpNext.draftCashout(this.details)
-      if (journal instanceof JournalEntryDraftError) return journal
+    const journal = await ErpNext.draftCashout(this.details)
+    if (journal instanceof JournalEntryDraftError) return journal
 
-      const resp = await Ibex.payInvoice({
-        accountId: this.details.ibexTrx.userAcct,
-        invoice: this.details.ibexTrx.invoice.paymentRequest as unknown as Bolt11,
-      })
-      if (resp instanceof Error) {
-        // TODO: Error handling
-        // Log error 
-        // reverse journal entry in ERPNext?
-        return resp
-      }
-      console.log(`Ibex resp = ${ JSON.stringify(resp) }`)
-
-      const submitted = await ErpNext.submit(journal.journalId)
-
-    } catch (e) {
-      throw e
+    const resp = await Ibex.payInvoice({
+      accountId: this.details.ibexTrx.userAcct,
+      invoice: this.details.ibexTrx.invoice.paymentRequest as unknown as Bolt11,
+    })
+    if (resp instanceof Error) {
+      ErpNext.delete(journal.journalId) // clean up accounting entry
+      return resp
     }
 
-    // move to NotificationService?
+    const submitted = await ErpNext.submit(journal.journalId)
+    if (submitted instanceof JournalEntrySubmitError) {
+      baseLogger.error({ submitted }, "Failed to submit journal after payment sent")
+    }
+
     EmailService.sendCashoutInitiatedEmail(this.account.username, this.details)
 
     return PaymentSendStatus.Pending // awaiting rtgs transfer

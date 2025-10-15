@@ -2,7 +2,7 @@ import { CashoutDetails } from "@app/offers"
 import { USDAmount } from "@domain/shared"
 import { baseLogger } from "@services/logger"
 import axios from "axios"
-import { JournalEntryDraftError, JournalEntrySubmitError, JournalEntryTitleError } from "./errors"
+import { JournalEntryDraftError, JournalEntrySubmitError, JournalEntryTitleError, JournalEntryDeleteError } from "./errors"
 import { FrappeConfig } from "@config"
 
 const erpUsd = (usd: USDAmount): number => Number(usd.asCents(2)) // Number(usd.asDollars(2))
@@ -97,14 +97,26 @@ class ErpNext {
   async submit(jeName: string): Promise<any | JournalEntrySubmitError> {
     try {
       const resp = await axios.put(
-      `${this.url}/api/resource/Journal Entry/${jeName}`,
-      { docstatus: 1 },  // docstatus: 1 means submitted
-      { headers: this.headers }
-    )
-    return resp.data
+        `${this.url}/api/resource/Journal Entry/${jeName}`,
+        { docstatus: 1 },  // docstatus: 1 means submitted
+        { headers: this.headers }
+      )
+      return resp.data
     } catch (err) {
       baseLogger.error({ err }, "Error submitting JE in ERPNext")
       return new JournalEntrySubmitError(err)
+    }
+  }
+
+  async delete(jeName: string): Promise<void | JournalEntryDeleteError> {
+    try {
+      await axios.delete(
+        `${this.url}/api/resource/Journal Entry/${jeName}`,
+        { headers: this.headers }
+      )
+    } catch (err) {
+      baseLogger.error({ err, jeName }, "Error deleting JE in ERPNext")
+      return new JournalEntryDeleteError(err)
     }
   }
 
