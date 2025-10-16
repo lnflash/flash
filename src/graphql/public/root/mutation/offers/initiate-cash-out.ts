@@ -2,10 +2,11 @@
 import OffersManager from "@app/offers/OffersManager"
 import { Cashout } from "@config"
 import { NotImplementedError } from "@domain/errors"
-import { mapToGqlErrorList } from "@graphql/error-map"
+import { InternalServerError, LightningPaymentError } from "@graphql/error"
 import { GT } from "@graphql/index"
-import SuccessPayload from "@graphql/shared/types/payload/success-payload"
+import IError from "@graphql/shared/types/abstract/error"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
+import { baseLogger } from "@services/logger"
 import dedent from "dedent"
 
 const InitiateCashoutInput = GT.Input({
@@ -19,13 +20,25 @@ const InitiateCashoutInput = GT.Input({
   }),
 })
 
+const InitiatedCashoutResponse = GT.Object({
+  name: "InitiatedCashoutResponse",
+  fields: () => ({
+    errors: {
+      type: GT.NonNullList(IError),
+    },
+    journalId: {
+      type: GT.ID,
+    },
+  }),
+})
+
 const InitiateCashoutMutation = GT.Field({
   description: dedent`Start the Cashout process; 
     User sends USD to Flash via Ibex and receives USD or JMD to bank account.`,
   args: {
     input: { type: GT.NonNull(InitiateCashoutInput) },
   },
-  type: GT.NonNull(SuccessPayload),
+  type: GT.NonNull(InitiatedCashoutResponse),
   extensions: {
     complexity: 60,
   },
@@ -39,10 +52,13 @@ const InitiateCashoutMutation = GT.Field({
       if (f instanceof Error) return { errors: [{ message: f.message, success: false }] }
     }
 
-    const status = await (OffersManager.executeOffer(offerId, walletId))
-    if (status instanceof Error) return { errors: mapToGqlErrorList(status) }
+    const offer = await (OffersManager.executeCashout(offerId, walletId))
+    // if (status instanceof IbexError) return new LightningPaymentError({ message: "Payment failure.", logger: baseLogger })
+    if (offer instanceof Error) {
+      return new InternalServerError({ message: "Server error. Please contact support", logger: baseLogger })
+    }
 
-    return { errors: [], success: true }
+    return { errors: [], journalId: offer.journalId }
   },
 })
 

@@ -5,6 +5,8 @@ import { baseLogger } from "@services/logger"
 import { CashoutDetails } from "@app/offers"
 
 import { CashoutBody } from "./templates/cashout"
+import Offer from "@app/offers/Offer"
+import { InitiatedCashout } from "@app/offers/ValidOffer"
 
 type EmailHeaders = {
   to: string
@@ -18,7 +20,10 @@ const config = Cashout.Email
 sgMail.setApiKey(SendGridConfig.apiKey)
 
 class EmailService {
-  sendCashoutInitiatedEmail = async (username: Username, offer: CashoutDetails) => {
+  sendCashoutInitiatedEmail = async (cashout: InitiatedCashout) => {
+    const username = cashout.offer.account.username
+    const offer = cashout.offer.details
+
     const body = CashoutBody({
       ...offer,
       username,

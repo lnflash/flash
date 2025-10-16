@@ -4,6 +4,7 @@ import { baseLogger } from "@services/logger"
 import axios from "axios"
 import { JournalEntryDraftError, JournalEntrySubmitError, JournalEntryTitleError, JournalEntryDeleteError } from "./errors"
 import { FrappeConfig } from "@config"
+import ValidOffer from "@app/offers/ValidOffer"
 
 const erpUsd = (usd: USDAmount): number => Number(usd.asCents(2)) // Number(usd.asDollars(2))
 
@@ -20,9 +21,11 @@ class ErpNext {
   }
 
   async draftCashout(
-    offer: CashoutDetails,
+    offer: ValidOffer,
   ): Promise<LedgerJournal | JournalEntryDraftError> {
-    const { ibexTrx, flash } = offer
+    const party = offer.account.erpParty
+    if (!party) return new JournalEntryDraftError("Account missing erpParty field")
+    const { ibexTrx, flash } = offer.details
     const { liability } = flash
     const flashFee = flash.fee // ibexTrx.usd.minus(liability.usd)
     const journalEntry = {
@@ -46,7 +49,7 @@ class ErpNext {
           credit: erpUsd(liability.usd),
           exchange_rate: erpUsd(liability.usd) / Number(liability.jmd.asCents(2)),
           party_type: "Supplier",
-          party: "Jon", 
+          party, 
         },
         {
           account: FrappeConfig.erpnext.accounts.serviceFees,

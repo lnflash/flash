@@ -466,3 +466,9 @@ export class IbexError extends CustomApolloError {
     })
   }
 }
+
+export class InternalServerError extends CustomApolloError {
+  constructor(errData: CustomApolloErrorData) {
+    super({ level: "error", code: "INTERNAL_SERVER_ERROR", forwardToClient: false, ...errData })
+  }
+}

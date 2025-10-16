@@ -1,13 +1,14 @@
 import Storage from "./storage/Redis"
-import ValidOffer from "./ValidOffer"
+import ValidOffer, { InitiatedCashout } from "./ValidOffer"
 import { USDAmount, ValidationError } from "@domain/shared"
 import { CacheServiceError } from "@domain/cache"
 import { getBankOwnerIbexAccount } from "@services/ledger/caching"
 import Ibex from "@services/ibex/client"
 import { UnexpectedIbexResponse } from "@services/ibex/errors"
-import { decodeInvoice } from "@domain/bitcoin/lightning"
+import { decodeInvoice, PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { Cashout, ExchangeRates } from "@config"
 import PersistedOffer from "./storage/PersistedOffer"
+import { EmailService } from "@services/email"
 
 const config = { 
   ...Cashout.OfferConfig,
@@ -61,7 +62,7 @@ const OffersManager = {
     return persistedOffer
   },
 
-  executeOffer: async (id: OfferId, walletId: WalletId): Promise<PaymentSendStatus | Error> => {
+  executeCashout: async (id: OfferId, walletId: WalletId): Promise<InitiatedCashout | Error> => {
     const offer = await Storage.get(id)
     if (offer instanceof Error) return offer
   
@@ -70,7 +71,12 @@ const OffersManager = {
     const validOffer = await ValidOffer.from(offer.details)
     if (validOffer instanceof Error) return validOffer
 
-    return validOffer.execute() 
+    const executedOffer = await validOffer.execute() 
+    if (executedOffer instanceof Error) return executedOffer
+    else {
+      EmailService.sendCashoutInitiatedEmail(executedOffer)
+      return executedOffer
+    }
   },
 
 }

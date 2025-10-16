@@ -22,6 +22,7 @@ import { CashoutDetails, ValidationInputs } from "./types"
 import ErpNext from "@services/frappe/ErpNext"
 import { JournalEntryDraftError, JournalEntrySubmitError } from "@services/frappe/errors"
 import { baseLogger } from "@services/logger"
+import { IbexError } from "@services/ibex/errors"
 
 // Only way to construct a ValidOffer is using the static method which contains validations
 class ValidOffer extends Offer {
@@ -61,28 +62,34 @@ class ValidOffer extends Offer {
     return new ValidOffer(inputs)
   }
 
-  async execute(): Promise<PaymentSendStatus | Error> {
-    const journal = await ErpNext.draftCashout(this.details)
+  async execute(): Promise<InitiatedCashout | Error> {
+    const journal = await ErpNext.draftCashout(this)
     if (journal instanceof JournalEntryDraftError) return journal
+    const id = journal.journalId
 
     const resp = await Ibex.payInvoice({
       accountId: this.details.ibexTrx.userAcct,
       invoice: this.details.ibexTrx.invoice.paymentRequest as unknown as Bolt11,
     })
-    if (resp instanceof Error) {
-      ErpNext.delete(journal.journalId) // clean up accounting entry
+    if (resp instanceof IbexError) {
+      ErpNext.delete(id) // clean up accounting entry
       return resp
     }
 
-    const submitted = await ErpNext.submit(journal.journalId)
+    const submitted = await ErpNext.submit(id)
     if (submitted instanceof JournalEntrySubmitError) {
       baseLogger.error({ submitted }, "Failed to submit journal after payment sent")
     }
 
-    EmailService.sendCashoutInitiatedEmail(this.account.username, this.details)
-
-    return PaymentSendStatus.Pending // awaiting rtgs transfer
+    return new InitiatedCashout(this, id) 
   }
 }
 
 export default ValidOffer
+
+
+
+export class InitiatedCashout {
+  readonly status = PaymentSendStatus.Pending
+  constructor(readonly offer: ValidOffer, readonly journalId: LedgerJournalId) {}
+}
