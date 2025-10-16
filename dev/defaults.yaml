@@ -38,6 +38,9 @@ cashout:
 sendgrid:
   apiKey: "<replace>"
 
+googlePlaces:
+  apiKey: "<replace>"
+
 frappe:
   url: "https://erp.test.flashapp.me"
   credentials:

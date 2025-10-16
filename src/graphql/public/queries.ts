@@ -19,6 +19,7 @@ import LnInvoicePaymentStatusQuery from "@graphql/public/root/query/ln-invoice-p
 import NpubByUserNameQuery from "./root/query/username-npub-query"
 import IsFlashNpubQuery from "./root/query/is-flash-npub-query"
 import AccountUpgradeRequestStatusQuery from "./root/query/account-upgrade-request-status"
+import BusinessAddressEnrichQuery from "./root/query/business-address-enrich"
 
 export const queryFields = {
   unauthed: {
@@ -27,6 +28,7 @@ export const queryFields = {
     userDefaultWalletId: AccountDefaultWalletIdQuery, // FIXME: migrate to AccountDefaultWalletId
     accountDefaultWallet: AccountDefaultWalletQuery,
     businessMapMarkers: BusinessMapMarkersQuery,
+    businessAddressEnrich: BusinessAddressEnrichQuery,
     currencyList: CurrencyListQuery,
     mobileVersions: MobileVersionsQuery,
     quizQuestions: QuizQuestionsQuery,

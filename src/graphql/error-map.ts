@@ -461,10 +461,23 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "UnexpectedIbexResponse":
       return new IbexError(baseLogger)
     case "OfferNotFound":
-      return new NotFoundError({ 
-        message: "Offer not available. Try again.", 
-        logger: baseLogger 
+      return new NotFoundError({
+        message: "Offer not available. Try again.",
+        logger: baseLogger
       })
+
+    case "AddressNotFoundError":
+      message = error.message
+      return new NotFoundError({ message, logger: baseLogger })
+
+    case "GeocodingError":
+      message = error.message
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "InvalidAddressInputError":
+      message = error.message
+      return new ValidationInternalError({ message, logger: baseLogger })
+
     // ----------
     // Unhandled below here
     // ----------

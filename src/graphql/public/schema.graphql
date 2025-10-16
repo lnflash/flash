@@ -180,6 +180,19 @@ input BusinessAccountUpgradeRequestInput {
   level: AccountLevel!
 }
 
+type BusinessAddressEnrichPayload {
+  errors: [Error!]!
+
+  """The standardized/formatted address returned by Google Places API"""
+  formattedAddress: String
+
+  """Geographic latitude coordinate"""
+  latitude: Float
+
+  """Geographic longitude coordinate"""
+  longitude: Float
+}
+
 type CallbackEndpoint {
   id: EndpointId!
   url: EndpointUrl!
@@ -1123,6 +1136,10 @@ type Query {
   accountUpgradeRequestStatus: AccountUpgradeRequestStatus!
   btcPrice(currency: DisplayCurrency! = "USD"): Price @deprecated(reason: "Deprecated in favor of realtimePrice")
   btcPriceList(range: PriceGraphRange!): [PricePoint]
+  businessAddressEnrich(
+    """The raw address string to enrich (minimum 3 characters)"""
+    address: String!
+  ): BusinessAddressEnrichPayload!
   businessMapMarkers: [MapMarker!]!
   currencyList: [Currency!]!
   globals: Globals

@@ -673,6 +673,10 @@ export const configSchema = {
       type: "object",
       required: ["apiKey"],
     },
+    googlePlaces: {
+      type: "object",
+      required: ["apiKey"],
+    },
   },
   required: [
     "lightningAddressDomain",

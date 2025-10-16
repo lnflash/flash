@@ -39,6 +39,10 @@ type SendGridConfig = {
   apiKey: string
 }
 
+type GooglePlacesConfig = {
+  apiKey: string
+}
+
 type YamlSchema = {
   name: string
   lightningAddressDomain: string
@@ -189,6 +193,7 @@ type YamlSchema = {
     email: CashoutEmail
   }
   sendgrid: SendGridConfig
+  googlePlaces: GooglePlacesConfig
   frappe: FrappeConfig
 }
 

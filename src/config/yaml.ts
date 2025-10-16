@@ -386,6 +386,8 @@ export const Cashout = {
 
 export const SendGridConfig = yamlConfig.sendgrid as SendGridConfig
 
+export const GooglePlacesConfig = yamlConfig.googlePlaces as GooglePlacesConfig
+
 export const IbexConfig = yamlConfig.ibex as IbexConfig
 
 export const FrappeConfig = yamlConfig.frappe as FrappeConfig
