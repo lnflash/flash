@@ -66,7 +66,7 @@ type User = {
   createdAt: Date
   deviceId?: DeviceId | undefined
   deletedEmails?: EmailAddress[] | undefined
-  validated?: boolean
+  requestedLevel?: AccountLevel | null
 }
 
 type UserUpdateInput = Omit<Partial<User>, "language" | "createdAt"> & {

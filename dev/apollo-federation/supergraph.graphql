@@ -92,6 +92,12 @@ enum AccountLevel
   ZERO @join__enumValue(graph: PUBLIC)
 }
 
+input AccountLevelUpgradeRequestInput
+  @join__type(graph: PUBLIC)
+{
+  level: AccountLevel!
+}
+
 interface AccountLimit
   @join__type(graph: PUBLIC)
 {
@@ -142,19 +148,6 @@ input AccountUpdateDisplayCurrencyInput
 }
 
 type AccountUpdateDisplayCurrencyPayload
-  @join__type(graph: PUBLIC)
-{
-  account: ConsumerAccount
-  errors: [Error!]!
-}
-
-input AccountUpdateLevelInput
-  @join__type(graph: PUBLIC)
-{
-  level: AccountLevel!
-}
-
-type AccountUpdateLevelPayload
   @join__type(graph: PUBLIC)
 {
   account: ConsumerAccount
@@ -968,9 +961,9 @@ type Mutation
   accountDisableNotificationChannel(input: AccountDisableNotificationChannelInput!): AccountUpdateNotificationSettingsPayload!
   accountEnableNotificationCategory(input: AccountEnableNotificationCategoryInput!): AccountUpdateNotificationSettingsPayload!
   accountEnableNotificationChannel(input: AccountEnableNotificationChannelInput!): AccountUpdateNotificationSettingsPayload!
+  accountLevelUpgradeRequest(input: AccountLevelUpgradeRequestInput!): SuccessPayload!
   accountUpdateDefaultWalletId(input: AccountUpdateDefaultWalletIdInput!): AccountUpdateDefaultWalletIdPayload!
   accountUpdateDisplayCurrency(input: AccountUpdateDisplayCurrencyInput!): AccountUpdateDisplayCurrencyPayload!
-  accountUpdateLevel(input: AccountUpdateLevelInput!): AccountUpdateLevelPayload!
   callbackEndpointAdd(input: CallbackEndpointAddInput!): CallbackEndpointAddPayload!
   callbackEndpointDelete(input: CallbackEndpointDeleteInput!): SuccessPayload!
   captchaCreateChallenge: CaptchaCreateChallengePayload!

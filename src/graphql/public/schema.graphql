@@ -55,6 +55,10 @@ enum AccountLevel {
   ZERO
 }
 
+input AccountLevelUpgradeRequestInput {
+  level: AccountLevel!
+}
+
 interface AccountLimit {
   """The rolling time interval in seconds that the limits would apply for."""
   interval: Seconds
@@ -95,15 +99,6 @@ input AccountUpdateDisplayCurrencyInput {
 }
 
 type AccountUpdateDisplayCurrencyPayload {
-  account: ConsumerAccount
-  errors: [Error!]!
-}
-
-input AccountUpdateLevelInput {
-  level: AccountLevel!
-}
-
-type AccountUpdateLevelPayload {
   account: ConsumerAccount
   errors: [Error!]!
 }
@@ -741,9 +736,9 @@ type Mutation {
   accountDisableNotificationChannel(input: AccountDisableNotificationChannelInput!): AccountUpdateNotificationSettingsPayload!
   accountEnableNotificationCategory(input: AccountEnableNotificationCategoryInput!): AccountUpdateNotificationSettingsPayload!
   accountEnableNotificationChannel(input: AccountEnableNotificationChannelInput!): AccountUpdateNotificationSettingsPayload!
+  accountLevelUpgradeRequest(input: AccountLevelUpgradeRequestInput!): SuccessPayload!
   accountUpdateDefaultWalletId(input: AccountUpdateDefaultWalletIdInput!): AccountUpdateDefaultWalletIdPayload!
   accountUpdateDisplayCurrency(input: AccountUpdateDisplayCurrencyInput!): AccountUpdateDisplayCurrencyPayload!
-  accountUpdateLevel(input: AccountUpdateLevelInput!): AccountUpdateLevelPayload!
   callbackEndpointAdd(input: CallbackEndpointAddInput!): CallbackEndpointAddPayload!
   callbackEndpointDelete(input: CallbackEndpointDeleteInput!): SuccessPayload!
   captchaCreateChallenge: CaptchaCreateChallengePayload!

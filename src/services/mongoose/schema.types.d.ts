@@ -150,7 +150,7 @@ interface UserRecord {
   createdAt: Date
   deviceId?: DeviceId
   deletedEmails?: string[] | undefined
-  validated?: boolean
+  requestedLevel?: number | null
 }
 
 type PaymentFlowStateRecord = {
