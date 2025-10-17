@@ -83,6 +83,7 @@ type Account = {
   displayCurrency: DisplayCurrency
   // temp
   role?: string
+  readonly erpParty?: string // Lookup key to Supplier (or Customer) in ERPNext. Required for Account level > 1
 }
 
 // deprecated

@@ -653,6 +653,22 @@ export const configSchema = {
       required: ["enabled", "minimum", "maximum", "accountLevel"],
       default: { enabled: true },
     },
+    frappe: {
+      type: "object",
+      properties: {
+        url: { type: "string" },
+        credentials: { type: "object" },
+        erpnext: {
+          type: "object",
+          properties: {
+            accounts: {
+              type: "object",
+            }
+          },
+        }
+      },
+      required: ["url", "credentials"],
+    },
     sendgrid: {
       type: "object",
       required: ["apiKey"],

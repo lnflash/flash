@@ -75,6 +75,7 @@ interface AccountRecord {
   username: string | null
   npub: Npub | null
   role: string
+  erpParty?: string
 
   level?: number // ?: enum [1, 2]
   statusHistory: AccountStatusHistory

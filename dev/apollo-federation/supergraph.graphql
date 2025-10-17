@@ -524,6 +524,13 @@ input InitiateCashoutInput
   walletId: WalletId!
 }
 
+type InitiatedCashoutResponse
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error!]!
+  journalId: ID
+}
+
 union InitiationVia
   @join__type(graph: PUBLIC)
   @join__unionMember(graph: PUBLIC, member: "InitiationViaIntraLedger")
@@ -968,7 +975,7 @@ type Mutation
   Start the Cashout process; 
   User sends USD to Flash via Ibex and receives USD or JMD to bank account.
   """
-  initiateCashout(input: InitiateCashoutInput!): SuccessPayload!
+  initiateCashout(input: InitiateCashoutInput!): InitiatedCashoutResponse!
 
   """
   Actions a payment which is internal to the ledger e.g. it does

@@ -174,6 +174,11 @@ const AccountSchema = new Schema<AccountRecord>(
       enum: Levels,
     },
 
+    erpParty: {
+      type: String,
+      required: false,
+    },
+
     kratosUserId: {
       type: String,
       index: true,

@@ -191,6 +191,7 @@ const translateToAccount = (result: AccountRecord): Account => ({
   username: result.username as Username,
   npub: result.npub as Npub,
   level: result.level as AccountLevel,
+  erpParty: result.erpParty,
   status: result.statusHistory.slice(-1)[0].status,
   statusHistory: (result.statusHistory || []) as AccountStatusHistory,
   title: result.title as BusinessMapTitle,
