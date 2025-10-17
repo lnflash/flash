@@ -29,6 +29,7 @@ import BridgeExternalAccountsQuery from "./root/query/bridge-external-accounts"
 import BridgeWithdrawalRequestQuery from "./root/query/bridge-withdrawal-request"
 import BridgeWithdrawalsQuery from "./root/query/bridge-withdrawals"
 import ApiKeysQuery from "./root/query/api-keys"
+import InvitePreviewQuery from "./root/query/invite-preview"
 
 export const queryFields = {
   unauthed: {
@@ -48,6 +49,7 @@ export const queryFields = {
     isFlashNpub: IsFlashNpubQuery,
     supportedBanks: SupportedBanksQuery,
     cashWalletCutover: CashWalletCutoverQuery,
+    invitePreview: InvitePreviewQuery,
   },
   authed: {
     atAccountLevel: {

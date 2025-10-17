@@ -51,6 +51,8 @@ import UserPhoneRegistrationValidateMutation from "@graphql/public/root/mutation
 import UserTotpDeleteMutation from "@graphql/public/root/mutation/user-totp-delete"
 
 import MerchantMapSuggestMutation from "@graphql/public/root/mutation/merchant-map-suggest"
+import CreateInviteMutation from "@graphql/public/root/mutation/create-invite"
+import RedeemInviteMutation from "@graphql/public/root/mutation/redeem-invite"
 
 import CallbackEndpointAdd from "./root/mutation/callback-endpoint-add"
 import CallbackEndpointDelete from "./root/mutation/callback-endpoint-delete"
@@ -92,6 +94,7 @@ export const mutationFields = {
       LnNoAmountInvoiceCreateOnBehalfOfRecipientMutation,
 
     merchantMapSuggest: MerchantMapSuggestMutation,
+    redeemInvite: RedeemInviteMutation,
   },
 
   authed: {
@@ -126,6 +129,8 @@ export const mutationFields = {
       accountDisableNotificationChannel: AccountDisableNotificationChannelMutation,
       accountDelete: AccountDeleteMutation,
       feedbackSubmit: FeedbackSubmitMutation,
+      
+      createInvite: CreateInviteMutation,
 
       callbackEndpointAdd: CallbackEndpointAdd,
       callbackEndpointDelete: CallbackEndpointDelete,

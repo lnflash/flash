@@ -19,7 +19,29 @@ const jwk = jwks.keys[0]
 const keystore = jose.JWK.createKeyStore()
 const isDev = true
 
+// Admin JWT configuration
+const ADMIN_JWT_SECRET = process.env.ERPNEXT_JWT_SECRET || "not-so-secret"
+
 async function main() {
+  // Check if --admin flag is passed
+  const isAdminToken = process.argv.includes("--admin")
+
+  if (isAdminToken) {
+    // Generate admin JWT token
+    const adminToken = genAdminToken()
+    console.log("\n=== Admin JWT Token ===")
+    console.log("Token:", adminToken)
+    console.log("\nTo use this token, add it to your GraphQL request headers:")
+    console.log("Authorization: Bearer", adminToken)
+    console.log("\nExample curl command:")
+    console.log(`curl -X POST http://localhost:4001/graphql \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer ${adminToken}" \\
+  -d '{"query":"{ invitesList { edges { node { id contact status } } } }"}'`)
+    return
+  }
+
+  // Original Firebase token generation
   const token = await genToken({
     sub,
     aud,
@@ -35,6 +57,23 @@ async function main() {
 
   // const verifiedToken = await verifyToken(token)
   // console.log("verifiedToken:", verifiedToken)
+}
+
+function genAdminToken(): string {
+  // Create admin JWT payload with required fields
+  const payload = {
+    userId: "admin-test-user",
+    roles: ["Accounts Manager"], // Required role for admin access
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24, // Expires in 24 hours
+  }
+
+  // Sign the token with the admin secret
+  const token = jsonwebtoken.sign(payload, ADMIN_JWT_SECRET, {
+    algorithm: "HS256",
+  })
+
+  return token
 }
 
 async function genToken(payload) {
@@ -86,12 +125,12 @@ async function verifyToken(token) {
   const pem = jwtAskey.toPEM(false)
 
   // Verify the token
-  // const verifiedToken = jsonwebtoken.verify(token, pem, {
-  //   algorithms: ["RS256"],
-  //   audience: aud,
-  //   issuer: iss,
-  // })
-  // return verifiedToken
+  const verifiedToken = jsonwebtoken.verify(token, pem, {
+    algorithms: ["RS256"],
+    audience: aud as any,
+    issuer: iss,
+  })
+  return verifiedToken
 }
 
 main()

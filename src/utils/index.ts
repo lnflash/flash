@@ -3,6 +3,7 @@ import { NonIntegerError } from "@domain/errors"
 import { decode as decodeBolt11 } from "bolt11"
 
 export * as GrpcStreamClient from "./grpc-stream-client"
+export * from "./hash"
 
 export async function sleep(ms: MilliSeconds | number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
