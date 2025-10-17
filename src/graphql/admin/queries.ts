@@ -14,6 +14,8 @@ import WalletQuery from "./root/query/wallet"
 import AccountDetailsByAccountId from "./root/query/account-details-by-account-id"
 import MerchantsPendingApprovalQuery from "./root/query/merchants-pending-approval-listing"
 import IdDocumentReadUrlQuery from "./root/query/id-document-read-url"
+import InvitesListQuery from "./root/query/invites-list"
+import InviteByIdQuery from "./root/query/invite-by-id"
 
 export const queryFields = {
   unauthed: {},
@@ -32,6 +34,8 @@ export const queryFields = {
     wallet: WalletQuery,
     merchantsPendingApproval: MerchantsPendingApprovalQuery,
     idDocumentReadUrl: IdDocumentReadUrlQuery,
+    invitesList: InvitesListQuery,
+    inviteById: InviteByIdQuery,
   },
 }
 

@@ -20,6 +20,7 @@ import NpubByUserNameQuery from "./root/query/username-npub-query"
 import IsFlashNpubQuery from "./root/query/is-flash-npub-query"
 import TransactionDetailsQuery from "./root/query/transaction-details"
 import AccountUpgradeRequestQuery from "./root/query/account-upgrade-request"
+import InvitePreviewQuery from "./root/query/invite-preview"
 
 export const queryFields = {
   unauthed: {
@@ -37,6 +38,7 @@ export const queryFields = {
     lnInvoicePaymentStatus: LnInvoicePaymentStatusQuery,
     npubByUsername: NpubByUserNameQuery,
     isFlashNpub: IsFlashNpubQuery,
+    invitePreview: InvitePreviewQuery,
   },
   authed: {
     atAccountLevel: {

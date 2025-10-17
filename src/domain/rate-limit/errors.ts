@@ -16,3 +16,5 @@ export class UserLoginIdentifierRateLimiterExceededError extends RateLimiterExce
 export class InvoiceCreateRateLimiterExceededError extends RateLimiterExceededError {}
 export class InvoiceCreateForRecipientRateLimiterExceededError extends RateLimiterExceededError {}
 export class OnChainAddressCreateRateLimiterExceededError extends RateLimiterExceededError {}
+export class InviteCreateRateLimiterExceededError extends RateLimiterExceededError {}
+export class InviteTargetRateLimiterExceededError extends RateLimiterExceededError {}

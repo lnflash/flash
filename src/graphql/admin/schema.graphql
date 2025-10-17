@@ -40,6 +40,20 @@ type AdminBroadcastSendPayload {
   success: Boolean
 }
 
+type AdminInvite {
+  contact: String!
+  createdAt: Timestamp!
+  expiresAt: Timestamp!
+  id: ID!
+  inviterAccountId: ID!
+  inviterUsername: Username
+  method: InviteMethod!
+  redeemedAt: Timestamp
+  redeemerAccountId: ID
+  redeemerUsername: Username
+  status: InviteStatus!
+}
+
 input AdminPushNotificationSendInput {
   accountId: String!
   body: String!
@@ -77,7 +91,9 @@ type AuditedAccount {
 type AuditedUser {
   createdAt: Timestamp!
 
-  """Email address"""
+  """
+  Email address
+  """
   email: Email
   id: ID!
   language: Language!
@@ -90,42 +106,66 @@ A wallet belonging to an account which contains a BTC balance and a list of tran
 type BTCWallet implements Wallet {
   accountId: ID!
 
-  """A balance stored in BTC."""
+  """
+  A balance stored in BTC.
+  """
   balance: FractionalCentAmount!
   id: ID!
   lnurlp: Lnurl
 
-  """An unconfirmed incoming onchain balance."""
+  """
+  An unconfirmed incoming onchain balance.
+  """
   pendingIncomingBalance: SignedAmount!
 
-  """A list of BTC transactions associated with this wallet."""
+  """
+  A list of BTC transactions associated with this wallet.
+  """
   transactions(
-    """Returns the items in the list that come after the specified cursor."""
+    """
+    Returns the items in the list that come after the specified cursor.
+    """
     after: String
 
-    """Returns the items in the list that come before the specified cursor."""
+    """
+    Returns the items in the list that come before the specified cursor.
+    """
     before: String
 
-    """Returns the first n items from the list."""
+    """
+    Returns the first n items from the list.
+    """
     first: Int
 
-    """Returns the last n items from the list."""
+    """
+    Returns the last n items from the list.
+    """
     last: Int
   ): TransactionConnection
   transactionsByAddress(
-    """Returns the items that include this address."""
+    """
+    Returns the items that include this address.
+    """
     address: OnChainAddress!
 
-    """Returns the items in the list that come after the specified cursor."""
+    """
+    Returns the items in the list that come after the specified cursor.
+    """
     after: String
 
-    """Returns the items in the list that come before the specified cursor."""
+    """
+    Returns the items in the list that come before the specified cursor.
+    """
     before: String
 
-    """Returns the first n items from the list."""
+    """
+    Returns the first n items from the list.
+    """
     first: Int
 
-    """Returns the last n items from the list."""
+    """
+    Returns the last n items from the list.
+    """
     last: Int
   ): TransactionConnection
   walletCurrency: WalletCurrency!
@@ -149,7 +189,9 @@ type Coordinates {
   longitude: Float!
 }
 
-"""Display currency of an account"""
+"""
+Display currency of an account
+"""
 scalar DisplayCurrency
 
 type Email {
@@ -157,7 +199,9 @@ type Email {
   verified: Boolean
 }
 
-"""Email address"""
+"""
+Email address
+"""
 scalar EmailAddress
 
 interface Error {
@@ -180,7 +224,9 @@ type GraphQLApplicationError implements Error {
 type IdDocumentReadUrlPayload {
   errors: [Error!]!
 
-  """Pre-signed URL for reading the ID document (valid for 1 hour)"""
+  """
+  Pre-signed URL for reading the ID document (valid for 1 hour)
+  """
   readUrl: String
 }
 
@@ -197,6 +243,49 @@ type InitiationViaLn {
 
 type InitiationViaOnChain {
   address: OnChainAddress!
+}
+
+enum InviteMethod {
+  EMAIL
+  SMS
+  WHATSAPP
+}
+
+enum InviteStatus {
+  ACCEPTED
+  EXPIRED
+  PENDING
+  SENT
+}
+
+"""
+A connection to a list of items.
+"""
+type InvitesConnection {
+  """
+  A list of edges.
+  """
+  edges: [InvitesEdge!]
+
+  """
+  Information to aid in pagination.
+  """
+  pageInfo: PageInfo!
+}
+
+"""
+An edge in a connection.
+"""
+type InvitesEdge {
+  """
+  A cursor for use in pagination
+  """
+  cursor: String!
+
+  """
+  The item at the end of the edge
+  """
+  node: AdminInvite!
 }
 
 scalar Language
@@ -225,7 +314,9 @@ type LightningPayment {
 
 scalar LnPaymentPreImage
 
-"""BOLT11 lightning invoice payment request with the amount included"""
+"""
+BOLT11 lightning invoice payment request with the amount included
+"""
 scalar LnPaymentRequest
 
 scalar LnPaymentSecret
@@ -239,11 +330,13 @@ enum LnPaymentStatus {
 scalar LnPubkey
 
 """
-A bech32-encoded HTTPS/Onion URL that can be interacted with automatically by a WALLET in a standard way such that a SERVICE can provide extra services or a better experience for the user. Ref: https://github.com/lnurl/luds/blob/luds/01.md 
+A bech32-encoded HTTPS/Onion URL that can be interacted with automatically by a WALLET in a standard way such that a SERVICE can provide extra services or a better experience for the user. Ref: https://github.com/lnurl/luds/blob/luds/01.md
 """
 scalar Lnurl
 
-"""Text field in a lightning payment transaction"""
+"""
+Text field in a lightning payment transaction
+"""
 scalar Memo
 
 type Merchant {
@@ -255,10 +348,14 @@ type Merchant {
   id: ID!
   title: String!
 
-  """The username of the merchant"""
+  """
+  The username of the merchant
+  """
   username: Username!
 
-  """Whether the merchant has been validated"""
+  """
+  Whether the merchant has been validated
+  """
   validated: Boolean!
 }
 
@@ -279,7 +376,9 @@ type Mutation {
   accountUpdateLevel(input: AccountUpdateLevelInput!): AccountDetailPayload!
   accountUpdateStatus(input: AccountUpdateStatusInput!): AccountDetailPayload!
   adminBroadcastSend(input: AdminBroadcastSendInput!): AdminBroadcastSendPayload!
-  adminPushNotificationSend(input: AdminPushNotificationSendInput!): AdminPushNotificationSendPayload!
+  adminPushNotificationSend(
+    input: AdminPushNotificationSendInput!
+  ): AdminPushNotificationSendPayload!
   businessDeleteMapInfo(input: BusinessDeleteMapInfoInput!): AccountDetailPayload!
   businessUpdateMapInfo(input: BusinessUpdateMapInfoInput!): AccountDetailPayload!
   merchantMapDelete(input: MerchantMapDeleteInput!): MerchantPayload!
@@ -291,29 +390,43 @@ scalar NotificationCategory
 
 scalar Object
 
-"""An address for an on-chain bitcoin destination"""
+"""
+An address for an on-chain bitcoin destination
+"""
 scalar OnChainAddress
 
 scalar OnChainTxHash
 
-"""Information about pagination in a connection."""
+"""
+Information about pagination in a connection.
+"""
 type PageInfo {
-  """When paginating forwards, the cursor to continue."""
+  """
+  When paginating forwards, the cursor to continue.
+  """
   endCursor: String
 
-  """When paginating forwards, are there more items?"""
+  """
+  When paginating forwards, are there more items?
+  """
   hasNextPage: Boolean!
 
-  """When paginating backwards, are there more items?"""
+  """
+  When paginating backwards, are there more items?
+  """
   hasPreviousPage: Boolean!
 
-  """When paginating backwards, the cursor to continue."""
+  """
+  When paginating backwards, the cursor to continue.
+  """
   startCursor: String
 }
 
 scalar PaymentHash
 
-"""Phone number which includes country code"""
+"""
+Phone number which includes country code
+"""
 scalar Phone
 
 interface PriceInterface {
@@ -339,9 +452,35 @@ type Query {
   accountDetailsByUsername(username: Username!): AuditedAccount!
   allLevels: [AccountLevel!]!
   idDocumentReadUrl(
-    """Storage key of the ID document file"""
+    """
+    Storage key of the ID document file
+    """
     fileKey: String!
   ): IdDocumentReadUrlPayload!
+  inviteById(id: ID!): AdminInvite
+  invitesList(
+    """
+    Returns the items in the list that come after the specified cursor.
+    """
+    after: String
+
+    """
+    Returns the items in the list that come before the specified cursor.
+    """
+    before: String
+
+    """
+    Returns the first n items from the list.
+    """
+    first: Int
+    inviterId: ID
+
+    """
+    Returns the last n items from the list.
+    """
+    last: Int
+    status: InviteStatus
+  ): InvitesConnection!
   lightningInvoice(hash: PaymentHash!): LightningInvoice!
   lightningPayment(hash: PaymentHash!): LightningPayment!
   listWalletIds(walletCurrency: WalletCurrency!): [WalletId!]!
@@ -357,7 +496,9 @@ Non-fractional signed whole numeric value between -(2^53) + 1 and 2^53 - 1
 """
 scalar SafeInt
 
-"""(Positive) Satoshi amount"""
+"""
+(Positive) Satoshi amount
+"""
 scalar SatAmount
 
 union SettlementVia = SettlementViaIntraLedger | SettlementViaLn | SettlementViaOnChain
@@ -371,7 +512,10 @@ type SettlementViaIntraLedger {
 }
 
 type SettlementViaLn {
-  paymentSecret: LnPaymentSecret @deprecated(reason: "Shifting property to 'preImage' to improve granularity of the LnPaymentSecret type")
+  paymentSecret: LnPaymentSecret
+    @deprecated(
+      reason: "Shifting property to 'preImage' to improve granularity of the LnPaymentSecret type"
+    )
   preImage: LnPaymentPreImage
 }
 
@@ -380,7 +524,9 @@ type SettlementViaOnChain {
   vout: Int
 }
 
-"""An amount (of a currency) that can be negative (e.g. in a transaction)"""
+"""
+An amount (of a currency) that can be negative (e.g. in a transaction)
+"""
 scalar SignedAmount
 
 """
@@ -405,96 +551,152 @@ type Transaction {
   direction: TxDirection!
   id: ID!
 
-  """From which protocol the payment has been initiated."""
+  """
+  From which protocol the payment has been initiated.
+  """
   initiationVia: InitiationVia!
   memo: Memo
 
-  """Amount of the settlement currency sent or received."""
+  """
+  Amount of the settlement currency sent or received.
+  """
   settlementAmount: SignedAmount!
 
-  """Wallet currency for transaction."""
+  """
+  Wallet currency for transaction.
+  """
   settlementCurrency: WalletCurrency!
   settlementDisplayAmount: SignedDisplayMajorAmount!
   settlementDisplayCurrency: DisplayCurrency!
   settlementDisplayFee: SignedDisplayMajorAmount!
   settlementFee: SignedAmount!
 
-  """Price in WALLETCURRENCY/SETTLEMENTUNIT at time of settlement."""
+  """
+  Price in WALLETCURRENCY/SETTLEMENTUNIT at time of settlement.
+  """
   settlementPrice: PriceOfOneSettlementMinorUnitInDisplayMinorUnit!
 
-  """To which protocol the payment has settled on."""
+  """
+  To which protocol the payment has settled on.
+  """
   settlementVia: SettlementVia!
   status: TxStatus!
 }
 
-"""A connection to a list of items."""
+"""
+A connection to a list of items.
+"""
 type TransactionConnection {
-  """A list of edges."""
+  """
+  A list of edges.
+  """
   edges: [TransactionEdge!]
 
-  """Information to aid in pagination."""
+  """
+  Information to aid in pagination.
+  """
   pageInfo: PageInfo!
 }
 
 type TransactionDetails {
-  """Account ID associated with the transaction"""
+  """
+  Account ID associated with the transaction
+  """
   accountId: String
 
-  """Bitcoin address for onchain transactions"""
+  """
+  Bitcoin address for onchain transactions
+  """
   address: String
 
-  """Transaction amount"""
+  """
+  Transaction amount
+  """
   amount: Float
 
-  """Number of confirmations for onchain transactions"""
+  """
+  Number of confirmations for onchain transactions
+  """
   confirmations: Int
 
-  """Transaction creation timestamp"""
+  """
+  Transaction creation timestamp
+  """
   createdAt: String
 
-  """Transaction currency"""
+  """
+  Transaction currency
+  """
   currency: String
 
-  """Transaction fee"""
+  """
+  Transaction fee
+  """
   fee: Float
 
-  """Transaction ID"""
+  """
+  Transaction ID
+  """
   id: String!
 
-  """Lightning invoice (bolt11)"""
+  """
+  Lightning invoice (bolt11)
+  """
   invoice: String
 
-  """Transaction memo/description"""
+  """
+  Transaction memo/description
+  """
   memo: String
 
-  """Lightning payment hash"""
+  """
+  Lightning payment hash
+  """
   paymentHash: String
 
-  """Lightning payment preimage"""
+  """
+  Lightning payment preimage
+  """
   paymentPreimage: String
 
-  """Transaction status"""
+  """
+  Transaction status
+  """
   status: String
 
-  """Bitcoin transaction ID for onchain transactions"""
+  """
+  Bitcoin transaction ID for onchain transactions
+  """
   txid: String
 
-  """Transaction type (lightning/onchain)"""
+  """
+  Transaction type (lightning/onchain)
+  """
   type: String
 
-  """Transaction last update timestamp"""
+  """
+  Transaction last update timestamp
+  """
   updatedAt: String
 
-  """Output index for onchain transactions"""
+  """
+  Output index for onchain transactions
+  """
   vout: Int
 }
 
-"""An edge in a connection."""
+"""
+An edge in a connection.
+"""
 type TransactionEdge {
-  """A cursor for use in pagination"""
+  """
+  A cursor for use in pagination
+  """
   cursor: String!
 
-  """The item at the end of the edge"""
+  """
+  The item at the end of the edge
+  """
   node: Transaction!
 }
 
@@ -518,35 +720,55 @@ type UsdWallet implements Wallet {
   id: ID!
   lnurlp: Lnurl
 
-  """An unconfirmed incoming onchain balance."""
+  """
+  An unconfirmed incoming onchain balance.
+  """
   pendingIncomingBalance: SignedAmount!
   transactions(
-    """Returns the items in the list that come after the specified cursor."""
+    """
+    Returns the items in the list that come after the specified cursor.
+    """
     after: String
 
-    """Returns the items in the list that come before the specified cursor."""
+    """
+    Returns the items in the list that come before the specified cursor.
+    """
     before: String
 
-    """Returns the first n items from the list."""
+    """
+    Returns the first n items from the list.
+    """
     first: Int
 
-    """Returns the last n items from the list."""
+    """
+    Returns the last n items from the list.
+    """
     last: Int
   ): TransactionConnection
   transactionsByAddress(
-    """Returns the items that include this address."""
+    """
+    Returns the items that include this address.
+    """
     address: OnChainAddress!
 
-    """Returns the items in the list that come after the specified cursor."""
+    """
+    Returns the items in the list that come after the specified cursor.
+    """
     after: String
 
-    """Returns the items in the list that come before the specified cursor."""
+    """
+    Returns the items in the list that come before the specified cursor.
+    """
     before: String
 
-    """Returns the first n items from the list."""
+    """
+    Returns the first n items from the list.
+    """
     first: Int
 
-    """Returns the last n items from the list."""
+    """
+    Returns the last n items from the list.
+    """
     last: Int
   ): TransactionConnection
   walletCurrency: WalletCurrency!
@@ -557,7 +779,9 @@ input UserUpdatePhoneInput {
   phone: Phone!
 }
 
-"""Unique identifier of a user"""
+"""
+Unique identifier of a user
+"""
 scalar Username
 
 """
@@ -575,16 +799,24 @@ interface Wallet {
   ie: the newest transaction will be first
   """
   transactions(
-    """Returns the items in the list that come after the specified cursor."""
+    """
+    Returns the items in the list that come after the specified cursor.
+    """
     after: String
 
-    """Returns the items in the list that come before the specified cursor."""
+    """
+    Returns the items in the list that come before the specified cursor.
+    """
     before: String
 
-    """Returns the first n items from the list."""
+    """
+    Returns the first n items from the list.
+    """
     first: Int
 
-    """Returns the last n items from the list."""
+    """
+    Returns the last n items from the list.
+    """
     last: Int
   ): TransactionConnection
 
@@ -593,19 +825,29 @@ interface Wallet {
   ie: the newest transaction will be first
   """
   transactionsByAddress(
-    """Returns the items that include this address."""
+    """
+    Returns the items that include this address.
+    """
     address: OnChainAddress!
 
-    """Returns the items in the list that come after the specified cursor."""
+    """
+    Returns the items in the list that come after the specified cursor.
+    """
     after: String
 
-    """Returns the items in the list that come before the specified cursor."""
+    """
+    Returns the items in the list that come before the specified cursor.
+    """
     before: String
 
-    """Returns the first n items from the list."""
+    """
+    Returns the first n items from the list.
+    """
     first: Int
 
-    """Returns the last n items from the list."""
+    """
+    Returns the last n items from the list.
+    """
     last: Int
   ): TransactionConnection
   walletCurrency: WalletCurrency!
@@ -616,5 +858,7 @@ enum WalletCurrency {
   USD
 }
 
-"""Unique identifier of a wallet"""
+"""
+Unique identifier of a wallet
+"""
 scalar WalletId
