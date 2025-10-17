@@ -1,6 +1,8 @@
 import {
   getFailedLoginAttemptPerIpLimits,
   getFailedLoginAttemptPerLoginIdentifierLimits,
+  getInviteCreateAttemptLimits,
+  getInviteTargetAttemptLimits,
   getInvoiceCreateAttemptLimits,
   getInvoiceCreateForRecipientAttemptLimits,
   getOnChainAddressCreateAttemptLimits,
@@ -9,6 +11,8 @@ import {
 } from "@config"
 
 import {
+  InviteCreateRateLimiterExceededError,
+  InviteTargetRateLimiterExceededError,
   InvoiceCreateForRecipientRateLimiterExceededError,
   InvoiceCreateRateLimiterExceededError,
   OnChainAddressCreateRateLimiterExceededError,
@@ -26,6 +30,8 @@ export const RateLimitPrefix = {
   invoiceCreate: "invoice_create",
   invoiceCreateForRecipient: "invoice_create_for_recipient",
   onChainAddressCreate: "onchain_address_create",
+  inviteCreate: "invite_daily",
+  inviteTarget: "invite_target",
 } as const
 
 export const RateLimitConfig: { [key: string]: RateLimitConfig } = {
@@ -63,5 +69,15 @@ export const RateLimitConfig: { [key: string]: RateLimitConfig } = {
     key: RateLimitPrefix.onChainAddressCreate,
     limits: getOnChainAddressCreateAttemptLimits(),
     error: OnChainAddressCreateRateLimiterExceededError,
+  },
+  inviteCreate: {
+    key: RateLimitPrefix.inviteCreate,
+    limits: getInviteCreateAttemptLimits(),
+    error: InviteCreateRateLimiterExceededError,
+  },
+  inviteTarget: {
+    key: RateLimitPrefix.inviteTarget,
+    limits: getInviteTargetAttemptLimits(),
+    error: InviteTargetRateLimiterExceededError,
   },
 }

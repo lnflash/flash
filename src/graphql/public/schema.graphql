@@ -295,6 +295,16 @@ type Country {
 """A CCA2 country code (ex US, FR, etc)"""
 scalar CountryCode
 
+input CreateInviteInput {
+  contact: String!
+  method: InviteMethod!
+}
+
+type CreateInvitePayload {
+  errors: [String!]!
+  invite: Invite
+}
+
 type Currency {
   flag: String!
   fractionDigits: Int!
@@ -458,6 +468,36 @@ input IntraLedgerUsdPaymentSendInput {
 
   """The wallet ID of the sender."""
   walletId: WalletId!
+}
+
+type Invite {
+  contact: String!
+  createdAt: String!
+  expiresAt: String!
+  id: ID!
+  method: InviteMethod!
+  status: InviteStatus!
+}
+
+enum InviteMethod {
+  EMAIL
+  SMS
+  WHATSAPP
+}
+
+type InvitePreview {
+  contact: String!
+  expiresAt: String!
+  inviterUsername: String
+  isValid: Boolean!
+  method: String!
+}
+
+enum InviteStatus {
+  ACCEPTED
+  EXPIRED
+  PENDING
+  SENT
 }
 
 enum InvoicePaymentStatus {
@@ -745,6 +785,7 @@ type Mutation {
   callbackEndpointDelete(input: CallbackEndpointDeleteInput!): SuccessPayload!
   captchaCreateChallenge: CaptchaCreateChallengePayload!
   captchaRequestAuthCode(input: CaptchaRequestAuthCodeInput!): SuccessPayload!
+  createInvite(input: CreateInviteInput!): CreateInvitePayload!
   deviceNotificationTokenCreate(input: DeviceNotificationTokenCreateInput!): SuccessPayload!
   feedbackSubmit(input: FeedbackSubmitInput!): SuccessPayload!
 
@@ -846,6 +887,7 @@ type Mutation {
   onChainUsdPaymentSend(input: OnChainUsdPaymentSendInput!): PaymentSendPayload!
   onChainUsdPaymentSendAsBtcDenominated(input: OnChainUsdPaymentSendAsBtcDenominatedInput!): PaymentSendPayload!
   quizCompleted(input: QuizCompletedInput!): QuizCompletedPayload!
+  redeemInvite(input: RedeemInviteInput!): RedeemInvitePayload!
 
   """
   Returns an offer from Flash for a user to withdraw from their USD wallet (denominated in cents).
@@ -1111,6 +1153,7 @@ type Query {
   businessMapMarkers: [MapMarker!]!
   currencyList: [Currency!]!
   globals: Globals
+  invitePreview(token: String!): InvitePreview
   isFlashNpub(input: IsFlashNpubInput!): IsFlashNpubPayload
   lnInvoicePaymentStatus(input: LnInvoicePaymentStatusInput!): LnInvoicePaymentStatusPayload!
   me: User
@@ -1168,6 +1211,15 @@ input RealtimePriceInput {
 type RealtimePricePayload {
   errors: [Error!]!
   realtimePrice: RealtimePrice
+}
+
+input RedeemInviteInput {
+  token: String!
+}
+
+type RedeemInvitePayload {
+  errors: [String!]!
+  success: Boolean!
 }
 
 input RequestCashoutInput {

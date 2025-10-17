@@ -12,6 +12,8 @@ import { UsdDisplayCurrency } from "@domain/fiat"
 
 import { Account } from "@services/mongoose/schema"
 
+export { Account }
+
 import { fromObjectId, parseRepositoryError, toObjectId } from "./utils"
 
 const caseInsensitiveRegex = (input: string) => {
