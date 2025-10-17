@@ -1,0 +1,45 @@
+enum InviteMethod {
+  EMAIL
+  SMS
+  WHATSAPP
+}
+
+enum InviteStatus {
+  PENDING
+  SENT
+  ACCEPTED
+  EXPIRED
+}
+
+type Invite {
+  id: ID!
+  contact: String!
+  method: InviteMethod!
+  status: InviteStatus!
+  createdAt: Timestamp!
+  expiresAt: Timestamp!
+}
+
+input CreateInviteInput {
+  contact: String!
+  method: InviteMethod!
+}
+
+type CreateInvitePayload {
+  invite: Invite
+  errors: [Error!]!
+}
+
+input RedeemInviteInput {
+  token: String!
+}
+
+type RedeemInvitePayload {
+  success: Boolean!
+  errors: [Error!]!
+}
+
+extend type Mutation {
+  createInvite(input: CreateInviteInput!): CreateInvitePayload!
+  redeemInvite(input: RedeemInviteInput!): RedeemInvitePayload!
+}

@@ -400,6 +400,20 @@ type Country
 scalar CountryCode
   @join__type(graph: PUBLIC)
 
+input CreateInviteInput
+  @join__type(graph: PUBLIC)
+{
+  contact: String!
+  method: InviteMethod!
+}
+
+type CreateInvitePayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [String!]!
+  invite: Invite
+}
+
 type Currency
   @join__type(graph: PUBLIC)
 {
@@ -613,6 +627,44 @@ input IntraLedgerUsdPaymentSendInput
 
   """The wallet ID of the sender."""
   walletId: WalletId!
+}
+
+type Invite
+  @join__type(graph: PUBLIC)
+{
+  contact: String!
+  createdAt: String!
+  expiresAt: String!
+  id: ID!
+  method: InviteMethod!
+  status: InviteStatus!
+}
+
+enum InviteMethod
+  @join__type(graph: PUBLIC)
+{
+  EMAIL @join__enumValue(graph: PUBLIC)
+  SMS @join__enumValue(graph: PUBLIC)
+  WHATSAPP @join__enumValue(graph: PUBLIC)
+}
+
+type InvitePreview
+  @join__type(graph: PUBLIC)
+{
+  contact: String!
+  expiresAt: String!
+  inviterUsername: String
+  isValid: Boolean!
+  method: String!
+}
+
+enum InviteStatus
+  @join__type(graph: PUBLIC)
+{
+  ACCEPTED @join__enumValue(graph: PUBLIC)
+  EXPIRED @join__enumValue(graph: PUBLIC)
+  PENDING @join__enumValue(graph: PUBLIC)
+  SENT @join__enumValue(graph: PUBLIC)
 }
 
 enum InvoicePaymentStatus
@@ -989,6 +1041,7 @@ type Mutation
   callbackEndpointDelete(input: CallbackEndpointDeleteInput!): SuccessPayload!
   captchaCreateChallenge: CaptchaCreateChallengePayload!
   captchaRequestAuthCode(input: CaptchaRequestAuthCodeInput!): SuccessPayload!
+  createInvite(input: CreateInviteInput!): CreateInvitePayload!
   deviceNotificationTokenCreate(input: DeviceNotificationTokenCreateInput!): SuccessPayload!
   feedbackSubmit(input: FeedbackSubmitInput!): SuccessPayload!
 
@@ -1090,6 +1143,7 @@ type Mutation
   onChainUsdPaymentSend(input: OnChainUsdPaymentSendInput!): PaymentSendPayload!
   onChainUsdPaymentSendAsBtcDenominated(input: OnChainUsdPaymentSendAsBtcDenominatedInput!): PaymentSendPayload!
   quizCompleted(input: QuizCompletedInput!): QuizCompletedPayload!
+  redeemInvite(input: RedeemInviteInput!): RedeemInvitePayload!
 
   """
   Returns an offer from Flash for a user to withdraw from their USD wallet (denominated in cents).
@@ -1443,6 +1497,7 @@ type Query
   businessMapMarkers: [MapMarker!]!
   currencyList: [Currency!]!
   globals: Globals
+  invitePreview(token: String!): InvitePreview
   isFlashNpub(input: IsFlashNpubInput!): IsFlashNpubPayload
   lnInvoicePaymentStatus(input: LnInvoicePaymentStatusInput!): LnInvoicePaymentStatusPayload!
   me: User
@@ -1515,6 +1570,19 @@ type RealtimePricePayload
 {
   errors: [Error!]!
   realtimePrice: RealtimePrice
+}
+
+input RedeemInviteInput
+  @join__type(graph: PUBLIC)
+{
+  token: String!
+}
+
+type RedeemInvitePayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [String!]!
+  success: Boolean!
 }
 
 input RequestCashoutInput

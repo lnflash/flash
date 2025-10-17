@@ -40,6 +40,13 @@ export const env = createEnv({
     TWILIO_ACCOUNT_SID: z.string().min(1),
     TWILIO_AUTH_TOKEN: z.string().min(1),
     TWILIO_VERIFY_SERVICE_ID: z.string().min(1),
+    TWILIO_FROM: z.string().optional(),
+    TWILIO_WHATSAPP_FROM: z.string().optional(),
+
+    FIREBASE_DYNAMIC_LINK_DOMAIN: z.string().optional(),
+    APP_INSTALL_URL: z.string().url().optional(),
+    ANDROID_PACKAGE_NAME: z.string().optional(),
+    IOS_BUNDLE_ID: z.string().optional(),
 
     KRATOS_PUBLIC_API: z.string().url(),
     KRATOS_ADMIN_API: z.string().url(),
@@ -160,6 +167,13 @@ export const env = createEnv({
     TWILIO_ACCOUNT_SID: process.env.TWILIO_ACCOUNT_SID,
     TWILIO_AUTH_TOKEN: process.env.TWILIO_AUTH_TOKEN,
     TWILIO_VERIFY_SERVICE_ID: process.env.TWILIO_VERIFY_SERVICE_ID,
+    TWILIO_FROM: process.env.TWILIO_FROM,
+    TWILIO_WHATSAPP_FROM: process.env.TWILIO_WHATSAPP_FROM,
+
+    FIREBASE_DYNAMIC_LINK_DOMAIN: process.env.FIREBASE_DYNAMIC_LINK_DOMAIN,
+    APP_INSTALL_URL: process.env.APP_INSTALL_URL,
+    ANDROID_PACKAGE_NAME: process.env.ANDROID_PACKAGE_NAME,
+    IOS_BUNDLE_ID: process.env.IOS_BUNDLE_ID,
 
     KRATOS_PUBLIC_API: process.env.KRATOS_PUBLIC_API,
     KRATOS_ADMIN_API: process.env.KRATOS_ADMIN_API,
