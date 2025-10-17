@@ -8,6 +8,8 @@ import {
 } from "./yaml"
 import { env } from "./env"
 
+export { env }
+
 export * from "./error"
 export * from "./yaml"
 export * from "./schema"
@@ -139,6 +141,8 @@ export const PRICE_SERVER_HOST = env.PRICE_SERVER_HOST
 export const TWILIO_ACCOUNT_SID = env.TWILIO_ACCOUNT_SID
 export const TWILIO_AUTH_TOKEN = env.TWILIO_AUTH_TOKEN
 export const TWILIO_VERIFY_SERVICE_ID = env.TWILIO_VERIFY_SERVICE_ID
+export const TWILIO_FROM = env.TWILIO_FROM
+export const TWILIO_WHATSAPP_FROM = env.TWILIO_WHATSAPP_FROM
 export const KRATOS_PUBLIC_API = env.KRATOS_PUBLIC_API
 export const KRATOS_ADMIN_API = env.KRATOS_ADMIN_API
 export const KRATOS_MASTER_USER_PASSWORD = env.KRATOS_MASTER_USER_PASSWORD
