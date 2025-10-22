@@ -321,6 +321,25 @@ export const AuthWithEmailPasswordlessService = (): IAuthWithEmailPasswordlessSe
     }
   }
 
+  /**
+   * Adds email to an existing Kratos identity and upgrades schema
+   *
+   * Supports two upgrade paths:
+   * 1. Device account → Email account
+   *    - Schema: username_password_deviceid_v0 → email_no_password_v0
+   *    - Traits: { username } → { email }
+   *    - Note: username trait is REMOVED (not supported by target schema)
+   *    - Note: MongoDB deviceId field is preserved separately
+   *
+   * 2. Phone account → Phone+Email account
+   *    - Schema: phone_no_password_v0 → phone_email_no_password_v0
+   *    - Traits: { phone } → { phone, email }
+   *    - Note: phone trait is PRESERVED
+   *
+   * @param kratosUserId - User ID in Kratos
+   * @param email - Email address to add
+   * @returns Updated identity or error
+   */
   const addUnverifiedEmailToIdentity = async ({
     kratosUserId,
     email,
@@ -350,8 +369,7 @@ export const AuthWithEmailPasswordlessService = (): IAuthWithEmailPasswordlessSe
       return new UnknownKratosError(err.message || err)
     }
 
-    // Handle both phone account (phone_no_password_v0 -> phone_email_no_password_v0)
-    // and device account (username_password_deviceid_v0 -> email_no_password_v0) upgrades
+    // Validate schema is compatible for email addition/upgrade
     if (
       identity.schema_id !== SchemaIdType.PhoneNoPasswordV0 &&
       identity.schema_id !== SchemaIdType.UsernamePasswordDeviceIdV0
@@ -364,12 +382,13 @@ export const AuthWithEmailPasswordlessService = (): IAuthWithEmailPasswordlessSe
     if (identity.state === undefined)
       throw new UnknownKratosError("state undefined, probably impossible state") // type issue
 
-    // For device account upgrade, replace traits (remove username from Kratos)
-    // For phone account upgrade, add email to existing traits (keep phone)
+    // Set traits based on upgrade path:
+    // - Device account: REPLACE traits (email_no_password_v0 schema only accepts email)
+    // - Phone account: ADD to existing traits (phone_email_no_password_v0 accepts both)
     identity.traits =
       identity.schema_id === SchemaIdType.UsernamePasswordDeviceIdV0
-        ? { email }
-        : { ...identity.traits, email }
+        ? { email } // Replace: removes username trait
+        : { ...identity.traits, email } // Add: keeps phone trait
 
     // Determine target schema based on current schema
     const targetSchemaId =
