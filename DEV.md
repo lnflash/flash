@@ -70,13 +70,17 @@ $ direnv reload
 
 ### Configure the app
 
-A base configuration for development purposes is provided in the `./dev/defaults.yaml` file. This file does excludes some values which are kept out of source control (e.g secrets). To add these values, you can either:
+A base configuration for development purposes is provided in the `./dev/config/base-config.yaml` file. This file does excludes some values which are kept out of source control (e.g secrets). To add these values, you can either:
 
 1. Copy an existing overrides file to the `$CONFIG_PATH/dev-overrides.yaml`, or:
 2. Run the `set-overrides.sh` script which will generate the `dev-overrides.yaml` with user-defined values.
 ```
-chmod +x ./dev/set-overrides.sh
-./dev/set-overrides.sh
+chmod +x ./dev/config/set-overrides.sh
+./dev/config/set-overrides.sh
+```
+3. To override invidual config values, use the `set-value.sh` script. E.g:
+```
+./set-value sendGrid.apiKey <value>
 ```
 
 #### Configure ErpNext
