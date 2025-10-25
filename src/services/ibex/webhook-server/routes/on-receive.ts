@@ -4,19 +4,18 @@ import { NotificationsService } from "@services/notifications"
 import { authenticate, logRequest } from "../middleware"
 import { AccountsRepository, UsersRepository, WalletsRepository } from "@services/mongoose"
 import { RepositoryError } from "@domain/errors"
-import { displayAmountFromWalletAmount } from "@domain/fiat"
 import { WalletCurrency } from "@domain/shared"
 import { DeviceTokensNotRegisteredNotificationsServiceError, NotificationsServiceError } from "@domain/notifications"
 import { getCurrentPriceAsDisplayPriceRatio } from "@app/prices"
-import { PriceService } from "@services/price"
-import { PriceServiceError } from "@domain/price"
 import { removeDeviceTokens } from "@app/users/remove-device-tokens"
+import { ZapRequestModel } from "@services/mongoose/zap-request"
+import { ZapPublisher } from "@services/nostr/zapPublisher"
 
 const sendLightningNotification = async (req: Request, resp: Response) => {
     const { transaction, receivedMsat } = req.body
     const receivedSat = receivedMsat / 1000 as Satoshis
     const recipientWalletId = transaction.accountId
-   
+
     const receiverWallet = await WalletsRepository().findById(recipientWalletId)
     if (receiverWallet instanceof RepositoryError) {
         logger.error(receiverWallet, `Failed to fetch wallet with id ${recipientWalletId}`)
@@ -36,6 +35,27 @@ const sendLightningNotification = async (req: Request, resp: Response) => {
         return resp.sendStatus(500)
     }
 
+    const paymentHash = transaction.invoice.hash
+
+    const zapRequest = await ZapRequestModel.findOne({ invoiceHash: paymentHash, fulfilled: false })
+    if (zapRequest) {
+        try {
+            await ZapPublisher.publishFromWebhook({
+                zapRequest: JSON.parse(zapRequest.nostrJson),
+                amountMsat: zapRequest.amountMsat,
+                bolt11: zapRequest.bolt11,
+                recipientUser,
+                recipientAccount,
+                receiverWallet,
+            })
+            // mark as fulfilled
+            zapRequest.fulfilled = true
+            await zapRequest.save()
+        } catch (err) {
+            logger.error({ err }, "Failed to publish zap receipt")
+        }
+    }
+
 
     const nsResp = await NotificationsService().lightningTxReceived({
         recipientAccountId: recipientAccountId,
@@ -46,9 +66,9 @@ const sendLightningNotification = async (req: Request, resp: Response) => {
         recipientDeviceTokens: recipientUser.deviceTokens,
         recipientNotificationSettings: recipientAccount.notificationSettings,
         recipientLanguage: recipientUser.language,
-    })       
+    })
     if (nsResp instanceof DeviceTokensNotRegisteredNotificationsServiceError) {
-      await removeDeviceTokens({ userId: recipientUser.id, deviceTokens: nsResp.tokens })
+        await removeDeviceTokens({ userId: recipientUser.id, deviceTokens: nsResp.tokens })
     } else if (nsResp instanceof NotificationsServiceError) {
         logger.error(nsResp)
     }
@@ -62,35 +82,35 @@ const paths = {
     cashout: "/receive/cashout",
 }
 
-const router = express.Router() 
+const router = express.Router()
 router.post(
-    paths.invoice, 
+    paths.invoice,
     authenticate,
-    logRequest, 
+    logRequest,
     sendLightningNotification
 )
 
 router.post(
-    paths.lnurl, 
+    paths.lnurl,
     authenticate,
-    logRequest, 
-    sendLightningNotification 
+    logRequest,
+    sendLightningNotification
 )
 
 router.post(
-    paths.cashout, 
+    paths.cashout,
     authenticate,
-    logRequest, 
+    logRequest,
     () => {
         baseLogger.info("Received payment for cashout.")
         // Ledger.recordCashout
-    } 
+    }
 )
 
 router.post(
-    paths.onchain, 
+    paths.onchain,
     authenticate,
-    logRequest, 
+    logRequest,
     // TODO: handleOnchainPayment.  
 )
 
@@ -108,11 +128,11 @@ const toPaymentAmount = (currency: WalletCurrency) => (dollarAmount: number) => 
 
 const toDisplayAmount = (currency: DisplayCurrency) => async (sats: Satoshis) => {
     const displayCurrencyPrice = await getCurrentPriceAsDisplayPriceRatio({
-      currency: currency,
+        currency: currency,
     })
     if (displayCurrencyPrice instanceof Error) {
         logger.warn(displayCurrencyPrice, "displayCurrencyPrice") // move to otel
         return undefined
     }
-    return displayCurrencyPrice.convertFromWallet({ amount: BigInt(sats), currency: "BTC" })  
+    return displayCurrencyPrice.convertFromWallet({ amount: BigInt(sats), currency: "BTC" })
 }

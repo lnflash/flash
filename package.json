@@ -110,6 +110,7 @@
     "medici": "^6.2.0",
     "mongoose": "^7.8.4",
     "node-cache": "^5.1.2",
+    "nostr-tools": "^2.17.0",
     "pg": "^8.11.3",
     "pino": "8.21.0",
     "pino-http": "^8.5.0",
