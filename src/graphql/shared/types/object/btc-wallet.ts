@@ -16,6 +16,7 @@ import IWallet from "../abstract/wallet"
 import SignedAmount from "../scalar/signed-amount"
 import WalletCurrency from "../scalar/wallet-currency"
 import OnChainAddress from "../scalar/on-chain-address"
+import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 
 import { TransactionConnection } from "./transaction"
 import Lnurl from "../scalar/lnurl"
@@ -42,7 +43,7 @@ const BtcWallet = GT.Object<Wallet>({
       resolve: (source) => source.lnurlp,
     },
     balance: {
-      type: GT.NonNull(SignedAmount),
+      type: GT.NonNull(FractionalCentAmount),
       description: "A balance stored in BTC.",
       resolve: async (source) => {
         const balanceSats = await Wallets.getBalanceForWallet({ walletId: source.id })

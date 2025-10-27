@@ -80,7 +80,7 @@ type BTCWallet implements Wallet {
   accountId: ID!
 
   """A balance stored in BTC."""
-  balance: SignedAmount!
+  balance: FractionalCentAmount!
   id: ID!
   lnurlp: Lnurl
 
@@ -152,6 +152,11 @@ interface Error {
   message: String!
   path: [String]
 }
+
+"""
+Cent amount (1/100 of a dollar) as a float, can be positive or negative
+"""
+scalar FractionalCentAmount
 
 type GraphQLApplicationError implements Error {
   code: String
@@ -430,7 +435,7 @@ A wallet belonging to an account which contains a USD balance and a list of tran
 """
 type UsdWallet implements Wallet {
   accountId: ID!
-  balance: SignedAmount!
+  balance: FractionalCentAmount!
   id: ID!
   lnurlp: Lnurl
 
@@ -481,7 +486,7 @@ A generic wallet which stores value in one of our supported currencies.
 """
 interface Wallet {
   accountId: ID!
-  balance: SignedAmount!
+  balance: FractionalCentAmount!
   id: ID!
   lnurlp: Lnurl
   pendingIncomingBalance: SignedAmount!
