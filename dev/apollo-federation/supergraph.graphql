@@ -177,7 +177,7 @@ type BTCWallet implements Wallet
   accountId: ID!
 
   """A balance stored in BTC."""
-  balance: SignedAmount!
+  balance: FractionalCentAmount!
   id: ID!
   lnurlp: Lnurl
 
@@ -469,7 +469,9 @@ type FeesInformation
   deposit: DepositFeesInformation!
 }
 
-"""(Positive) Cent amount (1/100 of a dollar) as a float"""
+"""
+Cent amount (1/100 of a dollar) as a float, can be positive or negative
+"""
 scalar FractionalCentAmount
   @join__type(graph: PUBLIC)
 
@@ -1714,7 +1716,7 @@ type UsdWallet implements Wallet
   @join__type(graph: PUBLIC)
 {
   accountId: ID!
-  balance: SignedAmount!
+  balance: FractionalCentAmount!
   id: ID!
   lnurlp: Lnurl
 
@@ -2043,7 +2045,7 @@ interface Wallet
   @join__type(graph: PUBLIC)
 {
   accountId: ID!
-  balance: SignedAmount!
+  balance: FractionalCentAmount!
   id: ID!
   lnurlp: Lnurl
   pendingIncomingBalance: SignedAmount!
