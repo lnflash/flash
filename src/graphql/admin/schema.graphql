@@ -29,6 +29,17 @@ input AccountUpdateStatusInput {
   uid: ID!
 }
 
+input AdminBroadcastSendInput {
+  body: String!
+  tag: BroadcastTag!
+  title: String!
+}
+
+type AdminBroadcastSendPayload {
+  errors: [Error!]!
+  success: Boolean
+}
+
 input AdminPushNotificationSendInput {
   accountId: String!
   body: String!
@@ -119,6 +130,8 @@ type BTCWallet implements Wallet {
   ): TransactionConnection
   walletCurrency: WalletCurrency!
 }
+
+scalar BroadcastTag
 
 input BusinessDeleteMapInfoInput {
   username: Username!
@@ -253,6 +266,7 @@ type MerchantPayload {
 type Mutation {
   accountUpdateLevel(input: AccountUpdateLevelInput!): AccountDetailPayload!
   accountUpdateStatus(input: AccountUpdateStatusInput!): AccountDetailPayload!
+  adminBroadcastSend(input: AdminBroadcastSendInput!): AdminBroadcastSendPayload!
   adminPushNotificationSend(input: AdminPushNotificationSendInput!): AdminPushNotificationSendPayload!
   businessDeleteMapInfo(input: BusinessDeleteMapInfoInput!): AccountDetailPayload!
   businessUpdateMapInfo(input: BusinessUpdateMapInfoInput!): AccountDetailPayload!
