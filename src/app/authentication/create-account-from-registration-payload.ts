@@ -50,6 +50,9 @@ export const createAccountFromRegistrationPayload = async ({
   }
 
   const { userId, phone, phoneMetadata } = regPayload
+  if (!phone) {
+    return new InvalidPhoneNumber("Phone is required for phone registration")
+  }
   const account = await createAccountWithPhoneIdentifier({
     newAccountInfo: { phone, kratosUserId: userId },
     config: getDefaultAccountsConfig(),
