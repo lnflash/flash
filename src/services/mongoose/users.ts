@@ -1,4 +1,8 @@
-import { CouldNotFindUserFromPhoneError, CouldNotFindUserFromEmailError, RepositoryError } from "@domain/errors"
+import {
+  CouldNotFindUserFromPhoneError,
+  CouldNotFindUserFromEmailError,
+  RepositoryError,
+} from "@domain/errors"
 
 import { User } from "./schema"
 
@@ -121,10 +125,30 @@ export const UsersRepository = (): IUsersRepository => {
     }
   }
 
+  const addEmail = async (
+    userId: UserId,
+    email: EmailAddress,
+  ): Promise<User | RepositoryError> => {
+    try {
+      const result = await User.findOneAndUpdate(
+        { userId },
+        { $set: { email: email.toLowerCase() as EmailAddress } },
+        { new: true, upsert: true },
+      )
+      if (!result) {
+        return new RepositoryError("Couldn't update user with email")
+      }
+      return translateToUser(result)
+    } catch (err) {
+      return parseRepositoryError(err)
+    }
+  }
+
   return {
     findById,
     findByPhone,
     findByEmail,
     update,
+    addEmail,
   }
 }
