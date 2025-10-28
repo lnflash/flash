@@ -5,7 +5,7 @@ jest.mock("yargs", () => {
     option: jest.fn().mockReturnThis(),
     argv: {
       configPath: [
-        "./dev/defaults.yaml", 
+        "./dev/config/base-config.yaml", 
       ],
     },
   };
