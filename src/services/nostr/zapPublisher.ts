@@ -2,6 +2,10 @@
 import { baseLogger as logger } from "@services/logger"
 import { Event, finalizeEvent, getPublicKey, nip19 } from "nostr-tools"
 import { pool } from "../../utils/nostr"
+import WebSocket from "ws"
+
+// @ts-ignore
+globalThis.WebSocket = WebSocket
 
 export interface PublishFromWebhookArgs {
   zapRequest: Event // deserialized nostrJson
