@@ -8,50 +8,9 @@ import { BlockchainService } from "@services/blockchain"
 import { baseLogger } from "@services/logger"
 import { recordExceptionInCurrentSpan } from "@services/tracing"
 import { ErrorLevel } from "@domain/shared"
+import { GetTransactionDetails1Response200 } from "ibex-client"
 
 const DEFAULT_CONFIRMED_BLOCKS = 6
-
-// Helper type for raw Ibex transaction data
-type RawIbexTransaction = {
-  id: string
-  accountId: string
-  amount: number
-  createdAt: string
-  updatedAt: string
-  currency?: string | { name?: string }
-  transactionType?: { name?: string }
-  type?: string | { name?: string }
-  status?: string | { name?: string; value?: string }
-  paymentHash?: string
-  paymentPreimage?: string
-  memo?: string
-  invoice?: string | {
-    hash?: string
-    preImage?: string
-    memo?: string
-    bolt11?: string
-  }
-  address?: string
-  txid?: string
-  vout?: number
-  confirmations?: number
-  fee?: number
-  networkFee?: number
-  onChainSendFee?: number
-  blockheight?: number
-  onChainTransaction?: {
-    destAddress?: string
-    address?: string
-    networkTxId?: string
-    txid?: string
-    vout?: number
-    feeSat?: number
-    fee?: number
-    blockheight?: number
-    confirmations?: number
-    status?: { value?: string }
-  }
-}
 
 type ParsedMetadata = {
   currency: string
@@ -97,43 +56,79 @@ export type TransactionDetailsResult = {
 /**
  * Parses transaction metadata (currency, type, status) from raw Ibex data
  */
-const parseTransactionMetadata = (txDetails: RawIbexTransaction): ParsedMetadata => {
-  // Parse currency
+const parseTransactionMetadata = (
+  txDetails: GetTransactionDetails1Response200,
+): ParsedMetadata => {
+  // Parse currency - handle the actual API response structure
   const currency =
-    typeof txDetails.currency === "object"
-      ? txDetails.currency?.name || ""
-      : txDetails.currency || ""
+    typeof txDetails.currency === "object" &&
+    txDetails.currency &&
+    "name" in txDetails.currency
+      ? (txDetails.currency as { name?: string }).name || ""
+      : typeof txDetails.currency === "string"
+        ? txDetails.currency
+        : ""
 
   // Parse transaction type
   const type =
-    txDetails.transactionType?.name ||
-    (typeof txDetails.type === "object" ? txDetails.type?.name : txDetails.type) ||
-    ""
+    typeof txDetails.transactionType === "object" &&
+    txDetails.transactionType &&
+    "name" in txDetails.transactionType
+      ? (txDetails.transactionType as { name?: string }).name || ""
+      : typeof txDetails.type === "object" && txDetails.type && "name" in txDetails.type
+        ? (txDetails.type as { name?: string }).name || ""
+        : typeof txDetails.type === "string"
+          ? txDetails.type
+          : ""
 
   // Parse status - check various possible locations
-  let status = txDetails.status || ""
-  if (txDetails.onChainTransaction?.status?.value) {
-    status = txDetails.onChainTransaction.status.value
-  } else if (typeof txDetails.status === "object") {
-    status = txDetails.status?.name || txDetails.status?.value || ""
+  let status = ""
+  if (
+    txDetails.onChainTransaction &&
+    typeof txDetails.onChainTransaction === "object" &&
+    "status" in txDetails.onChainTransaction &&
+    typeof txDetails.onChainTransaction.status === "object" &&
+    txDetails.onChainTransaction.status &&
+    "value" in txDetails.onChainTransaction.status
+  ) {
+    status = String(
+      (txDetails.onChainTransaction.status as { value?: string }).value || "",
+    )
+  } else if (typeof txDetails.status === "object" && txDetails.status) {
+    if ("name" in txDetails.status) {
+      status = String((txDetails.status as { name?: string }).name || "")
+    } else if ("value" in txDetails.status) {
+      status = String((txDetails.status as { value?: string }).value || "")
+    }
+  } else if (typeof txDetails.status === "string") {
+    status = txDetails.status
   }
 
-  return { currency, type, status: String(status) }
+  return { currency, type, status }
 }
 
 /**
  * Parses Lightning-specific fields from raw Ibex data
  */
-const parseLightningFields = (txDetails: RawIbexTransaction): ParsedLightningFields => {
-  let paymentHash = txDetails.paymentHash
-  let paymentPreimage = txDetails.paymentPreimage
-  let memo = txDetails.memo
+const parseLightningFields = (
+  txDetails: GetTransactionDetails1Response200,
+): ParsedLightningFields => {
+  let paymentHash =
+    typeof txDetails.paymentHash === "string" ? txDetails.paymentHash : undefined
+  let paymentPreimage =
+    typeof txDetails.paymentPreimage === "string" ? txDetails.paymentPreimage : undefined
+  let memo = typeof txDetails.memo === "string" ? txDetails.memo : undefined
   let bolt11: string | undefined =
     typeof txDetails.invoice === "string" ? txDetails.invoice : undefined
 
   // Parse Lightning invoice if it's an object
   if (typeof txDetails.invoice === "object" && txDetails.invoice !== null) {
-    const invoiceObj = txDetails.invoice
+    const invoiceObj = txDetails.invoice as {
+      hash?: string
+      preImage?: string
+      memo?: string
+      bolt11?: string
+    }
     paymentHash = invoiceObj.hash || paymentHash
     paymentPreimage = invoiceObj.preImage || paymentPreimage
     memo = invoiceObj.memo || memo
@@ -152,28 +147,54 @@ const parseLightningFields = (txDetails: RawIbexTransaction): ParsedLightningFie
  * Parses onchain-specific fields from raw Ibex data
  */
 const parseOnChainFields = async (
-  txDetails: RawIbexTransaction,
+  txDetails: GetTransactionDetails1Response200,
 ): Promise<ParsedOnChainFields> => {
-  let address = txDetails.address
-  let txid = txDetails.txid
-  let vout = txDetails.vout
-  let confirmations = txDetails.confirmations
-  let fee = txDetails.fee || txDetails.networkFee || txDetails.onChainSendFee
+  let address = typeof txDetails.address === "string" ? txDetails.address : undefined
+  let txid = typeof txDetails.txid === "string" ? txDetails.txid : undefined
+  let vout = typeof txDetails.vout === "number" ? txDetails.vout : undefined
+  let confirmations =
+    typeof txDetails.confirmations === "number" ? txDetails.confirmations : undefined
+  let fee =
+    typeof txDetails.fee === "number"
+      ? txDetails.fee
+      : typeof txDetails.networkFee === "number"
+        ? txDetails.networkFee
+        : typeof txDetails.onChainSendFee === "number"
+          ? txDetails.onChainSendFee
+          : undefined
 
   // Check for onChainTransaction object
-  if (txDetails.onChainTransaction) {
-    const onchainData = txDetails.onChainTransaction
+  if (txDetails.onChainTransaction && typeof txDetails.onChainTransaction === "object") {
+    const onchainData = txDetails.onChainTransaction as {
+      destAddress?: string
+      address?: string
+      networkTxId?: string
+      txid?: string
+      vout?: number
+      feeSat?: number
+      fee?: number
+      blockheight?: number
+      confirmations?: number
+      status?: { value?: string }
+    }
+
     address = onchainData.destAddress || onchainData.address || address
     txid = onchainData.networkTxId || onchainData.txid || txid
     vout = onchainData.vout !== undefined ? onchainData.vout : vout
     fee = onchainData.feeSat || onchainData.fee || fee
 
     // Calculate confirmations from blockheight
-    if (onchainData.blockheight !== undefined || txDetails.blockheight !== undefined) {
-      const txBlockHeight = onchainData.blockheight ?? txDetails.blockheight ?? 0
+    const txBlockHeight =
+      onchainData.blockheight ??
+      (typeof txDetails.blockheight === "number" ? txDetails.blockheight : undefined)
+
+    if (txBlockHeight !== undefined) {
       try {
         const currentBlockHeight = await BlockchainService.getCurrentBlockHeight()
-        if (!(currentBlockHeight instanceof Error)) {
+        if (
+          !(currentBlockHeight instanceof Error) &&
+          typeof currentBlockHeight === "number"
+        ) {
           confirmations = currentBlockHeight - txBlockHeight
         } else {
           // Fallback to status-based estimation if API call fails
@@ -228,7 +249,7 @@ export const getTransactionDetailsById = async (
     const transactionDetails = await IbexClient.getTransactionDetails(transactionId)
 
     if (transactionDetails instanceof Error) {
-      baseLogger.warn(
+      baseLogger.error(
         { transactionId, error: transactionDetails.message },
         "Failed to fetch transaction details from Ibex",
       )
@@ -241,7 +262,7 @@ export const getTransactionDetailsById = async (
     }
 
     // Cast to our structured type instead of any
-    const txDetails = transactionDetails as RawIbexTransaction
+    const txDetails = transactionDetails as GetTransactionDetails1Response200
 
     // Parse transaction data using helper functions
     const metadata = parseTransactionMetadata(txDetails)
@@ -249,14 +270,14 @@ export const getTransactionDetailsById = async (
     const onChainFields = await parseOnChainFields(txDetails)
 
     const result: TransactionDetailsResult = {
-      id: txDetails.id,
-      accountId: txDetails.accountId,
-      amount: txDetails.amount,
+      id: txDetails.id || "",
+      accountId: txDetails.accountId || "",
+      amount: txDetails.amount || 0,
       currency: metadata.currency,
       status: metadata.status,
       type: metadata.type,
-      createdAt: txDetails.createdAt,
-      updatedAt: txDetails.updatedAt,
+      createdAt: txDetails.createdAt || "",
+      updatedAt: typeof txDetails.updatedAt === "string" ? txDetails.updatedAt : "",
       invoice: lightningFields.invoice,
       paymentHash: lightningFields.paymentHash,
       paymentPreimage: lightningFields.paymentPreimage,
