@@ -1,10 +1,10 @@
 // services/nostr/zap-publisher.ts
 import { baseLogger as logger } from "@services/logger"
-import { finalizeEvent, getPublicKey, nip19 } from "nostr-tools"
+import { Event, finalizeEvent, getPublicKey, nip19 } from "nostr-tools"
 import { pool } from "../../utils/nostr"
 
 export interface PublishFromWebhookArgs {
-  zapRequest: any // deserialized nostrJson
+  zapRequest: Event // deserialized nostrJson
   amountMsat: number
   bolt11: string
   recipientUser: any
@@ -42,7 +42,8 @@ export const ZapPublisher = {
       }
 
       const signedEvent = finalizeEvent(zapReceipt, secretKey)
-      const relays = zapRequest.relays || []
+      const relaysTag = zapRequest.tags.find((tag) => tag[0] === "relays")
+      const relays = relaysTag ? relaysTag.slice(1) : []
       console.log("Publishing Zap receipts TO", relays)
       pool.publish(relays, signedEvent)
 
