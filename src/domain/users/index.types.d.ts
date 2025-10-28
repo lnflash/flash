@@ -79,4 +79,5 @@ interface IUsersRepository {
   findByPhone(phone: PhoneNumber): Promise<User | RepositoryError>
   findByEmail(email: EmailAddress): Promise<User | RepositoryError>
   update(user: UserUpdateInput): Promise<User | RepositoryError>
+  addEmail(userId: UserId, email: EmailAddress): Promise<User | RepositoryError>
 }

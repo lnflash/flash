@@ -57,15 +57,11 @@ export const upgradeAccountFromDeviceToEmail = async ({
   // so that if one fails, the other is rolled back
 
   // 1. Update user record with email (deviceId is preserved via spread)
-  const userUpdated = await UsersRepository().findById(userId)
-  if (userUpdated instanceof Error) return userUpdated
-  userUpdated.email = email
-
-  const res = await UsersRepository().update(userUpdated)
+  const res = await UsersRepository().addEmail(userId, email)
   if (res instanceof Error) return res
 
   // 2. Update account level from TRIAL (0) to verified (1)
-  const accountDevice = await AccountsRepository().findByUserId(userUpdated.id)
+  const accountDevice = await AccountsRepository().findByUserId(userId)
   if (accountDevice instanceof Error) return accountDevice
   accountDevice.level = AccountLevel.One
   const accountUpdated = await AccountsRepository().update(accountDevice)
