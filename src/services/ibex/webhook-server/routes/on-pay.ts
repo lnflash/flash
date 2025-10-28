@@ -58,7 +58,6 @@ router.get(paths.lnurl, logRequest, async (req: Request, resp: Response) => {
         requestEvent = null
       }
     }
-
     // 1. Lookup wallet for the user
     const account = await AccountsRepository().findByUsername(username as Username)
     if (account instanceof Error) {
@@ -95,6 +94,7 @@ router.get(paths.lnurl, logRequest, async (req: Request, resp: Response) => {
       return resp.status(500).json({ error: "Failed to extract payment hash" })
 
     // 4. Save zap request in Mongo
+    console.log("GOT REQUEST EVENT AS", JSON.stringify(requestEvent || "{}"))
     if (requestEvent) {
       const zapRecord = new ZapRequestModel({
         bolt11,

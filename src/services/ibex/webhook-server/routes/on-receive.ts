@@ -17,6 +17,7 @@ import { getCurrentPriceAsDisplayPriceRatio } from "@app/prices"
 import { removeDeviceTokens } from "@app/users/remove-device-tokens"
 import { ZapRequestModel } from "@services/mongoose/zap-request"
 import { ZapPublisher } from "@services/nostr/zapPublisher"
+import { all } from "axios"
 
 const sendLightningNotification = async (req: Request, resp: Response) => {
   console.log("Ibex called THE WEBHOOK!")
@@ -53,9 +54,17 @@ const sendLightningNotification = async (req: Request, resp: Response) => {
 
   const zapRequest = await ZapRequestModel.findOne({
     invoiceHash: paymentHash,
-    fulfilled: false,
   })
-  console.log("PENDING ZAP REQUWEST", JSON.stringify(zapRequest || "{}"))
+
+  const allRequests = await ZapRequestModel.findOne({
+    invoiceHash: paymentHash,
+  })
+  console.log(
+    "PENDING ZAP REQUWESTS",
+    JSON.stringify(zapRequest || "{}"),
+    "ALL REQUESTS",
+    JSON.stringify(allRequests || "{}"),
+  )
   if (zapRequest) {
     try {
       await ZapPublisher.publishFromWebhook({

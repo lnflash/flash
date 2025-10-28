@@ -43,6 +43,7 @@ export const ZapPublisher = {
 
       const signedEvent = finalizeEvent(zapReceipt, secretKey)
       const relays = zapRequest.relays || []
+      console.log("Publishing Zap receipts TO", relays)
       pool.publish(relays, signedEvent)
 
       logger.info(
