@@ -89,11 +89,3 @@ services:
   kratos-pg:
     ports:
       - "5433:5432"
-  # fulcrum:
-  #   ports:
-  #     - "50001:50001"
-  svix:
-    ports:
-      - "8071:8071"
-    extra_hosts:
-      - "bats-tests:host-gateway"

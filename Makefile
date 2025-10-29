@@ -3,6 +3,9 @@ BIN_DIR=node_modules/.bin
 start-deps:
 	docker compose up bats-deps -d
 
+start-frappe:
+	docker compose up frappe -d
+
 start-deps-integration:
 	docker compose up integration-deps -d
 
