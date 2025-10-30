@@ -2,7 +2,14 @@ import { CashoutDetails } from "@app/offers"
 import { USDAmount } from "@domain/shared"
 import { baseLogger } from "@services/logger"
 import axios from "axios"
-import { JournalEntryDraftError, JournalEntrySubmitError, JournalEntryTitleError, JournalEntryDeleteError } from "./errors"
+import {
+  JournalEntryDraftError,
+  JournalEntrySubmitError,
+  JournalEntryTitleError,
+  JournalEntryDeleteError,
+  IssueCreateError,
+  IssueQueryError,
+} from "./errors"
 import { FrappeConfig } from "@config"
 import ValidOffer from "@app/offers/ValidOffer"
 
@@ -20,9 +27,7 @@ class ErpNext {
     }
   }
 
-  async draftCashout(
-    offer: ValidOffer,
-  ): Promise<LedgerJournal | JournalEntryDraftError> {
+  async draftCashout(offer: ValidOffer): Promise<LedgerJournal | JournalEntryDraftError> {
     const party = offer.account.erpParty
     if (!party) return new JournalEntryDraftError("Account missing erpParty field")
     const { ibexTrx, flash } = offer.details
@@ -32,7 +37,7 @@ class ErpNext {
       doctype: "Journal Entry",
       company: "Flash",
       multi_currency: 1,
-      posting_date: new Date().toISOString().split('T')[0],
+      posting_date: new Date().toISOString().split("T")[0],
       remark: `${JSON.stringify({ paymentHash: ibexTrx.invoice.paymentHash, userWalletId: ibexTrx.userAcct })}`,
       accounts: [
         {
@@ -43,13 +48,13 @@ class ErpNext {
           exchange_rate: 1,
         },
         {
-          account: FrappeConfig.erpnext.accounts.cashout, 
+          account: FrappeConfig.erpnext.accounts.cashout,
           account_currency: "JMD",
           credit_in_account_currency: Number(liability.jmd.asCents(2)),
           credit: erpUsd(liability.usd),
           exchange_rate: erpUsd(liability.usd) / Number(liability.jmd.asCents(2)),
           party_type: "Supplier",
-          party, 
+          party,
         },
         {
           account: FrappeConfig.erpnext.accounts.serviceFees,
@@ -57,8 +62,8 @@ class ErpNext {
           credit_in_account_currency: erpUsd(flashFee),
           credit: erpUsd(flashFee),
           exchange_rate: 1,
-        }
-      ]
+        },
+      ],
     }
 
     try {
@@ -67,7 +72,10 @@ class ErpNext {
         journalEntry,
         { headers: this.headers },
       )
-      const titleResp = this.updateTitle(resp.data.data.name, `Open cashout ${ibexTrx.invoice.paymentHash.substring(0, 5)}`)
+      const titleResp = this.updateTitle(
+        resp.data.data.name,
+        `Open cashout ${ibexTrx.invoice.paymentHash.substring(0, 5)}`,
+      )
       if (titleResp instanceof JournalEntryTitleError) {
         baseLogger.error({ err: titleResp }, "Error updating JE title in ERPNext")
       }
@@ -81,15 +89,17 @@ class ErpNext {
       baseLogger.error({ err, journalEntry }, "Error drafting JE in ERPNext")
       return new JournalEntryDraftError(err)
     }
-
   }
 
-  private async updateTitle(jeName: string, title: string): Promise<any | JournalEntryTitleError> { 
+  private async updateTitle(
+    jeName: string,
+    title: string,
+  ): Promise<any | JournalEntryTitleError> {
     try {
       const resp = await axios.put(
         `${this.url}/api/resource/Journal Entry/${jeName}`,
         { title },
-        { headers: this.headers }
+        { headers: this.headers },
       )
       return resp.data
     } catch (err) {
@@ -101,8 +111,8 @@ class ErpNext {
     try {
       const resp = await axios.put(
         `${this.url}/api/resource/Journal Entry/${jeName}`,
-        { docstatus: 1 },  // docstatus: 1 means submitted
-        { headers: this.headers }
+        { docstatus: 1 }, // docstatus: 1 means submitted
+        { headers: this.headers },
       )
       return resp.data
     } catch (err) {
@@ -113,16 +123,67 @@ class ErpNext {
 
   async delete(jeName: string): Promise<void | JournalEntryDeleteError> {
     try {
-      await axios.delete(
-        `${this.url}/api/resource/Journal Entry/${jeName}`,
-        { headers: this.headers }
-      )
+      await axios.delete(`${this.url}/api/resource/Journal Entry/${jeName}`, {
+        headers: this.headers,
+      })
     } catch (err) {
       baseLogger.error({ err, jeName }, "Error deleting JE in ERPNext")
       return new JournalEntryDeleteError(err)
     }
   }
 
+  /**
+   * Create a support Issue in ERPNext for account upgrade requests
+   */
+  async createSupportIssue(data: {
+    subject: string
+    description: string
+    priority?: "Low" | "Medium" | "High"
+    issueType?: string
+  }): Promise<{ name: string } | IssueCreateError> {
+    const issue = {
+      doctype: "Issue",
+      subject: data.subject,
+      description: data.description,
+      priority: data.priority || "Medium",
+      issue_type: data.issueType || "Account Upgrade Request",
+      status: "Open",
+      raised_by: "system@flash.io",
+    }
+
+    try {
+      const resp = await axios.post(`${this.url}/api/resource/Issue`, issue, {
+        headers: this.headers,
+      })
+      return { name: resp.data.data.name }
+    } catch (err) {
+      baseLogger.error({ err, issue }, "Error creating Issue in ERPNext")
+      return new IssueCreateError(err)
+    }
+  }
+
+  /**
+   * Get open Issues for a username
+   * Returns list of open issue names
+   */
+  async getOpenIssuesByUsername(username: string): Promise<string[] | IssueQueryError> {
+    try {
+      const resp = await axios.get(`${this.url}/api/resource/Issue`, {
+        headers: this.headers,
+        params: {
+          filters: JSON.stringify([
+            ["subject", "like", `%${username}%`],
+            ["status", "=", "Open"],
+          ]),
+          fields: JSON.stringify(["name", "subject", "status"]),
+        },
+      })
+      return resp.data.data.map((issue: any) => issue.name)
+    } catch (err) {
+      baseLogger.error({ err, username }, "Error querying Issues in ERPNext")
+      return new IssueQueryError(err)
+    }
+  }
 }
 
 export default new ErpNext(FrappeConfig.url, FrappeConfig.credentials)
