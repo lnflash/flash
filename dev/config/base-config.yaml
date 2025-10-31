@@ -39,7 +39,7 @@ sendgrid:
   apiKey: "<replace>"
 
 frappe:
-  url: "https://erp.test.flashapp.me"
+  url: "http://localhost:8080"
   credentials:
     # get from ErpNext user -> settings -> API Access
     apiKey: "" 
