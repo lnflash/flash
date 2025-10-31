@@ -1436,6 +1436,7 @@ type Query
 
   """Returns 1 Sat and 1 Usd Cent price for the given currency"""
   realtimePrice(currency: DisplayCurrency = "USD"): RealtimePrice!
+  transactionDetails(input: TransactionDetailsInput!): TransactionDetailsPayload!
   userDefaultWalletId(username: Username!): WalletId! @deprecated(reason: "will be migrated to AccountDefaultWalletId")
   usernameAvailable(username: Username!): Boolean
 }
@@ -1657,6 +1658,81 @@ type TransactionConnection
 
   """Information to aid in pagination."""
   pageInfo: PageInfo!
+}
+
+type TransactionDetails
+  @join__type(graph: PUBLIC)
+{
+  """Account ID associated with the transaction"""
+  accountId: String
+
+  """Bitcoin address for onchain transactions"""
+  address: String
+
+  """Transaction amount"""
+  amount: Float
+
+  """Number of confirmations for onchain transactions"""
+  confirmations: Int
+
+  """Transaction creation timestamp"""
+  createdAt: String
+
+  """Transaction currency"""
+  currency: String
+
+  """Transaction fee"""
+  fee: Float
+
+  """Transaction ID"""
+  id: String!
+
+  """Lightning invoice (bolt11)"""
+  invoice: String
+
+  """Transaction memo/description"""
+  memo: String
+
+  """Lightning payment hash"""
+  paymentHash: String
+
+  """Lightning payment preimage"""
+  paymentPreimage: String
+
+  """Transaction status"""
+  status: String
+
+  """Bitcoin transaction ID for onchain transactions"""
+  txid: String
+
+  """Transaction type (lightning/onchain)"""
+  type: String
+
+  """Transaction last update timestamp"""
+  updatedAt: String
+
+  """Output index for onchain transactions"""
+  vout: Int
+}
+
+type TransactionDetailsError
+  @join__type(graph: PUBLIC)
+{
+  message: String!
+}
+
+input TransactionDetailsInput
+  @join__type(graph: PUBLIC)
+{
+  """Transaction ID to fetch details for"""
+  transactionId: String!
+}
+
+type TransactionDetailsPayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [TransactionDetailsError!]!
+  transactionDetails: TransactionDetails
 }
 
 """An edge in a connection."""

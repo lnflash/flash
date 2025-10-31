@@ -4,6 +4,7 @@ import AllLevelsQuery from "./root/query/all-levels"
 import LightningInvoiceQuery from "./root/query/lightning-invoice"
 import LightningPaymentQuery from "./root/query/lightning-payment"
 import TransactionByIdQuery from "./root/query/transaction-by-id"
+import TransactionDetailsByIdQuery from "./root/query/transaction-details-by-id"
 import TransactionsByHashQuery from "./root/query/transactions-by-hash"
 import AccountDetailsByUserPhoneQuery from "./root/query/account-details-by-phone"
 import AccountDetailsByUsernameQuery from "./root/query/account-details-by-username"
@@ -22,6 +23,7 @@ export const queryFields = {
     accountDetailsByEmail: AccountDetailsByUserEmailQuery,
     accountDetailsByAccountId: AccountDetailsByAccountId,
     transactionById: TransactionByIdQuery,
+    transactionDetailsById: TransactionDetailsByIdQuery,
     transactionsByHash: TransactionsByHashQuery,
     lightningInvoice: LightningInvoiceQuery,
     lightningPayment: LightningPaymentQuery,

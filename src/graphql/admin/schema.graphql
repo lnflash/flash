@@ -336,6 +336,7 @@ type Query {
   listWalletIds(walletCurrency: WalletCurrency!): [WalletId!]!
   merchantsPendingApproval: [Merchant!]!
   transactionById(id: ID!): Transaction
+  transactionDetailsById(id: ID!): TransactionDetails
   transactionsByHash(hash: PaymentHash!): [Transaction]
   wallet(walletId: WalletId!): Wallet!
 }
@@ -422,6 +423,59 @@ type TransactionConnection {
 
   """Information to aid in pagination."""
   pageInfo: PageInfo!
+}
+
+type TransactionDetails {
+  """Account ID associated with the transaction"""
+  accountId: String
+
+  """Bitcoin address for onchain transactions"""
+  address: String
+
+  """Transaction amount"""
+  amount: Float
+
+  """Number of confirmations for onchain transactions"""
+  confirmations: Int
+
+  """Transaction creation timestamp"""
+  createdAt: String
+
+  """Transaction currency"""
+  currency: String
+
+  """Transaction fee"""
+  fee: Float
+
+  """Transaction ID"""
+  id: String!
+
+  """Lightning invoice (bolt11)"""
+  invoice: String
+
+  """Transaction memo/description"""
+  memo: String
+
+  """Lightning payment hash"""
+  paymentHash: String
+
+  """Lightning payment preimage"""
+  paymentPreimage: String
+
+  """Transaction status"""
+  status: String
+
+  """Bitcoin transaction ID for onchain transactions"""
+  txid: String
+
+  """Transaction type (lightning/onchain)"""
+  type: String
+
+  """Transaction last update timestamp"""
+  updatedAt: String
+
+  """Output index for onchain transactions"""
+  vout: Int
 }
 
 """An edge in a connection."""
