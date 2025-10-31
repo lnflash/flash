@@ -13,6 +13,7 @@ import {
   walletBelongsToAccount,
   transferMax,
   isBeforeExpiry,
+  hasErpParty,
 } from "./Validations"
 import { RepositoryError } from "@domain/errors"
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
@@ -55,6 +56,7 @@ class ValidOffer extends Offer {
       walletBelongsToAccount,
       hasSufficientBalance,
       isBeforeExpiry,
+      hasErpParty,
       //  TODO daily/weekly/monthly volume limits
     ])
     if (validationErrs.length > 0) return new ValidationError(validationErrs)
