@@ -198,7 +198,8 @@ services:
 
   # Frappe/ERPNext services
   frappe-backend:
-    image: frappe/erpnext:v15.85.0
+    # image: lnflash/frappe-erp-admin:latest
+    image: brh28/frappe-flash:0.0.2
     deploy:
       restart_policy:
         condition: on-failure
@@ -212,7 +213,7 @@ services:
       MARIADB_ROOT_PASSWORD: admin
 
   frappe-configurator:
-    image: frappe/erpnext:v15.85.0
+    image: brh28/frappe-flash:0.0.2
     deploy:
       restart_policy:
         condition: none
@@ -221,6 +222,7 @@ services:
       - -c
     command:
       - >
+        set -ex;
         ls -1 apps > sites/apps.txt;
         bench set-config -g db_host $$DB_HOST;
         bench set-config -gp db_port $$DB_PORT;
@@ -228,21 +230,27 @@ services:
         bench set-config -g redis_queue "redis://$$REDIS_QUEUE";
         bench set-config -g redis_socketio "redis://$$REDIS_QUEUE";
         bench set-config -gp socketio_port $$SOCKETIO_PORT;
+        bench set-config -g flash_admin_api_url $$FLASH_API;
+        bench set-config -g admin_api_key $$FLASH_SECRET;
     environment:
       DB_HOST: mariadb
       DB_PORT: "3306"
       REDIS_CACHE: redis:6379/1
       REDIS_QUEUE: redis:6379/2
       SOCKETIO_PORT: "9000"
+      FLASH_API: "http://localhost:4002/admin/graphql" ### THIS IS THE HOST MACHINE. NOT DOCKER.
+      FLASH_SECRET: "not-so-secret"
     volumes:
       - frappe-sites:/home/frappe/frappe-bench/sites
       - frappe-logs:/home/frappe/frappe-bench/logs
 
   frappe-create-site:
-    image: frappe/erpnext:v15.85.0
+    image: brh28/frappe-flash:0.0.2
     deploy:
       restart_policy:
         condition: none
+    depends_on:
+      - frappe-configurator
     volumes:
       - frappe-sites:/home/frappe/frappe-bench/sites
       - frappe-logs:/home/frappe/frappe-bench/logs
@@ -267,7 +275,7 @@ services:
           fi
         done;
         echo "sites/common_site_config.json found";
-        bench new-site --mariadb-user-host-login-scope='%' --admin-password=admin --db-root-username=root --db-root-password=admin --install-app erpnext --set-default frontend;
+        bench new-site --mariadb-user-host-login-scope='%' --admin-password=admin --db-root-username=root --db-root-password=admin --install-app erpnext --install-app admin_panel --set-default frontend;
 
   mariadb:
     image: mariadb:10.6
@@ -291,7 +299,7 @@ services:
       - mariadb-data:/var/lib/mysql
 
   frappe-frontend:
-    image: frappe/erpnext:v15.85.0
+    image: brh28/frappe-flash:0.0.2
     ports: ["8080:8080"]
     depends_on:
       - frappe-websocket
@@ -314,7 +322,7 @@ services:
       - frappe-logs:/home/frappe/frappe-bench/logs
 
   frappe-websocket:
-    image: frappe/erpnext:v15.85.0
+    image: brh28/frappe-flash:0.0.2
     deploy:
       restart_policy:
         condition: on-failure
