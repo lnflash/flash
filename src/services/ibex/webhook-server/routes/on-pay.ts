@@ -1,17 +1,26 @@
 import express, { Request, Response } from "express"
 import { authenticate, logRequest } from "../middleware"
-import { WalletsRepository } from "@services/mongoose/wallets"
 import { ZapRequestModel } from "@services/mongoose/zap-request"
-import axios from "axios"
 import { baseLogger as logger } from "@services/logger"
 import { AccountsRepository } from "@services/mongoose"
 import { bech32 } from "bech32"
+
+import IbexClient from "ibex-client"
+import { IbexConfig } from "@config"
+import { Redis } from "@services/ibex/cache"
+import { onReceive } from "."
 
 const paths = {
   invoice: "/pay/invoice",
   lnurl: "/pay/lnurl/:username",
   onchain: "/pay/onchain",
 }
+
+const Ibex = new IbexClient(
+  IbexConfig.url,
+  { email: IbexConfig.email, password: IbexConfig.password },
+  Redis,
+)
 
 export function decodeLnurl(lnurl: string): { callback: string } {
   try {
@@ -24,28 +33,12 @@ export function decodeLnurl(lnurl: string): { callback: string } {
   }
 }
 
-// async function listAccounts() {
-//   const repo = AccountsRepository()
-//   const result = await repo.listUnlockedAccounts()
-
-//   if (result instanceof Error) {
-//     console.error("Error fetching accounts:", result)
-//     return
-//   }
-//   for await (const acct of result) {
-//     // Print the entire object as JSON
-//     console.log(JSON.stringify(acct, null, 2))
-//   }
-// }
-
 const router = express.Router()
 
 router.get(paths.lnurl, logRequest, async (req: Request, resp: Response) => {
-  console.log("i'm inside")
   try {
     const { username } = req.params
     const { amount, nostr, comment } = req.query
-    console.log("NOSTR IN REquest body", nostr)
     if (!username) return resp.status(400).json({ error: "username is required" })
     if (!amount) return resp.status(400).json({ error: "amount is required" })
 
@@ -63,29 +56,19 @@ router.get(paths.lnurl, logRequest, async (req: Request, resp: Response) => {
     if (account instanceof Error) {
       return resp.status(404).json({ error: "User not found" })
     }
-    const wallet = await WalletsRepository().listByAccountId(account.id)
-    if (!wallet || wallet instanceof Error || wallet.length === 0) {
-      return resp.status(404).json({ error: "No wallet found for this user" })
-    }
-    const lnurlp = wallet[0].lnurlp
-    if (!lnurlp)
-      return resp.status(404).json({ error: "No lnurlp found for this wallet" })
 
-    // 2. Decode lnurlp to get invoice callback URL
-    const decoded = decodeLnurl(lnurlp)
-    const callbackUrl = decoded.callback
-    if (!callbackUrl)
-      return resp.status(500).json({ error: "Failed to decode lnurl callback URL" })
-    const lnurlResponse = await axios.get(callbackUrl)
-    const invoiceAddress = lnurlResponse.data.callback
-    // 3. Call original invoice callback URL to generate invoice
-    const invoiceResp = await axios.get(invoiceAddress, {
-      params: {
-        amount,
-        comment: comment || "Zap payment",
-      },
+    const invoiceResponse = await Ibex.addInvoice({
+      accountId: account.defaultWalletId,
+      memo: (comment as string) || "Zap!",
+      amount: Number(amount),
+      webhookUrl: IbexConfig.webhook.uri + onReceive.paths.zap,
+      webhookSecret: IbexConfig.webhook.secret,
     })
-    const { pr: bolt11, successAction } = invoiceResp.data
+    if (invoiceResponse instanceof Error) {
+      return resp.status(500).json({ error: "Could Not generate invoice" })
+    }
+
+    const bolt11 = invoiceResponse.invoice?.bolt11
     if (!bolt11) return resp.status(500).json({ error: "Failed to generate invoice" })
 
     // Extract payment hash from bolt11 (or use library if needed)
@@ -94,7 +77,6 @@ router.get(paths.lnurl, logRequest, async (req: Request, resp: Response) => {
       return resp.status(500).json({ error: "Failed to extract payment hash" })
 
     // 4. Save zap request in Mongo
-    console.log("GOT REQUEST EVENT AS", JSON.stringify(requestEvent || "{}"))
     if (requestEvent) {
       const zapRecord = new ZapRequestModel({
         bolt11,
@@ -106,13 +88,11 @@ router.get(paths.lnurl, logRequest, async (req: Request, resp: Response) => {
         fulfilled: false,
       })
       const document = await zapRecord.save()
-      console.log("Document stgored", document)
     }
 
     // 5. Return LNURL-pay JSON
     return resp.json({
       pr: bolt11,
-      successAction: successAction || null,
       routes: [],
     })
   } catch (err) {
@@ -137,9 +117,7 @@ export { paths, router }
  */
 function extractPaymentHashFromBolt11(bolt11: string): string | null {
   try {
-    console.log("BOLT 11 ISL", bolt11)
     const decoded = require("bolt11").decode(bolt11)
-    console.log("BOLT 11 ISL decoded", decoded)
     const hashTag = decoded.tags.find((t: any) => t.tagName === "payment_hash")
     return hashTag?.data || null
   } catch {

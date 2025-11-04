@@ -19,6 +19,57 @@ import { ZapRequestModel } from "@services/mongoose/zap-request"
 import { ZapPublisher } from "@services/nostr/zapPublisher"
 import { all } from "axios"
 
+const sendZapReceipt = async (req: Request, resp: Response) => {
+  const { transaction, receivedMsat } = req.body
+  const recipientWalletId = transaction.accountId
+
+  const receiverWallet = await WalletsRepository().findById(recipientWalletId)
+  if (receiverWallet instanceof RepositoryError) {
+    logger.error(receiverWallet, `Failed to fetch wallet with id ${recipientWalletId}`)
+    return resp.sendStatus(500)
+  }
+  const recipientAccountId = receiverWallet.accountId
+  const recipientAccount = await AccountsRepository().findById(recipientAccountId)
+  if (recipientAccount instanceof Error) {
+    logger.error(
+      recipientAccount,
+      `Failed to fetch account with id ${recipientAccountId}`,
+    )
+    return resp.sendStatus(500)
+  }
+  const recipientUser = await UsersRepository().findById(recipientAccount.kratosUserId)
+  if (recipientUser instanceof Error) {
+    logger.error(
+      recipientUser,
+      `Failed to fetch user with kratos id ${recipientAccount.kratosUserId}`,
+    )
+    return resp.sendStatus(500)
+  }
+  const paymentHash = transaction.invoice.hash
+
+  const zapRequest = await ZapRequestModel.findOne({
+    invoiceHash: paymentHash,
+  })
+
+  if (zapRequest) {
+    try {
+      await ZapPublisher.publishFromWebhook({
+        zapRequest: JSON.parse(zapRequest.nostrJson),
+        amountMsat: zapRequest.amountMsat,
+        bolt11: zapRequest.bolt11,
+        recipientUser,
+        recipientAccount,
+        receiverWallet,
+      })
+      // mark as fulfilled
+      zapRequest.fulfilled = true
+      await zapRequest.save()
+    } catch (err) {
+      logger.error({ err }, "Failed to publish zap receipt")
+    }
+  }
+}
+
 const sendLightningNotification = async (req: Request, resp: Response) => {
   console.log("Ibex called THE WEBHOOK!")
   const { transaction, receivedMsat } = req.body
@@ -50,39 +101,6 @@ const sendLightningNotification = async (req: Request, resp: Response) => {
     return resp.sendStatus(500)
   }
 
-  const paymentHash = transaction.invoice.hash
-
-  const zapRequest = await ZapRequestModel.findOne({
-    invoiceHash: paymentHash,
-  })
-
-  const allRequests = await ZapRequestModel.findOne({
-    invoiceHash: paymentHash,
-  })
-  console.log(
-    "PENDING ZAP REQUWESTS",
-    JSON.stringify(zapRequest || "{}"),
-    "ALL REQUESTS",
-    JSON.stringify(allRequests || "{}"),
-  )
-  if (zapRequest) {
-    try {
-      await ZapPublisher.publishFromWebhook({
-        zapRequest: JSON.parse(zapRequest.nostrJson),
-        amountMsat: zapRequest.amountMsat,
-        bolt11: zapRequest.bolt11,
-        recipientUser,
-        recipientAccount,
-        receiverWallet,
-      })
-      // mark as fulfilled
-      zapRequest.fulfilled = true
-      await zapRequest.save()
-    } catch (err) {
-      logger.error({ err }, "Failed to publish zap receipt")
-    }
-  }
-
   const nsResp = await NotificationsService().lightningTxReceived({
     recipientAccountId: recipientAccountId,
     recipientWalletId,
@@ -106,6 +124,7 @@ const sendLightningNotification = async (req: Request, resp: Response) => {
 const paths = {
   invoice: "/receive/invoice",
   lnurl: "/receive/lnurlp",
+  zap: "/receive/zap",
   onchain: "/receive/onchain",
   cashout: "/receive/cashout",
 }
@@ -126,6 +145,8 @@ router.post(
   logRequest,
   // TODO: handleOnchainPayment.
 )
+
+router.post(paths.zap, authenticate, logRequest, sendZapReceipt)
 
 export { paths, router }
 
