@@ -54,6 +54,7 @@ import {
   rewardFailedLoginAttemptPerIpLimits,
   rewardFailedLoginAttemptPerLoginIdentifierLimits,
 } from "./ratelimits"
+import { getBalanceForWallet } from "@app/wallets"
 
 export const loginWithPhoneToken = async ({
   phone,
@@ -306,12 +307,11 @@ export const loginDeviceUpgradeWithPhone = async ({
   // is there still txns left over on the device account?
   const deviceWallets = await WalletsRepository().listByAccountId(account.id)
   if (deviceWallets instanceof Error) return deviceWallets
-  const ledger = LedgerService()
   let deviceAccountHasBalance = false
   for (const wallet of deviceWallets) {
-    const balance = await ledger.getWalletBalance(wallet.id)
+    const balance = await getBalanceForWallet({ walletId: wallet.id })
     if (balance instanceof Error) return balance
-    if (balance > 0) {
+    if (!balance.isZero()) {
       deviceAccountHasBalance = true
     }
   }

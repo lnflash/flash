@@ -100,7 +100,7 @@ gql_query() {
 }
 
 gql_file() {
-  echo "${BATS_TEST_DIRNAME:-${REPO_ROOT}/test/bats}/gql/$1.gql"
+  echo "${BATS_TEST_DIRNAME:-${REPO_ROOT}/test/galoy/bats}/gql/$1.gql"
 }
 
 gql_admin_query() {
@@ -136,13 +136,25 @@ exec_graphql() {
 
   gql_route="graphql"
 
-  ${run_cmd} curl -s \
-    -X POST \
-    ${AUTH_HEADER:+ -H "$AUTH_HEADER"} \
-    -H "Content-Type: application/json" \
-    -H "X-Idempotency-Key: $(new_idempotency_key)" \
-    -d "{\"query\": \"$(gql_query $query_name)\", \"variables\": $variables}" \
-    "${GALOY_ENDPOINT}/${gql_route}"
+  if [[ "${BATS_TEST_DIRNAME}" != "" ]]; then
+    # In BATS: run command captures output into $output
+    ${run_cmd} curl -s \
+      -X POST \
+      ${AUTH_HEADER:+ -H "$AUTH_HEADER"} \
+      -H "Content-Type: application/json" \
+      -H "X-Idempotency-Key: $(new_idempotency_key)" \
+      -d "{\"query\": \"$(gql_query $query_name)\", \"variables\": $variables}" \
+      "${GALOY_ENDPOINT}/${gql_route}"
+  else
+    # Outside BATS: manually capture output
+    output=$(curl -s \
+      -X POST \
+      ${AUTH_HEADER:+ -H "$AUTH_HEADER"} \
+      -H "Content-Type: application/json" \
+      -H "X-Idempotency-Key: $(new_idempotency_key)" \
+      -d "{\"query\": \"$(gql_query $query_name)\", \"variables\": $variables}" \
+      "${GALOY_ENDPOINT}/${gql_route}")
+  fi
 
   echo "GQL output: '$output'"
 }
@@ -168,12 +180,23 @@ exec_admin_graphql() {
 
   gql_route="admin/graphql"
 
-  ${run_cmd} curl -s \
-    -X POST \
-    ${AUTH_HEADER:+ -H "$AUTH_HEADER"} \
-    -H "Content-Type: application/json" \
-    -d "{\"query\": \"$(gql_admin_query $query_name)\", \"variables\": $variables}" \
-    "${GALOY_ENDPOINT}/${gql_route}"
+  if [[ "${BATS_TEST_DIRNAME}" != "" ]]; then
+    # In BATS: run command captures output into $output
+    ${run_cmd} curl -s \
+      -X POST \
+      ${AUTH_HEADER:+ -H "$AUTH_HEADER"} \
+      -H "Content-Type: application/json" \
+      -d "{\"query\": \"$(gql_admin_query $query_name)\", \"variables\": $variables}" \
+      "${GALOY_ENDPOINT}/${gql_route}"
+  else
+    # Outside BATS: manually capture output
+    output=$(curl -s \
+      -X POST \
+      ${AUTH_HEADER:+ -H "$AUTH_HEADER"} \
+      -H "Content-Type: application/json" \
+      -d "{\"query\": \"$(gql_admin_query $query_name)\", \"variables\": $variables}" \
+      "${GALOY_ENDPOINT}/${gql_route}")
+  fi
 
   echo "GQL output: '$output'"
 }
@@ -217,7 +240,13 @@ curl_request() {
 
   cmd+=("${url}")
 
-  "${cmd[@]}"
+  if [[ "${BATS_TEST_DIRNAME}" != "" ]]; then
+    # In BATS: run command captures output into $output
+    "${cmd[@]}"
+  else
+    # Outside BATS: manually capture output
+    output=$("${cmd[@]}")
+  fi
 
   echo "Curl output: '$output'"
 }
@@ -238,3 +267,29 @@ is_contact() {
   )
   [[ "$fetched_username" == "$contact_username" ]] || return 1
 }
+
+create_device_account() {
+    local token_name="$1"
+    local url="http://${GALOY_ENDPOINT}/auth/create/device-account"
+
+    # dev/ory/gen-test-jwt.ts
+    local jwt="eyJhbGciOiJSUzI1NiIsImtpZCI6IjFiOTdiMjIxLWNhMDgtNGViMi05ZDA5LWE1NzcwZmNjZWIzNyJ9.eyJzdWIiOiIxOjgwNjY0NjE0MDQzNTphbmRyb2lkOmE4YTBjY2ZlODhiZWUxNWIwNmY5ZTYiLCJhdWQiOlsicHJvamVjdHMvODA2NjQ2MTQwNDM1IiwicHJvamVjdHMvYXZpZC1jZWlsaW5nLTM5MDQxOCJdLCJwcm92aWRlciI6ImRlYnVnIiwiaXNzIjoiaHR0cHM6Ly9maXJlYmFzZWFwcGNoZWNrLmdvb2dsZWFwaXMuY29tLzgwNjY0NjE0MDQzNSIsImV4cCI6MjYzOTAwMDA2OX0.cgE2pX3srSzlPreJpBDLaFmPQn9CyKoxW1f-hFgVbGZ7xwWysogsNTrV0eIkvgDnZWjbjexOxf4HhuK2MSBmnRYTWgk6LC7LNoq_KPNAvxkMNj1HGSYh34q2uYafcc1LZCREDvPFTw-JN6FJOAzk7TbWwi8A8-Z8ed5W1kqzkWu_D79nZNWZuN6tUpoeyj1c77Cb7wn5UBlSBhoNrfxXOQKTsKTmuFpcR2P3zv_R9D-yedizqLpG75XJkJd6_4zuhhrW05nMgOHULQ2bTt3PTbi6dy64ObLwMOT5vevqqbKc303-rk02sDGCdRc251nL5sIvTIcajXUXs-Ruy3Op4g"  # the JWT token
+
+    local username="$(random_uuid)"
+    local password="$(random_uuid)"
+
+    if [[ "$(uname)" == "Linux" ]]; then
+      local basic_token="$(echo -n $username:$password | base64 -w 0)"
+    else
+      local basic_token="$(echo -n $username:$password | base64)"
+    fi
+
+    local auth_header="Authorization: Basic $basic_token"
+    local appcheck_header="Appcheck: $jwt"
+
+    # Create account
+    curl_request "$url" "" "$auth_header" "$appcheck_header"
+    local auth_token="$(echo $output | jq -r '.result')"
+    [[ "$auth_token" != "null" ]] || return 1
+    cache_value "$token_name" "$auth_token"
+  }
