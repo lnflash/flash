@@ -17,7 +17,6 @@ import { getCurrentPriceAsDisplayPriceRatio } from "@app/prices"
 import { removeDeviceTokens } from "@app/users/remove-device-tokens"
 import { ZapRequestModel } from "@services/mongoose/zap-request"
 import { ZapPublisher } from "@services/nostr/zapPublisher"
-import { all } from "axios"
 
 const sendZapReceipt = async (req: Request, resp: Response) => {
   const { transaction, receivedMsat } = req.body
@@ -57,9 +56,6 @@ const sendZapReceipt = async (req: Request, resp: Response) => {
         zapRequest: JSON.parse(zapRequest.nostrJson),
         amountMsat: zapRequest.amountMsat,
         bolt11: zapRequest.bolt11,
-        recipientUser,
-        recipientAccount,
-        receiverWallet,
       })
       // mark as fulfilled
       zapRequest.fulfilled = true
@@ -129,9 +125,21 @@ const paths = {
 }
 
 const router = express.Router()
-router.post(paths.invoice, authenticate, logRequest, sendLightningNotification)
+router.post(
+  paths.invoice,
+  authenticate,
+  logRequest,
+  sendLightningNotification,
+  sendZapReceipt,
+)
 
-router.post(paths.lnurl, authenticate, logRequest, sendLightningNotification)
+router.post(
+  paths.lnurl,
+  authenticate,
+  logRequest,
+  sendLightningNotification,
+  sendZapReceipt,
+)
 
 router.post(paths.cashout, authenticate, logRequest, () => {
   baseLogger.info("Received payment for cashout.")

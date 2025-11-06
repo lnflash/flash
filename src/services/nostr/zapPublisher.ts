@@ -3,6 +3,7 @@ import { baseLogger as logger } from "@services/logger"
 import { Event, finalizeEvent, getPublicKey, nip19 } from "nostr-tools"
 import { pool } from "../../utils/nostr"
 import WebSocket from "ws"
+import { NOSTR_PRIVATE_KEY } from "@config"
 
 // @ts-ignore
 globalThis.WebSocket = WebSocket
@@ -11,9 +12,6 @@ export interface PublishFromWebhookArgs {
   zapRequest: Event // deserialized nostrJson
   amountMsat: number
   bolt11: string
-  recipientUser: any
-  recipientAccount: any
-  receiverWallet: any
 }
 
 export const ZapPublisher = {
@@ -21,15 +19,12 @@ export const ZapPublisher = {
     zapRequest,
     amountMsat,
     bolt11,
-    recipientUser,
-    recipientAccount,
-    receiverWallet,
   }: PublishFromWebhookArgs) => {
     try {
-      if (!process.env.NOSTR_PRIVATE_KEY) {
+      if (!NOSTR_PRIVATE_KEY) {
         throw new Error("NOSTR_PRIVATE_KEY is not set")
       }
-      const secretKey = nip19.decode(process.env.NOSTR_PRIVATE_KEY).data as Uint8Array
+      const secretKey = nip19.decode(NOSTR_PRIVATE_KEY).data as Uint8Array
       const serverPubkey = getPublicKey(secretKey)
       // 1. Build the 9735 zap receipt event
       const zapReceipt = {
@@ -38,7 +33,7 @@ export const ZapPublisher = {
         created_at: Math.floor(Date.now() / 1000),
         tags: [
           ["bolt11", bolt11],
-          ["p", zapRequest.pubkey], // the original zap request sender pubkey
+          ["p", zapRequest.pubkey],
           ["amount", amountMsat.toString()],
         ],
         content: "", // optional message / comment
