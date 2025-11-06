@@ -6,6 +6,7 @@ import axios from "axios"
 import { baseLogger as logger } from "@services/logger"
 import { AccountsRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
+import { extractPaymentHashFromBolt11 } from "@utils"
 
 const paths = {
   invoice: "/pay/invoice",
@@ -103,17 +104,3 @@ router.post(paths.onchain, authenticate, logRequest, async (_: Request, resp: Re
 )
 
 export { paths, router }
-
-/**
- * Helper: extract payment hash from bolt11
- * You can use a proper BOLT11 decoding library if available
- */
-function extractPaymentHashFromBolt11(bolt11: string): string | null {
-  try {
-    const decoded = require("bolt11").decode(bolt11)
-    const hashTag = decoded.tags.find((t: any) => t.tagName === "payment_hash")
-    return hashTag?.data || null
-  } catch {
-    return null
-  }
-}
