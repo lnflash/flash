@@ -200,6 +200,7 @@ services:
   frappe-backend:
     # image: lnflash/frappe-erp-admin:latest
     image: brh28/frappe-flash:0.0.2
+    platform: linux/amd64
     deploy:
       restart_policy:
         condition: on-failure
@@ -214,6 +215,7 @@ services:
 
   frappe-configurator:
     image: brh28/frappe-flash:0.0.2
+    platform: linux/amd64
     deploy:
       restart_policy:
         condition: none
@@ -246,6 +248,7 @@ services:
 
   frappe-create-site:
     image: brh28/frappe-flash:0.0.2
+    platform: linux/amd64
     deploy:
       restart_policy:
         condition: none
@@ -300,6 +303,7 @@ services:
 
   frappe-frontend:
     image: brh28/frappe-flash:0.0.2
+    platform: linux/amd64
     ports: ["8080:8080"]
     depends_on:
       - frappe-websocket
@@ -323,6 +327,7 @@ services:
 
   frappe-websocket:
     image: brh28/frappe-flash:0.0.2
+    platform: linux/amd64
     deploy:
       restart_policy:
         condition: on-failure
