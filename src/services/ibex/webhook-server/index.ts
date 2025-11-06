@@ -13,7 +13,6 @@ const start = () => {
   app.get("/health", (_: Request, resp: Response) => resp.send("Ibex server is running"))
   app.use(onReceive.router)
   app.use(onPay.router)
-  logger.info(`🔑 Webhook secret (for local testing): ${IbexConfig.webhook.secret}`)
   app.listen(IbexConfig.webhook.port, () =>
     logger.info(
       `Listening for ibex events on port ${IbexConfig.webhook.port}. Can be reached at ${IbexConfig.webhook.uri}`,

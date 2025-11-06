@@ -71,7 +71,6 @@ const sendZapReceipt = async (req: Request, resp: Response) => {
 }
 
 const sendLightningNotification = async (req: Request, resp: Response) => {
-  console.log("Ibex called THE WEBHOOK!")
   const { transaction, receivedMsat } = req.body
   const receivedSat = (receivedMsat / 1000) as Satoshis
   const recipientWalletId = transaction.accountId

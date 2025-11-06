@@ -1,36 +1,16 @@
 import express, { Request, Response } from "express"
 import { authenticate, logRequest } from "../middleware"
+import { WalletsRepository } from "@services/mongoose/wallets"
 import { ZapRequestModel } from "@services/mongoose/zap-request"
+import axios from "axios"
 import { baseLogger as logger } from "@services/logger"
 import { AccountsRepository } from "@services/mongoose"
-import { bech32 } from "bech32"
-
-import IbexClient from "ibex-client"
-import { IbexConfig } from "@config"
-import { Redis } from "@services/ibex/cache"
-import { onReceive } from "."
+import Ibex from "@services/ibex/client"
 
 const paths = {
   invoice: "/pay/invoice",
   lnurl: "/pay/lnurl/:username",
   onchain: "/pay/onchain",
-}
-
-const Ibex = new IbexClient(
-  IbexConfig.url,
-  { email: IbexConfig.email, password: IbexConfig.password },
-  Redis,
-)
-
-export function decodeLnurl(lnurl: string): { callback: string } {
-  try {
-    const decoded = bech32.decode(lnurl, 1500)
-    const bytes = bech32.fromWords(decoded.words)
-    const url = Buffer.from(bytes).toString()
-    return { callback: url }
-  } catch (err) {
-    throw new Error("Failed to decode lnurl: " + err)
-  }
 }
 
 const router = express.Router()
@@ -56,19 +36,31 @@ router.get(paths.lnurl, logRequest, async (req: Request, resp: Response) => {
     if (account instanceof Error) {
       return resp.status(404).json({ error: "User not found" })
     }
-
-    const invoiceResponse = await Ibex.addInvoice({
-      accountId: account.defaultWalletId,
-      memo: (comment as string) || "Zap!",
-      amount: Number(amount),
-      webhookUrl: IbexConfig.webhook.uri + onReceive.paths.zap,
-      webhookSecret: IbexConfig.webhook.secret,
-    })
-    if (invoiceResponse instanceof Error) {
-      return resp.status(500).json({ error: "Could Not generate invoice" })
+    const wallet = await WalletsRepository().listByAccountId(account.id)
+    if (!wallet || wallet instanceof Error || wallet.length === 0) {
+      return resp.status(404).json({ error: "No wallet found for this user" })
     }
+    const lnurlp = wallet[0].lnurlp
+    if (!lnurlp)
+      return resp.status(404).json({ error: "No lnurlp found for this wallet" })
 
-    const bolt11 = invoiceResponse.invoice?.bolt11
+    // 2. Decode lnurlp to get invoice callback URL
+    const decoded = await Ibex.decodeLnurl({ lnurl: lnurlp })
+    if (decoded instanceof Error || !decoded.decodedLnurl)
+      return resp.status(500).json({ error: "Couldn't decode users lnurl" })
+    const callbackUrl = decoded.decodedLnurl
+    if (!callbackUrl)
+      return resp.status(500).json({ error: "Failed to decode lnurl callback URL" })
+    const lnurlResponse = await axios.get(callbackUrl)
+    const invoiceAddress = lnurlResponse.data.callback
+    // 3. Call original invoice callback URL to generate invoice
+    const invoiceResp = await axios.get(invoiceAddress, {
+      params: {
+        amount,
+        comment: comment || "Zap payment",
+      },
+    })
+    const { pr: bolt11, successAction } = invoiceResp.data
     if (!bolt11) return resp.status(500).json({ error: "Failed to generate invoice" })
 
     // Extract payment hash from bolt11 (or use library if needed)
@@ -87,12 +79,13 @@ router.get(paths.lnurl, logRequest, async (req: Request, resp: Response) => {
         createdAt: new Date(),
         fulfilled: false,
       })
-      const document = await zapRecord.save()
+      await zapRecord.save()
     }
 
     // 5. Return LNURL-pay JSON
     return resp.json({
       pr: bolt11,
+      successAction: successAction || null,
       routes: [],
     })
   } catch (err) {

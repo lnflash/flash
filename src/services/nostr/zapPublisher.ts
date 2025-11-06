@@ -25,7 +25,6 @@ export const ZapPublisher = {
     recipientAccount,
     receiverWallet,
   }: PublishFromWebhookArgs) => {
-    console.log("Zap publisher called")
     try {
       if (!process.env.NOSTR_PRIVATE_KEY) {
         throw new Error("NOSTR_PRIVATE_KEY is not set")
@@ -48,7 +47,6 @@ export const ZapPublisher = {
       const signedEvent = finalizeEvent(zapReceipt, secretKey)
       const relaysTag = zapRequest.tags.find((tag) => tag[0] === "relays")
       const relays = relaysTag ? relaysTag.slice(1) : []
-      console.log("Publishing Zap receipts TO", relays)
       pool.publish(relays, signedEvent)
 
       logger.info(
