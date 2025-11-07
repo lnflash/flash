@@ -1,7 +1,8 @@
-// this script generates and verifies a JSON Web Token (JWT), using the 'node-jose', 'jsonwebtoken', and 'jwks-rsa' packages.
-// It uses a local 'jwks.json' file for key storage and verification
+/*
+  Firebase App Check Token is used for Device Authentication. 
+  This JWT simulates the Firebase App Check token used in the device account creation flow.
+*/
 
-// cd dev/ory && ts-node gen-test-jwt.ts
 import fs from "fs"
 import * as jose from "node-jose"
 import jsonwebtoken from "jsonwebtoken"
@@ -85,12 +86,12 @@ async function verifyToken(token) {
   const pem = jwtAskey.toPEM(false)
 
   // Verify the token
-  const verifiedToken = jsonwebtoken.verify(token, pem, {
-    algorithms: ["RS256"],
-    audience: aud,
-    issuer: iss,
-  })
-  return verifiedToken
+  // const verifiedToken = jsonwebtoken.verify(token, pem, {
+  //   algorithms: ["RS256"],
+  //   audience: aud,
+  //   issuer: iss,
+  // })
+  // return verifiedToken
 }
 
 main()
