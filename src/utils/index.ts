@@ -115,3 +115,17 @@ export const delayWhile = async ({
   }
   return res
 }
+
+/**
+ * Helper: extract payment hash from bolt11
+ * You can use a proper BOLT11 decoding library if available
+ */
+export function extractPaymentHashFromBolt11(bolt11: string): string | null {
+  try {
+    const decoded = require("bolt11").decode(bolt11)
+    const hashTag = decoded.tags.find((t: any) => t.tagName === "payment_hash")
+    return hashTag?.data || null
+  } catch {
+    return null
+  }
+}
