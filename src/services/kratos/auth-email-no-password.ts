@@ -2,7 +2,7 @@ import { KRATOS_MASTER_USER_PASSWORD, KRATOS_PG_CON } from "@config"
 
 import { wrapAsyncFunctionsToRunInSpan } from "@services/tracing"
 
-import { isAxiosError } from "axios"
+import { isAxiosError, AxiosError } from "axios"
 
 import {
   EmailCodeInvalidError,
@@ -58,6 +58,55 @@ const getIdentityIdFromFlowId = async (flowId: string) => {
 
 export const AuthWithEmailPasswordlessService = (): IAuthWithEmailPasswordlessService => {
   const password = KRATOS_MASTER_USER_PASSWORD
+
+  // createIdentityForEmailRegistration creates a new identity with email
+  // and sends an OTP code via recovery flow
+  const createIdentityForEmailRegistration = async ({
+    email
+  }: {
+    email: EmailAddress
+  }): Promise<{ kratosUserId: UserId; flowId: EmailFlowId } | KratosError> => {
+    try {
+      let kratosUserId: UserId
+
+      // Check if identity already exists
+      const existingIdentities = await kratosAdmin.listIdentities({
+        credentialsIdentifier: email
+      })
+
+      if (existingIdentities.data.length > 0) {
+        kratosUserId = existingIdentities.data[0].id as UserId
+      } else {
+        // Create new identity with email
+        const createIdentityBody = {
+          credentials: { password: { config: { password } } },
+          state: "active" as const,
+          traits: { email },
+          schema_id: "email_no_password_v0",
+        }
+
+        const { data: identity } = await kratosAdmin.createIdentity({ createIdentityBody })
+        kratosUserId = identity.id as UserId
+      }
+
+      // Send OTP code via recovery flow
+      const { data: recoveryFlow } = await kratosPublic.createNativeRecoveryFlow()
+      await kratosPublic.updateRecoveryFlow({
+        flow: recoveryFlow.id,
+        updateRecoveryFlowBody: {
+          email,
+          method: "code",
+        },
+      })
+
+      return {
+        kratosUserId,
+        flowId: recoveryFlow.id as EmailFlowId
+      }
+    } catch (err) {
+      return new UnknownKratosError(err)
+    }
+  }
 
   // sendEmailWithCode return a flowId even if the user doesn't exist
   // this is to avoid account enumeration attacks
@@ -272,6 +321,25 @@ export const AuthWithEmailPasswordlessService = (): IAuthWithEmailPasswordlessSe
     }
   }
 
+  /**
+   * Adds email to an existing Kratos identity and upgrades schema
+   *
+   * Supports two upgrade paths:
+   * 1. Device account → Email account
+   *    - Schema: username_password_deviceid_v0 → email_no_password_v0
+   *    - Traits: { username } → { email }
+   *    - Note: username trait is REMOVED (not supported by target schema)
+   *    - Note: MongoDB deviceId field is preserved separately
+   *
+   * 2. Phone account → Phone+Email account
+   *    - Schema: phone_no_password_v0 → phone_email_no_password_v0
+   *    - Traits: { phone } → { phone, email }
+   *    - Note: phone trait is PRESERVED
+   *
+   * @param kratosUserId - User ID in Kratos
+   * @param email - Email address to add
+   * @returns Updated identity or error
+   */
   const addUnverifiedEmailToIdentity = async ({
     kratosUserId,
     email,
@@ -301,22 +369,38 @@ export const AuthWithEmailPasswordlessService = (): IAuthWithEmailPasswordlessSe
       return new UnknownKratosError(err.message || err)
     }
 
-    if (identity.schema_id !== SchemaIdType.PhoneNoPasswordV0) {
+    // Validate schema is compatible for email addition/upgrade
+    if (
+      identity.schema_id !== SchemaIdType.PhoneNoPasswordV0 &&
+      identity.schema_id !== SchemaIdType.UsernamePasswordDeviceIdV0
+    ) {
       return new IncompatibleSchemaUpgradeError(
-        `current schema_id: ${identity.schema_id}, expected: ${SchemaIdType.PhoneNoPasswordV0}`,
+        `current schema_id: ${identity.schema_id}, expected: ${SchemaIdType.PhoneNoPasswordV0} or ${SchemaIdType.UsernamePasswordDeviceIdV0}`,
       )
     }
 
     if (identity.state === undefined)
       throw new UnknownKratosError("state undefined, probably impossible state") // type issue
 
-    identity.traits = { ...identity.traits, email }
+    // Set traits based on upgrade path:
+    // - Device account: REPLACE traits (email_no_password_v0 schema only accepts email)
+    // - Phone account: ADD to existing traits (phone_email_no_password_v0 accepts both)
+    identity.traits =
+      identity.schema_id === SchemaIdType.UsernamePasswordDeviceIdV0
+        ? { email } // Replace: removes username trait
+        : { ...identity.traits, email } // Add: keeps phone trait
+
+    // Determine target schema based on current schema
+    const targetSchemaId =
+      identity.schema_id === SchemaIdType.UsernamePasswordDeviceIdV0
+        ? SchemaIdType.EmailNoPasswordV0
+        : SchemaIdType.PhoneEmailNoPasswordV0
 
     const adminIdentity: UpdateIdentityBody = {
       ...identity,
       credentials: { password: { config: { password } } },
       state: identity.state,
-      schema_id: SchemaIdType.PhoneEmailNoPasswordV0,
+      schema_id: targetSchemaId,
     }
 
     try {
@@ -488,6 +572,7 @@ export const AuthWithEmailPasswordlessService = (): IAuthWithEmailPasswordlessSe
       removePhoneFromIdentity,
       addPhoneToIdentity,
       addUnverifiedEmailToIdentity,
+      createIdentityForEmailRegistration,
       sendEmailWithCode,
       validateCode,
       hasEmail,

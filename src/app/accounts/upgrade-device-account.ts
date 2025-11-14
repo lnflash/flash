@@ -30,3 +30,42 @@ export const upgradeAccountFromDeviceToPhone = async ({
 
   return accountUpdated
 }
+
+/**
+ * Upgrades a TRIAL device account to an email-based account
+ *
+ * This function updates MongoDB records after Kratos schema has been upgraded
+ * from username_password_deviceid_v0 to email_no_password_v0
+ *
+ * Changes made:
+ * - Adds email to User record
+ * - Upgrades Account level from 0 (TRIAL) to 1 (verified)
+ * - Preserves deviceId field in User record
+ *
+ * @param userId - Kratos user ID
+ * @param email - Email address to add
+ * @returns Updated Account or RepositoryError
+ */
+export const upgradeAccountFromDeviceToEmail = async ({
+  userId,
+  email,
+}: {
+  userId: UserId
+  email: EmailAddress
+}): Promise<Account | RepositoryError> => {
+  // TODO: ideally both 1. and 2. should be done in a transaction,
+  // so that if one fails, the other is rolled back
+
+  // 1. Update user record with email (deviceId is preserved via spread)
+  const res = await UsersRepository().addEmail(userId, email)
+  if (res instanceof Error) return res
+
+  // 2. Update account level from TRIAL (0) to verified (1)
+  const accountDevice = await AccountsRepository().findByUserId(userId)
+  if (accountDevice instanceof Error) return accountDevice
+  accountDevice.level = AccountLevel.One
+  const accountUpdated = await AccountsRepository().update(accountDevice)
+  if (accountUpdated instanceof Error) return accountUpdated
+
+  return accountUpdated
+}
