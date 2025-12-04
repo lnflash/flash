@@ -7,13 +7,36 @@ import {
   JournalEntrySubmitError,
   JournalEntryTitleError,
   JournalEntryDeleteError,
-  IssueCreateError,
-  IssueQueryError,
+  UpgradeRequestCreateError,
+  UpgradeRequestQueryError,
 } from "./errors"
 import { FrappeConfig } from "@config"
 import ValidOffer from "@app/offers/ValidOffer"
 
 const erpUsd = (usd: USDAmount): number => Number(usd.asCents(2)) // Number(usd.asDollars(2))
+
+/**
+ * ERPNext Account Upgrade Request Integration
+ *
+ * This module integrates with the "Account Upgrade Request" doctype in ERPNext.
+ * The doctype must be created in ERPNext with matching field names (snake_case).
+ *
+ * Account levels in Flash use numeric values (0-3), but ERPNext stores them
+ * as string labels ("ZERO", "ONE", "TWO", "THREE") for readability in the UI.
+ */
+type ErpLevelString = "ZERO" | "ONE" | "TWO" | "THREE"
+
+/** Convert Flash's numeric account level to ERPNext's string representation */
+const levelToErpString = (level: number): ErpLevelString => {
+  const map: Record<number, ErpLevelString> = { 0: "ZERO", 1: "ONE", 2: "TWO", 3: "THREE" }
+  return map[level] || "ZERO"
+}
+
+/** Convert ERPNext's string level back to Flash's numeric representation */
+const erpStringToLevel = (str: ErpLevelString): number => {
+  const map: Record<ErpLevelString, number> = { ZERO: 0, ONE: 1, TWO: 2, THREE: 3 }
+  return map[str]
+}
 
 class ErpNext {
   url: string
@@ -133,55 +156,112 @@ class ErpNext {
   }
 
   /**
-   * Create a support Issue in ERPNext for account upgrade requests
+   * Create an Account Upgrade Request document in ERPNext
+   *
+   * This creates a new record in the "Account Upgrade Request" doctype, which tracks
+   * user requests to upgrade their account level (e.g., from Standard to Pro or Merchant).
+   *
+   * The request is created with status "Pending" and must be approved/rejected manually
+   * in ERPNext by an admin (except for Level 2 which auto-upgrades in Flash).
+   *
+   * Field mapping (camelCase -> snake_case for ERPNext):
+   * - User info (from MongoDB): username, phoneNumber, email
+   * - User input (from mutation): fullName, businessName, businessAddress, bank details, etc.
+   * - System-set: currentLevel, requestedLevel, status
+   *
+   * @returns The ERPNext document name (ID) on success, or an error
    */
-  async createSupportIssue(data: {
-    subject: string
-    description: string
-    priority?: "Low" | "Medium" | "High"
-    issueType?: string
-  }): Promise<{ name: string } | IssueCreateError> {
-    const issue = {
-      doctype: "Issue",
-      subject: data.subject,
-      description: data.description,
-      priority: data.priority || "Medium",
-      issue_type: data.issueType || "Account Upgrade Request",
-      status: "Open",
-      raised_by: "system@flash.io",
+  async createUpgradeRequest(data: {
+    currentLevel: number
+    requestedLevel: number
+    username: string
+    fullName: string
+    phoneNumber: string
+    email?: string
+    businessName?: string
+    businessAddress?: string
+    terminalRequested?: boolean
+    bankName?: string
+    bankBranch?: string
+    accountType?: string
+    currency?: string
+    accountNumber?: number
+    idDocument?: string
+  }): Promise<{ name: string } | UpgradeRequestCreateError> {
+    // Map camelCase fields to snake_case for ERPNext API
+    const upgradeRequest = {
+      doctype: "Account Upgrade Request",
+      current_level: levelToErpString(data.currentLevel),
+      requested_level: levelToErpString(data.requestedLevel),
+      username: data.username,
+      full_name: data.fullName,
+      phone_number: data.phoneNumber,
+      email: data.email,
+      business_name: data.businessName,
+      business_address: data.businessAddress,
+      terminal_requested: data.terminalRequested,
+      bank_name: data.bankName,
+      bank_branch: data.bankBranch,
+      account_type: data.accountType,
+      currency: data.currency,
+      account_number: data.accountNumber,
+      id_document: data.idDocument,
+      status: "Pending", // All new requests start as Pending
     }
 
     try {
-      const resp = await axios.post(`${this.url}/api/resource/Issue`, issue, {
-        headers: this.headers,
-      })
+      const resp = await axios.post(
+        `${this.url}/api/resource/Account Upgrade Request`,
+        upgradeRequest,
+        { headers: this.headers },
+      )
       return { name: resp.data.data.name }
     } catch (err) {
-      baseLogger.error({ err, issue }, "Error creating Issue in ERPNext")
-      return new IssueCreateError(err)
+      baseLogger.error({ err, upgradeRequest }, "Error creating Account Upgrade Request in ERPNext")
+      return new UpgradeRequestCreateError(err)
     }
   }
 
   /**
-   * Get open Issues for a username
-   * Returns list of open issue names
+   * Query ERPNext for a pending Account Upgrade Request by username
+   *
+   * Used to check if a user already has a pending upgrade request before
+   * allowing them to submit a new one. This prevents duplicate requests.
+   *
+   * @param username - The Flash username to search for
+   * @returns The pending request info, null if none exists, or an error
    */
-  async getOpenIssuesByUsername(username: string): Promise<string[] | IssueQueryError> {
+  async getPendingUpgradeRequest(
+    username: string,
+  ): Promise<{ name: string; requestedLevel: number } | null | UpgradeRequestQueryError> {
     try {
-      const resp = await axios.get(`${this.url}/api/resource/Issue`, {
+      // Query ERPNext for pending requests matching this username
+      const resp = await axios.get(`${this.url}/api/resource/Account Upgrade Request`, {
         headers: this.headers,
         params: {
           filters: JSON.stringify([
-            ["subject", "like", `%${username}%`],
-            ["status", "=", "Open"],
+            ["username", "=", username],
+            ["status", "=", "Pending"],
           ]),
-          fields: JSON.stringify(["name", "subject", "status"]),
+          fields: JSON.stringify(["name", "requested_level", "status"]),
+          limit_page_length: 1, // Only need to know if one exists
         },
       })
-      return resp.data.data.map((issue: any) => issue.name)
+
+      // No pending request found
+      if (resp.data.data.length === 0) {
+        return null
+      }
+
+      // Return the pending request details, converting level back to numeric
+      const request = resp.data.data[0]
+      return {
+        name: request.name,
+        requestedLevel: erpStringToLevel(request.requested_level),
+      }
     } catch (err) {
-      baseLogger.error({ err, username }, "Error querying Issues in ERPNext")
-      return new IssueQueryError(err)
+      baseLogger.error({ err, username }, "Error querying Account Upgrade Request in ERPNext")
+      return new UpgradeRequestQueryError(err)
     }
   }
 }
