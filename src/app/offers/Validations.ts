@@ -57,6 +57,14 @@ export const walletBelongsToAccount = async (o: ValidationInputs) => {
   return AccountValidator(o.account).validateWalletForAccount(o.wallet)
 }
 
+// TODO: Look this field up against ERP system to ensure it is valid
+export const hasErpParty = async (o: ValidationInputs): Promise<true | ValidationError> => {
+  if (!o.account.erpParty) {
+    return new ValidationError("Account is missing erpParty field.")
+  }
+  return true
+}
+
 export const validate = async (inputs: ValidationInputs, validators: ValidationFn[]): Promise<ValidationError[]> => {
   const results = await Promise.all(validators.map(v => v(inputs)))
   return results.filter((r): r is ValidationError => (r !== true)) 

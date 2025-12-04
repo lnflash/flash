@@ -17,10 +17,23 @@ services:
       # - lnd1
       # - lnd2
       # - lnd-outside-1
-      - svix
+      # - svix
       # - lnd-outside-2
       - otel-agent
     restart: on-failure:10
+
+  frappe:
+    image: busybox
+    depends_on:
+      - mariadb
+      - redis
+      - frappe-websocket
+      - frappe-backend
+      - frappe-frontend
+      - frappe-create-site
+      - frappe-configurator
+    restart: on-failure:10
+
   integration-deps:
     image: busybox
     depends_on:
@@ -124,178 +137,6 @@ services:
       - POSTGRES_USER=galoy-price-usr
       - POSTGRES_PASSWORD=galoy-price-pwd
       - POSTGRES_DB=galoy-price-history
-  # bitcoind:
-  #   image: lncm/bitcoind:v24.0.1
-  #   ports: []
-  #   volumes:
-  #     - ${HOST_PROJECT_PATH:-.}/dev/bitcoind/bitcoin.conf:/data/.bitcoin/bitcoin.conf
-  # bitcoind-signer:
-  #   image: lncm/bitcoind:v24.0.1
-  #   ports: []
-  #   volumes:
-  #     - ${HOST_PROJECT_PATH:-.}/dev/bitcoind/bitcoin.conf:/data/.bitcoin/bitcoin.conf
-  #   depends_on: [bitcoind]
-  #   entrypoint: ["/bin/sh", "-c"]
-  #   command:
-  #     - |
-  #       bitcoind -connect=bitcoind:18444
-  # lnd1:
-  #   image: lightninglabs/lnd:v0.16.2-beta
-  #   ports: []
-  #   volumes:
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/lnd.conf:/root/.lnd/lnd.conf
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/tls.key:/root/.lnd/tls.key
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/tls.cert:/root/.lnd/tls.cert
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd1.wallet.db:/root/.lnd/wallet.db
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd1.macaroons.db:/root/.lnd/macaroons.db
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd1.admin.macaroon:/root/.lnd/admin.macaroon
-  #   depends_on: [bitcoind]
-  #   entrypoint: ["/bin/sh", "-c"]
-  #   command:
-  #     - |
-  #       mkdir -p /root/.lnd/data/chain/bitcoin/regtest/
-  #       cp /root/.lnd/wallet.db /root/.lnd/data/chain/bitcoin/regtest/wallet.db
-  #       cp /root/.lnd/macaroons.db /root/.lnd/data/chain/bitcoin/regtest/macaroons.db
-  #       cp /root/.lnd/admin.macaroon /root/.lnd/data/chain/bitcoin/regtest/admin.macaroon
-  #       /bin/lnd
-  # lnd2:
-  #   image: lightninglabs/lnd:v0.16.2-beta
-  #   ports: []
-  #   volumes:
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/lnd.conf:/root/.lnd/lnd.conf
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/tls.key:/root/.lnd/tls.key
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/tls.cert:/root/.lnd/tls.cert
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd2.wallet.db:/root/.lnd/wallet.db
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd2.macaroons.db:/root/.lnd/macaroons.db
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd2.admin.macaroon:/root/.lnd/admin.macaroon
-  #   depends_on: [bitcoind]
-  #   entrypoint: ["/bin/sh", "-c"]
-  #   command:
-  #     - |
-  #       mkdir -p /root/.lnd/data/chain/bitcoin/regtest/
-  #       cp /root/.lnd/wallet.db /root/.lnd/data/chain/bitcoin/regtest/wallet.db
-  #       cp /root/.lnd/macaroons.db /root/.lnd/data/chain/bitcoin/regtest/macaroons.db
-  #       cp /root/.lnd/admin.macaroon /root/.lnd/data/chain/bitcoin/regtest/admin.macaroon
-  #       /bin/lnd
-  # lnd-outside-1:
-  #   image: lightninglabs/lnd:v0.16.2-beta
-  #   ports: []
-  #   volumes:
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/lnd.conf:/root/.lnd/lnd.conf
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/tls.key:/root/.lnd/tls.key
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/tls.cert:/root/.lnd/tls.cert
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd-outside-1.wallet.db:/root/.lnd/wallet.db
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd-outside-1.macaroons.db:/root/.lnd/macaroons.db
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd-outside-1.admin.macaroon:/root/.lnd/admin.macaroon
-  #   entrypoint: ["/bin/sh", "-c"]
-  #   command:
-  #     - |
-  #       mkdir -p /root/.lnd/data/chain/bitcoin/regtest/
-  #       cp /root/.lnd/wallet.db /root/.lnd/data/chain/bitcoin/regtest/wallet.db
-  #       cp /root/.lnd/macaroons.db /root/.lnd/data/chain/bitcoin/regtest/macaroons.db
-  #       cp /root/.lnd/admin.macaroon /root/.lnd/data/chain/bitcoin/regtest/admin.macaroon
-  #       /bin/lnd
-  #   depends_on: [bitcoind]
-  # lnd-outside-2:
-  #   image: lightninglabs/lnd:v0.16.2-beta
-  #   ports: []
-  #   volumes:
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/lnd.conf:/root/.lnd/lnd.conf
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/tls.key:/root/.lnd/tls.key
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/tls.cert:/root/.lnd/tls.cert
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd-outside-2.wallet.db:/root/.lnd/wallet.db
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd-outside-2.macaroons.db:/root/.lnd/macaroons.db
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd-outside-2.admin.macaroon:/root/.lnd/admin.macaroon
-  #   entrypoint: ["/bin/sh", "-c"]
-  #   command:
-  #     - |
-  #       mkdir -p /root/.lnd/data/chain/bitcoin/regtest/
-  #       cp /root/.lnd/wallet.db /root/.lnd/data/chain/bitcoin/regtest/wallet.db
-  #       cp /root/.lnd/macaroons.db /root/.lnd/data/chain/bitcoin/regtest/macaroons.db
-  #       cp /root/.lnd/admin.macaroon /root/.lnd/data/chain/bitcoin/regtest/admin.macaroon
-  #       /bin/lnd
-  #   depends_on: [bitcoind]
-  # loopserver:
-  #   image: lightninglabs/loopserver:v0.9.52-beta
-  #   ports: []
-  #   restart: unless-stopped
-  #   volumes:
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/lnd.conf:/root/.lnd/lnd.conf
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/tls.key:/root/.lnd/tls.key
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/tls.cert:/root/.lnd/tls.cert
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/loop/server/regtest:/root/.lnd/data/chain/bitcoin/regtest
-  #   depends_on:
-  #     - lnd-outside-1
-  #   command:
-  #     - "daemon"
-  #     - "--maxamt=5000000"
-  #     - "--lnd.host=lnd-outside-1:10009"
-  #     - "--lnd.macaroondir=/root/.lnd/data/chain/bitcoin/regtest"
-  #     - "--lnd.tlspath=/root/.lnd/tls.cert"
-  # loopd1:
-  #   image: lightninglabs/loop:v0.20.1-beta
-  #   ports: []
-  #   restart: unless-stopped
-  #   volumes:
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/lnd.conf:/root/.lnd/lnd.conf
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/tls.key:/root/.lnd/tls.key
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/tls.cert:/root/.lnd/tls.cert
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd1.admin.macaroon:/root/.lnd/lnd1.admin.macaroon
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/loop/regtest/loopd1-1.macaroons.db:/root/.loop/tmp/macaroons.db
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/loop/regtest/loopd1-1.loop.db:/root/.loop/tmp/loop.db
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/loop/regtest/loopd1-1.tls.key:/root/.loop/tmp/tls.key
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/loop/regtest/loopd1-1.tls.cert:/root/.loop/tmp/tls.cert
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/loop/regtest/loopd1-1.loop.macaroon:/root/.loop/tmp/loop.macaroon
-  #   depends_on:
-  #     - lnd1
-  #     - loopserver
-  #   environment:
-  #     - LOOP_SERVER_INTERNAL_IP=${LOOP_SERVER_INTERNAL_IP}
-  #   command: bash -c "
-  #     mkdir -p /root/.loop/regtest/ &&
-  #     cp /root/.loop/tmp/* /root/.loop/regtest/ &&
-  #     loopd\
-  #     --network=regtest\
-  #     --debuglevel=debug\
-  #     --server.host=${LOOP_SERVER_INTERNAL_IP}:11009\
-  #     --server.notls --lnd.host=lnd1:10009\
-  #     --lnd.macaroonpath=/root/.lnd/lnd1.admin.macaroon\
-  #     --lnd.tlspath=/root/.lnd/tls.cert\
-  #     --tlsautorefresh\
-  #     --restlisten=0.0.0.0:8081\
-  #     --rpclisten=0.0.0.0:11010"
-  # loopd2:
-  #   image: lightninglabs/loop:v0.20.1-beta
-  #   ports: []
-  #   restart: unless-stopped
-  #   volumes:
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/lnd.conf:/root/.lnd/lnd.conf
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/tls.key:/root/.lnd/tls.key
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/tls.cert:/root/.lnd/tls.cert
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd2.admin.macaroon:/root/.lnd/lnd2.admin.macaroon
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/loop/regtest/loopd2-1.macaroons.db:/root/.loop/tmp/macaroons.db
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/loop/regtest/loopd2-1.loop.db:/root/.loop/tmp/loop.db
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/loop/regtest/loopd2-1.tls.key:/root/.loop/tmp/tls.key
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/loop/regtest/loopd2-1.tls.cert:/root/.loop/tmp/tls.cert
-  #     - ${HOST_PROJECT_PATH:-.}/dev/lnd/loop/regtest/loopd2-1.loop.macaroon:/root/.loop/tmp/loop.macaroon
-  #   depends_on:
-  #     - lnd2
-  #     - loopserver
-  #   environment:
-  #     - LOOP_SERVER_INTERNAL_IP=${LOOP_SERVER_INTERNAL_IP}
-  #   command: bash -c "
-  #     mkdir -p /root/.loop/regtest/ &&
-  #     cp /root/.loop/tmp/* /root/.loop/regtest/ &&
-  #     loopd\
-  #     --network=regtest\
-  #     --debuglevel=debug\
-  #     --server.host=${LOOP_SERVER_INTERNAL_IP}:11009\
-  #     --server.notls --lnd.host=lnd2:10009\
-  #     --lnd.macaroonpath=/root/.lnd/lnd2.admin.macaroon\
-  #     --lnd.tlspath=/root/.lnd/tls.cert\
-  #     --tlsautorefresh\
-  #     --restlisten=0.0.0.0:8081\
-  #     --rpclisten=0.0.0.0:11010"
   bats-tests:
     image: us.gcr.io/galoy-org/nodejs-concourse
     ports: []
@@ -323,55 +164,6 @@ services:
       - ${TMP_ENV_CI:-.env.ci}
     volumes:
       - ./:/repo
-  # stablesats:
-  #   image: us.gcr.io/galoy-org/stablesats-rs:latest
-  #   ports: []
-  #   command: ["stablesats", "run"]
-  #   working_dir: /repo/dev
-  #   depends_on:
-  #     - otel-agent
-  #   restart: on-failure:10
-  #   volumes:
-  #     - ${HOST_PROJECT_PATH:-.}/:/repo
-  # bria:
-  #   image: us.gcr.io/galoy-org/bria:latest
-  #   ports: []
-  #   environment:
-  #     - PG_CON=postgres://user:password@postgres-bria:5432/pg
-  #     - BITCOIND_SIGNER_ENDPOINT=https://bitcoind-signer:18443
-  #   command:
-  #     - bria
-  #     - daemon
-  #     - --config
-  #     - /repo/dev/bria.yml
-  #     - dev
-  #     - -x
-  #     - tpubDDDDGYiFda8HfJRc2AHFJDxVzzEtBPrKsbh35EaW2UGd5qfzrF2G87ewAgeeRyHEz4iB3kvhAYW1sH6dpLepTkFUzAktumBN8AXeXWE9nd1
-  #     - -d
-  #     - m/84h/0h/0h
-  #   depends_on:
-  #     bitcoind-signer:
-  #       condition: service_started
-  #     otel-agent:
-  #       condition: service_started
-  #     fulcrum:
-  #       condition: service_started
-  #     postgres-bria:
-  #       condition: service_healthy
-  #   restart: on-failure:10
-  #   volumes:
-  #     - ${HOST_PROJECT_PATH:-.}/:/repo
-  # postgres-bria:
-  #   image: postgres:14.1
-  #   environment:
-  #     - POSTGRES_USER=user
-  #     - POSTGRES_PASSWORD=password
-  #     - POSTGRES_DB=pg
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "pg_isready"]
-  #     interval: 5s
-  #     timeout: 30s
-  #     retries: 5
   oathkeeper:
     image: oryd/oathkeeper:v0.40.4-distroless
     ports: []
@@ -403,35 +195,148 @@ services:
   mailslurper:
     image: oryd/mailslurper:latest-smtps
     ports: []
-  # fulcrum:
-  #   image: cculianu/fulcrum:latest
-  #   ports: []
-  #   depends_on: [bitcoind]
-  #   volumes:
-  #     - ${HOST_PROJECT_PATH:-.}/dev/fulcrum/fulcrum.conf:/fulcrum.conf
-  #     - ${HOST_PROJECT_PATH:-.}/dev/fulcrum/tls.key:/tls.key
-  #     - ${HOST_PROJECT_PATH:-.}/dev/fulcrum/tls.cert:/tls.cert
-  #   environment:
-  #     - DATA_DIR=/db
-  #     - SSL_CERTFILE=/tls.cert
-  #     - SSL_KEYFILE=/tls.key
-  #   command: ["Fulcrum", "/fulcrum.conf"]
 
-  svix:
-    image: svix/svix-server:v1.11
-    platform: linux/amd64
+  # Frappe/ERPNext services
+  frappe-backend:
+    # image: lnflash/frappe-erp-admin:latest
+    image: brh28/frappe-flash:0.0.2
+    deploy:
+      restart_policy:
+        condition: on-failure
+    volumes:
+      - frappe-sites:/home/frappe/frappe-bench/sites
+      - frappe-logs:/home/frappe/frappe-bench/logs
     environment:
-      WAIT_FOR: "true"
-      SVIX_DB_DSN: "postgresql://postgres:postgres@svix-pg/postgres"
-      SVIX_JWT_SECRET: "8KjzRXrKkd9YFcNyqLSIY8JwiaCeRc6WK4UkMnSW"
-      SVIX_WHITELIST_SUBNETS: "[0.0.0.0/0]"
-      SVIX_QUEUE_TYPE: "memory"
+      DB_HOST: mariadb
+      DB_PORT: "3306"
+      MYSQL_ROOT_PASSWORD: admin
+      MARIADB_ROOT_PASSWORD: admin
+
+  frappe-configurator:
+    image: brh28/frappe-flash:0.0.2
+    deploy:
+      restart_policy:
+        condition: none
+    entrypoint:
+      - bash
+      - -c
+    command:
+      - >
+        set -ex;
+        ls -1 apps > sites/apps.txt;
+        bench set-config -g db_host $$DB_HOST;
+        bench set-config -gp db_port $$DB_PORT;
+        bench set-config -g redis_cache "redis://$$REDIS_CACHE";
+        bench set-config -g redis_queue "redis://$$REDIS_QUEUE";
+        bench set-config -g redis_socketio "redis://$$REDIS_QUEUE";
+        bench set-config -gp socketio_port $$SOCKETIO_PORT;
+        bench set-config -g flash_admin_api_url $$FLASH_API;
+        bench set-config -g admin_api_key $$FLASH_SECRET;
+    environment:
+      DB_HOST: mariadb
+      DB_PORT: "3306"
+      REDIS_CACHE: redis:6379/1
+      REDIS_QUEUE: redis:6379/2
+      SOCKETIO_PORT: "9000"
+      FLASH_API: "http://localhost:4002/admin/graphql" ### THIS IS THE HOST MACHINE. NOT DOCKER.
+      FLASH_SECRET: "not-so-secret"
+    volumes:
+      - frappe-sites:/home/frappe/frappe-bench/sites
+      - frappe-logs:/home/frappe/frappe-bench/logs
+
+  frappe-create-site:
+    image: brh28/frappe-flash:0.0.2
+    deploy:
+      restart_policy:
+        condition: none
     depends_on:
-      - svix-pg
-    ports: []
-    extra_hosts: []
+      - frappe-configurator
+    volumes:
+      - frappe-sites:/home/frappe/frappe-bench/sites
+      - frappe-logs:/home/frappe/frappe-bench/logs
+    entrypoint:
+      - bash
+      - -c
+    command:
+      - >
+        wait-for-it -t 120 mariadb:3306;
+        wait-for-it -t 120 redis:6379;
+        wait-for-it -t 120 redis:6379;
+        export start=`date +%s`;
+        until [[ -n `grep -hs ^ sites/common_site_config.json | jq -r ".db_host // empty"` ]] && \
+          [[ -n `grep -hs ^ sites/common_site_config.json | jq -r ".redis_cache // empty"` ]] && \
+          [[ -n `grep -hs ^ sites/common_site_config.json | jq -r ".redis_queue // empty"` ]];
+        do
+          echo "Waiting for sites/common_site_config.json to be created";
+          sleep 5;
+          if (( `date +%s`-start > 120 )); then
+            echo "could not find sites/common_site_config.json with required keys";
+            exit 1
+          fi
+        done;
+        echo "sites/common_site_config.json found";
+        bench new-site --mariadb-user-host-login-scope='%' --admin-password=admin --db-root-username=root --db-root-password=admin --install-app erpnext --install-app admin_panel --set-default frontend;
 
-  svix-pg:
-    image: postgres:14.1
+  mariadb:
+    image: mariadb:10.6
+    ports: []
+    healthcheck:
+      test: mysqladmin ping -h localhost --password=admin
+      interval: 1s
+      retries: 20
+    deploy:
+      restart_policy:
+        condition: on-failure
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --skip-character-set-client-handshake
+      - --skip-innodb-read-only-compressed # Temporary fix for MariaDB 10.6
     environment:
-      POSTGRES_PASSWORD: postgres
+      MYSQL_ROOT_PASSWORD: admin
+      MARIADB_ROOT_PASSWORD: admin
+    volumes:
+      - mariadb-data:/var/lib/mysql
+
+  frappe-frontend:
+    image: brh28/frappe-flash:0.0.2
+    ports: ["8080:8080"]
+    depends_on:
+      - frappe-websocket
+    deploy:
+      restart_policy:
+        condition: on-failure
+    command:
+      - nginx-entrypoint.sh
+    environment:
+      BACKEND: frappe-backend:8000
+      FRAPPE_SITE_NAME_HEADER: frontend
+      SOCKETIO: frappe-websocket:9000
+      UPSTREAM_REAL_IP_ADDRESS: 127.0.0.1
+      UPSTREAM_REAL_IP_HEADER: X-Forwarded-For
+      UPSTREAM_REAL_IP_RECURSIVE: "off"
+      PROXY_READ_TIMEOUT: 120
+      CLIENT_MAX_BODY_SIZE: 50m
+    volumes:
+      - frappe-sites:/home/frappe/frappe-bench/sites
+      - frappe-logs:/home/frappe/frappe-bench/logs
+
+  frappe-websocket:
+    image: brh28/frappe-flash:0.0.2
+    deploy:
+      restart_policy:
+        condition: on-failure
+    command:
+      - node
+      - /home/frappe/frappe-bench/apps/frappe/socketio.js
+    environment:
+      FRAPPE_REDIS_CACHE: redis://redis:6379/1
+      FRAPPE_REDIS_QUEUE: redis://redis:6379/2
+    volumes:
+      - frappe-sites:/home/frappe/frappe-bench/sites
+      - frappe-logs:/home/frappe/frappe-bench/logs
+
+volumes:
+  mariadb-data:
+  frappe-sites:
+  frappe-logs:

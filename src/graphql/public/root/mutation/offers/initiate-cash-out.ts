@@ -2,11 +2,13 @@
 import OffersManager from "@app/offers/OffersManager"
 import { Cashout } from "@config"
 import { NotImplementedError } from "@domain/errors"
+import { ErrorLevel } from "@domain/shared"
 import { InternalServerError, LightningPaymentError } from "@graphql/error"
 import { GT } from "@graphql/index"
 import IError from "@graphql/shared/types/abstract/error"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import { baseLogger } from "@services/logger"
+import { recordExceptionInCurrentSpan } from "@services/tracing"
 import dedent from "dedent"
 
 const InitiateCashoutInput = GT.Input({
@@ -53,8 +55,8 @@ const InitiateCashoutMutation = GT.Field({
     }
 
     const offer = await (OffersManager.executeCashout(offerId, walletId))
-    // if (status instanceof IbexError) return new LightningPaymentError({ message: "Payment failure.", logger: baseLogger })
     if (offer instanceof Error) {
+      recordExceptionInCurrentSpan({ error: offer, level: ErrorLevel.Critical, attributes: { offerId} })
       return new InternalServerError({ message: "Server error. Please contact support", logger: baseLogger })
     }
 

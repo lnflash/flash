@@ -126,7 +126,7 @@ type BTCWallet implements Wallet {
   accountId: ID!
 
   """A balance stored in BTC."""
-  balance: SignedAmount!
+  balance: FractionalCentAmount!
   id: ID!
   lnurlp: Lnurl
 
@@ -375,7 +375,9 @@ type FeesInformation {
   deposit: DepositFeesInformation!
 }
 
-"""(Positive) Cent amount (1/100 of a dollar) as a float"""
+"""
+Cent amount (1/100 of a dollar) as a float, can be positive or negative
+"""
 scalar FractionalCentAmount
 
 """
@@ -1138,6 +1140,7 @@ type Query {
 
   """Returns 1 Sat and 1 Usd Cent price for the given currency"""
   realtimePrice(currency: DisplayCurrency = "USD"): RealtimePrice!
+  transactionDetails(input: TransactionDetailsInput!): TransactionDetailsPayload!
   userDefaultWalletId(username: Username!): WalletId! @deprecated(reason: "will be migrated to AccountDefaultWalletId")
   usernameAvailable(username: Username!): Boolean
 }
@@ -1313,6 +1316,73 @@ type TransactionConnection {
   pageInfo: PageInfo!
 }
 
+type TransactionDetails {
+  """Account ID associated with the transaction"""
+  accountId: String
+
+  """Bitcoin address for onchain transactions"""
+  address: String
+
+  """Transaction amount"""
+  amount: Float
+
+  """Number of confirmations for onchain transactions"""
+  confirmations: Int
+
+  """Transaction creation timestamp"""
+  createdAt: String
+
+  """Transaction currency"""
+  currency: String
+
+  """Transaction fee"""
+  fee: Float
+
+  """Transaction ID"""
+  id: String!
+
+  """Lightning invoice (bolt11)"""
+  invoice: String
+
+  """Transaction memo/description"""
+  memo: String
+
+  """Lightning payment hash"""
+  paymentHash: String
+
+  """Lightning payment preimage"""
+  paymentPreimage: String
+
+  """Transaction status"""
+  status: String
+
+  """Bitcoin transaction ID for onchain transactions"""
+  txid: String
+
+  """Transaction type (lightning/onchain)"""
+  type: String
+
+  """Transaction last update timestamp"""
+  updatedAt: String
+
+  """Output index for onchain transactions"""
+  vout: Int
+}
+
+type TransactionDetailsError {
+  message: String!
+}
+
+input TransactionDetailsInput {
+  """Transaction ID to fetch details for"""
+  transactionId: String!
+}
+
+type TransactionDetailsPayload {
+  errors: [TransactionDetailsError!]!
+  transactionDetails: TransactionDetails
+}
+
 """An edge in a connection."""
 type TransactionEdge {
   """A cursor for use in pagination"""
@@ -1356,7 +1426,7 @@ A wallet belonging to an account which contains a USD balance and a list of tran
 """
 type UsdWallet implements Wallet {
   accountId: ID!
-  balance: SignedAmount!
+  balance: FractionalCentAmount!
   id: ID!
   lnurlp: Lnurl
 
@@ -1613,7 +1683,7 @@ A generic wallet which stores value in one of our supported currencies.
 """
 interface Wallet {
   accountId: ID!
-  balance: SignedAmount!
+  balance: FractionalCentAmount!
   id: ID!
   lnurlp: Lnurl
   pendingIncomingBalance: SignedAmount!

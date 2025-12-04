@@ -29,6 +29,17 @@ input AccountUpdateStatusInput {
   uid: ID!
 }
 
+input AdminBroadcastSendInput {
+  body: String!
+  tag: BroadcastTag!
+  title: String!
+}
+
+type AdminBroadcastSendPayload {
+  errors: [Error!]!
+  success: Boolean
+}
+
 input AdminPushNotificationSendInput {
   accountId: String!
   body: String!
@@ -80,7 +91,7 @@ type BTCWallet implements Wallet {
   accountId: ID!
 
   """A balance stored in BTC."""
-  balance: SignedAmount!
+  balance: FractionalCentAmount!
   id: ID!
   lnurlp: Lnurl
 
@@ -120,6 +131,8 @@ type BTCWallet implements Wallet {
   walletCurrency: WalletCurrency!
 }
 
+scalar BroadcastTag
+
 input BusinessDeleteMapInfoInput {
   username: Username!
 }
@@ -152,6 +165,11 @@ interface Error {
   message: String!
   path: [String]
 }
+
+"""
+Cent amount (1/100 of a dollar) as a float, can be positive or negative
+"""
+scalar FractionalCentAmount
 
 type GraphQLApplicationError implements Error {
   code: String
@@ -253,6 +271,7 @@ type MerchantPayload {
 type Mutation {
   accountUpdateLevel(input: AccountUpdateLevelInput!): AccountDetailPayload!
   accountUpdateStatus(input: AccountUpdateStatusInput!): AccountDetailPayload!
+  adminBroadcastSend(input: AdminBroadcastSendInput!): AdminBroadcastSendPayload!
   adminPushNotificationSend(input: AdminPushNotificationSendInput!): AdminPushNotificationSendPayload!
   businessDeleteMapInfo(input: BusinessDeleteMapInfoInput!): AccountDetailPayload!
   businessUpdateMapInfo(input: BusinessUpdateMapInfoInput!): AccountDetailPayload!
@@ -317,6 +336,7 @@ type Query {
   listWalletIds(walletCurrency: WalletCurrency!): [WalletId!]!
   merchantsPendingApproval: [Merchant!]!
   transactionById(id: ID!): Transaction
+  transactionDetailsById(id: ID!): TransactionDetails
   transactionsByHash(hash: PaymentHash!): [Transaction]
   wallet(walletId: WalletId!): Wallet!
 }
@@ -405,6 +425,59 @@ type TransactionConnection {
   pageInfo: PageInfo!
 }
 
+type TransactionDetails {
+  """Account ID associated with the transaction"""
+  accountId: String
+
+  """Bitcoin address for onchain transactions"""
+  address: String
+
+  """Transaction amount"""
+  amount: Float
+
+  """Number of confirmations for onchain transactions"""
+  confirmations: Int
+
+  """Transaction creation timestamp"""
+  createdAt: String
+
+  """Transaction currency"""
+  currency: String
+
+  """Transaction fee"""
+  fee: Float
+
+  """Transaction ID"""
+  id: String!
+
+  """Lightning invoice (bolt11)"""
+  invoice: String
+
+  """Transaction memo/description"""
+  memo: String
+
+  """Lightning payment hash"""
+  paymentHash: String
+
+  """Lightning payment preimage"""
+  paymentPreimage: String
+
+  """Transaction status"""
+  status: String
+
+  """Bitcoin transaction ID for onchain transactions"""
+  txid: String
+
+  """Transaction type (lightning/onchain)"""
+  type: String
+
+  """Transaction last update timestamp"""
+  updatedAt: String
+
+  """Output index for onchain transactions"""
+  vout: Int
+}
+
 """An edge in a connection."""
 type TransactionEdge {
   """A cursor for use in pagination"""
@@ -430,7 +503,7 @@ A wallet belonging to an account which contains a USD balance and a list of tran
 """
 type UsdWallet implements Wallet {
   accountId: ID!
-  balance: SignedAmount!
+  balance: FractionalCentAmount!
   id: ID!
   lnurlp: Lnurl
 
@@ -481,7 +554,7 @@ A generic wallet which stores value in one of our supported currencies.
 """
 interface Wallet {
   accountId: ID!
-  balance: SignedAmount!
+  balance: FractionalCentAmount!
   id: ID!
   lnurlp: Lnurl
   pendingIncomingBalance: SignedAmount!

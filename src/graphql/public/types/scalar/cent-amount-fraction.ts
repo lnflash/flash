@@ -4,7 +4,7 @@ import { GT } from "@graphql/index"
 
 const FractionalCentAmount = GT.Scalar({
   name: "FractionalCentAmount",
-  description: "(Positive) Cent amount (1/100 of a dollar) as a float",
+  description: "Cent amount (1/100 of a dollar) as a float, can be positive or negative",
   parseValue(value) {
     if (typeof value !== "string" && typeof value !== "number") {
       return new InputValidationError({ message: "Invalid type for FractionalCentAmount" })
@@ -12,7 +12,7 @@ const FractionalCentAmount = GT.Scalar({
     return validFractionalCentAmount(value)
   },
   parseLiteral(ast) {
-    if (ast.kind === GT.Kind.INT) {
+    if (ast.kind === GT.Kind.INT || ast.kind === GT.Kind.FLOAT) {
       return validFractionalCentAmount(ast.value)
     }
     return new InputValidationError({ message: "Invalid type for FractionalCentAmount" })
@@ -20,22 +20,23 @@ const FractionalCentAmount = GT.Scalar({
 })
 
 function validFractionalCentAmount(value: string | number) {
-  let intValue: number
+  let floatValue: number
   if (typeof value === "number") {
-    intValue = value
+    floatValue = value
   } else {
-    intValue = Number.parseFloat(value) 
+    floatValue = Number.parseFloat(value)
   }
 
-  if (!(intValue >= 0)) {
+  if (!Number.isFinite(floatValue)) {
     return new InputValidationError({ message: "Invalid value for FractionalCentAmount" })
   }
 
-  if (intValue > MAX_CENTS.amount) {
-    return new InputValidationError({ message: "Value too big for FractionalCentAmount" })
+  const maxCents = Number(MAX_CENTS.amount)
+  if (floatValue > maxCents || floatValue < -maxCents) {
+    return new InputValidationError({ message: "Value out of range for FractionalCentAmount" })
   }
 
-  return intValue
+  return floatValue
 }
 
 export default FractionalCentAmount

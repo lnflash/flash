@@ -16,6 +16,7 @@ import IWallet from "../abstract/wallet"
 import WalletCurrency from "../scalar/wallet-currency"
 import SignedAmount from "../scalar/signed-amount"
 import OnChainAddress from "../scalar/on-chain-address"
+import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 
 import { TransactionConnection } from "./transaction"
 import { baseLogger } from "@services/logger"
@@ -45,13 +46,13 @@ const UsdWallet = GT.Object<Wallet>({
     },
     
     balance: {
-      type: GT.NonNull(SignedAmount),
+      type: GT.NonNull(FractionalCentAmount),
       resolve: async (source) => {
         const balance = await Wallets.getBalanceForWallet({ walletId: source.id })
         if (balance instanceof Error) {
           throw mapError(balance)
         }
-        return Number(balance.asCents())
+        return Number(balance.asCents(8))
       },
     },
     pendingIncomingBalance: {
