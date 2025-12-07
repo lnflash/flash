@@ -26,9 +26,9 @@ export const ZapPublisher = {
       }
       const secretKey = nip19.decode(NOSTR_PRIVATE_KEY).data as Uint8Array
       const serverPubkey = getPublicKey(secretKey)
-      const receiverPubkey = zapRequest.tags.filter((t) => t[0] === "p")?.[0]?.[1]
-      const eventId = zapRequest.tags.filter((t) => t[0] === "e")?.[0]?.[1]
-      const aTag = zapRequest.tags.filter((t) => t[0] === "a")?.[0]?.[1]
+      const receiverPubkey = zapRequest.tags.find((t) => t[0] === "p")?.[1]
+      const eventId = zapRequest.tags.find((t) => t[0] === "e")?.[1]
+      const aTag = zapRequest.tags.find((t) => t[0] === "a")?.[1]
       // 1. Build the 9735 zap receipt event
       const zapReceipt = {
         kind: 9735,
