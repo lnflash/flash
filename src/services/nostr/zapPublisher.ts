@@ -26,6 +26,9 @@ export const ZapPublisher = {
       }
       const secretKey = nip19.decode(NOSTR_PRIVATE_KEY).data as Uint8Array
       const serverPubkey = getPublicKey(secretKey)
+      const receiverPubkey = zapRequest.tags.find((t) => t[0] === "p")?.[1]
+      const eventId = zapRequest.tags.find((t) => t[0] === "e")?.[1]
+      const aTag = zapRequest.tags.find((t) => t[0] === "a")?.[1]
       // 1. Build the 9735 zap receipt event
       const zapReceipt = {
         kind: 9735,
@@ -33,11 +36,14 @@ export const ZapPublisher = {
         created_at: Math.floor(Date.now() / 1000),
         tags: [
           ["bolt11", bolt11],
-          ["p", zapRequest.pubkey],
           ["amount", amountMsat.toString()],
+          ["description", JSON.stringify(zapRequest)],
         ],
         content: "", // optional message / comment
       }
+      if (receiverPubkey) zapReceipt.tags.push(["p", receiverPubkey])
+      if (eventId) zapReceipt.tags.push(["e", eventId])
+      if (aTag) zapReceipt.tags.push(["a", aTag])
 
       const signedEvent = finalizeEvent(zapReceipt, secretKey)
       const relaysTag = zapRequest.tags.find((tag) => tag[0] === "relays")
