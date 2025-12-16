@@ -147,10 +147,13 @@ class ErpNext {
     email?: string
   }): Promise<{ name: string } | UpgradeRequestCreateError> {
     const upgradeRequest = {
-      doctype: "Account Management Test",
+      doctype: "Account Upgrade Request",
       current_level: levelToErpString(data.currentLevel),
       requested_level: levelToErpString(data.requestedLevel),
       username: data.username,
+      full_name: data.fullName,
+      phone_number: data.phoneNumber,
+      email: data.email,
     }
 
     try {
