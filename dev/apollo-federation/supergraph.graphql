@@ -155,14 +155,6 @@ type AccountUpdateNotificationSettingsPayload
   errors: [Error!]!
 }
 
-type AccountUpgradeRequestStatus
-  @join__type(graph: PUBLIC)
-{
-  errors: [String!]!
-  hasPendingRequest: Boolean!
-  requestedLevel: AccountLevel
-}
-
 """An Opaque Bearer token"""
 scalar AuthToken
   @join__type(graph: PUBLIC)
@@ -235,11 +227,7 @@ type BuildInformation
 input BusinessAccountUpgradeRequestInput
   @join__type(graph: PUBLIC)
 {
-  additionalInfo: String
-  businessAddress: String!
-  businessName: String!
-  businessPhone: String!
-  businessType: String!
+  fullName: String!
   level: AccountLevel!
 }
 
@@ -1439,7 +1427,6 @@ type Query
   @join__type(graph: PUBLIC)
 {
   accountDefaultWallet(username: Username!, walletCurrency: WalletCurrency): PublicWallet!
-  accountUpgradeRequestStatus: AccountUpgradeRequestStatus!
   btcPrice(currency: DisplayCurrency! = "USD"): Price @deprecated(reason: "Deprecated in favor of realtimePrice")
   btcPriceList(range: PriceGraphRange!): [PricePoint]
   businessMapMarkers: [MapMarker!]!

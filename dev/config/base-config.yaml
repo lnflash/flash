@@ -1,4 +1,4 @@
-# future admins should be added via admin-api. 
+# future admins should be added via admin-api.
 admin_accounts:
   - role: "bankowner"
     phone: "+16505554334"
@@ -42,8 +42,8 @@ frappe:
   url: "http://localhost:8080"
   credentials:
     # get from ErpNext user -> settings -> API Access
-    apiKey: "" 
-    apiSecret: ""
+    apiKey: "293bac5aa957da3"
+    apiSecret: "5c66e2eae880e60"
   erpnext:
     accounts:
       ibex:

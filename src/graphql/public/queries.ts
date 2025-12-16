@@ -18,7 +18,6 @@ import AccountDefaultWalletIdQuery from "@graphql/public/root/query/account-defa
 import LnInvoicePaymentStatusQuery from "@graphql/public/root/query/ln-invoice-payment-status"
 import NpubByUserNameQuery from "./root/query/username-npub-query"
 import IsFlashNpubQuery from "./root/query/is-flash-npub-query"
-import AccountUpgradeRequestStatusQuery from "./root/query/account-upgrade-request-status"
 import TransactionDetailsQuery from "./root/query/transaction-details"
 
 export const queryFields = {
@@ -41,7 +40,6 @@ export const queryFields = {
   authed: {
     atAccountLevel: {
       me: MeQuery,
-      accountUpgradeRequestStatus: AccountUpgradeRequestStatusQuery,
       transactionDetails: TransactionDetailsQuery,
     },
     atWalletLevel: {
