@@ -227,8 +227,19 @@ type BuildInformation
 input BusinessAccountUpgradeRequestInput
   @join__type(graph: PUBLIC)
 {
+  accountNumber: Int
+  accountType: String
+  bankBranch: String
+  bankName: String
+  businessAddress: String
+  businessName: String
+  currency: String
+  email: String
   fullName: String!
+  idDocument: String
   level: AccountLevel!
+  phoneNumber: String
+  terminalRequested: Boolean
 }
 
 type CallbackEndpoint

@@ -8,6 +8,7 @@ import {
   JournalEntryTitleError,
   JournalEntryDeleteError,
   UpgradeRequestCreateError,
+  UpgradeRequestQueryError,
 } from "./errors"
 import { FrappeConfig } from "@config"
 import ValidOffer from "@app/offers/ValidOffer"
@@ -17,8 +18,43 @@ const erpUsd = (usd: USDAmount): number => Number(usd.asCents(2))
 type ErpLevelString = "ZERO" | "ONE" | "TWO" | "THREE"
 
 const levelToErpString = (level: number): ErpLevelString => {
-  const map: Record<number, ErpLevelString> = { 0: "ZERO", 1: "ONE", 2: "TWO", 3: "THREE" }
+  const map: Record<number, ErpLevelString> = {
+    0: "ZERO",
+    1: "ONE",
+    2: "TWO",
+    3: "THREE",
+  }
   return map[level] || "ZERO"
+}
+
+const erpStringToLevel = (erpLevel: ErpLevelString): number => {
+  const map: Record<ErpLevelString, number> = {
+    ZERO: 0,
+    ONE: 1,
+    TWO: 2,
+    THREE: 3,
+  }
+  return map[erpLevel] ?? 0
+}
+
+export type AccountUpgradeRequest = {
+  name: string
+  username: string
+  currentLevel: number
+  requestedLevel: number
+  status: string
+  fullName: string
+  phoneNumber: string
+  email?: string
+  businessName?: string
+  businessAddress?: string
+  terminalRequested?: boolean
+  bankName?: string
+  bankBranch?: string
+  accountType?: string
+  currency?: string
+  accountNumber?: number
+  idDocument?: string
 }
 
 class ErpNext {
@@ -145,6 +181,15 @@ class ErpNext {
     fullName: string
     phoneNumber: string
     email?: string
+    businessName?: string
+    businessAddress?: string
+    terminalRequested?: boolean
+    bankName?: string
+    bankBranch?: string
+    accountType?: string
+    currency?: string
+    accountNumber?: number
+    idDocument?: string
   }): Promise<{ name: string } | UpgradeRequestCreateError> {
     const upgradeRequest = {
       doctype: "Account Upgrade Request",
@@ -154,6 +199,15 @@ class ErpNext {
       full_name: data.fullName,
       phone_number: data.phoneNumber,
       email: data.email,
+      business_name: data.businessName,
+      business_address: data.businessAddress,
+      terminal_requested: data.terminalRequested,
+      bank_name: data.bankName,
+      bank_branch: data.bankBranch,
+      account_type: data.accountType,
+      currency: data.currency,
+      account_number: data.accountNumber,
+      id_document: data.idDocument,
     }
 
     try {
@@ -164,10 +218,77 @@ class ErpNext {
       )
       return { name: resp.data.data.name }
     } catch (err) {
-      baseLogger.error({ err, upgradeRequest }, "Error creating Account Upgrade Request in ERPNext")
+      baseLogger.error(
+        { err, upgradeRequest },
+        "Error creating Account Upgrade Request in ERPNext",
+      )
       return new UpgradeRequestCreateError(err)
+    }
+  }
+
+  async getAccountUpgradeRequest(
+    username: string,
+  ): Promise<AccountUpgradeRequest | null | UpgradeRequestQueryError> {
+    try {
+      const filters = JSON.stringify([
+        ["Account Upgrade Request", "username", "=", username],
+      ])
+      const resp = await axios.get(`${this.url}/api/resource/Account Upgrade Request`, {
+        params: { filters },
+        headers: this.headers,
+      })
+
+      const data = resp.data?.data
+      if (!data || data.length === 0) {
+        return null
+      }
+
+      // Get the most recent request
+      const latestRequest = data[0]
+
+      // Fetch full details
+      const detailResp = await axios.get(
+        `${this.url}/api/resource/Account Upgrade Request/${latestRequest.name}`,
+        { headers: this.headers },
+      )
+
+      const request = detailResp.data?.data
+      if (!request) {
+        return null
+      }
+
+      return {
+        name: request.name,
+        username: request.username,
+        currentLevel: erpStringToLevel(request.current_level),
+        requestedLevel: erpStringToLevel(request.requested_level),
+        status: request.workflow_state || request.docstatus,
+        fullName: request.full_name,
+        phoneNumber: request.phone_number,
+        email: request.email,
+        businessName: request.business_name,
+        businessAddress: request.business_address,
+        terminalRequested: request.terminal_requested,
+        bankName: request.bank_name,
+        bankBranch: request.bank_branch,
+        accountType: request.account_type,
+        currency: request.currency,
+        accountNumber: request.account_number,
+        idDocument: request.id_document,
+      }
+    } catch (err) {
+      baseLogger.error(
+        { err, username },
+        "Error querying Account Upgrade Request from ERPNext",
+      )
+      return new UpgradeRequestQueryError(err)
     }
   }
 }
 
-export default new ErpNext(FrappeConfig.url, FrappeConfig.credentials)
+// Only instantiate if config is available, otherwise export a null-safe placeholder
+const erpNextInstance = FrappeConfig?.url
+  ? new ErpNext(FrappeConfig.url, FrappeConfig.credentials)
+  : null
+
+export default erpNextInstance as ErpNext

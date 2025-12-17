@@ -37,16 +37,3 @@ cashout:
 
 sendgrid:
   apiKey: "<replace>"
-
-frappe:
-  url: "http://localhost:8080"
-  credentials:
-    # get from ErpNext user -> settings -> API Access
-    apiKey: "293bac5aa957da3"
-    apiSecret: "5c66e2eae880e60"
-  erpnext:
-    accounts:
-      ibex:
-        operating: "<ibex id> - Ibex Operating - FL"
-      cashout: "Cashout Payables (JMD) - FL"
-      serviceFees: "Service Fees - FL"
