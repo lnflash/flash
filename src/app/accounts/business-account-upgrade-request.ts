@@ -1,5 +1,5 @@
 import { InvalidAccountStatusError } from "@domain/errors"
-import { checkedToAccountLevel } from "@domain/accounts"
+import { AccountLevel, checkedToAccountLevel } from "@domain/accounts"
 
 import { AccountsRepository, UsersRepository } from "@services/mongoose"
 import { IdentityRepository } from "@services/kratos"
@@ -112,8 +112,8 @@ export const businessAccountUpgradeRequest = async (
 
   if (requestResult instanceof Error) return requestResult
 
-  // Level 2 (Pro) auto-upgrades immediately
-  if (checkedLevel === 2) {
+  // Pro accounts auto-upgrade immediately (no manual approval needed)
+  if (checkedLevel === AccountLevel.Pro) {
     const upgradeResult = await updateAccountLevel({
       id: accountId,
       level: checkedLevel,
