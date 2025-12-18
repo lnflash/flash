@@ -85,7 +85,7 @@ export const createAccountForDeviceAccount = async ({
   if (accountNew instanceof Error) return accountNew
 
   const levelZeroAccountsConfig = getDefaultAccountsConfig()
-  levelZeroAccountsConfig.initialLevel = AccountLevel.ZERO
+  levelZeroAccountsConfig.initialLevel = AccountLevel.Zero
 
   return initializeCreatedAccount({
     account: accountNew,
