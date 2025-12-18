@@ -1,7 +1,12 @@
 import { CashoutDetails } from "@app/offers"
+import ValidOffer from "@app/offers/ValidOffer"
+import { FrappeConfig } from "@config"
+import { AccountLevel } from "@domain/accounts"
 import { USDAmount } from "@domain/shared"
 import { baseLogger } from "@services/logger"
+
 import axios from "axios"
+
 import {
   JournalEntryDraftError,
   JournalEntrySubmitError,
@@ -10,38 +15,36 @@ import {
   UpgradeRequestCreateError,
   UpgradeRequestQueryError,
 } from "./errors"
-import { FrappeConfig } from "@config"
-import ValidOffer from "@app/offers/ValidOffer"
 
 const erpUsd = (usd: USDAmount): number => Number(usd.asCents(2))
 
 type ErpLevelString = "ZERO" | "ONE" | "TWO" | "THREE"
 
-const levelToErpString = (level: number): ErpLevelString => {
-  const map: Record<number, ErpLevelString> = {
-    0: "ZERO",
-    1: "ONE",
-    2: "TWO",
-    3: "THREE",
+const levelToErpString = (level: AccountLevel): ErpLevelString => {
+  const map: Record<AccountLevel, ErpLevelString> = {
+    [AccountLevel.Zero]: "ZERO",
+    [AccountLevel.One]: "ONE",
+    [AccountLevel.Two]: "TWO",
+    [AccountLevel.Three]: "THREE",
   }
   return map[level] || "ZERO"
 }
 
-const erpStringToLevel = (erpLevel: ErpLevelString): number => {
-  const map: Record<ErpLevelString, number> = {
-    ZERO: 0,
-    ONE: 1,
-    TWO: 2,
-    THREE: 3,
+const erpStringToLevel = (erpLevel: ErpLevelString): AccountLevel => {
+  const map: Record<ErpLevelString, AccountLevel> = {
+    ZERO: AccountLevel.Zero,
+    ONE: AccountLevel.One,
+    TWO: AccountLevel.Two,
+    THREE: AccountLevel.Three,
   }
-  return map[erpLevel] ?? 0
+  return map[erpLevel] ?? AccountLevel.Zero
 }
 
 export type AccountUpgradeRequest = {
   name: string
   username: string
-  currentLevel: number
-  requestedLevel: number
+  currentLevel: AccountLevel
+  requestedLevel: AccountLevel
   status: string
   fullName: string
   phoneNumber: string
@@ -175,8 +178,8 @@ class ErpNext {
   }
 
   async createUpgradeRequest(data: {
-    currentLevel: number
-    requestedLevel: number
+    currentLevel: AccountLevel
+    requestedLevel: AccountLevel
     username: string
     fullName: string
     phoneNumber: string
