@@ -1,5 +1,5 @@
 export const AccountLevel = {
-  Zero: 0,
+  ZERO: 0,
   One: 1,
   Two: 2,
   Three: 3,
