@@ -38,6 +38,7 @@ export const ZapPublisher = {
           ["bolt11", bolt11],
           ["amount", amountMsat.toString()],
           ["description", JSON.stringify(zapRequest)],
+          ["P", zapRequest.pubkey],
         ],
         content: "", // optional message / comment
       }
@@ -48,12 +49,13 @@ export const ZapPublisher = {
       const signedEvent = finalizeEvent(zapReceipt, secretKey)
       const relaysTag = zapRequest.tags.find((tag) => tag[0] === "relays")
       const relays = relaysTag ? relaysTag.slice(1) : []
-      pool.publish(relays, signedEvent)
+      const messages = await Promise.allSettled(pool.publish(relays, signedEvent))
 
       logger.info(
         { zapReceipt },
         `Published zap receipt for invoice ${bolt11.substring(0, 10)}...`,
       )
+      logger.info({ messages }, "Relay messages")
     } catch (err) {
       logger.error({ err }, "Failed to publish zap receipt")
     }
