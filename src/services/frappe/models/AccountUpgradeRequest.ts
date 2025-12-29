@@ -1,7 +1,25 @@
 import { erpStringToLevel, levelToErpString } from "./AccountLevel"
 
+export type CreateUpgradeRequestInput = {
+  username: string
+  currentLevel: AccountLevel
+  requestedLevel: AccountLevel
+  fullName: string
+  phoneNumber: string
+  email?: string
+  businessName?: string
+  businessAddress?: string
+  terminalRequested?: boolean
+  bankName?: string
+  bankBranch?: string
+  accountType?: string
+  currency?: string
+  accountNumber?: number
+  idDocument?: string
+}
+
 export class AccountUpgradeRequest {
-  static doctype  = "Account Upgrade Request"
+  static doctype = "Account Upgrade Request"
 
   constructor(
     readonly name: string,
@@ -22,6 +40,28 @@ export class AccountUpgradeRequest {
     readonly accountNumber?: number,
     readonly idDocument?: string,
   ) {}
+
+  static forCreate(input: CreateUpgradeRequestInput): AccountUpgradeRequest {
+    return new AccountUpgradeRequest(
+      "", // name - assigned by ERPNext
+      input.username,
+      input.currentLevel,
+      input.requestedLevel,
+      "", // status - assigned by ERPNext
+      input.fullName,
+      input.phoneNumber,
+      input.email,
+      input.businessName,
+      input.businessAddress,
+      input.terminalRequested,
+      input.bankName,
+      input.bankBranch,
+      input.accountType,
+      input.currency,
+      input.accountNumber,
+      input.idDocument,
+    )
+  }
 
   toErpnext() {
     return {
@@ -66,5 +106,3 @@ export class AccountUpgradeRequest {
     )
   }
 }
-
-

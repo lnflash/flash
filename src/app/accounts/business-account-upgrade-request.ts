@@ -93,9 +93,9 @@ export const businessAccountUpgradeRequest = async (
   }
 
   const requestResult = await ErpNext.createUpgradeRequest({
+    username: (account.username as string) || account.id,
     currentLevel: account.level,
     requestedLevel: checkedLevel,
-    username: (account.username as string) || account.id,
     fullName,
     phoneNumber: storedPhone,
     email: storedEmail || undefined,

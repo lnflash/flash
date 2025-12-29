@@ -12,11 +12,13 @@ import {
   UpgradeRequestCreateError,
   UpgradeRequestQueryError,
 } from "./errors"
-import { AccountUpgradeRequest } from "./models/AccountUpgradeRequest"
+import {
+  AccountUpgradeRequest,
+  CreateUpgradeRequestInput,
+} from "./models/AccountUpgradeRequest"
 
 // Move to MoneyAmount
 const erpUsd = (usd: USDAmount): number => Number(usd.asCents(2))
-
 
 class ErpNext {
   url: string
@@ -135,9 +137,10 @@ class ErpNext {
     }
   }
 
-  async createUpgradeRequest(upgradeRequest: AccountUpgradeRequest): Promise<
-    { name: string } | UpgradeRequestCreateError
-  > {
+  async createUpgradeRequest(
+    input: CreateUpgradeRequestInput,
+  ): Promise<{ name: string } | UpgradeRequestCreateError> {
+    const upgradeRequest = AccountUpgradeRequest.forCreate(input)
     try {
       const resp = await axios.post(
         `${this.url}/api/resource/Account Upgrade Request`,
@@ -161,7 +164,9 @@ class ErpNext {
       const filters = JSON.stringify([
         [
           AccountUpgradeRequest.doctype, // Likely redundant since this is a path param
-          "username", "=", username
+          "username",
+          "=",
+          username,
         ],
       ])
       const resp = await axios.get(`${this.url}/api/resource/Account Upgrade Request`, {
@@ -170,7 +175,8 @@ class ErpNext {
       })
 
       const data = resp.data?.data
-      if (!data || data.length === 0) return new UpgradeRequestQueryError("No data in detail response")
+      if (!data || data.length === 0)
+        return new UpgradeRequestQueryError("No data in detail response")
 
       // Get the most recent request
       const latestRequest = data[0]
