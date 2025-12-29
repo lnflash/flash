@@ -1,10 +1,7 @@
-import { CashoutDetails } from "@app/offers"
 import ValidOffer from "@app/offers/ValidOffer"
 import { FrappeConfig } from "@config"
-import { AccountLevel } from "@domain/accounts"
 import { USDAmount } from "@domain/shared"
 import { baseLogger } from "@services/logger"
-
 import axios from "axios"
 
 import {
@@ -15,50 +12,11 @@ import {
   UpgradeRequestCreateError,
   UpgradeRequestQueryError,
 } from "./errors"
+import { AccountUpgradeRequest } from "./models/AccountUpgradeRequest"
 
+// Move to MoneyAmount
 const erpUsd = (usd: USDAmount): number => Number(usd.asCents(2))
 
-type ErpLevelString = "ZERO" | "ONE" | "TWO" | "THREE"
-
-const levelToErpString = (level: AccountLevel): ErpLevelString => {
-  const map: Record<AccountLevel, ErpLevelString> = {
-    [AccountLevel.Zero]: "ZERO",
-    [AccountLevel.One]: "ONE",
-    [AccountLevel.Two]: "TWO",
-    [AccountLevel.Three]: "THREE",
-  }
-  return map[level] || "ZERO"
-}
-
-const erpStringToLevel = (erpLevel: ErpLevelString): AccountLevel => {
-  const map: Record<ErpLevelString, AccountLevel> = {
-    ZERO: AccountLevel.Zero,
-    ONE: AccountLevel.One,
-    TWO: AccountLevel.Two,
-    THREE: AccountLevel.Three,
-  }
-  return map[erpLevel] ?? AccountLevel.Zero
-}
-
-export type AccountUpgradeRequest = {
-  name: string
-  username: string
-  currentLevel: AccountLevel
-  requestedLevel: AccountLevel
-  status: string
-  fullName: string
-  phoneNumber: string
-  email?: string
-  businessName?: string
-  businessAddress?: string
-  terminalRequested?: boolean
-  bankName?: string
-  bankBranch?: string
-  accountType?: string
-  currency?: string
-  accountNumber?: number
-  idDocument?: string
-}
 
 class ErpNext {
   url: string
@@ -177,46 +135,13 @@ class ErpNext {
     }
   }
 
-  async createUpgradeRequest(data: {
-    currentLevel: AccountLevel
-    requestedLevel: AccountLevel
-    username: string
-    fullName: string
-    phoneNumber: string
-    email?: string
-    businessName?: string
-    businessAddress?: string
-    terminalRequested?: boolean
-    bankName?: string
-    bankBranch?: string
-    accountType?: string
-    currency?: string
-    accountNumber?: number
-    idDocument?: string
-  }): Promise<{ name: string } | UpgradeRequestCreateError> {
-    const upgradeRequest = {
-      doctype: "Account Upgrade Request",
-      current_level: levelToErpString(data.currentLevel),
-      requested_level: levelToErpString(data.requestedLevel),
-      username: data.username,
-      full_name: data.fullName,
-      phone_number: data.phoneNumber,
-      email: data.email,
-      business_name: data.businessName,
-      business_address: data.businessAddress,
-      terminal_requested: data.terminalRequested,
-      bank_name: data.bankName,
-      bank_branch: data.bankBranch,
-      account_type: data.accountType,
-      currency: data.currency,
-      account_number: data.accountNumber,
-      id_document: data.idDocument,
-    }
-
+  async createUpgradeRequest(upgradeRequest: AccountUpgradeRequest): Promise<
+    { name: string } | UpgradeRequestCreateError
+  > {
     try {
       const resp = await axios.post(
         `${this.url}/api/resource/Account Upgrade Request`,
-        upgradeRequest,
+        upgradeRequest.toErpnext(),
         { headers: this.headers },
       )
       return { name: resp.data.data.name }
@@ -231,10 +156,13 @@ class ErpNext {
 
   async getAccountUpgradeRequest(
     username: string,
-  ): Promise<AccountUpgradeRequest | null | UpgradeRequestQueryError> {
+  ): Promise<AccountUpgradeRequest | UpgradeRequestQueryError> {
     try {
       const filters = JSON.stringify([
-        ["Account Upgrade Request", "username", "=", username],
+        [
+          AccountUpgradeRequest.doctype, // Likely redundant since this is a path param
+          "username", "=", username
+        ],
       ])
       const resp = await axios.get(`${this.url}/api/resource/Account Upgrade Request`, {
         params: { filters },
@@ -242,9 +170,7 @@ class ErpNext {
       })
 
       const data = resp.data?.data
-      if (!data || data.length === 0) {
-        return null
-      }
+      if (!data || data.length === 0) return new UpgradeRequestQueryError("No data in detail response")
 
       // Get the most recent request
       const latestRequest = data[0]
@@ -256,29 +182,8 @@ class ErpNext {
       )
 
       const request = detailResp.data?.data
-      if (!request) {
-        return null
-      }
-
-      return {
-        name: request.name,
-        username: request.username,
-        currentLevel: erpStringToLevel(request.current_level),
-        requestedLevel: erpStringToLevel(request.requested_level),
-        status: request.workflow_state || request.docstatus,
-        fullName: request.full_name,
-        phoneNumber: request.phone_number,
-        email: request.email,
-        businessName: request.business_name,
-        businessAddress: request.business_address,
-        terminalRequested: request.terminal_requested,
-        bankName: request.bank_name,
-        bankBranch: request.bank_branch,
-        accountType: request.account_type,
-        currency: request.currency,
-        accountNumber: request.account_number,
-        idDocument: request.id_document,
-      }
+      if (!data) return new UpgradeRequestQueryError("No data in detail response")
+      return AccountUpgradeRequest.fromErpnext(request)
     } catch (err) {
       baseLogger.error(
         { err, username },
