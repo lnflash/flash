@@ -14,6 +14,12 @@ export interface PublishFromWebhookArgs {
   bolt11: string
 }
 
+const FIXED_RELAYS = [
+  "wss://relay.damus.io",
+  "wss://relay.primal.net",
+  "wss://relay.flashapp.me",
+]
+
 export const ZapPublisher = {
   publishFromWebhook: async ({
     zapRequest,
@@ -48,7 +54,8 @@ export const ZapPublisher = {
 
       const signedEvent = finalizeEvent(zapReceipt, secretKey)
       const relaysTag = zapRequest.tags.find((tag) => tag[0] === "relays")
-      const relays = relaysTag ? relaysTag.slice(1) : []
+      const relaysFromRequest = relaysTag ? relaysTag.slice(1) : []
+      const relays = Array.from(new Set([...relaysFromRequest, ...FIXED_RELAYS]))
       const messages = await Promise.allSettled(pool.publish(relays, signedEvent))
 
       logger.info(

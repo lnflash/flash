@@ -28,7 +28,6 @@ interface PaymentRequest extends Request {
   paymentContext?: PaymentContext
 }
 
-// --- Shared middleware: fetch wallet, account, user ---
 const fetchPaymentContext = async (
   req: PaymentRequest,
   resp: Response,
@@ -60,13 +59,10 @@ const fetchPaymentContext = async (
     )
     return resp.sendStatus(500)
   }
-
-  // attach to request for downstream handlers
   req.paymentContext = { receiverWallet, recipientAccount, recipientUser }
   next()
 }
 
-// --- Lightning Notification ---
 const sendLightningNotification = async (
   req: PaymentRequest,
   resp: Response,
@@ -100,7 +96,6 @@ const sendLightningNotification = async (
   next()
 }
 
-// --- Zap Receipt ---
 const sendZapReceipt = async (
   req: PaymentRequest,
   _resp: Response,
