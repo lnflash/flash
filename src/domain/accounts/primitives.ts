@@ -3,6 +3,9 @@ export const AccountLevel = {
   One: 1,
   Two: 2,
   Three: 3,
+  // Semantic aliases
+  Pro: 2,
+  Merchant: 3,
 } as const
 
 export const AccountStatus = {

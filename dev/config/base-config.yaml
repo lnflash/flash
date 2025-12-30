@@ -1,4 +1,4 @@
-# future admins should be added via admin-api. 
+# future admins should be added via admin-api.
 admin_accounts:
   - role: "bankowner"
     phone: "+16505554334"
@@ -37,16 +37,3 @@ cashout:
 
 sendgrid:
   apiKey: "<replace>"
-
-frappe:
-  url: "http://localhost:8080"
-  credentials:
-    # get from ErpNext user -> settings -> API Access
-    apiKey: "" 
-    apiSecret: ""
-  erpnext:
-    accounts:
-      ibex:
-        operating: "<ibex id> - Ibex Operating - FL"
-      cashout: "Cashout Payables (JMD) - FL"
-      serviceFees: "Service Fees - FL"

@@ -165,6 +165,22 @@ type BuildInformation {
   helmRevision: Int
 }
 
+input BusinessAccountUpgradeRequestInput {
+  accountNumber: Int
+  accountType: String
+  bankBranch: String
+  bankName: String
+  businessAddress: String
+  businessName: String
+  currency: String
+  email: String
+  fullName: String!
+  idDocument: String
+  level: AccountLevel!
+  phoneNumber: String
+  terminalRequested: Boolean
+}
+
 type CallbackEndpoint {
   id: EndpointId!
   url: EndpointUrl!
@@ -741,6 +757,7 @@ type Mutation {
   accountEnableNotificationChannel(input: AccountEnableNotificationChannelInput!): AccountUpdateNotificationSettingsPayload!
   accountUpdateDefaultWalletId(input: AccountUpdateDefaultWalletIdInput!): AccountUpdateDefaultWalletIdPayload!
   accountUpdateDisplayCurrency(input: AccountUpdateDisplayCurrencyInput!): AccountUpdateDisplayCurrencyPayload!
+  businessAccountUpgradeRequest(input: BusinessAccountUpgradeRequestInput!): SuccessPayload!
   callbackEndpointAdd(input: CallbackEndpointAddInput!): CallbackEndpointAddPayload!
   callbackEndpointDelete(input: CallbackEndpointDeleteInput!): SuccessPayload!
   captchaCreateChallenge: CaptchaCreateChallengePayload!
