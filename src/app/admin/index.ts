@@ -1,6 +1,7 @@
 export * from "./update-user-phone"
 export * from "./send-admin-push-notification"
 export * from "./send-broadcast-notification"
+export * from "./decide-upgrade-request"
 
 import { checkedToAccountUuid, checkedToUsername } from "@domain/accounts"
 import { IdentityRepository } from "@services/kratos"

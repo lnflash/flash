@@ -7,3 +7,4 @@ export class JournalEntrySubmitError extends ErpNextError {}
 export class JournalEntryDeleteError extends ErpNextError {}
 export class UpgradeRequestCreateError extends ErpNextError {}
 export class UpgradeRequestQueryError extends ErpNextError {}
+export class UpgradeRequestUpdateError extends ErpNextError {}

@@ -11,6 +11,7 @@ import {
   JournalEntryDeleteError,
   UpgradeRequestCreateError,
   UpgradeRequestQueryError,
+  UpgradeRequestUpdateError,
 } from "./errors"
 import {
   AccountUpgradeRequest,
@@ -196,6 +197,45 @@ class ErpNext {
         "Error querying Account Upgrade Request from ERPNext",
       )
       return new UpgradeRequestQueryError(err)
+    }
+  }
+
+  async getAccountUpgradeRequestByName(
+    name: string,
+  ): Promise<AccountUpgradeRequest | UpgradeRequestQueryError> {
+    try {
+      const resp = await axios.get(
+        `${this.url}/api/resource/Account Upgrade Request/${name}`,
+        { headers: this.headers },
+      )
+      const data = resp.data?.data
+      if (!data) return new UpgradeRequestQueryError("No data in response")
+      return AccountUpgradeRequest.fromErpnext(data)
+    } catch (err) {
+      baseLogger.error(
+        { err, name },
+        "Error querying Account Upgrade Request by name from ERPNext",
+      )
+      return new UpgradeRequestQueryError(err)
+    }
+  }
+
+  async updateUpgradeRequestStatus(
+    name: string,
+    status: "Approved" | "Rejected",
+  ): Promise<void | UpgradeRequestUpdateError> {
+    try {
+      await axios.put(
+        `${this.url}/api/resource/Account Upgrade Request/${name}`,
+        { workflow_state: status },
+        { headers: this.headers },
+      )
+    } catch (err) {
+      baseLogger.error(
+        { err, name, status },
+        "Error updating Account Upgrade Request status in ERPNext",
+      )
+      return new UpgradeRequestUpdateError(err)
     }
   }
 }

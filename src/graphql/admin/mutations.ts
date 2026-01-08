@@ -11,10 +11,10 @@ import AdminBroadcastSendMutation from "./root/mutation/admin-broadcast-send"
 
 import MerchantMapDeleteMutation from "./root/mutation/merchant-map-delete"
 import MerchantMapValidateMutation from "./root/mutation/merchant-map-validate"
+import AccountUpgradeRequestDecideMutation from "./root/mutation/account-upgrade-request-decide"
 
 export const mutationFields = {
-  unauthed: {
-  },
+  unauthed: {},
   authed: {
     userUpdatePhone: UserUpdatePhoneMutation,
     accountUpdateLevel: AccountUpdateLevelMutation,
@@ -25,6 +25,7 @@ export const mutationFields = {
     businessDeleteMapInfo: BusinessDeleteMapInfoMutation,
     adminPushNotificationSend: AdminPushNotificationSendMutation,
     adminBroadcastSend: AdminBroadcastSendMutation,
+    accountUpgradeRequestDecide: AccountUpgradeRequestDecideMutation,
   },
 }
 
