@@ -716,6 +716,14 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = `Unknown error occurred (code: ${error.name})`
       return new UnknownClientError({ message, logger: baseLogger })
 
+    case "UpgradeRequestQueryError":
+      message = "No upgrade request found"
+      return new NotFoundError({ message, logger: baseLogger })
+
+    case "UpgradeRequestUpdateError":
+      message = "Failed to update upgrade request"
+      return new DbError({ message, logger: baseLogger })
+
     case "UnknownCaptchaError":
       message = `Unknown error occurred (code: ${error.name}${
         error.message ? ": " + error.message : ""

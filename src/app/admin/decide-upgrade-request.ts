@@ -1,4 +1,5 @@
 import { updateAccountLevel } from "@app/accounts/update-account-level"
+import { UpgradeRequestUpdateError } from "@services/frappe/errors"
 import { AccountsRepository } from "@services/mongoose"
 import ErpNext from "@services/frappe/ErpNext"
 
@@ -12,7 +13,7 @@ export const decideUpgradeRequest = async ({
   approve,
 }: DecideUpgradeRequestInput): Promise<true | ApplicationError> => {
   if (!ErpNext) {
-    return new Error("ERPNext service not configured") as ApplicationError
+    return new UpgradeRequestUpdateError("ERPNext service not configured")
   }
 
   const status = approve ? "Approved" : "Rejected"
