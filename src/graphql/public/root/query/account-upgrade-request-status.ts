@@ -1,6 +1,6 @@
 import { Accounts } from "@app"
 import { GT } from "@graphql/index"
-import { mapError } from "@graphql/error-map"
+import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import AccountUpgradeRequestPayload from "@graphql/public/types/payload/account-upgrade-request"
 
 const AccountUpgradeRequestStatusQuery = GT.Field({
@@ -15,7 +15,7 @@ const AccountUpgradeRequestStatusQuery = GT.Field({
 
     if (result instanceof Error) {
       return {
-        errors: [mapError(result)],
+        errors: [mapAndParseErrorForGqlResponse(result)],
         upgradeRequest: null,
       }
     }
