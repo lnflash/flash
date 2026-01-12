@@ -1,11 +1,9 @@
+import { UpgradeRequestQueryError } from "@services/frappe/errors"
 import ErpNext from "@services/frappe/ErpNext"
-import { AccountUpgradeRequest } from "@services/frappe/models/AccountUpgradeRequest"
 
-export const getAccountUpgradeRequest = async (
-  username: string,
-): Promise<AccountUpgradeRequest | ApplicationError> => {
+export const getAccountUpgradeRequest = async (username: string) => {
   if (!ErpNext) {
-    return new Error("ERPNext service not configured") as ApplicationError
+    return new UpgradeRequestQueryError("ERPNext service not configured")
   }
   return ErpNext.getAccountUpgradeRequest(username)
 }

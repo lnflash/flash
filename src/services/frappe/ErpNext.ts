@@ -188,7 +188,7 @@ class ErpNext {
       )
 
       const request = detailResp.data?.data
-      if (!data) return new UpgradeRequestQueryError("No data in detail response")
+      if (!request) return new UpgradeRequestQueryError("No data in detail response")
       return AccountUpgradeRequest.fromErpnext(request)
     } catch (err) {
       baseLogger.error(

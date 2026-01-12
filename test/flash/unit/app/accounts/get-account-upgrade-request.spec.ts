@@ -31,68 +31,40 @@ describe("getAccountUpgradeRequest", () => {
     jest.clearAllMocks()
   })
 
-  describe("successful queries", () => {
-    it("returns upgrade request when found", async () => {
-      mockGetAccountUpgradeRequest.mockResolvedValue(mockUpgradeRequest)
+  it("returns upgrade request when found", async () => {
+    mockGetAccountUpgradeRequest.mockResolvedValue(mockUpgradeRequest)
 
-      const result = await getAccountUpgradeRequest("testuser")
+    const result = await getAccountUpgradeRequest("testuser")
 
-      expect(result).toEqual(mockUpgradeRequest)
-      expect(mockGetAccountUpgradeRequest).toHaveBeenCalledWith("testuser")
-    })
-
-    it("returns request with all fields populated", async () => {
-      mockGetAccountUpgradeRequest.mockResolvedValue(mockUpgradeRequest)
-
-      const result = await getAccountUpgradeRequest("testuser")
-
-      expect(result).toHaveProperty("name", "ACC-UPG-00001")
-      expect(result).toHaveProperty("username", "testuser")
-      expect(result).toHaveProperty("currentLevel", 1)
-      expect(result).toHaveProperty("requestedLevel", 2)
-      expect(result).toHaveProperty("status", "Pending")
-      expect(result).toHaveProperty("fullName", "Test User")
-      expect(result).toHaveProperty("businessName", "Test Business")
-    })
+    expect(result).toEqual(mockUpgradeRequest)
+    expect(mockGetAccountUpgradeRequest).toHaveBeenCalledWith("testuser")
   })
 
-  describe("error handling", () => {
-    it("returns error when no upgrade request exists", async () => {
-      mockGetAccountUpgradeRequest.mockResolvedValue(
-        new UpgradeRequestQueryError("No data in detail response"),
-      )
+  it("returns error when no upgrade request exists", async () => {
+    mockGetAccountUpgradeRequest.mockResolvedValue(
+      new UpgradeRequestQueryError("No data in detail response"),
+    )
 
-      const result = await getAccountUpgradeRequest("nonexistent-user")
+    const result = await getAccountUpgradeRequest("nonexistent-user")
 
-      expect(result).toBeInstanceOf(UpgradeRequestQueryError)
-    })
-
-    it("returns error when ERPNext query fails", async () => {
-      mockGetAccountUpgradeRequest.mockResolvedValue(
-        new UpgradeRequestQueryError("Connection failed"),
-      )
-
-      const result = await getAccountUpgradeRequest("testuser")
-
-      expect(result).toBeInstanceOf(UpgradeRequestQueryError)
-    })
+    expect(result).toBeInstanceOf(UpgradeRequestQueryError)
   })
 
-  describe("username handling", () => {
-    it("queries with username when provided", async () => {
-      mockGetAccountUpgradeRequest.mockResolvedValue(mockUpgradeRequest)
+  it("returns error when ERPNext query fails", async () => {
+    mockGetAccountUpgradeRequest.mockResolvedValue(
+      new UpgradeRequestQueryError("Connection failed"),
+    )
 
-      await getAccountUpgradeRequest("myusername")
+    const result = await getAccountUpgradeRequest("testuser")
 
-      expect(mockGetAccountUpgradeRequest).toHaveBeenCalledWith("myusername")
-    })
+    expect(result).toBeInstanceOf(UpgradeRequestQueryError)
+  })
 
-    it("queries with account ID when used as fallback", async () => {
-      mockGetAccountUpgradeRequest.mockResolvedValue(mockUpgradeRequest)
+  it("passes username to ErpNext service", async () => {
+    mockGetAccountUpgradeRequest.mockResolvedValue(mockUpgradeRequest)
 
-      await getAccountUpgradeRequest("account-id-123")
+    await getAccountUpgradeRequest("myusername")
 
-      expect(mockGetAccountUpgradeRequest).toHaveBeenCalledWith("account-id-123")
-    })
+    expect(mockGetAccountUpgradeRequest).toHaveBeenCalledWith("myusername")
   })
 })
