@@ -19,7 +19,7 @@ const BusinessAccountUpgradeRequestInput = GT.Input({
     accountType: { type: GT.String },
     currency: { type: GT.String },
     accountNumber: { type: GT.Int },
-    idDocument: { type: GT.String },
+    idDocument: { type: GT.String, description: "Base64-encoded ID document file" },
   }),
 })
 

@@ -2,12 +2,15 @@
 
 import { InvalidAccountStatusError, InvalidAccountLevelError } from "@domain/errors"
 
+import { FileUploadError } from "@services/frappe/errors"
+
 // Mock all external dependencies
 const mockFindAccountById = jest.fn()
 const mockFindUserById = jest.fn()
 const mockGetIdentity = jest.fn()
 const mockCreateUpgradeRequest = jest.fn()
 const mockUpdateAccountLevel = jest.fn()
+const mockUploadFile = jest.fn()
 
 jest.mock("@services/mongoose", () => ({
   AccountsRepository: () => ({
@@ -28,6 +31,7 @@ jest.mock("@services/frappe/ErpNext", () => ({
   __esModule: true,
   default: {
     createUpgradeRequest: (...args: any[]) => mockCreateUpgradeRequest(...args),
+    uploadFile: (...args: any[]) => mockUploadFile(...args),
   },
 }))
 
@@ -64,6 +68,7 @@ describe("businessAccountUpgradeRequest", () => {
     mockGetIdentity.mockResolvedValue(baseIdentity)
     mockCreateUpgradeRequest.mockResolvedValue({ name: "REQ-001" })
     mockUpdateAccountLevel.mockResolvedValue(true)
+    mockUploadFile.mockResolvedValue({ file_url: "/files/test.pdf" })
   })
 
   describe("successful requests", () => {
@@ -316,6 +321,63 @@ describe("businessAccountUpgradeRequest", () => {
       })
 
       expect(result).toBe(true)
+    })
+  })
+
+  describe("file upload via base64", () => {
+    const base64PdfData = "data:application/pdf;base64,dGVzdCBwZGYgY29udGVudA=="
+
+    it("uploads file when base64 data is provided in idDocument", async () => {
+      const result = await businessAccountUpgradeRequest({
+        accountId: "account-123" as any,
+        level: 2,
+        fullName: "Test User",
+        idDocument: base64PdfData,
+      })
+
+      expect(result).toBe(true)
+      expect(mockUploadFile).toHaveBeenCalledWith(
+        expect.any(Buffer),
+        "id-document-REQ-001.pdf",
+        "Account Upgrade Request",
+        "REQ-001",
+      )
+    })
+
+    it("succeeds even when file upload fails", async () => {
+      mockUploadFile.mockResolvedValue(new FileUploadError("Upload failed"))
+
+      const result = await businessAccountUpgradeRequest({
+        accountId: "account-123" as any,
+        level: 2,
+        fullName: "Test User",
+        idDocument: base64PdfData,
+      })
+
+      expect(result).toBe(true)
+    })
+
+    it("does not upload file when idDocument is not base64", async () => {
+      const result = await businessAccountUpgradeRequest({
+        accountId: "account-123" as any,
+        level: 2,
+        fullName: "Test User",
+        idDocument: "passport.pdf", // Just a filename, not base64
+      })
+
+      expect(result).toBe(true)
+      expect(mockUploadFile).not.toHaveBeenCalled()
+    })
+
+    it("does not upload file when idDocument is not provided", async () => {
+      const result = await businessAccountUpgradeRequest({
+        accountId: "account-123" as any,
+        level: 2,
+        fullName: "Test User",
+      })
+
+      expect(result).toBe(true)
+      expect(mockUploadFile).not.toHaveBeenCalled()
     })
   })
 })

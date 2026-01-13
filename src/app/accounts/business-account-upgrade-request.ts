@@ -4,6 +4,8 @@ import { AccountLevel, checkedToAccountLevel } from "@domain/accounts"
 import { AccountsRepository, UsersRepository } from "@services/mongoose"
 import { IdentityRepository } from "@services/kratos"
 import ErpNext from "@services/frappe/ErpNext"
+import { AccountUpgradeRequest } from "@services/frappe/models/AccountUpgradeRequest"
+import { baseLogger } from "@services/logger"
 
 import { updateAccountLevel } from "./update-account-level"
 
@@ -21,7 +23,30 @@ type BusinessUpgradeRequestInput = {
   accountType?: string
   currency?: string
   accountNumber?: number
-  idDocument?: string
+  idDocument?: string // Can be base64-encoded file data (data:mime;base64,...) or filename
+}
+
+// Parse base64 data URL and extract buffer and mime type
+const parseBase64DataUrl = (
+  dataUrl: string,
+): { buffer: Buffer; mimeType: string; extension: string } | null => {
+  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/)
+  if (!match) return null
+
+  const mimeType = match[1]
+  const base64Data = match[2]
+  const buffer = Buffer.from(base64Data, "base64")
+
+  // Get file extension from mime type
+  const extensionMap: Record<string, string> = {
+    "application/pdf": "pdf",
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/gif": "gif",
+  }
+  const extension = extensionMap[mimeType] || "bin"
+
+  return { buffer, mimeType, extension }
 }
 
 // Composable validation helpers
@@ -111,6 +136,27 @@ export const businessAccountUpgradeRequest = async (
   })
 
   if (requestResult instanceof Error) return requestResult
+
+  // Upload ID document file if provided as base64
+  if (input.idDocument && requestResult.name) {
+    const parsed = parseBase64DataUrl(input.idDocument)
+    if (parsed) {
+      const filename = `id-document-${requestResult.name}.${parsed.extension}`
+      const uploadResult = await ErpNext.uploadFile(
+        parsed.buffer,
+        filename,
+        AccountUpgradeRequest.doctype,
+        requestResult.name,
+      )
+      if (uploadResult instanceof Error) {
+        // Log warning but don't fail the request - the upgrade request was created
+        baseLogger.warn(
+          { err: uploadResult, docname: requestResult.name },
+          "Failed to upload ID document, but upgrade request was created",
+        )
+      }
+    }
+  }
 
   // Pro accounts auto-upgrade immediately (no manual approval needed)
   if (checkedLevel === AccountLevel.Pro) {

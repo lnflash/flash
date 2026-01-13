@@ -3,6 +3,7 @@ import { FrappeConfig } from "@config"
 import { USDAmount } from "@domain/shared"
 import { baseLogger } from "@services/logger"
 import axios from "axios"
+import FormData from "form-data"
 
 import {
   JournalEntryDraftError,
@@ -11,6 +12,7 @@ import {
   JournalEntryDeleteError,
   UpgradeRequestCreateError,
   UpgradeRequestQueryError,
+  FileUploadError,
 } from "./errors"
 import {
   AccountUpgradeRequest,
@@ -188,7 +190,7 @@ class ErpNext {
       )
 
       const request = detailResp.data?.data
-      if (!data) return new UpgradeRequestQueryError("No data in detail response")
+      if (!request) return new UpgradeRequestQueryError("No data in detail response")
       return AccountUpgradeRequest.fromErpnext(request)
     } catch (err) {
       baseLogger.error(
@@ -196,6 +198,32 @@ class ErpNext {
         "Error querying Account Upgrade Request from ERPNext",
       )
       return new UpgradeRequestQueryError(err)
+    }
+  }
+
+  async uploadFile(
+    fileBuffer: Buffer,
+    filename: string,
+    doctype: string,
+    docname: string,
+  ): Promise<{ file_url: string } | FileUploadError> {
+    const formData = new FormData()
+    formData.append("file", fileBuffer, { filename })
+    formData.append("doctype", doctype)
+    formData.append("docname", docname)
+    formData.append("is_private", "1")
+
+    try {
+      const resp = await axios.post(`${this.url}/api/method/upload_file`, formData, {
+        headers: {
+          ...formData.getHeaders(),
+          Authorization: this.headers.Authorization,
+        },
+      })
+      return { file_url: resp.data.message?.file_url || resp.data.file_url }
+    } catch (err) {
+      baseLogger.error({ err, filename, doctype, docname }, "Error uploading file to ERPNext")
+      return new FileUploadError(err)
     }
   }
 }

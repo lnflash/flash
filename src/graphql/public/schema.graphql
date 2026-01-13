@@ -176,6 +176,7 @@ input BusinessAccountUpgradeRequestInput {
   email: String
   fullName: String!
   idDocument: String
+  idDocumentFile: Upload
   level: AccountLevel!
   phoneNumber: String
   terminalRequested: Boolean
@@ -1420,6 +1421,9 @@ type UpgradePayload {
   errors: [Error!]!
   success: Boolean!
 }
+
+"""The `Upload` scalar type represents a file upload."""
+scalar Upload
 
 """
 A wallet belonging to an account which contains a USD balance and a list of transactions.
