@@ -1,5 +1,5 @@
 BIN_DIR=node_modules/.bin
-
+CONFIG_PATH=/Users/nodirbek/.config/flash
 start-deps:
 	docker compose up bats-deps -d
 

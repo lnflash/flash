@@ -236,7 +236,8 @@ input BusinessAccountUpgradeRequestInput
   currency: String
   email: String
   fullName: String!
-  idDocument: String
+  idDocumentBase64: String
+  idDocumentFileName: String
   level: AccountLevel!
   phoneNumber: String
   terminalRequested: Boolean

@@ -19,7 +19,8 @@ const BusinessAccountUpgradeRequestInput = GT.Input({
     accountType: { type: GT.String },
     currency: { type: GT.String },
     accountNumber: { type: GT.Int },
-    idDocument: { type: GT.String },
+    idDocumentBase64: { type: GT.String },
+    idDocumentFileName: { type: GT.String },
   }),
 })
 
@@ -45,7 +46,8 @@ const BusinessAccountUpgradeRequestMutation = GT.Field({
       accountType,
       currency,
       accountNumber,
-      idDocument,
+      idDocumentBase64,
+      idDocumentFileName,
     } = args.input
 
     if (level instanceof Error) {
@@ -66,7 +68,8 @@ const BusinessAccountUpgradeRequestMutation = GT.Field({
       accountType: accountType || undefined,
       currency: currency || undefined,
       accountNumber: accountNumber || undefined,
-      idDocument: idDocument || undefined,
+      idDocumentBase64: idDocumentBase64 || undefined,
+      idDocumentFileName: idDocumentFileName || undefined,
     })
 
     if (result instanceof Error) {

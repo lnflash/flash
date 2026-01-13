@@ -21,7 +21,8 @@ type BusinessUpgradeRequestInput = {
   accountType?: string
   currency?: string
   accountNumber?: number
-  idDocument?: string
+  idDocumentBase64?: string
+  idDocumentFileName?: string
 }
 
 // Composable validation helpers
@@ -92,8 +93,26 @@ export const businessAccountUpgradeRequest = async (
     return new InvalidAccountStatusError("Email does not match account records")
   }
 
+  const username = (account.username as string) || account.id
+
+  // Upload ID document if provided
+  let idDocumentUrl: string | undefined
+  if (input.idDocumentBase64 && input.idDocumentFileName) {
+    const uploadResult = await ErpNext.uploadFile({
+      fileName: input.idDocumentFileName,
+      base64Content: input.idDocumentBase64,
+      doctype: "File",
+      isPrivate: true,
+      folder: "Home/Attachments",
+      description: `ID document for user ${username}`,
+    })
+
+    if (uploadResult instanceof Error) return uploadResult
+    idDocumentUrl = uploadResult.fileUrl
+  }
+
   const requestResult = await ErpNext.createUpgradeRequest({
-    username: (account.username as string) || account.id,
+    username,
     currentLevel: account.level,
     requestedLevel: checkedLevel,
     fullName,
@@ -107,7 +126,7 @@ export const businessAccountUpgradeRequest = async (
     accountType: input.accountType,
     currency: input.currency,
     accountNumber: input.accountNumber,
-    idDocument: input.idDocument,
+    idDocument: idDocumentUrl,
   })
 
   if (requestResult instanceof Error) return requestResult

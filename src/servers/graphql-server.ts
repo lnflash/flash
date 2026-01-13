@@ -57,6 +57,10 @@ export const startApolloServer = async ({
   setGqlContext: (req: Request, res: Response, next: NextFunction) => Promise<void>
 }): Promise<Record<string, unknown>> => {
   const app = express()
+
+  // Increase body size limit to 5MB for document uploads
+  app.use(express.json({ limit: "5mb" }))
+
   const httpServer = createServer(app)
 
   const apolloPlugins = [
@@ -179,6 +183,7 @@ export const startApolloServer = async ({
     app,
     path: "/graphql",
     cors: { credentials: true, origin: true },
+    bodyParserConfig: { limit: "5mb" },
   })
 
   return new Promise((resolve, reject) => {

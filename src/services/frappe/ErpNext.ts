@@ -3,6 +3,7 @@ import { FrappeConfig } from "@config"
 import { USDAmount } from "@domain/shared"
 import { baseLogger } from "@services/logger"
 import axios from "axios"
+import FormData from "form-data"
 
 import {
   JournalEntryDraftError,
@@ -11,6 +12,7 @@ import {
   JournalEntryDeleteError,
   UpgradeRequestCreateError,
   UpgradeRequestQueryError,
+  FileUploadError,
 } from "./errors"
 import {
   AccountUpgradeRequest,
@@ -196,6 +198,84 @@ class ErpNext {
         "Error querying Account Upgrade Request from ERPNext",
       )
       return new UpgradeRequestQueryError(err)
+    }
+  }
+
+  async uploadFile(input: {
+    fileName: string
+    base64Content: string
+    doctype: string
+    isPrivate: boolean
+    folder: string
+    linkedDoctype?: string
+    linkedName?: string
+    description?: string
+  }): Promise<{ name: string; fileUrl: string } | FileUploadError> {
+    const {
+      fileName,
+      base64Content,
+      isPrivate,
+      folder,
+      linkedDoctype,
+      linkedName,
+      description,
+    } = input
+
+    try {
+      // Convert base64 to Buffer for proper file upload
+      // Handle both "data:..." and malformed "ddata:..." prefixes
+      const base64Data = base64Content.replace(/^d?data:[^;]+;base64,/, "")
+      const fileBuffer = Buffer.from(base64Data, "base64")
+
+      const formData = new FormData()
+      formData.append("file", fileBuffer, { filename: fileName })
+      formData.append("file_name", fileName)
+      formData.append("is_private", isPrivate ? "1" : "0")
+      formData.append("folder", folder)
+
+      if (linkedDoctype) {
+        formData.append("doctype", linkedDoctype)
+      }
+      if (linkedName) {
+        formData.append("docname", linkedName)
+      }
+
+      const resp = await axios.post(`${this.url}/api/method/upload_file`, formData, {
+        headers: {
+          ...this.headers,
+          ...formData.getHeaders(),
+        },
+      })
+
+      const fileData = resp.data?.message
+      if (!fileData) {
+        return new FileUploadError("No file data returned from upload")
+      }
+
+      // Update the file description if provided
+      if (description && fileData.name) {
+        try {
+          await axios.put(
+            `${this.url}/api/resource/File/${fileData.name}`,
+            { description },
+            { headers: this.headers },
+          )
+        } catch (descErr) {
+          baseLogger.warn(
+            { err: descErr, fileName },
+            "Failed to update file description in ERPNext",
+          )
+        }
+      }
+
+      return {
+        name: fileData.name,
+        // Return just the path for ERPNext attach fields, not full URL
+        fileUrl: fileData.file_url || "",
+      }
+    } catch (err) {
+      baseLogger.error({ err, fileName }, "Error uploading file to ERPNext")
+      return new FileUploadError(err)
     }
   }
 }
