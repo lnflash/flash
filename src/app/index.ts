@@ -14,6 +14,7 @@ import * as WalletsMod from "./wallets"
 import * as PaymentsMod from "./payments"
 import * as MerchantsMod from "./merchants"
 import * as SwapMod from "./swap"
+import * as StorageMod from "./storage"
 
 const allFunctions = {
   Accounts: { ...AccountsMod },
@@ -30,6 +31,7 @@ const allFunctions = {
   Payments: { ...PaymentsMod },
   Merchants: { ...MerchantsMod },
   Swap: { ...SwapMod },
+  Storage: { ...StorageMod },
 } as const
 
 let subModule: keyof typeof allFunctions
@@ -60,4 +62,5 @@ export const {
   Payments,
   Merchants,
   Swap,
+  Storage,
 } = allFunctions
