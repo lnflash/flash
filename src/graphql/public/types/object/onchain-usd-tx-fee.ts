@@ -1,11 +1,11 @@
 import { GT } from "@graphql/index"
 
-import CentAmount from "../scalar/cent-amount"
+import FractionalCentAmount from "../scalar/cent-amount-fraction"
 
 const OnChainUsdTxFee = GT.Object({
   name: "OnChainUsdTxFee",
   fields: () => ({
-    amount: { type: GT.NonNull(CentAmount) },
+    amount: { type: GT.NonNull(FractionalCentAmount) },
   }),
 })
 
