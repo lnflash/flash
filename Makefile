@@ -6,6 +6,9 @@ start-deps:
 start-frappe:
 	docker compose up frappe -d
 
+clean-frappe:
+	./dev/clean-frappe
+
 start-deps-integration:
 	docker compose up integration-deps -d
 
