@@ -1464,7 +1464,7 @@ type Query
   @join__type(graph: PUBLIC)
 {
   accountDefaultWallet(username: Username!, walletCurrency: WalletCurrency): PublicWallet!
-  accountUpgradeRequestStatus: AccountUpgradeRequestPayload!
+  accountUpgradeRequest: AccountUpgradeRequestPayload!
   btcPrice(currency: DisplayCurrency! = "USD"): Price @deprecated(reason: "Deprecated in favor of realtimePrice")
   btcPriceList(range: PriceGraphRange!): [PricePoint]
   businessMapMarkers: [MapMarker!]!
