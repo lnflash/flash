@@ -4,18 +4,6 @@ export class StorageError extends Error {
 
 export class InvalidFileTypeError extends StorageError {
   constructor(contentType: string) {
-    super(`Invalid file type: ${contentType}. Allowed types: image/jpeg, image/png, image/webp, image/gif`)
-  }
-}
-
-export class StorageConfigError extends StorageError {
-  constructor(message: string) {
-    super(message)
-  }
-}
-
-export class StorageUploadError extends StorageError {
-  constructor(message: string) {
-    super(message)
+    super(`Invalid file type: ${contentType}. Allowed: image/jpeg, image/png, image/webp`)
   }
 }

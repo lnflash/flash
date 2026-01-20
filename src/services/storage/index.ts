@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3"
+import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 
 import {
@@ -8,32 +8,21 @@ import {
   DO_SPACES_REGION,
   DO_SPACES_SECRET_KEY,
 } from "@config"
-import {
-  SemanticAttributes,
-  asyncRunInSpan,
-  recordExceptionInCurrentSpan,
-} from "@services/tracing"
+import { asyncRunInSpan, recordExceptionInCurrentSpan } from "@services/tracing"
 import { ErrorLevel } from "@domain/shared"
 
-import { InvalidFileTypeError, StorageConfigError, StorageUploadError } from "./errors"
+import { InvalidFileTypeError, StorageError } from "./errors"
 
-const ALLOWED_CONTENT_TYPES = [
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/gif",
-] as const
+const ALLOWED_CONTENT_TYPES = ["image/jpeg", "image/png", "image/webp"] as const
+const UPLOAD_URL_EXPIRY_SECONDS = 15 * 60 // 15 minutes
+const READ_URL_EXPIRY_SECONDS = 60 * 60 // 1 hour
 
-const PRESIGNED_URL_EXPIRY_SECONDS = 15 * 60 // 15 minutes
-
-type AllowedContentType = (typeof ALLOWED_CONTENT_TYPES)[number]
-
-const isValidContentType = (contentType: string): contentType is AllowedContentType =>
-  ALLOWED_CONTENT_TYPES.includes(contentType as AllowedContentType)
+const isValidContentType = (contentType: string) =>
+  ALLOWED_CONTENT_TYPES.includes(contentType as (typeof ALLOWED_CONTENT_TYPES)[number])
 
 let s3Client: S3Client | null = null
 
-const getS3Client = (): S3Client | StorageConfigError => {
+const getS3Client = (): S3Client | StorageError => {
   if (s3Client) return s3Client
 
   if (
@@ -42,7 +31,7 @@ const getS3Client = (): S3Client | StorageConfigError => {
     !DO_SPACES_ACCESS_KEY ||
     !DO_SPACES_SECRET_KEY
   ) {
-    return new StorageConfigError("DigitalOcean Spaces configuration is incomplete")
+    return new StorageError("DigitalOcean Spaces configuration is incomplete")
   }
 
   s3Client = new S3Client({
@@ -57,33 +46,27 @@ const getS3Client = (): S3Client | StorageConfigError => {
   return s3Client
 }
 
-type GeneratePresignedUploadUrlArgs = {
-  accountId: AccountId
-  username?: string
+type GenerateIdDocumentUploadUrlArgs = {
+  username: string
   filename: string
   contentType: string
 }
 
-type PresignedUrlResult = {
+type PresignedUploadUrlResult = {
   uploadUrl: string
-  fileUrl: string
+  fileKey: string
 }
 
-export const generatePresignedUploadUrl = async ({
-  accountId,
+export const generateIdDocumentUploadUrl = async ({
   username,
   filename,
   contentType,
-}: GeneratePresignedUploadUrlArgs): Promise<
-  PresignedUrlResult | InvalidFileTypeError | StorageConfigError | StorageUploadError
-> => {
+}: GenerateIdDocumentUploadUrlArgs): Promise<PresignedUploadUrlResult | StorageError> => {
   return asyncRunInSpan(
-    "services.storage.generatePresignedUploadUrl",
+    "services.storage.generateIdDocumentUploadUrl",
     {
       attributes: {
-        [SemanticAttributes.CODE_FUNCTION]: "generatePresignedUploadUrl",
-        [SemanticAttributes.CODE_NAMESPACE]: "services.storage",
-        "storage.accountId": accountId,
+        "storage.username": username,
         "storage.filename": filename,
         "storage.contentType": contentType,
       },
@@ -99,7 +82,7 @@ export const generatePresignedUploadUrl = async ({
       }
 
       if (!DO_SPACES_BUCKET) {
-        return new StorageConfigError("DO_SPACES_BUCKET is not configured")
+        return new StorageError("DO_SPACES_BUCKET is not configured")
       }
 
       const sanitizedFilename = filename.replace(/[^a-zA-Z0-9.-]/g, "_")
@@ -110,30 +93,68 @@ export const generatePresignedUploadUrl = async ({
           Bucket: DO_SPACES_BUCKET,
           Key: objectKey,
           ContentType: contentType,
-          ACL: "public-read",
+          ACL: "private", // Private - requires signed URL to read
         })
 
         const uploadUrl = await getSignedUrl(client, command, {
-          expiresIn: PRESIGNED_URL_EXPIRY_SECONDS,
+          expiresIn: UPLOAD_URL_EXPIRY_SECONDS,
         })
 
-        // Construct the public file URL
-        // DO Spaces URLs follow: https://{bucket}.{region}.digitaloceanspaces.com/{key}
-        // or via CDN: https://{bucket}.{region}.cdn.digitaloceanspaces.com/{key}
-        const endpointUrl = new URL(DO_SPACES_ENDPOINT!)
-        const fileUrl = `https://${DO_SPACES_BUCKET}.${DO_SPACES_REGION}.digitaloceanspaces.com/${objectKey}`
-
-        return { uploadUrl, fileUrl }
+        // Return the file key instead of public URL (since file is private)
+        return { uploadUrl, fileKey: objectKey }
       } catch (error) {
         recordExceptionInCurrentSpan({
           error,
           level: ErrorLevel.Critical,
-          fallbackMsg: "Failed to generate pre-signed URL",
+          fallbackMsg: "Failed to generate pre-signed URL for ID document upload",
         })
-        return new StorageUploadError("Failed to generate pre-signed URL")
+        return new StorageError("Failed to generate pre-signed URL")
       }
     },
   )
 }
 
-export { InvalidFileTypeError, StorageConfigError, StorageUploadError } from "./errors"
+export const generateIdDocumentReadUrl = async ({
+  fileKey,
+}: {
+  fileKey: string
+}): Promise<{ readUrl: string } | StorageError> => {
+  return asyncRunInSpan(
+    "services.storage.generateIdDocumentReadUrl",
+    {
+      attributes: {
+        "storage.fileKey": fileKey,
+      },
+    },
+    async () => {
+      const client = getS3Client()
+      if (client instanceof Error) {
+        return client
+      }
+
+      if (!DO_SPACES_BUCKET) {
+        return new StorageError("DO_SPACES_BUCKET is not configured")
+      }
+
+      try {
+        const command = new GetObjectCommand({
+          Bucket: DO_SPACES_BUCKET,
+          Key: fileKey,
+        })
+
+        const readUrl = await getSignedUrl(client, command, {
+          expiresIn: READ_URL_EXPIRY_SECONDS,
+        })
+
+        return { readUrl }
+      } catch (error) {
+        recordExceptionInCurrentSpan({
+          error,
+          level: ErrorLevel.Critical,
+          fallbackMsg: "Failed to generate pre-signed read URL for ID document",
+        })
+        return new StorageError("Failed to generate pre-signed read URL")
+      }
+    },
+  )
+}

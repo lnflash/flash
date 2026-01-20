@@ -487,28 +487,6 @@ type FeesInformation
   deposit: DepositFeesInformation!
 }
 
-input FileUploadUrlGenerateInput
-  @join__type(graph: PUBLIC)
-{
-  """MIME type (image/jpeg, image/png, image/webp, image/gif)"""
-  contentType: String!
-
-  """Original filename (used for extension/key)"""
-  filename: String!
-}
-
-type FileUploadUrlPayload
-  @join__type(graph: PUBLIC)
-{
-  errors: [Error!]!
-
-  """Public URL where the file will be accessible after upload"""
-  fileUrl: String
-
-  """Pre-signed URL for uploading the file directly to storage"""
-  uploadUrl: String
-}
-
 """
 Cent amount (1/100 of a dollar) as a float, can be positive or negative
 """
@@ -557,6 +535,28 @@ type GraphQLApplicationError implements Error
 """Hex-encoded string of 32 bytes"""
 scalar Hex32Bytes
   @join__type(graph: PUBLIC)
+
+input IdDocumentUploadUrlGenerateInput
+  @join__type(graph: PUBLIC)
+{
+  """MIME type (image/jpeg, image/png, image/webp)"""
+  contentType: String!
+
+  """Original filename"""
+  filename: String!
+}
+
+type IdDocumentUploadUrlPayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error!]!
+
+  """Storage key for the uploaded file (use to generate read URLs)"""
+  fileKey: String
+
+  """Pre-signed URL for uploading the ID document directly to storage"""
+  uploadUrl: String
+}
 
 input InitiateCashoutInput
   @join__type(graph: PUBLIC)
@@ -1013,7 +1013,7 @@ type Mutation
   captchaRequestAuthCode(input: CaptchaRequestAuthCodeInput!): SuccessPayload!
   deviceNotificationTokenCreate(input: DeviceNotificationTokenCreateInput!): SuccessPayload!
   feedbackSubmit(input: FeedbackSubmitInput!): SuccessPayload!
-  fileUploadUrlGenerate(input: FileUploadUrlGenerateInput!): FileUploadUrlPayload!
+  idDocumentUploadUrlGenerate(input: IdDocumentUploadUrlGenerateInput!): IdDocumentUploadUrlPayload!
 
   """
   Start the Cashout process; 
