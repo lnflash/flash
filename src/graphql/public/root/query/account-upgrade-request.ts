@@ -3,7 +3,7 @@ import { GT } from "@graphql/index"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import AccountUpgradeRequestPayload from "@graphql/public/types/payload/account-upgrade-request"
 
-const AccountUpgradeRequestStatusQuery = GT.Field({
+const AccountUpgradeRequestQuery = GT.Field({
   extensions: {
     complexity: 120,
   },
@@ -27,4 +27,4 @@ const AccountUpgradeRequestStatusQuery = GT.Field({
   },
 })
 
-export default AccountUpgradeRequestStatusQuery
+export default AccountUpgradeRequestQuery
