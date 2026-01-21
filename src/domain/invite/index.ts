@@ -8,6 +8,7 @@ export const INVITE_EXPIRY_HOURS = 24
 export const DAILY_INVITE_LIMIT = 10
 export const TARGET_INVITE_LIMIT = 3
 export const NEW_USER_INVITE_WINDOW_HOURS = 24 // New users can redeem invites within this window after account creation
+export const INVITE_TOKEN_LENGTH = 40 // 20 bytes = 40 hex characters
 
 // Branded type for InviteId
 export type InviteId = string & { readonly brand: unique symbol }
@@ -24,4 +25,18 @@ export const checkedToInviteId = (inviteId: string): InviteId | ValidationError 
     return new InvalidInviteIdError(`Invalid invite ID format: ${inviteId}`)
   }
   return inviteId as InviteId
+}
+
+// Branded type for InviteToken
+export type InviteToken = string & { readonly brand: unique symbol }
+
+// Helper function to validate invite token format
+export const checkedToInviteToken = (token: string): InviteToken | ValidationError => {
+  if (!token || token.length !== INVITE_TOKEN_LENGTH) {
+    return new ValidationError("Invalid invitation token length")
+  }
+  if (!/^[a-f0-9]+$/i.test(token)) {
+    return new ValidationError("Invalid invitation token format")
+  }
+  return token as InviteToken
 }
