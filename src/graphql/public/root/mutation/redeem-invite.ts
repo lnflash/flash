@@ -1,7 +1,7 @@
 import { GT } from "@graphql/index"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { InviteRepository, InviteStatus } from "@services/mongoose/models/invite"
-import { NEW_USER_INVITE_WINDOW_HOURS } from "@domain/invite"
+import { NEW_USER_INVITE_WINDOW_HOURS, checkedToInviteToken } from "@domain/invite"
 import { hashToken } from "@utils"
 import { baseLogger } from "@services/logger"
 import SuccessPayload from "@graphql/shared/types/payload/success-payload"
@@ -35,8 +35,10 @@ const RedeemInviteMutation = GT.Field<null, GraphQLPublicContextAuth>({
   resolve: async (_, args, { user, domainAccount }) => {
     const { token } = args.input
 
-    if (!token || token.length !== 40) {
-      return { success: false, errors: ["Invalid invitation token"] }
+    // Validate token format
+    const validatedToken = checkedToInviteToken(token)
+    if (validatedToken instanceof Error) {
+      return { success: false, errors: [validatedToken.message] }
     }
 
     // Ensure user is authenticated

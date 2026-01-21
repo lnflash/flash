@@ -2,9 +2,8 @@ import crypto from "crypto"
 
 import mongoose from "mongoose"
 import { InviteRepository } from "@services/mongoose/models/invite"
-import { InviteStatus } from "@domain/invite"
+import { InviteStatus, checkedToInviteToken, InviteToken } from "@domain/invite"
 import { UnknownRepositoryError } from "@domain/errors"
-import { ValidationError } from "@domain/shared"
 
 export const redeemInvite = async ({
   accountId,
@@ -14,9 +13,10 @@ export const redeemInvite = async ({
   token: string
 }) => {
   try {
-    // Validate token format (should be 64 hex characters)
-    if (!/^[a-f0-9]{64}$/i.test(token)) {
-      return new ValidationError("Invalid invitation token format")
+    // Validate token format
+    const validatedToken = checkedToInviteToken(token)
+    if (validatedToken instanceof Error) {
+      return validatedToken
     }
 
     // Find invite by token hash

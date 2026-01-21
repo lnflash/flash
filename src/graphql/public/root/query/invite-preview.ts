@@ -1,6 +1,8 @@
 import { GT } from "@graphql/index"
 import { InviteRepository, InviteStatus } from "@services/mongoose/models/invite"
 import { AccountsRepository } from "@services/mongoose"
+import { checkedToAccountId } from "@domain/accounts"
+import { checkedToInviteToken } from "@domain/invite"
 import { hashToken } from "@utils"
 import { baseLogger } from "@services/logger"
 
@@ -26,8 +28,10 @@ const InvitePreviewQuery = GT.Field<null, GraphQLPublicContext>({
   resolve: async (_, args) => {
     const { token } = args
 
-    if (!token || token.length !== 40) {
-      throw new Error("Invalid invitation token")
+    // Validate token format
+    const validatedToken = checkedToInviteToken(token)
+    if (validatedToken instanceof Error) {
+      throw new Error(validatedToken.message)
     }
 
     try {
@@ -49,9 +53,12 @@ const InvitePreviewQuery = GT.Field<null, GraphQLPublicContext>({
       // Get inviter username
       let inviterUsername: string | undefined
       const accountsRepo = AccountsRepository()
-      const inviterAccount = await accountsRepo.findById(invite.inviterId.toString() as AccountId)
-      if (!(inviterAccount instanceof Error)) {
-        inviterUsername = inviterAccount.username
+      const inviterAccountId = checkedToAccountId(invite.inviterId.toString())
+      if (!(inviterAccountId instanceof Error)) {
+        const inviterAccount = await accountsRepo.findById(inviterAccountId)
+        if (!(inviterAccount instanceof Error)) {
+          inviterUsername = inviterAccount.username
+        }
       }
 
       // IMPORTANT: Return full contact for the intended recipient
