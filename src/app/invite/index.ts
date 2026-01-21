@@ -1,5 +1,3 @@
-import crypto from "crypto"
-
 import { InviteRepository } from "@services/mongoose/models/invite"
 import {
   InviteStatus,
@@ -12,6 +10,7 @@ import { UnknownRepositoryError } from "@domain/errors"
 import { ValidationError } from "@domain/shared"
 import { checkedToAccountId } from "@domain/accounts"
 import { sendInviteNotification } from "@services/notifications/invite"
+import { generateInviteToken } from "@utils"
 
 import { checkInviteCreateRateLimit, checkInviteTargetRateLimit } from "./rate-limits"
 
@@ -64,9 +63,8 @@ export const createInvite = async ({
     const inviterAccount = await accounts.findById(inviterAccountId)
     if (inviterAccount instanceof Error) return inviterAccount
 
-    // Generate secure token
-    const token = crypto.randomBytes(32).toString("hex")
-    const tokenHash = crypto.createHash("sha256").update(token).digest("hex")
+    // Generate secure token (20 bytes = 40 hex chars)
+    const { token, tokenHash } = generateInviteToken()
 
     // Create invite
     const expiresAt = new Date()

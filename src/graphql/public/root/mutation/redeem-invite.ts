@@ -1,6 +1,7 @@
 import { GT } from "@graphql/index"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { InviteRepository, InviteStatus } from "@services/mongoose/models/invite"
+import { NEW_USER_INVITE_WINDOW_HOURS } from "@domain/invite"
 import { hashToken } from "@utils"
 import { baseLogger } from "@services/logger"
 import SuccessPayload from "@graphql/shared/types/payload/success-payload"
@@ -71,7 +72,7 @@ const RedeemInviteMutation = GT.Field<null, GraphQLPublicContextAuth>({
         return { success: false, errors: ["You cannot redeem your own invitation"] }
       }
 
-      // Check if user account is new (created within last hour)
+      // Check if user account is new (created within the invite window)
       const accountsRepo = AccountsRepository()
       const account = await accountsRepo.findById(domainAccount.id)
       if (account instanceof Error) {
@@ -80,12 +81,13 @@ const RedeemInviteMutation = GT.Field<null, GraphQLPublicContextAuth>({
       }
 
       const accountAge = Date.now() - account.createdAt.getTime()
-      const oneHourInMs = 60 * 60 * 1000
-      if (accountAge > oneHourInMs) {
-        baseLogger.info({ 
+      const inviteWindowMs = NEW_USER_INVITE_WINDOW_HOURS * 60 * 60 * 1000
+      if (accountAge > inviteWindowMs) {
+        baseLogger.info({
           accountId: domainAccount.id,
           accountAge,
-          inviteId: invite._id 
+          inviteWindowHours: NEW_USER_INVITE_WINDOW_HOURS,
+          inviteId: invite._id
         }, "Existing user attempted to redeem new user invite")
         return { success: false, errors: ["This invitation is for new users only"] }
       }

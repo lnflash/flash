@@ -7,6 +7,7 @@ import { ValidationError } from "@domain/shared"
 export const INVITE_EXPIRY_HOURS = 24
 export const DAILY_INVITE_LIMIT = 10
 export const TARGET_INVITE_LIMIT = 3
+export const NEW_USER_INVITE_WINDOW_HOURS = 24 // New users can redeem invites within this window after account creation
 
 // Branded type for InviteId
 export type InviteId = string & { readonly brand: unique symbol }
