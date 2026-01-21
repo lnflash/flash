@@ -4,7 +4,10 @@ import {
   InviteId,
   InviteAlreadyAcceptedError,
   InvalidExpirationDateError,
+  DAILY_INVITE_LIMIT,
+  TARGET_INVITE_LIMIT,
 } from "@domain/invite"
+import { RateLimitPrefix } from "@domain/rate-limit"
 import { redis } from "@services/redis"
 import { UnknownRepositoryError, CouldNotFindError } from "@domain/errors"
 
@@ -74,8 +77,8 @@ export const extendInvite = async (inviteId: InviteId, newExpiresAt: Date) => {
 
 export const resetInviteRateLimit = async (accountId: AccountId) => {
   try {
-    // Clear all rate limit keys for this account
-    const dailyKey = `invite:daily:${accountId}`
+    // Clear the rate limit key for this account (matches rate-limiter-flexible key format)
+    const dailyKey = `${RateLimitPrefix.inviteCreate}:${accountId}`
 
     // Delete the daily limit key
     await redis.del(dailyKey)
@@ -88,8 +91,8 @@ export const resetInviteRateLimit = async (accountId: AccountId) => {
 
 export const resetInviteTargetRateLimit = async (contact: string) => {
   try {
-    // Clear the target rate limit key for this contact
-    const targetKey = `invite:target:${contact}`
+    // Clear the target rate limit key for this contact (matches rate-limiter-flexible key format)
+    const targetKey = `${RateLimitPrefix.inviteTarget}:${contact}`
 
     // Delete the target limit key
     await redis.del(targetKey)
@@ -103,7 +106,11 @@ export const resetInviteTargetRateLimit = async (contact: string) => {
 export const resetAllInviteRateLimits = async () => {
   try {
     // Use SCAN instead of KEYS for production safety
-    const patterns = [`invite:daily:*`, `invite:target:*`, `invite:ratelimit:*`]
+    // Match the rate-limiter-flexible key format
+    const patterns = [
+      `${RateLimitPrefix.inviteCreate}:*`,
+      `${RateLimitPrefix.inviteTarget}:*`,
+    ]
     const allKeys: string[] = []
 
     for (const pattern of patterns) {
@@ -139,16 +146,13 @@ export const getInviteRateLimitStatus = async ({
   contact?: string
 }) => {
   try {
-    const DAILY_INVITE_LIMIT = 10
-    const TARGET_INVITE_LIMIT = 3
-
     let dailyCount: number | null = null
     let dailyTtl: number | null = null
     let targetCount: number | null = null
     let targetTtl: number | null = null
 
     if (accountId) {
-      const dailyKey = `invite:daily:${accountId}`
+      const dailyKey = `${RateLimitPrefix.inviteCreate}:${accountId}`
       const count = await redis.get(dailyKey)
       dailyCount = count ? parseInt(count) : 0
       const ttl = await redis.ttl(dailyKey)
@@ -156,7 +160,7 @@ export const getInviteRateLimitStatus = async ({
     }
 
     if (contact) {
-      const targetKey = `invite:target:${contact}`
+      const targetKey = `${RateLimitPrefix.inviteTarget}:${contact}`
       const count = await redis.get(targetKey)
       targetCount = count ? parseInt(count) : 0
       const ttl = await redis.ttl(targetKey)

@@ -71,6 +71,7 @@ const InviteSchema = new Schema<InviteRecord>({
   redeemedById: {
     type: Schema.Types.ObjectId,
     ref: "Account",
+    index: true,
   },
   revokedAt: {
     type: Date,
