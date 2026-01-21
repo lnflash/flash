@@ -40,6 +40,13 @@ export const checkedToEmailLoginId = (flow: string): EmailLoginId | ValidationEr
   return flow as EmailLoginId
 }
 
+export const checkedToEmailFlowId = (flow: string): EmailFlowId | ValidationError => {
+  if (!flow.match(UuidRegex)) {
+    return new InvalidFlowId(flow)
+  }
+  return flow as EmailFlowId
+}
+
 export const checkedToTotpCode = (totpCode: string): TotpCode | ValidationError => {
   if (totpCode.length !== 6) {
     return new InvalidTotpCode(totpCode)

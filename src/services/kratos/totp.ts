@@ -5,6 +5,7 @@ import { isAxiosError } from "axios"
 
 import { KRATOS_MASTER_USER_PASSWORD } from "@config"
 
+import { checkedToTotpRegistrationId } from "./index"
 import {
   AuthenticationKratosError,
   MissingTotpKratosError,
@@ -23,9 +24,12 @@ export const kratosInitiateTotp = async (token: AuthToken) => {
       return new MissingTotpKratosError()
     }
 
+    const totpRegistrationId = checkedToTotpRegistrationId(res.data.id)
+    if (totpRegistrationId instanceof Error) return totpRegistrationId
+
     const totpSecret = (totpAttributes.attributes as UiNodeTextAttributes).text
       .text as TotpSecret
-    return { totpSecret, totpRegistrationId: res.data.id as TotpRegistrationId }
+    return { totpSecret, totpRegistrationId }
   } catch (err) {
     return new UnknownKratosError(err)
   }
@@ -38,7 +42,7 @@ export const kratosValidateTotp = async ({
 }: {
   authToken: AuthToken
   totpCode: string
-  totpRegistrationId: string
+  totpRegistrationId: TotpRegistrationId
 }) => {
   try {
     await kratosPublic.updateSettingsFlow({

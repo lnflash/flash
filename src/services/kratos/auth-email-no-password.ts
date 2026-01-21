@@ -17,6 +17,7 @@ import { checkedToEmailAddress } from "@domain/users"
 
 import knex from "knex"
 
+import { checkedToEmailFlowId } from "./index"
 import { createCookieLoginFlow } from "./cookie"
 import {
   CodeExpiredKratosError,
@@ -73,7 +74,10 @@ export const AuthWithEmailPasswordlessService = (): IAuthWithEmailPasswordlessSe
         },
       })
 
-      return data.id as EmailFlowId
+      const emailFlowId = checkedToEmailFlowId(data.id)
+      if (emailFlowId instanceof Error) return emailFlowId
+
+      return emailFlowId
     } catch (err) {
       return new UnknownKratosError(err)
     }
