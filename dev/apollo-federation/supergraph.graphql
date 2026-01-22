@@ -155,6 +155,32 @@ type AccountUpdateNotificationSettingsPayload
   errors: [Error!]!
 }
 
+type AccountUpgradeRequest
+  @join__type(graph: PUBLIC)
+{
+  businessAddress: String
+  businessName: String
+  currentLevel: AccountLevel!
+  email: String
+  fullName: String!
+
+  """ERPNext document name"""
+  name: String!
+  phoneNumber: String
+  requestedLevel: AccountLevel!
+
+  """Workflow status of the upgrade request"""
+  status: String!
+  username: String!
+}
+
+type AccountUpgradeRequestPayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error!]!
+  upgradeRequest: AccountUpgradeRequest
+}
+
 """An Opaque Bearer token"""
 scalar AuthToken
   @join__type(graph: PUBLIC)
@@ -1438,6 +1464,7 @@ type Query
   @join__type(graph: PUBLIC)
 {
   accountDefaultWallet(username: Username!, walletCurrency: WalletCurrency): PublicWallet!
+  accountUpgradeRequest: AccountUpgradeRequestPayload!
   btcPrice(currency: DisplayCurrency! = "USD"): Price @deprecated(reason: "Deprecated in favor of realtimePrice")
   btcPriceList(range: PriceGraphRange!): [PricePoint]
   businessMapMarkers: [MapMarker!]!
