@@ -4,10 +4,17 @@ start-deps:
 	docker compose up bats-deps -d
 
 start-frappe:
-	docker compose up frappe -d
+	./dev/erpnext/start.sh
 
-clean-frappe:
-	./dev/clean-frappe
+stop-frappe:
+	docker compose down frappe
+
+reset-frappe:
+	./dev/erpnext/clean.sh
+	./dev/erpnext/start.sh
+	@echo "Waiting for frappe to initialize..."
+	@sleep 60
+	./dev/erpnext/restore.sh dev/erpnext/backups/20260123_132015-frontend-database.sql.gz
 
 start-deps-integration:
 	docker compose up integration-deps -d
