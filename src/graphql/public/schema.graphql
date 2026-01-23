@@ -440,6 +440,24 @@ type GraphQLApplicationError implements Error {
 """Hex-encoded string of 32 bytes"""
 scalar Hex32Bytes
 
+input IdDocumentUploadUrlGenerateInput {
+  """MIME type (image/jpeg, image/png, image/webp)"""
+  contentType: String!
+
+  """Original filename"""
+  filename: String!
+}
+
+type IdDocumentUploadUrlPayload {
+  errors: [Error!]!
+
+  """Storage key for the uploaded file (use to generate read URLs)"""
+  fileKey: String
+
+  """Pre-signed URL for uploading the ID document directly to storage"""
+  uploadUrl: String
+}
+
 input InitiateCashoutInput {
   """The id of the offer being executed."""
   offerId: ID!
@@ -786,6 +804,7 @@ type Mutation {
   captchaRequestAuthCode(input: CaptchaRequestAuthCodeInput!): SuccessPayload!
   deviceNotificationTokenCreate(input: DeviceNotificationTokenCreateInput!): SuccessPayload!
   feedbackSubmit(input: FeedbackSubmitInput!): SuccessPayload!
+  idDocumentUploadUrlGenerate(input: IdDocumentUploadUrlGenerateInput!): IdDocumentUploadUrlPayload!
 
   """
   Start the Cashout process; 

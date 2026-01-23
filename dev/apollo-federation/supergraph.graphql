@@ -562,6 +562,28 @@ type GraphQLApplicationError implements Error
 scalar Hex32Bytes
   @join__type(graph: PUBLIC)
 
+input IdDocumentUploadUrlGenerateInput
+  @join__type(graph: PUBLIC)
+{
+  """MIME type (image/jpeg, image/png, image/webp)"""
+  contentType: String!
+
+  """Original filename"""
+  filename: String!
+}
+
+type IdDocumentUploadUrlPayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error!]!
+
+  """Storage key for the uploaded file (use to generate read URLs)"""
+  fileKey: String
+
+  """Pre-signed URL for uploading the ID document directly to storage"""
+  uploadUrl: String
+}
+
 input InitiateCashoutInput
   @join__type(graph: PUBLIC)
 {
@@ -1017,6 +1039,7 @@ type Mutation
   captchaRequestAuthCode(input: CaptchaRequestAuthCodeInput!): SuccessPayload!
   deviceNotificationTokenCreate(input: DeviceNotificationTokenCreateInput!): SuccessPayload!
   feedbackSubmit(input: FeedbackSubmitInput!): SuccessPayload!
+  idDocumentUploadUrlGenerate(input: IdDocumentUploadUrlGenerateInput!): IdDocumentUploadUrlPayload!
 
   """
   Start the Cashout process; 
