@@ -1020,7 +1020,7 @@ input OnChainUsdPaymentSendInput {
 }
 
 type OnChainUsdTxFee {
-  amount: CentAmount!
+  amount: FractionalCentAmount!
 }
 
 type OneDayAccountLimit implements AccountLimit {
@@ -1176,7 +1176,7 @@ type Query {
   mobileVersions: [MobileVersions]
   npubByUsername(username: Username!): npubByUsername
   onChainTxFee(address: OnChainAddress!, amount: SatAmount!, speed: PayoutSpeed = FAST, walletId: WalletId!): OnChainTxFee!
-  onChainUsdTxFee(address: OnChainAddress!, amount: CentAmount!, speed: PayoutSpeed = FAST, walletId: WalletId!): OnChainUsdTxFee!
+  onChainUsdTxFee(address: OnChainAddress!, amount: FractionalCentAmount!, speed: PayoutSpeed = FAST, walletId: WalletId!): OnChainUsdTxFee!
   onChainUsdTxFeeAsBtcDenominated(address: OnChainAddress!, amount: SatAmount!, speed: PayoutSpeed = FAST, walletId: WalletId!): OnChainUsdTxFee!
   quizQuestions: [QuizQuestion] @deprecated(reason: "TODO: remove. we don't need a non authenticated version of this query. the users can only do the query while authenticated")
 
