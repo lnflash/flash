@@ -50,11 +50,11 @@ Add Bridge.xyz integration to enable US bank account on-ramp (ACH/Wire → USDT)
 - Configuration schema for Bridge settings
 
 ### Definition of Done
-- [ ] `yarn tsc-check` passes with no new errors
-- [ ] Bridge service can create customers and virtual accounts
-- [ ] Webhooks are received and processed
-- [ ] GraphQL endpoints are accessible
-- [ ] Documentation exists in `docs/bridge-integration/`
+- [x] `yarn tsc-check` passes with no new errors
+- [x] Bridge service can create customers and virtual accounts
+- [x] Webhooks are received and processed
+- [x] GraphQL endpoints are accessible
+- [x] Documentation exists in `docs/bridge-integration/`
 
 ### Must Have
 - Bridge API client with typed responses
@@ -209,7 +209,7 @@ Task 5 (Repository) → Task 6 (Schema) → Task 7 (Service Layer)
 
 ---
 
-- [ ] 2b. Add USDT currency and wallet types
+- [x] 2b. Add USDT currency and wallet types
 
   **What to do**:
   - USDT is a **new currency type** (gradual migration - users have BOTH USD and USDT wallets)
@@ -308,7 +308,7 @@ Task 5 (Repository) → Task 6 (Schema) → Task 7 (Service Layer)
 
 ---
 
-- [ ] 3. Create Bridge API client
+- [x] 3. Create Bridge API client
 
   **What to do**:
   - Create `src/services/bridge/client.ts`
@@ -385,7 +385,7 @@ Task 5 (Repository) → Task 6 (Schema) → Task 7 (Service Layer)
 
 ---
 
-- [ ] 4. Create Bridge error types
+- [x] 4. Create Bridge error types
 
   **What to do**:
   - Create `src/services/bridge/errors.ts`
@@ -441,7 +441,7 @@ Task 5 (Repository) → Task 6 (Schema) → Task 7 (Service Layer)
 
 ---
 
-- [ ] 5. Create Bridge repository for Virtual/External Accounts
+- [x] 5. Create Bridge repository for Virtual/External Accounts
 
   **What to do**:
   - Create `src/services/mongoose/bridge-accounts.ts`
@@ -494,7 +494,7 @@ Task 5 (Repository) → Task 6 (Schema) → Task 7 (Service Layer)
 
 ---
 
-- [ ] 6. Add Bridge fields to Account schema
+- [x] 6. Add Bridge fields to Account schema
 
   **What to do**:
   - Add fields to Account mongoose schema in `src/services/mongoose/schema.ts`:
@@ -620,7 +620,7 @@ Task 5 (Repository) → Task 6 (Schema) → Task 7 (Service Layer)
 
 ---
 
-- [ ] 7. Create Bridge service layer
+- [x] 7. Create Bridge service layer
 
   **What to do**:
   - Create `src/services/bridge/index.ts` - public API
@@ -673,7 +673,7 @@ Task 5 (Repository) → Task 6 (Schema) → Task 7 (Service Layer)
 
 ---
 
-- [ ] 8. Create Bridge webhook server (standalone)
+- [x] 8. Create Bridge webhook server (standalone)
 
   **What to do**:
   - Create standalone Express server at `src/services/bridge/webhook-server/index.ts`
@@ -755,7 +755,7 @@ Task 5 (Repository) → Task 6 (Schema) → Task 7 (Service Layer)
 
 ---
 
-- [ ] 9. Add GraphQL endpoints for Bridge
+- [x] 9. Add GraphQL endpoints for Bridge
 
   **What to do**:
   
@@ -881,7 +881,7 @@ Task 5 (Repository) → Task 6 (Schema) → Task 7 (Service Layer)
 
 ---
 
-- [ ] 10. Add IBEX Crypto methods for Tron address
+- [x] 10. Add IBEX Crypto methods for Tron address
 
   **What to do**:
   - Add `getCryptoReceiveOptions()` to `src/services/ibex/client.ts`
@@ -912,7 +912,7 @@ Task 5 (Repository) → Task 6 (Schema) → Task 7 (Service Layer)
 
 ---
 
-- [ ] 10b. Add IBEX crypto webhook handler for USDT deposits
+- [x] 10b. Add IBEX crypto webhook handler for USDT deposits
 
   **What to do**:
   - Extend `src/services/ibex/webhook-server/` to handle crypto receive events
@@ -967,7 +967,7 @@ Task 5 (Repository) → Task 6 (Schema) → Task 7 (Service Layer)
 
 ---
 
-- [ ] 11. Create documentation
+- [x] 11. Create documentation
 
   **What to do**:
   - Create `docs/bridge-integration/ARCHITECTURE.md` - system architecture
@@ -1027,12 +1027,12 @@ yarn test:unit  # Expected: all pass (after adding tests)
 ```
 
 ### Final Checklist
-- [ ] All "Must Have" features present
-- [ ] All "Must NOT Have" guardrails respected
-- [ ] TypeScript compiles without errors
-- [ ] Documentation complete
-- [ ] Webhook server handles Bridge events
-- [ ] GraphQL endpoints work with authentication
+- [x] All "Must Have" features present
+- [x] All "Must NOT Have" guardrails respected
+- [x] TypeScript compiles without errors
+- [x] Documentation complete
+- [x] Webhook server handles Bridge events
+- [x] GraphQL endpoints work with authentication
 
 ---
 
