@@ -51,6 +51,14 @@ type InitiateWithdrawalResult = {
   state: string
 }
 
+type WithdrawalResult = {
+  transferId: string
+  amount: string
+  currency: string
+  state: string
+  createdAt: string
+}
+
 type KycStatusResult = "pending" | "approved" | "rejected" | null
 
 type VirtualAccountResult = {
@@ -517,6 +525,49 @@ const getExternalAccounts = async (
   }
 }
 
+/**
+ * Returns list of withdrawals
+ */
+const getWithdrawals = async (
+  accountId: AccountId,
+): Promise<WithdrawalResult[] | Error> => {
+  baseLogger.info({ accountId, operation: "getWithdrawals" }, "Bridge operation started")
+
+  const enabledCheck = checkBridgeEnabled()
+  if (enabledCheck instanceof Error) return enabledCheck
+
+  const account = await checkAccountLevel(accountId)
+  if (account instanceof Error) return account
+
+  try {
+    const withdrawals = await BridgeAccountsRepo.findWithdrawalsByAccountId(
+      accountId as string,
+    )
+    if (withdrawals instanceof Error) return withdrawals
+
+    const result: WithdrawalResult[] = withdrawals.map((w) => ({
+      transferId: w.bridgeTransferId,
+      amount: w.amount,
+      currency: w.currency,
+      state: w.status,
+      createdAt: w.createdAt.toISOString(),
+    }))
+
+    baseLogger.info(
+      { accountId, operation: "getWithdrawals", count: result.length },
+      "Bridge operation completed",
+    )
+
+    return result
+  } catch (error) {
+    baseLogger.error(
+      { accountId, operation: "getWithdrawals", error },
+      "Bridge operation failed",
+    )
+    return error instanceof Error ? error : new Error(String(error))
+  }
+}
+
 // ============ Export with Tracing ============
 
 export default wrapAsyncFunctionsToRunInSpan({
@@ -529,5 +580,6 @@ export default wrapAsyncFunctionsToRunInSpan({
     getKycStatus,
     getVirtualAccount,
     getExternalAccounts,
+    getWithdrawals,
   },
 })
