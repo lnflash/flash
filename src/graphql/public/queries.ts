@@ -20,6 +20,10 @@ import NpubByUserNameQuery from "./root/query/username-npub-query"
 import IsFlashNpubQuery from "./root/query/is-flash-npub-query"
 import TransactionDetailsQuery from "./root/query/transaction-details"
 import AccountUpgradeRequestQuery from "./root/query/account-upgrade-request"
+import BridgeKycStatusQuery from "./root/query/bridge-kyc-status"
+import BridgeVirtualAccountQuery from "./root/query/bridge-virtual-account"
+import BridgeExternalAccountsQuery from "./root/query/bridge-external-accounts"
+import BridgeWithdrawalsQuery from "./root/query/bridge-withdrawals"
 
 export const queryFields = {
   unauthed: {
@@ -43,6 +47,10 @@ export const queryFields = {
       me: MeQuery,
       transactionDetails: TransactionDetailsQuery,
       accountUpgradeRequest: AccountUpgradeRequestQuery,
+      bridgeKycStatus: BridgeKycStatusQuery,
+      bridgeVirtualAccount: BridgeVirtualAccountQuery,
+      bridgeExternalAccounts: BridgeExternalAccountsQuery,
+      bridgeWithdrawals: BridgeWithdrawalsQuery,
     },
     atWalletLevel: {
       onChainTxFee: OnChainTxFeeQuery,
