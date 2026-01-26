@@ -470,10 +470,52 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "UnexpectedIbexResponse":
       return new IbexError(baseLogger)
     case "OfferNotFound":
-      return new NotFoundError({ 
-        message: "Offer not available. Try again.", 
-        logger: baseLogger 
+      return new NotFoundError({
+        message: "Offer not available. Try again.",
+        logger: baseLogger,
       })
+
+    case "BridgeDisabledError":
+      message = "Bridge integration is currently disabled"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "BridgeAccountLevelError":
+      message = "Bridge requires Pro account (Level 2+)"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "BridgeKycPendingError":
+      message = "KYC verification is pending"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "BridgeKycRejectedError":
+      message = "KYC verification was rejected"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "BridgeCustomerNotFoundError":
+      message = "Bridge customer not found"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "BridgeInsufficientFundsError":
+      message = "Insufficient funds for withdrawal"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "BridgeRateLimitError":
+      message = "Rate limit exceeded, please try again later"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "BridgeTimeoutError":
+      message = "Request timed out"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "BridgeWebhookValidationError":
+      message = "Invalid webhook signature"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "BridgeApiError":
+    case "BridgeError":
+      message = error.message || "Bridge API error"
+      return new UnknownClientError({ message, logger: baseLogger })
+
     // ----------
     // Unhandled below here
     // ----------
@@ -741,17 +783,18 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
 }
 
 // Move to CustomApolloError class?
-export const apolloErrorResponse = (e: CustomApolloError): { errors: IError[] } => { 
+export const apolloErrorResponse = (e: CustomApolloError): { errors: IError[] } => {
   return {
     errors: [
       {
         message: e.message,
         path: e.path,
-        code: e.extensions.code 
-      }
+        code: e.extensions.code,
+      },
     ]
   }
 }
+
 
 export const mapAndParseErrorForGqlResponse = (err: ApplicationError): IError => {
   const mappedError = mapError(err)
@@ -763,7 +806,7 @@ export const mapAndParseErrorForGqlResponse = (err: ApplicationError): IError =>
 }
 
 export const mapToGqlErrorList = (err: ApplicationError): IError[] => {
-  if (err instanceof ValidationError && err.errors) return err.errors.map(mapAndParseErrorForGqlResponse)
+  if (err instanceof ValidationError && err.errors)
+    return err.errors.map(mapAndParseErrorForGqlResponse)
   else return [mapAndParseErrorForGqlResponse(err)]
-
 }
