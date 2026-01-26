@@ -1,32 +1,54 @@
 import { USDAmount } from "@domain/shared/MoneyAmount"
 
 export type PayInvoiceArgs = {
-  accountId: IbexAccountId,
-  invoice: Bolt11,
+  accountId: IbexAccountId
+  invoice: Bolt11
   send?: USDAmount // must match currency of account
 }
 
 // Ibex supports fee estimation in different currencies
 export type GetFeeEstimateArgs = {
-  invoice: Bolt11,
+  invoice: Bolt11
   send?: USDAmount
 }
 
 export type IbexFeeEstimation = {
-  fee: USDAmount,
-  invoice: USDAmount,
+  fee: USDAmount
+  invoice: USDAmount
 }
 
 export type IbexAccountDetails = {
-    id: string | undefined;
-    userId: string | undefined;
-    name: string | undefined;
-    balance: USDAmount | undefined;
+  id: string | undefined
+  userId: string | undefined
+  name: string | undefined
+  balance: USDAmount | undefined
 }
 
-export type IbexInvoiceArgs = { 
-  accountId: IbexAccountId,
+export type IbexInvoiceArgs = {
+  accountId: IbexAccountId
   amount?: USDAmount
   memo: string
-  expiration?: Seconds 
-};
+  expiration?: Seconds
+}
+
+export interface CryptoReceiveOption {
+  id: string
+  currency: string
+  network: string
+  name: string
+}
+
+export interface CryptoReceiveInfo {
+  id: string
+  wallet_id: string
+  option_id: string
+  address: string
+  currency: string
+  network: string
+  created_at: string
+}
+
+export interface CreateCryptoReceiveInfoRequest {
+  wallet_id: string
+  option_id: string
+}

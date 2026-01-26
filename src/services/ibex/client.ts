@@ -42,6 +42,9 @@ import {
   IbexFeeEstimation,
   IbexInvoiceArgs,
   PayInvoiceArgs,
+  CryptoReceiveOption,
+  CryptoReceiveInfo,
+  CreateCryptoReceiveInfoRequest,
 } from "./types"
 import { USDAmount, USDTAmount } from "@domain/shared"
 import { baseLogger } from "@services/logger"
@@ -236,6 +239,49 @@ const getCryptoReceiveBalance = async (
   }
 }
 
+const getCryptoReceiveOptions = async (): Promise<CryptoReceiveOption[] | IbexError> => {
+  try {
+    const resp = await (Ibex as any).getCryptoReceiveOptions()
+    if (resp instanceof Error) return new IbexError(resp)
+    return resp.options || []
+  } catch (err) {
+    return new IbexError(err instanceof Error ? err : new Error(String(err)))
+  }
+}
+
+const createCryptoReceiveInfo = async (
+  walletId: IbexAccountId,
+  optionId: string,
+): Promise<CryptoReceiveInfo | IbexError> => {
+  try {
+    const resp = await (Ibex as any).createCryptoReceiveInfo({
+      wallet_id: walletId,
+      option_id: optionId,
+    } as CreateCryptoReceiveInfoRequest)
+    if (resp instanceof Error) return new IbexError(resp)
+    if (!resp.address) return new UnexpectedIbexResponse("Address not found")
+    return resp
+  } catch (err) {
+    return new IbexError(err instanceof Error ? err : new Error(String(err)))
+  }
+}
+
+const getTronUsdtOption = async (): Promise<string | IbexError> => {
+  const options = await getCryptoReceiveOptions()
+  if (options instanceof IbexError) return options
+
+  const tronUsdt = options.find(
+    (opt) =>
+      opt.currency.toLowerCase() === "usdt" && opt.network.toLowerCase() === "tron",
+  )
+
+  if (!tronUsdt) {
+    return new IbexError(new Error("Tron USDT option not found"))
+  }
+
+  return tronUsdt.id
+}
+
 // const sendBetweenAccounts = async (
 //   sender: IbexAccount,
 //   receiver: IbexAccount,
@@ -274,5 +320,8 @@ export default wrapAsyncFunctionsToRunInSpan({
     decodeLnurl,
     payToLnurl,
     getCryptoReceiveBalance,
+    getCryptoReceiveOptions,
+    createCryptoReceiveInfo,
+    getTronUsdtOption,
   },
 })
