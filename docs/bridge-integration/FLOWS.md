@@ -70,7 +70,7 @@ This flow allows users to withdraw USDT from their Flash wallet to their externa
 
 ```ascii
 User            Flash App          Flash Backend          Bridge.xyz             Bank
- |                  |                   |                     |                   |
+ | (Check for KYC, if complete, skip to 12.                   |                   |
  | 1. Start KYC     |                   |                     |                   |
  |----------------->| 2. bridgeInitKyc  |                     |                   |
  |                  |------------------>| 3. Create Customer  |                   |
