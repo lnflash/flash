@@ -325,6 +325,20 @@ const AccountSchema = new Schema<AccountRecord>(
     },
 
     displayCurrency: String, // FIXME: should be an enum
+
+    bridgeCustomerId: {
+      type: String,
+      required: false,
+    },
+    bridgeKycStatus: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      required: false,
+    },
+    bridgeTronAddress: {
+      type: String,
+      required: false,
+    },
   },
   { id: false },
 )
@@ -333,6 +347,8 @@ AccountSchema.index({
   title: 1,
   coordinates: 1,
 })
+
+AccountSchema.index({ bridgeTronAddress: 1 }, { sparse: true })
 
 export const Account = mongoose.model<AccountRecord>("Account", AccountSchema)
 
