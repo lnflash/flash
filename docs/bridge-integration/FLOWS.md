@@ -86,18 +86,18 @@ User            Flash App          Flash Backend          Bridge.xyz            
  |                  |                   |<--------------------|                   |
  | 8. Link Bank     |                   |                     |                   |
  |----------------->| 9. bridgeAddExtAcc|                     |                   |
- |                  |------------------>| 10. Get Link URL     |                   |
+ |                  |------------------>| 10. Get Link URL    |                   |
  |                  |                   |-------------------->|                   |
- |                  | 11. Link URL       |                     |                   |
+ |                  | 11. Link URL      |                     |                   |
  |                  |<------------------|                     |                   |
- | 12. Auth Bank     |                   |                     |                   |
+ | 12. Auth Bank    |                   |                     |                   |
  |----------------->|                   |                     |                   |
  | (Plaid Flow)     |                   |                     |                   |
- |                  |                   | 13. ext_acc.verified |                   |
+ |                  |                   | 13. ext_acc.verified|                   |
  |                  |                   |<--------------------|                   |
- | 14. Withdraw      |                   |                     |                   |
- |----------------->| 15. bridgeInitWith |                     |                   |
- |                  |------------------>| 16. Create Transfer  |                   |
+ | 14. Withdraw     |                   |                     |                   |
+ |----------------->| 15. bridgeInitWith|                     |                   |
+ |                  |------------------>| 16. Create Transfer |                   |
  |                  |                   |-------------------->|                   |
  |                  | 17. Pending       |                     |                   |
  |<-----------------|                   |                     |                   |
