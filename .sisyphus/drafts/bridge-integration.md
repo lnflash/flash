@@ -63,15 +63,47 @@
 - Need to determine which chain Bridge should use
 
 ## Decisions Made
-1. **Blockchain**: Tron (TRC-20) - Bridge supports USDT.trx
-2. **Stablecoin**: USDT (not USDC/USDB)
+1. **Blockchain**: Tron (TRC-20) - Bridge supports USDT.trx with enhanced support
+2. **Stablecoin**: USDT (TRC-20) directly to IBEX wallet
 3. **Bridge Customer Creation**: Lazy - on first on-ramp request
-4. **Deposit Target**: Directly to user's IBEX wallet address (not intermediary)
+4. **Deposit Target**: Directly to user's IBEX wallet Tron address
+5. **KYC**: Bridge uses Persona - can use KYC Links API (hosted flow)
+6. **Fee Structure**: Bridge fees + 0.5% Flash markup
 
-## Remaining Open Questions
-1. KYC data sharing - does Bridge need user info?
-2. Fee structure - Bridge fees + Flash markup?
-3. Does IBEX support receiving USDT on Tron?
+## IBEX Crypto API (Confirmed)
+- `GET /crypto/receive-infos/options` - Get available crypto options
+- `POST /crypto/receive-infos` - Create receive address (Tron USDT)
+- `POST /crypto/send-infos` - Create send destination
+- `POST /crypto/send` - Send crypto (for off-ramp)
+
+## Bridge KYC Requirements (Individual)
+**Required Fields:**
+- first_name, last_name
+- email
+- residential_address (street_line_1, city, subdivision, postal_code, country)
+- birth_date (must be 18+)
+- SSN (US residents) or National ID (non-US)
+- signed_agreement_id (Terms of Service acceptance)
+
+**Optional/Conditional:**
+- ID verification (photo ID)
+- Proof of address (for SEPA/EEA)
+
+**KYC Flow Options:**
+1. **KYC Links API** (Recommended) - `POST /kyc_links`
+   - Generate hosted Persona link for user to complete KYC
+   - User redirected to Bridge's Persona flow
+   - Simpler integration, Bridge handles UI
+   
+2. **Customers API** - `POST /customers`
+   - Pass KYC data directly to Bridge
+   - More control but more implementation work
+
+## All Questions Resolved
+- ✅ IBEX supports Tron USDT (Crypto Receive/Send API)
+- ✅ Wallet address via IBEX `POST /crypto/receive-infos`
+- ✅ KYC via Bridge Persona (KYC Links API)
+- ✅ Fee: Bridge fees + 0.5% Flash
 
 ## Research Findings
 
