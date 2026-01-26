@@ -94,6 +94,11 @@ interface AccountRecord {
   title?: string
   coordinates?: CoordinateObjectForUser
 
+  // Bridge integration:
+  bridgeCustomerId?: string
+  bridgeKycStatus?: "pending" | "approved" | "rejected"
+  bridgeTronAddress?: string
+
   // mongoose in-built functions
   save: () => Promise<AccountRecord>
 }

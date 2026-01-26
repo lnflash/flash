@@ -171,6 +171,51 @@ export const AccountsRepository = (): IAccountsRepository => {
     }
   }
 
+  const updateBridgeFields = async (
+    id: AccountId,
+    fields: {
+      bridgeCustomerId?: BridgeCustomerId
+      bridgeKycStatus?: "pending" | "approved" | "rejected"
+      bridgeTronAddress?: string
+    },
+  ): Promise<Account | RepositoryError> => {
+    try {
+      const result = await Account.findByIdAndUpdate(
+        toObjectId<AccountId>(id),
+        { $set: fields },
+        { new: true },
+      )
+      if (!result) return new RepositoryError("Account not found")
+      return translateToAccount(result)
+    } catch (error) {
+      return parseRepositoryError(error)
+    }
+  }
+
+  const findByBridgeTronAddress = async (
+    address: string,
+  ): Promise<Account | RepositoryError> => {
+    try {
+      const result = await Account.findOne({ bridgeTronAddress: address })
+      if (!result) return new RepositoryError("Account not found for Tron address")
+      return translateToAccount(result)
+    } catch (error) {
+      return parseRepositoryError(error)
+    }
+  }
+
+  const findByBridgeCustomerId = async (
+    customerId: BridgeCustomerId,
+  ): Promise<Account | RepositoryError> => {
+    try {
+      const result = await Account.findOne({ bridgeCustomerId: customerId })
+      if (!result) return new RepositoryError("Account not found for Bridge customer ID")
+      return translateToAccount(result)
+    } catch (error) {
+      return parseRepositoryError(error)
+    }
+  }
+
   return {
     persistNew,
     findByUserId,
@@ -180,6 +225,9 @@ export const AccountsRepository = (): IAccountsRepository => {
     findByUsername,
     findByNpub,
     update,
+    updateBridgeFields,
+    findByBridgeTronAddress,
+    findByBridgeCustomerId,
   }
 }
 
@@ -241,4 +289,7 @@ const translateToAccount = (result: AccountRecord): Account => ({
 
   kratosUserId: result.kratosUserId as UserId,
   displayCurrency: (result.displayCurrency || UsdDisplayCurrency) as DisplayCurrency,
+  bridgeCustomerId: result.bridgeCustomerId as BridgeCustomerId | undefined,
+  bridgeKycStatus: result.bridgeKycStatus,
+  bridgeTronAddress: result.bridgeTronAddress,
 })

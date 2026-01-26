@@ -1,5 +1,7 @@
 type AccountError = import("./errors").AccountError
 
+type BridgeCustomerId = import("@domain/primitives/bridge").BridgeCustomerId
+
 type CurrencyRatio = number & { readonly brand: unique symbol }
 type AccountLevel =
   (typeof import("./index").AccountLevel)[keyof typeof import("./index").AccountLevel]
@@ -84,6 +86,10 @@ type Account = {
   // temp
   role?: string
   readonly erpParty?: string // Lookup key to Supplier (or Customer) in ERPNext. Required for Account level > 1
+  // Bridge integration:
+  bridgeCustomerId?: BridgeCustomerId
+  bridgeKycStatus?: "pending" | "approved" | "rejected"
+  bridgeTronAddress?: string
 }
 
 // deprecated
@@ -152,7 +158,7 @@ type AccountLimitsVolumes =
 
 type AccountValidator = {
   isActive(): true | ValidationError
-  isLevel(accountLevel: number): true | ValidationError 
+  isLevel(accountLevel: number): true | ValidationError
   validateWalletForAccount(wallet: Wallet): true | ValidationError
 }
 
@@ -168,6 +174,19 @@ interface IAccountsRepository {
   // listBusinessesForMap(): Promise<BusinessMapMarker[] | RepositoryError>
   findByNpub(npub: Npub): Promise<Account | RepositoryError>
   update(account: Account): Promise<Account | RepositoryError>
+
+  updateBridgeFields(
+    id: AccountId,
+    fields: {
+      bridgeCustomerId?: BridgeCustomerId
+      bridgeKycStatus?: "pending" | "approved" | "rejected"
+      bridgeTronAddress?: string
+    },
+  ): Promise<Account | RepositoryError>
+
+  findByBridgeTronAddress(address: string): Promise<Account | RepositoryError>
+
+  findByBridgeCustomerId(customerId: BridgeCustomerId): Promise<Account | RepositoryError>
 }
 
 type AdminRole = "dealer" | "funder" | "bankowner" | "editor"
