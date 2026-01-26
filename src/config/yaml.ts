@@ -24,44 +24,43 @@ import mergeWith from "lodash.mergewith"
 import { configSchema } from "./schema"
 import { ConfigError } from "./error"
 
-import yargs from "yargs";
+import yargs from "yargs"
 
-const argv: any = yargs(process.argv.slice(2))
-  .option("configPath", {
+const argv: any =
+  // .help()
+  yargs(process.argv.slice(2)).option("configPath", {
     alias: "c",
     type: "array",
     description: "Paths to YAML configuration files",
     demandOption: true,
-  })
-  // .help()
-  .argv;
+  }).argv
 
 // replaces array with override
 const merge = (defaultConfig: unknown, customConfig: unknown) =>
   mergeWith(defaultConfig, customConfig, (a, b) => (Array.isArray(b) ? b : undefined))
 
 export const mergeYamls = (filePaths: string[]): Record<string, unknown> => {
-  const mergedConfig: Record<string, unknown> = {};
+  const mergedConfig: Record<string, unknown> = {}
 
   filePaths.forEach((filePath) => {
     try {
-      const resolvedPath = path.resolve(filePath);
-      const fileContent = fs.readFileSync(resolvedPath, "utf8");
-      const parsedConfig = yaml.load(fileContent) as Record<string, unknown>;
+      const resolvedPath = path.resolve(filePath)
+      const fileContent = fs.readFileSync(resolvedPath, "utf8")
+      const parsedConfig = yaml.load(fileContent) as Record<string, unknown>
 
       merge(mergedConfig, parsedConfig)
 
-      baseLogger.info(`Successfully loaded config from ${resolvedPath}`);
+      baseLogger.info(`Successfully loaded config from ${resolvedPath}`)
     } catch (err) {
-      baseLogger.warn({ err, filePath }, `Failed to load config from ${filePath}`);
+      baseLogger.warn({ err, filePath }, `Failed to load config from ${filePath}`)
     }
-  });
+  })
 
-  return mergedConfig;
-};
+  return mergedConfig
+}
 
-const paths = argv.configPath.map((p: string) => path.resolve(p)) 
-const yamlConfigInit = mergeYamls(paths) 
+const paths = argv.configPath.map((p: string) => path.resolve(p))
+const yamlConfigInit = mergeYamls(paths)
 
 // TODO: fix errors
 // const ajv = new Ajv({ allErrors: true, strict: "log" })
@@ -356,7 +355,7 @@ const { ask } = yamlConfig.exchangeRates["USD"]["JMD"]
 const sellRate = JMDAmount.dollars(ask)
 if (sellRate instanceof BigIntConversionError) throw sellRate
 export const ExchangeRates = {
-  jmd: { sell: sellRate }
+  jmd: { sell: sellRate },
 }
 
 export const Cashout = {
@@ -380,12 +379,13 @@ export const Cashout = {
     to: yamlConfig.cashout.email.to,
     from: yamlConfig.cashout.email.from,
     subject: yamlConfig.cashout.email.subject,
-  }
-
+  },
 }
 
 export const SendGridConfig = yamlConfig.sendgrid as SendGridConfig
 
 export const IbexConfig = yamlConfig.ibex as IbexConfig
+
+export const BridgeConfig = yamlConfig.bridge as BridgeConfig
 
 export const FrappeConfig = yamlConfig.frappe as FrappeConfig

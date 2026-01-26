@@ -29,6 +29,25 @@ type IbexConfig = {
   webhook: WebhookServer
 }
 
+type BridgeWebhookPublicKeys = {
+  kyc: string
+  deposit: string
+  transfer: string
+}
+
+type BridgeWebhook = {
+  port: number
+  publicKeys: BridgeWebhookPublicKeys
+  timestampSkewMs: number
+}
+
+type BridgeConfig = {
+  enabled: boolean
+  apiKey: string
+  baseUrl: string
+  webhook: BridgeWebhook
+}
+
 type CashoutEmail = {
   to: string
   from: string
@@ -171,7 +190,8 @@ type YamlSchema = {
   skipFeeProbeConfig: { pubkey: string[]; chanId: string[] }
   smsAuthUnsupportedCountries: string[]
   whatsAppAuthUnsupportedCountries: string[]
-  ibex: IbexConfig,
+  ibex: IbexConfig
+  bridge: BridgeConfig
   exchangeRates: StaticRates
   cashout: {
     enabled: boolean
@@ -214,8 +234,8 @@ type FrappeConfig = {
 type CurrencyCode = string
 
 type PriceSpread = {
-  bid: number,
-  ask: number,
+  bid: number
+  ask: number
 }
 
 type StaticRates = {

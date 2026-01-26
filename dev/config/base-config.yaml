@@ -12,6 +12,18 @@ ibex:
     port: 4008
     secret: "not-so-secret"
 
+bridge:
+  enabled: false
+  apiKey: "<replace>"
+  baseUrl: "https://api.bridge.xyz"
+  webhook:
+    port: 4009
+    publicKeys:
+      kyc: "<replace>"
+      deposit: "<replace>"
+      transfer: "<replace>"
+    timestampSkewMs: 300000
+
 # See Foreign Exchange Rates: https://www.firstglobal-bank.com/
 exchangeRates:
   USD:
