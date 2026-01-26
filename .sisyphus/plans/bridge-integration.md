@@ -175,7 +175,7 @@ Task 5 (Repository) → Task 6 (Schema) → Task 7 (Service Layer)
 
 ---
 
-- [ ] 2. Create Bridge TypeScript types
+- [x] 2. Create Bridge TypeScript types
 
   **What to do**:
   - Create `src/services/bridge/index.types.d.ts` with Bridge domain types
