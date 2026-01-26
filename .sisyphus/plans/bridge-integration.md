@@ -7,17 +7,18 @@ Integrate Bridge.xyz API into Flash backend to enable USD fiat on-ramp/off-ramp 
 
 ### Interview Summary
 **Key Discussions**:
-- Blockchain: Tron (TRC-20) for USDT transfers (low fees, widely used)
-- Stablecoin: USDT directly (not USDC or USDB)
+- Blockchain: Tron (TRC-20) for USDT transfers (low fees, $75B+ USDT supply)
+- Stablecoin: USDT directly to user's IBEX Tron wallet address
 - Customer Creation: Lazy - only when user requests on-ramp capability
-- Deposit Target: Directly to user's IBEX wallet address
+- KYC: Bridge uses Persona - use KYC Links API for hosted flow
+- Fees: Bridge fees + 0.5% Flash markup
 
 **Research Findings**:
-- Bridge.xyz supports Tron with USDT.trx for on-ramps and off-ramps
-- Bridge has "Enhanced TRON Support" with memoless deposits
+- **Bridge.xyz**: Enhanced TRON support, memoless USDT.trx deposits, fiat↔USDT.trx on/off ramps
+- **IBEX Crypto API**: `GET /crypto/receive-infos/options`, `POST /crypto/receive-infos` for Tron address
+- **Bridge KYC**: Persona integration via KYC Links API (`POST /kyc_links`)
 - Current Flash architecture uses IBEX for all wallet operations
 - Account levels: 0 (unverified), 1 (basic KYC), 2 (Pro), 3 (Merchant)
-- Wallet creation in `src/services/mongoose/wallets.ts` calls IBEX
 
 ### Metis Review
 **Identified Gaps** (addressed):
@@ -378,28 +379,61 @@ Task 8 (Webhooks) → Task 9 (GraphQL) → Task 10 (Docs)
 
 ---
 
-- [ ] 10. Create documentation
+- [ ] 10. Add IBEX Crypto methods for Tron address
+
+  **What to do**:
+  - Add `getCryptoReceiveOptions()` to `src/services/ibex/client.ts`
+  - Add `createCryptoReceiveInfo()` to generate Tron USDT address
+  - Add types for crypto receive options and responses
+  - Use this to get user's Tron address for Bridge Virtual Account destination
+
+  **Must NOT do**:
+  - Do NOT change existing IBEX methods
+  - Do NOT hardcode option IDs (fetch dynamically)
+
+  **Parallelizable**: YES (with 3, independent IBEX work)
+
+  **References**:
+  - `src/services/ibex/client.ts` - Existing IBEX client
+  - IBEX API: `GET /crypto/receive-infos/options`
+  - IBEX API: `POST /crypto/receive-infos`
+
+  **Acceptance Criteria**:
+  - [ ] Can fetch Tron USDT receive options
+  - [ ] Can generate Tron USDT address for a wallet
+  - [ ] Address is valid TRC-20 format
+  - [ ] `yarn tsc-check` passes
+
+  **Commit**: YES
+  - Message: `feat(ibex): add crypto receive methods for Tron USDT`
+  - Files: `src/services/ibex/client.ts`, `src/services/ibex/types.ts`
+
+---
+
+- [ ] 11. Create documentation
 
   **What to do**:
   - Create `docs/bridge-integration/ARCHITECTURE.md` - system architecture
   - Create `docs/bridge-integration/API.md` - GraphQL API reference
   - Create `docs/bridge-integration/WEBHOOKS.md` - webhook handling
-  - Create `docs/bridge-integration/CONFIGURATION.md` - setup guide
+  - Create `docs/bridge-integration/FLOWS.md` - on-ramp/off-ramp flows with diagrams
 
   **Must NOT do**:
   - Do NOT include real API keys or secrets
 
-  **Parallelizable**: YES (after 7, 8, 9)
+  **Parallelizable**: YES (after 7, 8, 9, 10)
 
   **References**:
   - `DEV.md` - Existing dev docs pattern
   - `README.md` - Existing readme pattern
 
   **Acceptance Criteria**:
-  - [ ] Architecture diagram included
+  - [ ] Architecture diagram included (matching user's original diagram)
+  - [ ] On-ramp flow documented (US Bank → Bridge → IBEX Tron → User Wallet)
+  - [ ] Off-ramp flow documented (User Wallet → Bridge → US Bank)
   - [ ] All GraphQL endpoints documented
   - [ ] Webhook events documented
-  - [ ] Configuration options documented
+  - [ ] Fee structure documented (Bridge fees + 0.5% Flash)
 
   **Commit**: YES
   - Message: `docs: add Bridge integration documentation`
@@ -420,7 +454,8 @@ Task 8 (Webhooks) → Task 9 (GraphQL) → Task 10 (Docs)
 | 7 | `feat(bridge): add Bridge service layer` | services/bridge/index.ts | yarn tsc-check |
 | 8 | `feat(bridge): add webhook server for Bridge events` | services/bridge/webhook-server/* | yarn tsc-check |
 | 9 | `feat(graphql): add Bridge API endpoints` | graphql/public/* | yarn tsc-check |
-| 10 | `docs: add Bridge integration documentation` | docs/bridge-integration/* | N/A |
+| 10 | `feat(ibex): add crypto receive methods for Tron USDT` | services/ibex/* | yarn tsc-check |
+| 11 | `docs: add Bridge integration documentation` | docs/bridge-integration/* | N/A |
 
 ---
 
@@ -442,10 +477,58 @@ yarn test:unit  # Expected: all pass (after adding tests)
 
 ---
 
-## Open Items (Require Follow-up)
+## Resolved Items
 
-1. **IBEX Tron Support**: Verify IBEX can receive USDT on Tron network
-2. **KYC Data**: Determine what user data Bridge needs for customer creation
-3. **Fee Structure**: Define Bridge fees and any Flash markup
-4. **Wallet Address**: Determine how to get user's IBEX wallet Tron address
-5. **Webhook URL**: Set up production webhook endpoint (DNS, SSL)
+| Item | Resolution |
+|------|------------|
+| **IBEX Tron Support** | ✅ IBEX Crypto API supports Tron USDT via `POST /crypto/receive-infos` |
+| **KYC Data** | ✅ Use Bridge KYC Links API (`POST /kyc_links`) - Persona hosted flow |
+| **Fee Structure** | ✅ Bridge fees + 0.5% Flash markup |
+| **Wallet Address** | ✅ Call IBEX `POST /crypto/receive-infos` with Tron/USDT options |
+
+## Remaining Setup Items
+
+1. **Webhook URL**: Set up production Bridge webhook endpoint (DNS, SSL)
+2. **Bridge API Key**: Obtain production API key from Bridge dashboard
+3. **IBEX Crypto Options**: Verify exact `currency_id` and `network_id` for Tron USDT
+
+---
+
+## Technical Details
+
+### Bridge KYC Links API Flow
+```
+1. User requests on-ramp → Flash calls POST /kyc_links
+2. Bridge returns: kyc_link, tos_link, customer_id
+3. User opens kyc_link → Persona hosted KYC flow
+4. User completes KYC → Bridge sends webhook (kyc.approved)
+5. Flash stores customer_id, creates Virtual Account
+```
+
+### IBEX Tron Address Generation
+```
+1. Call GET /crypto/receive-infos/options → Get Tron USDT option IDs
+2. Call POST /crypto/receive-infos with:
+   - account_id: user's IBEX wallet ID
+   - crypto_option_id: Tron USDT receive option
+3. Returns: Tron USDT address for user
+4. Pass address to Bridge Virtual Account destination
+```
+
+### Bridge Virtual Account Flow
+```
+1. User has Bridge customer_id and IBEX Tron address
+2. Call POST /customers/{id}/virtual_accounts:
+   - source.currency: "usd"
+   - destination.currency: "usdt"
+   - destination.payment_rail: "tron"
+   - destination.address: user's IBEX Tron address
+3. Returns: Bank details (routing#, account#) for ACH/Wire
+4. User sends fiat → Bridge converts → USDT arrives at IBEX wallet
+```
+
+### Fee Calculation
+```
+user_receives = deposit_amount - bridge_fee - (deposit_amount * 0.005)
+flash_revenue = deposit_amount * 0.005  // 0.5% markup
+```
