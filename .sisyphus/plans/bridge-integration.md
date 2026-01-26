@@ -136,7 +136,7 @@ Task 5 (Repository) → Task 6 (Schema) → Task 7 (Service Layer)
 
 ## TODOs
 
-- [ ] 1. Add Bridge configuration schema
+- [x] 1. Add Bridge configuration schema
 
   **What to do**:
   - Add Bridge config type to `src/config/schema.types.d.ts`
