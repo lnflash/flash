@@ -15,30 +15,33 @@ import { GraphQLError, GraphQLSchema } from "graphql"
 import PinoHttp from "pino-http"
 import { mapError } from "@graphql/error-map"
 import { fieldExtensionsEstimator, simpleEstimator } from "graphql-query-complexity"
-import { createComplexityPlugin } from "graphql-query-complexity-apollo-plugin"
+import { createComplexityPlugin } from "./plugins/complexity"
 import { parseUnknownDomainErrorFromUnknown } from "@domain/shared"
 import healthzHandler from "./middlewares/healthz"
 import { idempotencyMiddleware } from "./middlewares/idempotency"
 import requestIp from "request-ip"
-import jwt from 'jsonwebtoken'
+import jwt from "jsonwebtoken"
 
 const graphqlLogger = baseLogger.child({ module: "graphql" })
 
 interface JWTPayload {
-  userId: string;
-  roles: string[];
+  userId: string
+  roles: string[]
 }
 
 // Parse the "Authorization" header to verify the JWT token and return its payload
 function parseAuthHeader(authHeader: string | undefined): JWTPayload {
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    throw new AuthenticationError({ message: 'Invalid authorization header', logger: graphqlLogger });
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    throw new AuthenticationError({
+      message: "Invalid authorization header",
+      logger: graphqlLogger,
+    })
   }
   try {
-    const token = authHeader.slice(7);
-    return jwt.verify(token, ADMIN_CONFIG.ERPNEXT_JWT_SECRET as string) as JWTPayload; // process.env.ERPNEXT_JWT_SECRET
+    const token = authHeader.slice(7)
+    return jwt.verify(token, ADMIN_CONFIG.ERPNEXT_JWT_SECRET as string) as JWTPayload // process.env.ERPNEXT_JWT_SECRET
   } catch (error) {
-    throw new AuthenticationError({ message: 'Invalid Token', logger: graphqlLogger });
+    throw new AuthenticationError({ message: "Invalid Token", logger: graphqlLogger })
   }
 }
 
@@ -47,7 +50,9 @@ export const hasAdminUserRole = rule({ cache: "contextual" })((
   args,
   ctx: GraphQLAdminContext,
 ) => {
-  return ctx.user.roles.includes("Accounts Manager") ? true : new AuthorizationError({ logger: graphqlLogger })
+  return ctx.user.roles.includes("Accounts Manager")
+    ? true
+    : new AuthorizationError({ logger: graphqlLogger })
 })
 
 //   // const ipString = UNSECURE_IP_FROM_REQUEST_OBJECT
@@ -61,7 +66,7 @@ export const hasAdminUserRole = rule({ cache: "contextual" })((
 //   // }
 //   addAttributesToCurrentSpanAndPropagate(
 //     {
-      // [SemanticAttributes.HTTP_CLIENT_IP]: ip,
+// [SemanticAttributes.HTTP_CLIENT_IP]: ip,
 //       [SemanticAttributes.HTTP_USER_AGENT]: req.headers["user-agent"],
 //     },
 //     next,
@@ -98,15 +103,15 @@ const startAdminServer = async ({
     cache: "bounded",
     plugins: apolloPlugins,
     context: (ctx: ExpressContext) => {
-      const { authorization } = ctx.req.headers;
-      const decodedJwt = parseAuthHeader(authorization);
+      const { authorization } = ctx.req.headers
+      const decodedJwt = parseAuthHeader(authorization)
       return {
-        logger: graphqlLogger, 
+        logger: graphqlLogger,
         user: {
           id: decodedJwt.userId,
           roles: decodedJwt.roles,
           ip: requestIp.getClientIp(ctx.req),
-        }
+        },
       }
     },
     formatError: (err) => {
@@ -200,9 +205,7 @@ const startAdminServer = async ({
       )
 
       console.log(
-        `in dev mode, ${type} server should be accessed through oathkeeper reverse proxy at ${
-          "http://localhost:4002/admin/graphql"
-        }`,
+        `in dev mode, ${type} server should be accessed through oathkeeper reverse proxy at ${"http://localhost:4002/admin/graphql"}`,
       )
 
       resolve({ app, httpServer, apolloServer })

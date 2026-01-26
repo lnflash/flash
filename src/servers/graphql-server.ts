@@ -16,7 +16,7 @@ import { mapError } from "@graphql/error-map"
 
 import { fieldExtensionsEstimator, simpleEstimator } from "graphql-query-complexity"
 
-import { createComplexityPlugin } from "graphql-query-complexity-apollo-plugin"
+import { createComplexityPlugin } from "./plugins/complexity"
 
 import jwksRsa from "jwks-rsa"
 
