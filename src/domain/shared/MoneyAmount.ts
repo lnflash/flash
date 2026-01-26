@@ -50,6 +50,7 @@ export abstract class MoneyAmount {
 
     if (currency === WalletCurrency.Usd) return USDAmount.cents(amt)
     else if (currency === WalletCurrency.Jmd) return JMDAmount.cents(amt)
+    else if (currency === WalletCurrency.Usdt) return USDTAmount.smallestUnits(amt)
     else return new RedisParseError(`Could not read currency: ${currency}`)
   }
 }
@@ -65,7 +66,9 @@ export class USDAmount extends MoneyAmount {
     try {
       return new USDAmount(cents)
     } catch (error) {
-      return new BigIntConversionError(error instanceof Error ? error.message : String(error))
+      return new BigIntConversionError(
+        error instanceof Error ? error.message : String(error),
+      )
     }
   }
 
@@ -77,9 +80,10 @@ export class USDAmount extends MoneyAmount {
       if (cents instanceof BigIntConversionError) return cents // should never happen
       return new USDAmount(cents.money.multiply(dollarAmt).toFixed(2))
     } catch (error) {
-      return new BigIntConversionError(error instanceof Error ? error.message : String(error))
+      return new BigIntConversionError(
+        error instanceof Error ? error.message : String(error),
+      )
     }
-
   }
 
   static ZERO = new USDAmount(0)
@@ -92,12 +96,12 @@ export class USDAmount extends MoneyAmount {
     return this.money.divide(100).toFixed(precision)
   }
 
-    // const jmdLiability = {
-    //   amount: BigInt(usdLiability.asCents()) * exchangeRate / 100n, 
-    //   currency: "JMD",
-    // }
+  // const jmdLiability = {
+  //   amount: BigInt(usdLiability.asCents()) * exchangeRate / 100n,
+  //   currency: "JMD",
+  // }
   // Rate is the ratio at which one currency can be exchanged for another.
-  // T:USD  
+  // T:USD
   convertAtRate<T extends MoneyAmount>(rate: T): T {
     const converted = rate.money.multiply(this.money).divide(100)
     return rate.getInstance(converted)
@@ -123,7 +127,9 @@ export class JMDAmount extends MoneyAmount {
     try {
       return new JMDAmount(c)
     } catch (error) {
-      return new BigIntConversionError(error instanceof Error ? error.message : String(error))
+      return new BigIntConversionError(
+        error instanceof Error ? error.message : String(error),
+      )
     }
   }
 
@@ -131,9 +137,10 @@ export class JMDAmount extends MoneyAmount {
     try {
       return new JMDAmount(BigInt(d) * 100n)
     } catch (error) {
-      return new BigIntConversionError(error instanceof Error ? error.message : String(error))
+      return new BigIntConversionError(
+        error instanceof Error ? error.message : String(error),
+      )
     }
-
   }
 
   asCents(precision: number = 0): string {
@@ -149,3 +156,51 @@ export class JMDAmount extends MoneyAmount {
   }
 }
 
+export class USDTAmount extends MoneyAmount {
+  static currencyId: IbexCurrencyId = 4 as IbexCurrencyId
+
+  private constructor(amount: Money | bigint | string | number) {
+    super(amount, WalletCurrency.Usdt)
+  }
+
+  static smallestUnits(units: string | bigint): USDTAmount | BigIntConversionError {
+    try {
+      return new USDTAmount(units)
+    } catch (error) {
+      return new BigIntConversionError(
+        error instanceof Error ? error.message : String(error),
+      )
+    }
+  }
+
+  static fromNumber(d: number | string): USDTAmount | BigIntConversionError {
+    try {
+      const usdtAmt = new Money(d.toString(), "USDT", Round.HALF_TO_EVEN)
+      const multiplier = USDTAmount.smallestUnits(1_000_000n)
+      if (multiplier instanceof BigIntConversionError) return multiplier
+      return new USDTAmount(multiplier.money.multiply(usdtAmt).toFixed(0))
+    } catch (error) {
+      return new BigIntConversionError(
+        error instanceof Error ? error.message : String(error),
+      )
+    }
+  }
+
+  static ZERO = new USDTAmount(0)
+
+  asSmallestUnits(precision: number = 0): string {
+    return this.money.toFixed(precision)
+  }
+
+  asNumber(precision: number = 6): string {
+    return this.money.divide(1_000_000).toFixed(precision)
+  }
+
+  toIbex(): number {
+    return Number(this.asNumber(8))
+  }
+
+  getInstance(amount: Money): this {
+    return new USDTAmount(amount) as this
+  }
+}

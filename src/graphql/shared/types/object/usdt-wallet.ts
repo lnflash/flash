@@ -22,12 +22,12 @@ import { TransactionConnection } from "./transaction"
 import { baseLogger } from "@services/logger"
 import Lnurl from "../scalar/lnurl"
 
-const UsdWallet = GT.Object<Wallet>({
-  name: "UsdWallet",
+const UsdtWallet = GT.Object<Wallet>({
+  name: "UsdtWallet",
   description:
-    "A wallet belonging to an account which contains a USD balance and a list of transactions.",
+    "A wallet belonging to an account which contains a USDT balance and a list of transactions.",
   interfaces: () => [IWallet],
-  isTypeOf: (source) => source.currency === WalletCurrencyDomain.Usd,
+  isTypeOf: (source) => source.currency === WalletCurrencyDomain.Usdt,
   fields: () => ({
     id: {
       type: GT.NonNullID,
@@ -89,7 +89,6 @@ const UsdWallet = GT.Object<Wallet>({
           throw mapError(error)
         }
 
-        // Non-null signal to type checker; consider fixing in PartialResult type
         if (!result?.slice) throw error
 
         return connectionFromPaginatedArray<IbexTransaction>(
@@ -126,7 +125,6 @@ const UsdWallet = GT.Object<Wallet>({
           throw mapError(error)
         }
 
-        // Non-null signal to type checker; consider fixing in PartialResult type
         if (!result?.slice) throw error
 
         return connectionFromPaginatedArray<BaseWalletTransaction>(
@@ -139,4 +137,4 @@ const UsdWallet = GT.Object<Wallet>({
   }),
 })
 
-export default UsdWallet
+export default UsdtWallet

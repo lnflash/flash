@@ -4,6 +4,7 @@ import BtcWallet from "../../shared/types/object/btc-wallet"
 import GraphQLApplicationError from "../../shared/types/object/graphql-application-error"
 
 import UsdWallet from "../../shared/types/object/usd-wallet"
+import UsdtWallet from "../../shared/types/object/usdt-wallet"
 
 import ConsumerAccount from "./object/consumer-account"
 import OneDayAccountLimit from "./object/one-day-account-limit"
@@ -17,5 +18,6 @@ export const ALL_INTERFACE_TYPES = [
   // BusinessAccount,
   BtcWallet,
   UsdWallet,
+  UsdtWallet,
   OneDayAccountLimit,
 ]
