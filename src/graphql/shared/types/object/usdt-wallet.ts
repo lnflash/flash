@@ -6,28 +6,28 @@ import {
 } from "@graphql/connections"
 import { normalizePaymentAmount } from "@graphql/shared/root/mutation"
 import { mapError } from "@graphql/error-map"
-import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 
 import { Wallets } from "@app"
 
 import { WalletCurrency as WalletCurrencyDomain, USDTAmount } from "@domain/shared"
-import { WalletType } from "@domain/wallets"
 
 import IWallet from "../abstract/wallet"
 
 import WalletCurrency from "../scalar/wallet-currency"
 import SignedAmount from "../scalar/signed-amount"
 import OnChainAddress from "../scalar/on-chain-address"
-import Lnurl from "../scalar/lnurl"
+import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 
 import { TransactionConnection } from "./transaction"
+import { baseLogger } from "@services/logger"
+import Lnurl from "../scalar/lnurl"
 
-const UsdWallet = GT.Object<Wallet>({
-  name: "UsdWallet",
+const UsdtWallet = GT.Object<Wallet>({
+  name: "UsdtWallet",
   description:
-    "A wallet belonging to an account which contains a USD balance and a list of transactions.",
+    "A wallet belonging to an account which contains a USDT balance and a list of transactions.",
   interfaces: () => [IWallet],
-  isTypeOf: (source) => source.currency === WalletCurrencyDomain.Usd,
+  isTypeOf: (source) => source.currency === WalletCurrencyDomain.Usdt,
   fields: () => ({
     id: {
       type: GT.NonNullID,
@@ -39,18 +39,15 @@ const UsdWallet = GT.Object<Wallet>({
       type: GT.NonNull(WalletCurrency),
       resolve: (source) => source.currency,
     },
+
     lnurlp: {
       type: Lnurl,
       resolve: (source) => source.lnurlp,
     },
-    isExternal: {
-      type: GT.NonNull(GT.Boolean),
-      resolve: (source) => source.type === WalletType.External,
-    },
+
     balance: {
-      type: FractionalCentAmount,
+      type: GT.NonNull(FractionalCentAmount),
       resolve: async (source) => {
-        if (source.type === WalletType.External) return null
         const balance = await Wallets.getBalanceForWallet({
           walletId: source.id,
           currency: source.currency,
@@ -61,7 +58,7 @@ const UsdWallet = GT.Object<Wallet>({
         if (balance instanceof USDTAmount) {
           return Number(balance.asSmallestUnits(8))
         }
-        return Number(balance.asCents(8))
+        return Number((balance as any).asCents(8))
       },
     },
     pendingIncomingBalance: {
@@ -92,7 +89,6 @@ const UsdWallet = GT.Object<Wallet>({
           throw mapError(error)
         }
 
-        // Non-null signal to type checker; consider fixing in PartialResult type
         if (!result?.slice) throw error
 
         return connectionFromPaginatedArray<IbexTransaction>(
@@ -129,7 +125,6 @@ const UsdWallet = GT.Object<Wallet>({
           throw mapError(error)
         }
 
-        // Non-null signal to type checker; consider fixing in PartialResult type
         if (!result?.slice) throw error
 
         return connectionFromPaginatedArray<BaseWalletTransaction>(
@@ -142,4 +137,4 @@ const UsdWallet = GT.Object<Wallet>({
   }),
 })
 
-export default UsdWallet
+export default UsdtWallet
