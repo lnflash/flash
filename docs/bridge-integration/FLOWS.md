@@ -71,29 +71,42 @@ This flow allows users to withdraw USDT from their Flash wallet to their externa
 ```ascii
 User            Flash App          Flash Backend          Bridge.xyz             Bank
  |                  |                   |                     |                   |
- | 1. Link Bank     |                   |                     |                   |
- |----------------->| 2. bridgeAddExtAcc|                     |                   |
- |                  |------------------>| 3. Get Link URL     |                   |
+ | 1. Start KYC     |                   |                     |                   |
+ |----------------->| 2. bridgeInitKyc  |                     |                   |
+ |                  |------------------>| 3. Create Customer  |                   |
  |                  |                   |-------------------->|                   |
- |                  | 4. Link URL       |                     |                   |
+ |                  |                   | 4. Create KYC Link  |                   |
+ |                  |                   |-------------------->|                   |
+ |                  | 5. KYC Link       |                     |                   |
  |                  |<------------------|                     |                   |
- | 5. Auth Bank     |                   |                     |                   |
+ | 6. Complete KYC  |                   |                     |                   |
+ |----------------->|                   |                     |                   |
+ | (Persona Flow)   |                   |                     |                   |
+ |                  |                   | 7. kyc.approved     |                   |
+ |                  |                   |<--------------------|                   |
+ | 8. Link Bank     |                   |                     |                   |
+ |----------------->| 9. bridgeAddExtAcc|                     |                   |
+ |                  |------------------>| 10. Get Link URL     |                   |
+ |                  |                   |-------------------->|                   |
+ |                  | 11. Link URL       |                     |                   |
+ |                  |<------------------|                     |                   |
+ | 12. Auth Bank     |                   |                     |                   |
  |----------------->|                   |                     |                   |
  | (Plaid Flow)     |                   |                     |                   |
- |                  |                   | 6. ext_acc.verified |                   |
+ |                  |                   | 13. ext_acc.verified |                   |
  |                  |                   |<--------------------|                   |
- | 7. Withdraw      |                   |                     |                   |
- |----------------->| 8. bridgeInitWith |                     |                   |
- |                  |------------------>| 9. Create Transfer  |                   |
+ | 14. Withdraw      |                   |                     |                   |
+ |----------------->| 15. bridgeInitWith |                     |                   |
+ |                  |------------------>| 16. Create Transfer  |                   |
  |                  |                   |-------------------->|                   |
- |                  | 10. Pending       |                     |                   |
+ |                  | 17. Pending       |                     |                   |
  |<-----------------|                   |                     |                   |
- |                  |                   |                     | 11. Convert USDT  |
- |                  |                   |                     | 12. Send ACH      |
+ |                  |                   |                     | 18. Convert USDT  |
+ |                  |                   |                     | 19. Send ACH      |
  |                  |                   |                     |------------------>|
- |                  |                   | 13. trans.completed |                   |
+ |                  |                   | 20. trans.completed |                   |
  |                  |                   |<--------------------|                   |
- | 14. Funds Arrive |                   |                     |                   |
+ | 21. Funds Arrive |                   |                     |                   |
  |<-------------------------------------------------------------------------------|
 ```
 
