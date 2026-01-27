@@ -412,8 +412,14 @@ export const fundWalletIdFromLightning = async ({
 
   const invoice =
     wallet.currency === WalletCurrency.Btc
-      ? await Wallets.addInvoiceForSelfForBtcWallet({ walletId, amount })
-      : await Wallets.addInvoiceForSelfForUsdWallet({ walletId, amount })
+      ? await Wallets.addInvoiceForSelfForUsdWallet({
+          walletId,
+          amount: amount as FractionalCentAmount,
+        })
+      : await Wallets.addInvoiceForSelfForUsdWallet({
+          walletId,
+          amount: amount as FractionalCentAmount,
+        })
   if (invoice instanceof Error) return invoice
 
   safePay({ lnd: lndOutside1, request: invoice.paymentRequest })

@@ -3,7 +3,7 @@ import { addWalletIfNonexistent } from "@app/accounts/add-wallet"
 import { getAdminAccounts, getDefaultAccountsConfig } from "@config"
 
 import { CouldNotFindAccountFromKratosIdError, CouldNotFindError } from "@domain/errors"
-import { UsdWalletDescriptor, WalletCurrency } from "@domain/shared"
+import { BtcWalletDescriptor, UsdWalletDescriptor, WalletCurrency } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
 
 import {
@@ -231,20 +231,27 @@ export const getUser = async <T extends WalletCurrency>(walletD: WalletDescripto
 
 export const createRandomUserAndWallets = async (): Promise<{
   usdWalletDescriptor: WalletDescriptor<"USD">
-  // btcWalletDescriptor: WalletDescriptor<"BTC">
+  btcWalletDescriptor: WalletDescriptor<"BTC">
 }> => {
   const phone = randomPhone()
-  const btcWalletDescriptor = await createUserAndWallet(phone)
+  const defaultWalletDescriptor = await createUserAndWallet(phone)
 
   const usdWallet = await addWalletIfNonexistent({
     currency: WalletCurrency.Usd,
-    accountId: btcWalletDescriptor.accountId,
+    accountId: defaultWalletDescriptor.accountId,
     type: WalletType.Checking,
   })
   if (usdWallet instanceof Error) throw usdWallet
 
+  const btcWallet = await addWalletIfNonexistent({
+    currency: WalletCurrency.Btc,
+    accountId: defaultWalletDescriptor.accountId,
+    type: WalletType.Checking,
+  })
+  if (btcWallet instanceof Error) throw btcWallet
+
   return {
-    // btcWalletDescriptor,
+    btcWalletDescriptor: BtcWalletDescriptor(btcWallet.id),
     usdWalletDescriptor: {
       id: usdWallet.id,
       currency: WalletCurrency.Usd,
@@ -361,11 +368,11 @@ export const createAndFundNewWallet = async <S extends WalletCurrency>({
   if (balanceAmount.amount === 0n) return wallet
   const addInvoiceFn =
     wallet.currency === WalletCurrency.Btc
-      ? Wallets.addInvoiceForSelfForBtcWallet
+      ? Wallets.addInvoiceForSelfForUsdWallet
       : Wallets.addInvoiceForSelfForUsdWallet
   const lnInvoice = await addInvoiceFn({
     walletId: wallet.id,
-    amount: Number(balanceAmount.amount),
+    amount: Number(balanceAmount.amount) as FractionalCentAmount,
     memo: `Fund new wallet ${wallet.id}`,
   })
   if (lnInvoice instanceof Error) throw lnInvoice
@@ -406,11 +413,11 @@ export const fundWallet = async ({
 
   const addInvoiceFn =
     wallet.currency === WalletCurrency.Btc
-      ? Wallets.addInvoiceForSelfForBtcWallet
+      ? Wallets.addInvoiceForSelfForUsdWallet
       : Wallets.addInvoiceForSelfForUsdWallet
   const lnInvoice = await addInvoiceFn({
     walletId: wallet.id,
-    amount: Number(balanceAmount.amount),
+    amount: Number(balanceAmount.amount) as FractionalCentAmount,
     memo: `Fund new wallet ${wallet.id}`,
   })
   if (lnInvoice instanceof Error) throw lnInvoice

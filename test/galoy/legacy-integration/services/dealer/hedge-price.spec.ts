@@ -8,7 +8,11 @@ import { AmountCalculator, paymentAmountFromNumber, WalletCurrency } from "@doma
 import { baseLogger } from "@services/logger"
 import { AccountsRepository } from "@services/mongoose"
 
-import { createAccount, createAndFundNewWallet, getBalanceHelper } from "test/galoy/helpers"
+import {
+  createAccount,
+  createAndFundNewWallet,
+  getBalanceHelper,
+} from "test/galoy/helpers"
 
 class ZeroAmountForUsdRecipientError extends Error {}
 
@@ -122,9 +126,9 @@ const getUsdEquivalentForWithAmountInvoiceSendToBtc = async ({
   accountAndWallets: AccountAndWallets
 }): Promise<CurrencyBaseAmount> => {
   const { newBtcWallet, newUsdWallet, newAccount } = accountAndWallets
-  const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+  const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
     walletId: newBtcWallet.id,
-    amount: toSats(btcPaymentAmount.amount),
+    amount: toSats(btcPaymentAmount.amount) as unknown as FractionalCentAmount,
   })
   if (lnInvoice instanceof Error) throw lnInvoice
 
@@ -149,9 +153,9 @@ const getUsdEquivalentForWithAmountInvoiceProbeAndSendToBtc = async ({
 }): Promise<CurrencyBaseAmount> => {
   const { newBtcWallet, newUsdWallet, newAccount } = accountAndWallets
 
-  const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+  const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
     walletId: newBtcWallet.id,
-    amount: toSats(btcPaymentAmount.amount),
+    amount: toSats(btcPaymentAmount.amount) as unknown as FractionalCentAmount,
   })
   if (lnInvoice instanceof Error) throw lnInvoice
 
@@ -401,9 +405,9 @@ describe("arbitrage strategies", () => {
           const usdBalanceBefore = await getBalanceHelper(newUsdWallet.id)
 
           // Step 1: Create invoice from BTC Wallet using discovered 'maxBtcAmountToEarn' from $0.01
-          const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+          const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
             walletId: newBtcWallet.id,
-            amount: toSats(maxBtcAmountToEarn.amount),
+            amount: toSats(maxBtcAmountToEarn.amount) as unknown as FractionalCentAmount,
           })
           if (lnInvoice instanceof Error) throw lnInvoice
 
@@ -419,7 +423,7 @@ describe("arbitrage strategies", () => {
           // Step 3: Replenish USD from BTC wallet with $0.01 invoice
           const lnInvoiceUsd = await Wallets.addInvoiceForSelfForUsdWallet({
             walletId: newUsdWallet.id,
-            amount: toCents(1),
+            amount: toCents(1) as unknown as FractionalCentAmount,
           })
           if (lnInvoiceUsd instanceof Error) throw lnInvoiceUsd
 
@@ -465,9 +469,9 @@ describe("arbitrage strategies", () => {
           const usdBalanceBefore = await getBalanceHelper(newUsdWallet.id)
 
           // Step 1: Create invoice from BTC Wallet using discovered 'maxBtcAmountToEarn' from $0.01
-          const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+          const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
             walletId: newBtcWallet.id,
-            amount: toSats(maxBtcAmountToEarn.amount),
+            amount: toSats(maxBtcAmountToEarn.amount) as unknown as FractionalCentAmount,
           })
           if (lnInvoice instanceof Error) throw lnInvoice
 
@@ -483,7 +487,7 @@ describe("arbitrage strategies", () => {
           // Step 3: Replenish USD from BTC wallet with $0.01 invoice
           const lnInvoiceUsd = await Wallets.addInvoiceForSelfForUsdWallet({
             walletId: newUsdWallet.id,
-            amount: toCents(1),
+            amount: toCents(1) as unknown as FractionalCentAmount,
           })
           if (lnInvoiceUsd instanceof Error) throw lnInvoiceUsd
 
@@ -546,9 +550,9 @@ describe("arbitrage strategies", () => {
           const usdBalanceBefore = await getBalanceHelper(newUsdWallet.id)
 
           // Step 1: Create invoice from BTC Wallet using discovered 'maxBtcAmountToEarn' from $0.01
-          const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+          const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
             walletId: newBtcWallet.id,
-            amount: toSats(maxBtcAmountToEarn.amount),
+            amount: toSats(maxBtcAmountToEarn.amount) as unknown as FractionalCentAmount,
           })
           if (lnInvoice instanceof Error) throw lnInvoice
 
@@ -618,9 +622,9 @@ describe("arbitrage strategies", () => {
           const usdBalanceBefore = await getBalanceHelper(newUsdWallet.id)
 
           // Step 1: Create invoice from BTC Wallet using discovered 'maxBtcAmountToEarn' from $0.01
-          const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+          const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
             walletId: newBtcWallet.id,
-            amount: toSats(maxBtcAmountToEarn.amount),
+            amount: toSats(maxBtcAmountToEarn.amount) as unknown as FractionalCentAmount,
           })
           if (lnInvoice instanceof Error) throw lnInvoice
 
@@ -690,9 +694,9 @@ describe("arbitrage strategies", () => {
           const usdBalanceBefore = await getBalanceHelper(newUsdWallet.id)
 
           // Step 1: Create invoice from BTC Wallet using discovered 'maxBtcAmountToEarn' from $0.01
-          const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+          const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
             walletId: newBtcWallet.id,
-            amount: toSats(maxBtcAmountToEarn.amount),
+            amount: toSats(maxBtcAmountToEarn.amount) as unknown as FractionalCentAmount,
           })
           if (lnInvoice instanceof Error) throw lnInvoice
 
@@ -765,9 +769,9 @@ describe("arbitrage strategies", () => {
           const usdBalanceBefore = await getBalanceHelper(newUsdWallet.id)
 
           // Step 1: Create invoice from BTC Wallet using discovered 'maxBtcAmountToEarn' from $0.01
-          const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+          const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
             walletId: newBtcWallet.id,
-            amount: toSats(maxBtcAmountToEarn.amount),
+            amount: toSats(maxBtcAmountToEarn.amount) as unknown as FractionalCentAmount,
           })
           if (lnInvoice instanceof Error) throw lnInvoice
 
@@ -789,7 +793,7 @@ describe("arbitrage strategies", () => {
           // Step 3: Replenish USD from BTC wallet with $0.01 invoice
           const lnInvoiceUsd = await Wallets.addInvoiceForSelfForUsdWallet({
             walletId: newUsdWallet.id,
-            amount: toCents(1),
+            amount: toCents(1) as unknown as FractionalCentAmount,
           })
           if (lnInvoiceUsd instanceof Error) throw lnInvoiceUsd
 
@@ -835,9 +839,9 @@ describe("arbitrage strategies", () => {
           const usdBalanceBefore = await getBalanceHelper(newUsdWallet.id)
 
           // Step 1: Create invoice from BTC Wallet using discovered 'maxBtcAmountToEarn' from $0.01
-          const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+          const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
             walletId: newBtcWallet.id,
-            amount: toSats(maxBtcAmountToEarn.amount),
+            amount: toSats(maxBtcAmountToEarn.amount) as unknown as FractionalCentAmount,
           })
           if (lnInvoice instanceof Error) throw lnInvoice
 
@@ -859,7 +863,7 @@ describe("arbitrage strategies", () => {
           // Step 3: Replenish USD from BTC wallet with $0.01 invoice
           const lnInvoiceUsd = await Wallets.addInvoiceForSelfForUsdWallet({
             walletId: newUsdWallet.id,
-            amount: toCents(1),
+            amount: toCents(1) as unknown as FractionalCentAmount,
           })
           if (lnInvoiceUsd instanceof Error) throw lnInvoiceUsd
 
@@ -922,9 +926,9 @@ describe("arbitrage strategies", () => {
           const usdBalanceBefore = await getBalanceHelper(newUsdWallet.id)
 
           // Step 1: Create invoice from BTC Wallet using discovered 'maxBtcAmountToEarn' from $0.01
-          const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+          const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
             walletId: newBtcWallet.id,
-            amount: toSats(maxBtcAmountToEarn.amount),
+            amount: toSats(maxBtcAmountToEarn.amount) as unknown as FractionalCentAmount,
           })
           if (lnInvoice instanceof Error) throw lnInvoice
 
@@ -1000,9 +1004,9 @@ describe("arbitrage strategies", () => {
           const usdBalanceBefore = await getBalanceHelper(newUsdWallet.id)
 
           // Step 1: Create invoice from BTC Wallet using discovered 'maxBtcAmountToEarn' from $0.01
-          const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+          const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
             walletId: newBtcWallet.id,
-            amount: toSats(maxBtcAmountToEarn.amount),
+            amount: toSats(maxBtcAmountToEarn.amount) as unknown as FractionalCentAmount,
           })
           if (lnInvoice instanceof Error) throw lnInvoice
 
@@ -1078,9 +1082,9 @@ describe("arbitrage strategies", () => {
           const usdBalanceBefore = await getBalanceHelper(newUsdWallet.id)
 
           // Step 1: Create invoice from BTC Wallet using discovered 'maxBtcAmountToEarn' from $0.01
-          const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+          const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
             walletId: newBtcWallet.id,
-            amount: toSats(maxBtcAmountToEarn.amount),
+            amount: toSats(maxBtcAmountToEarn.amount) as unknown as FractionalCentAmount,
           })
           if (lnInvoice instanceof Error) throw lnInvoice
 
@@ -1427,9 +1431,9 @@ describe("arbitrage strategies", () => {
           if (paid instanceof Error) throw paid
 
           // Step 2: Pay back $0.01 from USD to BTC wallet
-          const lnInvoiceBtc = await Wallets.addInvoiceForSelfForBtcWallet({
+          const lnInvoiceBtc = await Wallets.addInvoiceForSelfForUsdWallet({
             walletId: newBtcWallet.id,
-            amount: toSats(maxBtcAmountToEarn.amount),
+            amount: toSats(maxBtcAmountToEarn.amount) as unknown as FractionalCentAmount,
           })
           if (lnInvoiceBtc instanceof Error) throw lnInvoiceBtc
 
@@ -1498,9 +1502,9 @@ describe("arbitrage strategies", () => {
           if (paid instanceof Error) throw paid
 
           // Step 2: Pay back $0.01 from USD to BTC wallet
-          const lnInvoiceBtc = await Wallets.addInvoiceForSelfForBtcWallet({
+          const lnInvoiceBtc = await Wallets.addInvoiceForSelfForUsdWallet({
             walletId: newBtcWallet.id,
-            amount: toSats(maxBtcAmountToEarn.amount),
+            amount: toSats(maxBtcAmountToEarn.amount) as unknown as FractionalCentAmount,
           })
           if (lnInvoiceBtc instanceof Error) throw lnInvoiceBtc
 
@@ -1788,9 +1792,9 @@ describe("arbitrage strategies", () => {
           if (paid instanceof Error) throw paid
 
           // Step 2: Pay back $0.01 from USD to BTC wallet
-          const lnInvoiceBtc = await Wallets.addInvoiceForSelfForBtcWallet({
+          const lnInvoiceBtc = await Wallets.addInvoiceForSelfForUsdWallet({
             walletId: newBtcWallet.id,
-            amount: toSats(maxBtcAmountToEarn.amount),
+            amount: toSats(maxBtcAmountToEarn.amount) as unknown as FractionalCentAmount,
           })
           if (lnInvoiceBtc instanceof Error) throw lnInvoiceBtc
 
@@ -1866,9 +1870,9 @@ describe("arbitrage strategies", () => {
           if (paid instanceof Error) throw paid
 
           // Step 2: Pay back $0.01 from USD to BTC wallet
-          const lnInvoiceBtc = await Wallets.addInvoiceForSelfForBtcWallet({
+          const lnInvoiceBtc = await Wallets.addInvoiceForSelfForUsdWallet({
             walletId: newBtcWallet.id,
-            amount: toSats(maxBtcAmountToEarn.amount),
+            amount: toSats(maxBtcAmountToEarn.amount) as unknown as FractionalCentAmount,
           })
           if (lnInvoiceBtc instanceof Error) throw lnInvoiceBtc
 

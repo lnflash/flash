@@ -11,6 +11,7 @@ const btcWallet: Wallet = {
   accountId: "a1" as AccountId,
   onChainAddressIdentifiers: [],
   onChainAddresses: () => [],
+  lnurlp: "lnurlmock" as Lnurl,
 }
 
 const VolumeAfterLightningReceiptFn = () =>

@@ -153,9 +153,9 @@ describe("UserWallet Limits - Lightning Pay", () => {
       )
       if (senderAccount instanceof Error) throw senderAccount
 
-      const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+      const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
         walletId: otherBtcWallet.id,
-        amount: Number(btcThresholdAmount.amount),
+        amount: Number(btcThresholdAmount.amount) as unknown as FractionalCentAmount,
       })
       if (lnInvoice instanceof Error) throw lnInvoice
       const { paymentRequest: request } = lnInvoice
@@ -211,7 +211,7 @@ describe("UserWallet Limits - Lightning Pay", () => {
       {
         const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
           walletId: usdWalletDescriptor.id,
-          amount: Number(usdPaymentAmount.amount),
+          amount: Number(usdPaymentAmount.amount) as unknown as FractionalCentAmount,
         })
         if (lnInvoice instanceof Error) throw lnInvoice
         const { paymentRequest: uncheckedPaymentRequest } = lnInvoice
@@ -231,9 +231,9 @@ describe("UserWallet Limits - Lightning Pay", () => {
 
       // Test USD -> BTC limits
       {
-        const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+        const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
           walletId: btcWalletDescriptor.id,
-          amount: Number(btcThresholdAmount.amount),
+          amount: Number(btcThresholdAmount.amount) as unknown as FractionalCentAmount,
         })
         if (lnInvoice instanceof Error) throw lnInvoice
         const { paymentRequest: uncheckedPaymentRequestBtc } = lnInvoice
@@ -314,9 +314,9 @@ describe("UserWallet Limits - Lightning Pay", () => {
           numPayments,
         })
       for (let i = 0; i < numPayments; i++) {
-        const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+        const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
           walletId: otherBtcWallet.id,
-          amount: Number(partialBtcSendAmount.amount),
+          amount: Number(partialBtcSendAmount.amount) as unknown as FractionalCentAmount,
         })
         if (lnInvoice instanceof Error) throw lnInvoice
         const { paymentRequest: request } = lnInvoice
@@ -340,9 +340,11 @@ describe("UserWallet Limits - Lightning Pay", () => {
 
       {
         // Fails for payment just above limit
-        const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+        const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
           walletId: otherBtcWallet.id,
-          amount: Number(btcAmountAboveThreshold.amount),
+          amount: Number(
+            btcAmountAboveThreshold.amount,
+          ) as unknown as FractionalCentAmount,
         })
         if (lnInvoice instanceof Error) throw lnInvoice
         const { paymentRequest: request } = lnInvoice
@@ -393,7 +395,9 @@ describe("UserWallet Limits - Lightning Pay", () => {
         // Succeeds for same payment just above tradeIntraAccount limit
         const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
           walletId: usdWalletDescriptor.id,
-          amount: Number(usdAmountAboveThreshold.amount),
+          amount: Number(
+            usdAmountAboveThreshold.amount,
+          ) as unknown as FractionalCentAmount,
         })
         if (lnInvoice instanceof Error) throw lnInvoice
         const { paymentRequest: uncheckedPaymentRequest } = lnInvoice
@@ -446,7 +450,7 @@ describe("UserWallet Limits - Lightning Pay", () => {
       {
         const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
           walletId: usdWalletDescriptor.id,
-          amount: Number(partialUsdSendAmount.amount),
+          amount: Number(partialUsdSendAmount.amount) as unknown as FractionalCentAmount,
         })
         if (lnInvoice instanceof Error) throw lnInvoice
         const { paymentRequest: uncheckedPaymentRequest } = lnInvoice
@@ -461,9 +465,9 @@ describe("UserWallet Limits - Lightning Pay", () => {
         expect(paymentResult).toBe(PaymentSendStatus.Success)
       }
       {
-        const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+        const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
           walletId: btcWalletDescriptor.id,
-          amount: Number(partialBtcSendAmount.amount),
+          amount: Number(partialBtcSendAmount.amount) as unknown as FractionalCentAmount,
         })
         if (lnInvoice instanceof Error) throw lnInvoice
         const { paymentRequest: uncheckedPaymentRequest } = lnInvoice
@@ -489,7 +493,9 @@ describe("UserWallet Limits - Lightning Pay", () => {
         // Fails for payment just above limit, from btc
         const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
           walletId: usdWalletDescriptor.id,
-          amount: Number(usdAmountAboveThreshold.amount),
+          amount: Number(
+            usdAmountAboveThreshold.amount,
+          ) as unknown as FractionalCentAmount,
         })
         if (lnInvoice instanceof Error) throw lnInvoice
         const { paymentRequest: uncheckedPaymentRequest } = lnInvoice
@@ -509,9 +515,11 @@ describe("UserWallet Limits - Lightning Pay", () => {
 
       {
         // Fails for payment just above limit, from usd
-        const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+        const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
           walletId: btcWalletDescriptor.id,
-          amount: Number(btcAmountAboveThreshold.amount),
+          amount: Number(
+            btcAmountAboveThreshold.amount,
+          ) as unknown as FractionalCentAmount,
         })
         if (lnInvoice instanceof Error) throw lnInvoice
         const { paymentRequest: uncheckedPaymentRequest } = lnInvoice
@@ -548,9 +556,11 @@ describe("UserWallet Limits - Lightning Pay", () => {
 
       {
         // Succeeds for same payment just above intraledger limit
-        const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+        const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
           walletId: otherBtcWallet.id,
-          amount: Number(btcAmountAboveThreshold.amount),
+          amount: Number(
+            btcAmountAboveThreshold.amount,
+          ) as unknown as FractionalCentAmount,
         })
         if (lnInvoice instanceof Error) throw lnInvoice
         const { paymentRequest: uncheckedPaymentRequest } = lnInvoice
@@ -645,9 +655,11 @@ describe("UserWallet Limits - Lightning Pay", () => {
 
       {
         // Succeeds for same payment just above intraledger limit
-        const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+        const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
           walletId: otherBtcWallet.id,
-          amount: Number(btcAmountAboveThreshold.amount),
+          amount: Number(
+            btcAmountAboveThreshold.amount,
+          ) as unknown as FractionalCentAmount,
         })
         if (lnInvoice instanceof Error) throw lnInvoice
         const { paymentRequest: uncheckedPaymentRequest } = lnInvoice
@@ -666,7 +678,9 @@ describe("UserWallet Limits - Lightning Pay", () => {
         // Succeeds for same payment just above tradeIntraAccount limit
         const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
           walletId: usdWalletDescriptor.id,
-          amount: Number(usdAmountAboveThreshold.amount),
+          amount: Number(
+            usdAmountAboveThreshold.amount,
+          ) as unknown as FractionalCentAmount,
         })
         if (lnInvoice instanceof Error) throw lnInvoice
         const { paymentRequest: uncheckedPaymentRequest } = lnInvoice

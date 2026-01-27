@@ -10,7 +10,7 @@ export const getBalanceHelper = async (
 ): Promise<CurrencyBaseAmount> => {
   const balance = await getBalanceForWallet({ walletId })
   if (balance instanceof Error) throw balance
-  return balance
+  return balance as unknown as CurrencyBaseAmount
 }
 
 export const getTransactionsForWalletId = async (
@@ -19,7 +19,9 @@ export const getTransactionsForWalletId = async (
   const wallets = WalletsRepository()
   const wallet = await wallets.findById(walletId)
   if (wallet instanceof RepositoryError) return PartialResult.err(wallet)
-  return getTransactionsForWallets({ wallets: [wallet] })
+  return getTransactionsForWallets({ wallets: [wallet] }) as unknown as Promise<
+    PartialResult<PaginatedArray<WalletTransaction>>
+  >
 }
 
 // This is to test detection of funds coming in on legacy addresses

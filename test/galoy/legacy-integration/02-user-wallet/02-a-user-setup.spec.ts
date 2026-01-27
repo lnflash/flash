@@ -5,7 +5,7 @@ import { setUsername } from "@app/accounts"
 import { UsernameIsImmutableError, UsernameNotAvailableError } from "@domain/accounts"
 import { ValidationError } from "@domain/shared"
 import { CsvWalletsExport } from "@services/ledger/csv-wallet-export"
-import { AccountsRepository } from "@services/mongoose"
+import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import { Account } from "@services/mongoose/schema"
 
 import {
@@ -149,7 +149,10 @@ describe("UserWallet", () => {
       "id,walletId,type,credit,debit,fee,currency,timestamp,pendingConfirmation,journalId,lnMemo,usd,feeUsd,recipientWalletId,username,memoFromPayer,paymentHash,pubkey,feeKnownInAdvance,address,txHash"
     it("exports to csv", async () => {
       const csv = new CsvWalletsExport()
-      await csv.addWallet(walletIdA)
+      const walletsRepo = WalletsRepository()
+      const wallet = await walletsRepo.findById(walletIdA)
+      if (wallet instanceof Error) throw wallet
+      await csv.addWallets([wallet])
       const base64Data = csv.getBase64()
       expect(typeof base64Data).toBe("string")
       const data = Buffer.from(base64Data, "base64")

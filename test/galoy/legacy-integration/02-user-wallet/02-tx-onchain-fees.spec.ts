@@ -6,7 +6,7 @@ import { sat2btc, toSats } from "@domain/bitcoin"
 import { LessThanDustThresholdError } from "@domain/errors"
 import { toCents } from "@domain/fiat"
 import { WalletCurrency, paymentAmountFromNumber } from "@domain/shared"
-import { PayoutSpeed } from "@domain/bitcoin/onchain"
+import { PayoutSpeed, checkedToOnChainAddress } from "@domain/bitcoin/onchain"
 
 import { DealerPriceService } from "@services/dealer-price"
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
@@ -140,9 +140,11 @@ describe("UserWallet - getOnchainFee", () => {
     })
 
     it("returns zero for an on us address", async () => {
-      const address = await Wallets.createOnChainAddress({
+      const addressStr = await Wallets.createOnChainAddress({
         walletId: walletIdB,
       })
+      if (addressStr instanceof Error) throw addressStr
+      const address = checkedToOnChainAddress({ network: "regtest", value: addressStr })
       if (address instanceof Error) throw address
       const feeAmount = await Wallets.getOnChainFeeForBtcWallet({
         walletId: walletIdA,
@@ -259,8 +261,13 @@ describe("UserWallet - getOnchainFee", () => {
         })
 
         it("returns zero for an on us address", async () => {
-          const address = await Wallets.createOnChainAddress({
+          const addressStr = await Wallets.createOnChainAddress({
             walletId: walletIdB,
+          })
+          if (addressStr instanceof Error) throw addressStr
+          const address = checkedToOnChainAddress({
+            network: "regtest",
+            value: addressStr,
           })
           if (address instanceof Error) throw address
 

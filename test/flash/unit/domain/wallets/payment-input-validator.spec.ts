@@ -35,6 +35,7 @@ describe("PaymentInputValidator", () => {
     quiz: [],
     kratosUserId: "kratosUserId" as UserId,
     displayCurrency: UsdDisplayCurrency,
+    npub: "npub1mock" as Npub,
   }
 
   const dummySenderWallet: Wallet = {
@@ -44,6 +45,7 @@ describe("PaymentInputValidator", () => {
     currency: WalletCurrency.Btc,
     onChainAddressIdentifiers: [],
     onChainAddresses: () => [],
+    lnurlp: "lnurlmock" as Lnurl,
   }
 
   const dummyRecipientWallet: Wallet = {
@@ -53,6 +55,7 @@ describe("PaymentInputValidator", () => {
     currency: WalletCurrency.Btc,
     onChainAddressIdentifiers: [],
     onChainAddresses: () => [],
+    lnurlp: "lnurlmock" as Lnurl,
   }
 
   const wallets: { [key: WalletId]: Wallet } = {}
@@ -113,6 +116,7 @@ describe("PaymentInputValidator", () => {
       senderAccount: {
         ...dummyAccount,
         status: AccountStatus.Locked,
+        npub: "npub1mock" as Npub,
       },
       recipientWalletId: dummyRecipientWallet.id,
     })

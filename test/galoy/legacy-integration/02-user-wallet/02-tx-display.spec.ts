@@ -14,7 +14,7 @@ import { UsdDisplayCurrency, displayAmountFromNumber } from "@domain/fiat"
 
 import { updateDisplayCurrency } from "@app/accounts"
 
-import { PayoutSpeed } from "@domain/bitcoin/onchain"
+import { PayoutSpeed, checkedToOnChainAddress } from "@domain/bitcoin/onchain"
 
 import { translateToLedgerTx } from "@services/ledger"
 import { MainBook, Transaction } from "@services/ledger/books"
@@ -212,9 +212,9 @@ describe("Display properties on transactions", () => {
         // Receive payment
         const memo = "invoiceMemo #" + (Math.random() * 1_000_000).toFixed()
 
-        const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+        const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
           walletId: recipientWalletId,
-          amount: amountInvoice,
+          amount: amountInvoice as unknown as FractionalCentAmount,
           memo,
         })
         if (lnInvoice instanceof Error) throw lnInvoice
@@ -285,9 +285,9 @@ describe("Display properties on transactions", () => {
         // Send payment
         const memo = "invoiceMemo #" + (Math.random() * 1_000_000).toFixed()
 
-        const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+        const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
           walletId: recipientWalletId,
-          amount: amountInvoice,
+          amount: amountInvoice as unknown as FractionalCentAmount,
           memo,
         })
         if (lnInvoice instanceof Error) throw lnInvoice
@@ -650,11 +650,13 @@ describe("Display properties on transactions", () => {
       amountSats: Satoshis
       walletId: WalletId
     }) => {
-      const address = await Wallets.createOnChainAddress({
+      const addressStr = await Wallets.createOnChainAddress({
         walletId,
       })
+      if (addressStr instanceof Error) throw addressStr
+      expect(addressStr.substring(0, 4)).toBe("bcrt")
+      const address = checkedToOnChainAddress({ network: "regtest", value: addressStr })
       if (address instanceof Error) throw address
-      expect(address.substring(0, 4)).toBe("bcrt")
 
       const txId = await sendToAddressAndConfirm({
         walletClient: bitcoindOutside,

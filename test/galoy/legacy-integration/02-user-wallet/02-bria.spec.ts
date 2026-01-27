@@ -1,6 +1,7 @@
 import { Wallets } from "@app"
 
 import { sat2btc, toSats } from "@domain/bitcoin"
+import { checkedToOnChainAddress } from "@domain/bitcoin/onchain"
 import { UnknownRepositoryError } from "@domain/errors"
 import { utxoSettledEventHandler } from "@servers/event-handlers/bria"
 
@@ -49,11 +50,13 @@ describe("BriaSubscriber", () => {
     it("receives utxo events", async () => {
       const amountSats = toSats(5_000)
       // Receive onchain
-      const address = await Wallets.createOnChainAddress({
+      const addressStr = await Wallets.createOnChainAddress({
         walletId: walletIdA,
       })
+      if (addressStr instanceof Error) throw addressStr
+      expect(addressStr.substring(0, 4)).toBe("bcrt")
+      const address = checkedToOnChainAddress({ network: "regtest", value: addressStr })
       if (address instanceof Error) throw address
-      expect(address.substring(0, 4)).toBe("bcrt")
 
       let expectedTxId: string | Error = ""
       expectedTxId = await sendToAddressAndConfirm({
@@ -117,11 +120,13 @@ describe("BriaSubscriber", () => {
       const amountSats = toSats(5_000)
 
       // Receive onchain
-      const address = await Wallets.createOnChainAddress({
+      const addressStr = await Wallets.createOnChainAddress({
         walletId: walletIdA,
       })
+      if (addressStr instanceof Error) throw addressStr
+      expect(addressStr.substring(0, 4)).toBe("bcrt")
+      const address = checkedToOnChainAddress({ network: "regtest", value: addressStr })
       if (address instanceof Error) throw address
-      expect(address.substring(0, 4)).toBe("bcrt")
 
       const expectedTxId = await sendToAddressAndConfirm({
         walletClient: bitcoindOutside,

@@ -18,6 +18,7 @@ beforeAll(() => {
     accountId: "a1" as AccountId,
     onChainAddressIdentifiers: [],
     onChainAddresses: () => [],
+    lnurlp: "lnurlmock" as Lnurl,
   }
 
   usdWallet = {
@@ -27,6 +28,7 @@ beforeAll(() => {
     accountId: "a1" as AccountId,
     onChainAddressIdentifiers: [],
     onChainAddresses: () => [],
+    lnurlp: "lnurlmock" as Lnurl,
   }
 })
 

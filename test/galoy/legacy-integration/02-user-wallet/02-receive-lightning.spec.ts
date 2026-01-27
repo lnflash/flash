@@ -75,9 +75,9 @@ describe("UserWallet - Lightning", () => {
     const sats = 500_000
     const memo = "myMemo"
 
-    const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+    const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
       walletId: walletIdB,
-      amount: toSats(sats),
+      amount: toSats(sats) as unknown as FractionalCentAmount,
       memo,
     })
     if (lnInvoice instanceof Error) throw lnInvoice
@@ -130,7 +130,7 @@ describe("UserWallet - Lightning", () => {
 
     const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
       walletId: walletIdUsdB as WalletId,
-      amount: toCents(cents),
+      amount: toCents(cents) as unknown as FractionalCentAmount,
       memo,
     })
     if (lnInvoice instanceof Error) throw lnInvoice
@@ -208,9 +208,9 @@ describe("UserWallet - Lightning", () => {
     const sats = 25000
     const memo = "myBtcMemo"
 
-    const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+    const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
       walletId: walletIdB as WalletId,
-      amount: toSats(sats),
+      amount: toSats(sats) as unknown as FractionalCentAmount,
       memo,
     })
     if (lnInvoice instanceof Error) throw lnInvoice
@@ -284,9 +284,9 @@ describe("Invoice handling from trigger", () => {
 
     it("should process held invoice when trigger comes back up", async () => {
       // Create invoice for self
-      const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+      const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
         walletId: walletIdF,
-        amount: sats,
+        amount: sats as unknown as FractionalCentAmount,
       })
       expect(lnInvoice).not.toBeInstanceOf(Error)
       if (lnInvoice instanceof Error) throw lnInvoice
@@ -324,9 +324,9 @@ describe("Invoice handling from trigger", () => {
 
     it("should process new invoice payment when trigger comes back up", async () => {
       // Create invoice for self
-      const lnInvoice = await Wallets.addInvoiceForSelfForBtcWallet({
+      const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
         walletId: walletIdF,
-        amount: sats,
+        amount: sats as unknown as FractionalCentAmount,
       })
       expect(lnInvoice).not.toBeInstanceOf(Error)
       if (lnInvoice instanceof Error) throw lnInvoice
@@ -358,7 +358,7 @@ describe("Invoice handling from trigger", () => {
       // Create invoice for self
       const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
         walletId: walletIdUsdF,
-        amount: cents,
+        amount: cents as unknown as FractionalCentAmount,
       })
       expect(lnInvoice).not.toBeInstanceOf(Error)
       if (lnInvoice instanceof Error) throw lnInvoice
@@ -398,7 +398,7 @@ describe("Invoice handling from trigger", () => {
       // Create invoice for self
       const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
         walletId: walletIdUsdF,
-        amount: cents,
+        amount: cents as unknown as FractionalCentAmount,
       })
       expect(lnInvoice).not.toBeInstanceOf(Error)
       if (lnInvoice instanceof Error) throw lnInvoice
@@ -444,7 +444,7 @@ describe("Invoice handling from trigger", () => {
       // Create invoice for self
       const lnInvoice = await Wallets.addInvoiceForSelfForUsdWallet({
         walletId: walletIdUsdF,
-        amount: cents,
+        amount: cents as unknown as FractionalCentAmount,
       })
       expect(lnInvoice).not.toBeInstanceOf(Error)
       if (lnInvoice instanceof Error) throw lnInvoice
