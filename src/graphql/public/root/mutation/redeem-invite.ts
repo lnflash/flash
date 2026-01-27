@@ -78,19 +78,25 @@ const RedeemInviteMutation = GT.Field<null, GraphQLPublicContextAuth>({
       const accountsRepo = AccountsRepository()
       const account = await accountsRepo.findById(domainAccount.id)
       if (account instanceof Error) {
-        baseLogger.error({ error: account }, "Failed to fetch account for invite validation")
+        baseLogger.error(
+          { error: account },
+          "Failed to fetch account for invite validation",
+        )
         return { success: false, errors: ["Failed to validate account"] }
       }
 
       const accountAge = Date.now() - account.createdAt.getTime()
       const inviteWindowMs = NEW_USER_INVITE_WINDOW_HOURS * 60 * 60 * 1000
       if (accountAge > inviteWindowMs) {
-        baseLogger.info({
-          accountId: domainAccount.id,
-          accountAge,
-          inviteWindowHours: NEW_USER_INVITE_WINDOW_HOURS,
-          inviteId: invite._id
-        }, "Existing user attempted to redeem new user invite")
+        baseLogger.info(
+          {
+            accountId: domainAccount.id,
+            accountAge,
+            inviteWindowHours: NEW_USER_INVITE_WINDOW_HOURS,
+            inviteId: invite._id,
+          },
+          "Existing user attempted to redeem new user invite",
+        )
         return { success: false, errors: ["This invitation is for new users only"] }
       }
 
@@ -98,28 +104,42 @@ const RedeemInviteMutation = GT.Field<null, GraphQLPublicContextAuth>({
       const usersRepo = UsersRepository()
       const userDetails = await usersRepo.findById(user.id)
       if (userDetails instanceof Error) {
-        baseLogger.error({ error: userDetails }, "Failed to fetch user for invite validation")
+        baseLogger.error(
+          { error: userDetails },
+          "Failed to fetch user for invite validation",
+        )
         return { success: false, errors: ["Failed to validate user"] }
       }
 
       // Check if the invite contact matches user's phone or email
       const inviteContact = invite.contact.toLowerCase()
       const userPhone = userDetails.phone?.toLowerCase()
-      // TODO: Add email check when email field is available
-      // const userEmail = userDetails.email?.toLowerCase()
 
       if (invite.method === "SMS" || invite.method === "WHATSAPP") {
         if (!userPhone || userPhone !== inviteContact) {
-          baseLogger.info({ 
-            inviteContact,
-            userPhone,
-            inviteMethod: invite.method 
-          }, "Phone number mismatch for invite redemption")
-          return { success: false, errors: ["This invitation was sent to a different phone number"] }
+          baseLogger.info(
+            {
+              inviteContact,
+              userPhone,
+              inviteMethod: invite.method,
+            },
+            "Phone number mismatch for invite redemption",
+          )
+          return {
+            success: false,
+            errors: ["This invitation was sent to a different phone number"],
+          }
         }
       }
-      // TODO: Add email validation when email accounts are supported
+      // NOTE: Email validation is deferred until email-only registration is available.
+      // Currently, users can only register with phone numbers, so email invites cannot
+      // be validated against the redeemer's identity. Once the email-only registration
+      // feature (feat/email-registration) is merged, this should be implemented to
+      // verify that email invites are redeemed by the intended recipient.
+      // See: https://github.com/lnflash/flash/pull/212
+      //
       // else if (invite.method === "EMAIL") {
+      //   const userEmail = userDetails.email?.toLowerCase()
       //   if (!userEmail || userEmail !== inviteContact) {
       //     return { success: false, errors: ["This invitation was sent to a different email address"] }
       //   }
@@ -133,8 +153,8 @@ const RedeemInviteMutation = GT.Field<null, GraphQLPublicContextAuth>({
 
       // Log successful redemption
       baseLogger.info(
-        { 
-          inviteId: invite._id, 
+        {
+          inviteId: invite._id,
           inviterId: invite.inviterId,
           redeemedById: domainAccount.id,
           redeemerUsername: domainAccount.username,
