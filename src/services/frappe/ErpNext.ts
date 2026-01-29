@@ -24,11 +24,12 @@ class ErpNext {
   url: string
   headers: Record<string, string>
 
-  constructor(url: string, creds: FrappeCredentials) {
+  constructor(url: string, sitename: string, creds: FrappeCredentials) {
     this.url = url
     this.headers = {
       "Content-Type": "application/json",
       "Authorization": `token ${creds.apiKey}:${creds.apiSecret}`,
+      "Host": sitename
     }
   }
 
@@ -58,7 +59,7 @@ class ErpNext {
           credit_in_account_currency: Number(liability.jmd.asCents(2)),
           credit: erpUsd(liability.usd),
           exchange_rate: erpUsd(liability.usd) / Number(liability.jmd.asCents(2)),
-          party_type: "Supplier",
+          party_type: "Customer",
           party,
         },
         {
@@ -202,7 +203,7 @@ class ErpNext {
 
 // Only instantiate if config is available, otherwise export a null-safe placeholder
 const erpNextInstance = FrappeConfig?.url
-  ? new ErpNext(FrappeConfig.url, FrappeConfig.credentials)
+  ? new ErpNext(FrappeConfig.url, FrappeConfig.sitename, FrappeConfig.credentials)
   : null
 
 export default erpNextInstance as ErpNext

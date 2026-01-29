@@ -2,6 +2,7 @@
 admin_accounts:
   - role: "bankowner"
     phone: "+16505554334"
+    wallet: "4196cf42-b4a7-4d20-879b-8c7f0334bee1"
 
 ibex:
   url: "https://api-sandbox.poweredbyibex.io"
@@ -34,6 +35,20 @@ cashout:
     to: "" # add to the overrides.yaml
     from: "notifications@getflash.io"
     subject: "New Cashout"
+
+# credentials and accounts defined in the erpnext restore script
+frappe:
+  url: http://frontend.local:8080
+  sitename: frontend # default sitename for frappe docker container
+  credentials:
+    apiKey: "2701937b221364c"
+    apiSecret: "a05ab1998d20828"
+  erpnext:
+    accounts:
+      ibex:
+        operating: "Ibex Operating - F"
+      cashout: "Cashout Payables (JMD) - F"
+      serviceFees: "Service Fees - F"
 
 sendgrid:
   apiKey: "<replace>"
