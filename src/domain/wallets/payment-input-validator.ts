@@ -1,64 +1,33 @@
-import { AccountStatus } from "@domain/accounts"
-import { InactiveAccountError, InvalidWalletId, SelfPaymentError } from "@domain/errors"
-
 import {
-  WalletCurrency,
-  checkedToBtcPaymentAmount,
-  checkedToUsdPaymentAmount,
+  USDAmount,
+  ValidationError,
+  isActiveAccount,
+  validator,
+  walletBelongsToAccount,
 } from "@domain/shared"
+import { SendOnchainArgs } from "@services/ibex/types"
 
-import { checkedToWalletId } from "./validation"
+// Ibex does not allow us to check if address is Ibex owned,
+// const checkForSelfPayment = (o: { senderWallet: Wallet, recipientWallet: Wallet }) => {
+//   if (o.recipientWallet.id === o.senderWallet.id) return new SelfPaymentError()
+//   else return true
+// }
 
-export const PaymentInputValidator = (
-  getWalletFn: PaymentInputValidatorConfig,
-): PaymentInputValidator => {
-  const validatePaymentInput = async <T extends undefined | string>({
-    amount,
-    amountCurrency: amountCurrencyRaw,
-    senderWalletId: uncheckedSenderWalletId,
-    senderAccount,
-    recipientWalletId: uncheckedRecipientWalletId,
-  }: ValidatePaymentInputArgs<T>) => {
-    if (senderAccount.status !== AccountStatus.Active) {
-      return new InactiveAccountError(senderAccount.id)
-    }
-
-    const senderWalletId = checkedToWalletId(uncheckedSenderWalletId)
-    if (senderWalletId instanceof Error) return senderWalletId
-
-    const senderWallet = await getWalletFn(senderWalletId)
-    if (senderWallet instanceof Error) return senderWallet
-
-    if (senderWallet.accountId !== senderAccount.id) return new InvalidWalletId()
-
-    const amountCurrency = amountCurrencyRaw || senderWallet.currency
-    const validAmount =
-      amountCurrency === WalletCurrency.Btc
-        ? checkedToBtcPaymentAmount(amount)
-        : checkedToUsdPaymentAmount(amount)
-    if (validAmount instanceof Error) return validAmount
-
-    if (uncheckedRecipientWalletId) {
-      const recipientWalletId = checkedToWalletId(uncheckedRecipientWalletId)
-      if (recipientWalletId instanceof Error) return recipientWalletId
-
-      const recipientWallet = await getWalletFn(recipientWalletId)
-      if (recipientWallet instanceof Error) return recipientWallet
-      if (recipientWallet.id === senderWallet.id) return new SelfPaymentError()
-      return {
-        amount: validAmount,
-        senderWallet,
-        recipientWallet,
-      } as ValidatePaymentInputRet<T>
-    }
-
-    return {
-      amount: validAmount,
-      senderWallet,
-    } as ValidatePaymentInputRet<T>
-  }
-
-  return {
-    validatePaymentInput,
-  }
+const checkOnchainMin = async (o: { amount: USDAmount }) => {
+  // TODO: Currently relying on Ibex to enforce dust limits
+  // const { dustThreshold } = getOnChainWalletConfig()
+  // const minBtc = BtcAmount.sats(dustThreshold.toString()) 
+  // const btcPrice = await PriceService().getUsdCentRealTimePrice(_)
+  // if (btcPrice instanceof PriceServiceError) return new ValidationError(btcPrice)
+  // const minUsd = minBtc.convertAtRate(MoneyAmount.from("50000", WalletCurrency.Usd))
+  const minUsd = USDAmount.ZERO
+  return o.amount.isGreaterThan(minUsd) 
+    ? true 
+    : new ValidationError(`Amount must be greater than ${minUsd.asDollars()}`)
 }
+
+export const OnchainUsdPaymentValidator = validator<SendOnchainArgs & { wallet: Wallet, account: Account }>([
+  isActiveAccount,
+  walletBelongsToAccount,
+  checkOnchainMin,
+])

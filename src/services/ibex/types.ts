@@ -6,6 +6,12 @@ export type PayInvoiceArgs = {
   send?: USDAmount // must match currency of account
 }
 
+export type SendOnchainArgs = {
+  accountId: IbexAccountId, // source of funds
+  address: OnChainAddress, // destination
+  amount: USDAmount
+}
+
 // Ibex supports fee estimation in different currencies
 export type GetFeeEstimateArgs = {
   invoice: Bolt11,

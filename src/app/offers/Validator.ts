@@ -1,18 +1,18 @@
 import { getBalanceForWallet } from "@app/wallets";
 import { Cashout } from "@config";
 import { AccountValidator } from "@domain/accounts";
-import { USDAmount, ValidationError } from "@domain/shared";
-import { ValidationFn, ValidationInputs } from "./types";
+import { hasErpParty, isActiveAccount, USDAmount, ValidationError, ValidationFn, validator, walletBelongsToAccount } from "@domain/shared";
+import { ValidationInputs } from "./types";
 
 const config = Cashout.validations
 
-export const isBeforeExpiry = async (o: ValidationInputs): Promise<true | ValidationError> => {
+const isBeforeExpiry = async (o: ValidationInputs): Promise<true | ValidationError> => {
   const now = new Date()
   if (now > o.ibexTrx.invoice.expiresAt) return new ValidationError("Offer has expired")
   else return true
 }
 
-export const transferMin = async (o: ValidationInputs): Promise<true | ValidationError> => {
+const cashoutMin = async (o: ValidationInputs): Promise<true | ValidationError> => {
   const min = USDAmount.cents(config.minimum.amount)
   if (min instanceof Error) return new ValidationError(min)
   if (o.ibexTrx.usd.isLesserThan(min)) 
@@ -20,15 +20,15 @@ export const transferMin = async (o: ValidationInputs): Promise<true | Validatio
   else return true 
 }
 
-export const transferMax = async (o: ValidationInputs): Promise<true | ValidationError> => {
+const cashoutMax: ValidationFn<ValidationInputs> = async (o: ValidationInputs): Promise<true | ValidationError> => {
   const max = USDAmount.cents(config.maximum.amount)
   if (max instanceof Error) return new ValidationError(max)
   if (o.ibexTrx.usd.isGreaterThan(max) ) 
     return new ValidationError(`Maximum cashout is $${max.asDollars()}`)
   else return true 
-}
+} 
 
-export const isUsd = async (o: ValidationInputs) => {
+const isUsd = async (o: ValidationInputs) => {
   // if (o.ibexTrx.currency !== "USD") 
   //   return new ValidationError("Cash out only supports USD")
   if (o.wallet.currency !== "USD") 
@@ -36,7 +36,7 @@ export const isUsd = async (o: ValidationInputs) => {
   return true
 }
 
-export const hasSufficientBalance = async (o: ValidationInputs): Promise<true | ValidationError> => {
+const hasSufficientBalance = async (o: ValidationInputs): Promise<true | ValidationError> => {
   const balance = await getBalanceForWallet({ walletId: o.wallet.id })
   if (balance instanceof Error) 
     return new ValidationError(balance) 
@@ -45,27 +45,21 @@ export const hasSufficientBalance = async (o: ValidationInputs): Promise<true | 
   else return true
 }
 
-export const isActiveAccount = async (o: ValidationInputs) => {
-  return AccountValidator(o.account).isActive()
-}
 
-export const accountLevel = async (o: ValidationInputs) => {
+const accountLevel = async (o: ValidationInputs) => {
   return AccountValidator(o.account).isLevel(config.accountLevel)
 }
 
-export const walletBelongsToAccount = async (o: ValidationInputs) => {
-  return AccountValidator(o.account).validateWalletForAccount(o.wallet)
-}
 
-// TODO: Look this field up against ERP system to ensure it is valid
-export const hasErpParty = async (o: ValidationInputs): Promise<true | ValidationError> => {
-  if (!o.account.erpParty) {
-    return new ValidationError("Account is missing erpParty field.")
-  }
-  return true
-}
-
-export const validate = async (inputs: ValidationInputs, validators: ValidationFn[]): Promise<ValidationError[]> => {
-  const results = await Promise.all(validators.map(v => v(inputs)))
-  return results.filter((r): r is ValidationError => (r !== true)) 
-};
+export const CashoutValidator = validator([
+  isUsd,
+  cashoutMin,
+  cashoutMax,
+  isActiveAccount,
+  accountLevel,
+  walletBelongsToAccount,
+  hasSufficientBalance,
+  isBeforeExpiry,
+  hasErpParty,
+  //  TODO daily/weekly/monthly volume limits
+])
