@@ -1,5 +1,7 @@
 import { AccountValidator } from "@domain/accounts";
 import { ValidationError } from "./errors";
+import { WalletCurrency } from "./primitives";
+import { MismatchedCurrencyForWalletError } from "@domain/errors";
 
 
 export const UuidRegex =
@@ -35,3 +37,13 @@ export const hasErpParty = async (o: { account: Account }): Promise<true | Valid
 export const walletBelongsToAccount = async (o: { account: Account, wallet: Wallet}) => {
   return AccountValidator(o.account).validateWalletForAccount(o.wallet)
 }
+
+const checkWalletCurrency = (currency: WalletCurrency) => async (o: { wallet: Wallet }) => {
+  if (o.wallet.currency === currency) {
+    return true
+  }
+  return new MismatchedCurrencyForWalletError(`Expected ${currency}, got ${o.wallet.currency}`)
+}
+
+export const isBtcWallet = checkWalletCurrency(WalletCurrency.Btc)
+export const isUsdWallet = checkWalletCurrency(WalletCurrency.Usd)

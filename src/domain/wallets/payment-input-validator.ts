@@ -1,7 +1,9 @@
 import {
+  BtcAmount,
   USDAmount,
   ValidationError,
   isActiveAccount,
+  isUsdWallet,
   validator,
   walletBelongsToAccount,
 } from "@domain/shared"
@@ -26,7 +28,10 @@ const checkOnchainMin = async (o: { amount: USDAmount }) => {
     : new ValidationError(`Amount must be greater than ${minUsd.asDollars()}`)
 }
 
-export const OnchainUsdPaymentValidator = validator<SendOnchainArgs & { wallet: Wallet, account: Account }>([
+type SendOnchainArgsWithContext = SendOnchainArgs & { wallet: Wallet, account: Account }
+
+export const OnchainUsdPaymentValidator = validator<SendOnchainArgsWithContext>([
+  isUsdWallet,
   isActiveAccount,
   walletBelongsToAccount,
   checkOnchainMin,
