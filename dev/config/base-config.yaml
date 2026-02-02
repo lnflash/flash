@@ -35,5 +35,19 @@ cashout:
     from: "notifications@getflash.io"
     subject: "New Cashout"
 
+# credentials and accounts defined in the erpnext restore script
+frappe:
+  url: http://frontend.local:8080
+  sitename: frontend # default sitename for frappe docker container
+  credentials:
+    apiKey: "2701937b221364c"
+    apiSecret: "a05ab1998d20828"
+  erpnext:
+    accounts:
+      ibex:
+        operating: "Ibex Operating - F"
+      cashout: "Cashout Payables (JMD) - F"
+      serviceFees: "Service Fees - F"
+
 sendgrid:
   apiKey: "<replace>"
