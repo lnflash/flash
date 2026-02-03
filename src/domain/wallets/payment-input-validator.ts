@@ -2,11 +2,10 @@ import {
   BtcAmount,
   USDAmount,
   ValidationError,
-  isActiveAccount,
   isUsdWallet,
   validator,
-  walletBelongsToAccount,
 } from "@domain/shared"
+import { isActiveAccount, walletBelongsToAccount } from "@domain/accounts"
 import { SendOnchainArgs } from "@services/ibex/types"
 
 // Ibex does not allow us to check if address is Ibex owned,

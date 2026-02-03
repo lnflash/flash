@@ -1,7 +1,7 @@
 import { getBalanceForWallet } from "@app/wallets";
 import { Cashout } from "@config";
-import { AccountValidator } from "@domain/accounts";
-import { hasErpParty, isActiveAccount, USDAmount, ValidationError, ValidationFn, validator, walletBelongsToAccount } from "@domain/shared";
+import { AccountValidator, hasErpParty, isActiveAccount, walletBelongsToAccount } from "@domain/accounts";
+import { USDAmount, ValidationError, ValidationFn, validator } from "@domain/shared";
 import { ValidationInputs } from "./types";
 
 const config = Cashout.validations

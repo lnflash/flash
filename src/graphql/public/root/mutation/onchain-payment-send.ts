@@ -10,6 +10,7 @@ import SatAmount from "@graphql/shared/types/scalar/sat-amount"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 
 import { Wallets } from "@app"
+import { UnsupportedCurrencyError } from "@domain/errors"
 
 const OnChainPaymentSendInput = GT.Input({
   name: "OnChainPaymentSendInput",
@@ -46,41 +47,42 @@ const OnChainPaymentSendMutation = GT.Field<
     input: { type: GT.NonNull(OnChainPaymentSendInput) },
   },
   resolve: async (_, args, { domainAccount }) => {
-    const { walletId, address, amount, memo, speed } = args.input
+    return new UnsupportedCurrencyError("BTC amount is not supported")
+    // const { walletId, address, amount, memo, speed } = args.input
 
-    if (walletId instanceof Error) {
-      return { errors: [{ message: walletId.message }] }
-    }
+    // if (walletId instanceof Error) {
+    //   return { errors: [{ message: walletId.message }] }
+    // }
 
-    if (address instanceof Error) {
-      return { errors: [{ message: address.message }] }
-    }
+    // if (address instanceof Error) {
+    //   return { errors: [{ message: address.message }] }
+    // }
 
-    if (memo instanceof Error) {
-      return { errors: [{ message: memo.message }] }
-    }
+    // if (memo instanceof Error) {
+    //   return { errors: [{ message: memo.message }] }
+    // }
 
-    if (speed instanceof Error) {
-      return { errors: [{ message: speed.message }] }
-    }
+    // if (speed instanceof Error) {
+    //   return { errors: [{ message: speed.message }] }
+    // }
 
-    const result = await Wallets.payOnChainByWalletIdForBtcWallet({
-      senderAccount: domainAccount,
-      senderWalletId: walletId,
-      amount,
-      address,
-      speed,
-      memo,
-    })
+    // const result = await Wallets.payOnChainByWalletIdForBtcWallet({
+    //   senderAccount: domainAccount,
+    //   senderWalletId: walletId,
+    //   amount,
+    //   address,
+    //   speed,
+    //   memo,
+    // })
 
-    if (result instanceof Error) {
-      return { status: "failed", errors: [mapAndParseErrorForGqlResponse(result)] }
-    }
+    // if (result instanceof Error) {
+    //   return { status: "failed", errors: [mapAndParseErrorForGqlResponse(result)] }
+    // }
 
-    return {
-      errors: [],
-      status: result.status.value,
-    }
+    // return {
+    //   errors: [],
+    //   status: result.status.value,
+    // }
   },
 })
 

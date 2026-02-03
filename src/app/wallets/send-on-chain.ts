@@ -49,6 +49,7 @@ export const payOnChainByWalletId = async <R extends WalletCurrency>({
   speed,
   memo,
 }: PayOnChainByUsdArgs): Promise<PayOnChainByWalletIdResult | Error> => {
+  // For testing purposes, would be nice to extract these functions
   const latestAccountState = await AccountsRepository().findById(senderAccount.id)
   if (latestAccountState instanceof Error) return latestAccountState
   

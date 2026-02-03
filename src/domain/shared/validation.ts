@@ -1,7 +1,5 @@
-import { AccountValidator } from "@domain/accounts";
 import { ValidationError } from "./errors";
 import { WalletCurrency } from "./primitives";
-import { MismatchedCurrencyForWalletError } from "@domain/errors";
 
 
 export const UuidRegex =
@@ -9,40 +7,28 @@ export const UuidRegex =
 
 // Note: do not export. This symbol should only be used to create Validated<T> in this module
 const validatedSymbol = Symbol("validated")
-                                                                                                                                                                                                                                             
-export type Validated<T> = T & { [validatedSymbol]: true } 
+
+export type Validated<T> = T & { [validatedSymbol]: true }
+
+export const isValidated = <T>(value: T | Validated<T> | ValidationError[]): value is Validated<T> => {
+  return !Array.isArray(value) && typeof value === 'object' && value !== null && validatedSymbol in value
+}
 
 export type ValidationFn<T> = (inputs: T) => Promise<true | ValidationError>;
 
-export const validator = <T>(validators: ValidationFn<T>[]) => 
+export const validator = <T>(validators: ValidationFn<T>[]) =>
   async (inputs: T): Promise<Validated<T> | ValidationError[]> => {
     const results = await Promise.all(validators.map(v => v(inputs)))
-    const errs = results.filter((r): r is ValidationError => (r !== true)) 
+    const errs = results.filter((r): r is ValidationError => (r !== true))
     if (errs.length > 0) return errs
     else return { ...inputs, [validatedSymbol]: true } as Validated<T>
 };
-
-export const isActiveAccount = async (o: { account: Account }) => {
-  return AccountValidator(o.account).isActive()
-}
-
-// TODO: Look this field up against ERP system to ensure it is valid
-export const hasErpParty = async (o: { account: Account }): Promise<true | ValidationError> => {
-  if (!o.account.erpParty) {
-    return new ValidationError("Account is missing erpParty field.")
-  }
-  return true
-}
-
-export const walletBelongsToAccount = async (o: { account: Account, wallet: Wallet}) => {
-  return AccountValidator(o.account).validateWalletForAccount(o.wallet)
-}
 
 const checkWalletCurrency = (currency: WalletCurrency) => async (o: { wallet: Wallet }) => {
   if (o.wallet.currency === currency) {
     return true
   }
-  return new MismatchedCurrencyForWalletError(`Expected ${currency}, got ${o.wallet.currency}`)
+  return new ValidationError(`Expected ${currency}, got ${o.wallet.currency}`)
 }
 
 export const isBtcWallet = checkWalletCurrency(WalletCurrency.Btc)
