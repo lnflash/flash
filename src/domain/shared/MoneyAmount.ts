@@ -1,6 +1,5 @@
-import { UnsupportedCurrencyError } from "@domain/errors"
 import { Money, Round } from "./bigint-money"
-import { BigIntConversionError, RedisParseError } from "./errors"
+import { BigIntConversionError, UnsupportedCurrencyError } from "./errors"
 import { ExchangeCurrencyUnit, WalletCurrency } from "./primitives"
 
 export abstract class MoneyAmount {
