@@ -11,11 +11,13 @@ import {
   JournalEntryDeleteError,
   UpgradeRequestCreateError,
   UpgradeRequestQueryError,
+  BanksQueryError,
 } from "./errors"
 import {
   AccountUpgradeRequest,
   CreateUpgradeRequestInput,
 } from "./models/AccountUpgradeRequest"
+import { Bank } from "./models/Bank"
 
 // Move to MoneyAmount
 const erpUsd = (usd: USDAmount): number => Number(usd.asCents(2))
@@ -197,6 +199,22 @@ class ErpNext {
         "Error querying Account Upgrade Request from ERPNext",
       )
       return new UpgradeRequestQueryError(err)
+    }
+  }
+
+  async listBanks(): Promise<Bank[] | BanksQueryError> {
+    try {
+      const resp = await axios.get(`${this.url}/api/resource/Bank`, {
+        headers: this.headers,
+      })
+
+      const data = resp.data?.data
+      if (!data) return new BanksQueryError("No data in response")
+
+      return data
+    } catch (err) {
+      baseLogger.error({ err }, "Error querying Banks from ERPNext")
+      return new BanksQueryError(err)
     }
   }
 }

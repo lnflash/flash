@@ -182,6 +182,10 @@ type BTCWallet implements Wallet {
   walletCurrency: WalletCurrency!
 }
 
+type Bank {
+  name: String!
+}
+
 type BuildInformation {
   commitHash: String
   helmRevision: Int
@@ -1182,6 +1186,7 @@ type Query {
 
   """Returns 1 Sat and 1 Usd Cent price for the given currency"""
   realtimePrice(currency: DisplayCurrency = "USD"): RealtimePrice!
+  supportedBanks: [Bank!]!
   transactionDetails(input: TransactionDetailsInput!): TransactionDetailsPayload!
   userDefaultWalletId(username: Username!): WalletId! @deprecated(reason: "will be migrated to AccountDefaultWalletId")
   usernameAvailable(username: Username!): Boolean
