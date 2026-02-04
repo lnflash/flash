@@ -50,3 +50,5 @@ export class BtcAmountTooLargeError extends ValidationError {}
 export class UsdAmountTooLargeError extends ValidationError {}
 export class InvalidBtcPaymentAmountError extends ValidationError {}
 export class InvalidUsdPaymentAmountError extends ValidationError {}
+
+export class UnsupportedCurrencyError extends DomainError {}

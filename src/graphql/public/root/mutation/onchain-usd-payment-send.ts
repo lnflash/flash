@@ -11,6 +11,7 @@ import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { Wallets } from "@app/index"
+import { BigIntConversionError, USDAmount } from "@domain/shared"
 
 const OnChainUsdPaymentSendInput = GT.Input({
   name: "OnChainUsdPaymentSendInput",
@@ -65,11 +66,14 @@ const OnChainUsdPaymentSendMutation = GT.Field<
       return { errors: [{ message: speed.message }] }
     }
     if (!domainAccount) throw new Error("Authentication required")
+
+    const usdAmount = USDAmount.cents(amount.toString())
+    if (usdAmount instanceof BigIntConversionError) return usdAmount
  
-    const result = await Wallets.payOnChainByWalletIdForUsdWallet({
+    const result = await Wallets.payOnChainByWalletId({
       senderAccount: domainAccount,
       senderWalletId: walletId,
-      amount,
+      amount: usdAmount,
       address,
       speed,
       memo,

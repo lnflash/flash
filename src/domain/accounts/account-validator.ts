@@ -1,7 +1,7 @@
 import { InactiveAccountError, InvalidWalletId } from "@domain/errors"
 
 import { AccountStatus } from "./primitives"
-import { ValidationError } from "@domain/shared"
+import { ValidationError } from "@domain/shared/errors"
 
 export const AccountValidator = (
   account: Account,
@@ -31,4 +31,21 @@ export const AccountValidator = (
   }
 
   return { validateWalletForAccount, isLevel, isActive }
+}
+
+// Account-specific validators for use with the validator() function
+export const isActiveAccount = async (o: { account: Account }) => {
+  return AccountValidator(o.account).isActive()
+}
+
+// TODO: Look this field up against ERP system to ensure it is valid
+export const hasErpParty = async (o: { account: Account }): Promise<true | ValidationError> => {
+  if (!o.account.erpParty) {
+    return new ValidationError("Account is missing erpParty field.")
+  }
+  return true
+}
+
+export const walletBelongsToAccount = async (o: { account: Account, wallet: Wallet}) => {
+  return AccountValidator(o.account).validateWalletForAccount(o.wallet)
 }
