@@ -20,8 +20,14 @@ fi
 BACKUP_FILENAME=$(basename "$BACKUP_FILE")
 
 # Copy the backup file from host to container restore directory
-docker exec -it flash-frappe-frontend-1 mkdir -p /tmp/restore
-docker cp "$BACKUP_FILE" flash-frappe-frontend-1:/tmp/restore/"$BACKUP_FILENAME"
+docker exec -it flash-frappe-backend-1 mkdir -p /tmp/restore
+docker cp "$BACKUP_FILE" flash-frappe-backend-1:/tmp/restore/"$BACKUP_FILENAME"
+
+# Remove stale locks if present (e.g. from frappe-create-site)
+docker exec flash-frappe-backend-1 rm -f /home/frappe/frappe-bench/sites/frontend/locks/*.lock 2>/dev/null || true
 
 # Restore the database inside the container with the password
-docker exec -it flash-frappe-frontend-1 bench --site frontend restore --db-root-password "$DB_PASSWORD" /tmp/restore/"$BACKUP_FILENAME"
+docker exec -it flash-frappe-backend-1 bench --site frontend restore --db-root-password "$DB_PASSWORD" /tmp/restore/"$BACKUP_FILENAME"
+
+# Run migrate to sync database schema with current code
+docker exec -it flash-frappe-backend-1 bench --site frontend migrate
