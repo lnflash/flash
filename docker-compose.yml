@@ -199,7 +199,7 @@ services:
   # Frappe/ERPNext services
   frappe-backend:
     # image: lnflash/frappe-erp-admin:latest
-    image: brh28/frappe-flash:0.0.2
+    image: brh28/frappe-flash:0.0.4
     deploy:
       restart_policy:
         condition: on-failure
@@ -213,7 +213,7 @@ services:
       MARIADB_ROOT_PASSWORD: admin
 
   frappe-configurator:
-    image: brh28/frappe-flash:0.0.2
+    image: brh28/frappe-flash:0.0.4
     deploy:
       restart_policy:
         condition: none
@@ -245,7 +245,7 @@ services:
       - frappe-logs:/home/frappe/frappe-bench/logs
 
   frappe-create-site:
-    image: brh28/frappe-flash:0.0.2
+    image: brh28/frappe-flash:0.0.4
     deploy:
       restart_policy:
         condition: none
@@ -299,7 +299,7 @@ services:
       - mariadb-data:/var/lib/mysql
 
   frappe-frontend:
-    image: brh28/frappe-flash:0.0.2
+    image: brh28/frappe-flash:0.0.4
     ports: ["8080:8080"]
     depends_on:
       - frappe-websocket
@@ -322,7 +322,7 @@ services:
       - frappe-logs:/home/frappe/frappe-bench/logs
 
   frappe-websocket:
-    image: brh28/frappe-flash:0.0.2
+    image: brh28/frappe-flash:0.0.4
     deploy:
       restart_policy:
         condition: on-failure

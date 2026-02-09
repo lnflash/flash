@@ -12,7 +12,7 @@ stop-frappe:
 reset-frappe:
 	./dev/erpnext/clean.sh
 	./dev/erpnext/start.sh
-	@echo "Waiting for frappe to initialize..."
+	@echo "Waiting 60 seconds for frappe to initialize..."
 	@sleep 60
 	./dev/erpnext/restore.sh dev/erpnext/backups/20260123_132015-frontend-database.sql.gz
 
