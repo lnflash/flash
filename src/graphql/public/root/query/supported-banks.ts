@@ -1,7 +1,6 @@
 import { Accounts } from "@app"
 
 import { GT } from "@graphql/index"
-import { mapAndParseErrorForGqlResponse, mapError } from "@graphql/error-map"
 import Bank from "@graphql/public/types/object/bank"
 import { BanksQueryError } from "@services/frappe/errors"
 import { InternalServerError } from "@graphql/error"
