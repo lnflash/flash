@@ -164,13 +164,19 @@ type AccountUpgradeRequest
   email: String
   fullName: String!
 
+  """Whether an ID document is provided with the upgrade request"""
+  idDocument: Boolean!
+
   """ERPNext document name"""
   name: String!
   phoneNumber: String
   requestedLevel: AccountLevel!
 
-  """Workflow status of the upgrade request"""
+  """Status of the upgrade request"""
   status: String!
+
+  """Whether a PoS terminal is requested with the upgrade"""
+  terminalRequested: Boolean!
   username: String!
 }
 

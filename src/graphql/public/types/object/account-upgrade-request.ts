@@ -19,7 +19,16 @@ const AccountUpgradeRequest = GT.Object({
     },
     status: {
       type: GT.NonNull(GT.String),
-      description: "Workflow status of the upgrade request",
+      description: "Status of the upgrade request",
+    },
+    terminalRequested: {
+      type: GT.NonNull(GT.Boolean),
+      description: "Whether a PoS terminal is requested with the upgrade",
+    },
+    idDocument: {
+      type: GT.NonNull(GT.Boolean),
+      description: "Whether an ID document is provided with the upgrade request",
+      resolve: (source) => Boolean(source.idDocument),
     },
     fullName: {
       type: GT.NonNull(GT.String),
