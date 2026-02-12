@@ -9,6 +9,7 @@ import PayoutSpeed from "@graphql/public/types/scalar/payout-speed"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 
 import { Wallets } from "@app"
+import { getBalanceForWallet } from "@app/wallets"
 
 const OnChainPaymentSendAllInput = GT.Input({
   name: "OnChainPaymentSendAllInput",
@@ -61,9 +62,13 @@ const OnChainPaymentSendAllMutation = GT.Field<
       return { errors: [{ message: speed.message }] }
     }
 
-    const result = await Wallets.payAllOnChainByWalletId({
+    const amount = await getBalanceForWallet({ walletId })
+    if (amount instanceof Error) return amount
+
+    const result = await Wallets.payOnChainByWalletId({
       senderAccount: domainAccount,
       senderWalletId: walletId,
+      amount,
       address,
       speed,
       memo,

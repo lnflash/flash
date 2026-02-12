@@ -131,6 +131,13 @@ export const env = createEnv({
 
     ERPNEXT_JWT_SECRET: z.string().min(1).optional(),
     NOSTR_PRIVATE_KEY: z.string().min(63).optional(),
+
+    // DigitalOcean Spaces
+    DO_SPACES_ENDPOINT: z.string().url().optional(),
+    DO_SPACES_REGION: z.string().min(1).optional(),
+    DO_SPACES_BUCKET: z.string().min(1).optional(),
+    DO_SPACES_ACCESS_KEY: z.string().min(1).optional(),
+    DO_SPACES_SECRET_KEY: z.string().min(1).optional(),
   },
 
   runtimeEnvStrict: {
@@ -231,5 +238,11 @@ export const env = createEnv({
 
     ERPNEXT_JWT_SECRET: process.env.ERPNEXT_JWT_SECRET,
     NOSTR_PRIVATE_KEY: process.env.NOSTR_PRIVATE_KEY,
+
+    DO_SPACES_ENDPOINT: process.env.DO_SPACES_ENDPOINT,
+    DO_SPACES_REGION: process.env.DO_SPACES_REGION,
+    DO_SPACES_BUCKET: process.env.DO_SPACES_BUCKET,
+    DO_SPACES_ACCESS_KEY: process.env.DO_SPACES_ACCESS_KEY,
+    DO_SPACES_SECRET_KEY: process.env.DO_SPACES_SECRET_KEY,
   },
 })

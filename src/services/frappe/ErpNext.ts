@@ -11,11 +11,13 @@ import {
   JournalEntryDeleteError,
   UpgradeRequestCreateError,
   UpgradeRequestQueryError,
+  BanksQueryError,
 } from "./errors"
 import {
   AccountUpgradeRequest,
   CreateUpgradeRequestInput,
 } from "./models/AccountUpgradeRequest"
+import { Bank } from "./models/Bank"
 
 // Move to MoneyAmount
 const erpUsd = (usd: USDAmount): number => Number(usd.asCents(2))
@@ -24,11 +26,12 @@ class ErpNext {
   url: string
   headers: Record<string, string>
 
-  constructor(url: string, creds: FrappeCredentials) {
+  constructor(url: string, sitename: string, creds: FrappeCredentials) {
     this.url = url
     this.headers = {
       "Content-Type": "application/json",
       "Authorization": `token ${creds.apiKey}:${creds.apiSecret}`,
+      "Host": sitename
     }
   }
 
@@ -58,7 +61,7 @@ class ErpNext {
           credit_in_account_currency: Number(liability.jmd.asCents(2)),
           credit: erpUsd(liability.usd),
           exchange_rate: erpUsd(liability.usd) / Number(liability.jmd.asCents(2)),
-          party_type: "Supplier",
+          party_type: "Customer",
           party,
         },
         {
@@ -188,7 +191,7 @@ class ErpNext {
       )
 
       const request = detailResp.data?.data
-      if (!data) return new UpgradeRequestQueryError("No data in detail response")
+      if (!request) return new UpgradeRequestQueryError("No data in detail response")
       return AccountUpgradeRequest.fromErpnext(request)
     } catch (err) {
       baseLogger.error(
@@ -198,11 +201,27 @@ class ErpNext {
       return new UpgradeRequestQueryError(err)
     }
   }
+
+  async listBanks(): Promise<Bank[] | BanksQueryError> {
+    try {
+      const resp = await axios.get(`${this.url}/api/resource/Bank`, {
+        headers: this.headers,
+      })
+
+      const data = resp.data?.data
+      if (!data) return new BanksQueryError("No data in response")
+
+      return data
+    } catch (err) {
+      baseLogger.error({ err }, "Error querying Banks from ERPNext")
+      return new BanksQueryError(err)
+    }
+  }
 }
 
 // Only instantiate if config is available, otherwise export a null-safe placeholder
 const erpNextInstance = FrappeConfig?.url
-  ? new ErpNext(FrappeConfig.url, FrappeConfig.credentials)
+  ? new ErpNext(FrappeConfig.url, FrappeConfig.sitename, FrappeConfig.credentials)
   : null
 
 export default erpNextInstance as ErpNext

@@ -177,6 +177,13 @@ type GraphQLApplicationError implements Error {
   path: [String]
 }
 
+type IdDocumentReadUrlPayload {
+  errors: [Error!]!
+
+  """Pre-signed URL for reading the ID document (valid for 1 hour)"""
+  readUrl: String
+}
+
 union InitiationVia = InitiationViaIntraLedger | InitiationViaLn | InitiationViaOnChain
 
 type InitiationViaIntraLedger {
@@ -331,6 +338,10 @@ type Query {
   accountDetailsByUserPhone(phone: Phone!): AuditedAccount!
   accountDetailsByUsername(username: Username!): AuditedAccount!
   allLevels: [AccountLevel!]!
+  idDocumentReadUrl(
+    """Storage key of the ID document file"""
+    fileKey: String!
+  ): IdDocumentReadUrlPayload!
   lightningInvoice(hash: PaymentHash!): LightningInvoice!
   lightningPayment(hash: PaymentHash!): LightningPayment!
   listWalletIds(walletCurrency: WalletCurrency!): [WalletId!]!

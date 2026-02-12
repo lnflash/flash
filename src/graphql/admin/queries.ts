@@ -13,6 +13,7 @@ import ListWalletIdsQuery from "./root/query/all-walletids"
 import WalletQuery from "./root/query/wallet"
 import AccountDetailsByAccountId from "./root/query/account-details-by-account-id"
 import MerchantsPendingApprovalQuery from "./root/query/merchants-pending-approval-listing"
+import IdDocumentReadUrlQuery from "./root/query/id-document-read-url"
 
 export const queryFields = {
   unauthed: {},
@@ -30,6 +31,7 @@ export const queryFields = {
     listWalletIds: ListWalletIdsQuery,
     wallet: WalletQuery,
     merchantsPendingApproval: MerchantsPendingApprovalQuery,
+    idDocumentReadUrl: IdDocumentReadUrlQuery,
   },
 }
 

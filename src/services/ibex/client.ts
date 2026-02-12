@@ -5,9 +5,8 @@ import { AddInvoiceBodyParam, AddInvoiceResponse201, CreateAccountResponse201, C
 import { addAttributesToCurrentSpan, wrapAsyncFunctionsToRunInSpan } from "@services/tracing";
 import WebhookServer from "./webhook-server";
 import { Redis }  from "./cache"
-import { GetFeeEstimateArgs, IbexAccountDetails, IbexFeeEstimation, IbexInvoiceArgs, PayInvoiceArgs } from "./types";
+import { GetFeeEstimateArgs, IbexAccountDetails, IbexFeeEstimation, IbexInvoiceArgs, PayInvoiceArgs, SendOnchainArgs } from "./types";
 import { USDAmount } from "@domain/shared";
-import { baseLogger } from "@services/logger";
 
 const Ibex = new IbexClient(
   IbexConfig.url, 
@@ -108,14 +107,16 @@ const payInvoice = async (args: PayInvoiceArgs): Promise<PayInvoiceV2Response200
 
 // onchain transactions are typically high-value
 // logging all Ibex responses until we have higher confidence & higher volume
-const sendOnchain = async (body: SendToAddressCopyBodyParam): Promise<SendToAddressCopyResponse200 | IbexError> => {
-    const bodyWithHooks = { 
-        ...body,
+const sendOnchain = async (args: SendOnchainArgs): Promise<SendToAddressCopyResponse200 | IbexError> => {
+    const body = { 
+        accountId: args.accountId,
+        address: args.address,
+        amount: args.amount.toIbex(),
         webhookUrl: WebhookServer.endpoints.onPay.onchain,
         webhookSecret: WebhookServer.secret, 
     } as SendToAddressCopyBodyParam
-    addAttributesToCurrentSpan({ "request.params": JSON.stringify(bodyWithHooks) })
-    return Ibex.sendToAddressV2(bodyWithHooks).then(errorHandler)
+    addAttributesToCurrentSpan({ "request.params": JSON.stringify(body) })
+    return Ibex.sendToAddressV2(body).then(errorHandler)
 }
 
 const estimateOnchainFee = async (send: USDAmount, address: OnChainAddress): Promise<EstimateFeeCopyResponse200 | IbexError> => {

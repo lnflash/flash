@@ -1,4 +1,7 @@
+import { parse } from "path"
 import { erpStringToLevel, levelToErpString } from "./AccountLevel"
+
+export type AccountUpgradeRequestStatus = "Pending" | "Approved" | "Rejected"
 
 export type CreateUpgradeRequestInput = {
   username: string
@@ -26,7 +29,7 @@ export class AccountUpgradeRequest {
     readonly username: string,
     readonly currentLevel: AccountLevel,
     readonly requestedLevel: AccountLevel,
-    readonly status: string,
+    readonly status: AccountUpgradeRequestStatus,
     readonly fullName: string,
     readonly phoneNumber: string,
     readonly email?: string,
@@ -47,7 +50,7 @@ export class AccountUpgradeRequest {
       input.username,
       input.currentLevel,
       input.requestedLevel,
-      "", // status - assigned by ERPNext
+      "Pending", // status - default, may be overridden by ERPNext
       input.fullName,
       input.phoneNumber,
       input.email,
@@ -85,18 +88,24 @@ export class AccountUpgradeRequest {
   }
 
   static fromErpnext(data: any): AccountUpgradeRequest {
+    const parseTerminalRequested = (d: any): boolean => {
+      if (d.terminal_requested != null && typeof d.terminal_requested === "string")
+          return d.terminal_requested !== "0" && d.terminal_requested !== ""
+      else return Boolean(d.terminal_requested)
+
+    }
     return new AccountUpgradeRequest(
       data.name,
       data.username,
       erpStringToLevel(data.current_level),
       erpStringToLevel(data.requested_level),
-      data.workflow_state || data.docstatus,
+      data.status,
       data.full_name,
       data.phone_number,
       data.email,
       data.business_name,
       data.business_address,
-      data.terminal_requested,
+      parseTerminalRequested(data),
       data.bank_name,
       data.bank_branch,
       data.account_type,

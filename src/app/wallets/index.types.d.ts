@@ -107,28 +107,6 @@ type IntraLedgerPaymentSendWalletIdArgs = PaymentSendArgs & {
   amount: number
 }
 
-type PayAllOnChainByWalletIdArgs = {
-  senderWalletId: WalletId
-  senderAccount: Account
-  address: string
-  speed: PayoutSpeed
-  memo: string | null
-}
-
-type PayOnChainByWalletIdWithoutCurrencyArgs = {
-  senderWalletId: WalletId
-  senderAccount: Account
-  amount: number
-  address: string
-  speed: PayoutSpeed
-  memo: string | null
-}
-
-type PayOnChainByWalletIdArgs = PayOnChainByWalletIdWithoutCurrencyArgs & {
-  amountCurrency: WalletCurrency | undefined
-  sendAll: boolean
-}
-
 type PayOnChainByWalletIdResult = {
   status: PaymentSendStatus
   payoutId: PayoutId | undefined

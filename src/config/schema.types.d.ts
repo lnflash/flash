@@ -199,6 +199,7 @@ type FrappeCredentials = {
 
 type FrappeConfig = {
   url: string
+  sitename: string
   credentials: FrappeCredentials
   erpnext: {
     accounts: {
