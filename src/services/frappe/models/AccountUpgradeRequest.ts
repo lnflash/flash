@@ -1,3 +1,4 @@
+import { parse } from "path"
 import { erpStringToLevel, levelToErpString } from "./AccountLevel"
 
 export type AccountUpgradeRequestStatus = "Pending" | "Approved" | "Rejected"
@@ -87,6 +88,12 @@ export class AccountUpgradeRequest {
   }
 
   static fromErpnext(data: any): AccountUpgradeRequest {
+    const parseTerminalRequested = (d: any): boolean => {
+      if (d.terminal_requested != null && typeof d.terminal_requested === "string")
+          return d.terminal_requested !== "0" && d.terminal_requested !== ""
+      else return Boolean(d.terminal_requested)
+
+    }
     return new AccountUpgradeRequest(
       data.name,
       data.username,
@@ -98,7 +105,7 @@ export class AccountUpgradeRequest {
       data.email,
       data.business_name,
       data.business_address,
-      Boolean(data.terminal_requested),
+      parseTerminalRequested(data),
       data.bank_name,
       data.bank_branch,
       data.account_type,
