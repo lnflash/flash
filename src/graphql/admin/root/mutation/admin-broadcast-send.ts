@@ -4,6 +4,7 @@ import AdminBroadcastSendPayload from "@graphql/admin/types/payload/admin-broadc
 import BroadcastTag from "@graphql/admin/types/scalar/broadcast-tag"
 import { Admin } from "@app"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
+import { SUCCESS_RESPONSE } from "@graphql/shared/types/payload/success-payload"
 
 const AdminBroadcastSendInput = GT.Input({
   name: "AdminBroadcastSendInput",
@@ -50,7 +51,7 @@ const AdminBroadcastSendMutation = GT.Field<
     if (success instanceof Error) {
       return { errors: [mapAndParseErrorForGqlResponse(success)] }
     }
-    return { errors: [], success: true }
+    return SUCCESS_RESPONSE
   },
 })
 

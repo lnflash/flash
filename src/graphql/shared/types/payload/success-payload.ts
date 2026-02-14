@@ -15,4 +15,6 @@ const SuccessPayload = GT.Object({
   }),
 })
 
+export const SUCCESS_RESPONSE = { errors: [], success: true } as const
+
 export default SuccessPayload

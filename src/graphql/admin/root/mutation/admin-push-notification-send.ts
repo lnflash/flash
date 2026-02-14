@@ -3,6 +3,7 @@ import { GT } from "@graphql/index"
 import AdminPushNotificationSendPayload from "@graphql/admin/types/payload/admin-push-notification-send"
 import { Admin } from "@app"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
+import { SUCCESS_RESPONSE } from "@graphql/shared/types/payload/success-payload"
 import NotificationCategory from "@graphql/shared/types/scalar/notification-category"
 
 const AdminPushNotificationSendInput = GT.Input({
@@ -60,7 +61,7 @@ const AdminPushNotificationSendMutation = GT.Field<
     if (success instanceof Error) {
       return { errors: [mapAndParseErrorForGqlResponse(success)] }
     }
-    return { errors: [], success: true }
+    return SUCCESS_RESPONSE
   },
 })
 

@@ -1,6 +1,6 @@
 import { GT } from "@graphql/index"
 
-import SuccessPayload from "@graphql/shared/types/payload/success-payload"
+import SuccessPayload, { SUCCESS_RESPONSE } from "@graphql/shared/types/payload/success-payload"
 
 import { Users } from "@app"
 import { parseErrorMessageFromUnknown } from "@domain/shared"
@@ -34,7 +34,7 @@ const DeviceNotificationTokenCreateMutation = GT.Field<
       return { errors: [{ message: parseErrorMessageFromUnknown(err) }] }
     }
 
-    return { errors: [], success: true }
+    return SUCCESS_RESPONSE
   },
 })
 
