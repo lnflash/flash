@@ -104,6 +104,12 @@ type AccountUpdateNotificationSettingsPayload {
   errors: [Error!]!
 }
 
+type AccountUpgradePayload {
+  errors: [Error]
+  id: String
+  status: String
+}
+
 type AccountUpgradeRequest {
   businessAddress: String
   businessName: String
@@ -130,6 +136,16 @@ type AccountUpgradeRequest {
 type AccountUpgradeRequestPayload {
   errors: [Error!]!
   upgradeRequest: AccountUpgradeRequest
+}
+
+input AddressInput {
+  city: String!
+  country: String!
+  line1: String!
+  line2: String
+  postalCode: String!
+  state: String!
+  title: String!
 }
 
 """An Opaque Bearer token"""
@@ -192,25 +208,26 @@ type Bank {
   name: String!
 }
 
+input BankAccountInput {
+  accountNumber: Int
+  accountType: String
+  bankBranch: String
+  bankName: String
+  currency: String
+}
+
 type BuildInformation {
   commitHash: String
   helmRevision: Int
 }
 
 input BusinessAccountUpgradeRequestInput {
-  accountNumber: Int
-  accountType: String
-  bankBranch: String
-  bankName: String
-  businessAddress: String
-  businessName: String
-  currency: String
-  email: String
+  address: AddressInput!
+  bankAccount: BankAccountInput
   fullName: String!
   idDocument: String
   level: AccountLevel!
-  phoneNumber: String
-  terminalRequested: Boolean
+  terminalsRequested: Int = 0
 }
 
 type CallbackEndpoint {
@@ -807,7 +824,7 @@ type Mutation {
   accountEnableNotificationChannel(input: AccountEnableNotificationChannelInput!): AccountUpdateNotificationSettingsPayload!
   accountUpdateDefaultWalletId(input: AccountUpdateDefaultWalletIdInput!): AccountUpdateDefaultWalletIdPayload!
   accountUpdateDisplayCurrency(input: AccountUpdateDisplayCurrencyInput!): AccountUpdateDisplayCurrencyPayload!
-  businessAccountUpgradeRequest(input: BusinessAccountUpgradeRequestInput!): SuccessPayload!
+  businessAccountUpgradeRequest(input: BusinessAccountUpgradeRequestInput!): AccountUpgradePayload!
   callbackEndpointAdd(input: CallbackEndpointAddInput!): CallbackEndpointAddPayload!
   callbackEndpointDelete(input: CallbackEndpointDeleteInput!): SuccessPayload!
   captchaCreateChallenge: CaptchaCreateChallengePayload!

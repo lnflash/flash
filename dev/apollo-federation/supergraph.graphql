@@ -155,6 +155,14 @@ type AccountUpdateNotificationSettingsPayload
   errors: [Error!]!
 }
 
+type AccountUpgradePayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error]
+  id: String
+  status: String
+}
+
 type AccountUpgradeRequest
   @join__type(graph: PUBLIC)
 {
@@ -187,6 +195,18 @@ type AccountUpgradeRequestPayload
   upgradeRequest: AccountUpgradeRequest
 }
 
+input AddressInput
+  @join__type(graph: PUBLIC)
+{
+  city: String!
+  country: String!
+  line1: String!
+  line2: String
+  postalCode: String!
+  state: String!
+  title: String!
+}
+
 """An Opaque Bearer token"""
 scalar AuthToken
   @join__type(graph: PUBLIC)
@@ -203,6 +223,16 @@ type Bank
   @join__type(graph: PUBLIC)
 {
   name: String!
+}
+
+input BankAccountInput
+  @join__type(graph: PUBLIC)
+{
+  accountNumber: Int
+  accountType: String
+  bankBranch: String
+  bankName: String
+  currency: String
 }
 
 """
@@ -265,19 +295,12 @@ type BuildInformation
 input BusinessAccountUpgradeRequestInput
   @join__type(graph: PUBLIC)
 {
-  accountNumber: Int
-  accountType: String
-  bankBranch: String
-  bankName: String
-  businessAddress: String
-  businessName: String
-  currency: String
-  email: String
+  address: AddressInput!
+  bankAccount: BankAccountInput
   fullName: String!
   idDocument: String
   level: AccountLevel!
-  phoneNumber: String
-  terminalRequested: Boolean
+  terminalsRequested: Int = 0
 }
 
 type CallbackEndpoint
@@ -1044,7 +1067,7 @@ type Mutation
   accountEnableNotificationChannel(input: AccountEnableNotificationChannelInput!): AccountUpdateNotificationSettingsPayload!
   accountUpdateDefaultWalletId(input: AccountUpdateDefaultWalletIdInput!): AccountUpdateDefaultWalletIdPayload!
   accountUpdateDisplayCurrency(input: AccountUpdateDisplayCurrencyInput!): AccountUpdateDisplayCurrencyPayload!
-  businessAccountUpgradeRequest(input: BusinessAccountUpgradeRequestInput!): SuccessPayload!
+  businessAccountUpgradeRequest(input: BusinessAccountUpgradeRequestInput!): AccountUpgradePayload!
   callbackEndpointAdd(input: CallbackEndpointAddInput!): CallbackEndpointAddPayload!
   callbackEndpointDelete(input: CallbackEndpointDeleteInput!): SuccessPayload!
   captchaCreateChallenge: CaptchaCreateChallengePayload!
