@@ -202,7 +202,7 @@ input AddressInput
   country: String!
   line1: String!
   line2: String
-  postalCode: String!
+  postalCode: String
   state: String!
   title: String!
 }

@@ -31,7 +31,7 @@ export type Address = {
   line2?: string
   city: string
   state: string
-  postalCode: string
+  postalCode?: string
   country: string // Should fetch from ErpNext options
 }
 

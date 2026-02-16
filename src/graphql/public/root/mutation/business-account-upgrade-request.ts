@@ -23,7 +23,7 @@ const AddressInput = GT.Input({
     line2: { type: GT.String },
     city: { type: GT.NonNull(GT.String) },
     state: { type: GT.NonNull(GT.String) },
-    postalCode: { type: GT.NonNull(GT.String) },
+    postalCode: { type: GT.String },
     country: { type: GT.NonNull(GT.String) },
   }),
 })
