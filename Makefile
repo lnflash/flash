@@ -12,8 +12,8 @@ stop-frappe:
 reset-frappe:
 	./dev/erpnext/clean.sh
 	./dev/erpnext/start.sh
-	@echo "Waiting 60 seconds for frappe to initialize..."
-	@sleep 60
+	@echo "Waiting for frappe-create-site to finish..."
+	@exit_code=$$(docker wait flash-frappe-create-site-1); if [ "$$exit_code" != "0" ]; then echo "frappe-create-site failed (exit code $$exit_code). Check logs: docker logs flash-frappe-create-site-1"; exit 1; fi
 	./dev/erpnext/restore.sh dev/erpnext/backups/20260123_132015-frontend-database.sql.gz
 
 start-deps-integration:

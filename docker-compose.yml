@@ -199,7 +199,7 @@ services:
   # Frappe/ERPNext services
   frappe-backend:
     # image: lnflash/frappe-erp-admin:latest
-    image: brh28/frappe-flash:0.0.4
+    image: brh28/frappe-flash-admin:1.0.0
     deploy:
       restart_policy:
         condition: on-failure
@@ -213,7 +213,7 @@ services:
       MARIADB_ROOT_PASSWORD: admin
 
   frappe-configurator:
-    image: brh28/frappe-flash:0.0.4
+    image: brh28/frappe-flash-admin:1.0.0
     deploy:
       restart_policy:
         condition: none
@@ -232,6 +232,7 @@ services:
         bench set-config -gp socketio_port $$SOCKETIO_PORT;
         bench set-config -g flash_admin_api_url $$FLASH_API;
         bench set-config -g admin_api_key $$FLASH_SECRET;
+        bench set-config -gp developer_mode 1;
     environment:
       DB_HOST: mariadb
       DB_PORT: "3306"
@@ -245,7 +246,7 @@ services:
       - frappe-logs:/home/frappe/frappe-bench/logs
 
   frappe-create-site:
-    image: brh28/frappe-flash:0.0.4
+    image: brh28/frappe-flash-admin:1.0.0
     deploy:
       restart_policy:
         condition: none
@@ -265,7 +266,8 @@ services:
         export start=`date +%s`;
         until [[ -n `grep -hs ^ sites/common_site_config.json | jq -r ".db_host // empty"` ]] && \
           [[ -n `grep -hs ^ sites/common_site_config.json | jq -r ".redis_cache // empty"` ]] && \
-          [[ -n `grep -hs ^ sites/common_site_config.json | jq -r ".redis_queue // empty"` ]];
+          [[ -n `grep -hs ^ sites/common_site_config.json | jq -r ".redis_queue // empty"` ]] && \
+          [[ -n `grep -hs ^ sites/common_site_config.json | jq -r ".developer_mode // empty"` ]];
         do
           echo "Waiting for sites/common_site_config.json to be created";
           sleep 5;
@@ -299,7 +301,7 @@ services:
       - mariadb-data:/var/lib/mysql
 
   frappe-frontend:
-    image: brh28/frappe-flash:0.0.4
+    image: brh28/frappe-flash-admin:1.0.0
     ports: ["8080:8080"]
     depends_on:
       - frappe-websocket
@@ -322,7 +324,7 @@ services:
       - frappe-logs:/home/frappe/frappe-bench/logs
 
   frappe-websocket:
-    image: brh28/frappe-flash:0.0.4
+    image: brh28/frappe-flash-admin:1.0.0
     deploy:
       restart_policy:
         condition: on-failure
