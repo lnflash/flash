@@ -111,31 +111,37 @@ type AccountUpgradePayload {
 }
 
 type AccountUpgradeRequest {
-  businessAddress: String
-  businessName: String
+  address: Address!
+  bankAccount: BankAccount
   currentLevel: AccountLevel!
-  email: String
+  email: String!
   fullName: String!
-
-  """Whether an ID document is provided with the upgrade request"""
   idDocument: Boolean!
 
   """ERPNext document name"""
   name: String!
-  phoneNumber: String
+  phoneNumber: String!
   requestedLevel: AccountLevel!
 
   """Status of the upgrade request"""
   status: String!
-
-  """Whether a PoS terminal is requested with the upgrade"""
-  terminalRequested: Boolean!
+  terminalsRequested: Int!
   username: String!
 }
 
 type AccountUpgradeRequestPayload {
   errors: [Error!]!
   upgradeRequest: AccountUpgradeRequest
+}
+
+type Address {
+  city: String!
+  country: String!
+  line1: String!
+  line2: String
+  postalCode: String
+  state: String!
+  title: String!
 }
 
 input AddressInput {
@@ -208,12 +214,20 @@ type Bank {
   name: String!
 }
 
+type BankAccount {
+  accountNumber: Int!
+  accountType: String!
+  bankName: String!
+  branch: String!
+  currency: String!
+}
+
 input BankAccountInput {
-  accountNumber: Int
-  accountType: String
-  bankBranch: String
-  bankName: String
-  currency: String
+  accountNumber: Int!
+  accountType: String!
+  bankBranch: String!
+  bankName: String!
+  currency: String!
 }
 
 type BuildInformation {

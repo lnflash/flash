@@ -1,5 +1,7 @@
 import { GT } from "@graphql/index"
 import AccountLevel from "@graphql/shared/types/scalar/account-level"
+import Address from "./address"
+import BankAccount from "./bank-account"
 
 const AccountUpgradeRequest = GT.Object({
   name: "AccountUpgradeRequest",
@@ -21,29 +23,27 @@ const AccountUpgradeRequest = GT.Object({
       type: GT.NonNull(GT.String),
       description: "Status of the upgrade request",
     },
-    terminalRequested: {
-      type: GT.NonNull(GT.Boolean),
-      description: "Whether a PoS terminal is requested with the upgrade",
-    },
-    idDocument: {
-      type: GT.NonNull(GT.Boolean),
-      description: "Whether an ID document is provided with the upgrade request",
-      resolve: (source) => Boolean(source.idDocument),
-    },
     fullName: {
       type: GT.NonNull(GT.String),
     },
     phoneNumber: {
-      type: GT.String,
+      type: GT.NonNull(GT.String),
     },
     email: {
-      type: GT.String,
+      type: GT.NonNull(GT.String),
     },
-    businessName: {
-      type: GT.String,
+    idDocument: {
+      type: GT.NonNull(GT.Boolean),
+      resolve: (source) => !!source.idDocument && source.idDocument !== "",
     },
-    businessAddress: {
-      type: GT.String,
+    address: {
+      type: GT.NonNull(Address),
+    },
+    terminalsRequested: {
+      type: GT.NonNull(GT.Int),
+    },
+    bankAccount: {
+      type: BankAccount,
     },
   }),
 })

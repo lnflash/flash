@@ -7,11 +7,11 @@ import IError from "@graphql/shared/types/abstract/error"
 const BankAccountInput = GT.Input({
   name: "BankAccountInput",
   fields: () => ({
-    bankName: { type: GT.String },
-    bankBranch: { type: GT.String },
-    accountType: { type: GT.String },
-    currency: { type: GT.String },
-    accountNumber: { type: GT.Int },
+    bankName: { type: GT.NonNull(GT.String) },
+    bankBranch: { type: GT.NonNull(GT.String) },
+    accountType: { type: GT.NonNull(GT.String) },
+    currency: { type: GT.NonNull(GT.String) },
+    accountNumber: { type: GT.NonNull(GT.Int) },
   }),
 })
 

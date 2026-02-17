@@ -106,13 +106,13 @@ export class AccountUpgradeRequest {
         country: data.country,
       },
       Number(data.terminals_requested) || 0,
-      {
+      data.bank_name ? {
         bankName: data.bank_name,
         branch: data.bank_branch,
         accountType: data.account_type,
         currency: data.currency,
         accountNumber: data.account_number,
-      } 
+      } : undefined
     )
   }
 }
