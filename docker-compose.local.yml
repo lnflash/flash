@@ -1,0 +1,7 @@
+# Local overrides — this file is committed but changes are personal.
+# Example: bind mount local frappe-flash-admin for live editing
+#
+# services:
+#   frappe-backend:
+#     volumes:
+#       - ../frappe-flash-admin/admin_panel:/home/frappe/frappe-bench/apps/admin_panel
