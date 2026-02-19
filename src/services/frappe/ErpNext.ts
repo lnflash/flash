@@ -1,8 +1,8 @@
 import ValidOffer from "@app/offers/ValidOffer"
 import { FrappeConfig } from "@config"
-import { USDAmount } from "@domain/shared"
+import { USDAmount, Validated } from "@domain/shared"
 import { baseLogger } from "@services/logger"
-import axios from "axios"
+import axios, { isAxiosError } from "axios"
 
 import {
   JournalEntryDraftError,
@@ -15,7 +15,6 @@ import {
 } from "./errors"
 import {
   AccountUpgradeRequest,
-  CreateUpgradeRequestInput,
 } from "./models/AccountUpgradeRequest"
 import { Bank } from "./models/Bank"
 
@@ -140,20 +139,19 @@ class ErpNext {
     }
   }
 
-  async createUpgradeRequest(
-    input: CreateUpgradeRequestInput,
+  async postUpgradeRequest(
+    req: Validated<AccountUpgradeRequest>,
   ): Promise<{ name: string } | UpgradeRequestCreateError> {
-    const upgradeRequest = AccountUpgradeRequest.forCreate(input)
     try {
       const resp = await axios.post(
         `${this.url}/api/resource/Account Upgrade Request`,
-        upgradeRequest.toErpnext(),
+        req.toErpnext(),
         { headers: this.headers },
       )
       return { name: resp.data.data.name }
     } catch (err) {
       baseLogger.error(
-        { err, upgradeRequest },
+        { err, responseData: isAxiosError(err) ? err.response?.data : undefined, ...req.toErpnext() },
         "Error creating Account Upgrade Request in ERPNext",
       )
       return new UpgradeRequestCreateError(err)

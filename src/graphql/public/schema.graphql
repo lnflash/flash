@@ -104,32 +104,54 @@ type AccountUpdateNotificationSettingsPayload {
   errors: [Error!]!
 }
 
-type AccountUpgradeRequest {
-  businessAddress: String
-  businessName: String
-  currentLevel: AccountLevel!
-  email: String
-  fullName: String!
+type AccountUpgradePayload {
+  errors: [Error]
+  id: String
+  status: String
+}
 
-  """Whether an ID document is provided with the upgrade request"""
+type AccountUpgradeRequest {
+  address: Address!
+  bankAccount: BankAccount
+  currentLevel: AccountLevel!
+  email: String!
+  fullName: String!
   idDocument: Boolean!
 
   """ERPNext document name"""
   name: String!
-  phoneNumber: String
+  phoneNumber: String!
   requestedLevel: AccountLevel!
 
   """Status of the upgrade request"""
   status: String!
-
-  """Whether a PoS terminal is requested with the upgrade"""
-  terminalRequested: Boolean!
+  terminalsRequested: Int!
   username: String!
 }
 
 type AccountUpgradeRequestPayload {
   errors: [Error!]!
   upgradeRequest: AccountUpgradeRequest
+}
+
+type Address {
+  city: String!
+  country: String!
+  line1: String!
+  line2: String
+  postalCode: String
+  state: String!
+  title: String!
+}
+
+input AddressInput {
+  city: String!
+  country: String!
+  line1: String!
+  line2: String
+  postalCode: String
+  state: String!
+  title: String!
 }
 
 """An Opaque Bearer token"""
@@ -192,25 +214,34 @@ type Bank {
   name: String!
 }
 
+type BankAccount {
+  accountNumber: Int!
+  accountType: String!
+  bankName: String!
+  branch: String!
+  currency: String!
+}
+
+input BankAccountInput {
+  accountNumber: Int!
+  accountType: String!
+  bankBranch: String!
+  bankName: String!
+  currency: String!
+}
+
 type BuildInformation {
   commitHash: String
   helmRevision: Int
 }
 
 input BusinessAccountUpgradeRequestInput {
-  accountNumber: Int
-  accountType: String
-  bankBranch: String
-  bankName: String
-  businessAddress: String
-  businessName: String
-  currency: String
-  email: String
+  address: AddressInput!
+  bankAccount: BankAccountInput
   fullName: String!
   idDocument: String
   level: AccountLevel!
-  phoneNumber: String
-  terminalRequested: Boolean
+  terminalsRequested: Int = 0
 }
 
 type CallbackEndpoint {
@@ -807,7 +838,7 @@ type Mutation {
   accountEnableNotificationChannel(input: AccountEnableNotificationChannelInput!): AccountUpdateNotificationSettingsPayload!
   accountUpdateDefaultWalletId(input: AccountUpdateDefaultWalletIdInput!): AccountUpdateDefaultWalletIdPayload!
   accountUpdateDisplayCurrency(input: AccountUpdateDisplayCurrencyInput!): AccountUpdateDisplayCurrencyPayload!
-  businessAccountUpgradeRequest(input: BusinessAccountUpgradeRequestInput!): SuccessPayload!
+  businessAccountUpgradeRequest(input: BusinessAccountUpgradeRequestInput!): AccountUpgradePayload!
   callbackEndpointAdd(input: CallbackEndpointAddInput!): CallbackEndpointAddPayload!
   callbackEndpointDelete(input: CallbackEndpointDeleteInput!): SuccessPayload!
   captchaCreateChallenge: CaptchaCreateChallengePayload!

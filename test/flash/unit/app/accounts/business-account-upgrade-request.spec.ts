@@ -35,7 +35,7 @@ jest.mock("@app/accounts/update-account-level", () => ({
   updateAccountLevel: (...args: any[]) => mockUpdateAccountLevel(...args),
 }))
 
-import { businessAccountUpgradeRequest } from "@app/accounts/business-account-upgrade-request"
+import { createUpgradeRequest } from "@app/accounts/business-account-upgrade-request"
 
 const baseAccount = {
   id: "account-123",
@@ -68,7 +68,7 @@ describe("businessAccountUpgradeRequest", () => {
 
   describe("successful requests", () => {
     it("creates upgrade request successfully with required fields only", async () => {
-      const result = await businessAccountUpgradeRequest({
+      const result = await createUpgradeRequest({
         accountId: "account-123" as any,
         level: 2,
         fullName: "Test User",
@@ -88,7 +88,7 @@ describe("businessAccountUpgradeRequest", () => {
     })
 
     it("creates upgrade request with all optional business fields", async () => {
-      const result = await businessAccountUpgradeRequest({
+      const result = await createUpgradeRequest({
         accountId: "account-123" as any,
         level: 2,
         fullName: "Test User",
@@ -120,7 +120,7 @@ describe("businessAccountUpgradeRequest", () => {
     })
 
     it("auto-upgrades account for Level 2 requests", async () => {
-      const result = await businessAccountUpgradeRequest({
+      const result = await createUpgradeRequest({
         accountId: "account-123" as any,
         level: 2,
         fullName: "Test User",
@@ -134,7 +134,7 @@ describe("businessAccountUpgradeRequest", () => {
     })
 
     it("does not auto-upgrade for Level 3 requests", async () => {
-      const result = await businessAccountUpgradeRequest({
+      const result = await createUpgradeRequest({
         accountId: "account-123" as any,
         level: 3,
         fullName: "Test User",
@@ -147,7 +147,7 @@ describe("businessAccountUpgradeRequest", () => {
 
   describe("phone number validation", () => {
     it("passes when provided phone matches stored phone", async () => {
-      const result = await businessAccountUpgradeRequest({
+      const result = await createUpgradeRequest({
         accountId: "account-123" as any,
         level: 2,
         fullName: "Test User",
@@ -158,7 +158,7 @@ describe("businessAccountUpgradeRequest", () => {
     })
 
     it("fails when provided phone does not match stored phone", async () => {
-      const result = await businessAccountUpgradeRequest({
+      const result = await createUpgradeRequest({
         accountId: "account-123" as any,
         level: 2,
         fullName: "Test User",
@@ -172,7 +172,7 @@ describe("businessAccountUpgradeRequest", () => {
     it("passes when phone is provided but account has no stored phone", async () => {
       mockFindUserById.mockResolvedValue({ ...baseUser, phone: "" })
 
-      const result = await businessAccountUpgradeRequest({
+      const result = await createUpgradeRequest({
         accountId: "account-123" as any,
         level: 2,
         fullName: "Test User",
@@ -183,7 +183,7 @@ describe("businessAccountUpgradeRequest", () => {
     })
 
     it("passes when no phone is provided", async () => {
-      const result = await businessAccountUpgradeRequest({
+      const result = await createUpgradeRequest({
         accountId: "account-123" as any,
         level: 2,
         fullName: "Test User",
@@ -195,7 +195,7 @@ describe("businessAccountUpgradeRequest", () => {
 
   describe("email validation", () => {
     it("passes when provided email matches stored email", async () => {
-      const result = await businessAccountUpgradeRequest({
+      const result = await createUpgradeRequest({
         accountId: "account-123" as any,
         level: 2,
         fullName: "Test User",
@@ -206,7 +206,7 @@ describe("businessAccountUpgradeRequest", () => {
     })
 
     it("fails when provided email does not match stored email", async () => {
-      const result = await businessAccountUpgradeRequest({
+      const result = await createUpgradeRequest({
         accountId: "account-123" as any,
         level: 2,
         fullName: "Test User",
@@ -220,7 +220,7 @@ describe("businessAccountUpgradeRequest", () => {
     it("passes when email is provided but account has no stored email", async () => {
       mockGetIdentity.mockResolvedValue({ ...baseIdentity, email: "" })
 
-      const result = await businessAccountUpgradeRequest({
+      const result = await createUpgradeRequest({
         accountId: "account-123" as any,
         level: 2,
         fullName: "Test User",
@@ -231,7 +231,7 @@ describe("businessAccountUpgradeRequest", () => {
     })
 
     it("passes when no email is provided", async () => {
-      const result = await businessAccountUpgradeRequest({
+      const result = await createUpgradeRequest({
         accountId: "account-123" as any,
         level: 2,
         fullName: "Test User",
@@ -245,7 +245,7 @@ describe("businessAccountUpgradeRequest", () => {
     it("fails when requesting same level as current", async () => {
       mockFindAccountById.mockResolvedValue({ ...baseAccount, level: 2 })
 
-      const result = await businessAccountUpgradeRequest({
+      const result = await createUpgradeRequest({
         accountId: "account-123" as any,
         level: 2,
         fullName: "Test User",
@@ -258,7 +258,7 @@ describe("businessAccountUpgradeRequest", () => {
     it("fails when requesting downgrade", async () => {
       mockFindAccountById.mockResolvedValue({ ...baseAccount, level: 3 })
 
-      const result = await businessAccountUpgradeRequest({
+      const result = await createUpgradeRequest({
         accountId: "account-123" as any,
         level: 2,
         fullName: "Test User",
@@ -269,7 +269,7 @@ describe("businessAccountUpgradeRequest", () => {
     })
 
     it("fails with invalid level value", async () => {
-      const result = await businessAccountUpgradeRequest({
+      const result = await createUpgradeRequest({
         accountId: "account-123" as any,
         level: 5,
         fullName: "Test User",
@@ -281,7 +281,7 @@ describe("businessAccountUpgradeRequest", () => {
 
   describe("combined phone and email validation", () => {
     it("fails on phone mismatch even if email matches", async () => {
-      const result = await businessAccountUpgradeRequest({
+      const result = await createUpgradeRequest({
         accountId: "account-123" as any,
         level: 2,
         fullName: "Test User",
@@ -294,7 +294,7 @@ describe("businessAccountUpgradeRequest", () => {
     })
 
     it("fails on email mismatch even if phone matches", async () => {
-      const result = await businessAccountUpgradeRequest({
+      const result = await createUpgradeRequest({
         accountId: "account-123" as any,
         level: 2,
         fullName: "Test User",
@@ -307,7 +307,7 @@ describe("businessAccountUpgradeRequest", () => {
     })
 
     it("passes when both phone and email match", async () => {
-      const result = await businessAccountUpgradeRequest({
+      const result = await createUpgradeRequest({
         accountId: "account-123" as any,
         level: 2,
         fullName: "Test User",
