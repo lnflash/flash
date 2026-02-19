@@ -130,7 +130,7 @@ type AccountUpgradeRequest {
 }
 
 type AccountUpgradeRequestPayload {
-  errors: [Error!]!
+  errors: [Error]
   upgradeRequest: AccountUpgradeRequest
 }
 

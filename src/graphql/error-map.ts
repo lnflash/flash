@@ -731,13 +731,25 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
   }
 }
 
+// Move to CustomApolloError class?
+export const apolloErrorResponse = (e: CustomApolloError): { errors: IError[] } => { 
+  return {
+    errors: [
+      {
+        message: e.message,
+        path: e.path,
+        code: e.extensions.code 
+      }
+    ]
+  }
+}
 
 export const mapAndParseErrorForGqlResponse = (err: ApplicationError): IError => {
   const mappedError = mapError(err)
   return {
     message: mappedError.message,
     path: mappedError.path,
-    code: mappedError.extensions.code,
+    code: mappedError.extensions.code 
   }
 }
 

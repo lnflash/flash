@@ -14,7 +14,7 @@ export class CustomApolloError extends ApolloError {
     message,
     code,
     forwardToClient,
-    logger,
+    logger = baseLogger,
     level,
     ...metadata
   }: CustomApolloErrorData & { code: string }) {

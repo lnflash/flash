@@ -105,7 +105,7 @@ export class AccountUpgradeRequest {
         postalCode: data.pincode,
         country: data.country,
       },
-      Number(data.terminals_requested) || 0,
+      Number(data.terminal_requested) || 0,
       data.bank_name ? {
         bankName: data.bank_name,
         branch: data.bank_branch,

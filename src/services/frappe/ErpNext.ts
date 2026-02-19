@@ -15,11 +15,29 @@ import {
 } from "./errors"
 import {
   AccountUpgradeRequest,
+  RequestStatus,
 } from "./models/AccountUpgradeRequest"
 import { Bank } from "./models/Bank"
 
 // Move to MoneyAmount
 const erpUsd = (usd: USDAmount): number => Number(usd.asCents(2))
+
+// poorly written but correct as is
+const buildUpgradeRequestFilters = (filters: {
+  username?: string
+  status?: RequestStatus
+}): string => {
+  const conditions: [string, string, string, string][] = []
+  if (filters.username) {
+    conditions.push([AccountUpgradeRequest.doctype, "username", "=", filters.username])
+  }
+  if (filters.status) {
+    conditions.push([AccountUpgradeRequest.doctype, "status", "=", filters.status])
+  }
+  return JSON.stringify(conditions)
+}
+
+type QueryFilters = { username?: string; status?: RequestStatus }
 
 class ErpNext {
   url: string
@@ -158,42 +176,41 @@ class ErpNext {
     }
   }
 
-  async getAccountUpgradeRequest(
-    username: string,
-  ): Promise<AccountUpgradeRequest | UpgradeRequestQueryError> {
+  async getAccountUpgradeRequestList(
+    filters: QueryFilters,
+  ): Promise<{ name: string }[] | UpgradeRequestQueryError> {
     try {
-      const filters = JSON.stringify([
-        [
-          AccountUpgradeRequest.doctype, // Likely redundant since this is a path param
-          "username",
-          "=",
-          username,
-        ],
-      ])
+      const requestParams = buildUpgradeRequestFilters(filters)
       const resp = await axios.get(`${this.url}/api/resource/Account Upgrade Request`, {
-        params: { filters },
+        params: { filters: requestParams },
         headers: this.headers,
       })
 
-      const data = resp.data?.data
-      if (!data || data.length === 0)
-        return new UpgradeRequestQueryError("No data in detail response")
+      return resp.data?.data
+    } catch (err) {
+      baseLogger.error(
+        { err, filters },
+        "Error querying Account Upgrade Request from ERPNext",
+      )
+      return new UpgradeRequestQueryError(err)
+    }
+  }
 
-      // Get the most recent request
-      const latestRequest = data[0]
-
-      // Fetch full details
-      const detailResp = await axios.get(
-        `${this.url}/api/resource/Account Upgrade Request/${latestRequest.name}`,
+  async getAccountUpgradeRequestById(
+    id: string,
+  ): Promise<AccountUpgradeRequest | UpgradeRequestQueryError> {
+    try {
+      const resp = await axios.get(
+        `${this.url}/api/resource/Account Upgrade Request/${id}`,
         { headers: this.headers },
       )
 
-      const request = detailResp.data?.data
+      const request = resp.data?.data
       if (!request) return new UpgradeRequestQueryError("No data in detail response")
       return AccountUpgradeRequest.fromErpnext(request)
     } catch (err) {
       baseLogger.error(
-        { err, username },
+        { err, id },
         "Error querying Account Upgrade Request from ERPNext",
       )
       return new UpgradeRequestQueryError(err)

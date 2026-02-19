@@ -66,7 +66,89 @@ const makeContext = (overrides: { status?: AccountStatus } = {}) => ({
   kratos: {} as AnyIdentity,
 })
 
+const erpNextResponse = {
+  name: "v7mo8aqv0q",
+  owner: "erpnext_sa@getflash.io",
+  creation: "2026-02-16 10:36:02.194364",
+  modified: "2026-02-19 08:46:51.009662",
+  modified_by: "Administrator",
+  docstatus: 0,
+  idx: 0,
+  current_level: "ONE",
+  requested_level: "TWO",
+  status: "Pending",
+  username: "john",
+  full_name: "Ben Hindman",
+  phone_number: "+16505554321",
+  id_document: "picture.jpg",
+  address_title: "Acme Industries",
+  address_line1: "123 Apple St",
+  city: "Portmore",
+  state: "St. Catherine",
+  country: "Jamaica",
+  terminal_requested: 1,
+  bank_name: "NCB",
+  bank_branch: "branch",
+  account_type: "chequing",
+  account_number: "12345",
+  currency: "JMD",
+  doctype: "Account Upgrade Request",
+}
+
 describe("AccountUpgradeRequest", () => {
+  describe("fromErpnext", () => {
+    it("should deserialize from ErpNext json", () => {
+      const result = AccountUpgradeRequest.fromErpnext(erpNextResponse)
+
+      expect(result.name).toBe("v7mo8aqv0q")
+      expect(result.username).toBe("john")
+      expect(result.currentLevel).toBe(AccountLevel.One)
+      expect(result.requestedLevel).toBe(AccountLevel.Two)
+      expect(result.status).toBe("Pending")
+      expect(result.fullName).toBe("Ben Hindman")
+      expect(result.phoneNumber).toBe("+16505554321")
+      expect(result.idDocument).toBe("picture.jpg")
+    })
+
+    it("should deserialize address fields", () => {
+      const result = AccountUpgradeRequest.fromErpnext(erpNextResponse)
+
+      expect(result.address).toEqual({
+        title: "Acme Industries",
+        line1: "123 Apple St",
+        line2: undefined,
+        city: "Portmore",
+        state: "St. Catherine",
+        postalCode: undefined, // response has no "pincode" field
+        country: "Jamaica",
+      })
+    })
+
+    it("should deserialize bank account fields", () => {
+      const result = AccountUpgradeRequest.fromErpnext(erpNextResponse)
+
+      expect(result.bankAccount).toEqual({
+        bankName: "NCB",
+        branch: "branch",
+        accountType: "chequing",
+        currency: "JMD",
+        accountNumber: "12345",
+      })
+    })
+
+    it("should deserialize terminalsRequested from terminal_requested", () => {
+      const result = AccountUpgradeRequest.fromErpnext(erpNextResponse)
+
+      expect(result.terminalsRequested).toBe(1)
+    })
+
+    it("should omit bankAccount when bank_name is absent", () => {
+      const result = AccountUpgradeRequest.fromErpnext({ ...erpNextResponse, bank_name: undefined })
+
+      expect(result.bankAccount).toBeUndefined()
+    })
+  })
+
   describe("toErpnext", () => {
     it("should serialize to ErpNext json", () => {
       const req = makeRequest({ bankAccount: mockBankAccount })
