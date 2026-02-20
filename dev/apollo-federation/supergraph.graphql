@@ -238,8 +238,8 @@ type BankAccount
 {
   accountNumber: Int!
   accountType: String!
+  bankBranch: String!
   bankName: String!
-  branch: String!
   currency: String!
 }
 

@@ -8,13 +8,13 @@ export const getAccountUpgradeRequests = async (
   if (!ErpNext) {
     return new UpgradeRequestQueryError("ERPNext service not configured")
   }
-  const pendingRequests = await ErpNext.getAccountUpgradeRequestList(filters)
-  if (pendingRequests instanceof UpgradeRequestQueryError) return pendingRequests
-  const results = await Promise.all(pendingRequests.slice(0, filters.count).map(pr => {
-    const { name } = pr
-    return ErpNext.getAccountUpgradeRequestById(name)
-  }))
-  const err = results.find((r): r is UpgradeRequestQueryError => r instanceof UpgradeRequestQueryError)
-  if (err) return err
-  return results as AccountUpgradeRequest[]
+  const ids = await ErpNext.getAccountUpgradeRequestList(filters)
+  if (ids instanceof UpgradeRequestQueryError) return ids
+  const upgradeRequests = await Promise.all(ids.slice(0, filters.count).map(_ => ErpNext.getAccountUpgradeRequestById(_)))
+  return findErrors(upgradeRequests)
+}
+
+const findErrors = (erpnextResponses: (AccountUpgradeRequest | UpgradeRequestQueryError)[]): AccountUpgradeRequest[] | UpgradeRequestQueryError => {
+  return erpnextResponses.find((r): r is UpgradeRequestQueryError => r instanceof UpgradeRequestQueryError) 
+    || erpnextResponses as AccountUpgradeRequest[]
 }

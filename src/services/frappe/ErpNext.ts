@@ -12,6 +12,7 @@ import {
   UpgradeRequestCreateError,
   UpgradeRequestQueryError,
   BanksQueryError,
+  SetDocTypeValueError,
 } from "./errors"
 import {
   AccountUpgradeRequest,
@@ -178,7 +179,7 @@ class ErpNext {
 
   async getAccountUpgradeRequestList(
     filters: QueryFilters,
-  ): Promise<{ name: string }[] | UpgradeRequestQueryError> {
+  ): Promise<string[] | UpgradeRequestQueryError> {
     try {
       const requestParams = buildUpgradeRequestFilters(filters)
       const resp = await axios.get(`${this.url}/api/resource/Account Upgrade Request`, {
@@ -186,7 +187,7 @@ class ErpNext {
         headers: this.headers,
       })
 
-      return resp.data?.data
+      return resp.data?.data.map((r: { name: string }) => r.name)
     } catch (err) {
       baseLogger.error(
         { err, filters },
@@ -214,6 +215,35 @@ class ErpNext {
         "Error querying Account Upgrade Request from ERPNext",
       )
       return new UpgradeRequestQueryError(err)
+    }
+  }
+
+  closeAccountUpgradeRequests = this.setStatusForRequests(RequestStatus.Closed)
+
+  private setStatusForRequests(status: RequestStatus) {
+    return async (names: string[]): Promise<void | SetDocTypeValueError> => {
+      try {
+        const docs = names.map((name) => ({
+          doctype: AccountUpgradeRequest.doctype,
+          docname: name,
+          status,
+        }))
+
+        const resp = await axios.post(
+          `${this.url}/api/method/frappe.client.bulk_update`,
+          { docs: JSON.stringify(docs) },
+          { headers: this.headers },
+        )
+
+        const failedDocs = resp.data?.message?.failed_docs
+        if (failedDocs?.length) {
+          baseLogger.error({ failedDocs, names, status }, "Bulk update failed for some docs")
+          return new SetDocTypeValueError(failedDocs)
+        }
+      } catch (err) {
+        baseLogger.error({ err, names, status }, "Error bulk updating upgrade request status")
+        return new SetDocTypeValueError(err)
+      }
     }
   }
 

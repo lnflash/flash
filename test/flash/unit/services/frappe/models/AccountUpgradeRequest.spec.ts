@@ -18,7 +18,7 @@ const mockAddress: Address = {
 
 const mockBankAccount: BankAccount = {
   bankName: "Test Bank",
-  branch: "Main Branch",
+  bankBranch: "Main Branch",
   accountType: "Savings",
   currency: "USD",
   accountNumber: 123456789,
@@ -129,7 +129,7 @@ describe("AccountUpgradeRequest", () => {
 
       expect(result.bankAccount).toEqual({
         bankName: "NCB",
-        branch: "branch",
+        bankBranch: "branch",
         accountType: "chequing",
         currency: "JMD",
         accountNumber: "12345",
