@@ -25,7 +25,7 @@ type CustomApolloError = import("./error").CustomApolloError
 
 type CustomApolloErrorData = {
   message?: string
-  logger: Logger
+  logger?: Logger
   level?: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent"
   forwardToClient?: boolean
   [key: string]: unknown

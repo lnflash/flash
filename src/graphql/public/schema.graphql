@@ -130,7 +130,7 @@ type AccountUpgradeRequest {
 }
 
 type AccountUpgradeRequestPayload {
-  errors: [Error!]!
+  errors: [Error]
   upgradeRequest: AccountUpgradeRequest
 }
 
@@ -217,8 +217,8 @@ type Bank {
 type BankAccount {
   accountNumber: Int!
   accountType: String!
+  bankBranch: String!
   bankName: String!
-  branch: String!
   currency: String!
 }
 

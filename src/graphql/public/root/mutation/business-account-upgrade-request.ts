@@ -1,8 +1,10 @@
 import { Accounts } from "@app"
 import { GT } from "@graphql/index"
-import { mapToGqlErrorList } from "@graphql/error-map"
+import { apolloErrorResponse, mapToGqlErrorList } from "@graphql/error-map"
 import AccountLevel from "@graphql/shared/types/scalar/account-level"
 import IError from "@graphql/shared/types/abstract/error"
+import { SetDocTypeValueError } from "@services/frappe/errors"
+import { InternalServerError } from "@graphql/error"
 
 const BankAccountInput = GT.Input({
   name: "BankAccountInput",
@@ -65,6 +67,7 @@ const BusinessAccountUpgradeRequestMutation = GT.Field({
   },
   resolve: async (_, args, { domainAccount }: { domainAccount: Account }) => {
     const result = await Accounts.createUpgradeRequest(domainAccount.id, args.input)
+    if (result instanceof SetDocTypeValueError) return apolloErrorResponse(new InternalServerError({ message: "Pending upgrade request(s) failed to update." }))
     if (result instanceof Error) return { errors: mapToGqlErrorList(result) }
     else return result
   },

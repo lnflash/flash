@@ -7,7 +7,7 @@ const AccountUpgradeRequestPayload = GT.Object({
   name: "AccountUpgradeRequestPayload",
   fields: () => ({
     errors: {
-      type: GT.NonNullList(IError),
+      type: GT.List(IError),
     },
     upgradeRequest: {
       type: AccountUpgradeRequest,

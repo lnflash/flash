@@ -7,6 +7,7 @@ export enum RequestStatus {
   Pending = "Pending",
   Approved = "Approved",
   Rejected = "Rejected",
+  Closed = "Closed",
 }
 
 const isRequestedLevelGreater = async (input: AccountUpgradeRequest) => {
@@ -77,7 +78,7 @@ export class AccountUpgradeRequest {
       country: this.address.country,
       terminal_requested: this.terminalsRequested.toString(),
       bank_name: this.bankAccount?.bankName,
-      bank_branch: this.bankAccount?.branch,
+      bank_branch: this.bankAccount?.bankBranch,
       account_type: this.bankAccount?.accountType,
       currency: this.bankAccount?.currency,
       account_number: this.bankAccount?.accountNumber,
@@ -105,10 +106,10 @@ export class AccountUpgradeRequest {
         postalCode: data.pincode,
         country: data.country,
       },
-      Number(data.terminals_requested) || 0,
+      Number(data.terminal_requested) || 0,
       data.bank_name ? {
         bankName: data.bank_name,
-        branch: data.bank_branch,
+        bankBranch: data.bank_branch,
         accountType: data.account_type,
         currency: data.currency,
         accountNumber: data.account_number,

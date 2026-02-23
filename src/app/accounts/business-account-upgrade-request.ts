@@ -3,27 +3,18 @@ import { IdentityRepository } from "@services/kratos"
 import ErpNext from "@services/frappe/ErpNext"
 
 import { AccountUpgradeRequest, RequestStatus } from "@services/frappe/models/AccountUpgradeRequest"
-import { ValidationError } from "@domain/shared"
+import { DomainError, ValidationError } from "@domain/shared"
 import { AccountLevel } from "@domain/accounts"
+import { SetDocTypeValueError, UpgradeRequestQueryError } from "@services/frappe/errors"
 
-
-
-// export type BusinessUpgradeRequestInput = {
-//   accountId: AccountId
-//   level: number
-//   fullName: string
-//   businessName?: string
-//   businessAddress?: string
-//   terminalRequested: boolean
-//   bankAccount?: BankAccount
-//   idDocument: string
-// }
 
 type RequestId = string & { __brand: "UpgradeRequestId" }
 type UpgradeStatusResponse = {
   id: RequestId
   status: RequestStatus
 }
+
+export class CreateUpgradeRequestError extends DomainError {}
 
 export type Address = {
   title: string,
@@ -37,7 +28,7 @@ export type Address = {
 
 export type BankAccount = {
   bankName: string
-  branch: string
+  bankBranch: string
   accountType: string
   currency: string
   accountNumber: number
@@ -83,6 +74,15 @@ export const createUpgradeRequest = async (
   if (identity instanceof Error) return identity
 
   const context = { account, user, kratos: identity }
+
+  const pendingRequests = await ErpNext.getAccountUpgradeRequestList({ 
+    username: account.username,
+    status: RequestStatus.Pending
+  })
+  if (pendingRequests instanceof UpgradeRequestQueryError) return pendingRequests
+  
+  const closeResp = await ErpNext.closeAccountUpgradeRequests(pendingRequests)
+  if (closeResp instanceof SetDocTypeValueError) return closeResp
 
   const initialStatus = RequestStatus.Pending
   const req = await new AccountUpgradeRequest(
