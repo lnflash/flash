@@ -249,6 +249,14 @@ Flash requires Node 20.x. Switch with `nvm use 20` or run `yarn install --ignore
 
 SendGrid isn't configured — email notifications won't work. Safe to ignore in dev unless you're testing email features. Add a real key to your `dev-overrides.yaml` if needed.
 
+### Price service platform warning (Apple Silicon)
+
+```
+The requested image's platform (linux/amd64) does not match the detected host platform (linux/arm64/v8)
+```
+
+The `lnflash/price:edge` image is amd64-only. On Apple Silicon Macs it runs under Rosetta emulation — this is harmless but slow. The warning is safe to ignore.
+
 ### Server starts but crashes immediately
 
 Check that all Docker deps are healthy: `docker compose ps`. If MongoDB or Redis failed to start, run `make reset-deps`.
