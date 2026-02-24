@@ -1,309 +1,277 @@
-# Dev environment
+# Dev Environment
 
-- [Dev environment](#dev-environment)
-  - [Setup](#setup)
-    - [Runtime dependencies](#runtime-dependencies)
-  - [Development](#development)
-    - [Config](#config)
-    - [Using GraphQL Playground](#using-graphql-playground)
-    - [Honeycomb](#honeycomb)
-    - [Docker compose](#docker-compose)
-  - [Testing](#testing)
-    - [Run unit tests](#run-unit-tests)
-    - [Run integration tests](#run-integration-tests)
-    - [Run specific test file](#run-specific-test-file)
-      - [Unit](#unit)
-      - [Integration](#integration)
-  - [Migrations](#migrations)
-    - [Testing migrations](#testing-migrations)
-      - [Create a new migration](#create-a-new-migration)
-    - [Known issues](#known-issues)
-  - [Running checks](#running-checks)
-  - [Contributing](#contributing)
-
-## Setup
-
-This setup was last tested with the following tools:
-
-```
-$ node --version
-v20.10.0
-$ yarn --version
-1.22.21
-$ direnv --version
-2.28.0
-$ jq --version
-jq-1.6
-$ docker --version
-Docker version 20.10.8, build f0df350
-$ docker compose version
-Docker Compose version 2.0.0
-```
-
-To use the correct node version, you can install nvm and run `nvm use 20`. Then enable and inititialize yarn using the [yarn docs](https://yarnpkg.com/getting-started/install)
-
-### Clone the repo:
-
-```
-$ git clone git@github.com:lnflash/flash.git
-$ cd flash
-```
-
-*Flash is a fork of [Blink](https://github.com/GaloyMoney/blink) at commit `0a52b0673` (tag: 0.13.92)*
-
-### Set the Environment 
-
-[direnv](https://direnv.net) is required to load environment variables. Make sure it is installed and that the [direnv hook](https://direnv.net/docs/hook.html) is added to your `shell.rc` file.
-
-Create a `.env.local` to add local environment overrides. For the Flash project, the IBEX_PASSWORD is required. E.g: 
-
- `echo "export IBEX_EMAIL='<insert-email>'" >> .env.local`
- `echo "export IBEX_PASSWORD='<insert-password>'" >> .env.local`
-
-Make sure to allow direnv and reload:
-
-```
-$ direnv allow
-$ direnv reload
-(...)
-```
-
-### Configure the app
-
-A base configuration for development purposes is provided in the `./dev/config/base-config.yaml` file. This file does excludes some values which are kept out of source control (e.g secrets). To add these values, you can either:
-
-1. Copy an existing overrides file to the `$CONFIG_PATH/dev-overrides.yaml`, or:
-2. Run the `set-overrides.sh` script which will generate the `dev-overrides.yaml` with user-defined values.
-```
-chmod +x ./dev/config/set-overrides.sh
-./dev/config/set-overrides.sh
-```
-3. To override invidual config values, use the `set-value.sh` script. E.g:
-```
-./set-value sendGrid.apiKey <value>
-```
-
-#### Configure ErpNext
-
-Flash uses Frappe's ErpNext application for accounting purposes. 
-
-By default, the development configuration uses the Frappe Bench server running in the [Flash test environment](https://erp.test.flashapp.me). You may need to update your yaml config with proper credentials and account information.
-
-When testing and developing features, it is recommended to run the Frappe Bench server locally. [See here](https://github.com/frappe/bench) for installation instructions. Once the server is running, update your FrappeConfig set in the dev yamls. 
-
-#### Testing the ibex-webhook
-
-You'll need a web gateway that forwards traffic to your local server (default http://localhost:4008). This can be done with Ngrok. After installing the ngrok cli and creating an account, do the following:
-
-1. Start ngrok tunnel:
-   
-   ```
-   ngrok http http://localhost:4008
-   ```
-
-2. Copy the provided URL ("forwarding" field)
-
-3. Add the URL to your `$CONFIG_PATH/dev-overrides.yaml` environment variable. E.g
-   
-   Note: To avoid repeating steps 2 & 3 everytime you restart the web gateway, you can get a static domain (e.g [ngrok domains](https://dashboard.ngrok.com/cloud-edge/domains))
-
-### Install dependencies
-
-```
-$ yarn install
-```
-
-### Start the runtime dependencies
+## Quick Start
 
 ```bash
-$ make start-deps
-# or
-$ make reset-deps
+# 1. Clone and enter
+git clone git@github.com:lnflash/flash.git && cd flash
+
+# 2. Run the setup script (validates env, installs deps, configures credentials)
+./dev/setup.sh
+
+# 3. Start the server
+make start
 ```
 
-Everytime the dependencies are re-started the environment must be reloaded via `direnv reload`. When using the [make command](../Makefile) this will happen automatically.
+The setup script will check your prerequisites, prompt for Ibex sandbox credentials, install dependencies, and start Docker containers. After that, `make start` launches all four backend services.
 
-## Development
+**GraphQL playground:** http://localhost:4002/graphql
+**Admin API:** http://localhost:4002/admin/graphql
+**Test login:** phone `+16505554328`, code `000000`
 
-To start the GraphQL server and its dependencies:
+---
 
+## Manual Setup
+
+If you prefer to set things up yourself, or if the setup script fails:
+
+### Prerequisites
+
+| Tool | Required Version | Install |
+|------|-----------------|---------|
+| Node.js | 20.x (20.18.1+ recommended) | [nvm](https://github.com/nvm-sh/nvm): `nvm install 20` |
+| yarn | 1.x | `corepack enable && corepack prepare yarn@1 --activate` |
+| Docker | 20+ with compose v2 | [Docker Desktop](https://www.docker.com/products/docker-desktop) |
+| direnv | any (optional) | [direnv.net](https://direnv.net) |
+
+> **Note:** The project specifies `"node": "20"` in `package.json`. Node 22+ will fail on `yarn install` due to transitive dependency engine checks. Use `--ignore-engines` if you need to override, but Node 20.x is recommended.
+
+### 1. Environment Variables
+
+The project loads environment variables from `.env` (committed) and `.env.local` (git-ignored, for secrets).
+
+Create `.env.local` with your Ibex sandbox credentials:
+
+```bash
+echo "export IBEX_EMAIL='your-ibex-email'" >> .env.local
+echo "export IBEX_PASSWORD='your-ibex-password'" >> .env.local
 ```
-$ make start
+
+If you use direnv, allow it:
+
+```bash
+direnv allow
 ```
 
-To run in debug mode:
+If not using direnv, source the env files manually before running commands:
 
+```bash
+source .env && source .env.local
 ```
-DEBUG=* make start
+
+### 2. App Config Overrides
+
+Flash uses YAML config files. The base config is at `dev/config/base-config.yaml`. Secrets and local overrides go in `$CONFIG_PATH/dev-overrides.yaml` (default: `~/.config/flash/dev-overrides.yaml`).
+
+**Option A — Run the interactive script:**
+
+```bash
+./dev/config/set-overrides.sh
 ```
 
-After running `make start-deps` or `make reset-deps`, the lightning network - running on regtest - will not have any channel, and the mongodb database - that includes some mandatory accounts for Galoy to work - will be empty.
+**Option B — Create manually:**
 
-You can then login with the following credentials to get an account with an existing balance: `phone: +16505554328`, `code: 000000`
+```yaml
+# ~/.config/flash/dev-overrides.yaml
+ibex:
+  email: your-ibex-email
+  password: your-ibex-password
+```
 
-### Using GraphQL Playground
+Additional overrides you might need:
 
-You can load the Apollo GraphQL Playground, a web GUI for GraphQL. Start the server and open the following url:
+```yaml
+ibex:
+  webhook:
+    uri: https://your-ngrok-domain.ngrok-free.app  # for webhook testing
 
-- http://localhost:4002/admin/graphql (admin API, proxied thru oathkeeper)
-- http://localhost:4002/graphql (end user API, proxied thru oathkeeper)
+sendgrid:
+  apiKey: SG.your-sendgrid-key  # for email notifications
 
-### Honeycomb
+cashout:
+  email:
+    to: your-email@example.com  # for cashout notification testing
+```
 
-To test the effect of a change on open telemetry locally, `HONEYCOMB_API_KEY` and `HONEYCOMB_DATASET` values needs to be set.
+### 3. Install Dependencies
 
-`HONEYCOMB_API_KEY` can be found in Account > Team settings > Environments and API Keys > Manage > copy the dev key
-`HONEYCOMB_DATASET` can be any string, pick something like `myusername-dev`
+```bash
+yarn install
+```
 
-### Docker compose
+> If you hit engine compatibility errors, use `yarn install --ignore-engines`.
 
-The docker compose files are split into `docker-compose.yml` and `docker-compose.override.yml`.
+### 4. Start Docker Dependencies
 
-By default, with `docker compose up`, docker will merge both files. The `docker-compose.override.yml` will expose ports on your host machine to various containers.
+```bash
+make start-deps
+```
 
-During CI testing we ignore the override file in order to contain tests within a docker network. This is achieved by specifically calling out the docker compose file to use ex: `docker compose -f docker-compose.yml up`.
+This starts: MongoDB, Redis, Kratos (auth), Oathkeeper (API gateway), Apollo Router, price service, and OpenTelemetry collector.
+
+If you need a clean slate:
+
+```bash
+make reset-deps
+```
+
+> **Note:** After restarting dependencies, reload environment variables with `direnv reload` (or re-source your `.env` files).
+
+### 5. Start the Server
+
+```bash
+make start
+```
+
+This runs four processes in parallel:
+
+| Process | Port | Description |
+|---------|------|-------------|
+| `start-main` | 4012 (direct), 4002 (via oathkeeper) | Main GraphQL API |
+| `start-trigger` | — | Event trigger processor |
+| `start-ws` | 4000 | WebSocket server for subscriptions |
+| `start-ibex-wh` | 4008 | Ibex webhook receiver |
+
+Access the API through the oathkeeper proxy at **http://localhost:4002/graphql** (not the direct 4012 port, which requires a JWT).
+
+---
+
+## Testing Ibex Webhooks
+
+For payment event testing, you need a public URL that forwards to your local webhook server (port 4008).
+
+```bash
+# Install ngrok: https://ngrok.com
+ngrok http 4008
+```
+
+Copy the forwarding URL and add it to your `dev-overrides.yaml`:
+
+```yaml
+ibex:
+  webhook:
+    uri: https://your-domain.ngrok-free.app
+```
+
+**Tip:** Use a [static ngrok domain](https://dashboard.ngrok.com/cloud-edge/domains) so you don't have to update the config every restart.
+
+---
+
+## ERPNext (Frappe)
+
+Flash uses ERPNext for accounting. The dev config defaults to the Flash test environment at `https://erp.test.flashapp.me`.
+
+To run Frappe locally:
+
+```bash
+make start-frappe        # start local Frappe
+make reset-frappe        # clean + start + restore from backup
+make stop-frappe         # stop local Frappe
+```
+
+Update your `dev-overrides.yaml` with local Frappe credentials if running locally.
+
+---
 
 ## Testing
 
-To run the full test suite you can run:
+```bash
+make test                # full suite (unit + integration)
+make unit                # unit tests only (no Docker deps needed)
+make integration         # integration tests (needs Docker deps)
+make reset-integration   # reset state + run integration tests
+```
+
+Run a specific test file:
 
 ```bash
-$ make test
+TEST=utils make unit              # runs utils.spec.ts
+TEST=01-connection make integration  # runs 01-connection.spec.ts
 ```
 
-Executing the full test suite requires [runtime dependencies](#runtime-dependencies).
+**Known issues:**
+- Integration tests are not fully idempotent — use `make reset-integration` between runs
+- If tests timeout, increase: `JEST_TIMEOUT=120000 yarn test:integration`
+- Use an SSD for Docker volumes (tests are disk-intensive)
 
-### Run unit tests
+---
 
-```bash
-$ yarn test:unit
-# or
-$ make unit
-```
-
-Runtime dependencies are not required for unit tests
-
-### Run integration tests
-
-To execute the integration tests [runtime dependencies](#runtime-dependencies) must be running.
-
-```bash
-$ yarn test:integration
-# or
-$ make integration
-```
-
-The  integration tests are *not* fully idempotent (yet) so currently to re-run the tests, run:
+## Architecture Overview
 
 ```
-$ make reset-integration
+Client → Oathkeeper (4002) → GraphQL Main (4012)
+                            → Admin API (4001)
+         WebSocket (4000)
+         Ibex Webhook (4008) ← Ibex payment events
+
+Docker deps:
+  MongoDB (27017)    — primary database
+  Redis (6378→6379)  — caching, pub/sub
+  Kratos (4433/4434) — identity/auth
+  Price (50051)      — gRPC price service
+  Apollo Router (4004) — federation
+  OTEL Collector (4318) — telemetry
 ```
 
-### Run specific test file
+---
 
-To execute a specific test file:
+## Useful Commands
 
-#### Unit
+| Command | Description |
+|---------|-------------|
+| `make start` | Start all servers |
+| `make start-main` | Start only the main GraphQL server |
+| `make start-deps` | Start Docker dependencies |
+| `make clean-deps` | Stop and remove Docker containers |
+| `make reset-deps` | Clean + restart Docker deps |
+| `make watch` | Start with file watching (auto-restart on changes) |
+| `make check-code` | Run all linting/type checks |
+| `yarn prettier -w .` | Format all files |
+| `DEBUG=* make start` | Start in debug mode |
 
-Example to run `test/unit/config.spec.ts`
+---
 
-```bash
-$ TEST=utils yarn test:unit
-# or
-$ TEST=utils make unit
-```
+## Troubleshooting
 
-where `utils` is the name of the file `utils.spec.ts`
+### `UnauthorizedError: No authorization token was found`
 
-#### Integration
+You're hitting the GraphQL server directly (port 4012). Use the oathkeeper proxy at **http://localhost:4002/graphql** instead, which handles auth for anonymous/public queries.
 
-Example to run `test/integration/01-setup/01-connection.spec.ts`
+### `The engine "node" is incompatible`
 
-```bash
-$ TEST=01-connection yarn test:integration
-# or
-$ TEST=01-connection make integration
-```
+Flash requires Node 20.x. Switch with `nvm use 20` or run `yarn install --ignore-engines`.
 
-if within a specific test suite you want to run/debug only a describe or it(test) block please use:
+### Docker warnings about unset variables
 
-* [describe.only](https://jestjs.io/docs/api#describeonlyname-fn): just for debug purposes
-* [it.only](https://jestjs.io/docs/api#testonlyname-fn-timeout): just for debug purposes
-* [it.skip](https://jestjs.io/docs/api#testskipname-fn): use it when a test is temporarily broken. Please don't commit commented test cases
+`IBEX_URL`, `HONEYCOMB_DATASET`, `HONEYCOMB_API_KEY` warnings in docker compose output are harmless in dev — these are only needed for the Docker-based server (not used by `make start`).
 
-## Migrations
+### `API key does not start with "SG."`
 
-### Testing migrations
+SendGrid isn't configured — email notifications won't work. Safe to ignore in dev unless you're testing email features. Add a real key to your `dev-overrides.yaml` if needed.
 
-Migrations are stored in the `src/migrations` folder.
-When developing migrations the best way to test them on a clean database is:
-
-```
-make test-migrate
-```
-
-#### Create a new migration
-
-Create the migration file
-
-```bash
-npx migrate-mongo create <migration-name> \
-  -f src/migrations/migrate-mongo-config.js
-```
-
-Write the migration in the newly created migration file and then test/run with the following:
-
-```bash
-# Migrate
-npx migrate-mongo up \
-  -f src/migrations/migrate-mongo-config.js
-
-# Rollback
-npx migrate-mongo down \
-  -f src/migrations/migrate-mongo-config.js
-```
-
-When testing, to isolate just the current migration being worked on in local dev you can temporarily move the other migrations to another dir.
-
-### Known issues
-
-* **Test suite timeouts**: increase jest timeout value. Example:
-  
-  ```bash
-  # 120 seconds
-  $ JEST_TIMEOUT=120000 yarn test:integration
-  ```
-
-* **Integration tests running slow**: we use docker to run dependencies (redis, mongodb, bitcoind and 4 lnds) so the entire test suite is disk-intensive.
-  
-  * Please make sure that you are running docker containers in a solid state drive (SSD)
-  
-  * Reduce lnd log disk usage: change debuglevel to critical
-    
-    ```
-    # ./dev/lnd/lnd.conf
-    debuglevel=critical
-    ```
-
-## Running checks
-
-It's recommended that you use plugins in your editor to run ESLint checks and perform Prettier formatting on-save.
-
-To run all the checks required for the code to pass GitHub actions check:
+### Price service platform warning (Apple Silicon)
 
 ```
-$ make check-code
-(...)
-$ echo $?
-0
+The requested image's platform (linux/amd64) does not match the detected host platform (linux/arm64/v8)
 ```
 
-If you need to run Prettier through the command line, you can use:
+The `lnflash/price:edge` image is amd64-only. On Apple Silicon Macs it runs under Rosetta emulation — this is harmless but slow. The warning is safe to ignore.
 
-```
-$ yarn prettier -w .
-```
+### Server starts but crashes immediately
+
+Check that all Docker deps are healthy: `docker compose ps`. If MongoDB or Redis failed to start, run `make reset-deps`.
+
+---
 
 ## Contributing
 
-See the [CONTRIBUTING.md](./CONTRIBUTING.md)
+See [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+### Code Quality
+
+```bash
+make check-code   # ESLint + TypeScript checks
+yarn prettier -w . # auto-format
+```
+
+Use editor plugins for ESLint and Prettier for best experience.
