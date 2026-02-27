@@ -1,3 +1,3 @@
 export { Money, Money as default } from './money';
 export { IncompatibleCurrencyError, UnsafeIntegerError } from './errors';
-export { Round } from './utils';
+export { Round, PRECISION_M } from './utils';

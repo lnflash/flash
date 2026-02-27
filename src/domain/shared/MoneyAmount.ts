@@ -1,4 +1,4 @@
-import { Money, Round } from "./bigint-money"
+import { Money, Round, PRECISION_M } from "./bigint-money"
 import { BigIntConversionError, UnsupportedCurrencyError } from "./errors"
 import { ExchangeCurrencyUnit, WalletCurrency } from "./primitives"
 
@@ -39,6 +39,13 @@ export abstract class MoneyAmount {
 
   toJson(): [string, string] {
     return this.money.toJSON()
+  }
+
+  asPaymentAmount(): PaymentAmount<WalletCurrency> {
+    return {
+      amount: this.money.toSource() / PRECISION_M,
+      currency: this.currencyCode,
+    }
   }
 
   fromSource(val: string, currency: WalletCurrency): this {
