@@ -1,4 +1,4 @@
-import { JMDAmount, USDAmount } from "@domain/shared/MoneyAmount"
+import { JMDAmount, USDAmount, WalletCurrency } from "@domain/shared"
 import JmdAmount from "@graphql/shared/types/scalar/jmd-amount"
 
 describe("Money Amount", () => {
@@ -114,6 +114,24 @@ describe("Money Amount", () => {
         if (amt instanceof Error) throw amt
         
         expect(amt.toIbex()).toBe(0)
+      })
+    })
+
+    describe("asPaymentAmount", () => {
+      it("should return the correct PaymentAmount for USDAmount", () => {
+        const amt = USDAmount.cents('12345')
+        if (amt instanceof Error) throw amt
+        const paymentAmount = amt.asPaymentAmount()
+        expect(paymentAmount.amount).toBe(12345n)
+        expect(paymentAmount.currency).toBe(WalletCurrency.Usd)
+      })
+
+      it("should return the correct PaymentAmount for JMDAmount", () => {
+        const amt = JMDAmount.cents('54321')
+        if (amt instanceof Error) throw amt
+        const paymentAmount = amt.asPaymentAmount()
+        expect(paymentAmount.amount).toBe(54321n)
+        expect(paymentAmount.currency).toBe(WalletCurrency.Jmd)
       })
     })
   })
