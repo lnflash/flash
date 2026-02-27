@@ -78,10 +78,9 @@ const sendLightningNotification = async (
     recipientAccountId: recipientAccount.id,
     recipientWalletId: receiverWallet.id,
     paymentAmount: toPaymentAmount(receiverWallet.currency)(transaction.amount),
-    displayPaymentAmount: await toDisplayAmount(
-      recipientAccount.displayCurrency,
-      WalletCurrency.Btc,
-    )(receivedSat),
+    displayPaymentAmount: await toDisplayAmount(recipientAccount.displayCurrency)(
+      receivedSat,
+    ),
     paymentHash: transaction.invoice.hash,
     recipientDeviceTokens: recipientUser.deviceTokens,
     recipientNotificationSettings: recipientAccount.notificationSettings,
@@ -112,14 +111,11 @@ const sendOnchainNotification = async (
     recipientAccountId: recipientAccount.id,
     recipientWalletId: receiverWallet.id,
     paymentAmount: toPaymentAmount(receiverWallet.currency)(transaction.amount),
-    displayPaymentAmount: await toDisplayAmount(
-      recipientAccount.displayCurrency,
-      receiverWallet.currency as WalletCurrency,
-    )(transaction.amount),
+    displayPaymentAmount: await toDisplayAmount(recipientAccount.displayCurrency)(transaction.amount),
     recipientDeviceTokens: recipientUser.deviceTokens,
     recipientNotificationSettings: recipientAccount.notificationSettings,
     recipientLanguage: recipientUser.language,
-    txHash: transaction.hash,
+    txHash: transaction.hash
   })
 
   if (nResp instanceof DeviceTokensNotRegisteredNotificationsServiceError) {
@@ -212,30 +208,17 @@ router.post(paths.onchain, authenticate, logRequest, fetchPaymentContext, sendOn
 export { paths, router }
 
 // --- Helper functions ---
-const toPaymentAmount = (currency: WalletCurrency) => (amount: number) => {
-  let paymentAmount: bigint
-  if (currency === WalletCurrency.Usd) {
-    paymentAmount = BigInt(Math.round(amount * 100))
-  } else if (currency === WalletCurrency.Btc) {
-    paymentAmount = BigInt(Math.round(amount * 100_000_000))
-  } else {
-    paymentAmount = BigInt(Math.round(amount))
-  }
-  return { amount: paymentAmount, currency }
+const toPaymentAmount = (currency: WalletCurrency) => (dollarAmount: number) => {
+  let amount
+  if (currency === WalletCurrency.Usd) amount = (dollarAmount * 100) as any
+  return { amount, currency }
 }
 
-const toDisplayAmount =
-  (displayCurrency: DisplayCurrency, walletCurrency: WalletCurrency) =>
-    async (amount: number) => {
-      const displayCurrencyPrice = await getCurrentPriceAsDisplayPriceRatio({
-        currency: displayCurrency,
-        walletCurrency,
-      })
-      if (displayCurrencyPrice instanceof Error) {
-        logger.warn(displayCurrencyPrice, "displayCurrencyPrice")
-        return undefined
-      }
-      return displayCurrencyPrice.convertFromWallet(
-        toPaymentAmount(walletCurrency)(amount),
-      )
-    }
+const toDisplayAmount = (currency: DisplayCurrency) => async (sats: number) => {
+  const displayCurrencyPrice = await getCurrentPriceAsDisplayPriceRatio({ currency })
+  if (displayCurrencyPrice instanceof Error) {
+    logger.warn(displayCurrencyPrice, "displayCurrencyPrice")
+    return undefined
+  }
+  return displayCurrencyPrice.convertFromWallet({ amount: BigInt(sats), currency: "BTC" })
+}
