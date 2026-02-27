@@ -78,9 +78,10 @@ const sendLightningNotification = async (
     recipientAccountId: recipientAccount.id,
     recipientWalletId: receiverWallet.id,
     paymentAmount: toPaymentAmount(receiverWallet.currency)(transaction.amount),
-    displayPaymentAmount: await toDisplayAmount(recipientAccount.displayCurrency)(
-      receivedSat,
-    ),
+    displayPaymentAmount: await toDisplayAmount(
+      recipientAccount.displayCurrency,
+      WalletCurrency.Btc,
+    )(receivedSat),
     paymentHash: transaction.invoice.hash,
     recipientDeviceTokens: recipientUser.deviceTokens,
     recipientNotificationSettings: recipientAccount.notificationSettings,
@@ -91,6 +92,40 @@ const sendLightningNotification = async (
     await removeDeviceTokens({ userId: recipientUser.id, deviceTokens: nsResp.tokens })
   } else if (nsResp instanceof NotificationsServiceError) {
     logger.error(nsResp)
+  }
+
+  next()
+}
+
+const sendOnchainNotification = async (
+  req: PaymentRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  if (!req.paymentContext) return next()
+
+  const { transaction } = req.body;
+
+  const { receiverWallet, recipientAccount, recipientUser } = req.paymentContext;
+
+  const nResp = await NotificationsService().onChainTxReceived({
+    recipientAccountId: recipientAccount.id,
+    recipientWalletId: receiverWallet.id,
+    paymentAmount: toPaymentAmount(receiverWallet.currency)(transaction.amount),
+    displayPaymentAmount: await toDisplayAmount(
+      recipientAccount.displayCurrency,
+      receiverWallet.currency as WalletCurrency,
+    )(transaction.amount),
+    recipientDeviceTokens: recipientUser.deviceTokens,
+    recipientNotificationSettings: recipientAccount.notificationSettings,
+    recipientLanguage: recipientUser.language,
+    txHash: transaction.hash,
+  })
+
+  if (nResp instanceof DeviceTokensNotRegisteredNotificationsServiceError) {
+    await removeDeviceTokens({ userId: recipientUser.id, deviceTokens: nResp.tokens })
+  } else if (nResp instanceof NotificationsServiceError) {
+    logger.error(nResp)
   }
 
   next()
@@ -169,25 +204,38 @@ router.post(paths.cashout, authenticate, logRequest, (_req, resp) => {
   resp.status(200).end()
 })
 
-router.post(paths.onchain, authenticate, logRequest, (_req, resp) => {
-  baseLogger.info("Received onchain payment (not implemented).")
+router.post(paths.onchain, authenticate, logRequest, fetchPaymentContext, sendOnchainNotification, (_req, resp) => {
+  baseLogger.info("Received onchain payment.")
   resp.status(200).end()
 })
 
 export { paths, router }
 
 // --- Helper functions ---
-const toPaymentAmount = (currency: WalletCurrency) => (dollarAmount: number) => {
-  let amount
-  if (currency === WalletCurrency.Usd) amount = (dollarAmount * 100) as any
-  return { amount, currency }
+const toPaymentAmount = (currency: WalletCurrency) => (amount: number) => {
+  let paymentAmount: bigint
+  if (currency === WalletCurrency.Usd) {
+    paymentAmount = BigInt(Math.round(amount * 100))
+  } else if (currency === WalletCurrency.Btc) {
+    paymentAmount = BigInt(Math.round(amount * 100_000_000))
+  } else {
+    paymentAmount = BigInt(Math.round(amount))
+  }
+  return { amount: paymentAmount, currency }
 }
 
-const toDisplayAmount = (currency: DisplayCurrency) => async (sats: number) => {
-  const displayCurrencyPrice = await getCurrentPriceAsDisplayPriceRatio({ currency })
-  if (displayCurrencyPrice instanceof Error) {
-    logger.warn(displayCurrencyPrice, "displayCurrencyPrice")
-    return undefined
-  }
-  return displayCurrencyPrice.convertFromWallet({ amount: BigInt(sats), currency: "BTC" })
-}
+const toDisplayAmount =
+  (displayCurrency: DisplayCurrency, walletCurrency: WalletCurrency) =>
+    async (amount: number) => {
+      const displayCurrencyPrice = await getCurrentPriceAsDisplayPriceRatio({
+        currency: displayCurrency,
+        walletCurrency,
+      })
+      if (displayCurrencyPrice instanceof Error) {
+        logger.warn(displayCurrencyPrice, "displayCurrencyPrice")
+        return undefined
+      }
+      return displayCurrencyPrice.convertFromWallet(
+        toPaymentAmount(walletCurrency)(amount),
+      )
+    }
