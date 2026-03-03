@@ -1,0 +1,50 @@
+meta {
+  name: lnUsdInvoiceCreateOnBehalfOfRecipient
+  type: graphql
+  seq: 7
+}
+
+post {
+  url: {{main_protocol}}://{{main_domain}}:{{main_port}}/graphql
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  mutation lnInvoiceCreateOnBehalfOfRecipient($input: LnInvoiceCreateOnBehalfOfRecipientInput!) {
+    lnInvoiceCreateOnBehalfOfRecipient(input: $input) {
+      errors {
+        message
+      }
+      invoice {
+        paymentRequest
+        paymentHash
+        paymentSecret
+        satoshis
+      }
+    }
+  }
+  
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "amount": 10,
+      "memo": "memo",
+      "recipientWalletId": "{{walletIdBtc}}"
+    }
+  }
+}
+
+script:post-response {
+  test("add invoice", function () {
+      const jsonData = res.getBody();
+      const invoice = jsonData.data.invoice.addInvoice
+      expect(invoice.substring(0,2)).to.eql("ln")
+  });
+}
+
+settings {
+  encodeUrl: true
+}

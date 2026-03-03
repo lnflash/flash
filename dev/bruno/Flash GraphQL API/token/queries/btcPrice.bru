@@ -1,0 +1,30 @@
+meta {
+  name: btcPrice
+  type: graphql
+  seq: 15
+}
+
+post {
+  url: {{main_protocol}}://{{main_domain}}:{{main_port}}/graphql
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  query btcPrice {
+      btcPrice {
+          base
+          currencyUnit
+          formattedAmount
+          offset 
+      }
+  }
+}
+
+settings {
+  encodeUrl: true
+}

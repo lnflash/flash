@@ -1,0 +1,45 @@
+meta {
+  name: lnNoAmountUsdInvoiceFeeProbe
+  type: graphql
+  seq: 23
+}
+
+post {
+  url: {{main_protocol}}://{{main_domain}}:{{main_port}}/graphql
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  mutation LnNoAmountUsdInvoiceFeeProbe($input: LnNoAmountUsdInvoiceFeeProbeInput!) {
+    lnNoAmountUsdInvoiceFeeProbe(input: $input) {
+      errors {
+        message
+      }
+      amount
+    }
+  }
+  
+}
+
+body:graphql:vars {
+  {
+      "input": {
+          "paymentRequest": "lnbcrt1p39aw9gpp54xlvdj7w7wk8u4pvdwxphkmpenq6lvq95zh73ss6c7v3nplhqv3sdqqcqzpuxqr23ssp5uxl2n8297fny3dnejzwr8zvkcp6dud8nw7v0uz89aknled3nsqus9qyyssqxch49l59q6939aluk0vsc85cv4clp583cdrph9fj5a9f59qp68jstaj4w2hgeg6szjkhnvezhacrmcse6l30awnw3h2lhf5kyd0pwegpyf8xz5",
+          "amount": 10,
+          "walletId": "{{walletIdUsd}}"
+      }
+  }
+}
+
+script:post-response {
+  test("add invoice", function () {
+      const jsonData = res.getBody();
+      const invoice = jsonData.data.invoice.addInvoice
+      expect(invoice.substring(0,2)).to.eql("ln")
+  });
+}
+
+settings {
+  encodeUrl: true
+}

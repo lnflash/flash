@@ -1,0 +1,88 @@
+meta {
+  name: contactTransactions
+  type: graphql
+  seq: 9
+}
+
+post {
+  url: {{main_protocol}}://{{main_domain}}:{{main_port}}/graphql
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  query transactionsListForContact($first: Int, $after: String, $username: Username!) {
+      me {
+          contactByUsername(username: $username) {
+              transactions(first: $first, after: $after) {
+                  pageInfo {
+                      hasNextPage
+                  }
+                  edges {
+                      cursor
+                      node {
+                          __typename
+                          id
+                          settlementAmount
+                          settlementFee
+                          status
+                          direction
+                          settlementPrice {
+                              base
+                              offset
+                              # currencyUnit
+                              # formattedAmount
+                          }
+                          memo
+                          createdAt
+                          initiationVia {
+                              ... on InitiationViaOnChain {
+                                  __typename
+                                  address
+                              }
+                              ... on InitiationViaLn {
+                                  __typename
+                                  paymentHash
+                              }
+                              ... on InitiationViaIntraLedger {
+                                  __typename
+                                  counterPartyWalletId
+                                  counterPartyUsername
+                              }
+                          }
+                          settlementVia {
+                              ... on SettlementViaOnChain {
+                                  __typename
+                                  transactionHash
+                              }
+                              ... on SettlementViaLn {
+                                  __typename
+                                  paymentSecret
+                                  preImage
+                              }
+                              ... on SettlementViaIntraLedger {
+                                  __typename
+                                  counterPartyWalletId
+                                  counterPartyUsername
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+      }
+  }
+  
+}
+
+body:graphql:vars {
+  {
+      "first": 5,
+      "after": null,
+      "username": "user0"
+  }
+}
+
+settings {
+  encodeUrl: true
+}

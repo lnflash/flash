@@ -1,0 +1,46 @@
+meta {
+  name: userLogin
+  type: graphql
+  seq: 4
+}
+
+post {
+  url: {{main_protocol}}://{{main_domain}}:{{main_port}}/graphql
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  mutation userLogin($input: UserLoginInput!) {
+      userLogin(input: $input) {
+          errors {
+              message
+          }
+          authToken
+      }
+  }
+}
+
+body:graphql:vars {
+  {
+      "input": {
+          "phone": "{{phone}}",
+          "code": "{{code}}"
+      }
+  }
+}
+
+script:post-response {
+  test("requesting a token", function () {
+      const jsonData = res.getBody();
+      const token = jsonData.data.userLogin.authToken
+      // token should have two dot "."
+      // const parts = token.split(".")
+  //     // pm.expect(parts.length).to.eql(3);
+      bru.setEnvVar("token", token)
+  });
+}
+
+settings {
+  encodeUrl: true
+}
