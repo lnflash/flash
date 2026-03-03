@@ -1,0 +1,38 @@
+meta {
+  name: onChainUsdTxFee
+  type: graphql
+  seq: 9
+}
+
+post {
+  url: {{main_protocol}}://{{main_domain}}:{{main_port}}/graphql
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  query onChainUsdTxFee($walletId: WalletId!, $address: OnChainAddress!, $amount: CentAmount!, $targetConfirmations: TargetConfirmations) {
+    onChainUsdTxFee(walletId: $walletId, address: $address, amount: $amount, targetConfirmations: $targetConfirmations) {
+      amount
+      targetConfirmations
+    }
+  }
+  
+}
+
+body:graphql:vars {
+  {
+      "walletId": "{{walletIdUsd}}",
+      "address": "{{regtest-segwitV0-address}}",
+      "amount": 56,
+      "targetConfirmations": 3
+  } 
+}
+
+settings {
+  encodeUrl: true
+}

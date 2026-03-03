@@ -1,0 +1,44 @@
+meta {
+  name: onChainUsdPaymentSendAsBtcDenominated_1
+  type: graphql
+  seq: 6
+}
+
+post {
+  url: {{main_protocol}}://{{main_domain}}:{{main_port}}/graphql
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  mutation onChainUsdPaymentSendAsBtcDenominated($input: OnChainUsdPaymentSendAsBtcDenominatedInput!) {
+    onChainUsdPaymentSendAsBtcDenominated(input: $input) {
+      errors {
+        message
+      }
+      status
+    }
+  }
+  
+}
+
+body:graphql:vars {
+  {
+    "input": {
+        "walletId": "{{walletIdUsd}}",
+          "address": "{{regtest-segwitV0-address}}",
+          "amount": 5000,
+          "memo": "",
+          "targetConfirmations": 2
+      }
+  }
+  
+}
+
+settings {
+  encodeUrl: true
+}

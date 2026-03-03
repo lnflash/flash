@@ -1,0 +1,65 @@
+meta {
+  name: transactionsForAccount
+  type: graphql
+  seq: 8
+}
+
+post {
+  url: {{main_protocol}}://{{main_domain}}:{{main_port}}/graphql
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  query transactionsForAccount($walletIds: [WalletId], $first: Int, $after: String) {
+      me {
+          defaultAccount {
+                transactions(walletIds: $walletIds, first: $first, after: $after) {
+                    pageInfo {
+                        hasNextPage
+                    }
+                    edges {
+                        cursor
+                        node {
+                          direction
+                          settlementAmount
+                          settlementFee
+                          settlementCurrency
+                          settlementDisplayAmount
+                          settlementDisplayFee
+                          settlementDisplayCurrency
+                          settlementPrice {
+                              base
+                              offset
+                              currencyUnit
+                              formattedAmount
+                          }
+                          settlementDisplayAmount
+                          settlementDisplayCurrency
+                          status
+                          createdAt
+                          initiationVia {
+                              __typename
+                          }
+                          settlementVia {
+                              __typename
+                          }
+                        }
+                    }
+                }
+          }
+      }
+  }
+  
+}
+
+body:graphql:vars {
+  {
+      "first": 5,
+      "after": null
+  }
+}
+
+settings {
+  encodeUrl: true
+}

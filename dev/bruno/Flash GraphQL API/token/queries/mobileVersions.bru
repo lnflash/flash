@@ -1,0 +1,29 @@
+meta {
+  name: mobileVersions
+  type: graphql
+  seq: 17
+}
+
+post {
+  url: {{main_protocol}}://{{main_domain}}:{{main_port}}/graphql
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  query mobileVersions {
+      mobileVersions {
+          currentSupported
+          minSupported
+          platform
+      }
+  }
+}
+
+settings {
+  encodeUrl: true
+}

@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "name": "Flash GraphQL API",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}

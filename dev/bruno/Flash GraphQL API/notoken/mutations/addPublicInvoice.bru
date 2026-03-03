@@ -1,0 +1,38 @@
+meta {
+  name: addPublicInvoice
+  type: graphql
+  seq: 5
+}
+
+post {
+  url: {{main_protocol}}://{{main_domain}}:{{main_port}}/graphql
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  mutation publicInvoice ($username: String) {
+      publicInvoice (username: $username) {
+          addInvoice
+      }
+  }
+}
+
+body:graphql:vars {
+  {
+    "username": "xyz"
+  }
+}
+
+script:post-response {
+  test("invoice starts with lnbcrt", function () {
+      var jsonData = res.getBody();
+      expect(jsonData.data.publicInvoice.addInvoice.slice(0,6)).to.be('lnbcrt');
+  });
+  
+  
+}
+
+settings {
+  encodeUrl: true
+}

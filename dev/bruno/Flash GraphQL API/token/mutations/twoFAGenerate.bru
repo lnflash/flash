@@ -1,0 +1,41 @@
+meta {
+  name: twoFAGenerate
+  type: graphql
+  seq: 30
+}
+
+post {
+  url: {{main_protocol}}://{{main_domain}}:{{main_port}}/graphql
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  mutation twoFAGenerate {
+    twoFAGenerate {
+      errors {
+        message
+      }
+      twoFASecret {
+        secret
+        uri
+      }
+    }
+  }
+}
+
+script:post-response {
+  test("requesting TwoFA generate", function () {
+      const jsonData = res.getBody();
+      const twoFASecret = jsonData.data.twoFAGenerate.twoFASecret.secret
+      bru.setEnvVar("twoFASecret", twoFASecret)
+  });
+}
+
+settings {
+  encodeUrl: true
+}

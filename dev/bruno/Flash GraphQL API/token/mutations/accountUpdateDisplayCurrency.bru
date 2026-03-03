@@ -1,0 +1,42 @@
+meta {
+  name: accountUpdateDisplayCurrency
+  type: graphql
+  seq: 29
+}
+
+post {
+  url: {{main_protocol}}://{{main_domain}}:{{main_port}}/graphql
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  mutation accountUpdateDisplayCurrency($input: AccountUpdateDisplayCurrencyInput!) {
+    accountUpdateDisplayCurrency(input:$input) {
+      errors {
+        message
+      }
+      account {
+          defaultWalletId
+          displayCurrency
+      }
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+      "input": {
+          "currency": "CRC"
+      }
+  }
+  
+}
+
+settings {
+  encodeUrl: true
+}

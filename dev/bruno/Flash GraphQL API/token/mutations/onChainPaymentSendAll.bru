@@ -1,0 +1,43 @@
+meta {
+  name: onChainPaymentSendAll
+  type: graphql
+  seq: 7
+}
+
+post {
+  url: {{main_protocol}}://{{main_domain}}:{{main_port}}/graphql
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  mutation onChainPaymentSendAll($input: OnChainPaymentSendAllInput!) {
+    onChainPaymentSendAll(input: $input) {
+      errors {
+        message
+      }
+      status
+    }
+  }
+  
+}
+
+body:graphql:vars {
+  {
+    "input": {
+        "walletId": "{{walletIdUsd}}",
+          "address": "tb1qkg75mht826qg0fa8r8h7s3vxedt7qfaedeccec",
+          "memo": "",
+          "targetConfirmations": 2
+      }
+  }
+  
+}
+
+settings {
+  encodeUrl: true
+}
