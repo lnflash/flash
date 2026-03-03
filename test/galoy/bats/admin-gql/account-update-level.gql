@@ -27,6 +27,7 @@ mutation accountUpdateLevel($input: AccountUpdateLevelInput!) {
         pendingIncomingBalance
       }
       createdAt
+      erpParty
     }
   }
 }

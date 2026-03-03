@@ -19,6 +19,7 @@ enum AccountStatus {
 }
 
 input AccountUpdateLevelInput {
+  erpParty: String
   level: AccountLevel!
   uid: ID!
 }
@@ -62,6 +63,7 @@ type AuditedAccount {
   """
   coordinates: Coordinates
   createdAt: Timestamp!
+  erpParty: String
   id: ID!
   level: AccountLevel!
   merchants: [Merchant!]!

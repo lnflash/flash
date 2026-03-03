@@ -7,7 +7,7 @@ const AccountDetailPayload = GT.Object({
   name: "AccountDetailPayload",
   fields: () => ({
     errors: {
-      type: GT.NonNullList(IError),
+      type: GT.List(IError),
     },
     accountDetails: {
       type: GraphQLAccount,
