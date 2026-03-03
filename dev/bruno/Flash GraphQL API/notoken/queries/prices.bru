@@ -1,0 +1,35 @@
+meta {
+  name: prices
+  type: graphql
+  seq: 1
+}
+
+post {
+  url: {{main_protocol}}://{{main_domain}}:{{main_port}}/graphql
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  # Write your query or mutation here
+  query btcPriceList($range: PriceGraphRange!) {
+      btcPriceList(range: $range) {
+      	timestamp
+        price {
+          base
+          offset
+          currencyUnit
+          formattedAmount
+        }
+      }
+  }
+  
+}
+
+body:graphql:vars {
+  {"range": "ONE_DAY"}
+}
+
+settings {
+  encodeUrl: true
+}

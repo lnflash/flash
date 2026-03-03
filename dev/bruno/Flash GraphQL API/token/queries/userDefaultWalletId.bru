@@ -1,0 +1,32 @@
+meta {
+  name: userDefaultWalletId
+  type: graphql
+  seq: 12
+}
+
+post {
+  url: {{main_protocol}}://{{main_domain}}:{{main_port}}/graphql
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  query userDefaultWalletId($username: Username!) {
+      userDefaultWalletId(username: $username)
+    }
+}
+
+body:graphql:vars {
+  {
+      "username": "userB"
+  }
+  
+}
+
+settings {
+  encodeUrl: true
+}

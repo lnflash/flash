@@ -1,0 +1,46 @@
+meta {
+  name: captchaRequestPhoneCode
+  type: graphql
+  seq: 3
+}
+
+post {
+  url: {{main_protocol}}://{{main_domain}}:{{main_port}}/graphql
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  mutation captchaRequestAuthCode($input: CaptchaRequestAuthCodeInput!) {
+      captchaRequestAuthCode(input: $input) {
+          success
+          errors {
+              message
+          }
+      }
+  }
+}
+
+body:graphql:vars {
+  {
+      "input": {
+          "phone": "{{phone}}",
+          "challengeCode": "",
+          "secCode": "",
+          "validationCode": ""
+      }
+  }
+}
+
+script:post-response {
+  test("requesting a code", function () {
+      var jsonData = res.getBody();
+      expect(jsonData.data.requestPhoneCode.success).to.eql(true);
+  });
+  
+  
+}
+
+settings {
+  encodeUrl: true
+}

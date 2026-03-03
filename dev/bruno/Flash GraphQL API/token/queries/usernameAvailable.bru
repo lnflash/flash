@@ -1,0 +1,32 @@
+meta {
+  name: usernameAvailable
+  type: graphql
+  seq: 14
+}
+
+post {
+  url: {{main_protocol}}://{{main_domain}}:{{main_port}}/graphql
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  query usernameAvailable($username: Username!) {
+      usernameAvailable(username: $username)
+  }
+}
+
+body:graphql:vars {
+  {
+      "username": "userB"
+  }
+  
+}
+
+settings {
+  encodeUrl: true
+}

@@ -1,0 +1,133 @@
+meta {
+  name: main query
+  type: graphql
+  seq: 10
+}
+
+post {
+  url: {{main_protocol}}://{{main_domain}}:{{main_port}}/graphql
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  query mainQuery($hasToken: Boolean!) {
+    globals {
+      nodesIds
+      __typename
+    }
+    quizQuestions {
+      id
+      earnAmount
+      __typename
+    }
+    me @include(if: $hasToken) {
+      id
+      language
+      username
+      phone
+      quizQuestions {
+        question {
+          id
+          earnAmount
+          __typename
+        }
+        completed
+        __typename
+      }
+      defaultAccount {
+        id
+        defaultWalletId
+        wallets {
+          id
+          balance
+          walletCurrency
+          transactions(first: 3) {
+            ...TransactionList
+            __typename
+          }
+          __typename
+        }
+        __typename
+      }
+      __typename
+    }
+    mobileVersions {
+      platform
+      currentSupported
+      minSupported
+      __typename
+    }
+  }
+  
+  fragment TransactionList on TransactionConnection {
+    pageInfo {
+      hasNextPage
+      __typename
+    }
+    edges {
+      cursor
+      node {
+        __typename
+        id
+        status
+        direction
+        memo
+        createdAt
+        settlementAmount
+        settlementFee
+        settlementDisplayCurrency
+        settlementPrice {
+          base
+          offset
+          __typename
+        }
+        initiationVia {
+          __typename
+          ... on InitiationViaIntraLedger {
+            counterPartyUsername
+            __typename
+          }
+          ... on InitiationViaLn {
+            paymentHash
+            __typename
+          }
+        }
+        settlementVia {
+          __typename
+          ... on SettlementViaIntraLedger {
+            counterPartyUsername
+            __typename
+          }
+          ... on SettlementViaLn {
+            paymentSecret
+            __typename
+          }
+        }
+      }
+      __typename
+    }
+    __typename
+  }
+}
+
+body:graphql:vars {
+  {
+      "hasToken": true
+  }
+}
+
+script:post-response {
+  test("requesting me data", function () {
+      const jsonData = res.getBody();
+      const walletId = jsonData.data.me.defaultAccount.defaultWalletId
+      // walletId should have 5 groups separated by dashes "-"
+      const parts = walletId.split("-")
+      expect(parts.length).to.eql(5);
+      bru.setEnvVar("walletId", walletId)
+  });
+}
+
+settings {
+  encodeUrl: true
+}

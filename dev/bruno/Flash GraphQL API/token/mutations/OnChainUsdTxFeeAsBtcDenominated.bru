@@ -1,0 +1,38 @@
+meta {
+  name: OnChainUsdTxFeeAsBtcDenominated
+  type: graphql
+  seq: 10
+}
+
+post {
+  url: {{main_protocol}}://{{main_domain}}:{{main_port}}/graphql
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  query onChainUsdTxFeeAsBtcDenominated($walletId: WalletId!, $address: OnChainAddress!, $amount: SatAmount!, $targetConfirmations: TargetConfirmations) {
+    onChainUsdTxFeeAsBtcDenominated(walletId: $walletId, address: $address, amount: $amount, targetConfirmations: $targetConfirmations) {
+      amount
+      targetConfirmations
+    }
+  }
+  
+}
+
+body:graphql:vars {
+  {
+      "walletId": "{{walletIdUsd}}",
+      "address": "{{regtest-segwitV0-address}}",
+      "amount": 2000,
+      "targetConfirmations": 3
+  } 
+}
+
+settings {
+  encodeUrl: true
+}
