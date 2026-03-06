@@ -114,7 +114,7 @@ type AccountUpgradeRequest {
   address: Address!
   bankAccount: BankAccount
   currentLevel: AccountLevel!
-  email: String!
+  email: String
   fullName: String!
   idDocument: Boolean!
 
@@ -1205,13 +1205,13 @@ type PublicWallet {
 
 type Query {
   accountDefaultWallet(username: Username!, walletCurrency: WalletCurrency): PublicWallet!
-  accountUpgradeRequest: AccountUpgradeRequestPayload!
   btcPrice(currency: DisplayCurrency! = "USD"): Price @deprecated(reason: "Deprecated in favor of realtimePrice")
   btcPriceList(range: PriceGraphRange!): [PricePoint]
   businessMapMarkers: [MapMarker!]!
   currencyList: [Currency!]!
   globals: Globals
   isFlashNpub(input: IsFlashNpubInput!): IsFlashNpubPayload
+  latestAccountUpgradeRequest: AccountUpgradeRequestPayload!
   lnInvoicePaymentStatus(input: LnInvoicePaymentStatusInput!): LnInvoicePaymentStatusPayload!
   me: User
   mobileVersions: [MobileVersions]
