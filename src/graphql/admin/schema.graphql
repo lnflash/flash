@@ -1,6 +1,6 @@
 type AccountDetailPayload {
   accountDetails: AuditedAccount
-  errors: [Error!]!
+  errors: [Error]
 }
 
 enum AccountLevel {

@@ -6,6 +6,7 @@ import { AccountUpgradeRequest, RequestStatus } from "@services/frappe/models/Ac
 import { DomainError, ValidationError } from "@domain/shared"
 import { AccountLevel } from "@domain/accounts"
 import { SetDocTypeValueError, UpgradeRequestQueryError } from "@services/frappe/errors"
+import { SearchFilter } from "@services/frappe/SearchFilters"
 
 
 type RequestId = string & { __brand: "UpgradeRequestId" }
@@ -76,8 +77,8 @@ export const createUpgradeRequest = async (
   const context = { account, user, kratos: identity }
 
   const pendingRequests = await ErpNext.getAccountUpgradeRequestList({ 
-    username: account.username,
-    status: RequestStatus.Pending
+    username: SearchFilter.Eq(account.username),
+    status: SearchFilter.Eq(RequestStatus.Pending)
   })
   if (pendingRequests instanceof UpgradeRequestQueryError) return pendingRequests
   
