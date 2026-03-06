@@ -19,26 +19,19 @@ import {
   RequestStatus,
 } from "./models/AccountUpgradeRequest"
 import { Bank } from "./models/Bank"
+import { Filter } from "./SearchFilters"
+
+export type AccountUpgradeRequestFilters = { username?: Filter, status?: Filter }
+type ErpNextFilter = [string, string, string, string[]]
+export const toJson = (filters: AccountUpgradeRequestFilters): string => {
+  const erpNextFilters = Object.entries(filters)
+    .filter((entry): entry is [string, Filter] => entry[1] !== undefined)
+    .map(([key, filter]) => [AccountUpgradeRequest.doctype, key, filter.operator, filter.value] as ErpNextFilter)
+  return JSON.stringify(erpNextFilters)
+}
 
 // Move to MoneyAmount
 const erpUsd = (usd: USDAmount): number => Number(usd.asCents(2))
-
-// poorly written but correct as is
-const buildUpgradeRequestFilters = (filters: {
-  username?: string
-  status?: RequestStatus
-}): string => {
-  const conditions: [string, string, string, string][] = []
-  if (filters.username) {
-    conditions.push([AccountUpgradeRequest.doctype, "username", "=", filters.username])
-  }
-  if (filters.status) {
-    conditions.push([AccountUpgradeRequest.doctype, "status", "=", filters.status])
-  }
-  return JSON.stringify(conditions)
-}
-
-type QueryFilters = { username?: string; status?: RequestStatus }
 
 class ErpNext {
   url: string
@@ -178,12 +171,14 @@ class ErpNext {
   }
 
   async getAccountUpgradeRequestList(
-    filters: QueryFilters,
+    filters: AccountUpgradeRequestFilters,
   ): Promise<string[] | UpgradeRequestQueryError> {
     try {
-      const requestParams = buildUpgradeRequestFilters(filters)
-      const resp = await axios.get(`${this.url}/api/resource/Account Upgrade Request`, {
-        params: { filters: requestParams },
+      const resp = await axios.get(`${this.url}/api/resource/${AccountUpgradeRequest.doctype}`, {
+        params: { 
+          filters: toJson(filters),
+          order_by: "creation desc",
+        },
         headers: this.headers,
       })
 

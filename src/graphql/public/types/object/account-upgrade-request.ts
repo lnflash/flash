@@ -30,7 +30,7 @@ const AccountUpgradeRequest = GT.Object({
       type: GT.NonNull(GT.String),
     },
     email: {
-      type: GT.NonNull(GT.String),
+      type: GT.String,
     },
     idDocument: {
       type: GT.NonNull(GT.Boolean),
