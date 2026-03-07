@@ -8,6 +8,19 @@ import {
   CashuMintQuoteNotPaidError,
 } from "@domain/cashu"
 
+import type {
+  CashuProof,
+  CashuBlindingData,
+  CashuBlindedMessage,
+  CashuBlindSignature,
+} from "@domain/cashu"
+
+type CashuCardProvisionResult = {
+  proofs: CashuProof[]
+  cardPubkey: string
+  totalAmount: number // cents
+}
+
 import * as secp from "tiny-secp256k1"
 
 import {

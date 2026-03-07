@@ -1,3 +1,10 @@
+/**
+ * Flash-layer Cashu error wrappers.
+ *
+ * These extend DomainError (for Flash ErrorLevel metadata/logging) while
+ * delegating message construction to the same names from @lnflash/cashu-client.
+ * Callers use instanceof checks against these types.
+ */
 import { DomainError, ErrorLevel } from "@domain/shared"
 
 export class CashuMintError extends DomainError {
@@ -17,6 +24,10 @@ export class CashuBlindingError extends DomainError {
 }
 
 export class CashuInvalidProofError extends DomainError {
+  level = ErrorLevel.Warn
+}
+
+export class CashuInsufficientSlotsError extends DomainError {
   level = ErrorLevel.Warn
 }
 

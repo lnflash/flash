@@ -1,124 +1,60 @@
-import axios from "axios"
+/**
+ * Flash Cashu service layer.
+ *
+ * Thin wrappers around @lnflash/cashu-client mint functions that:
+ *  1. Inject the configured mint URL from Flash's YAML config
+ *  2. Map package-level CashuError instances to Flash DomainError subclasses
+ *     (preserving ErrorLevel metadata for Flash's logging/error handling)
+ */
+import {
+  requestMintQuote as _requestMintQuote,
+  getMintQuoteState as _getMintQuoteState,
+  getMintKeysets as _getMintKeysets,
+  getMintKeyset as _getMintKeyset,
+  mintProofs as _mintProofs,
+  CashuError,
+} from "@lnflash/cashu-client"
+
+import type { CashuMintQuote, CashuBlindedMessage, CashuBlindSignature, CashuKeyset, CashuKeysetDetail } from "@lnflash/cashu-client"
 
 import { CashuMintError } from "@domain/cashu"
 import { getCashuConfig } from "@config"
-import { baseLogger } from "@services/logger"
-
-const logger = baseLogger.child({ module: "cashu-service" })
-
-const MINT_UNIT = "usd" // USD cents
 
 const mintUrl = () => getCashuConfig().mintUrl
 
-/**
- * Request a mint quote (returns a bolt11 invoice to pay).
- * NUT-04: POST /v1/mint/quote/bolt11
- */
+const wrapError = (err: CashuError): CashuMintError =>
+  new CashuMintError(err.message)
+
 export const requestMintQuote = async (
   amountCents: number,
 ): Promise<CashuMintQuote | CashuMintError> => {
-  try {
-    const resp = await axios.post(`${mintUrl()}/v1/mint/quote/bolt11`, {
-      amount: amountCents,
-      unit: MINT_UNIT,
-    })
-    const data = resp.data
-    return {
-      quoteId: data.quote,
-      paymentRequest: data.request,
-      state: data.state,
-      expiry: data.expiry,
-    }
-  } catch (err) {
-    logger.error({ err }, "cashu: requestMintQuote failed")
-    return new CashuMintError(`Mint quote request failed: ${(err as Error).message}`)
-  }
+  const result = await _requestMintQuote(mintUrl(), amountCents, "usd")
+  return result instanceof CashuError ? wrapError(result) : result
 }
 
-/**
- * Check the state of a mint quote.
- * NUT-04: GET /v1/mint/quote/bolt11/:quoteId
- */
 export const getMintQuoteState = async (
   quoteId: string,
 ): Promise<CashuMintQuote | CashuMintError> => {
-  try {
-    const resp = await axios.get(`${mintUrl()}/v1/mint/quote/bolt11/${quoteId}`)
-    const data = resp.data
-    return {
-      quoteId: data.quote,
-      paymentRequest: data.request,
-      state: data.state,
-      expiry: data.expiry,
-    }
-  } catch (err) {
-    logger.error({ err }, "cashu: getMintQuoteState failed")
-    return new CashuMintError(`Mint quote state check failed: ${(err as Error).message}`)
-  }
+  const result = await _getMintQuoteState(mintUrl(), quoteId)
+  return result instanceof CashuError ? wrapError(result) : result
 }
 
-/**
- * Fetch the active keysets from the mint.
- * NUT-01: GET /v1/keysets
- * Returns a map of keyset_id → { unit, active, keys: { amount: pubkey_hex } }
- */
-export const getMintKeysets = async (): Promise<
-  { id: string; unit: string; active: boolean }[] | CashuMintError
-> => {
-  try {
-    const resp = await axios.get(`${mintUrl()}/v1/keysets`)
-    return resp.data.keysets
-  } catch (err) {
-    logger.error({ err }, "cashu: getMintKeysets failed")
-    return new CashuMintError(`Mint keyset fetch failed: ${(err as Error).message}`)
-  }
+export const getMintKeysets = async (): Promise<CashuKeyset[] | CashuMintError> => {
+  const result = await _getMintKeysets(mintUrl())
+  return result instanceof CashuError ? wrapError(result) : result
 }
 
-/**
- * Fetch the public keys for a specific keyset.
- * NUT-01: GET /v1/keys/:keysetId
- * Returns { id, unit, keys: { "1": hex, "2": hex, ... } }
- */
 export const getMintKeyset = async (
   keysetId: string,
-): Promise<{ id: string; unit: string; keys: Record<string, string> } | CashuMintError> => {
-  try {
-    const resp = await axios.get(`${mintUrl()}/v1/keys/${keysetId}`)
-    // Response wraps in { keysets: [{ id, unit, keys }] }
-    const ks = resp.data.keysets?.[0] ?? resp.data
-    return ks
-  } catch (err) {
-    logger.error({ err }, "cashu: getMintKeyset failed")
-    return new CashuMintError(`Mint keyset fetch failed: ${(err as Error).message}`)
-  }
+): Promise<CashuKeysetDetail | CashuMintError> => {
+  const result = await _getMintKeyset(mintUrl(), keysetId)
+  return result instanceof CashuError ? wrapError(result) : result
 }
 
-/**
- * Submit blinded messages to mint and receive blind signatures.
- * NUT-04: POST /v1/mint/bolt11
- */
 export const mintProofs = async (
   quoteId: string,
   blindedMessages: CashuBlindedMessage[],
 ): Promise<CashuBlindSignature[] | CashuMintError> => {
-  try {
-    const resp = await axios.post(`${mintUrl()}/v1/mint/bolt11`, {
-      quote: quoteId,
-      outputs: blindedMessages.map((bm) => ({
-        id: bm.id,
-        amount: bm.amount,
-        B_: bm.B_,
-      })),
-    })
-    return resp.data.signatures.map(
-      (sig: { id: string; amount: number; C_: string }) => ({
-        id: sig.id,
-        amount: sig.amount,
-        C_: sig.C_,
-      }),
-    )
-  } catch (err) {
-    logger.error({ err }, "cashu: mintProofs failed")
-    return new CashuMintError(`Mint proof issuance failed: ${(err as Error).message}`)
-  }
+  const result = await _mintProofs(mintUrl(), quoteId, blindedMessages)
+  return result instanceof CashuError ? wrapError(result) : result
 }
