@@ -6,14 +6,12 @@ import {
   CashuInvalidCardPubkeyError,
   CashuBlindingError,
   CashuMintQuoteNotPaidError,
-  CashuMintQuoteExpiredError,
 } from "@domain/cashu"
 
 import * as secp from "tiny-secp256k1"
 
 import {
   requestMintQuote,
-  getMintQuoteState,
   getMintKeysets,
   getMintKeyset,
   mintProofs,
@@ -124,16 +122,6 @@ export const provisionCashuCard = async ({
 
   logger.info({ quoteId: quote.quoteId }, "cashu: mint invoice paid")
 
-  // Confirm mint sees payment
-  const quotePaid = await getMintQuoteState(quote.quoteId)
-  if (quotePaid instanceof Error) return quotePaid
-  if (quotePaid.state === "EXPIRED") return new CashuMintQuoteExpiredError()
-  if (quotePaid.state !== "PAID") {
-    return new CashuMintQuoteNotPaidError(
-      `Mint quote state is ${quotePaid.state} — expected PAID`,
-    )
-  }
-
   // --- 6. Build P2PK blind messages ---
   const denominations = splitIntoDenominations(amountCents)
 
@@ -156,15 +144,49 @@ export const provisionCashuCard = async ({
     }
   }
 
-  // --- 7. Submit to mint, receive blind signatures ---
-  const blindSigs = await mintProofs(quote.quoteId, blindedMessages)
-  if (blindSigs instanceof Error) return blindSigs
+  // --- 7. Submit to mint, receive blind signatures (with retry on quote-not-yet-PAID) ---
+  //
+  // We don't pre-check quote state. The mint is the authoritative check:
+  // - If paid → returns signatures immediately
+  // - If not yet processed → returns HTTP 400 "quote not paid"
+  //
+  // There is a small window between our Lightning payment settling and the mint's
+  // internal state updating (webhook/polling from its LN node). We retry with
+  // exponential backoff on that specific error. This is the pattern used by
+  // cashu-ts (reference wallet) — attempt mint directly, retry on "quote not paid".
+  const RETRY_DELAYS_MS = [500, 1000, 2000, 4000] // max ~7.5s total
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  let blindSigs: CashuBlindSignature[] | ApplicationError | undefined
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    blindSigs = await mintProofs(quote.quoteId, blindedMessages)
+    if (!(blindSigs instanceof Error)) break
+
+    const isNotPaid =
+      blindSigs instanceof CashuMintError &&
+      blindSigs.message.toLowerCase().includes("quote not paid")
+
+    if (!isNotPaid || attempt === RETRY_DELAYS_MS.length) {
+      return blindSigs
+    }
+
+    logger.warn(
+      { quoteId: quote.quoteId, attempt: attempt + 1, delayMs: RETRY_DELAYS_MS[attempt] },
+      "cashu: quote not yet PAID on mint, retrying",
+    )
+    await sleep(RETRY_DELAYS_MS[attempt])
+  }
+
+  if (!blindSigs || blindSigs instanceof Error) {
+    return new CashuMintQuoteNotPaidError("Mint did not confirm payment after retries")
+  }
 
   // --- 8. Unblind signatures → final proofs ---
   const proofs: CashuProof[] = []
+  const confirmedSigs = blindSigs as CashuBlindSignature[]
 
-  for (let i = 0; i < blindSigs.length; i++) {
-    const sig = blindSigs[i]
+  for (let i = 0; i < confirmedSigs.length; i++) {
+    const sig = confirmedSigs[i]
     const bd = blindingDataList[i]
     const mintPubkey = mintKeys[String(sig.amount)]
 

@@ -8,10 +8,6 @@ export class CashuMintQuoteNotPaidError extends DomainError {
   level = ErrorLevel.Warn
 }
 
-export class CashuMintQuoteExpiredError extends DomainError {
-  level = ErrorLevel.Warn
-}
-
 export class CashuInvalidCardPubkeyError extends DomainError {
   level = ErrorLevel.Warn
 }
