@@ -176,7 +176,7 @@ type YamlSchema = {
   smsAuthUnsupportedCountries: string[]
   whatsAppAuthUnsupportedCountries: string[]
   ibex: IbexConfig,
-  cashu: CashuConfig,
+  cashu?: CashuConfig,
   exchangeRates: StaticRates
   cashout: {
     enabled: boolean
