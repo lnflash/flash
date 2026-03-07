@@ -6,7 +6,12 @@ import {
   CashuInvalidCardPubkeyError,
   CashuBlindingError,
   CashuMintQuoteNotPaidError,
+  CashuInsufficientSlotsError,
 } from "@domain/cashu"
+
+import {
+  CashuInsufficientSlotsError as PkgCashuInsufficientSlotsError,
+} from "@lnflash/cashu-client"
 
 import type {
   CashuProof,
@@ -41,28 +46,34 @@ const logger = baseLogger.child({ module: "cashu-provision-card" })
 const CASHU_UNIT = "usd"
 
 /**
- * ENG-174: Cashu card provisioning
+ * ENG-174/ENG-175: Cashu card provisioning and top-up
+ *
+ * Handles both first-time provisioning (card is blank, all 32 slots free)
+ * and subsequent top-ups (card has existing proofs, availableSlots < 32).
  *
  * Flow:
  *  1. Validate wallet belongs to account and has sufficient balance
  *  2. Fetch active USD keyset from mint
  *  3. Request mint quote (get Lightning invoice)
  *  4. Pay invoice from user's USD wallet
- *  5. Build P2PK-locked blind messages for requested denominations
- *  6. Submit to mint → receive blind signatures
- *  7. Unblind signatures → proofs
- *  8. Return proofs to caller (POS writes to card via NFC)
+ *  5. Split amount into denominations, respecting availableSlots if provided
+ *  6. Build P2PK-locked blind messages for each denomination
+ *  7. Submit to mint → receive blind signatures (with retry on quote-not-yet-PAID)
+ *  8. Unblind signatures → proofs
+ *  9. Return proofs to caller (POS/mobile writes to card via LOAD_PROOF APDUs)
  */
 export const provisionCashuCard = async ({
   walletId: uncheckedWalletId,
   accountId,
   amountCents,
   cardPubkey,
+  availableSlots,
 }: {
   walletId: string
   accountId: string
   amountCents: number
   cardPubkey: string
+  availableSlots?: number
 }): Promise<CashuCardProvisionResult | ApplicationError> => {
   // --- 1. Validate inputs ---
   const walletId = checkedToWalletId(uncheckedWalletId)
@@ -136,7 +147,15 @@ export const provisionCashuCard = async ({
   logger.info({ quoteId: quote.quoteId }, "cashu: mint invoice paid")
 
   // --- 6. Build P2PK blind messages ---
-  const denominations = splitIntoDenominations(amountCents)
+  let denominations: number[]
+  try {
+    denominations = splitIntoDenominations(amountCents, availableSlots)
+  } catch (err) {
+    if (err instanceof PkgCashuInsufficientSlotsError) {
+      return new CashuInsufficientSlotsError(err.message)
+    }
+    return new CashuMintError(`Denomination split failed: ${(err as Error).message}`)
+  }
 
   const blindingDataList: (CashuBlindingData & { keysetId: string })[] = []
   const blindedMessages: CashuBlindedMessage[] = []

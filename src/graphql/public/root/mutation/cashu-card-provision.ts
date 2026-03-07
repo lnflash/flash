@@ -23,6 +23,14 @@ const CashuCardProvisionInput = GT.Input({
         "The card's compressed secp256k1 public key (33 bytes, 66 hex chars). " +
         "Obtained from the NFC card via GET_PUBKEY APDU (INS: 0x10).",
     },
+    availableSlots: {
+      type: GT.Int,
+      description:
+        "Number of free proof slots on the card. " +
+        "Required for top-ups where some slots are already in use. " +
+        "Omit (or pass 32) for first-time provisioning. " +
+        "Returns an error if the amount requires more denominations than available slots.",
+    },
   }),
 })
 
@@ -48,7 +56,7 @@ const CashuCardProvisionMutation = GT.Field({
     input: { type: GT.NonNull(CashuCardProvisionInput) },
   },
   resolve: async (_, args, { domainAccount }: { domainAccount: Account }) => {
-    const { walletId, amountCents, cardPubkey } = args.input
+    const { walletId, amountCents, cardPubkey, availableSlots } = args.input
 
     for (const input of [walletId, amountCents, cardPubkey]) {
       if (input instanceof Error) {
@@ -66,11 +74,18 @@ const CashuCardProvisionMutation = GT.Field({
       }
     }
 
+    if (availableSlots !== undefined && availableSlots !== null) {
+      if (!Number.isInteger(availableSlots) || availableSlots < 1 || availableSlots > 32) {
+        return { errors: [{ message: "availableSlots must be an integer between 1 and 32" }] }
+      }
+    }
+
     const result = await Cashu.provisionCashuCard({
       walletId,
       accountId: domainAccount.id,
       amountCents,
       cardPubkey,
+      availableSlots: availableSlots ?? undefined,
     })
 
     if (result instanceof Error) {
