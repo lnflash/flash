@@ -180,14 +180,10 @@ export const provisionCashuCard = async ({
       return new CashuBlindingError(`Unblinding failed: ${(err as Error).message}`)
     }
 
-    // Build the full P2PK secret string (what gets stored in Proof.secret)
-    const secret =
-      `["P2PK",{"nonce":"${bd.secret}","data":"${cardPubkey}","tags":[["sigflag","SIG_INPUTS"]]}]`
-
     proofs.push({
       id: sig.id,
       amount: sig.amount,
-      secret,
+      secret: bd.secretStr, // full NUT-10 P2PK JSON string
       C,
     })
   }

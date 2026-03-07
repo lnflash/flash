@@ -94,7 +94,8 @@ export const createBlindedMessage = (
   if (!B_) throw new Error("pointAdd failed for B_")
 
   return {
-    secret: nonceHex, // the nonce stored on card
+    nonce: nonceHex,   // stored on card (compact form)
+    secretStr,          // full Proof.secret string (P2PK JSON)
     r,
     B_: Buffer.from(B_).toString("hex"),
     amount,

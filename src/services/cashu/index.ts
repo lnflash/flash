@@ -1,12 +1,14 @@
 import axios from "axios"
 
 import { CashuMintError } from "@domain/cashu"
+import { getCashuConfig } from "@config"
 import { baseLogger } from "@services/logger"
 
 const logger = baseLogger.child({ module: "cashu-service" })
 
-const MINT_URL = process.env.CASHU_MINT_URL ?? "https://forge.flashapp.me"
 const MINT_UNIT = "usd" // USD cents
+
+const mintUrl = () => getCashuConfig().mintUrl
 
 /**
  * Request a mint quote (returns a bolt11 invoice to pay).
@@ -16,7 +18,7 @@ export const requestMintQuote = async (
   amountCents: number,
 ): Promise<CashuMintQuote | CashuMintError> => {
   try {
-    const resp = await axios.post(`${MINT_URL}/v1/mint/quote/bolt11`, {
+    const resp = await axios.post(`${mintUrl()}/v1/mint/quote/bolt11`, {
       amount: amountCents,
       unit: MINT_UNIT,
     })
@@ -41,7 +43,7 @@ export const getMintQuoteState = async (
   quoteId: string,
 ): Promise<CashuMintQuote | CashuMintError> => {
   try {
-    const resp = await axios.get(`${MINT_URL}/v1/mint/quote/bolt11/${quoteId}`)
+    const resp = await axios.get(`${mintUrl()}/v1/mint/quote/bolt11/${quoteId}`)
     const data = resp.data
     return {
       quoteId: data.quote,
@@ -64,7 +66,7 @@ export const getMintKeysets = async (): Promise<
   { id: string; unit: string; active: boolean }[] | CashuMintError
 > => {
   try {
-    const resp = await axios.get(`${MINT_URL}/v1/keysets`)
+    const resp = await axios.get(`${mintUrl()}/v1/keysets`)
     return resp.data.keysets
   } catch (err) {
     logger.error({ err }, "cashu: getMintKeysets failed")
@@ -81,7 +83,7 @@ export const getMintKeyset = async (
   keysetId: string,
 ): Promise<{ id: string; unit: string; keys: Record<string, string> } | CashuMintError> => {
   try {
-    const resp = await axios.get(`${MINT_URL}/v1/keys/${keysetId}`)
+    const resp = await axios.get(`${mintUrl()}/v1/keys/${keysetId}`)
     // Response wraps in { keysets: [{ id, unit, keys }] }
     const ks = resp.data.keysets?.[0] ?? resp.data
     return ks
@@ -100,7 +102,7 @@ export const mintProofs = async (
   blindedMessages: CashuBlindedMessage[],
 ): Promise<CashuBlindSignature[] | CashuMintError> => {
   try {
-    const resp = await axios.post(`${MINT_URL}/v1/mint/bolt11`, {
+    const resp = await axios.post(`${mintUrl()}/v1/mint/bolt11`, {
       quote: quoteId,
       outputs: blindedMessages.map((bm) => ({
         id: bm.id,

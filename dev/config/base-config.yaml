@@ -3,6 +3,9 @@ admin_accounts:
   - role: "bankowner"
     phone: "+16505554334"
 
+cashu:
+  mintUrl: "https://forge.flashapp.me"
+
 ibex:
   url: "https://api-sandbox.poweredbyibex.io"
   email: ""

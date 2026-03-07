@@ -29,6 +29,10 @@ type IbexConfig = {
   webhook: WebhookServer
 }
 
+type CashuConfig = {
+  mintUrl: string
+}
+
 type CashoutEmail = {
   to: string
   from: string
@@ -172,6 +176,7 @@ type YamlSchema = {
   smsAuthUnsupportedCountries: string[]
   whatsAppAuthUnsupportedCountries: string[]
   ibex: IbexConfig,
+  cashu: CashuConfig,
   exchangeRates: StaticRates
   cashout: {
     enabled: boolean

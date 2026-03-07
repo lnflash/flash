@@ -31,8 +31,9 @@ type CashuBlindSignature = {
 }
 
 type CashuBlindingData = {
-  secret: string  // the raw 32-byte nonce (hex) — stored on card
-  r: Uint8Array   // blinding factor scalar
-  B_: string      // blinded point hex
+  nonce: string     // raw 32-byte nonce (hex) — stored on card
+  secretStr: string // full NUT-10 P2PK secret JSON string — becomes Proof.secret
+  r: Uint8Array     // blinding factor scalar
+  B_: string        // blinded point hex
   amount: number
 }
