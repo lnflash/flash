@@ -14,8 +14,10 @@ import * as WalletsMod from "./wallets"
 import * as PaymentsMod from "./payments"
 import * as MerchantsMod from "./merchants"
 import * as SwapMod from "./swap"
+import * as CashuMod from "./cashu"
 
 const allFunctions = {
+  Cashu: { ...CashuMod },
   Accounts: { ...AccountsMod },
   Authentication: { ...AuthenticationMod },
   Admin: { ...AdminMod },
@@ -46,6 +48,7 @@ for (subModule in allFunctions) {
 }
 
 export const {
+  Cashu,
   Accounts,
   Authentication,
   Admin,

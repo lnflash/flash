@@ -388,4 +388,8 @@ export const SendGridConfig = yamlConfig.sendgrid as SendGridConfig
 
 export const IbexConfig = yamlConfig.ibex as IbexConfig
 
+export const getCashuConfig = (): CashuConfig => ({
+  mintUrl: yamlConfig.cashu?.mintUrl ?? "https://forge.flashapp.me",
+})
+
 export const FrappeConfig = yamlConfig.frappe as FrappeConfig

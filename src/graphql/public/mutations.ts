@@ -59,6 +59,7 @@ import AccountDisableNotificationChannelMutation from "./root/mutation/account-d
 import UserUpdateNpubMutation from "./root/mutation/user-update-npub"
 import RequestCashoutMutation from "./root/mutation/offers/request-cash-out"
 import InitiateCashoutMutation from "./root/mutation/offers/initiate-cash-out"
+import CashuCardProvisionMutation from "./root/mutation/cashu-card-provision"
 import IdDocumentUploadUrlGenerateMutation from "./root/mutation/id-document-upload-url-generate"
 
 // TODO: // const fields: { [key: string]: GraphQLFieldConfig<any, GraphQLPublicContext> }
@@ -142,6 +143,7 @@ export const mutationFields = {
 
       requestCashout: RequestCashoutMutation,
       initiateCashout: InitiateCashoutMutation,
+      cashuCardProvision: CashuCardProvisionMutation,
     },
   },
 }
