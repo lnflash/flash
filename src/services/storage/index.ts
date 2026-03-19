@@ -13,7 +13,7 @@ import { ErrorLevel } from "@domain/shared"
 
 import { InvalidFileTypeError, StorageError } from "./errors"
 
-const ALLOWED_CONTENT_TYPES = ["image/jpeg", "image/png", "image/webp"] as const
+const ALLOWED_CONTENT_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic"] as const
 const UPLOAD_URL_EXPIRY_SECONDS = 15 * 60 // 15 minutes
 const READ_URL_EXPIRY_SECONDS = 60 * 60 // 1 hour
 
