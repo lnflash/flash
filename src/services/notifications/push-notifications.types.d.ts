@@ -18,6 +18,8 @@ type SendFilteredPushNotificationStatus =
   (typeof import("./push-notifications").SendFilteredPushNotificationStatus)[keyof typeof import("./push-notifications").SendFilteredPushNotificationStatus]
 
 interface IPushNotificationsService {
+  send(message: Message): Promise<string | NotificationsServiceError>
+
   sendNotification({
     deviceTokens,
     title,

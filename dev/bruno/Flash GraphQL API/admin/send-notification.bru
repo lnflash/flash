@@ -1,0 +1,36 @@
+meta {
+  name: send-notification
+  type: graphql
+  seq: 2
+}
+
+post {
+  url: {{admin_url}}
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{admin_token}}
+}
+
+body:graphql {
+  mutation SendNotification($input: SendNotificationInput!) {
+    sendNotification(input: $input) {
+      errors {
+        message
+      }
+      success
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "topic": "brh28-ATTENTION",
+      "title": "Hello",
+      "body": "This is a notification"
+    }
+  }
+}

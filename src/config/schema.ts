@@ -673,6 +673,11 @@ export const configSchema = {
       type: "object",
       required: ["apiKey"],
     },
+    notificationTopics: {
+      type: "array",
+      items: { type: "string" },
+      uniqueItems: true,
+    },
   },
   required: [
     "lightningAddressDomain",
@@ -704,6 +709,7 @@ export const configSchema = {
     "exchangeRates",
     "cashout",
     "ibex",
+    "notificationTopics",
   ],
   additionalProperties: false,
 } as const
