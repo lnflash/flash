@@ -465,6 +465,14 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         message: "Offer not available. Try again.", 
         logger: baseLogger 
       })
+    case "StorageError":
+      message = error.message
+      return new UnexpectedClientError({ message, logger: baseLogger })
+
+    case "InvalidFileTypeError":
+      message = error.message
+      return new ValidationInternalError({ message, logger: baseLogger })
+
     // ----------
     // Unhandled below here
     // ----------
