@@ -146,6 +146,13 @@ input BusinessUpdateMapInfoInput {
   username: Username!
 }
 
+input CashoutNotificationSendInput {
+  accountId: String!
+  amount: Float!
+  currency: String!
+  notificationCategory: NotificationCategory
+}
+
 type Coordinates {
   latitude: Float!
   longitude: Float!
@@ -284,6 +291,7 @@ type Mutation {
   adminPushNotificationSend(input: AdminPushNotificationSendInput!): AdminPushNotificationSendPayload!
   businessDeleteMapInfo(input: BusinessDeleteMapInfoInput!): AccountDetailPayload!
   businessUpdateMapInfo(input: BusinessUpdateMapInfoInput!): AccountDetailPayload!
+  cashoutNotificationSend(input: CashoutNotificationSendInput!): AdminPushNotificationSendPayload!
   merchantMapDelete(input: MerchantMapDeleteInput!): MerchantPayload!
   merchantMapValidate(input: MerchantMapValidateInput!): MerchantPayload!
   userUpdatePhone(input: UserUpdatePhoneInput!): AccountDetailPayload!

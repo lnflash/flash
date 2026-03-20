@@ -1,0 +1,37 @@
+meta {
+  name: cashout-notification-send
+  type: graphql
+  seq: 2
+}
+
+post {
+  url: {{admin_url}}
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{admin_token}}
+}
+
+body:graphql {
+  mutation CashoutNotificationSend($input: CashoutNotificationSendInput!) {
+    cashoutNotificationSend(input: $input) {
+      errors {
+        message
+      }
+      success
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "accountId": "37590fbc-89b3-4218-abf6-5bded51b8fe7",
+      "amount": 100.0,
+      "currency": "JMD",
+      "notificationCategory": "Payments"
+    }
+  }
+}
