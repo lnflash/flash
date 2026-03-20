@@ -677,6 +677,7 @@ export const configSchema = {
       type: "array",
       items: { type: "string" },
       uniqueItems: true,
+      default: [],
     },
   },
   required: [
@@ -709,7 +710,6 @@ export const configSchema = {
     "exchangeRates",
     "cashout",
     "ibex",
-    "notificationTopics",
   ],
   additionalProperties: false,
 } as const

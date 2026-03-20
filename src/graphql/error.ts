@@ -474,7 +474,7 @@ export class InternalServerError extends CustomApolloError {
 }
 
 // Admin API error
-export class FirebaseError extends CustomApolloError {
+export class PushNotificationError extends CustomApolloError {
   constructor(errData: CustomApolloErrorData) {
     super({ level: "error", code: "FIREBASE_ERROR", forwardToClient: true, ...errData })
   }

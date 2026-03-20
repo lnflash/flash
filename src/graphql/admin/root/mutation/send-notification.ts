@@ -1,7 +1,7 @@
 import { GT } from "@graphql/index"
 import { apolloErrorResponse } from "@graphql/error-map"
 import { PushNotificationsService } from "@services/notifications/push-notifications"
-import { FirebaseError } from "@graphql/error"
+import { PushNotificationError } from "@graphql/error"
 import IError from "@graphql/shared/types/abstract/error"
 import NotificationTopicScalar from "@graphql/admin/types/scalar/notification-topic"
 import { SUCCESS_RESPONSE } from "@graphql/shared/types/payload/success-payload"
@@ -60,7 +60,7 @@ const SendNotificationMutation = GT.Field<
       topic,
       notification: { title, body },
     })
-    if (res instanceof Error) return apolloErrorResponse(new FirebaseError({ message: "Failed to send push notification(s)", error: res }))
+    if (res instanceof Error) return apolloErrorResponse(new PushNotificationError({ message: "Failed to send push notification(s)", error: res }))
 
     return SUCCESS_RESPONSE
   },
