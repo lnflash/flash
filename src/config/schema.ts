@@ -673,6 +673,12 @@ export const configSchema = {
       type: "object",
       required: ["apiKey"],
     },
+    notificationTopics: {
+      type: "array",
+      items: { type: "string" },
+      uniqueItems: true,
+      default: [],
+    },
   },
   required: [
     "lightningAddressDomain",

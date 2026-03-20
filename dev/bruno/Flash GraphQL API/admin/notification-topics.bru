@@ -1,0 +1,21 @@
+meta {
+  name: notification-topics
+  type: graphql
+  seq: 3
+}
+
+post {
+  url: {{admin_url}}
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{admin_token}}
+}
+
+body:graphql {
+  query {
+    notificationTopics
+  }
+}

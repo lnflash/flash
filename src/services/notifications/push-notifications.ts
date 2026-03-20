@@ -19,6 +19,7 @@ import {
 } from "@services/tracing"
 import { messaging } from "./firebase"
 import { FirebaseError } from "firebase-admin"
+import { Message } from "firebase-admin/lib/messaging/messaging-api"
 
 const logger = baseLogger.child({ module: "notifications" })
 
@@ -73,7 +74,17 @@ const sendToDevice = async (
   }
 }
 
+// Wraps the Firebase messaging service
 export const PushNotificationsService = (): IPushNotificationsService => {
+  const send = async (message: Message): Promise<string | NotificationsServiceError> => {
+    if (!messaging) {
+      baseLogger.error("Firebase messaging module not loaded")
+      return new NotificationsServiceError("Firebase messaging module not loaded")
+    }
+
+    return await messaging.send(message)
+  }
+
   const sendNotification = async ({
     deviceTokens,
     title,
@@ -134,7 +145,7 @@ export const PushNotificationsService = (): IPushNotificationsService => {
     }
   }
 
-  return { sendNotification, sendFilteredNotification }
+  return { send, sendNotification, sendFilteredNotification }
 }
 
 export const handleCommonNotificationErrors = (err: Error | string | unknown) => {

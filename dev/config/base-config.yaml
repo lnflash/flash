@@ -51,3 +51,11 @@ frappe:
 
 sendgrid:
   apiKey: "<replace>"
+
+# FCM topic names for push notifications.
+# Replace "dev" with a unique identifier to avoid accidentally sending to other environments.
+notificationTopics:
+  - "dev-EMERGENCY"
+  - "dev-ATTENTION"
+  - "dev-INFO"
+  - "dev-MARKETING"
