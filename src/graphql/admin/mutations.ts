@@ -8,6 +8,7 @@ import UserUpdatePhoneMutation from "./root/mutation/user-update-phone"
 import BusinessDeleteMapInfoMutation from "./root/mutation/delete-business-map"
 import AdminPushNotificationSendMutation from "./root/mutation/admin-push-notification-send"
 import AdminBroadcastSendMutation from "./root/mutation/admin-broadcast-send"
+import sendCashoutSettledNotification from "./root/mutation/cashout-notification-send"
 
 import MerchantMapDeleteMutation from "./root/mutation/merchant-map-delete"
 import MerchantMapValidateMutation from "./root/mutation/merchant-map-validate"
@@ -24,6 +25,7 @@ export const mutationFields = {
     businessUpdateMapInfo: BusinessUpdateMapInfoMutation,
     businessDeleteMapInfo: BusinessDeleteMapInfoMutation,
     adminPushNotificationSend: AdminPushNotificationSendMutation,
+    cashoutNotificationSend: sendCashoutSettledNotification,
     adminBroadcastSend: AdminBroadcastSendMutation,
   },
 }
