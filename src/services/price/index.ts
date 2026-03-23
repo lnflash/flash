@@ -14,7 +14,7 @@ import { WalletCurrency } from "@domain/shared"
 
 import { CENTS_PER_USD, UsdDisplayCurrency } from "@domain/fiat"
 
-import { PRICE_HISTORY_HOST, PRICE_HISTORY_PORT, PRICE_HOST, PRICE_PORT } from "@config"
+import { PRICE_HISTORY_HOST, PRICE_HISTORY_PORT, PRICE_HOST, PRICE_PORT, ExchangeRates } from "@config"
 
 import { baseLogger } from "../logger"
 
@@ -73,6 +73,18 @@ export const PriceService = (): IPriceService => {
         return {
           timestamp: new Date(),
           price: 1 / offset,
+          currency: displayCurrency,
+        }
+      }
+
+      // For JMD, use the static exchange rate from config instead of triangulating through BTC.
+      // This avoids compounding imprecision from two separate BTC price lookups.
+      if (displayCurrency === ("JMD" as DisplayCurrency) && walletCurrency === WalletCurrency.Usd) {
+        // ExchangeRates.jmd.sell is JMD cents per USD dollar — convert to JMD per USD cent
+        const jmdPerUsdCent = Number(ExchangeRates.jmd.sell.asCents()) / CENTS_PER_USD
+        return {
+          timestamp: new Date(),
+          price: jmdPerUsdCent,
           currency: displayCurrency,
         }
       }
