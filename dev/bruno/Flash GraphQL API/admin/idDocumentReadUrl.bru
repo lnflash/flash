@@ -1,0 +1,32 @@
+meta {
+  name: idDocumentReadUrl
+  type: graphql
+  seq: 2
+}
+
+post {
+  url: {{admin_url}}
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{admin_token}}
+}
+
+body:graphql {
+  query IdDocumentReadUrl($fileKey: String!) {
+    idDocumentReadUrl(fileKey: $fileKey) {
+      errors {
+        message
+      }
+      readUrl
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "fileKey": "id_documents/janedoe_id_front.jpg"
+  }
+}

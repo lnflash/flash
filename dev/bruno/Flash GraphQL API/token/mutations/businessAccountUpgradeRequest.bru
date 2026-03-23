@@ -1,0 +1,58 @@
+meta {
+  name: businessAccountUpgradeRequest
+  type: graphql
+  seq: 29
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  mutation BusinessAccountUpgradeRequest($input: BusinessAccountUpgradeRequestInput!) {
+    businessAccountUpgradeRequest(input: $input) {
+      errors {
+        message
+      }
+      id
+      status
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "fullName": "Jane Doe",
+      "level": "TWO",
+      "idDocument": "id_documents/janedoe_id_front.jpg",
+      "address": {
+        "title": "Home",
+        "line1": "123 Main St",
+        "line2": "",
+        "city": "Kingston",
+        "state": "Kingston",
+        "country": "JM",
+        "postalCode": "JMAKN05"
+      },
+      "bankAccount": {
+        "bankName": "NCB",
+        "bankBranch": "Half Way Tree",
+        "accountNumber": 1234567890,
+        "accountType": "CHECKING",
+        "currency": "JMD"
+      },
+      "terminalsRequested": 1
+    }
+  }
+}
+
+settings {
+  encodeUrl: true
+}
