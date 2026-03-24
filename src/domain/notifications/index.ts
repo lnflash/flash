@@ -1,4 +1,5 @@
 import { InvalidPushNotificationSettingError as InvalidNotificationSettingsError } from "./errors"
+import { getNotificationTopics } from "@config"
 
 export * from "./errors"
 
@@ -21,13 +22,6 @@ export const GaloyNotificationCategories = {
   AdminPushNotification: "AdminPushNotification" as NotificationCategory,
 } as const
 
-export const BroadcastTag = {
-  EMERGENCY: "EMERGENCY",
-  ATTENTION: "ATTENTION",
-  INFO: "INFO",
-  MARKETING: "MARKETING",
-} as const
-
 export const checkedToNotificationCategory = (
   notificationCategory: string,
 ): NotificationCategory | ValidationError => {
@@ -37,18 +31,6 @@ export const checkedToNotificationCategory = (
   }
 
   return notificationCategory as NotificationCategory
-}
-
-export const checkedToBroadcastTag = (
-  tag: string,
-): BroadcastTag | ValidationError => {
-  const validTags = Object.values(BroadcastTag)
-  if (!validTags.includes(tag as BroadcastTag)) {
-    return new InvalidNotificationSettingsError(
-      `Invalid broadcast tag. Must be one of: ${validTags.join(", ")}`,
-    )
-  }
-  return tag as BroadcastTag
 }
 
 export const enableNotificationChannel = ({
@@ -190,4 +172,16 @@ export const shouldSendNotification = ({
   }
 
   return false
+}
+
+export const checkedToNotificationTopic = (
+  t: string,
+): NotificationTopic | ValidationError => {
+  const topics = getNotificationTopics()
+  if (!topics.includes(t)) {
+    return new InvalidNotificationSettingsError(
+      `Invalid topic. Must be one of: ${topics.join(", ")}`,
+    )
+  }
+  return t as unknown as NotificationTopic
 }

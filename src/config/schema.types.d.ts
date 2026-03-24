@@ -190,6 +190,7 @@ type YamlSchema = {
   }
   sendgrid: SendGridConfig
   frappe: FrappeConfig
+  notificationTopics: string[]
 }
 
 type FrappeCredentials = {

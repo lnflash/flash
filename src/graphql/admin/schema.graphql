@@ -30,30 +30,6 @@ input AccountUpdateStatusInput {
   uid: ID!
 }
 
-input AdminBroadcastSendInput {
-  body: String!
-  tag: BroadcastTag!
-  title: String!
-}
-
-type AdminBroadcastSendPayload {
-  errors: [Error!]!
-  success: Boolean
-}
-
-input AdminPushNotificationSendInput {
-  accountId: String!
-  body: String!
-  data: Object
-  notificationCategory: NotificationCategory
-  title: String!
-}
-
-type AdminPushNotificationSendPayload {
-  errors: [Error!]!
-  success: Boolean
-}
-
 """
 Accounts are core to the Galoy architecture. they have users, and own wallets
 """
@@ -132,8 +108,6 @@ type BTCWallet implements Wallet {
   ): TransactionConnection
   walletCurrency: WalletCurrency!
 }
-
-scalar BroadcastTag
 
 input BusinessDeleteMapInfoInput {
   username: Username!
@@ -280,18 +254,15 @@ type MerchantPayload {
 type Mutation {
   accountUpdateLevel(input: AccountUpdateLevelInput!): AccountDetailPayload!
   accountUpdateStatus(input: AccountUpdateStatusInput!): AccountDetailPayload!
-  adminBroadcastSend(input: AdminBroadcastSendInput!): AdminBroadcastSendPayload!
-  adminPushNotificationSend(input: AdminPushNotificationSendInput!): AdminPushNotificationSendPayload!
   businessDeleteMapInfo(input: BusinessDeleteMapInfoInput!): AccountDetailPayload!
   businessUpdateMapInfo(input: BusinessUpdateMapInfoInput!): AccountDetailPayload!
   merchantMapDelete(input: MerchantMapDeleteInput!): MerchantPayload!
   merchantMapValidate(input: MerchantMapValidateInput!): MerchantPayload!
+  sendNotification(input: SendNotificationInput!): SendNotificationPayload!
   userUpdatePhone(input: UserUpdatePhoneInput!): AccountDetailPayload!
 }
 
-scalar NotificationCategory
-
-scalar Object
+scalar NotificationTopic
 
 """An address for an on-chain bitcoin destination"""
 scalar OnChainAddress
@@ -348,6 +319,7 @@ type Query {
   lightningPayment(hash: PaymentHash!): LightningPayment!
   listWalletIds(walletCurrency: WalletCurrency!): [WalletId!]!
   merchantsPendingApproval: [Merchant!]!
+  notificationTopics: [String!]!
   transactionById(id: ID!): Transaction
   transactionDetailsById(id: ID!): TransactionDetails
   transactionsByHash(hash: PaymentHash!): [Transaction]
@@ -361,6 +333,17 @@ scalar SafeInt
 
 """(Positive) Satoshi amount"""
 scalar SatAmount
+
+input SendNotificationInput {
+  body: String!
+  title: String!
+  topic: NotificationTopic!
+}
+
+type SendNotificationPayload {
+  errors: [Error]
+  success: Boolean
+}
 
 union SettlementVia = SettlementViaIntraLedger | SettlementViaLn | SettlementViaOnChain
 

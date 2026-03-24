@@ -1,6 +1,6 @@
 import { applyMiddleware } from "graphql-middleware"
-import { and, rule, shield } from "graphql-shield"
-import { Rule, RuleAnd } from "graphql-shield/typings/rules"
+import { and, or, rule, shield } from "graphql-shield"
+import { Rule, RuleAnd, RuleOr } from "graphql-shield/typings/rules"
 import { baseLogger } from "@services/logger"
 import { setupMongoConnection } from "@services/mongodb"
 import { adminMutationFields, adminQueryFields, gqlAdminSchema } from "@graphql/admin"
@@ -21,6 +21,7 @@ import healthzHandler from "./middlewares/healthz"
 import { idempotencyMiddleware } from "./middlewares/idempotency"
 import requestIp from "request-ip"
 import jwt from 'jsonwebtoken'
+import { ErpNextRole, ErpNextRoles } from "@services/frappe/Roles"
 
 const graphqlLogger = baseLogger.child({ module: "graphql" })
 
@@ -42,12 +43,12 @@ function parseAuthHeader(authHeader: string | undefined): JWTPayload {
   }
 }
 
-export const hasAdminUserRole = rule({ cache: "contextual" })((
+export const hasRole = (role: ErpNextRole) => rule({ cache: "contextual" })((
   parent,
   args,
   ctx: GraphQLAdminContext,
 ) => {
-  return ctx.user.roles.includes("Accounts Manager") ? true : new AuthorizationError({ logger: graphqlLogger })
+  return ctx.user.roles.includes(role) ? true : new AuthorizationError({ logger: graphqlLogger })
 })
 
 //   // const ipString = UNSECURE_IP_FROM_REQUEST_OBJECT
@@ -216,14 +217,21 @@ const startAdminServer = async ({
 }
 
 export async function startApolloServerForAdminSchema() {
-  const authedQueryFields: { [key: string]: Rule } = {}
+  const defaultRule = or(hasRole(ErpNextRoles.SystemManager), hasRole(ErpNextRoles.AccountsManager))
+
+  const authedQueryFields: { [key: string]: RuleOr } = {}
   for (const key of Object.keys(adminQueryFields.authed)) {
-    authedQueryFields[key] = hasAdminUserRole
+    authedQueryFields[key] = defaultRule
   }
 
-  const authedMutationFields: { [key: string]: Rule } = {}
+
+  const mutationRoleOverrides: { [key: string]: Rule } = {                                                                                               
+    // sendNotification: hasRole(ErpNextRoles.SystemManager)
+  }
+
+  const authedMutationFields: { [key: string]: Rule | RuleOr } = {}
   for (const key of Object.keys(adminMutationFields.authed)) {
-    authedMutationFields[key] = hasAdminUserRole
+    authedMutationFields[key] = mutationRoleOverrides[key] ?? defaultRule
   }
 
   const permissions = shield(

@@ -269,6 +269,8 @@ export const getTestAccounts = (config = yamlConfig): TestAccount[] =>
 
 export const getCronConfig = (config = yamlConfig): CronConfig => config.cronConfig
 
+export const getNotificationTopics = (config = yamlConfig): string[] => config.notificationTopics
+
 export const getCaptcha = (config = yamlConfig): CaptchaConfig => config.captcha
 
 export const getRewardsConfig = (): RewardsConfig => {
