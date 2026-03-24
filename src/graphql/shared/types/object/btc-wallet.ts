@@ -46,11 +46,12 @@ const BtcWallet = GT.Object<Wallet>({
       type: GT.NonNull(FractionalCentAmount),
       description: "A balance stored in BTC.",
       resolve: async (source) => {
-        const balanceSats = await Wallets.getBalanceForWallet({ walletId: source.id })
-        if (balanceSats instanceof Error) {
-          throw mapError(balanceSats)
+        const balance = await Wallets.getBalanceForWallet({ walletId: source.id })
+        if (balance instanceof Error) {
+          throw mapError(balance)
         }
-        return balanceSats
+        // USDAmount is a class — extract the raw numeric cent value for GraphQL serialization
+        return typeof balance === "number" ? balance : Number(balance.asCents(8))
       },
     },
     pendingIncomingBalance: {
