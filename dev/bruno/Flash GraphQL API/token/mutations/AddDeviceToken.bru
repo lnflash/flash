@@ -1,0 +1,40 @@
+meta {
+  name: AddDeviceToken
+  type: graphql
+  seq: 35
+}
+
+post {
+  url: {{graphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  Authorization: ••••••
+}
+
+body:graphql {
+  mutation DeviceNotificationTokenCreate($input: DeviceNotificationTokenCreateInput!) {
+    deviceNotificationTokenCreate(input: $input) {
+      errors {
+        message
+      }
+      success
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "deviceToken": "eoue0qFVOEKFrDktHhUcnB:APA91bGZph0dgNAfH3YvJepeet7lgs8nhQZc1bHJfVjdsU792m_rGqCY6uQgqB-lNArYZ05r27ijQfQBjKSGl_7xb2BHxyLx7TaZBQqJ0EqkD36UKJ1wP_mEuHp-Uw1b6q7voYC_LTbB"
+    }
+  }
+}
+
+settings {
+  encodeUrl: false
+  timeout: 0
+}
