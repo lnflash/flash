@@ -5,7 +5,7 @@ import { RedisCacheService } from "@services/cache"
 import { CacheServiceError, CacheUndefinedError, OfferNotFound } from "@domain/cache"
 import { baseLogger } from "@services/logger"
 import { randomUUID } from "crypto"
-import { JMDAmount, MoneyAmount, USDAmount } from "@domain/shared"
+import { JMDAmount, MoneyAmount, USDAmount, toMoneyAmountFromJSON } from "@domain/shared"
 import { CashoutDetails } from "../types"
 
 /**
@@ -26,7 +26,7 @@ const OffersSerde = {
       json, 
       (key: string, value: any) => {
         if (['usd', 'jmd', 'fee'].includes(key.toLowerCase()) && Array.isArray(value)) {
-          return MoneyAmount.fromJSON(value as [string, string])
+          return toMoneyAmountFromJSON(value as [string, string])
         }
         if (key.toLowerCase() === 'amount' && typeof value === 'string') {
             return BigInt(value);

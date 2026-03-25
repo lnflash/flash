@@ -1,4 +1,4 @@
-import { USDAmount } from "@domain/shared/MoneyAmount"
+import { USDAmount } from "@domain/shared"
 
 export type PayInvoiceArgs = {
   accountId: IbexAccountId,
