@@ -120,6 +120,12 @@ input BusinessUpdateMapInfoInput {
   username: Username!
 }
 
+input CashoutNotificationSendInput {
+  accountId: String!
+  amount: Float!
+  currency: String!
+}
+
 type Coordinates {
   latitude: Float!
   longitude: Float!
@@ -256,6 +262,7 @@ type Mutation {
   accountUpdateStatus(input: AccountUpdateStatusInput!): AccountDetailPayload!
   businessDeleteMapInfo(input: BusinessDeleteMapInfoInput!): AccountDetailPayload!
   businessUpdateMapInfo(input: BusinessUpdateMapInfoInput!): AccountDetailPayload!
+  cashoutNotificationSend(input: CashoutNotificationSendInput!): SuccessPayload!
   merchantMapDelete(input: MerchantMapDeleteInput!): MerchantPayload!
   merchantMapValidate(input: MerchantMapValidateInput!): MerchantPayload!
   sendNotification(input: SendNotificationInput!): SendNotificationPayload!
@@ -372,6 +379,11 @@ scalar SignedAmount
 A string amount (of a currency) that can be negative (e.g. in a transaction)
 """
 scalar SignedDisplayMajorAmount
+
+type SuccessPayload {
+  errors: [Error!]!
+  success: Boolean
+}
 
 """
 Timestamp field, serialized as Unix time (the number of seconds since the Unix epoch)
