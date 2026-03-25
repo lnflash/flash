@@ -1,0 +1,54 @@
+meta {
+  name: RequestCashout
+  type: graphql
+  seq: 33
+}
+
+post {
+  url: {{graphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  Authorization: ••••••
+}
+
+body:graphql {
+  mutation Mutation($input: RequestCashoutInput!) {
+    requestCashout(input: $input) {
+      offer {
+          offerId
+          # exchangeRate
+          expiresAt
+          flashFee
+          send
+          receiveUsd
+          receiveJmd
+          walletId
+      }
+      errors {
+        ... on GraphQLApplicationError {
+          code
+          message
+          path
+        }
+      }
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "walletId": "{{walletIdUsd}}",
+      "amount": 1
+    }
+  }
+}
+
+settings {
+  encodeUrl: false
+  timeout: 0
+}
