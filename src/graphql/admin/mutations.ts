@@ -7,6 +7,7 @@ import BusinessUpdateMapInfoMutation from "@graphql/admin/root/mutation/business
 import UserUpdatePhoneMutation from "./root/mutation/user-update-phone"
 import BusinessDeleteMapInfoMutation from "./root/mutation/delete-business-map"
 import SendNotificationMutation from "./root/mutation/send-notification"
+import sendCashoutSettledNotification from "./root/mutation/cashout-notification-send"
 
 import MerchantMapDeleteMutation from "./root/mutation/merchant-map-delete"
 import MerchantMapValidateMutation from "./root/mutation/merchant-map-validate"
@@ -23,6 +24,7 @@ export const mutationFields = {
     businessUpdateMapInfo: BusinessUpdateMapInfoMutation,
     businessDeleteMapInfo: BusinessDeleteMapInfoMutation,
     sendNotification: SendNotificationMutation,
+    cashoutNotificationSend: sendCashoutSettledNotification,
   },
 }
 

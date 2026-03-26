@@ -36,6 +36,10 @@
         "bodyDisplayCurrency": "+{{baseCurrencyAmount}}{{baseCurrencyName}} ({{displayCurrencyAmount}})",
         "title": "{{walletCurrency}} Transaction"
       }
+    },
+    "cashout": {
+      "body": "Your cashout of {{amount}} has been deposited to your bank account.",
+      "title": "Cashout"
     }
   }
 }

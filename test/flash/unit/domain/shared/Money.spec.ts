@@ -1,4 +1,4 @@
-import { JMDAmount, USDAmount } from "@domain/shared/MoneyAmount"
+import { JMDAmount, USDAmount } from "@domain/shared"
 import JmdAmount from "@graphql/shared/types/scalar/jmd-amount"
 
 describe("Money Amount", () => {
