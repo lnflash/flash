@@ -8,7 +8,7 @@ import {
   WalletsRepository,
 } from "@services/mongoose"
 import { RepositoryError } from "@domain/errors"
-import { WalletCurrency } from "@domain/shared"
+import { USDAmount, WalletCurrency } from "@domain/shared"
 import {
   DeviceTokensNotRegisteredNotificationsServiceError,
   NotificationsServiceError,
@@ -96,6 +96,43 @@ const sendLightningNotification = async (
   next()
 }
 
+const sendOnchainNotification = async (
+  req: PaymentRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  if (!req.paymentContext) return next()
+
+  const { transaction } = req.body;
+
+  const { receiverWallet, recipientAccount, recipientUser } = req.paymentContext;
+
+  const usdAmount = USDAmount.dollars(transaction.amount);
+  if (usdAmount instanceof Error) {
+    logger.error(usdAmount, "Invalid transaction amount");
+    return next();
+  }
+
+  const nResp = await NotificationsService().onChainTxReceived({
+    recipientAccountId: recipientAccount.id,
+    recipientWalletId: receiverWallet.id,
+    paymentAmount: usdAmount.asPaymentAmount(),
+    displayPaymentAmount: await toDisplayAmount(recipientAccount.displayCurrency)(transaction.amount),
+    recipientDeviceTokens: recipientUser.deviceTokens,
+    recipientNotificationSettings: recipientAccount.notificationSettings,
+    recipientLanguage: recipientUser.language,
+    txHash: transaction.hash
+  })
+
+  if (nResp instanceof DeviceTokensNotRegisteredNotificationsServiceError) {
+    await removeDeviceTokens({ userId: recipientUser.id, deviceTokens: nResp.tokens })
+  } else if (nResp instanceof NotificationsServiceError) {
+    logger.error(nResp)
+  }
+
+  next()
+}
+
 const sendZapReceipt = async (
   req: PaymentRequest,
   _resp: Response,
@@ -169,8 +206,8 @@ router.post(paths.cashout, authenticate, logRequest, (_req, resp) => {
   resp.status(200).end()
 })
 
-router.post(paths.onchain, authenticate, logRequest, (_req, resp) => {
-  baseLogger.info("Received onchain payment (not implemented).")
+router.post(paths.onchain, authenticate, logRequest, fetchPaymentContext, sendOnchainNotification, (_req, resp) => {
+  baseLogger.info("Received onchain payment.")
   resp.status(200).end()
 })
 
@@ -189,5 +226,8 @@ const toDisplayAmount = (currency: DisplayCurrency) => async (sats: number) => {
     logger.warn(displayCurrencyPrice, "displayCurrencyPrice")
     return undefined
   }
-  return displayCurrencyPrice.convertFromWallet({ amount: BigInt(sats), currency: "BTC" })
+  return displayCurrencyPrice.convertFromWallet({
+    amount: BigInt(Math.round(sats)),
+    currency: "BTC",
+  })
 }

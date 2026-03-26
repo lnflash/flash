@@ -5,14 +5,22 @@ import { FirebaseMessageError, FirebaseNotAvailable } from "@domain/notification
 import { baseLogger } from "@services/logger"
 
 
-let messaging: Messaging | null  = null
+let messaging: Messaging | null = null
 
 if (GOOGLE_APPLICATION_CREDENTIALS) {
-  admin.initializeApp({
-    credential: admin.credential.applicationDefault(),
-  })
+  try {
+    baseLogger.info({ GOOGLE_APPLICATION_CREDENTIALS }, "Initializing Firebase Admin")
+    admin.initializeApp({
+      credential: admin.credential.applicationDefault(),
+    })
 
-  messaging = admin.messaging()
+    messaging = admin.messaging()
+    baseLogger.info("Firebase messaging module loaded")
+  } catch (err) {
+    baseLogger.error({ err }, "Failed to initialize Firebase Admin")
+  }
+} else {
+  baseLogger.warn("GOOGLE_APPLICATION_CREDENTIALS not set")
 }
 
 const isDeviceTokenValid = async (token: string): Promise<boolean | NotificationsServiceError> => {
