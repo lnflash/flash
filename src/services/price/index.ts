@@ -14,7 +14,7 @@ import { WalletCurrency } from "@domain/shared"
 
 import { CENTS_PER_USD, UsdDisplayCurrency } from "@domain/fiat"
 
-import { PRICE_HISTORY_HOST, PRICE_HISTORY_PORT, PRICE_HOST, PRICE_PORT } from "@config"
+import { PRICE_HISTORY_HOST, PRICE_HISTORY_PORT, PRICE_HOST, PRICE_PORT, ExchangeRates } from "@config"
 
 import { baseLogger } from "../logger"
 
@@ -80,6 +80,19 @@ export const PriceService = (): IPriceService => {
       // FIXME: price server should return CentsPerSat directly and timestamp
       const { price } = await getPrice({ currency: displayCurrency })
       if (!price) return new PriceNotAvailableError()
+
+      // For JMD, use the static exchange rate from config instead of BTC triangulation
+      // to avoid compounding rounding errors from two gRPC price calls
+      if (displayCurrency === "JMD" as DisplayCurrency && walletCurrency === WalletCurrency.Usd) {
+        const jmdPerUsd = Number(ExchangeRates.jmd.sell.asCents(2))
+        const displayCurrencyPrice = jmdPerUsd / CENTS_PER_USD
+
+        return {
+          timestamp: new Date(),
+          price: displayCurrencyPrice,
+          currency: displayCurrency,
+        }
+      }
 
       let displayCurrencyPrice = price / SATS_PER_BTC
       if (walletCurrency === WalletCurrency.Usd) {

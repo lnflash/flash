@@ -4,6 +4,7 @@ import { IbexError } from "@services/ibex/errors"
 import { baseLogger } from "@services/logger"
 import { GResponse200 } from "ibex-client"
 import { ConnectionArguments, ConnectionCursor } from "graphql-relay"
+import { SAT_PRICE_PRECISION_OFFSET } from "@domain/fiat"
 
 export const getTransactionsForWallets = async ({
   wallets,
@@ -36,9 +37,10 @@ export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] 
   return ibexResp.map(trx => {
     const currency = (trx.currencyId === 3 ? "USD" : "BTC") as WalletCurrency // WalletCurrency: "USD" | "BTC",
 
+    const exchangeRate = trx.exchangeRateCurrencySats ?? 0
     const settlementDisplayPrice: WalletMinorUnitDisplayPrice<WalletCurrency, DisplayCurrency> = {
-      base: trx.exchangeRateCurrencySats ? BigInt(Math.floor(trx.exchangeRateCurrencySats)) : 0n,
-      offset: 0n, // what is this?
+      base: BigInt(Math.round(exchangeRate * 10 ** SAT_PRICE_PRECISION_OFFSET)),
+      offset: BigInt(SAT_PRICE_PRECISION_OFFSET),
       displayCurrency: "USD" as DisplayCurrency,
       walletCurrency: currency
     }
