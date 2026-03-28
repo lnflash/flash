@@ -36,10 +36,17 @@ export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] 
   return ibexResp.map(trx => {
     const currency = (trx.currencyId === 3 ? "USD" : "BTC") as WalletCurrency // WalletCurrency: "USD" | "BTC",
 
+    // FIXME: displayCurrency should come from user preferences, not hardcoded USD
+    // See: https://github.com/lnflash/flash/issues/282
+    const displayCurrency: DisplayCurrency = "USD"
     const settlementDisplayPrice: WalletMinorUnitDisplayPrice<WalletCurrency, DisplayCurrency> = {
-      base: trx.exchangeRateCurrencySats ? BigInt(Math.floor(trx.exchangeRateCurrencySats)) : 0n,
-      offset: 0n, // what is this?
-      displayCurrency: "USD" as DisplayCurrency,
+      // Use Math.round instead of Math.floor to avoid truncating sub-unit JMD amounts to 0
+      // Note: trx.exchangeRateCurrencySats interpretation may need review (see bounty issue)
+      base: trx.exchangeRateCurrencySats ? BigInt(Math.round(trx.exchangeRateCurrencySats)) : 0n,
+      // offset is set to 0 here because exchangeRateCurrencySats may already embed the exponent
+      // TODO: verify exchangeRateCurrencySats unit from Ibex API (sats vs sats*10^offset)
+      offset: 0n,
+      displayCurrency,
       walletCurrency: currency
     }
 
@@ -48,6 +55,9 @@ export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] 
       settlementAmount: toSettlementAmount(trx.amount, trx.transactionTypeId, currency),
       settlementFee: asCurrency(trx.networkFee, currency),
       settlementCurrency: currency, 
+      // FIXME: settlementDisplayAmount should be converted to displayCurrency, not raw wallet amount
+      // Currently for JMD users, this shows USD amounts (wallet currency) instead of JMD
+      // See: https://github.com/lnflash/flash/issues/282
       settlementDisplayAmount: `${trx.amount}`, 
       settlementDisplayFee: `${trx.networkFee}`, 
       settlementDisplayPrice: settlementDisplayPrice,
