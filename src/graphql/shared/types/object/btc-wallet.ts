@@ -50,7 +50,7 @@ const BtcWallet = GT.Object<Wallet>({
         if (balanceSats instanceof Error) {
           throw mapError(balanceSats)
         }
-        return balanceSats
+        return Number(balanceSats.asCents(8))
       },
     },
     pendingIncomingBalance: {
