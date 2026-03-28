@@ -30,7 +30,7 @@ docs {
   # Admin JWT
   To generate a new admin JWT signed with `ERPNEXT_JWT_SECRET`:
   ```
-  node -e "const c=require('crypto'),b=o=>Buffer.from(JSON.stringify(o)).toString('base64url'),h=b({alg:'HS256',typ:'JWT'}),p=b({userId:'admin',roles:['Accounts Manager']}),s=c.createHmac('sha256','not-so-secret').update(h+'.'+p).digest('base64url');console.log(h+'.'+p+'.'+s)"
+  ERPNEXT_JWT_SECRET=<admin-api-secret> node -e "const c=require('crypto'),b=o=>Buffer.from(JSON.stringify(o)).toString('base64url'),h=b({alg:'HS256',typ:'JWT'}),p=b({userId:'admin',roles:['Accounts Manager']}),s=c.createHmac('sha256',process.env.ERPNEXT_JWT_SECRET).update(h+'.'+p).digest('base64url');console.log(h+'.'+p+'.'+s)"
   ```
 
   # Extra Resources
