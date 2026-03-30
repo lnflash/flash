@@ -190,7 +190,10 @@ type YamlSchema = {
   }
   sendgrid: SendGridConfig
   frappe: FrappeConfig
-  notificationTopics: string[]
+  fcmTopics: {
+    default: boolean // whether this topic should be subscribed to by default
+    name: string
+  }[]
 }
 
 type FrappeCredentials = {

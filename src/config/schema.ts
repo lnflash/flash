@@ -673,9 +673,17 @@ export const configSchema = {
       type: "object",
       required: ["apiKey"],
     },
-    notificationTopics: {
+    fcmTopics: {
       type: "array",
-      items: { type: "string" },
+      items: {
+        type: "object",
+        properties: {
+          default: { type: "boolean" },
+          name: { type: "string" },
+        },
+        required: ["default", "name"],
+        additionalProperties: false,
+      },
       uniqueItems: true,
       default: [],
     },

@@ -145,6 +145,7 @@ interface UserRecord {
   userId: string
   language?: string
   deviceTokens: string[]
+  notificationTopics?: string[]
   phoneMetadata?: TwilioObjectForUser
   phone?: string
   deletedPhones?: string[]

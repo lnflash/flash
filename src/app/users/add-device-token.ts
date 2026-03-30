@@ -1,5 +1,6 @@
 import { checkedToDeviceToken } from "@domain/users"
 import { UsersRepository } from "@services/mongoose"
+import firebase from "@services/notifications/firebase"
 
 export const addDeviceToken = async ({
   userId,
@@ -13,10 +14,11 @@ export const addDeviceToken = async ({
   const user = await users.findById(userId)
   if (user instanceof Error) return user
 
-  const deviceTokens = user.deviceTokens
+  const { deviceTokens, notificationTopics } = user
 
   if (!deviceTokens.includes(deviceTokenChecked)) {
     deviceTokens.push(deviceTokenChecked)
+    firebase.subscribeToTopics(deviceTokenChecked, notificationTopics)
   }
 
   return users.update({ ...user, deviceTokens })
