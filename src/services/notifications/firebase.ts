@@ -48,5 +48,17 @@ const isDeviceTokenValid = async (token: string): Promise<boolean | Notification
   }
 }
 
-export default { isDeviceTokenValid }
+// Failed subscriptions need a retry mechanism
+const subscribeToTopics = async (tokens: string | string[], topics: string[]): Promise<void> => {
+  topics.forEach(async (t) => {
+    if (!messaging) {
+      baseLogger.error({ tokens, topic: t }, "Firebase messaging module not loaded, skipping topic subscription") 
+      return new FirebaseNotAvailable()
+    }
+    const result = await messaging.subscribeToTopic(tokens, t)
+    baseLogger.info({ tokens, topic: t, result })
+  })
+}
+
+export default { isDeviceTokenValid, subscribeToTopics }
 export { messaging } 

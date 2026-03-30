@@ -67,26 +67,31 @@ async function main() {
     const users = await db
       .collection("users")
       .find(
-        { deviceTopics: { $exists: true } },
-        { projection: { _id: 0, deviceTopics: 1 } },
+        { "deviceTokens.0": { $exists: true } },
+        { projection: { _id: 0, deviceTokens: 1, notificationTopics: 1 } },
       )
       .toArray()
 
+    console.log(`users: ${JSON.stringify(users)}`)
+
     if (users.length === 0) {
-      console.log("No users with deviceTopics found — run the migration first")
+      console.log("No users with deviceTokens found")
       return
     }
 
     // Group tokens by topic
     const tokensByTopic = {}
     for (const user of users) {
-      for (const [token, topics] of Object.entries(user.deviceTopics)) {
+      const topics = user.notificationTopics ?? []
+      for (const token of user.deviceTokens) {
         for (const topic of topics) {
           if (!tokensByTopic[topic]) tokensByTopic[topic] = []
           tokensByTopic[topic].push(token)
         }
       }
     }
+
+    console.log(JSON.stringify(tokensByTopic))
 
     for (const [topic, tokens] of Object.entries(tokensByTopic)) {
       console.log(`\nSubscribing ${tokens.length} tokens to topic "${topic}"`)

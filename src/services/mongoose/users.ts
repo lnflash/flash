@@ -1,4 +1,5 @@
 import { CouldNotFindUserFromPhoneError, RepositoryError } from "@domain/errors"
+import { getDefaultFCMTopics } from "@config"
 
 import { User } from "./schema"
 
@@ -7,6 +8,7 @@ import { parseRepositoryError } from "./utils"
 export const translateToUser = (user: UserRecord): User => {
   const language = (user?.language ?? "") as UserLanguageOrEmpty
   const deviceTokens = user.deviceTokens ?? []
+  const notificationTopics = user.notificationTopics as NotificationTopic[] ?? []
   const phoneMetadata = user.phoneMetadata
   const phone = user.phone as PhoneNumber | undefined
   const deletedPhones = user.deletedPhones as PhoneNumber[] | undefined
@@ -18,6 +20,7 @@ export const translateToUser = (user: UserRecord): User => {
     id: user.userId as UserId,
     language,
     deviceTokens: deviceTokens as DeviceToken[],
+    notificationTopics,
     phoneMetadata,
     phone,
     deletedPhones,
@@ -86,10 +89,13 @@ export const UsersRepository = (): IUsersRepository => {
     }
 
     try {
-      const result = await User.findOneAndUpdate({ userId: id }, updateObject, {
-        new: true,
-        upsert: true,
-      })
+      const result = await User.findOneAndUpdate(
+        { userId: id }, 
+        { ...updateObject, $setOnInsert: { notificationTopics: getDefaultFCMTopics() }},
+        {
+          new: true,
+          upsert: true,
+        })
       if (!result) {
         return new RepositoryError("Couldn't update user")
       }

@@ -1,6 +1,6 @@
 import crypto from "crypto"
 
-import { getDefaultAccountsConfig, getFeesConfig, Levels } from "@config"
+import { getDefaultAccountsConfig, getFeesConfig, getDefaultFCMTopics, Levels } from "@config"
 import { AccountStatus, UsernameRegex } from "@domain/accounts"
 import { WalletIdRegex, WalletType } from "@domain/wallets"
 import { WalletCurrency } from "@domain/shared"
@@ -453,6 +453,10 @@ const UserSchema = new Schema(
     deviceTokens: {
       type: [String],
       default: [],
+    },
+    notificationTopics: {
+      type: [String],
+      default: getDefaultFCMTopics(),
     },
     phoneMetadata: {
       type: {

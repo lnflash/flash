@@ -1,9 +1,9 @@
 import { GT } from "@graphql/index"
-import { getNotificationTopics } from "@config"
+import { getFCMTopics } from "@config"
 
 const NotificationTopicsQuery = GT.Field({
   type: GT.NonNullList(GT.String),
-  resolve: () => getNotificationTopics(),
+  resolve: () => getFCMTopics(),
 })
 
 export default NotificationTopicsQuery
