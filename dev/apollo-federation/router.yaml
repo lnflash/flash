@@ -2,7 +2,7 @@ headers:
   all:
     request:
       - propagate:
-          matching: .*
+          matching: ".*"
 include_subgraph_errors:
   all: true
 sandbox:
@@ -10,13 +10,15 @@ sandbox:
 homepage:
   enabled: false
 supergraph:
-  listen: 0.0.0.0:4004
+  listen: "0.0.0.0:4004"
   introspection: true
   path: /graphql
 cors:
   allow_any_origin: true
 telemetry:
-  tracing:
-    otlp:
-      endpoint: http://otel-agent:4318
-      protocol: http
+  exporters:
+    tracing:
+      otlp:
+        enabled: true
+        endpoint: "http://otel-agent:4318"
+        protocol: http

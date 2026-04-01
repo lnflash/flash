@@ -37,7 +37,8 @@ services:
       - otel-agent
     restart: on-failure:10
   apollo-router:
-    image: ghcr.io/apollographql/router:v1.25.0
+    image: ghcr.io/apollographql/router:v2.13.0
+    command: ["--config", "/repo/dev/apollo-federation/router.yaml", "--supergraph", "/repo/dev/apollo-federation/supergraph.graphql"]
     ports: []
     environment:
       - APOLLO_ROUTER_SUPERGRAPH_PATH=/repo/dev/apollo-federation/supergraph.graphql
@@ -48,7 +49,7 @@ services:
   otel-agent:
     ports: []
     image: otel/opentelemetry-collector-contrib:0.79.0
-    command: ["--config=/etc/otel-agent-config.yaml"]
+    command: [ "--config=/etc/otel-agent-config.yaml" ]
     environment:
       - HONEYCOMB_DATASET=${HONEYCOMB_DATASET}
       - HONEYCOMB_API_KEY=${HONEYCOMB_API_KEY}
@@ -85,7 +86,7 @@ services:
       - DB_POOL_MIN=1
       - DB_POOL_MAX=5
       - DB_DEBUG=false
-    depends_on: [postgres-price-history]
+    depends_on: [ postgres-price-history ]
   redis:
     image: redis:7.0.8
     ports: []
@@ -93,7 +94,7 @@ services:
       - ALLOW_EMPTY_PASSWORD=yes
       - REDIS_DISABLE_COMMANDS=FLUSHDB,FLUSHALL
   mongodb-migrate:
-    depends_on: [mongodb]
+    depends_on: [ mongodb ]
     build:
       context: .
       dockerfile: Dockerfile-migrate
@@ -121,8 +122,8 @@ services:
     ports: []
     volumes:
       - ${HOST_PROJECT_PATH:-.}/dev/bitcoind/bitcoin.conf:/data/.bitcoin/bitcoin.conf
-    depends_on: [bitcoind]
-    entrypoint: ["/bin/sh", "-c"]
+    depends_on: [ bitcoind ]
+    entrypoint: [ "/bin/sh", "-c" ]
     command:
       - |
         bitcoind -connect=bitcoind:18444
@@ -136,8 +137,8 @@ services:
       - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd1.wallet.db:/root/.lnd/wallet.db
       - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd1.macaroons.db:/root/.lnd/macaroons.db
       - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd1.admin.macaroon:/root/.lnd/admin.macaroon
-    depends_on: [bitcoind]
-    entrypoint: ["/bin/sh", "-c"]
+    depends_on: [ bitcoind ]
+    entrypoint: [ "/bin/sh", "-c" ]
     command:
       - |
         mkdir -p /root/.lnd/data/chain/bitcoin/regtest/
@@ -155,8 +156,8 @@ services:
       - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd2.wallet.db:/root/.lnd/wallet.db
       - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd2.macaroons.db:/root/.lnd/macaroons.db
       - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd2.admin.macaroon:/root/.lnd/admin.macaroon
-    depends_on: [bitcoind]
-    entrypoint: ["/bin/sh", "-c"]
+    depends_on: [ bitcoind ]
+    entrypoint: [ "/bin/sh", "-c" ]
     command:
       - |
         mkdir -p /root/.lnd/data/chain/bitcoin/regtest/
@@ -174,7 +175,7 @@ services:
       - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd-outside-1.wallet.db:/root/.lnd/wallet.db
       - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd-outside-1.macaroons.db:/root/.lnd/macaroons.db
       - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd-outside-1.admin.macaroon:/root/.lnd/admin.macaroon
-    entrypoint: ["/bin/sh", "-c"]
+    entrypoint: [ "/bin/sh", "-c" ]
     command:
       - |
         mkdir -p /root/.lnd/data/chain/bitcoin/regtest/
@@ -182,7 +183,7 @@ services:
         cp /root/.lnd/macaroons.db /root/.lnd/data/chain/bitcoin/regtest/macaroons.db
         cp /root/.lnd/admin.macaroon /root/.lnd/data/chain/bitcoin/regtest/admin.macaroon
         /bin/lnd
-    depends_on: [bitcoind]
+    depends_on: [ bitcoind ]
   lnd-outside-2:
     image: lightninglabs/lnd:v0.16.2-beta
     ports: []
@@ -193,7 +194,7 @@ services:
       - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd-outside-2.wallet.db:/root/.lnd/wallet.db
       - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd-outside-2.macaroons.db:/root/.lnd/macaroons.db
       - ${HOST_PROJECT_PATH:-.}/dev/lnd/regtest/lnd-outside-2.admin.macaroon:/root/.lnd/admin.macaroon
-    entrypoint: ["/bin/sh", "-c"]
+    entrypoint: [ "/bin/sh", "-c" ]
     command:
       - |
         mkdir -p /root/.lnd/data/chain/bitcoin/regtest/
@@ -201,7 +202,7 @@ services:
         cp /root/.lnd/macaroons.db /root/.lnd/data/chain/bitcoin/regtest/macaroons.db
         cp /root/.lnd/admin.macaroon /root/.lnd/data/chain/bitcoin/regtest/admin.macaroon
         /bin/lnd
-    depends_on: [bitcoind]
+    depends_on: [ bitcoind ]
   loopserver:
     image: lightninglabs/loopserver:v0.9.52-beta
     ports: []
@@ -238,19 +239,7 @@ services:
       - loopserver
     environment:
       - LOOP_SERVER_INTERNAL_IP=${LOOP_SERVER_INTERNAL_IP}
-    command: bash -c "
-      mkdir -p /root/.loop/regtest/ &&
-      cp /root/.loop/tmp/* /root/.loop/regtest/ &&
-      loopd\
-      --network=regtest\
-      --debuglevel=debug\
-      --server.host=${LOOP_SERVER_INTERNAL_IP}:11009\
-      --server.notls --lnd.host=lnd1:10009\
-      --lnd.macaroonpath=/root/.lnd/lnd1.admin.macaroon\
-      --lnd.tlspath=/root/.lnd/tls.cert\
-      --tlsautorefresh\
-      --restlisten=0.0.0.0:8081\
-      --rpclisten=0.0.0.0:11010"
+    command: bash -c " mkdir -p /root/.loop/regtest/ && cp /root/.loop/tmp/* /root/.loop/regtest/ && loopd\ --network=regtest\ --debuglevel=debug\ --server.host=${LOOP_SERVER_INTERNAL_IP}:11009\ --server.notls --lnd.host=lnd1:10009\ --lnd.macaroonpath=/root/.lnd/lnd1.admin.macaroon\ --lnd.tlspath=/root/.lnd/tls.cert\ --tlsautorefresh\ --restlisten=0.0.0.0:8081\ --rpclisten=0.0.0.0:11010"
   loopd2:
     image: lightninglabs/loop:v0.20.1-beta
     ports: []
@@ -270,25 +259,13 @@ services:
       - loopserver
     environment:
       - LOOP_SERVER_INTERNAL_IP=${LOOP_SERVER_INTERNAL_IP}
-    command: bash -c "
-      mkdir -p /root/.loop/regtest/ &&
-      cp /root/.loop/tmp/* /root/.loop/regtest/ &&
-      loopd\
-      --network=regtest\
-      --debuglevel=debug\
-      --server.host=${LOOP_SERVER_INTERNAL_IP}:11009\
-      --server.notls --lnd.host=lnd2:10009\
-      --lnd.macaroonpath=/root/.lnd/lnd2.admin.macaroon\
-      --lnd.tlspath=/root/.lnd/tls.cert\
-      --tlsautorefresh\
-      --restlisten=0.0.0.0:8081\
-      --rpclisten=0.0.0.0:11010"
+    command: bash -c " mkdir -p /root/.loop/regtest/ && cp /root/.loop/tmp/* /root/.loop/regtest/ && loopd\ --network=regtest\ --debuglevel=debug\ --server.host=${LOOP_SERVER_INTERNAL_IP}:11009\ --server.notls --lnd.host=lnd2:10009\ --lnd.macaroonpath=/root/.lnd/lnd2.admin.macaroon\ --lnd.tlspath=/root/.lnd/tls.cert\ --tlsautorefresh\ --restlisten=0.0.0.0:8081\ --rpclisten=0.0.0.0:11010"
   bats-tests:
     image: us.gcr.io/galoy-org/nodejs-concourse
     ports: []
     depends_on:
       - bats-deps
-    command: ["make", "execute-bats-from-within-container"]
+    command: [ "make", "execute-bats-from-within-container" ]
     working_dir: /repo
     env_file:
       - ${TMP_ENV_CI:-.env.ci}
@@ -304,7 +281,7 @@ services:
     image: us.gcr.io/galoy-org/nodejs-concourse
     depends_on:
       - integration-deps
-    command: ["make", "execute-integration-from-within-container"]
+    command: [ "make", "execute-integration-from-within-container" ]
     working_dir: /repo
     env_file:
       - ${TMP_ENV_CI:-.env.ci}
@@ -313,7 +290,7 @@ services:
   stablesats:
     image: us.gcr.io/galoy-org/stablesats-rs:latest
     ports: []
-    command: ["stablesats", "run"]
+    command: [ "stablesats", "run" ]
     working_dir: /repo/dev
     depends_on:
       - otel-agent
@@ -355,7 +332,7 @@ services:
       - POSTGRES_PASSWORD=password
       - POSTGRES_DB=pg
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready"]
+      test: [ "CMD-SHELL", "pg_isready" ]
       interval: 5s
       timeout: 30s
       retries: 5
@@ -393,7 +370,7 @@ services:
   fulcrum:
     image: cculianu/fulcrum:latest
     ports: []
-    depends_on: [bitcoind]
+    depends_on: [ bitcoind ]
     volumes:
       - ${HOST_PROJECT_PATH:-.}/dev/fulcrum/fulcrum.conf:/fulcrum.conf
       - ${HOST_PROJECT_PATH:-.}/dev/fulcrum/tls.key:/tls.key
@@ -402,7 +379,7 @@ services:
       - DATA_DIR=/db
       - SSL_CERTFILE=/tls.cert
       - SSL_KEYFILE=/tls.key
-    command: ["Fulcrum", "/fulcrum.conf"]
+    command: [ "Fulcrum", "/fulcrum.conf" ]
 
   svix:
     image: svix/svix-server:v1.11
