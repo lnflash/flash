@@ -16,7 +16,8 @@ supergraph:
 cors:
   allow_any_origin: true
 telemetry:
-  tracing:
-    otlp:
-      endpoint: http://otel-agent:4318
-      protocol: http
+    tracing:
+      otlp:
+        enabled: true
+        endpoint: http://otel-agent:4318
+        protocol: http
