@@ -339,6 +339,12 @@ const AccountSchema = new Schema<AccountRecord>(
       type: String,
       required: false,
     },
+    // ENG-280: IBEX receive info ID needed for balance check before withdrawal
+    // Populated by ENG-277 (IBEX Tron USDT address provisioning)
+    bridgeIbexReceiveInfoId: {
+      type: String,
+      required: false,
+    },
   },
   { id: false },
 )
@@ -626,6 +632,9 @@ const BridgeExternalAccountSchema = new Schema<IBridgeExternalAccountRecord>({
   status: { type: String, enum: ["pending", "verified", "failed"], default: "pending" },
   createdAt: { type: Date, default: Date.now },
 })
+
+// ENG-281: Compound index enforces ownership — lookup must match BOTH accountId AND bridgeExternalAccountId
+BridgeExternalAccountSchema.index({ accountId: 1, bridgeExternalAccountId: 1 }, { unique: false })
 
 const BridgeWithdrawalSchema = new Schema<IBridgeWithdrawalRecord>({
   accountId: { type: String, required: true, index: true },

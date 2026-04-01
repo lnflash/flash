@@ -21,9 +21,11 @@ import {
   BridgeKycPendingError,
   BridgeKycRejectedError,
   BridgeCustomerNotFoundError,
+  BridgeInsufficientFundsError,
 } from "./errors"
 import { RepositoryError } from "@domain/errors"
 import { toBridgeCustomerId, toBridgeExternalAccountId } from "@domain/primitives/bridge"
+import IbexClient from "@services/ibex/client"
 
 // ============ Types ============
 
@@ -336,20 +338,42 @@ const initiateWithdrawal = async (
       return new Error("Account has no Tron address. Create virtual account first.")
     }
 
-    // Verify external account exists
-    const externalAccounts = await BridgeAccountsRepo.findExternalAccountsByAccountId(
+    // Verify external account exists and belongs to this user (ENG-281)
+    const targetAccount = await BridgeAccountsRepo.findExternalAccountByOwner(
       accountId as string,
+      externalAccountId,
     )
-    if (externalAccounts instanceof Error) return externalAccounts
-
-    const targetAccount = externalAccounts.find(
-      (acc) => acc.bridgeExternalAccountId === externalAccountId,
-    )
-    if (!targetAccount) {
+    if (targetAccount instanceof Error) {
       return new Error("External account not found")
     }
     if (targetAccount.status !== "verified") {
       return new Error("External account is not verified")
+    }
+
+    // Verify sufficient USDT balance in IBEX Tron wallet (ENG-280)
+    const ibexReceiveInfoId = account.bridgeIbexReceiveInfoId
+    if (ibexReceiveInfoId) {
+      const balance = await IbexClient.getCryptoReceiveBalance(ibexReceiveInfoId)
+      if (balance instanceof Error) {
+        baseLogger.error({ accountId, error: balance }, "Failed to fetch IBEX Tron balance")
+        return balance
+      }
+
+      const requestedAmount = parseFloat(amount)
+      if (isNaN(requestedAmount) || requestedAmount <= 0) {
+        return new BridgeInsufficientFundsError("Invalid withdrawal amount")
+      }
+
+      const availableBalance = balance.asNumber()
+      if (requestedAmount > availableBalance) {
+        baseLogger.warn(
+          { accountId, requested: requestedAmount, available: availableBalance },
+          "Withdrawal amount exceeds USDT balance",
+        )
+        return new BridgeInsufficientFundsError(
+          `Insufficient balance. Requested: ${amount} USDT, available: ${availableBalance} USDT`,
+        )
+      }
     }
 
     // Create transfer via Bridge

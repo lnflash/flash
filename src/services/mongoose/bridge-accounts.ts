@@ -69,6 +69,26 @@ export const findExternalAccountsByAccountId = async (accountId: string) => {
   }
 }
 
+/**
+ * ENG-281: Find external account by BOTH accountId AND bridgeExternalAccountId.
+ * Using a single compound DB query (not post-query filter) to enforce ownership.
+ * Prevents users from referencing another user's external account ID.
+ */
+export const findExternalAccountByOwner = async (
+  accountId: string,
+  bridgeExternalAccountId: string,
+) => {
+  try {
+    const record = await BridgeExternalAccount.findOne({
+      accountId,
+      bridgeExternalAccountId,
+    })
+    return record || new RepositoryError("External account not found or not owned by this account")
+  } catch (error) {
+    return new RepositoryError(String(error))
+  }
+}
+
 export const updateExternalAccountStatus = async (
   bridgeId: BridgeExternalAccountId,
   status: "pending" | "verified" | "failed",

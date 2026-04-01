@@ -177,6 +177,7 @@ export const AccountsRepository = (): IAccountsRepository => {
       bridgeCustomerId?: BridgeCustomerId
       bridgeKycStatus?: "pending" | "approved" | "rejected"
       bridgeTronAddress?: string
+      bridgeIbexReceiveInfoId?: string // ENG-280: populated by ENG-277 IBEX provisioning
     },
   ): Promise<Account | RepositoryError> => {
     try {
@@ -292,4 +293,5 @@ const translateToAccount = (result: AccountRecord): Account => ({
   bridgeCustomerId: result.bridgeCustomerId as BridgeCustomerId | undefined,
   bridgeKycStatus: result.bridgeKycStatus,
   bridgeTronAddress: result.bridgeTronAddress,
+  bridgeIbexReceiveInfoId: result.bridgeIbexReceiveInfoId,
 })
