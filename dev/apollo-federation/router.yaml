@@ -3,12 +3,8 @@ headers:
     request:
       - propagate:
           matching: .*
-# include_subgraph_errors removed in v2 — subgraph errors are now always propagated in dev
-# and controlled via per-subgraph error masking (errors.subgraph)
-errors:
-  subgraph:
-    all:
-      redact: false
+include_subgraph_errors:
+  all: true
 sandbox:
   enabled: true
 homepage:
