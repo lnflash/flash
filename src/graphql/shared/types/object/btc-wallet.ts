@@ -50,7 +50,9 @@ const BtcWallet = GT.Object<Wallet>({
         if (balanceSats instanceof Error) {
           throw mapError(balanceSats)
         }
-        return balanceSats
+        // Return numeric satoshi count instead of serialized WalletBalance class instance
+        // See: https://github.com/lnflash/flash/issues/282 [Bounty] JMD Currency Precision
+        return Number(balanceSats.asCents(8))
       },
     },
     pendingIncomingBalance: {
