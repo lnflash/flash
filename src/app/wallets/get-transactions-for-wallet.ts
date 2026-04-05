@@ -32,27 +32,31 @@ export const getTransactionsForWallets = async ({
   })
 }
 
-export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] => {
+export const toWalletTransactions = (ibexResp: GResponse200, displayCurrency?: DisplayCurrency): IbexTransaction[] => {
+  const effectiveDisplayCurrency = displayCurrency || ("USD" as DisplayCurrency)
+
   return ibexResp.map(trx => {
     const currency = (trx.currencyId === 3 ? "USD" : "BTC") as WalletCurrency // WalletCurrency: "USD" | "BTC",
 
+    // Use Math.round instead of Math.floor to avoid truncating sub-dollar JMD prices to 0.
+    // Offset of 4n means the base is scaled by 10^4 to preserve precision as an integer.
     const settlementDisplayPrice: WalletMinorUnitDisplayPrice<WalletCurrency, DisplayCurrency> = {
-      base: trx.exchangeRateCurrencySats ? BigInt(Math.floor(trx.exchangeRateCurrencySats)) : 0n,
-      offset: 0n, // what is this?
-      displayCurrency: "USD" as DisplayCurrency,
+      base: trx.exchangeRateCurrencySats ? BigInt(Math.round(trx.exchangeRateCurrencySats * 10000)) : 0n,
+      offset: 4n,
+      displayCurrency: effectiveDisplayCurrency,
       walletCurrency: currency
     }
 
     const baseTrx: BaseWalletTransaction = {
-      walletId: (trx.accountId || "") as WalletId, 
+      walletId: (trx.accountId || "") as WalletId,
       settlementAmount: toSettlementAmount(trx.amount, trx.transactionTypeId, currency),
       settlementFee: asCurrency(trx.networkFee, currency),
-      settlementCurrency: currency, 
-      settlementDisplayAmount: `${trx.amount}`, 
-      settlementDisplayFee: `${trx.networkFee}`, 
+      settlementCurrency: currency,
+      settlementDisplayAmount: `${trx.amount}`,
+      settlementDisplayFee: `${trx.networkFee}`,
       settlementDisplayPrice: settlementDisplayPrice,
       createdAt: trx.createdAt ? new Date(trx.createdAt) : new Date(), // should always return
-      id: trx.id || "null", // "LedgerTransactionId" - this is likely unused 
+      id: trx.id || "null", // "LedgerTransactionId" - this is likely unused
       status: "success" as TxStatus, // assuming Ibex returns on completed
       memo: null, // query transaction details
     }
