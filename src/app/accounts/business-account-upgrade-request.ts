@@ -32,7 +32,7 @@ export type BankAccount = {
   bankBranch: string
   accountType: string
   currency: string
-  accountNumber: number
+  accountNumber: string
 }
 
 type ProUpgradeRequest = {
