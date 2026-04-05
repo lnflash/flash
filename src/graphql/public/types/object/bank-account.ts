@@ -7,7 +7,7 @@ const BankAccount = GT.Object({
     bankBranch: { type: GT.NonNull(GT.String) },
     accountType: { type: GT.NonNull(GT.String) },
     currency: { type: GT.NonNull(GT.String) },
-    accountNumber: { type: GT.NonNull(GT.Int) },
+    accountNumber: { type: GT.NonNull(GT.String) },
   }),
 })
 
