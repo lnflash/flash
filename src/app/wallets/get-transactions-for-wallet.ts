@@ -4,13 +4,18 @@ import { IbexError } from "@services/ibex/errors"
 import { baseLogger } from "@services/logger"
 import { GResponse200 } from "ibex-client"
 import { ConnectionArguments, ConnectionCursor } from "graphql-relay"
+import { ExchangeRates } from "@config"
+import { SATS_PER_BTC } from "@domain/bitcoin"
+import { CENTS_PER_USD } from "@domain/fiat"
 
 export const getTransactionsForWallets = async ({
   wallets,
   paginationArgs,
+  displayCurrency,
 }: {
   wallets: Wallet[]
   paginationArgs?: PaginationArgs
+  displayCurrency?: DisplayCurrency
 }): Promise<PartialResult<PaginatedArray<IbexTransaction>>> => {
   const walletIds = wallets.map((wallet) => wallet.id)
   
@@ -21,9 +26,11 @@ export const getTransactionsForWallets = async ({
     }))
   )
 
+  const resolvedDisplayCurrency = displayCurrency || ("USD" as DisplayCurrency)
+
   const transactions = ibexCalls.flatMap(resp => {
     if (resp instanceof IbexError) return [] 
-    else return toWalletTransactions(resp)
+    else return toWalletTransactions(resp, resolvedDisplayCurrency)
   })
 
   return PartialResult.ok({
@@ -32,14 +39,24 @@ export const getTransactionsForWallets = async ({
   })
 }
 
-export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] => {
+export const toWalletTransactions = (ibexResp: GResponse200, displayCurrency: DisplayCurrency = "USD" as DisplayCurrency): IbexTransaction[] => {
   return ibexResp.map(trx => {
     const currency = (trx.currencyId === 3 ? "USD" : "BTC") as WalletCurrency // WalletCurrency: "USD" | "BTC",
 
+    // Use ExchangeRates.jmd.sell for JMD display currency instead of BTC triangulation
+    let exchangeRateBase = trx.exchangeRateCurrencySats ? BigInt(Math.round(trx.exchangeRateCurrencySats)) : 0n
+    if (displayCurrency === ("JMD" as DisplayCurrency) && ExchangeRates?.jmd?.sell) {
+      const jmdRate = Number(ExchangeRates.jmd.sell)
+      if (jmdRate > 0) {
+        // Convert using static JMD/USD rate instead of BTC triangulation
+        exchangeRateBase = BigInt(Math.round(jmdRate * CENTS_PER_USD))
+      }
+    }
+
     const settlementDisplayPrice: WalletMinorUnitDisplayPrice<WalletCurrency, DisplayCurrency> = {
-      base: trx.exchangeRateCurrencySats ? BigInt(Math.floor(trx.exchangeRateCurrencySats)) : 0n,
-      offset: 0n, // what is this?
-      displayCurrency: "USD" as DisplayCurrency,
+      base: exchangeRateBase,
+      offset: BigInt(SATS_PER_BTC), // proper offset: satoshi precision (8 decimal places)
+      displayCurrency: displayCurrency,
       walletCurrency: currency
     }
 
