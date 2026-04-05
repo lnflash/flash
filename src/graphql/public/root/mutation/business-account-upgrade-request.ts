@@ -13,7 +13,10 @@ const BankAccountInput = GT.Input({
     bankBranch: { type: GT.NonNull(GT.String) },
     accountType: { type: GT.NonNull(GT.String) },
     currency: { type: GT.NonNull(GT.String) },
-    accountNumber: { type: GT.NonNull(GT.Int) },
+    // Bank account numbers are identifiers, not integers.
+    // They can exceed Int32 (2,147,483,647) for Jamaican and Caribbean banks.
+    // Using String preserves leading zeros and supports all account number lengths.
+    accountNumber: { type: GT.NonNull(GT.String) },
   }),
 })
 
