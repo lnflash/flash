@@ -1,15 +1,18 @@
 import { CsvWalletsExport } from "@services/ledger/csv-wallet-export"
-import { WalletsRepository } from "@services/mongoose"
+import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 
 export const getCSVForAccount = async (
   accountId: AccountId,
 ): Promise<string | ApplicationError> => {
+  const account = await AccountsRepository().findById(accountId)
+  if (account instanceof Error) return account
+
   const wallets = await WalletsRepository().listByAccountId(accountId)
   if (wallets instanceof Error) return wallets
 
   const csv = new CsvWalletsExport()
 
-  await csv.addWallets(wallets)
+  await csv.addWallets(wallets, account.displayCurrency)
 
   return csv.getBase64()
 }

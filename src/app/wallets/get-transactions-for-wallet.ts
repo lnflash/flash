@@ -1,4 +1,6 @@
+import { ExchangeRates } from "@config"
 import { PartialResult } from "@app/partial-result"
+import { CENTS_PER_USD, SAT_PRICE_PRECISION_OFFSET, UsdDisplayCurrency } from "@domain/fiat"
 import Ibex from "@services/ibex/client"
 import { IbexError } from "@services/ibex/errors"
 import { baseLogger } from "@services/logger"
@@ -8,9 +10,11 @@ import { ConnectionArguments, ConnectionCursor } from "graphql-relay"
 export const getTransactionsForWallets = async ({
   wallets,
   paginationArgs,
+  displayCurrency = UsdDisplayCurrency,
 }: {
   wallets: Wallet[]
   paginationArgs?: PaginationArgs
+  displayCurrency?: DisplayCurrency
 }): Promise<PartialResult<PaginatedArray<IbexTransaction>>> => {
   const walletIds = wallets.map((wallet) => wallet.id)
   
@@ -23,7 +27,7 @@ export const getTransactionsForWallets = async ({
 
   const transactions = ibexCalls.flatMap(resp => {
     if (resp instanceof IbexError) return [] 
-    else return toWalletTransactions(resp)
+    else return toWalletTransactions(resp, displayCurrency)
   })
 
   return PartialResult.ok({
@@ -32,14 +36,26 @@ export const getTransactionsForWallets = async ({
   })
 }
 
-export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] => {
+export const toWalletTransactions = (
+  ibexResp: GResponse200,
+  displayCurrency: DisplayCurrency = UsdDisplayCurrency,
+): IbexTransaction[] => {
+  const jmdPerUsdCent = Number(ExchangeRates.jmd.sell.asCents(2)) / CENTS_PER_USD
+
   return ibexResp.map(trx => {
     const currency = (trx.currencyId === 3 ? "USD" : "BTC") as WalletCurrency // WalletCurrency: "USD" | "BTC",
+    const exchangeRateCurrencySats = trx.exchangeRateCurrencySats ?? 0
+    const settlementDisplayPriceBase =
+      displayCurrency === "JMD"
+        ? exchangeRateCurrencySats * jmdPerUsdCent
+        : exchangeRateCurrencySats
 
     const settlementDisplayPrice: WalletMinorUnitDisplayPrice<WalletCurrency, DisplayCurrency> = {
-      base: trx.exchangeRateCurrencySats ? BigInt(Math.floor(trx.exchangeRateCurrencySats)) : 0n,
-      offset: 0n, // what is this?
-      displayCurrency: "USD" as DisplayCurrency,
+      base: BigInt(
+        Math.round(settlementDisplayPriceBase * 10 ** SAT_PRICE_PRECISION_OFFSET),
+      ),
+      offset: BigInt(SAT_PRICE_PRECISION_OFFSET),
+      displayCurrency,
       walletCurrency: currency
     }
 
@@ -48,8 +64,8 @@ export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] 
       settlementAmount: toSettlementAmount(trx.amount, trx.transactionTypeId, currency),
       settlementFee: asCurrency(trx.networkFee, currency),
       settlementCurrency: currency, 
-      settlementDisplayAmount: `${trx.amount}`, 
-      settlementDisplayFee: `${trx.networkFee}`, 
+      settlementDisplayAmount: `${displayCurrency === "JMD" ? trx.amount * jmdPerUsdCent : trx.amount}`, 
+      settlementDisplayFee: `${displayCurrency === "JMD" ? (trx.networkFee ?? 0) * jmdPerUsdCent : trx.networkFee}`, 
       settlementDisplayPrice: settlementDisplayPrice,
       createdAt: trx.createdAt ? new Date(trx.createdAt) : new Date(), // should always return
       id: trx.id || "null", // "LedgerTransactionId" - this is likely unused 

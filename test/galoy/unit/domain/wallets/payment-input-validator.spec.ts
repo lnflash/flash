@@ -44,6 +44,7 @@ describe("PaymentInputValidator", () => {
     currency: WalletCurrency.Btc,
     onChainAddressIdentifiers: [],
     onChainAddresses: () => [],
+    lnurlp: "LNURLP" as Lnurl,
   }
 
   const dummyRecipientWallet: Wallet = {
@@ -53,6 +54,7 @@ describe("PaymentInputValidator", () => {
     currency: WalletCurrency.Btc,
     onChainAddressIdentifiers: [],
     onChainAddresses: () => [],
+    lnurlp: "LNURLP" as Lnurl,
   }
 
   const wallets: { [key: WalletId]: Wallet } = {}
