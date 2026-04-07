@@ -627,6 +627,14 @@ const BridgeExternalAccountSchema = new Schema<IBridgeExternalAccountRecord>({
   createdAt: { type: Date, default: Date.now },
 })
 
+// CRIT-2 (ENG-281): Compound index enforces that a given bridgeExternalAccountId
+// can only be associated with one accountId at the DB layer, preventing cross-account
+// withdrawal attacks even if application-layer ownership checks are bypassed.
+BridgeExternalAccountSchema.index(
+  { accountId: 1, bridgeExternalAccountId: 1 },
+  { unique: true },
+)
+
 const BridgeWithdrawalSchema = new Schema<IBridgeWithdrawalRecord>({
   accountId: { type: String, required: true, index: true },
   bridgeTransferId: { type: String, required: true, unique: true },
