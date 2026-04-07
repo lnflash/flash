@@ -24,6 +24,10 @@ import {
 } from "./errors"
 import { RepositoryError } from "@domain/errors"
 import { toBridgeCustomerId, toBridgeExternalAccountId } from "@domain/primitives/bridge"
+import { getBalanceForWallet } from "@app/wallets/get-balance-for-wallet"
+import { WalletCurrency } from "@domain/shared"
+import { WalletsRepository } from "@services/mongoose/wallets"
+import { BridgeInsufficientFundsError } from "./errors"
 
 // ============ Types ============
 
@@ -336,7 +340,35 @@ const initiateWithdrawal = async (
       return new Error("Account has no Tron address. Create virtual account first.")
     }
 
-    // Verify external account exists
+    // CRIT-1 (ENG-280): Check USDT balance before initiating withdrawal
+    const wallets = await WalletsRepository().listByAccountId(accountId)
+    if (wallets instanceof Error) return wallets
+    const usdtWallet = wallets.find((w) => w.currency === WalletCurrency.Usdt)
+    if (!usdtWallet) {
+      return new BridgeInsufficientFundsError("No USDT wallet found on account")
+    }
+    const balance = await getBalanceForWallet({
+      walletId: usdtWallet.id,
+      currency: WalletCurrency.Usdt,
+    })
+    if (balance instanceof Error) return balance
+    const withdrawalAmount = parseFloat(amount)
+    if (isNaN(withdrawalAmount) || withdrawalAmount <= 0) {
+      return new BridgeInsufficientFundsError("Invalid withdrawal amount")
+    }
+    const availableBalance = parseFloat(balance.amount.toString())
+    if (availableBalance < withdrawalAmount) {
+      baseLogger.warn(
+        { accountId, availableBalance, withdrawalAmount, operation: "initiateWithdrawal" },
+        "Insufficient USDT balance for withdrawal",
+      )
+      return new BridgeInsufficientFundsError(
+        `Insufficient USDT balance: available ${availableBalance}, requested ${withdrawalAmount}`,
+      )
+    }
+
+    // CRIT-2 (ENG-281): Verify caller owns this external account (ownership enforced here
+    // and at DB level via compound index — see schema.ts BridgeExternalAccountSchema)
     const externalAccounts = await BridgeAccountsRepo.findExternalAccountsByAccountId(
       accountId as string,
     )
@@ -346,6 +378,7 @@ const initiateWithdrawal = async (
       (acc) => acc.bridgeExternalAccountId === externalAccountId,
     )
     if (!targetAccount) {
+      // Do not leak existence — return same error regardless of whether account exists
       return new Error("External account not found")
     }
     if (targetAccount.status !== "verified") {
