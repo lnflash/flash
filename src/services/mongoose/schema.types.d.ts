@@ -87,6 +87,11 @@ interface AccountRecord {
   created_at: Date
   onchain: OnChainObjectForUser[]
   defaultWalletId: WalletId
+  lnurlps: {
+    lnurlp: string
+    active: boolean
+    walletId?: WalletId
+  }[]
   displayCurrency?: string
   notificationSettings?: NotificationSettings
 

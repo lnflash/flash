@@ -26,6 +26,7 @@ export * from "./npub-by-username"
 export * from "./delete-business-map-info"
 export * from "./upgrade-device-account"
 export * from "./set-npub"
+export * from "./update-account-lnurlp"
 
 const accounts = AccountsRepository()
 

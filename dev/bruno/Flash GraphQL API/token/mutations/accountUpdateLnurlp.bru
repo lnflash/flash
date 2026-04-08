@@ -1,0 +1,44 @@
+meta {
+  name: accountUpdateLnurlp
+  type: graphql
+  seq: 39
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  mutation accountUpdateLnurlp($input: AccountUpdateLnurlpInput!) {
+    accountUpdateLnurlp(input: $input) {
+      errors {
+        message
+      }
+      account {
+        id
+        wallets {
+          id
+          walletCurrency
+        }
+      }
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "lnurlp": "lnurl1dp68gurn8ghj7mrww35xjct5wfhyummn9e3k7mf0d46ku6twv94k2mt9de6hc6twv3khymn9wshxxmmd9akxatnwv468gurn8ghj7ampd3kx2ar0veekzar0wd5xjtnrdakj7tnhv4kxctttdehhwm30d3h82unvwqhhymn9wshxxcpndphxyer99uh8wet9v56nz0"
+    }
+  }
+}
+
+settings {
+  encodeUrl: true
+}
