@@ -295,6 +295,16 @@ const AccountSchema = new Schema<AccountRecord>(
     },
 
     displayCurrency: String, // FIXME: should be an enum
+    lnurlps: {
+      type: [
+        {
+          lnurlp: { type: String, required: true },
+          active: { type: Boolean, required: true },
+          walletId: { type: String },
+        },
+      ],
+      default: [],
+    },
   },
   { id: false },
 )
@@ -566,4 +576,3 @@ export const WalletOnChainPendingReceive =
     "WalletOnChainPendingReceive",
     WalletOnChainPendingReceiveSchema,
   )
-  

@@ -101,6 +101,7 @@ export const AccountsRepository = (): IAccountsRepository => {
     defaultWalletId,
     withdrawFee,
     kratosUserId,
+    lnurlps,
     displayCurrency,
     notificationSettings,
     npub,
@@ -128,6 +129,7 @@ export const AccountsRepository = (): IAccountsRepository => {
           defaultWalletId,
           withdrawFee,
           kratosUserId,
+          lnurlps,
           displayCurrency,
           notificationSettings,
           npub,
@@ -243,4 +245,5 @@ const translateToAccount = (result: AccountRecord): Account => ({
 
   kratosUserId: result.kratosUserId as UserId,
   displayCurrency: (result.displayCurrency || UsdDisplayCurrency) as DisplayCurrency,
+  lnurlps: result.lnurlps,
 })
