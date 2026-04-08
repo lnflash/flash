@@ -1,4 +1,4 @@
-interface Account {
+finterface Account {
   callbackEndpoints: [CallbackEndpoint!]!
   csvTransactions(walletIds: [WalletId!]!): String!
   defaultWalletId: WalletId!
@@ -811,6 +811,7 @@ type Mutation {
   accountDelete: AccountDeletePayload!
   accountUpdateDefaultWalletId(input: AccountUpdateDefaultWalletIdInput!): AccountUpdateDefaultWalletIdPayload!
   accountUpdateDisplayCurrency(input: AccountUpdateDisplayCurrencyInput!): AccountUpdateDisplayCurrencyPayload!
+  accountUpdateLnurlp(input: AccountUpdateLnurlpInput!): AccountUpdateLnurlpPayload!
   businessAccountUpgradeRequest(input: BusinessAccountUpgradeRequestInput!): AccountUpgradePayload!
   callbackEndpointAdd(input: CallbackEndpointAddInput!): CallbackEndpointAddPayload!
   callbackEndpointDelete(input: CallbackEndpointDeleteInput!): SuccessPayload!
