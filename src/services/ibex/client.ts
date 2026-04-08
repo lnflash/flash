@@ -282,6 +282,30 @@ const getTronUsdtOption = async (): Promise<string | IbexError> => {
   return tronUsdt.id
 }
 
+/**
+ * Finds the IBEX option ID for Ethereum USDT (ERC20) receive, then creates a
+ * CryptoReceiveInfo for the given IBEX wallet. Returns the full CryptoReceiveInfo
+ * including the Ethereum address and option ID for storage.
+ */
+const createEthUsdtReceiveAddress = async (
+  walletId: IbexAccountId,
+): Promise<CryptoReceiveInfo | IbexError> => {
+  const options = await getCryptoReceiveOptions()
+  if (options instanceof IbexError) return options
+
+  const ethUsdt = options.find(
+    (opt) =>
+      opt.currency.toLowerCase() === "usdt" &&
+      (opt.network.toLowerCase() === "ethereum" || opt.network.toLowerCase() === "erc20"),
+  )
+
+  if (!ethUsdt) {
+    return new IbexError(new Error("Ethereum USDT (ERC20) option not found in IBEX"))
+  }
+
+  return createCryptoReceiveInfo(walletId, ethUsdt.id)
+}
+
 // const sendBetweenAccounts = async (
 //   sender: IbexAccount,
 //   receiver: IbexAccount,
@@ -323,5 +347,6 @@ export default wrapAsyncFunctionsToRunInSpan({
     getCryptoReceiveOptions,
     createCryptoReceiveInfo,
     getTronUsdtOption,
+    createEthUsdtReceiveAddress,
   },
 })
