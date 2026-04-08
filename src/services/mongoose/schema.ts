@@ -47,6 +47,17 @@ interface IBridgeWithdrawalRecord {
   updatedAt: Date
 }
 
+interface IBridgeDepositAddressRecord {
+  accountId: string
+  rail: string       // "ethereum", "tron", "solana", etc.
+  currency: string   // "usdt", "usdc", etc.
+  address: string    // chain-specific receive address
+  ibexReceiveInfoId: string  // IBEX CryptoReceiveInfo.id for balance queries
+  isActive: boolean
+  createdAt: Date
+  updatedAt: Date
+}
+
 const dbMetadataSchema = new Schema<DbMetadataRecord>({
   routingFeeLastEntry: Date, // TODO: rename to routingRevenueLastEntry
 })
@@ -335,10 +346,6 @@ const AccountSchema = new Schema<AccountRecord>(
       enum: ["pending", "approved", "rejected"],
       required: false,
     },
-    bridgeTronAddress: {
-      type: String,
-      required: false,
-    },
   },
   { id: false },
 )
@@ -347,8 +354,6 @@ AccountSchema.index({
   title: 1,
   coordinates: 1,
 })
-
-AccountSchema.index({ bridgeTronAddress: 1 }, { sparse: true })
 
 export const Account = mongoose.model<AccountRecord>("Account", AccountSchema)
 
@@ -659,4 +664,26 @@ export const BridgeExternalAccount = mongoose.model<IBridgeExternalAccountRecord
 export const BridgeWithdrawal = mongoose.model<IBridgeWithdrawalRecord>(
   "BridgeWithdrawal",
   BridgeWithdrawalSchema,
+)
+
+// ============ Bridge Deposit Address ============
+
+const BridgeDepositAddressSchema = new Schema<IBridgeDepositAddressRecord>(
+  {
+    accountId: { type: String, required: true },
+    rail: { type: String, required: true },
+    currency: { type: String, required: true },
+    address: { type: String, required: true },
+    ibexReceiveInfoId: { type: String, required: true },
+    isActive: { type: Boolean, default: true },
+  },
+  { timestamps: true },
+)
+
+BridgeDepositAddressSchema.index({ accountId: 1, isActive: 1 })
+BridgeDepositAddressSchema.index({ address: 1 }, { unique: true, sparse: true })
+
+export const BridgeDepositAddress = mongoose.model<IBridgeDepositAddressRecord>(
+  "BridgeDepositAddress",
+  BridgeDepositAddressSchema,
 )

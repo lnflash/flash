@@ -12,7 +12,11 @@ import BridgeClient, {
   Transfer,
 } from "./client"
 import * as BridgeAccountsRepo from "@services/mongoose/bridge-accounts"
+import * as BridgeDepositAddressRepo from "@services/mongoose/bridge-deposit-addresses"
 import { AccountsRepository } from "@services/mongoose/accounts"
+import { IdentityRepository } from "@services/kratos"
+import IbexService from "@services/ibex"
+import { WalletsRepository } from "@services/mongoose/wallets"
 import { wrapAsyncFunctionsToRunInSpan } from "@services/tracing"
 import { baseLogger } from "@services/logger"
 import {
@@ -121,11 +125,23 @@ const initiateKyc = async (accountId: AccountId): Promise<InitiateKycResult | Er
     // Create customer if not exists
     if (!customerId) {
       // For now, create with minimal data - in production, gather from account profile
+      // Fetch real email from Kratos identity
+      let customerEmail: string = `${account.id}@flash.app` // fallback (no real email risk)
+      const identity = await IdentityRepository().getIdentity(account.kratosUserId)
+      if (!(identity instanceof Error) && identity.email) {
+        customerEmail = identity.email
+      } else {
+        baseLogger.warn(
+          { accountId, kratosUserId: account.kratosUserId },
+          "Bridge KYC: could not resolve real email from Kratos — using account-id placeholder",
+        )
+      }
+
       const customer = await BridgeClient.createCustomer({
         type: "individual",
         first_name: account.username || "Flash",
         last_name: "User",
-        email: `${account.id}@flash.app`, // Placeholder - should use real email
+        email: customerEmail,
       })
 
       customerId = toBridgeCustomerId(customer.id)
@@ -200,25 +216,48 @@ const createVirtualAccount = async (
       return new BridgeKycPendingError("KYC not yet completed")
     }
 
-    // Get or create Tron address
-    let tronAddress = account.bridgeTronAddress
+    // Get or create crypto deposit address (chain-agnostic — stored in BridgeDepositAddress collection)
+    let depositAddress = await BridgeDepositAddressRepo.findActiveDepositAddress(
+      accountId as string,
+    )
+    if (depositAddress instanceof Error) return depositAddress
 
-    if (!tronAddress) {
-      // TODO: Integrate with IBEX to create Tron USDT receive address
-      // For now, this is a placeholder - actual implementation requires:
-      // 1. Call Ibex.getCryptoReceiveOptions() to get Tron USDT option
-      // 2. Call Ibex.createCryptoReceiveInfo() to get Tron address
-      // This will be implemented when IBEX crypto receive methods are available
-      return new Error("IBEX Tron address creation not yet implemented")
+    if (!depositAddress) {
+      // Find the account's IBEX wallet ID (wallet.id = IBEX account ID)
+      const wallets = await WalletsRepository().listByAccountId(accountId)
+      if (wallets instanceof Error) return wallets
+      const usdWallet = wallets.find((w) => w.currency === "USD")
+      if (!usdWallet) return new Error("No USD wallet found for account")
+
+      // Create ETH USDT receive address in IBEX
+      const receiveInfo = await IbexService.client.createEthUsdtReceiveAddress(usdWallet.id)
+      if (receiveInfo instanceof Error) return receiveInfo
+
+      const upsertResult = await BridgeDepositAddressRepo.upsertDepositAddress({
+        accountId: accountId as string,
+        rail: "ethereum",
+        currency: "usdt",
+        address: receiveInfo.address,
+        ibexReceiveInfoId: receiveInfo.id,
+      })
+      if (upsertResult instanceof Error) return upsertResult
+
+      depositAddress = upsertResult
+
+      baseLogger.info(
+        { accountId, rail: depositAddress.rail, address: depositAddress.address },
+        "Bridge: created new IBEX ETH USDT deposit address",
+      )
     }
 
-    // Create Bridge virtual account
+    // Create Bridge virtual account — destination is driven by the deposit address record,
+    // not hardcoded. Switching rails in the future = update the deposit address record only.
     const virtualAccount = await BridgeClient.createVirtualAccount(customerId, {
       source: { currency: "usd" },
       destination: {
-        currency: "usdt",
-        payment_rail: "tron",
-        address: tronAddress,
+        currency: depositAddress.currency as "usdt" | "usdc",
+        payment_rail: depositAddress.rail as any,
+        address: depositAddress.address,
       },
     })
 
@@ -246,6 +285,7 @@ const createVirtualAccount = async (
         accountId,
         operation: "createVirtualAccount",
         virtualAccountId: virtualAccount.id,
+        rail: depositAddress.rail,
       },
       "Bridge operation completed",
     )
@@ -335,9 +375,13 @@ const initiateWithdrawal = async (
       )
     }
 
-    const tronAddress = account.bridgeTronAddress
-    if (!tronAddress) {
-      return new Error("Account has no Tron address. Create virtual account first.")
+    // Resolve active deposit address for this account (source of the withdrawal)
+    const depositAddress = await BridgeDepositAddressRepo.findActiveDepositAddress(
+      accountId as string,
+    )
+    if (depositAddress instanceof Error) return depositAddress
+    if (!depositAddress) {
+      return new Error("Account has no deposit address. Create virtual account first.")
     }
 
     // CRIT-1 (ENG-280): Check USDT balance before initiating withdrawal
@@ -385,14 +429,14 @@ const initiateWithdrawal = async (
       return new Error("External account is not verified")
     }
 
-    // Create transfer via Bridge
+    // Create transfer via Bridge — source rail/address driven by deposit address record
     const transfer = await BridgeClient.createTransfer(customerId, {
       amount,
       on_behalf_of: customerId,
       source: {
-        payment_rail: "tron",
-        currency: "usdt",
-        from_address: tronAddress,
+        payment_rail: depositAddress.rail as any,
+        currency: depositAddress.currency,
+        from_address: depositAddress.address,
       },
       destination: {
         payment_rail: "ach",

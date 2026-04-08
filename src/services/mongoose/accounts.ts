@@ -176,7 +176,6 @@ export const AccountsRepository = (): IAccountsRepository => {
     fields: {
       bridgeCustomerId?: BridgeCustomerId
       bridgeKycStatus?: "pending" | "approved" | "rejected"
-      bridgeTronAddress?: string
     },
   ): Promise<Account | RepositoryError> => {
     try {
@@ -192,17 +191,7 @@ export const AccountsRepository = (): IAccountsRepository => {
     }
   }
 
-  const findByBridgeTronAddress = async (
-    address: string,
-  ): Promise<Account | RepositoryError> => {
-    try {
-      const result = await Account.findOne({ bridgeTronAddress: address })
-      if (!result) return new RepositoryError("Account not found for Tron address")
-      return translateToAccount(result)
-    } catch (error) {
-      return parseRepositoryError(error)
-    }
-  }
+
 
   const findByBridgeCustomerId = async (
     customerId: BridgeCustomerId,
@@ -226,7 +215,6 @@ export const AccountsRepository = (): IAccountsRepository => {
     findByNpub,
     update,
     updateBridgeFields,
-    findByBridgeTronAddress,
     findByBridgeCustomerId,
   }
 }
@@ -291,5 +279,4 @@ const translateToAccount = (result: AccountRecord): Account => ({
   displayCurrency: (result.displayCurrency || UsdDisplayCurrency) as DisplayCurrency,
   bridgeCustomerId: result.bridgeCustomerId as BridgeCustomerId | undefined,
   bridgeKycStatus: result.bridgeKycStatus,
-  bridgeTronAddress: result.bridgeTronAddress,
 })

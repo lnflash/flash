@@ -89,7 +89,8 @@ type Account = {
   // Bridge integration:
   bridgeCustomerId?: BridgeCustomerId
   bridgeKycStatus?: "pending" | "approved" | "rejected"
-  bridgeTronAddress?: string
+  // Crypto deposit address is stored in BridgeDepositAddress collection (not on Account)
+  // — see src/services/mongoose/bridge-deposit-addresses.ts
 }
 
 // deprecated
@@ -180,11 +181,9 @@ interface IAccountsRepository {
     fields: {
       bridgeCustomerId?: BridgeCustomerId
       bridgeKycStatus?: "pending" | "approved" | "rejected"
-      bridgeTronAddress?: string
     },
   ): Promise<Account | RepositoryError>
 
-  findByBridgeTronAddress(address: string): Promise<Account | RepositoryError>
 
   findByBridgeCustomerId(customerId: BridgeCustomerId): Promise<Account | RepositoryError>
 }

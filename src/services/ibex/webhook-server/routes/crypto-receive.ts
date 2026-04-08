@@ -1,5 +1,5 @@
 import express, { Request, Response } from "express"
-import { AccountsRepository } from "@services/mongoose/accounts"
+import { findActiveDepositAddressByAddress } from "@services/mongoose/bridge-deposit-addresses"
 import { listWalletsByAccountId } from "@app/wallets"
 import { WalletCurrency, USDTAmount } from "@domain/shared"
 import { baseLogger } from "@services/logger"
@@ -20,7 +20,14 @@ interface CryptoReceiveResult {
 const cryptoReceiveHandler = async (req: Request, res: Response) => {
   const { tx_hash, address, amount, currency, network } = req.body
 
-  if (!tx_hash || !address || !amount || currency !== "USDT" || network !== "tron") {
+  const normalizedNetwork = String(network || "").toLowerCase()
+  if (
+    !tx_hash ||
+    !address ||
+    !amount ||
+    String(currency).toUpperCase() !== "USDT" ||
+    !(normalizedNetwork === "ethereum" || normalizedNetwork === "erc20")
+  ) {
     baseLogger.warn(
       { tx_hash, address, amount, currency, network },
       "Invalid crypto receive payload",
@@ -30,16 +37,20 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
 
   const lockResult = await LockService().lockPaymentHash(tx_hash as any, async () => {
     try {
-      const account = await AccountsRepository().findByBridgeTronAddress(address)
-      if (account instanceof Error) {
-        baseLogger.error({ address, tx_hash }, "Account not found for Tron address")
-        return { status: "error", code: "account_not_found" } as CryptoReceiveResult
+      const depositAddress = await findActiveDepositAddressByAddress(address)
+      if (depositAddress instanceof Error) {
+        baseLogger.error({ address, tx_hash }, "Deposit address lookup failed")
+        return { status: "error", code: "deposit_address_lookup_failed" } as CryptoReceiveResult
+      }
+      if (!depositAddress) {
+        baseLogger.error({ address, tx_hash }, "Deposit address not found")
+        return { status: "error", code: "deposit_address_not_found" } as CryptoReceiveResult
       }
 
-      const wallets = await listWalletsByAccountId(account.id)
+      const wallets = await listWalletsByAccountId(depositAddress.accountId as any)
       if (wallets instanceof Error) {
         baseLogger.error(
-          { accountId: account.id, error: wallets },
+          { accountId: depositAddress.accountId, error: wallets },
           "Failed to list wallets",
         )
         return { status: "error", code: "wallet_list_failed" } as CryptoReceiveResult
@@ -47,11 +58,11 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
 
       const usdtWallet = wallets.find((w) => w.currency === WalletCurrency.Usdt)
       if (!usdtWallet) {
-        baseLogger.error({ accountId: account.id }, "USDT wallet not found")
+        baseLogger.error({ accountId: depositAddress.accountId }, "USDT wallet not found")
         return { status: "error", code: "usdt_wallet_not_found" } as CryptoReceiveResult
       }
 
-      const usdtAmount = USDTAmount.fromNumber(amount)
+      const usdtAmount = USDTAmount.smallestUnits(amount.toString())
       if (usdtAmount instanceof Error) {
         baseLogger.error({ amount, error: usdtAmount }, "Invalid USDT amount")
         return { status: "error", code: "invalid_amount" } as CryptoReceiveResult
@@ -59,11 +70,13 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
 
       baseLogger.info(
         {
-          accountId: account.id,
+          accountId: depositAddress.accountId,
           walletId: usdtWallet.id,
           amount: usdtAmount.asNumber(),
           tx_hash,
           address,
+          rail: depositAddress.rail,
+          currency: depositAddress.currency,
         },
         "USDT deposit received",
       )
@@ -88,7 +101,8 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
   }
 
   const statusMap: Record<string, number> = {
-    account_not_found: 404,
+    deposit_address_lookup_failed: 500,
+    deposit_address_not_found: 404,
     wallet_list_failed: 500,
     usdt_wallet_not_found: 404,
     invalid_amount: 400,

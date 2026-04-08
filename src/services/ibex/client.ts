@@ -248,16 +248,15 @@ const getCryptoReceiveOptions = async (): Promise<CryptoReceiveOption[] | IbexEr
     return new IbexError(err instanceof Error ? err : new Error(String(err)))
   }
 }
-
 const createCryptoReceiveInfo = async (
-  walletId: IbexAccountId,
-  optionId: string,
+  accountId: IbexAccountId,
+  body: CreateCryptoReceiveInfoRequest,
 ): Promise<CryptoReceiveInfo | IbexError> => {
   try {
     const resp = await (Ibex as any).createCryptoReceiveInfo({
-      wallet_id: walletId,
-      option_id: optionId,
-    } as CreateCryptoReceiveInfoRequest)
+      account_id: accountId,
+      ...body,
+    } as CreateCryptoReceiveInfoRequest & { account_id: IbexAccountId })
     if (resp instanceof Error) return new IbexError(resp)
     if (!resp.address) return new UnexpectedIbexResponse("Address not found")
     return resp
@@ -282,6 +281,31 @@ const getTronUsdtOption = async (): Promise<string | IbexError> => {
   return tronUsdt.id
 }
 
+/**
+ * Finds the IBEX option ID for Ethereum USDT (ERC20) receive, then creates a
+ * receive info record via the documented IBEX API (name + network).
+ */
+const createEthUsdtReceiveAddress = async (
+  walletId: IbexAccountId,
+): Promise<CryptoReceiveInfo | IbexError> => {
+  const options = await getCryptoReceiveOptions()
+  if (options instanceof IbexError) return options
+
+  const ethUsdt = options.find(
+    (opt) =>
+      opt.currency.toLowerCase() === "usdt" &&
+      (opt.network.toLowerCase() === "ethereum" || opt.network.toLowerCase() === "erc20"),
+  )
+
+  if (!ethUsdt) {
+    return new IbexError(new Error("Ethereum USDT (ERC20) option not found in IBEX"))
+  }
+
+  return createCryptoReceiveInfo(walletId, {
+    name: `bridge-usdt-${walletId}`,
+    network: ethUsdt.network,
+  })
+}
 // const sendBetweenAccounts = async (
 //   sender: IbexAccount,
 //   receiver: IbexAccount,
@@ -323,5 +347,6 @@ export default wrapAsyncFunctionsToRunInSpan({
     getCryptoReceiveOptions,
     createCryptoReceiveInfo,
     getTronUsdtOption,
+    createEthUsdtReceiveAddress,
   },
 })

@@ -45,7 +45,17 @@ export const verifyBridgeSignature = (publicKeyType: "kyc" | "deposit" | "transf
 
     // Verify signature using Bridge public key
     const publicKey = BridgeConfig.webhook.publicKeys[publicKeyType]
-    const rawBody = (req as any).rawBody || JSON.stringify(req.body)
+    // rawBody MUST be set by the express.json verify callback in webhook-server/index.ts.
+    // If it's missing, we must NOT silently fall back to JSON.stringify(req.body) —
+    // that would allow signature bypass on any payload where body-parser mutates whitespace.
+    const rawBody: string | undefined = (req as any).rawBody
+    if (rawBody === undefined) {
+      baseLogger.error(
+        "Bridge webhook: req.rawBody not set — express.raw() or verify callback missing. " +
+          "Check that express.json({ verify }) is applied BEFORE this route.",
+      )
+      return res.status(500).json({ error: "Webhook configuration error" })
+    }
     const payload = `${timestamp}.${rawBody}`
 
     try {

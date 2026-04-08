@@ -49,6 +49,6 @@ export interface CryptoReceiveInfo {
 }
 
 export interface CreateCryptoReceiveInfoRequest {
-  wallet_id: string
-  option_id: string
+  name: string
+  network: string
 }

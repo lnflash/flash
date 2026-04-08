@@ -51,12 +51,12 @@ User            Flash App          Flash Backend          Bridge.xyz            
 5.  **Redirect**: App opens the KYC link (Persona).
 6.  **Verification**: User completes identity verification.
 7.  **KYC Webhook**: Bridge sends `kyc.approved` webhook to Flash.
-8.  **Tron Address**: Flash requests a unique Tron USDT receive address from IBEX.
-9.  **Virtual Account**: Flash creates a Bridge virtual account linked to the Tron address.
+8.  **ETH USDT Receive Address**: Flash requests a unique ETH USDT receive address from IBEX via the published receive-info API.
+9.  **Virtual Account**: Flash creates a Bridge virtual account linked to the ETH USDT receive address.
 10. **Display Details**: User sees bank name, routing number, and account number in the app.
 11. **Bank Transfer**: User initiates a transfer from their banking app.
 12. **Conversion**: Bridge receives USD and converts it to USDT.
-13. **Settlement**: Bridge sends USDT to the user's Tron address.
+13. **Settlement**: Bridge sends USDT to the user's ETH USDT receive address.
 14. **IBEX Webhook**: IBEX detects the incoming USDT and notifies Flash.
 15. **Credit**: Flash credits the user's USDT wallet and sends a push notification.
 
