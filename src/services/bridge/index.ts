@@ -13,6 +13,7 @@ import BridgeClient, {
 } from "./client"
 import * as BridgeAccountsRepo from "@services/mongoose/bridge-accounts"
 import { AccountsRepository } from "@services/mongoose/accounts"
+import { IdentityRepository } from "@services/kratos"
 import { wrapAsyncFunctionsToRunInSpan } from "@services/tracing"
 import { baseLogger } from "@services/logger"
 import {
@@ -117,11 +118,23 @@ const initiateKyc = async (accountId: AccountId): Promise<InitiateKycResult | Er
     // Create customer if not exists
     if (!customerId) {
       // For now, create with minimal data - in production, gather from account profile
+      // Fetch real email from Kratos identity
+      let customerEmail: string = `${account.id}@flash.app` // fallback (no real email risk)
+      const identity = await IdentityRepository().getIdentity(account.kratosUserId)
+      if (!(identity instanceof Error) && identity.email) {
+        customerEmail = identity.email
+      } else {
+        baseLogger.warn(
+          { accountId, kratosUserId: account.kratosUserId },
+          "Bridge KYC: could not resolve real email from Kratos — using account-id placeholder",
+        )
+      }
+
       const customer = await BridgeClient.createCustomer({
         type: "individual",
         first_name: account.username || "Flash",
         last_name: "User",
-        email: `${account.id}@flash.app`, // Placeholder - should use real email
+        email: customerEmail,
       })
 
       customerId = toBridgeCustomerId(customer.id)
