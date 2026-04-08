@@ -9,9 +9,6 @@ export interface BridgeDepositAddressData {
   ibexReceiveInfoId: string
 }
 
-/**
- * Returns the active deposit address for an account, or null if none.
- */
 export const findActiveDepositAddress = async (
   accountId: string,
 ): Promise<BridgeDepositAddressData | null | RepositoryError> => {
@@ -30,15 +27,28 @@ export const findActiveDepositAddress = async (
   }
 }
 
-/**
- * Deactivates any existing deposit address for the account and inserts the new one.
- * Idempotent: if address already exists and is active, returns it unchanged.
- */
+export const findActiveDepositAddressByAddress = async (
+  address: string,
+): Promise<BridgeDepositAddressData | null | RepositoryError> => {
+  try {
+    const record = await BridgeDepositAddress.findOne({ address, isActive: true })
+    if (!record) return null
+    return {
+      accountId: record.accountId,
+      rail: record.rail,
+      currency: record.currency,
+      address: record.address,
+      ibexReceiveInfoId: record.ibexReceiveInfoId,
+    }
+  } catch (error) {
+    return new RepositoryError(String(error))
+  }
+}
+
 export const upsertDepositAddress = async (
   data: BridgeDepositAddressData,
 ): Promise<BridgeDepositAddressData | RepositoryError> => {
   try {
-    // Check if exact same address already exists and is active
     const existing = await BridgeDepositAddress.findOne({
       accountId: data.accountId,
       address: data.address,
@@ -54,13 +64,11 @@ export const upsertDepositAddress = async (
       }
     }
 
-    // Deactivate any previous active address for this account
     await BridgeDepositAddress.updateMany(
       { accountId: data.accountId, isActive: true },
       { isActive: false },
     )
 
-    // Insert new record
     const record = await BridgeDepositAddress.create({ ...data, isActive: true })
     return {
       accountId: record.accountId,
@@ -74,9 +82,6 @@ export const upsertDepositAddress = async (
   }
 }
 
-/**
- * Deactivates the active deposit address for an account (e.g. on rail change).
- */
 export const deactivateDepositAddress = async (
   accountId: string,
 ): Promise<void | RepositoryError> => {

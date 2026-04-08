@@ -38,16 +38,16 @@ The integration consists of three main components:
 ### On-Ramp (USD -> USDT)
 
 1.  **KYC**: User initiates KYC via Flash, which creates a Bridge customer and returns a KYC link (Persona).
-2.  **Virtual Account**: Once KYC is approved, Flash creates a Tron USDT address via IBEX and a Bridge virtual account pointing to that address.
+2.  **Virtual Account**: Once KYC is approved, Flash creates a Ethereum USDT (ERC20) receive address via IBEX, stored in the BridgeDepositAddress collection, and a Bridge virtual account pointing to that address.
 3.  **Deposit**: User sends USD to the virtual account.
-4.  **Conversion**: Bridge converts USD to USDT and sends it to the Tron address.
+4.  **Conversion**: Bridge converts USD to USDT and sends it to the Ethereum USDT address.
 5.  **Credit**: IBEX detects the USDT deposit and notifies Flash via webhook, which credits the user's wallet.
 
 ### Off-Ramp (USDT -> USD)
 
 1.  **Link Bank**: User links an external bank account via Bridge's hosted UI.
 2.  **Withdrawal**: User initiates a withdrawal in Flash.
-3.  **Transfer**: Flash creates a Bridge transfer from the user's Tron address to the linked bank account.
+3.  **Transfer**: Flash creates a Bridge transfer from the user's Ethereum USDT address to the linked bank account.
 4.  **Conversion**: Bridge converts USDT to USD and sends it to the bank via ACH.
 
 ## Technology Stack

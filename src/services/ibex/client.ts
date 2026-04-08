@@ -248,16 +248,15 @@ const getCryptoReceiveOptions = async (): Promise<CryptoReceiveOption[] | IbexEr
     return new IbexError(err instanceof Error ? err : new Error(String(err)))
   }
 }
-
 const createCryptoReceiveInfo = async (
-  walletId: IbexAccountId,
-  optionId: string,
+  accountId: IbexAccountId,
+  body: CreateCryptoReceiveInfoRequest,
 ): Promise<CryptoReceiveInfo | IbexError> => {
   try {
     const resp = await (Ibex as any).createCryptoReceiveInfo({
-      wallet_id: walletId,
-      option_id: optionId,
-    } as CreateCryptoReceiveInfoRequest)
+      account_id: accountId,
+      ...body,
+    } as CreateCryptoReceiveInfoRequest & { account_id: IbexAccountId })
     if (resp instanceof Error) return new IbexError(resp)
     if (!resp.address) return new UnexpectedIbexResponse("Address not found")
     return resp
@@ -284,8 +283,7 @@ const getTronUsdtOption = async (): Promise<string | IbexError> => {
 
 /**
  * Finds the IBEX option ID for Ethereum USDT (ERC20) receive, then creates a
- * CryptoReceiveInfo for the given IBEX wallet. Returns the full CryptoReceiveInfo
- * including the Ethereum address and option ID for storage.
+ * receive info record via the documented IBEX API (name + network).
  */
 const createEthUsdtReceiveAddress = async (
   walletId: IbexAccountId,
@@ -303,9 +301,11 @@ const createEthUsdtReceiveAddress = async (
     return new IbexError(new Error("Ethereum USDT (ERC20) option not found in IBEX"))
   }
 
-  return createCryptoReceiveInfo(walletId, ethUsdt.id)
+  return createCryptoReceiveInfo(walletId, {
+    name: `bridge-usdt-${walletId}`,
+    network: ethUsdt.network,
+  })
 }
-
 // const sendBetweenAccounts = async (
 //   sender: IbexAccount,
 //   receiver: IbexAccount,
