@@ -46,6 +46,7 @@ const sendToDevice = async (
     batchResp.responses
       .forEach((r, idx) => {
         if (!r.success) {
+          logger.warn({ error: r.error, token: tokens[idx] }, "Error sending notification to device")
           recordExceptionInCurrentSpan({
             error: new FirebaseMessageError(r.error as unknown as FirebaseError, tokens[idx]),
             level: ErrorLevel.Warn,
@@ -55,6 +56,11 @@ const sendToDevice = async (
           invalidTokens.push(tokens[idx])
         }
       })
+
+    logger.info(
+      { successCount: batchResp.successCount, failureCount: batchResp.failureCount },
+      "Notification batch response",
+    )
 
     // addAttributesToCurrentSpan({
     //   failureCount: response.failureCount,

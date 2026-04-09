@@ -16,17 +16,19 @@ export const NotificationChannel = {
   Push: "push",
 } as const
 
-export const GaloyNotificationCategories = {
+export const FlashNotificationCategories = {
   Payments: "Payments" as NotificationCategory,
   Balance: "Balance" as NotificationCategory,
   AdminPushNotification: "AdminPushNotification" as NotificationCategory,
+  Cashout: "Cashout" as NotificationCategory
 } as const
 
 export const checkedToNotificationCategory = (
   notificationCategory: string,
 ): NotificationCategory | ValidationError => {
-  // TODO: add validation
-  if (!notificationCategory) {
+
+  const validNotificationCategories = Object.values(FlashNotificationCategories)
+  if (!validNotificationCategories.includes(notificationCategory as NotificationCategory)) {
     return new InvalidNotificationSettingsError("Invalid notification category")
   }
 

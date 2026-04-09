@@ -9,7 +9,7 @@ let messaging: Messaging | null = null
 
 if (GOOGLE_APPLICATION_CREDENTIALS) {
   try {
-    baseLogger.info({ GOOGLE_APPLICATION_CREDENTIALS }, "Initializing Firebase Admin")
+    baseLogger.info("Firebase initalization")
     admin.initializeApp({
       credential: admin.credential.applicationDefault(),
     })
