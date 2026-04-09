@@ -3,7 +3,7 @@ import { apolloErrorResponse, mapAndParseErrorForGqlResponse } from "@graphql/er
 import { GT } from "@graphql/index";
 import SuccessPayload, { SUCCESS_RESPONSE } from "@graphql/shared/types/payload/success-payload";
 import { checkedToAccountUuid } from "@domain/accounts";
-import { toMoneyAmount } from "@domain/shared";
+import { toMoneyAmount, USDAmount } from "@domain/shared";
 import { InputValidationError } from "@graphql/error";
 
 
@@ -14,7 +14,7 @@ const CashoutNotificationSendInput = GT.Input({
             type: GT.NonNull(GT.String),
         },
         amount: {
-            type: GT.NonNull(GT.Float),
+            type: GT.NonNull(GT.Int),
         },
         currency: {
             type: GT.NonNull(GT.String)
