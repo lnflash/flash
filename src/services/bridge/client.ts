@@ -32,36 +32,14 @@ export class BridgeApiError extends Error {
 
 export interface CreateIndividualCustomerRequest {
   type: "individual"
-  first_name: string
-  last_name: string
+  full_name: string
   email: string
-  phone?: string
-  address?: {
-    street_line_1: string
-    street_line_2?: string
-    city: string
-    state?: string
-    postal_code: string
-    country: string
-  }
-  birth_date?: string
-  tax_identification_number?: string
 }
 
 export interface CreateBusinessCustomerRequest {
   type: "business"
-  business_name: string
+  full_name: string
   email: string
-  phone?: string
-  address?: {
-    street_line_1: string
-    street_line_2?: string
-    city: string
-    state?: string
-    postal_code: string
-    country: string
-  }
-  ein?: string
 }
 
 export type CreateCustomerRequest =
@@ -81,8 +59,15 @@ export interface Customer {
   business_name?: string
 }
 
+export interface InitiateKyc {
+  type: "individual" | "business"
+  email: string
+  full_name: string
+}
+
 export interface KycLink {
   kyc_link: string
+  kyc_status: string
   tos_link: string
   customer_id: string
 }
@@ -301,8 +286,13 @@ export class BridgeClient {
 
   // ============ KYC ============
 
-  async createKycLink(customerId: BridgeCustomerId): Promise<KycLink> {
-    return this.request<KycLink>("POST", "/kyc_links", { customer_id: customerId })
+  async createKycLink(initiateKyc: InitiateKyc): Promise<KycLink> {
+    return this.request<KycLink>("POST", "/kyc_links", { initiate_kyc: initiateKyc })
+  }
+
+  async getLatestKycLink(customerId: BridgeCustomerId): Promise<KycLink> {
+    const kycLinks = await this.request<ListResponse<KycLink>>("GET", `/kyc_links?customer_id=${customerId}`)
+    return kycLinks.data[0]
   }
 
   // ============ Virtual Accounts ============

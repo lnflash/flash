@@ -35,6 +35,7 @@ import { UsersRepository } from "@services/mongoose"
 
 type InitiateKycResult = {
   kycLink: string
+  kycStatus: string
   tosLink: string
 }
 
@@ -66,6 +67,7 @@ type WithdrawalResult = {
 }
 
 type KycStatusResult = "pending" | "approved" | "rejected" | null
+type InitateKycType = "individual" | "business"
 
 type VirtualAccountResult = {
   bridgeVirtualAccountId: string
@@ -108,7 +110,7 @@ const checkAccountLevel = async (
  * - Creates Bridge customer if not exists
  * - Returns KYC and TOS links
  */
-const initiateKyc = async (accountId: AccountId): Promise<InitiateKycResult | Error> => {
+const initiateKyc = async (accountId: AccountId, type: InitateKycType = "individual"): Promise<InitiateKycResult | Error> => {
   baseLogger.info({ accountId, operation: "initiateKyc" }, "Bridge operation started")
 
   const enabledCheck = checkBridgeEnabled()
@@ -122,18 +124,21 @@ const initiateKyc = async (accountId: AccountId): Promise<InitiateKycResult | Er
 
     // Create customer if not exists
     if (!customerId) {
-      // For now, create with minimal data - in production, gather from account profile
+      // create the KYC link and get the customer id
       const identity = await IdentityRepository().getIdentity(account.kratosUserId)
       if (identity instanceof Error) return new Error("Identity not found")
       if (!identity.email) return new Error("Email not found")
-      const customer = await BridgeClient.createCustomer({
-        type: "individual",
-        first_name: account.username || "Flash",
-        last_name: "User",
-        email: identity.email
-      })
 
-      customerId = toBridgeCustomerId(customer.id)
+
+      const kycLink = await BridgeClient.createKycLink({
+        type,
+        email: identity.email,
+        full_name: account.username || "Flash"
+      });
+
+      if (kycLink instanceof Error) return kycLink
+
+      customerId = toBridgeCustomerId(kycLink.customer_id)
 
       // Store customer ID
       const updateResult = await AccountsRepository().updateBridgeFields(accountId, {
@@ -143,11 +148,27 @@ const initiateKyc = async (accountId: AccountId): Promise<InitiateKycResult | Er
       if (updateResult instanceof Error) return updateResult
     }
 
-    // Create KYC link
-    const kycLink = await BridgeClient.createKycLink(customerId)
+    // If there is a customer id check if the latest kyc link is still valid
+    const latestKycLink = await BridgeClient.getLatestKycLink(customerId)
+    if (latestKycLink instanceof Error) return latestKycLink
+    if (latestKycLink.kyc_status !== "rejected" && latestKycLink.kyc_status !== "offboarded") return {
+      kycLink: latestKycLink.kyc_link,
+      kycStatus: latestKycLink.kyc_status,
+      tosLink: latestKycLink.tos_link,
+    }
+    const identity = await IdentityRepository().getIdentity(account.kratosUserId)
+    if (identity instanceof Error) return new Error("Identity not found")
+    if (!identity.email) return new Error("Email not found")
+
+    const kycLink = await BridgeClient.createKycLink({
+      type,
+      email: identity.email,
+      full_name: account.username || "Flash"
+    })
 
     const result: InitiateKycResult = {
       kycLink: kycLink.kyc_link,
+      kycStatus: kycLink.kyc_status,
       tosLink: kycLink.tos_link,
     }
 
