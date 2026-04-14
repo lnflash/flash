@@ -335,7 +335,7 @@ const AccountSchema = new Schema<AccountRecord>(
       enum: ["pending", "approved", "rejected"],
       required: false,
     },
-    bridgeTronAddress: {
+    bridgeEthereumAddress: {
       type: String,
       required: false,
     },
@@ -348,7 +348,7 @@ AccountSchema.index({
   coordinates: 1,
 })
 
-AccountSchema.index({ bridgeTronAddress: 1 }, { sparse: true })
+AccountSchema.index({ bridgeEthereumAddress: 1 }, { sparse: true })
 
 export const Account = mongoose.model<AccountRecord>("Account", AccountSchema)
 

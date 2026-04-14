@@ -1,6 +1,6 @@
 /**
  * Bridge.xyz API Client
- * Ported from bridge-mcp and extended with Tron/USDT support
+ * Ported from bridge-mcp and extended with Ethereum/USDT support
  */
 
 import { BridgeConfig } from "@config"
@@ -72,7 +72,7 @@ export interface KycLink {
   customer_id: string
 }
 
-// Extended payment rails to include Tron
+// Extended payment rails to include Ethereum
 export type PaymentRail =
   | "solana"
   | "ethereum"

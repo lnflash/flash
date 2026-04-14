@@ -266,17 +266,17 @@ const createCryptoReceiveInfo = async (
   }
 }
 
-const getTronUsdtOption = async (): Promise<string | IbexError> => {
+const getEthereumUsdtOption = async (): Promise<string | IbexError> => {
   const options = await getCryptoReceiveOptions()
   if (options instanceof IbexError) return options
 
   const tronUsdt = options.find(
     (opt) =>
-      opt.currency.toLowerCase() === "usdt" && opt.network.toLowerCase() === "tron",
+      opt.currency.toLowerCase() === "usdt" && opt.network.toLowerCase() === "ethereum",
   )
 
   if (!tronUsdt) {
-    return new IbexError(new Error("Tron USDT option not found"))
+    return new IbexError(new Error("Ethereum USDT option not found"))
   }
 
   return tronUsdt.id
@@ -322,6 +322,6 @@ export default wrapAsyncFunctionsToRunInSpan({
     getCryptoReceiveBalance,
     getCryptoReceiveOptions,
     createCryptoReceiveInfo,
-    getTronUsdtOption,
+    getEthereumUsdtOption,
   },
 })

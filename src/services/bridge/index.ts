@@ -143,7 +143,7 @@ const initiateKyc = async (accountId: AccountId, type: InitateKycType = "individ
       // Store customer ID
       const updateResult = await AccountsRepository().updateBridgeFields(accountId, {
         bridgeCustomerId: customerId,
-        bridgeKycStatus: "pending",
+        bridgeKycStatus: "not_started",
       })
       if (updateResult instanceof Error) return updateResult
     }
@@ -190,8 +190,8 @@ const initiateKyc = async (accountId: AccountId, type: InitateKycType = "individ
 /**
  * Creates a virtual account for receiving USD deposits
  * - Requires approved KYC
- * - Creates IBEX Tron USDT receive address
- * - Creates Bridge virtual account pointing to Tron address
+ * - Creates IBEX Ethereum USDT receive address
+ * - Creates Bridge virtual account pointing to Ethereum address
  */
 const createVirtualAccount = async (
   accountId: AccountId,
@@ -226,16 +226,16 @@ const createVirtualAccount = async (
       return new BridgeKycPendingError("KYC not yet completed")
     }
 
-    // Get or create Tron address
-    let tronAddress = account.bridgeTronAddress
+    // Get or create Ethereum address
+    let ethereumAddress = account.bridgeEthereumAddress
 
-    if (!tronAddress) {
-      // TODO: Integrate with IBEX to create Tron USDT receive address
+    if (!ethereumAddress) {
+      // TODO: Integrate with IBEX to create Ethereum USDT receive address
       // For now, this is a placeholder - actual implementation requires:
-      // 1. Call Ibex.getCryptoReceiveOptions() to get Tron USDT option
-      // 2. Call Ibex.createCryptoReceiveInfo() to get Tron address
+      // 1. Call Ibex.getCryptoReceiveOptions() to get Ethereum USDT option
+      // 2. Call Ibex.createCryptoReceiveInfo() to get Ethereum address
       // This will be implemented when IBEX crypto receive methods are available
-      return new Error("IBEX Tron address creation not yet implemented")
+      return new Error("IBEX Ethereum address creation not yet implemented")
     }
 
     // Create Bridge virtual account
@@ -243,8 +243,8 @@ const createVirtualAccount = async (
       source: { currency: "usd" },
       destination: {
         currency: "usdt",
-        payment_rail: "tron",
-        address: tronAddress,
+        payment_rail: "ethereum",
+        address: ethereumAddress,
       },
     })
 
@@ -361,9 +361,9 @@ const initiateWithdrawal = async (
       )
     }
 
-    const tronAddress = account.bridgeTronAddress
-    if (!tronAddress) {
-      return new Error("Account has no Tron address. Create virtual account first.")
+    const ethereumAddress = account.bridgeEthereumAddress
+    if (!ethereumAddress) {
+      return new Error("Account has no Ethereum address. Create virtual account first.")
     }
 
     // CRIT-1 (ENG-280): Check USDT balance before initiating withdrawal
@@ -416,9 +416,9 @@ const initiateWithdrawal = async (
       amount,
       on_behalf_of: customerId,
       source: {
-        payment_rail: "tron",
+        payment_rail: "ethereum",
         currency: "usdt",
-        from_address: tronAddress,
+        from_address: ethereumAddress,
       },
       destination: {
         payment_rail: "ach",
