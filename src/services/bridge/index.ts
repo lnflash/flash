@@ -28,6 +28,8 @@ import { getBalanceForWallet } from "@app/wallets/get-balance-for-wallet"
 import { WalletCurrency } from "@domain/shared"
 import { WalletsRepository } from "@services/mongoose/wallets"
 import { BridgeInsufficientFundsError } from "./errors"
+import { IdentityRepository } from "@services/kratos"
+import { UsersRepository } from "@services/mongoose"
 
 // ============ Types ============
 
@@ -121,11 +123,14 @@ const initiateKyc = async (accountId: AccountId): Promise<InitiateKycResult | Er
     // Create customer if not exists
     if (!customerId) {
       // For now, create with minimal data - in production, gather from account profile
+      const identity = await IdentityRepository().getIdentity(account.kratosUserId)
+      if (identity instanceof Error) return new Error("Identity not found")
+      if (!identity.email) return new Error("Email not found")
       const customer = await BridgeClient.createCustomer({
         type: "individual",
         first_name: account.username || "Flash",
         last_name: "User",
-        email: `${account.id}@flash.app`, // Placeholder - should use real email
+        email: identity.email
       })
 
       customerId = toBridgeCustomerId(customer.id)
