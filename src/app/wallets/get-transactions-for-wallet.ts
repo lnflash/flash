@@ -4,13 +4,16 @@ import { IbexError } from "@services/ibex/errors"
 import { baseLogger } from "@services/logger"
 import { GResponse200 } from "ibex-client"
 import { ConnectionArguments, ConnectionCursor } from "graphql-relay"
+import { SAT_PRICE_PRECISION_OFFSET } from "@domain/fiat"
 
 export const getTransactionsForWallets = async ({
   wallets,
   paginationArgs,
+  displayCurrency = "USD" as DisplayCurrency,
 }: {
   wallets: Wallet[]
   paginationArgs?: PaginationArgs
+  displayCurrency?: DisplayCurrency
 }): Promise<PartialResult<PaginatedArray<IbexTransaction>>> => {
   const walletIds = wallets.map((wallet) => wallet.id)
   
@@ -23,7 +26,7 @@ export const getTransactionsForWallets = async ({
 
   const transactions = ibexCalls.flatMap(resp => {
     if (resp instanceof IbexError) return [] 
-    else return toWalletTransactions(resp)
+    else return toWalletTransactions(resp, displayCurrency)
   })
 
   return PartialResult.ok({
@@ -32,14 +35,21 @@ export const getTransactionsForWallets = async ({
   })
 }
 
-export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] => {
+export const toWalletTransactions = (
+  ibexResp: GResponse200,
+  displayCurrency: DisplayCurrency = "USD" as DisplayCurrency
+): IbexTransaction[] => {
   return ibexResp.map(trx => {
     const currency = (trx.currencyId === 3 ? "USD" : "BTC") as WalletCurrency // WalletCurrency: "USD" | "BTC",
 
+    // Scale exchangeRateCurrencySats to preserve precision (matches priceAmountFromNumber pattern)
+    const exchangeRate = trx.exchangeRateCurrencySats ?? 0
+    const scaledBase = Math.round(exchangeRate * Math.pow(10, SAT_PRICE_PRECISION_OFFSET))
+
     const settlementDisplayPrice: WalletMinorUnitDisplayPrice<WalletCurrency, DisplayCurrency> = {
-      base: trx.exchangeRateCurrencySats ? BigInt(Math.floor(trx.exchangeRateCurrencySats)) : 0n,
-      offset: 0n, // what is this?
-      displayCurrency: "USD" as DisplayCurrency,
+      base: BigInt(scaledBase),
+      offset: BigInt(SAT_PRICE_PRECISION_OFFSET),
+      displayCurrency: displayCurrency,
       walletCurrency: currency
     }
 
