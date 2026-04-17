@@ -24,7 +24,7 @@ User            Flash App          Flash Backend          Bridge.xyz            
  | (Persona Flow)   |                   |                     |                   |
  |                  |                   | 7. kyc.approved     |                   |
  |                  |                   |<--------------------|                   |
- |                  |                   | 8. Create Tron Addr |                   |
+ |                  |                   | 8. Create Eth Addr  |                   |
  |                  |                   |---------------------------------------->|
  |                  |                   | 9. Create Virt Acc  |                   |
  |                  |                   |-------------------->|                   |
@@ -45,22 +45,100 @@ User            Flash App          Flash Backend          Bridge.xyz            
 ### Steps
 
 1.  **Initiate KYC**: User clicks "Deposit USD" in the app.
-2.  **GraphQL Mutation**: App calls `bridgeInitiateKyc`.
+2.  **GraphQL Mutation**: App calls [`bridgeInitiateKyc`](https://apidocs.bridge.xyz/api-reference/kyc-links/generate-the-links-needs-to-complete-kyc-for-an-individual-or-business).
 3.  **Bridge Customer**: Flash creates a Bridge customer if one doesn't exist.
 4.  **KYC Link**: Flash requests a KYC link from Bridge.
 5.  **Redirect**: App opens the KYC link (Persona).
 6.  **Verification**: User completes identity verification.
-7.  **KYC Webhook**: Bridge sends `kyc.approved` webhook to Flash.
-8.  **Tron Address**: Flash requests a unique Tron USDT receive address from IBEX.
-9.  **Virtual Account**: Flash creates a Bridge virtual account linked to the Tron address.
+7.  [**KYC Webhook**](https://apidocs.bridge.xyz/api-reference/webhooks/create-a-webhook-endpoint): Bridge sends `kyc.approved` webhook to Flash.
+8.  [**Ethereum Address**](https://docs.ibexmercado.com/reference/create-receive-info): Flash requests a unique Ethereum USDT receive address from IBEX.
+9.  [**Virtual Account**](https://apidocs.bridge.xyz/platform/orchestration/virtual_accounts/virtual-account): Flash creates a Bridge virtual account linked to the Ethereum address.
 10. **Display Details**: User sees bank name, routing number, and account number in the app.
 11. **Bank Transfer**: User initiates a transfer from their banking app.
-12. **Conversion**: Bridge receives USD and converts it to USDT.
-13. **Settlement**: Bridge sends USDT to the user's Tron address.
-14. **IBEX Webhook**: IBEX detects the incoming USDT and notifies Flash.
+12. [**Conversion**](https://apidocs.bridge.xyz/platform/orchestration/virtual_accounts/virtual-account): Bridge receives USD and converts it to USDT.
+13. [**Settlement**](https://apidocs.bridge.xyz/platform/orchestration/virtual_accounts/virtual-account): Bridge sends USDT to the user's Ethereum address.
+14. [**IBEX Webhook**](https://docs.ibexmercado.com/reference/trigger-transaction-webhook): IBEX detects the incoming USDT and notifies Flash.
 15. **Credit**: Flash credits the user's USDT wallet and sends a push notification.
 
+
+**NOTES** :
+
+1. When the `bridgeInitKyc` is called, we ask for the user's email, full name, and type of kyc (individual or business) and if the user already has a customer id, we check if the latest kyc link is still valid and if not, we create a new one then give the user the kyc link to complete the kyc process. (3. & 4.)
+
+2. The virtual account handles conversion automatically. We don't need a separate conversion step. (12.) When we are creating the virtual account we have to set the destination object with `USDT` as currency and the appropriate `payment_rail` `ethereum` in our case and the `address` field set to the user's IBEX Ethereum address.
+Each time a user deposits USD into their virtual account, Bridge will automatically convert it to USDT and send it to the user's IBEX Ethereum address and we will be notified via the webhook we set up in step 14.
+
+### High-Level Integrated On-Ramp Flow
+
+This diagram abstracts many internal operations handled automatically by Bridge and IBEX to show the core user journey, while highlighting the `bridgeInitKyc` orchestration.
+
+> [!NOTE]
+> The `bridgeInitKyc` GraphQL resolver calls the `initiateKyc` service function, which triggers the Bridge API `createKycLink` to handle customer and link management.
+
+#### ASCII Version
+```ascii
+User            Flash App          Flash Backend          Bridge.xyz             IBEX
+ |                  |                   |                     |                   |
+ | 1. Start KYC     |                   |                     |                   |
+ |----------------->| 2. bridgeInitKyc  |                     |                   |
+ |                  |    (Resolver)     |                     |                   |
+ |                  |        |          |                     |                   |
+ |                  |        v          |                     |                   |
+ |                  |    initiateKyc    |                     |                   |
+ |                  |    (Function)     |                     |                   |
+ |                  |        |          |                     |                   |
+ |                  |        v          |                     |                   |
+ |                  |    createKycLink  |                     |                   |
+ |                  |    (Bridge API)   |                     |                   |
+ |                  |                   |                     |                   |
+ |                  | 3. KYC Link       |                     |                   |
+ |                  |<------------------|                     |                   |
+ | 4. Complete KYC  |                   |                     |                   |
+ |----------------->|                   |                     |                   |
+ |                  |                   | 5. kyc.approved     |                   |
+ |                  |                   |<--------------------|                   |
+ | 6. View Bank Det |                   |                     |                   |
+ |<-----------------|                   |                     |                   |
+ | 7. Transfer USD  |                   |                     |                   |
+ |----------------------------------------------------------->|                   |
+ |                  |                   |                     |                   |
+ |                  |                   |             (Bridge -> IBEX Automagic)  |
+ |                  |                   |                     |                   |
+ |                  |                   | 8. Crypto Webhook   |                   |
+ |                  |                   |<----------------------------------------|
+ |                  | 9. Notify User    |                     |                   |
+ |<-----------------|                   |                     |                   |
+```
+
+#### Mermaid Version (Recommended for Rendering)
+```mermaid
+sequenceDiagram
+    autonumber
+    participant User
+    participant App as Flash App
+    participant Backend as Flash Backend
+    participant Bridge as Bridge.xyz
+    participant IBEX
+
+    User->>App: Start KYC
+    App->>Backend: bridgeInitKyc (Resolver)
+    rect rgb(240, 240, 240)
+        Note over Backend, Bridge: Orchestration (initiateKyc -> createKycLink)
+    end
+    Backend->>App: KYC Link (Persona)
+    User->>Bridge: Complete Verification
+    Bridge-->>Backend: Webhook: kyc.approved
+    Note over Backend, IBEX: Internal: Auto Setup Virtual Account
+    App->>User: Display Bank Details
+    User->>Bridge: Transfer USD (ACH/Wire)
+    Note over Bridge, IBEX: Automatic Conversion & Settlement
+    IBEX-->>Backend: Webhook: USDT Deposit Received
+    Backend->>User: Notify: Wallet Credited
+```
+
 ---
+
+
 
 ## Off-Ramp Flow (USDT -> USD)
 
