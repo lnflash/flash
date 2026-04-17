@@ -1208,6 +1208,7 @@ type Query {
   btcPrice(currency: DisplayCurrency! = "USD"): Price @deprecated(reason: "Deprecated in favor of realtimePrice")
   btcPriceList(range: PriceGraphRange!): [PricePoint]
   businessMapMarkers: [MapMarker!]!
+  closestMerchants(latitude: Float!, longitude: Float!): [MapMarker!]!
   currencyList: [Currency!]!
   globals: Globals
   isFlashNpub(input: IsFlashNpubInput!): IsFlashNpubPayload

@@ -36,3 +36,13 @@ export const getMerchantsByUsername = async (
 
   return result
 }
+
+export const getClosestMerchants = async ({
+  latitude,
+  longitude,
+}: {
+  latitude: number
+  longitude: number
+}): Promise<BusinessMapMarker[] | RepositoryError> => {
+  return merchants.findClosest({ latitude, longitude, limit: 3 })
+}
