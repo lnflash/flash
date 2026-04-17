@@ -460,6 +460,8 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "IbexError":
     case "UnexpectedIbexResponse":
       return new IbexError(baseLogger)
+    case "IbexUnavailableError":
+      return new IbexError(baseLogger)
     case "OfferNotFound":
       return new NotFoundError({ 
         message: "Offer not available. Try again.", 

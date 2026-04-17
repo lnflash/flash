@@ -8,18 +8,47 @@ import { Redis }  from "./cache"
 import { GetFeeEstimateArgs, IbexAccountDetails, IbexFeeEstimation, IbexInvoiceArgs, PayInvoiceArgs, SendOnchainArgs } from "./types";
 import { USDAmount } from "@domain/shared";
 
-const Ibex = new IbexClient(
-  IbexConfig.url, 
-  { email: IbexConfig.email, password: IbexConfig.password }, 
-  Redis
-)
+// Lazy IBEX client initialization - non-fatal if IBEX is unreachable at startup
+let _ibexClient: InstanceType<typeof IbexClient> | null = null
+let _ibexAvailable = true
+
+const getIbexClient = (): InstanceType<typeof IbexClient> | null => {
+  if (_ibexClient) return _ibexClient
+  if (!_ibexAvailable) return null
+  try {
+    _ibexClient = new IbexClient(
+      IbexConfig.url,
+      { email: IbexConfig.email, password: IbexConfig.password },
+      Redis,
+    )
+    return _ibexClient
+  } catch (err) {
+    _ibexAvailable = false
+    return null
+  }
+}
+
+// Wrapper to handle IBEX unavailability
+const withIbex = <T>(fn: (ibex: InstanceType<typeof IbexClient>) => Promise<T | IbexError>) => {
+  return async (): Promise<T | IbexError> => {
+    const ibex = getIbexClient()
+    if (!ibex) {
+      return new (require("./errors").IbexUnavailableError)()
+    }
+    return fn(ibex)
+  }
+}
 
 const createAccount = async (name: string, currencyId: IbexCurrencyId): Promise<CreateAccountResponse201 | IbexError> => {
-  return Ibex.createAccount({ name, currencyId }).then(errorHandler)
+  const ibex = getIbexClient()
+  if (!ibex) { const { IbexUnavailableError } = require('./errors'); return new IbexUnavailableError() }
+  return ibex.createAccount({ name, currencyId }).then(errorHandler)
 }
 
 const getAccountDetails = async (accountId: IbexAccountId): Promise<IbexAccountDetails | IbexError> => {
-  return Ibex.getAccountDetails({ accountId })
+  const ibex = getIbexClient()
+  if (!ibex) { const { IbexUnavailableError } = require('./errors'); return new IbexUnavailableError() }
+  return ibex.getAccountDetails({ accountId })
     .then(r => {
       if (r instanceof Error) return r
       else {
@@ -37,11 +66,15 @@ const getAccountDetails = async (accountId: IbexAccountId): Promise<IbexAccountD
 }
 
 const getAccountTransactions = async (params: GMetadataParam): Promise<GResponse200 | IbexError> => {
+  const ibex = getIbexClient()
+  if (!ibex) { const { IbexUnavailableError } = require('./errors'); return new IbexUnavailableError() }
   addAttributesToCurrentSpan({ "request.params": JSON.stringify(params) })
-  return Ibex.getAccountTransactions(params).then(errorHandler)
+  return ibex.getAccountTransactions(params).then(errorHandler)
 }
 
 const addInvoice = async (args: IbexInvoiceArgs): Promise<AddInvoiceResponse201 | IbexError> => {
+  const ibex = getIbexClient()
+  if (!ibex) { const { IbexUnavailableError } = require('./errors'); return new IbexUnavailableError() }
   const body = { 
       ...args, 
       amount: args.amount?.toIbex(), 
@@ -49,15 +82,19 @@ const addInvoice = async (args: IbexInvoiceArgs): Promise<AddInvoiceResponse201 
       webhookSecret: WebhookServer.secret, 
   } as AddInvoiceBodyParam
   addAttributesToCurrentSpan({ "request.params": JSON.stringify(body) })
-  return Ibex.addInvoice(body).then(errorHandler)
+  return ibex.addInvoice(body).then(errorHandler)
 }
 
 const getTransactionDetails = async (id: IbexTransactionId): Promise<GetTransactionDetails1Response200 | IbexError> => {
-  return Ibex.getTransactionDetails({ transaction_id: id }).then(errorHandler)
+  const ibex = getIbexClient()
+  if (!ibex) { const { IbexUnavailableError } = require('./errors'); return new IbexUnavailableError() }
+  return ibex.getTransactionDetails({ transaction_id: id }).then(errorHandler)
 }
 
 const generateBitcoinAddress = async (accountId: IbexAccountId): Promise<GenerateBitcoinAddressResponse201 | IbexError> => {
-  return Ibex.generateBitcoinAddress({
+  const ibex = getIbexClient()
+  if (!ibex) { const { IbexUnavailableError } = require('./errors'); return new IbexUnavailableError() }
+  return ibex.generateBitcoinAddress({
     accountId,
     webhookUrl: WebhookServer.endpoints.onReceive.onchain,
     webhookSecret: WebhookServer.secret, 
@@ -65,15 +102,19 @@ const generateBitcoinAddress = async (accountId: IbexAccountId): Promise<Generat
 }
 
 const invoiceFromHash = async (invoice_hash: PaymentHash): Promise<InvoiceFromHashResponse200 | IbexError> => {
-  return Ibex.invoiceFromHash({ invoice_hash }).then(errorHandler)
+  const ibex = getIbexClient()
+  if (!ibex) { const { IbexUnavailableError } = require('./errors'); return new IbexUnavailableError() }
+  return ibex.invoiceFromHash({ invoice_hash }).then(errorHandler)
 }
 
 // Only supports USD for now
 const getLnFeeEstimation = async (args: GetFeeEstimateArgs): Promise<IbexFeeEstimation | IbexError> => {
+  const ibex = getIbexClient()
+  if (!ibex) { const { IbexUnavailableError } = require('./errors'); return new IbexUnavailableError() }
   const currencyId = USDAmount.currencyId
   // const amount = (args.send instanceof IbexCurrency) ? args.send.amount.toString() : undefined 
  
-  const resp = await Ibex.getFeeEstimation({
+  const resp = await ibex.getFeeEstimation({
     bolt11: args.invoice as string,
     amount: args.send?.asDollars(8), 
     currencyId: currencyId.toString(),
@@ -94,6 +135,8 @@ const getLnFeeEstimation = async (args: GetFeeEstimateArgs): Promise<IbexFeeEsti
 }
 
 const payInvoice = async (args: PayInvoiceArgs): Promise<PayInvoiceV2Response200 | IbexError> => {
+  const ibex = getIbexClient()
+  if (!ibex) { const { IbexUnavailableError } = require('./errors'); return new IbexUnavailableError() }
   const bodyWithHooks = { 
       accountId: args.accountId,
       bolt11: args.invoice,
@@ -102,12 +145,13 @@ const payInvoice = async (args: PayInvoiceArgs): Promise<PayInvoiceV2Response200
       webhookSecret: WebhookServer.secret, 
   } as PayInvoiceV2BodyParam
   addAttributesToCurrentSpan({ "request.params": JSON.stringify(bodyWithHooks) })
-  return Ibex.payInvoiceV2(bodyWithHooks).then(errorHandler)
+  return ibex.payInvoiceV2(bodyWithHooks).then(errorHandler)
 }
 
 // onchain transactions are typically high-value
 // logging all Ibex responses until we have higher confidence & higher volume
 const sendOnchain = async (args: SendOnchainArgs): Promise<SendToAddressCopyResponse200 | IbexError> => {
+    const ibex = getIbexClient(); if (!ibex) { const { IbexUnavailableError } = require('./errors'); return new IbexUnavailableError() }
     const body = { 
         accountId: args.accountId,
         address: args.address,
@@ -116,11 +160,12 @@ const sendOnchain = async (args: SendOnchainArgs): Promise<SendToAddressCopyResp
         webhookSecret: WebhookServer.secret, 
     } as SendToAddressCopyBodyParam
     addAttributesToCurrentSpan({ "request.params": JSON.stringify(body) })
-    return Ibex.sendToAddressV2(body).then(errorHandler)
+    return ibex.sendToAddressV2(body).then(errorHandler)
 }
 
 const estimateOnchainFee = async (send: USDAmount, address: OnChainAddress): Promise<EstimateFeeCopyResponse200 | IbexError> => {
-  return Ibex.estimateFeeV2({ 
+  const ibex = getIbexClient(); if (!ibex) { const { IbexUnavailableError } = require('./errors'); return new IbexUnavailableError() }
+  return ibex.estimateFeeV2({ 
     amount: send.toIbex(), 
     "currency-id": USDAmount.currencyId.toString(), 
     address
@@ -128,21 +173,24 @@ const estimateOnchainFee = async (send: USDAmount, address: OnChainAddress): Pro
 }
     
 const createLnurlPay = async (body: CreateLnurlPayBodyParam): Promise<CreateLnurlPayResponse201 | IbexError> => {
+  const ibex = getIbexClient(); if (!ibex) { const { IbexUnavailableError } = require('./errors'); return new IbexUnavailableError() }
   const bodyWithHooks = { 
       ...body,
       webhookUrl: WebhookServer.endpoints.onReceive.lnurl,
       webhookSecret: WebhookServer.secret, 
   } as CreateLnurlPayBodyParam
   addAttributesToCurrentSpan({ "request.params": JSON.stringify(bodyWithHooks) })
-  return Ibex.createLnurlPay(bodyWithHooks).then(errorHandler)
+  return ibex.createLnurlPay(bodyWithHooks).then(errorHandler)
 }
 
 const decodeLnurl = async (lnurl: DecodeLnurlMetadataParam): Promise<DecodeLnurlResponse200 | IbexError> => {
-  return Ibex.decodeLnurl(lnurl).then(errorHandler)
+  const ibex = getIbexClient(); if (!ibex) { const { IbexUnavailableError } = require('./errors'); return new IbexUnavailableError() }
+  return ibex.decodeLnurl(lnurl).then(errorHandler)
 }
     
 const payToLnurl = async (args: PayLnurlArgs): Promise<PayToALnurlPayResponse201 | IbexError> => {
-  return Ibex.payToLnurl({
+  const ibex = getIbexClient(); if (!ibex) { const { IbexUnavailableError } = require('./errors'); return new IbexUnavailableError() }
+  return ibex.payToLnurl({
     accountId: args.accountId,
     amount: args.send.amount,
     params: args.params,
