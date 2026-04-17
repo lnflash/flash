@@ -396,6 +396,59 @@ const MerchantSchema = new Schema<MerchantRecord>({
 
 export const Merchant = mongoose.model<MerchantRecord>("Merchant", MerchantSchema)
 
+// Featured Merchants - curated list shown to users as favorites
+const FeaturedMerchantSchema = new Schema<FeaturedMerchantRecord>(
+  {
+    id: {
+      type: String,
+      index: true,
+      unique: true,
+      sparse: true,
+      required: true,
+      default: () => crypto.randomUUID(),
+    },
+    merchantUsername: {
+      type: String,
+      required: true,
+      index: true,
+    },
+    title: {
+      type: String,
+      required: true,
+    },
+    description: {
+      type: String,
+      default: "",
+    },
+    priority: {
+      type: Number,
+      default: 0,
+      index: true,
+    },
+    active: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now,
+    },
+    updatedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { id: false },
+)
+
+FeaturedMerchantSchema.index({ priority: -1, createdAt: -1 })
+
+export const FeaturedMerchant = mongoose.model<FeaturedMerchantRecord>(
+  "FeaturedMerchant",
+  FeaturedMerchantSchema,
+)
+
 const AccountIpsSchema = new Schema<AccountIpsRecord>({
   ip: {
     type: String,

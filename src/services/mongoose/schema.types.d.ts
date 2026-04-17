@@ -112,6 +112,17 @@ interface MerchantRecord {
   validated: boolean
 }
 
+interface FeaturedMerchantRecord {
+  id: string
+  merchantUsername: string
+  title: string
+  description: string
+  priority: number
+  active: boolean
+  createdAt: Date
+  updatedAt: Date
+}
+
 interface QuizCompletedRecord {
   accountId: string
   quizId: string

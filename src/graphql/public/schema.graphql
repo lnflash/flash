@@ -809,6 +809,35 @@ type Merchant {
   validated: Boolean!
 }
 
+type FeaturedMerchant {
+  id: ID!
+  merchantUsername: String!
+  title: String!
+  description: String
+  priority: Int!
+  active: Boolean!
+}
+
+input FeaturedMerchantInput {
+  merchantUsername: String!
+  title: String!
+  description: String
+  priority: Int
+}
+
+input UpdateFeaturedMerchantInput {
+  id: ID!
+  title: String
+  description: String
+  priority: Int
+  active: Boolean
+}
+
+type FeaturedMerchantPayload {
+  errors: [Error!]!
+  featuredMerchant: FeaturedMerchant
+}
+
 input MerchantMapSuggestInput {
   latitude: Float!
   longitude: Float!
@@ -938,6 +967,9 @@ type Mutation {
   lnUsdInvoiceCreateOnBehalfOfRecipient(input: LnUsdInvoiceCreateOnBehalfOfRecipientInput!): LnInvoicePayload!
   lnUsdInvoiceFeeProbe(input: LnUsdInvoiceFeeProbeInput!): CentAmountPayload!
   merchantMapSuggest(input: MerchantMapSuggestInput!): MerchantPayload!
+  addFlashFavorite(input: FeaturedMerchantInput!): FeaturedMerchantPayload!
+  updateFlashFavorite(input: UpdateFeaturedMerchantInput!): FeaturedMerchantPayload!
+  removeFlashFavorite(id: ID!): FeaturedMerchantPayload!
   onChainAddressCreate(input: OnChainAddressCreateInput!): OnChainAddressPayload!
   onChainAddressCurrent(input: OnChainAddressCurrentInput!): OnChainAddressPayload!
   onChainPaymentSend(input: OnChainPaymentSendInput!): PaymentSendPayload!
@@ -1208,6 +1240,7 @@ type Query {
   btcPrice(currency: DisplayCurrency! = "USD"): Price @deprecated(reason: "Deprecated in favor of realtimePrice")
   btcPriceList(range: PriceGraphRange!): [PricePoint]
   businessMapMarkers: [MapMarker!]!
+  flashFavorites: [FeaturedMerchant!]!
   currencyList: [Currency!]!
   globals: Globals
   isFlashNpub(input: IsFlashNpubInput!): IsFlashNpubPayload
