@@ -4,26 +4,31 @@ import { IbexError } from "@services/ibex/errors"
 import { baseLogger } from "@services/logger"
 import { GResponse200 } from "ibex-client"
 import { ConnectionArguments, ConnectionCursor } from "graphql-relay"
+import { DisplayCurrency } from "@domain/fiat"
 
 export const getTransactionsForWallets = async ({
   wallets,
   paginationArgs,
+  displayCurrency,
 }: {
   wallets: Wallet[]
   paginationArgs?: PaginationArgs
+  displayCurrency?: DisplayCurrency
 }): Promise<PartialResult<PaginatedArray<IbexTransaction>>> => {
   const walletIds = wallets.map((wallet) => wallet.id)
-  
+
   const ibexCalls = await Promise.all(walletIds
-    .map(id => Ibex.getAccountTransactions({ 
+    .map(id => Ibex.getAccountTransactions({
       account_id: id,
       ...toIbexPaginationArgs(paginationArgs)
     }))
   )
 
+  const userDisplayCurrency = displayCurrency || ("USD" as DisplayCurrency)
+
   const transactions = ibexCalls.flatMap(resp => {
-    if (resp instanceof IbexError) return [] 
-    else return toWalletTransactions(resp)
+    if (resp instanceof IbexError) return []
+    else return toWalletTransactions(resp, userDisplayCurrency)
   })
 
   return PartialResult.ok({
@@ -32,29 +37,37 @@ export const getTransactionsForWallets = async ({
   })
 }
 
-export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] => {
+export const toWalletTransactions = (ibexResp: GResponse200, displayCurrency?: DisplayCurrency): IbexTransaction[] => {
+  const userDisplayCurrency = displayCurrency || ("USD" as DisplayCurrency)
+
   return ibexResp.map(trx => {
-    const currency = (trx.currencyId === 3 ? "USD" : "BTC") as WalletCurrency // WalletCurrency: "USD" | "BTC",
+    const currency = (trx.currencyId === 3 ? "USD" : "BTC") as WalletCurrency
+
+    const exchangeRate = trx.exchangeRateCurrencySats ? Number(trx.exchangeRateCurrencySats) : 0
+    const offset = exchangeRate >= 1_000_000 ? 6n : exchangeRate >= 1_000 ? 3n : 0n
+    const base = exchangeRate > 0
+      ? BigInt(Math.round(exchangeRate * Number(10n ** offset)))
+      : 0n
 
     const settlementDisplayPrice: WalletMinorUnitDisplayPrice<WalletCurrency, DisplayCurrency> = {
-      base: trx.exchangeRateCurrencySats ? BigInt(Math.floor(trx.exchangeRateCurrencySats)) : 0n,
-      offset: 0n, // what is this?
-      displayCurrency: "USD" as DisplayCurrency,
+      base,
+      offset,
+      displayCurrency: userDisplayCurrency,
       walletCurrency: currency
     }
 
     const baseTrx: BaseWalletTransaction = {
-      walletId: (trx.accountId || "") as WalletId, 
+      walletId: (trx.accountId || "") as WalletId,
       settlementAmount: toSettlementAmount(trx.amount, trx.transactionTypeId, currency),
       settlementFee: asCurrency(trx.networkFee, currency),
-      settlementCurrency: currency, 
-      settlementDisplayAmount: `${trx.amount}`, 
-      settlementDisplayFee: `${trx.networkFee}`, 
+      settlementCurrency: currency,
+      settlementDisplayAmount: `${trx.amount}`,
+      settlementDisplayFee: `${trx.networkFee}`,
       settlementDisplayPrice: settlementDisplayPrice,
-      createdAt: trx.createdAt ? new Date(trx.createdAt) : new Date(), // should always return
-      id: trx.id || "null", // "LedgerTransactionId" - this is likely unused 
-      status: "success" as TxStatus, // assuming Ibex returns on completed
-      memo: null, // query transaction details
+      createdAt: trx.createdAt ? new Date(trx.createdAt) : new Date(),
+      id: trx.id || "null",
+      status: "success" as TxStatus,
+      memo: null,
     }
 
     switch (trx.transactionTypeId) {
