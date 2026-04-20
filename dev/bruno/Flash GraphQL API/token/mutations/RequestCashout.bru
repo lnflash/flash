@@ -5,7 +5,7 @@ meta {
 }
 
 post {
-  url: {{graphqlUrl}}
+  url: {{flashGraphqlUrl}}
   body: graphql
   auth: inherit
 }
@@ -42,9 +42,16 @@ body:graphql {
 body:graphql:vars {
   {
     "input": {
-      "walletId": "{{walletIdUsd}}",
+      "walletId": "{{walletId}}",
       "amount": 1
     }
+  }
+}
+
+script:post-response {
+  const offerId = res.body?.data?.requestCashout?.offer?.offerId;
+  if (offerId) {
+    bru.setEnvVar("offerId", offerId);
   }
 }
 
