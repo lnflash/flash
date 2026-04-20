@@ -10,7 +10,7 @@ ibex:
   webhook:
     uri: "" # external uri defined in overrides
     port: 4008
-    secret: "" # injected at deploy time via Terraform
+    secret: "not-so-secret"
 
 # See Foreign Exchange Rates: https://www.firstglobal-bank.com/
 exchangeRates:
