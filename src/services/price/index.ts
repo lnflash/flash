@@ -39,6 +39,26 @@ const priceHistoryClient = new PriceHistoryProtoDescriptor.PriceHistory(
 )
 const listPrices = util.promisify(priceHistoryClient.listPrices).bind(priceHistoryClient)
 
+/**
+ * ENG-317 / Phase A of the float→double rollout for the price wire format.
+ *
+ * The wire now carries two fields: `price` (float32, deprecated, original tag)
+ * and `price_v2` (double, new tag). Servers populate both during Phase A;
+ * older servers populate only `price`. We prefer `price_v2` and fall back to
+ * `price` so this client works against both server versions.
+ *
+ * `@grpc/proto-loader` is configured with `defaults: true`, which means
+ * unset scalar fields arrive as their proto3 default (`0` for floating-point
+ * types). A real-time price of `0` is already treated as "no price" by the
+ * `PriceNotAvailableError` path, so a falsy check is the correct fallback
+ * trigger.
+ *
+ * Phase B (separate PR, after Phase A is in prod for one release cycle) will
+ * remove the deprecated `price` field entirely.
+ */
+const preferDouble = (resp: { price?: number; price_v2?: number }): number =>
+  resp.price_v2 || resp.price || 0
+
 export const PriceService = (): IPriceService => {
   const getSatRealTimePrice = ({
     displayCurrency,
@@ -78,14 +98,14 @@ export const PriceService = (): IPriceService => {
       }
 
       // FIXME: price server should return CentsPerSat directly and timestamp
-      const { price } = await getPrice({ currency: displayCurrency })
+      const priceResponse = await getPrice({ currency: displayCurrency })
+      const price = preferDouble(priceResponse)
       if (!price) return new PriceNotAvailableError()
 
       let displayCurrencyPrice = price / SATS_PER_BTC
       if (walletCurrency === WalletCurrency.Usd) {
-        const { price: usdBtcPrice } = await getPrice({
-          currency: UsdDisplayCurrency,
-        })
+        const usdPriceResponse = await getPrice({ currency: UsdDisplayCurrency })
+        const usdBtcPrice = preferDouble(usdPriceResponse)
         if (!usdBtcPrice) return new PriceNotAvailableError()
 
         displayCurrencyPrice = price / usdBtcPrice / CENTS_PER_USD
@@ -107,10 +127,12 @@ export const PriceService = (): IPriceService => {
   }: ListHistoryArgs): Promise<Tick[] | PriceServiceError> => {
     try {
       const { priceHistory } = await listPrices({ range })
-      return priceHistory.map((t: { timestamp: number; price: number }) => ({
-        date: new Date(t.timestamp * 1000),
-        price: t.price / SATS_PER_BTC,
-      }))
+      return priceHistory.map(
+        (t: { timestamp: number; price?: number; price_v2?: number }) => ({
+          date: new Date(t.timestamp * 1000),
+          price: preferDouble(t) / SATS_PER_BTC,
+        }),
+      )
     } catch (err) {
       return new UnknownPriceServiceError(err)
     }

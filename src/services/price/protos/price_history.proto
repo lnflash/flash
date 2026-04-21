@@ -22,5 +22,10 @@ message PriceHistoryResponse {
 
 message Tick {
   uint64 timestamp = 1;
-  float price = 2;
+  // ENG-317 / Phase A of float→double rollout. See price.proto for the full
+  // rationale. Servers MUST populate both fields; clients SHOULD prefer
+  // `price_v2` and fall back to `price` when the server has not yet been
+  // upgraded. `float price = 2` will be removed in Phase B.
+  float price = 2 [deprecated = true];
+  double price_v2 = 3;
 }

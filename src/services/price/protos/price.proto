@@ -6,7 +6,21 @@ service PriceFeed {
 }
 
 message PriceResponse {
-  float price = 1;
+  // ENG-317 / Phase A of float→double rollout.
+  //
+  // `price` (float32) is lossy for non-USD/non-BTC currencies — the JMD
+  // round-trip exhibited ~J$0.80 of drift, see ENG-316 / lnflash/flash#282.
+  // It is preserved here at its original tag for wire compatibility with
+  // pre-ENG-317 clients and servers, and is marked deprecated.
+  //
+  // Servers MUST populate both `price` and `price_v2` for the duration of
+  // Phase A. Clients SHOULD prefer `price_v2` and fall back to `price` when
+  // talking to a server that has not yet been upgraded.
+  //
+  // Phase B (future PR) will remove `float price = 1` once all clients are
+  // confirmed upgraded in prod.
+  float price = 1 [deprecated = true];
+  double price_v2 = 3;
 }
 
 message PriceQuery {
