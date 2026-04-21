@@ -203,7 +203,7 @@ type Bank
 type BankAccount
   @join__type(graph: PUBLIC)
 {
-  accountNumber: Int!
+  accountNumber: String!
   accountType: String!
   bankBranch: String!
   bankName: String!
@@ -213,7 +213,7 @@ type BankAccount
 input BankAccountInput
   @join__type(graph: PUBLIC)
 {
-  accountNumber: Int!
+  accountNumber: String!
   accountType: String!
   bankBranch: String!
   bankName: String!

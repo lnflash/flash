@@ -192,7 +192,7 @@ type Bank {
 }
 
 type BankAccount {
-  accountNumber: Int!
+  accountNumber: String!
   accountType: String!
   bankBranch: String!
   bankName: String!
@@ -200,7 +200,7 @@ type BankAccount {
 }
 
 input BankAccountInput {
-  accountNumber: Int!
+  accountNumber: String!
   accountType: String!
   bankBranch: String!
   bankName: String!

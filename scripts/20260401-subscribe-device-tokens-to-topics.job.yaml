@@ -1,0 +1,35 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: subscribe-device-tokens-to-topics
+  namespace: flash
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: subscribe-device-tokens
+        # Replace with the current digest from charts/charts/flash/values.yaml
+        image: "docker.io/lnflash/galoy-app-migrate@sha256:c0824984f2b2513c16150e9390e3868f544808bbc4c91608b43f354adabb4436"
+        workingDir: /app
+        command: ["node", "scripts/subscribe-device-tokens-to-topics.js"]
+        env:
+        - name: MONGODB_CON
+          valueFrom:
+            secretKeyRef:
+              name: galoy-mongodb-connection-string
+              key: mongodb-con
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: "/tmp/firebase-service-account/service-account.json"
+        volumeMounts:
+        - name: firebase-service-account
+          mountPath: /tmp/firebase-service-account/
+      volumes:
+      - name: firebase-service-account
+        secret:
+          secretName: galoyapp-firebase-serviceaccount
+          items:
+          - key: galoyapp-firebase-serviceaccount.json
+            path: service-account.json
