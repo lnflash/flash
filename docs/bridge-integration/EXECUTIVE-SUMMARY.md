@@ -30,12 +30,16 @@ Flash is adding a **USD on/off-ramp** to the wallet by integrating with
   converts USDT → USD and pushes it to the user's verified external
   bank account. The Cash Wallet balance goes down because IBEX sent
   the USDT out.
-- **JM users** who opt in get the same ETH-USDT Cash Wallet. Cashout
-  V1 (JMD off-ramp via ERPNext + manual RTGS) continues to exist;
-  **but** for opted-in JM users, the source of the JMD off-ramp is
-  now the ETH-USDT account rather than the legacy IBEX USD account.
-  How Cashout V1 interacts with the ETH-USDT source is the subject
-  of a new ticket (see §4 blockers).
+- **JM users** who opt in get the same ETH-USDT Cash Wallet. Per Dread
+  2026-04-22 14:15 ET: on Cashout V1's re-launch, **ETH-USDT becomes
+  the first-class source wallet** for the JMD off-ramp (not merely an
+  alternative for opted-in users). Legacy IBEX USD is the fallback for
+  non-opted-in users only. Settlement involves a USDT → USD swap via
+  IBEX before the JMD leg. This is tracked on this project as
+  NEW-CASHOUT-V1-WALLET (Bridge-side half) and mirrored by a spec
+  update on the Cashout V1 project (opt-in decision tree) owned by
+  Dread. **ENG-296 is now a cross-project launch blocker for both
+  Bridge Wallet Integration and Cashout V1.**
 - **Lightning parity on the new Cash Wallet** is Phase 1 scope —
   opted-in users must still be able to send/receive Lightning on day
   one. IBEX's ETH-USDT accounts support Lightning per
@@ -71,7 +75,7 @@ Flash is adding a **USD on/off-ramp** to the wallet by integrating with
 | KYC delivery | **Bridge-hosted iframes** (Persona/Plaid) | Keeps US PII off Flash entirely. |
 | Country gating | **Flash-maintained allowlist (superset of Bridge + Caribbean markets) PLUS Bridge's rail-driven check.** | Flash allowlist gates UI entry; Bridge's link-time check remains the authoritative rail gate. |
 | JMD KYC | **Frappe ERPNext (existing flow)** unchanged | JMD KYC stays separate from Bridge KYC. |
-| JMD off-ramp | **Cashout V1 (ERPNext, manual RTGS) — but source wallet changes for opted-in users.** | For JM users who opt in, the JMD off-ramp source is the ETH-USDT account, not legacy IBEX USD. Requires new ticket. |
+| JMD off-ramp | **Cashout V1 (ERPNext, manual RTGS) — ETH-USDT becomes the first-class source wallet on re-launch.** | Confirmed Dread 2026-04-22 14:15 ET. Default source is ETH-USDT for opted-in users (with USDT→USD swap via IBEX); legacy IBEX USD only for non-opted-in fallback. Tracked as **NEW-CASHOUT-V1-WALLET**. **ENG-296 is a cross-project blocker** — it gates both this project and Cashout V1. |
 | Workflow | Pushes to review branch **`docs/bridge-integration-rewrite-2026-04-22`** allowed; **no PRs and nothing to `main`** without explicit approval. | Review material; live branch. |
 
 ## 4. Current implementation state
@@ -125,7 +129,7 @@ Flash is adding a **USD on/off-ramp** to the wallet by integrating with
 | **Lightning send/receive parity on the ETH-USDT wallet** (IBEX supports it per docs, but Flash surface not wired) | **ENG-297** — now a **Phase-1 launch blocker** | Without LN parity, opted-in users lose existing Cash Wallet capabilities — unacceptable for launch. |
 | **Per-user opt-in toggle** (settings screen; permanent, non-reversible; gates Bridge features; Flash UI shows one Cash Wallet) | **NEW-OPTIN** (to file; Nick/Ben) | No way for a user to switch to the new Cash Wallet model. Blocks every user-visible Bridge feature. |
 | **ERPNext audit ledger for Bridge ↔ IBEX USDT movements** | **NEW-ERPNEXT-LEDGER** (to file; Olaniran or Dread) | Finance/accounting requirement; a USDT flow between two vendors under a Flash user's name must be reconcilable. |
-| **Cashout V1 interaction with the new ETH-USDT Cash Wallet** (for opted-in JM users, source of JMD off-ramp is now the ETH-USDT account, not legacy IBEX USD) | **NEW-CASHOUT-V1-WALLET** (to file) | JM opt-in users can't use Cashout V1 until the source-wallet change is handled. |
+| **Cashout V1 — ETH-USDT as first-class source wallet on re-launch** (default for opted-in users, with USDT→USD swap before JMD off-ramp; legacy USD fallback only for non-opted-in users). Confirmed Dread 2026-04-22 14:15 ET. | **NEW-CASHOUT-V1-WALLET** (to file on this project, Olaniran+Ben) + Cashout V1 project spec update (owned by Dread) | Cashout V1 cannot launch with ETH-USDT as a first-class wallet without this. **ENG-296 blocks both projects.** |
 | **Country allowlist** (Flash-maintained superset of Bridge's allowlist + Caribbean markets we plan to serve) | **NEW-COUNTRY-ALLOWLIST** (to file; Dread/Nick) | Without it, UI entry gating relies on Bridge's list alone, which does not include the Caribbean markets where we want Cashout V1 to appear. |
 | **GraphQL payload-shape mismatches** across all 4 mutations + 4 queries | (new) | Most response fields resolve to `null` on the wire. App relies on side-channel queries. |
 | **All Bridge errors collapse to `INVALID_INPUT` or `UNKNOWN_CLIENT_ERROR`** | (new) | App cannot distinguish "rate limited", "KYC pending", "account suspended" — all look the same. |
@@ -224,7 +228,8 @@ Detail in **OPERATIONS.md**.
 In rough order (launch waves):
 
 1. **ENG-296** — IBEX ETH-USDT wallet provisioning. **Without this,
-   there is no new Cash Wallet to opt users into.**
+   there is no new Cash Wallet to opt users into. Also a cross-project
+   launch blocker for Cashout V1** (Dread 2026-04-22 14:15 ET).
 2. **ENG-297** — Lightning send/receive parity on the ETH-USDT wallet.
    **Launch blocker**; opted-in users must retain LN capability.
 3. **NEW-OPTIN** — per-user opt-in toggle (settings screen; permanent,
@@ -232,8 +237,10 @@ In rough order (launch waves):
    Cash Wallet).
 4. **NEW-ERPNEXT-LEDGER** — ERPNext audit-row writer for every
    Bridge ↔ IBEX USDT movement under a Flash user's name.
-5. **NEW-CASHOUT-V1-WALLET** — Cashout V1 source-wallet switch for
-   opted-in JM users (source is now ETH-USDT, not legacy IBEX USD).
+5. **NEW-CASHOUT-V1-WALLET** — Cashout V1: ETH-USDT as the first-class
+   source wallet on re-launch (with USDT→USD swap before JMD off-ramp);
+   legacy USD fallback only for non-opted-in users. Mirrors a Cashout
+   V1 project spec update owned by Dread.
 6. **NEW-COUNTRY-ALLOWLIST** — Flash-maintained country allowlist
    (superset of Bridge + Caribbean markets) gating UI entry.
 7. **ENG-343** — Pre-KYC profile capture (real legal name + email +
