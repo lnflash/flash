@@ -2,7 +2,7 @@
 
 > **Status:** Specification, aligned with code on `lnflash/flash:docs/bridge-integration-spec` @ `85af420`. The Bridge webhook server is fully implemented; the IBEX `/crypto/receive` handler is partially implemented (account/wallet lookup + lock + log).
 >
-> **Architectural note (Dread 13:09 ET):** earlier drafts described the IBEX `/crypto/receive` handler as the place where the user's wallet would be **credited**. That framing is wrong: **IBEX's ETH-USDT account IS the user's Cash Wallet**, so the balance has already moved on IBEX's side by the time this webhook fires. The Flash-side follow-on work on this handler is **(a) ERPNext audit-row write (`NEW-ERPNEXT-LEDGER`)** and **(b) push notification (`ENG-275`)** — not a wallet credit. The two-webhook model below is renamed accordingly.
+> **Architectural note (Dread 13:09 ET):** earlier drafts described the IBEX `/crypto/receive` handler as the place where the user's wallet would be **credited**. That framing is wrong: **IBEX's ETH-USDT account IS the user's Cash Wallet**, so the balance has already moved on IBEX's side by the time this webhook fires. The Flash-side follow-on work on this handler is **(a) ERPNext audit-row write (`ENG-348`)** and **(b) push notification (`ENG-275`)** — not a wallet credit. The two-webhook model below is renamed accordingly.
 >
 > **Audience:** Flash backend engineers, ops/SRE, anyone configuring the Bridge dashboard or reverse-proxy in front of Flash.
 >
@@ -147,9 +147,9 @@ Note: KYC includes `event` in the key (so an `approved` and a later `rejected` f
 3. **Log `info` "Bridge deposit completed"** with the full payload. Do nothing else.
 4. `200 { "status": "success" }`.
 
-**Why log-only today?** Two reasons. First: there is no Flash-side wallet ledger to credit — IBEX's ETH-USDT account IS the Cash Wallet, and the balance only moves once IBEX actually receives the USDT settlement (signaled via `/crypto/receive`, §4). Second: the audit/accounting work that *does* belong on this handler — writing an ERPNext row recording the Bridge-side fiat landing — is not yet implemented (see `NEW-ERPNEXT-LEDGER`).
+**Why log-only today?** Two reasons. First: there is no Flash-side wallet ledger to credit — IBEX's ETH-USDT account IS the Cash Wallet, and the balance only moves once IBEX actually receives the USDT settlement (signaled via `/crypto/receive`, §4). Second: the audit/accounting work that *does* belong on this handler — writing an ERPNext row recording the Bridge-side fiat landing — is not yet implemented (see `ENG-348`).
 
-The Bridge `/deposit` log line is critical today for **reconciliation visibility**: if the IBEX event never arrives within the SLA window (24h is the working assumption — see `FLOWS.md` §6 / `ENG-276` reconciliation worker), the Bridge log is what tells ops "Bridge says fiat landed; we're waiting on IBEX." Once `NEW-ERPNEXT-LEDGER` lands, the same data will be in ERPNext as a structured audit row.
+The Bridge `/deposit` log line is critical today for **reconciliation visibility**: if the IBEX event never arrives within the SLA window (24h is the working assumption — see `FLOWS.md` §6 / `ENG-276` reconciliation worker), the Bridge log is what tells ops "Bridge says fiat landed; we're waiting on IBEX." Once `ENG-348` lands, the same data will be in ERPNext as a structured audit row.
 
 > **What this handler will NOT do, ever:** credit a Flash-side wallet ledger. There is no such ledger — IBEX is the ledger.
 
@@ -220,7 +220,7 @@ The handler **strictly requires** `currency === "USDT"` and `network === "ethere
    5. **Log `info` "USDT deposit received"** with `accountId`, `walletId`, `amount`, `tx_hash`, `address`.
    6. Return `{ status: "success" }`.
 
-**Critical current limitation:** step 3.5 is the **last step in the current code**. The handler does **not yet write an ERPNext audit row** (`NEW-ERPNEXT-LEDGER`) and **does not yet send a push notification** (`ENG-275`). Both are being held until `ENG-296` lands so end-to-end is testable.
+**Critical current limitation:** step 3.5 is the **last step in the current code**. The handler does **not yet write an ERPNext audit row** (`ENG-348`) and **does not yet send a push notification** (`ENG-275`). Both are being held until `ENG-296` lands so end-to-end is testable.
 
 > **Important framing correction (Dread 13:09 ET):** earlier drafts of this section described the missing work as "credit the user's USDT wallet ledger." That is wrong — there is no Flash-side USDT wallet ledger to credit. The IBEX ETH-USDT account IS the Cash Wallet; the balance has already moved on IBEX's side by the time this webhook fires. The two real follow-on items are the ERPNext audit row and the push notification. The in-source `// TODO` comments still use the old wording and should be updated when the work lands.
 
@@ -263,8 +263,8 @@ Cross-reference to `ARCHITECTURE.md` §5.4 — the same diagram is reproduced he
         │── POST /deposit ──────────────►│                    │                           │
         │   X-Webhook-Signature:         │                    │                           │
         │     t=<ms>,v0=<sig>            │── log + (TODO      │                           │
-        │   { event, data: {transfer_id, │   NEW-ERPNEXT-     │                           │
-        │     amount, currency, tx_hash, │   LEDGER) ERPNext  │                           │
+        │   { event, data: {transfer_id, │   ENG-348)         │                           │
+        │     amount, currency, tx_hash, │   audit row        │                           │
         │     customer_id} }             │   audit row        │                           │
         │                                │                    │                           │
         │── (Bridge sends USDT to        │                    │                           │
@@ -278,9 +278,9 @@ Cross-reference to `ARCHITECTURE.md` §5.4 — the same diagram is reproduced he
         │                                │                    │   { tx_hash, address,     │── lookup account by
         │                                │                    │     amount, currency:     │   bridgeEthereumAddress
         │                                │                    │     "USDT",               │── log "USDT received"
-        │                                │                    │     network: "ethereum"}  │── (TODO NEW-ERPNEXT-
-        │                                │                    │                           │    LEDGER: ERPNext
-        │                                │                    │                           │    audit row)
+        │                                │                    │     network: "ethereum"}  │── (TODO ENG-348:        
+        │                                │                    │                           │    ERPNext audit
+        │                                │                    │                           │    row)
         │                                │                    │                           │── (TODO ENG-275:
         │                                │                    │                           │    send push)
         │                                │                    │                           │
@@ -336,7 +336,7 @@ Cross-reference to `ARCHITECTURE.md` §5.4 — the same diagram is reproduced he
 | Linear | Description | Severity | Notes |
 |---|---|---|---|
 | **ENG-296** | IBEX ETH-USDT account / address provisioning. The provisioned account IS the Cash Wallet. | **Critical** | Until this lands, there is no new wallet to opt users into and the `/crypto/receive` handler has no real account to look up. |
-| **NEW-ERPNEXT-LEDGER** | ERPNext audit-row writer for `/deposit` (Bridge accepted fiat) and `/crypto/receive` (USDT settled) | High | Replaces the old "wallet credit" framing. Also covers the off-ramp `/transfer` leg. |
+| **ENG-348** | ERPNext audit-row writer for `/deposit` (Bridge accepted fiat) and `/crypto/receive` (USDT settled) | High | Replaces the old "wallet credit" framing. Also covers the off-ramp `/transfer` leg. |
 | **ENG-275** | Push notifications on `/crypto/receive` (deposit completed) and `/transfer` (off-ramp `completed` / `failed`) | Med | `// TODO` in `transferHandler` and absent in `crypto-receive` handler. Owner: Laurent. |
 | ENG-273 | Webhook monitoring / alerting (the §6.5 alerts) | Med | Owner: Nick. |
 | ENG-276 | Reconciliation worker (deposit-no-ibex-followup, stuck transfers) | Med | Owner: Nick. Backstop for the 24h-no-IBEX alert. |
@@ -352,5 +352,5 @@ Cross-reference to `ARCHITECTURE.md` §5.4 — the same diagram is reproduced he
 | Date | Change | Author |
 |---|---|---|
 | 2026-04-21 | Full rewrite, grounded in actual handler code (`webhook-server/index.ts`, `routes/{kyc,deposit,transfer}.ts`, `middleware/verify-signature.ts`, `ibex/webhook-server/routes/crypto-receive.ts`). Corrections: port (4009 not 3005), root paths (no `/bridge/webhooks/` prefix), single combined `X-Webhook-Signature: t=...,v0=...` header (not separate Bridge-Signature/Bridge-Timestamp), timestamp in milliseconds (not seconds), per-endpoint public keys, real lock-key shapes, real response codes, exact event payloads. Added IBEX `/crypto/receive` route documentation (missing entirely from prior doc). Added two-webhook model diagram, operational concerns, and §7 open-work table. Called out current credit-logic gap and `// TODO` push notifications. | Taddesse + Dread |
-| 2026-04-22 | **Architectural correction (Dread, 13:09 ET):** removed "wallet credit" framing throughout. IBEX ETH-USDT account IS the Cash Wallet; webhooks drive audit + push, not bookkeeping. §1 status note + scope rewritten; §3.2 `depositHandler` rationale rewritten; §4 IBEX `/crypto/receive` reframed as "settlement signal" (not "credit path"); §4.2 limitation paragraph rewritten with correct framing; §5 diagram redrawn; §7 open-work table updated with `NEW-ERPNEXT-LEDGER` and ENG-275 expanded to cover deposit push as well. | Taddesse + Dread |
+| 2026-04-22 | **Architectural correction (Dread, 13:09 ET):** removed "wallet credit" framing throughout. IBEX ETH-USDT account IS the Cash Wallet; webhooks drive audit + push, not bookkeeping. §1 status note + scope rewritten; §3.2 `depositHandler` rationale rewritten; §4 IBEX `/crypto/receive` reframed as "settlement signal" (not "credit path"); §4.2 limitation paragraph rewritten with correct framing; §5 diagram redrawn; §7 open-work table updated with `ENG-348` and ENG-275 expanded to cover deposit push as well. | Taddesse + Dread |
 | (prior) | 65-line draft with Tron mentions, wrong port, wrong paths, made-up headers, missing IBEX route. | heyolaniran et al. |

@@ -126,18 +126,18 @@ relies on will fail.
 
 ### Cash Wallet opt-in rollout strategy (per 2026-04-22 architectural correction)
 
-Per Dread's 2026-04-22 13:09 ET directive: Phase 1 is a **per-user, permanent, non-reversible opt-in** migration of the Cash Wallet from the legacy IBEX USD account to the new IBEX ETH-USDT account. The IBEX ETH-USDT account **IS** the Flash Cash Wallet (IBEX is the ledger; no parallel Flash-side USDT wallet). See FLOWS §3d for the state machine and LINEAR-PROPOSAL §1 for NEW-OPTIN.
+Per Dread's 2026-04-22 13:09 ET directive: Phase 1 is a **per-user, permanent, non-reversible opt-in** migration of the Cash Wallet from the legacy IBEX USD account to the new IBEX ETH-USDT account. The IBEX ETH-USDT account **IS** the Flash Cash Wallet (IBEX is the ledger; no parallel Flash-side USDT wallet). See FLOWS §3d for the state machine and LINEAR-PROPOSAL §1 for ENG-345/346 (opt-in).
 
 Recommended rollout ordering — do **not** expose opt-in to users until all of these are green:
 
-1. **Deploy with opt-in gated off.** `bridge.enabled: true` globally but the NEW-OPTIN mutation is either feature-flagged off or returns "not yet available". Everybody is still on legacy USD.
+1. **Deploy with opt-in gated off.** `bridge.enabled: true` globally but the ENG-345/346 (opt-in) mutation is either feature-flagged off or returns "not yet available". Everybody is still on legacy USD.
 2. **Verify the target wallet exists.** ENG-296 landed — Flash can provision an IBEX ETH-USDT account per user.
 3. **Verify LN parity on the target wallet.** ENG-297 landed — LN invoice gen, LN pay, LNURL, balance, history all work against the IBEX ETH-USDT account. **If LN parity isn't proven, do not open the opt-in.** Opting a user in without LN parity is a Cash Wallet regression vs. legacy USD.
-4. **Verify audit ledger is writing.** NEW-ERPNEXT-LEDGER landed — every Bridge↔IBEX USDT movement produces an ERPNext audit row. Confirm on staging with at least one sandbox on-ramp + off-ramp.
-5. **Verify Cashout V1 with ETH-USDT as the first-class source wallet.** NEW-CASHOUT-V1-WALLET landed (Bridge-side half) **and** the Cashout V1 project spec update is live (the opt-in decision tree). Cashout V1 defaults to ETH-USDT for opted-in users (with a USDT→USD swap step via IBEX before the JMD off-ramp), and falls back to legacy USD only for non-opted-in users. Smoke this with two JM test users on staging — one opted in (should source from ETH-USDT), one not (should source from legacy USD). Per Dread 2026-04-22 14:15 ET: ENG-296 is the cross-project gate for both halves.
+4. **Verify audit ledger is writing.** ENG-348 landed — every Bridge↔IBEX USDT movement produces an ERPNext audit row. Confirm on staging with at least one sandbox on-ramp + off-ramp.
+5. **Verify Cashout V1 with ETH-USDT as the first-class source wallet.** ENG-357 landed (Bridge-side half) **and** the Cashout V1 project spec update is live (the opt-in decision tree). Cashout V1 defaults to ETH-USDT for opted-in users (with a USDT→USD swap step via IBEX before the JMD off-ramp), and falls back to legacy USD only for non-opted-in users. Smoke this with two JM test users on staging — one opted in (should source from ETH-USDT), one not (should source from legacy USD). Per Dread 2026-04-22 14:15 ET: ENG-296 is the cross-project gate for both halves.
 6. **Internal dogfood wave.** Opt in the Flash team accounts first (10–30 users). Monitor: opt-in state transitions land cleanly (`legacy_usd → opt_in_pending → eth_usdt_ready → eth_usdt_active`), ERPNext audit rows write, LN send/receive works, Cashout V1 works for the JM testers, no stuck `opt_in_pending` rows.
 7. **Limited external wave.** Open opt-in to a small country/user cohort (e.g. friends-and-family list) behind the same feature flag.
-8. **Country-gated general availability.** Open opt-in to all users in the Flash country allowlist (NEW-COUNTRY-ALLOWLIST — not the raw 86-country Bridge list).
+8. **Country-gated general availability.** Open opt-in to all users in the Flash country allowlist (ENG-347 — not the raw 86-country Bridge list).
 
 **Rollback scope:** The opt-in state machine is **one-way terminal by design**. There is no user-facing rollback — once a user reaches `eth_usdt_active`, they stay there. Incident-only rollback = flip the opt-in mutation feature flag off (stops new opt-ins; does not reverse existing ones). If a user ends up in a broken `opt_in_pending` or `eth_usdt_ready` state, that's a state-machine bug to fix forward, not a "send them back to legacy USD" action.
 
@@ -287,10 +287,10 @@ the alert fires anyway:
 
 ### 8.5 "IBEX `/crypto/receive` fired but no ERPNext audit row / no push landed"
 
-**Framing correction (2026-04-22):** The IBEX ETH-USDT account **IS** the Flash Cash Wallet — IBEX is the ledger. The `/crypto/receive` webhook does **not** "credit a wallet" on the Flash side. Its job is (a) write an ERPNext audit row (NEW-ERPNEXT-LEDGER) and (b) emit a push notification (ENG-275). The Cash Wallet balance itself moves on IBEX's side inside the IBEX ETH-USDT account.
+**Framing correction (2026-04-22):** The IBEX ETH-USDT account **IS** the Flash Cash Wallet — IBEX is the ledger. The `/crypto/receive` webhook does **not** "credit a wallet" on the Flash side. Its job is (a) write an ERPNext audit row (ENG-348) and (b) emit a push notification (ENG-275). The Cash Wallet balance itself moves on IBEX's side inside the IBEX ETH-USDT account.
 
 1. If the user is saying "my Cash Wallet didn't go up": this is an IBEX-side question. Check the IBEX dashboard for the ETH-USDT account balance. If IBEX shows the credit, the Cash Wallet *is* up — the app probably needs a refresh / balance re-fetch.
-2. If the audit row is missing but the balance moved on IBEX: that's a NEW-ERPNEXT-LEDGER bug (audit writer failed silently). File an incident on that ticket; finance can reconstruct the row from IBEX + Bridge dashboards in the meantime.
+2. If the audit row is missing but the balance moved on IBEX: that's a ENG-348 bug (audit writer failed silently). File an incident on that ticket; finance can reconstruct the row from IBEX + Bridge dashboards in the meantime.
 3. If no push landed but the balance moved on IBEX: that's an ENG-275 bug on the deposit-side push path.
 4. If `/crypto/receive` never logged at all: check IBEX webhook delivery to Flash, `lockPaymentHash` idempotency collisions, and webhook-server logs.
 
@@ -348,12 +348,12 @@ ticket (TBD).
 | Symptom | Most likely | First action |
 |---|---|---|
 | Users can't start KYC | Bridge API down, or `bridge.enabled: false` | Status page; check config flag. |
-| Users can't see the deposit CTA | User hasn't opted in yet (state ≠ `eth_usdt_active`), or NEW-OPTIN feature flag off, or user's country not on NEW-COUNTRY-ALLOWLIST | Check `cashWalletOptInState` on account; check feature flag; check country allowlist. |
-| Opt-in mutation rejected | ENG-296 or ENG-297 not ready, or NEW-OPTIN feature flag off, or user has in-flight Cash Wallet activity | Check feature flag + dependency states. |
+| Users can't see the deposit CTA | User hasn't opted in yet (state ≠ `eth_usdt_active`), or ENG-345/346 (opt-in) feature flag off, or user's country not on ENG-347 | Check `cashWalletOptInState` on account; check feature flag; check country allowlist. |
+| Opt-in mutation rejected | ENG-296 or ENG-297 not ready, or ENG-345/346 (opt-in) feature flag off, or user has in-flight Cash Wallet activity | Check feature flag + dependency states. |
 | User opted in but deposit CTA still hidden | Client cache / stale account state | Force a client refresh; confirm server-side `cashWalletOptInState = eth_usdt_active`. |
 | Users can't create virtual account | KYC not approved, or ETH-USDT account provisioning (ENG-296) hasn't completed for this user | Check `Account.bridgeEthereumAddress`, `bridgeKycStatus`, `cashWalletOptInState`. |
 | LN send/receive fails on an opted-in user's Cash Wallet | ENG-297 regression, or IBEX LN on ETH-USDT account issue | Smoke test via sandbox ETH-USDT account; escalate to IBEX if IBEX-side. |
-| Cashout V1 failing for opted-in JM users | Cashout V1 source-wallet selection not defaulting to ETH-USDT (NEW-CASHOUT-V1-WALLET regression), or USDT→USD swap step failing | Check Cashout V1 source-wallet selection logic — for opted-in users it should default to ETH-USDT, fall back to legacy USD only when opt-in flag is absent. Verify the IBEX swap leg ran. |
+| Cashout V1 failing for opted-in JM users | Cashout V1 source-wallet selection not defaulting to ETH-USDT (ENG-357 regression), or USDT→USD swap step failing | Check Cashout V1 source-wallet selection logic — for opted-in users it should default to ETH-USDT, fall back to legacy USD only when opt-in flag is absent. Verify the IBEX swap leg ran. |
 | Withdrawal returns "Insufficient funds" but balance looks fine | Float-precision rounding (API §8.5), or balance is being read from legacy wallet when the user is opted in | Reduce amount slightly; confirm balance source = IBEX ETH-USDT for opted-in users. |
 | Withdrawal returns "External account not verified" | Bank link not yet confirmed by Bridge | User must wait for Bridge verification webhook. |
 | Many `INVALID_INPUT` errors with no detail | Error-code collapse (API §8.4) | Read the `message` string — that's where the actual cause is. |
@@ -370,10 +370,10 @@ ticket (TBD).
 | Idempotency keys on outbound calls | New ticket (related to ENG-286) |
 | ETH-USDT Cash Wallet provisioning + Cash Wallet pointer flip | **ENG-296** |
 | LN parity on ETH-USDT Cash Wallet (launch blocker) | **ENG-297** |
-| Per-user permanent opt-in toggle + state machine | **NEW-OPTIN** |
-| ERPNext audit row per Bridge↔IBEX USDT movement | **NEW-ERPNEXT-LEDGER** (replaces the old "audit-log ledger" line) |
-| Cashout V1: ETH-USDT as the first-class source wallet on re-launch (USDT→USD swap before JMD off-ramp); legacy USD fallback only for non-opted-in users. **ENG-296 is a cross-project launch blocker for both this project and Cashout V1** (Dread 2026-04-22 14:15 ET). | **NEW-CASHOUT-V1-WALLET** (this project) + Cashout V1 project spec update (Dread) |
-| Flash country allowlist (superset of Bridge's 86 countries) | **NEW-COUNTRY-ALLOWLIST** |
+| Per-user permanent opt-in toggle + state machine | **ENG-345/346 (opt-in)** |
+| ERPNext audit row per Bridge↔IBEX USDT movement | **ENG-348** (replaces the old "audit-log ledger" line) |
+| Cashout V1: ETH-USDT as the first-class source wallet on re-launch (USDT→USD swap before JMD off-ramp); legacy USD fallback only for non-opted-in users. **ENG-296 is a cross-project launch blocker for both this project and Cashout V1** (Dread 2026-04-22 14:15 ET). | **ENG-357** (this project) + Cashout V1 project spec update (Dread) |
+| Flash country allowlist (superset of Bridge's 86 countries) | **ENG-347** |
 | Push notifications on deposit settlement + withdrawal completion | **ENG-275** (scope expanded to include deposit-side push) |
 | Sandbox E2E runbook section (now incl. opt-in + LN parity + ERPNext audit row checks) | **ENG-274** |
 | Monitoring dashboards / formal alert wiring (now incl. ERPNext-write-failure panel) | **ENG-273** |
@@ -384,4 +384,4 @@ ticket (TBD).
 |---|---|---|
 | 2026-04-22 | Taddesse (Dread review) | Initial v0 runbook for ENG-272. |
 | 2026-04-22 14:15 ET | Taddesse (Dread confirmation) | **Cashout V1 follow-up.** Updated §10 cheatsheet "Cashout V1 failing" row to reflect ETH-USDT-as-default selection logic. Updated §11 open-ops Cashout V1 row to call out **ENG-296 as cross-project launch blocker for both Bridge and Cashout V1** and to add the Cashout V1 project spec-update line item (Dread). |
-| 2026-04-22 13:09 ET | Taddesse (Dread directive) | **IBEX-ETH-USDT-is-the-wallet cascade.** Added §3 Cash Wallet opt-in rollout strategy (8-step ordering: deploy gated → ENG-296 → ENG-297 → NEW-ERPNEXT-LEDGER → NEW-CASHOUT-V1-WALLET → dogfood → limited cohort → country-gated GA; rollback is feature-flag-only because state machine is one-way terminal). Rewrote §8.5 from "expected — only logs" to the correct framing (IBEX is the ledger; `/crypto/receive` writes audit + push, not wallet credit) and added §8.6 "Opt-in stuck in `opt_in_pending`". Expanded §10 cheatsheet with opt-in / LN-parity / Cashout V1 / Cash Wallet balance source patterns. Rewrote §11 open-ops table to replace "wallet-credit" line with NEW-ERPNEXT-LEDGER + NEW-OPTIN + NEW-CASHOUT-V1-WALLET + NEW-COUNTRY-ALLOWLIST + ENG-297, and reframed ENG-275 to cover deposit+withdrawal push. |
+| 2026-04-22 13:09 ET | Taddesse (Dread directive) | **IBEX-ETH-USDT-is-the-wallet cascade.** Added §3 Cash Wallet opt-in rollout strategy (8-step ordering: deploy gated → ENG-296 → ENG-297 → ENG-348 → ENG-357 → dogfood → limited cohort → country-gated GA; rollback is feature-flag-only because state machine is one-way terminal). Rewrote §8.5 from "expected — only logs" to the correct framing (IBEX is the ledger; `/crypto/receive` writes audit + push, not wallet credit) and added §8.6 "Opt-in stuck in `opt_in_pending`". Expanded §10 cheatsheet with opt-in / LN-parity / Cashout V1 / Cash Wallet balance source patterns. Rewrote §11 open-ops table to replace "wallet-credit" line with ENG-348 + ENG-345/346 (opt-in) + ENG-357 + ENG-347 + ENG-297, and reframed ENG-275 to cover deposit+withdrawal push. |

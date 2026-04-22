@@ -20,36 +20,36 @@ mirrored to the repo at `docs/bridge-integration/`.
 
 **Branch:** `docs/bridge-integration-rewrite-2026-04-22`
 **Repo:** `lnflash/flash`
-**HEAD as of session close:** _(cascade #8 push in flight — see bottom of file for final SHA)_
+**HEAD as of session close:** `148da20` (cascade #8)
 
 | # | Commit | Date/Time ET | Summary |
 |---|---|---|---|
 | 1 | (initial) | 2026-04-21 | Full rewrite of doc set: ETH-only, four state machines, JM jurisdiction support, iframe-embed KYC, edge cases, alignment with `85af420`. |
-| 2 | (early-day) | 2026-04-22 13:09 ET | **Architectural correction (Dread):** IBEX ETH-USDT account IS the Cash Wallet — no parallel Flash-side wallet ledger. Per-user permanent opt-in. ENG-297 (LN parity) promoted to Phase-1 launch blocker. Filed NEW-OPTIN, NEW-ERPNEXT-LEDGER, NEW-CASHOUT-V1-WALLET, NEW-COUNTRY-ALLOWLIST. JM users included in migration. |
+| 2 | (early-day) | 2026-04-22 13:09 ET | **Architectural correction (Dread):** IBEX ETH-USDT account IS the Cash Wallet — no parallel Flash-side wallet ledger. Per-user permanent opt-in. ENG-297 (LN parity) promoted to Phase-1 launch blocker. Filed the opt-in pair (ENG-345 + ENG-346), ENG-348 (ERPNext audit), ENG-357 (Cashout V1 wallet), ENG-347 (country allowlist). JM users included in migration. |
 | 3 | (mid-day) | 2026-04-22 14:15 ET | **Cashout V1 follow-up:** ETH-USDT is the **first-class** source wallet on Cashout V1 re-launch; legacy USD = fallback only. ENG-296 = cross-project launch blocker for both Bridge Integration and Cashout V1. |
 | 4 | (mid-day) | 2026-04-22 14:29 ET + 14:52 ET | **Diagram modernization:** Replaced all ASCII-art diagrams with Mermaid (stateDiagram-v2 / sequenceDiagram with `link` directives / flowchart with `click`). Owner + ticket ID inline in node labels. Parse-error fix on §3 component diagram. |
-| 5 | `e0317fa` | 2026-04-22 15:36 ET | **Olaniran load-shed + §5.2 direction fix + §3 ELI5.** Reassigned ENG-296 + ENG-297 + ENG-275-server to Ben; NEW-CASHOUT-V1-WALLET to Dread (lead) + Ben. Olaniran ~18→~13. Ben ~9→~13. Fixed §5.2 off-ramp direction (Bridge does not pull; Flash backend instructs IBEX to send USDT to `BRIDGE_TRANSFER_ETH_ADDR`). Added §3 ELI5 intro on state machines (board-game analogy). |
-| 6 | `a626c71` | 2026-04-22 15:52 ET | **NEW-ERPNEXT-LEDGER → Ben.** Audit writer sits on top of webhook handlers Ben now owns; consolidating avoids cross-engineer handoffs. Olaniran ~13→~12. Ben ~13→~14. Dread ~9→~8. Propagated across LINEAR-PROPOSAL, FLOWS, ARCHITECTURE, README, EXECUTIVE-SUMMARY. |
-| 7 | `3d9e570` | 2026-04-22 16:30 ET | **Pre-Linear-mirror cleanup.** Stale owner refs in TL;DR + Nick §1.3; `[⚠ CRIT-PATH]` markers on Ben's W1/W2 four-pack; new §5A ticket-boundary discipline (NEW-1↔NEW-2↔NEW-6, ENG-276↔NEW-ERPNEXT-LEDGER, NEW-OPTIN↔NEW-CASHOUT-V1-WALLET); ENG-273 → parent + 2 sub-issues; NEW-13 → sub-issue of ENG-284; §6 split into 6A required / 6B nice / 6C fallbacks; §2 W5 reframed as graduated gate. |
-| 8 | _(this push)_ | 2026-04-22 18:30 ET | **Linear mirror executed + ID translation appendix.** Per Dread "go!" 18:11 ET. ~50 mutations against live Linear: 16 new tickets ENG-345→ENG-360, 3 sub-issues ENG-361/362/363, 8 reassignments, 4 priority bumps, 11 description rewrites, 2 title rewrites (ENG-296/297), 12 blocks relations, critical-path label on ENG-296/297/345/348, project description + content body. Doc-side: status banner + ID translation table at top of LINEAR-PROPOSAL.md mapping NEW-* / ENG-273a/b → live IDs. This file (SESSION-CONTEXT) refreshed with cascade #7 + #8 rows + ticket assignment lists updated to live Linear IDs. |
+| 5 | `e0317fa` | 2026-04-22 15:36 ET | **Olaniran load-shed + §5.2 direction fix + §3 ELI5.** Reassigned ENG-296 + ENG-297 + ENG-275-server to Ben; ENG-357 to Dread (lead) + Ben. Olaniran ~18→~13. Ben ~9→~13. Fixed §5.2 off-ramp direction (Bridge does not pull; Flash backend instructs IBEX to send USDT to `BRIDGE_TRANSFER_ETH_ADDR`). Added §3 ELI5 intro on state machines (board-game analogy). |
+| 6 | `a626c71` | 2026-04-22 15:52 ET | **ENG-348 → Ben.** Audit writer sits on top of webhook handlers Ben now owns; consolidating avoids cross-engineer handoffs. Olaniran ~13→~12. Ben ~13→~14. Dread ~9→~8. Propagated across LINEAR-PROPOSAL, FLOWS, ARCHITECTURE, README, EXECUTIVE-SUMMARY. |
+| 7 | `3d9e570` | 2026-04-22 16:30 ET | **Pre-Linear-mirror cleanup.** Stale owner refs in TL;DR + Nick §1.3; `[⚠ CRIT-PATH]` markers on Ben's W1/W2 four-pack; new §5A ticket-boundary discipline (ENG-351/352↔ENG-353↔ENG-354, ENG-276↔ENG-348, ENG-345/346↔ENG-357); ENG-273 → parent + 2 sub-issues; ENG-363 → sub-issue of ENG-284; §6 split into 6A required / 6B nice / 6C fallbacks; §2 W5 reframed as graduated gate. |
+| 8 | _(this push)_ | 2026-04-22 18:30 ET | **Linear mirror executed + ID translation appendix.** Per Dread "go!" 18:11 ET. ~50 mutations against live Linear: 16 new tickets ENG-345→ENG-360, 3 sub-issues ENG-361/362/363, 8 reassignments, 4 priority bumps, 11 description rewrites, 2 title rewrites (ENG-296/297), 12 blocks relations, critical-path label on ENG-296/297/345/348, project description + content body. Doc-side: status banner + ID translation table at top of LINEAR-PROPOSAL.md mapping placeholder names → live ENG IDs. This file (SESSION-CONTEXT) refreshed with cascade #7 + #8 rows + ticket assignment lists updated to live Linear IDs. |
 
 Cascade scripts live in `/tmp/work/push-*.mjs` (one per cascade — disposable, not reused). Pattern: GitHub Git Data API (blobs → tree → commit → PATCH ref), `GITHUB_TOKEN` env, parent = previous cascade head.
 
-## Current ticket assignments (after cascade #8 — all NEW-* now have live Linear IDs)
+## Current ticket assignments (after cascade #8 — all placeholders now have live Linear IDs)
 
 > Linear mirror landed cleanly 2026-04-22 18:11–18:30 ET. The
-> placeholders (`NEW-OPTIN`, `NEW-1` etc.) are still used in doc body
-> for narrative; the live Linear IDs (ENG-345..ENG-363) are below and
-> in the ID translation table at the top of `LINEAR-PROPOSAL.md`.
+> Placeholder names from earlier drafts (`NEW-OPTIN`, `NEW-1`, etc.) have all been
+> rewritten to live ENG IDs in cascade #9 (2026-04-22 18:45 ET).
+> See the historical placeholder map at the top of `LINEAR-PROPOSAL.md`.
 
 ### Ben (~14 tickets — heaviest in project)
 
-W1: **ENG-296** (ETH-USDT Cash Wallet provisioning, launch blocker, cross-project) · **ENG-297** (LN parity, launch blocker) · **ENG-345** (NEW-OPTIN server half — state machine + GraphQL mutation)
-W2: **ENG-348** (NEW-ERPNEXT-LEDGER audit-row writer; reassigned 15:52 ET)
-W3: **ENG-350** (NEW-4 state-reset, blocked by ENG-296)
-W4: **ENG-351** (NEW-1 gql half, lead) · **ENG-353** (NEW-2 error-code differentiation, ships with ENG-351) · **ENG-354** (NEW-6 KYC-tier ceiling error, blocked by ENG-353) · **ENG-357** (NEW-CASHOUT-V1-WALLET — Dread is lead; Ben holds the account-flag GraphQL surface)
+W1: **ENG-296** (ETH-USDT Cash Wallet provisioning, launch blocker, cross-project) · **ENG-297** (LN parity, launch blocker) · **ENG-345** (Cash Wallet opt-in: server — state machine + GraphQL mutation)
+W2: **ENG-348** (ERPNext audit-row writer; reassigned 15:52 ET)
+W3: **ENG-350** (pending-withdrawal state reset on transfer.failed; blocked by ENG-296)
+W4: **ENG-351** (GraphQL payload-shape fix — gql half, lead) · **ENG-353** (GraphQL error-code differentiation, ships with ENG-351) · **ENG-354** (KYC-tier ceiling distinct error, blocked by ENG-353) · **ENG-357** (Cashout V1 source-wallet selection — Dread is lead; Ben holds the account-flag GraphQL surface)
 W5: **ENG-275 server half** (deposit + withdrawal push trigger; reassigned 15:36 ET)
-W6: **ENG-358** (NEW-8 schema migration for fee/fxRate columns; blocks ENG-276 fee persistence)
+W6: **ENG-358** (schema migration for fee/fxRate columns; blocks ENG-276 fee persistence)
 In Review: ENG-278
 Phase 2: ENG-298
 
@@ -59,29 +59,29 @@ Phase 2: ENG-298
 
 ### Olaniran (~12 tickets — Bridge service / webhook server / outbound API only, no IBEX spine)
 
-W2: **ENG-276** (deposit reconciliation Bridge↔IBEX, launch blocker, fold NEW-9 + NEW-12; blocked by ENG-358 for fee columns)
-W3: **ENG-349** (NEW-3 withdrawal idempotency) · **ENG-350** svc half (joint w/ Ben) · ENG-286 timeout half · ENG-285 (amount validation)
-W4: **ENG-352** (NEW-1 svc half — return-shape match, ships with Ben's ENG-351) · **ENG-355** (NEW-7 min-withdrawal floor) · **ENG-356** (FEE-1 — 2% developer_fee_percent)
+W2: **ENG-276** (deposit reconciliation Bridge↔IBEX, launch blocker, absorbs the former Bridge-fee-persistence + replay-tooling acceptance items; blocked by ENG-358 for fee columns)
+W3: **ENG-349** (withdrawal idempotency key on bridgeInitiateWithdrawal) · **ENG-350** svc half (joint w/ Ben) · ENG-286 timeout half · ENG-285 (amount validation)
+W4: **ENG-352** (Bridge service return-shape match — svc half, ships with Ben's ENG-351) · **ENG-355** (min-withdrawal floor enforcement) · **ENG-356** (2% developer_fee_percent on Bridge transfers)
 W5: ENG-274 (joint w/ Dread)
-W7: ENG-286 breaker half · NEW-11 svc half
-In Progress: ENG-284 (parent of sub-issue **ENG-363** = NEW-13 schema constraint)
+W7: ENG-286 breaker half · ENG-360 server-side rotation tooling
+In Progress: ENG-284 (parent of sub-issue **ENG-363** = one-VA-per-account Mongoose schema constraint)
 In Review: ENG-282 · ENG-283
 
 ### Nick (~5–6 tickets)
 
-W1: **ENG-346** (NEW-OPTIN mobile half — CTA + permanence-emphasizing confirm modal; blocked by ENG-345) · ENG-343 · ENG-344 (blocked by ENG-347)
+W1: **ENG-346** (Cash Wallet opt-in: mobile — CTA + permanence-emphasizing confirm modal; blocked by ENG-345) · ENG-343 · ENG-344 (blocked by ENG-347)
 W2: ENG-342 (deposit USD button, gated on `eth_usdt_active`; blocked by ENG-345)
 W4: PROD-E (quote/confirmation UX)
 W5: ENG-275 mobile half
 
 ### Dread (~8 owned tickets + project hygiene + commercial)
 
-W1: **ENG-347** (NEW-COUNTRY-ALLOWLIST — Flash-maintained superset of Bridge 86; joint w/ Nick)
-W4: **ENG-357** (NEW-CASHOUT-V1-WALLET, lead — source-wallet selection logic + Cashout V1 cross-project coordination; blocked by ENG-345)
+W1: **ENG-347** (Flash-maintained country allowlist — superset of Bridge 86; joint w/ Nick)
+W4: **ENG-357** (Cashout V1 source-wallet selection — lead; cross-project coordination; blocked by ENG-345)
 W5: **ENG-361** (sub-issue of ENG-273 — wire alerts to PagerDuty/Slack, must-have W5 launch gate) · **ENG-362** (sub-issue of ENG-273 — Bridge dashboards + ERPNext-audit-failure panel, strong should-have W5) · ENG-273 parent (closes when both children close) · ENG-274 lead (joint w/ Olaniran)
 W6: ENG-272 (drill OPERATIONS.md against staging)
-W7: **ENG-359** (NEW-10 — Bridge API key to vault) · **ENG-360** (NEW-11 webhook public-key rotation deployment side)
-Ongoing: ENG-279 close-out · ENG-298 caretaker (Phase-2 schema cleanup, reassigned 18:11 ET) · PROD-A..D commercial · Cashout V1 cross-project coordination · ERPNext contract counterpart (NEW-ERPNEXT-LEDGER = ENG-348 stays Ben-owned, Dread is contract-side) · **Linear cross-project blocks link from ENG-296 → Cashout V1 issue** (skipped in mirror per Dread "skip" decision — Dread sets manually in UI when target Cashout V1 ticket is identified)
+W7: **ENG-359** (Bridge API key → vault) · **ENG-360** (webhook public-key rotation deployment side)
+Ongoing: ENG-279 close-out · ENG-298 caretaker (Phase-2 schema cleanup, reassigned 18:11 ET) · PROD-A..D commercial · Cashout V1 cross-project coordination · ERPNext contract counterpart (ENG-348 stays Ben-owned, Dread is contract-side) · **Linear cross-project blocks link from ENG-296 → Cashout V1 issue** (skipped in mirror per Dread "skip" decision — Dread sets manually in UI when target Cashout V1 ticket is identified)
 
 Hands-on candidates if anything slips: {ENG-359, ENG-360, ENG-355}.
 
@@ -117,7 +117,7 @@ Under `/workspace/group/bridge-integration/`:
 | `WEBHOOKS.md` | Webhook handler reference |
 | `OPERATIONS.md` | Runbooks, drills, on-call |
 | `API.md` | GraphQL + Bridge REST surface |
-| `FEES.md` | What's enforced today (zero) vs commercial intent (2% per FEE-1) |
+| `FEES.md` | What's enforced today (zero) vs commercial intent (2% per ENG-356) |
 | `LIMITS.md` | Bridge limits + Flash overlay caps |
 | `SECURITY.md` | CRIT-1/2, HIGH-1..4, MED-1/2 audit findings |
 | `planning/LINEAR-PROPOSAL.md` | Ticket-by-assignee plan, waves W1–W7, critical paths |
@@ -129,7 +129,7 @@ Under `/workspace/group/bridge-integration/`:
 - **No PRs, no merges to main.** Pushes to the working branch are allowed (per Dread 12:35 ET).
 - **One push script per cascade** in `/tmp/work/push-*.mjs`. Disposable. Don't reuse.
 - **History rows** at the bottom of every changed doc — every cascade adds a dated row with author + change summary.
-- **Diagram convention:** Mermaid only. Owner + ticket ID inline in node labels. `link`/`click` directives to Linear URLs. Use project-URL placeholders for NEW-* tickets not yet filed.
+- **Diagram convention:** Mermaid only. Owner + ticket ID inline in node labels. `link`/`click` directives to Linear URLs. Use project-URL placeholders for any tickets not yet filed.
 - **Mermaid pitfall:** unquoted parens inside pipe-edge labels break the parser (PS token error). Use `&mdash;` instead.
 
 ## Stale attributions still in FLOWS.md (not addressed this session)
@@ -141,11 +141,11 @@ Other potentially stale tag in ARCHITECTURE.md: line 132 (ENG-296 owner: "Ben / 
 ## What I'd do next if Dread reopens this
 
 1. **Stale-attribution sweep across ARCHITECTURE.md and FLOWS.md** for the items flagged above (Laurent → Ben/Nick on ENG-275; Ben/Olaniran → Ben on ENG-296; Nick → Dread on ENG-273). _Not addressed by cascade #8 — that one was doc → Linear, not doc internal cleanup._
-2. ~~**File the NEW-* tickets in Linear**~~ — **DONE cascade #8.** All 16 NEW-* + 3 sub-issues now live as ENG-345→ENG-363. See ID translation table at top of `planning/LINEAR-PROPOSAL.md`.
+2. ~~**File the placeholder tickets in Linear**~~ — **DONE cascade #8.** All 16 originally-placeholder tickets + 3 sub-issues now live as ENG-345→ENG-363. See historical placeholder map at top of `planning/LINEAR-PROPOSAL.md`.
 3. **Dread manual UI step: cross-project blocks link from ENG-296 → Cashout V1 issue.** Skipped in the mirror per Dread "skip" decision (18:11 ET, Q3) — no specific Cashout V1 target was picked. When the target ticket is identified on the Cashout V1 project, add the relation in Linear UI.
 4. **PROD-A..E commercial sign-off** — Bridge limits, fees, markup model, overlay caps, quote UX. Dread owns; flagged as a launch dependency in EXECUTIVE-SUMMARY §4 and §11 risks.
 5. **ENG-38 deadline tracking** — IBEX auth deprecation due 2026-05-31. ~5 weeks out. Ben-owned but cross-project visibility is Dread's job.
-6. **Walk Ben through the new IBEX-spine ownership** — he just inherited ENG-296 + ENG-297 + ENG-345 (NEW-OPTIN-server) + ENG-348 (NEW-ERPNEXT-LEDGER) + ENG-275-server + ENG-357-flag-half (NEW-CASHOUT-V1-WALLET) on top of ENG-38. ~14 tickets is heaviest in the project; four of them carry `critical-path`.
+6. **Walk Ben through the new IBEX-spine ownership** — he just inherited ENG-296 + ENG-297 + ENG-345 (opt-in server) + ENG-348 (ERPNext audit) + ENG-275-server + ENG-357 flag half on top of ENG-38. ~14 tickets is heaviest in the project; four of them carry `critical-path`.
 
 ## Reference: where to look first
 
@@ -153,12 +153,12 @@ Other potentially stale tag in ARCHITECTURE.md: line 132 (ENG-296 owner: "Ben / 
 - **What's the state-machine model?** → `FLOWS.md` §3 (with ELI5 intro)
 - **What does the deposit flow look like end-to-end?** → `FLOWS.md` §4
 - **What does the off-ramp / withdrawal flow look like?** → `FLOWS.md` §5.2 (corrected direction)
-- **What's the audit story?** → NEW-ERPNEXT-LEDGER, owned by Ben; FLOWS §4 + §5.2 ticket maps + ARCHITECTURE §5.4
+- **What's the audit story?** → ENG-348, owned by Ben; FLOWS §4 + §5.2 ticket maps + ARCHITECTURE §5.4
 - **What's blocking launch?** → EXECUTIVE-SUMMARY §4 + LINEAR-PROPOSAL §2 W1 + FLOWS §9
 - **Why is the Cash Wallet model what it is?** → ARCHITECTURE §1–§2 + FLOWS §3c + EXECUTIVE-SUMMARY §1 (post-13:09 ET correction)
 
 ---
 
-_Last pushed cascade: `3d9e570` — pre-Linear-mirror cleanup (16:30 ET)._
-_Cascade #8 (Linear mirror + ID translation table) being pushed now — SHA captured at run time._
+_Last pushed cascade: `148da20` — Linear mirror executed + ID translation appendix (18:30 ET, cascade #8)._
+_Previous: `3d9e570` — pre-Linear-mirror cleanup (16:30 ET, cascade #7)._
 _Session re-opened by Dread at 16:41 ET ("lets go ahead and update Linear now") and green-lit at 18:11 ET ("go!")._

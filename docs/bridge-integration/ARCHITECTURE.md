@@ -54,7 +54,7 @@ Routing of withdrawals between **Cashout V1** (existing JMD off-ramp via Flash b
 > this doc set. Non-opted-in users keep the legacy USD Cash Wallet
 > and never reach the surfaces described here. JM users opt in too —
 > for them, Cashout V1's source wallet changes from legacy USD to
-> ETH-USDT (handled by `NEW-CASHOUT-V1-WALLET`).
+> ETH-USDT (handled by `ENG-357`).
 
 ---
 
@@ -108,12 +108,12 @@ flowchart TB
     IWeb -->|lookup by<br/>bridgeEthereumAddress| Mongo
     IWeb --> Redis
 
-    IWeb -.->|TODO: NEW-ERPNEXT-LEDGER<br/>audit row<br/>+ ENG-275 push<br/>⚠ no Flash wallet credit —<br/>IBEX is the ledger| ERP["ERPNext<br/>(audit)"]
-    BWeb -.->|TODO: NEW-ERPNEXT-LEDGER<br/>audit row<br/>+ ENG-275 push| ERP
+    IWeb -.->|TODO: ENG-348<br/>audit row<br/>+ ENG-275 push<br/>⚠ no Flash wallet credit —<br/>IBEX is the ledger| ERP["ERPNext<br/>(audit)"]
+    BWeb -.->|TODO: ENG-348<br/>audit row<br/>+ ENG-275 push| ERP
 
     click BSvc "https://linear.app/island-bitcoin/issue/ENG-296" "ENG-296 — IBEX ETH-USDT account provisioning (Ben/Olaniran)" _blank
     click IBEX "https://linear.app/island-bitcoin/issue/ENG-297" "ENG-297 — LN parity on ETH-USDT Cash Wallet (Olaniran)" _blank
-    click ERP "https://linear.app/island-bitcoin/project/bridge-wallet-integration-a1596c3a2b6a" "NEW-ERPNEXT-LEDGER (to be filed) + ENG-275 push (Laurent)" _blank
+    click ERP "https://linear.app/island-bitcoin/project/bridge-wallet-integration-a1596c3a2b6a" "ENG-348 (to be filed) + ENG-275 push (Laurent)" _blank
     click BWeb "https://linear.app/island-bitcoin/issue/ENG-273" "ENG-273 — webhook monitoring/alerting (Nick)" _blank
     click IWeb "https://linear.app/island-bitcoin/issue/ENG-275" "ENG-275 — /crypto/receive push notification (Laurent)" _blank
 
@@ -134,17 +134,17 @@ flowchart TB
 | [ENG-273](https://linear.app/island-bitcoin/issue/ENG-273) | Bridge Webhook Server: monitoring + alerting | Nick |
 | [ENG-275](https://linear.app/island-bitcoin/issue/ENG-275) | IBEX Webhook Server `/crypto/receive`: push notification | Laurent |
 | [ENG-239](https://linear.app/island-bitcoin/issue/ENG-239) | Mobile: withdrawal router (Cashout V1 vs Bridge off-ramp) | Nick |
-| **NEW-ERPNEXT-LEDGER** | Both webhook servers: ERPNext audit-row writer (IBEX is the ledger — this is audit, not bookkeeping) | **Ben** *(reassigned 15:52 ET; to be filed)* |
-| **NEW-OPTIN** | Bridge Service: per-user Cash Wallet opt-in toggle | Nick / Ben (to be filed) |
-| **NEW-CASHOUT-V1-WALLET** | Cross-project: ETH-USDT as first-class source wallet for Cashout V1 (ENG-296 is a cross-project blocker) | Olaniran + Ben (Bridge); Dread (Cashout V1 spec) (to be filed) |
-| **NEW-COUNTRY-ALLOWLIST** | Flash-maintained country allowlist for UI entry | Dread / Nick (to be filed) |
+| **ENG-348** | Both webhook servers: ERPNext audit-row writer (IBEX is the ledger — this is audit, not bookkeeping) | **Ben** *(reassigned 15:52 ET; to be filed)* |
+| **ENG-345/346 (opt-in)** | Bridge Service: per-user Cash Wallet opt-in toggle | Nick / Ben (to be filed) |
+| **ENG-357** | Cross-project: ETH-USDT as first-class source wallet for Cashout V1 (ENG-296 is a cross-project blocker) | Olaniran + Ben (Bridge); Dread (Cashout V1 spec) (to be filed) |
+| **ENG-347** | Flash-maintained country allowlist for UI entry | Dread / Nick (to be filed) |
 
 **Diagram notes:**
 
 - The Bridge KYC iframe and the Bridge bank-link iframe both load Bridge-hosted URLs **directly** from the mobile app. The Flash backend never proxies PII; it only requests the URLs from Bridge and hands them to the client.
 - **The existing JMD KYC flow is a separate path** that runs through Frappe ERPNext via the legacy onboarding mutations. It is unchanged by the Bridge integration and is not depicted in the diagram. The mobile app decides which KYC flow to surface based on the user's selected jurisdiction at sign-up. A user can in principle hold both — JMD KYC (Frappe) for their JM identity and Bridge KYC (Persona) for US-style on/off-ramp — and the two state fields are independent.
 - The **Bridge Webhook Server** is a separate Express process from the main Apollo Server (see §5), running on `BridgeConfig.webhook.port` (default 4009). It writes to MongoDB and Redis but does not import the Apollo schema.
-- The **IBEX Webhook Server** is the existing IBEX webhook receiver inside Flash; the Bridge integration adds one new route handler at `POST /crypto/receive` that looks up an account by `bridgeEthereumAddress` (the on-ramp notification path). **Today this handler only logs the deposit.** The follow-on work is **not** "credit a Flash ledger" — IBEX is the ledger; the Cash Wallet balance has already moved on IBEX side by the time this webhook arrives. The follow-on work is **(a)** write an ERPNext audit row (`NEW-ERPNEXT-LEDGER`) and **(b)** emit a push notification to the user (`ENG-275`). Both are blocked on `ENG-296` so end-to-end is testable; see §5.4 and `WEBHOOKS.md` §4.2.
+- The **IBEX Webhook Server** is the existing IBEX webhook receiver inside Flash; the Bridge integration adds one new route handler at `POST /crypto/receive` that looks up an account by `bridgeEthereumAddress` (the on-ramp notification path). **Today this handler only logs the deposit.** The follow-on work is **not** "credit a Flash ledger" — IBEX is the ledger; the Cash Wallet balance has already moved on IBEX side by the time this webhook arrives. The follow-on work is **(a)** write an ERPNext audit row (`ENG-348`) and **(b)** emit a push notification to the user (`ENG-275`). Both are blocked on `ENG-296` so end-to-end is testable; see §5.4 and `WEBHOOKS.md` §4.2.
 - The **Ethereum Network** does not appear as its own box — it is the substrate Bridge and IBEX both transact on. Flash never reads or writes chain state.
 - The dashed split between `Bridge Webhook Server` and `IBEX Webhook Server` is significant: the Bridge `/deposit` webhook tells us "Bridge accepted fiat in the VA"; the IBEX `crypto.received` webhook tells us "USDT actually settled to the user's IBEX ETH-USDT account" (which IS the Cash Wallet). Neither webhook credits a Flash-side ledger — the balance lives on IBEX. The webhooks drive **audit + notification**, not bookkeeping. See §5.4.
 
@@ -258,13 +258,13 @@ sequenceDiagram
     link FI: ENG-275 — /crypto/receive push notification (Laurent) @ https://linear.app/island-bitcoin/issue/ENG-275
 
     B->>FB: POST /deposit<br/>(RSA-SHA256 sig)
-    Note right of FB: log + future:<br/>NEW-ERPNEXT-LEDGER<br/>"USD landed" audit row<br/>⚠ no Flash wallet credit
+    Note right of FB: log + future:<br/>ENG-348<br/>"USD landed" audit row<br/>⚠ no Flash wallet credit
 
     B->>I: Bridge sends USDT to<br/>user's ETH-USDT IBEX<br/>child address
     Note over I: balance moves on IBEX side<br/>= Cash Wallet up<br/>(IBEX IS the ledger)
 
     I->>FI: POST /crypto/receive<br/>(token auth, lockPaymentHash)
-    Note right of FI: lookup acct by bridgeEthereumAddress<br/>log "USDT received"<br/>TODO NEW-ERPNEXT-LEDGER: audit row<br/>TODO ENG-275: push notification<br/>⚠ no Flash wallet credit
+    Note right of FI: lookup acct by bridgeEthereumAddress<br/>log "USDT received"<br/>TODO ENG-348: audit row<br/>TODO ENG-275: push notification<br/>⚠ no Flash wallet credit
 ```
 
 **Linear tickets on this flow (not yet filed = to-be-filed):**
@@ -274,11 +274,11 @@ sequenceDiagram
 | [ENG-273](https://linear.app/island-bitcoin/issue/ENG-273) | Monitoring + alerts for both webhook legs | Nick |
 | [ENG-275](https://linear.app/island-bitcoin/issue/ENG-275) | Push on `/crypto/receive` completion | Laurent |
 | [ENG-276](https://linear.app/island-bitcoin/issue/ENG-276) | Reconciliation worker flags 24h Bridge-without-IBEX gap as orphan | Nick |
-| **NEW-ERPNEXT-LEDGER** | Audit-row writer on both legs (replaces the old "wallet credit" framing) | **Ben** *(reassigned 15:52 ET; to be filed)* |
+| **ENG-348** | Audit-row writer on both legs (replaces the old "wallet credit" framing) | **Ben** *(reassigned 15:52 ET; to be filed)* |
 
 Why two webhooks? Bridge's deposit-family event tells us **fiat** landed in the VA — useful for ops visibility ("Bridge accepted; we're waiting on USDT settlement"). The IBEX `/crypto/receive` event tells us **USDT actually arrived** in the user's ETH-USDT IBEX account — i.e., the Cash Wallet balance is now up. Both events are needed for accurate audit (the spread between them is "in flight" for ops/finance). Neither writes a wallet ledger entry on Flash side, because there is no Flash-side wallet ledger to write to — that was the wrong mental model in earlier drafts.
 
-The Bridge `/deposit` handler is intentionally minimal: it logs the event for reconciliation visibility (so ops can see "Bridge says fiat landed; we're waiting on IBEX") and will write an ERPNext audit row once `NEW-ERPNEXT-LEDGER` lands.
+The Bridge `/deposit` handler is intentionally minimal: it logs the event for reconciliation visibility (so ops can see "Bridge says fiat landed; we're waiting on IBEX") and will write an ERPNext audit row once `ENG-348` lands.
 
 ### IBEX `/crypto/receive` route (existing IBEX webhook server)
 
@@ -297,7 +297,7 @@ Behavior today:
 7. Return `200 { "status": "success" }`.
 
 **Not yet implemented (held until ENG-296 lands so end-to-end is testable):**
-- ERPNext audit-row write (`NEW-ERPNEXT-LEDGER`).
+- ERPNext audit-row write (`ENG-348`).
 - Push notification (`ENG-275`).
 
 There is **no** "wallet ledger credit" item in this list because IBEX's ETH-USDT account IS the Cash Wallet — the balance has already moved on IBEX's side by the time this webhook fires. Earlier draft docs (and the in-source `// TODO` comments) framed the missing work as "credit USDT wallet"; that wording is wrong and has been replaced with the audit + push framing above.
@@ -360,7 +360,7 @@ All write operations send an `Idempotency-Key` header; the key is constructed de
 Three integration surfaces:
 1. **ETH-USDT account / address provisioning (ENG-296, not yet built):** the future code will call `Ibex.createCryptoReceiveInfo({ accountId, network: "ethereum", currency: "usdt" })` and persist the returned child address into `account.bridgeEthereumAddress`. The provisioned IBEX ETH-USDT account **is** the user's new Cash Wallet — not just a "deposit address." Until this lands, `createVirtualAccount` returns an error and there is nothing to opt users into.
 2. **Lightning send/receive on the ETH-USDT account (ENG-297, Phase-1 launch blocker):** IBEX's ETH-USDT accounts support Lightning per `docs.ibexmercado.com/reference/welcome`. Phase 1 must wire the Flash mobile app to use IBEX's LN endpoints against the new Cash Wallet so opted-in users do not lose existing LN capability.
-3. **IBEX `/crypto/receive` webhook (existing pipeline, new route):** when IBEX detects an inbound USDT-on-ETH transfer to a child address, it POSTs to `/crypto/receive` on the Flash IBEX webhook server. The new route handler looks up the account by `bridgeEthereumAddress` and logs the deposit. **There is no Flash-side wallet credit step** — IBEX is the ledger; the balance has already moved on IBEX's side. The Flash-side follow-on work is the ERPNext audit row (`NEW-ERPNEXT-LEDGER`) and the push notification (`ENG-275`), held until ENG-296 lands. See `WEBHOOKS.md` §4 for full details.
+3. **IBEX `/crypto/receive` webhook (existing pipeline, new route):** when IBEX detects an inbound USDT-on-ETH transfer to a child address, it POSTs to `/crypto/receive` on the Flash IBEX webhook server. The new route handler looks up the account by `bridgeEthereumAddress` and logs the deposit. **There is no Flash-side wallet credit step** — IBEX is the ledger; the balance has already moved on IBEX's side. The Flash-side follow-on work is the ERPNext audit row (`ENG-348`) and the push notification (`ENG-275`), held until ENG-296 lands. See `WEBHOOKS.md` §4 for full details.
 
 ### Persona (via Bridge KYC Links)
 
@@ -496,10 +496,10 @@ For each environment (sandbox, production):
 |---|---|---|---|
 | **ENG-296** | IBEX ETH-USDT account / address provisioning (`Ibex.createCryptoReceiveInfo` for ETH). The provisioned IBEX account IS the new Cash Wallet. | **Critical** | Without provisioning, `bridgeCreateVirtualAccount` returns an error, there is no new Cash Wallet to opt users into, and the on-ramp is end-to-end broken. |
 | **ENG-297** | Lightning send/receive parity on the IBEX ETH-USDT Cash Wallet | **Critical (Phase-1 launch blocker)** | Opted-in users must keep existing LN capability. IBEX docs confirm support; Flash surface must wire it. |
-| **NEW-OPTIN** | Per-user Cash Wallet opt-in toggle (settings screen, permanent, non-reversible, gates Bridge features) | **Critical** | No way to switch a user from legacy IBEX USD wallet to the new ETH-USDT Cash Wallet. |
-| **NEW-ERPNEXT-LEDGER** | ERPNext audit-row writer for every Bridge ↔ IBEX USDT movement under a Flash user | High | Finance/accounting requirement; replaces the old "wallet ledger credit" framing for the `/crypto/receive` handler and adds the off-ramp leg too. |
-| **NEW-CASHOUT-V1-WALLET** | Cashout V1 source-wallet switch for opted-in JM users (source = ETH-USDT, not legacy USD) | High | Opted-in JM users would otherwise lose Cashout V1 access. |
-| **NEW-COUNTRY-ALLOWLIST** | Flash-maintained country allowlist (superset of Bridge + Caribbean markets) gating UI entry | Med | Without it, UI entry depends on Bridge's list, which excludes Caribbean markets where Cashout V1 must surface. |
+| **ENG-345/346 (opt-in)** | Per-user Cash Wallet opt-in toggle (settings screen, permanent, non-reversible, gates Bridge features) | **Critical** | No way to switch a user from legacy IBEX USD wallet to the new ETH-USDT Cash Wallet. |
+| **ENG-348** | ERPNext audit-row writer for every Bridge ↔ IBEX USDT movement under a Flash user | High | Finance/accounting requirement; replaces the old "wallet ledger credit" framing for the `/crypto/receive` handler and adds the off-ramp leg too. |
+| **ENG-357** | Cashout V1 source-wallet switch for opted-in JM users (source = ETH-USDT, not legacy USD) | High | Opted-in JM users would otherwise lose Cashout V1 access. |
+| **ENG-347** | Flash-maintained country allowlist (superset of Bridge + Caribbean markets) gating UI entry | Med | Without it, UI entry depends on Bridge's list, which excludes Caribbean markets where Cashout V1 must surface. |
 | **ENG-275** | `/crypto/receive` push notification (formerly listed as "wallet credit + push") | Med | Owner: Laurent. The "wallet credit" half is removed (IBEX is the ledger); the push half remains. |
 | ENG-282/283/284 | Open security items | High | Owner: Laurent. Details in their respective tickets. |
 | ENG-285 | Withdrawal amount validation (min/max, dust) | Med | Owner: Nick. |
@@ -524,8 +524,8 @@ For each environment (sandbox, production):
 | 2026-04-21 | Full rewrite: ETH-only, four-service architecture (service / client / webhook-server / repos), redrawn component diagram, two-webhook deposit model documented, data model + indexes + Account additions tabulated, security model expanded with CRIT-1/CRIT-2, observability section added, open-work table aligned with current Linear state. | Taddesse + Dread |
 | 2026-04-21 | Revisions: added explicit JMD-KYC catch in §2/§3 (Frappe-backed, separate from Bridge KYC); §5 timestamp skew sourced from `bridge.webhook.timestampSkewMs`; §7 + §9 corrected — backend does not perform `/verify` → `/widget` URL rewrite (mobile/dashboard concern); §9 replaced fictional `BRIDGE_*` env-var table with the actual `bridge:` YAML config schema. | Taddesse + Dread |
 | 2026-04-21 | Code-grounded corrections after pulling actual webhook handlers: IBEX route is `POST /crypto/receive` (slash, not hyphen); the handler currently only logs — wallet credit + push are not yet implemented and are folded into the ENG-296 dependency. §3 component diagram updated. §5.3 idempotency lock-key shapes corrected (KYC includes event; deposit/transfer use only `transfer_id`; IBEX uses `lockPaymentHash`). §5.4 two-webhook diagram and IBEX route description rewritten to match real behavior. §6, §7, §10, §12 updated for consistency. | Taddesse + Dread |
-| 2026-04-22 | **Architectural correction (Dread, 13:09 ET):** IBEX ETH-USDT account IS the Cash Wallet — no Flash-side wallet ledger; webhooks drive audit + push, not bookkeeping. §1 key-non-goals, §2 system overview, §3 diagram notes, §5.4 two-webhook diagram + narrative, §7 IBEX integration, §12 open-work all rewritten. New tickets surfaced: NEW-OPTIN, NEW-ERPNEXT-LEDGER, NEW-CASHOUT-V1-WALLET, NEW-COUNTRY-ALLOWLIST. ENG-297 promoted to Phase-1 launch blocker. Per-user permanent opt-in migration model added in §2/§5.4. | Taddesse + Dread |
+| 2026-04-22 | **Architectural correction (Dread, 13:09 ET):** IBEX ETH-USDT account IS the Cash Wallet — no Flash-side wallet ledger; webhooks drive audit + push, not bookkeeping. §1 key-non-goals, §2 system overview, §3 diagram notes, §5.4 two-webhook diagram + narrative, §7 IBEX integration, §12 open-work all rewritten. New tickets surfaced: ENG-345/346 (opt-in), ENG-348, ENG-357, ENG-347. ENG-297 promoted to Phase-1 launch blocker. Per-user permanent opt-in migration model added in §2/§5.4. | Taddesse + Dread |
 | 2026-04-22 14:29 ET | **Diagram modernization (Dread).** Replaced the §3 ASCII component diagram with a Mermaid `flowchart` (subgraphs for Mobile App / Flash Backend / Data Stores / External, with interactive `click` directives to Linear issues on every significant node: ENG-296, ENG-297, ENG-273, ENG-275, + NEW-* project-URL placeholders) and added a "Linear tickets surfaced in this diagram" reference table. Replaced the §5.4 two-webhook ASCII diagram with a Mermaid `sequenceDiagram` including participant `link` directives and a companion ticket table. Owner + ticket ID appear in node labels so the cross-references survive renderers that strip `click`. | Taddesse + Dread |
-| 2026-04-22 15:52 ET | **NEW-ERPNEXT-LEDGER reassigned to Ben (Dread).** Per Dread: the ERPNext audit-row writer belongs on Ben rather than Olaniran (or Dread as relief). Rationale: the audit writer sits on top of the `/crypto/receive` + `/deposit` + `/transfer` webhook paths Ben now owns after the 15:36 ET IBEX handoff (moved into LINEAR-PROPOSAL.md during the prior cascade but not yet reflected here) — consolidating the audit writer with the handlers that emit the USDT-movement events avoids cross-engineer handoffs at the ticket boundary. Changes in ARCHITECTURE.md: §3 component-diagram ticket table (NEW-ERPNEXT-LEDGER owner: `Olaniran or Dread` → `Ben *(reassigned 15:52 ET; to be filed)*`); §5.4 two-webhook ticket table (NEW-ERPNEXT-LEDGER owner: `Olaniran / Dread` → `Ben *(reassigned 15:52 ET; to be filed)*`). Dread remains the ERPNext contract counterpart. §12 open-work priority row (NEW-ERPNEXT-LEDGER priority High — owner not listed there, so unchanged). Diagram owner labels and `click` directives unchanged — they reference NEW-ERPNEXT-LEDGER as a generic ticket link, not an owner tag. | Taddesse + Dread |
+| 2026-04-22 15:52 ET | **ENG-348 reassigned to Ben (Dread).** Per Dread: the ERPNext audit-row writer belongs on Ben rather than Olaniran (or Dread as relief). Rationale: the audit writer sits on top of the `/crypto/receive` + `/deposit` + `/transfer` webhook paths Ben now owns after the 15:36 ET IBEX handoff (moved into LINEAR-PROPOSAL.md during the prior cascade but not yet reflected here) — consolidating the audit writer with the handlers that emit the USDT-movement events avoids cross-engineer handoffs at the ticket boundary. Changes in ARCHITECTURE.md: §3 component-diagram ticket table (ENG-348 owner: `Olaniran or Dread` → `Ben *(reassigned 15:52 ET; to be filed)*`); §5.4 two-webhook ticket table (ENG-348 owner: `Olaniran / Dread` → `Ben *(reassigned 15:52 ET; to be filed)*`). Dread remains the ERPNext contract counterpart. §12 open-work priority row (ENG-348 priority High — owner not listed there, so unchanged). Diagram owner labels and `click` directives unchanged — they reference ENG-348 as a generic ticket link, not an owner tag. | Taddesse + Dread |
 | 2026-04-22 14:52 ET | **Parse-error fix (Dread).** §3 component diagram line 33 had an unquoted `(` inside a flowchart pipe-edge label (`\|GraphQL<br/>(separate legacy path)\|`) which Mermaid's parser rejected as a `PS` token. Replaced the parens with `&mdash; separate legacy path` (rewrote as `\|GraphQL &mdash; separate legacy path\|`). Grep-verified no other pipe-edge labels in the file carry unquoted parens. | Taddesse + Dread |
 | (prior) | Original 67-line draft, Tron-based, missing webhook server / Mongo / Redis / iframe-KYC / two-webhook split. | heyolaniran et al. |
