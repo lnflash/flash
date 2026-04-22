@@ -14,14 +14,16 @@
 
 ## TL;DR
 
+> **2026-04-22 13:09 ET correction:** The IBEX ETH-USDT account **IS** the Flash Cash Wallet. ENG-297 (Lightning parity on the ETH-USDT wallet) is no longer Phase 2 / post-launch — it is a **Phase 1 launch blocker** because the opted-in user's only Cash Wallet is the ETH-USDT one, and that wallet must support LN send/receive from day 1. This section's Section B and cascade list have been updated accordingly.
+
 | Severity | Count | Tickets |
 |---|---|---|
 | **Critical external dependency** — owned outside this project | 1 | **ENG-38** (IBEX auth deprecation, May 31 2026 deadline). Updated in Linear: assignee Ben, **Urgent**, due **2026-05-31**. Tracked outside the Bridge project. |
-| **Moved into the Bridge Wallet Integration project** | 2 | **ENG-297** (Phase 2 Lightning parity), **ENG-298** (Phase 3 schema cleanup). Verified non-duplicate of any NEW-* / FEE-1 ticket. |
+| **Moved into the Bridge Wallet Integration project** | 2 | **ENG-297** (**Phase 1 launch blocker** — LN parity on the ETH-USDT Cash Wallet), **ENG-298** (Phase 2 / post-launch schema cleanup, renumbered from Phase 3). Verified non-duplicate of any NEW-* / FEE-1 ticket. |
 | **Canceled as superseded** | 1 | **ENG-16** (Instant Fiat Conversion — empty body, superseded by Bridge integration). |
 | **No-op / parent already canceled** | 1 | ENG-295 — parent epic, already Canceled and properly split into ENG-296/297/298. Left alone. |
 | **Already completed and deployed** | 1 | **ENG-291** (account upgrade form bug). Confirmed by Dread as completed and deployed; **no longer a Bridge launch blocker**. |
-| **Out of scope but adjacent (Cashout V1/V2)** | 3 | ENG-42, ENG-43, ENG-158 — leave alone |
+| **Out of scope but adjacent (Cashout V1/V2)** | 3 | ENG-42, ENG-43, ENG-158 — leave alone. **Exception:** NEW-CASHOUT-V1-WALLET (Cashout V1 source-wallet switch for opted-in JM users) is filed on the Bridge project — see LINEAR-PROPOSAL §1.1 / §1.2 / §1.4. |
 | **Out of this project plan** (separate effort) | — | **Currency Precision project (ENG-318/319/326)** — intentionally **not** taken as a dependency for this project per Dread. Bridge withdrawal amount handling stays local (ENG-285) and may migrate to `MoneyAmount` later if/when that project ships. No cross-link recorded here. |
 | **False positives in keyword search** | ~30 | i18n, BTCMap, Lightning Address, WhatsApp Agent, etc. — no action |
 
@@ -52,7 +54,7 @@
 
 ## Section B — Tickets moved into this project
 
-These are the **"Phase 1 / 2 / 3" split** of the original ENG-295 epic. ENG-296 (Phase 1) was already in the project; ENG-297 and ENG-298 are now being added as Phase 2 and Phase 3 of this same project. Verified non-duplicate of any NEW-1..NEW-11 / FEE-1 ticket — all NEW tickets are Phase-1 scope.
+These are the **"Phase 1 / 2 / 3" split** of the original ENG-295 epic. Post 2026-04-22 13:09 ET correction: **ENG-296 and ENG-297 are both Phase 1 launch blockers**, and ENG-298 moves to Phase 2 post-launch. Verified non-duplicate of any NEW-1..NEW-11 / FEE-1 / NEW-OPTIN / NEW-ERPNEXT-LEDGER / NEW-CASHOUT-V1-WALLET / NEW-COUNTRY-ALLOWLIST ticket — ENG-297 is about LN parity on the ETH-USDT Cash Wallet, which is not covered by any NEW-* ticket.
 
 ### **ENG-295 — Full IBEX wallet parity replacement** (Canceled — already properly split)
 
@@ -67,22 +69,24 @@ Body opens with "⚠️ Superseded — split into ENG-296, ENG-297, ENG-298." Al
 
 **Decision:** Leave as-is. No engineering action.
 
-### **ENG-297 — [Phase 2] Lightning parity on ETH USDT wallet** — *moving into project*
+### **ENG-297 — Lightning parity on the ETH-USDT Cash Wallet** — *moving into project as Phase 1 launch blocker*
 
 | Field | Value |
 |---|---|
 | State | Backlog |
-| Priority | High |
+| Priority | **Urgent** (promote from High) |
 | Project (target) | Bridge Wallet Integration |
 | Depends on | ENG-296 |
 | Suggested assignee | **Olaniran** (continuation of ENG-296 code) |
-| Wave tag | **P2** (post-launch; separate from W1–W7 launch waves) |
+| Wave tag | **W1** (Phase 1 launch blocker — **not** post-launch anymore) |
 
-Scope: Lightning invoice generation, send/pay LN invoices, LNURL, balance display, transaction history, webhook crediting on the ETH USDT wallet. Mirrors the existing IBEX USD wallet capabilities for the Bridge ETH USDT wallet.
+Scope: Lightning invoice generation, send/pay LN invoices, LNURL, balance display, transaction history on the IBEX ETH-USDT account (which **IS** the Flash Cash Wallet for opted-in users). Mirrors the existing IBEX USD wallet LN capabilities on the new ETH-USDT Cash Wallet. Per docs.ibexmercado.com/reference/welcome, IBEX supports LN on ETH-USDT accounts.
 
-**Action:** Add to Bridge Wallet Integration project via Linear `issueUpdate { projectId }` mutation. Add `blocks-on` link to ENG-296. Reflected in `LINEAR-PROPOSAL.md §1.1` Olaniran row "Phase 2".
+**Why Phase 1 (not Phase 2):** After opt-in, the user's **only** Cash Wallet is the ETH-USDT one. If LN send/receive doesn't work on it from day 1, we've downgraded the Cash Wallet experience compared to the legacy USD wallet. That's a launch-blocker product regression, not a post-launch enhancement.
 
-### **ENG-298 — [Phase 3] Schema cleanup — remove chain-specific fields** — *moving into project*
+**Action:** Add to Bridge Wallet Integration project via Linear `issueUpdate { projectId }` mutation. **Update priority to Urgent.** Add `blocks-on` link to ENG-296. **Add `blocks` link to NEW-OPTIN and ENG-342** (neither can activate for users until LN parity is proven on the new wallet). Reflected in `LINEAR-PROPOSAL.md §1.1` Olaniran W1 row.
+
+### **ENG-298 — [Phase 2 post-launch] Schema cleanup — remove chain-specific fields** — *moving into project*
 
 | Field | Value |
 |---|---|
@@ -91,11 +95,11 @@ Scope: Lightning invoice generation, send/pay LN invoices, LNURL, balance displa
 | Project (target) | Bridge Wallet Integration |
 | Depends on | ENG-296 + ENG-297 |
 | Suggested assignee | **Ben** (Flash app schema is his domain) |
-| Wave tag | **P3** (post-launch cleanup) |
+| Wave tag | **P2** (post-launch cleanup, renumbered from P3 now that ENG-297 is Phase 1) |
 
 Scope: remove `bridgeTronAddress`, `bridgeEthAddress` and other chain-specific fields from Account; migration script; full unit tests.
 
-**Action:** Add to Bridge Wallet Integration project via Linear `issueUpdate { projectId }` mutation. Add `blocks-on` link to ENG-297. Reflected in `LINEAR-PROPOSAL.md §1.2` Ben row "Phase 3".
+**Action:** Add to Bridge Wallet Integration project via Linear `issueUpdate { projectId }` mutation. Add `blocks-on` link to ENG-297. Reflected in `LINEAR-PROPOSAL.md §1.2` Ben row "Phase 2".
 
 ## Section C — Canceled as superseded
 
@@ -156,7 +160,8 @@ No action needed.
 
 | Action | Tickets | Owner | Status |
 |---|---|---|---|
-| **Move into project** (2) | ENG-297 (Phase 2), ENG-298 (Phase 3) | Dread | Pending — Linear `issueUpdate { projectId }`. Verified non-duplicate of any NEW-* / FEE-1. |
+| **Move into project + promote to Phase 1** (1) | **ENG-297** (now Phase 1 launch blocker — W1) | Dread | Pending — Linear `issueUpdate { projectId, priority: Urgent }`. Add `blocks` links to NEW-OPTIN + ENG-342. |
+| **Move into project as Phase 2 post-launch** (1) | ENG-298 (renumbered from Phase 3) | Dread | Pending — Linear `issueUpdate { projectId }`. |
 | **Cancel as superseded** (1) | ENG-16 (Instant Fiat Conversion) | Dread | Pending — Linear `issueUpdate { stateId }`. |
 | **Update + leave outside project** (1) | ENG-38 (IBEX auth) | Ben | **Done** — Linear: assignee Ben, Urgent, due 2026-05-31. |
 | **No action** | ENG-291 (already deployed), ENG-295 (already canceled), Currency Precision (out of plan), Section E + F | — | — |
@@ -165,9 +170,9 @@ No action needed.
 
 - ✅ **EXECUTIVE-SUMMARY.md §4** — added ENG-38 (IBEX auth, May 31, Ben, Urgent) as cross-cutting external dependency in the blockers table.
 - ✅ **EXECUTIVE-SUMMARY.md §11** — added risk #6: IBEX auth deprecation cuts the crypto rail if not migrated.
-- ✅ **LINEAR-PROPOSAL.md §1.1 Olaniran** — added ENG-297 (Phase 2 / post-launch) and external-dependency note for ENG-38.
-- ✅ **LINEAR-PROPOSAL.md §1.2 Ben** — added ENG-298 (Phase 3 / post-launch) and external-dependency note for ENG-38.
-- ✅ **LINEAR-PROPOSAL.md §1.4 Dread** — added ENG-16 cancellation, ENG-297 + ENG-298 project moves, and ENG-38 cross-project visibility as project-hygiene items.
+- ✅ **LINEAR-PROPOSAL.md §1.1 Olaniran** — **ENG-297 promoted to Phase 1 / W1 launch blocker** (priority Urgent). External-dependency note for ENG-38 retained.
+- ✅ **LINEAR-PROPOSAL.md §1.2 Ben** — added ENG-298 (Phase 2 / post-launch, renumbered from Phase 3) and external-dependency note for ENG-38.
+- ✅ **LINEAR-PROPOSAL.md §1.4 Dread** — added ENG-16 cancellation, **ENG-297 Phase-1 promotion** project-hygiene item, ENG-298 project-move project-hygiene item, and ENG-38 cross-project visibility.
 - ✅ **OPERATIONS.md §3** — added IBEX migration as an external deployment dependency.
 - ❌ **No** Currency Precision references added anywhere in the project plan, per Dread.
 
@@ -177,3 +182,4 @@ No action needed.
 |---|---|---|
 | 2026-04-22 | Taddesse (Dread review) | Initial scan of ENG team for Bridge-related orphans. Found 1 critical external dependency (ENG-38), 3 to move into project (ENG-295/297/298), 1 likely stale (ENG-16), 4 to cross-link (ENG-291, ENG-318, ENG-319, ENG-326). |
 | 2026-04-22 | Taddesse (Dread review) | Applied Dread decisions: ENG-38 updated in Linear (Ben, Urgent, due 2026-05-31) and intentionally **not** moved into the Bridge project; ENG-297 + ENG-298 to be moved into project (verified non-duplicate of NEW-*); ENG-16 to be canceled; ENG-291 confirmed already completed and deployed (no longer a blocker, no cross-link); Currency Precision (ENG-318/319/326) intentionally **left out** of this project plan. ENG-295 left as-is (already canceled). Section D speculation about ENG-344 routing dropped. |
+| 2026-04-22 13:09 ET | Taddesse (Dread directive) | **IBEX-ETH-USDT-is-the-wallet cascade.** ENG-297 reclassified from **Phase 2 post-launch → Phase 1 / W1 launch blocker** (priority bump High → Urgent). Rationale: after opt-in, the user's only Cash Wallet is the ETH-USDT wallet — if LN send/receive doesn't work on it from day 1, it's a launch-blocker product regression vs the legacy USD Cash Wallet. ENG-298 renumbered from Phase 3 → Phase 2. Added `blocks` links: ENG-297 blocks NEW-OPTIN + ENG-342 (neither can activate without proven LN parity). Verified non-duplicate of all four newly filed NEW tickets (NEW-OPTIN / NEW-ERPNEXT-LEDGER / NEW-CASHOUT-V1-WALLET / NEW-COUNTRY-ALLOWLIST). |

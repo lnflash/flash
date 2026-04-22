@@ -10,6 +10,8 @@
 
 ## §0. Routing & Jurisdiction
 
+> **Cash Wallet migration (new in Phase 1).** Every Bridge-touching flow below assumes the user has **opted in** to the new IBEX ETH-USDT Cash Wallet. Opt-in is a per-user, permanent, non-reversible toggle in the settings screen; non-opted-in users remain on the legacy IBEX USD Cash Wallet and never reach any of these flows. The opt-in flow itself is documented in §3e. **JM users are included** — post-opt-in, their Cash Wallet is the IBEX ETH-USDT account, which changes Cashout V1's source wallet (see §5 and `NEW-CASHOUT-V1-WALLET`).
+
 Three flows coexist; a user may use any combination depending on the bank accounts they have:
 
 ```
@@ -64,7 +66,7 @@ Per-account jurisdiction is read from `Account.country` (set during Level-2 KYC)
 | **Flash Backend** | This codebase. Service layer at `src/services/bridge/`, GraphQL at `src/graphql/public/`, webhook server at `src/services/bridge/webhook-server/`. |
 | **Bridge.xyz** | USD on/off-ramp processor. Holds KYC, virtual accounts, external accounts, transfers. |
 | **Persona** | KYC vendor used by Bridge. Renders inside the Bridge iframe; never touches Flash backend. |
-| **IBEX** | Crypto receive infrastructure. Provisions Ethereum USDT addresses, observes deposits, credits Flash's USDT wallets. |
+| **IBEX** | Provides the user's **ETH-USDT account — which IS the Flash Cash Wallet after opt-in.** IBEX is the ledger; the balance lives on IBEX's side. IBEX provisions the account + child ETH address, observes deposits, and notifies Flash via `/crypto/receive`. Flash does not run a parallel USDT ledger. |
 
 ### Data-flow constraint (CRITICAL)
 
@@ -205,9 +207,11 @@ A user may deposit many times into the same VA; each deposit traverses this mach
         ▼  (Bridge: deposit.completed webhook; tx_hash known)
    bridge_sent_onchain ─────────────────────────────────┐
         │                                               │
-        ▼  (IBEX: crypto.received webhook fires)        │  (IBEX never observes
-   ibex_credited (terminal: success)                    ▼   within 24h SLA)
-                                                  orphaned
+        ▼  (IBEX: crypto.received webhook fires;        │  (IBEX never observes
+        │   IBEX ETH-USDT account balance has moved     │   within 24h SLA)
+        │   on IBEX side — Cash Wallet balance is up)   │
+   ibex_received (terminal: success — Flash writes      ▼
+   ERPNext audit row + push)                       orphaned
                                                         │
                                                         ▼ (ops opens ticket)
                                                   manual_reconciliation
@@ -222,19 +226,55 @@ A user may deposit many times into the same VA; each deposit traverses this mach
 | `awaiting_funds` | implicit | No | Default state; we don't persist until Bridge fires. |
 | `bridge_received` | Bridge | No (we don't currently get a webhook for this intermediate state) | Could be added if Bridge exposes it. |
 | `bridge_converting` | Bridge | No | Same. |
-| `bridge_sent_onchain` | Flash | Yes — log entry from Bridge `deposit.completed` webhook (idempotent via `bridge-deposit:{tx_hash}` lock) | We do **not** credit on this signal. |
-| `ibex_credited` | Flash | Yes — credits USDT wallet via `crypto-receive` IBEX webhook (idempotent via `tx_hash`) | Push notification fires. |
+| `bridge_sent_onchain` | Flash | Yes — log entry from Bridge `deposit.completed` webhook (idempotent via `bridge-deposit:{tx_hash}` lock) | No Flash wallet credit — there is no Flash-side wallet ledger. |
+| `ibex_received` | IBEX (Flash logs) | Yes — IBEX `/crypto/receive` webhook fires (idempotent via `lockPaymentHash(tx_hash)`); Flash writes ERPNext audit row (`NEW-ERPNEXT-LEDGER`) and sends push (`ENG-275`). **IBEX's ETH-USDT account balance — the Cash Wallet — has moved on IBEX's side.** | Terminal: success. |
 | `orphaned` | Flash (reconciler) | Yes — flagged after 24h | Driven by ENG-276 reconciliation worker (TODO). |
 | `manual_reconciliation` | Ops | Yes | Ops runbook in `OPERATIONS.md` (ENG-272). |
 | `bridge_returned` | Bridge | Yes — webhook event TBD; today not handled | Need to extend Bridge webhook handler. |
 
-**Why two webhooks?** Bridge owns the fiat-rail confirmation; IBEX owns the chain-receipt confirmation. Crediting on Bridge alone risks crediting before USDT actually lands (chain congestion, contract failure). Crediting on IBEX alone misses fiat-side context (amount/route/customer). We log Bridge-side, credit IBEX-side, and reconcile the gap.
+**Why two webhooks?** Bridge owns the fiat-rail confirmation; IBEX owns the chain-receipt confirmation. Both events are needed for accurate audit — the gap between them is "in flight" for finance/ops. **Neither webhook "credits a Flash wallet"** — the Cash Wallet balance lives on IBEX (the IBEX ETH-USDT account IS the Cash Wallet). The webhooks drive **audit + push**, not bookkeeping.
 
 **Idempotency keys:**
 - Bridge deposit log: `bridge-deposit:{tx_hash}` via `LockService`
-- IBEX credit: `ibex-crypto-receive:{tx_hash}` via `LockService`
+- IBEX `/crypto/receive`: `lockPaymentHash(tx_hash)` (callback-style)
 
-### 3d. Withdrawal state machine
+### 3d. Cash Wallet opt-in state machine (new)
+
+Per user; one-shot, permanent, non-reversible. This is the gate to every Bridge-touching flow below.
+
+```
+   legacy_usd (default)
+        │
+        ▼  (user taps "Switch to USDT Cash Wallet" in settings;
+        │   confirms permanence dialog)
+   opt_in_pending
+        │
+        ▼  (Flash: call IBEX to provision ETH-USDT account for user —
+        │   this is ENG-296; the provisioned account IS the new Cash Wallet)
+   eth_usdt_ready
+        │
+        ▼  (Flash: flip account.cashWallet = "eth_usdt"; permanent flip)
+   eth_usdt_active (terminal; one-way)
+
+   Failure branches:
+   - opt_in_failed (IBEX provisioning failed; user stays on legacy; can retry)
+```
+
+| State | Persisted? | Notes |
+|---|---|---|
+| `legacy_usd` | Implicit (default; `account.cashWallet` absent or `"legacy_usd"`) | User sees the legacy IBEX USD Cash Wallet; no Bridge features. |
+| `opt_in_pending` | Yes — written when user confirms in settings | UI shows a one-time confirm dialog ("This is permanent"); blocks the button while pending. |
+| `eth_usdt_ready` | Yes — written after successful `Ibex.createCryptoReceiveInfo` returns a child address | Account has `bridgeEthereumAddress`; about to flip the Cash Wallet pointer. |
+| `eth_usdt_active` | Yes — `account.cashWallet = "eth_usdt"` | Terminal. User now sees the new Cash Wallet and all Bridge features unlock (subject to KYC, account level, etc.). **Non-reversible**: no mutation flips this back. |
+| `opt_in_failed` | Yes — retryable | User stays on legacy; settings screen surfaces retry. |
+
+**Implementation notes:**
+- Ticket: **NEW-OPTIN** (Nick/Ben). Depends on ENG-296 (account provisioning) and ENG-297 (LN parity — the new wallet must have LN send/receive on day one or opting in is a regression).
+- The Flash UI must **only ever show one Cash Wallet** — never both. Both legacy IBEX USD and new IBEX ETH-USDT accounts exist on IBEX's side; Flash picks which one to surface based on `account.cashWallet`.
+- ERPNext audit row on the opt-in event itself is TBD (probably wanted for compliance — flag for finance review).
+- A downgrade path does **not** exist. If a user regrets the opt-in, that is a support-ops ticket, not a self-serve flow.
+
+### 3e. Withdrawal state machine
 
 Per withdrawal; persisted as `BridgeWithdrawalRecord`.
 
@@ -341,24 +381,45 @@ User      Mobile App         Flash Backend            Bridge        Persona     
  │             │                    │◀──────────────────┤              │            │
  │             │                    │ verify sig,       │              │            │
  │             │                    │ idempotency,      │              │            │
- │             │                    │ LOG ONLY          │              │            │
- │             │                    │ (no balance       │              │            │
- │             │                    │  credit yet)      │              │            │
+ │             │                    │ log + (TODO       │              │            │
+ │             │                    │  NEW-ERPNEXT-     │              │            │
+ │             │                    │  LEDGER) ERPNext  │              │            │
+ │             │                    │  audit row        │              │            │
+ │             │                    │ (no Flash wallet  │              │            │
+ │             │                    │  credit — IBEX    │              │            │
+ │             │                    │  is the ledger)   │              │            │
  │             │                    │                   │              │ crypto.    │
  │             │                    │                   │              │ received   │
+ │             │                    │                   │              │ (IBEX      │
+ │             │                    │                   │              │  balance   │
+ │             │                    │                   │              │  already   │
+ │             │                    │                   │              │  moved =   │
+ │             │                    │                   │              │  Cash      │
+ │             │                    │                   │              │  Wallet    │
+ │             │                    │                   │              │  balance   │
+ │             │                    │                   │              │  up)       │
  │             │                    │◀──────────────────────────────────────────────┤
- │             │                    │ verify sig,       │              │            │
- │             │                    │ idempotency,      │              │            │
+ │             │                    │ authenticate,     │              │            │
+ │             │                    │ idempotency       │              │            │
+ │             │                    │ (lockPaymentHash),│              │            │
  │             │                    │ findByBridge-     │              │            │
  │             │                    │  EthereumAddress, │              │            │
- │             │                    │ credit USDT wallet│              │            │
- │             │ push: "Deposit     │                   │              │            │
- │             │ complete: X USDT"  │                   │              │            │
+ │             │                    │ log + (TODO       │              │            │
+ │             │                    │  NEW-ERPNEXT-     │              │            │
+ │             │                    │  LEDGER) ERPNext  │              │            │
+ │             │                    │  audit row        │              │            │
+ │             │                    │ (no Flash wallet  │              │            │
+ │             │                    │  credit)          │              │            │
+ │             │ push (ENG-275):    │                   │              │            │
+ │             │ "Deposit complete: │                   │              │            │
+ │             │  X USDT"           │                   │              │            │
  │             │◀──────────────────┤                   │              │            │
  │             │                    │                   │              │            │
 ```
 
-**Pre-launch gating dependency:** The IBEX `POST /crypto/receive-infos` call (ENG-296) is currently unimplemented; `createVirtualAccount` returns `Error("IBEX Ethereum address creation not yet implemented")`. Until ENG-296 lands, the on-ramp halts at the "persist `bridgeEthereumAddress`" step.
+**Pre-launch gating dependency:** The IBEX `POST /crypto/receive-infos` call (ENG-296) is currently unimplemented; `createVirtualAccount` returns `Error("IBEX Ethereum address creation not yet implemented")`. Until ENG-296 lands, the on-ramp halts at the "persist `bridgeEthereumAddress`" step. **Also gated on NEW-OPTIN** — this entire sequence is only reachable by users who have opted in to the IBEX ETH-USDT Cash Wallet. Non-opted-in users never see the "Enable USD" entry point.
+
+> **Important framing (Dread 13:09 ET):** earlier versions of this diagram showed the Flash backend "crediting USDT wallet" on `/crypto/receive`. That step does not exist — the IBEX ETH-USDT account IS the Cash Wallet, and the balance has already moved on IBEX's side. The Flash-side work on `/crypto/receive` is (a) ERPNext audit row (`NEW-ERPNEXT-LEDGER`) and (b) push notification (`ENG-275`). The diagram above reflects the corrected model.
 
 ---
 
@@ -466,7 +527,9 @@ User      Mobile App         Flash Backend            Bridge          IBEX
  │             │  (ENG-275 TODO)    │                   │                │
 ```
 
-**JM user with no Bridge External Account attempts off-ramp:** Mobile app's withdrawal router detects the user has no Bridge EA and calls the **Cashout V1** mutation instead of `bridgeInitiateWithdrawal`. Cashout V1 is itself backend-orchestrated: the backend collects the user's `BankAccount` (from `Account` / ERPNext Customer record), invokes IBEX to debit the user's USD wallet for the cashout amount + service fee, creates a `Cashout` DocType in ERPNext linked to the resulting JournalEntry and BankAccount, and then waits for a Flash support user to settle via RTGS through the admin UI. On RTGS settlement, a `PaymentEntry` is recorded in ERPNext and the user is notified via `adminPaymentEntryNotificationSend`. The Bridge service layer is never invoked in this branch, but the **backend and ERPNext are**. Authoritative spec: [Cashout V1 Linear project](https://linear.app/island-bitcoin/project/cashout-v1-c1fbf09713bb) (key tickets: ENG-199 Cashout DocType, ENG-197 PaymentEntry on RTGS, ENG-198 user notification, ENG-157 settlement admin page, ENG-239 mobile API integration, ENG-240 BankAccount query, ENG-292 BankAccount on offer).
+**JM user with no Bridge External Account attempts off-ramp:** Mobile app's withdrawal router detects the user has no Bridge EA and calls the **Cashout V1** mutation instead of `bridgeInitiateWithdrawal`. Cashout V1 is itself backend-orchestrated: the backend collects the user's `BankAccount` (from `Account` / ERPNext Customer record), invokes IBEX to debit the user's Cash Wallet for the cashout amount + service fee, creates a `Cashout` DocType in ERPNext linked to the resulting JournalEntry and BankAccount, and then waits for a Flash support user to settle via RTGS through the admin UI. On RTGS settlement, a `PaymentEntry` is recorded in ERPNext and the user is notified via `adminPaymentEntryNotificationSend`. The Bridge service layer is never invoked in this branch, but the **backend and ERPNext are**. Authoritative spec: [Cashout V1 Linear project](https://linear.app/island-bitcoin/project/cashout-v1-c1fbf09713bb) (key tickets: ENG-199 Cashout DocType, ENG-197 PaymentEntry on RTGS, ENG-198 user notification, ENG-157 settlement admin page, ENG-239 mobile API integration, ENG-240 BankAccount query, ENG-292 BankAccount on offer).
+
+> **Cashout V1 source-wallet change for opted-in users (new).** The IBEX debit in Cashout V1 historically pulls from the legacy IBEX USD account. For users who have opted in to the new IBEX ETH-USDT Cash Wallet, the source is now the ETH-USDT account — and the settlement semantics change (USDT → JMD involves a USD swap step that the legacy path did not need). This is tracked as **NEW-CASHOUT-V1-WALLET**. Non-opted-in JM users continue to use the legacy path unchanged; opted-in JM users cannot use Cashout V1 until NEW-CASHOUT-V1-WALLET lands.
 
 **JM user with linked US/EU/etc. External Account:** Mobile app surfaces a destination choice ("Withdraw to JMD Bank" vs "Withdraw to US Bank"). User picks; mobile app calls the matching mutation — either `bridgeInitiateWithdrawal` (this section) or the Cashout V1 mutation (above). Bridge off-ramp via the linked EA proceeds exactly as for a US user — Bridge has already verified rail eligibility at link time, so no Flash-side jurisdiction check is required.
 
@@ -584,7 +647,12 @@ UX recommendation: surface limits to the user in the deposit/withdrawal screens 
 
 | Ticket | Item | Owner | Why it gates launch |
 |---|---|---|---|
-| ENG-296 | IBEX Ethereum USDT address provisioning (`Ibex.createCryptoReceiveInfo` for ETH) | Ben | Without this, `bridgeCreateVirtualAccount` returns an error and the on-ramp is end-to-end broken. |
+| ENG-296 | IBEX ETH-USDT account / address provisioning (`Ibex.createCryptoReceiveInfo` for ETH). Provisioned account IS the new Cash Wallet. | Ben / Olaniran | Without this, there is no new Cash Wallet to opt into; `bridgeCreateVirtualAccount` returns an error; the on-ramp is end-to-end broken. |
+| **ENG-297** | **Lightning send/receive parity on the ETH-USDT Cash Wallet** (IBEX supports it per docs; Flash surface must match legacy-wallet LN capability) | Olaniran | Without this, opted-in users lose LN — a regression. Phase-1 launch blocker (not post-launch). |
+| **NEW-OPTIN** | Per-user opt-in toggle (settings screen; permanent; gates Bridge features; Flash UI shows one Cash Wallet) | Nick/Ben | No way to switch users to the new Cash Wallet without this. Depends on ENG-296 + ENG-297. |
+| **NEW-ERPNEXT-LEDGER** | ERPNext audit-row writer for every Bridge ↔ IBEX USDT movement (on-ramp deposit, off-ramp transfer) | Olaniran or Dread | Finance/accounting requirement; replaces the old "wallet credit" framing on `/crypto/receive`. |
+| **NEW-CASHOUT-V1-WALLET** | Cashout V1 source-wallet switch for opted-in JM users (ETH-USDT → JMD instead of legacy IBEX USD → JMD) | TBD | Opted-in JM users lose Cashout V1 access without this. |
+| **NEW-COUNTRY-ALLOWLIST** | Flash-maintained country allowlist (superset of Bridge + Caribbean markets) gating UI entry | Dread / Nick | UI entry today depends on Bridge's list, which excludes Caribbean markets where we want Cashout V1 to surface. |
 | ENG-239 (mobile) | Cashout API integration on `lnflash/flash-mobile` — finalize the withdrawal router so it detects whether the user has a JMD bank, a Bridge EA, or both, and calls the matching backend mutation (Cashout V1 vs `bridgeInitiateWithdrawal`); surface destination choice when both exist | nick@getflash.io | Without this, users with both account types have no way to pick which rail to use. Backend already exposes both flows as independent mutations. Tracks alongside the Cashout V1 backend tickets (ENG-199, ENG-197, ENG-198, ENG-240, ENG-292, ENG-157). |
 
 ### Should-have for launch
@@ -620,4 +688,5 @@ UX recommendation: surface limits to the user in the deposit/withdrawal screens 
 | 2026-04-21 | Full rewrite: ETH-only, four state machines, JM jurisdiction support (post-May 15), iframe-embed KYC pattern, edge-case coverage, alignment with current code @ `85af420` | Taddesse + Dread |
 | 2026-04-21 | Revisions: clarified "no US PII on Flash systems" (existing JM PII unchanged); removed Flash-side jurisdiction gate on off-ramp (Bridge enforces rail eligibility); added mobile withdrawal router for JM users with mixed accounts | Taddesse + Dread |
 | 2026-04-21 | Corrected JMD off-ramp characterization: Cashout V1 is backend + ERPNext-orchestrated (IBEX debit + Cashout DocType + JournalEntry + manual RTGS settlement + PaymentEntry + push notification), **not** "backend never invoked." Linked authoritative spec at [Cashout V1 Linear project](https://linear.app/island-bitcoin/project/cashout-v1-c1fbf09713bb). Updated §0 routing diagram + rules, §5 bottom narrative, §6.2 edge-case rows, §9 mobile router entry. | Taddesse + Dread |
+| 2026-04-22 | **Architectural correction (Dread, 13:09 ET):** §0 prefaced with Cash Wallet migration note; §1 IBEX actor row rewritten (IBEX is the ledger); §3c deposit state machine renamed `ibex_credited → ibex_received` with corrected framing (no Flash-side credit); §3d added — Cash Wallet opt-in state machine (legacy_usd → opt_in_pending → eth_usdt_ready → eth_usdt_active); existing §3d renumbered to §3e (Withdrawal); §4 on-ramp diagram redrawn (no "credit USDT wallet" step; IBEX balance moves on IBEX side; Flash-side work = ERPNext audit + push); §5 Cashout V1 narrative updated for NEW-CASHOUT-V1-WALLET source-wallet switch; §9 gating-for-launch table expanded with ENG-297 promotion + NEW-OPTIN + NEW-ERPNEXT-LEDGER + NEW-CASHOUT-V1-WALLET + NEW-COUNTRY-ALLOWLIST. | Taddesse + Dread |
 | (prior) | Original plan + Tron-based draft | heyolaniran et al. |

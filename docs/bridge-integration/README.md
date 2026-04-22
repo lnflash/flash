@@ -1,9 +1,13 @@
 # Bridge.xyz Wallet Integration
 
-> Flash's USD on/off-ramp via Bridge.xyz. Phase 1 scope is USDT-on-Ethereum
-> settlement, US bank rails (ACH), Persona-driven KYC delivered via Bridge's
-> hosted iframes, and Cashout V1 for JMD off-ramp via the existing
-> ERPNext-backed flow.
+> Flash's USD on/off-ramp via Bridge.xyz. Phase 1 scope is **a Cash Wallet
+> swap from the legacy IBEX USD account to an IBEX ETH-USDT account**
+> (IBEX is the ledger; the IBEX ETH-USDT account IS the Cash Wallet),
+> opt-in per user and permanent, USDT-on-Ethereum settlement, US bank
+> rails (ACH), Persona-driven KYC delivered via Bridge's hosted iframes,
+> Lightning parity on the new wallet (ENG-297), and Cashout V1 for JMD
+> off-ramp via the existing ERPNext-backed flow (with source-wallet
+> change for opted-in JM users).
 
 ## Status
 
@@ -43,11 +47,36 @@
 
 - **USDT on Ethereum** for settlement (Tron pivoted away; IBEX
   parent-account/child-address cost was prohibitive).
-- **No US PII on Flash systems.** Persona/Plaid iframes load directly from
-  Bridge inside the mobile app; backend never proxies PII. Existing JM PII in
-  Frappe ERPNext is unchanged.
-- **Iframe-embed KYC pattern.** Bridge KYC links open as iframes; backend's
-  involvement ends at issuing the link.
+- **IBEX ETH-USDT account IS the Flash Cash Wallet.** IBEX is the
+  ledger. There is no Flash-side parallel USDT ledger being credited.
+  On-ramp = USDT lands in the user's IBEX ETH-USDT account (balance
+  goes up on IBEX side). Off-ramp = IBEX sends USDT from the user's
+  ETH-USDT account to Bridge (balance goes down on IBEX side).
+- **Per-user opt-in Cash Wallet migration, permanent and
+  non-reversible.** On IBEX side, both the legacy IBEX USD account and
+  the new IBEX ETH-USDT account exist for the foreseeable future. In
+  Flash UI, a user ever sees only one Cash Wallet. Users opt in from
+  the settings screen post app-update. Non-opted-in users keep the
+  legacy wallet and cannot access any Bridge features. Opt-in is a
+  one-way flip — a user cannot roll back.
+- **Lightning send/receive parity on the new wallet (ENG-297)** is a
+  **Phase-1 launch blocker**, not post-launch. IBEX ETH-USDT accounts
+  support Lightning per
+  <https://docs.ibexmercado.com/reference/welcome>.
+- **ERPNext ledger for every Bridge ↔ IBEX USDT movement.** New
+  Phase-1 work (NEW-ERPNEXT-LEDGER). Writes an audit row per on-ramp
+  and off-ramp leg for accounting/reconciliation.
+- **JM users opt in too.** Their cash-in lands as USDT in the IBEX
+  ETH-USDT account. **Cashout V1** (JMD off-ramp via ERPNext + manual
+  RTGS) must learn to source from the ETH-USDT account for opted-in
+  users (NEW-CASHOUT-V1-WALLET).
+- **No US KYC PII on Flash systems.** Persona/Plaid iframes load
+  directly from Bridge inside the mobile app; backend never proxies
+  PII. SSN, DOB, address, ID document stay with Bridge/Persona. Name
+  + email (captured pre-KYC per ENG-343) are PII Flash already holds
+  in Mongo / Kratos. Existing JM PII in Frappe ERPNext is unchanged.
+- **Iframe-embed KYC pattern.** Bridge KYC links open as iframes;
+  backend's involvement ends at issuing the link.
 - **Off-ramp gating is rail-driven, plus a Flash-maintained country
   allowlist.** Bridge enforces rail availability at link time as the
   authoritative second check. **Flash maintains its own country allowlist
@@ -71,8 +100,12 @@
 
 | Area | Linear | One-line |
 |---|---|---|
-| IBEX Ethereum address provisioning | **ENG-296** | Service hard-stops with "IBEX Ethereum address creation not yet implemented" — blocks every deposit. |
-| Wallet-credit on `/crypto/receive` | **ENG-296** (broader) | IBEX webhook only logs today — no wallet credit, no push. |
+| IBEX ETH-USDT wallet provisioning | **ENG-296** | Service hard-stops with "IBEX Ethereum address creation not yet implemented" — blocks the whole migration (no new Cash Wallet to opt users into). |
+| Lightning send/receive parity on ETH-USDT wallet | **ENG-297** (promoted to **Phase-1 launch blocker**) | IBEX docs confirm LN send/receive on ETH-USDT accounts; Flash surface must match existing legacy-wallet LN capability or opt-in users regress. |
+| Per-user opt-in toggle (settings screen; permanent; gates Bridge features) | **NEW-OPTIN** (to file — Nick/Ben) | No way to switch to the new Cash Wallet today; every Bridge feature depends on this. |
+| ERPNext audit ledger for Bridge ↔ IBEX USDT movements | **NEW-ERPNEXT-LEDGER** (to file — Olaniran or Dread) | Finance/accounting requirement; audit every on-ramp + off-ramp leg. |
+| Cashout V1 source-wallet switch for opted-in JM users | **NEW-CASHOUT-V1-WALLET** (to file) | Source of JMD off-ramp changes from legacy IBEX USD to ETH-USDT for opted-in users. |
+| `/crypto/receive` follow-ups | **ENG-275** (push) + **NEW-ERPNEXT-LEDGER** (audit) | IBEX webhook today only logs; no push notification, no ERPNext audit row. (Previously listed as "wallet credit" — that framing was wrong; IBEX owns the wallet balance.) |
 | ToS-accept + pre-KYC profile mutation | **ENG-343** | KYC link today defaults `full_name` to `account.username` and falls back to the literal string `"Flash"` when `username` is empty — both are wrong (the `"Flash"` literal is essentially dead-code defensive fallback). ENG-343 captures the user's **real legal name + email + ToS-accept timestamp** before the link is minted. **PII boundary note:** name + email are PII Flash already holds (in Mongo / Kratos). SSN, DOB, address, ID document never touch Flash — they are entered inside the Persona iframe and stored by Bridge. **Phone-number capture + ERPNext storage is a separate product decision** (see Dread question 2026-04-22) — if adopted, it would be the first time Flash holds a US user's phone outside Kratos and crosses into US-PII-on-Flash territory. |
 | Insufficient-balance / amount validation | **ENG-280** (CRIT-1) | Done in service via float parsing; precision concern. |
 | Cross-account ownership for external accounts | **ENG-281** (CRIT-2) | Done at app + DB compound-index level. |
@@ -106,3 +139,4 @@
 |---|---|---|
 | 2026-04-22 | Taddesse (Dread review) | Initial README created as the index for the rewritten doc set. |
 | 2026-04-22 | Taddesse (Dread review) | Applied Dread feedback (12:35 ET): country allowlist — Flash maintains a superset of Bridge + Caribbean countries we plan to serve (open work, ticket TBD); ENG-343 line clarified (real legal name + email + ToS, with phone/ERPNext as a flagged product decision and PII-boundary note); workflow note updated — pushes to review branch are now allowed, no PRs / no `main`. |
+| 2026-04-22 | Taddesse (Dread review) | **Architectural correction (13:09 ET):** top-of-file blurb rewritten; Phase 1 scope rewritten with IBEX ETH-USDT = Cash Wallet, per-user opt-in migration, Lightning parity as launch blocker, ERPNext USDT-movement ledger, and JM inclusion (with Cashout V1 source-wallet implication); open-work table replaced "wallet credit" row with IBEX-is-the-ledger framing and added NEW-OPTIN, ENG-297 promotion, NEW-ERPNEXT-LEDGER, NEW-CASHOUT-V1-WALLET. |
