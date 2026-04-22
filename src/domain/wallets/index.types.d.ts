@@ -199,6 +199,7 @@ interface IWalletsRepository {
   listByWalletCurrency(
     walletCurrency: WalletCurrency,
   ): Promise<Wallet[] | RepositoryError>
+  update(wallet: Wallet): Promise<Wallet | RepositoryError>
 }
 
 type OnChainDepositFeeArgs = {

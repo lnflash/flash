@@ -153,6 +153,19 @@ export const WalletsRepository = (): IWalletsRepository => {
     }
   }
 
+  const update = async (wallet: Wallet): Promise<Wallet | RepositoryError> => {
+    try {
+      const { id, lnurlp } = wallet
+      const result = await Wallet.updateOne({ id }, { $set: { lnurlp } })
+      if (result.matchedCount === 0) {
+        return new CouldNotFindWalletFromIdError()
+      }
+      return wallet
+    } catch (err) {
+      return parseRepositoryError(err)
+    }
+  }
+
   return {
     findById,
     listByAccountId,
@@ -160,6 +173,7 @@ export const WalletsRepository = (): IWalletsRepository => {
     listByAddresses,
     persistNew,
     listByWalletCurrency,
+    update,
   }
 }
 
