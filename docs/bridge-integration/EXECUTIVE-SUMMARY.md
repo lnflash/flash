@@ -79,6 +79,7 @@ Flash is adding a **USD on/off-ramp** to the wallet by integrating with
 | **No outbound retry / circuit breaker** to Bridge | ENG-286 | Transient Bridge 5xx surface as user-facing failures. |
 | **No sandbox E2E** | ENG-274 | Confidence in changes is low. |
 | **Pre-KYC profile mutation** (real name, ToS accept) | ENG-343 | KYC link is created with `full_name = username \|\| "Flash"`. |
+| **IBEX auth deprecation deadline — May 31, 2026** (external, cross-cutting) | ENG-38 | Bridge depends on IBEX for the crypto leg. If Flash has not migrated to IBEX's new M2M client-credentials auth by May 31, the rail breaks on that date. Tracked outside the Bridge project; **Ben owns it, due 2026-05-31, Urgent**. |
 
 ### What's intentionally out of scope (Phase 1)
 
@@ -190,6 +191,7 @@ In rough order:
 | 3 | `transfer.failed` leaves wallet debited with no refund | Medium | High | Implement refund handler. |
 | 4 | Bridge API key leaks (config-file storage, no rotation policy) | Low | Critical | Move to vault + rotation policy (open SECURITY work). |
 | 5 | KYC link issued with wrong name → Bridge rejects → user stuck | High | Medium | ENG-343 pre-KYC profile. |
+| 6 | **IBEX auth deprecation (May 31, 2026)** cuts the crypto rail on that date if Flash has not migrated to IBEX's new M2M client-credentials auth. Bridge depends on IBEX, so this is a hard external deadline. | Medium | Critical | **ENG-38**, owned by Ben, Urgent, due 2026-05-31. Tracked outside the Bridge project; Dread coordinates cross-project visibility. |
 
 ## 12. Document map
 

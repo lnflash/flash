@@ -91,6 +91,28 @@ What the chart must do:
 - Logs shipped to the same sink as the rest of the platform; tracing namespace
   is `services.bridge` (set via `wrapAsyncFunctionsToRunInSpan`).
 
+### External deployment dependency — IBEX auth migration
+
+Bridge depends on IBEX for the crypto leg (inbound USDT via
+`/crypto/receive`, and the parent-account / child-address scheme that
+provisions `Account.bridgeEthereumAddress`). IBEX is deprecating the
+current auth scheme on **May 31, 2026**; after that date Flash must be
+on the new M2M client-credentials auth or the IBEX calls that Bridge
+relies on will fail.
+
+- Tracked as **ENG-38** (owned by Ben, Urgent, due 2026-05-31). Not in
+  the Bridge Wallet Integration project — tracked independently
+  because it spans more than Bridge.
+- **Deployment implication:** any Bridge production rollout planned on
+  or after May 31, 2026 must ship with the IBEX auth migration
+  already landed. If ENG-38 slips, the Bridge launch slips with it
+  regardless of Bridge-side readiness.
+- Incident fallback: if the auth cut happens before migration, flip
+  `bridge.enabled: false` to stop accepting new deposits / withdrawal
+  initiations; in-flight Bridge webhooks continue to verify and apply
+  but the crypto leg (IBEX → wallet credit) will be down until ENG-38
+  lands.
+
 ### Rollout order
 
 1. Land chart change with `bridge.enabled: false`.

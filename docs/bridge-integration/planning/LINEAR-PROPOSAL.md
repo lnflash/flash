@@ -58,8 +58,11 @@ The bulk of the engineering critical path lives here.
 | In Progress | **ENG-284** | Idempotency guard in `createVirtualAccount` (HIGH-4) | High | In Progress — fold NEW-13 (one-VA-per-account schema constraint) as acceptance. |
 | In Review | **ENG-282** | Reject webhook if rawBody missing (HIGH-2) | High | Watch through merge. |
 | In Review | **ENG-283** | Validate timestamp header before skew (HIGH-3) | High | Watch through merge. |
+| Phase 2 (post-launch) | **ENG-297** | Lightning parity on ETH USDT wallet | High | Backlog → moved into this project as **Phase 2 / out of Phase-1 launch scope**. Mirrors the existing IBEX USD wallet capabilities (LN invoice gen, send/pay, LNURL, balance, history, webhook crediting) on the Bridge ETH USDT wallet. Depends on ENG-296. |
 
-**Olaniran's load:** ~14 tickets across W1–W7. Critical path: **ENG-296 → ENG-276 → NEW-3 → NEW-4 → NEW-1**.
+**External dependency (NOT in this project):** **ENG-38** — IBEX auth deprecation (May 31, 2026). Owned by Ben, Urgent, due 2026-05-31. ENG-296 depends on IBEX, so this is a hard external deadline; Dread coordinates cross-project visibility.
+
+**Olaniran's load:** ~15 tickets across W1–W7 + Phase 2. Critical path: **ENG-296 → ENG-276 → NEW-3 → NEW-4 → NEW-1**. ENG-297 follows post-launch.
 
 ### 1.2 Ben — Flash Application Developer
 
@@ -73,8 +76,11 @@ Touches GraphQL, Mongoose schemas, Kratos, wallet/ledger primitives.
 | W4 | **NEW-6** | Distinct error for KYC tier ceiling (gql side) | Medium | **File.** Joint with Olaniran. Depends on NEW-2. |
 | W6 | **NEW-8** | Add `fee` / `developerFee` / `fxRate` / `quoteRate` columns to `bridgeWithdrawals` | Medium | **File.** Mongoose schema migration + GraphQL exposure. Prereq for ENG-276 reconciliation accuracy and finance reporting. |
 | In Review | **ENG-278** | Use real account email in Bridge customer creation | High | In Review (Kratos lookup). Watch through merge. |
+| Phase 3 (post-launch) | **ENG-298** | Schema cleanup — remove chain-specific fields (`bridgeTronAddress`, `bridgeEthAddress`) | Medium | Backlog → moved into this project as **Phase 3 / post-launch cleanup**. Migration script + tests. Depends on ENG-296 + ENG-297. |
 
-**Ben's load:** ~6 tickets. Critical path: **NEW-1 + NEW-2** in W4 (both unblock the mobile UI), then schema work in W6.
+**External dependency (NOT in this project):** **ENG-38** — IBEX auth deprecation (May 31, 2026). Ben owns it, Urgent, due 2026-05-31. Tracked separately from the Bridge project because it spans more than Bridge.
+
+**Ben's load:** ~7 tickets (incl. Phase 3) plus ENG-38 outside-project. Critical path: **NEW-1 + NEW-2** in W4 (both unblock the mobile UI), then schema work in W6, then ENG-298 post-launch.
 
 ### 1.3 Nick — Mobile App / UI Developer
 
@@ -100,9 +106,12 @@ Touches GraphQL, Mongoose schemas, Kratos, wallet/ledger primitives.
 | W7 | **NEW-10** | Move Bridge API key from YAML config to vault | Deployment / infra. |
 | W7 | **NEW-11** | Webhook public-key rotation policy (deployment side) | Joint with Olaniran (config loading). |
 | ongoing | **PROD-A..D** | Commercial decisions (limits / fees / markup / overlay caps) | Owns the contract conversation with Bridge sales. |
+| project hygiene | **ENG-16** cancellation | Cancel "Instant Fiat Conversion - Seamless Currency Exchange" | Empty description, superseded by this project. **Cancel as superseded.** |
+| project hygiene | **ENG-297 + ENG-298** project moves | Add Phase 2 (ENG-297) and Phase 3 (ENG-298) into the Bridge Wallet Integration project | Visibility for the post-launch waves so they don't drift. Verified non-duplicate of NEW-* / FEE-1 (NEW-* are all Phase-1 scope). |
+| cross-project visibility | **ENG-38** coordination | IBEX auth deprecation (May 31, 2026) | **Not** moved into the Bridge project — Ben owns it on its own ticket, Urgent, due 2026-05-31. Dread tracks it as an external launch dependency in EXECUTIVE-SUMMARY §4 + §11 risk #6 + OPERATIONS §3 deployment dependency. |
 | ongoing | review/QA | All tickets | Code review, sign-off, deployment gate. |
 
-**Dread's load:** ~6 owned tickets + project-wide review/coordination + commercial. Suggest also picking up one of {NEW-10, NEW-11, NEW-7} for hands-on.
+**Dread's load:** ~6 owned tickets + 3 project-hygiene actions + project-wide review/coordination + commercial + ENG-38 cross-project tracking. Suggest also picking up one of {NEW-10, NEW-11, NEW-7} for hands-on.
 
 ## 2. Recommended launch sequence (with assignees)
 
@@ -178,3 +187,4 @@ Dread     ENG-279 close ──────────┴──→ ENG-273a/b �
 |---|---|---|
 | 2026-04-22 | Taddesse (Dread review) | Initial proposal derived from the rewritten doc set. |
 | 2026-04-22 | Taddesse (Dread review) | Reconciled against live Linear state (per `LINEAR-VS-PROPOSAL.md`); reorganized by role/assignee for the new team structure (Dread lead; Olaniran integration; Ben Flash app; Nick mobile/UI). |
+| 2026-04-22 | Taddesse (Dread review) | Cascade from ENG team orphan scan: added ENG-297 (Phase 2 Lightning) under Olaniran and ENG-298 (Phase 3 schema cleanup) under Ben as post-launch waves of this project; added ENG-16 cancellation + ENG-297/298 project moves to Dread project-hygiene list; added ENG-38 (IBEX auth May 31, 2026) as cross-project external dependency owned by Ben (Urgent, due 2026-05-31). Currency Precision tickets (ENG-318/319/326) intentionally left **out** of this project plan per Dread. |
