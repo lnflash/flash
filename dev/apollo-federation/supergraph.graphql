@@ -122,6 +122,20 @@ type AccountUpdateDisplayCurrencyPayload
   errors: [Error!]!
 }
 
+input AccountUpdateLnurlpInput
+  @join__type(graph: PUBLIC)
+{
+  lnurlp: String
+  walletId: WalletId
+}
+
+type AccountUpdateLnurlpPayload
+  @join__type(graph: PUBLIC)
+{
+  account: ConsumerAccount
+  errors: [Error!]!
+}
+
 type AccountUpgradePayload
   @join__type(graph: PUBLIC)
 {

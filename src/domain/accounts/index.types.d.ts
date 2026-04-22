@@ -17,6 +17,12 @@ type DepositFeeRatioAsBasisPoints = bigint & { readonly brand: unique symbol }
 
 type ContactAlias = string & { readonly brand: unique symbol }
 
+type AccountLnurlp = {
+  lnurlp: string,
+  active: boolean
+  walletId?: WalletId
+}
+
 type AccountLimitsArgs = {
   level: AccountLevel
   accountLimits?: {
@@ -81,6 +87,7 @@ type Account = {
   notificationSettings: NotificationSettings
   kratosUserId: UserId
   displayCurrency: DisplayCurrency
+  lnurlps: AccountLnurlp[]
   // temp
   role?: string
   erpParty?: string // Lookup key to Supplier (or Customer) in ERPNext. Required for Account level > 1
@@ -129,10 +136,10 @@ type LimitsCheckerFn = (args: LimiterCheckInputs) => Promise<true | LimitsExceed
 
 type LimitsVolumesFn = (walletVolumes: TxBaseVolumeAmount<WalletCurrency>[]) => Promise<
   | {
-      volumeTotalLimit: UsdPaymentAmount
-      volumeUsed: UsdPaymentAmount
-      volumeRemaining: UsdPaymentAmount
-    }
+    volumeTotalLimit: UsdPaymentAmount
+    volumeUsed: UsdPaymentAmount
+    volumeRemaining: UsdPaymentAmount
+  }
   | ValidationError
 >
 
@@ -144,15 +151,15 @@ type AccountLimitsChecker = {
 
 type AccountLimitsVolumes =
   | {
-      volumesIntraledger: LimitsVolumesFn
-      volumesWithdrawal: LimitsVolumesFn
-      volumesTradeIntraAccount: LimitsVolumesFn
-    }
+    volumesIntraledger: LimitsVolumesFn
+    volumesWithdrawal: LimitsVolumesFn
+    volumesTradeIntraAccount: LimitsVolumesFn
+  }
   | ValidationError
 
 type AccountValidator = {
   isActive(): true | ValidationError
-  isLevel(accountLevel: number): true | ValidationError 
+  isLevel(accountLevel: number): true | ValidationError
   validateWalletForAccount(wallet: Wallet): true | ValidationError
 }
 

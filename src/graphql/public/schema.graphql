@@ -1,4 +1,4 @@
-finterface Account {
+interface Account {
   callbackEndpoints: [CallbackEndpoint!]!
   csvTransactions(walletIds: [WalletId!]!): String!
   defaultWalletId: WalletId!
@@ -77,6 +77,16 @@ input AccountUpdateDisplayCurrencyInput {
 }
 
 type AccountUpdateDisplayCurrencyPayload {
+  account: ConsumerAccount
+  errors: [Error!]!
+}
+
+input AccountUpdateLnurlpInput {
+  lnurlp: String
+  walletId: WalletId
+}
+
+type AccountUpdateLnurlpPayload {
   account: ConsumerAccount
   errors: [Error!]!
 }

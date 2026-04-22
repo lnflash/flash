@@ -116,7 +116,7 @@ const sendOnchainNotification = async (
   const nResp = await NotificationsService().onChainTxReceived({
     recipientAccountId: recipientAccount.id,
     recipientWalletId: receiverWallet.id,
-    paymentAmount: usdAmount.asPaymentAmount(),
+    paymentAmount: { amount: BigInt(usdAmount.asCents()), currency: WalletCurrency.Usd },
     displayPaymentAmount: await toDisplayAmount(recipientAccount.displayCurrency)(transaction.amount),
     recipientDeviceTokens: recipientUser.deviceTokens,
     recipientNotificationSettings: recipientAccount.notificationSettings,

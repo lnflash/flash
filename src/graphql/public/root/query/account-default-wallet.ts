@@ -41,6 +41,13 @@ const AccountDefaultWalletQuery = GT.Field({
       throw mapError(new CouldNotFindWalletFromUsernameAndCurrencyError(username))
     }
 
+    if (account.lnurlps && account.lnurlps.length > 0) {
+      const activeLnurlp = account.lnurlps.find((lnurlp) => lnurlp.active && lnurlp.walletId === wallet.id)
+      if (activeLnurlp) {
+        return { ...wallet, lnurlp: activeLnurlp.lnurlp }
+      }
+    }
+
     return wallet
   },
 })
