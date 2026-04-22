@@ -308,21 +308,25 @@ Per withdrawal; persisted as `BridgeWithdrawalRecord`.
 
 ```mermaid
 stateDiagram-v2
-    direction LR
-    [*] --> pending: bridgeInitiateWithdrawal<br/>(balance/ownership/verified<br/>checks pass; before Bridge call)
-    pending --> submitted: BridgeClient.createTransfer ok<br/>(bridgeTransferId received)
-    submitted --> processing: Bridge intermediate webhook<br/>(optional)
-    submitted --> completed: Bridge transfer.completed<br/>(push — ENG-275 — Laurent)
-    processing --> completed: Bridge transfer.completed
-    submitted --> failed: Bridge transfer.failed
-    processing --> failed: Bridge transfer.failed
-    completed --> refunded: manual ops<br/>(ENG-276 — Nick)
-    failed --> refunded: manual ops<br/>(ENG-276 — Nick)
-    completed --> [*]
+    direction TB
 
-    completed: completed ✔ TERMINAL<br/>+ push (ENG-275)
-    failed: failed ✗<br/>+ push; refund logic TBD
-    refunded: refunded<br/>(ops runbook ENG-272)
+    [*] --> pending
+    pending --> submitted : Bridge createTransfer ok<br/>bridgeTransferId received
+    submitted --> processing : Bridge intermediate<br/>webhook (rare)
+    submitted --> completed : transfer.completed
+    processing --> completed : transfer.completed
+    submitted --> failed : transfer.failed
+    processing --> failed : transfer.failed
+    failed --> refunded : manual ops
+    completed --> [*]
+    refunded --> [*]
+
+    pending : pending<br/>persisted BEFORE Bridge call<br/>CRIT-1 ENG-280 balance +<br/>CRIT-2 ENG-281 owner (both landed)
+    submitted : submitted<br/>bridgeTransferId received
+    processing : processing<br/>(rarely emitted by Bridge)
+    completed : completed ✔ TERMINAL<br/>push ENG-275 (Laurent) +<br/>audit NEW-ERPNEXT-LEDGER
+    failed : failed ✗<br/>push notification fires;<br/>refund logic TBD
+    refunded : refunded<br/>manual ops • ENG-276 (Nick)<br/>per ops runbook • ENG-272 (Nick)
 ```
 
 | State | Set by | Notes |
@@ -352,26 +356,34 @@ sequenceDiagram
     participant P as Persona
     participant I as IBEX
 
-    link M: ENG-239 (Nick) — mobile withdrawal router @ https://linear.app/island-bitcoin/issue/ENG-239
-    link F: NEW-OPTIN (Nick/Ben) @ https://linear.app/island-bitcoin/project/bridge-wallet-integration-a1596c3a2b6a
-    link I: ENG-296 (Ben/Olaniran) — ETH-USDT account provisioning @ https://linear.app/island-bitcoin/issue/ENG-296
+    link M: ENG-239 Nick — mobile withdrawal router @ https://linear.app/island-bitcoin/issue/ENG-239
+    link M: ENG-342 Nick — mobile wallet UX for ETH-USDT @ https://linear.app/island-bitcoin/issue/ENG-342
+    link M: ENG-344 Nick — mobile opt-in UX @ https://linear.app/island-bitcoin/issue/ENG-344
+    link F: NEW-OPTIN Nick/Ben — Cash Wallet opt-in mutation @ https://linear.app/island-bitcoin/project/bridge-wallet-integration-a1596c3a2b6a
+    link F: ENG-273 Ben — bridgeCreateVirtualAccount @ https://linear.app/island-bitcoin/issue/ENG-273
+    link F: ENG-278 Ben — bridgeInitiateKyc @ https://linear.app/island-bitcoin/issue/ENG-278
+    link F: ENG-297 Ben — LN-parity webhook wiring @ https://linear.app/island-bitcoin/issue/ENG-297
+    link F: ENG-275 Laurent — push notifications @ https://linear.app/island-bitcoin/issue/ENG-275
+    link F: NEW-ERPNEXT-LEDGER — audit rows @ https://linear.app/island-bitcoin/project/bridge-wallet-integration-a1596c3a2b6a
+    link B: ENG-274 Ben — Bridge KYC client + webhook route @ https://linear.app/island-bitcoin/issue/ENG-274
+    link I: ENG-296 Ben/Olaniran — ETH-USDT account provisioning @ https://linear.app/island-bitcoin/issue/ENG-296
 
-    U->>M: tap "Enable USD"
+    U->>M: tap "Enable USD"<br/>(ENG-344 opt-in UX)
     M->>F: bridgeInitiateKyc
-    Note right of F: check level≥2, bridge.enabled
+    Note right of F: check level≥2, bridge.enabled<br/>(ENG-278 — Ben, landed)
     F->>B: POST /v0/kyc_links
     B-->>F: {kyc_link, ...}
-    Note right of F: persist bridgeCustomerId
+    Note right of F: persist bridgeCustomerId<br/>(ENG-278)
     F-->>M: {kycLink, tosLink}
     M->>B: render KYC iframe (widget)
     U->>B: submit KYC form
     B->>P: inquiry
     P-->>B: result
     B->>F: webhook kyc.approved
-    Note right of F: verify sig, idempotency lock,<br/>update bridgeKycStatus
+    Note right of F: verify sig, idempotency lock,<br/>update bridgeKycStatus<br/>(ENG-274 — Ben, landed)
     M->>F: poll bridgeKycStatus
     F-->>M: "approved"
-    M->>F: bridgeCreateVirtualAccount
+    M->>F: bridgeCreateVirtualAccount<br/>(ENG-273 — Ben, landed)
 
     rect rgb(255, 243, 224)
     Note over F,I: ⚠ BLOCKED on ENG-296 (Ben/Olaniran)<br/>until Ibex.createCryptoReceiveInfo ships
@@ -380,9 +392,9 @@ sequenceDiagram
     Note right of F: persist bridgeEthereumAddress<br/>(this IBEX account IS the Cash Wallet)
     end
 
-    F->>B: POST /v0/customers/{id}/virtual_accounts<br/>source=usd, destination={ethereum,usdt,address}
+    F->>B: POST /v0/customers/{id}/virtual_accounts<br/>source=usd, destination={ethereum,usdt,address}<br/>(ENG-273)
     B-->>F: {VA + bank routing/account}
-    Note right of F: persist BridgeVirtualAccountRecord
+    Note right of F: persist BridgeVirtualAccountRecord<br/>(ENG-273 — Ben, landed)
     F-->>M: {bankName, routingNumber, accountNumberLast4}
 
     U->>B: ACH/wire from external bank
@@ -392,10 +404,26 @@ sequenceDiagram
 
     Note over I: IBEX balance already moved<br/>= Cash Wallet balance up
 
-    I->>F: webhook /crypto/receive
+    I->>F: webhook /crypto/receive<br/>(ENG-297 — Ben, LN-parity wiring)
     Note right of F: authenticate, lockPaymentHash,<br/>findByBridgeEthereumAddress,<br/>log + TODO: ERPNext audit row<br/>(NEW-ERPNEXT-LEDGER)<br/>⚠ no Flash wallet credit
     F-->>M: push "Deposit complete: X USDT"<br/>(ENG-275 — Laurent)
 ```
+
+**Ticket map for this flow (§4 On-ramp):**
+
+| Step | Mutation / Webhook / Call | Ticket | Owner | Status |
+|---|---|---|---|---|
+| entry UX | "Enable USD" button + opt-in decision tree | [ENG-344](https://linear.app/island-bitcoin/issue/ENG-344) | Nick | in flight |
+| opt-in mutation | `bridgeEnableCashWallet` (mutation name TBD) | [NEW-OPTIN](https://linear.app/island-bitcoin/project/bridge-wallet-integration-a1596c3a2b6a) | Nick/Ben | to be filed |
+| KYC link | `bridgeInitiateKyc` → `POST /v0/kyc_links`, persist `bridgeCustomerId` | [ENG-278](https://linear.app/island-bitcoin/issue/ENG-278) | Ben | landed |
+| KYC webhook | `kyc.approved` sig verify + idempotency + status update | [ENG-274](https://linear.app/island-bitcoin/issue/ENG-274) | Ben | landed |
+| VA mutation | `bridgeCreateVirtualAccount` → `POST /v0/customers/{id}/virtual_accounts` | [ENG-273](https://linear.app/island-bitcoin/issue/ENG-273) | Ben | landed |
+| IBEX ETH-USDT provisioning | `Ibex.createCryptoReceiveInfo` — **blocker** | [ENG-296](https://linear.app/island-bitcoin/issue/ENG-296) | Ben/Olaniran | **in flight — launch blocker (cross-project: Bridge Integration + Cashout V1)** |
+| Bridge deposit webhook | `transfer.completed` on VA deposit — sig + idempotency + audit | [ENG-297](https://linear.app/island-bitcoin/issue/ENG-297) | Ben | **launch blocker (LN parity)** |
+| IBEX `/crypto/receive` webhook | authenticate + `lockPaymentHash` + `findByBridgeEthereumAddress` + audit | [ENG-297](https://linear.app/island-bitcoin/issue/ENG-297) | Ben | **launch blocker (LN parity)** |
+| ERPNext audit row | write Journal Entry / ledger row on each webhook | [NEW-ERPNEXT-LEDGER](https://linear.app/island-bitcoin/project/bridge-wallet-integration-a1596c3a2b6a) | TBD | **to be filed** |
+| push notification | "Deposit complete: X USDT" | [ENG-275](https://linear.app/island-bitcoin/issue/ENG-275) | Laurent | in flight |
+| mobile wallet UX | ETH-USDT balance/activity surfaces in app | [ENG-342](https://linear.app/island-bitcoin/issue/ENG-342) | Nick | in flight |
 
 **Pre-launch gating dependency:** The IBEX `POST /crypto/receive-infos` call (ENG-296) is currently unimplemented; `createVirtualAccount` returns `Error("IBEX Ethereum address creation not yet implemented")`. Until ENG-296 lands, the on-ramp halts at the "persist `bridgeEthereumAddress`" step. **Also gated on NEW-OPTIN** — this entire sequence is only reachable by users who have opted in to the IBEX ETH-USDT Cash Wallet. Non-opted-in users never see the "Enable USD" entry point.
 
@@ -420,9 +448,16 @@ sequenceDiagram
     participant B as Bridge.xyz
     participant PL as Plaid
 
+    link M: ENG-342 Nick — mobile wallet UX (Add Bank surface) @ https://linear.app/island-bitcoin/issue/ENG-342
+    link F: bridgeAddExternalAccount — already implemented in src/services/bridge/index.ts @ https://github.com/lnflash/flash/blob/master/src/services/bridge/index.ts
+    link F: CRIT-2 ENG-281 ownership guard (landed) @ https://linear.app/island-bitcoin/issue/ENG-281
+    link F: NEW-EA-VERIFIED-WEBHOOK — pending→verified handler (to be filed) @ https://linear.app/island-bitcoin/project/bridge-wallet-integration-a1596c3a2b6a
+    link B: Bridge.xyz External Account API @ https://apidocs.bridge.xyz/
+    link PL: Plaid instant verify or micro-deposits @ https://plaid.com/
+
     U->>M: tap "Add bank"
-    M->>F: bridgeAddExternalAccount
-    Note right of F: check level≥2, bridge.enabled,<br/>kyc==approved
+    M->>F: bridgeAddExternalAccount<br/>(service method — already built)
+    Note right of F: check level≥2, bridge.enabled,<br/>kyc==approved,<br/>ownership guard (ENG-281 landed)
     F->>B: POST /v0/customers/{id}/external_accounts/link
     B-->>F: {link_url, expires_at}
     F-->>M: {linkUrl, expiresAt}
@@ -430,10 +465,22 @@ sequenceDiagram
     U->>PL: Plaid OAuth (or routing/account entry)
     PL-->>B: link confirmation
     Note over B: EA appears in listExternalAccounts<br/>status: pending → verified<br/>(Bridge micro-deposit OR Plaid instant verify)
-    Note right of F: OPEN: does Bridge fire an<br/>external_account.verified webhook?<br/>Today = client re-fetches bridgeExternalAccounts.<br/>See §9 open-items.
+    Note right of F: OPEN: does Bridge fire an<br/>external_account.verified webhook?<br/>Today = client re-fetches bridgeExternalAccounts.<br/>Tracked as NEW-EA-VERIFIED-WEBHOOK in §9.
 ```
 
-**Open question (capture as TODO):** Does Bridge fire a webhook when an EA transitions `pending → verified`, or do we need to poll `listExternalAccounts`? Today's code has no `external_account.verified` route; we currently rely on the user re-fetching `bridgeExternalAccounts`. Add to §9.
+**Ticket map for this flow (§5.1 EA linking):**
+
+| Step | Mutation / Route / Check | Ticket | Owner | Status |
+|---|---|---|---|---|
+| entry UX — "Add bank" | surface in mobile wallet | [ENG-342](https://linear.app/island-bitcoin/issue/ENG-342) | Nick | in flight |
+| `bridgeAddExternalAccount` service method | wraps `POST /v0/customers/{id}/external_accounts/link`, returns Bridge-hosted link URL | **already implemented** — [`src/services/bridge/index.ts`](https://github.com/lnflash/flash/blob/master/src/services/bridge/index.ts) | Ben (original) | **landed (no ticket — pre-existing code)** |
+| ownership guard on `bridgeExternalAccounts` query | prevent cross-account EA enumeration | [CRIT-2 / ENG-281](https://linear.app/island-bitcoin/issue/ENG-281) | Ben | landed |
+| `pending → verified` webhook handler | no `external_account.verified` route exists today; client re-fetches `bridgeExternalAccounts` | [NEW-EA-VERIFIED-WEBHOOK](https://linear.app/island-bitcoin/project/bridge-wallet-integration-a1596c3a2b6a) | Nick (suggested) | **to be filed** |
+| Plaid/micro-deposit verification | out of scope for Flash (Bridge-hosted) | n/a | Bridge | external |
+
+> **Direct answer to "what ticket is building `bridgeAddExternalAccount`?":** Nothing — the service method is already checked in at `src/services/bridge/index.ts`; it is not new work. The only adjacent Linear work is [ENG-281](https://linear.app/island-bitcoin/issue/ENG-281) (CRIT-2 ownership guard on the companion `bridgeExternalAccounts` list query, landed) and the un-filed **NEW-EA-VERIFIED-WEBHOOK** item above.
+
+**Open question (captured in §9):** Does Bridge fire a webhook when an EA transitions `pending → verified`, or do we need to poll `listExternalAccounts`? Today's code has no `external_account.verified` route; we currently rely on the user re-fetching `bridgeExternalAccounts`.
 
 ### 5.2 Initiating and settling a withdrawal
 
@@ -446,12 +493,21 @@ sequenceDiagram
     participant B as Bridge.xyz
     participant I as IBEX
 
-    link F: CRIT-1 ENG-280 balance + CRIT-2 ENG-281 ownership (both landed) @ https://linear.app/island-bitcoin/issue/ENG-281
-    link F: ENG-275 push (Laurent) @ https://linear.app/island-bitcoin/issue/ENG-275
+    link M: ENG-239 Nick — mobile withdrawal router @ https://linear.app/island-bitcoin/issue/ENG-239
+    link F: CRIT-1 ENG-280 Laurent — balance guard (landed) @ https://linear.app/island-bitcoin/issue/ENG-280
+    link F: CRIT-2 ENG-281 Ben — ownership guard (landed) @ https://linear.app/island-bitcoin/issue/ENG-281
+    link F: ENG-285 Nick — amount validation @ https://linear.app/island-bitcoin/issue/ENG-285
+    link F: ENG-286 Nick — circuit breaker (post-launch) @ https://linear.app/island-bitcoin/issue/ENG-286
+    link F: ENG-275 Laurent — push notifications @ https://linear.app/island-bitcoin/issue/ENG-275
+    link F: ENG-276 Nick — refund/failure handling @ https://linear.app/island-bitcoin/issue/ENG-276
+    link F: ENG-272 Nick — ops runbook @ https://linear.app/island-bitcoin/issue/ENG-272
+    link F: ENG-297 Ben — LN-parity webhook wiring @ https://linear.app/island-bitcoin/issue/ENG-297
+    link F: NEW-ERPNEXT-LEDGER — audit rows @ https://linear.app/island-bitcoin/project/bridge-wallet-integration-a1596c3a2b6a
+    link B: Bridge.xyz transfers API @ https://apidocs.bridge.xyz/
 
     U->>M: enter amount, select EA
     M->>F: bridgeInitiateWithdrawal
-    Note right of F: check level≥2, bridge.enabled,<br/>kyc==approved,<br/>USDT balance ≥ amount (ENG-280),<br/>EA verified + owned (ENG-281)
+    Note right of F: check level≥2, bridge.enabled,<br/>kyc==approved,<br/>amount validation (ENG-285 — Nick),<br/>USDT balance ≥ amount (ENG-280 — Laurent, landed),<br/>EA verified + owned (ENG-281 — Ben, landed),<br/>circuit breaker (ENG-286 — Nick, post-launch)
     F->>B: POST /v0/transfers<br/>source: ethereum/usdt/from_addr<br/>destination: ach/usd/external_id
     B-->>F: {transfer_id, state: pending}
     Note right of F: persist BridgeWithdrawalRecord<br/>(status=pending)<br/>⚠ ordering caveat — see §9
@@ -460,10 +516,32 @@ sequenceDiagram
     B->>I: pull USDT from user's ETH address
     Note over I: balance moves on IBEX side<br/>= Cash Wallet debited
     B->>B: swap → USD, initiate ACH to user's bank
-    B->>F: webhook transfer.completed
+    B->>F: webhook transfer.completed<br/>(ENG-297 — Ben)
     Note right of F: verify sig, idempotency,<br/>WithdrawalRecord.status=completed,<br/>TODO: ERPNext audit row<br/>(NEW-ERPNEXT-LEDGER)
+
+    alt failure path
+        B->>F: webhook transfer.failed
+        Note right of F: ENG-276 (Nick) — refund logic<br/>per ENG-272 (Nick) ops runbook
+    end
+
     F-->>M: push "Withdrawal complete:<br/>$X to [bank]"<br/>(ENG-275 — Laurent)
 ```
+
+**Ticket map for this flow (§5.2 withdrawal):**
+
+| Step | Mutation / Route / Check | Ticket | Owner | Status |
+|---|---|---|---|---|
+| entry UX — withdrawal router | mobile app decides Bridge vs Cashout V1 | [ENG-239](https://linear.app/island-bitcoin/issue/ENG-239) | Nick | in flight |
+| amount validation | min/max, precision, rail limits | [ENG-285](https://linear.app/island-bitcoin/issue/ENG-285) | Nick | in flight |
+| CRIT-1 balance guard | pre-call balance ≥ amount check | [ENG-280](https://linear.app/island-bitcoin/issue/ENG-280) | Laurent | landed |
+| CRIT-2 EA ownership guard | prevent cross-account EA use | [ENG-281](https://linear.app/island-bitcoin/issue/ENG-281) | Ben | landed |
+| circuit breaker | rate-limit withdrawals on anomaly | [ENG-286](https://linear.app/island-bitcoin/issue/ENG-286) | Nick | **post-launch** |
+| `bridgeInitiateWithdrawal` service | `POST /v0/transfers`, persist `BridgeWithdrawalRecord` | already implemented — [`src/services/bridge/index.ts`](https://github.com/lnflash/flash/blob/master/src/services/bridge/index.ts) | Ben (original) | **landed (no ticket — pre-existing code, subject to ordering fix in §9)** |
+| `transfer.completed` webhook | sig + idempotency + status update | [ENG-297](https://linear.app/island-bitcoin/issue/ENG-297) | Ben | **launch blocker (LN parity)** |
+| `transfer.failed` / refund handler | refund logic on failure | [ENG-276](https://linear.app/island-bitcoin/issue/ENG-276) | Nick | in flight |
+| ops runbook for refund | manual procedure + admin UI | [ENG-272](https://linear.app/island-bitcoin/issue/ENG-272) | Nick | in flight |
+| ERPNext audit row | write Journal Entry on completed/failed | [NEW-ERPNEXT-LEDGER](https://linear.app/island-bitcoin/project/bridge-wallet-integration-a1596c3a2b6a) | TBD | **to be filed** |
+| push notification | "Withdrawal complete" / "Withdrawal failed" | [ENG-275](https://linear.app/island-bitcoin/issue/ENG-275) | Laurent | in flight |
 
 **JM user with no Bridge External Account attempts off-ramp:** Mobile app's withdrawal router detects the user has no Bridge EA and calls the **Cashout V1** mutation instead of `bridgeInitiateWithdrawal`. Cashout V1 is itself backend-orchestrated: the backend collects the user's `BankAccount` (from `Account` / ERPNext Customer record), invokes IBEX to debit the user's Cash Wallet for the cashout amount + service fee, creates a `Cashout` DocType in ERPNext linked to the resulting JournalEntry and BankAccount, and then waits for a Flash support user to settle via RTGS through the admin UI. On RTGS settlement, a `PaymentEntry` is recorded in ERPNext and the user is notified via `adminPaymentEntryNotificationSend`. The Bridge service layer is never invoked in this branch, but the **backend and ERPNext are**. Authoritative spec: [Cashout V1 Linear project](https://linear.app/island-bitcoin/project/cashout-v1-c1fbf09713bb) (key tickets: ENG-199 Cashout DocType, ENG-197 PaymentEntry on RTGS, ENG-198 user notification, ENG-157 settlement admin page, ENG-239 mobile API integration, ENG-240 BankAccount query, ENG-292 BankAccount on offer).
 
@@ -630,4 +708,5 @@ UX recommendation: surface limits to the user in the deposit/withdrawal screens 
 | 2026-04-22 | **Architectural correction (Dread, 13:09 ET):** §0 prefaced with Cash Wallet migration note; §1 IBEX actor row rewritten (IBEX is the ledger); §3c deposit state machine renamed `ibex_credited → ibex_received` with corrected framing (no Flash-side credit); §3d added — Cash Wallet opt-in state machine (legacy_usd → opt_in_pending → eth_usdt_ready → eth_usdt_active); existing §3d renumbered to §3e (Withdrawal); §4 on-ramp diagram redrawn (no "credit USDT wallet" step; IBEX balance moves on IBEX side; Flash-side work = ERPNext audit + push); §5 Cashout V1 narrative updated for NEW-CASHOUT-V1-WALLET source-wallet switch; §9 gating-for-launch table expanded with ENG-297 promotion + NEW-OPTIN + NEW-ERPNEXT-LEDGER + NEW-CASHOUT-V1-WALLET + NEW-COUNTRY-ALLOWLIST. | Taddesse + Dread |
 | 2026-04-22 14:15 ET | Cashout V1 follow-up (Dread confirmation). Reworded §5 Cashout V1 source-wallet callout to make **ETH-USDT the first-class source wallet** on Cashout V1 re-launch (not merely a switch for opted-in users). Updated §9 NEW-CASHOUT-V1-WALLET row with the same framing + owner assignment + ENG-296 cross-project blocker note. | Taddesse + Dread |
 | 2026-04-22 14:29 ET | **Diagram modernization (Dread).** Replaced all ASCII-art diagrams with Mermaid. State machines (§3a KYC, §3b VirtualAccount, §3c Deposit, §3d Cash Wallet opt-in, §3e Withdrawal) are now `stateDiagram-v2`; sequence diagrams (§4 on-ramp, §5.1 EA linking, §5.2 withdrawal) are now `sequenceDiagram` with participant `link` directives to Linear issues; the §0 routing and §7 Re-KYC flows are `flowchart` with interactive `click` directives pointing at each ticket's Linear URL (and at the Bridge Wallet Integration / Cashout V1 project URLs as placeholders for NEW-* tickets not yet filed). Every diagram now surfaces owner + ticket ID inline in node labels so cross-references survive even if a renderer strips `click` directives. | Taddesse + Dread |
+| 2026-04-22 14:52 ET | **Diagram polish follow-up (Dread).** §3e Withdrawal state machine redrawn top-down with ticket + owner embedded in every state label (was the messy LR version); `completed → refunded` edge removed (refund applies only to failed). §4 on-ramp sequence expanded: added participant `link` directives for M (ENG-239, ENG-342, ENG-344), F (NEW-OPTIN, ENG-273, ENG-278, ENG-297, ENG-275, NEW-ERPNEXT-LEDGER), B (ENG-274), I (ENG-296), and added in-diagram Notes citing the ticket at each step — plus a full ticket-map table directly below the diagram. §5.1 EA linking sequence expanded with participant links and a ticket-map table that directly answers *"what ticket is building `bridgeAddExternalAccount`?"* (answer: **none — the service method is already implemented in `src/services/bridge/index.ts`**; the adjacent landed work is ENG-281 CRIT-2 ownership guard, and the pending piece is the un-filed NEW-EA-VERIFIED-WEBHOOK handler). §5.2 withdrawal expanded with participant links (ENG-285 amount validation, ENG-286 circuit breaker, ENG-276 refund, ENG-272 ops runbook, NEW-ERPNEXT-LEDGER) and a ticket-map table covering every pre-check, webhook, and failure path. | Taddesse + Dread |
 | (prior) | Original plan + Tron-based draft | heyolaniran et al. |

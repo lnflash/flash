@@ -93,7 +93,7 @@ flowchart TB
     GQL -->|GraphQL<br/>Public Auth| Apollo
     KYCF -->|HTTPS WebView<br/>direct to Bridge widget| BridgeAPI
     BANKF -->|HTTPS WebView<br/>direct to Plaid via Bridge| BridgeAPI
-    JMDKYC -->|GraphQL<br/>(separate legacy path)| Apollo
+    JMDKYC -->|GraphQL &mdash; separate legacy path| Apollo
 
     BSvc -->|REST| BridgeAPI
     BSvc -->|REST<br/>ENG-296: createCryptoReceiveInfo<br/>ENG-297: LN parity| IBEX
@@ -526,4 +526,5 @@ For each environment (sandbox, production):
 | 2026-04-21 | Code-grounded corrections after pulling actual webhook handlers: IBEX route is `POST /crypto/receive` (slash, not hyphen); the handler currently only logs — wallet credit + push are not yet implemented and are folded into the ENG-296 dependency. §3 component diagram updated. §5.3 idempotency lock-key shapes corrected (KYC includes event; deposit/transfer use only `transfer_id`; IBEX uses `lockPaymentHash`). §5.4 two-webhook diagram and IBEX route description rewritten to match real behavior. §6, §7, §10, §12 updated for consistency. | Taddesse + Dread |
 | 2026-04-22 | **Architectural correction (Dread, 13:09 ET):** IBEX ETH-USDT account IS the Cash Wallet — no Flash-side wallet ledger; webhooks drive audit + push, not bookkeeping. §1 key-non-goals, §2 system overview, §3 diagram notes, §5.4 two-webhook diagram + narrative, §7 IBEX integration, §12 open-work all rewritten. New tickets surfaced: NEW-OPTIN, NEW-ERPNEXT-LEDGER, NEW-CASHOUT-V1-WALLET, NEW-COUNTRY-ALLOWLIST. ENG-297 promoted to Phase-1 launch blocker. Per-user permanent opt-in migration model added in §2/§5.4. | Taddesse + Dread |
 | 2026-04-22 14:29 ET | **Diagram modernization (Dread).** Replaced the §3 ASCII component diagram with a Mermaid `flowchart` (subgraphs for Mobile App / Flash Backend / Data Stores / External, with interactive `click` directives to Linear issues on every significant node: ENG-296, ENG-297, ENG-273, ENG-275, + NEW-* project-URL placeholders) and added a "Linear tickets surfaced in this diagram" reference table. Replaced the §5.4 two-webhook ASCII diagram with a Mermaid `sequenceDiagram` including participant `link` directives and a companion ticket table. Owner + ticket ID appear in node labels so the cross-references survive renderers that strip `click`. | Taddesse + Dread |
+| 2026-04-22 14:52 ET | **Parse-error fix (Dread).** §3 component diagram line 33 had an unquoted `(` inside a flowchart pipe-edge label (`\|GraphQL<br/>(separate legacy path)\|`) which Mermaid's parser rejected as a `PS` token. Replaced the parens with `&mdash; separate legacy path` (rewrote as `\|GraphQL &mdash; separate legacy path\|`). Grep-verified no other pipe-edge labels in the file carry unquoted parens. | Taddesse + Dread |
 | (prior) | Original 67-line draft, Tron-based, missing webhook server / Mongo / Redis / iframe-KYC / two-webhook split. | heyolaniran et al. |
