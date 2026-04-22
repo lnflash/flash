@@ -20,7 +20,7 @@ mirrored to the repo at `docs/bridge-integration/`.
 
 **Branch:** `docs/bridge-integration-rewrite-2026-04-22`
 **Repo:** `lnflash/flash`
-**HEAD as of session close:** `148da20` (cascade #8)
+**HEAD as of session close:** `4f9fd48` (cascade #9)
 
 | # | Commit | Date/Time ET | Summary |
 |---|---|---|---|
@@ -31,7 +31,8 @@ mirrored to the repo at `docs/bridge-integration/`.
 | 5 | `e0317fa` | 2026-04-22 15:36 ET | **Olaniran load-shed + §5.2 direction fix + §3 ELI5.** Reassigned ENG-296 + ENG-297 + ENG-275-server to Ben; ENG-357 to Dread (lead) + Ben. Olaniran ~18→~13. Ben ~9→~13. Fixed §5.2 off-ramp direction (Bridge does not pull; Flash backend instructs IBEX to send USDT to `BRIDGE_TRANSFER_ETH_ADDR`). Added §3 ELI5 intro on state machines (board-game analogy). |
 | 6 | `a626c71` | 2026-04-22 15:52 ET | **ENG-348 → Ben.** Audit writer sits on top of webhook handlers Ben now owns; consolidating avoids cross-engineer handoffs. Olaniran ~13→~12. Ben ~13→~14. Dread ~9→~8. Propagated across LINEAR-PROPOSAL, FLOWS, ARCHITECTURE, README, EXECUTIVE-SUMMARY. |
 | 7 | `3d9e570` | 2026-04-22 16:30 ET | **Pre-Linear-mirror cleanup.** Stale owner refs in TL;DR + Nick §1.3; `[⚠ CRIT-PATH]` markers on Ben's W1/W2 four-pack; new §5A ticket-boundary discipline (ENG-351/352↔ENG-353↔ENG-354, ENG-276↔ENG-348, ENG-345/346↔ENG-357); ENG-273 → parent + 2 sub-issues; ENG-363 → sub-issue of ENG-284; §6 split into 6A required / 6B nice / 6C fallbacks; §2 W5 reframed as graduated gate. |
-| 8 | _(this push)_ | 2026-04-22 18:30 ET | **Linear mirror executed + ID translation appendix.** Per Dread "go!" 18:11 ET. ~50 mutations against live Linear: 16 new tickets ENG-345→ENG-360, 3 sub-issues ENG-361/362/363, 8 reassignments, 4 priority bumps, 11 description rewrites, 2 title rewrites (ENG-296/297), 12 blocks relations, critical-path label on ENG-296/297/345/348, project description + content body. Doc-side: status banner + ID translation table at top of LINEAR-PROPOSAL.md mapping placeholder names → live ENG IDs. This file (SESSION-CONTEXT) refreshed with cascade #7 + #8 rows + ticket assignment lists updated to live Linear IDs. |
+| 8 | `148da20` | 2026-04-22 18:30 ET | **Linear mirror executed + ID translation appendix.** Per Dread "go!" 18:11 ET. ~50 mutations against live Linear: 16 new tickets ENG-345→ENG-360, 3 sub-issues ENG-361/362/363, 8 reassignments, 4 priority bumps, 11 description rewrites, 2 title rewrites (ENG-296/297), 12 blocks relations, critical-path label on ENG-296/297/345/348, project description + content body. Doc-side: status banner + ID translation table at top of LINEAR-PROPOSAL.md mapping placeholder names → live ENG IDs. This file (SESSION-CONTEXT) refreshed with cascade #7 + #8 rows + ticket assignment lists updated to live Linear IDs. |
+| 9 | `4f9fd48` | 2026-04-22 18:50 ET | **NEW-*/FEE-* placeholder scrub across all 10 docs.** Per Dread "we need to update all the docs so they no longer say NEW- on the issues" (18:39 ET). Two-pass mechanism: (a) bulk substring scrub with longest-prefix-first ordered table — 491 subs across 10 files with disambiguations for split tickets (NEW-OPTIN → ENG-345/346, NEW-1 → ENG-351/352) and inline labels for retracted tickets (NEW-5/9/12 folded into ENG-286/ENG-276 scope); (b) cleanup pass — 80 hand-targeted fixes for bulk-scrub artifacts (redundant `**ENG-345** (ENG-345 …)` patterns rewritten with descriptive labels; doubled `[retired → ENG-276 acceptance]` markers distinguished as Bridge-fee-persistence + replay-tooling; LINEAR-PROPOSAL self-referential ID-translation table reframed as "Historical placeholder map (cascade #8 → cascade #9)" Rosetta stone with backtick-quoted original placeholder names restored in leftmost column; multi-line wrapped `NEW-ERPNEXT-\nLEDGER` ASCII-diagram cells in WEBHOOKS.md replaced as compact ENG-348 labels). Residual `NEW-*` tokens are intentional — they survive only inside backtick-quoted historical-archaeology cells (the placeholder-map table + a few "former placeholder names from earlier drafts" callouts). Every inline / narrative reference now uses the live ENG ID. |
 
 Cascade scripts live in `/tmp/work/push-*.mjs` (one per cascade — disposable, not reused). Pattern: GitHub Git Data API (blobs → tree → commit → PATCH ref), `GITHUB_TOKEN` env, parent = previous cascade head.
 
@@ -159,6 +160,6 @@ Other potentially stale tag in ARCHITECTURE.md: line 132 (ENG-296 owner: "Ben / 
 
 ---
 
-_Last pushed cascade: `148da20` — Linear mirror executed + ID translation appendix (18:30 ET, cascade #8)._
-_Previous: `3d9e570` — pre-Linear-mirror cleanup (16:30 ET, cascade #7)._
+_Last pushed cascade: `4f9fd48` — NEW-*/FEE-* placeholder scrub across all 10 docs (18:50 ET, cascade #9)._
+_Previous: `148da20` — Linear mirror executed + ID translation appendix (18:30 ET, cascade #8)._
 _Session re-opened by Dread at 16:41 ET ("lets go ahead and update Linear now") and green-lit at 18:11 ET ("go!")._
