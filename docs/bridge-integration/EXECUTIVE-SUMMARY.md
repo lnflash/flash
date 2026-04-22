@@ -52,9 +52,26 @@ Flash is adding a **USD on/off-ramp** to the wallet by integrating with
 - Service layer (`BridgeService`) for KYC link creation, virtual
   account creation, external account linking, withdrawal initiation,
   and four read queries.
+  > **No separate "payment route" creation step.** Bridge's model is
+  > VA (inbound rail) + EA (outbound destination) + **Transfer** (the
+  > money movement). `BridgeService.initiateWithdrawal` is what calls
+  > Bridge's `/transfers` endpoint — that single call is the route +
+  > the execution. Routing per se is implicit in `(source = VA's
+  > rail/USDT-on-ETH, destination = EA's rail/ACH-USD)` at the moment
+  > the transfer is initiated.
 - Webhook server on port 4009 with three handlers (`/kyc`,
   `/deposit`, `/transfer`) using **RSA-SHA256 signature verification**
   with a 5-minute timestamp skew window.
+  > **There is no `/withdraw` endpoint.** Bridge names the off-ramp
+  > lifecycle "transfer" (because the bank-side leg is a USD wire /
+  > ACH transfer). The Flash UI surfaces the same lifecycle as
+  > **Transfer → Cashout (Withdraw)** for off-ramp and
+  > **Transfer → Topup (Deposit)** for on-ramp. The mapping is:
+  > Flash Cashout/Withdraw ⇄ Bridge `/transfer` webhook events
+  > (`transfer.created` / `.updated` / `.completed` / `.failed`);
+  > Flash Topup/Deposit ⇄ Bridge `/deposit` webhook events **plus**
+  > the IBEX `/crypto/receive` notification that actually credits the
+  > wallet (the `/deposit` webhook itself is log-only today).
 - IBEX `/crypto/receive` route on the main API for inbound USDT
   notifications.
 - Mongo schema for virtual accounts, external accounts, and
@@ -211,3 +228,4 @@ In rough order:
 | Date | Author | Change |
 |---|---|---|
 | 2026-04-22 | Taddesse (Dread review) | Initial executive summary, written after the 8 detail docs to land at a 10,000-foot view. |
+| 2026-04-22 | Taddesse (Dread review) | §4 clarifications per Dread questions (12:35 ET): (a) no separate "payment route" creation — Bridge's model is VA + EA + Transfer, and `initiateWithdrawal` is the single call to `/transfers`; (b) no `/withdraw` webhook — Bridge calls the off-ramp lifecycle "transfer" and the Flash UI maps it as "Transfer → Cashout (Withdraw)" / "Transfer → Topup (Deposit)". |

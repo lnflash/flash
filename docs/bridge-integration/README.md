@@ -12,7 +12,7 @@
 | Spec branch | `lnflash/flash:docs/bridge-integration-spec @ 85af420` | 2026-04-22 |
 | Phase | 1 (ETH-only, US-only fiat rails for the Bridge half) | — |
 | Day-one resourcing | JM available post-2026-05-15 | — |
-| Workflow | Drafts in this folder; **no pushes / no PRs** without explicit approval | — |
+| Workflow | Pushes to review branch `docs/bridge-integration-rewrite-2026-04-22` allowed; **no PRs and nothing to `main`** without explicit approval | — |
 
 ## Document index
 
@@ -48,9 +48,17 @@
   Frappe ERPNext is unchanged.
 - **Iframe-embed KYC pattern.** Bridge KYC links open as iframes; backend's
   involvement ends at issuing the link.
-- **Off-ramp gating is rail-driven, not country-driven.** Bridge enforces
-  rail availability at link time; Flash does not maintain its own country
-  allowlist.
+- **Off-ramp gating is rail-driven, plus a Flash-maintained country
+  allowlist.** Bridge enforces rail availability at link time as the
+  authoritative second check. **Flash maintains its own country allowlist
+  as a superset of Bridge's allowlist plus the Caribbean countries we
+  plan to serve.** The Flash allowlist gates UI/feature visibility before
+  the user ever hits Bridge so users in supported Caribbean markets see
+  the Cashout/Topup entry points even when their country is not on
+  Bridge's list (those routes can fall back to Cashout V1 / JMD ERPNext
+  rather than Bridge). **Open work** — the country allowlist itself is
+  not yet built; tracked as `NEW-COUNTRY-ALLOWLIST` (to be filed under
+  Dread / Nick).
 - **JMD KYC remains separate** — handled by the existing Frappe ERPNext flow,
   unchanged by this integration.
 - **Cashout V1 (JMD off-ramp) does invoke the backend** — it creates a
@@ -65,7 +73,7 @@
 |---|---|---|
 | IBEX Ethereum address provisioning | **ENG-296** | Service hard-stops with "IBEX Ethereum address creation not yet implemented" — blocks every deposit. |
 | Wallet-credit on `/crypto/receive` | **ENG-296** (broader) | IBEX webhook only logs today — no wallet credit, no push. |
-| ToS-accept + pre-KYC profile mutation | **ENG-343** | KYC link is created with `full_name = account.username \|\| "Flash"`. |
+| ToS-accept + pre-KYC profile mutation | **ENG-343** | KYC link today defaults `full_name` to `account.username` and falls back to the literal string `"Flash"` when `username` is empty — both are wrong (the `"Flash"` literal is essentially dead-code defensive fallback). ENG-343 captures the user's **real legal name + email + ToS-accept timestamp** before the link is minted. **PII boundary note:** name + email are PII Flash already holds (in Mongo / Kratos). SSN, DOB, address, ID document never touch Flash — they are entered inside the Persona iframe and stored by Bridge. **Phone-number capture + ERPNext storage is a separate product decision** (see Dread question 2026-04-22) — if adopted, it would be the first time Flash holds a US user's phone outside Kratos and crosses into US-PII-on-Flash territory. |
 | Insufficient-balance / amount validation | **ENG-280** (CRIT-1) | Done in service via float parsing; precision concern. |
 | Cross-account ownership for external accounts | **ENG-281** (CRIT-2) | Done at app + DB compound-index level. |
 | Withdrawal idempotency | (new) | `bridgeInitiateWithdrawal` has no client idempotency key; retries duplicate transfers. |
@@ -85,11 +93,16 @@
   grounded in source on that ref.
 - **No fictional symbols.** If a symbol/route/field is documented, it exists
   in code. If it's planned, it's labelled "TBD" or linked to a Linear ticket.
-- **Drafts stay local.** This work has not been pushed; nothing in this
-  folder reflects merged code beyond the spec branch.
+- **Pushes go to the review branch only.** This doc set lives on
+  `docs/bridge-integration-rewrite-2026-04-22` for Dread's review.
+  **No PRs and nothing to `main`** without explicit approval. The spec
+  branch (`docs/bridge-integration-spec @ 85af420`) remains the
+  source-of-truth for code references; nothing in this folder reflects
+  merged code beyond that ref.
 
 ## Document History
 
 | Date | Author | Change |
 |---|---|---|
 | 2026-04-22 | Taddesse (Dread review) | Initial README created as the index for the rewritten doc set. |
+| 2026-04-22 | Taddesse (Dread review) | Applied Dread feedback (12:35 ET): country allowlist — Flash maintains a superset of Bridge + Caribbean countries we plan to serve (open work, ticket TBD); ENG-343 line clarified (real legal name + email + ToS, with phone/ERPNext as a flagged product decision and PII-boundary note); workflow note updated — pushes to review branch are now allowed, no PRs / no `main`. |
