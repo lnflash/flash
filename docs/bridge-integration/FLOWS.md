@@ -14,22 +14,26 @@
 
 Three flows coexist; a user may use any combination depending on the bank accounts they have:
 
-```
-                              User goal
-                                  │
-        ┌─────────────────┬───────┴────────┬─────────────────┐
-        ▼                 ▼                ▼                 ▼
-   Send/receive     Receive USD      Withdraw to        Withdraw to any
-   JMD via JM bank  via ACH/wire     JMD bank           Bridge-supported rail
-        │                 │                │                 │
-        ▼                 ▼                ▼                 ▼
-   Existing JMD     Bridge on-ramp   Cashout V1         Bridge off-ramp
-   in-flow          (US + JM,        (backend +         (any user with a
-   (out of scope    this document)   ERPNext, manual    Bridge-supported
-   for this doc)                     RTGS settlement;   External Account;
-                                     out of scope for   this document)
-                                     detailed flow,
-                                     summarized in §5)
+```mermaid
+flowchart TB
+    Goal(["User goal"])
+    Goal --> J["Send / receive JMD<br/>via JM bank"]
+    Goal --> U["Receive USD<br/>via ACH / wire"]
+    Goal --> C["Withdraw to<br/>JMD bank"]
+    Goal --> B["Withdraw to any<br/>Bridge-supported rail"]
+
+    J --> J2["Existing JMD in-flow<br/>(out of scope for deposit side;<br/>withdrawal side = Cashout V1)"]:::outOfScope
+    U --> U2["Bridge on-ramp<br/>US + JM post-2026-05-15<br/><b>— this document</b>"]:::scope
+    C --> C2["Cashout V1<br/>backend + ERPNext<br/>manual RTGS settlement<br/>summarized §5<br/><i>spec owned on Cashout V1 project</i>"]:::cashout
+    B --> B2["Bridge off-ramp<br/>any Level-2+ user with a<br/>Bridge-supported External Account<br/><b>— this document</b>"]:::scope
+
+    click C2 "https://linear.app/island-bitcoin/project/cashout-v1-c1fbf09713bb" "Cashout V1 — authoritative spec (Dread)" _blank
+    click U2 "https://linear.app/island-bitcoin/project/bridge-wallet-integration-a1596c3a2b6a" "Bridge Wallet Integration project" _blank
+    click B2 "https://linear.app/island-bitcoin/project/bridge-wallet-integration-a1596c3a2b6a" "Bridge Wallet Integration project" _blank
+
+    classDef scope fill:#e1f5ff,stroke:#0288d1,color:#01579b
+    classDef outOfScope fill:#f5f5f5,stroke:#999,color:#666
+    classDef cashout fill:#fff4e5,stroke:#ef6c00,color:#5d4037
 ```
 
 **Rules:**
@@ -121,30 +125,32 @@ Every Bridge operation must clear **all** of its pre-conditions or return a type
 
 ### 3a. KYC state machine
 
-```
-                                    ┌───────────┐
-                          ┌────────▶│  pending  │────────┐
-                          │         └───────────┘        │
-                          │                ▲             │
-                          │                │             │
-            ┌──────────┐  │  ┌────────────┴────────┐    │
-   null ──▶ │not_started│──┴─▶│ (Persona inquiry  │    │
-            └──────────┘     │  in progress)     │    │
-                  ▲          └─────────────────────┘    │
-                  │                                     ▼
-                  │                          ┌─────────────────┐
-                  │                          │  approved       │  (terminal-success)
-                  │                          └─────────────────┘
-                  │                                     │
-                  │                                     ▼
-                  │                          ┌─────────────────┐
-                  └──────────────────────────│  rejected       │  (re-link allowed)
-                                             └─────────────────┘
-                                                       │
-                                                       ▼
-                                             ┌─────────────────┐
-                                             │  offboarded     │  (Bridge-initiated;
-                                             └─────────────────┘   re-link allowed)
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> not_started: bridgeInitiateKyc<br/>(creates customer)
+    not_started --> pending: user opens iframe<br/>Persona inquiry starts
+    pending --> approved: webhook kyc.approved
+    pending --> rejected: webhook kyc.rejected
+    approved --> offboarded: webhook kyc.offboarded<br/>(Bridge-initiated)
+    rejected --> not_started: bridgeInitiateKyc re-called<br/>(mints new link)
+    offboarded --> not_started: bridgeInitiateKyc re-called<br/>(mints new link)
+
+    approved: approved ✔<br/>terminal-success<br/>unlocks VA creation (ENG-296)
+    rejected: rejected<br/>(re-link allowed)
+    offboarded: offboarded<br/>(re-link allowed)
+
+    note right of pending
+        Persona typical < 1 min
+        Manual review: hours/days
+        (long-lived pending)
+    end note
+    note right of approved
+        Gates ENG-296 (Ben / Olaniran)
+        — IBEX ETH-USDT account
+        provisioning; that account IS
+        the new Cash Wallet.
+    end note
 ```
 
 **Transitions:**
@@ -167,15 +173,27 @@ Every Bridge operation must clear **all** of its pre-conditions or return a type
 
 Per-account; one VA per user.
 
-```
-                                       ┌──────────────────────┐
-   absent ────▶ eth_address_pending ──▶│ eth_address_failed   │ (retry → pending)
-                       │               └──────────────────────┘
-                       ▼
-              bridge_va_pending ────▶ bridge_va_failed (retry → pending)
-                       │
-                       ▼
-                    active
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> absent
+    absent --> eth_address_pending: approved KYC +<br/>bridgeCreateVirtualAccount
+    eth_address_pending --> eth_address_failed: IBEX error<br/>(today 100%: ENG-296 unimplemented)
+    eth_address_failed --> eth_address_pending: retry
+    eth_address_pending --> bridge_va_pending: Ibex.createCryptoReceiveInfo ok<br/>(ENG-296)
+    bridge_va_pending --> bridge_va_failed: Bridge 4xx/5xx<br/>after retries
+    bridge_va_failed --> bridge_va_pending: retry
+    bridge_va_pending --> active: Bridge VA created<br/>+ persisted
+    active --> [*]
+
+    eth_address_pending: eth_address_pending<br/>(ENG-296 — Ben / Olaniran)
+    active: active ✔<br/>BridgeVirtualAccountRecord persisted<br/>user can deposit
+
+    note right of eth_address_pending
+        ENG-296 — IBEX ETH-USDT account
+        provisioning. The provisioned IBEX
+        account IS the new Cash Wallet.
+    end note
 ```
 
 | State | Meaning | Code touch-point |
@@ -195,30 +213,29 @@ Per-account; one VA per user.
 
 A user may deposit many times into the same VA; each deposit traverses this machine independently. **Two systems must agree** for a deposit to terminate successfully — Bridge confirms the fiat side, IBEX confirms the crypto side.
 
-```
-   awaiting_funds
-        │
-        ▼  (Bridge sees ACH/wire land in VA)
-   bridge_received
-        │
-        ▼  (Bridge swaps USD → USDT)
-   bridge_converting
-        │
-        ▼  (Bridge: deposit.completed webhook; tx_hash known)
-   bridge_sent_onchain ─────────────────────────────────┐
-        │                                               │
-        ▼  (IBEX: crypto.received webhook fires;        │  (IBEX never observes
-        │   IBEX ETH-USDT account balance has moved     │   within 24h SLA)
-        │   on IBEX side — Cash Wallet balance is up)   │
-   ibex_received (terminal: success — Flash writes      ▼
-   ERPNext audit row + push)                       orphaned
-                                                        │
-                                                        ▼ (ops opens ticket)
-                                                  manual_reconciliation
+```mermaid
+stateDiagram-v2
+    direction TB
+    [*] --> awaiting_funds
+    awaiting_funds --> bridge_received: Bridge sees ACH/wire<br/>land in VA
+    bridge_received --> bridge_converting: Bridge swaps<br/>USD → USDT
+    bridge_converting --> bridge_sent_onchain: Bridge deposit.completed<br/>webhook (tx_hash known)
+    bridge_sent_onchain --> ibex_received: IBEX crypto.received webhook<br/>(balance moved on IBEX side =<br/>Cash Wallet up)
+    bridge_sent_onchain --> orphaned: no IBEX event<br/>within 24h SLA
+    orphaned --> manual_reconciliation: ops opens ticket
+    bridge_received --> bridge_returned: Bridge bounces<br/>(wrong amount / sender /<br/>KYC expired)
 
-   Failure branches (terminal):
-   - bridge_returned   (Bridge bounced the ACH/wire — wrong amount, wrong sender,
-                       KYC expired, etc. No USDT minted; no IBEX side.)
+    ibex_received: ibex_received ✔ TERMINAL<br/>Flash → ERPNext audit row<br/>(NEW-ERPNEXT-LEDGER)<br/>+ push (ENG-275 — Laurent)
+    bridge_returned: bridge_returned ✗ TERMINAL<br/>no USDT minted; no IBEX side
+    orphaned: orphaned<br/>(ENG-276 reconciler flags)
+    manual_reconciliation: manual_reconciliation<br/>(ENG-272 runbook)
+
+    note right of ibex_received
+        Neither webhook credits a Flash wallet.
+        IBEX ETH-USDT account IS the Cash
+        Wallet; balance moves on IBEX side.
+        Flash-side work = audit + push only.
+    end note
 ```
 
 | State | Owner | Persisted? | Notes |
@@ -242,22 +259,33 @@ A user may deposit many times into the same VA; each deposit traverses this mach
 
 Per user; one-shot, permanent, non-reversible. This is the gate to every Bridge-touching flow below.
 
-```
-   legacy_usd (default)
-        │
-        ▼  (user taps "Switch to USDT Cash Wallet" in settings;
-        │   confirms permanence dialog)
-   opt_in_pending
-        │
-        ▼  (Flash: call IBEX to provision ETH-USDT account for user —
-        │   this is ENG-296; the provisioned account IS the new Cash Wallet)
-   eth_usdt_ready
-        │
-        ▼  (Flash: flip account.cashWallet = "eth_usdt"; permanent flip)
-   eth_usdt_active (terminal; one-way)
+```mermaid
+stateDiagram-v2
+    direction TB
+    [*] --> legacy_usd
+    legacy_usd --> opt_in_pending: user taps<br/>"Switch to USDT Cash Wallet"<br/>+ confirms permanence dialog
+    opt_in_pending --> eth_usdt_ready: Ibex.createCryptoReceiveInfo ok<br/>(ENG-296)
+    opt_in_pending --> opt_in_failed: IBEX error
+    opt_in_failed --> opt_in_pending: user retries
+    eth_usdt_ready --> eth_usdt_active: flip account.cashWallet<br/>= "eth_usdt"<br/>(permanent)
+    eth_usdt_active --> [*]
 
-   Failure branches:
-   - opt_in_failed (IBEX provisioning failed; user stays on legacy; can retry)
+    legacy_usd: legacy_usd (default)<br/>legacy IBEX USD Cash Wallet<br/>no Bridge features
+    opt_in_pending: opt_in_pending<br/>(NEW-OPTIN — Nick/Ben)
+    eth_usdt_ready: eth_usdt_ready<br/>(ENG-296 provisioned;<br/>about to flip pointer)
+    eth_usdt_active: eth_usdt_active ✔ TERMINAL<br/>one-way, non-reversible<br/>Bridge features unlock
+
+    note right of eth_usdt_active
+        Downgrade is NOT self-serve.
+        Support-ops ticket only.
+        See OPERATIONS.md §3 opt-in rollout.
+    end note
+    note left of opt_in_pending
+        Gated on:
+          • ENG-296 (Ben/Olaniran) account prov
+          • ENG-297 (Olaniran) LN parity —
+            opting in without LN = regression
+    end note
 ```
 
 | State | Persisted? | Notes |
@@ -278,12 +306,23 @@ Per user; one-shot, permanent, non-reversible. This is the gate to every Bridge-
 
 Per withdrawal; persisted as `BridgeWithdrawalRecord`.
 
-```
-   pending ──▶ submitted ──▶ processing ──▶ completed (terminal)
-                                  │
-                                  ├──▶ failed   (Bridge transfer.failed webhook)
-                                  │
-                                  └──▶ refunded (manual ops; ENG-276)
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> pending: bridgeInitiateWithdrawal<br/>(balance/ownership/verified<br/>checks pass; before Bridge call)
+    pending --> submitted: BridgeClient.createTransfer ok<br/>(bridgeTransferId received)
+    submitted --> processing: Bridge intermediate webhook<br/>(optional)
+    submitted --> completed: Bridge transfer.completed<br/>(push — ENG-275 — Laurent)
+    processing --> completed: Bridge transfer.completed
+    submitted --> failed: Bridge transfer.failed
+    processing --> failed: Bridge transfer.failed
+    completed --> refunded: manual ops<br/>(ENG-276 — Nick)
+    failed --> refunded: manual ops<br/>(ENG-276 — Nick)
+    completed --> [*]
+
+    completed: completed ✔ TERMINAL<br/>+ push (ENG-275)
+    failed: failed ✗<br/>+ push; refund logic TBD
+    refunded: refunded<br/>(ops runbook ENG-272)
 ```
 
 | State | Set by | Notes |
@@ -303,118 +342,59 @@ Per withdrawal; persisted as `BridgeWithdrawalRecord`.
 
 Applies to **US and JM** Level-2+ users. JMD-only users do not enter this flow.
 
-```
-User      Mobile App         Flash Backend            Bridge        Persona       IBEX
- │             │                    │                   │              │            │
- │ tap         │                    │                   │              │            │
- │ "Enable    │                    │                   │              │            │
- │  USD"     │                    │                   │              │            │
- ├────────▶ │                    │                   │              │            │
- │             │ bridgeInitiateKyc │                   │              │            │
- │             ├──────────────────▶│                   │              │            │
- │             │                    │ check level≥2,    │              │            │
- │             │                    │ bridge.enabled    │              │            │
- │             │                    │                   │              │            │
- │             │                    │ POST /v0/kyc_links│              │            │
- │             │                    ├──────────────────▶│              │            │
- │             │                    │ {kyc_link, ...}   │              │            │
- │             │                    │◀──────────────────┤              │            │
- │             │                    │ persist           │              │            │
- │             │                    │ bridgeCustomerId  │              │            │
- │             │ {kycLink, tosLink}│                   │              │            │
- │             │◀──────────────────┤                   │              │            │
- │             │ rewrite /verify→  │                   │              │            │
- │             │ /widget,          │                   │              │            │
- │             │ add iframe-origin │                   │              │            │
- │             │ render iframe     │                   │              │            │
- │ KYC form   │ ───────────────────┼──────────────────▶│              │            │
- │             │                    │                   │ inquiry      │            │
- │ submit     │                    │                   ├─────────────▶│            │
- │ ─────────▶│                    │                   │              │            │
- │             │                    │                   │ result       │            │
- │             │                    │                   │◀─────────────┤            │
- │             │                    │ kyc.approved      │              │            │
- │             │                    │◀──────────────────┤              │            │
- │             │                    │ verify signature, │              │            │
- │             │                    │ idempotency lock, │              │            │
- │             │                    │ update            │              │            │
- │             │                    │ bridgeKycStatus   │              │            │
- │             │ poll               │                   │              │            │
- │             │ bridgeKycStatus    │                   │              │            │
- │             ├──────────────────▶│ "approved"        │              │            │
- │             │◀──────────────────┤                   │              │            │
- │             │ bridgeCreateVirtualAccount             │              │            │
- │             ├──────────────────▶│                   │              │            │
- │             │                    │ POST /crypto/     │              │            │
- │             │                    │  receive-infos    │              │            │
- │             │                    ├──────────────────────────────────┼───────────▶│
- │             │                    │ {ETH USDT address}│              │            │
- │             │                    │◀──────────────────┼──────────────┼────────────┤
- │             │                    │ persist           │              │            │
- │             │                    │ bridgeEthereum-   │              │            │
- │             │                    │   Address         │              │            │
- │             │                    │ POST /v0/customers/{id}/         │            │
- │             │                    │  virtual_accounts │              │            │
- │             │                    │  source=usd,      │              │            │
- │             │                    │  destination=     │              │            │
- │             │                    │   {ethereum,usdt, │              │            │
- │             │                    │    address}       │              │            │
- │             │                    ├──────────────────▶│              │            │
- │             │                    │ {VA + bank        │              │            │
- │             │                    │  routing/account} │              │            │
- │             │                    │◀──────────────────┤              │            │
- │             │                    │ persist           │              │            │
- │             │                    │ BridgeVirtual-    │              │            │
- │             │                    │ AccountRecord     │              │            │
- │             │ {bankName,         │                   │              │            │
- │             │  routingNumber,    │                   │              │            │
- │             │  accountNumberLast4│                   │              │            │
- │             │◀──────────────────┤                   │              │            │
- │             │                    │                   │              │            │
- │ ─── User funds via ACH/wire from external bank ───────────────────▶│            │
- │             │                    │                   │              │            │
- │             │                    │                   │ swap USD→USDT│            │
- │             │                    │                   │ send to ETH  │            │
- │             │                    │                   │ address      │            │
- │             │                    │                   ├──────────────┼───────────▶│
- │             │                    │ deposit.completed │              │            │
- │             │                    │◀──────────────────┤              │            │
- │             │                    │ verify sig,       │              │            │
- │             │                    │ idempotency,      │              │            │
- │             │                    │ log + (TODO       │              │            │
- │             │                    │  NEW-ERPNEXT-     │              │            │
- │             │                    │  LEDGER) ERPNext  │              │            │
- │             │                    │  audit row        │              │            │
- │             │                    │ (no Flash wallet  │              │            │
- │             │                    │  credit — IBEX    │              │            │
- │             │                    │  is the ledger)   │              │            │
- │             │                    │                   │              │ crypto.    │
- │             │                    │                   │              │ received   │
- │             │                    │                   │              │ (IBEX      │
- │             │                    │                   │              │  balance   │
- │             │                    │                   │              │  already   │
- │             │                    │                   │              │  moved =   │
- │             │                    │                   │              │  Cash      │
- │             │                    │                   │              │  Wallet    │
- │             │                    │                   │              │  balance   │
- │             │                    │                   │              │  up)       │
- │             │                    │◀──────────────────────────────────────────────┤
- │             │                    │ authenticate,     │              │            │
- │             │                    │ idempotency       │              │            │
- │             │                    │ (lockPaymentHash),│              │            │
- │             │                    │ findByBridge-     │              │            │
- │             │                    │  EthereumAddress, │              │            │
- │             │                    │ log + (TODO       │              │            │
- │             │                    │  NEW-ERPNEXT-     │              │            │
- │             │                    │  LEDGER) ERPNext  │              │            │
- │             │                    │  audit row        │              │            │
- │             │                    │ (no Flash wallet  │              │            │
- │             │                    │  credit)          │              │            │
- │             │ push (ENG-275):    │                   │              │            │
- │             │ "Deposit complete: │                   │              │            │
- │             │  X USDT"           │                   │              │            │
- │             │◀──────────────────┤                   │              │            │
- │             │                    │                   │              │            │
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant M as Mobile App
+    participant F as Flash Backend
+    participant B as Bridge.xyz
+    participant P as Persona
+    participant I as IBEX
+
+    link M: ENG-239 (Nick) — mobile withdrawal router @ https://linear.app/island-bitcoin/issue/ENG-239
+    link F: NEW-OPTIN (Nick/Ben) @ https://linear.app/island-bitcoin/project/bridge-wallet-integration-a1596c3a2b6a
+    link I: ENG-296 (Ben/Olaniran) — ETH-USDT account provisioning @ https://linear.app/island-bitcoin/issue/ENG-296
+
+    U->>M: tap "Enable USD"
+    M->>F: bridgeInitiateKyc
+    Note right of F: check level≥2, bridge.enabled
+    F->>B: POST /v0/kyc_links
+    B-->>F: {kyc_link, ...}
+    Note right of F: persist bridgeCustomerId
+    F-->>M: {kycLink, tosLink}
+    M->>B: render KYC iframe (widget)
+    U->>B: submit KYC form
+    B->>P: inquiry
+    P-->>B: result
+    B->>F: webhook kyc.approved
+    Note right of F: verify sig, idempotency lock,<br/>update bridgeKycStatus
+    M->>F: poll bridgeKycStatus
+    F-->>M: "approved"
+    M->>F: bridgeCreateVirtualAccount
+
+    rect rgb(255, 243, 224)
+    Note over F,I: ⚠ BLOCKED on ENG-296 (Ben/Olaniran)<br/>until Ibex.createCryptoReceiveInfo ships
+    F->>I: POST /crypto/receive-infos<br/>(ENG-296)
+    I-->>F: {ETH-USDT address}
+    Note right of F: persist bridgeEthereumAddress<br/>(this IBEX account IS the Cash Wallet)
+    end
+
+    F->>B: POST /v0/customers/{id}/virtual_accounts<br/>source=usd, destination={ethereum,usdt,address}
+    B-->>F: {VA + bank routing/account}
+    Note right of F: persist BridgeVirtualAccountRecord
+    F-->>M: {bankName, routingNumber, accountNumberLast4}
+
+    U->>B: ACH/wire from external bank
+    B->>I: swap USD→USDT, send to user's ETH-USDT address
+    B->>F: webhook deposit.completed
+    Note right of F: verify sig, idempotency,<br/>log + TODO: ERPNext audit row<br/>(NEW-ERPNEXT-LEDGER)<br/>⚠ no Flash wallet credit — IBEX is the ledger
+
+    Note over I: IBEX balance already moved<br/>= Cash Wallet balance up
+
+    I->>F: webhook /crypto/receive
+    Note right of F: authenticate, lockPaymentHash,<br/>findByBridgeEthereumAddress,<br/>log + TODO: ERPNext audit row<br/>(NEW-ERPNEXT-LEDGER)<br/>⚠ no Flash wallet credit
+    F-->>M: push "Deposit complete: X USDT"<br/>(ENG-275 — Laurent)
 ```
 
 **Pre-launch gating dependency:** The IBEX `POST /crypto/receive-infos` call (ENG-296) is currently unimplemented; `createVirtualAccount` returns `Error("IBEX Ethereum address creation not yet implemented")`. Until ENG-296 lands, the on-ramp halts at the "persist `bridgeEthereumAddress`" step. **Also gated on NEW-OPTIN** — this entire sequence is only reachable by users who have opted in to the IBEX ETH-USDT Cash Wallet. Non-opted-in users never see the "Enable USD" entry point.
@@ -431,100 +411,58 @@ The example below uses the US ACH rail; other rails follow the same shape with d
 
 ### 5.1 Linking an external bank account (one-time per bank)
 
-```
-User      Mobile App         Flash Backend            Bridge        Plaid
- │             │                    │                   │              │
- │ tap "Add   │                    │                   │              │
- │  bank"    │                    │                   │              │
- ├────────▶ │                    │                   │              │
- │             │ bridgeAddExternalAccount               │              │
- │             ├──────────────────▶│                   │              │
- │             │                    │ check level≥2,    │              │
- │             │                    │ bridge.enabled,   │              │
- │             │                    │ kyc==approved     │              │
- │             │                    │ POST /v0/         │              │
- │             │                    │  customers/{id}/  │              │
- │             │                    │  external_accounts│              │
- │             │                    │  /link            │              │
- │             │                    ├──────────────────▶│              │
- │             │                    │ {link_url,        │              │
- │             │                    │  expires_at}      │              │
- │             │                    │◀──────────────────┤              │
- │             │ {linkUrl,          │                   │              │
- │             │  expiresAt}        │                   │              │
- │             │◀──────────────────┤                   │              │
- │             │ open linkUrl in    │                   │              │
- │             │ webview            │                   │              │
- │ link bank  │ ─────────────────────────────────────▶│ ─────────────▶│
- │ (Plaid OAuth or routing/account entry)              │              │
- │             │                    │                   │              │
- │             │                    │ (EA appears in    │              │
- │             │                    │  listExternal-    │              │
- │             │                    │  Accounts;        │              │
- │             │                    │  status: pending  │              │
- │             │                    │  → verified       │              │
- │             │                    │  via Bridge's     │              │
- │             │                    │  micro-deposit    │              │
- │             │                    │  flow or Plaid's  │              │
- │             │                    │  instant verify)  │              │
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant M as Mobile App
+    participant F as Flash Backend
+    participant B as Bridge.xyz
+    participant PL as Plaid
+
+    U->>M: tap "Add bank"
+    M->>F: bridgeAddExternalAccount
+    Note right of F: check level≥2, bridge.enabled,<br/>kyc==approved
+    F->>B: POST /v0/customers/{id}/external_accounts/link
+    B-->>F: {link_url, expires_at}
+    F-->>M: {linkUrl, expiresAt}
+    M->>B: open linkUrl in webview
+    U->>PL: Plaid OAuth (or routing/account entry)
+    PL-->>B: link confirmation
+    Note over B: EA appears in listExternalAccounts<br/>status: pending → verified<br/>(Bridge micro-deposit OR Plaid instant verify)
+    Note right of F: OPEN: does Bridge fire an<br/>external_account.verified webhook?<br/>Today = client re-fetches bridgeExternalAccounts.<br/>See §9 open-items.
 ```
 
 **Open question (capture as TODO):** Does Bridge fire a webhook when an EA transitions `pending → verified`, or do we need to poll `listExternalAccounts`? Today's code has no `external_account.verified` route; we currently rely on the user re-fetching `bridgeExternalAccounts`. Add to §9.
 
 ### 5.2 Initiating and settling a withdrawal
 
-```
-User      Mobile App         Flash Backend            Bridge          IBEX
- │             │                    │                   │                │
- │ enter      │                    │                   │                │
- │ amount,    │                    │                   │                │
- │ select EA │                    │                   │                │
- ├────────▶ │                    │                   │                │
- │             │ bridgeInitiateWithdrawal               │                │
- │             ├──────────────────▶│                   │                │
- │             │                    │ check level≥2,    │                │
- │             │                    │ bridge.enabled,   │                │
- │             │                    │ kyc==approved     │                │
- │             │                    │ check USDT        │                │
- │             │                    │  balance ≥ amount │                │
- │             │                    │ check EA          │                │
- │             │                    │  verified + owned │                │
- │             │                    │  by caller        │                │
- │             │                    │ POST /v0/transfers│                │
- │             │                    │  source: ethereum/│                │
- │             │                    │   usdt/from_addr  │                │
- │             │                    │  destination: ach/│                │
- │             │                    │   usd/external_id │                │
- │             │                    ├──────────────────▶│                │
- │             │                    │ {transfer_id,     │                │
- │             │                    │  state: pending}  │                │
- │             │                    │◀──────────────────┤                │
- │             │                    │ persist           │                │
- │             │                    │ BridgeWithdrawal- │                │
- │             │                    │ Record (status=   │                │
- │             │                    │ pending)          │                │
- │             │ {transferId,       │                   │                │
- │             │  state}            │                   │                │
- │             │◀──────────────────┤                   │                │
- │             │                    │                   │                │
- │             │                    │                   │ pull USDT from │
- │             │                    │                   │ ETH address    │
- │             │                    │                   ├───────────────▶│
- │             │                    │                   │ swap → USD,    │
- │             │                    │                   │ initiate ACH   │
- │             │                    │                   │ to user's bank │
- │             │                    │ transfer.completed│                │
- │             │                    │◀──────────────────┤                │
- │             │                    │ verify sig,       │                │
- │             │                    │ idempotency,      │                │
- │             │                    │ update Withdrawal-│                │
- │             │                    │ Record.status=    │                │
- │             │                    │ completed         │                │
- │             │ push: "Withdrawal  │                   │                │
- │             │ complete: $X to    │                   │                │
- │             │  [bank]"           │                   │                │
- │             │◀──────────────────┤                   │                │
- │             │  (ENG-275 TODO)    │                   │                │
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant M as Mobile App
+    participant F as Flash Backend
+    participant B as Bridge.xyz
+    participant I as IBEX
+
+    link F: CRIT-1 ENG-280 balance + CRIT-2 ENG-281 ownership (both landed) @ https://linear.app/island-bitcoin/issue/ENG-281
+    link F: ENG-275 push (Laurent) @ https://linear.app/island-bitcoin/issue/ENG-275
+
+    U->>M: enter amount, select EA
+    M->>F: bridgeInitiateWithdrawal
+    Note right of F: check level≥2, bridge.enabled,<br/>kyc==approved,<br/>USDT balance ≥ amount (ENG-280),<br/>EA verified + owned (ENG-281)
+    F->>B: POST /v0/transfers<br/>source: ethereum/usdt/from_addr<br/>destination: ach/usd/external_id
+    B-->>F: {transfer_id, state: pending}
+    Note right of F: persist BridgeWithdrawalRecord<br/>(status=pending)<br/>⚠ ordering caveat — see §9
+    F-->>M: {transferId, state}
+
+    B->>I: pull USDT from user's ETH address
+    Note over I: balance moves on IBEX side<br/>= Cash Wallet debited
+    B->>B: swap → USD, initiate ACH to user's bank
+    B->>F: webhook transfer.completed
+    Note right of F: verify sig, idempotency,<br/>WithdrawalRecord.status=completed,<br/>TODO: ERPNext audit row<br/>(NEW-ERPNEXT-LEDGER)
+    F-->>M: push "Withdrawal complete:<br/>$X to [bank]"<br/>(ENG-275 — Laurent)
 ```
 
 **JM user with no Bridge External Account attempts off-ramp:** Mobile app's withdrawal router detects the user has no Bridge EA and calls the **Cashout V1** mutation instead of `bridgeInitiateWithdrawal`. Cashout V1 is itself backend-orchestrated: the backend collects the user's `BankAccount` (from `Account` / ERPNext Customer record), invokes IBEX to debit the user's Cash Wallet for the cashout amount + service fee, creates a `Cashout` DocType in ERPNext linked to the resulting JournalEntry and BankAccount, and then waits for a Flash support user to settle via RTGS through the admin UI. On RTGS settlement, a `PaymentEntry` is recorded in ERPNext and the user is notified via `adminPaymentEntryNotificationSend`. The Bridge service layer is never invoked in this branch, but the **backend and ERPNext are**. Authoritative spec: [Cashout V1 Linear project](https://linear.app/island-bitcoin/project/cashout-v1-c1fbf09713bb) (key tickets: ENG-199 Cashout DocType, ENG-197 PaymentEntry on RTGS, ENG-198 user notification, ENG-157 settlement admin page, ENG-239 mobile API integration, ENG-240 BankAccount query, ENG-292 BankAccount on offer).
@@ -594,29 +532,30 @@ User      Mobile App         Flash Backend            Bridge          IBEX
 
 When KYC ends in `rejected` or `offboarded`, the user can re-attempt without operator intervention.
 
-```
-   bridgeKycStatus: rejected
-              │
-              ▼
-   User taps "Retry KYC" in mobile app
-              │
-              ▼
-   Mobile App → Flash: bridgeInitiateKyc
-              │
-              ▼
-   Service: account.bridgeCustomerId exists → call BridgeClient.getLatestKycLink(customerId)
-              │
-              ▼
-   Service: latestKycLink.kyc_status ∈ {rejected, offboarded}
-              │
-              ▼
-   Service: BridgeClient.createKycLink({type, email, full_name})
-              │
-              ▼
-   Mobile App receives fresh kyc_link → renders iframe → user re-submits
-              │
-              ▼
-   Bridge → Flash webhook: kyc.approved | kyc.rejected | kyc.offboarded
+```mermaid
+flowchart TB
+    S0["bridgeKycStatus: rejected<br/>(or offboarded)"]:::fail
+    S1["User taps 'Retry KYC'<br/>in mobile app"]
+    S2["Mobile App → Flash:<br/>bridgeInitiateKyc"]
+    S3{"account.bridgeCustomerId<br/>exists?"}
+    S4["BridgeClient.getLatestKycLink(customerId)"]
+    S5{"latestKycLink.kyc_status<br/>∈ {rejected, offboarded}?"}
+    S6["BridgeClient.createKycLink({type, email, full_name})<br/>→ reuses existing customer"]
+    S7["Mobile App receives fresh kyc_link<br/>renders iframe → user re-submits"]
+    S8["Bridge → Flash webhook:<br/>kyc.approved | kyc.rejected | kyc.offboarded"]:::terminal
+
+    S0 --> S1 --> S2 --> S3
+    S3 -->|yes| S4
+    S4 --> S5
+    S5 -->|yes| S6
+    S5 -->|no| S7
+    S6 --> S7
+    S7 --> S8
+
+    click S6 "https://linear.app/island-bitcoin/issue/ENG-278" "ENG-278 — email from Kratos identity used in createKycLink" _blank
+
+    classDef fail fill:#ffebee,stroke:#c62828,color:#c62828
+    classDef terminal fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
 ```
 
 **Code reference:** `src/services/bridge/index.ts:152-167`. The current implementation reuses the **same** `bridgeCustomerId` across re-attempts, which matches Bridge's expected pattern: a customer with a rejected inquiry can have a new inquiry attached to the same customer record.
@@ -690,4 +629,5 @@ UX recommendation: surface limits to the user in the deposit/withdrawal screens 
 | 2026-04-21 | Corrected JMD off-ramp characterization: Cashout V1 is backend + ERPNext-orchestrated (IBEX debit + Cashout DocType + JournalEntry + manual RTGS settlement + PaymentEntry + push notification), **not** "backend never invoked." Linked authoritative spec at [Cashout V1 Linear project](https://linear.app/island-bitcoin/project/cashout-v1-c1fbf09713bb). Updated §0 routing diagram + rules, §5 bottom narrative, §6.2 edge-case rows, §9 mobile router entry. | Taddesse + Dread |
 | 2026-04-22 | **Architectural correction (Dread, 13:09 ET):** §0 prefaced with Cash Wallet migration note; §1 IBEX actor row rewritten (IBEX is the ledger); §3c deposit state machine renamed `ibex_credited → ibex_received` with corrected framing (no Flash-side credit); §3d added — Cash Wallet opt-in state machine (legacy_usd → opt_in_pending → eth_usdt_ready → eth_usdt_active); existing §3d renumbered to §3e (Withdrawal); §4 on-ramp diagram redrawn (no "credit USDT wallet" step; IBEX balance moves on IBEX side; Flash-side work = ERPNext audit + push); §5 Cashout V1 narrative updated for NEW-CASHOUT-V1-WALLET source-wallet switch; §9 gating-for-launch table expanded with ENG-297 promotion + NEW-OPTIN + NEW-ERPNEXT-LEDGER + NEW-CASHOUT-V1-WALLET + NEW-COUNTRY-ALLOWLIST. | Taddesse + Dread |
 | 2026-04-22 14:15 ET | Cashout V1 follow-up (Dread confirmation). Reworded §5 Cashout V1 source-wallet callout to make **ETH-USDT the first-class source wallet** on Cashout V1 re-launch (not merely a switch for opted-in users). Updated §9 NEW-CASHOUT-V1-WALLET row with the same framing + owner assignment + ENG-296 cross-project blocker note. | Taddesse + Dread |
+| 2026-04-22 14:29 ET | **Diagram modernization (Dread).** Replaced all ASCII-art diagrams with Mermaid. State machines (§3a KYC, §3b VirtualAccount, §3c Deposit, §3d Cash Wallet opt-in, §3e Withdrawal) are now `stateDiagram-v2`; sequence diagrams (§4 on-ramp, §5.1 EA linking, §5.2 withdrawal) are now `sequenceDiagram` with participant `link` directives to Linear issues; the §0 routing and §7 Re-KYC flows are `flowchart` with interactive `click` directives pointing at each ticket's Linear URL (and at the Bridge Wallet Integration / Cashout V1 project URLs as placeholders for NEW-* tickets not yet filed). Every diagram now surfaces owner + ticket ID inline in node labels so cross-references survive even if a renderer strips `click` directives. | Taddesse + Dread |
 | (prior) | Original plan + Tron-based draft | heyolaniran et al. |

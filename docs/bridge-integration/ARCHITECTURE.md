@@ -60,82 +60,84 @@ Routing of withdrawals between **Cashout V1** (existing JMD off-ramp via Flash b
 
 ## §3. Component Diagram
 
+```mermaid
+flowchart TB
+    subgraph Mobile["Mobile App (lnflash/flash-mobile)"]
+        direction LR
+        GQL["GraphQL client<br/>(Apollo)"]
+        KYCF["Bridge KYC iframe<br/>(Persona-hosted by Bridge)"]
+        BANKF["Bridge bank-link iframe<br/>(Plaid-hosted by Bridge)"]
+        JMDKYC["JMD KYC: existing<br/>Frappe ERPNext onboarding<br/>(separate flow)"]
+    end
+
+    subgraph Flash["Flash Backend (this repo)"]
+        direction TB
+        Apollo["Apollo Server"]
+        BSvc["Bridge Service<br/>src/services/bridge/index.ts<br/>(gating, spans)"]
+        BRepo["Bridge Repos<br/>(Mongoose)"]
+        BWeb["Bridge Webhook Server<br/>port 4009<br/>/kyc • /deposit • /transfer"]
+        IWeb["IBEX Webhook Server<br/>(existing)<br/>/crypto/receive"]
+        Apollo --> BSvc --> BRepo
+    end
+
+    subgraph Stores["Data Stores"]
+        Mongo[("MongoDB<br/>accounts, bridge* collections")]
+        Redis[("Redis<br/>LockService + rate limit")]
+    end
+
+    subgraph Ext["External"]
+        IBEX["IBEX API<br/>ETH-USDT accounts<br/>= Cash Wallet (the ledger)<br/>+ child addrs + LN + webhooks"]
+        BridgeAPI["Bridge.xyz API<br/>/v0/customers<br/>/v0/kyc_links<br/>/v0/.../virtual_accounts<br/>/v0/transfers<br/>/v0/external_accounts"]
+    end
+
+    GQL -->|GraphQL<br/>Public Auth| Apollo
+    KYCF -->|HTTPS WebView<br/>direct to Bridge widget| BridgeAPI
+    BANKF -->|HTTPS WebView<br/>direct to Plaid via Bridge| BridgeAPI
+    JMDKYC -->|GraphQL<br/>(separate legacy path)| Apollo
+
+    BSvc -->|REST| BridgeAPI
+    BSvc -->|REST<br/>ENG-296: createCryptoReceiveInfo<br/>ENG-297: LN parity| IBEX
+    BRepo --> Mongo
+    BSvc --> Redis
+
+    BridgeAPI -.->|webhook HTTPS POST<br/>RSA-SHA256 sig| BWeb
+    IBEX -.->|webhook<br/>/crypto/receive<br/>token auth| IWeb
+
+    BWeb -->|update| Mongo
+    BWeb --> Redis
+    IWeb -->|lookup by<br/>bridgeEthereumAddress| Mongo
+    IWeb --> Redis
+
+    IWeb -.->|TODO: NEW-ERPNEXT-LEDGER<br/>audit row<br/>+ ENG-275 push<br/>⚠ no Flash wallet credit —<br/>IBEX is the ledger| ERP["ERPNext<br/>(audit)"]
+    BWeb -.->|TODO: NEW-ERPNEXT-LEDGER<br/>audit row<br/>+ ENG-275 push| ERP
+
+    click BSvc "https://linear.app/island-bitcoin/issue/ENG-296" "ENG-296 — IBEX ETH-USDT account provisioning (Ben/Olaniran)" _blank
+    click IBEX "https://linear.app/island-bitcoin/issue/ENG-297" "ENG-297 — LN parity on ETH-USDT Cash Wallet (Olaniran)" _blank
+    click ERP "https://linear.app/island-bitcoin/project/bridge-wallet-integration-a1596c3a2b6a" "NEW-ERPNEXT-LEDGER (to be filed) + ENG-275 push (Laurent)" _blank
+    click BWeb "https://linear.app/island-bitcoin/issue/ENG-273" "ENG-273 — webhook monitoring/alerting (Nick)" _blank
+    click IWeb "https://linear.app/island-bitcoin/issue/ENG-275" "ENG-275 — /crypto/receive push notification (Laurent)" _blank
+
+    classDef ext fill:#fff8e1,stroke:#f9a825
+    classDef store fill:#e0f2f1,stroke:#00796b
+    classDef mobile fill:#e8eaf6,stroke:#3949ab
+    classDef flash fill:#e1f5fe,stroke:#0277bd
+    class IBEX,BridgeAPI,ERP ext
+    class Mongo,Redis store
 ```
-                 ┌──────────────────────────────────────────────────────────┐
-                 │                       Mobile App                         │
-                 │                                                          │
-                 │   GraphQL client       Bridge KYC iframe   Bridge bank-  │
-                 │   (Apollo)             (Persona-hosted     link iframe   │
-                 │                         by Bridge)         (Plaid-hosted │
-                 │                                             by Bridge)   │
-                 │                                                          │
-                 │   (JMD KYC: existing Frappe ERPNext-backed onboarding,   │
-                 │    via GraphQL — separate flow, not depicted)            │
-                 └────────┬───────────────────┬────────────────────┬────────┘
-                          │ GraphQL            │ HTTPS               │ HTTPS
-                          │ (Public Auth)      │ (WebView direct     │ (WebView
-                          ▼                    │  to Bridge widget)  │  direct)
-                 ┌──────────────────┐          │                     │
-                 │  Flash Backend   │          │                     │
-                 │ (Apollo Server)  │          │                     │
-                 │                  │          │                     │
-                 │ ┌──────────────┐ │          │                     │
-                 │ │   Bridge     │ │          │                     │
-                 │ │   Service    │◄┼──REST────┼─────────────────────┼──┐
-                 │ │ (gating,     │ │          │                     │  │
-                 │ │  spans)      │ │          │                     │  │
-                 │ └──────┬───────┘ │          │                     │  │
-                 │        │         │          │                     │  │
-                 │ ┌──────▼──────┐  │          │                     │  │
-                 │ │  Bridge     │  │          │                     │  │
-                 │ │  Repos      │  │          │                     │  │
-                 │ │  (Mongoose) │  │          │                     │  │
-                 │ └──────┬──────┘  │          │                     │  │
-                 └────────┼─────────┘          │                     │  │
-                          │                    │                     │  │
-              ┌───────────┼────────────┐       │                     │  │
-              ▼           ▼            ▼       ▼                     ▼  ▼
-        ┌──────────┐ ┌─────────┐ ┌──────────┐  │           ┌────────────────────┐
-        │ MongoDB  │ │  Redis  │ │   IBEX   │◄─┼──REST────►│    Bridge.xyz      │
-        │          │ │         │ │   API    │  │           │       API          │
-        │ accounts │ │ Lock    │ │          │  │           │                    │
-        │ bridge*  │ │ Service │ │ (USDT    │  │           │ /v0/customers      │
-        │  collect-│ │ +       │ │  child   │  │           │ /v0/kyc_links      │
-        │  ions    │ │ rate    │ │  addrs,  │  │           │ /v0/customers/.../ │
-        │          │ │ limit   │ │  send,   │  │           │   virtual_accounts │
-        └──────────┘ └─────────┘ │  webhook)│  │           │ /v0/transfers      │
-                                 └────┬─────┘  │           │ /v0/external_      │
-                                      │        │           │   accounts/...     │
-                          ┌───────────┴────┐   │           └────────┬───────────┘
-                          ▼                ▼   │                    │
-                 ┌─────────────────┐  ┌─────────────────┐           │
-                 │ IBEX Webhook    │  │ Bridge Webhook  │◄──webhook─┘
-                 │ Server          │  │ Server          │   (HTTPS POST)
-                 │ (existing)      │  │ (NEW, port 4009)│
-                 │                 │  │                 │
-                 │ /crypto/receive │  │ /kyc            │
-                 │ ─ looks up acct │  │ /deposit        │
-                 │   by ETH addr,  │  │ /transfer       │
-                 │   logs deposit  │  │                 │
-                 │ ─ (TODO: ERPNext│  │                 │
-                 │   audit row +   │  │                 │
-                 │   push notif;   │  │                 │
-                 │   no Flash-side │  │                 │
-                 │   "credit" —    │  │                 │
-                 │   IBEX is the   │  │                 │
-                 │   ledger)       │  │                 │
-                 └─────────────────┘  └─────────────────┘
-                          │                    │
-                          ▼                    ▼
-                    IBEX ETH-USDT acct  Account.bridgeKycStatus
-                    = Cash Wallet       BridgeWithdrawalRecord.status
-                    (balance lives on   (status updates;
-                     IBEX side)          push pending ENG-275)
-                    Future: ERPNext
-                    audit row + push
-                    (NEW-ERPNEXT-LEDGER,
-                     ENG-275)
-```
+
+**Linear tickets surfaced in this diagram:**
+
+| Ticket | Where it touches | Owner |
+|---|---|---|
+| [ENG-296](https://linear.app/island-bitcoin/issue/ENG-296) | Bridge Service → IBEX: `createCryptoReceiveInfo` for ETH-USDT account provisioning | Ben / Olaniran |
+| [ENG-297](https://linear.app/island-bitcoin/issue/ENG-297) | IBEX: Lightning send/receive parity on the new ETH-USDT Cash Wallet | Olaniran |
+| [ENG-273](https://linear.app/island-bitcoin/issue/ENG-273) | Bridge Webhook Server: monitoring + alerting | Nick |
+| [ENG-275](https://linear.app/island-bitcoin/issue/ENG-275) | IBEX Webhook Server `/crypto/receive`: push notification | Laurent |
+| [ENG-239](https://linear.app/island-bitcoin/issue/ENG-239) | Mobile: withdrawal router (Cashout V1 vs Bridge off-ramp) | Nick |
+| **NEW-ERPNEXT-LEDGER** | Both webhook servers: ERPNext audit-row writer (IBEX is the ledger — this is audit, not bookkeeping) | Olaniran or Dread (to be filed) |
+| **NEW-OPTIN** | Bridge Service: per-user Cash Wallet opt-in toggle | Nick / Ben (to be filed) |
+| **NEW-CASHOUT-V1-WALLET** | Cross-project: ETH-USDT as first-class source wallet for Cashout V1 (ENG-296 is a cross-project blocker) | Olaniran + Ben (Bridge); Dread (Cashout V1 spec) (to be filed) |
+| **NEW-COUNTRY-ALLOWLIST** | Flash-maintained country allowlist for UI entry | Dread / Nick (to be filed) |
 
 **Diagram notes:**
 
@@ -244,33 +246,35 @@ See `WEBHOOKS.md` §2.4 and §4.3 for the full per-handler details.
 
 This is the single most important architectural decision in the integration. **Important framing correction:** neither webhook "credits a Flash wallet." The IBEX ETH-USDT account IS the Cash Wallet, so the balance change happens on IBEX's side as a function of USDT actually arriving. The two webhooks drive **audit + user notification**, not bookkeeping.
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Bridge<br/>(USD lands in VA)
+    participant FB as Flash Bridge<br/>Webhook Server<br/>(port 4009)
+    participant I as IBEX<br/>(detects USDT on<br/>user's ETH-USDT acct<br/>= Cash Wallet)
+    participant FI as Flash IBEX<br/>Webhook Server
+
+    link FB: ENG-273 — webhook monitoring/alerting (Nick) @ https://linear.app/island-bitcoin/issue/ENG-273
+    link FI: ENG-275 — /crypto/receive push notification (Laurent) @ https://linear.app/island-bitcoin/issue/ENG-275
+
+    B->>FB: POST /deposit<br/>(RSA-SHA256 sig)
+    Note right of FB: log + future:<br/>NEW-ERPNEXT-LEDGER<br/>"USD landed" audit row<br/>⚠ no Flash wallet credit
+
+    B->>I: Bridge sends USDT to<br/>user's ETH-USDT IBEX<br/>child address
+    Note over I: balance moves on IBEX side<br/>= Cash Wallet up<br/>(IBEX IS the ledger)
+
+    I->>FI: POST /crypto/receive<br/>(token auth, lockPaymentHash)
+    Note right of FI: lookup acct by bridgeEthereumAddress<br/>log "USDT received"<br/>TODO NEW-ERPNEXT-LEDGER: audit row<br/>TODO ENG-275: push notification<br/>⚠ no Flash wallet credit
 ```
-   Bridge                    Flash Bridge        IBEX                   Flash IBEX
-   (USD lands in VA)         Webhook Server      (USDT detected on      Webhook Server
-                                                  user's ETH-USDT acct
-                                                  = the Cash Wallet)
-        │                          │                  │                      │
-        │── POST /deposit ────────►│                  │                      │
-        │                          │── log + future:  │                      │
-        │                          │   ERPNext audit  │                      │
-        │                          │   "USD landed"   │                      │
-        │                          │                  │                      │
-        │── (Bridge sends USDT     │                  │                      │
-        │    to user's ETH-USDT ───┼─────────────────►│ (balance moves on    │
-        │    IBEX child address)   │                  │  IBEX side — this    │
-        │                          │                  │  IS the Cash Wallet) │
-        │                          │                  │                      │
-        │                          │                  │── POST               │
-        │                          │                  │   /crypto/receive ──►│
-        │                          │                  │                      │── lookup acct by
-        │                          │                  │                      │   bridgeEthereumAddr
-        │                          │                  │                      │── log "USDT received"
-        │                          │                  │                      │── (TODO NEW-ERPNEXT-
-        │                          │                  │                      │    LEDGER: ERPNext
-        │                          │                  │                      │    audit row)
-        │                          │                  │                      │── (TODO ENG-275:
-        │                          │                  │                      │    push notification)
-```
+
+**Linear tickets on this flow (not yet filed = to-be-filed):**
+
+| Ticket | Where | Owner |
+|---|---|---|
+| [ENG-273](https://linear.app/island-bitcoin/issue/ENG-273) | Monitoring + alerts for both webhook legs | Nick |
+| [ENG-275](https://linear.app/island-bitcoin/issue/ENG-275) | Push on `/crypto/receive` completion | Laurent |
+| [ENG-276](https://linear.app/island-bitcoin/issue/ENG-276) | Reconciliation worker flags 24h Bridge-without-IBEX gap as orphan | Nick |
+| **NEW-ERPNEXT-LEDGER** | Audit-row writer on both legs (replaces the old "wallet credit" framing) | Olaniran / Dread (to be filed) |
 
 Why two webhooks? Bridge's deposit-family event tells us **fiat** landed in the VA — useful for ops visibility ("Bridge accepted; we're waiting on USDT settlement"). The IBEX `/crypto/receive` event tells us **USDT actually arrived** in the user's ETH-USDT IBEX account — i.e., the Cash Wallet balance is now up. Both events are needed for accurate audit (the spread between them is "in flight" for ops/finance). Neither writes a wallet ledger entry on Flash side, because there is no Flash-side wallet ledger to write to — that was the wrong mental model in earlier drafts.
 
@@ -521,4 +525,5 @@ For each environment (sandbox, production):
 | 2026-04-21 | Revisions: added explicit JMD-KYC catch in §2/§3 (Frappe-backed, separate from Bridge KYC); §5 timestamp skew sourced from `bridge.webhook.timestampSkewMs`; §7 + §9 corrected — backend does not perform `/verify` → `/widget` URL rewrite (mobile/dashboard concern); §9 replaced fictional `BRIDGE_*` env-var table with the actual `bridge:` YAML config schema. | Taddesse + Dread |
 | 2026-04-21 | Code-grounded corrections after pulling actual webhook handlers: IBEX route is `POST /crypto/receive` (slash, not hyphen); the handler currently only logs — wallet credit + push are not yet implemented and are folded into the ENG-296 dependency. §3 component diagram updated. §5.3 idempotency lock-key shapes corrected (KYC includes event; deposit/transfer use only `transfer_id`; IBEX uses `lockPaymentHash`). §5.4 two-webhook diagram and IBEX route description rewritten to match real behavior. §6, §7, §10, §12 updated for consistency. | Taddesse + Dread |
 | 2026-04-22 | **Architectural correction (Dread, 13:09 ET):** IBEX ETH-USDT account IS the Cash Wallet — no Flash-side wallet ledger; webhooks drive audit + push, not bookkeeping. §1 key-non-goals, §2 system overview, §3 diagram notes, §5.4 two-webhook diagram + narrative, §7 IBEX integration, §12 open-work all rewritten. New tickets surfaced: NEW-OPTIN, NEW-ERPNEXT-LEDGER, NEW-CASHOUT-V1-WALLET, NEW-COUNTRY-ALLOWLIST. ENG-297 promoted to Phase-1 launch blocker. Per-user permanent opt-in migration model added in §2/§5.4. | Taddesse + Dread |
+| 2026-04-22 14:29 ET | **Diagram modernization (Dread).** Replaced the §3 ASCII component diagram with a Mermaid `flowchart` (subgraphs for Mobile App / Flash Backend / Data Stores / External, with interactive `click` directives to Linear issues on every significant node: ENG-296, ENG-297, ENG-273, ENG-275, + NEW-* project-URL placeholders) and added a "Linear tickets surfaced in this diagram" reference table. Replaced the §5.4 two-webhook ASCII diagram with a Mermaid `sequenceDiagram` including participant `link` directives and a companion ticket table. Owner + ticket ID appear in node labels so the cross-references survive renderers that strip `click`. | Taddesse + Dread |
 | (prior) | Original 67-line draft, Tron-based, missing webhook server / Mongo / Redis / iframe-KYC / two-webhook split. | heyolaniran et al. |
