@@ -96,6 +96,10 @@ type AccountLimits
   withdrawal: [AccountLimit!]!
 }
 
+"""Bank account number. Accepts String or Int and coerces to String."""
+scalar AccountNumber
+  @join__type(graph: PUBLIC)
+
 input AccountUpdateDefaultWalletIdInput
   @join__type(graph: PUBLIC)
 {
@@ -213,7 +217,7 @@ type BankAccount
 input BankAccountInput
   @join__type(graph: PUBLIC)
 {
-  accountNumber: String!
+  accountNumber: AccountNumber!
   accountType: String!
   bankBranch: String!
   bankName: String!
