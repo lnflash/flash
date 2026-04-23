@@ -3,7 +3,9 @@
  * Ported from bridge-mcp and extended with Tron/USDT support
  */
 
+import crypto from "crypto"
 import { BridgeConfig } from "@config"
+
 import {
   BridgeCustomerId,
   BridgeVirtualAccountId,
@@ -240,6 +242,13 @@ export interface Transfer {
   updated_at: string
 }
 
+
+export interface BridgeIntiateKyc {
+  email: string
+  type: "individual" | "business"
+  full_name?: string
+}
+
 // ============ Bridge Client ============
 
 export class BridgeClient {
@@ -265,7 +274,10 @@ export class BridgeClient {
 
     if (idempotencyKey) {
       headers["Idempotency-Key"] = idempotencyKey
+    } else {
+      headers["Idempotency-Key"] = crypto.randomUUID()
     }
+
 
     const response = await fetch(url, {
       method,
@@ -301,8 +313,8 @@ export class BridgeClient {
 
   // ============ KYC ============
 
-  async createKycLink(customerId: BridgeCustomerId): Promise<KycLink> {
-    return this.request<KycLink>("POST", "/kyc_links", { customer_id: customerId })
+  async createKycLink(request: BridgeIntiateKyc, idempotencyKey?: string): Promise<KycLink> {
+    return this.request<KycLink>("POST", "/kyc_links", request, idempotencyKey)
   }
 
   // ============ Virtual Accounts ============
