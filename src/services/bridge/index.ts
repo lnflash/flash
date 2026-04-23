@@ -4,6 +4,8 @@
  * for USD on/off-ramp functionality via Bridge.xyz
  */
 
+import crypto from "crypto"
+
 import { BridgeConfig } from "@config"
 import BridgeClient, {
   KycLink,
@@ -25,14 +27,16 @@ import {
 import { RepositoryError } from "@domain/errors"
 import { toBridgeCustomerId, toBridgeExternalAccountId } from "@domain/primitives/bridge"
 import { getBalanceForWallet } from "@app/wallets/get-balance-for-wallet"
-import { WalletCurrency } from "@domain/shared"
+import { USDTAmount, WalletCurrency } from "@domain/shared"
 import { WalletsRepository } from "@services/mongoose/wallets"
 import { BridgeInsufficientFundsError } from "./errors"
+import { IdentityRepository } from "@services/kratos"
 
 // ============ Types ============
 
 type InitiateKycResult = {
   kycLink: string
+  customerId: string
   tosLink: string
 }
 
@@ -106,7 +110,7 @@ const checkAccountLevel = async (
  * - Creates Bridge customer if not exists
  * - Returns KYC and TOS links
  */
-const initiateKyc = async (accountId: AccountId): Promise<InitiateKycResult | Error> => {
+const initiateKyc = async ({ accountId, email, type, full_name }: { accountId: AccountId, email: string, type?: "individual" | "business", full_name: string }): Promise<InitiateKycResult | Error> => {
   baseLogger.info({ accountId, operation: "initiateKyc" }, "Bridge operation started")
 
   const enabledCheck = checkBridgeEnabled()
@@ -115,39 +119,41 @@ const initiateKyc = async (accountId: AccountId): Promise<InitiateKycResult | Er
   const account = await checkAccountLevel(accountId)
   if (account instanceof Error) return account
 
+  const identity = await IdentityRepository().getIdentity(account.kratosUserId);
+
+  if (identity instanceof Error) return identity
+
+  const useremail = identity.email;
+
   try {
-    let customerId = account.bridgeCustomerId
-
-    // Create customer if not exists
-    if (!customerId) {
-      // For now, create with minimal data - in production, gather from account profile
-      const customer = await BridgeClient.createCustomer({
-        type: "individual",
-        first_name: account.username || "Flash",
-        last_name: "User",
-        email: `${account.id}@flash.app`, // Placeholder - should use real email
-      })
-
-      customerId = toBridgeCustomerId(customer.id)
-
-      // Store customer ID
-      const updateResult = await AccountsRepository().updateBridgeFields(accountId, {
-        bridgeCustomerId: customerId,
-        bridgeKycStatus: "pending",
-      })
-      if (updateResult instanceof Error) return updateResult
-    }
 
     // Create KYC link
-    const kycLink = await BridgeClient.createKycLink(customerId)
+    const kycLink = await BridgeClient.createKycLink({
+      email: useremail || email,
+      type: type || "individual",
+      full_name: full_name || account.username
+    })
 
     const result: InitiateKycResult = {
       kycLink: kycLink.kyc_link,
+      customerId: kycLink.customer_id,
       tosLink: kycLink.tos_link,
     }
 
+    // link the customer Id to the bridge account 
+    const customerId = toBridgeCustomerId(kycLink.customer_id);
+
+    const updateResult = await AccountsRepository().updateBridgeFields(accountId, {
+      bridgeCustomerId: customerId,
+      bridgeKycStatus: "pending"
+    })
+
+    if (updateResult instanceof Error) {
+      return updateResult
+    }
+
     baseLogger.info(
-      { accountId, operation: "initiateKyc", customerId },
+      { accountId, operation: "initiateKyc", kycLink },
       "Bridge operation completed",
     )
 
@@ -200,6 +206,19 @@ const createVirtualAccount = async (
       return new BridgeKycPendingError("KYC not yet completed")
     }
 
+    // Idempotency guard: return the existing VA immediately without touching Bridge
+    const existingVa = await BridgeAccountsRepo.findVirtualAccountByAccountId(
+      accountId as string,
+    )
+    if (!(existingVa instanceof RepositoryError)) {
+      return {
+        virtualAccountId: existingVa.bridgeVirtualAccountId,
+        bankName: existingVa.bankName,
+        routingNumber: existingVa.routingNumber,
+        accountNumberLast4: existingVa.accountNumberLast4,
+      }
+    }
+
     // Get or create Tron address
     let tronAddress = account.bridgeTronAddress
 
@@ -212,15 +231,26 @@ const createVirtualAccount = async (
       return new Error("IBEX Tron address creation not yet implemented")
     }
 
+    // Deterministic key so Bridge deduplicates on their side if two calls race past
+    // the check above before either has written to the repo.
+    const vaIdempotencyKey = crypto
+      .createHash("sha256")
+      .update(`va:${accountId}`)
+      .digest("hex")
+
     // Create Bridge virtual account
-    const virtualAccount = await BridgeClient.createVirtualAccount(customerId, {
-      source: { currency: "usd" },
-      destination: {
-        currency: "usdt",
-        payment_rail: "tron",
-        address: tronAddress,
+    const virtualAccount = await BridgeClient.createVirtualAccount(
+      customerId,
+      {
+        source: { currency: "usd" },
+        destination: {
+          currency: "usdt",
+          payment_rail: "ethereum",
+          address: tronAddress,
+        },
       },
-    })
+      vaIdempotencyKey,
+    )
 
     // Store virtual account in repository
     const repoResult = await BridgeAccountsRepo.createVirtualAccount({
@@ -352,11 +382,16 @@ const initiateWithdrawal = async (
       currency: WalletCurrency.Usdt,
     })
     if (balance instanceof Error) return balance
+
+    if (!(balance instanceof USDTAmount)) {
+      return new BridgeInsufficientFundsError("Invalid balance type")
+    }
     const withdrawalAmount = parseFloat(amount)
     if (isNaN(withdrawalAmount) || withdrawalAmount <= 0) {
       return new BridgeInsufficientFundsError("Invalid withdrawal amount")
     }
-    const availableBalance = parseFloat(balance.amount.toString())
+
+    const availableBalance = balance.toIbex();
     if (availableBalance < withdrawalAmount) {
       baseLogger.warn(
         { accountId, availableBalance, withdrawalAmount, operation: "initiateWithdrawal" },

@@ -16,7 +16,13 @@ export const createVirtualAccount = async (data: {
   accountNumberLast4: string
 }) => {
   try {
-    const record = await BridgeVirtualAccount.create(data)
+    // Atomic upsert: if a doc for this accountId already exists (concurrent call won the
+    // race), $setOnInsert is skipped and we get back the winner's record — no duplicate.
+    const record = await BridgeVirtualAccount.findOneAndUpdate(
+      { accountId: data.accountId },
+      { $setOnInsert: data },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    )
     return record
   } catch (error) {
     return new RepositoryError(String(error))

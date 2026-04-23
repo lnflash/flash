@@ -13,9 +13,22 @@ const BridgeInitiateKycPayload = GT.Object({
   }),
 })
 
+const BridgeInitiateKycInput = GT.Object({
+  name: "BridgeInitiateKycInput",
+  fields: () => ({
+    email: { type: GT.String, nullable: true },
+    type: { type: GT.String, nullable: true },
+    full_name: { type: GT.String, nullable: true },
+  }),
+})
+
 const bridgeInitiateKyc = GT.Field({
   type: GT.NonNull(BridgeInitiateKycPayload),
-  resolve: async (_, __, { domainAccount }: GraphQLPublicContextAuth) => {
+  args: {
+    input: { type: GT.NonNull(BridgeInitiateKycInput) },
+  },
+  resolve: async (_, { input }, { domainAccount }: GraphQLPublicContextAuth) => {
+    const { email, type, full_name } = input
     if (!BridgeConfig.enabled) {
       return { errors: [mapAndParseErrorForGqlResponse(new BridgeDisabledError())] }
     }
@@ -24,7 +37,7 @@ const bridgeInitiateKyc = GT.Field({
       return { errors: [mapAndParseErrorForGqlResponse(new BridgeAccountLevelError())] }
     }
 
-    const result = await BridgeService.initiateKyc(domainAccount.id)
+    const result = await BridgeService.initiateKyc({ accountId: domainAccount.id, email, type, full_name })
     if (result instanceof Error) {
       return { errors: [mapAndParseErrorForGqlResponse(result)] }
     }

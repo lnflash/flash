@@ -610,7 +610,8 @@ export const WalletOnChainPendingReceive =
   )
 
 const BridgeVirtualAccountSchema = new Schema<IBridgeVirtualAccountRecord>({
-  accountId: { type: String, required: true, index: true },
+  // unique: true enforces one VA per account at the DB layer — idempotency guard
+  accountId: { type: String, required: true, unique: true },
   bridgeVirtualAccountId: { type: String, required: true, unique: true },
   bankName: { type: String, required: true },
   routingNumber: { type: String, required: true },
