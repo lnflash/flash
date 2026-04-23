@@ -207,6 +207,106 @@ Items in the same wave run in parallel.
 
 Per Dread: "we should be careful not to over-gate." Treat W5 items as a **graduated gate** — the three must-haves listed above are blockers; the rest should be target-for-launch but not blockers.
 
+## 2A. Dated schedule (added 2026-04-22 21:16 ET, cascade #10)
+
+**Targets per Dread (21:02 ET):** code complete by **Mon 2026-05-11**, launch by **Fri 2026-05-22**. Each owner is paired with an AI dev agent. **Dread is Ben's dev backup**; anything that slips on any owner gets re-routed to Dread. All 37 open issues now carry these dueDates in Linear (applied 21:18 ET via GraphQL `issueUpdate`).
+
+Wave numbering below (W0–W5) is the **dated schedule's** wave structure, distinct from §2's logical W1–W7 launch sequence — the dated waves slice the calendar week-by-week, the logical waves group by goal.
+
+### W0 — Close out in-review (this week, by Fri Apr 24)
+
+| Ticket | Owner | Due | Notes |
+|---|---|---|---|
+| [ENG-278](https://linear.app/island-bitcoin/issue/ENG-278) | Olaniran | 2026-04-24 | In Review — merge |
+| [ENG-282](https://linear.app/island-bitcoin/issue/ENG-282) | Olaniran | 2026-04-24 | In Review — merge |
+| [ENG-283](https://linear.app/island-bitcoin/issue/ENG-283) | Olaniran | 2026-04-24 | In Review — merge |
+| [ENG-279](https://linear.app/island-bitcoin/issue/ENG-279) | Forge | 2026-04-24 | Security audit close-out |
+| [ENG-284](https://linear.app/island-bitcoin/issue/ENG-284) | Olaniran | 2026-04-27 | In Progress — idempotency guard |
+
+### W1 — Foundation / unblockers (Apr 27 – May 1)
+
+| Ticket | Owner | Due | Notes |
+|---|---|---|---|
+| **[ENG-347](https://linear.app/island-bitcoin/issue/ENG-347)** Country allowlist | Dread | 2026-04-28 | Quick win, unblocks Nick's 344 |
+| **[ENG-296](https://linear.app/island-bitcoin/issue/ENG-296)** ETH-USDT provisioning ⚠ crit | Ben | 2026-05-01 | 7 working days — foundational |
+| **[ENG-276](https://linear.app/island-bitcoin/issue/ENG-276)** Deposit reconciliation | Olaniran | 2026-05-01 | Absorbs former NEW-9/12 (Bridge-fee + replay) |
+| [ENG-349](https://linear.app/island-bitcoin/issue/ENG-349) Withdrawal idempotency | Olaniran | 2026-04-29 | Fast |
+| [ENG-352](https://linear.app/island-bitcoin/issue/ENG-352) Bridge svc return shapes | Olaniran | 2026-04-30 | Pair with Ben's 351 |
+| [ENG-351](https://linear.app/island-bitcoin/issue/ENG-351) GraphQL types fix | Ben | 2026-05-04 | Parallel with 296 tail |
+| [ENG-356](https://linear.app/island-bitcoin/issue/ENG-356) 2% developer_fee | Olaniran | 2026-05-01 | |
+| [ENG-344](https://linear.app/island-bitcoin/issue/ENG-344) FE Pre-KYC (after 347) | Nick | 2026-04-30 | |
+| [ENG-343](https://linear.app/island-bitcoin/issue/ENG-343) Pre-KYC form | Nick | 2026-05-05 | |
+| [ENG-359](https://linear.app/island-bitcoin/issue/ENG-359) Vault for Bridge API key | Dread | 2026-05-08 | Sec prereq before launch |
+
+### W2 — Critical-path enablement (May 4 – May 8)
+
+| Ticket | Owner | Due | Notes |
+|---|---|---|---|
+| **[ENG-297](https://linear.app/island-bitcoin/issue/ENG-297)** LN parity ⚠ crit | Ben | 2026-05-04 | Partial parallel with 296 |
+| **[ENG-345](https://linear.app/island-bitcoin/issue/ENG-345)** Opt-in server ⚠ crit | Ben | 2026-05-06 | After 296+297 — unblocks mobile + Cashout |
+| **[ENG-348](https://linear.app/island-bitcoin/issue/ENG-348)** ERPNext audit ⚠ crit | Ben | 2026-05-06 | After 296 |
+| [ENG-350](https://linear.app/island-bitcoin/issue/ENG-350) Withdrawal state reset | Olaniran | 2026-05-05 | After 296 |
+| [ENG-275](https://linear.app/island-bitcoin/issue/ENG-275) Push notifications | Ben | 2026-05-04 | After 276 |
+| [ENG-353](https://linear.app/island-bitcoin/issue/ENG-353) GQL error-code diff | Ben | 2026-05-06 | After 351 |
+| [ENG-363](https://linear.app/island-bitcoin/issue/ENG-363) One-VA-per-account schema | Olaniran | 2026-05-05 | |
+| [ENG-355](https://linear.app/island-bitcoin/issue/ENG-355) Min-withdrawal floor | Olaniran | 2026-05-06 | |
+| [ENG-285](https://linear.app/island-bitcoin/issue/ENG-285) Withdrawal amount validation | Olaniran | 2026-05-07 | |
+| [ENG-358](https://linear.app/island-bitcoin/issue/ENG-358) Fee columns on bridgeWithdrawals | Ben | 2026-05-07 | |
+| [ENG-360](https://linear.app/island-bitcoin/issue/ENG-360) Webhook key rotation | Dread | 2026-05-11 | |
+
+### W3 — Dependent features → code complete (May 7 – May 11)
+
+| Ticket | Owner | Due | Notes |
+|---|---|---|---|
+| **[ENG-346](https://linear.app/island-bitcoin/issue/ENG-346)** Opt-in mobile CTA | Nick | 2026-05-08 | After 345 |
+| [ENG-342](https://linear.app/island-bitcoin/issue/ENG-342) Deposit USD button | Nick | 2026-05-08 | After 345 |
+| [ENG-357](https://linear.app/island-bitcoin/issue/ENG-357) Cashout V1 wallet | Dread | 2026-05-08 | After 345 |
+| [ENG-354](https://linear.app/island-bitcoin/issue/ENG-354) KYC tier ceiling error | Ben | 2026-05-08 | After 353 |
+| [ENG-286](https://linear.app/island-bitcoin/issue/ENG-286) Timeout + circuit breaker | Olaniran | 2026-05-11 | Absorbs former NEW-5 outbound timeout |
+
+**🎯 CODE COMPLETE: Mon 2026-05-11.**
+
+### W4 — Stabilization / launch readiness (May 11 – May 18)
+
+| Ticket | Owner | Due | Notes |
+|---|---|---|---|
+| [ENG-361](https://linear.app/island-bitcoin/issue/ENG-361) PagerDuty/Slack alerts | Dread | 2026-05-13 | Must be live before launch |
+| [ENG-273](https://linear.app/island-bitcoin/issue/ENG-273) Webhook-failure monitoring (parent) | Dread | 2026-05-15 | Rollup of 361/362 |
+| [ENG-362](https://linear.app/island-bitcoin/issue/ENG-362) Dashboards + ERPNext-audit panel | Dread | 2026-05-15 | |
+| [ENG-274](https://linear.app/island-bitcoin/issue/ENG-274) Bridge sandbox e2e tests | Dread | 2026-05-15 | UAT runs Mon–Fri May 18–22 |
+| [ENG-272](https://linear.app/island-bitcoin/issue/ENG-272) Ops runbook | Dread | 2026-05-18 | Finalize after dashboards land |
+
+**🚀 LAUNCH: Fri 2026-05-22.**
+
+### W5 — Explicitly post-launch
+
+| Ticket | Owner | Due | Notes |
+|---|---|---|---|
+| [ENG-298](https://linear.app/island-bitcoin/issue/ENG-298) Phase 2 schema cleanup | Dread | 2026-05-29 | Tagged Phase 2 — not launch-blocking |
+
+### Load check (with AI dev agent doubling each owner)
+
+| Owner | Open tickets | Crit-path | Est. dev-days in 13-day window | Risk |
+|---|---|---|---|---|
+| **Ben** | 9 | 4 | ~21 | **Tightest** — single-point-of-failure on the 296→297→345→348 chain. Dread is dev backup. |
+| **Olaniran** | 13 (4 in review) | 0 | ~18 | Workable — in-review close-outs front-load this week, new feature work fits in next 2 weeks. |
+| **Dread** | 10 | 0 | ~14 | Mostly back-loaded into stabilization. Comfortable margin. |
+| **Nick** | 4 | 0 | ~6 | Very comfortable, can absorb extra polish or take overflow. |
+| **Forge** | 1 | 0 | <1 | Single security-audit close-out. |
+
+### Slippage policy (per Dread 21:16 ET)
+
+> "i'm going to be Ben's dev backup. anything that slips, Jabari will take it over."
+
+- **Ben slippage** → Dread pairs in directly (informal, no Linear ownership change).
+- **Anyone else's slippage** → Dread takes over the ticket (formal reassign in Linear at the time of escalation).
+
+### Risks flagged
+
+1. **Ben is the critical-path single-point-of-failure.** ENG-296 → ENG-297 → ENG-345 → ENG-348 all chain through him. Mitigation: Dread as dev backup.
+2. **ENG-273 / 274 / 362 land after code-complete (May 13–15).** That's deliberate — observability/QA work is launch-readiness, not code-complete-blocking. The 9 working days between code-complete and launch (May 12–22) absorb them with room for UAT.
+3. **ENG-279 (Forge security audit)** assumed closeable by Apr 24 since it's already In Review. If Forge needs longer, it becomes a launch gate.
+
 ## 3. Per-role critical paths (visual)
 
 _Updated 2026-04-22 15:36 ET + 15:52 ET + 16:30 ET to reflect Olaniran→Ben/Dread handoff (incl. ENG-348 → Ben) and the critical-path marking on Ben's W1/W2 per Dread 16:30 ET. `[⚠ CRIT-PATH]` items are the project's single biggest schedule risk; they should be Urgent + `critical-path` labelled in Linear._
@@ -382,6 +482,7 @@ Do if the workspace allows; skip without blocking the project start.
 
 | Date | Author | Change |
 |---|---|---|
+| 2026-04-22 21:18 ET | Taddesse (Dread approved) | **Cascade #10 — dated schedule applied to all 37 open issues.** Per Dread 21:02 ET ("put some due dates on all 37 open issues … aggressive goal of May 22nd with code complete on May 11th. … each Owner will have the help of a developer AI agent") + 21:16 ET approval ("i'm going to be Ben's dev backup. anything that slips, Jabari will take it over. i approve - update all 37 due dates"). Built backwards from **code-complete = Mon 2026-05-11** and **launch = Fri 2026-05-22**, sliced into calendar waves W0–W5 (distinct from §2's logical W1–W7 launch sequence). All 37 dueDate mutations applied via Linear `issueUpdate` GraphQL — 0 failures. Slippage policy: Ben's slips → Dread pairs in as dev backup (informal); anyone else's slips → Dread takes over the ticket (formal reassign at escalation time). Doc-side: added new §2A "Dated schedule" with five wave tables + load-check matrix + slippage policy + flagged risks. ENG-298 explicitly placed post-launch (May 29, Phase 2 schema cleanup — not launch-blocking). | Taddesse + Dread |
 | 2026-04-22 | Taddesse (Dread review) | Initial proposal derived from the rewritten doc set. |
 | 2026-04-22 | Taddesse (Dread review) | Reconciled against live Linear state (per `LINEAR-VS-PROPOSAL.md`); reorganized by role/assignee for the new team structure (Dread lead; Olaniran integration; Ben Flash app; Nick mobile/UI). |
 | 2026-04-22 | Taddesse (Dread review) | Cascade from ENG team orphan scan: added ENG-297 (Phase 2 Lightning) under Olaniran and ENG-298 (Phase 3 schema cleanup) under Ben as post-launch waves of this project; added ENG-16 cancellation + ENG-297/298 project moves to Dread project-hygiene list; added ENG-38 (IBEX auth May 31, 2026) as cross-project external dependency owned by Ben (Urgent, due 2026-05-31). Currency Precision tickets (ENG-318/319/326) intentionally left **out** of this project plan per Dread. |
