@@ -38,16 +38,16 @@ export interface CreateIndividualCustomerRequest {
   last_name: string
   email: string
   phone?: string
-  address?: {
+  residential_address?: {
     street_line_1: string
     street_line_2?: string
     city: string
-    state?: string
+    subdivision?: string
     postal_code: string
     country: string
   }
   birth_date?: string
-  tax_identification_number?: string
+  signed_agreement_id?: string
 }
 
 export interface CreateBusinessCustomerRequest {
@@ -55,15 +55,15 @@ export interface CreateBusinessCustomerRequest {
   business_name: string
   email: string
   phone?: string
-  address?: {
+  residential_address?: {
     street_line_1: string
     street_line_2?: string
     city: string
-    state?: string
+    subdivision?: string
     postal_code: string
     country: string
   }
-  ein?: string
+  signed_agreement_id?: string
 }
 
 export type CreateCustomerRequest =
@@ -73,8 +73,8 @@ export type CreateCustomerRequest =
 export interface Customer {
   id: string
   type: "individual" | "business"
-  kyc_status: string
-  tos_status: string
+  status?: "active" | "awaiting_questionnaire" | "rejected" | "paused" | "under_review" | "offboarded" | "awaiting_ubo" | "incomplete" | "not_started"
+  has_accepted_terms_of_service?: string
   created_at: string
   updated_at: string
   first_name?: string
@@ -103,27 +103,29 @@ export type PaymentRail =
   | "spei"
   | "pix"
 
-// Extended currencies to include USDT
-export type Currency =
+export type VirtualAccountDestinationPaymentRail = "arbitrum" | "avalanche_c_chain" | "base" | "celo" | "ethereum" | "optimism" | "polygon" | "solana" | "stellar" | "tempo" | "tron"
+
+
+export type SourceCurrency =
   | "usd"
   | "eur"
   | "mxn"
   | "brl"
   | "gbp"
-  | "usdc"
-  | "usdb"
-  | "eurc"
-  | "usdt"
+
+// Extended currencies to include USDT
+export type Currency = "usdb" | "usdt" | "dai" | "pyusd" | "usdc" | "eurc"
 
 export interface CreateVirtualAccountRequest {
   developer_fee_percent?: string
   source: {
-    currency: "usd" | "eur" | "mxn" | "brl" | "gbp"
+    currency: SourceCurrency
   }
   destination: {
     currency: Currency
-    payment_rail: PaymentRail
+    payment_rail: VirtualAccountDestinationPaymentRail
     address?: string
+    blockchain_memo?: string
     bridge_wallet_id?: string
   }
 }
@@ -136,18 +138,17 @@ export interface VirtualAccount {
   source_deposit_instructions: {
     currency: string
     payment_rails: string[]
-    bank_name?: string
-    bank_address?: string
-    bank_beneficiary_name?: string
-    bank_account_number?: string
-    bank_routing_number?: string
-    iban?: string
-    bic?: string
+    bank_name: string
+    bank_beneficiary_address: string
+    bank_beneficiary_name: string
+    bank_account_number: string
+    bank_routing_number: string
   }
   destination: {
     currency: string
     payment_rail: string
     address?: string
+    blockchain_memo?: string
     bridge_wallet_id?: string
   }
   created_at: string
