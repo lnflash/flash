@@ -45,7 +45,13 @@ export const verifyBridgeSignature = (publicKeyType: "kyc" | "deposit" | "transf
 
     // Verify signature using Bridge public key
     const publicKey = BridgeConfig.webhook.publicKeys[publicKeyType]
-    const rawBody = (req as any).rawBody || JSON.stringify(req.body)
+    const rawBody = (req as any).rawBody
+
+    if (!rawBody) {
+      baseLogger.warn(`Missing raw body for webhook`)
+      return res.status(401).json({ error: "Missing raw body" })
+    }
+
     const payload = `${timestamp}.${rawBody}`
 
     try {
