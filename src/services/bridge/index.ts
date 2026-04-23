@@ -27,7 +27,7 @@ import {
 import { RepositoryError } from "@domain/errors"
 import { toBridgeCustomerId, toBridgeExternalAccountId } from "@domain/primitives/bridge"
 import { getBalanceForWallet } from "@app/wallets/get-balance-for-wallet"
-import { WalletCurrency } from "@domain/shared"
+import { USDTAmount, WalletCurrency } from "@domain/shared"
 import { WalletsRepository } from "@services/mongoose/wallets"
 import { BridgeInsufficientFundsError } from "./errors"
 import { IdentityRepository } from "@services/kratos"
@@ -245,7 +245,7 @@ const createVirtualAccount = async (
         source: { currency: "usd" },
         destination: {
           currency: "usdt",
-          payment_rail: "tron",
+          payment_rail: "ethereum",
           address: tronAddress,
         },
       },
@@ -382,11 +382,16 @@ const initiateWithdrawal = async (
       currency: WalletCurrency.Usdt,
     })
     if (balance instanceof Error) return balance
+
+    if (!(balance instanceof USDTAmount)) {
+      return new BridgeInsufficientFundsError("Invalid balance type")
+    }
     const withdrawalAmount = parseFloat(amount)
     if (isNaN(withdrawalAmount) || withdrawalAmount <= 0) {
       return new BridgeInsufficientFundsError("Invalid withdrawal amount")
     }
-    const availableBalance = parseFloat(balance.amount.toString())
+
+    const availableBalance = balance.toIbex();
     if (availableBalance < withdrawalAmount) {
       baseLogger.warn(
         { accountId, availableBalance, withdrawalAmount, operation: "initiateWithdrawal" },
