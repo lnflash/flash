@@ -2,6 +2,7 @@ import { Accounts } from "@app"
 import { GT } from "@graphql/index"
 import { apolloErrorResponse, mapToGqlErrorList } from "@graphql/error-map"
 import AccountLevel from "@graphql/shared/types/scalar/account-level"
+import AccountNumber from "@graphql/shared/types/scalar/account-number"
 import IError from "@graphql/shared/types/abstract/error"
 import { SetDocTypeValueError } from "@services/frappe/errors"
 import { InternalServerError } from "@graphql/error"
@@ -13,10 +14,7 @@ const BankAccountInput = GT.Input({
     bankBranch: { type: GT.NonNull(GT.String) },
     accountType: { type: GT.NonNull(GT.String) },
     currency: { type: GT.NonNull(GT.String) },
-    // Bank account numbers are identifiers, not integers.
-    // They can exceed Int32 (2,147,483,647) for Jamaican and Caribbean banks.
-    // Using String preserves leading zeros and supports all account number lengths.
-    accountNumber: { type: GT.NonNull(GT.String) },
+    accountNumber: { type: GT.NonNull(AccountNumber) },
   }),
 })
 

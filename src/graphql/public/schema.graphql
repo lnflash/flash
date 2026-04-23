@@ -63,6 +63,9 @@ type AccountLimits {
   withdrawal: [AccountLimit!]!
 }
 
+"""Bank account number. Accepts String or Int and coerces to String."""
+scalar AccountNumber
+
 input AccountUpdateDefaultWalletIdInput {
   walletId: WalletId!
 }
@@ -200,7 +203,7 @@ type BankAccount {
 }
 
 input BankAccountInput {
-  accountNumber: String!
+  accountNumber: AccountNumber!
   accountType: String!
   bankBranch: String!
   bankName: String!
