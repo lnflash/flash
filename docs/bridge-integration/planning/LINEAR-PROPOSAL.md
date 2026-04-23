@@ -16,6 +16,21 @@
 > cascade #9 (18:45 ET). The historical placeholder map below is kept
 > only as a Rosetta stone for old PRs / standup notes that referenced
 > the placeholders before the rename.
+>
+> **Status (2026-04-23 12:30 ET, cascade #11):** ✅ PROD-A..E commercial
+> sign-off tickets filed on the **Operations team** as
+> [OPS-45](https://linear.app/island-bitcoin/issue/OPS-45)
+> / [OPS-46](https://linear.app/island-bitcoin/issue/OPS-46)
+> / [OPS-47](https://linear.app/island-bitcoin/issue/OPS-47)
+> / [OPS-48](https://linear.app/island-bitcoin/issue/OPS-48)
+> / [OPS-49](https://linear.app/island-bitcoin/issue/OPS-49)
+> — Charlene assignee, Jabari subscribed as engineering liaison. OPS
+> added as a second team on the Bridge Wallet Integration project so
+> the tickets show up on the same roadmap. `blocks` relations set
+> against ENG-354 / ENG-356+ENG-358 / ENG-356 / ENG-355 / ENG-342+ENG-346
+> — 7 relations, 5 issueCreate + 6 issueRelationCreate + 1 projectUpdate
+> = 12 mutations. The `PROD-A..E` labels used in earlier drafts have
+> been rewritten inline to the live `OPS-*` IDs below.
 
 ## Historical placeholder map (cascade #8 → cascade #9)
 
@@ -77,7 +92,7 @@ Cross-cutting:
 - **14 new tickets to file**: ENG-351/352, ENG-353, ENG-349, ENG-350, ENG-354, ENG-355, ENG-358, ENG-359, ENG-360, ENG-356, **ENG-345/346 (opt-in)** (per-user Cash Wallet opt-in toggle, Nick+Ben), **ENG-348** (ERPNext audit row per Bridge↔IBEX USDT movement, **Ben** — reassigned 2026-04-22 15:52 ET), **ENG-357** (Cashout V1 source-wallet switch for opted-in JM users, Dread+Ben), **ENG-347** (Flash-maintained country allowlist superset, Dread+Nick).
 - **4 acceptance items consolidated rather than filed separately:** outbound-timeout work (folded into ENG-286 scope), Bridge-fee persistence (folded into ENG-276 acceptance), backfill/replay tooling (folded into ENG-276 acceptance), one-VA-per-account schema constraint (now sub-issue ENG-363 of ENG-284).
 - **3 mobile FE tickets** already exist: ENG-342, ENG-343, ENG-344 (Nick).
-- **5 product/commercial tickets** (PROD-A..E) live outside this project.
+- **5 product/commercial tickets** (originally labelled PROD-A..E, now **[OPS-45](https://linear.app/island-bitcoin/issue/OPS-45)** / **[OPS-46](https://linear.app/island-bitcoin/issue/OPS-46)** / **[OPS-47](https://linear.app/island-bitcoin/issue/OPS-47)** / **[OPS-48](https://linear.app/island-bitcoin/issue/OPS-48)** / **[OPS-49](https://linear.app/island-bitcoin/issue/OPS-49)**) filed on the **Operations team** (cascade #11, 2026-04-23 12:30 ET) — assignee **Charlene**, subscribers Charlene + Jabari, project set to Bridge Wallet Integration (OPS added as second team on the project at the same time so the tickets render on this project's roadmap). `blocks` relations set against ENG-354 / ENG-356 / ENG-358 / ENG-355 / ENG-342 / ENG-346 accordingly.
 
 ## 1. Tickets by assignee
 
@@ -97,7 +112,7 @@ The bulk of the engineering critical path lives here.
 | W3 | **ENG-285** | Validate withdrawal amount string (MED-1) | Medium | Backlog. Add API §8 reference; ≤6 dp, positive, min-amount. |
 | W4 | **ENG-351/352** | Bridge service return shapes match GraphQL types (svc side) | High | **File.** Joint with Ben (GraphQL types side); Ben is ticket lead. |
 | W4 | **ENG-354** | Distinct error for KYC tier ceiling (svc mapping) | Medium | **File.** Depends on ENG-353 from Ben. |
-| W4 | **ENG-355** | Min-withdrawal floor enforcement | Medium | **File.** Lives next to the balance check in `BridgeService.initiateWithdrawal`. Floor value gated on PROD-D. |
+| W4 | **ENG-355** | Min-withdrawal floor enforcement | Medium | **File.** Lives next to the balance check in `BridgeService.initiateWithdrawal`. Floor value gated on [OPS-48](https://linear.app/island-bitcoin/issue/OPS-48) (overlay caps — Charlene). |
 | W4 | **ENG-356** | Implement 2% `developer_fee_percent` on Bridge transfers | High | **File.** Per ENG-272 commercial intent. See §5 flag #1. |
 | W5 | **ENG-274** | Bridge sandbox E2E test suite | Medium | Todo. Joint with Dread (testing coordination). **E2E scope now includes opt-in flow + ETH-USDT wallet LN parity smoke test + ERPNext audit row verification.** |
 | W7 | **ENG-286 (breaker half)** | Circuit breaker on Bridge client | Medium | Post-launch. |
@@ -151,7 +166,7 @@ Touches GraphQL, Mongoose schemas, Kratos, wallet/ledger primitives.
 | W1 | **ENG-343** | Pre-KYC form (name, email, type) | Medium | Todo. **Launch blocker for KYC.** Add acceptance item: "ToS-accept timestamp persisted to account". |
 | W1 | **ENG-344** | FE: Pre-KYC & Region Check | Medium | Todo. Pairs with ENG-343; routes US users to hosted KYC flow. Region check **reads from the Flash-maintained allowlist** (see ENG-347) rather than the Bridge-returned 86-country list. |
 | W2 | **ENG-342** | Deposit USD button + feature flag | Medium | Todo. Visibility gated on Bridge feature flag **and** on the user having opted in (state machine `eth_usdt_active`). |
-| W4 | **PROD-E** (mobile half) | Quote / confirmation UX showing Bridge fee deduction | TBD | **File once PROD-A/B/C are pinned.** Show user the net amount they'll receive. |
+| W4 | Quote/confirmation UX ENG ticket (to be filed) | Quote / confirmation UX showing Bridge fee deduction — mobile implementation | TBD | **Gated on [OPS-49](https://linear.app/island-bitcoin/issue/OPS-49)** (Charlene's commercial sign-off on net-receive breakdown + copy). File the ENG implementation ticket once OPS-45/46/47/49 are pinned. Show user the net amount they'll receive. |
 | W5 | **ENG-275** (mobile half) | Push notification client config for deposit + withdrawal events | Medium | Coordinate with **Ben's** server-side trigger (server half reassigned from Olaniran to Ben 2026-04-22 15:36 ET). Deposit-side push is now in-scope (not just withdrawal completion). |
 
 **Nick's load:** ~5–6 tickets, mostly W1–W2 (ENG-346 (opt-in mobile) + KYC + deposit entry) and W4–W5 (UX refinement + push). On the critical path for W1 user flow — the opt-in CTA is the funnel that unlocks Bridge access.
@@ -169,7 +184,7 @@ Touches GraphQL, Mongoose schemas, Kratos, wallet/ledger primitives.
 | W6 | **ENG-272** | Drill OPERATIONS.md against staging | Re-scope to "rehearse one playbook end-to-end" — include the opt-in rollout dry-run. |
 | W7 | **ENG-359** | Move Bridge API key from YAML config to vault | Deployment / infra. |
 | W7 | **ENG-360** | Webhook public-key rotation policy (deployment side) | Joint with Olaniran (config loading). |
-| ongoing | **PROD-A..D** | Commercial decisions (limits / fees / markup / overlay caps) | Owns the contract conversation with Bridge sales. |
+| ongoing | **[OPS-45](https://linear.app/island-bitcoin/issue/OPS-45) / [OPS-46](https://linear.app/island-bitcoin/issue/OPS-46) / [OPS-47](https://linear.app/island-bitcoin/issue/OPS-47) / [OPS-48](https://linear.app/island-bitcoin/issue/OPS-48)** *(filed cascade #11, 2026-04-23 12:30 ET)* | Commercial decisions (Bridge limits / Bridge fees / Flash markup model / Flash-side overlay caps) | **Charlene is assignee; Jabari subscribed as engineering liaison.** Dread's role is cross-project oversight + contract-side conversation with Bridge sales (unchanged), coordinated via the Jabari subscription. Blocks set against ENG-354 / ENG-356+ENG-358 / ENG-356 / ENG-355 respectively. |
 | ongoing | **Cashout V1 cross-project coordination** | ENG-296 is now a launch blocker for **two** projects: Bridge Wallet Integration AND Cashout V1 | **Confirmed by Dread 2026-04-22 14:15 ET; ownership re-cast 15:36 ET:** Dread leads the source-wallet selection work directly via ENG-357 (W4 row above). Still in scope: (1) update the Cashout V1 project spec to include the opt-in decision tree, (2) add a cross-project `blocks` link from ENG-296 to the Cashout V1 project's launch milestone, (3) coordinate Cashout V1 launch ordering with this project so ENG-296 (now Ben-owned) sequencing is visible to both sides. |
 | project hygiene | **ENG-16** cancellation | Cancel "Instant Fiat Conversion - Seamless Currency Exchange" | Empty description, superseded by this project. **Cancel as superseded.** |
 | project hygiene | **ENG-297 Phase-1 move** | Move ENG-297 from Phase 2 / post-launch into Phase 1 / W1 launch blocker | Per 2026-04-22 13:09 ET correction. Update Linear project + priority (High → Urgent). |
@@ -188,7 +203,7 @@ Items in the same wave run in parallel.
 | **W1** | Provision the new Cash Wallet + opt-in path + region policy | **ENG-296 (Ben)** · **ENG-297 (Ben)** · ENG-345/346 (opt-in) (Ben+Nick) · ENG-347 (Dread+Nick) · ENG-343 (Nick) · ENG-344 (Nick) · ENG-278 close-out (Ben — In Review) |
 | **W2** | Unblock the deposit — Bridge→IBEX ETH-USDT settlement with audit trail | ENG-276 (Olaniran) · **ENG-348 (Ben — reassigned 15:52 ET)** · ENG-342 (Nick) |
 | **W3** | Make the withdrawal safe | ENG-349 (Olaniran) · ENG-350 (Olaniran + Ben) · ENG-286 timeout half (Olaniran) · ENG-285 (Olaniran) |
-| **W4** | Make the app show useful states + close the JM loop | ENG-351/352 (Ben + Olaniran) · ENG-353 (Ben) · ENG-354 (Ben + Olaniran) · ENG-355 (Olaniran) · ENG-356 (Olaniran) · **ENG-357 (Dread + Ben)** · PROD-E (Nick) |
+| **W4** | Make the app show useful states + close the JM loop | ENG-351/352 (Ben + Olaniran) · ENG-353 (Ben) · ENG-354 (Ben + Olaniran) · ENG-355 (Olaniran) · ENG-356 (Olaniran) · **ENG-357 (Dread + Ben)** · quote/confirmation UX ENG ticket (Nick, TBD — gated on [OPS-49](https://linear.app/island-bitcoin/issue/OPS-49)) |
 | **W5** | Make it observable | ENG-273a (Dread) · ENG-273b (Dread) · ENG-274 (Dread + Olaniran) · **ENG-275 (Ben + Nick — deposit + withdrawal push)** |
 | **W6** | Make the books match | ENG-358 (Ben) · ENG-272 drill (Dread) · Bridge-fee-persistence acceptance fold-in (Olaniran, on ENG-276) |
 | **W7** | Harden | ENG-286 breaker half (Olaniran) · ENG-359 (Dread) · ENG-360 (Dread + Olaniran) · ENG-363 fold-in (Olaniran, on ENG-284) |
@@ -319,10 +334,10 @@ Ben       [⚠ CRIT-PATH:] ENG-296 ─→ ENG-297 ─→ ENG-345 ─→ ENG-348 
 Olaniran  ENG-276 ─→ ENG-349 ─→ ENG-350(svc) ─→ ENG-352(svc) ─→ ENG-354(svc) ─→ ENG-355 ─→ ENG-356 ─→ ENG-274(joint) ─→ ENG-286 breaker
               (no IBEX integration spine, no ERPNext audit writer — Bridge service / webhook server / outbound API only)
 
-Nick      ENG-346 ─→ ENG-343 + ENG-344 ─→ ENG-342 ─────────────────── PROD-E ─→ ENG-275(client)
+Nick      ENG-346 ─→ ENG-343 + ENG-344 ─→ ENG-342 ─────────────────── OPS-49 (quote-UX ENG impl TBD) ─→ ENG-275(client)
 
 Dread     ENG-347 ─→ ENG-357(lead) ─→ ENG-279 close ─→ ENG-273a/b ─→ ENG-274 drill ─→ ENG-272 rehearse ─→ ENG-359/11
-                                   (PROD-A..D contract work + Cashout V1 cross-project coordination in parallel throughout)
+                                   (OPS-45..48 contract work — Charlene-led, Jabari subscribed — + Cashout V1 cross-project coordination in parallel throughout)
 ```
 
 ## 4. Net recommended actions (from comparison report)
@@ -337,7 +352,7 @@ Dread     ENG-347 ─→ ENG-357(lead) ─→ ENG-279 close ─→ ENG-273a/b �
 | **File new** | **14** | ENG-351/352, ENG-353, ENG-349, ENG-350, ENG-354, ENG-355, ENG-358, ENG-359, ENG-360, ENG-356, **ENG-345/346 (opt-in), ENG-348, ENG-357, ENG-347** |
 | **Retract from earlier proposal** | 4 | outbound-timeout (into ENG-286), Bridge-fee persistence (into ENG-276), backfill/replay tooling (into ENG-276), one-VA-per-account schema constraint (now sub-issue ENG-363 of ENG-284) |
 | **Mobile-side, already filed** | 3 | ENG-342, ENG-343, ENG-344 |
-| **Product/commercial, file outside this project** | 5 | PROD-A (Bridge limits), PROD-B (Bridge fees), PROD-C (markup model), PROD-D (overlay caps), PROD-E (quote UX) |
+| **Product/commercial, filed on OPS team** *(cascade #11, 2026-04-23 12:30 ET — Charlene assignee, Jabari subscribed, also attached to Bridge project for roadmap visibility)* | 5 | **[OPS-45](https://linear.app/island-bitcoin/issue/OPS-45)** Bridge limits (due 2026-05-04, blocks ENG-354) · **[OPS-46](https://linear.app/island-bitcoin/issue/OPS-46)** Bridge fees (due 2026-04-29, blocks ENG-356+ENG-358) · **[OPS-47](https://linear.app/island-bitcoin/issue/OPS-47)** Flash markup model (due 2026-04-29, blocks ENG-356) · **[OPS-48](https://linear.app/island-bitcoin/issue/OPS-48)** Flash-side overlay caps (due 2026-05-04, blocks ENG-355) · **[OPS-49](https://linear.app/island-bitcoin/issue/OPS-49)** Quote/confirmation UX sign-off (due 2026-05-06, blocks ENG-342+ENG-346) |
 
 ## 5. Cross-cutting flags (from comparison report)
 
@@ -377,7 +392,7 @@ on ENG-353) but they are **not** one ticket.
 
 **ENG-354 — Distinct error for KYC tier ceiling (both halves).**
 - **Scope:** Surface a specific `KYC_TIER_CEILING_EXCEEDED` code (or similar) when the Bridge API rejects a withdrawal for exceeding the user's current KYC tier cap. Joint: Olaniran owns the svc-side `BridgeError` subclass; Ben owns the gql mapping.
-- **Non-goals:** Re-KYC upgrade flow itself (Nick's mobile follow-up). The KYC tier numbers themselves (PROD-A commercial decision). Generic error mapping (→ ENG-353).
+- **Non-goals:** Re-KYC upgrade flow itself (Nick's mobile follow-up). The KYC tier numbers themselves ([OPS-45](https://linear.app/island-bitcoin/issue/OPS-45) commercial decision — Charlene). Generic error mapping (→ ENG-353).
 - **Dependencies:** Blocked by ENG-353 (needs the differentiation plumbing). Feeds the mobile app's "upgrade your verification to withdraw more" CTA (not in this ticket).
 - **Acceptance:** A sandbox over-cap withdrawal attempt returns the specific error code on both service and gql layers; mobile can branch on it.
 
@@ -474,14 +489,15 @@ Do if the workspace allows; skip without blocking the project start.
 
 - **JM Cashout V1 work** *broadly* — separate project (FLOWS §5). **Exceptions:** (1) ENG-357 is in this plan because making ETH-USDT the first-class Cashout V1 source wallet is a direct consequence of the Cash Wallet swap; (2) ENG-296 is now a cross-project launch blocker for Cashout V1 as well (confirmed Dread 2026-04-22 14:15 ET) — tracked via the cross-project coordination row in §1.4. Anything else about Cashout V1 UX/FX/limits stays on the Cashout V1 project and needs that project's own opt-in-decision-tree spec update.
 - **General IBEX maintenance** unrelated to ENG-296/ENG-297/ENG-276.
-- **Mobile app changes unrelated to ENG-345/346 (opt-in) / ENG-351/352 / ENG-353 / ENG-354 / PROD-E** — Nick's other backlog.
-- **PROD-A..E themselves** — these belong on a Product/Finance project, with this plan taking dependencies on them where flagged.
+- **Mobile app changes unrelated to ENG-345/346 (opt-in) / ENG-351/352 / ENG-353 / ENG-354 / the [OPS-49](https://linear.app/island-bitcoin/issue/OPS-49)-gated quote-UX implementation** — Nick's other backlog.
+- **[OPS-45](https://linear.app/island-bitcoin/issue/OPS-45)..[OPS-49](https://linear.app/island-bitcoin/issue/OPS-49) themselves** — these are Operations-team tickets (Charlene-led, Jabari subscribed) that this plan takes dependencies on via the `blocks` relations. They are cross-attached to the Bridge Wallet Integration project for roadmap visibility but their **resolution** is Charlene's work, not this plan's. Engineering waits on them where flagged; engineering does not drive them.
 - **Rollback / reversal of the opt-in** — explicitly out of scope per Dread 2026-04-22. The state machine is one-way terminal. Users who opt in cannot opt back out to the legacy USD Cash Wallet.
 
 ## Document History
 
 | Date | Author | Change |
 |---|---|---|
+| 2026-04-23 12:30 ET | Taddesse (Dread approved) | **Cascade #11 — PROD-A..E filed on Operations team as OPS-45..49.** Per Dread 2026-04-23 12:19 ET ("these decisions need to be made with Charlene in Linear. File them under the Operations team and assign Charlene, and Jabari will be helping her") + 12:25 ET approval ("approved"). First attempt at `issueCreate` errored with `"project not in same team as issue"` — the Bridge Wallet Integration project was attached only to the ENG team. Fix: added **OPS** as a second team on the project via `projectUpdate(teamIds: [ENG, OPS])`, then all 5 tickets + 7 blocks relations landed cleanly. Ticket breakdown: [OPS-45](https://linear.app/island-bitcoin/issue/OPS-45) Bridge limits (due 2026-05-04, blocks ENG-354); [OPS-46](https://linear.app/island-bitcoin/issue/OPS-46) Bridge fees (due 2026-04-29, blocks ENG-356+ENG-358); [OPS-47](https://linear.app/island-bitcoin/issue/OPS-47) Flash markup model (due 2026-04-29, blocks ENG-356); [OPS-48](https://linear.app/island-bitcoin/issue/OPS-48) Flash-side overlay caps (due 2026-05-04, blocks ENG-355); [OPS-49](https://linear.app/island-bitcoin/issue/OPS-49) Quote/confirmation UX sign-off (due 2026-05-06, blocks ENG-342+ENG-346). All 5 Urgent priority, assigneeId = Charlene, subscriberIds = [Charlene, Jabari]. Doc-side: rewrote every inline `PROD-A..E` reference in TL;DR / §1.1 ENG-355 note / §1.3 Nick row / §1.4 Dread ongoing row / §2 W4 row / §3 ASCII diagram / §4 actions table / §5A.1 KYC-ceiling non-goals / §7 scope guardrails to point at the live `OPS-*` IDs. The placeholder `PROD-A..E` labels survive only inside commit messages / session-context history rows as decoding aids. Total mutations: 5 issueCreate + 6 issueRelationCreate + 1 projectUpdate = 12. | Taddesse + Dread |
 | 2026-04-22 21:18 ET | Taddesse (Dread approved) | **Cascade #10 — dated schedule applied to all 37 open issues.** Per Dread 21:02 ET ("put some due dates on all 37 open issues … aggressive goal of May 22nd with code complete on May 11th. … each Owner will have the help of a developer AI agent") + 21:16 ET approval ("i'm going to be Ben's dev backup. anything that slips, Jabari will take it over. i approve - update all 37 due dates"). Built backwards from **code-complete = Mon 2026-05-11** and **launch = Fri 2026-05-22**, sliced into calendar waves W0–W5 (distinct from §2's logical W1–W7 launch sequence). All 37 dueDate mutations applied via Linear `issueUpdate` GraphQL — 0 failures. Slippage policy: Ben's slips → Dread pairs in as dev backup (informal); anyone else's slips → Dread takes over the ticket (formal reassign at escalation time). Doc-side: added new §2A "Dated schedule" with five wave tables + load-check matrix + slippage policy + flagged risks. ENG-298 explicitly placed post-launch (May 29, Phase 2 schema cleanup — not launch-blocking). | Taddesse + Dread |
 | 2026-04-22 | Taddesse (Dread review) | Initial proposal derived from the rewritten doc set. |
 | 2026-04-22 | Taddesse (Dread review) | Reconciled against live Linear state (per `LINEAR-VS-PROPOSAL.md`); reorganized by role/assignee for the new team structure (Dread lead; Olaniran integration; Ben Flash app; Nick mobile/UI). |
