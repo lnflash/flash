@@ -36,6 +36,11 @@ export const verifyBridgeSignature = (publicKeyType: "kyc" | "deposit" | "transf
     // Check timestamp skew (default 5 minutes)
     const now = Date.now()
     const timestampMs = parseInt(timestamp, 10)
+    if (isNaN(timestampMs) || !isFinite(timestampMs)) {
+      baseLogger.warn({ timestamp }, "Invalid timestamp format in Bridge webhook signature")
+      return res.status(401).json({ error: "Invalid signature format" })
+    }
+
     const skew = Math.abs(now - timestampMs)
 
     if (skew > BridgeConfig.webhook.timestampSkewMs) {
