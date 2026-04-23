@@ -4,6 +4,8 @@
  * for USD on/off-ramp functionality via Bridge.xyz
  */
 
+import crypto from "crypto"
+
 import { BridgeConfig } from "@config"
 import BridgeClient, {
   KycLink,
@@ -204,6 +206,19 @@ const createVirtualAccount = async (
       return new BridgeKycPendingError("KYC not yet completed")
     }
 
+    // Idempotency guard: return the existing VA immediately without touching Bridge
+    const existingVa = await BridgeAccountsRepo.findVirtualAccountByAccountId(
+      accountId as string,
+    )
+    if (!(existingVa instanceof RepositoryError)) {
+      return {
+        virtualAccountId: existingVa.bridgeVirtualAccountId,
+        bankName: existingVa.bankName,
+        routingNumber: existingVa.routingNumber,
+        accountNumberLast4: existingVa.accountNumberLast4,
+      }
+    }
+
     // Get or create Tron address
     let tronAddress = account.bridgeTronAddress
 
@@ -216,15 +231,26 @@ const createVirtualAccount = async (
       return new Error("IBEX Tron address creation not yet implemented")
     }
 
+    // Deterministic key so Bridge deduplicates on their side if two calls race past
+    // the check above before either has written to the repo.
+    const vaIdempotencyKey = crypto
+      .createHash("sha256")
+      .update(`va:${accountId}`)
+      .digest("hex")
+
     // Create Bridge virtual account
-    const virtualAccount = await BridgeClient.createVirtualAccount(customerId, {
-      source: { currency: "usd" },
-      destination: {
-        currency: "usdt",
-        payment_rail: "tron",
-        address: tronAddress,
+    const virtualAccount = await BridgeClient.createVirtualAccount(
+      customerId,
+      {
+        source: { currency: "usd" },
+        destination: {
+          currency: "usdt",
+          payment_rail: "tron",
+          address: tronAddress,
+        },
       },
-    })
+      vaIdempotencyKey,
+    )
 
     // Store virtual account in repository
     const repoResult = await BridgeAccountsRepo.createVirtualAccount({
