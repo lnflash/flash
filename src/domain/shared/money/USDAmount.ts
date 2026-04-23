@@ -1,4 +1,4 @@
-import Money, { Round } from "../bigint-money"
+import Money, { PRECISION_M, Round } from "../bigint-money"
 import { MoneyAmount } from "./MoneyAmount"
 import { WalletCurrency } from "../primitives"
 import { BigIntConversionError } from "../errors"
@@ -42,10 +42,10 @@ export class USDAmount extends MoneyAmount {
     return this.money.divide(100).toFixed(precision)
   }
 
-    // const jmdLiability = {
-    //   amount: BigInt(usdLiability.asCents()) * exchangeRate / 100n, 
-    //   currency: "JMD",
-    // }
+  // const jmdLiability = {
+  //   amount: BigInt(usdLiability.asCents()) * exchangeRate / 100n, 
+  //   currency: "JMD",
+  // }
   // Rate is the ratio at which one currency can be exchanged for another.
   // T:USD  
   convertAtRate<T extends MoneyAmount>(rate: T): T {
@@ -64,11 +64,18 @@ export class USDAmount extends MoneyAmount {
   i18n(): string {
     const exponent = getCurrencyMajorExponent(this.currencyCode as DisplayCurrency);
     return new Intl.NumberFormat("en", {
-        style: "currency",
-        currency: this.currencyCode,
-        currencyDisplay: "narrowSymbol",
-        minimumFractionDigits: exponent,
-        maximumFractionDigits: exponent,
+      style: "currency",
+      currency: this.currencyCode,
+      currencyDisplay: "narrowSymbol",
+      minimumFractionDigits: exponent,
+      maximumFractionDigits: exponent,
     }).format(Number(this.asDollars()));
+  }
+
+  asPaymentAmount(): Amount<WalletCurrency> {
+    return {
+      currency: this.currencyCode,
+      amount: this.money.toSource() / PRECISION_M,
+    }
   }
 }
