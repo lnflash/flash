@@ -1,5 +1,4 @@
-
-import Money, { PRECISION_M, Round } from "../bigint-money"
+import Money, { Round } from "../bigint-money"
 import { MoneyAmount } from "./MoneyAmount"
 import { WalletCurrency } from "../primitives"
 import { BigIntConversionError } from "../errors"
@@ -73,10 +72,4 @@ export class USDAmount extends MoneyAmount {
     }).format(Number(this.asDollars()));
   }
 
-  asPaymentAmount(): Amount<WalletCurrency> {
-    return {
-      currency: this.currencyCode,
-      amount: this.money.toSource() / PRECISION_M,
-    }
-  }
 }
