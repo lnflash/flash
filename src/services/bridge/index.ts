@@ -23,6 +23,7 @@ import {
   BridgeKycPendingError,
   BridgeKycRejectedError,
   BridgeCustomerNotFoundError,
+  BridgeBelowMinimumWithdrawalError,
 } from "./errors"
 import { RepositoryError } from "@domain/errors"
 import { toBridgeCustomerId, toBridgeExternalAccountId } from "@domain/primitives/bridge"
@@ -389,6 +390,10 @@ const initiateWithdrawal = async (
     const withdrawalAmount = parseFloat(amount)
     if (isNaN(withdrawalAmount) || withdrawalAmount <= 0) {
       return new BridgeInsufficientFundsError("Invalid withdrawal amount")
+    }
+
+    if (withdrawalAmount < BridgeConfig.minWithdrawalAmount) {
+      return new BridgeBelowMinimumWithdrawalError(BridgeConfig.minWithdrawalAmount)
     }
 
     const availableBalance = balance.toIbex();

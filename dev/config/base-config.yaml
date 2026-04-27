@@ -16,6 +16,7 @@ bridge:
   enabled: false
   apiKey: "<replace>"
   baseUrl: "https://api.bridge.xyz"
+  minWithdrawalAmount: 10
   webhook:
     port: 4009
     publicKeys:
