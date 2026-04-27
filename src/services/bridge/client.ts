@@ -90,18 +90,7 @@ export interface KycLink {
 }
 
 // Extended payment rails to include Tron
-export type PaymentRail =
-  | "solana"
-  | "ethereum"
-  | "polygon"
-  | "base"
-  | "tron"
-  | "ach_push"
-  | "ach_pull"
-  | "wire"
-  | "sepa"
-  | "spei"
-  | "pix"
+export type PaymentRail = "ach" | "wire" | "ach_push" | "ach_same_day" | "arbitrum" | "avalanche_c_chain" | "base" | "bre_b" | "co_bank_transfer" | "celo" | "ethereum" | "faster_payments" | "optimism" | "pix" | "polygon" | "sepa" | "solana" | "spei" | "stellar" | "swift" | "tempo" | "tron";
 
 export type VirtualAccountDestinationPaymentRail = "arbitrum" | "avalanche_c_chain" | "base" | "celo" | "ethereum" | "optimism" | "polygon" | "solana" | "stellar" | "tempo" | "tron"
 
@@ -178,6 +167,7 @@ export interface ListResponse<T> {
   cursor?: string
 }
 
+export type TrasfertSourceCurrency = "brl" | "cop" | "dai" | "eur" | "eurc" | "gbp" | "mxn" | "pyusd" | "usd" | "usdb" | "usdc" | "usdt"
 export interface CreateTransferRequest {
   amount?: string
   currency?: string
@@ -186,7 +176,7 @@ export interface CreateTransferRequest {
   developer_fee_percent?: string
   source: {
     payment_rail: PaymentRail | "bridge_wallet"
-    currency: string
+    currency: TrasfertSourceCurrency
     from_address?: string
     external_account_id?: string
     bridge_wallet_id?: string
