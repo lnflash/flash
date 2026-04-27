@@ -1,4 +1,4 @@
-import { Money, Round } from "../bigint-money"
+import { Money, PRECISION_M, Round } from "../bigint-money"
 import { WalletCurrency } from "../primitives"
 
 export abstract class MoneyAmount {
@@ -35,6 +35,13 @@ export abstract class MoneyAmount {
 
   isZero(): boolean {
     return this.money.isEqual(0)
+  }
+
+  asPaymentAmount(): Amount<WalletCurrency> {
+    return {
+      currency: this.currencyCode,
+      amount: this.money.toSource() / PRECISION_M,
+    }
   }
 
   toJson(): [string, string] {
