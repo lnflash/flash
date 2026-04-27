@@ -38,7 +38,7 @@ interface IBridgeExternalAccountRecord {
 
 interface IBridgeWithdrawalRecord {
   accountId: string
-  bridgeTransferId: string
+  bridgeTransferId?: string
   amount: string
   currency: string
   status: "pending" | "completed" | "failed"
@@ -335,7 +335,7 @@ const AccountSchema = new Schema<AccountRecord>(
       enum: ["pending", "approved", "rejected"],
       required: false,
     },
-    bridgeTronAddress: {
+    bridgeEthereumAddress: {
       type: String,
       required: false,
     },
@@ -348,7 +348,7 @@ AccountSchema.index({
   coordinates: 1,
 })
 
-AccountSchema.index({ bridgeTronAddress: 1 }, { sparse: true })
+AccountSchema.index({ bridgeEthereumAddress: 1 }, { sparse: true })
 
 export const Account = mongoose.model<AccountRecord>("Account", AccountSchema)
 
@@ -642,7 +642,7 @@ BridgeExternalAccountSchema.index(
 
 const BridgeWithdrawalSchema = new Schema<IBridgeWithdrawalRecord>({
   accountId: { type: String, required: true, index: true },
-  bridgeTransferId: { type: String, required: true, unique: true },
+  bridgeTransferId: { type: String, unique: true, sparse: true },
   amount: { type: String, required: true },
   currency: { type: String, required: true },
   status: { type: String, enum: ["pending", "completed", "failed"], default: "pending" },
