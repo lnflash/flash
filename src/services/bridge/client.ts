@@ -112,6 +112,7 @@ export type SourceCurrency =
   | "mxn"
   | "brl"
   | "gbp"
+  | "cop"
 
 // Extended currencies to include USDT
 export type Currency = "usdb" | "usdt" | "dai" | "pyusd" | "usdc" | "eurc"
