@@ -2,6 +2,7 @@ import ValidOffer from "@app/offers/ValidOffer"
 import { FrappeConfig } from "@config"
 import { USDAmount, Validated } from "@domain/shared"
 import { baseLogger } from "@services/logger"
+import { recordExceptionInCurrentSpan } from "@services/tracing"
 import axios, { isAxiosError } from "axios"
 
 import {
@@ -162,10 +163,12 @@ class ErpNext {
       )
       return { name: resp.data.data.name }
     } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
       baseLogger.error(
-        { err, responseData: isAxiosError(err) ? err.response?.data : undefined, ...req.toErpnext() },
+        { err, responseData, ...req.toErpnext() },
         "Error creating Account Upgrade Request in ERPNext",
       )
+      recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
       return new UpgradeRequestCreateError(err)
     }
   }

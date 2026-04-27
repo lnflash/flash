@@ -25,10 +25,18 @@ const checkMaxTerminals = async (input: AccountUpgradeRequest) => {
   return true
 }
 
+const hasUsername = async (input: AccountUpgradeRequest) => {
+  if (!input.username) {
+    return new ValidationError("Username is required for upgrade request")
+  }
+  return true
+}
+
 const AccountUpgradeRequestValidator = validator<AccountUpgradeRequest & Context>([
   isActiveAccount,
   isRequestedLevelGreater,
   checkMaxTerminals,
+  hasUsername,
 ])
 
 type Context = { account: Account, user: User, kratos: AnyIdentity }
