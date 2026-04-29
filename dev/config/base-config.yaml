@@ -13,14 +13,14 @@ ibex:
     secret: "not-so-secret"
 
 bridge:
-  enabled: false
-  apiKey: "<replace>"
-  baseUrl: "https://api.bridge.xyz"
+  enabled: true
+  apiKey: "sk-test-f759431a0782ad7e3c047817731b1c24"
+  baseUrl: "https://api.sandbox.bridge.xyz/v0"
   minWithdrawalAmount: 10
   webhook:
     port: 4009
     publicKeys:
-      kyc: "<replace>"
+      kyc: "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxrV+s8CvC0+s1W6vZG52\n5eozo6W6HzkTcLQMWDoEzQX+ulEoYH2fPuXeupi11MdVLpEqNqYas8LD3BIf/c9H\nkK54V8vnXNwoHa5ROp/Gjp3B17q3wGfjLa8bQJoJZFWd9W+e3TjUohCDNpeD/qv+\nbkY2y3b1QixmXKK3REw35sfiEe5NkGMU4aEfXhZieIZ1mKXLsIgsgrIpv9BFwQr5\n+h3R7Vv3hGKVgSZHnRMa9F1/go8v5Au8gj+9w0LxxRJikoJCubI6igaTCivibxuo\nQXWfFylw6m7eQTvZDQz70pnUEakofRlvKasetbyKmvLzMhuRHeqsxgi8C4ZCx7MP\ndwIDAQAB\n-----END PUBLIC KEY-----"
       deposit: "<replace>"
       transfer: "<replace>"
     timestampSkewMs: 300000

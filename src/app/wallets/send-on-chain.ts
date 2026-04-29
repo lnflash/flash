@@ -75,7 +75,11 @@ export const payOnChainByWalletId = async <R extends WalletCurrency>({
   })
   if (validationResult instanceof Error) return validationResult
 
-  const resp = await Ibex.sendOnchain(args)
+  const resp = await Ibex.sendOnchain({
+    accountId: args.accountId,
+    address: args.address,
+    amount: amount.toIbex(),
+  })
   if (resp instanceof IbexError) return resp
   
   let status = IbexAdaptor.toPaymentSendStatus(resp.status)

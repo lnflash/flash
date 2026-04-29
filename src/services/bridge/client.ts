@@ -249,7 +249,7 @@ export class BridgeClient {
 
   constructor() {
     this.apiKey = BridgeConfig.apiKey
-    this.baseUrl = BridgeConfig.baseUrl || "https://api.bridge.xyz/v0"
+    this.baseUrl = BridgeConfig.baseUrl || "https://api.sandbox.bridge.xyz/v0"
   }
 
   private async request<T>(

@@ -1,7 +1,7 @@
 import { getBalanceForWallet } from "@app/wallets"
 import { Cashout } from "@config"
-import { AccountValidator } from "@domain/accounts"
-import { USDAmount, ValidationError, ValidationFn } from "@domain/shared"
+import { AccountValidator, isActiveAccount, walletBelongsToAccount } from "@domain/accounts"
+import { USDAmount, ValidationError, ValidationFn, validator } from "@domain/shared"
 import { ValidationInputs } from "./types"
 
 const config = Cashout.validations
@@ -76,3 +76,15 @@ export const validate = async (
   const results = await Promise.all(validators.map((v) => v(inputs)))
   return results.filter((r): r is ValidationError => r !== true)
 }
+
+export const CashoutValidator = validator<ValidationInputs>([
+  isUsd,
+  transferMin,
+  transferMax,
+  isActiveAccount,
+  accountLevel,
+  walletBelongsToAccount,
+  hasSufficientBalance,
+  isBeforeExpiry,
+  hasErpParty,
+])

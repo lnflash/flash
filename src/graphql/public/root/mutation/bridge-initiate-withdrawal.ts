@@ -1,5 +1,6 @@
 import { GT } from "@graphql/index"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
+import IError from "@graphql/shared/types/abstract/error"
 import BridgeWithdrawal from "@graphql/public/types/object/bridge-withdrawal"
 import { BridgeConfig } from "@config"
 import BridgeService from "@services/bridge"
@@ -21,7 +22,7 @@ const BridgeInitiateWithdrawalInput = GT.Input({
 const BridgeInitiateWithdrawalPayload = GT.Object({
   name: "BridgeInitiateWithdrawalPayload",
   fields: () => ({
-    errors: { type: GT.List(GT.NonNull(Error)) },
+    errors: { type: GT.NonNullList(IError) },
     withdrawal: { type: BridgeWithdrawal },
   }),
 })
