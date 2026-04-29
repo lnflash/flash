@@ -1,0 +1,31 @@
+meta {
+  name: bridgeVirtualAccount
+  type: graphql
+  seq: 18
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:graphql {
+  query BridgeVirtualAccount {
+    bridgeVirtualAccount {
+      id
+      bankName
+      routingNumber
+      accountNumberLast4
+    }
+  }
+}
+
+settings {
+  encodeUrl: false
+  timeout: 30000
+}
