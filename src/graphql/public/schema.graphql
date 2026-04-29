@@ -243,6 +243,64 @@ input BankAccountInput {
   currency: String!
 }
 
+type BridgeAddExternalAccountPayload {
+  errors: [Error!]!
+  externalAccount: BridgeExternalAccount
+}
+
+type BridgeCreateVirtualAccountPayload {
+  errors: [Error!]!
+  virtualAccount: BridgeVirtualAccount
+}
+
+type BridgeExternalAccount {
+  accountNumberLast4: String!
+  bankName: String!
+  id: ID!
+  status: String!
+}
+
+input BridgeInitiateKycInput {
+  email: String
+  full_name: String
+  type: String
+}
+
+type BridgeInitiateKycPayload {
+  errors: [Error!]!
+  kycLink: BridgeKycLink
+}
+
+input BridgeInitiateWithdrawalInput {
+  amount: String!
+  externalAccountId: ID!
+}
+
+type BridgeInitiateWithdrawalPayload {
+  errors: [Error!]!
+  withdrawal: BridgeWithdrawal
+}
+
+type BridgeKycLink {
+  kycLink: String!
+  tosLink: String!
+}
+
+type BridgeVirtualAccount {
+  accountNumberLast4: String!
+  bankName: String!
+  id: ID!
+  routingNumber: String!
+}
+
+type BridgeWithdrawal {
+  amount: String!
+  createdAt: String!
+  currency: String!
+  id: ID!
+  status: String!
+}
+
 type BuildInformation {
   commitHash: String
   helmRevision: Int
@@ -855,6 +913,10 @@ type Mutation {
   accountEnableNotificationChannel(input: AccountEnableNotificationChannelInput!): AccountUpdateNotificationSettingsPayload!
   accountUpdateDefaultWalletId(input: AccountUpdateDefaultWalletIdInput!): AccountUpdateDefaultWalletIdPayload!
   accountUpdateDisplayCurrency(input: AccountUpdateDisplayCurrencyInput!): AccountUpdateDisplayCurrencyPayload!
+  bridgeAddExternalAccount: BridgeAddExternalAccountPayload!
+  bridgeCreateVirtualAccount: BridgeCreateVirtualAccountPayload!
+  bridgeInitiateKyc(input: BridgeInitiateKycInput!): BridgeInitiateKycPayload!
+  bridgeInitiateWithdrawal(input: BridgeInitiateWithdrawalInput!): BridgeInitiateWithdrawalPayload!
   businessAccountUpgradeRequest(input: BusinessAccountUpgradeRequestInput!): AccountUpgradePayload!
   callbackEndpointAdd(input: CallbackEndpointAddInput!): CallbackEndpointAddPayload!
   callbackEndpointDelete(input: CallbackEndpointDeleteInput!): SuccessPayload!
@@ -1223,13 +1285,17 @@ type PublicWallet {
 
 type Query {
   accountDefaultWallet(username: Username!, walletCurrency: WalletCurrency): PublicWallet!
+  accountUpgradeRequest: AccountUpgradeRequestPayload!
+  bridgeExternalAccounts: [BridgeExternalAccount]
+  bridgeKycStatus: String
+  bridgeVirtualAccount: BridgeVirtualAccount
+  bridgeWithdrawals: [BridgeWithdrawal]
   btcPrice(currency: DisplayCurrency! = "USD"): Price @deprecated(reason: "Deprecated in favor of realtimePrice")
   btcPriceList(range: PriceGraphRange!): [PricePoint]
   businessMapMarkers: [MapMarker!]!
   currencyList: [Currency!]!
   globals: Globals
   isFlashNpub(input: IsFlashNpubInput!): IsFlashNpubPayload
-  latestAccountUpgradeRequest: AccountUpgradeRequestPayload!
   lnInvoicePaymentStatus(input: LnInvoicePaymentStatusInput!): LnInvoicePaymentStatusPayload!
   me: User
   mobileVersions: [MobileVersions]
@@ -1579,6 +1645,49 @@ type UsdWallet implements Wallet {
   walletCurrency: WalletCurrency!
 }
 
+"""
+A wallet belonging to an account which contains a USDT balance and a list of transactions.
+"""
+type UsdtWallet implements Wallet {
+  accountId: ID!
+  balance: FractionalCentAmount!
+  id: ID!
+  lnurlp: Lnurl
+
+  """An unconfirmed incoming onchain balance."""
+  pendingIncomingBalance: SignedAmount!
+  transactions(
+    """Returns the items in the list that come after the specified cursor."""
+    after: String
+
+    """Returns the items in the list that come before the specified cursor."""
+    before: String
+
+    """Returns the first n items from the list."""
+    first: Int
+
+    """Returns the last n items from the list."""
+    last: Int
+  ): TransactionConnection
+  transactionsByAddress(
+    """Returns the items that include this address."""
+    address: OnChainAddress!
+
+    """Returns the items in the list that come after the specified cursor."""
+    after: String
+
+    """Returns the items in the list that come before the specified cursor."""
+    before: String
+
+    """Returns the first n items from the list."""
+    first: Int
+
+    """Returns the last n items from the list."""
+    last: Int
+  ): TransactionConnection
+  walletCurrency: WalletCurrency!
+}
+
 type User {
   """Bank accounts available for cashout"""
   bankAccounts: [BankAccount!]!
@@ -1851,6 +1960,7 @@ interface Wallet {
 enum WalletCurrency {
   BTC
   USD
+  USDT
 }
 
 """Unique identifier of a wallet"""
