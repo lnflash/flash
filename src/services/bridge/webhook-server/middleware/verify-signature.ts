@@ -30,8 +30,8 @@ export const verifyBridgeSignature = (publicKeyType: "kyc" | "deposit" | "transf
       return res.status(401).json({ error: "Invalid signature format" })
     }
 
-    const timestamp = timestampPart.split("=")[1]
-    const sig = signaturePart.split("=")[1]
+    const timestamp = timestampPart.slice("t=".length)
+    const sig = signaturePart.slice("v0=".length)
 
     // Check timestamp skew (default 5 minutes)
     const now = Date.now()
@@ -57,11 +57,14 @@ export const verifyBridgeSignature = (publicKeyType: "kyc" | "deposit" | "transf
       return res.status(401).json({ error: "Missing raw body" })
     }
 
-    const payload = `${timestamp}.${rawBody}`
+    const signedPayload = `${timestamp}.${rawBody}`
+
+    const digest = crypto.createHash("sha256").update(signedPayload).digest()
+    baseLogger.debug({ signedPayload, digest: digest.toString("hex") }, "Verifying Bridge webhook signature")
 
     try {
       const verifier = crypto.createVerify("RSA-SHA256")
-      verifier.update(payload)
+      verifier.update(digest)
       const isValid = verifier.verify(publicKey, sig, "base64")
 
       if (!isValid) {
