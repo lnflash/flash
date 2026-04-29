@@ -18,6 +18,7 @@ import { AccountsRepository } from "@services/mongoose/accounts"
 import { wrapAsyncFunctionsToRunInSpan } from "@services/tracing"
 import { baseLogger } from "@services/logger"
 import {
+  BridgeError,
   BridgeDisabledError,
   BridgeAccountLevelError,
   BridgeKycPendingError,
@@ -124,6 +125,10 @@ const initiateKyc = async ({ accountId, email, type, full_name }: { accountId: A
 
   const account = await checkAccountLevel(accountId)
   if (account instanceof Error) return account
+
+  if (account.bridgeKycStatus === "approved") {
+    return new BridgeError("KYC already approved for this account")
+  }
 
   const identity = await IdentityRepository().getIdentity(account.kratosUserId);
 
@@ -234,7 +239,7 @@ const createVirtualAccount = async (
       // 1. Call Ibex.getCryptoReceiveOptions() to get Ethereum USDT option
       // 2. Call Ibex.createCryptoReceiveInfo() to get Ethereum address
       // This will be implemented when IBEX crypto receive methods are available
-      return new Error("IBEX Ethereum address creation not yet implemented")
+      return new BridgeError("IBEX Ethereum address creation not yet implemented")
     }
 
     // Deterministic key so Bridge deduplicates on their side if two calls race past
