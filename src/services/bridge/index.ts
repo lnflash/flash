@@ -32,6 +32,7 @@ import { USDTAmount, WalletCurrency } from "@domain/shared"
 import { WalletsRepository } from "@services/mongoose/wallets"
 import { BridgeInsufficientFundsError } from "./errors"
 import { IdentityRepository } from "@services/kratos"
+import IbexClient from "@services/ibex/client"
 
 // ============ Types ============
 
@@ -234,12 +235,21 @@ const createVirtualAccount = async (
     let ethereumAddress = account.bridgeEthereumAddress
 
     if (!ethereumAddress) {
-      // TODO: Integrate with IBEX to create Ethereum USDT receive address
-      // For now, this is a placeholder - actual implementation requires:
-      // 1. Call Ibex.getCryptoReceiveOptions() to get Ethereum USDT option
-      // 2. Call Ibex.createCryptoReceiveInfo() to get Ethereum address
-      // This will be implemented when IBEX crypto receive methods are available
-      return new BridgeError("IBEX Ethereum address creation not yet implemented")
+      const option = await IbexClient.getEthereumUsdtOption()
+      if (option instanceof Error) return new BridgeError(option.message)
+
+      const receiveInfo = await IbexClient.createCryptoReceiveInfo(
+        account.defaultWalletId as IbexAccountId,
+        option,
+      )
+      if (receiveInfo instanceof Error) return new BridgeError(receiveInfo.message)
+
+      const updateResult = await AccountsRepository().updateBridgeFields(accountId, {
+        bridgeEthereumAddress: receiveInfo.address,
+      })
+      if (updateResult instanceof Error) return updateResult
+
+      ethereumAddress = receiveInfo.address
     }
 
     // Deterministic key so Bridge deduplicates on their side if two calls race past

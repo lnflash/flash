@@ -223,15 +223,45 @@ const payToLnurl = async (
   }).then(errorHandler)
 }
 
+const getIbexToken = async (): Promise<string | IbexError> => {
+  const cached = await Ibex.authentication.storage.getAccessToken()
+  if (typeof cached === "string") return cached
+  const signInErr = await Ibex.authentication.signIn()
+  if (signInErr) return new IbexError(new Error("IBEX sign-in failed"))
+  const fresh = await Ibex.authentication.storage.getAccessToken()
+  return typeof fresh === "string" ? fresh : new IbexError(new Error("IBEX token unavailable"))
+}
+
+const ibexGet = async <T>(token: string, path: string): Promise<T | IbexError> => {
+  const resp = await fetch(`${IbexConfig.url}${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!resp.ok) return new IbexError(new Error(`IBEX ${path} failed: ${resp.status}`))
+  return resp.json() as Promise<T>
+}
+
+const ibexPost = async <T>(token: string, path: string, body: unknown): Promise<T | IbexError> => {
+  const resp = await fetch(`${IbexConfig.url}${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!resp.ok) return new IbexError(new Error(`IBEX ${path} failed: ${resp.status}`))
+  return resp.json() as Promise<T>
+}
+
 const getCryptoReceiveBalance = async (
   receiveInfoId: string,
 ): Promise<USDTAmount | IbexError> => {
   try {
-    const resp = await (Ibex as any).getCryptoReceiveBalance({ receiveInfoId })
-    if (resp instanceof Error) return new IbexError(resp)
-    if (resp.balance === null || resp.balance === undefined)
-      return new UnexpectedIbexResponse("Balance not found")
-    const balance = USDTAmount.smallestUnits(resp.balance.toString())
+    const token = await getIbexToken()
+    if (token instanceof IbexError) return token
+    const data = await ibexGet<{ balance: number }>(
+      token,
+      `/crypto/receive-infos/${receiveInfoId}/balance`,
+    )
+    if (data instanceof IbexError) return data
+    const balance = USDTAmount.smallestUnits(data.balance?.toString())
     if (balance instanceof Error) return new IbexError(balance)
     return balance
   } catch (err) {
@@ -241,26 +271,34 @@ const getCryptoReceiveBalance = async (
 
 const getCryptoReceiveOptions = async (): Promise<CryptoReceiveOption[] | IbexError> => {
   try {
-    const resp = await (Ibex as any).getCryptoReceiveOptions()
-    if (resp instanceof Error) return new IbexError(resp)
-    return resp.options || []
+    const token = await getIbexToken()
+    if (token instanceof IbexError) return token
+    const data = await ibexGet<{ options: CryptoReceiveOption[] }>(
+      token,
+      "/crypto/receive-infos/options",
+    )
+    if (data instanceof IbexError) return data
+    return data.options || []
   } catch (err) {
     return new IbexError(err instanceof Error ? err : new Error(String(err)))
   }
 }
 
 const createCryptoReceiveInfo = async (
-  walletId: IbexAccountId,
-  optionId: string,
+  accountId: IbexAccountId,
+  option: Pick<CryptoReceiveOption, "name" | "network">,
 ): Promise<CryptoReceiveInfo | IbexError> => {
   try {
-    const resp = await (Ibex as any).createCryptoReceiveInfo({
-      wallet_id: walletId,
-      option_id: optionId,
-    } as CreateCryptoReceiveInfoRequest)
-    if (resp instanceof Error) return new IbexError(resp)
-    if (!resp.address) return new UnexpectedIbexResponse("Address not found")
-    return resp
+    const token = await getIbexToken()
+    if (token instanceof IbexError) return token
+    const data = await ibexPost<CryptoReceiveInfo>(
+      token,
+      `/accounts/${accountId}/crypto/receive-infos`,
+      { name: option.name, network: option.network } as CreateCryptoReceiveInfoRequest,
+    )
+    if (data instanceof IbexError) return data
+    if (!data.address) return new UnexpectedIbexResponse("Address not found")
+    return data
   } catch (err) {
     return new IbexError(err instanceof Error ? err : new Error(String(err)))
   }
@@ -280,6 +318,22 @@ const getTronUsdtOption = async (): Promise<string | IbexError> => {
   }
 
   return tronUsdt.id
+}
+
+const getEthereumUsdtOption = async (): Promise<CryptoReceiveOption | IbexError> => {
+  const options = await getCryptoReceiveOptions()
+  if (options instanceof IbexError) return options
+
+  const ethereumUsdt = options.find(
+    (opt) =>
+      opt.currency.toLowerCase() === "usdt" && opt.network.toLowerCase() === "ethereum",
+  )
+
+  if (!ethereumUsdt) {
+    return new IbexError(new Error("Ethereum USDT option not found"))
+  }
+
+  return ethereumUsdt
 }
 
 // const sendBetweenAccounts = async (
@@ -323,5 +377,6 @@ export default wrapAsyncFunctionsToRunInSpan({
     getCryptoReceiveOptions,
     createCryptoReceiveInfo,
     getTronUsdtOption,
+    getEthereumUsdtOption,
   },
 })
