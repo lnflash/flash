@@ -1,8 +1,9 @@
-/**
- * Bridge Webhook Server Entrypoint
- * Starts the standalone Bridge webhook server
- */
-
 import { startBridgeWebhookServer } from "@services/bridge/webhook-server"
+import { baseLogger } from "@services/logger"
+import { setupMongoConnection } from "@services/mongodb"
 
-startBridgeWebhookServer()
+if (require.main === module) {
+  setupMongoConnection()
+    .then(async () => startBridgeWebhookServer())
+    .catch((err) => baseLogger.error(err, "bridge webhook server error"))
+}
