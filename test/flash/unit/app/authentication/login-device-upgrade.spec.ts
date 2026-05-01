@@ -1,11 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import { loginDeviceUpgradeWithPhone } from "@app/authentication/login"
+import { getBalanceForWallet } from "@app/wallets"
 import { USDAmount } from "@domain/shared"
 import {
+  IdentityRepository,
   PhoneAccountAlreadyExistsCannotUpgradeError,
   PhoneAccountAlreadyExistsNeedToSweepFundsError,
 } from "@services/kratos"
-import { loginDeviceUpgradeWithPhone } from "@app/authentication/login"
+import { WalletsRepository } from "@services/mongoose"
 
 jest.mock("@app/accounts/create-account", () => ({
   createAccountForDeviceAccount: jest.fn(),
@@ -71,11 +74,23 @@ jest.mock("@config", () => ({
   getAccountsOnboardConfig: jest.fn(() => ({ requireCountry: false })),
 }))
 
+const mockedWalletsRepository = WalletsRepository as jest.MockedFunction<
+  typeof WalletsRepository
+>
+const mockedIdentityRepository = IdentityRepository as jest.MockedFunction<
+  typeof IdentityRepository
+>
+const mockedGetBalanceForWallet = getBalanceForWallet as jest.MockedFunction<
+  typeof getBalanceForWallet
+>
+
 const mockWalletsRepo = (): { listByAccountId: jest.Mock } => ({
   listByAccountId: jest.fn().mockResolvedValue([]),
 })
 
 describe("loginDeviceUpgradeWithPhone", () => {
+  let walletsRepo: { listByAccountId: jest.Mock }
+
   const mockAccount = { id: "account-id" } as any
   const mockPhone = "+15551234567" as any
   const mockCode = "123456" as any
@@ -83,21 +98,17 @@ describe("loginDeviceUpgradeWithPhone", () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
-    ;(require("@services/mongoose").WalletsRepository as jest.Mock).mockReturnValue(
-      mockWalletsRepo(),
-    )
-    ;(require("@services/kratos").IdentityRepository as jest.Mock).mockReturnValue({
+    walletsRepo = mockWalletsRepo()
+    mockedWalletsRepository.mockReturnValue(walletsRepo as any)
+    mockedIdentityRepository.mockReturnValue({
       getUserIdFromIdentifier: jest.fn().mockResolvedValue("existing-user-id"),
-    })
+    } as any)
   })
 
   it("returns NeedToSweepFunds when device account has balance", async () => {
-    const { WalletsRepository } = require("@services/mongoose")
     const wallet = { id: "wallet-id" }
-    WalletsRepository().listByAccountId.mockResolvedValue([wallet])
-
-    const { getBalanceForWallet } = require("@app/wallets")
-    getBalanceForWallet.mockResolvedValue(USDAmount.cents(5000n))
+    walletsRepo.listByAccountId.mockResolvedValue([wallet])
+    mockedGetBalanceForWallet.mockResolvedValue(USDAmount.cents(5000n) as any)
 
     const result = await loginDeviceUpgradeWithPhone({
       account: mockAccount,
@@ -107,16 +118,13 @@ describe("loginDeviceUpgradeWithPhone", () => {
     })
 
     expect(result).toBeInstanceOf(PhoneAccountAlreadyExistsNeedToSweepFundsError)
-    expect(getBalanceForWallet).toHaveBeenCalledWith({ walletId: "wallet-id" })
+    expect(mockedGetBalanceForWallet).toHaveBeenCalledWith({ walletId: "wallet-id" })
   })
 
   it("returns CannotUpgrade when device account has zero balance", async () => {
-    const { WalletsRepository } = require("@services/mongoose")
     const wallet = { id: "wallet-id" }
-    WalletsRepository().listByAccountId.mockResolvedValue([wallet])
-
-    const { getBalanceForWallet } = require("@app/wallets")
-    getBalanceForWallet.mockResolvedValue(USDAmount.ZERO)
+    walletsRepo.listByAccountId.mockResolvedValue([wallet])
+    mockedGetBalanceForWallet.mockResolvedValue(USDAmount.ZERO as any)
 
     const result = await loginDeviceUpgradeWithPhone({
       account: mockAccount,
@@ -126,19 +134,17 @@ describe("loginDeviceUpgradeWithPhone", () => {
     })
 
     expect(result).toBeInstanceOf(PhoneAccountAlreadyExistsCannotUpgradeError)
-    expect(getBalanceForWallet).toHaveBeenCalledWith({ walletId: "wallet-id" })
+    expect(mockedGetBalanceForWallet).toHaveBeenCalledWith({ walletId: "wallet-id" })
   })
 
   it("returns NeedToSweepFunds when any wallet has balance among multiple", async () => {
-    const { WalletsRepository } = require("@services/mongoose")
     const wallet0 = { id: "wallet-0" }
     const wallet1 = { id: "wallet-1" }
-    WalletsRepository().listByAccountId.mockResolvedValue([wallet0, wallet1])
+    walletsRepo.listByAccountId.mockResolvedValue([wallet0, wallet1])
 
-    const { getBalanceForWallet } = require("@app/wallets")
-    getBalanceForWallet
-      .mockResolvedValueOnce(USDAmount.ZERO)
-      .mockResolvedValueOnce(USDAmount.cents(100n))
+    mockedGetBalanceForWallet
+      .mockResolvedValueOnce(USDAmount.ZERO as any)
+      .mockResolvedValueOnce(USDAmount.cents(100n) as any)
 
     const result = await loginDeviceUpgradeWithPhone({
       account: mockAccount,
