@@ -23,6 +23,10 @@ export class PhoneAccountAlreadyExistsNeedToSweepFundsError extends KratosError 
   level = ErrorLevel.Info
 }
 
+export class PhoneAccountAlreadyExistsCannotUpgradeError extends KratosError {
+  level = ErrorLevel.Info
+}
+
 export class MissingCreatedAtKratosError extends KratosError {
   level = ErrorLevel.Critical
 }

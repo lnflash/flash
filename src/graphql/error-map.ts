@@ -22,6 +22,7 @@ import {
   DealerError,
   PhoneAccountAlreadyExistsError,
   PhoneAccountAlreadyExistsNeedToSweepFundsError,
+  PhoneAccountAlreadyExistsCannotUpgradeError,
   EmailUnverifiedError,
   AccountAlreadyHasEmailError,
   PhoneAlreadyExistsError,
@@ -409,6 +410,14 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message =
         "Error phone account already exists. You need to manually sweep funds to your phone account."
       return new PhoneAccountAlreadyExistsNeedToSweepFundsError({
+        message,
+        logger: baseLogger,
+      })
+
+    case "PhoneAccountAlreadyExistsCannotUpgradeError":
+      message =
+        "Phone number is already registered to another user. Please log out and log in with that phone account."
+      return new PhoneAccountAlreadyExistsCannotUpgradeError({
         message,
         logger: baseLogger,
       })

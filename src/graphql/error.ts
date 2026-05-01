@@ -409,6 +409,18 @@ export class InvalidPhoneMetadataForOnboardingError extends CustomApolloError {
   }
 }
 
+export class PhoneAccountAlreadyExistsCannotUpgradeError extends CustomApolloError {
+  constructor(errData: CustomApolloErrorData) {
+    super({
+      message:
+        "Phone number is already registered to another user. Please log out and log in with that phone account.",
+      forwardToClient: true,
+      code: "PHONE_ALREADY_REGISTERED_TO_ANOTHER_USER",
+      ...errData,
+    })
+  }
+}
+
 export class PhoneAccountAlreadyExistsNeedToSweepFundsError extends CustomApolloError {
   constructor(errData: CustomApolloErrorData) {
     super({
