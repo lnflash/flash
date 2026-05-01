@@ -4,11 +4,13 @@ import { loginDeviceUpgradeWithPhone } from "@app/authentication/login"
 import { getBalanceForWallet } from "@app/wallets"
 import { USDAmount } from "@domain/shared"
 import {
+  AuthWithPhonePasswordlessService,
   IdentityRepository,
   PhoneAccountAlreadyExistsCannotUpgradeError,
   PhoneAccountAlreadyExistsNeedToSweepFundsError,
 } from "@services/kratos"
 import { WalletsRepository } from "@services/mongoose"
+import { addAttributesToCurrentSpan } from "@services/tracing"
 
 jest.mock("@app/accounts/create-account", () => ({
   createAccountForDeviceAccount: jest.fn(),
@@ -80,9 +82,14 @@ const mockedWalletsRepository = WalletsRepository as jest.MockedFunction<
 const mockedIdentityRepository = IdentityRepository as jest.MockedFunction<
   typeof IdentityRepository
 >
+const mockedPhoneAuthService = AuthWithPhonePasswordlessService as jest.MockedFunction<
+  typeof AuthWithPhonePasswordlessService
+>
 const mockedGetBalanceForWallet = getBalanceForWallet as jest.MockedFunction<
   typeof getBalanceForWallet
 >
+const mockedAddAttributesToCurrentSpan =
+  addAttributesToCurrentSpan as jest.MockedFunction<typeof addAttributesToCurrentSpan>
 
 const mockWalletsRepo = (): { listByAccountId: jest.Mock } => ({
   listByAccountId: jest.fn().mockResolvedValue([]),
@@ -90,6 +97,7 @@ const mockWalletsRepo = (): { listByAccountId: jest.Mock } => ({
 
 describe("loginDeviceUpgradeWithPhone", () => {
   let walletsRepo: { listByAccountId: jest.Mock }
+  let phoneAuthService: { loginToken: jest.Mock }
 
   const mockAccount = { id: "account-id" } as any
   const mockPhone = "+15551234567" as any
@@ -99,13 +107,18 @@ describe("loginDeviceUpgradeWithPhone", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     walletsRepo = mockWalletsRepo()
+    phoneAuthService = {
+      loginToken: jest.fn().mockResolvedValue({ authToken: "should-not-be-used" }),
+    }
+
     mockedWalletsRepository.mockReturnValue(walletsRepo as any)
     mockedIdentityRepository.mockReturnValue({
       getUserIdFromIdentifier: jest.fn().mockResolvedValue("existing-user-id"),
     } as any)
+    mockedPhoneAuthService.mockReturnValue(phoneAuthService as any)
   })
 
-  it("returns NeedToSweepFunds when device account has balance", async () => {
+  it("returns NeedToSweepFunds when device account has balance and does not log into the existing phone account", async () => {
     const wallet = { id: "wallet-id" }
     walletsRepo.listByAccountId.mockResolvedValue([wallet])
     mockedGetBalanceForWallet.mockResolvedValue(USDAmount.cents(5000n) as any)
@@ -119,9 +132,14 @@ describe("loginDeviceUpgradeWithPhone", () => {
 
     expect(result).toBeInstanceOf(PhoneAccountAlreadyExistsNeedToSweepFundsError)
     expect(mockedGetBalanceForWallet).toHaveBeenCalledWith({ walletId: "wallet-id" })
+    expect(phoneAuthService.loginToken).not.toHaveBeenCalled()
+    expect(mockedAddAttributesToCurrentSpan).toHaveBeenCalledWith({
+      "login.upgrade.collisionRejected": true,
+      "login.upgrade.collisionHasDeviceBalance": true,
+    })
   })
 
-  it("returns CannotUpgrade when device account has zero balance", async () => {
+  it("returns CannotUpgrade for zero-balance collision and does not silently log into the existing phone account", async () => {
     const wallet = { id: "wallet-id" }
     walletsRepo.listByAccountId.mockResolvedValue([wallet])
     mockedGetBalanceForWallet.mockResolvedValue(USDAmount.ZERO as any)
@@ -135,6 +153,11 @@ describe("loginDeviceUpgradeWithPhone", () => {
 
     expect(result).toBeInstanceOf(PhoneAccountAlreadyExistsCannotUpgradeError)
     expect(mockedGetBalanceForWallet).toHaveBeenCalledWith({ walletId: "wallet-id" })
+    expect(phoneAuthService.loginToken).not.toHaveBeenCalled()
+    expect(mockedAddAttributesToCurrentSpan).toHaveBeenCalledWith({
+      "login.upgrade.collisionRejected": true,
+      "login.upgrade.collisionHasDeviceBalance": false,
+    })
   })
 
   it("returns NeedToSweepFunds when any wallet has balance among multiple", async () => {
@@ -154,5 +177,6 @@ describe("loginDeviceUpgradeWithPhone", () => {
     })
 
     expect(result).toBeInstanceOf(PhoneAccountAlreadyExistsNeedToSweepFundsError)
+    expect(phoneAuthService.loginToken).not.toHaveBeenCalled()
   })
 })
