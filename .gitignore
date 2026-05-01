@@ -28,6 +28,7 @@ public/*
 coverage
 lib
 artifacts
+.worktrees/
 
 generated.gql
 .swc
