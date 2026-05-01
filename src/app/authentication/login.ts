@@ -1,4 +1,6 @@
+import { upgradeAccountFromDeviceToPhone } from "@app/accounts"
 import { createAccountForDeviceAccount } from "@app/accounts/create-account"
+import { getBalanceForWallet } from "@app/wallets"
 
 import {
   EmailUnverifiedError,
@@ -20,14 +22,12 @@ import {
   PhoneAccountAlreadyExistsNeedToSweepFundsError,
 } from "@services/kratos"
 
-import { LedgerService } from "@services/ledger"
 import { WalletsRepository } from "@services/mongoose"
 import {
   addAttributesToCurrentSpan,
   recordExceptionInCurrentSpan,
 } from "@services/tracing"
 
-import { upgradeAccountFromDeviceToPhone } from "@app/accounts"
 import { checkedToEmailCode } from "@domain/authentication"
 import { isPhoneCodeValid, TwilioClient } from "@services/twilio"
 
@@ -55,7 +55,6 @@ import {
   rewardFailedLoginAttemptPerIpLimits,
   rewardFailedLoginAttemptPerLoginIdentifierLimits,
 } from "./ratelimits"
-import { getBalanceForWallet } from "@app/wallets"
 
 export const loginWithPhoneToken = async ({
   phone,
