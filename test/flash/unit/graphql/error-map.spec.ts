@@ -8,6 +8,6 @@ describe("error-map", () => {
 
     expect(result).toBeDefined()
     expect(result.message).toContain("already registered")
-    expect(result.code).toBe("PHONE_ALREADY_REGISTERED_TO_ANOTHER_USER")
+    expect(result.extensions.code).toBe("PHONE_ALREADY_REGISTERED_TO_ANOTHER_USER")
   })
 })

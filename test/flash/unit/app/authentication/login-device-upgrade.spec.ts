@@ -1,40 +1,40 @@
-/**
- * Unit tests for loginDeviceUpgradeWithPhone — device→phone upgrade collision handling.
- *
- * Verifies the two error paths when a phone number is already registered:
- * - Non-zero device balance → PhoneAccountAlreadyExistsNeedToSweepFundsError
- * - Zero device balance → PhoneAccountAlreadyExistsCannotUpgradeError
- */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { USDAmount } from "@domain/shared"
-import {
-  loginDeviceUpgradeWithPhone,
-} from "@app/authentication/login"
 import {
   PhoneAccountAlreadyExistsCannotUpgradeError,
   PhoneAccountAlreadyExistsNeedToSweepFundsError,
 } from "@services/kratos"
+import { loginDeviceUpgradeWithPhone } from "@app/authentication/login"
 
-// Mock all external service boundaries to isolate the function under test
-jest.mock("@services/rate-limit", () => ({
-  consumeLimiter: jest.fn().mockResolvedValue(true),
-  RedisRateLimitService: jest.fn(() => ({
-    reward: jest.fn().mockResolvedValue(true),
-  })),
+jest.mock("@app/accounts/create-account", () => ({
+  createAccountForDeviceAccount: jest.fn(),
+}))
+
+jest.mock("@services/ledger", () => ({
+  LedgerService: jest.fn(),
+}))
+
+jest.mock("@app/accounts", () => ({
+  upgradeAccountFromDeviceToPhone: jest.fn(),
 }))
 
 jest.mock("@services/twilio", () => ({
   isPhoneCodeValid: jest.fn().mockResolvedValue(true),
+  TwilioClient: jest.fn(),
 }))
 
 jest.mock("@services/kratos", () => {
+  const actual = jest.requireActual("@services/kratos")
   const mockIdentityRepo = {
     getUserIdFromIdentifier: jest.fn().mockResolvedValue("existing-user-id"),
   }
+
   return {
+    ...actual,
     IdentityRepository: jest.fn(() => mockIdentityRepo),
-    PhoneAccountAlreadyExistsCannotUpgradeError: jest.fn(),
-    PhoneAccountAlreadyExistsNeedToSweepFundsError: jest.fn(),
+    AuthWithEmailPasswordlessService: jest.fn(),
+    AuthWithPhonePasswordlessService: jest.fn(),
     AuthWithUsernamePasswordDeviceIdService: jest.fn(),
   }
 })
@@ -49,18 +49,27 @@ jest.mock("@app/wallets", () => ({
 
 jest.mock("@services/tracing", () => ({
   addAttributesToCurrentSpan: jest.fn(),
-  wrapAsyncFunctionsToRunInSpan: jest.fn(),
   recordExceptionInCurrentSpan: jest.fn(),
-  ErrorLevel: { Warn: "warn", Critical: "critical" },
 }))
 
-jest.mock("@config", () => {
-  const actual = jest.requireActual("@config")
-  return {
-    ...actual,
-    getTestAccounts: jest.fn(() => ({})),
-  }
-})
+jest.mock("@domain/accounts-ips/ip-metadata-authorizer", () => ({
+  IPMetadataAuthorizer: jest.fn(),
+}))
+
+jest.mock("@services/ipfetcher", () => ({
+  IpFetcher: jest.fn(),
+}))
+
+jest.mock("@app/authentication/ratelimits", () => ({
+  checkFailedLoginAttemptPerIpLimits: jest.fn().mockResolvedValue(true),
+  checkFailedLoginAttemptPerLoginIdentifierLimits: jest.fn().mockResolvedValue(true),
+  rewardFailedLoginAttemptPerIpLimits: jest.fn().mockResolvedValue(true),
+  rewardFailedLoginAttemptPerLoginIdentifierLimits: jest.fn().mockResolvedValue(true),
+}))
+
+jest.mock("@config", () => ({
+  getAccountsOnboardConfig: jest.fn(() => ({ requireCountry: false })),
+}))
 
 const mockWalletsRepo = (): { listByAccountId: jest.Mock } => ({
   listByAccountId: jest.fn().mockResolvedValue([]),
@@ -77,6 +86,9 @@ describe("loginDeviceUpgradeWithPhone", () => {
     ;(require("@services/mongoose").WalletsRepository as jest.Mock).mockReturnValue(
       mockWalletsRepo(),
     )
+    ;(require("@services/kratos").IdentityRepository as jest.Mock).mockReturnValue({
+      getUserIdFromIdentifier: jest.fn().mockResolvedValue("existing-user-id"),
+    })
   })
 
   it("returns NeedToSweepFunds when device account has balance", async () => {
