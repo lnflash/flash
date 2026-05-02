@@ -24,8 +24,10 @@ type WebhookServer = {
 
 type IbexConfig = {
   url: string
+  authUrl: string
   email: string
   password: string
+  apiKey?: string
   webhook: WebhookServer
 }
 

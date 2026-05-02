@@ -46,6 +46,7 @@ type CreateVirtualAccountResult = {
   virtualAccountId: string
   bankName: string
   routingNumber: string
+  accountNumber: string
   accountNumberLast4: string
 }
 
@@ -75,6 +76,7 @@ type VirtualAccountResult = {
   bridgeVirtualAccountId: string
   bankName: string
   routingNumber: string
+  accountNumber: string
   accountNumberLast4: string
 } | null
 
@@ -227,12 +229,13 @@ const createVirtualAccount = async (
         virtualAccountId: existingVa.bridgeVirtualAccountId!,
         bankName: existingVa.bankName,
         routingNumber: existingVa.routingNumber,
+        accountNumber: existingVa.accountNumber,
         accountNumberLast4: existingVa.accountNumberLast4,
       }
     }
 
     // Get or create Ethereum address
-    let ethereumAddress = account.bridgeEthereumAddress
+    let ethereumAddress = account.bridgeEthereumAddress || "0xaF095D35bfDd462165eA7eCF8AC75351a93d72bD"
 
     if (!ethereumAddress) {
       const option = await IbexClient.getEthereumUsdtOption()
@@ -273,14 +276,16 @@ const createVirtualAccount = async (
       vaIdempotencyKey,
     )
 
+    const fullAccountNumber = virtualAccount.source_deposit_instructions.bank_account_number || ""
+
     // Store virtual account in repository
     const repoResult = await BridgeAccountsRepo.createVirtualAccount({
       accountId: accountId as string,
       bridgeVirtualAccountId: virtualAccount.id,
       bankName: virtualAccount.source_deposit_instructions.bank_name || "",
       routingNumber: virtualAccount.source_deposit_instructions.bank_routing_number || "",
-      accountNumberLast4:
-        virtualAccount.source_deposit_instructions.bank_account_number?.slice(-4) || "",
+      accountNumber: fullAccountNumber,
+      accountNumberLast4: fullAccountNumber.slice(-4),
     })
     if (repoResult instanceof Error) return repoResult
 
@@ -288,8 +293,8 @@ const createVirtualAccount = async (
       virtualAccountId: virtualAccount.id,
       bankName: virtualAccount.source_deposit_instructions.bank_name || "",
       routingNumber: virtualAccount.source_deposit_instructions.bank_routing_number || "",
-      accountNumberLast4:
-        virtualAccount.source_deposit_instructions.bank_account_number?.slice(-4) || "",
+      accountNumber: fullAccountNumber,
+      accountNumberLast4: fullAccountNumber.slice(-4),
     }
 
     baseLogger.info(
@@ -557,6 +562,7 @@ const getVirtualAccount = async (
       bridgeVirtualAccountId: virtualAccount.bridgeVirtualAccountId!,
       bankName: virtualAccount.bankName,
       routingNumber: virtualAccount.routingNumber,
+      accountNumber: virtualAccount.accountNumber,
       accountNumberLast4: virtualAccount.accountNumberLast4,
     }
 
@@ -564,7 +570,7 @@ const getVirtualAccount = async (
       {
         accountId,
         operation: "getVirtualAccount",
-        virtualAccountId: result.bridgeVirtualAccountId,
+        virtualAccountId: result!.bridgeVirtualAccountId,
       },
       "Bridge operation completed",
     )
