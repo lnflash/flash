@@ -9,7 +9,7 @@ import { mapError } from "@graphql/error-map"
 
 import { Wallets } from "@app"
 
-import { WalletCurrency as WalletCurrencyDomain } from "@domain/shared"
+import { WalletCurrency as WalletCurrencyDomain, USDTAmount } from "@domain/shared"
 
 import IWallet from "../abstract/wallet"
 
@@ -39,20 +39,26 @@ const UsdWallet = GT.Object<Wallet>({
       type: GT.NonNull(WalletCurrency),
       resolve: (source) => source.currency,
     },
-    
+
     lnurlp: {
       type: Lnurl,
       resolve: (source) => source.lnurlp,
     },
-    
+
     balance: {
       type: GT.NonNull(FractionalCentAmount),
       resolve: async (source) => {
-        const balance = await Wallets.getBalanceForWallet({ walletId: source.id })
+        const balance = await Wallets.getBalanceForWallet({
+          walletId: source.id,
+          currency: source.currency,
+        })
         if (balance instanceof Error) {
           throw mapError(balance)
         }
-        return Number(balance.asCents(8))
+        if (balance instanceof USDTAmount) {
+          return Number(balance.asSmallestUnits(8))
+        }
+        return Number((balance as any).asCents(8))
       },
     },
     pendingIncomingBalance: {

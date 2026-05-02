@@ -1,4 +1,4 @@
-import { IdentityState } from "@ory/client"
+import { IdentityStateEnum as IdentityState } from "@ory/client"
 
 import { baseLogger } from "@services/logger"
 

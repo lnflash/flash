@@ -630,6 +630,7 @@ export const configSchema = {
       type: "object",
       properties: {
         url: { type: "string" },
+        authUrl: { type: "string" },
         email: { type: "string" },
         password: { type: "string" },
         webhook: {
@@ -641,6 +642,32 @@ export const configSchema = {
           },
         },
       },
+    },
+    bridge: {
+      type: "object",
+      properties: {
+        enabled: { type: "boolean" },
+        apiKey: { type: "string" },
+        baseUrl: { type: "string" },
+        webhook: {
+          type: "object",
+          properties: {
+            port: { type: "integer" },
+            publicKeys: {
+              type: "object",
+              properties: {
+                kyc: { type: "string" },
+                deposit: { type: "string" },
+                transfer: { type: "string" },
+              },
+              required: ["kyc", "deposit", "transfer"],
+            },
+            timestampSkewMs: { type: "integer" },
+          },
+          required: ["port", "publicKeys", "timestampSkewMs"],
+        },
+      },
+      required: ["enabled", "apiKey", "baseUrl", "webhook"],
     },
     exchangeRates: {
       type: "object",
@@ -663,9 +690,9 @@ export const configSchema = {
           properties: {
             accounts: {
               type: "object",
-            }
+            },
           },
-        }
+        },
       },
       required: ["url", "credentials"],
     },
@@ -718,6 +745,7 @@ export const configSchema = {
     "exchangeRates",
     "cashout",
     "ibex",
+    "bridge",
   ],
   additionalProperties: false,
 } as const
