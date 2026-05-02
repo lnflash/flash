@@ -8,6 +8,7 @@ import { AccountsRepository } from "@services/mongoose/accounts"
 import { LockService } from "@services/lock"
 import { baseLogger } from "@services/logger"
 import { toBridgeCustomerId } from "@domain/primitives/bridge"
+import BridgeService from "@services/bridge"
 
 export const kycHandler = async (req: Request, res: Response) => {
 
@@ -49,6 +50,19 @@ export const kycHandler = async (req: Request, res: Response) => {
       }
 
       baseLogger.info({ accountId: account.id, customer_id }, "Bridge KYC approved")
+
+      const vaResult = await BridgeService.createVirtualAccount(account.id)
+      if (vaResult instanceof Error) {
+        baseLogger.error(
+          { accountId: account.id, error: vaResult },
+          "Failed to auto-create virtual account after KYC approval",
+        )
+      } else {
+        baseLogger.info(
+          { accountId: account.id, virtualAccountId: vaResult.virtualAccountId },
+          "Virtual account auto-created after KYC approval",
+        )
+      }
     } else if (kyc_status === "rejected") {
       const result = await AccountsRepository().updateBridgeFields(account.id, {
         bridgeKycStatus: "rejected",

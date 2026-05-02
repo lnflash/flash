@@ -13,6 +13,7 @@ export const createVirtualAccount = async (data: {
   bridgeVirtualAccountId: string
   bankName: string
   routingNumber: string
+  accountNumber: string
   accountNumberLast4: string
 }) => {
   try {

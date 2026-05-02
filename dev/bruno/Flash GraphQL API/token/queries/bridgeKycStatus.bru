@@ -1,7 +1,7 @@
 meta {
-  name: bridgeVirtualAccount
+  name: bridgeKycStatus
   type: graphql
-  seq: 18
+  seq: 19
 }
 
 post {
@@ -15,14 +15,8 @@ headers {
 }
 
 body:graphql {
-  query BridgeVirtualAccount {
-    bridgeVirtualAccount {
-      id
-      bankName
-      routingNumber
-      accountNumberLast4
-      accountNumber
-    }
+  query BridgeKycStatus {
+    bridgeKycStatus
   }
 }
 

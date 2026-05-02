@@ -23,6 +23,7 @@ interface IBridgeVirtualAccountRecord {
   bridgeVirtualAccountId: string
   bankName: string
   routingNumber: string
+  accountNumber: string
   accountNumberLast4: string
   createdAt: Date
 }
@@ -619,6 +620,7 @@ const BridgeVirtualAccountSchema = new Schema<IBridgeVirtualAccountRecord>({
   bridgeVirtualAccountId: { type: String, required: true, unique: true },
   bankName: { type: String, required: true },
   routingNumber: { type: String, required: true },
+  accountNumber: { type: String, required: true },
   accountNumberLast4: { type: String, required: true },
   createdAt: { type: Date, default: Date.now },
 })

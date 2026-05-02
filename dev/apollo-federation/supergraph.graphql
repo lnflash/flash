@@ -286,10 +286,15 @@ type BridgeKycLink
 type BridgeVirtualAccount
   @join__type(graph: PUBLIC)
 {
-  accountNumberLast4: String!
-  bankName: String!
-  id: ID!
-  routingNumber: String!
+  accountNumber: String
+  accountNumberLast4: String
+  bankName: String
+  id: ID
+  kycLink: String
+  message: String
+  pending: Boolean
+  routingNumber: String
+  tosLink: String
 }
 
 type BridgeWithdrawal

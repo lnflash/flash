@@ -225,30 +225,60 @@ const payToLnurl = async (
 
 const getIbexToken = async (): Promise<string | IbexError> => {
   const cached = await Ibex.authentication.storage.getAccessToken()
-  if (typeof cached === "string") return cached
-  const signInErr = await Ibex.authentication.signIn()
-  if (signInErr) return new IbexError(new Error("IBEX sign-in failed"))
-  const fresh = await Ibex.authentication.storage.getAccessToken()
-  return typeof fresh === "string" ? fresh : new IbexError(new Error("IBEX token unavailable"))
-}
+  if (typeof cached === "string") return `Bearer ${cached}`
 
-const ibexGet = async <T>(token: string, path: string): Promise<T | IbexError> => {
-  const resp = await fetch(`${IbexConfig.url}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!resp.ok) return new IbexError(new Error(`IBEX ${path} failed: ${resp.status}`))
-  return resp.json() as Promise<T>
-}
-
-const ibexPost = async <T>(token: string, path: string, body: unknown): Promise<T | IbexError> => {
-  const resp = await fetch(`${IbexConfig.url}${path}`, {
+  // The SDK uses a single base URL for all calls, but the sandbox auth domain is separate
+  const resp = await fetch(`${IbexConfig.authUrl}/auth/signin`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: IbexConfig.email, password: IbexConfig.password }),
+  }).catch((err: unknown) => new IbexError(err instanceof Error ? err : new Error(String(err))))
+
+  if (resp instanceof IbexError) return resp
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "")
+    return new IbexError(new Error(`IBEX sign-in failed: ${resp.status} — ${body}`))
+  }
+
+  const data = await resp.json() as {
+    accessToken?: string
+    accessTokenExpiresAt?: number
+    refreshToken?: string
+    refreshTokenExpiresAt?: number
+  }
+  if (!data.accessToken) return new IbexError(new Error("IBEX sign-in: no access token in response"))
+
+  await Ibex.authentication.storage.setAccessToken(data.accessToken, data.accessTokenExpiresAt)
+  if (data.refreshToken) {
+    await Ibex.authentication.storage.setRefreshToken(data.refreshToken, data.refreshTokenExpiresAt)
+  }
+
+  return `Bearer ${data.accessToken}`
+}
+
+const ibexFetch = async <T>(
+  token: string,
+  path: string,
+  init: RequestInit = {},
+): Promise<T | IbexError> => {
+  const url = `${IbexConfig.url}${path}`
+  const resp = await fetch(url, {
+    ...init,
+    headers: { Authorization: token, "Content-Type": "application/json", ...init.headers },
   })
-  if (!resp.ok) return new IbexError(new Error(`IBEX ${path} failed: ${resp.status}`))
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "")
+    baseLogger.error({ url, status: resp.status, body }, "IBEX request failed")
+    return new IbexError(new Error(`IBEX ${path} failed: ${resp.status} — ${body}`))
+  }
   return resp.json() as Promise<T>
 }
+
+const ibexGet = <T>(token: string, path: string) =>
+  ibexFetch<T>(token, path, { method: "GET" })
+
+const ibexPost = <T>(token: string, path: string, body: unknown) =>
+  ibexFetch<T>(token, path, { method: "POST", body: JSON.stringify(body) })
 
 const getCryptoReceiveBalance = async (
   receiveInfoId: string,
