@@ -32,7 +32,16 @@ bridge:
         QXWfFylw6m7eQTvZDQz70pnUEakofRlvKasetbyKmvLzMhuRHeqsxgi8C4ZCx7MP
         dwIDAQAB
         -----END PUBLIC KEY-----
-      deposit: "<replace>"
+      deposit: | 
+        -----BEGIN PUBLIC KEY-----
+        MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxrV+s8CvC0+s1W6vZG52
+        5eozo6W6HzkTcLQMWDoEzQX+ulEoYH2fPuXeupi11MdVLpEqNqYas8LD3BIf/c9H
+        kK54V8vnXNwoHa5ROp/Gjp3B17q3wGfjLa8bQJoJZFWd9W+e3TjUohCDNpeD/qv+
+        bkY2y3b1QixmXKK3REw35sfiEe5NkGMU4aEfXhZieIZ1mKXLsIgsgrIpv9BFwQr5
+        +h3R7Vv3hGKVgSZHnRMa9F1/go8v5Au8gj+9w0LxxRJikoJCubI6igaTCivibxuo
+        QXWfFylw6m7eQTvZDQz70pnUEakofRlvKasetbyKmvLzMhuRHeqsxgi8C4ZCx7MP
+        dwIDAQAB
+        -----END PUBLIC KEY-----
       transfer: "<replace>"
     timestampSkewMs: 300000
 

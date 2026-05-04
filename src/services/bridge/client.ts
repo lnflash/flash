@@ -120,6 +120,23 @@ export interface CreateVirtualAccountRequest {
   }
 }
 
+export interface CreateExternalAccountRequest {
+  account_owner_name: string
+  address: {
+    street_line_1: string
+    city: string
+    country: string
+  }
+  account_type: string | "us" | "iban" | "unknown" | "clabe" | "pix" | "gb"
+  currency: 'usd' | 'gbp' | 'brl' | 'eur' | string
+  account: {
+    account_number: string
+    routing_number: string
+    checking_or_savings?: "checking" | "savings"
+  }
+  bank_name?: string
+}
+
 export interface VirtualAccount {
   id: string
   status: string
@@ -147,6 +164,7 @@ export interface VirtualAccount {
 export interface ExternalAccount {
   id: string
   customer_id: string
+  account_owner_name: string
   account_type: string
   currency: string
   bank_name?: string
@@ -309,6 +327,10 @@ export class BridgeClient {
     return this.request<KycLink>("POST", "/kyc_links", request, idempotencyKey)
   }
 
+  async getKycLatestLink(customerId: BridgeCustomerId): Promise<KycLink> {
+    return this.request<KycLink>("GET", `/customers/${customerId}/kyc_links/latest`)
+  }
+
   // ============ Virtual Accounts ============
 
   async createVirtualAccount(
@@ -325,6 +347,18 @@ export class BridgeClient {
   }
 
   // ============ External Accounts ============
+
+  async createExternalAccount(
+    customerId: BridgeCustomerId,
+    data: CreateExternalAccountRequest,
+    idempotencyKey: string,
+  ): Promise<ExternalAccount> {
+    return this.request<ExternalAccount>(
+      "POST",
+      `/customers/${customerId}/external_accounts`,
+      data,
+      idempotencyKey);
+  }
 
   async getExternalAccountLinkUrl(
     customerId: BridgeCustomerId,
