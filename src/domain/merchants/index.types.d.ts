@@ -13,6 +13,7 @@ type BusinessMapMarker = {
   coordinates: Coordinates
   validated: boolean
   createdAt: Date
+  pubkey?: Npub
 }
 
 // Legacy type used before refactoring of the
@@ -25,4 +26,5 @@ type BusinessMapInfoLegacy = {
 type BusinessMapMarkerLegacy = {
   username: Username
   mapInfo: BusinessMapInfoLegacy
+  pubkey: string | null
 }

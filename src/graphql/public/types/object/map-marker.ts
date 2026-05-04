@@ -1,6 +1,7 @@
 import { GT } from "@graphql/index"
 
 import Username from "../../../shared/types/scalar/username"
+import Npub from "@graphql/shared/types/scalar/npub"
 
 import MapInfo from "./map-info"
 
@@ -12,6 +13,9 @@ const MapMarker = GT.Object({
     },
     mapInfo: {
       type: GT.NonNull(MapInfo),
+    },
+    pubkey: {
+      type: Npub,
     },
   }),
 })

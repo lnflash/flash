@@ -767,6 +767,7 @@ type MapInfo {
 
 type MapMarker {
   mapInfo: MapInfo!
+  pubkey: npub
   username: Username
 }
 
