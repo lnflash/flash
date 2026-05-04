@@ -168,6 +168,7 @@ export interface ListResponse<T> {
 }
 
 export type TrasfertSourceCurrency = "brl" | "cop" | "dai" | "eur" | "eurc" | "gbp" | "mxn" | "pyusd" | "usd" | "usdb" | "usdc" | "usdt"
+
 export interface CreateTransferRequest {
   amount?: string
   currency?: string

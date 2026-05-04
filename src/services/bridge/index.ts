@@ -94,7 +94,6 @@ export const deriveWithdrawalIdempotencyKey = (rowId: string): string =>
 
 // ============ Guards ============
 
-
 const checkBridgeEnabled = (): true | BridgeDisabledError => {
   if (!BridgeConfig.enabled) {
     return new BridgeDisabledError()
