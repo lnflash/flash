@@ -260,6 +260,24 @@ export interface BridgeIntiateKyc {
   full_name?: string
 }
 
+export type BridgeWebhookEventType = "kyc" | "transfer" | "virtual_account" | "external_account"
+
+export interface BridgeWebhookEvent {
+  id: string
+  event_type: string
+  payload: unknown
+  created_at: string
+}
+
+export interface ListEventsParams {
+  start_date?: string
+  end_date?: string
+  event_type?: string
+  after?: string
+  page_size?: number
+}
+
+
 // ============ Bridge Client ============
 
 export class BridgeClient {
@@ -401,6 +419,44 @@ export class BridgeClient {
     // Note: Bridge API uses /transfers/{id} not /customers/{id}/transfers/{id}
     return this.request<Transfer>("GET", `/transfers/${transferId}`)
   }
+
+
+  // ============ List Events ============
+
+  async listEvents(params?: ListEventsParams): Promise<ListResponse<BridgeWebhookEvent>> {
+    const queryParams = new URLSearchParams()
+
+    if (params?.start_date) queryParams.append("start_date", params.start_date)
+    if (params?.end_date) queryParams.append("end_date", params.end_date)
+    if (params?.event_type) queryParams.append("event_type", params.event_type)
+    if (params?.after) queryParams.append("after", params.after)
+    if (params?.page_size) queryParams.append("page_size", params.page_size.toString())
+
+    const suffix = queryParams.toString() ? `?${queryParams.toString()}` : ""
+
+    return this.request<ListResponse<BridgeWebhookEvent>>(
+      "GET",
+      `/developer/webhooks/events${suffix}`,
+    )
+  }
+
 }
 
 export default new BridgeClient()
+
+export async function* listAllEvents(
+  params?: Omit<ListEventsParams, "after">,
+): AsyncGenerator<BridgeWebhookEvent> {
+  const client = new BridgeClient()
+
+  let cursor: string | undefined
+  do {
+    const page = await client.listEvents({ ...params, after: cursor, page_size: 100 })
+
+    for (const event of page.data) {
+      yield event
+    }
+
+    cursor = page.has_more ? page.cursor : undefined
+  } while (cursor)
+}

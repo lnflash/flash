@@ -21,6 +21,7 @@ bridge:
   minWithdrawalAmount: 10
   webhook:
     port: 4009
+    replaySecret: "also-not-so-secret"
     publicKeys:
       kyc: |
         -----BEGIN PUBLIC KEY-----
