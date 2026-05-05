@@ -653,6 +653,46 @@ const BridgeWithdrawalSchema = new Schema<IBridgeWithdrawalRecord>({
   updatedAt: { type: Date, default: Date.now },
 })
 
+const BridgeDepositLogSchema = new Schema({
+  eventId: { type: String, required: true, unique: true },
+  transferId: { type: String, required: true },
+  customerId: { type: String, required: true },
+  state: { type: String, required: true },
+  amount: { type: String, required: true },
+  currency: { type: String, required: true },
+  subtotalAmount: { type: String },
+  developerFee: { type: String },
+  initialAmount: { type: String },
+  finalAmount: { type: String },
+  destinationTxHash: { type: String },
+  createdAt: { type: Date, default: Date.now },
+})
+
+BridgeDepositLogSchema.index({ transferId: 1 })
+BridgeDepositLogSchema.index({ customerId: 1, createdAt: -1 })
+
+export const BridgeDepositLog = mongoose.model("BridgeDepositLog", BridgeDepositLogSchema)
+
+const BridgeReplayLogSchema = new Schema({
+  eventId: { type: String, required: true },
+  eventType: { type: String, required: true },
+  eventPayload: { type: Schema.Types.Mixed, required: true },
+  bridgeEventCreatedAt: { type: Date, required: true },
+  replayedAt: { type: Date, required: true, default: Date.now },
+  operator: { type: String, required: true },
+  timeWindowStart: { type: Date, required: true },
+  timeWindowEnd: { type: Date, required: true },
+  httpStatus: { type: Number, required: true },
+  httpResponse: { type: Schema.Types.Mixed, required: true },
+  dryRun: { type: Boolean, required: true, default: false }
+})
+
+BridgeReplayLogSchema.index({ eventId: 1 })
+BridgeReplayLogSchema.index({ replayedAt: -1 })
+BridgeReplayLogSchema.index({ eventType: 1, replayedAt: -1 })
+
+export const BridgeReplayLog = mongoose.model("BridgeReplayLog", BridgeReplayLogSchema)
+
 export const BridgeVirtualAccount = mongoose.model<IBridgeVirtualAccountRecord>(
   "BridgeVirtualAccount",
   BridgeVirtualAccountSchema,
