@@ -13,6 +13,7 @@ import {
   UpgradeRequestCreateError,
   UpgradeRequestQueryError,
   BanksQueryError,
+  BankAccountQueryError,
   SetDocTypeValueError,
 } from "./errors"
 import {
@@ -20,6 +21,7 @@ import {
   RequestStatus,
 } from "./models/AccountUpgradeRequest"
 import { Bank } from "./models/Bank"
+import { BankAccount } from "./models/BankAccount"
 import { Filter } from "./SearchFilters"
 
 export type AccountUpgradeRequestFilters = { username?: Filter, status?: Filter }
@@ -242,6 +244,23 @@ class ErpNext {
         baseLogger.error({ err, names, status }, "Error bulk updating upgrade request status")
         return new SetDocTypeValueError(err)
       }
+    }
+  }
+
+  async getBankAccountsByCustomer(
+    customerName: string,
+  ): Promise<BankAccount[] | BankAccountQueryError> {
+    try {
+      const filters = `[["party_type","=","Customer"],["party","=","${customerName}"]]`
+      const fields = `["name","account_name","bank","bank_account_no","branch_code","account_type","currency","is_default"]`
+      const resp = await axios.get(
+        `${this.url}/api/resource/Bank%20Account?filters=${filters}&fields=${fields}`,
+        { headers: this.headers },
+      )
+      return resp.data?.data ?? []
+    } catch (err) {
+      baseLogger.error({ err, customerName }, "Error querying Bank Account from ERPNext")
+      return new BankAccountQueryError(err)
     }
   }
 
