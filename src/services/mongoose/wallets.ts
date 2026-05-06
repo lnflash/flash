@@ -40,17 +40,17 @@ export const WalletsRepository = (): IWalletsRepository => {
   }: NewWalletInfo): Promise<Wallet | ApplicationError> => {
     const account = await AccountsRepository().findById(accountId)
     if (account instanceof Error) return account
-    
+
     try {
       let currencyId = USDAmount.currencyId
 
       const resp = await Ibex.createAccount(accountId, currencyId)
       if (resp instanceof IbexError) return resp
-      const ibexAccountId = resp.id 
- 
+      const ibexAccountId = resp.id
+
       let lnurlp: string | undefined
       if (ibexAccountId !== undefined) {
-        const lnurlResp = await Ibex.createLnurlPay({ 
+        const lnurlResp = await Ibex.createLnurlPay({
           accountId: ibexAccountId,
           currencyId,
         })
@@ -66,7 +66,7 @@ export const WalletsRepository = (): IWalletsRepository => {
         }
         else lnurlp = lnurlResp.lnurl
       }
-      
+
       const wallet = new Wallet({
         _accountId: toObjectId<AccountId>(accountId),
         id: ibexAccountId,
@@ -158,9 +158,11 @@ export const WalletsRepository = (): IWalletsRepository => {
 
   const upsertExternal = async ({
     accountId,
+    currency,
     lnurlp,
   }: {
     accountId: AccountId
+    currency: WalletCurrency
     lnurlp: Lnurl
   }): Promise<Wallet | RepositoryError> => {
     if (!lnurlp.toLowerCase().startsWith("lnurl1")) {
@@ -171,7 +173,7 @@ export const WalletsRepository = (): IWalletsRepository => {
         { _accountId: toObjectId<AccountId>(accountId), type: WalletType.External },
         {
           $set: { lnurlp },
-          $setOnInsert: { id: randomUUID(), currency: WalletCurrency.Btc },
+          $setOnInsert: { id: randomUUID(), currency: currency },
         },
         { upsert: true, new: true },
       )

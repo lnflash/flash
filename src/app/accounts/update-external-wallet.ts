@@ -1,3 +1,4 @@
+import { WalletCurrency } from "@domain/shared"
 import { checkedToLunurl } from "@domain/wallets"
 import { WalletsRepository } from "@services/mongoose"
 
@@ -8,6 +9,6 @@ export const updateExternalWallet = async ({ accountId, lnurlp }: { accountId: A
     if (checkedLnurl instanceof Error) return checkedLnurl
 
 
-    return WalletsRepository().upsertExternal({ accountId, lnurlp: checkedLnurl })
+    return WalletsRepository().upsertExternal({ accountId, currency: WalletCurrency.Btc, lnurlp: checkedLnurl })
 
 }
