@@ -40,6 +40,7 @@ body:graphql {
                   balance
               }
           }
+        bankAccounts { id accountName bank currency }
       }
   }
 }
@@ -57,4 +58,5 @@ script:post-response {
 
 settings {
   encodeUrl: true
+  timeout: 0
 }

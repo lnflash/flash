@@ -207,11 +207,18 @@ type Bank
 type BankAccount
   @join__type(graph: PUBLIC)
 {
+  accountName: String!
   accountNumber: String!
-  accountType: String!
-  bankBranch: String!
-  bankName: String!
+
+  """Name of the bank institution"""
+  bank: String!
+
+  """Account currency (e.g. JMD, USD)"""
   currency: String!
+
+  """ERPNext bank account identifier"""
+  id: ID!
+  isDefault: Boolean!
 }
 
 input BankAccountInput
@@ -1917,6 +1924,9 @@ type UsdWallet implements Wallet
 type User
   @join__type(graph: PUBLIC)
 {
+  """Bank accounts available for cashout"""
+  bankAccounts: [BankAccount!]!
+
   """
   Get single contact details.
   Can include the transactions associated with the contact.

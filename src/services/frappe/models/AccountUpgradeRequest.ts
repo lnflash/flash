@@ -1,7 +1,8 @@
 import { erpStringToLevel, levelToErpString } from "./AccountLevel"
 import { Validated, ValidationError, validator } from "@domain/shared"
 import { isActiveAccount } from "@domain/accounts"
-import { Address, BankAccount } from "@app/accounts"
+import { Address } from "@app/accounts"
+import { BankAccount } from "./BankAccount"
 
 export enum RequestStatus {
   Pending = "Pending",
@@ -85,11 +86,11 @@ export class AccountUpgradeRequest {
       pincode: this.address.postalCode,
       country: this.address.country,
       terminal_requested: this.terminalsRequested.toString(),
-      bank_name: this.bankAccount?.bankName,
-      bank_branch: this.bankAccount?.bankBranch,
-      account_type: this.bankAccount?.accountType,
+      bank_name: this.bankAccount?.bank,
+      bank_branch: this.bankAccount?.branch_code,
+      account_type: this.bankAccount?.account_type,
       currency: this.bankAccount?.currency,
-      account_number: this.bankAccount?.accountNumber,
+      account_number: this.bankAccount?.bank_account_no,
       id_document: this.idDocument,
     }
   }
@@ -116,11 +117,11 @@ export class AccountUpgradeRequest {
       },
       Number(data.terminal_requested) || 0,
       data.bank_name ? {
-        bankName: data.bank_name,
-        bankBranch: data.bank_branch,
-        accountType: data.account_type,
+        bank: data.bank_name,
+        branch_code: data.bank_branch,
+        account_type: data.account_type,
         currency: data.currency,
-        accountNumber: data.account_number,
+        bank_account_no: data.account_number,
       } : undefined
     )
   }
