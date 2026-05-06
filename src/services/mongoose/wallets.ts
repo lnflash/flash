@@ -4,10 +4,12 @@ import {
   CouldNotFindWalletFromOnChainAddressesError,
   CouldNotListWalletsFromAccountIdError,
   CouldNotListWalletsFromWalletCurrencyError,
+  InvalidLnurlError,
   RepositoryError,
   UnsupportedCurrencyError,
 } from "@domain/errors"
 import { Types } from "mongoose"
+import { randomUUID } from "crypto"
 
 // FLASH FORK: import IBEX routes and helper
 import Ibex from "@services/ibex/client"
@@ -19,6 +21,7 @@ import { Wallet } from "./schema"
 import { AccountsRepository } from "./accounts"
 import { recordExceptionInCurrentSpan } from "@services/tracing"
 import { ErrorLevel, USDAmount, WalletCurrency } from "@domain/shared"
+import { WalletType } from "@domain/wallets"
 
 export interface WalletRecord {
   id: string
@@ -153,6 +156,47 @@ export const WalletsRepository = (): IWalletsRepository => {
     }
   }
 
+  const upsertExternal = async ({
+    accountId,
+    lnurlp,
+  }: {
+    accountId: AccountId
+    lnurlp: Lnurl
+  }): Promise<Wallet | RepositoryError> => {
+    if (!lnurlp.toLowerCase().startsWith("lnurl1")) {
+      return new InvalidLnurlError()
+    }
+    try {
+      const result: WalletRecord | null = await Wallet.findOneAndUpdate(
+        { _accountId: toObjectId<AccountId>(accountId), type: WalletType.External },
+        {
+          $set: { lnurlp },
+          $setOnInsert: { id: randomUUID(), currency: WalletCurrency.Btc },
+        },
+        { upsert: true, new: true },
+      )
+      if (!result) return new CouldNotFindWalletFromIdError()
+      return resultToWallet(result)
+    } catch (err) {
+      return parseRepositoryError(err)
+    }
+  }
+
+  const findExternalByAccountId = async (
+    accountId: AccountId,
+  ): Promise<Wallet | RepositoryError> => {
+    try {
+      const result: WalletRecord | null = await Wallet.findOne({
+        _accountId: toObjectId<AccountId>(accountId),
+        type: WalletType.External,
+      })
+      if (!result) return new CouldNotFindWalletFromIdError()
+      return resultToWallet(result)
+    } catch (err) {
+      return parseRepositoryError(err)
+    }
+  }
+
   return {
     findById,
     listByAccountId,
@@ -160,6 +204,8 @@ export const WalletsRepository = (): IWalletsRepository => {
     listByAddresses,
     persistNew,
     listByWalletCurrency,
+    upsertExternal,
+    findExternalByAccountId,
   }
 }
 

@@ -1,0 +1,38 @@
+meta {
+  name: updateExternalWallet
+  type: graphql
+  seq: 32
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  mutation updateExternalWallet($input: UpdateExternalWalletInput!) {
+    updateExternalWallet(input: $input) {
+      errors {
+        message
+      }
+      walletId
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "lnurlp": "LNURL1DP68GURN8GHJ7MRWW4EXCTNZD9NHXATW9EU8J730D3H82UNV94MKJ4RF9DZ"
+    }
+  }
+}
+
+settings {
+  encodeUrl: true
+}

@@ -74,7 +74,7 @@ type BaseWalletTransaction = {
   readonly settlementAmount: Satoshis | UsdCents
   readonly settlementFee: Satoshis | UsdCents
   readonly settlementCurrency: WalletCurrency
-  
+
   readonly settlementDisplayAmount: DisplayCurrencyMajorAmount
   readonly settlementDisplayFee: DisplayCurrencyMajorAmount
   readonly settlementDisplayPrice: WalletMinorUnitDisplayPrice<
@@ -131,12 +131,12 @@ type WalletLnSettledTransaction = BaseWalletTransaction & {
 }
 
 type UnknownTypeTransaction = BaseWalletTransaction & {
-  readonly initiationVia: { 
+  readonly initiationVia: {
     readonly type: 'unknown'
-  } 
-  readonly settlementVia: { 
+  }
+  readonly settlementVia: {
     readonly type: 'unknown'
-  } 
+  }
 }
 
 type WalletOnChainTransaction =
@@ -199,6 +199,10 @@ interface IWalletsRepository {
   listByWalletCurrency(
     walletCurrency: WalletCurrency,
   ): Promise<Wallet[] | RepositoryError>
+
+  upsertExternal({ accountId, lnurlp }: { accountId: AccountId, lnurlp: Lnurl }): Promise<Wallet | RepositoryError>
+
+  findExternalByAccountId(accountId: AccountId): Promise<Wallet | RepositoryError>
 }
 
 type OnChainDepositFeeArgs = {
