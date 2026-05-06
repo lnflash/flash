@@ -9,6 +9,10 @@ import { decodeInvoice, PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { Cashout, ExchangeRates } from "@config"
 import PersistedOffer from "./storage/PersistedOffer"
 import { EmailService } from "@services/email"
+import { AccountsRepository, WalletsRepository } from "@services/mongoose"
+import { RepositoryError } from "@domain/errors"
+import ErpNext from "@services/frappe/ErpNext"
+import { BankAccount } from "@services/frappe/models/BankAccount"
 
 const config = { 
   ...Cashout.OfferConfig,
@@ -19,6 +23,7 @@ const OffersManager = {
   createCashoutOffer: async (
     walletId: WalletId, 
     userPayment: USDAmount, 
+    bank: BankAccount,
   ): Promise<PersistedOffer | Error> => {
     const flashWallet = await getBankOwnerIbexAccount()
 
@@ -37,6 +42,8 @@ const OffersManager = {
     const usdLiability = userPayment.subtract(flashFee)
     const exchangeRate = config.jmd.sell // todo: get from price server
     const jmdLiability = usdLiability.convertAtRate(exchangeRate) 
+
+
 
     const validated = await ValidOffer.from({
       ibexTrx: {

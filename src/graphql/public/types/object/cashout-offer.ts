@@ -46,7 +46,7 @@ const CashoutOffer: GraphQLObjectType<PersistedOffer, GraphQLPublicContext> = GT
       resolve: (o) => o.details.flash.fee // Number(src.details.flash.fee.asCents(2)),
     },
     expiresAt: {
-      type: GT.NonNull(Timestamp), 
+      type: GT.NonNull(Timestamp),
       description: "The time at which this offer is no longer accepted by Flash",
       resolve: (o) => o.details.ibexTrx.invoice.expiresAt.getTime(),
     },

@@ -13,7 +13,7 @@ export type CashoutDetails = {
       readonly usd: USDAmount,
       readonly jmd: JMDAmount,
     }
-    readonly fee: USDAmount 
+    readonly fee: USDAmount
     readonly exchangeRate: JMDAmount,
   },
 }

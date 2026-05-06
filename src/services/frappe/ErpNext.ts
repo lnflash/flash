@@ -23,6 +23,7 @@ import {
 import { Bank } from "./models/Bank"
 import { BankAccount } from "./models/BankAccount"
 import { Filter } from "./SearchFilters"
+import ibex from "@services/ibex"
 
 export type AccountUpgradeRequestFilters = { username?: Filter, status?: Filter }
 type ErpNextFilter = [string, string, string, string[]]
@@ -55,60 +56,85 @@ class ErpNext {
     const { ibexTrx, flash } = offer.details
     const { liability } = flash
     const flashFee = flash.fee
-    const journalEntry = {
-      doctype: "Journal Entry",
-      company: "Flash",
-      multi_currency: 1,
-      posting_date: new Date().toISOString().split("T")[0],
-      remark: `${JSON.stringify({ paymentHash: ibexTrx.invoice.paymentHash, userWalletId: ibexTrx.userAcct })}`,
-      accounts: [
-        {
-          account: FrappeConfig.erpnext.accounts.ibex.operating,
-          account_currency: "USD",
-          debit_in_account_currency: erpUsd(ibexTrx.usd),
-          debit: erpUsd(ibexTrx.usd),
-          exchange_rate: 1,
-        },
-        {
-          account: FrappeConfig.erpnext.accounts.cashout,
-          account_currency: "JMD",
-          credit_in_account_currency: Number(liability.jmd.asCents(2)),
-          credit: erpUsd(liability.usd),
-          exchange_rate: erpUsd(liability.usd) / Number(liability.jmd.asCents(2)),
-          party_type: "Customer",
-          party,
-        },
-        {
-          account: FrappeConfig.erpnext.accounts.serviceFees,
-          account_currency: "USD",
-          credit_in_account_currency: erpUsd(flashFee),
-          credit: erpUsd(flashFee),
-          exchange_rate: 1,
-        },
-      ],
-    }
+    // const journalEntry = {
+    //   doctype: "Journal Entry",
+    //   company: "Flash",
+    //   multi_currency: 1,
+    //   posting_date: new Date().toISOString().split("T")[0],
+    //   remark: `${JSON.stringify({ paymentHash: ibexTrx.invoice.paymentHash, userWalletId: ibexTrx.userAcct })}`,
+    //   accounts: [
+    //     {
+    //       account: FrappeConfig.erpnext.accounts.ibex.operating,
+    //       account_currency: "USD",
+    //       debit_in_account_currency: erpUsd(ibexTrx.usd),
+    //       debit: erpUsd(ibexTrx.usd),
+    //       exchange_rate: 1,
+    //     },
+    //     {
+    //       account: FrappeConfig.erpnext.accounts.cashout,
+    //       account_currency: "JMD",
+    //       credit_in_account_currency: Number(liability.jmd.asCents(2)),
+    //       credit: erpUsd(liability.usd),
+    //       exchange_rate: erpUsd(liability.usd) / Number(liability.jmd.asCents(2)),
+    //       party_type: "Customer",
+    //       party,
+    //     },
+    //     {
+    //       account: FrappeConfig.erpnext.accounts.serviceFees,
+    //       account_currency: "USD",
+    //       credit_in_account_currency: erpUsd(flashFee),
+    //       credit: erpUsd(flashFee),
+    //       exchange_rate: 1,
+    //     },
+    //   ],
+    // }
+
+    // try {
+    //   const resp = await axios.post(
+    //     `${this.url}/api/resource/Journal Entry`,
+    //     journalEntry,
+    //     { headers: this.headers },
+    //   )
+    //   const titleResp = this.updateTitle(
+    //     resp.data.data.name,
+    //     `Open cashout ${ibexTrx.invoice.paymentHash.substring(0, 5)}`,
+    //   )
+    //   if (titleResp instanceof JournalEntryTitleError) {
+    //     baseLogger.error({ err: titleResp }, "Error updating JE title in ERPNext")
+    //   }
+
+    //   return {
+    //     journalId: resp.data.data.name,
+    //     voided: false,
+    //     transactionIds: [],
+    //   } as LedgerJournal
 
     try {
-      const resp = await axios.post(
-        `${this.url}/api/resource/Journal Entry`,
-        journalEntry,
+      const response = await axios.post(
+        `${this.url}/api/resource/Cashout`,
+        {
+          customer: party,
+          // bank_account: offer.details.bank,
+          amount: 100.00,
+          transaction_id: ibexTrx.invoice.paymentHash,                                                                       
+          wallet_id: ibexTrx.userAcct,
+          flash_wallet: ibexTrx.flashAcct,                                                                          
+          // invoice: ibexTrx.invoice.paymentHash,
+          usd_liability: liability.usd,                                                                        
+          jmd_liability: liability.jmd,                                                                        
+          exchange_rate: flash.exchangeRate,
+          flash_fee: flashFee,                                                                                
+        },           
         { headers: this.headers },
-      )
-      const titleResp = this.updateTitle(
-        resp.data.data.name,
-        `Open cashout ${ibexTrx.invoice.paymentHash.substring(0, 5)}`,
-      )
-      if (titleResp instanceof JournalEntryTitleError) {
-        baseLogger.error({ err: titleResp }, "Error updating JE title in ERPNext")
-      }
-
+      );
+      console.log("Cashout response:", response.data);
       return {
-        journalId: resp.data.data.name,
+        journalId: response.data.data.name,
         voided: false,
         transactionIds: [],
-      } as LedgerJournal
+      }
     } catch (err) {
-      baseLogger.error({ err, journalEntry }, "Error drafting JE in ERPNext")
+      baseLogger.error({ err }, "Error drafting Cashout in ERPNext")
       return new JournalEntryDraftError(err)
     }
   }
