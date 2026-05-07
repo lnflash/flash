@@ -10,6 +10,7 @@ import { mapError } from "@graphql/error-map"
 import { Wallets } from "@app"
 
 import { WalletCurrency as WalletCurrencyDomain } from "@domain/shared"
+import { WalletType } from "@domain/wallets"
 
 import IWallet from "../abstract/wallet"
 
@@ -42,10 +43,15 @@ const BtcWallet = GT.Object<Wallet>({
       type: Lnurl,
       resolve: (source) => source.lnurlp,
     },
+    isExternal: {
+      type: GT.NonNull(GT.Boolean),
+      resolve: (source) => source.type === WalletType.External,
+    },
     balance: {
-      type: GT.NonNull(FractionalCentAmount),
+      type: FractionalCentAmount,
       description: "A balance stored in BTC.",
       resolve: async (source) => {
+        if (source.type === WalletType.External) return null
         const balanceSats = await Wallets.getBalanceForWallet({ walletId: source.id })
         if (balanceSats instanceof Error) {
           throw mapError(balanceSats)

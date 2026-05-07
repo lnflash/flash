@@ -234,8 +234,9 @@ type BTCWallet implements Wallet
   accountId: ID!
 
   """A balance stored in BTC."""
-  balance: FractionalCentAmount!
+  balance: FractionalCentAmount
   id: ID!
+  isExternal: Boolean!
   lnurlp: Lnurl
 
   """An unconfirmed incoming onchain balance."""
@@ -1890,8 +1891,9 @@ type UsdWallet implements Wallet
   @join__type(graph: PUBLIC)
 {
   accountId: ID!
-  balance: FractionalCentAmount!
+  balance: FractionalCentAmount
   id: ID!
+  isExternal: Boolean!
   lnurlp: Lnurl
 
   """An unconfirmed incoming onchain balance."""
@@ -2219,8 +2221,9 @@ interface Wallet
   @join__type(graph: PUBLIC)
 {
   accountId: ID!
-  balance: FractionalCentAmount!
+  balance: FractionalCentAmount
   id: ID!
+  isExternal: Boolean!
   lnurlp: Lnurl
   pendingIncomingBalance: SignedAmount!
 
