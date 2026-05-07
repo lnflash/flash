@@ -277,6 +277,21 @@ export interface ListEventsParams {
   page_size?: number
 }
 
+type WebhookEventsApiResponse = {
+  data: Array<{
+    event_id?: string
+    event_type?: string
+    event_created_at?: string
+    event_object?: unknown
+    id?: string
+    created_at?: string
+    payload?: unknown
+  }>
+  count?: number
+  has_more?: boolean
+  cursor?: string
+}
+
 
 // ============ Bridge Client ============
 
@@ -301,10 +316,13 @@ export class BridgeClient {
       "Content-Type": "application/json",
     }
 
-    if (idempotencyKey) {
-      headers["Idempotency-Key"] = idempotencyKey
-    } else {
-      headers["Idempotency-Key"] = crypto.randomUUID()
+    // Bridge rejects Idempotency-Key on some GET endpoints (e.g. /webhook_events).
+    if (method.toUpperCase() !== "GET") {
+      if (idempotencyKey) {
+        headers["Idempotency-Key"] = idempotencyKey
+      } else {
+        headers["Idempotency-Key"] = crypto.randomUUID()
+      }
     }
 
 
@@ -426,18 +444,40 @@ export class BridgeClient {
   async listEvents(params?: ListEventsParams): Promise<ListResponse<BridgeWebhookEvent>> {
     const queryParams = new URLSearchParams()
 
-    if (params?.start_date) queryParams.append("start_date", params.start_date)
-    if (params?.end_date) queryParams.append("end_date", params.end_date)
-    if (params?.event_type) queryParams.append("event_type", params.event_type)
-    if (params?.after) queryParams.append("after", params.after)
-    if (params?.page_size) queryParams.append("page_size", params.page_size.toString())
+    // Bridge webhook events endpoint uses cursor pagination via starting_after.
+    if (params?.after) queryParams.append("starting_after", params.after)
+    if (params?.page_size) queryParams.append("limit", params.page_size.toString())
+    // Preserve call-site compatibility: derive category from event_type when possible.
+    if (params?.event_type) {
+      const category = params.event_type.split(".")[0]
+      if (category) queryParams.append("category", category)
+    }
 
     const suffix = queryParams.toString() ? `?${queryParams.toString()}` : ""
 
-    return this.request<ListResponse<BridgeWebhookEvent>>(
+    const response = await this.request<WebhookEventsApiResponse>(
       "GET",
-      `/developer/webhooks/events${suffix}`,
+      `/webhook_events${suffix}`,
     )
+
+    const mappedData: BridgeWebhookEvent[] = (response.data ?? []).map((event) => ({
+      id: event.event_id ?? event.id ?? "",
+      event_type: event.event_type ?? "",
+      created_at: event.event_created_at ?? event.created_at ?? "",
+      payload: event.event_object ?? event.payload ?? {},
+    }))
+
+    // Keep legacy ListResponse shape for existing callers.
+    const limit = params?.page_size ?? 100
+    const hasMoreFromCount = typeof response.count === "number" && response.count >= limit
+    const hasMore = response.has_more ?? hasMoreFromCount
+    const cursor = response.cursor ?? mappedData[mappedData.length - 1]?.id
+
+    return {
+      data: mappedData,
+      has_more: Boolean(hasMore && cursor),
+      cursor,
+    }
   }
 
 }

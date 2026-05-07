@@ -1,6 +1,11 @@
 import crypto from "crypto"
 
-import { getDefaultAccountsConfig, getFeesConfig, getDefaultFCMTopics, Levels } from "@config"
+import {
+  getDefaultAccountsConfig,
+  getFeesConfig,
+  getDefaultFCMTopics,
+  Levels,
+} from "@config"
 import { AccountStatus, UsernameRegex } from "@domain/accounts"
 import { WalletIdRegex, WalletType } from "@domain/wallets"
 import { WalletCurrency } from "@domain/shared"
@@ -661,7 +666,7 @@ const BridgeDepositLogSchema = new Schema({
   amount: { type: String, required: true },
   currency: { type: String, required: true },
   subtotalAmount: { type: String },
-  developerFee: { type: String },
+  developerFee: { type: String, required: true, default: "0" },
   initialAmount: { type: String },
   finalAmount: { type: String },
   destinationTxHash: { type: String },
@@ -672,6 +677,49 @@ BridgeDepositLogSchema.index({ transferId: 1 })
 BridgeDepositLogSchema.index({ customerId: 1, createdAt: -1 })
 
 export const BridgeDepositLog = mongoose.model("BridgeDepositLog", BridgeDepositLogSchema)
+
+const IbexCryptoReceiveLogSchema = new Schema({
+  txHash: { type: String, required: true, unique: true },
+  address: { type: String, required: true },
+  amount: { type: String, required: true },
+  currency: { type: String, required: true },
+  network: { type: String, required: true },
+  accountId: { type: String },
+  receivedAt: { type: Date, default: Date.now },
+})
+
+IbexCryptoReceiveLogSchema.index({ receivedAt: -1 })
+IbexCryptoReceiveLogSchema.index({ address: 1, receivedAt: -1 })
+
+export const IbexCryptoReceiveLog = mongoose.model(
+  "IbexCryptoReceiveLog",
+  IbexCryptoReceiveLogSchema,
+)
+
+const BridgeReconciliationOrphanSchema = new Schema({
+  orphanKey: { type: String, required: true, unique: true },
+  orphanType: {
+    type: String,
+    enum: ["bridge_without_ibex", "ibex_without_bridge"],
+    required: true,
+  },
+  transferId: { type: String },
+  txHash: { type: String },
+  bridgeEventId: { type: String },
+  customerId: { type: String },
+  amount: { type: String },
+  currency: { type: String },
+  triageContext: { type: Schema.Types.Mixed, required: true },
+  detectedAt: { type: Date, default: Date.now },
+})
+
+BridgeReconciliationOrphanSchema.index({ orphanType: 1, detectedAt: -1 })
+BridgeReconciliationOrphanSchema.index({ detectedAt: -1 })
+
+export const BridgeReconciliationOrphan = mongoose.model(
+  "BridgeReconciliationOrphan",
+  BridgeReconciliationOrphanSchema,
+)
 
 const BridgeReplayLogSchema = new Schema({
   eventId: { type: String, required: true },
@@ -684,7 +732,7 @@ const BridgeReplayLogSchema = new Schema({
   timeWindowEnd: { type: Date, required: true },
   httpStatus: { type: Number, required: true },
   httpResponse: { type: Schema.Types.Mixed, required: true },
-  dryRun: { type: Boolean, required: true, default: false }
+  dryRun: { type: Boolean, required: true, default: false },
 })
 
 BridgeReplayLogSchema.index({ eventId: 1 })
