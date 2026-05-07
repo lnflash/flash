@@ -1,9 +1,11 @@
 import express, { Request, Response } from "express"
 import { AccountsRepository } from "@services/mongoose/accounts"
+import { createIbexCryptoReceiveLog } from "@services/mongoose/ibex-crypto-receive-log"
 import { listWalletsByAccountId } from "@app/wallets"
 import { WalletCurrency, USDTAmount } from "@domain/shared"
 import { baseLogger } from "@services/logger"
 import { LockService } from "@services/lock"
+
 import { authenticate, logRequest } from "../middleware"
 
 const paths = {
@@ -28,52 +30,71 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
     return res.status(400).json({ error: "Invalid payload" })
   }
 
-  const lockResult = await LockService().lockPaymentHash(tx_hash as any, async () => {
-    try {
-      const account = await AccountsRepository().findByBridgeEthereumAddress(address)
-      if (account instanceof Error) {
-        baseLogger.error({ address, tx_hash }, "Account not found for Ethereum address")
-        return { status: "error", code: "account_not_found" } as CryptoReceiveResult
-      }
+  const lockResult = await LockService().lockPaymentHash(
+    tx_hash as PaymentHash,
+    async () => {
+      try {
+        const account = await AccountsRepository().findByBridgeEthereumAddress(address)
+        if (account instanceof Error) {
+          baseLogger.error({ address, tx_hash }, "Account not found for Ethereum address")
+          return { status: "error", code: "account_not_found" } as CryptoReceiveResult
+        }
 
-      const wallets = await listWalletsByAccountId(account.id)
-      if (wallets instanceof Error) {
-        baseLogger.error(
-          { accountId: account.id, error: wallets },
-          "Failed to list wallets",
-        )
-        return { status: "error", code: "wallet_list_failed" } as CryptoReceiveResult
-      }
-
-      const usdtWallet = wallets.find((w) => w.currency === WalletCurrency.Usdt)
-      if (!usdtWallet) {
-        baseLogger.error({ accountId: account.id }, "USDT wallet not found")
-        return { status: "error", code: "usdt_wallet_not_found" } as CryptoReceiveResult
-      }
-
-      const usdtAmount = USDTAmount.fromNumber(amount)
-      if (usdtAmount instanceof Error) {
-        baseLogger.error({ amount, error: usdtAmount }, "Invalid USDT amount")
-        return { status: "error", code: "invalid_amount" } as CryptoReceiveResult
-      }
-
-      baseLogger.info(
-        {
+        const ibexLog = await createIbexCryptoReceiveLog({
+          txHash: String(tx_hash),
+          address: String(address),
+          amount: String(amount),
+          currency: String(currency),
+          network: String(network),
           accountId: account.id,
-          walletId: usdtWallet.id,
-          amount: usdtAmount.asNumber(),
-          tx_hash,
-          address,
-        },
-        "USDT deposit received",
-      )
+        })
+        if (ibexLog instanceof Error) {
+          baseLogger.error(
+            { error: ibexLog, tx_hash },
+            "Failed to persist IBEX crypto receive log",
+          )
+          return { status: "error", code: "internal_error" } as CryptoReceiveResult
+        }
 
-      return { status: "success" } as CryptoReceiveResult
-    } catch (error) {
-      baseLogger.error({ error, tx_hash }, "Error processing crypto receive webhook")
-      return { status: "error", code: "internal_error" } as CryptoReceiveResult
-    }
-  })
+        const wallets = await listWalletsByAccountId(account.id)
+        if (wallets instanceof Error) {
+          baseLogger.error(
+            { accountId: account.id, error: wallets },
+            "Failed to list wallets",
+          )
+          return { status: "error", code: "wallet_list_failed" } as CryptoReceiveResult
+        }
+
+        const usdtWallet = wallets.find((w) => w.currency === WalletCurrency.Usdt)
+        if (!usdtWallet) {
+          baseLogger.error({ accountId: account.id }, "USDT wallet not found")
+          return { status: "error", code: "usdt_wallet_not_found" } as CryptoReceiveResult
+        }
+
+        const usdtAmount = USDTAmount.fromNumber(amount)
+        if (usdtAmount instanceof Error) {
+          baseLogger.error({ amount, error: usdtAmount }, "Invalid USDT amount")
+          return { status: "error", code: "invalid_amount" } as CryptoReceiveResult
+        }
+
+        baseLogger.info(
+          {
+            accountId: account.id,
+            walletId: usdtWallet.id,
+            amount: usdtAmount.asNumber(),
+            tx_hash,
+            address,
+          },
+          "USDT deposit received",
+        )
+
+        return { status: "success" } as CryptoReceiveResult
+      } catch (error) {
+        baseLogger.error({ error, tx_hash }, "Error processing crypto receive webhook")
+        return { status: "error", code: "internal_error" } as CryptoReceiveResult
+      }
+    },
+  )
 
   if (lockResult instanceof Error) {
     baseLogger.warn(

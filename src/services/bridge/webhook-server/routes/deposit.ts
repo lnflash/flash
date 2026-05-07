@@ -21,7 +21,7 @@ export const depositHandler = async (req: Request, res: Response) => {
 
   // Idempotency: lock on the transfer id + state so each state transition is processed once
   const lockKey = `bridge-deposit:${id}:${state}`
-  const lockResult = await LockService().lockIdempotencyKey(lockKey as any)
+  const lockResult = await LockService().lockIdempotencyKey(lockKey as IdempotencyKey)
   if (lockResult instanceof Error) {
     baseLogger.info({ event_id, id, state }, "Duplicate Bridge deposit webhook")
     return res.status(200).json({ status: "already_processed" })
@@ -54,15 +54,26 @@ export const depositHandler = async (req: Request, res: Response) => {
       state,
       amount: String(amount),
       currency,
-      subtotalAmount: receipt?.subtotal_amount != null ? String(receipt.subtotal_amount) : undefined,
-      developerFee: receipt?.developer_fee != null ? String(receipt.developer_fee) : undefined,
-      initialAmount: receipt?.initial_amount != null ? String(receipt.initial_amount) : undefined,
-      finalAmount: receipt?.final_amount != null ? String(receipt.final_amount) : undefined,
+      developerFee:
+        receipt?.developer_fee != null
+          ? String(receipt.developer_fee)
+          : event_object?.developer_fee != null
+            ? String(event_object.developer_fee)
+            : "0",
+      subtotalAmount:
+        receipt?.subtotal_amount != null ? String(receipt.subtotal_amount) : undefined,
+      initialAmount:
+        receipt?.initial_amount != null ? String(receipt.initial_amount) : undefined,
+      finalAmount:
+        receipt?.final_amount != null ? String(receipt.final_amount) : undefined,
       destinationTxHash: receipt?.destination_tx_hash,
     })
 
     if (depositLog instanceof Error) {
-      baseLogger.error({ error: depositLog, event_id, id }, "Failed to persist bridge deposit log")
+      baseLogger.error(
+        { error: depositLog, event_id, id },
+        "Failed to persist bridge deposit log",
+      )
       return res.status(500).json({ error: "Failed to persist deposit log" })
     }
 

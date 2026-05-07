@@ -1,6 +1,6 @@
 import { OnChain, Lightning, Wallets, Payments, Swap } from "@app"
 
-import { getCronConfig, TWO_MONTHS_IN_MS } from "@config"
+import { BridgeConfig, getCronConfig, TWO_MONTHS_IN_MS } from "@config"
 
 import { ErrorLevel } from "@domain/shared"
 import { OperationInterruptedError } from "@domain/errors"
@@ -20,6 +20,7 @@ import {
 import { baseLogger } from "@services/logger"
 import { setupMongoConnection } from "@services/mongodb"
 import { activateLndHealthCheck, checkAllLndHealth } from "@services/lnd/health"
+import { reconcileBridgeAndIbexDeposits } from "@services/bridge/reconciliation"
 
 import { elapsedSinceTimestamp, sleep } from "@utils"
 import { rebalancingInternalChannels } from "@services/lnd/rebalancing"
@@ -64,6 +65,13 @@ const swapOutJob = async () => {
   if (swapResult instanceof Error) throw swapResult
 }
 
+const reconcileBridgeDepositsJob = async () => {
+  if (!BridgeConfig.enabled) return
+
+  const result = await reconcileBridgeAndIbexDeposits()
+  if (result instanceof Error) throw result
+}
+
 const main = async () => {
   console.log("cronjob started")
   const start = new Date()
@@ -84,6 +92,7 @@ const main = async () => {
     updateLegacyOnChainReceipt,
     ...(cronConfig.rebalanceEnabled ? [rebalance] : []),
     ...(cronConfig.swapEnabled ? [swapOutJob] : []),
+    reconcileBridgeDepositsJob,
     deleteExpiredPaymentFlows,
     deleteExpiredInvoices,
     deleteLndPaymentsBefore2Months,

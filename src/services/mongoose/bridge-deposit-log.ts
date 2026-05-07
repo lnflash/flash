@@ -7,8 +7,8 @@ export const createBridgeDepositLog = async (data: {
   state: string
   amount: string
   currency: string
+  developerFee: string
   subtotalAmount?: string
-  developerFee?: string
   initialAmount?: string
   finalAmount?: string
   destinationTxHash?: string
