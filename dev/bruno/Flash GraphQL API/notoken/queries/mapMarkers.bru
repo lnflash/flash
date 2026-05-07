@@ -1,0 +1,34 @@
+meta {
+  name: mapMarkers
+  type: graphql
+  seq: 3
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  query businessMapMarkers {
+    businessMapMarkers {
+      username
+      mapInfo {
+        title
+        coordinates {
+          latitude
+          longitude
+        }
+      }
+    }
+  }
+}
+
+body:graphql:vars {
+  {"range": "ONE_DAY"}
+}
+
+settings {
+  encodeUrl: true
+}

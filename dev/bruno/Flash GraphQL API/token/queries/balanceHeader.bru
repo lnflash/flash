@@ -1,0 +1,57 @@
+meta {
+  name: balanceHeader
+  type: graphql
+  seq: 11
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  query balanceHeader {
+    me {
+      id
+      defaultAccount {
+        id
+        wallets {
+            ... on BTCWallet {
+              id
+              balance
+              __typename
+          }
+          ... on UsdWallet {
+              id
+              balance
+              __typename
+          }
+      }
+        __typename
+      }
+      __typename
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+      "hasToken": true
+  }
+}
+
+script:post-response {
+  test("requesting me data", function () {
+      const jsonData = res.getBody();
+      const walletId = jsonData.data.me.defaultAccount.defaultWalletId
+      // walletId should have 5 groups separated by dashes "-"
+      const parts = walletId.split("-")
+      expect(parts.length).to.eql(5);
+      bru.setEnvVar("walletId", walletId)
+  });
+}
+
+settings {
+  encodeUrl: true
+}

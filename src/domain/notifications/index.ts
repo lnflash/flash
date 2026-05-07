@@ -1,4 +1,5 @@
 import { InvalidPushNotificationSettingError as InvalidNotificationSettingsError } from "./errors"
+import { getDefaultFCMTopics } from "@config"
 
 export * from "./errors"
 
@@ -15,40 +16,23 @@ export const NotificationChannel = {
   Push: "push",
 } as const
 
-export const GaloyNotificationCategories = {
+export const FlashNotificationCategories = {
   Payments: "Payments" as NotificationCategory,
   Balance: "Balance" as NotificationCategory,
   AdminPushNotification: "AdminPushNotification" as NotificationCategory,
-} as const
-
-export const BroadcastTag = {
-  EMERGENCY: "EMERGENCY",
-  ATTENTION: "ATTENTION",
-  INFO: "INFO",
-  MARKETING: "MARKETING",
+  Cashout: "Cashout" as NotificationCategory
 } as const
 
 export const checkedToNotificationCategory = (
   notificationCategory: string,
 ): NotificationCategory | ValidationError => {
-  // TODO: add validation
-  if (!notificationCategory) {
+
+  const validNotificationCategories = Object.values(FlashNotificationCategories)
+  if (!validNotificationCategories.includes(notificationCategory as NotificationCategory)) {
     return new InvalidNotificationSettingsError("Invalid notification category")
   }
 
   return notificationCategory as NotificationCategory
-}
-
-export const checkedToBroadcastTag = (
-  tag: string,
-): BroadcastTag | ValidationError => {
-  const validTags = Object.values(BroadcastTag)
-  if (!validTags.includes(tag as BroadcastTag)) {
-    return new InvalidNotificationSettingsError(
-      `Invalid broadcast tag. Must be one of: ${validTags.join(", ")}`,
-    )
-  }
-  return tag as BroadcastTag
 }
 
 export const enableNotificationChannel = ({
@@ -190,4 +174,16 @@ export const shouldSendNotification = ({
   }
 
   return false
+}
+
+export const checkedToNotificationTopic = (
+  t: string,
+): NotificationTopic | ValidationError => {
+  const topics = getDefaultFCMTopics()
+  if (!topics.includes(t)) {
+    return new InvalidNotificationSettingsError(
+      `Invalid topic. Must be one of: ${topics.join(", ")}`,
+    )
+  }
+  return t as unknown as NotificationTopic
 }

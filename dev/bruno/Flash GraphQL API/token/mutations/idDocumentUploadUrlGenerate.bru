@@ -1,0 +1,40 @@
+meta {
+  name: idDocumentUploadUrlGenerate
+  type: graphql
+  seq: 28
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  mutation IdDocumentUploadUrlGenerate($input: IdDocumentUploadUrlGenerateInput!) {
+    idDocumentUploadUrlGenerate(input: $input) {
+      errors {
+        message
+      }
+      uploadUrl
+      fileKey
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "filename": "id_front.jpg",
+      "contentType": "image/jpeg"
+    }
+  }
+}
+
+settings {
+  encodeUrl: true
+}

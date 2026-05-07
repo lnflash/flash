@@ -1,0 +1,66 @@
+meta {
+  name: me
+  type: graphql
+  seq: 2
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  query me {
+      me {
+          username
+          phone
+          defaultAccount {
+              displayCurrency
+              defaultWalletId
+              wallets {
+                  id
+                  walletCurrency
+                  balance
+              }
+          }
+      }
+  }
+}
+
+body:graphql:vars {
+  {}
+}
+
+script:post-response {
+  test("requesting me data", function () {
+      const jsonData = res.getBody();
+      const walletIdUsd = jsonData.data.me.defaultAccount.wallets.find((wallet) => wallet.walletCurrency === "USD")?.id
+      const walletIdBtc = jsonData.data.me.defaultAccount.wallets.find((wallet) => wallet.walletCurrency === "BTC")?.id
+      const defaultWalletId = jsonData.data.me.defaultAccount.defaultWalletId
+      // walletId should have 5 groups separated by dashes "-"
+      let parts = defaultWalletId.split("-")
+      expect(parts.length).to.eql(5);
+      bru.setEnvVar("walletId", defaultWalletId)
+  
+      if (walletIdUsd) {
+          parts = walletIdUsd.split("-")
+          expect(parts.length).to.eql(5);
+          bru.setEnvVar("walletIdUsd", walletIdUsd)
+      } else {
+          bru.setEnvVar("walletIdUsd", null)
+      }
+  
+      parts = walletIdBtc.split("-")
+      expect(parts.length).to.eql(5);
+      bru.setEnvVar("walletIdBtc", walletIdBtc)
+  });
+}
+
+settings {
+  encodeUrl: true
+}

@@ -1,0 +1,36 @@
+meta {
+  name: usernameExists
+  type: graphql
+  seq: 7
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  query usernameAvailable($username: Username!) {
+      usernameAvailable(username: $username)
+  }
+}
+
+body:graphql:vars {
+  {
+      "username": "xyz"
+  }
+}
+
+script:post-response {
+  test("expect usernameExists to return true for test username", function () {
+      var jsonData = res.getBody();
+      expect(jsonData.data.usernameExists).to.be(true);
+  });
+  
+  
+}
+
+settings {
+  encodeUrl: true
+}

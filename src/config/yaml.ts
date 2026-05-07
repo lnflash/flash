@@ -268,6 +268,9 @@ export const getTestAccounts = (config = yamlConfig): TestAccount[] =>
 
 export const getCronConfig = (config = yamlConfig): CronConfig => config.cronConfig
 
+export const getDefaultFCMTopics = (config = yamlConfig): string[] => config.fcmTopics.filter(t => t.default).map(t => t.name)
+export const getFCMTopics = (config = yamlConfig): string[] => config.fcmTopics.map(t => t.name)
+
 export const getCaptcha = (config = yamlConfig): CaptchaConfig => config.captcha
 
 export const getRewardsConfig = (): RewardsConfig => {

@@ -6,7 +6,7 @@ import { paymentAmountFromNumber, USDAmount, ValidationError, WalletCurrency } f
 import { GT } from "@graphql/index"
 import { mapError } from "@graphql/error-map"
 
-import CentAmount from "@graphql/public/types/scalar/cent-amount"
+import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 import OnChainAddress from "@graphql/shared/types/scalar/on-chain-address"
 import PayoutSpeed from "@graphql/public/types/scalar/payout-speed"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
@@ -25,7 +25,7 @@ const OnChainUsdTxFeeQuery = GT.Field<null, GraphQLPublicContextAuth>({
   args: {
     walletId: { type: GT.NonNull(WalletId) },
     address: { type: GT.NonNull(OnChainAddress) },
-    amount: { type: GT.NonNull(CentAmount) },
+    amount: { type: GT.NonNull(FractionalCentAmount) },
     speed: {
       type: PayoutSpeed,
       defaultValue: DomainPayoutSpeed.Fast,
@@ -46,20 +46,15 @@ const OnChainUsdTxFeeQuery = GT.Field<null, GraphQLPublicContextAuth>({
     //   speed,
     // })
 
-    const send = USDAmount.cents(amount)
+    const send = USDAmount.cents(amount.toString())
     if (send instanceof Error) return send
     const resp = await Ibex.estimateOnchainFee(send, address)
 
     if (resp instanceof IbexError) return resp
     if (resp.fee === undefined) return new UnexpectedIbexResponse("Missing fee field")
 
-    const fee: PaymentAmount<WalletCurrency> = {
-      amount: BigInt(Math.round(resp.fee * 100)),
-      currency: WalletCurrency.Usd,
-    }
-
     return {
-      amount: normalizePaymentAmount(fee).amount,
+      amount: resp.fee,
     }
   },
 })

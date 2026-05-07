@@ -1,0 +1,40 @@
+meta {
+  name: account-update-level
+  type: graphql
+  seq: 1
+}
+
+post {
+  url: {{admin_url}}
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{admin_token}}
+}
+
+body:graphql {
+  mutation AccountUpdateLevel($input: AccountUpdateLevelInput!) {
+    accountUpdateLevel(input: $input) {
+      errors {
+        message
+      }
+      accountDetails {
+        id
+        level
+        erpParty
+      }
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "uid": "69fb995b012e5336d69a0f1f",
+      "level": "THREE",
+      "erpParty": "John Doe"
+    }
+  }
+}

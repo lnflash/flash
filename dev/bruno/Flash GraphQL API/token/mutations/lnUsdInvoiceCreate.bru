@@ -1,0 +1,50 @@
+meta {
+  name: lnUsdInvoiceCreate
+  type: graphql
+  seq: 14
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  mutation lnUsdInvoiceCreate($input: LnUsdInvoiceCreateInput!) {
+    lnUsdInvoiceCreate(input: $input) {
+      invoice {
+        paymentRequest
+        paymentHash
+        paymentSecret
+        satoshis
+      }
+      errors {
+        message
+      }
+    }
+  }
+  
+}
+
+body:graphql:vars {
+  {
+      "input": {
+          "walletId": "{{walletIdUsd}}",
+          "amount": 100000,
+          "memo": "Test"
+      }
+  }
+}
+
+script:post-response {
+  test("add invoice", function () {
+      const jsonData = res.getBody();
+      const invoice = jsonData.data.invoice.addInvoice
+      expect(invoice.substring(0,2)).to.eql("ln")
+  });
+}
+
+settings {
+  encodeUrl: true
+}

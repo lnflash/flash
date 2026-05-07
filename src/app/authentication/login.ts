@@ -1,4 +1,6 @@
+import { upgradeAccountFromDeviceToPhone } from "@app/accounts"
 import { createAccountForDeviceAccount } from "@app/accounts/create-account"
+import { getBalanceForWallet } from "@app/wallets"
 
 import {
   EmailUnverifiedError,
@@ -16,17 +18,16 @@ import {
   AuthWithPhonePasswordlessService,
   AuthWithUsernamePasswordDeviceIdService,
   IdentityRepository,
+  PhoneAccountAlreadyExistsCannotUpgradeError,
   PhoneAccountAlreadyExistsNeedToSweepFundsError,
 } from "@services/kratos"
 
-import { LedgerService } from "@services/ledger"
 import { WalletsRepository } from "@services/mongoose"
 import {
   addAttributesToCurrentSpan,
   recordExceptionInCurrentSpan,
 } from "@services/tracing"
 
-import { upgradeAccountFromDeviceToPhone } from "@app/accounts"
 import { checkedToEmailCode } from "@domain/authentication"
 import { isPhoneCodeValid, TwilioClient } from "@services/twilio"
 
@@ -54,7 +55,6 @@ import {
   rewardFailedLoginAttemptPerIpLimits,
   rewardFailedLoginAttemptPerLoginIdentifierLimits,
 } from "./ratelimits"
-import { getBalanceForWallet } from "@app/wallets"
 
 export const loginWithPhoneToken = async ({
   phone,
@@ -315,13 +315,20 @@ export const loginDeviceUpgradeWithPhone = async ({
       deviceAccountHasBalance = true
     }
   }
-  if (deviceAccountHasBalance) return new PhoneAccountAlreadyExistsNeedToSweepFundsError()
+  if (deviceAccountHasBalance) {
+    addAttributesToCurrentSpan({
+      "login.upgrade.collisionRejected": true,
+      "login.upgrade.collisionHasDeviceBalance": true,
+    })
+    return new PhoneAccountAlreadyExistsNeedToSweepFundsError()
+  }
 
-  // no txns on device account but phone account exists, just log the user in with the phone account
-  const authService = AuthWithPhonePasswordlessService()
-  const kratosResult = await authService.loginToken({ phone })
-  if (kratosResult instanceof Error) return kratosResult
-  return { success: true, authToken: kratosResult.authToken }
+  addAttributesToCurrentSpan({
+    "login.upgrade.collisionRejected": true,
+    "login.upgrade.collisionHasDeviceBalance": false,
+  })
+
+  return new PhoneAccountAlreadyExistsCannotUpgradeError()
 }
 
 export const loginWithDevice = async ({

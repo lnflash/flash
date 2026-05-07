@@ -74,6 +74,9 @@ const Account: GraphQLObjectType<Account> = GT.Object<Account>({
       type: GT.NonNull(Timestamp),
       resolve: (source) => source.createdAt,
     },
+    erpParty: {
+      type: GT.String,
+    },
   }),
 })
 

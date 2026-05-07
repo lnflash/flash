@@ -19,6 +19,7 @@ import {
 } from "@services/tracing"
 import { messaging } from "./firebase"
 import { FirebaseError } from "firebase-admin"
+import { Message } from "firebase-admin/lib/messaging/messaging-api"
 
 const logger = baseLogger.child({ module: "notifications" })
 
@@ -45,6 +46,7 @@ const sendToDevice = async (
     batchResp.responses
       .forEach((r, idx) => {
         if (!r.success) {
+          logger.warn({ error: r.error, token: tokens[idx] }, "Error sending notification to device")
           recordExceptionInCurrentSpan({
             error: new FirebaseMessageError(r.error as unknown as FirebaseError, tokens[idx]),
             level: ErrorLevel.Warn,
@@ -54,6 +56,11 @@ const sendToDevice = async (
           invalidTokens.push(tokens[idx])
         }
       })
+
+    logger.info(
+      { successCount: batchResp.successCount, failureCount: batchResp.failureCount },
+      "Notification batch response",
+    )
 
     // addAttributesToCurrentSpan({
     //   failureCount: response.failureCount,
@@ -73,7 +80,17 @@ const sendToDevice = async (
   }
 }
 
+// Wraps the Firebase messaging service
 export const PushNotificationsService = (): IPushNotificationsService => {
+  const send = async (message: Message): Promise<string | NotificationsServiceError> => {
+    if (!messaging) {
+      baseLogger.error("Firebase messaging module not loaded")
+      return new NotificationsServiceError("Firebase messaging module not loaded")
+    }
+
+    return await messaging.send(message)
+  }
+
   const sendNotification = async ({
     deviceTokens,
     title,
@@ -134,7 +151,7 @@ export const PushNotificationsService = (): IPushNotificationsService => {
     }
   }
 
-  return { sendNotification, sendFilteredNotification }
+  return { send, sendNotification, sendFilteredNotification }
 }
 
 export const handleCommonNotificationErrors = (err: Error | string | unknown) => {

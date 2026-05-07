@@ -1,77 +1,72 @@
-import { InvalidAccountStatusError } from "@domain/errors"
-import { AccountLevel, checkedToAccountLevel } from "@domain/accounts"
-
 import { AccountsRepository, UsersRepository } from "@services/mongoose"
 import { IdentityRepository } from "@services/kratos"
 import ErpNext from "@services/frappe/ErpNext"
 
-import { updateAccountLevel } from "./update-account-level"
+import { AccountUpgradeRequest, RequestStatus } from "@services/frappe/models/AccountUpgradeRequest"
+import { DomainError, ValidationError } from "@domain/shared"
+import { AccountLevel } from "@domain/accounts"
+import { SetDocTypeValueError, UpgradeRequestQueryError } from "@services/frappe/errors"
+import { SearchFilter } from "@services/frappe/SearchFilters"
 
-type BusinessUpgradeRequestInput = {
+
+type RequestId = string & { __brand: "UpgradeRequestId" }
+type UpgradeStatusResponse = {
+  id: RequestId
+  status: RequestStatus
+}
+
+export class CreateUpgradeRequestError extends DomainError {}
+
+export type Address = {
+  title: string,
+  line1: string
+  line2?: string
+  city: string
+  state: string
+  postalCode?: string
+  country: string // Should fetch from ErpNext options
+}
+
+export type BankAccount = {
+  bankName: string
+  bankBranch: string
+  accountType: string
+  currency: string
+  accountNumber: string
+}
+
+type ProUpgradeRequest = {
+  level: typeof AccountLevel.Pro
   accountId: AccountId
-  level: number
   fullName: string
-  phoneNumber?: string
-  email?: string
-  businessName?: string
-  businessAddress?: string
-  terminalRequested?: boolean
-  bankName?: string
-  bankBranch?: string
-  accountType?: string
-  currency?: string
-  accountNumber?: number
-  idDocument?: string
+  address: Address
+  terminalsRequested: number
+  bankAccount?: BankAccount
+  idDocument: string
 }
 
-// Composable validation helpers
-type Validator<T> = (value: T) => true | ApplicationError
-type CheckedValidator<T, R> = (value: T) => R | ApplicationError
-
-const validate = <T>(value: T, validators: Validator<T>[]): T | ApplicationError => {
-  for (const validator of validators) {
-    const result = validator(value)
-    if (result instanceof Error) return result
-  }
-  return value
+type MerchantUpgradeRequest = {
+  level: typeof AccountLevel.Merchant
+  accountId: AccountId
+  fullName: string
+  address: Address
+  terminalsRequested: number
+  bankAccount: BankAccount
+  idDocument: string
 }
 
-const validateAndTransform = <T, R>(
-  value: T,
-  transform: CheckedValidator<T, R>,
-  validators: Validator<R>[],
-): R | ApplicationError => {
-  const transformed = transform(value)
-  if (transformed instanceof Error) return transformed
-  return validate(transformed, validators)
-}
+type UpgradeRequest = ProUpgradeRequest | MerchantUpgradeRequest
 
-const isGreaterThan =
-  (threshold: number, errorMsg: string): Validator<number> =>
-  (value) =>
-    value > threshold ? true : new InvalidAccountStatusError(errorMsg)
-
-const isNotEqual =
-  (compareTo: number, errorMsg: string): Validator<number> =>
-  (value) =>
-    value !== compareTo ? true : new InvalidAccountStatusError(errorMsg)
-
-export const businessAccountUpgradeRequest = async (
-  input: BusinessUpgradeRequestInput,
-): Promise<true | ApplicationError> => {
-  const { accountId, level, fullName } = input
-
+export const createUpgradeRequest = async (
+  accountId: AccountId,
+  input: UpgradeRequest,
+): Promise<UpgradeStatusResponse | ApplicationError> => {
   const accountsRepo = AccountsRepository()
   const usersRepo = UsersRepository()
 
   const account = await accountsRepo.findById(accountId)
   if (account instanceof Error) return account
 
-  const checkedLevel = validateAndTransform(level, checkedToAccountLevel, [
-    isGreaterThan(account.level - 1, "Cannot request account level downgrade"),
-    isNotEqual(account.level, "Account is already at requested level"),
-  ])
-  if (checkedLevel instanceof Error) return checkedLevel
 
   const user = await usersRepo.findById(account.kratosUserId)
   if (user instanceof Error) return user
@@ -79,47 +74,36 @@ export const businessAccountUpgradeRequest = async (
   const identity = await IdentityRepository().getIdentity(account.kratosUserId)
   if (identity instanceof Error) return identity
 
-  const storedPhone = (user.phone as string) || ""
-  const storedEmail = (identity.email as string) || ""
+  const context = { account, user, kratos: identity }
 
-  // Validate phone number if provided and account has existing phone
-  if (input.phoneNumber && storedPhone && input.phoneNumber !== storedPhone) {
-    return new InvalidAccountStatusError("Phone number does not match account records")
-  }
-
-  // Validate email if provided and account has existing email
-  if (input.email && storedEmail && input.email !== storedEmail) {
-    return new InvalidAccountStatusError("Email does not match account records")
-  }
-
-  const requestResult = await ErpNext.createUpgradeRequest({
-    username: (account.username as string) || account.id,
-    currentLevel: account.level,
-    requestedLevel: checkedLevel,
-    fullName,
-    phoneNumber: storedPhone,
-    email: storedEmail || undefined,
-    businessName: input.businessName,
-    businessAddress: input.businessAddress,
-    terminalRequested: input.terminalRequested,
-    bankName: input.bankName,
-    bankBranch: input.bankBranch,
-    accountType: input.accountType,
-    currency: input.currency,
-    accountNumber: input.accountNumber,
-    idDocument: input.idDocument,
+  const pendingRequests = await ErpNext.getAccountUpgradeRequestList({ 
+    username: SearchFilter.Eq(account.username),
+    status: SearchFilter.Eq(RequestStatus.Pending)
   })
+  if (pendingRequests instanceof UpgradeRequestQueryError) return pendingRequests
+  
+  const closeResp = await ErpNext.closeAccountUpgradeRequests(pendingRequests)
+  if (closeResp instanceof SetDocTypeValueError) return closeResp
 
+  const initialStatus = RequestStatus.Pending
+  const req = await new AccountUpgradeRequest(
+    "", // name - assigned by ERPNext
+    account.username as Username,
+    account.level,
+    input.level as AccountLevel,
+    initialStatus,
+    input.fullName,
+    user.phone as PhoneNumber,
+    identity.email as EmailAddress,
+    input.idDocument,
+    input.address,
+    input.terminalsRequested,
+    input.bankAccount,
+  ).validate(context)
+  if (Array.isArray(req)) return new ValidationError(req)
+
+  const requestResult = await ErpNext.postUpgradeRequest(req)
   if (requestResult instanceof Error) return requestResult
 
-  // Pro accounts auto-upgrade immediately (no manual approval needed)
-  if (checkedLevel === AccountLevel.Pro) {
-    const upgradeResult = await updateAccountLevel({
-      id: accountId,
-      level: checkedLevel,
-    })
-    if (upgradeResult instanceof Error) return upgradeResult
-  }
-
-  return true
+  return { id: requestResult.name, status: initialStatus } as UpgradeStatusResponse
 }

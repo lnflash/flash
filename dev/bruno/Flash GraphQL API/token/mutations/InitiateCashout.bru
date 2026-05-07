@@ -1,0 +1,43 @@
+meta {
+  name: InitiateCashout
+  type: graphql
+  seq: 34
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  Authorization: ••••••
+}
+
+body:graphql {
+  mutation InitiateCashout($input: InitiateCashoutInput!) {
+    initiateCashout(input: $input) {
+      errors {
+        code
+        message
+        path
+      }
+      # success
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "offerId": "{{offerId}}",
+      "walletId": "{{walletId}}"
+    }
+  }
+}
+
+settings {
+  encodeUrl: false
+  timeout: 0
+}

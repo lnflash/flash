@@ -24,8 +24,10 @@ type WebhookServer = {
 
 type IbexConfig = {
   url: string
+  authUrl: string
   email: string
   password: string
+  apiKey?: string
   webhook: WebhookServer
 }
 
@@ -39,12 +41,14 @@ type BridgeWebhook = {
   port: number
   publicKeys: BridgeWebhookPublicKeys
   timestampSkewMs: number
+  replaySecret?: string
 }
 
 type BridgeConfig = {
   enabled: boolean
   apiKey: string
   baseUrl: string
+  minWithdrawalAmount: number
   webhook: BridgeWebhook
 }
 
@@ -210,6 +214,10 @@ type YamlSchema = {
   }
   sendgrid: SendGridConfig
   frappe: FrappeConfig
+  fcmTopics: {
+    default: boolean // whether this topic should be subscribed to by default
+    name: string
+  }[]
 }
 
 type FrappeCredentials = {
@@ -219,6 +227,7 @@ type FrappeCredentials = {
 
 type FrappeConfig = {
   url: string
+  sitename: string
   credentials: FrappeCredentials
   erpnext: {
     accounts: {

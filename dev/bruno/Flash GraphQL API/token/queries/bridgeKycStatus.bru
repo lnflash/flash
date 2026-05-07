@@ -1,0 +1,26 @@
+meta {
+  name: bridgeKycStatus
+  type: graphql
+  seq: 19
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:graphql {
+  query BridgeKycStatus {
+    bridgeKycStatus
+  }
+}
+
+settings {
+  encodeUrl: false
+  timeout: 30000
+}

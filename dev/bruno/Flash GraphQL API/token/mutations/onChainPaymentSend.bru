@@ -1,0 +1,44 @@
+meta {
+  name: onChainPaymentSend
+  type: graphql
+  seq: 3
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  mutation onChainPaymentSend($input: OnChainPaymentSendInput!) {
+    onChainPaymentSend(input: $input) {
+      errors {
+        message
+      }
+      status
+    }
+  }
+  
+}
+
+body:graphql:vars {
+  {
+    "input": {
+        "walletId": "{{walletIdBtc}}",
+          "address": "{{regtest-segwitV0-address}}",
+          "amount": 5000,
+          "memo": "",
+          "targetConfirmations": 2
+      }
+  }
+  
+}
+
+settings {
+  encodeUrl: true
+}

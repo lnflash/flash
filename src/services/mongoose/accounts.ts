@@ -105,6 +105,7 @@ export const AccountsRepository = (): IAccountsRepository => {
     notificationSettings,
     npub,
     role,
+    erpParty,
   }: Account): Promise<Account | RepositoryError> => {
     try {
       const result = await Account.findOneAndUpdate(
@@ -116,6 +117,7 @@ export const AccountsRepository = (): IAccountsRepository => {
           title,
           username,
           contactEnabled,
+          erpParty,
           contacts: contacts.map(
             ({ username, alias, transactionsCount }: AccountContact) => ({
               id: username,
@@ -176,7 +178,7 @@ export const AccountsRepository = (): IAccountsRepository => {
     fields: {
       bridgeCustomerId?: BridgeCustomerId
       bridgeKycStatus?: "pending" | "approved" | "rejected"
-      bridgeTronAddress?: string
+      bridgeEthereumAddress?: string
     },
   ): Promise<Account | RepositoryError> => {
     try {
@@ -192,12 +194,12 @@ export const AccountsRepository = (): IAccountsRepository => {
     }
   }
 
-  const findByBridgeTronAddress = async (
+  const findByBridgeEthereumAddress = async (
     address: string,
   ): Promise<Account | RepositoryError> => {
     try {
-      const result = await Account.findOne({ bridgeTronAddress: address })
-      if (!result) return new RepositoryError("Account not found for Tron address")
+      const result = await Account.findOne({ bridgeEthereumAddress: address })
+      if (!result) return new RepositoryError("Account not found for Ethereum address")
       return translateToAccount(result)
     } catch (error) {
       return parseRepositoryError(error)
@@ -226,7 +228,7 @@ export const AccountsRepository = (): IAccountsRepository => {
     findByNpub,
     update,
     updateBridgeFields,
-    findByBridgeTronAddress,
+    findByBridgeEthereumAddress,
     findByBridgeCustomerId,
   }
 }
@@ -291,5 +293,5 @@ const translateToAccount = (result: AccountRecord): Account => ({
   displayCurrency: (result.displayCurrency || UsdDisplayCurrency) as DisplayCurrency,
   bridgeCustomerId: result.bridgeCustomerId as BridgeCustomerId | undefined,
   bridgeKycStatus: result.bridgeKycStatus,
-  bridgeTronAddress: result.bridgeTronAddress,
+  bridgeEthereumAddress: result.bridgeEthereumAddress,
 })

@@ -1,0 +1,43 @@
+meta {
+  name: mobileVersions
+  type: graphql
+  seq: 4
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  query mobileVersions {
+      mobileVersions {
+          platform
+          currentSupported
+          minSupported
+      }
+  }
+}
+
+body:graphql:vars {
+  {}
+}
+
+script:post-response {
+  var moment = require('moment')
+  
+  test("validate build parameters are set", function () {
+      if (bru.getEnvName() != "devnet") {
+          const jsonData = res.getBody();
+          const {commitHash, buildTime} = jsonData.data.buildParameters
+          expect(commitHash.length).to.eql(40);
+          expect(buildTime.substring(0,4)).to.eql("2020")
+      }
+  });
+  
+}
+
+settings {
+  encodeUrl: true
+}

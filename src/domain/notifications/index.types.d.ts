@@ -84,17 +84,12 @@ interface INotificationsService {
   adminPushNotificationSend(
     args: SendPushNotificationArgs,
   ): Promise<true | NotificationsServiceError>
-  adminPushNotificationFilteredSend(
-    args: SendFilteredPushNotificationArgs,
-  ): Promise<true | NotificationsServiceError>
-  sendBroadcast(args: SendBroadcastArgs): Promise<true | NotificationsServiceError>
 }
 
 type NotificationChannel =
   (typeof import("./index").NotificationChannel)[keyof typeof import("./index").NotificationChannel]
 
-type BroadcastTag =
-  (typeof import("./index").BroadcastTag)[keyof typeof import("./index").BroadcastTag]
+type NotificationTopic = string & { readonly brand: unique symbol }
 
 type NotificationSettings = Record<NotificationChannel, NotificationChannelSettings>
 

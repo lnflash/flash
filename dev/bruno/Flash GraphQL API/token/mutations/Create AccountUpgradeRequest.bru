@@ -1,0 +1,64 @@
+meta {
+  name: Create AccountUpgradeRequest
+  type: graphql
+  seq: 32
+}
+
+post {
+  url: {{graphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  Authorization: ••••••
+}
+
+body:graphql {
+  mutation BusinessAccountUpgradeRequest($input:     
+    BusinessAccountUpgradeRequestInput!) {             
+      businessAccountUpgradeRequest(input: $input) {   
+        id
+        status                                        
+        errors {                                       
+          code                                         
+          message   
+          path                                         
+        }           
+      }
+    }
+  
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "bankAccount": {
+        "accountType": "chequing",
+        "bankBranch": "Portmore",
+        "bankName": "NCB",
+        "currency": "JMD",
+        "accountNumber": 12345
+      },
+      "address": {
+        "title": "Acme Industries",
+        "line1": "123 Apple St",
+        "city": "Kingston",
+        "state": "St. Catherine",
+        "postalCode": null,
+        "country": "Jamaica"
+      },
+      "terminalsRequested": 1,
+      "fullName": "Benjamin Hindman",
+      "idDocument": "picture.jpg",
+      "level": "THREE"
+    }
+  }
+  
+}
+
+settings {
+  encodeUrl: false
+  timeout: 0
+}

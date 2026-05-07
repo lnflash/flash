@@ -60,6 +60,7 @@ type User = {
   id: UserId
   language: UserLanguageOrEmpty
   deviceTokens: DeviceToken[]
+  notificationTopics: NotificationTopic[]
   phoneMetadata: PhoneMetadata | undefined
   phone?: PhoneNumber | undefined
   deletedPhones?: PhoneNumber[]

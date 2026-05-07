@@ -1,0 +1,40 @@
+meta {
+  name: onChainAddressCreate
+  type: graphql
+  seq: 1
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  mutation onChainAddressCreate($input: OnChainAddressCreateInput!) {
+    onChainAddressCreate(input: $input) {
+      address
+      errors {
+        message
+      }
+    }
+  }
+  
+}
+
+body:graphql:vars {
+  {
+      "input": {
+          "walletId": "{{walletId}}"
+      }
+  }
+  
+}
+
+settings {
+  encodeUrl: true
+}

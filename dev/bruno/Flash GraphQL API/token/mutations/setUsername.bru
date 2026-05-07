@@ -1,0 +1,41 @@
+meta {
+  name: setUsername
+  type: graphql
+  seq: 27
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  mutation setUsername($input: UserUpdateUsernameInput!) {
+    userUpdateUsername(input:$input) {
+      errors {
+        message
+      }
+      user {
+          username
+      }
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+      "input": {
+          "username": "Bob"
+      }
+  }
+  
+}
+
+settings {
+  encodeUrl: true
+}

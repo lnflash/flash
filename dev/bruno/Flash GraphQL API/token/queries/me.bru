@@ -1,0 +1,60 @@
+meta {
+  name: me
+  type: graphql
+  seq: 1
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  query me {
+      me {
+          id
+          phone
+          username
+          language
+          quizQuestions {
+              question {
+                  id
+                  earnAmount
+              }
+              completed
+          }
+          contacts {
+              id
+              username
+              alias
+              transactionsCount
+          }
+          createdAt
+          defaultAccount {
+              id
+              defaultWalletId
+              wallets {
+                  id
+                  walletCurrency
+                  balance
+              }
+          }
+      }
+  }
+}
+
+script:post-response {
+  test("requesting me data", function () {
+      const jsonData = res.getBody();
+      const walletId = jsonData.data.me.defaultAccount.defaultWalletId
+      // walletId should have 5 groups separated by dashes "-"
+      const parts = walletId.split("-")
+      expect(parts.length).to.eql(5);
+      bru.setEnvVar("walletId", walletId)
+  });
+}
+
+settings {
+  encodeUrl: true
+}

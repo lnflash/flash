@@ -630,6 +630,7 @@ export const configSchema = {
       type: "object",
       properties: {
         url: { type: "string" },
+        authUrl: { type: "string" },
         email: { type: "string" },
         password: { type: "string" },
         webhook: {
@@ -662,6 +663,7 @@ export const configSchema = {
               required: ["kyc", "deposit", "transfer"],
             },
             timestampSkewMs: { type: "integer" },
+            replaySecret: { type: "string" }
           },
           required: ["port", "publicKeys", "timestampSkewMs"],
         },
@@ -698,6 +700,20 @@ export const configSchema = {
     sendgrid: {
       type: "object",
       required: ["apiKey"],
+    },
+    fcmTopics: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          default: { type: "boolean" },
+          name: { type: "string" },
+        },
+        required: ["default", "name"],
+        additionalProperties: false,
+      },
+      uniqueItems: true,
+      default: [],
     },
   },
   required: [

@@ -2,11 +2,12 @@ import crypto from "crypto"
 
 import { UsdDisplayCurrency } from "@domain/fiat"
 import { AccountLevel, AccountStatus } from "@domain/accounts"
-import { InvalidAccountStatusError, SelfPaymentError } from "@domain/errors"
-import { PaymentInputValidator, WalletType } from "@domain/wallets"
-import { WalletCurrency, InvalidBtcPaymentAmountError } from "@domain/shared"
+import { InactiveAccountError } from "@domain/errors"
+import { ValidationError } from "@domain/shared"
+import { OnchainUsdPaymentValidator, WalletType } from "@domain/wallets"
+import { WalletCurrency, USDAmount, isValidated } from "@domain/shared"
 
-describe("PaymentInputValidator", () => {
+describe("OnchainUsdPaymentValidator", () => {
   const dummyAccount: Account = {
     id: crypto.randomUUID() as AccountId,
     uuid: crypto.randomUUID() as AccountUuid,
@@ -35,87 +36,61 @@ describe("PaymentInputValidator", () => {
     quiz: [],
     kratosUserId: "kratosUserId" as UserId,
     displayCurrency: UsdDisplayCurrency,
+    npub: "npub..." as Npub
   }
 
   const dummySenderWallet: Wallet = {
     id: crypto.randomUUID() as WalletId,
     accountId: dummyAccount.id,
     type: WalletType.Checking,
-    currency: WalletCurrency.Btc,
+    currency: WalletCurrency.Usd,
     onChainAddressIdentifiers: [],
     onChainAddresses: () => [],
-  }
-
-  const dummyRecipientWallet: Wallet = {
-    id: crypto.randomUUID() as WalletId,
-    accountId: crypto.randomUUID() as AccountId,
-    type: WalletType.Checking,
-    currency: WalletCurrency.Btc,
-    onChainAddressIdentifiers: [],
-    onChainAddresses: () => [],
-  }
-
-  const wallets: { [key: WalletId]: Wallet } = {}
-  wallets[dummySenderWallet.id] = dummySenderWallet
-  wallets[dummyRecipientWallet.id] = dummyRecipientWallet
-
-  const getWalletFn: PaymentInputValidatorConfig = (walletId: WalletId) => {
-    return Promise.resolve(wallets[walletId])
+    lnurlp: "LNURLP" as Lnurl
   }
 
   it("returns the correct types when everything is valid", async () => {
-    const validator: PaymentInputValidator = PaymentInputValidator(getWalletFn)
-    const result = await validator.validatePaymentInput({
-      amount: 2,
-      amountCurrency: WalletCurrency.Btc,
-      senderWalletId: dummySenderWallet.id,
-      senderAccount: dummyAccount,
-      recipientWalletId: dummyRecipientWallet.id,
+    const usd = USDAmount.cents(5n)
+    if (usd instanceof Error) return usd
+    const result = OnchainUsdPaymentValidator({ 
+      wallet: dummySenderWallet,
+      account: dummyAccount,
+      accountId: dummySenderWallet.id,
+      amount: usd,
+      address: "bc1q..." as OnChainAddress
     })
     if (result instanceof Error) throw result
 
-    const { amount, senderWallet, recipientWallet } = result
-    expect(amount).toStrictEqual({ amount: 2n, currency: WalletCurrency.Btc })
-    expect(senderWallet).toEqual(expect.objectContaining(dummySenderWallet))
-    expect(recipientWallet).toEqual(expect.objectContaining(dummyRecipientWallet))
+    console.log(await result)
+    expect(isValidated(await result)).toBe(true)
   })
 
   it("Fails on invalid amount", async () => {
-    const validator: PaymentInputValidator = PaymentInputValidator(getWalletFn)
-    const result = await validator.validatePaymentInput({
-      amount: -1,
-      amountCurrency: WalletCurrency.Btc,
-      senderWalletId: dummySenderWallet.id,
-      senderAccount: dummyAccount,
-      recipientWalletId: dummyRecipientWallet.id,
+    const usd = USDAmount.cents(0n)
+    if (usd instanceof Error) throw usd
+    const result = await OnchainUsdPaymentValidator({
+      wallet: dummySenderWallet,
+      account: dummyAccount,
+      accountId: dummySenderWallet.id,
+      amount: usd,
+      address: "bc1q..." as OnChainAddress
     })
-    expect(result).toBeInstanceOf(InvalidBtcPaymentAmountError)
-  })
-
-  it("Fails when sender === recipient", async () => {
-    const validator: PaymentInputValidator = PaymentInputValidator(getWalletFn)
-    const result = await validator.validatePaymentInput({
-      amount: 2,
-      amountCurrency: WalletCurrency.Btc,
-      senderWalletId: dummySenderWallet.id,
-      senderAccount: dummyAccount,
-      recipientWalletId: dummySenderWallet.id,
-    })
-    expect(result).toBeInstanceOf(SelfPaymentError)
+    expect(Array.isArray(result) && result[0]).toBeInstanceOf(ValidationError)
   })
 
   it("Fails if the account is not active", async () => {
-    const validator: PaymentInputValidator = PaymentInputValidator(getWalletFn)
-    const result = await validator.validatePaymentInput({
-      amount: 2,
-      amountCurrency: WalletCurrency.Btc,
-      senderWalletId: dummySenderWallet.id,
-      senderAccount: {
+    const usd = USDAmount.cents(5n)
+    if (usd instanceof Error) throw usd
+    const result = await OnchainUsdPaymentValidator({
+      wallet: dummySenderWallet,
+      account: {
         ...dummyAccount,
         status: AccountStatus.Locked,
       },
-      recipientWalletId: dummyRecipientWallet.id,
+      accountId: dummySenderWallet.id,
+      amount: usd,
+      address: "bc1q..." as OnChainAddress
     })
-    expect(result).toBeInstanceOf(InvalidAccountStatusError)
+    expect(Array.isArray(result) && result[0]).toBeInstanceOf(InactiveAccountError)
   })
 })

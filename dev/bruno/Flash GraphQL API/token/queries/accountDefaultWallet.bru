@@ -1,0 +1,35 @@
+meta {
+  name: accountDefaultWallet
+  type: graphql
+  seq: 13
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  query accountDefaultWallet($username: Username!) {
+      accountDefaultWallet(username: $username) {
+          id
+          walletCurrency
+      }
+  }
+}
+
+body:graphql:vars {
+  {
+      "username": "userB"
+  }
+  
+}
+
+settings {
+  encodeUrl: true
+}

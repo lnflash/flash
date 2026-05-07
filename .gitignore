@@ -52,3 +52,4 @@ junit.xml
 .yarn/
 .yarnrc.yml
 
+docker-compose.local.yml

@@ -1,0 +1,41 @@
+meta {
+  name: updateDefaultWalletId
+  type: graphql
+  seq: 28
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  mutation updateDefaultWalletId($input: AccountUpdateDefaultWalletIdInput!) {
+    accountUpdateDefaultWalletId(input:$input) {
+      errors {
+        message
+      }
+      account {
+          defaultWalletId
+      }
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+      "input": {
+          "walletId": "4ab79e9e-ca96-4cd1-a5ae-11bef2051fee"
+      }
+  }
+  
+}
+
+settings {
+  encodeUrl: true
+}

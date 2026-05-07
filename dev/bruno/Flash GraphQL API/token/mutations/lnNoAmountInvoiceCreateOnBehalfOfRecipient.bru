@@ -1,0 +1,48 @@
+meta {
+  name: lnNoAmountInvoiceCreateOnBehalfOfRecipient
+  type: graphql
+  seq: 13
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  mutation lnNoAmountInvoiceCreateOnBehalfOfRecipient($input: LnNoAmountInvoiceCreateOnBehalfOfRecipientInput!) {
+    lnNoAmountInvoiceCreateOnBehalfOfRecipient(input: $input) {
+      errors {
+        message
+      }
+      invoice {
+        paymentRequest
+        paymentHash
+        paymentSecret
+      }
+    }
+  }
+  
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "memo": "memo",
+      "recipientWalletId": "{{walletId}}"
+    }
+  }
+}
+
+script:post-response {
+  test("add invoice", function () {
+      const jsonData = res.getBody();
+      const invoice = jsonData.data.invoice.addInvoice
+      expect(invoice.substring(0,2)).to.eql("ln")
+  });
+}
+
+settings {
+  encodeUrl: true
+}

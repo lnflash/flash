@@ -1,0 +1,38 @@
+meta {
+  name: Flash GraphQL API
+}
+
+auth {
+  mode: none
+}
+
+vars:pre-request {
+  protocol: http
+  domain: localhost
+  port: 4000
+}
+
+docs {
+  # Overview
+  The API endpoints are
+  
+  testnet: `https://api.testnet.galoy.io/graphql`
+  
+  mainnet: `https://api.mainnet.galoy.io/graphql`
+  
+  # Authentication
+  To get a new JWT:
+  1. Use `userRequestAuthCode` to receive an auth code via SMS
+  2. Call `userLogin` using the same phone number and auth code
+  
+  All other methods require a valid JWT set in the header as a bearer token - `Authorization: Bearer`
+  
+  # Admin JWT
+  To generate a new admin JWT signed with `ERPNEXT_JWT_SECRET`:
+  ```
+  ERPNEXT_JWT_SECRET=<admin-api-secret> node -e "const c=require('crypto'),b=o=>Buffer.from(JSON.stringify(o)).toString('base64url'),h=b({alg:'HS256',typ:'JWT'}),p=b({userId:'admin',roles:['Accounts Manager']}),s=c.createHmac('sha256',process.env.ERPNEXT_JWT_SECRET).update(h+'.'+p).digest('base64url');console.log(h+'.'+p+'.'+s)"
+  ```
+
+  # Extra Resources
+  If you use Postman, we have a collection you can import to test the API. Download it here: [galoy_graphql_main_api.postman_collection.json](https://github.com/GaloyMoney/galoy/tree/main/src/graphql/docs/galoy_graphql_main_api.postman_collection.json)
+}

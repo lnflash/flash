@@ -16,6 +16,7 @@ import { toCents } from "@domain/fiat"
 import Ibex from "@services/ibex/client"
 
 import { IbexError } from "@services/ibex/errors"
+import { UnsupportedCurrencyError } from "@domain/errors"
 
 const OnChainUsdPaymentSendAsBtcDenominatedInput = GT.Input({
   name: "OnChainUsdPaymentSendAsBtcDenominatedInput",
@@ -52,49 +53,50 @@ const OnChainUsdPaymentSendAsBtcDenominatedMutation = GT.Field<
     input: { type: GT.NonNull(OnChainUsdPaymentSendAsBtcDenominatedInput) },
   },
   resolve: async (_, args, { domainAccount }) => {
-    const { walletId, address, amount, memo, speed } = args.input
+    return new UnsupportedCurrencyError("Currently do not support Bitcoin denomination.")
+    // const { walletId, address, amount, memo, speed } = args.input
 
-    if (walletId instanceof Error) {
-      return { errors: [{ message: walletId.message }] }
-    }
+    // if (walletId instanceof Error) {
+    //   return { errors: [{ message: walletId.message }] }
+    // }
 
-    if (address instanceof Error) {
-      return { errors: [{ message: address.message }] }
-    }
+    // if (address instanceof Error) {
+    //   return { errors: [{ message: address.message }] }
+    // }
 
-    if (memo instanceof Error) {
-      return { errors: [{ message: memo.message }] }
-    }
+    // if (memo instanceof Error) {
+    //   return { errors: [{ message: memo.message }] }
+    // }
 
-    if (speed instanceof Error) {
-      return { errors: [{ message: speed.message }] }
-    }
+    // if (speed instanceof Error) {
+    //   return { errors: [{ message: speed.message }] }
+    // }
 
-    // FLASH FORK: use IBEX to send on-chain payment
-    // const result = await Wallets.payOnChainByWalletIdForUsdWalletAndBtcAmount({
-    //   senderAccount: domainAccount,
-    //   senderWalletId: walletId,
-    //   amount,
+    // // FLASH FORK: use IBEX to send on-chain payment
+    // // const result = await Wallets.payOnChainByWalletIdForUsdWalletAndBtcAmount({
+    // //   senderAccount: domainAccount,
+    // //   senderWalletId: walletId,
+    // //   amount,
+    // //   address,
+    // //   speed,
+    // //   memo,
+    // // })
+    // if (!domainAccount) throw new Error("Authentication required")
+
+    // const resp = await Ibex.sendOnchain({
+    //   accountId: walletId,
     //   address,
-    //   speed,
-    //   memo,
+    //   amount: toCents(amount),
     // })
-    if (!domainAccount) throw new Error("Authentication required")
 
-    const resp = await Ibex.sendOnchain({
-      accountId: walletId,
-      address,
-      amount: toCents(amount),
-    })
+    // if (resp instanceof IbexError) {
+    //   return { status: "failed", errors: [mapAndParseErrorForGqlResponse(resp)] }
+    // }
 
-    if (resp instanceof IbexError) {
-      return { status: "failed", errors: [mapAndParseErrorForGqlResponse(resp)] }
-    }
-
-    return {
-      errors: [],
-      status: resp.status, // UI expecting type PaymentSendStatus
-    }
+    // return {
+    //   errors: [],
+    //   status: resp.status, // UI expecting type PaymentSendStatus
+    // }
   },
 })
 

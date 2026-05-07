@@ -1,0 +1,45 @@
+meta {
+  name: lnNoAmountInvoiceFeeProbe
+  type: graphql
+  seq: 22
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  mutation LnNoAmountInvoiceFeeProbe($input: LnNoAmountInvoiceFeeProbeInput!) {
+    lnNoAmountInvoiceFeeProbe(input: $input) {
+      errors {
+        message
+      }
+      amount
+    }
+  }
+  
+}
+
+body:graphql:vars {
+  {
+      "input": {
+          "paymentRequest": "lntb1p38jzs7pp5lhrxyetmx36x2fx4374l2uja6fvj7ap5keleljcaqgwd90ky8c4qsp5g77rxjwjp7lqt3zky43djfq2eznrs07tc0239m8syqhut43067dsdqj2aex7mn8ypc8ymmzv5cqzynxqyz5vq9qxpq9qsqrzjqt4dhk0824eh29salzmyvam22379e0pwjkesw8kgz4fl3mpvagaccgqd7qqqq0cqqqqqqqlgqqqqqqgq9qrzjqv43we5lgmdwmn8gldtfwc9jm2an0qkjvmtvlwg96dvz4rcaw4746gy7cuqqqpsqqyqqqqlgqqqq86qq9qrzjqd4hzv9j0g3adlsa2hqa80keumd959cfqkytpq6wsgqwp4gwu6yx5gy7ccqqqpcqqqqqqqlgqqqqqqgq9qdnm9f72yygsznzgwhmekmqejdtcyqq9hjxvuma7jhv4r73g9q4v9dcux32yj2cyxwvup6k7t9kjkrs2wj86ygj985qe42l4zjyq02jqpsmcsla",
+          "amount": 10,
+          "walletId": "{{walletIdBtc}}"
+      }
+  }
+}
+
+script:post-response {
+  test("add invoice", function () {
+      const jsonData = res.getBody();
+      const invoice = jsonData.data.invoice.addInvoice
+      expect(invoice.substring(0,2)).to.eql("ln")
+  });
+}
+
+settings {
+  encodeUrl: true
+}

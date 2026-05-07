@@ -14,7 +14,7 @@ export class CustomApolloError extends ApolloError {
     message,
     code,
     forwardToClient,
-    logger,
+    logger = baseLogger,
     level,
     ...metadata
   }: CustomApolloErrorData & { code: string }) {
@@ -409,6 +409,18 @@ export class InvalidPhoneMetadataForOnboardingError extends CustomApolloError {
   }
 }
 
+export class PhoneAccountAlreadyExistsCannotUpgradeError extends CustomApolloError {
+  constructor(errData: CustomApolloErrorData) {
+    super({
+      message:
+        "Phone number is already registered to another user. Please log out and log in with that phone account.",
+      forwardToClient: true,
+      code: "PHONE_ALREADY_REGISTERED_TO_ANOTHER_USER",
+      ...errData,
+    })
+  }
+}
+
 export class PhoneAccountAlreadyExistsNeedToSweepFundsError extends CustomApolloError {
   constructor(errData: CustomApolloErrorData) {
     super({
@@ -472,3 +484,11 @@ export class InternalServerError extends CustomApolloError {
     super({ level: "error", code: "INTERNAL_SERVER_ERROR", forwardToClient: false, ...errData })
   }
 }
+
+// Admin API error
+export class PushNotificationError extends CustomApolloError {
+  constructor(errData: CustomApolloErrorData) {
+    super({ level: "error", code: "FIREBASE_ERROR", forwardToClient: true, ...errData })
+  }
+}
+

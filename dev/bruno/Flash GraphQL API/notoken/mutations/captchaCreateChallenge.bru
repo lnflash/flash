@@ -1,0 +1,40 @@
+meta {
+  name: captchaCreateChallenge
+  type: graphql
+  seq: 2
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  mutation CaptchaCreateChallenge {
+      captchaCreateChallenge {
+          result {
+              challengeCode
+              failbackMode
+              id
+              newCaptcha
+          }
+          errors {
+              message
+          }
+      }
+  }
+}
+
+script:post-response {
+  test("requesting a code", function () {
+      var jsonData = res.getBody();
+      expect(jsonData.data.requestPhoneCode.success).to.eql(true);
+  });
+  
+  
+}
+
+settings {
+  encodeUrl: true
+}

@@ -1,0 +1,93 @@
+meta {
+  name: transactionsByAddressForWallet
+  type: graphql
+  seq: 7
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  query transactionsListForContact($first: Int, $after: String, $address: OnChainAddress!) {
+      me {
+          defaultAccount {
+              wallets {
+                  ... on BTCWallet {
+                      __typename
+                      walletCurrency
+                      transactionsByAddress(first: $first, after: $after, address: $address) {
+                          ... TransactionList
+                      }
+                  }
+              }
+          }
+      }
+  }
+  
+  fragment TransactionList on TransactionConnection {
+      pageInfo {
+          hasNextPage
+      }
+      edges {
+          cursor
+          node {
+              __typename
+              id
+              status
+              direction
+              memo
+              createdAt
+              settlementAmount
+              settlementFee
+              settlementPrice {
+                  base
+                  offset
+                  # currencyUnit
+                  # formattedAmount
+              }
+              initiationVia {
+                  __typename
+                  ... on InitiationViaIntraLedger {
+                      counterPartyWalletId
+                      counterPartyUsername
+                  }
+                  ... on InitiationViaLn {
+                      paymentHash
+                  }
+                  ... on InitiationViaOnChain {
+                      address
+                  }
+              }
+              settlementVia {
+                  __typename
+                  ... on SettlementViaIntraLedger {
+                      counterPartyWalletId
+                      counterPartyUsername
+                  }
+                  ... on SettlementViaLn {
+                      paymentSecret
+                      preImage
+                  }
+                  ... on SettlementViaOnChain {
+                      transactionHash
+                  }
+              }
+          }
+      }
+    }
+}
+
+body:graphql:vars {
+  {
+      "first": 20,
+      "after": null,
+      "address": "{{currentOnChainAddress}}"
+  }
+}
+
+settings {
+  encodeUrl: true
+}

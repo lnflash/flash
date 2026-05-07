@@ -1,0 +1,120 @@
+meta {
+  name: intraledgerPaymentSend (multiple)
+  type: graphql
+  seq: 19
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  mutation intraLedgerPaymentSend($input: IntraLedgerPaymentSendInput!) {
+    a: intraLedgerPaymentSend(input:$input) {
+      status
+      errors {
+        message
+        path
+      }
+    }
+  
+    b: intraLedgerPaymentSend(input:$input) {
+      status
+      errors {
+        message
+        path
+      }
+    }
+  
+    c: intraLedgerPaymentSend(input:$input) {
+      status
+      errors {
+        message
+        path
+      }
+    }
+    
+    d: intraLedgerPaymentSend(input:$input) {
+      status
+      errors {
+        message
+        path
+      }
+    }
+  
+    e: intraLedgerPaymentSend(input:$input) {
+      status
+      errors {
+        message
+        path
+      }
+    }
+  
+    f: intraLedgerPaymentSend(input:$input) {
+      status
+      errors {
+        message
+        path
+      }
+    }
+  
+    g: intraLedgerPaymentSend(input:$input) {
+      status
+      errors {
+        message
+        path
+      }
+    }
+  
+    h: intraLedgerPaymentSend(input:$input) {
+      status
+      errors {
+        message
+        path
+      }
+    }
+  
+    i: intraLedgerPaymentSend(input:$input) {
+      status
+      errors {
+        message
+        path
+      }
+    }
+  
+    j: intraLedgerPaymentSend(input:$input) {
+      status
+      errors {
+        message
+        path
+      }
+    }
+  }
+  
+}
+
+body:graphql:vars {
+  {
+      "input": {
+          "walletId": "{{walletIdBtc}}",
+          "amount": 100,
+          "recipientWalletId": "{{walletIdUsd}}",
+          "memo": "Test"
+      }
+  }
+  
+}
+
+script:post-response {
+  test("add invoice", function () {
+      const jsonData = res.getBody();
+      const invoice = jsonData.data.invoice.addInvoice
+      expect(invoice.substring(0,2)).to.eql("ln")
+  });
+}
+
+settings {
+  encodeUrl: true
+}

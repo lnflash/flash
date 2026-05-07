@@ -1,0 +1,32 @@
+meta {
+  name: contacts
+  type: graphql
+  seq: 4
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  query me {
+      me {
+          contacts {
+              id
+              username
+              alias
+              transactionsCount
+          }
+      }
+  }
+}
+
+body:graphql:vars {
+  {}
+}
+
+settings {
+  encodeUrl: true
+}

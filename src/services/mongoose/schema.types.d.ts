@@ -97,7 +97,7 @@ interface AccountRecord {
   // Bridge integration:
   bridgeCustomerId?: string
   bridgeKycStatus?: "pending" | "approved" | "rejected"
-  bridgeTronAddress?: string
+  bridgeEthereumAddress?: string
 
   // mongoose in-built functions
   save: () => Promise<AccountRecord>
@@ -150,6 +150,7 @@ interface UserRecord {
   userId: string
   language?: string
   deviceTokens: string[]
+  notificationTopics?: string[]
   phoneMetadata?: TwilioObjectForUser
   phone?: string
   deletedPhones?: string[]

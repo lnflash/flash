@@ -1,0 +1,39 @@
+meta {
+  name: balance
+  type: graphql
+  seq: 2
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  query me {
+      me {
+          username
+          defaultAccount {
+              wallets {
+                  ... on BTCWallet {
+                      id
+                      walletCurrency
+                      balance
+                      pendingIncomingBalance
+                  }
+                  ... on UsdWallet {
+                      id
+                      walletCurrency
+                      balance
+                      # pendingIncomingBalance
+                  }
+              }
+          }
+      }
+  }
+}
+
+settings {
+  encodeUrl: true
+}

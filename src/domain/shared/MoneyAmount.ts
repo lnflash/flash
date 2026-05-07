@@ -1,5 +1,5 @@
-import { Money, Round } from "./bigint-money"
-import { BigIntConversionError, RedisParseError } from "./errors"
+import { Money, Round, PRECISION_M } from "./bigint-money"
+import { BigIntConversionError, UnsupportedCurrencyError } from "./errors"
 import { ExchangeCurrencyUnit, WalletCurrency } from "./primitives"
 
 export abstract class MoneyAmount {
@@ -41,17 +41,27 @@ export abstract class MoneyAmount {
     return this.money.toJSON()
   }
 
+  asPaymentAmount(): PaymentAmount<WalletCurrency> {
+    return {
+      amount: this.money.toSource() / PRECISION_M,
+      currency: this.currencyCode,
+    }
+  }
+
   fromSource(val: string, currency: WalletCurrency): this {
     return this.getInstance(new Money(val, currency, Round.HALF_TO_EVEN))
   }
 
-  static fromJSON(val: [string, string]): MoneyAmount | BigIntConversionError {
+  static fromJSON(val: [string, string]): MoneyAmount | Error {
     const [amt, currency] = val
+    return this.from(amt, currency as WalletCurrency)
+  }
 
-    if (currency === WalletCurrency.Usd) return USDAmount.cents(amt)
-    else if (currency === WalletCurrency.Jmd) return JMDAmount.cents(amt)
-    else if (currency === WalletCurrency.Usdt) return USDTAmount.smallestUnits(amt)
-    else return new RedisParseError(`Could not read currency: ${currency}`)
+  static from(amount: number | string, currency: WalletCurrency): MoneyAmount | Error {
+    if (currency === WalletCurrency.Usd) return USDAmount.cents(amount.toString())
+    else if (currency === WalletCurrency.Jmd) return JMDAmount.cents(amount.toString())
+    else if (currency === WalletCurrency.Usdt) return USDTAmount.smallestUnits(amount.toString())
+    else return new UnsupportedCurrencyError(`Could not read currency: ${currency}`)
   }
 }
 
@@ -153,6 +163,30 @@ export class JMDAmount extends MoneyAmount {
 
   getInstance(amount: Money): this {
     return new JMDAmount(amount) as this
+  }
+}
+
+export class BtcAmount extends MoneyAmount {
+  currencyCode = WalletCurrency.Btc as WalletCurrency
+
+  private constructor(amount: Money | bigint | string | number) {
+    super(amount, WalletCurrency.Btc)
+  }
+
+  static sats(c: string): BtcAmount | BigIntConversionError {
+    try {
+      return new BtcAmount(c)
+    } catch (error) {
+      return new BigIntConversionError(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  asSats(precision: number = 0): string {
+    return this.money.toFixed(precision)
+  }
+
+  getInstance(amount: Money): this {
+    return new BtcAmount(amount) as this
   }
 }
 

@@ -50,7 +50,8 @@ services:
       - otel-agent
     restart: on-failure:10
   apollo-router:
-    image: ghcr.io/apollographql/router:v1.25.0
+    image: ghcr.io/apollographql/router:v2.13.0
+    command: ["--config", "/repo/dev/apollo-federation/router.yaml", "--supergraph", "/repo/dev/apollo-federation/supergraph.graphql"]
     ports: []
     environment:
       - APOLLO_ROUTER_SUPERGRAPH_PATH=/repo/dev/apollo-federation/supergraph.graphql
@@ -61,7 +62,7 @@ services:
   otel-agent:
     ports: []
     image: otel/opentelemetry-collector-contrib:0.79.0
-    command: ["--config=/etc/otel-agent-config.yaml"]
+    command: [ "--config=/etc/otel-agent-config.yaml" ]
     environment:
       - HONEYCOMB_DATASET=${HONEYCOMB_DATASET}
       - HONEYCOMB_API_KEY=${HONEYCOMB_API_KEY}
@@ -111,7 +112,7 @@ services:
       - DB_POOL_MIN=1
       - DB_POOL_MAX=5
       - DB_DEBUG=false
-    depends_on: [postgres-price-history]
+    depends_on: [ postgres-price-history ]
   redis:
     image: redis:7.0.8
     ports: []
@@ -119,7 +120,7 @@ services:
       - ALLOW_EMPTY_PASSWORD=yes
       - REDIS_DISABLE_COMMANDS=FLUSHDB,FLUSHALL
   mongodb-migrate:
-    depends_on: [mongodb]
+    depends_on: [ mongodb ]
     build:
       context: .
       dockerfile: Dockerfile-migrate
@@ -142,7 +143,7 @@ services:
     ports: []
     depends_on:
       - bats-deps
-    command: ["make", "execute-bats-from-within-container"]
+    command: [ "make", "execute-bats-from-within-container" ]
     working_dir: /repo
     env_file:
       - ${TMP_ENV_CI:-.env.ci}
@@ -158,7 +159,7 @@ services:
     image: us.gcr.io/galoy-org/nodejs-concourse
     depends_on:
       - integration-deps
-    command: ["make", "execute-integration-from-within-container"]
+    command: [ "make", "execute-integration-from-within-container" ]
     working_dir: /repo
     env_file:
       - ${TMP_ENV_CI:-.env.ci}
@@ -198,8 +199,7 @@ services:
 
   # Frappe/ERPNext services
   frappe-backend:
-    # image: lnflash/frappe-erp-admin:latest
-    image: brh28/frappe-flash:0.0.2
+    image: brh28/frappe-flash:${FRAPPE_TAG:-latest}
     deploy:
       restart_policy:
         condition: on-failure
@@ -213,7 +213,7 @@ services:
       MARIADB_ROOT_PASSWORD: admin
 
   frappe-configurator:
-    image: brh28/frappe-flash:0.0.2
+    image: brh28/frappe-flash:${FRAPPE_TAG:-latest}
     deploy:
       restart_policy:
         condition: none
@@ -222,16 +222,7 @@ services:
       - -c
     command:
       - >
-        set -ex;
-        ls -1 apps > sites/apps.txt;
-        bench set-config -g db_host $$DB_HOST;
-        bench set-config -gp db_port $$DB_PORT;
-        bench set-config -g redis_cache "redis://$$REDIS_CACHE";
-        bench set-config -g redis_queue "redis://$$REDIS_QUEUE";
-        bench set-config -g redis_socketio "redis://$$REDIS_QUEUE";
-        bench set-config -gp socketio_port $$SOCKETIO_PORT;
-        bench set-config -g flash_admin_api_url $$FLASH_API;
-        bench set-config -g admin_api_key $$FLASH_SECRET;
+        set -ex; ls -1 apps > sites/apps.txt; bench set-config -g db_host $$DB_HOST; bench set-config -gp db_port $$DB_PORT; bench set-config -g redis_cache "redis://$$REDIS_CACHE"; bench set-config -g redis_queue "redis://$$REDIS_QUEUE"; bench set-config -g redis_socketio "redis://$$REDIS_QUEUE"; bench set-config -gp socketio_port $$SOCKETIO_PORT; bench set-config -g flash_admin_api_url $$FLASH_API; bench set-config -g admin_api_key $$FLASH_SECRET; bench set-config -gp developer_mode 1;
     environment:
       DB_HOST: mariadb
       DB_PORT: "3306"
@@ -245,7 +236,7 @@ services:
       - frappe-logs:/home/frappe/frappe-bench/logs
 
   frappe-create-site:
-    image: brh28/frappe-flash:0.0.2
+    image: brh28/frappe-flash:${FRAPPE_TAG:-latest}
     deploy:
       restart_policy:
         condition: none
@@ -259,13 +250,10 @@ services:
       - -c
     command:
       - >
-        wait-for-it -t 120 mariadb:3306;
-        wait-for-it -t 120 redis:6379;
-        wait-for-it -t 120 redis:6379;
-        export start=`date +%s`;
-        until [[ -n `grep -hs ^ sites/common_site_config.json | jq -r ".db_host // empty"` ]] && \
+        wait-for-it -t 120 mariadb:3306; wait-for-it -t 120 redis:6379; wait-for-it -t 120 redis:6379; export start=`date +%s`; until [[ -n `grep -hs ^ sites/common_site_config.json | jq -r ".db_host // empty"` ]] && \
           [[ -n `grep -hs ^ sites/common_site_config.json | jq -r ".redis_cache // empty"` ]] && \
-          [[ -n `grep -hs ^ sites/common_site_config.json | jq -r ".redis_queue // empty"` ]];
+          [[ -n `grep -hs ^ sites/common_site_config.json | jq -r ".redis_queue // empty"` ]] && \
+          [[ -n `grep -hs ^ sites/common_site_config.json | jq -r ".developer_mode // empty"` ]];
         do
           echo "Waiting for sites/common_site_config.json to be created";
           sleep 5;
@@ -273,9 +261,7 @@ services:
             echo "could not find sites/common_site_config.json with required keys";
             exit 1
           fi
-        done;
-        echo "sites/common_site_config.json found";
-        bench new-site --mariadb-user-host-login-scope='%' --admin-password=admin --db-root-username=root --db-root-password=admin --install-app erpnext --install-app admin_panel --set-default frontend;
+        done; echo "sites/common_site_config.json found"; bench new-site --mariadb-user-host-login-scope='%' --admin-password=admin --db-root-username=root --db-root-password=admin --install-app erpnext --install-app admin_panel --set-default frontend;
 
   mariadb:
     image: mariadb:10.6
@@ -299,8 +285,8 @@ services:
       - mariadb-data:/var/lib/mysql
 
   frappe-frontend:
-    image: brh28/frappe-flash:0.0.2
-    ports: ["8080:8080"]
+    image: brh28/frappe-flash:${FRAPPE_TAG:-latest}
+    ports: [ "8080:8080" ]
     depends_on:
       - frappe-websocket
     deploy:
@@ -322,7 +308,7 @@ services:
       - frappe-logs:/home/frappe/frappe-bench/logs
 
   frappe-websocket:
-    image: brh28/frappe-flash:0.0.2
+    image: brh28/frappe-flash:${FRAPPE_TAG:-latest}
     deploy:
       restart_policy:
         condition: on-failure

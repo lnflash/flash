@@ -1,0 +1,46 @@
+meta {
+  name: userQuizQuestionCompleted
+  type: graphql
+  seq: 26
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  mutation userQuizQuestionUpdateCompleted($input: UserQuizQuestionUpdateCompletedInput!) {
+    userQuizQuestionUpdateCompleted(input: $input) {
+      userQuizQuestion {
+          completed
+          question {
+              earnAmount
+              id
+          }
+      }
+      errors {
+        message
+      }
+    }
+  }
+  
+}
+
+body:graphql:vars {
+  {
+      "input": {
+          "id": "sat"
+      }
+  }
+  
+}
+
+settings {
+  encodeUrl: true
+}

@@ -1,0 +1,39 @@
+meta {
+  name: twoFASave
+  type: graphql
+  seq: 31
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  mutation twoFASave($input: TwoFASaveInput!) {
+    twoFASave(input: $input) {
+      errors {
+        message
+      }
+      success
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+      "input": {
+          "secret": "{{twoFASecret}}",
+          "token": "123456"
+      }
+  }
+}
+
+settings {
+  encodeUrl: true
+}

@@ -1,0 +1,46 @@
+meta {
+  name: account-limits
+  type: graphql
+  seq: 3
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  query me {
+      me {
+          defaultAccount {
+              limits {
+                  withdrawal {
+                      ...on OneDayAccountLimit {
+                          __typename
+                          totalLimit
+                          remainingLimit
+                          interval
+                      }
+                  }
+                  internalSend {
+                      __typename
+                      totalLimit 
+                      remainingLimit
+                      interval
+                  }
+                  convert {
+                      __typename
+                      totalLimit
+                      remainingLimit
+                      interval
+                  }
+              }
+          }
+      }
+  }
+}
+
+settings {
+  encodeUrl: true
+}

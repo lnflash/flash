@@ -22,6 +22,7 @@ import {
   DealerError,
   PhoneAccountAlreadyExistsError,
   PhoneAccountAlreadyExistsNeedToSweepFundsError,
+  PhoneAccountAlreadyExistsCannotUpgradeError,
   EmailUnverifiedError,
   AccountAlreadyHasEmailError,
   PhoneAlreadyExistsError,
@@ -413,6 +414,14 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         logger: baseLogger,
       })
 
+    case "PhoneAccountAlreadyExistsCannotUpgradeError":
+      message =
+        "Phone number is already registered to another user. Please log out and log in with that phone account."
+      return new PhoneAccountAlreadyExistsCannotUpgradeError({
+        message,
+        logger: baseLogger,
+      })
+
     case "InvalidIdempotencyKeyError":
       message =
         "Invalid format for the provided ImpotencyKey. You must use a UUID-v4 format"
@@ -465,6 +474,14 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         message: "Offer not available. Try again.",
         logger: baseLogger,
       })
+
+    case "BridgeInvalidAmountError":
+      message = error.message || "Amount must be strictly positive with at most 6 decimal places"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "BridgeBelowMinimumWithdrawalError":
+      message = error.message || "Withdrawal amount is below the minimum"
+      return new ValidationInternalError({ message, logger: baseLogger })
 
     case "BridgeDisabledError":
       message = "Bridge integration is currently disabled"
@@ -773,12 +790,26 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
   }
 }
 
+// Move to CustomApolloError class?
+export const apolloErrorResponse = (e: CustomApolloError): { errors: IError[] } => {
+  return {
+    errors: [
+      {
+        message: e.message,
+        path: e.path,
+        code: e.extensions.code,
+      },
+    ]
+  }
+}
+
+
 export const mapAndParseErrorForGqlResponse = (err: ApplicationError): IError => {
   const mappedError = mapError(err)
   return {
     message: mappedError.message,
     path: mappedError.path,
-    code: mappedError.extensions.code,
+    code: mappedError.extensions.code 
   }
 }
 

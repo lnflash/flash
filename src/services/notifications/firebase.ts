@@ -5,14 +5,22 @@ import { FirebaseMessageError, FirebaseNotAvailable } from "@domain/notification
 import { baseLogger } from "@services/logger"
 
 
-let messaging: Messaging | null  = null
+let messaging: Messaging | null = null
 
 if (GOOGLE_APPLICATION_CREDENTIALS) {
-  admin.initializeApp({
-    credential: admin.credential.applicationDefault(),
-  })
+  try {
+    baseLogger.info("Firebase initalization")
+    admin.initializeApp({
+      credential: admin.credential.applicationDefault(),
+    })
 
-  messaging = admin.messaging()
+    messaging = admin.messaging()
+    baseLogger.info("Firebase messaging module loaded")
+  } catch (err) {
+    baseLogger.error({ err }, "Failed to initialize Firebase Admin")
+  }
+} else {
+  baseLogger.warn("GOOGLE_APPLICATION_CREDENTIALS not set")
 }
 
 const isDeviceTokenValid = async (token: string): Promise<boolean | NotificationsServiceError> => {
@@ -40,5 +48,17 @@ const isDeviceTokenValid = async (token: string): Promise<boolean | Notification
   }
 }
 
-export default { isDeviceTokenValid }
+// Failed subscriptions need a retry mechanism
+const subscribeToTopics = async (tokens: string | string[], topics: string[]): Promise<void> => {
+  topics.forEach(async (t) => {
+    if (!messaging) {
+      baseLogger.error({ tokens, topic: t }, "Firebase messaging module not loaded, skipping topic subscription") 
+      return new FirebaseNotAvailable()
+    }
+    const result = await messaging.subscribeToTopic(tokens, t)
+    baseLogger.info({ tokens, topic: t, result })
+  })
+}
+
+export default { isDeviceTokenValid, subscribeToTopics }
 export { messaging } 

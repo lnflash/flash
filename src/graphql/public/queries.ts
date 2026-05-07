@@ -20,6 +20,7 @@ import NpubByUserNameQuery from "./root/query/username-npub-query"
 import IsFlashNpubQuery from "./root/query/is-flash-npub-query"
 import TransactionDetailsQuery from "./root/query/transaction-details"
 import AccountUpgradeRequestQuery from "./root/query/account-upgrade-request"
+import SupportedBanksQuery from "./root/query/supported-banks"
 import BridgeKycStatusQuery from "./root/query/bridge-kyc-status"
 import BridgeVirtualAccountQuery from "./root/query/bridge-virtual-account"
 import BridgeExternalAccountsQuery from "./root/query/bridge-external-accounts"
@@ -41,6 +42,7 @@ export const queryFields = {
     lnInvoicePaymentStatus: LnInvoicePaymentStatusQuery,
     npubByUsername: NpubByUserNameQuery,
     isFlashNpub: IsFlashNpubQuery,
+    supportedBanks: SupportedBanksQuery,
   },
   authed: {
     atAccountLevel: {

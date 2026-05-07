@@ -1,0 +1,32 @@
+meta {
+  name: globals
+  type: graphql
+  seq: 16
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  query globals {
+      globals {
+          buildInformation {
+              buildTime
+              commitHash
+              helmRevision
+          }
+          nodesIds
+      }
+  }
+}
+
+settings {
+  encodeUrl: true
+}

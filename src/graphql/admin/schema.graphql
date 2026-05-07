@@ -1,6 +1,6 @@
 type AccountDetailPayload {
   accountDetails: AuditedAccount
-  errors: [Error!]!
+  errors: [Error]
 }
 
 enum AccountLevel {
@@ -19,6 +19,7 @@ enum AccountStatus {
 }
 
 input AccountUpdateLevelInput {
+  erpParty: String
   level: AccountLevel!
   uid: ID!
 }
@@ -27,30 +28,6 @@ input AccountUpdateStatusInput {
   comment: String
   status: AccountStatus!
   uid: ID!
-}
-
-input AdminBroadcastSendInput {
-  body: String!
-  tag: BroadcastTag!
-  title: String!
-}
-
-type AdminBroadcastSendPayload {
-  errors: [Error!]!
-  success: Boolean
-}
-
-input AdminPushNotificationSendInput {
-  accountId: String!
-  body: String!
-  data: Object
-  notificationCategory: NotificationCategory
-  title: String!
-}
-
-type AdminPushNotificationSendPayload {
-  errors: [Error!]!
-  success: Boolean
 }
 
 """
@@ -62,6 +39,7 @@ type AuditedAccount {
   """
   coordinates: Coordinates
   createdAt: Timestamp!
+  erpParty: String
   id: ID!
   level: AccountLevel!
   merchants: [Merchant!]!
@@ -131,8 +109,6 @@ type BTCWallet implements Wallet {
   walletCurrency: WalletCurrency!
 }
 
-scalar BroadcastTag
-
 input BusinessDeleteMapInfoInput {
   username: Username!
 }
@@ -142,6 +118,12 @@ input BusinessUpdateMapInfoInput {
   longitude: Float!
   title: String!
   username: Username!
+}
+
+input CashoutNotificationSendInput {
+  accountId: String!
+  amount: Int!
+  currency: String!
 }
 
 type Coordinates {
@@ -278,18 +260,16 @@ type MerchantPayload {
 type Mutation {
   accountUpdateLevel(input: AccountUpdateLevelInput!): AccountDetailPayload!
   accountUpdateStatus(input: AccountUpdateStatusInput!): AccountDetailPayload!
-  adminBroadcastSend(input: AdminBroadcastSendInput!): AdminBroadcastSendPayload!
-  adminPushNotificationSend(input: AdminPushNotificationSendInput!): AdminPushNotificationSendPayload!
   businessDeleteMapInfo(input: BusinessDeleteMapInfoInput!): AccountDetailPayload!
   businessUpdateMapInfo(input: BusinessUpdateMapInfoInput!): AccountDetailPayload!
+  cashoutNotificationSend(input: CashoutNotificationSendInput!): SuccessPayload!
   merchantMapDelete(input: MerchantMapDeleteInput!): MerchantPayload!
   merchantMapValidate(input: MerchantMapValidateInput!): MerchantPayload!
+  sendNotification(input: SendNotificationInput!): SendNotificationPayload!
   userUpdatePhone(input: UserUpdatePhoneInput!): AccountDetailPayload!
 }
 
-scalar NotificationCategory
-
-scalar Object
+scalar NotificationTopic
 
 """An address for an on-chain bitcoin destination"""
 scalar OnChainAddress
@@ -346,6 +326,7 @@ type Query {
   lightningPayment(hash: PaymentHash!): LightningPayment!
   listWalletIds(walletCurrency: WalletCurrency!): [WalletId!]!
   merchantsPendingApproval: [Merchant!]!
+  notificationTopics: [String!]!
   transactionById(id: ID!): Transaction
   transactionDetailsById(id: ID!): TransactionDetails
   transactionsByHash(hash: PaymentHash!): [Transaction]
@@ -359,6 +340,17 @@ scalar SafeInt
 
 """(Positive) Satoshi amount"""
 scalar SatAmount
+
+input SendNotificationInput {
+  body: String!
+  title: String!
+  topic: NotificationTopic!
+}
+
+type SendNotificationPayload {
+  errors: [Error]
+  success: Boolean
+}
 
 union SettlementVia = SettlementViaIntraLedger | SettlementViaLn | SettlementViaOnChain
 
@@ -387,6 +379,11 @@ scalar SignedAmount
 A string amount (of a currency) that can be negative (e.g. in a transaction)
 """
 scalar SignedDisplayMajorAmount
+
+type SuccessPayload {
+  errors: [Error!]!
+  success: Boolean
+}
 
 """
 Timestamp field, serialized as Unix time (the number of seconds since the Unix epoch)
@@ -614,6 +611,7 @@ interface Wallet {
 enum WalletCurrency {
   BTC
   USD
+  USDT
 }
 
 """Unique identifier of a wallet"""

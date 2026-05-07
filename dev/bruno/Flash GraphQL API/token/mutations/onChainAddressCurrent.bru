@@ -1,0 +1,50 @@
+meta {
+  name: onChainAddressCurrent
+  type: graphql
+  seq: 2
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  mutation onChainAddressCurrent($input: OnChainAddressCurrentInput!) {
+    onChainAddressCurrent(input: $input) {
+      address
+      errors {
+        message
+      }
+    }
+  }
+  
+}
+
+body:graphql:vars {
+  {
+      "input": {
+          "walletId": "{{walletIdBtc}}"
+      }
+  }
+  
+}
+
+script:post-response {
+  test("requesting address data", function () {
+      const jsonData = res.getBody();
+      const address = jsonData.data.onChainAddressCurrent.address
+  
+      expect(address).to.be.a("string");
+      bru.setEnvVar("currentOnChainAddress", address)
+  });
+}
+
+settings {
+  encodeUrl: true
+}

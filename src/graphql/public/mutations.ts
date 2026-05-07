@@ -52,10 +52,6 @@ import MerchantMapSuggestMutation from "@graphql/public/root/mutation/merchant-m
 
 import CallbackEndpointAdd from "./root/mutation/callback-endpoint-add"
 import CallbackEndpointDelete from "./root/mutation/callback-endpoint-delete"
-import AccountEnableNotificationCategoryMutation from "./root/mutation/account-enable-notification-category-for-channel"
-import AccountDisableNotificationCategoryMutation from "./root/mutation/account-disable-notification-category-for-channel"
-import AccountEnableNotificationChannelMutation from "./root/mutation/account-enable-notification-channel"
-import AccountDisableNotificationChannelMutation from "./root/mutation/account-disable-notification-channel"
 import UserUpdateNpubMutation from "./root/mutation/user-update-npub"
 import RequestCashoutMutation from "./root/mutation/offers/request-cash-out"
 import InitiateCashoutMutation from "./root/mutation/offers/initiate-cash-out"
@@ -105,11 +101,6 @@ export const mutationFields = {
       accountUpdateDefaultWalletId: AccountUpdateDefaultWalletIdMutation,
       accountUpdateDisplayCurrency: AccountUpdateDisplayCurrencyMutation,
       businessAccountUpgradeRequest: BusinessAccountUpgradeRequestMutation,
-      accountEnableNotificationCategory: AccountEnableNotificationCategoryMutation,
-      accountDisableNotificationCategory: AccountDisableNotificationCategoryMutation,
-      accountEnableNotificationChannel: AccountEnableNotificationChannelMutation,
-      accountDisableNotificationChannel: AccountDisableNotificationChannelMutation,
-
       accountDelete: AccountDeleteMutation,
       feedbackSubmit: FeedbackSubmitMutation,
 

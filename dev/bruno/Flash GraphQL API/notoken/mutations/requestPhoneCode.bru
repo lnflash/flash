@@ -1,0 +1,43 @@
+meta {
+  name: requestPhoneCode
+  type: graphql
+  seq: 1
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  mutation userRequestAuthCode($input: UserRequestAuthCodeInput!) {
+      userRequestAuthCode(input: $input) {
+          success
+          errors {
+              message
+          }
+      }
+  }
+}
+
+body:graphql:vars {
+  {
+      "input": {
+          "phone": "{{phone}}"
+      }
+  }
+}
+
+script:post-response {
+  test("requesting a code", function () {
+      var jsonData = res.getBody();
+      expect(jsonData.data.requestPhoneCode.success).to.eql(true);
+  });
+  
+  
+}
+
+settings {
+  encodeUrl: true
+}

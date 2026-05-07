@@ -1,9 +1,15 @@
-import { USDAmount } from "@domain/shared/MoneyAmount"
+import { USDAmount } from "@domain/shared"
 
 export type PayInvoiceArgs = {
   accountId: IbexAccountId
   invoice: Bolt11
   send?: USDAmount // must match currency of account
+}
+
+export type SendOnchainArgs = {
+  accountId: IbexAccountId, // source of funds
+  address: OnChainAddress, // destination
+  amount: USDAmount
 }
 
 // Ibex supports fee estimation in different currencies
@@ -49,6 +55,6 @@ export interface CryptoReceiveInfo {
 }
 
 export interface CreateCryptoReceiveInfoRequest {
-  wallet_id: string
-  option_id: string
+  name: string
+  network: string
 }

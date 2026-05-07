@@ -1,0 +1,37 @@
+meta {
+  name: bridgeCreateVirtualAccount
+  type: graphql
+  seq: 37
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:graphql {
+  mutation BridgeCreateVirtualAccount {
+    bridgeCreateVirtualAccount {
+      errors {
+        message
+        code
+      }
+      virtualAccount {
+        id
+        bankName
+        routingNumber
+        accountNumberLast4
+      }
+    }
+  }
+}
+
+settings {
+  encodeUrl: false
+  timeout: 30000
+}

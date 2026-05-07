@@ -1,0 +1,44 @@
+meta {
+  name: onChainUsdPaymentSend
+  type: graphql
+  seq: 5
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  mutation onChainUsdPaymentSend($input: OnChainUsdPaymentSendInput!) {
+    onChainUsdPaymentSend(input: $input) {
+      errors {
+        message
+      }
+      status
+    }
+  }
+  
+}
+
+body:graphql:vars {
+  {
+    "input": {
+        "walletId": "{{walletIdUsd}}",
+          "address": "{{regtest-segwitV0-address}}",
+          "amount": 49,
+          "memo": "",
+          "targetConfirmations": 2
+      }
+  }
+  
+}
+
+settings {
+  encodeUrl: true
+}

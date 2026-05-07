@@ -1,8 +1,9 @@
 import ValidOffer from "@app/offers/ValidOffer"
 import { FrappeConfig } from "@config"
-import { USDAmount } from "@domain/shared"
+import { USDAmount, Validated } from "@domain/shared"
 import { baseLogger } from "@services/logger"
-import axios from "axios"
+import { recordExceptionInCurrentSpan } from "@services/tracing"
+import axios, { isAxiosError } from "axios"
 
 import {
   JournalEntryDraftError,
@@ -11,11 +12,24 @@ import {
   JournalEntryDeleteError,
   UpgradeRequestCreateError,
   UpgradeRequestQueryError,
+  BanksQueryError,
+  SetDocTypeValueError,
 } from "./errors"
 import {
   AccountUpgradeRequest,
-  CreateUpgradeRequestInput,
+  RequestStatus,
 } from "./models/AccountUpgradeRequest"
+import { Bank } from "./models/Bank"
+import { Filter } from "./SearchFilters"
+
+export type AccountUpgradeRequestFilters = { username?: Filter, status?: Filter }
+type ErpNextFilter = [string, string, string, string[]]
+export const toJson = (filters: AccountUpgradeRequestFilters): string => {
+  const erpNextFilters = Object.entries(filters)
+    .filter((entry): entry is [string, Filter] => entry[1] !== undefined)
+    .map(([key, filter]) => [AccountUpgradeRequest.doctype, key, filter.operator, filter.value] as ErpNextFilter)
+  return JSON.stringify(erpNextFilters)
+}
 
 // Move to MoneyAmount
 const erpUsd = (usd: USDAmount): number => Number(usd.asCents(2))
@@ -24,11 +38,12 @@ class ErpNext {
   url: string
   headers: Record<string, string>
 
-  constructor(url: string, creds: FrappeCredentials) {
+  constructor(url: string, sitename: string, creds: FrappeCredentials) {
     this.url = url
     this.headers = {
       "Content-Type": "application/json",
       "Authorization": `token ${creds.apiKey}:${creds.apiSecret}`,
+      "Host": sitename
     }
   }
 
@@ -58,7 +73,7 @@ class ErpNext {
           credit_in_account_currency: Number(liability.jmd.asCents(2)),
           credit: erpUsd(liability.usd),
           exchange_rate: erpUsd(liability.usd) / Number(liability.jmd.asCents(2)),
-          party_type: "Supplier",
+          party_type: "Customer",
           party,
         },
         {
@@ -137,72 +152,119 @@ class ErpNext {
     }
   }
 
-  async createUpgradeRequest(
-    input: CreateUpgradeRequestInput,
+  async postUpgradeRequest(
+    req: Validated<AccountUpgradeRequest>,
   ): Promise<{ name: string } | UpgradeRequestCreateError> {
-    const upgradeRequest = AccountUpgradeRequest.forCreate(input)
     try {
       const resp = await axios.post(
         `${this.url}/api/resource/Account Upgrade Request`,
-        upgradeRequest.toErpnext(),
+        req.toErpnext(),
         { headers: this.headers },
       )
       return { name: resp.data.data.name }
     } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
       baseLogger.error(
-        { err, upgradeRequest },
+        { err, responseData, ...req.toErpnext() },
         "Error creating Account Upgrade Request in ERPNext",
       )
+      recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
       return new UpgradeRequestCreateError(err)
     }
   }
 
-  async getAccountUpgradeRequest(
-    username: string,
-  ): Promise<AccountUpgradeRequest | UpgradeRequestQueryError> {
+  async getAccountUpgradeRequestList(
+    filters: AccountUpgradeRequestFilters,
+  ): Promise<string[] | UpgradeRequestQueryError> {
     try {
-      const filters = JSON.stringify([
-        [
-          AccountUpgradeRequest.doctype, // Likely redundant since this is a path param
-          "username",
-          "=",
-          username,
-        ],
-      ])
-      const resp = await axios.get(`${this.url}/api/resource/Account Upgrade Request`, {
-        params: { filters },
+      const resp = await axios.get(`${this.url}/api/resource/${AccountUpgradeRequest.doctype}`, {
+        params: { 
+          filters: toJson(filters),
+          order_by: "creation desc",
+        },
         headers: this.headers,
       })
 
-      const data = resp.data?.data
-      if (!data || data.length === 0)
-        return new UpgradeRequestQueryError("No data in detail response")
+      return resp.data?.data.map((r: { name: string }) => r.name)
+    } catch (err) {
+      baseLogger.error(
+        { err, filters },
+        "Error querying Account Upgrade Request from ERPNext",
+      )
+      return new UpgradeRequestQueryError(err)
+    }
+  }
 
-      // Get the most recent request
-      const latestRequest = data[0]
-
-      // Fetch full details
-      const detailResp = await axios.get(
-        `${this.url}/api/resource/Account Upgrade Request/${latestRequest.name}`,
+  async getAccountUpgradeRequestById(
+    id: string,
+  ): Promise<AccountUpgradeRequest | UpgradeRequestQueryError> {
+    try {
+      const resp = await axios.get(
+        `${this.url}/api/resource/Account Upgrade Request/${id}`,
         { headers: this.headers },
       )
 
-      const request = detailResp.data?.data
+      const request = resp.data?.data
       if (!request) return new UpgradeRequestQueryError("No data in detail response")
       return AccountUpgradeRequest.fromErpnext(request)
     } catch (err) {
       baseLogger.error(
-        { err, username },
+        { err, id },
         "Error querying Account Upgrade Request from ERPNext",
       )
       return new UpgradeRequestQueryError(err)
+    }
+  }
+
+  closeAccountUpgradeRequests = this.setStatusForRequests(RequestStatus.Closed)
+
+  private setStatusForRequests(status: RequestStatus) {
+    return async (names: string[]): Promise<void | SetDocTypeValueError> => {
+      try {
+        const docs = names.map((name) => ({
+          doctype: AccountUpgradeRequest.doctype,
+          docname: name,
+          status,
+        }))
+
+        const resp = await axios.post(
+          `${this.url}/api/method/frappe.client.bulk_update`,
+          { docs: JSON.stringify(docs) },
+          { headers: this.headers },
+        )
+
+        const failedDocs = resp.data?.message?.failed_docs
+        if (failedDocs?.length) {
+          baseLogger.error({ failedDocs, names, status }, "Bulk update failed for some docs")
+          return new SetDocTypeValueError(failedDocs)
+        }
+      } catch (err) {
+        baseLogger.error({ err, names, status }, "Error bulk updating upgrade request status")
+        return new SetDocTypeValueError(err)
+      }
+    }
+  }
+
+  async listBanks(): Promise<Bank[] | BanksQueryError> {
+    try {
+      const resp = await axios.get(`${this.url}/api/resource/Bank`, {
+        headers: this.headers,
+      })
+
+      const data = resp.data?.data
+      if (!data) return new BanksQueryError("No data in response")
+
+      return data
+    } catch (err) {
+      baseLogger.error({ err }, "Error querying Banks from ERPNext")
+      return new BanksQueryError(err)
     }
   }
 }
 
 // Only instantiate if config is available, otherwise export a null-safe placeholder
 const erpNextInstance = FrappeConfig?.url
-  ? new ErpNext(FrappeConfig.url, FrappeConfig.credentials)
+  ? new ErpNext(FrappeConfig.url, FrappeConfig.sitename, FrappeConfig.credentials)
   : null
 
 export default erpNextInstance as ErpNext

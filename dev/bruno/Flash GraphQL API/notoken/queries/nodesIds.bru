@@ -1,0 +1,39 @@
+meta {
+  name: nodesIds
+  type: graphql
+  seq: 5
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  query globals {
+      globals {
+          nodesIds
+      }
+  }
+}
+
+body:graphql:vars {
+  {}
+}
+
+script:post-response {
+  test("validate build parameters are set", function () {
+      if (bru.getEnvName() != "devnet") {
+          const jsonData = res.getBody();
+          const {peersCount, channelsCount} = jsonData.data.nodeStats
+          expect(peersCount).to.be.above(1);
+          expect(channelsCount).to.be.above(2);
+      }
+  });
+  
+}
+
+settings {
+  encodeUrl: true
+}

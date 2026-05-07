@@ -33,7 +33,6 @@ export type ValidationInputs = CashoutDetails & {
   wallet: Wallet,
   account: Account
 }
-export type ValidationFn = (inputs: ValidationInputs) => Promise<true | ValidationError>;
 
 // Rtgs is Jamaican bank transfer
 export type RtgsTransfer = {

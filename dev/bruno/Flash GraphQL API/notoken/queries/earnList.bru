@@ -1,0 +1,28 @@
+meta {
+  name: earnList
+  type: graphql
+  seq: 6
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  query quizQuestions {
+      quizQuestions {
+          id
+          earnAmount
+      }
+  }
+}
+
+body:graphql:vars {
+  {}
+}
+
+settings {
+  encodeUrl: true
+}

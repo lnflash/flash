@@ -1,0 +1,32 @@
+meta {
+  name: lnInvoicePaymentStatus
+  type: graphql
+  seq: 2
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  query LnInvoicePaymentStatus($input: LnInvoicePaymentStatusInput!) {
+    lnInvoicePaymentStatus(input: $input) {
+      status
+    }
+  }
+  
+}
+
+body:graphql:vars {
+  {
+      "input": {
+          "paymentRequest": ""
+      }
+  }
+}
+
+settings {
+  encodeUrl: true
+}
