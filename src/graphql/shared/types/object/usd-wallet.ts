@@ -6,6 +6,7 @@ import {
 } from "@graphql/connections"
 import { normalizePaymentAmount } from "@graphql/shared/root/mutation"
 import { mapError } from "@graphql/error-map"
+import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 
 import { Wallets } from "@app"
 
@@ -17,10 +18,9 @@ import IWallet from "../abstract/wallet"
 import WalletCurrency from "../scalar/wallet-currency"
 import SignedAmount from "../scalar/signed-amount"
 import OnChainAddress from "../scalar/on-chain-address"
-import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
+import Lnurl from "../scalar/lnurl"
 
 import { TransactionConnection } from "./transaction"
-import Lnurl from "../scalar/lnurl"
 
 const UsdWallet = GT.Object<Wallet>({
   name: "UsdWallet",
@@ -39,7 +39,6 @@ const UsdWallet = GT.Object<Wallet>({
       type: GT.NonNull(WalletCurrency),
       resolve: (source) => source.currency,
     },
-    
     lnurlp: {
       type: Lnurl,
       resolve: (source) => source.lnurlp,
