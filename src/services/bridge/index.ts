@@ -91,6 +91,38 @@ type ExternalAccountResult = {
 export const deriveWithdrawalIdempotencyKey = (rowId: string): string =>
   crypto.createHash("sha256").update(`withdrawal:${rowId}`).digest("hex")
 
+const ensureEthUsdtCashWallet = async (
+  account: Account,
+): Promise<Wallet | ApplicationError> => {
+  const wallets = await WalletsRepository().listByAccountId(account.id)
+  if (wallets instanceof Error) return wallets
+
+  let usdtWallet = wallets.find(
+    (wallet) =>
+      wallet.currency === WalletCurrency.Usdt && wallet.type === WalletType.Checking,
+  )
+
+  if (!usdtWallet) {
+    const createdWallet = await WalletsRepository().persistNew({
+      accountId: account.id,
+      type: WalletType.Checking,
+      currency: WalletCurrency.Usdt,
+    })
+    if (createdWallet instanceof Error) return createdWallet
+    usdtWallet = createdWallet
+  }
+
+  if (account.defaultWalletId !== usdtWallet.id) {
+    const updatedAccount = await AccountsRepository().update({
+      ...account,
+      defaultWalletId: usdtWallet.id,
+    })
+    if (updatedAccount instanceof Error) return updatedAccount
+  }
+
+  return usdtWallet
+}
+
 // ============ Guards ============
 
 const checkBridgeEnabled = (): true | BridgeDisabledError => {
@@ -191,8 +223,9 @@ const initiateKyc = async ({
 /**
  * Creates a virtual account for receiving USD deposits
  * - Requires approved KYC
- * - Creates IBEX Tron USDT receive address
- * - Creates Bridge virtual account pointing to Tron address
+ * - Ensures an IBEX ETH-USDT Cash Wallet exists and is the account default
+ * - Creates IBEX Ethereum USDT receive address
+ * - Creates Bridge virtual account pointing to Ethereum address
  */
 const createVirtualAccount = async (
   accountId: AccountId,
@@ -227,6 +260,9 @@ const createVirtualAccount = async (
       return new BridgeKycPendingError("KYC not yet completed")
     }
 
+    const usdtCashWallet = await ensureEthUsdtCashWallet(account)
+    if (usdtCashWallet instanceof Error) return usdtCashWallet
+
     // Idempotency guard: return the existing VA immediately without touching Bridge
     const existingVa = await BridgeAccountsRepo.findVirtualAccountByAccountId(
       accountId as string,
@@ -250,7 +286,7 @@ const createVirtualAccount = async (
       if (option instanceof Error) return new BridgeError(option.message)
 
       const receiveInfo = await IbexClient.createCryptoReceiveInfo(
-        account.defaultWalletId as IbexAccountId,
+        usdtCashWallet.id as IbexAccountId,
         option,
       )
       if (receiveInfo instanceof Error) return new BridgeError(receiveInfo.message)
