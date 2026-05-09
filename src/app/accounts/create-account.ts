@@ -45,7 +45,7 @@ const initializeCreatedAccount = async ({
     else enabledWallets[currency] = wallet
   }
 
-  // Set default wallet to USD
+  // Set default wallet to the first configured Cash Wallet currency
   const defaultWalletId = enabledWallets[walletsEnabledConfig[0]]?.id
 
   if (defaultWalletId === undefined) {

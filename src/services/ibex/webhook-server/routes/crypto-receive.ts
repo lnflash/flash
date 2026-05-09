@@ -22,7 +22,16 @@ interface CryptoReceiveResult {
 const cryptoReceiveHandler = async (req: Request, res: Response) => {
   const { tx_hash, address, amount, currency, network } = req.body
 
-  if (!tx_hash || !address || !amount || currency !== "USDT" || network !== "tron") {
+  const normalizedCurrency = String(currency || "").toUpperCase()
+  const normalizedNetwork = String(network || "").toLowerCase()
+
+  if (
+    !tx_hash ||
+    !address ||
+    !amount ||
+    normalizedCurrency !== "USDT" ||
+    normalizedNetwork !== "ethereum"
+  ) {
     baseLogger.warn(
       { tx_hash, address, amount, currency, network },
       "Invalid crypto receive payload",
@@ -44,8 +53,8 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
           txHash: String(tx_hash),
           address: String(address),
           amount: String(amount),
-          currency: String(currency),
-          network: String(network),
+          currency: normalizedCurrency,
+          network: normalizedNetwork,
           accountId: account.id,
         })
         if (ibexLog instanceof Error) {

@@ -18,7 +18,7 @@ import { toObjectId, fromObjectId, parseRepositoryError } from "./utils"
 import { Wallet } from "./schema"
 import { AccountsRepository } from "./accounts"
 import { recordExceptionInCurrentSpan } from "@services/tracing"
-import { ErrorLevel, USDAmount, WalletCurrency } from "@domain/shared"
+import { ErrorLevel, USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
 
 export interface WalletRecord {
   id: string
@@ -39,7 +39,8 @@ export const WalletsRepository = (): IWalletsRepository => {
     if (account instanceof Error) return account
     
     try {
-      let currencyId = USDAmount.currencyId
+      const currencyId =
+        currency === WalletCurrency.Usdt ? USDTAmount.currencyId : USDAmount.currencyId
 
       const resp = await Ibex.createAccount(accountId, currencyId)
       if (resp instanceof IbexError) return resp

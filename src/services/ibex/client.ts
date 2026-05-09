@@ -46,7 +46,7 @@ import {
   CryptoReceiveInfo,
   CreateCryptoReceiveInfoRequest,
 } from "./types"
-import { USDAmount, USDTAmount } from "@domain/shared"
+import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
 import { baseLogger } from "@services/logger"
 
 const Ibex = new IbexClient(
@@ -64,13 +64,18 @@ const createAccount = async (
 
 const getAccountDetails = async (
   accountId: IbexAccountId,
+  currency: WalletCurrency = WalletCurrency.Usd,
 ): Promise<IbexAccountDetails | IbexError> => {
   return Ibex.getAccountDetails({ accountId })
     .then((r) => {
       if (r instanceof Error) return r
       else {
         let balance =
-          r.balance !== undefined ? USDAmount.dollars(r.balance.toString()) : undefined
+          r.balance !== undefined
+            ? currency === WalletCurrency.Usdt
+              ? USDTAmount.fromNumber(r.balance.toString())
+              : USDAmount.dollars(r.balance.toString())
+            : undefined
         if (balance instanceof Error) balance = undefined
         return {
           id: r.id,
