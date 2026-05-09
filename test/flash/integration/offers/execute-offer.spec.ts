@@ -1,4 +1,4 @@
-import OffersManager from "@app/offers/OffersManager"
+import CashoutManager from "@app/offers/CashoutManager"
 
 // import { mockedIbex } from "../jest.setup"
 import { USDAmount } from "@domain/shared"
@@ -36,11 +36,12 @@ afterEach(async () => {
 
 describe("Offers", () => {
   it("successfully makes and executes an offer", async () => {
-    const offer = await OffersManager.createCashoutOffer(alice.usdWalletD.id, send)
+    const manager = new CashoutManager()
+    const offer = await manager.makeCashoutOffer(alice.usdWalletD.id, send)
     if (offer instanceof Error) throw offer
 
     const { id } = offer
-    const status = await OffersManager.executeCashout(id, alice.usdWalletD.id)
+    const status = await CashoutManager.executeCashout(id, alice.usdWalletD.id)
 
     // make assertions against ledger
     expect(status).toBeDefined()

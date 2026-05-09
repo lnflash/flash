@@ -12,18 +12,18 @@ import { EmailService } from "@services/email"
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import { RepositoryError } from "@domain/errors"
 import ErpNext from "@services/frappe/ErpNext"
-import { BankAccount } from "@services/frappe/models/BankAccount"
+import { BankAccountQueryError } from "@services/frappe/errors"
 
 const config = { 
   ...Cashout.OfferConfig,
   ...ExchangeRates,
 }
 
-const OffersManager = {
-  createCashoutOffer: async (
+const CashoutManager = {
+  createOffer: async (
     walletId: WalletId, 
     userPayment: USDAmount, 
-    bank: BankAccount,
+    bankAccountId: string,
   ): Promise<PersistedOffer | Error> => {
     const flashWallet = await getBankOwnerIbexAccount()
 
@@ -38,29 +38,35 @@ const OffersManager = {
     const invoice = decodeInvoice(invoiceResp.invoice.bolt11)
     if (invoice instanceof Error) return invoice
 
-    const flashFee = userPayment.multiplyBips(config.fee)
-    const usdLiability = userPayment.subtract(flashFee)
+    const serviceFee = userPayment.multiplyBips(config.fee)
+    const usdPayout = userPayment.subtract(serviceFee)
     const exchangeRate = config.jmd.sell // todo: get from price server
-    const jmdLiability = usdLiability.convertAtRate(exchangeRate) 
+    const jmdPayout = usdPayout.convertAtRate(exchangeRate)
 
+    const wallet = await WalletsRepository().findById(walletId)
+    if (wallet instanceof RepositoryError) return new ValidationError(wallet)
+    const account = await AccountsRepository().findById(wallet.accountId)
+    if (account instanceof RepositoryError) return new ValidationError(account)
+    if (!account.erpParty) return new Error("Could not find erpParty for account")
 
+    const bankAccounts = await ErpNext.getBankAccountsByCustomer(account.erpParty!)
+    if (bankAccounts instanceof BankAccountQueryError) return bankAccounts
+    const bankAccount = bankAccounts.find(b => b.name === bankAccountId)
+    if (!bankAccount) return new ValidationError(`Bank account not found: ${bankAccountId}`)
+
+    const isJmdPayout = bankAccount.currency === "JMD"
+    const payout = isJmdPayout
+      ? { bankAccountId, amount: jmdPayout, serviceFee, exchangeRate }
+      : { bankAccountId, amount: usdPayout, serviceFee }
 
     const validated = await ValidOffer.from({
-      ibexTrx: {
+      payment: {
         userAcct: walletId,
         flashAcct: flashWallet,
         invoice,
-        usd: userPayment,
-        // currency: "USD",
+        amount: userPayment,
       },
-      flash: {
-        liability: {
-          usd: usdLiability,
-          jmd: jmdLiability,
-        },
-        exchangeRate,
-        fee: flashFee,
-      },
+      payout,
     })
     if (validated instanceof ValidationError) return validated
 
@@ -73,7 +79,7 @@ const OffersManager = {
     const offer = await Storage.get(id)
     if (offer instanceof Error) return offer
   
-    if (walletId !== offer.details.ibexTrx.userAcct) return new ValidationError("Offer is not good for provided wallet.")
+    if (walletId !== offer.details.payment.userAcct) return new ValidationError("Offer is not good for provided wallet.")
 
     const validOffer = await ValidOffer.from(offer.details)
     if (validOffer instanceof Error) return validOffer
@@ -88,4 +94,4 @@ const OffersManager = {
 
 }
 
-export default OffersManager
+export default CashoutManager

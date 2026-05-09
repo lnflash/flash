@@ -7,10 +7,11 @@ import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
 import { EmailService } from "@services/email"
 import { CashoutDetails, ValidationInputs } from "./types"
-import ErpNext from "@services/frappe/ErpNext"
-import { JournalEntryDraftError, JournalEntrySubmitError } from "@services/frappe/errors"
+import ErpNext, { CashoutId } from "@services/frappe/ErpNext"
+import { JournalEntryDraftError, CashoutSubmitError } from "@services/frappe/errors"
 import { baseLogger } from "@services/logger"
 import { IbexError } from "@services/ibex/errors"
+import { Cashout } from "@config"
 
 // Only way to construct a ValidOffer is using the static method which contains validations
 class ValidOffer extends Offer {
@@ -27,7 +28,7 @@ class ValidOffer extends Offer {
   static from = async (
     details: CashoutDetails,
   ): Promise<ValidOffer | ValidationError> => {
-    const wallet = await WalletsRepository().findById(details.ibexTrx.userAcct)
+    const wallet = await WalletsRepository().findById(details.payment.userAcct)
     if (wallet instanceof RepositoryError) return new ValidationError(wallet)
 
     const account = await AccountsRepository().findById(wallet.accountId)
@@ -42,25 +43,28 @@ class ValidOffer extends Offer {
   }
 
   async execute(): Promise<InitiatedCashout | Error> {
-    const journal = await ErpNext.draftCashout(this)
-    if (journal instanceof JournalEntryDraftError) return journal
-    const id = journal.journalId
+    const cashoutId = await ErpNext.draftCashout(this)
+    if (cashoutId instanceof JournalEntryDraftError) return cashoutId
 
-    const resp = await Ibex.payInvoice({
-      accountId: this.details.ibexTrx.userAcct,
-      invoice: this.details.ibexTrx.invoice.paymentRequest as unknown as Bolt11,
-    })
-    if (resp instanceof IbexError) {
-      ErpNext.delete(id) // clean up accounting entry
-      return resp
+    if (!Cashout.SkipPayment) {
+      const resp = await Ibex.payInvoice({
+        accountId: this.details.payment.userAcct,
+        invoice: this.details.payment.invoice.paymentRequest as unknown as Bolt11,
+      })
+      if (resp instanceof IbexError) {
+        baseLogger.error({ resp }, "Failed to pay invoice for cashout")
+        return resp
+      }
+    } else {
+      baseLogger.warn({ cashoutId }, "Skipping Ibex payment (skipPayment=true)")
     }
 
-    const submitted = await ErpNext.submit(id)
-    if (submitted instanceof JournalEntrySubmitError) {
+    const submitted = await ErpNext.submitCashout(cashoutId)
+    if (submitted instanceof CashoutSubmitError) {
       baseLogger.error({ submitted }, "Failed to submit journal after payment sent")
     }
 
-    return new InitiatedCashout(this, id) 
+    return new InitiatedCashout(this, cashoutId) 
   }
 }
 
@@ -70,5 +74,5 @@ export default ValidOffer
 
 export class InitiatedCashout {
   readonly status = PaymentSendStatus.Pending
-  constructor(readonly offer: ValidOffer, readonly journalId: LedgerJournalId) {}
+  constructor(readonly offer: ValidOffer, readonly cashoutId: CashoutId) {}
 }

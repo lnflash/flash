@@ -20,16 +20,12 @@ const OffersSerde = {
     });
   },
 
-  // todo: Find better way to identify MoneyAmount
   deserialize: (json: string) => {
     return JSON.parse(
-      json, 
+      json,
       (key: string, value: any) => {
-        if (['usd', 'jmd', 'fee'].includes(key.toLowerCase()) && Array.isArray(value)) {
+        if (['amount', 'servicefee', 'exchangerate'].includes(key.toLowerCase()) && Array.isArray(value)) {
           return toMoneyAmountFromJSON(value as [string, string])
-        }
-        if (key.toLowerCase() === 'amount' && typeof value === 'string') {
-            return BigInt(value);
         }
         return value;
     })

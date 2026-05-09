@@ -1,4 +1,4 @@
-import OffersManager from "@app/offers/OffersManager"
+import CashoutManager from "@app/offers/CashoutManager"
 
 // import { mockedIbex } from "../jest.setup"
 import Ibex from "@services/ibex/client"
@@ -41,7 +41,7 @@ afterEach(async () => {
 
 describe("Offers", () => {
   it("successfully makes and persists an offer using default config", async () => {
-    const offer = await OffersManager.createCashoutOffer(alice.usdWalletD.id, send)
+    const offer = await (new CashoutManager().makeCashoutOffer(alice.usdWalletD.id, send))
 
     if (offer instanceof Error) throw offer
     expect(offer.details.ibexTrx.usd.asCents()).toEqual(send.asCents())

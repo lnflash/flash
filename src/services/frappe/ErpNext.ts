@@ -1,13 +1,13 @@
 import ValidOffer from "@app/offers/ValidOffer"
 import { FrappeConfig } from "@config"
-import { USDAmount, Validated } from "@domain/shared"
+import { JMDAmount, USDAmount, Validated } from "@domain/shared"
 import { baseLogger } from "@services/logger"
 import { recordExceptionInCurrentSpan } from "@services/tracing"
 import axios, { isAxiosError } from "axios"
 
 import {
   JournalEntryDraftError,
-  JournalEntrySubmitError,
+  CashoutSubmitError,
   JournalEntryTitleError,
   JournalEntryDeleteError,
   UpgradeRequestCreateError,
@@ -23,7 +23,6 @@ import {
 import { Bank } from "./models/Bank"
 import { BankAccount } from "./models/BankAccount"
 import { Filter } from "./SearchFilters"
-import ibex from "@services/ibex"
 
 export type AccountUpgradeRequestFilters = { username?: Filter, status?: Filter }
 type ErpNextFilter = [string, string, string, string[]]
@@ -36,6 +35,8 @@ export const toJson = (filters: AccountUpgradeRequestFilters): string => {
 
 // Move to MoneyAmount
 const erpUsd = (usd: USDAmount): number => Number(usd.asCents(2))
+
+export type CashoutId = string & { readonly brand: unique symbol }
 
 class ErpNext {
   url: string
@@ -50,122 +51,48 @@ class ErpNext {
     }
   }
 
-  async draftCashout(offer: ValidOffer): Promise<LedgerJournal | JournalEntryDraftError> {
+  async draftCashout(offer: ValidOffer): Promise<CashoutId | JournalEntryDraftError> {
     const party = offer.account.erpParty
     if (!party) return new JournalEntryDraftError("Account missing erpParty field")
-    const { ibexTrx, flash } = offer.details
-    const { liability } = flash
-    const flashFee = flash.fee
-    // const journalEntry = {
-    //   doctype: "Journal Entry",
-    //   company: "Flash",
-    //   multi_currency: 1,
-    //   posting_date: new Date().toISOString().split("T")[0],
-    //   remark: `${JSON.stringify({ paymentHash: ibexTrx.invoice.paymentHash, userWalletId: ibexTrx.userAcct })}`,
-    //   accounts: [
-    //     {
-    //       account: FrappeConfig.erpnext.accounts.ibex.operating,
-    //       account_currency: "USD",
-    //       debit_in_account_currency: erpUsd(ibexTrx.usd),
-    //       debit: erpUsd(ibexTrx.usd),
-    //       exchange_rate: 1,
-    //     },
-    //     {
-    //       account: FrappeConfig.erpnext.accounts.cashout,
-    //       account_currency: "JMD",
-    //       credit_in_account_currency: Number(liability.jmd.asCents(2)),
-    //       credit: erpUsd(liability.usd),
-    //       exchange_rate: erpUsd(liability.usd) / Number(liability.jmd.asCents(2)),
-    //       party_type: "Customer",
-    //       party,
-    //     },
-    //     {
-    //       account: FrappeConfig.erpnext.accounts.serviceFees,
-    //       account_currency: "USD",
-    //       credit_in_account_currency: erpUsd(flashFee),
-    //       credit: erpUsd(flashFee),
-    //       exchange_rate: 1,
-    //     },
-    //   ],
-    // }
-
-    // try {
-    //   const resp = await axios.post(
-    //     `${this.url}/api/resource/Journal Entry`,
-    //     journalEntry,
-    //     { headers: this.headers },
-    //   )
-    //   const titleResp = this.updateTitle(
-    //     resp.data.data.name,
-    //     `Open cashout ${ibexTrx.invoice.paymentHash.substring(0, 5)}`,
-    //   )
-    //   if (titleResp instanceof JournalEntryTitleError) {
-    //     baseLogger.error({ err: titleResp }, "Error updating JE title in ERPNext")
-    //   }
-
-    //   return {
-    //     journalId: resp.data.data.name,
-    //     voided: false,
-    //     transactionIds: [],
-    //   } as LedgerJournal
+    const { payment, payout } = offer.details
 
     try {
       const response = await axios.post(
         `${this.url}/api/resource/Cashout`,
         {
           customer: party,
-          // bank_account: offer.details.bank,
-          amount: 100.00,
-          transaction_id: ibexTrx.invoice.paymentHash,                                                                       
-          wallet_id: ibexTrx.userAcct,
-          flash_wallet: ibexTrx.flashAcct,                                                                          
-          // invoice: ibexTrx.invoice.paymentHash,
-          usd_liability: liability.usd,                                                                        
-          jmd_liability: liability.jmd,                                                                        
-          exchange_rate: flash.exchangeRate,
-          flash_fee: flashFee,                                                                                
+          bank_account: payout.bankAccountId,
+          transaction_id: payment.invoice.paymentHash,
+          wallet_id: payment.userAcct,
+          flash_wallet: payment.flashAcct,
+          user_receives: Number(payout.amount.asDollars()),
+          user_pays: Number(payment.amount.asDollars()),
+          currency: payout.amount.currencyCode,
+          exchange_rate: Number(payout.exchangeRate?.asDollars()),
+          flash_fee: Number(payout.serviceFee.asDollars()),
         },           
         { headers: this.headers },
       );
       console.log("Cashout response:", response.data);
-      return {
-        journalId: response.data.data.name,
-        voided: false,
-        transactionIds: [],
-      }
+      return response.data.data.name as CashoutId
     } catch (err) {
       baseLogger.error({ err }, "Error drafting Cashout in ERPNext")
       return new JournalEntryDraftError(err)
     }
   }
 
-  private async updateTitle(
-    jeName: string,
-    title: string,
-  ): Promise<any | JournalEntryTitleError> {
+  async submitCashout(cashoutId: CashoutId): Promise<true | CashoutSubmitError> {
     try {
-      const resp = await axios.put(
-        `${this.url}/api/resource/Journal Entry/${jeName}`,
-        { title },
+      await axios.post(
+        `${this.url}/api/method/admin_panel.admin_panel.doctype.cashout.cashout.submit_cashout`,
+        { name: cashoutId },
         { headers: this.headers },
       )
-      return resp.data
+      return true
     } catch (err) {
-      return new JournalEntryTitleError(err)
-    }
-  }
-
-  async submit(jeName: string): Promise<any | JournalEntrySubmitError> {
-    try {
-      const resp = await axios.put(
-        `${this.url}/api/resource/Journal Entry/${jeName}`,
-        { docstatus: 1 },
-        { headers: this.headers },
-      )
-      return resp.data
-    } catch (err) {
-      baseLogger.error({ err }, "Error submitting JE in ERPNext")
-      return new JournalEntrySubmitError(err)
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error({ err, responseData }, "Error submitting Cashout in ERPNext")
+      return new CashoutSubmitError(err)
     }
   }
 

@@ -1,4 +1,4 @@
-import OffersManager from "@app/offers/OffersManager"
+import CashoutManager from "@app/offers/CashoutManager"
 import { mapToGqlErrorList } from "@graphql/error-map"
 import { GT } from "@graphql/index"
 import CashoutOffer from "@graphql/public/types/object/cashout-offer"
@@ -20,8 +20,12 @@ const RequestCashoutInput = GT.Input({
       description: "ID for a USD wallet belonging to the current user.",
     },
     amount: {
-      type: GT.NonNull(USDCentsScalar), 
-      description: "Amount in USD cents." 
+      type: GT.NonNull(USDCentsScalar),
+      description: "Amount in USD cents."
+    },
+    bankAccountId: {
+      type: GT.NonNull(GT.ID),
+      description: "ERPNext bank account identifier to receive the cashout.",
     },
   }),
 })
@@ -52,29 +56,17 @@ const RequestCashoutMutation = GT.Field({
     if (!Cashout.Enabled)
       return new NotImplementedError("Cashout feature is not enabled")
 
-    const { walletId, amount } = args.input
-    for (const input of [walletId, amount]) {
+    const { walletId, amount, bankAccountId } = args.input
+    for (const input of [walletId, amount, bankAccountId]) {
       if (input instanceof Error) {
         return { errors: [{ message: input.message }] }
       }
     }
 
-
-    // For now, I want to surface the bank selection,
-    // but eventually move out of graphql resolver
-    const wallet = await WalletsRepository().findById(walletId)
-    if (wallet instanceof RepositoryError) return new ValidationError(wallet)
-    const account = await AccountsRepository().findById(wallet.accountId)
-    if (account instanceof RepositoryError) return new ValidationError(account)
-    if (!account.erpParty) return new Error("Could not find erpParty for account")
-    const banks = await ErpNext.getBankAccountsByCustomer(account.erpParty)
-    if (banks instanceof Error) return banks
-    if (!banks.length) return Error(`Could not find banks for customer: ${account.erpParty}`)
-
-    const offer = await (OffersManager.createCashoutOffer(
+    const offer = await (CashoutManager.createOffer(
       walletId,
-      amount, 
-      banks[0], // todo: allow user to select bank account
+      amount,
+      bankAccountId,
     ))
     if (offer instanceof Error) return { errors: mapToGqlErrorList(offer) }
 
