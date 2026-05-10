@@ -7,7 +7,7 @@ import {
 } from "@graphql/connections"
 import { mapError } from "@graphql/error-map"
 
-import { Wallets } from "@app"
+import { Accounts, Wallets } from "@app"
 
 import { WalletCurrency as WalletCurrencyDomain } from "@domain/shared"
 
@@ -46,11 +46,11 @@ const BtcWallet = GT.Object<Wallet>({
       type: GT.NonNull(FractionalCentAmount),
       description: "A balance stored in BTC.",
       resolve: async (source) => {
-        const balanceSats = await Wallets.getBalanceForWallet({ walletId: source.id })
-        if (balanceSats instanceof Error) {
-          throw mapError(balanceSats)
+        const balance = await Wallets.getBalanceForWallet({ walletId: source.id })
+        if (balance instanceof Error) {
+          throw mapError(balance)
         }
-        return balanceSats
+        return Number(balance.asCents(8))
       },
     },
     pendingIncomingBalance: {
@@ -73,9 +73,15 @@ const BtcWallet = GT.Object<Wallet>({
           throw paginationArgs
         }
 
+        const account = await Accounts.getAccount(source.accountId)
+        if (account instanceof Error) {
+          throw mapError(account)
+        }
+
         const { result, error } = await Wallets.getTransactionsForWallets({
           wallets: [source],
           paginationArgs,
+          displayCurrency: account.displayCurrency,
         })
         if (error instanceof Error) {
           throw mapError(error)

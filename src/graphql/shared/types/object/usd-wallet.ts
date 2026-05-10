@@ -7,7 +7,7 @@ import {
 import { normalizePaymentAmount } from "@graphql/shared/root/mutation"
 import { mapError } from "@graphql/error-map"
 
-import { Wallets } from "@app"
+import { Accounts, Wallets } from "@app"
 
 import { WalletCurrency as WalletCurrencyDomain } from "@domain/shared"
 
@@ -39,12 +39,12 @@ const UsdWallet = GT.Object<Wallet>({
       type: GT.NonNull(WalletCurrency),
       resolve: (source) => source.currency,
     },
-    
+
     lnurlp: {
       type: Lnurl,
       resolve: (source) => source.lnurlp,
     },
-    
+
     balance: {
       type: GT.NonNull(FractionalCentAmount),
       resolve: async (source) => {
@@ -75,9 +75,15 @@ const UsdWallet = GT.Object<Wallet>({
           throw paginationArgs
         }
 
+        const account = await Accounts.getAccount(source.accountId)
+        if (account instanceof Error) {
+          throw mapError(account)
+        }
+
         const { result, error } = await Wallets.getTransactionsForWallets({
           wallets: [source],
           paginationArgs,
+          displayCurrency: account.displayCurrency,
         })
         if (error instanceof Error) {
           throw mapError(error)
