@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ENG-348 ERPNext Audit Writer Research</title>
+<style>
+:root{
+  color-scheme:dark;
+  --green:#41ad49;
+  --bg:#070908;
+  --surface:#0d100e;
+  --surface-2:#121612;
+  --surface-3:#171c18;
+  --line:#273027;
+  --line-soft:rgba(244,247,244,.08);
+  --text:#f4f7f4;
+  --muted:#bac4bb;
+  --dim:#879288;
+  --danger:#ff6b63;
+  --warn:#f1b84b;
+  --info:#8dbdff;
+  --success:#7dde83;
+  --r-lg:20px;
+  --r-md:14px;
+  --shadow:0 24px 70px rgba(0,0,0,.28);
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);line-height:1.6;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+body:before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(circle at 16% -8%,rgba(65,173,73,.14),transparent 30rem),linear-gradient(180deg,rgba(255,255,255,.018),transparent 18rem);z-index:-1}
+a{color:inherit;text-decoration-thickness:1px;text-underline-offset:3px}.wrap{width:min(1160px,calc(100% - 32px));margin-inline:auto}
+h1,h2,h3{margin:0;letter-spacing:-.03em;line-height:1.1}h1{font-size:clamp(30px,5vw,54px);max-width:880px}h2{font-size:clamp(24px,3vw,34px)}h3{font-size:17px;letter-spacing:-.015em}p{margin:0;color:var(--muted)}code,pre{font-family:SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace}code{font-size:.92em;color:#d7dfd8;overflow-wrap:anywhere}pre{margin:0;overflow:auto;background:#080a08;border:1px solid var(--line-soft);border-radius:var(--r-md);padding:16px;font-size:13px;line-height:1.55}.skip{position:absolute;left:-999px;top:12px;background:var(--green);color:#041006;padding:10px 14px;border-radius:999px;font-weight:850}.skip:focus{left:12px;z-index:20}.hero{padding:40px 0 22px;border-bottom:1px solid var(--line-soft)}.hero-grid{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:32px;align-items:start}.eyebrow{color:var(--green);font-size:12px;font-weight:850;letter-spacing:.14em;text-transform:uppercase;margin-bottom:14px}.lede{max-width:820px;margin-top:18px;font-size:18px;color:#c9d3ca}.meta-panel,.panel,.section-shell{background:linear-gradient(180deg,rgba(255,255,255,.032),rgba(255,255,255,.016));border:1px solid var(--line-soft);border-radius:var(--r-lg);box-shadow:var(--shadow)}.meta-panel{padding:18px}.risk-line{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:14px}.risk-line strong{font-size:13px;color:var(--dim);font-weight:760;text-transform:uppercase;letter-spacing:.08em}.meta{display:grid;border-top:1px solid var(--line-soft)}.meta div{display:grid;grid-template-columns:108px minmax(0,1fr);gap:14px;padding:11px 0;border-bottom:1px solid var(--line-soft);font-size:13px}.meta div:last-child{border-bottom:0;padding-bottom:0}.meta span{color:var(--dim);font-weight:760}.meta strong{font-weight:680;text-align:right;overflow-wrap:anywhere}.badge{display:inline-flex;align-items:center;min-height:26px;border-radius:999px;padding:0 10px;border:1px solid transparent;font-size:11px;font-weight:850;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap}.success{color:#baf4be;background:rgba(65,173,73,.11);border-color:rgba(65,173,73,.28)}.warning{color:#ffe0a1;background:rgba(241,184,75,.11);border-color:rgba(241,184,75,.3)}.critical{color:#ffc1bd;background:rgba(255,107,99,.11);border-color:rgba(255,107,99,.32)}.note{color:#c3dcff;background:rgba(141,189,255,.11);border-color:rgba(141,189,255,.3)}.tabs-wrap{position:sticky;top:0;z-index:10;background:rgba(7,9,8,.86);backdrop-filter:blur(18px);border-bottom:1px solid var(--line-soft)}.tabs{display:flex;gap:6px;overflow:auto;padding:10px 0;scrollbar-width:none}.tabs::-webkit-scrollbar{display:none}.tab{appearance:none;border:1px solid transparent;background:transparent;color:var(--dim);border-radius:999px;min-height:40px;padding:0 14px;font:inherit;font-size:13px;font-weight:780;white-space:nowrap;cursor:pointer}.tab:hover{color:var(--text);background:rgba(255,255,255,.04);border-color:var(--line-soft)}.tab[aria-selected="true"]{color:#061008;background:var(--green);border-color:var(--green)}main{padding:26px 0 56px}.tab-panel{display:none}.tab-panel.active{display:block}.section-shell{padding:24px;margin-top:18px}.section-head{display:flex;justify-content:space-between;gap:20px;align-items:start;margin-bottom:18px}.kicker{color:var(--dim);font-size:12px;font-weight:850;letter-spacing:.12em;text-transform:uppercase;margin-bottom:7px}.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.panel{padding:18px;box-shadow:none}.panel h3{margin-top:12px}.panel p{margin-top:8px}.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;margin-top:16px;border:1px solid var(--line-soft);border-radius:var(--r-md);overflow:hidden;background:var(--line-soft)}.metric{background:rgba(13,16,14,.9);padding:15px}.metric span{display:block;color:var(--dim);font-size:11px;font-weight:850;text-transform:uppercase;letter-spacing:.08em}.metric strong{display:block;margin-top:6px;font-size:22px;letter-spacing:-.03em}.details-stack{display:grid;gap:10px}.disclosure{border:1px solid var(--line-soft);border-radius:var(--r-md);background:rgba(255,255,255,.018);overflow:hidden}.disclosure summary{list-style:none;display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:58px;padding:14px 16px;cursor:pointer}.disclosure summary::-webkit-details-marker{display:none}.summary-title{display:flex;align-items:center;gap:10px;min-width:0}.summary-title code{color:var(--text);font-size:13px}.chev{width:10px;height:10px;border-right:2px solid var(--dim);border-bottom:2px solid var(--dim);transform:rotate(45deg);transition:transform .18s ease;flex:0 0 auto}.disclosure[open] .chev{transform:rotate(225deg)}.disclosure-body{border-top:1px solid var(--line-soft);padding:16px;background:rgba(0,0,0,.14)}.diff-grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:16px;align-items:start}.note-card{border-left:3px solid var(--green);padding:12px 0 12px 16px}.note-card h3{margin-bottom:8px}.diagram{overflow:auto;background:#090b09;border:1px solid var(--line-soft);border-radius:var(--r-md);padding:12px}.flow-table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid var(--line-soft);border-radius:var(--r-md);overflow:hidden}th,td{padding:14px 16px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line-soft)}tr:last-child td{border-bottom:0}th{color:var(--dim);background:rgba(255,255,255,.032);font-size:11px;font-weight:850;letter-spacing:.08em;text-transform:uppercase}td{color:var(--muted);font-size:14px}.checklist{list-style:none;margin:0;padding:0;display:grid;gap:10px}.checklist li{position:relative;color:var(--muted);padding:14px 14px 14px 46px;border:1px solid var(--line-soft);border-radius:var(--r-md);background:rgba(255,255,255,.018)}.checklist li:before{content:"";position:absolute;left:16px;top:17px;width:16px;height:16px;border-radius:5px;border:1px solid rgba(65,173,73,.46);background:rgba(65,173,73,.1)}.footer{padding:26px 0 54px;color:var(--dim);font-size:13px;border-top:1px solid var(--line-soft)}@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.chev{transition:none}}@media(max-width:920px){.hero-grid,.grid2,.grid3,.diff-grid,.metrics{grid-template-columns:1fr}.meta strong{text-align:left}.meta div{grid-template-columns:1fr}.section-head{display:grid}.flow-table{display:block;overflow-x:auto;white-space:nowrap}th,td{white-space:normal;min-width:160px}}@media(max-width:640px){.wrap{width:min(100% - 24px,1160px)}.hero{padding-top:28px}.section-shell,.panel,.meta-panel{border-radius:16px}.section-shell{padding:16px}.tabs{padding-inline:0}.tab{min-height:38px;padding-inline:11px}.risk-line{align-items:flex-start;flex-direction:column}.disclosure summary{align-items:flex-start}.summary-title{align-items:flex-start;flex-direction:column}}
+</style>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <div class="eyebrow">Flash research artifact</div>
+      <h1>ENG-348 ERPNext Audit Writer Research</h1>
+      <p class="lede">What we know so far about writing ERPNext audit rows for Bridge-backed Cash Wallet topups/cashouts, and the recommended implementation shape for ENG-348.</p>
+    </div>
+    <aside class="meta-panel" aria-label="Artifact metadata">
+      <div class="risk-line"><strong>Status</strong><span class="badge warning">Ready for sign-off</span></div>
+      <div class="meta">
+        <div><span>Source</span><strong>Linear ENG-348 + local Bridge/IBEX code</strong></div>
+        <div><span>Owner</span><strong>Engineering / Dread schema sign-off</strong></div>
+        <div><span>Scope</span><strong>Bridge ↔ IBEX USDT webhook audit rows</strong></div>
+        <div><span>Updated</span><strong>2026-05-10</strong></div>
+        <div><span>Verification</span><strong>Research only; no code changes verified</strong></div>
+      </div>
+    </aside>
+  </div>
+</header>
+<nav class="tabs-wrap" aria-label="Artifact sections">
+  <div class="wrap tabs" role="tablist">
+    <button class="tab" id="tab-summary" role="tab" aria-selected="true" aria-controls="panel-summary">Summary</button>
+    <button class="tab" id="tab-architecture" role="tab" aria-selected="false" aria-controls="panel-architecture">Architecture</button>
+    <button class="tab" id="tab-evidence" role="tab" aria-selected="false" aria-controls="panel-evidence">Evidence</button>
+    <button class="tab" id="tab-risk" role="tab" aria-selected="false" aria-controls="panel-risk">Risk</button>
+    <button class="tab" id="tab-testing" role="tab" aria-selected="false" aria-controls="panel-testing">Testing</button>
+    <button class="tab" id="tab-checklist" role="tab" aria-selected="false" aria-controls="panel-checklist">Checklist</button>
+  </div>
+</nav>
+<main id="content" class="wrap">
+  <section id="panel-summary" class="tab-panel active" role="tabpanel" aria-labelledby="tab-summary">
+    <div class="section-shell">
+      <div class="section-head"><div><div class="kicker">01 / Executive summary</div><h2>Build a synchronous ERPNext audit writer, but make the ERPNext object a dedicated DocType.</h2></div><span class="badge warning">Recommendation</span></div>
+      <div class="grid2">
+        <article class="panel"><span class="badge success">Known</span><h3>The webhook seams already exist</h3><p>Bridge deposit, IBEX crypto receive, and Bridge transfer handlers already perform validation, idempotency, and local persistence/status changes. ENG-348 adds the finance-facing ERPNext write at those seams.</p></article>
+        <article class="panel"><span class="badge warning">Decision</span><h3>Use Bridge Transfer Request, not Journal Entry semantics</h3><p>The ticket asks for a Journal Entry / audit row, but the current need is reconciliation visibility. A dedicated DocType gives Finance a clean report now without prematurely encoding GL policy.</p></article>
+      </div>
+      <div class="metrics"><div class="metric"><span>Webhook paths</span><strong>4</strong></div><div class="metric"><span>ERPNext object</span><strong>1 DocType</strong></div><div class="metric"><span>Primary key</span><strong>request_id</strong></div><div class="metric"><span>Failure mode</span><strong>500 + retry</strong></div></div>
+    </div>
+    <div class="section-shell">
+      <div class="section-head"><div><div class="kicker">02 / Change map</div><h2>Three small backend components plus one Frappe DocType.</h2></div></div>
+      <div class="grid3">
+        <article class="panel"><h3>Frappe DocType</h3><p>Create Bridge Transfer Request with unique request_id, status/type fields, provider references, Flash references, raw payload, and source-system trace metadata.</p></article>
+        <article class="panel"><h3>ERPNext client + model</h3><p>Add BridgeTransferRequest model and ErpNext.upsertBridgeTransferRequest with GET-by-request_id, POST, PUT, and duplicate-conflict recovery.</p></article>
+        <article class="panel"><h3>Webhook writer service</h3><p>Add BridgeTransferRequestWriter mapping functions and call them after existing local persistence/status updates succeed.</p></article>
+      </div>
+    </div>
+  </section>
+
+  <section id="panel-architecture" class="tab-panel" role="tabpanel" aria-labelledby="tab-architecture">
+    <div class="section-shell">
+      <div class="section-head"><div><div class="kicker">03 / Architecture</div><h2>One logical request row accumulates facts from Bridge and IBEX events.</h2></div></div>
+      <details class="disclosure" open><summary><span class="summary-title"><span class="badge note">Diagram</span><strong>Recommended writer flow</strong></span><span class="chev" aria-hidden="true"></span></summary><div class="disclosure-body"><div class="diagram"><pre><code>Bridge /deposit ─┐
+                 ├─ BridgeTransferRequestWriter ── ErpNext.upsertBridgeTransferRequest ── ERPNext Bridge Transfer Request
+IBEX /crypto/receive ─┘
+
+Bridge /transfer.completed ── BridgeTransferRequestWriter ── ERPNext row: Cashout / Completed
+Bridge /transfer.failed    ── BridgeTransferRequestWriter ── ERPNext row: Cashout / Failed</code></pre></div></div></details>
+      <details class="disclosure"><summary><span class="summary-title"><span class="badge note">Flow</span><strong>Event mapping overview</strong></span><span class="chev" aria-hidden="true"></span></summary><div class="disclosure-body"><table class="flow-table"><thead><tr><th>Step</th><th>Component</th><th>Behavior</th><th>Review edge</th></tr></thead><tbody><tr><td>1</td><td>Bridge /deposit</td><td>Topup, Fiat Received, request_id = event_object.id, receipt fields copied.</td><td>Must not credit wallet here; IBEX remains ledger source.</td></tr></tbody></table></div></details>
+    </div>
+  </section>
+
+  <section id="panel-evidence" class="tab-panel" role="tabpanel" aria-labelledby="tab-evidence">
+    <div class="section-shell">
+      <div class="section-head"><div><div class="kicker">04 / Evidence</div><h2>Code evidence and design evidence used for the recommendation.</h2></div></div>
+      <div class="details-stack">
+        <details class="disclosure" open><summary><span class="summary-title"><span class="badge critical">Gap</span><code>Current webhook handlers stop before ERPNext</code></span><span class="chev" aria-hidden="true"></span></summary><div class="disclosure-body diff-grid"><pre><code>Existing handlers have the right webhook points but no ERPNext write yet.
+
+src/services/bridge/webhook-server/routes/deposit.ts
+- locks on bridge-deposit:&lt;id&gt;:&lt;state&gt;
+- logs Bridge deposit details
+- persists BridgeDepositLog
+- returns success without writing ERPNext
+
+src/services/ibex/webhook-server/routes/crypto-receive.ts
+- validates tx_hash/address/amount/currency/network
+- requires USDT + ethereum
+- resolves account by bridgeEthereumAddress
+- persists IbexCryptoReceiveLog
+- finds USDT wallet
+- returns success without writing ERPNext
+
+src/services/bridge/webhook-server/routes/transfer.ts
+- locks on bridge-transfer:&lt;transfer_id&gt;
+- updates withdrawal status completed/failed
+- returns success without writing ERPNext</code></pre><div class="note-card"><h3>Review note</h3><p>This is exactly the right insertion point: after local persistence/status updates, before returning webhook success.</p></div></div></details>
+        <details class="disclosure"><summary><span class="summary-title"><span class="badge warning">Design</span><code>Dedicated DocType preserves audit semantics without GL coupling</code></span><span class="chev" aria-hidden="true"></span></summary><div class="disclosure-body diff-grid"><pre><code>Recommended ERPNext object: Bridge Transfer Request
+
+Core fields:
+- request_id unique
+- transaction_type: Topup | Cashout
+- status: Pending | Fiat Received | Settled | Completed | Failed
+- provider: Bridge
+- asset: USDT
+- network: Ethereum
+- amount/currency/developer_fee/receipt amounts
+- account_id/wallet_id
+- bridge_customer_id/bridge_transfer_id/ibex_tx_hash/address
+- source_systems_seen/raw_payload_json/first_seen_at/last_seen_at
+
+Why not Journal Entry in v1:
+- ENG-348 needs a reportable audit/reconciliation surface
+- GL policy is not finalized
+- provider trace payloads fit a purpose-built DocType better than JE remarks/custom fields
+- a DocType can later feed formal accounting entries if Finance wants that</code></pre><div class="note-card"><h3>Review note</h3><p>If Finance treats “Journal Entry” as hard acceptance, get explicit sign-off before implementation. Otherwise DocType is the cleaner v1.</p></div></div></details>
+      </div>
+    </div>
+  </section>
+
+  <section id="panel-risk" class="tab-panel" role="tabpanel" aria-labelledby="tab-risk">
+    <div class="section-shell"><div class="section-head"><div><div class="kicker">05 / Risk review</div><h2>Main risks are schema sign-off, join keys, and retry observability.</h2></div></div><div class="grid3"><article class="panel"><span class="badge critical">Critical</span><h3>DocType vs Journal Entry ambiguity</h3><p>Ticket wording says Journal Entry / audit row. Research recommends a dedicated DocType. Dread/Finance should confirm this distinction before engineering starts.</p></article><article class="panel"><span class="badge warning">Warning</span><h3>IBEX receive may not carry Bridge transfer id</h3><p>If IBEX crypto receive cannot be joined to a Bridge transfer, v1 should use request_id = ibex:<tx_hash> and let ENG-276 link records later.</p></article><article class="panel"><span class="badge note">Note</span><h3>Network naming changed in practice</h3><p>Earlier docs mention Tron/TRC-20, but the current PR #344 route validates network=ethereum. ENG-348 should follow the actual ENG-296 implementation branch.</p></article></div></div>
+  </section>
+
+  <section id="panel-testing" class="tab-panel" role="tabpanel" aria-labelledby="tab-testing">
+    <div class="section-shell"><div class="section-head"><div><div class="kicker">06 / Testing</div><h2>Recommended focused verification before claiming ENG-348 done.</h2></div></div><table class="flow-table"><thead><tr><th>Area</th><th>Evidence seen</th><th>Status</th><th>Reviewer note</th></tr></thead><tbody><tr><td>Unit + schema checks</td><td>DocType JSON validation; model serialization; ERPNext upsert create/update/conflict/failure; route writer calls and writer-failure 500s.</td><td><span class="badge warning">Planned</span></td><td>No implementation was changed for this artifact, so no test suite was run beyond file creation/inspection.</td></tr></tbody></table></div>
+  </section>
+
+  <section id="panel-checklist" class="tab-panel" role="tabpanel" aria-labelledby="tab-checklist">
+    <div class="section-shell"><div class="section-head"><div><div class="kicker">07 / Checklist</div><h2>Next actions for implementation sign-off.</h2></div></div><ul class="checklist"><li>Confirm with Dread/Finance that Bridge Transfer Request DocType satisfies the “Journal Entry / audit row” requirement.</li><li>Confirm IBEX crypto receive payload joinability to Bridge transfer id or accept ibex:<tx_hash> fallback.</li><li>Implement DocType, model, upsert client, writer service, route wiring, and focused tests in that order.</li></ul></div>
+  </section>
+</main>
+<footer class="footer"><div class="wrap">Sources: Linear ENG-348 current description/comment fetched 2026-05-10; docs/plans/2026-05-09-eng-348-erpnext-bridge-transfer-request-design.md; docs/plans/2026-05-09-eng-348-erpnext-bridge-transfer-request.md; src/services/bridge/webhook-server/routes/deposit.ts; src/services/bridge/webhook-server/routes/transfer.ts; src/services/ibex/webhook-server/routes/crypto-receive.ts; src/services/frappe/ErpNext.ts. Caveat: this is a research/design artifact, not implementation verification.</div></footer>
+<script>
+const tabs = [...document.querySelectorAll('[role="tab"]')];
+const panels = [...document.querySelectorAll('[role="tabpanel"]')];
+function activateTab(tab, pushHash = true){
+  tabs.forEach(t => t.setAttribute('aria-selected', String(t === tab)));
+  panels.forEach(panel => panel.classList.toggle('active', panel.id === tab.getAttribute('aria-controls')));
+  if(pushHash) history.replaceState(null, '', '#' + tab.id.replace('tab-',''));
+}
+tabs.forEach((tab, index) => {
+  tab.addEventListener('click', () => activateTab(tab));
+  tab.addEventListener('keydown', event => {
+    const dir = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+    if(!dir) return;
+    event.preventDefault();
+    const next = tabs[(index + dir + tabs.length) % tabs.length];
+    next.focus();
+    activateTab(next);
+  });
+});
+const initial = location.hash && document.getElementById('tab-' + location.hash.slice(1));
+if(initial) activateTab(initial, false);
+</script>
+</body>
+</html>
