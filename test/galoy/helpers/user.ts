@@ -3,7 +3,7 @@ import { addWalletIfNonexistent } from "@app/accounts/add-wallet"
 import { getAdminAccounts, getDefaultAccountsConfig } from "@config"
 
 import { CouldNotFindAccountFromKratosIdError, CouldNotFindError } from "@domain/errors"
-import { WalletCurrency } from "@domain/shared"
+import { BtcPaymentAmount, WalletCurrency } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
 
 import {
@@ -370,15 +370,18 @@ export const createAndFundNewWallet = async <S extends WalletCurrency>({
   if (wallet instanceof Error) throw wallet
   // Fund new wallet if a non-zero balance is passed
   if (balanceAmount.amount === 0n) return wallet
-  const addInvoiceFn =
+  const lnInvoice =
     wallet.currency === WalletCurrency.Btc
-      ? Wallets.addInvoiceForSelfForBtcWallet
-      : Wallets.addInvoiceForSelfForUsdWallet
-  const lnInvoice = await addInvoiceFn({
-    walletId: wallet.id,
-    amount: Number(balanceAmount.amount),
-    memo: `Fund new wallet ${wallet.id}`,
-  })
+      ? await Wallets.addInvoiceForSelfForBtcWallet({
+          walletId: wallet.id,
+          amount: BtcPaymentAmount(balanceAmount.amount),
+          memo: `Fund new wallet ${wallet.id}`,
+        })
+      : await Wallets.addInvoiceForSelfForUsdWallet({
+          walletId: wallet.id,
+          amount: Number(balanceAmount.amount) as FractionalCentAmount,
+          memo: `Fund new wallet ${wallet.id}`,
+        })
   if (lnInvoice instanceof Error) throw lnInvoice
   const { paymentRequest: invoice, paymentHash } = lnInvoice
   const updateInvoice = () =>
@@ -415,15 +418,18 @@ export const fundWallet = async ({
   const wallet = await WalletsRepository().findById(walletId)
   if (wallet instanceof Error) throw wallet
 
-  const addInvoiceFn =
+  const lnInvoice =
     wallet.currency === WalletCurrency.Btc
-      ? Wallets.addInvoiceForSelfForBtcWallet
-      : Wallets.addInvoiceForSelfForUsdWallet
-  const lnInvoice = await addInvoiceFn({
-    walletId: wallet.id,
-    amount: Number(balanceAmount.amount),
-    memo: `Fund new wallet ${wallet.id}`,
-  })
+      ? await Wallets.addInvoiceForSelfForBtcWallet({
+          walletId: wallet.id,
+          amount: BtcPaymentAmount(balanceAmount.amount),
+          memo: `Fund new wallet ${wallet.id}`,
+        })
+      : await Wallets.addInvoiceForSelfForUsdWallet({
+          walletId: wallet.id,
+          amount: Number(balanceAmount.amount) as FractionalCentAmount,
+          memo: `Fund new wallet ${wallet.id}`,
+        })
   if (lnInvoice instanceof Error) throw lnInvoice
   const { paymentRequest: invoice, paymentHash } = lnInvoice
   const updateInvoice = () =>

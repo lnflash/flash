@@ -74,7 +74,7 @@ type BaseWalletTransaction = {
   readonly settlementAmount: Satoshis | UsdCents
   readonly settlementFee: Satoshis | UsdCents
   readonly settlementCurrency: WalletCurrency
-  
+
   readonly settlementDisplayAmount: DisplayCurrencyMajorAmount
   readonly settlementDisplayFee: DisplayCurrencyMajorAmount
   readonly settlementDisplayPrice: WalletMinorUnitDisplayPrice<
@@ -131,12 +131,12 @@ type WalletLnSettledTransaction = BaseWalletTransaction & {
 }
 
 type UnknownTypeTransaction = BaseWalletTransaction & {
-  readonly initiationVia: { 
-    readonly type: 'unknown'
-  } 
-  readonly settlementVia: { 
-    readonly type: 'unknown'
-  } 
+  readonly initiationVia: {
+    readonly type: "unknown"
+  }
+  readonly settlementVia: {
+    readonly type: "unknown"
+  }
 }
 
 type WalletOnChainTransaction =
@@ -234,15 +234,4 @@ type OnChainFeeCalculator = {
     bankFee: BtcPaymentAmount
   }
   intraLedgerFees(): PaymentAmountInAllCurrencies
-}
-
-type PaymentInputValidatorConfig = (
-  walletId: WalletId,
-) => Promise<Wallet | RepositoryError>
-
-
-type PaymentInputValidator = {
-  validatePaymentInput: <T extends undefined | string>(
-    args: ValidatePaymentInputArgs<T>,
-  ) => Promise<ValidatePaymentInputRet<T> | ValidationError | RepositoryError>
 }
