@@ -1,6 +1,7 @@
 import { AccountLevel, AccountStatus } from "@domain/accounts"
 import { ValidationError } from "@domain/shared"
-import { Address, BankAccount } from "@app/accounts"
+import { Address } from "@app/accounts"
+import { BankAccount } from "@services/frappe/models/BankAccount"
 import {
   AccountUpgradeRequest,
   RequestStatus,
@@ -17,11 +18,11 @@ const mockAddress: Address = {
 }
 
 const mockBankAccount: BankAccount = {
-  bankName: "Test Bank",
-  bankBranch: "Main Branch",
-  accountType: "Savings",
+  bank: "Test Bank",
+  branch_code: "Main Branch",
+  account_type: "Savings",
   currency: "USD",
-  accountNumber: 123456789,
+  bank_account_no: "123456789",
 }
 
 type RequestOverrides = {
@@ -128,11 +129,11 @@ describe("AccountUpgradeRequest", () => {
       const result = AccountUpgradeRequest.fromErpnext(erpNextResponse)
 
       expect(result.bankAccount).toEqual({
-        bankName: "NCB",
-        bankBranch: "branch",
-        accountType: "chequing",
+        bank: "NCB",
+        branch_code: "branch",
+        account_type: "chequing",
         currency: "JMD",
-        accountNumber: "12345",
+        bank_account_no: "12345",
       })
     })
 
@@ -176,7 +177,7 @@ describe("AccountUpgradeRequest", () => {
         bank_branch: "Main Branch",
         account_type: "Savings",
         currency: "USD",
-        account_number: 123456789,
+        account_number: "123456789",
       })
     })
 

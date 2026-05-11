@@ -1,10 +1,4 @@
-import {
-  BtcAmount,
-  USDAmount,
-  ValidationError,
-  isUsdWallet,
-  validator,
-} from "@domain/shared"
+import { USDAmount, ValidationError, isUsdWallet, validator } from "@domain/shared"
 import { isActiveAccount, walletBelongsToAccount } from "@domain/accounts"
 import { SendOnchainArgs } from "@services/ibex/types"
 
@@ -17,17 +11,17 @@ import { SendOnchainArgs } from "@services/ibex/types"
 const checkOnchainMin = async (o: { amount: USDAmount }) => {
   // TODO: Currently relying on Ibex to enforce dust limits
   // const { dustThreshold } = getOnChainWalletConfig()
-  // const minBtc = BtcAmount.sats(dustThreshold.toString()) 
+  // const minBtc = BtcAmount.sats(dustThreshold.toString())
   // const btcPrice = await PriceService().getUsdCentRealTimePrice(_)
   // if (btcPrice instanceof PriceServiceError) return new ValidationError(btcPrice)
   // const minUsd = minBtc.convertAtRate(MoneyAmount.from("50000", WalletCurrency.Usd))
   const minUsd = USDAmount.ZERO
-  return o.amount.isGreaterThan(minUsd) 
-    ? true 
+  return o.amount.isGreaterThan(minUsd)
+    ? true
     : new ValidationError(`Amount must be greater than ${minUsd.asDollars()}`)
 }
 
-type SendOnchainArgsWithContext = SendOnchainArgs & { wallet: Wallet, account: Account }
+type SendOnchainArgsWithContext = SendOnchainArgs & { wallet: Wallet; account: Account }
 
 export const OnchainUsdPaymentValidator = validator<SendOnchainArgsWithContext>([
   isUsdWallet,

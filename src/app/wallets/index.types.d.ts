@@ -5,12 +5,12 @@ type AddInvoiceForSelfArgs = {
   expiresIn: Minutes
 }
 
-// type AddInvoiceForSelfForBtcWalletArgs = {
-//   walletId: string
-//   amount: number
-//   memo?: string
-//   expiresIn?: number
-// }
+type AddInvoiceForSelfForBtcWalletArgs = {
+  walletId: string
+  amount: BtcPaymentAmount
+  memo?: string
+  expiresIn?: number
+}
 
 type AddInvoiceForSelfForUsdWalletArgs = {
   walletId: string
@@ -35,7 +35,7 @@ type AddInvoiceForRecipientArgs = {
 
 type AddInvoiceForRecipientForBtcWalletArgs = {
   recipientWalletId: string
-  amount: number
+  amount: BtcPaymentAmount
   memo?: string
   descriptionHash?: string
   expiresIn?: number
@@ -72,7 +72,7 @@ type GetOnChainFeeWithoutCurrencyArgs = {
   walletId: WalletId
   account: Account
   amount: number
-  address: OnChainAddress
+  address: string | OnChainAddress
   speed: PayoutSpeed
 }
 

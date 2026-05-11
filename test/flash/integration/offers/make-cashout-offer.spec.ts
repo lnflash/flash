@@ -1,15 +1,14 @@
 import OffersManager from "@app/offers/OffersManager"
-import { alice } from "../jest.setup"
-import OffersRepository from "@app/offers/storage/Redis"
-import { RepositoryError } from "@domain/errors"
-// import { mockedIbex } from "../jest.setup"
-import * as Mocks from "test/flash/mocks/ibex"
-import Ibex from "@services/ibex/client"
 
-const send = {
-  amount: 101n,
-  currency: "USD"
-} as Amount<"USD">
+// import { mockedIbex } from "../jest.setup"
+import Ibex from "@services/ibex/client"
+import { USDAmount } from "@domain/shared"
+
+import { alice } from "../jest.setup"
+
+import * as Mocks from "test/flash/mocks/ibex"
+
+const send = USDAmount.cents("101") as USDAmount
 
 jest.mock(
   "@services/ibex/client",
@@ -18,7 +17,7 @@ jest.mock(
 let mockedIbex: jest.Mock
 beforeAll(async () => {
   // Mocking the http call would be more useful, but adds complexity to tests
-  mockedIbex = Ibex as jest.Mock // move to beforeAll
+  mockedIbex = Ibex as unknown as jest.Mock // move to beforeAll
 
   //  await Ibex().getAccountDetails({ accountId: walletId })
   // mockedIbex.mockReset()
@@ -29,7 +28,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   const getAccountDetailsMock = jest.fn().mockResolvedValue(
-    Mocks.account.response // override the balance
+    Mocks.account.response, // override the balance
   )
   mockedIbex.mockReturnValue({
     getAccountDetails: getAccountDetailsMock,
@@ -37,20 +36,20 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
-  jest.clearAllMocks() 
+  jest.clearAllMocks()
 })
 
 describe("Offers", () => {
   it("successfully makes and persists an offer using default config", async () => {
-    const offer = await (new OffersManager().makeCashoutOffer(alice.usdWalletD.id, send))
-   
+    const offer = await OffersManager.createCashoutOffer(alice.usdWalletD.id, send)
+
     if (offer instanceof Error) throw offer
-    expect(offer.ibexTransfer.amount).toEqual(send.amount)
-    expect(offer.flashFee.amount).toEqual(2n)
-    expect(offer.flashFee.currency).toEqual("USD")
-    expect(offer.usdLiability.amount).toEqual(99n)
-    expect(offer.usdLiability.currency).toEqual("USD")
-    expect(offer.jmdLiability.amount).toEqual(157n)
-    expect(offer.jmdLiability.currency).toEqual("JMD")
+    expect(offer.details.ibexTrx.usd.asCents()).toEqual(send.asCents())
+    expect(offer.details.flash.fee.asCents()).toEqual("2")
+    expect(offer.details.flash.fee.currencyCode).toEqual("USD")
+    expect(offer.details.flash.liability.usd.asCents()).toEqual("99")
+    expect(offer.details.flash.liability.usd.currencyCode).toEqual("USD")
+    expect(offer.details.flash.liability.jmd.asCents()).toEqual("157")
+    expect(offer.details.flash.liability.jmd.currencyCode).toEqual("JMD")
   })
 })

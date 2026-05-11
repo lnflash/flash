@@ -132,10 +132,10 @@ type WalletLnSettledTransaction = BaseWalletTransaction & {
 
 type UnknownTypeTransaction = BaseWalletTransaction & {
   readonly initiationVia: {
-    readonly type: 'unknown'
+    readonly type: "unknown"
   }
   readonly settlementVia: {
-    readonly type: 'unknown'
+    readonly type: "unknown"
   }
 }
 
@@ -238,15 +238,4 @@ type OnChainFeeCalculator = {
     bankFee: BtcPaymentAmount
   }
   intraLedgerFees(): PaymentAmountInAllCurrencies
-}
-
-type PaymentInputValidatorConfig = (
-  walletId: WalletId,
-) => Promise<Wallet | RepositoryError>
-
-
-type PaymentInputValidator = {
-  validatePaymentInput: <T extends undefined | string>(
-    args: ValidatePaymentInputArgs<T>,
-  ) => Promise<ValidatePaymentInputRet<T> | ValidationError | RepositoryError>
 }

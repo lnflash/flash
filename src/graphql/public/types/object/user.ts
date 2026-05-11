@@ -25,6 +25,9 @@ import GraphQLEmail from "../../../shared/types/object/email"
 import AccountContact from "./account-contact"
 import UserQuizQuestion from "./user-quiz-question"
 import Npub from "@graphql/shared/types/scalar/npub"
+import GraphQLBankAccount from "./bank-account"
+import ErpNext from "@services/frappe/ErpNext"
+import { BankAccountQueryError } from "@services/frappe/errors"
 
 const GraphQLUser = GT.Object<User, GraphQLPublicContextAuth>({
   name: "User",
@@ -141,6 +144,20 @@ const GraphQLUser = GT.Object<User, GraphQLPublicContextAuth>({
       description: "Nostr public key",
       resolve: async (source, args, { domainAccount }) => {
         return domainAccount?.npub
+      },
+    },
+
+    bankAccounts: {
+      type: GT.NonNullList(GraphQLBankAccount),
+      description: "Bank accounts available for cashout",
+      resolve: async (_source, _args, { domainAccount }) => {
+        if (!domainAccount.erpParty) {
+          console.log("No ERP party associated with account, cannot fetch bank accounts")
+          return []
+        }
+        const accounts = await ErpNext.getBankAccountsByCustomer(domainAccount.erpParty)
+        if (accounts instanceof BankAccountQueryError) return []
+        return accounts
       },
     },
 

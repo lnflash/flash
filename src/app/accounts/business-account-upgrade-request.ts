@@ -3,6 +3,7 @@ import { IdentityRepository } from "@services/kratos"
 import ErpNext from "@services/frappe/ErpNext"
 
 import { AccountUpgradeRequest, RequestStatus } from "@services/frappe/models/AccountUpgradeRequest"
+import { BankAccount } from "@services/frappe/models/BankAccount"
 import { DomainError, ValidationError } from "@domain/shared"
 import { AccountLevel } from "@domain/accounts"
 import { SetDocTypeValueError, UpgradeRequestQueryError } from "@services/frappe/errors"
@@ -25,14 +26,6 @@ export type Address = {
   state: string
   postalCode?: string
   country: string // Should fetch from ErpNext options
-}
-
-export type BankAccount = {
-  bankName: string
-  bankBranch: string
-  accountType: string
-  currency: string
-  accountNumber: string
 }
 
 type ProUpgradeRequest = {

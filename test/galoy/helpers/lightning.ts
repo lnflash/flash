@@ -2,7 +2,7 @@ import { once } from "events"
 
 import { Wallets } from "@app"
 
-import { WalletCurrency } from "@domain/shared"
+import { BtcPaymentAmount, WalletCurrency } from "@domain/shared"
 import { onChannelUpdated, updateEscrows } from "@services/lnd/utils"
 import { baseLogger } from "@services/logger"
 import { WalletsRepository } from "@services/mongoose"
@@ -412,8 +412,14 @@ export const fundWalletIdFromLightning = async ({
 
   const invoice =
     wallet.currency === WalletCurrency.Btc
-      ? await Wallets.addInvoiceForSelfForBtcWallet({ walletId, amount })
-      : await Wallets.addInvoiceForSelfForUsdWallet({ walletId, amount })
+      ? await Wallets.addInvoiceForSelfForBtcWallet({
+          walletId,
+          amount: BtcPaymentAmount(BigInt(amount)),
+        })
+      : await Wallets.addInvoiceForSelfForUsdWallet({
+          walletId,
+          amount: amount as FractionalCentAmount,
+        })
   if (invoice instanceof Error) return invoice
 
   safePay({ lnd: lndOutside1, request: invoice.paymentRequest })

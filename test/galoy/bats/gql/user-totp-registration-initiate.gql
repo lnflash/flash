@@ -1,9 +1,0 @@
-mutation userTotpRegistrationInitiate($input: UserTotpRegistrationInitiateInput!) {
-  userTotpRegistrationInitiate(input: $input) {
-    errors {
-      message
-    }
-    totpRegistrationId
-    totpSecret
-  }
-}

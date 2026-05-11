@@ -3,6 +3,7 @@ import { toSats } from "@domain/bitcoin"
 import { checkedToWalletId } from "@domain/wallets"
 import { RateLimitConfig } from "@domain/rate-limit"
 import { checkedToMinutes } from "@domain/primitives"
+import { UnsupportedCurrencyError } from "@domain/errors"
 import { RateLimiterExceededError } from "@domain/rate-limit/errors"
 import { DEFAULT_EXPIRATIONS } from "@domain/bitcoin/lightning/invoice-expiration"
 import { WalletInvoiceBuilder } from "@domain/wallet-invoices/wallet-invoice-builder"
@@ -16,12 +17,13 @@ import {
   WalletsRepository,
 } from "@services/mongoose"
 
-import { validateIsBtcWallet, validateIsUsdWallet } from "./validate"
 import Ibex from "@services/ibex/client"
 import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
 import { decodeInvoice } from "@domain/bitcoin/lightning/ln-invoice"
-import { checkedToUsdPaymentAmount, USDAmount, UsdPaymentAmount, ValidationError } from "@domain/shared"
+import { USDAmount } from "@domain/shared"
 import { AddInvoiceResponse201 } from "ibex-client"
+
+import { validateIsBtcWallet, validateIsUsdWallet } from "./validate"
 
 const defaultBtcExpiration = DEFAULT_EXPIRATIONS["BTC"].delayMinutes
 const defaultUsdExpiration = DEFAULT_EXPIRATIONS["USD"].delayMinutes
@@ -34,7 +36,7 @@ const addInvoiceForSelf = async ({
 }: AddInvoiceForSelfArgs): Promise<LnInvoice | ApplicationError> => {
   const wallet = await WalletsRepository().findById(walletId)
   if (wallet instanceof Error) return wallet
-  
+
   const account = await AccountsRepository().findById(wallet.accountId)
   if (account instanceof Error) return account
 
@@ -44,32 +46,27 @@ const addInvoiceForSelf = async ({
   const limitOk = await checkSelfWalletIdRateLimits(wallet.accountId)
   if (limitOk instanceof Error) return limitOk
 
-  const checkedAmount = amount ? USDAmount.cents(amount.toString()) : undefined 
+  const checkedAmount = amount ? USDAmount.cents(amount.toString()) : undefined
   if (checkedAmount instanceof Error) return checkedAmount
   const resp = await Ibex.addInvoice({
-    amount: checkedAmount, 
+    amount: checkedAmount,
     accountId: walletId,
     memo,
-    expiration: expiresIn * 60 as Seconds, 
+    expiration: (expiresIn * 60) as Seconds,
   })
   if (resp instanceof IbexError) return resp
   return toDomainInvoice(resp)
 }
 
-// Flash fork: remove because not BTC Wallets
-// export const addInvoiceForSelfForBtcWallet = async (
-//   args: AddInvoiceForSelfForBtcWalletArgs,
-// ): Promise<LnInvoice | ApplicationError> => {
-//   const walletId = checkedToWalletId(args.walletId)
-//   if (walletId instanceof Error) return walletId
-
-//   const expiresIn = checkedToMinutes(args.expiresIn || defaultBtcExpiration)
-//   if (expiresIn instanceof Error) return expiresIn
-
-//   const validated = await validateIsBtcWallet(walletId)
-//   if (validated instanceof Error) return validated
-//   return addInvoiceForSelf({ ...args, walletId, expiresIn })
-// }
+// Flash fork: BTC invoices are not supported, but the legacy Galoy tests still
+// reference this API. Keep the export typed so the test suite can typecheck.
+export const addInvoiceForSelfForBtcWallet = async (
+  args: AddInvoiceForSelfForBtcWalletArgs,
+): Promise<LnInvoice | ApplicationError> => {
+  return new UnsupportedCurrencyError(
+    `BTC invoices are not supported for wallet ${args.walletId}`,
+  )
+}
 
 export const addInvoiceForSelfForUsdWallet = async (
   args: AddInvoiceForSelfForUsdWalletArgs,
@@ -122,12 +119,11 @@ const addInvoiceForRecipient = async ({
   recipientWalletId,
   amount,
   memo = "",
-  descriptionHash,
   expiresIn,
 }: AddInvoiceForRecipientArgs): Promise<LnInvoice | ApplicationError> => {
   const wallet = await WalletsRepository().findById(recipientWalletId)
   if (wallet instanceof Error) return wallet
-  
+
   const account = await AccountsRepository().findById(wallet.accountId)
   if (account instanceof Error) return account
 
@@ -143,26 +139,20 @@ const addInvoiceForRecipient = async ({
     amount: checkedAmount,
     accountId: recipientWalletId,
     memo,
-    expiration: expiresIn ? expiresIn * 60 as Seconds : undefined,
+    expiration: expiresIn ? ((expiresIn * 60) as Seconds) : undefined,
   })
   if (resp instanceof IbexError) return resp
 
   return toDomainInvoice(resp)
 }
 
-// export const addInvoiceForRecipientForBtcWallet = async (
-//   args: AddInvoiceForRecipientForBtcWalletArgs,
-// ): Promise<LnInvoice | ApplicationError> => {
-//   const recipientWalletId = checkedToWalletId(args.recipientWalletId)
-//   if (recipientWalletId instanceof Error) return recipientWalletId
-
-//   const expiresIn = checkedToMinutes(args.expiresIn || defaultBtcExpiration)
-//   if (expiresIn instanceof Error) return expiresIn
-
-//   const validated = await validateIsBtcWallet(recipientWalletId)
-//   if (validated instanceof Error) return validated
-//   return addInvoiceForRecipient({ ...args, recipientWalletId, expiresIn })
-// }
+export const addInvoiceForRecipientForBtcWallet = async (
+  args: AddInvoiceForRecipientForBtcWalletArgs,
+): Promise<LnInvoice | ApplicationError> => {
+  return new UnsupportedCurrencyError(
+    `BTC invoices are not supported for wallet ${args.recipientWalletId}`,
+  )
+}
 
 export const addInvoiceForRecipientForUsdWallet = async (
   args: AddInvoiceForRecipientForUsdWalletArgs,
@@ -175,7 +165,6 @@ export const addInvoiceForRecipientForUsdWallet = async (
 
   const validated = await validateIsUsdWallet(recipientWalletId)
   if (validated instanceof Error) return validated
-
 
   return addInvoiceForRecipient({ ...args, recipientWalletId, expiresIn })
 }
@@ -273,12 +262,12 @@ const checkRecipientWalletIdRateLimits = async (
   })
 
 // Takes a successful Ibex Response and returns a domain 'LnInvoice' or error
-const toDomainInvoice = (ibex: AddInvoiceResponse201): (LnInvoice | ApplicationError) => {
+const toDomainInvoice = (ibex: AddInvoiceResponse201): LnInvoice | ApplicationError => {
   const invoiceString: string | undefined = ibex.invoice?.bolt11
   if (!invoiceString) return new UnexpectedIbexResponse("Could not find invoice.")
-  
+
   const decodedInvoice = decodeInvoice(invoiceString)
-  if (decodedInvoice instanceof Error) return decodedInvoice 
+  if (decodedInvoice instanceof Error) return decodedInvoice
 
   return {
     destination: decodedInvoice.destination,
