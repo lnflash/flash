@@ -5,7 +5,6 @@ import { CashoutValidator } from "./Validator"
 import { RepositoryError } from "@domain/errors"
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
-import { EmailService } from "@services/email"
 import { CashoutDetails, ValidationInputs } from "./types"
 import ErpNext, { CashoutId } from "@services/frappe/ErpNext"
 import { JournalEntryDraftError, CashoutSubmitError } from "@services/frappe/errors"
@@ -59,12 +58,16 @@ class ValidOffer extends Offer {
       baseLogger.warn({ cashoutId }, "Skipping Ibex payment (skipPayment=true)")
     }
 
-    const submitted = await ErpNext.submitCashout(cashoutId)
+    let submitted = await ErpNext.submitCashout(cashoutId)
     if (submitted instanceof CashoutSubmitError) {
-      baseLogger.error({ submitted }, "Failed to submit journal after payment sent")
+      baseLogger.warn({ cashoutId }, "submitCashout failed, retrying")
+      submitted = await ErpNext.submitCashout(cashoutId)
+      if (submitted instanceof CashoutSubmitError) {
+        baseLogger.error({ cashoutId }, "submitCashout failed after retry — manual intervention required")
+      }
     }
 
-    return new InitiatedCashout(this, cashoutId) 
+    return new InitiatedCashout(this, cashoutId)
   }
 }
 

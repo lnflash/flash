@@ -68,12 +68,11 @@ class ErpNext {
           user_receives: Number(payout.amount.asDollars()),
           user_pays: Number(payment.amount.asDollars()),
           currency: payout.amount.currencyCode,
-          exchange_rate: Number(payout.exchangeRate?.asDollars()),
+          exchange_rate: payout.exchangeRate ? Number(payout.exchangeRate.asDollars()) : undefined,
           flash_fee: Number(payout.serviceFee.asDollars()),
         },           
         { headers: this.headers },
       );
-      console.log("Cashout response:", response.data);
       return response.data.data.name as CashoutId
     } catch (err) {
       baseLogger.error({ err }, "Error drafting Cashout in ERPNext")
