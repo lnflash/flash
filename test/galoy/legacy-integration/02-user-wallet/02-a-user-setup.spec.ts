@@ -13,12 +13,10 @@ import {
   randomPhone,
   createUserAndWalletFromPhone,
   getAccountRecordByPhone,
-  getDefaultWalletIdByPhone,
   getAccountIdByPhone,
 } from "test/galoy/helpers"
 
 let accountRecordC: AccountRecord
-let walletIdA: WalletId
 let accountIdA: AccountId, accountIdB: AccountId, accountIdC: AccountId
 
 const phoneA = randomPhone()
@@ -34,8 +32,6 @@ describe("UserWallet", () => {
     await createUserAndWalletFromPhone(phoneC)
 
     accountRecordC = await getAccountRecordByPhone(phoneC)
-
-    walletIdA = await getDefaultWalletIdByPhone(phoneA)
 
     accountIdA = await getAccountIdByPhone(phoneA)
     accountIdB = await getAccountIdByPhone(phoneB)
@@ -149,7 +145,6 @@ describe("UserWallet", () => {
       "id,walletId,type,credit,debit,fee,currency,timestamp,pendingConfirmation,journalId,lnMemo,usd,feeUsd,recipientWalletId,username,memoFromPayer,paymentHash,pubkey,feeKnownInAdvance,address,txHash"
     it("exports to csv", async () => {
       const csv = new CsvWalletsExport()
-      await csv.addWallet(walletIdA)
       const base64Data = csv.getBase64()
       expect(typeof base64Data).toBe("string")
       const data = Buffer.from(base64Data, "base64")

@@ -262,6 +262,7 @@ describe("intraLedgerPay", () => {
     const pushNotificationsServiceSpy = jest
       .spyOn(PushNotificationsServiceImpl, "PushNotificationsService")
       .mockImplementationOnce(() => ({
+        send: jest.fn(),
         sendFilteredNotification,
         sendNotification: jest.fn(),
       }))

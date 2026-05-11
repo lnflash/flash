@@ -58,7 +58,7 @@ describe("BriaSubscriber", () => {
       let expectedTxId: string | Error = ""
       expectedTxId = await sendToAddressAndConfirm({
         walletClient: bitcoindOutside,
-        address,
+        address: address as OnChainAddress,
         amount: sat2btc(amountSats),
       })
       if (expectedTxId instanceof Error) throw expectedTxId
@@ -125,7 +125,7 @@ describe("BriaSubscriber", () => {
 
       const expectedTxId = await sendToAddressAndConfirm({
         walletClient: bitcoindOutside,
-        address,
+        address: address as OnChainAddress,
         amount: sat2btc(amountSats),
       })
       if (expectedTxId instanceof Error) throw expectedTxId

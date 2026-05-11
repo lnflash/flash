@@ -658,7 +658,7 @@ describe("Display properties on transactions", () => {
 
       const txId = await sendToAddressAndConfirm({
         walletClient: bitcoindOutside,
-        address,
+        address: address as OnChainAddress,
         amount: sat2btc(amountSats),
       })
       if (txId instanceof Error) throw txId

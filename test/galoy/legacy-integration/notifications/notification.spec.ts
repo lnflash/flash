@@ -18,7 +18,7 @@ import {
   getCurrentPriceAsDisplayPriceRatio,
 } from "@app/prices"
 import { WalletCurrency } from "@domain/shared"
-import { GaloyNotificationCategories } from "@domain/notifications"
+import { FlashNotificationCategories } from "@domain/notifications"
 
 let spy
 let displayPriceRatios: Record<string, DisplayPriceRatio<"BTC", DisplayCurrency>>
@@ -108,6 +108,7 @@ describe("notification", () => {
       jest
         .spyOn(PushNotificationsServiceImpl, "PushNotificationsService")
         .mockImplementation(() => ({
+          send: jest.fn(),
           sendFilteredNotification,
           sendNotification: jest.fn(),
         }))
@@ -211,6 +212,7 @@ describe("notification", () => {
           jest
             .spyOn(PushNotificationsServiceImpl, "PushNotificationsService")
             .mockImplementationOnce(() => ({
+              send: jest.fn(),
               sendFilteredNotification,
               sendNotification: jest.fn(),
             }))
@@ -231,7 +233,7 @@ describe("notification", () => {
           expect(sendFilteredNotification.mock.calls[0][0].title).toBe(title)
           expect(sendFilteredNotification.mock.calls[0][0].body).toBe(body)
           expect(sendFilteredNotification.mock.calls[0][0].notificationCategory).toBe(
-            GaloyNotificationCategories.Payments,
+            FlashNotificationCategories.Payments,
           )
         }),
       )
@@ -259,6 +261,7 @@ describe("notification", () => {
           jest
             .spyOn(PushNotificationsServiceImpl, "PushNotificationsService")
             .mockImplementationOnce(() => ({
+              send: jest.fn(),
               sendFilteredNotification,
               sendNotification: jest.fn(),
             }))
@@ -278,7 +281,7 @@ describe("notification", () => {
           expect(sendFilteredNotification.mock.calls[0][0].title).toBe(title)
           expect(sendFilteredNotification.mock.calls[0][0].body).toBe(body)
           expect(sendFilteredNotification.mock.calls[0][0].notificationCategory).toBe(
-            GaloyNotificationCategories.Payments,
+            FlashNotificationCategories.Payments,
           )
         }),
       )
@@ -306,6 +309,7 @@ describe("notification", () => {
           jest
             .spyOn(PushNotificationsServiceImpl, "PushNotificationsService")
             .mockImplementationOnce(() => ({
+              send: jest.fn(),
               sendFilteredNotification,
               sendNotification: jest.fn(),
             }))
@@ -326,7 +330,7 @@ describe("notification", () => {
           expect(sendFilteredNotification.mock.calls[0][0].title).toBe(title)
           expect(sendFilteredNotification.mock.calls[0][0].body).toBe(body)
           expect(sendFilteredNotification.mock.calls[0][0].notificationCategory).toBe(
-            GaloyNotificationCategories.Payments,
+            FlashNotificationCategories.Payments,
           )
         }),
       )
@@ -354,6 +358,7 @@ describe("notification", () => {
           jest
             .spyOn(PushNotificationsServiceImpl, "PushNotificationsService")
             .mockImplementationOnce(() => ({
+              send: jest.fn(),
               sendFilteredNotification,
               sendNotification: jest.fn(),
             }))
@@ -373,7 +378,7 @@ describe("notification", () => {
           expect(sendFilteredNotification.mock.calls[0][0].title).toBe(title)
           expect(sendFilteredNotification.mock.calls[0][0].body).toBe(body)
           expect(sendFilteredNotification.mock.calls[0][0].notificationCategory).toBe(
-            GaloyNotificationCategories.Payments,
+            FlashNotificationCategories.Payments,
           )
         }),
       )
@@ -401,6 +406,7 @@ describe("notification", () => {
           jest
             .spyOn(PushNotificationsServiceImpl, "PushNotificationsService")
             .mockImplementationOnce(() => ({
+              send: jest.fn(),
               sendFilteredNotification,
               sendNotification: jest.fn(),
             }))
@@ -420,7 +426,7 @@ describe("notification", () => {
           expect(sendFilteredNotification.mock.calls[0][0].title).toBe(title)
           expect(sendFilteredNotification.mock.calls[0][0].body).toBe(body)
           expect(sendFilteredNotification.mock.calls[0][0].notificationCategory).toBe(
-            GaloyNotificationCategories.Payments,
+            FlashNotificationCategories.Payments,
           )
         }),
       )

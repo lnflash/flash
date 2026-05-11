@@ -3,7 +3,7 @@ import { addWalletIfNonexistent } from "@app/accounts/add-wallet"
 import { getAdminAccounts, getDefaultAccountsConfig } from "@config"
 
 import { CouldNotFindAccountFromKratosIdError, CouldNotFindError } from "@domain/errors"
-import { UsdWalletDescriptor, WalletCurrency } from "@domain/shared"
+import { WalletCurrency } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
 
 import {
@@ -208,8 +208,8 @@ export const createAccount = async ({
 }
 
 export const createRandomUserAndBtcWallet = async () => {
-  const phone = randomPhone()
-  return createUserAndWallet(phone)
+  const { btcWalletDescriptor } = await createRandomUserAndWallets()
+  return btcWalletDescriptor
 }
 
 export type TestUser = {
@@ -231,20 +231,31 @@ export const getUser = async <T extends WalletCurrency>(walletD: WalletDescripto
 
 export const createRandomUserAndWallets = async (): Promise<{
   usdWalletDescriptor: WalletDescriptor<"USD">
-  // btcWalletDescriptor: WalletDescriptor<"BTC">
+  btcWalletDescriptor: WalletDescriptor<"BTC">
 }> => {
   const phone = randomPhone()
-  const btcWalletDescriptor = await createUserAndWallet(phone)
+  const usdWalletDescriptor = await createUserAndWallet(phone)
+
+  const btcWallet = await addWalletIfNonexistent({
+    currency: WalletCurrency.Btc,
+    accountId: usdWalletDescriptor.accountId,
+    type: WalletType.Checking,
+  })
+  if (btcWallet instanceof Error) throw btcWallet
 
   const usdWallet = await addWalletIfNonexistent({
     currency: WalletCurrency.Usd,
-    accountId: btcWalletDescriptor.accountId,
+    accountId: usdWalletDescriptor.accountId,
     type: WalletType.Checking,
   })
   if (usdWallet instanceof Error) throw usdWallet
 
   return {
-    // btcWalletDescriptor,
+    btcWalletDescriptor: {
+      id: btcWallet.id,
+      currency: WalletCurrency.Btc,
+      accountId: btcWallet.accountId,
+    },
     usdWalletDescriptor: {
       id: usdWallet.id,
       currency: WalletCurrency.Usd,

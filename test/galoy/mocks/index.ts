@@ -1,4 +1,4 @@
-import SendToAddressV2 from "./ibex/send-to-address-v2"
+import SendToAddressV2 from "../../flash/mocks/ibex/send-to-address-v2"
 
 export default {
   ibex: {
