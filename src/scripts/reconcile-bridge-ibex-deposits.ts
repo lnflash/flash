@@ -9,8 +9,8 @@ import { reconcileBridgeAndIbexDeposits } from "@services/bridge/reconciliation"
 const args = yargs(hideBin(process.argv))
   .option("window-hours", {
     type: "number",
-    default: 24,
-    describe: "Reconciliation window in hours",
+    default: 0.25,
+    describe: "Reconciliation window in hours (default: 15 minutes)",
   })
   .option("configPath", { type: "string", demandOption: true })
   .parseSync()
