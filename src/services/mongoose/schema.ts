@@ -715,6 +715,12 @@ const BridgeReconciliationOrphanSchema = new Schema({
     enum: ["bridge_without_ibex", "ibex_without_bridge"],
     required: true,
   },
+  status: {
+    type: String,
+    enum: ["unmatched", "resolved"],
+    default: "unmatched",
+    required: true,
+  },
   transferId: { type: String },
   txHash: { type: String },
   bridgeEventId: { type: String },
@@ -723,10 +729,13 @@ const BridgeReconciliationOrphanSchema = new Schema({
   currency: { type: String },
   triageContext: { type: Schema.Types.Mixed, required: true },
   detectedAt: { type: Date, default: Date.now },
+  resolvedAt: { type: Date },
 })
 
 BridgeReconciliationOrphanSchema.index({ orphanType: 1, detectedAt: -1 })
 BridgeReconciliationOrphanSchema.index({ detectedAt: -1 })
+BridgeReconciliationOrphanSchema.index({ status: 1, detectedAt: -1 })
+BridgeReconciliationOrphanSchema.index({ txHash: 1 })
 
 export const BridgeReconciliationOrphan = mongoose.model(
   "BridgeReconciliationOrphan",
