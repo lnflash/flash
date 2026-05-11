@@ -5,6 +5,7 @@ export const PubSubDefaultTriggers = {
   UserPriceUpdate: "USER_PRICE_UPDATE",
   AccountUpdate: "ACCOUNT_UPDATE",
   LnPaymentStatus: "LN_PAYMENT_STATUS",
+  BridgeReconciliationUpdate: "BRIDGE_RECONCILIATION_UPDATE",
 } as const
 
 export const customPubSubTrigger = ({
