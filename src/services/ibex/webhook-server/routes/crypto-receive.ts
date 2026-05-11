@@ -5,6 +5,7 @@ import { listWalletsByAccountId } from "@app/wallets"
 import { WalletCurrency, USDTAmount } from "@domain/shared"
 import { baseLogger } from "@services/logger"
 import { LockService } from "@services/lock"
+import { reconcileByTxHash } from "@services/bridge/reconciliation"
 
 import { authenticate, logRequest } from "../middleware"
 
@@ -63,6 +64,10 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
           )
           return { status: "error", code: "internal_error" } as CryptoReceiveResult
         }
+
+        reconcileByTxHash({ txHash: String(tx_hash) }).catch((err) =>
+          baseLogger.error({ err, tx_hash }, "Real-time reconciliation failed"),
+        )
 
         const wallets = await listWalletsByAccountId(account.id)
         if (wallets instanceof Error) {
