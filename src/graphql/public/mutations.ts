@@ -56,6 +56,7 @@ import UserUpdateNpubMutation from "./root/mutation/user-update-npub"
 import RequestCashoutMutation from "./root/mutation/offers/request-cash-out"
 import InitiateCashoutMutation from "./root/mutation/offers/initiate-cash-out"
 import IdDocumentUploadUrlGenerateMutation from "./root/mutation/id-document-upload-url-generate"
+import UpdateExternalWalletMutation from "./root/mutation/update-external-wallet"
 
 // TODO: // const fields: { [key: string]: GraphQLFieldConfig<any, GraphQLPublicContext> }
 export const mutationFields = {
@@ -104,6 +105,8 @@ export const mutationFields = {
       callbackEndpointDelete: CallbackEndpointDelete,
 
       idDocumentUploadUrlGenerate: IdDocumentUploadUrlGenerateMutation,
+
+      updateExternalWallet: UpdateExternalWalletMutation,
     },
 
     atWalletLevel: {
