@@ -1,9 +1,14 @@
 import { baseLogger } from "@services/logger"
 import { findIbexCryptoReceiveLogsSince } from "@services/mongoose/ibex-crypto-receive-log"
-import { upsertBridgeReconciliationOrphan } from "@services/mongoose/bridge-reconciliation-orphan"
-import { BridgeDepositLog } from "@services/mongoose/schema"
+import {
+  upsertBridgeReconciliationOrphan,
+  resolveOrphansByTxHash,
+} from "@services/mongoose/bridge-reconciliation-orphan"
+import { BridgeDepositLog, IbexCryptoReceiveLog } from "@services/mongoose/schema"
+import { PubSubService } from "@services/pubsub"
+import { PubSubDefaultTriggers } from "@domain/pubsub"
 
-const ONE_DAY_MS = 24 * 60 * 60 * 1000
+const FIFTEEN_MIN_MS = 15 * 60 * 1000
 
 type BridgeDepositLike = {
   eventId: string
@@ -29,7 +34,7 @@ type IbexReceiveLike = {
 const toOrphanKey = (prefix: string, value: string) => `${prefix}:${value.toLowerCase()}`
 
 export const reconcileBridgeAndIbexDeposits = async ({
-  windowMs = ONE_DAY_MS,
+  windowMs = FIFTEEN_MIN_MS,
 }: {
   windowMs?: number
 } = {}): Promise<
@@ -47,7 +52,7 @@ export const reconcileBridgeAndIbexDeposits = async ({
 
     const bridgeDeposits = (await BridgeDepositLog.find({
       createdAt: { $gte: since, $lte: now },
-      state: "funds_received",
+      state: "payment_processed",
     })
       .lean()
       .exec()) as BridgeDepositLike[]
@@ -82,7 +87,7 @@ export const reconcileBridgeAndIbexDeposits = async ({
           amount: deposit.amount,
           currency: deposit.currency,
           triageContext: {
-            reason: "Bridge funds_received has no destinationTxHash",
+            reason: "Bridge payment_processed has no destinationTxHash",
             windowStart: since.toISOString(),
             windowEnd: now.toISOString(),
             depositState: deposit.state,
@@ -107,7 +112,7 @@ export const reconcileBridgeAndIbexDeposits = async ({
         currency: deposit.currency,
         triageContext: {
           reason:
-            "No IBEX crypto.receive found for Bridge destinationTxHash within 24h window",
+            "No IBEX crypto.receive found for Bridge destinationTxHash within window",
           windowStart: since.toISOString(),
           windowEnd: now.toISOString(),
           depositState: deposit.state,
@@ -129,7 +134,7 @@ export const reconcileBridgeAndIbexDeposits = async ({
         currency: receive.currency,
         triageContext: {
           reason:
-            "No Bridge deposit funds_received found for IBEX tx hash within 24h window",
+            "No Bridge deposit payment_processed found for IBEX tx hash within window",
           windowStart: since.toISOString(),
           windowEnd: now.toISOString(),
           address: receive.address,
@@ -149,6 +154,126 @@ export const reconcileBridgeAndIbexDeposits = async ({
 
     baseLogger.info(summary, "Bridge↔IBEX reconciliation completed")
     return summary
+  } catch (error) {
+    return error instanceof Error ? error : new Error(String(error))
+  }
+}
+
+type ReconcileByTxHashResult = {
+  txHash: string
+  status: "matched" | "unmatched"
+  orphanType?: "bridge_without_ibex" | "ibex_without_bridge"
+  transferId?: string
+  customerId?: string
+  amount?: string
+  currency?: string
+  detectedAt: Date
+}
+
+export const reconcileByTxHash = async ({
+  txHash,
+}: {
+  txHash: string
+}): Promise<ReconcileByTxHashResult | Error> => {
+  const normalizedHash = txHash.toLowerCase()
+  const now = new Date()
+
+  try {
+    const [bridgeDeposit, ibexReceive] = await Promise.all([
+      BridgeDepositLog.findOne({
+        destinationTxHash: { $regex: new RegExp(`^${normalizedHash}$`, "i") },
+        state: "payment_processed",
+      })
+        .lean()
+        .exec(),
+      IbexCryptoReceiveLog.findOne({
+        txHash: { $regex: new RegExp(`^${normalizedHash}$`, "i") },
+      })
+        .lean()
+        .exec(),
+    ])
+
+    const pubsub = PubSubService()
+
+    if (bridgeDeposit && ibexReceive) {
+      await resolveOrphansByTxHash(normalizedHash)
+
+      const event: ReconcileByTxHashResult = {
+        txHash: normalizedHash,
+        status: "matched",
+        transferId: (bridgeDeposit as BridgeDepositLike).transferId,
+        customerId: (bridgeDeposit as BridgeDepositLike).customerId,
+        amount: (bridgeDeposit as BridgeDepositLike).amount,
+        currency: (bridgeDeposit as BridgeDepositLike).currency,
+        detectedAt: now,
+      }
+
+      baseLogger.info(event, "Bridge↔IBEX real-time reconciliation: matched")
+      pubsub.publish({ trigger: PubSubDefaultTriggers.BridgeReconciliationUpdate, payload: event })
+      return event
+    }
+
+    let orphanType: "bridge_without_ibex" | "ibex_without_bridge"
+    let orphanKey: string
+    let triageContext: Record<string, unknown>
+    let transferId: string | undefined
+    let customerId: string | undefined
+    let amount: string | undefined
+    let currency: string | undefined
+
+    if (bridgeDeposit && !ibexReceive) {
+      orphanType = "bridge_without_ibex"
+      orphanKey = toOrphanKey("bridge", normalizedHash)
+      transferId = (bridgeDeposit as BridgeDepositLike).transferId
+      customerId = (bridgeDeposit as BridgeDepositLike).customerId
+      amount = (bridgeDeposit as BridgeDepositLike).amount
+      currency = (bridgeDeposit as BridgeDepositLike).currency
+      triageContext = {
+        reason: "Bridge payment_processed has no matching IBEX crypto.receive yet",
+        txHash: normalizedHash,
+        depositState: (bridgeDeposit as BridgeDepositLike).state,
+        createdAt: (bridgeDeposit as BridgeDepositLike).createdAt.toISOString(),
+        detectedAt: now.toISOString(),
+      }
+    } else {
+      orphanType = "ibex_without_bridge"
+      orphanKey = toOrphanKey("ibex", normalizedHash)
+      amount = ibexReceive ? (ibexReceive as IbexReceiveLike).amount : undefined
+      currency = ibexReceive ? (ibexReceive as IbexReceiveLike).currency : undefined
+      triageContext = {
+        reason: "IBEX crypto.receive has no matching Bridge funds_received yet",
+        txHash: normalizedHash,
+        address: ibexReceive ? (ibexReceive as IbexReceiveLike).address : undefined,
+        network: ibexReceive ? (ibexReceive as IbexReceiveLike).network : undefined,
+        detectedAt: now.toISOString(),
+      }
+    }
+
+    await upsertBridgeReconciliationOrphan({
+      orphanKey,
+      orphanType,
+      txHash: normalizedHash,
+      transferId,
+      customerId,
+      amount,
+      currency,
+      triageContext,
+    })
+
+    const event: ReconcileByTxHashResult = {
+      txHash: normalizedHash,
+      status: "unmatched",
+      orphanType,
+      transferId,
+      customerId,
+      amount,
+      currency,
+      detectedAt: now,
+    }
+
+    baseLogger.info(event, "Bridge↔IBEX real-time reconciliation: unmatched")
+    pubsub.publish({ trigger: PubSubDefaultTriggers.BridgeReconciliationUpdate, payload: event })
+    return event
   } catch (error) {
     return error instanceof Error ? error : new Error(String(error))
   }
