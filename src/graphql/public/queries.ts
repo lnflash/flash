@@ -49,6 +49,7 @@ export const queryFields = {
       me: MeQuery,
       transactionDetails: TransactionDetailsQuery,
       accountUpgradeRequest: AccountUpgradeRequestQuery,
+      latestAccountUpgradeRequest: AccountUpgradeRequestQuery,
       bridgeKycStatus: BridgeKycStatusQuery,
       bridgeVirtualAccount: BridgeVirtualAccountQuery,
       bridgeExternalAccounts: BridgeExternalAccountsQuery,

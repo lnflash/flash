@@ -1632,6 +1632,7 @@ type Query
 {
   accountDefaultWallet(username: Username!, walletCurrency: WalletCurrency): PublicWallet!
   accountUpgradeRequest: AccountUpgradeRequestPayload!
+  latestAccountUpgradeRequest: AccountUpgradeRequestPayload!
   bridgeExternalAccounts: [BridgeExternalAccount]
   bridgeKycStatus: String
   bridgeVirtualAccount: BridgeVirtualAccount
