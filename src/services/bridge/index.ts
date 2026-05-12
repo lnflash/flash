@@ -260,10 +260,7 @@ const createVirtualAccount = async (
       return new BridgeKycPendingError("KYC not yet completed")
     }
 
-    const usdtCashWallet = await ensureEthUsdtCashWallet(account)
-    if (usdtCashWallet instanceof Error) return usdtCashWallet
-
-    // Idempotency guard: return the existing VA immediately without touching Bridge
+    // Idempotency guard first: do not mutate wallets/default when a VA already exists
     const existingVa = await BridgeAccountsRepo.findVirtualAccountByAccountId(
       accountId as string,
     )
@@ -277,9 +274,11 @@ const createVirtualAccount = async (
       }
     }
 
-    // Get or create Ethereum address
-    let ethereumAddress =
-      account.bridgeEthereumAddress || "0xaF095D35bfDd462165eA7eCF8AC75351a93d72bD"
+    const usdtCashWallet = await ensureEthUsdtCashWallet(account)
+    if (usdtCashWallet instanceof Error) return usdtCashWallet
+
+    // Get or create Ethereum USDT receive address for the ETH-USDT Cash Wallet
+    let ethereumAddress = account.bridgeEthereumAddress
 
     if (!ethereumAddress) {
       const option = await IbexClient.getEthereumUsdtOption()
@@ -443,7 +442,9 @@ const initiateWithdrawal = async (
 
     const wallets = await WalletsRepository().listByAccountId(accountId)
     if (wallets instanceof Error) return wallets
-    const usdtWallet = wallets.find((w) => w.currency === WalletCurrency.Usdt)
+    const usdtWallet = wallets.find(
+      (w) => w.currency === WalletCurrency.Usdt && w.type === WalletType.Checking,
+    )
     if (!usdtWallet) {
       return new BridgeInsufficientFundsError("No USDT wallet found on account")
     }
