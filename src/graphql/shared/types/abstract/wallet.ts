@@ -27,7 +27,10 @@ const IWallet = GT.Interface({
       type: Lnurl,
     },
     balance: {
-      type: GT.NonNull(FractionalCentAmount),
+      type: FractionalCentAmount,
+    },
+    isExternal: {
+      type: GT.NonNull(GT.Boolean),
     },
     pendingIncomingBalance: {
       type: GT.NonNull(SignedAmount),

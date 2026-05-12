@@ -468,6 +468,17 @@ export class PhoneAlreadyExistsError extends CustomApolloError {
   }
 }
 
+export class InvalidLnurlError extends CustomApolloError {
+  constructor(errData: CustomApolloErrorData) {
+    super({
+      message: "Invalid LNURL provided",
+      forwardToClient: true,
+      code: "INVALID_LNURL",
+      ...errData,
+    })
+  }
+}
+
 export class IbexError extends CustomApolloError {
   constructor(logger: Logger) {
     super({

@@ -241,8 +241,9 @@ type BTCWallet implements Wallet
   accountId: ID!
 
   """A balance stored in BTC."""
-  balance: FractionalCentAmount!
+  balance: FractionalCentAmount
   id: ID!
+  isExternal: Boolean!
   lnurlp: Lnurl
 
   """An unconfirmed incoming onchain balance."""
@@ -1172,6 +1173,7 @@ type Mutation
   The user can review this offer and then execute the withdrawal by calling the initiateCashout mutation.
   """
   requestCashout(input: RequestCashoutInput!): RequestCashoutResponse!
+  updateExternalWallet(input: UpdateExternalWalletInput!): UpdateExternalWalletPayload!
   userContactUpdateAlias(input: UserContactUpdateAliasInput!): UserContactUpdateAliasPayload! @deprecated(reason: "will be moved to AccountContact")
   userEmailDelete: UserEmailDeletePayload!
   userEmailRegistrationInitiate(input: UserEmailRegistrationInitiateInput!): UserEmailRegistrationInitiatePayload!
@@ -1863,6 +1865,19 @@ enum TxStatus
   SUCCESS @join__enumValue(graph: PUBLIC)
 }
 
+input UpdateExternalWalletInput
+  @join__type(graph: PUBLIC)
+{
+  lnurlp: Lnurl!
+}
+
+type UpdateExternalWalletPayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error!]!
+  walletId: WalletId
+}
+
 type UpgradePayload
   @join__type(graph: PUBLIC)
 {
@@ -1883,8 +1898,9 @@ type UsdWallet implements Wallet
   @join__type(graph: PUBLIC)
 {
   accountId: ID!
-  balance: FractionalCentAmount!
+  balance: FractionalCentAmount
   id: ID!
+  isExternal: Boolean!
   lnurlp: Lnurl
 
   """An unconfirmed incoming onchain balance."""
@@ -2215,8 +2231,9 @@ interface Wallet
   @join__type(graph: PUBLIC)
 {
   accountId: ID!
-  balance: FractionalCentAmount!
+  balance: FractionalCentAmount
   id: ID!
+  isExternal: Boolean!
   lnurlp: Lnurl
   pendingIncomingBalance: SignedAmount!
 

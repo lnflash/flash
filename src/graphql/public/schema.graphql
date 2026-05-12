@@ -150,8 +150,9 @@ type BTCWallet implements Wallet {
   accountId: ID!
 
   """A balance stored in BTC."""
-  balance: FractionalCentAmount!
+  balance: FractionalCentAmount
   id: ID!
+  isExternal: Boolean!
   lnurlp: Lnurl
 
   """An unconfirmed incoming onchain balance."""
@@ -934,6 +935,7 @@ type Mutation {
   The user can review this offer and then execute the withdrawal by calling the initiateCashout mutation.
   """
   requestCashout(input: RequestCashoutInput!): RequestCashoutResponse!
+  updateExternalWallet(input: UpdateExternalWalletInput!): UpdateExternalWalletPayload!
   userContactUpdateAlias(input: UserContactUpdateAliasInput!): UserContactUpdateAliasPayload! @deprecated(reason: "will be moved to AccountContact")
   userEmailDelete: UserEmailDeletePayload!
   userEmailRegistrationInitiate(input: UserEmailRegistrationInitiateInput!): UserEmailRegistrationInitiatePayload!
@@ -1478,6 +1480,15 @@ enum TxStatus {
 """Amount in USD cents"""
 scalar USDCents
 
+input UpdateExternalWalletInput {
+  lnurlp: Lnurl!
+}
+
+type UpdateExternalWalletPayload {
+  errors: [Error!]!
+  walletId: WalletId
+}
+
 type UpgradePayload {
   authToken: AuthToken
   errors: [Error!]!
@@ -1489,8 +1500,9 @@ A wallet belonging to an account which contains a USD balance and a list of tran
 """
 type UsdWallet implements Wallet {
   accountId: ID!
-  balance: FractionalCentAmount!
+  balance: FractionalCentAmount
   id: ID!
+  isExternal: Boolean!
   lnurlp: Lnurl
 
   """An unconfirmed incoming onchain balance."""
@@ -1749,8 +1761,9 @@ A generic wallet which stores value in one of our supported currencies.
 """
 interface Wallet {
   accountId: ID!
-  balance: FractionalCentAmount!
+  balance: FractionalCentAmount
   id: ID!
+  isExternal: Boolean!
   lnurlp: Lnurl
   pendingIncomingBalance: SignedAmount!
 

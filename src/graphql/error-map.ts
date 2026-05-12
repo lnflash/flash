@@ -36,6 +36,7 @@ import {
   UnauthorizedIPMetadataProxyError,
   UnauthorizedIPMetadataCountryError,
   IbexError,
+  InvalidLnurlError,
 } from "@graphql/error"
 import { baseLogger } from "@services/logger"
 
@@ -728,6 +729,9 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "UpgradeRequestQueryError":
       message = "No upgrade request found for this account"
       return new NotFoundError({ message, logger: baseLogger })
+
+    case "InvalidLnurlError":
+      return new InvalidLnurlError({ message: error.message, logger: baseLogger })
 
     case "UnknownCaptchaError":
       message = `Unknown error occurred (code: ${error.name}${
