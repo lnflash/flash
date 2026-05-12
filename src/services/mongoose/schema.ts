@@ -658,6 +658,18 @@ const BridgeWithdrawalSchema = new Schema<IBridgeWithdrawalRecord>({
   updatedAt: { type: Date, default: Date.now },
 })
 
+// At most one pending row per (account, destination, amount, currency). Partial filter must
+// not use $exists:false — MongoDB rejects it for partial indexes ("$not ... $exists").
+// "pending" alone is enough: completed/failed rows are excluded so the same tuple can repeat
+// after a terminal status.
+BridgeWithdrawalSchema.index(
+  { accountId: 1, externalAccountId: 1, amount: 1, currency: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: "pending" },
+  },
+)
+
 const BridgeDepositLogSchema = new Schema({
   eventId: { type: String, required: true, unique: true },
   transferId: { type: String, required: true },

@@ -106,7 +106,18 @@ export const createWithdrawal = async (data: {
   try {
     const record = await BridgeWithdrawal.create(data)
     return record
-  } catch (error) {
+  } catch (error: unknown) {
+    const mongoErr = error as { code?: number }
+    if (mongoErr.code === 11000) {
+      const record = await BridgeWithdrawal.findOne({
+        accountId: data.accountId,
+        externalAccountId: data.externalAccountId,
+        amount: data.amount,
+        currency: data.currency,
+        status: "pending",
+      })
+      if (record) return record
+    }
     return new RepositoryError(String(error))
   }
 }
