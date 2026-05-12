@@ -209,7 +209,10 @@ export const reconcileByTxHash = async ({
       }
 
       baseLogger.info(event, "Bridge↔IBEX real-time reconciliation: matched")
-      pubsub.publish({ trigger: PubSubDefaultTriggers.BridgeReconciliationUpdate, payload: event })
+      pubsub.publish({
+        trigger: PubSubDefaultTriggers.BridgeReconciliationUpdate,
+        payload: event,
+      })
       return event
     }
 
@@ -272,7 +275,10 @@ export const reconcileByTxHash = async ({
     }
 
     baseLogger.info(event, "Bridge↔IBEX real-time reconciliation: unmatched")
-    pubsub.publish({ trigger: PubSubDefaultTriggers.BridgeReconciliationUpdate, payload: event })
+    pubsub.publish({
+      trigger: PubSubDefaultTriggers.BridgeReconciliationUpdate,
+      payload: event,
+    })
     return event
   } catch (error) {
     return error instanceof Error ? error : new Error(String(error))
