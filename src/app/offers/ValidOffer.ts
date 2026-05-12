@@ -7,7 +7,7 @@ import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
 import { CashoutDetails, ValidationInputs } from "./types"
 import ErpNext, { CashoutId } from "@services/frappe/ErpNext"
-import { JournalEntryDraftError, CashoutSubmitError } from "@services/frappe/errors"
+import { CashoutDraftError, CashoutSubmitError } from "@services/frappe/errors"
 import { baseLogger } from "@services/logger"
 import { IbexError } from "@services/ibex/errors"
 import { Cashout } from "@config"
@@ -43,7 +43,7 @@ class ValidOffer extends Offer {
 
   async execute(): Promise<InitiatedCashout | Error> {
     const cashoutId = await ErpNext.draftCashout(this)
-    if (cashoutId instanceof JournalEntryDraftError) return cashoutId
+    if (cashoutId instanceof CashoutDraftError) return cashoutId
 
     if (!Cashout.SkipPayment) {
       const resp = await Ibex.payInvoice({
