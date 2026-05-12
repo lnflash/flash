@@ -11,12 +11,15 @@ import {
 
 import { recordExceptionInCurrentSpan } from "@services/tracing"
 import { ErrorLevel, WalletCurrency } from "@domain/shared"
+import Ibex from "@services/ibex/client"
 
 const requiredCashWalletCurrencies: WalletCurrency[] = [
   WalletCurrency.Usd,
   WalletCurrency.Usdt,
 ]
 const defaultCashWalletCurrency = WalletCurrency.Usdt
+const defaultCashWalletReceiveInfoName = (account: Account) =>
+  account.username || account.id
 
 const initializeCreatedAccount = async ({
   account,
@@ -56,12 +59,24 @@ const initializeCreatedAccount = async ({
   }
 
   // Set ETH-USDT as the active Cash Wallet while preserving USD for migration.
-  const defaultWalletId = enabledWallets[defaultCashWalletCurrency]?.id
+  const defaultWallet = enabledWallets[defaultCashWalletCurrency]
+  const defaultWalletId = defaultWallet?.id
 
   if (defaultWalletId === undefined) {
     return new ConfigError("NoWalletsEnabledInConfigError")
   }
   account.defaultWalletId = defaultWalletId
+
+  const defaultCashWalletReceiveOption = await Ibex.getEthereumUsdtOption()
+  if (defaultCashWalletReceiveOption instanceof Error)
+    return defaultCashWalletReceiveOption
+
+  const receiveInfo = await Ibex.createCryptoReceiveInfo(defaultWalletId, {
+    ...defaultCashWalletReceiveOption,
+    name: defaultCashWalletReceiveInfoName(account),
+  })
+  if (receiveInfo instanceof Error) return receiveInfo
+  account.bridgeEthereumAddress = receiveInfo.address
 
   // TODO: improve bootstrap process
   // the script below is to dynamically attribute the editor account at runtime

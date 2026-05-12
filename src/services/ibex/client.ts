@@ -231,7 +231,7 @@ const payToLnurl = async (
 
 const getIbexToken = async (): Promise<string | IbexError> => {
   const cached = await Ibex.authentication.storage.getAccessToken()
-  if (typeof cached === "string") return `Bearer ${cached}`
+  if (typeof cached === "string") return cached
 
   // The SDK uses a single base URL for all calls, but the sandbox auth domain is separate
   const resp = await fetch(`${IbexConfig.authUrl}/auth/signin`, {
@@ -268,7 +268,7 @@ const getIbexToken = async (): Promise<string | IbexError> => {
     )
   }
 
-  return `Bearer ${data.accessToken}`
+  return data.accessToken
 }
 
 const ibexFetch = async <T>(
