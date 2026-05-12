@@ -4,7 +4,6 @@ import {
   CouldNotFindWalletFromIdError,
   CouldNotFindWalletFromOnChainAddressError,
   CouldNotFindWalletFromOnChainAddressesError,
-  CouldNotListWalletsFromAccountIdError,
   CouldNotListWalletsFromWalletCurrencyError,
   InvalidLnurlError,
   RepositoryError,
@@ -119,7 +118,7 @@ export const WalletsRepository = (): IWalletsRepository => {
         _accountId: toObjectId<AccountId>(accountId),
       })
       if (!result || result.length === 0) {
-        return new CouldNotListWalletsFromAccountIdError(`accountId: ${accountId}}`)
+        return []
       }
       return result.map(resultToWallet)
     } catch (err) {
