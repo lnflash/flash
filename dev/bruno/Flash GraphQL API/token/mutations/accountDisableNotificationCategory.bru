@@ -1,0 +1,46 @@
+meta {
+  name: accountDisableNotificationCategory
+  type: graphql
+  seq: 39
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  mutation accountDisableNotificationCategory($input: AccountDisableNotificationCategoryInput!) {
+    accountDisableNotificationCategory(input: $input) {
+      errors {
+        message
+      }
+      account {
+        notificationSettings {
+          push {
+            enabled
+            disabledCategories
+          }
+        }
+      }
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "channel": "PUSH",
+      "category": "Payments"
+    }
+  }
+}
+
+settings {
+  encodeUrl: true
+}
