@@ -162,9 +162,9 @@ const setupGuards = () => {
     findById: jest.fn().mockResolvedValue(mockAccount),
   })
   ;(WalletsRepository as jest.Mock).mockReturnValue({
-    listByAccountId: jest
-      .fn()
-      .mockResolvedValue([{ id: "wallet-001", currency: "USDT" }]),
+    listByAccountId: jest.fn().mockResolvedValue([
+      { id: "wallet-001", currency: "USDT", type: "checking" },
+    ]),
   })
   ;(getBalanceForWallet as jest.Mock).mockResolvedValue(balance)
   ;(BridgeAccountsRepo.findExternalAccountsByAccountId as jest.Mock).mockResolvedValue([
@@ -209,12 +209,22 @@ describe("deriveWithdrawalIdempotencyKey", () => {
   })
 })
 
-describe("createVirtualAccount — ETH-USDT Cash Wallet provisioning", () => {
+/**
+ * Linear ENG-296 — ETH-USDT Cash Wallet + Bridge virtual account
+ * @see https://linear.app/island-bitcoin/issue/ENG-296
+ *
+ * Acceptance ↔ tests (staging steps: `dev/qa/ENG-296-staging-checklist.md`):
+ * - AC1 IBEX ETH-USDT as Cash Wallet: first `it` — USDT checking persisted/reused, Ibex
+ *   `createCryptoReceiveInfo` uses USDT wallet id; account `bridgeEthereumAddress` updated.
+ * - AC2 USD not primary: first `it` — `AccountsRepository.update` sets `defaultWalletId` to USDT wallet.
+ * - AC3 createVirtualAccount E2E: first & second `it` — Bridge + repo; third `it` — idempotent VA return.
+ */
+describe("createVirtualAccount — ETH-USDT Cash Wallet provisioning (ENG-296)", () => {
   beforeEach(() => {
     jest.clearAllMocks()
   })
 
-  it("creates an IBEX ETH-USDT wallet, flips the default wallet, then creates the Bridge virtual account against its Ethereum receive address", async () => {
+  it("ENG-296 AC1+AC2+AC3: provisions USDT cash wallet, flips default off USD, persists Ibex ETH receive address, creates Bridge VA", async () => {
     const usdtWallet = makeWallet(USDT_WALLET_ID, "USDT")
     const accountWithoutUsdt = {
       ...mockAccount,
@@ -276,6 +286,10 @@ describe("createVirtualAccount — ETH-USDT Cash Wallet provisioning", () => {
       USDT_WALLET_ID,
       expect.objectContaining({ network: "ethereum", currency: "USDT" }),
     )
+    expect(accountsRepo.updateBridgeFields).toHaveBeenCalledWith(
+      ACCOUNT_ID,
+      expect.objectContaining({ bridgeEthereumAddress: ETHEREUM_ADDRESS }),
+    )
     expect(BridgeClient.createVirtualAccount).toHaveBeenCalledWith(
       CUSTOMER_ID,
       expect.objectContaining({
@@ -289,7 +303,7 @@ describe("createVirtualAccount — ETH-USDT Cash Wallet provisioning", () => {
     )
   })
 
-  it("reuses an existing USDT wallet and existing Ethereum address without reprovisioning", async () => {
+  it("ENG-296 AC1+AC3: reuses existing USDT cash wallet and stored Ethereum address (no extra Ibex receive-info call)", async () => {
     const usdtWallet = makeWallet(USDT_WALLET_ID, "USDT")
     const accountWithUsdtDefault = {
       ...mockAccount,
@@ -326,6 +340,47 @@ describe("createVirtualAccount — ETH-USDT Cash Wallet provisioning", () => {
       }),
       expect.any(String),
     )
+  })
+
+  it("ENG-296 AC3 (idempotent): existing VA returns stored bank details without wallet or Ibex side effects", async () => {
+    const existingVaRecord = {
+      bridgeVirtualAccountId: VIRTUAL_ACCOUNT_ID,
+      bankName: "Existing Bank",
+      routingNumber: "021000021",
+      accountNumber: "000111222",
+      accountNumberLast4: "0222",
+    }
+
+    ;(AccountsRepository as jest.Mock).mockReturnValue({
+      findById: jest.fn().mockResolvedValue(mockAccount),
+      update: jest.fn(),
+      updateBridgeFields: jest.fn(),
+    })
+    ;(WalletsRepository as jest.Mock).mockReturnValue({
+      listByAccountId: jest.fn(),
+      persistNew: jest.fn(),
+    })
+    ;(BridgeAccountsRepo.findVirtualAccountByAccountId as jest.Mock).mockResolvedValue(
+      existingVaRecord,
+    )
+
+    const result = await BridgeService.createVirtualAccount(ACCOUNT_ID)
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        virtualAccountId: VIRTUAL_ACCOUNT_ID,
+        bankName: "Existing Bank",
+        routingNumber: "021000021",
+        accountNumber: "000111222",
+        accountNumberLast4: "0222",
+      }),
+    )
+    expect(WalletsRepository().listByAccountId).not.toHaveBeenCalled()
+    expect(WalletsRepository().persistNew).not.toHaveBeenCalled()
+    expect(AccountsRepository().update).not.toHaveBeenCalled()
+    expect(IbexClient.getEthereumUsdtOption).not.toHaveBeenCalled()
+    expect(IbexClient.createCryptoReceiveInfo).not.toHaveBeenCalled()
+    expect(BridgeClient.createVirtualAccount).not.toHaveBeenCalled()
   })
 })
 
