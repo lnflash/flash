@@ -6,9 +6,8 @@ import { recordExceptionInCurrentSpan } from "@services/tracing"
 import axios, { isAxiosError } from "axios"
 
 import {
-  JournalEntryDraftError,
+  CashoutDraftError,
   CashoutSubmitError,
-  JournalEntryTitleError,
   JournalEntryDeleteError,
   UpgradeRequestCreateError,
   UpgradeRequestQueryError,
@@ -47,13 +46,14 @@ class ErpNext {
     this.headers = {
       "Content-Type": "application/json",
       "Authorization": `token ${creds.apiKey}:${creds.apiSecret}`,
-      "Host": sitename
+      "Host": sitename,
+      "Expect": ""
     }
   }
 
-  async draftCashout(offer: ValidOffer): Promise<CashoutId | JournalEntryDraftError> {
+  async draftCashout(offer: ValidOffer): Promise<CashoutId | CashoutDraftError> {
     const party = offer.account.erpParty
-    if (!party) return new JournalEntryDraftError("Account missing erpParty field")
+    if (!party) return new CashoutDraftError("Account missing erpParty field")
     const { payment, payout } = offer.details
 
     try {
@@ -76,7 +76,7 @@ class ErpNext {
       return response.data.data.name as CashoutId
     } catch (err) {
       baseLogger.error({ err }, "Error drafting Cashout in ERPNext")
-      return new JournalEntryDraftError(err)
+      return new CashoutDraftError(err)
     }
   }
 
