@@ -47,6 +47,7 @@ const mockedWalletsRepository = WalletsRepository as jest.MockedFunction<
 describe("createAccountWithPhoneIdentifier", () => {
   let persistNew: jest.Mock
   let updateAccount: jest.Mock
+  let updateBridgeFields: jest.Mock
 
   const account = {
     id: "account-id" as AccountId,
@@ -66,13 +67,21 @@ describe("createAccountWithPhoneIdentifier", () => {
       update: jest.fn().mockResolvedValue({ id: "user-id" }),
     } as unknown as ReturnType<typeof UsersRepository>)
 
-    updateAccount = jest
-      .fn()
-      .mockImplementation(async (updatedAccount: Account) => updatedAccount)
+    let persistedAccount = { ...account }
+    updateAccount = jest.fn().mockImplementation(async (updatedAccount: Account) => {
+      persistedAccount = updatedAccount
+      return updatedAccount
+    })
+    updateBridgeFields = jest.fn().mockImplementation(async (id, fields) => ({
+      ...persistedAccount,
+      id,
+      ...fields,
+    }))
 
     mockedAccountsRepository.mockReturnValue({
       persistNew: jest.fn().mockResolvedValue({ ...account }),
       update: updateAccount,
+      updateBridgeFields,
     } as unknown as ReturnType<typeof AccountsRepository>)
 
     jest.mocked(Ibex.getEthereumUsdtOption).mockResolvedValue({
@@ -143,9 +152,9 @@ describe("createAccountWithPhoneIdentifier", () => {
       `${WalletCurrency.Usdt}-wallet-id`,
       expect.objectContaining({ name: account.id, network: "ethereum" }),
     )
-    expect(updateAccount).toHaveBeenCalledWith(
-      expect.objectContaining({ bridgeEthereumAddress: "0xeth-usdt-address" }),
-    )
+    expect(updateBridgeFields).toHaveBeenCalledWith(account.id, {
+      bridgeEthereumAddress: "0xeth-usdt-address",
+    })
     expect((result as Account).bridgeEthereumAddress).toBe("0xeth-usdt-address")
   })
 

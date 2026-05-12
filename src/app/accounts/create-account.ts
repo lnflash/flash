@@ -105,8 +105,10 @@ const initializeCreatedAccount = async ({
     return updatedAccount
   }
 
-  updatedAccount.bridgeEthereumAddress = receiveInfo.address
-  const accountWithReceiveAddress = await AccountsRepository().update(updatedAccount)
+  const accountWithReceiveAddress = await AccountsRepository().updateBridgeFields(
+    account.id,
+    { bridgeEthereumAddress: receiveInfo.address },
+  )
   if (accountWithReceiveAddress instanceof Error) return accountWithReceiveAddress
 
   return accountWithReceiveAddress
