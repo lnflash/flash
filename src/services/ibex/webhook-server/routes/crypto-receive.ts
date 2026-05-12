@@ -21,7 +21,6 @@ interface CryptoReceiveResult {
 
 const cryptoReceiveHandler = async (req: Request, res: Response) => {
   const { tx_hash, address, amount, currency, network } = req.body
-
   const normalizedCurrency = String(currency || "").toUpperCase()
   const normalizedNetwork = String(network || "").toLowerCase()
 
@@ -131,4 +130,4 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
 
 router.post(paths.cryptoReceive, authenticate, logRequest, cryptoReceiveHandler)
 
-export { paths, router }
+export { cryptoReceiveHandler, paths, router }
