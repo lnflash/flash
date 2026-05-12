@@ -649,6 +649,7 @@ export const configSchema = {
       type: "object",
       properties: {
         enabled: { type: "boolean" },
+        skipPayment: { type: "boolean", default: false },
       },
       required: ["enabled", "minimum", "maximum", "accountLevel"],
       default: { enabled: true },
@@ -658,14 +659,6 @@ export const configSchema = {
       properties: {
         url: { type: "string" },
         credentials: { type: "object" },
-        erpnext: {
-          type: "object",
-          properties: {
-            accounts: {
-              type: "object",
-            }
-          },
-        }
       },
       required: ["url", "credentials"],
     },

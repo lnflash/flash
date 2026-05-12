@@ -1,5 +1,5 @@
 
-import OffersManager from "@app/offers/OffersManager"
+import CashoutManager from "@app/offers/CashoutManager"
 import { Cashout } from "@config"
 import { NotImplementedError } from "@domain/errors"
 import { ErrorLevel } from "@domain/shared"
@@ -28,7 +28,7 @@ const InitiatedCashoutResponse = GT.Object({
     errors: {
       type: GT.NonNullList(IError),
     },
-    journalId: {
+    id: {
       type: GT.ID,
     },
   }),
@@ -54,13 +54,13 @@ const InitiateCashoutMutation = GT.Field({
       if (f instanceof Error) return { errors: [{ message: f.message, success: false }] }
     }
 
-    const offer = await (OffersManager.executeCashout(offerId, walletId))
+    const offer = await (CashoutManager.executeCashout(offerId, walletId))
     if (offer instanceof Error) {
       recordExceptionInCurrentSpan({ error: offer, level: ErrorLevel.Critical, attributes: { offerId} })
       return new InternalServerError({ message: "Server error. Please contact support", logger: baseLogger })
     }
 
-    return { errors: [], journalId: offer.journalId }
+    return { errors: [], id: offer.cashoutId }
   },
 })
 

@@ -198,9 +198,11 @@ type Bank {
 type BankAccount {
   accountName: String!
   accountNumber: String!
+  accountType: String!
 
   """Name of the bank institution"""
   bank: String!
+  branchCode: String!
 
   """Account currency (e.g. JMD, USD)"""
   currency: String!
@@ -273,22 +275,26 @@ input CaptchaRequestAuthCodeInput {
 
 type CashoutOffer {
   """The rate used when withdrawing to a JMD bank account"""
-  exchangeRate: JMDCents!
+  exchangeRate: JMDCents
 
   """The time at which this offer is no longer accepted by Flash"""
   expiresAt: Timestamp!
 
-  """The amount that Flash is charging for it's services"""
+  """The amount that Flash is charging for its services"""
   flashFee: USDCents!
 
   """ID of the offer"""
   offerId: ID!
 
-  """The amount Flash owes to the user denominated in JMD as cents"""
-  receiveJmd: JMDCents!
+  """
+  The amount Flash owes to the user denominated in JMD cents (null for USD payouts)
+  """
+  receiveJmd: JMDCents
 
-  """The amount Flash owes to the user denominated in USD as cents"""
-  receiveUsd: USDCents!
+  """
+  The amount Flash owes to the user denominated in USD cents (null for JMD payouts)
+  """
+  receiveUsd: USDCents
 
   """The amount the user is sending to flash"""
   send: USDCents!
@@ -495,7 +501,7 @@ input InitiateCashoutInput {
 
 type InitiatedCashoutResponse {
   errors: [Error!]!
-  journalId: ID
+  id: ID
 }
 
 union InitiationVia = InitiationViaIntraLedger | InitiationViaLn | InitiationViaOnChain
@@ -1256,6 +1262,9 @@ type RealtimePricePayload {
 input RequestCashoutInput {
   """Amount in USD cents."""
   amount: USDCents!
+
+  """ERPNext bank account identifier to receive the cashout."""
+  bankAccountId: ID!
 
   """ID for a USD wallet belonging to the current user."""
   walletId: WalletId!
