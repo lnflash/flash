@@ -234,7 +234,7 @@ const getIbexToken = async (): Promise<string | IbexError> => {
   if (typeof cached === "string") return `Bearer ${cached}`
 
   // The SDK uses a single base URL for all calls, but the sandbox auth domain is separate
-  const resp = await fetch(`${IbexConfig.authUrl}/auth/signin`, {
+  const resp = await fetch(`${IbexConfig.url}/auth/signin`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email: IbexConfig.email, password: IbexConfig.password }),
