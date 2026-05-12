@@ -1,0 +1,820 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ENG-394 Review Archive — Flash PR #349</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0d1117; --panel:#161b22; --text:#e6edf3; --muted:#8b949e; --line:#30363d; --accent:#2f81f7; --ok:#3fb950; --warn:#d29922; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; background:var(--bg); color:var(--text); line-height:1.55; }
+    header { padding:48px 24px 28px; border-bottom:1px solid var(--line); background:linear-gradient(135deg,#0d1117,#13233a); }
+    main { max-width:1100px; margin:0 auto; padding:28px 20px 64px; }
+    h1 { margin:0 0 8px; font-size:clamp(28px,4vw,44px); }
+    h2 { margin-top:32px; border-bottom:1px solid var(--line); padding-bottom:8px; }
+    a { color:var(--accent); }
+    .meta { color:var(--muted); display:flex; flex-wrap:wrap; gap:10px 18px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:14px; margin:22px 0; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; }
+    .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.08em; }
+    .value { font-size:20px; margin-top:4px; }
+    .ok { color:var(--ok); }
+    .warn { color:var(--warn); }
+    pre { background:#010409; border:1px solid var(--line); border-radius:10px; padding:16px; overflow:auto; white-space:pre-wrap; word-break:break-word; }
+    code { background:#010409; border:1px solid var(--line); border-radius:6px; padding:.1em .35em; }
+    details { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px 16px; margin:14px 0; }
+    summary { cursor:pointer; font-weight:600; }
+    ul { padding-left:22px; }
+    .callout { border-left:4px solid var(--warn); padding:10px 14px; background:#1f1a0d; border-radius:8px; }
+  </style>
+</head>
+<body>
+<header>
+  <main style="padding-top:0;padding-bottom:0">
+    <h1>ENG-394 Review Archive</h1>
+    <div class="meta">
+      <span>Flash backend PR <a href="https://github.com/lnflash/flash/pull/349">#349</a></span>
+      <span>ENG-394 create USDT wallet for new accounts</span>
+      <span>Archived 2026-05-12T00:44:56Z</span>
+    </div>
+  </main>
+</header>
+<main>
+  <div class="grid">
+    <div class="card"><div class="label">State</div><div class="value">OPEN</div></div>
+    <div class="card"><div class="label">Mergeable</div><div class="value ok">MERGEABLE</div></div>
+    <div class="card"><div class="label">Base</div><div class="value">feature/bridge-integration</div></div>
+    <div class="card"><div class="label">Head</div><div class="value">eng-394/usdt-default-wallet</div></div>
+    <div class="card"><div class="label">Commit</div><div class="value"><code>03cee09fb</code></div></div>
+    <div class="card"><div class="label">Diff</div><div class="value">+358 / -77 · 10 files</div></div>
+  </div>
+
+  <h2>Scope</h2>
+  <ul>
+    <li>Create both legacy USD and new USDT cash wallets during raw account creation.</li>
+    <li>Default new accounts to the USDT wallet while preserving the USD wallet for migration compatibility.</li>
+    <li>Provision USDT wallets with IBEX currency id <code>29</code>.</li>
+    <li>Load USDT balances from IBEX account details using wallet/account id, not crypto receive-info id.</li>
+    <li>Reject unsupported IBEX wallet currencies instead of silently provisioning USD accounts.</li>
+  </ul>
+
+  <h2>Verification</h2>
+  <pre>Fresh verification performed on ForgeMini before publishing PR #349:
+
+- git diff --check
+- TEST=&quot;test/flash/unit/app/accounts/create-account.spec.ts test/flash/unit/app/wallets/get-balance-for-wallet.spec.ts test/flash/unit/services/mongoose/wallets.spec.ts&quot; yarn test:unit
+  - 3 suites passed
+  - 5 tests passed
+- yarn tsc-check-noimplicitany
+- changed-file ESLint
+- changed-file Prettier
+- yarn build
+</pre>
+
+  <h2>Known Follow-up</h2>
+  <div class="callout">Backend/IBEX balance loading returns non-zero USDT balances after receive. Mobile still needs a follow-up to display the default/USDT wallet on the home Cash card instead of selecting the legacy USD wallet via <code>getUsdWallet(...)</code>, and to regenerate GraphQL types for <code>UsdtWallet</code>.</div>
+
+  <h2>PR Body Snapshot</h2>
+  <pre>## Summary
+- Create both USD and USDT cash wallets during raw account creation
+- Default new accounts to the USDT wallet while preserving the USD wallet for migration compatibility
+- Provision USDT wallets as IBEX currency `29` accounts and LNURL Pay endpoints
+- Load USDT wallet balances from the IBEX account id via account details instead of crypto receive-info balance endpoints
+- Guard unsupported wallet currencies from silently provisioning USD IBEX accounts
+
+## Verification
+- `git diff --check`
+- `TEST=&quot;test/flash/unit/app/accounts/create-account.spec.ts test/flash/unit/app/wallets/get-balance-for-wallet.spec.ts test/flash/unit/services/mongoose/wallets.spec.ts&quot; yarn test:unit`
+- `yarn tsc-check-noimplicitany`
+- changed-file ESLint
+- changed-file Prettier
+- `yarn build`
+
+## Notes
+- Backend/IBEX balance loading for the USDT wallet now returns non-zero balances after receive.
+- Mobile currently still displays the legacy USD wallet in the home Cash card (`getUsdWallet(...)`), so the mobile UI needs a follow-up to show the default/USDT wallet balance and regenerate GraphQL types for `UsdtWallet`.
+</pre>
+
+  <h2>Commit List</h2>
+  <pre>03cee09fb ENG-394 create USDT wallet for new accounts
+</pre>
+
+  <h2>Diff Stat</h2>
+  <pre> src/app/accounts/create-account.ts                 |  26 +++--
+ src/app/wallets/get-balance-for-wallet.ts          |  16 +--
+ src/config/schema.ts                               |   4 +-
+ src/domain/shared/MoneyAmount.ts                   |  11 +-
+ src/services/ibex/client.ts                        |  91 +++++++++------
+ src/services/ibex/types.ts                         |   8 +-
+ src/services/mongoose/wallets.ts                   |  37 +++++--
+ .../flash/unit/app/accounts/create-account.spec.ts | 122 +++++++++++++++++++++
+ .../app/wallets/get-balance-for-wallet.spec.ts     |  38 +++++++
+ test/flash/unit/services/mongoose/wallets.spec.ts  |  82 ++++++++++++++
+ 10 files changed, 358 insertions(+), 77 deletions(-)
+</pre>
+
+  <details>
+    <summary>Full PR diff</summary>
+    <pre>diff --git a/src/app/accounts/create-account.ts b/src/app/accounts/create-account.ts
+index 67b28fc04..17ea2c1f2 100644
+--- a/src/app/accounts/create-account.ts
++++ b/src/app/accounts/create-account.ts
+@@ -10,8 +10,13 @@ import {
+ } from &quot;@services/mongoose&quot;
+ 
+ import { recordExceptionInCurrentSpan } from &quot;@services/tracing&quot;
+-import { ErrorLevel } from &quot;@domain/shared&quot;
+-import { RepositoryError } from &quot;@domain/errors&quot;
++import { ErrorLevel, WalletCurrency } from &quot;@domain/shared&quot;
++
++const requiredCashWalletCurrencies: WalletCurrency[] = [
++  WalletCurrency.Usd,
++  WalletCurrency.Usdt,
++]
++const defaultCashWalletCurrency = WalletCurrency.Usdt
+ 
+ const initializeCreatedAccount = async ({
+   account,
+@@ -29,24 +34,29 @@ const initializeCreatedAccount = async ({
+       currency,
+     })
+ 
+-  const walletsEnabledConfig = config.initialWallets
++  const walletsEnabledConfig = Array.from(
++    new Set([...config.initialWallets, ...requiredCashWalletCurrencies]),
++  )
+ 
+   // Create all wallets
+   const enabledWallets: Partial&lt;Record&lt;WalletCurrency, Wallet&gt;&gt; = {}
+   for (const currency of walletsEnabledConfig) {
+     const wallet = await newWallet(currency)
+-    if (wallet instanceof RepositoryError) {
++    if (wallet instanceof Error) {
+       recordExceptionInCurrentSpan({
+         error: wallet,
+         level: ErrorLevel.Critical,
+-        attributes: { accountId: account.id }
++        attributes: { accountId: account.id, currency },
+       })
++      if (requiredCashWalletCurrencies.includes(currency)) return wallet
++      continue
+     }
+-    else enabledWallets[currency] = wallet
++
++    enabledWallets[currency] = wallet
+   }
+ 
+-  // Set default wallet to USD
+-  const defaultWalletId = enabledWallets[walletsEnabledConfig[0]]?.id
++  // Set ETH-USDT as the active Cash Wallet while preserving USD for migration.
++  const defaultWalletId = enabledWallets[defaultCashWalletCurrency]?.id
+ 
+   if (defaultWalletId === undefined) {
+     return new ConfigError(&quot;NoWalletsEnabledInConfigError&quot;)
+diff --git a/src/app/wallets/get-balance-for-wallet.ts b/src/app/wallets/get-balance-for-wallet.ts
+index 30aaff7a4..46ddf6cad 100644
+--- a/src/app/wallets/get-balance-for-wallet.ts
++++ b/src/app/wallets/get-balance-for-wallet.ts
+@@ -11,19 +11,11 @@ export const getBalanceForWallet = async ({
+   currency?: WalletCurrency
+ }): Promise&lt;USDAmount | USDTAmount | ApplicationError&gt; =&gt; {
+   try {
+-    if (currency === WalletCurrency.Usdt) {
+-      const resp = await Ibex.getCryptoReceiveBalance(walletId)
+-      if (resp instanceof IbexError) {
+-        if (resp.httpCode === 404) return USDTAmount.ZERO
+-        return resp
+-      }
+-      if (resp === undefined) return new UnexpectedIbexResponse(&quot;Balance not found&quot;)
+-      return resp
+-    }
+-
+-    const resp = await Ibex.getAccountDetails(walletId)
++    const resp = await Ibex.getAccountDetails(walletId, currency)
+     if (resp instanceof IbexError) {
+-      if (resp.httpCode === 404) return USDAmount.ZERO
++      if (resp.httpCode === 404) {
++        return currency === WalletCurrency.Usdt ? USDTAmount.ZERO : USDAmount.ZERO
++      }
+       return resp
+     }
+     if (resp.balance === undefined) return new UnexpectedIbexResponse(&quot;Balance not found&quot;)
+diff --git a/src/config/schema.ts b/src/config/schema.ts
+index 1bffc3267..9ccc2625f 100644
+--- a/src/config/schema.ts
++++ b/src/config/schema.ts
+@@ -385,7 +385,7 @@ export const configSchema = {
+       additionalProperties: false,
+       default: {
+         initialStatus: &quot;active&quot;,
+-        initialWallets: [&quot;USD&quot;],
++        initialWallets: [&quot;USD&quot;, &quot;USDT&quot;],
+         enablePhoneCheck: false,
+         enableIpCheck: false,
+         enableIpProxyCheck: false,
+@@ -663,7 +663,7 @@ export const configSchema = {
+               required: [&quot;kyc&quot;, &quot;deposit&quot;, &quot;transfer&quot;],
+             },
+             timestampSkewMs: { type: &quot;integer&quot; },
+-            replaySecret: { type: &quot;string&quot; }
++            replaySecret: { type: &quot;string&quot; },
+           },
+           required: [&quot;port&quot;, &quot;publicKeys&quot;, &quot;timestampSkewMs&quot;],
+         },
+diff --git a/src/domain/shared/MoneyAmount.ts b/src/domain/shared/MoneyAmount.ts
+index 8818c20aa..7ad965663 100644
+--- a/src/domain/shared/MoneyAmount.ts
++++ b/src/domain/shared/MoneyAmount.ts
+@@ -1,6 +1,6 @@
+ import { Money, Round, PRECISION_M } from &quot;./bigint-money&quot;
+ import { BigIntConversionError, UnsupportedCurrencyError } from &quot;./errors&quot;
+-import { ExchangeCurrencyUnit, WalletCurrency } from &quot;./primitives&quot;
++import { WalletCurrency } from &quot;./primitives&quot;
+ 
+ export abstract class MoneyAmount {
+   readonly money: Money
+@@ -60,7 +60,8 @@ export abstract class MoneyAmount {
+   static from(amount: number | string, currency: WalletCurrency): MoneyAmount | Error {
+     if (currency === WalletCurrency.Usd) return USDAmount.cents(amount.toString())
+     else if (currency === WalletCurrency.Jmd) return JMDAmount.cents(amount.toString())
+-    else if (currency === WalletCurrency.Usdt) return USDTAmount.smallestUnits(amount.toString())
++    else if (currency === WalletCurrency.Usdt)
++      return USDTAmount.smallestUnits(amount.toString())
+     else return new UnsupportedCurrencyError(`Could not read currency: ${currency}`)
+   }
+ }
+@@ -177,7 +178,9 @@ export class BtcAmount extends MoneyAmount {
+     try {
+       return new BtcAmount(c)
+     } catch (error) {
+-      return new BigIntConversionError(error instanceof Error ? error.message : String(error))
++      return new BigIntConversionError(
++        error instanceof Error ? error.message : String(error),
++      )
+     }
+   }
+ 
+@@ -191,7 +194,7 @@ export class BtcAmount extends MoneyAmount {
+ }
+ 
+ export class USDTAmount extends MoneyAmount {
+-  static currencyId: IbexCurrencyId = 4 as IbexCurrencyId
++  static currencyId: IbexCurrencyId = 29 as IbexCurrencyId
+ 
+   private constructor(amount: Money | bigint | string | number) {
+     super(amount, WalletCurrency.Usdt)
+diff --git a/src/services/ibex/client.ts b/src/services/ibex/client.ts
+index 409e03570..2eb0a65fa 100644
+--- a/src/services/ibex/client.ts
++++ b/src/services/ibex/client.ts
+@@ -1,7 +1,4 @@
+-import IbexClient, { GetFeeEstimateResponse200, IbexClientError } from &quot;ibex-client&quot;
+-import { errorHandler, IbexError, ParseError, UnexpectedIbexResponse } from &quot;./errors&quot;
+-import { IbexConfig } from &quot;@config&quot;
+-import {
++import IbexClient, {
+   AddInvoiceBodyParam,
+   AddInvoiceResponse201,
+   CreateAccountResponse201,
+@@ -9,32 +6,29 @@ import {
+   CreateLnurlPayResponse201,
+   DecodeLnurlMetadataParam,
+   DecodeLnurlResponse200,
+-  EstimateFeeCopyMetadataParam,
+   EstimateFeeCopyResponse200,
+-  GenerateBitcoinAddressBodyParam,
+   GenerateBitcoinAddressResponse201,
+-  GetAccountDetailsMetadataParam,
+-  GetAccountDetailsResponse200,
+-  GetFeeEstimationMetadataParam,
+-  GetFeeEstimationResponse200,
+-  GetTransactionDetails1MetadataParam,
+   GetTransactionDetails1Response200,
+   GMetadataParam,
+   GResponse200,
+-  InvoiceFromHashMetadataParam,
+   InvoiceFromHashResponse200,
+   PayInvoiceV2BodyParam,
+   PayInvoiceV2Response200,
+-  PayToALnurlPayBodyParam,
+   PayToALnurlPayResponse201,
+   SendToAddressCopyBodyParam,
+   SendToAddressCopyResponse200,
+ } from &quot;ibex-client&quot;
++
++import { IbexConfig } from &quot;@config&quot;
+ import {
+   addAttributesToCurrentSpan,
+   wrapAsyncFunctionsToRunInSpan,
+ } from &quot;@services/tracing&quot;
+-import WebhookServer from &quot;./webhook-server&quot;
++
++import { USDAmount, USDTAmount, WalletCurrency } from &quot;@domain/shared&quot;
++
++import { baseLogger } from &quot;@services/logger&quot;
++
+ import { Redis } from &quot;./cache&quot;
+ import {
+   GetFeeEstimateArgs,
+@@ -46,8 +40,9 @@ import {
+   CryptoReceiveInfo,
+   CreateCryptoReceiveInfoRequest,
+ } from &quot;./types&quot;
+-import { USDAmount, USDTAmount } from &quot;@domain/shared&quot;
+-import { baseLogger } from &quot;@services/logger&quot;
++
++import { errorHandler, IbexError, ParseError, UnexpectedIbexResponse } from &quot;./errors&quot;
++import WebhookServer from &quot;./webhook-server&quot;
+ 
+ const Ibex = new IbexClient(
+   IbexConfig.url,
+@@ -62,22 +57,33 @@ const createAccount = async (
+   return Ibex.createAccount({ name, currencyId }).then(errorHandler)
+ }
+ 
++const parseAccountBalance = (
++  balance: number | undefined,
++  currency: WalletCurrency,
++): IbexAccountDetails[&quot;balance&quot;] =&gt; {
++  if (balance === undefined) return undefined
++
++  const amount =
++    currency === WalletCurrency.Usdt
++      ? USDTAmount.fromNumber(balance.toString())
++      : USDAmount.dollars(balance.toString())
++
++  return amount instanceof Error ? undefined : amount
++}
++
+ const getAccountDetails = async (
+   accountId: IbexAccountId,
++  currency: WalletCurrency = WalletCurrency.Usd,
+ ): Promise&lt;IbexAccountDetails | IbexError&gt; =&gt; {
+   return Ibex.getAccountDetails({ accountId })
+-    .then((r) =&gt; {
+-      if (r instanceof Error) return r
+-      else {
+-        let balance =
+-          r.balance !== undefined ? USDAmount.dollars(r.balance.toString()) : undefined
+-        if (balance instanceof Error) balance = undefined
+-        return {
+-          id: r.id,
+-          userId: r.userId,
+-          name: r.name,
+-          balance,
+-        }
++    .then((resp) =&gt; {
++      if (resp instanceof Error) return resp
++
++      return {
++        id: resp.id,
++        userId: resp.userId,
++        name: resp.name,
++        balance: parseAccountBalance(resp.balance, currency),
+       }
+     })
+     .then(errorHandler)
+@@ -143,9 +149,9 @@ const getLnFeeEstimation = async (
+   else if (resp.invoiceAmount === null || resp.invoiceAmount === undefined)
+     return new UnexpectedIbexResponse(&quot;invoiceAmount not found.&quot;)
+   else {
+-    let fee = USDAmount.dollars(resp.amount)
++    const fee = USDAmount.dollars(resp.amount)
+     if (fee instanceof Error) return new ParseError(fee)
+-    let invoiceAmount = USDAmount.dollars(resp.invoiceAmount)
++    const invoiceAmount = USDAmount.dollars(resp.invoiceAmount)
+     if (invoiceAmount instanceof Error) return new ParseError(invoiceAmount)
+     return {
+       fee,
+@@ -232,7 +238,9 @@ const getIbexToken = async (): Promise&lt;string | IbexError&gt; =&gt; {
+     method: &quot;POST&quot;,
+     headers: { &quot;Content-Type&quot;: &quot;application/json&quot; },
+     body: JSON.stringify({ email: IbexConfig.email, password: IbexConfig.password }),
+-  }).catch((err: unknown) =&gt; new IbexError(err instanceof Error ? err : new Error(String(err))))
++  }).catch(
++    (err: unknown) =&gt; new IbexError(err instanceof Error ? err : new Error(String(err))),
++  )
+ 
+   if (resp instanceof IbexError) return resp
+   if (!resp.ok) {
+@@ -240,17 +248,24 @@ const getIbexToken = async (): Promise&lt;string | IbexError&gt; =&gt; {
+     return new IbexError(new Error(`IBEX sign-in failed: ${resp.status} — ${body}`))
+   }
+ 
+-  const data = await resp.json() as {
++  const data = (await resp.json()) as {
+     accessToken?: string
+     accessTokenExpiresAt?: number
+     refreshToken?: string
+     refreshTokenExpiresAt?: number
+   }
+-  if (!data.accessToken) return new IbexError(new Error(&quot;IBEX sign-in: no access token in response&quot;))
++  if (!data.accessToken)
++    return new IbexError(new Error(&quot;IBEX sign-in: no access token in response&quot;))
+ 
+-  await Ibex.authentication.storage.setAccessToken(data.accessToken, data.accessTokenExpiresAt)
++  await Ibex.authentication.storage.setAccessToken(
++    data.accessToken,
++    data.accessTokenExpiresAt,
++  )
+   if (data.refreshToken) {
+-    await Ibex.authentication.storage.setRefreshToken(data.refreshToken, data.refreshTokenExpiresAt)
++    await Ibex.authentication.storage.setRefreshToken(
++      data.refreshToken,
++      data.refreshTokenExpiresAt,
++    )
+   }
+ 
+   return `Bearer ${data.accessToken}`
+@@ -264,7 +279,11 @@ const ibexFetch = async &lt;T&gt;(
+   const url = `${IbexConfig.url}${path}`
+   const resp = await fetch(url, {
+     ...init,
+-    headers: { Authorization: token, &quot;Content-Type&quot;: &quot;application/json&quot;, ...init.headers },
++    headers: {
++      &quot;Authorization&quot;: token,
++      &quot;Content-Type&quot;: &quot;application/json&quot;,
++      ...init.headers,
++    },
+   })
+   if (!resp.ok) {
+     const body = await resp.text().catch(() =&gt; &quot;&quot;)
+diff --git a/src/services/ibex/types.ts b/src/services/ibex/types.ts
+index 4a02bf260..ec3d55015 100644
+--- a/src/services/ibex/types.ts
++++ b/src/services/ibex/types.ts
+@@ -1,4 +1,4 @@
+-import { USDAmount } from &quot;@domain/shared&quot;
++import { USDAmount, USDTAmount } from &quot;@domain/shared&quot;
+ 
+ export type PayInvoiceArgs = {
+   accountId: IbexAccountId
+@@ -7,8 +7,8 @@ export type PayInvoiceArgs = {
+ }
+ 
+ export type SendOnchainArgs = {
+-  accountId: IbexAccountId, // source of funds
+-  address: OnChainAddress, // destination
++  accountId: IbexAccountId // source of funds
++  address: OnChainAddress // destination
+   amount: USDAmount
+ }
+ 
+@@ -27,7 +27,7 @@ export type IbexAccountDetails = {
+   id: string | undefined
+   userId: string | undefined
+   name: string | undefined
+-  balance: USDAmount | undefined
++  balance: USDAmount | USDTAmount | undefined
+ }
+ 
+ export type IbexInvoiceArgs = {
+diff --git a/src/services/mongoose/wallets.ts b/src/services/mongoose/wallets.ts
+index 41c975173..45cd29204 100644
+--- a/src/services/mongoose/wallets.ts
++++ b/src/services/mongoose/wallets.ts
+@@ -14,11 +14,13 @@ import Ibex from &quot;@services/ibex/client&quot;
+ 
+ import { IbexError } from &quot;@services/ibex/errors&quot;
+ 
++import { recordExceptionInCurrentSpan } from &quot;@services/tracing&quot;
++
++import { ErrorLevel, USDAmount, USDTAmount, WalletCurrency } from &quot;@domain/shared&quot;
++
+ import { toObjectId, fromObjectId, parseRepositoryError } from &quot;./utils&quot;
+ import { Wallet } from &quot;./schema&quot;
+ import { AccountsRepository } from &quot;./accounts&quot;
+-import { recordExceptionInCurrentSpan } from &quot;@services/tracing&quot;
+-import { ErrorLevel, USDAmount, WalletCurrency } from &quot;@domain/shared&quot;
+ 
+ export interface WalletRecord {
+   id: string
+@@ -29,6 +31,19 @@ export interface WalletRecord {
+   lnurlp: string
+ }
+ 
++const getIbexCurrencyId = (
++  currency: WalletCurrency,
++): IbexCurrencyId | UnsupportedCurrencyError =&gt; {
++  switch (currency) {
++    case WalletCurrency.Usd:
++      return USDAmount.currencyId
++    case WalletCurrency.Usdt:
++      return USDTAmount.currencyId
++    default:
++      return new UnsupportedCurrencyError(`Unsupported IBEX wallet currency: ${currency}`)
++  }
++}
++
+ export const WalletsRepository = (): IWalletsRepository =&gt; {
+   const persistNew = async ({
+     accountId,
+@@ -37,17 +52,18 @@ export const WalletsRepository = (): IWalletsRepository =&gt; {
+   }: NewWalletInfo): Promise&lt;Wallet | ApplicationError&gt; =&gt; {
+     const account = await AccountsRepository().findById(accountId)
+     if (account instanceof Error) return account
+-    
++
+     try {
+-      let currencyId = USDAmount.currencyId
++      const currencyId = getIbexCurrencyId(currency)
++      if (currencyId instanceof Error) return currencyId
+ 
+       const resp = await Ibex.createAccount(accountId, currencyId)
+       if (resp instanceof IbexError) return resp
+-      const ibexAccountId = resp.id 
+- 
++      const ibexAccountId = resp.id
++
+       let lnurlp: string | undefined
+       if (ibexAccountId !== undefined) {
+-        const lnurlResp = await Ibex.createLnurlPay({ 
++        const lnurlResp = await Ibex.createLnurlPay({
+           accountId: ibexAccountId,
+           currencyId,
+         })
+@@ -60,16 +76,15 @@ export const WalletsRepository = (): IWalletsRepository =&gt; {
+               ibexAccountId,
+             },
+           })
+-        }
+-        else lnurlp = lnurlResp.lnurl
++        } else lnurlp = lnurlResp.lnurl
+       }
+-      
++
+       const wallet = new Wallet({
+         _accountId: toObjectId&lt;AccountId&gt;(accountId),
+         id: ibexAccountId,
+         type,
+         currency,
+-        lnurlp
++        lnurlp,
+       })
+       await wallet.save()
+       return resultToWallet(wallet)
+diff --git a/test/flash/unit/app/accounts/create-account.spec.ts b/test/flash/unit/app/accounts/create-account.spec.ts
+new file mode 100644
+index 000000000..9f7eb2d35
+--- /dev/null
++++ b/test/flash/unit/app/accounts/create-account.spec.ts
+@@ -0,0 +1,122 @@
++import { createAccountWithPhoneIdentifier } from &quot;@app/accounts/create-account&quot;
++import { AccountLevel } from &quot;@domain/accounts&quot;
++import { WalletCurrency } from &quot;@domain/shared&quot;
++import { PersistError } from &quot;@domain/errors&quot;
++import { WalletType } from &quot;@domain/wallets&quot;
++import {
++  AccountsRepository,
++  UsersRepository,
++  WalletsRepository,
++} from &quot;@services/mongoose&quot;
++
++jest.mock(&quot;@config&quot;, () =&gt; ({
++  getAdminAccounts: jest.fn(() =&gt; []),
++}))
++
++jest.mock(&quot;@services/tracing&quot;, () =&gt; ({
++  recordExceptionInCurrentSpan: jest.fn(),
++}))
++
++jest.mock(&quot;@services/mongoose&quot;, () =&gt; ({
++  AccountsRepository: jest.fn(),
++  UsersRepository: jest.fn(),
++  WalletsRepository: jest.fn(),
++}))
++
++const mockedAccountsRepository = AccountsRepository as jest.MockedFunction&lt;
++  typeof AccountsRepository
++&gt;
++const mockedUsersRepository = UsersRepository as jest.MockedFunction&lt;
++  typeof UsersRepository
++&gt;
++const mockedWalletsRepository = WalletsRepository as jest.MockedFunction&lt;
++  typeof WalletsRepository
++&gt;
++
++describe(&quot;createAccountWithPhoneIdentifier&quot;, () =&gt; {
++  let persistNew: jest.Mock
++
++  const account = {
++    id: &quot;account-id&quot; as AccountId,
++    defaultWalletId: undefined,
++  } as Account
++
++  const config = {
++    initialWallets: [WalletCurrency.Usd],
++    initialStatus: &quot;active&quot;,
++    initialLevel: AccountLevel.One,
++  } as AccountsConfig
++
++  beforeEach(() =&gt; {
++    jest.clearAllMocks()
++
++    mockedUsersRepository.mockReturnValue({
++      update: jest.fn().mockResolvedValue({ id: &quot;user-id&quot; }),
++    } as unknown as ReturnType&lt;typeof UsersRepository&gt;)
++
++    mockedAccountsRepository.mockReturnValue({
++      persistNew: jest.fn().mockResolvedValue({ ...account }),
++      update: jest
++        .fn()
++        .mockImplementation(async (updatedAccount: Account) =&gt; updatedAccount),
++    } as unknown as ReturnType&lt;typeof AccountsRepository&gt;)
++
++    persistNew = jest.fn().mockImplementation(async ({ accountId, type, currency }) =&gt; ({
++      id: `${currency}-wallet-id`,
++      accountId,
++      type,
++      currency,
++    }))
++
++    mockedWalletsRepository.mockReturnValue({
++      persistNew,
++    } as unknown as ReturnType&lt;typeof WalletsRepository&gt;)
++  })
++
++  it(&quot;creates both USD and USDT cash wallets and defaults new accounts to USDT&quot;, async () =&gt; {
++    const result = await createAccountWithPhoneIdentifier({
++      newAccountInfo: {
++        kratosUserId: &quot;kratos-user-id&quot; as UserId,
++        phone: &quot;+15551234567&quot; as PhoneNumber,
++      },
++      config,
++    })
++
++    expect(result).not.toBeInstanceOf(Error)
++
++    expect(persistNew).toHaveBeenCalledWith({
++      accountId: account.id,
++      type: WalletType.Checking,
++      currency: WalletCurrency.Usd,
++    })
++    expect(persistNew).toHaveBeenCalledWith({
++      accountId: account.id,
++      type: WalletType.Checking,
++      currency: WalletCurrency.Usdt,
++    })
++    expect(persistNew).toHaveBeenCalledTimes(2)
++    expect((result as Account).defaultWalletId).toBe(`${WalletCurrency.Usdt}-wallet-id`)
++  })
++
++  it(&quot;does not create an account with a USD fallback default if the USDT wallet is missing&quot;, async () =&gt; {
++    persistNew.mockImplementation(async ({ accountId, type, currency }) =&gt; {
++      if (currency === WalletCurrency.Usdt) return new PersistError(&quot;USDT wallet failed&quot;)
++      return {
++        id: `${currency}-wallet-id`,
++        accountId,
++        type,
++        currency,
++      }
++    })
++
++    const result = await createAccountWithPhoneIdentifier({
++      newAccountInfo: {
++        kratosUserId: &quot;kratos-user-id&quot; as UserId,
++        phone: &quot;+15551234567&quot; as PhoneNumber,
++      },
++      config,
++    })
++
++    expect(result).toBeInstanceOf(Error)
++  })
++})
+diff --git a/test/flash/unit/app/wallets/get-balance-for-wallet.spec.ts b/test/flash/unit/app/wallets/get-balance-for-wallet.spec.ts
+new file mode 100644
+index 000000000..4c7fe2680
+--- /dev/null
++++ b/test/flash/unit/app/wallets/get-balance-for-wallet.spec.ts
+@@ -0,0 +1,38 @@
++import { getBalanceForWallet } from &quot;@app/wallets/get-balance-for-wallet&quot;
++import { USDTAmount, WalletCurrency } from &quot;@domain/shared&quot;
++import Ibex from &quot;@services/ibex/client&quot;
++
++jest.mock(&quot;@services/ibex/client&quot;, () =&gt; ({
++  __esModule: true,
++  default: {
++    getAccountDetails: jest.fn(),
++    getCryptoReceiveBalance: jest.fn(),
++  },
++}))
++
++describe(&quot;getBalanceForWallet&quot;, () =&gt; {
++  beforeEach(() =&gt; {
++    jest.mocked(Ibex.getAccountDetails).mockReset()
++    jest.mocked(Ibex.getCryptoReceiveBalance).mockReset()
++  })
++
++  it(&quot;loads USDT balances from the IBEX account id, not a crypto receive-info id&quot;, async () =&gt; {
++    const balance = USDTAmount.ZERO
++    jest.mocked(Ibex.getAccountDetails).mockResolvedValue({
++      id: &quot;ibex-account-id&quot;,
++      balance,
++    } as never)
++
++    const result = await getBalanceForWallet({
++      walletId: &quot;ibex-account-id&quot; as WalletId,
++      currency: WalletCurrency.Usdt,
++    })
++
++    expect(Ibex.getAccountDetails).toHaveBeenCalledWith(
++      &quot;ibex-account-id&quot;,
++      WalletCurrency.Usdt,
++    )
++    expect(Ibex.getCryptoReceiveBalance).not.toHaveBeenCalled()
++    expect(result).toBe(balance)
++  })
++})
+diff --git a/test/flash/unit/services/mongoose/wallets.spec.ts b/test/flash/unit/services/mongoose/wallets.spec.ts
+new file mode 100644
+index 000000000..9707694cd
+--- /dev/null
++++ b/test/flash/unit/services/mongoose/wallets.spec.ts
+@@ -0,0 +1,82 @@
++import { UnsupportedCurrencyError } from &quot;@domain/errors&quot;
++import { WalletCurrency } from &quot;@domain/shared&quot;
++import Ibex from &quot;@services/ibex/client&quot;
++import { AccountsRepository } from &quot;@services/mongoose/accounts&quot;
++import { WalletsRepository } from &quot;@services/mongoose/wallets&quot;
++
++const save = jest.fn()
++const walletConstructor = jest.fn().mockImplementation((record) =&gt; ({
++  ...record,
++  save,
++}))
++
++jest.mock(&quot;@services/ibex/client&quot;, () =&gt; ({
++  __esModule: true,
++  default: {
++    createAccount: jest.fn(),
++    createLnurlPay: jest.fn(),
++  },
++}))
++
++jest.mock(&quot;@services/mongoose/accounts&quot;, () =&gt; ({
++  AccountsRepository: jest.fn(),
++}))
++
++jest.mock(&quot;@services/mongoose/schema&quot;, () =&gt; ({
++  Wallet: jest.fn().mockImplementation((record) =&gt; walletConstructor(record)),
++}))
++
++jest.mock(&quot;@services/mongoose/utils&quot;, () =&gt; ({
++  toObjectId: jest.fn((id) =&gt; id),
++  fromObjectId: jest.fn((id) =&gt; id),
++  parseRepositoryError: jest.fn((err) =&gt; err),
++}))
++
++describe(&quot;WalletsRepository.persistNew&quot;, () =&gt; {
++  beforeEach(() =&gt; {
++    save.mockReset().mockResolvedValue(undefined)
++    walletConstructor.mockClear()
++    jest.mocked(AccountsRepository).mockReturnValue({
++      findById: jest.fn().mockResolvedValue({ id: &quot;account-id&quot; }),
++    } as never)
++    jest
++      .mocked(Ibex.createAccount)
++      .mockReset()
++      .mockResolvedValue({
++        id: &quot;ibex-account-id&quot;,
++      } as never)
++    jest
++      .mocked(Ibex.createLnurlPay)
++      .mockReset()
++      .mockResolvedValue({
++        lnurl: &quot;lnurlp&quot;,
++      } as never)
++  })
++
++  it(&quot;rejects currencies without an IBEX account currency id&quot;, async () =&gt; {
++    const result = await WalletsRepository().persistNew({
++      accountId: &quot;account-id&quot; as AccountId,
++      type: &quot;checking&quot; as WalletType,
++      currency: WalletCurrency.Btc,
++    })
++
++    expect(result).toBeInstanceOf(UnsupportedCurrencyError)
++    expect(Ibex.createAccount).not.toHaveBeenCalled()
++    expect(Ibex.createLnurlPay).not.toHaveBeenCalled()
++  })
++
++  it(&quot;creates USDT wallets as IBEX currency 29 accounts&quot;, async () =&gt; {
++    const result = await WalletsRepository().persistNew({
++      accountId: &quot;account-id&quot; as AccountId,
++      type: &quot;checking&quot; as WalletType,
++      currency: WalletCurrency.Usdt,
++    })
++
++    expect(result).not.toBeInstanceOf(Error)
++    expect(Ibex.createAccount).toHaveBeenCalledWith(&quot;account-id&quot;, 29)
++    expect(Ibex.createLnurlPay).toHaveBeenCalledWith({
++      accountId: &quot;ibex-account-id&quot;,
++      currencyId: 29,
++    })
++  })
++})
+</pre>
+  </details>
+</main>
+</body>
+</html>
