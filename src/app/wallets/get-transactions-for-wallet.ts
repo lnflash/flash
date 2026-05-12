@@ -37,10 +37,10 @@ export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] 
     const currency = (trx.currencyId === 3 ? "USD" : "BTC") as WalletCurrency // WalletCurrency: "USD" | "BTC",
 
     const settlementDisplayPrice: WalletMinorUnitDisplayPrice<WalletCurrency, DisplayCurrency> = {
-      base: trx.exchangeRateCurrencySats ? BigInt(Math.floor(trx.exchangeRateCurrencySats)) : 0n,
+      base: trx.exchangeRateCurrencySats ? BigInt(Math.round(trx.exchangeRateCurrencySats)) : 0n,
       offset: 0n, // what is this?
       displayCurrency: "USD" as DisplayCurrency,
-      walletCurrency: currency
+      walletCurrency: currency,
     }
 
     const baseTrx: BaseWalletTransaction = {
@@ -88,7 +88,9 @@ export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] 
 }
 
 const asCurrency = (amount: number | undefined, currency: WalletCurrency): Satoshis | UsdCents => {
-  return currency === "USD" ? amount as UsdCents : amount as Satoshis
+  if (amount === undefined) return amount as never
+  const rounded = Math.round(amount)
+  return currency === "USD" ? (rounded as UsdCents) : (rounded as Satoshis)
 }
 
 const toSettlementAmount = (

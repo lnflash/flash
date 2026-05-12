@@ -14,7 +14,13 @@ import { WalletCurrency } from "@domain/shared"
 
 import { CENTS_PER_USD, UsdDisplayCurrency } from "@domain/fiat"
 
-import { PRICE_HISTORY_HOST, PRICE_HISTORY_PORT, PRICE_HOST, PRICE_PORT } from "@config"
+import {
+  ExchangeRates,
+  PRICE_HISTORY_HOST,
+  PRICE_HISTORY_PORT,
+  PRICE_HOST,
+  PRICE_PORT,
+} from "@config"
 
 import { baseLogger } from "../logger"
 
@@ -83,6 +89,14 @@ export const PriceService = (): IPriceService => {
 
       let displayCurrencyPrice = price / SATS_PER_BTC
       if (walletCurrency === WalletCurrency.Usd) {
+        if (displayCurrency === (WalletCurrency.Jmd as unknown as DisplayCurrency)) {
+          return {
+            timestamp: new Date(),
+            price: Number(ExchangeRates.jmd.sell.asCents()) / CENTS_PER_USD,
+            currency: displayCurrency,
+          }
+        }
+
         const { price: usdBtcPrice } = await getPrice({
           currency: UsdDisplayCurrency,
         })
