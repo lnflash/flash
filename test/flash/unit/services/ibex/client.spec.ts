@@ -109,4 +109,54 @@ describe("Ibex crypto receive info client", () => {
       }),
     )
   })
+
+  it("accepts common IBEX Ethereum USDT network labels", async () => {
+    mockGetAccessToken.mockResolvedValue("access-token")
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        options: [
+          {
+            id: "tron-usdt",
+            name: "Tron USDT",
+            currency: "USDT",
+            network: "Tron",
+          },
+          {
+            id: "eth-usdt",
+            name: "USDT ERC20",
+            currency: "USDT",
+            network: "ETH",
+          },
+        ],
+      }),
+    })
+
+    const option = await Ibex.getEthereumUsdtOption()
+
+    expect(option).toMatchObject({ id: "eth-usdt" })
+  })
+
+  it("returns available crypto receive options when Ethereum USDT is missing", async () => {
+    mockGetAccessToken.mockResolvedValue("access-token")
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        options: [
+          {
+            id: "tron-usdt",
+            name: "Tron USDT",
+            currency: "USDT",
+            network: "Tron",
+          },
+        ],
+      }),
+    })
+
+    const option = await Ibex.getEthereumUsdtOption()
+
+    expect(option).toBeInstanceOf(Error)
+    expect((option as Error).message).toContain("Available options")
+    expect((option as Error).message).toContain("Tron")
+  })
 })

@@ -369,17 +369,41 @@ const getTronUsdtOption = async (): Promise<string | IbexError> => {
   return tronUsdt.id
 }
 
+const normalizeCryptoReceiveOptionField = (value: string) =>
+  value.toLowerCase().replace(/[^a-z0-9]/g, "")
+
+const isEthereumUsdtOption = (option: CryptoReceiveOption) => {
+  const currency = normalizeCryptoReceiveOptionField(option.currency)
+  const network = normalizeCryptoReceiveOptionField(option.network)
+  const name = normalizeCryptoReceiveOptionField(option.name)
+
+  return (
+    currency === "usdt" &&
+    (network === "ethereum" ||
+      network === "eth" ||
+      network === "erc20" ||
+      name.includes("ethereum") ||
+      name.includes("erc20"))
+  )
+}
+
 const getEthereumUsdtOption = async (): Promise<CryptoReceiveOption | IbexError> => {
   const options = await getCryptoReceiveOptions()
   if (options instanceof IbexError) return options
 
-  const ethereumUsdt = options.find(
-    (opt) =>
-      opt.currency.toLowerCase() === "usdt" && opt.network.toLowerCase() === "ethereum",
-  )
+  const ethereumUsdt = options.find(isEthereumUsdtOption)
 
   if (!ethereumUsdt) {
-    return new IbexError(new Error("Ethereum USDT option not found"))
+    const availableOptions = options.map(({ currency, network, name }) => ({
+      currency,
+      network,
+      name,
+    }))
+    return new IbexError(
+      new Error(
+        `Ethereum USDT option not found. Available options: ${JSON.stringify(availableOptions)}`,
+      ),
+    )
   }
 
   return ethereumUsdt
