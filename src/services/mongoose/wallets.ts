@@ -23,6 +23,7 @@ import { ErrorLevel, USDAmount, USDTAmount, WalletCurrency } from "@domain/share
 
 import { WalletType } from "@domain/wallets"
 
+
 import { toObjectId, fromObjectId, parseRepositoryError } from "./utils"
 import { Wallet } from "./schema"
 import { AccountsRepository } from "./accounts"
