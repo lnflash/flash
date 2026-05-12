@@ -67,17 +67,6 @@ const initializeCreatedAccount = async ({
   }
   account.defaultWalletId = defaultWalletId
 
-  const defaultCashWalletReceiveOption = await Ibex.getEthereumUsdtOption()
-  if (defaultCashWalletReceiveOption instanceof Error)
-    return defaultCashWalletReceiveOption
-
-  const receiveInfo = await Ibex.createCryptoReceiveInfo(defaultWalletId, {
-    ...defaultCashWalletReceiveOption,
-    name: defaultCashWalletReceiveInfoName(account),
-  })
-  if (receiveInfo instanceof Error) return receiveInfo
-  account.bridgeEthereumAddress = receiveInfo.address
-
   // TODO: improve bootstrap process
   // the script below is to dynamically attribute the editor account at runtime
   // this is only if editor is set in the config - typically only in test env
@@ -93,7 +82,34 @@ const initializeCreatedAccount = async ({
   const updatedAccount = await AccountsRepository().update(account)
   if (updatedAccount instanceof Error) return updatedAccount
 
-  return updatedAccount
+  const defaultCashWalletReceiveOption = await Ibex.getEthereumUsdtOption()
+  if (defaultCashWalletReceiveOption instanceof Error) {
+    recordExceptionInCurrentSpan({
+      error: defaultCashWalletReceiveOption,
+      level: ErrorLevel.Critical,
+      attributes: { accountId: account.id, walletId: defaultWalletId },
+    })
+    return updatedAccount
+  }
+
+  const receiveInfo = await Ibex.createCryptoReceiveInfo(defaultWalletId, {
+    ...defaultCashWalletReceiveOption,
+    name: defaultCashWalletReceiveInfoName(account),
+  })
+  if (receiveInfo instanceof Error) {
+    recordExceptionInCurrentSpan({
+      error: receiveInfo,
+      level: ErrorLevel.Critical,
+      attributes: { accountId: account.id, walletId: defaultWalletId },
+    })
+    return updatedAccount
+  }
+
+  updatedAccount.bridgeEthereumAddress = receiveInfo.address
+  const accountWithReceiveAddress = await AccountsRepository().update(updatedAccount)
+  if (accountWithReceiveAddress instanceof Error) return accountWithReceiveAddress
+
+  return accountWithReceiveAddress
 }
 
 export const createAccountForDeviceAccount = async ({

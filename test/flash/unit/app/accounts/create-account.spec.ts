@@ -1,4 +1,5 @@
 import { createAccountWithPhoneIdentifier } from "@app/accounts/create-account"
+import { recordExceptionInCurrentSpan } from "@services/tracing"
 import { AccountLevel } from "@domain/accounts"
 import { WalletCurrency } from "@domain/shared"
 import { PersistError } from "@domain/errors"
@@ -148,7 +149,7 @@ describe("createAccountWithPhoneIdentifier", () => {
     expect((result as Account).bridgeEthereumAddress).toBe("0xeth-usdt-address")
   })
 
-  it("fails account creation if the required Ethereum USDT receive address cannot be created", async () => {
+  it("keeps the new account usable if the Ethereum USDT receive address cannot be created", async () => {
     jest
       .mocked(Ibex.createCryptoReceiveInfo)
       .mockResolvedValueOnce(new IbexError(new Error("receive-info failed")))
@@ -161,8 +162,14 @@ describe("createAccountWithPhoneIdentifier", () => {
       config,
     })
 
-    expect(result).toBeInstanceOf(Error)
-    expect(updateAccount).not.toHaveBeenCalled()
+    expect(result).not.toBeInstanceOf(Error)
+    expect((result as Account).defaultWalletId).toBe(`${WalletCurrency.Usdt}-wallet-id`)
+    expect(updateAccount).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultWalletId: `${WalletCurrency.Usdt}-wallet-id` }),
+    )
+    expect(recordExceptionInCurrentSpan).toHaveBeenCalledWith(
+      expect.objectContaining({ error: expect.any(IbexError) }),
+    )
   })
 
   it("does not create an account with a USD fallback default if the USDT wallet is missing", async () => {
