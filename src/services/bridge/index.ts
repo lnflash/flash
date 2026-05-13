@@ -103,6 +103,8 @@ const ensureEthUsdtCashWallet = async (
   )
 
   if (!usdtWallet) {
+
+    console.log(`No USDT wallet found for account ${account.id}, creating one...`)
     const createdWallet = await WalletsRepository().persistNew({
       accountId: account.id,
       type: WalletType.Checking,
@@ -281,21 +283,26 @@ const createVirtualAccount = async (
     let ethereumAddress = account.bridgeEthereumAddress
 
     if (!ethereumAddress) {
-      const option = await IbexClient.getEthereumUsdtOption()
+      let option = await IbexClient.getEthereumUsdtOption()
       if (option instanceof Error) return new BridgeError(option.message)
 
+      option.name = `USDT-ETH ${account.username}-${crypto.randomBytes(4).toString("hex")}`
       const receiveInfo = await IbexClient.createCryptoReceiveInfo(
         usdtCashWallet.id as IbexAccountId,
         option,
       )
+
+      console.log(`Received crypto receive info: ${JSON.stringify(receiveInfo)}`)
+
+      console.log(`Ethereum USDT address from Ibex: ${receiveInfo instanceof Error ? receiveInfo.message : receiveInfo.data.address}`)
       if (receiveInfo instanceof Error) return new BridgeError(receiveInfo.message)
 
       const updateResult = await AccountsRepository().updateBridgeFields(accountId, {
-        bridgeEthereumAddress: receiveInfo.address,
+        bridgeEthereumAddress: receiveInfo.data.address,
       })
       if (updateResult instanceof Error) return updateResult
 
-      ethereumAddress = receiveInfo.address
+      ethereumAddress = receiveInfo.data.address
     }
 
     // Deterministic key so Bridge deduplicates on their side if two calls race past
