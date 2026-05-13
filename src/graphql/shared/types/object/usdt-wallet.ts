@@ -14,6 +14,7 @@ import {
   WalletCurrency as WalletCurrencyDomain,
   USDTAmount,
 } from "@domain/shared"
+import { WalletType } from "@domain/wallets"
 
 import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 
@@ -48,6 +49,10 @@ const UsdtWallet = GT.Object<Wallet>({
     lnurlp: {
       type: Lnurl,
       resolve: (source) => source.lnurlp,
+    },
+    isExternal: {
+      type: GT.NonNull(GT.Boolean),
+      resolve: (source) => source.type === WalletType.External,
     },
 
     balance: {
