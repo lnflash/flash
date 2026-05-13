@@ -41,6 +41,7 @@ type BridgeWebhook = {
   port: number
   publicKeys: BridgeWebhookPublicKeys
   timestampSkewMs: number
+  replaySecret?: string
 }
 
 type BridgeConfig = {

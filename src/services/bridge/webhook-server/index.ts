@@ -13,6 +13,7 @@ import { verifyBridgeSignature } from "./middleware/verify-signature"
 import { kycHandler } from "./routes/kyc"
 import { depositHandler } from "./routes/deposit"
 import { transferHandler } from "./routes/transfer"
+import { replayAuthMiddleware, replayHandler } from "./routes/replay"
 
 export const startBridgeWebhookServer = () => {
   const app = express()
@@ -35,6 +36,11 @@ export const startBridgeWebhookServer = () => {
   app.post("/kyc", verifyBridgeSignature("kyc"), kycHandler)
   app.post("/deposit", verifyBridgeSignature("deposit"), depositHandler)
   app.post("/transfer", verifyBridgeSignature("transfer"), transferHandler)
+  app.post("/internal/replay", replayAuthMiddleware, replayHandler)
+
+  if (!BridgeConfig.webhook.replaySecret && !process.env.BRIDGE_WEBHOOK_REPLAY_SECRET) {
+    baseLogger.warn("replaySecret not configured (neither BridgeConfig.webhook.replaySecret nor BRIDGE_WEBHOOK_REPLAY_SECRET) — /internal/replay will reject all requests with 503")
+  }
 
   // Start server
   const port = BridgeConfig.webhook.port

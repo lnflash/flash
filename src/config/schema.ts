@@ -663,6 +663,7 @@ export const configSchema = {
               required: ["kyc", "deposit", "transfer"],
             },
             timestampSkewMs: { type: "integer" },
+            replaySecret: { type: "string" }
           },
           required: ["port", "publicKeys", "timestampSkewMs"],
         },
