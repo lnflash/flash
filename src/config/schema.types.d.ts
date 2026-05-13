@@ -24,8 +24,10 @@ type WebhookServer = {
 
 type IbexConfig = {
   url: string
+  authUrl: string
   email: string
   password: string
+  apiKey?: string
   webhook: WebhookServer
 }
 
@@ -45,6 +47,7 @@ type BridgeConfig = {
   enabled: boolean
   apiKey: string
   baseUrl: string
+  minWithdrawalAmount: number
   webhook: BridgeWebhook
 }
 

@@ -4,6 +4,8 @@
  * for USD on/off-ramp functionality via Bridge.xyz
  */
 
+import crypto from "crypto"
+
 import { BridgeConfig } from "@config"
 import BridgeClient, {
   KycLink,
@@ -16,6 +18,7 @@ import { AccountsRepository } from "@services/mongoose/accounts"
 import { wrapAsyncFunctionsToRunInSpan } from "@services/tracing"
 import { baseLogger } from "@services/logger"
 import {
+  BridgeError,
   BridgeDisabledError,
   BridgeAccountLevelError,
   BridgeKycPendingError,
@@ -24,11 +27,18 @@ import {
 } from "./errors"
 import { RepositoryError } from "@domain/errors"
 import { toBridgeCustomerId, toBridgeExternalAccountId } from "@domain/primitives/bridge"
+import { getBalanceForWallet } from "@app/wallets/get-balance-for-wallet"
+import { USDTAmount, WalletCurrency } from "@domain/shared"
+import { WalletsRepository } from "@services/mongoose/wallets"
+import { BridgeInsufficientFundsError } from "./errors"
+import { IdentityRepository } from "@services/kratos"
+import IbexClient from "@services/ibex/client"
 
 // ============ Types ============
 
 type InitiateKycResult = {
   kycLink: string
+  customerId: string
   tosLink: string
 }
 
@@ -36,6 +46,7 @@ type CreateVirtualAccountResult = {
   virtualAccountId: string
   bankName: string
   routingNumber: string
+  accountNumber: string
   accountNumberLast4: string
 }
 
@@ -65,6 +76,7 @@ type VirtualAccountResult = {
   bridgeVirtualAccountId: string
   bankName: string
   routingNumber: string
+  accountNumber: string
   accountNumberLast4: string
 } | null
 
@@ -75,7 +87,13 @@ type ExternalAccountResult = {
   status: "pending" | "verified" | "failed"
 }
 
+// ============ Helpers ============
+
+export const deriveWithdrawalIdempotencyKey = (rowId: string): string =>
+  crypto.createHash("sha256").update(`withdrawal:${rowId}`).digest("hex")
+
 // ============ Guards ============
+
 
 const checkBridgeEnabled = (): true | BridgeDisabledError => {
   if (!BridgeConfig.enabled) {
@@ -102,7 +120,7 @@ const checkAccountLevel = async (
  * - Creates Bridge customer if not exists
  * - Returns KYC and TOS links
  */
-const initiateKyc = async (accountId: AccountId): Promise<InitiateKycResult | Error> => {
+const initiateKyc = async ({ accountId, email, type, full_name }: { accountId: AccountId, email: string, type?: "individual" | "business", full_name: string }): Promise<InitiateKycResult | Error> => {
   baseLogger.info({ accountId, operation: "initiateKyc" }, "Bridge operation started")
 
   const enabledCheck = checkBridgeEnabled()
@@ -111,39 +129,45 @@ const initiateKyc = async (accountId: AccountId): Promise<InitiateKycResult | Er
   const account = await checkAccountLevel(accountId)
   if (account instanceof Error) return account
 
+  if (account.bridgeKycStatus === "approved") {
+    return new BridgeError("KYC already approved for this account")
+  }
+
+  const identity = await IdentityRepository().getIdentity(account.kratosUserId);
+
+  if (identity instanceof Error) return identity
+
+  const useremail = identity.email;
+
   try {
-    let customerId = account.bridgeCustomerId
-
-    // Create customer if not exists
-    if (!customerId) {
-      // For now, create with minimal data - in production, gather from account profile
-      const customer = await BridgeClient.createCustomer({
-        type: "individual",
-        first_name: account.username || "Flash",
-        last_name: "User",
-        email: `${account.id}@flash.app`, // Placeholder - should use real email
-      })
-
-      customerId = toBridgeCustomerId(customer.id)
-
-      // Store customer ID
-      const updateResult = await AccountsRepository().updateBridgeFields(accountId, {
-        bridgeCustomerId: customerId,
-        bridgeKycStatus: "pending",
-      })
-      if (updateResult instanceof Error) return updateResult
-    }
 
     // Create KYC link
-    const kycLink = await BridgeClient.createKycLink(customerId)
+    const kycLink = await BridgeClient.createKycLink({
+      email: useremail || email,
+      type: type || "individual",
+      full_name: full_name || account.username
+    })
 
     const result: InitiateKycResult = {
       kycLink: kycLink.kyc_link,
+      customerId: kycLink.customer_id,
       tosLink: kycLink.tos_link,
     }
 
+    // link the customer Id to the bridge account 
+    const customerId = toBridgeCustomerId(kycLink.customer_id);
+
+    const updateResult = await AccountsRepository().updateBridgeFields(accountId, {
+      bridgeCustomerId: customerId,
+      bridgeKycStatus: "pending"
+    })
+
+    if (updateResult instanceof Error) {
+      return updateResult
+    }
+
     baseLogger.info(
-      { accountId, operation: "initiateKyc", customerId },
+      { accountId, operation: "initiateKyc", kycLink },
       "Bridge operation completed",
     )
 
@@ -196,27 +220,63 @@ const createVirtualAccount = async (
       return new BridgeKycPendingError("KYC not yet completed")
     }
 
-    // Get or create Tron address
-    let tronAddress = account.bridgeTronAddress
-
-    if (!tronAddress) {
-      // TODO: Integrate with IBEX to create Tron USDT receive address
-      // For now, this is a placeholder - actual implementation requires:
-      // 1. Call Ibex.getCryptoReceiveOptions() to get Tron USDT option
-      // 2. Call Ibex.createCryptoReceiveInfo() to get Tron address
-      // This will be implemented when IBEX crypto receive methods are available
-      return new Error("IBEX Tron address creation not yet implemented")
+    // Idempotency guard: return the existing VA immediately without touching Bridge
+    const existingVa = await BridgeAccountsRepo.findVirtualAccountByAccountId(
+      accountId as string,
+    )
+    if (!(existingVa instanceof RepositoryError)) {
+      return {
+        virtualAccountId: existingVa.bridgeVirtualAccountId!,
+        bankName: existingVa.bankName,
+        routingNumber: existingVa.routingNumber,
+        accountNumber: existingVa.accountNumber,
+        accountNumberLast4: existingVa.accountNumberLast4,
+      }
     }
 
+    // Get or create Ethereum address
+    let ethereumAddress = account.bridgeEthereumAddress || "0xaF095D35bfDd462165eA7eCF8AC75351a93d72bD"
+
+    if (!ethereumAddress) {
+      const option = await IbexClient.getEthereumUsdtOption()
+      if (option instanceof Error) return new BridgeError(option.message)
+
+      const receiveInfo = await IbexClient.createCryptoReceiveInfo(
+        account.defaultWalletId as IbexAccountId,
+        option,
+      )
+      if (receiveInfo instanceof Error) return new BridgeError(receiveInfo.message)
+
+      const updateResult = await AccountsRepository().updateBridgeFields(accountId, {
+        bridgeEthereumAddress: receiveInfo.address,
+      })
+      if (updateResult instanceof Error) return updateResult
+
+      ethereumAddress = receiveInfo.address
+    }
+
+    // Deterministic key so Bridge deduplicates on their side if two calls race past
+    // the check above before either has written to the repo.
+    const vaIdempotencyKey = crypto
+      .createHash("sha256")
+      .update(`va:${accountId}`)
+      .digest("hex")
+
     // Create Bridge virtual account
-    const virtualAccount = await BridgeClient.createVirtualAccount(customerId, {
-      source: { currency: "usd" },
-      destination: {
-        currency: "usdt",
-        payment_rail: "tron",
-        address: tronAddress,
+    const virtualAccount = await BridgeClient.createVirtualAccount(
+      customerId,
+      {
+        source: { currency: "usd" },
+        destination: {
+          currency: "usdt",
+          payment_rail: "ethereum",
+          address: ethereumAddress,
+        },
       },
-    })
+      vaIdempotencyKey,
+    )
+
+    const fullAccountNumber = virtualAccount.source_deposit_instructions.bank_account_number || ""
 
     // Store virtual account in repository
     const repoResult = await BridgeAccountsRepo.createVirtualAccount({
@@ -224,8 +284,8 @@ const createVirtualAccount = async (
       bridgeVirtualAccountId: virtualAccount.id,
       bankName: virtualAccount.source_deposit_instructions.bank_name || "",
       routingNumber: virtualAccount.source_deposit_instructions.bank_routing_number || "",
-      accountNumberLast4:
-        virtualAccount.source_deposit_instructions.bank_account_number?.slice(-4) || "",
+      accountNumber: fullAccountNumber,
+      accountNumberLast4: fullAccountNumber.slice(-4),
     })
     if (repoResult instanceof Error) return repoResult
 
@@ -233,8 +293,8 @@ const createVirtualAccount = async (
       virtualAccountId: virtualAccount.id,
       bankName: virtualAccount.source_deposit_instructions.bank_name || "",
       routingNumber: virtualAccount.source_deposit_instructions.bank_routing_number || "",
-      accountNumberLast4:
-        virtualAccount.source_deposit_instructions.bank_account_number?.slice(-4) || "",
+      accountNumber: fullAccountNumber,
+      accountNumberLast4: fullAccountNumber.slice(-4),
     }
 
     baseLogger.info(
@@ -331,12 +391,44 @@ const initiateWithdrawal = async (
       )
     }
 
-    const tronAddress = account.bridgeTronAddress
-    if (!tronAddress) {
-      return new Error("Account has no Tron address. Create virtual account first.")
+    const ethereumAddress = account.bridgeEthereumAddress
+    if (!ethereumAddress) {
+      return new Error("Account has no Ethereum address. Create virtual account first.")
     }
 
-    // Verify external account exists
+    const wallets = await WalletsRepository().listByAccountId(accountId)
+    if (wallets instanceof Error) return wallets
+    const usdtWallet = wallets.find((w) => w.currency === WalletCurrency.Usdt)
+    if (!usdtWallet) {
+      return new BridgeInsufficientFundsError("No USDT wallet found on account")
+    }
+    const balance = await getBalanceForWallet({
+      walletId: usdtWallet.id,
+      currency: WalletCurrency.Usdt,
+    })
+    if (balance instanceof Error) return balance
+
+    if (!(balance instanceof USDTAmount)) {
+      return new BridgeInsufficientFundsError("Invalid balance type")
+    }
+    const withdrawalAmount = parseFloat(amount)
+    if (isNaN(withdrawalAmount) || withdrawalAmount <= 0) {
+      return new BridgeInsufficientFundsError("Invalid withdrawal amount")
+    }
+
+    const availableBalance = balance.toIbex();
+    if (availableBalance < withdrawalAmount) {
+      baseLogger.warn(
+        { accountId, availableBalance, withdrawalAmount, operation: "initiateWithdrawal" },
+        "Insufficient USDT balance for withdrawal",
+      )
+      return new BridgeInsufficientFundsError(
+        `Insufficient USDT balance: available ${availableBalance}, requested ${withdrawalAmount}`,
+      )
+    }
+
+    // CRIT-2 (ENG-281): Verify caller owns this external account (ownership enforced here
+    // and at DB level via compound index — see schema.ts BridgeExternalAccountSchema)
     const externalAccounts = await BridgeAccountsRepo.findExternalAccountsByAccountId(
       accountId as string,
     )
@@ -346,38 +438,41 @@ const initiateWithdrawal = async (
       (acc) => acc.bridgeExternalAccountId === externalAccountId,
     )
     if (!targetAccount) {
+      // Do not leak existence — return same error regardless of whether account exists
       return new Error("External account not found")
     }
     if (targetAccount.status !== "verified") {
       return new Error("External account is not verified")
     }
 
+
+    // Store withdrawal record
+    const pendingWithdrawal = await BridgeAccountsRepo.createWithdrawal({
+      accountId: accountId as string,
+      amount: amount,
+      currency: "usdt",
+      externalAccountId,
+      status: "pending",
+    })
+    if (pendingWithdrawal instanceof Error) return pendingWithdrawal
+
+    const idempotencyKey = deriveWithdrawalIdempotencyKey(pendingWithdrawal.id)
+
     // Create transfer via Bridge
     const transfer = await BridgeClient.createTransfer(customerId, {
       amount,
       on_behalf_of: customerId,
       source: {
-        payment_rail: "tron",
+        payment_rail: "ethereum",
         currency: "usdt",
-        from_address: tronAddress,
+        from_address: ethereumAddress,
       },
       destination: {
         payment_rail: "ach",
         currency: "usd",
         external_account_id: externalAccountId,
       },
-    })
-
-    // Store withdrawal record
-    const withdrawalResult = await BridgeAccountsRepo.createWithdrawal({
-      accountId: accountId as string,
-      bridgeTransferId: transfer.id,
-      amount: transfer.amount,
-      currency: transfer.currency,
-      externalAccountId,
-      status: "pending",
-    })
-    if (withdrawalResult instanceof Error) return withdrawalResult
+    }, idempotencyKey)
 
     const result: InitiateWithdrawalResult = {
       transferId: transfer.id,
@@ -385,6 +480,15 @@ const initiateWithdrawal = async (
       currency: transfer.currency,
       state: transfer.state,
     }
+
+    const withdrawalResult = await BridgeAccountsRepo.updateWithdrawalTransferId(
+      pendingWithdrawal.id,
+      transfer.id,
+      transfer.amount,
+      transfer.currency,
+    )
+
+    if (withdrawalResult instanceof Error) return withdrawalResult
 
     baseLogger.info(
       { accountId, operation: "initiateWithdrawal", transferId: transfer.id },
@@ -455,9 +559,10 @@ const getVirtualAccount = async (
     }
 
     const result: VirtualAccountResult = {
-      bridgeVirtualAccountId: virtualAccount.bridgeVirtualAccountId,
+      bridgeVirtualAccountId: virtualAccount.bridgeVirtualAccountId!,
       bankName: virtualAccount.bankName,
       routingNumber: virtualAccount.routingNumber,
+      accountNumber: virtualAccount.accountNumber,
       accountNumberLast4: virtualAccount.accountNumberLast4,
     }
 
@@ -465,7 +570,7 @@ const getVirtualAccount = async (
       {
         accountId,
         operation: "getVirtualAccount",
-        virtualAccountId: result.bridgeVirtualAccountId,
+        virtualAccountId: result!.bridgeVirtualAccountId,
       },
       "Bridge operation completed",
     )
@@ -545,13 +650,15 @@ const getWithdrawals = async (
     )
     if (withdrawals instanceof Error) return withdrawals
 
-    const result: WithdrawalResult[] = withdrawals.map((w) => ({
-      transferId: w.bridgeTransferId,
-      amount: w.amount,
-      currency: w.currency,
-      state: w.status,
-      createdAt: w.createdAt.toISOString(),
-    }))
+    const result: WithdrawalResult[] = withdrawals
+      .filter((w) => w.bridgeTransferId !== null || w.bridgeTransferId !== undefined)
+      .map((w) => ({
+        transferId: w.bridgeTransferId!,
+        amount: w.amount,
+        currency: w.currency,
+        state: w.status,
+        createdAt: w.createdAt.toISOString(),
+      }))
 
     baseLogger.info(
       { accountId, operation: "getWithdrawals", count: result.length },

@@ -5,22 +5,43 @@ admin_accounts:
 
 ibex:
   url: "https://api-sandbox.poweredbyibex.io"
+  authUrl: "https://auth.hub.sandbox.poweredbyibex.io"
   email: ""
-  password: ""
+  password: "Ibex@1234"
+  apiKey: "sk-test-3bd6463c9cd77c3d8858c60b9997d0c6"
   webhook:
     uri: "" # external uri defined in overrides
     port: 4008
     secret: "not-so-secret"
 
 bridge:
-  enabled: false
-  apiKey: "<replace>"
-  baseUrl: "https://api.bridge.xyz"
+  enabled: true
+  apiKey: "sk-test-3bd6463c9cd77c3d8858c60b9997d0c6"
+  baseUrl: "https://api.sandbox.bridge.xyz/v0"
+  minWithdrawalAmount: 10
   webhook:
     port: 4009
     publicKeys:
-      kyc: "<replace>"
-      deposit: "<replace>"
+      kyc: |
+        -----BEGIN PUBLIC KEY-----
+        MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxrV+s8CvC0+s1W6vZG52
+        5eozo6W6HzkTcLQMWDoEzQX+ulEoYH2fPuXeupi11MdVLpEqNqYas8LD3BIf/c9H
+        kK54V8vnXNwoHa5ROp/Gjp3B17q3wGfjLa8bQJoJZFWd9W+e3TjUohCDNpeD/qv+
+        bkY2y3b1QixmXKK3REw35sfiEe5NkGMU4aEfXhZieIZ1mKXLsIgsgrIpv9BFwQr5
+        +h3R7Vv3hGKVgSZHnRMa9F1/go8v5Au8gj+9w0LxxRJikoJCubI6igaTCivibxuo
+        QXWfFylw6m7eQTvZDQz70pnUEakofRlvKasetbyKmvLzMhuRHeqsxgi8C4ZCx7MP
+        dwIDAQAB
+        -----END PUBLIC KEY-----
+      deposit: | 
+        -----BEGIN PUBLIC KEY-----
+        MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxrV+s8CvC0+s1W6vZG52
+        5eozo6W6HzkTcLQMWDoEzQX+ulEoYH2fPuXeupi11MdVLpEqNqYas8LD3BIf/c9H
+        kK54V8vnXNwoHa5ROp/Gjp3B17q3wGfjLa8bQJoJZFWd9W+e3TjUohCDNpeD/qv+
+        bkY2y3b1QixmXKK3REw35sfiEe5NkGMU4aEfXhZieIZ1mKXLsIgsgrIpv9BFwQr5
+        +h3R7Vv3hGKVgSZHnRMa9F1/go8v5Au8gj+9w0LxxRJikoJCubI6igaTCivibxuo
+        QXWfFylw6m7eQTvZDQz70pnUEakofRlvKasetbyKmvLzMhuRHeqsxgi8C4ZCx7MP
+        dwIDAQAB
+        -----END PUBLIC KEY-----
       transfer: "<replace>"
     timestampSkewMs: 300000
 

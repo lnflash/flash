@@ -67,7 +67,7 @@ const verifyBankAccount = async (o: ValidationInputs): Promise<true | Validation
   return true
 }
 
-export const CashoutValidator = validator([
+export const CashoutValidator = validator<ValidationInputs>([
   isUsd,
   cashoutMin,
   cashoutMax,
