@@ -416,7 +416,7 @@ const initiateWithdrawal = async (
       return new BridgeInsufficientFundsError("Invalid withdrawal amount")
     }
 
-    const availableBalance = balance.toIbex();
+    const availableBalance = balance.toIbex()
     if (availableBalance < withdrawalAmount) {
       baseLogger.warn(
         { accountId, availableBalance, withdrawalAmount, operation: "initiateWithdrawal" },
@@ -445,15 +445,23 @@ const initiateWithdrawal = async (
       return new Error("External account is not verified")
     }
 
-
-    // Store withdrawal record
-    const pendingWithdrawal = await BridgeAccountsRepo.createWithdrawal({
-      accountId: accountId as string,
-      amount: amount,
-      currency: "usdt",
+    const existingWithdrawal = await BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer(
+      accountId as string,
       externalAccountId,
-      status: "pending",
-    })
+      amount,
+    )
+    if (existingWithdrawal instanceof Error) return existingWithdrawal
+
+    // Store withdrawal record, or reuse the in-flight row for a retry of the same request.
+    const pendingWithdrawal =
+      existingWithdrawal ||
+      (await BridgeAccountsRepo.createWithdrawal({
+        accountId: accountId as string,
+        amount,
+        currency: "usdt",
+        externalAccountId,
+        status: "pending",
+      }))
     if (pendingWithdrawal instanceof Error) return pendingWithdrawal
 
     const idempotencyKey = deriveWithdrawalIdempotencyKey(pendingWithdrawal.id)
