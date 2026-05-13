@@ -11,7 +11,6 @@ import { toBridgeCustomerId } from "@domain/primitives/bridge"
 import BridgeService from "@services/bridge"
 
 export const kycHandler = async (req: Request, res: Response) => {
-
   const { event_id, event_object } = req.body
   const { customer_id, kyc_status, rejection_reasons } = event_object
 
@@ -21,7 +20,7 @@ export const kycHandler = async (req: Request, res: Response) => {
 
   // Idempotency check using customer_id + event as lock key
   const lockKey = `bridge-kyc:${customer_id}:${event_object.kyc_status}:${event_object.id}`
-  const lockResult = await LockService().lockIdempotencyKey(lockKey as any)
+  const lockResult = await LockService().lockIdempotencyKey(lockKey as IdempotencyKey)
   if (lockResult instanceof Error) {
     baseLogger.info({ customer_id, event_id }, "Duplicate Bridge KYC webhook")
     return res.status(200).json({ status: "already_processed" })
@@ -31,7 +30,10 @@ export const kycHandler = async (req: Request, res: Response) => {
     const bridgeCustomerId = toBridgeCustomerId(customer_id)
     const account = await AccountsRepository().findByBridgeCustomerId(bridgeCustomerId)
     if (account instanceof Error) {
-      baseLogger.warn({ customer_id }, "Account not found for Bridge customer — may be a timing issue, Bridge will retry")
+      baseLogger.warn(
+        { customer_id },
+        "Account not found for Bridge customer — may be a timing issue, Bridge will retry",
+      )
       return res.status(503).json({ error: "Account not ready" })
     }
 

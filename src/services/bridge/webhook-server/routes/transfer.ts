@@ -19,7 +19,7 @@ export const transferHandler = async (req: Request, res: Response) => {
 
   // Idempotency check using transfer_id as lock key
   const lockKey = `bridge-transfer:${transfer_id}`
-  const lockResult = await LockService().lockIdempotencyKey(lockKey as any)
+  const lockResult = await LockService().lockIdempotencyKey(lockKey as IdempotencyKey)
   if (lockResult instanceof Error) {
     baseLogger.info({ transfer_id }, "Duplicate Bridge transfer webhook")
     return res.status(200).json({ status: "already_processed" })

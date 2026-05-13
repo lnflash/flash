@@ -6,10 +6,13 @@
  * Signature is computed over: <timestamp>.<raw_body>
  */
 
-import { Request, Response, NextFunction } from "express"
 import crypto from "crypto"
+
+import { Request, Response, NextFunction } from "express"
 import { BridgeConfig } from "@config"
 import { baseLogger } from "@services/logger"
+
+type RawBodyRequest = Request & { rawBody?: string }
 
 export const verifyBridgeSignature = (publicKeyType: "kyc" | "deposit" | "transfer") => {
   return (req: Request, res: Response, next: NextFunction) => {
@@ -37,7 +40,10 @@ export const verifyBridgeSignature = (publicKeyType: "kyc" | "deposit" | "transf
     const now = Date.now()
     const timestampMs = parseInt(timestamp, 10)
     if (isNaN(timestampMs) || !isFinite(timestampMs)) {
-      baseLogger.warn({ timestamp }, "Invalid timestamp format in Bridge webhook signature")
+      baseLogger.warn(
+        { timestamp },
+        "Invalid timestamp format in Bridge webhook signature",
+      )
       return res.status(401).json({ error: "Invalid signature format" })
     }
 
@@ -50,7 +56,7 @@ export const verifyBridgeSignature = (publicKeyType: "kyc" | "deposit" | "transf
 
     // Verify signature using Bridge public key
     const publicKey = BridgeConfig.webhook.publicKeys[publicKeyType]
-    const rawBody = (req as any).rawBody
+    const rawBody = (req as RawBodyRequest).rawBody
 
     if (!rawBody) {
       baseLogger.warn(`Missing raw body for webhook`)
@@ -60,7 +66,10 @@ export const verifyBridgeSignature = (publicKeyType: "kyc" | "deposit" | "transf
     const signedPayload = `${timestamp}.${rawBody}`
 
     const digest = crypto.createHash("sha256").update(signedPayload).digest()
-    baseLogger.debug({ signedPayload, digest: digest.toString("hex") }, "Verifying Bridge webhook signature")
+    baseLogger.debug(
+      { signedPayload, digest: digest.toString("hex") },
+      "Verifying Bridge webhook signature",
+    )
 
     try {
       const verifier = crypto.createVerify("RSA-SHA256")

@@ -200,7 +200,15 @@ interface IWalletsRepository {
     walletCurrency: WalletCurrency,
   ): Promise<Wallet[] | RepositoryError>
 
-  upsertExternal({ accountId, currency, lnurlp }: { accountId: AccountId, currency?: WalletCurrency, lnurlp: Lnurl }): Promise<Wallet | RepositoryError>
+  upsertExternal({
+    accountId,
+    currency,
+    lnurlp,
+  }: {
+    accountId: AccountId
+    currency?: WalletCurrency
+    lnurlp: Lnurl
+  }): Promise<Wallet | RepositoryError>
 
   findExternalByAccountId(accountId: AccountId): Promise<Wallet | RepositoryError>
 }
@@ -249,4 +257,3 @@ type PaymentInputValidator = {
     args: ValidatePaymentInputArgs<T>,
   ) => Promise<ValidatePaymentInputRet<T> | ValidationError | RepositoryError>
 }
-

@@ -1,10 +1,11 @@
-import { BridgeVirtualAccount, BridgeExternalAccount, BridgeWithdrawal } from "./schema"
 import {
   BridgeVirtualAccountId,
   BridgeExternalAccountId,
   BridgeTransferId,
 } from "@domain/primitives/bridge"
 import { RepositoryError } from "@domain/errors"
+
+import { BridgeVirtualAccount, BridgeExternalAccount, BridgeWithdrawal } from "./schema"
 
 // ============ Virtual Accounts ============
 
@@ -123,7 +124,7 @@ export const findPendingWithdrawalWithoutTransfer = async (
       bridgeTransferId: { $exists: false },
       status: "pending",
     })
-    return record  // null when no in-flight row exists
+    return record // null when no in-flight row exists
   } catch (error) {
     return new RepositoryError(String(error))
   }
