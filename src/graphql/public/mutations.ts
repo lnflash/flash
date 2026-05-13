@@ -61,6 +61,10 @@ import RequestCashoutMutation from "./root/mutation/offers/request-cash-out"
 import InitiateCashoutMutation from "./root/mutation/offers/initiate-cash-out"
 import IdDocumentUploadUrlGenerateMutation from "./root/mutation/id-document-upload-url-generate"
 import UpdateExternalWalletMutation from "./root/mutation/update-external-wallet"
+import BridgeInitiateKycMutation from "./root/mutation/bridge-initiate-kyc"
+import BridgeCreateVirtualAccountMutation from "./root/mutation/bridge-create-virtual-account"
+import BridgeAddExternalAccountMutation from "./root/mutation/bridge-add-external-account"
+import BridgeInitiateWithdrawalMutation from "./root/mutation/bridge-initiate-withdrawal"
 
 // TODO: // const fields: { [key: string]: GraphQLFieldConfig<any, GraphQLPublicContext> }
 export const mutationFields = {
@@ -115,6 +119,10 @@ export const mutationFields = {
       idDocumentUploadUrlGenerate: IdDocumentUploadUrlGenerateMutation,
 
       updateExternalWallet: UpdateExternalWalletMutation,
+      bridgeInitiateKyc: BridgeInitiateKycMutation,
+      bridgeCreateVirtualAccount: BridgeCreateVirtualAccountMutation,
+      bridgeAddExternalAccount: BridgeAddExternalAccountMutation,
+      bridgeInitiateWithdrawal: BridgeInitiateWithdrawalMutation,
     },
 
     atWalletLevel: {
