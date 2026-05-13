@@ -45,7 +45,11 @@ const bridgeInitiateWithdrawal = GT.Field({
     // validate the amount is greater than the minimum withdrawal amount
     if (parseFloat(amount) < BridgeConfig.minWithdrawalAmount) {
       return {
-        errors: [mapAndParseErrorForGqlResponse(new BridgeBelowMinimumWithdrawalError(BridgeConfig.minWithdrawalAmount))],
+        errors: [
+          mapAndParseErrorForGqlResponse(
+            new BridgeBelowMinimumWithdrawalError(BridgeConfig.minWithdrawalAmount),
+          ),
+        ],
       }
     }
 

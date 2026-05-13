@@ -3,7 +3,7 @@ import fs from "fs"
 import path from "path"
 
 import Ajv from "ajv"
-import yaml from "js-yaml"
+import { load as loadYaml } from "js-yaml"
 import { I18n } from "i18n"
 
 import { baseLogger } from "@services/logger"
@@ -21,19 +21,19 @@ import { AccountLevel } from "@domain/accounts"
 
 import mergeWith from "lodash.mergewith"
 
+import yargs from "yargs"
+
 import { configSchema } from "./schema"
 import { ConfigError } from "./error"
 
-import yargs from "yargs"
-
-const argv: any =
+const argv =
   // .help()
   yargs(process.argv.slice(2)).option("configPath", {
     alias: "c",
     type: "array",
     description: "Paths to YAML configuration files",
     demandOption: true,
-  }).argv
+  }).argv as { configPath: string[] }
 
 // replaces array with override
 const merge = (defaultConfig: unknown, customConfig: unknown) =>
@@ -46,7 +46,7 @@ export const mergeYamls = (filePaths: string[]): Record<string, unknown> => {
     try {
       const resolvedPath = path.resolve(filePath)
       const fileContent = fs.readFileSync(resolvedPath, "utf8")
-      const parsedConfig = yaml.load(fileContent) as Record<string, unknown>
+      const parsedConfig = loadYaml(fileContent) as Record<string, unknown>
 
       merge(mergedConfig, parsedConfig)
 
@@ -268,8 +268,10 @@ export const getTestAccounts = (config = yamlConfig): TestAccount[] =>
 
 export const getCronConfig = (config = yamlConfig): CronConfig => config.cronConfig
 
-export const getDefaultFCMTopics = (config = yamlConfig): string[] => config.fcmTopics.filter(t => t.default).map(t => t.name)
-export const getFCMTopics = (config = yamlConfig): string[] => config.fcmTopics.map(t => t.name)
+export const getDefaultFCMTopics = (config = yamlConfig): string[] =>
+  config.fcmTopics.filter((t) => t.default).map((t) => t.name)
+export const getFCMTopics = (config = yamlConfig): string[] =>
+  config.fcmTopics.map((t) => t.name)
 
 export const getCaptcha = (config = yamlConfig): CaptchaConfig => config.captcha
 

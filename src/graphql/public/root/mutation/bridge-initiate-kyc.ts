@@ -38,7 +38,12 @@ const bridgeInitiateKyc = GT.Field({
       return { errors: [mapAndParseErrorForGqlResponse(new BridgeAccountLevelError())] }
     }
 
-    const result = await BridgeService.initiateKyc({ accountId: domainAccount.id, email, type, full_name })
+    const result = await BridgeService.initiateKyc({
+      accountId: domainAccount.id,
+      email,
+      type,
+      full_name,
+    })
     if (result instanceof Error) {
       return { errors: [mapAndParseErrorForGqlResponse(result)] }
     }

@@ -40,7 +40,7 @@ import {
 } from "@graphql/error"
 import { baseLogger } from "@services/logger"
 
-const assertUnreachable = (x: any): never => {
+const assertUnreachable = (x: unknown): never => {
   throw new Error(`This should never compile with ${x}`)
 }
 
@@ -477,7 +477,8 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       })
 
     case "BridgeInvalidAmountError":
-      message = error.message || "Amount must be strictly positive with at most 6 decimal places"
+      message =
+        error.message || "Amount must be strictly positive with at most 6 decimal places"
       return new ValidationInternalError({ message, logger: baseLogger })
 
     case "BridgeBelowMinimumWithdrawalError":
@@ -803,17 +804,16 @@ export const apolloErrorResponse = (e: CustomApolloError): { errors: IError[] } 
         path: e.path,
         code: e.extensions.code,
       },
-    ]
+    ],
   }
 }
-
 
 export const mapAndParseErrorForGqlResponse = (err: ApplicationError): IError => {
   const mappedError = mapError(err)
   return {
     message: mappedError.message,
     path: mappedError.path,
-    code: mappedError.extensions.code 
+    code: mappedError.extensions.code,
   }
 }
 

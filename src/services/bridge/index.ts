@@ -7,17 +7,23 @@
 import crypto from "crypto"
 
 import { BridgeConfig } from "@config"
-import BridgeClient, {
-  KycLink,
-  VirtualAccount,
-  ExternalAccountLinkUrl,
-  Transfer,
-} from "./client"
+
 import * as BridgeAccountsRepo from "@services/mongoose/bridge-accounts"
 import { AccountsRepository } from "@services/mongoose/accounts"
 import { wrapAsyncFunctionsToRunInSpan } from "@services/tracing"
 import { baseLogger } from "@services/logger"
+
+import { RepositoryError } from "@domain/errors"
+import { toBridgeCustomerId } from "@domain/primitives/bridge"
+import { getBalanceForWallet } from "@app/wallets/get-balance-for-wallet"
+import { USDTAmount, WalletCurrency } from "@domain/shared"
+import { WalletsRepository } from "@services/mongoose/wallets"
+
+import { IdentityRepository } from "@services/kratos"
+import IbexClient from "@services/ibex/client"
+
 import {
+  BridgeInsufficientFundsError,
   BridgeError,
   BridgeDisabledError,
   BridgeAccountLevelError,
@@ -25,14 +31,7 @@ import {
   BridgeKycRejectedError,
   BridgeCustomerNotFoundError,
 } from "./errors"
-import { RepositoryError } from "@domain/errors"
-import { toBridgeCustomerId, toBridgeExternalAccountId } from "@domain/primitives/bridge"
-import { getBalanceForWallet } from "@app/wallets/get-balance-for-wallet"
-import { USDTAmount, WalletCurrency } from "@domain/shared"
-import { WalletsRepository } from "@services/mongoose/wallets"
-import { BridgeInsufficientFundsError } from "./errors"
-import { IdentityRepository } from "@services/kratos"
-import IbexClient from "@services/ibex/client"
+import BridgeApiClient from "./client"
 
 // ============ Types ============
 
@@ -94,7 +93,6 @@ export const deriveWithdrawalIdempotencyKey = (rowId: string): string =>
 
 // ============ Guards ============
 
-
 const checkBridgeEnabled = (): true | BridgeDisabledError => {
   if (!BridgeConfig.enabled) {
     return new BridgeDisabledError()
@@ -120,7 +118,17 @@ const checkAccountLevel = async (
  * - Creates Bridge customer if not exists
  * - Returns KYC and TOS links
  */
-const initiateKyc = async ({ accountId, email, type, full_name }: { accountId: AccountId, email: string, type?: "individual" | "business", full_name: string }): Promise<InitiateKycResult | Error> => {
+const initiateKyc = async ({
+  accountId,
+  email,
+  type,
+  full_name,
+}: {
+  accountId: AccountId
+  email: string
+  type?: "individual" | "business"
+  full_name: string
+}): Promise<InitiateKycResult | Error> => {
   baseLogger.info({ accountId, operation: "initiateKyc" }, "Bridge operation started")
 
   const enabledCheck = checkBridgeEnabled()
@@ -133,19 +141,18 @@ const initiateKyc = async ({ accountId, email, type, full_name }: { accountId: A
     return new BridgeError("KYC already approved for this account")
   }
 
-  const identity = await IdentityRepository().getIdentity(account.kratosUserId);
+  const identity = await IdentityRepository().getIdentity(account.kratosUserId)
 
   if (identity instanceof Error) return identity
 
-  const useremail = identity.email;
+  const useremail = identity.email
 
   try {
-
     // Create KYC link
-    const kycLink = await BridgeClient.createKycLink({
+    const kycLink = await BridgeApiClient.createKycLink({
       email: useremail || email,
       type: type || "individual",
-      full_name: full_name || account.username
+      full_name: full_name || account.username,
     })
 
     const result: InitiateKycResult = {
@@ -154,12 +161,12 @@ const initiateKyc = async ({ accountId, email, type, full_name }: { accountId: A
       tosLink: kycLink.tos_link,
     }
 
-    // link the customer Id to the bridge account 
-    const customerId = toBridgeCustomerId(kycLink.customer_id);
+    // link the customer Id to the bridge account
+    const customerId = toBridgeCustomerId(kycLink.customer_id)
 
     const updateResult = await AccountsRepository().updateBridgeFields(accountId, {
       bridgeCustomerId: customerId,
-      bridgeKycStatus: "pending"
+      bridgeKycStatus: "pending",
     })
 
     if (updateResult instanceof Error) {
@@ -235,7 +242,8 @@ const createVirtualAccount = async (
     }
 
     // Get or create Ethereum address
-    let ethereumAddress = account.bridgeEthereumAddress || "0xaF095D35bfDd462165eA7eCF8AC75351a93d72bD"
+    let ethereumAddress =
+      account.bridgeEthereumAddress || "0xaF095D35bfDd462165eA7eCF8AC75351a93d72bD"
 
     if (!ethereumAddress) {
       const option = await IbexClient.getEthereumUsdtOption()
@@ -263,7 +271,7 @@ const createVirtualAccount = async (
       .digest("hex")
 
     // Create Bridge virtual account
-    const virtualAccount = await BridgeClient.createVirtualAccount(
+    const virtualAccount = await BridgeApiClient.createVirtualAccount(
       customerId,
       {
         source: { currency: "usd" },
@@ -276,7 +284,8 @@ const createVirtualAccount = async (
       vaIdempotencyKey,
     )
 
-    const fullAccountNumber = virtualAccount.source_deposit_instructions.bank_account_number || ""
+    const fullAccountNumber =
+      virtualAccount.source_deposit_instructions.bank_account_number || ""
 
     // Store virtual account in repository
     const repoResult = await BridgeAccountsRepo.createVirtualAccount({
@@ -341,7 +350,7 @@ const addExternalAccount = async (
       )
     }
 
-    const linkUrl = await BridgeClient.getExternalAccountLinkUrl(customerId)
+    const linkUrl = await BridgeApiClient.getExternalAccountLinkUrl(customerId)
 
     const result: AddExternalAccountResult = {
       linkUrl: linkUrl.link_url,
@@ -419,7 +428,12 @@ const initiateWithdrawal = async (
     const availableBalance = balance.toIbex()
     if (availableBalance < withdrawalAmount) {
       baseLogger.warn(
-        { accountId, availableBalance, withdrawalAmount, operation: "initiateWithdrawal" },
+        {
+          accountId,
+          availableBalance,
+          withdrawalAmount,
+          operation: "initiateWithdrawal",
+        },
         "Insufficient USDT balance for withdrawal",
       )
       return new BridgeInsufficientFundsError(
@@ -445,11 +459,12 @@ const initiateWithdrawal = async (
       return new Error("External account is not verified")
     }
 
-    const existingWithdrawal = await BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer(
-      accountId as string,
-      externalAccountId,
-      amount,
-    )
+    const existingWithdrawal =
+      await BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer(
+        accountId as string,
+        externalAccountId,
+        amount,
+      )
     if (existingWithdrawal instanceof Error) return existingWithdrawal
 
     // Store withdrawal record, or reuse the in-flight row for a retry of the same request.
@@ -467,20 +482,24 @@ const initiateWithdrawal = async (
     const idempotencyKey = deriveWithdrawalIdempotencyKey(pendingWithdrawal.id)
 
     // Create transfer via Bridge
-    const transfer = await BridgeClient.createTransfer(customerId, {
-      amount,
-      on_behalf_of: customerId,
-      source: {
-        payment_rail: "ethereum",
-        currency: "usdt",
-        from_address: ethereumAddress,
+    const transfer = await BridgeApiClient.createTransfer(
+      customerId,
+      {
+        amount,
+        on_behalf_of: customerId,
+        source: {
+          payment_rail: "ethereum",
+          currency: "usdt",
+          from_address: ethereumAddress,
+        },
+        destination: {
+          payment_rail: "ach",
+          currency: "usd",
+          external_account_id: externalAccountId,
+        },
       },
-      destination: {
-        payment_rail: "ach",
-        currency: "usd",
-        external_account_id: externalAccountId,
-      },
-    }, idempotencyKey)
+      idempotencyKey,
+    )
 
     const result: InitiateWithdrawalResult = {
       transferId: transfer.id,
