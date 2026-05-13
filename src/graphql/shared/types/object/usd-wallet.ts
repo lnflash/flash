@@ -10,7 +10,7 @@ import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fract
 
 import { Wallets } from "@app"
 
-import { WalletCurrency as WalletCurrencyDomain } from "@domain/shared"
+import { WalletCurrency as WalletCurrencyDomain, USDTAmount } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
 
 import IWallet from "../abstract/wallet"
@@ -51,9 +51,15 @@ const UsdWallet = GT.Object<Wallet>({
       type: FractionalCentAmount,
       resolve: async (source) => {
         if (source.type === WalletType.External) return null
-        const balance = await Wallets.getBalanceForWallet({ walletId: source.id })
+        const balance = await Wallets.getBalanceForWallet({
+          walletId: source.id,
+          currency: source.currency,
+        })
         if (balance instanceof Error) {
           throw mapError(balance)
+        }
+        if (balance instanceof USDTAmount) {
+          return Number(balance.asSmallestUnits(8))
         }
         return Number(balance.asCents(8))
       },
