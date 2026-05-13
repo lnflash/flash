@@ -1,7 +1,4 @@
-import IbexClient, { GetFeeEstimateResponse200, IbexClientError } from "ibex-client"
-import { errorHandler, IbexError, ParseError, UnexpectedIbexResponse } from "./errors"
-import { IbexConfig } from "@config"
-import {
+import IbexClient, {
   AddInvoiceBodyParam,
   AddInvoiceResponse201,
   CreateAccountResponse201,
@@ -9,32 +6,29 @@ import {
   CreateLnurlPayResponse201,
   DecodeLnurlMetadataParam,
   DecodeLnurlResponse200,
-  EstimateFeeCopyMetadataParam,
   EstimateFeeCopyResponse200,
-  GenerateBitcoinAddressBodyParam,
   GenerateBitcoinAddressResponse201,
-  GetAccountDetailsMetadataParam,
-  GetAccountDetailsResponse200,
-  GetFeeEstimationMetadataParam,
-  GetFeeEstimationResponse200,
-  GetTransactionDetails1MetadataParam,
   GetTransactionDetails1Response200,
   GMetadataParam,
   GResponse200,
-  InvoiceFromHashMetadataParam,
   InvoiceFromHashResponse200,
   PayInvoiceV2BodyParam,
   PayInvoiceV2Response200,
-  PayToALnurlPayBodyParam,
   PayToALnurlPayResponse201,
   SendToAddressCopyBodyParam,
   SendToAddressCopyResponse200,
 } from "ibex-client"
+
+import { IbexConfig } from "@config"
 import {
   addAttributesToCurrentSpan,
   wrapAsyncFunctionsToRunInSpan,
 } from "@services/tracing"
-import WebhookServer from "./webhook-server"
+
+import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
+
+import { baseLogger } from "@services/logger"
+
 import { Redis } from "./cache"
 import {
   GetFeeEstimateArgs,
@@ -46,8 +40,9 @@ import {
   CryptoReceiveInfo,
   CreateCryptoReceiveInfoRequest,
 } from "./types"
-import { USDAmount, USDTAmount } from "@domain/shared"
-import { baseLogger } from "@services/logger"
+
+import { errorHandler, IbexError, ParseError, UnexpectedIbexResponse } from "./errors"
+import WebhookServer from "./webhook-server"
 
 const Ibex = new IbexClient(
   IbexConfig.url,
@@ -62,22 +57,33 @@ const createAccount = async (
   return Ibex.createAccount({ name, currencyId }).then(errorHandler)
 }
 
+const parseAccountBalance = (
+  balance: number | undefined,
+  currency: WalletCurrency,
+): IbexAccountDetails["balance"] => {
+  if (balance === undefined) return undefined
+
+  const amount =
+    currency === WalletCurrency.Usdt
+      ? USDTAmount.fromNumber(balance.toString())
+      : USDAmount.dollars(balance.toString())
+
+  return amount instanceof Error ? undefined : amount
+}
+
 const getAccountDetails = async (
   accountId: IbexAccountId,
+  currency: WalletCurrency = WalletCurrency.Usd,
 ): Promise<IbexAccountDetails | IbexError> => {
   return Ibex.getAccountDetails({ accountId })
-    .then((r) => {
-      if (r instanceof Error) return r
-      else {
-        let balance =
-          r.balance !== undefined ? USDAmount.dollars(r.balance.toString()) : undefined
-        if (balance instanceof Error) balance = undefined
-        return {
-          id: r.id,
-          userId: r.userId,
-          name: r.name,
-          balance,
-        }
+    .then((resp) => {
+      if (resp instanceof Error) return resp
+
+      return {
+        id: resp.id,
+        userId: resp.userId,
+        name: resp.name,
+        balance: parseAccountBalance(resp.balance, currency),
       }
     })
     .then(errorHandler)
@@ -143,9 +149,9 @@ const getLnFeeEstimation = async (
   else if (resp.invoiceAmount === null || resp.invoiceAmount === undefined)
     return new UnexpectedIbexResponse("invoiceAmount not found.")
   else {
-    let fee = USDAmount.dollars(resp.amount)
+    const fee = USDAmount.dollars(resp.amount)
     if (fee instanceof Error) return new ParseError(fee)
-    let invoiceAmount = USDAmount.dollars(resp.invoiceAmount)
+    const invoiceAmount = USDAmount.dollars(resp.invoiceAmount)
     if (invoiceAmount instanceof Error) return new ParseError(invoiceAmount)
     return {
       fee,
@@ -232,7 +238,9 @@ const getIbexToken = async (): Promise<string | IbexError> => {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email: IbexConfig.email, password: IbexConfig.password }),
-  }).catch((err: unknown) => new IbexError(err instanceof Error ? err : new Error(String(err))))
+  }).catch(
+    (err: unknown) => new IbexError(err instanceof Error ? err : new Error(String(err))),
+  )
 
   if (resp instanceof IbexError) return resp
   if (!resp.ok) {
@@ -240,17 +248,24 @@ const getIbexToken = async (): Promise<string | IbexError> => {
     return new IbexError(new Error(`IBEX sign-in failed: ${resp.status} — ${body}`))
   }
 
-  const data = await resp.json() as {
+  const data = (await resp.json()) as {
     accessToken?: string
     accessTokenExpiresAt?: number
     refreshToken?: string
     refreshTokenExpiresAt?: number
   }
-  if (!data.accessToken) return new IbexError(new Error("IBEX sign-in: no access token in response"))
+  if (!data.accessToken)
+    return new IbexError(new Error("IBEX sign-in: no access token in response"))
 
-  await Ibex.authentication.storage.setAccessToken(data.accessToken, data.accessTokenExpiresAt)
+  await Ibex.authentication.storage.setAccessToken(
+    data.accessToken,
+    data.accessTokenExpiresAt,
+  )
   if (data.refreshToken) {
-    await Ibex.authentication.storage.setRefreshToken(data.refreshToken, data.refreshTokenExpiresAt)
+    await Ibex.authentication.storage.setRefreshToken(
+      data.refreshToken,
+      data.refreshTokenExpiresAt,
+    )
   }
 
   return `Bearer ${data.accessToken}`
@@ -264,7 +279,11 @@ const ibexFetch = async <T>(
   const url = `${IbexConfig.url}${path}`
   const resp = await fetch(url, {
     ...init,
-    headers: { Authorization: token, "Content-Type": "application/json", ...init.headers },
+    headers: {
+      "Authorization": token,
+      "Content-Type": "application/json",
+      ...init.headers,
+    },
   })
   if (!resp.ok) {
     const body = await resp.text().catch(() => "")

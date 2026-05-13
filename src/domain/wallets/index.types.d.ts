@@ -189,7 +189,7 @@ interface IWalletsRepository {
     accountId,
     type,
     currency,
-  }: NewWalletInfo): Promise<Wallet | RepositoryError>
+  }: NewWalletInfo): Promise<Wallet | ApplicationError>
   findById(walletId: WalletId): Promise<Wallet | RepositoryError>
 
   listByAccountId(accountId: AccountId): Promise<Wallet[] | RepositoryError>
@@ -200,7 +200,7 @@ interface IWalletsRepository {
     walletCurrency: WalletCurrency,
   ): Promise<Wallet[] | RepositoryError>
 
-  upsertExternal({ accountId, currency, lnurlp }: { accountId: AccountId, currency: WalletCurrency, lnurlp: Lnurl }): Promise<Wallet | RepositoryError>
+  upsertExternal({ accountId, currency, lnurlp }: { accountId: AccountId, currency?: WalletCurrency, lnurlp: Lnurl }): Promise<Wallet | RepositoryError>
 
   findExternalByAccountId(accountId: AccountId): Promise<Wallet | RepositoryError>
 }
@@ -239,3 +239,14 @@ type OnChainFeeCalculator = {
   }
   intraLedgerFees(): PaymentAmountInAllCurrencies
 }
+
+type PaymentInputValidatorConfig = (
+  walletId: WalletId,
+) => Promise<Wallet | RepositoryError>
+
+type PaymentInputValidator = {
+  validatePaymentInput: <T extends undefined | string>(
+    args: ValidatePaymentInputArgs<T>,
+  ) => Promise<ValidatePaymentInputRet<T> | ValidationError | RepositoryError>
+}
+

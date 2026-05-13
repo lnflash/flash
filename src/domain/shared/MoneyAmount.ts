@@ -1,6 +1,6 @@
 import { Money, Round, PRECISION_M } from "./bigint-money"
 import { BigIntConversionError, UnsupportedCurrencyError } from "./errors"
-import { ExchangeCurrencyUnit, WalletCurrency } from "./primitives"
+import { WalletCurrency } from "./primitives"
 
 export abstract class MoneyAmount {
   readonly money: Money
@@ -60,7 +60,8 @@ export abstract class MoneyAmount {
   static from(amount: number | string, currency: WalletCurrency): MoneyAmount | Error {
     if (currency === WalletCurrency.Usd) return USDAmount.cents(amount.toString())
     else if (currency === WalletCurrency.Jmd) return JMDAmount.cents(amount.toString())
-    else if (currency === WalletCurrency.Usdt) return USDTAmount.smallestUnits(amount.toString())
+    else if (currency === WalletCurrency.Usdt)
+      return USDTAmount.smallestUnits(amount.toString())
     else return new UnsupportedCurrencyError(`Could not read currency: ${currency}`)
   }
 }
@@ -177,7 +178,9 @@ export class BtcAmount extends MoneyAmount {
     try {
       return new BtcAmount(c)
     } catch (error) {
-      return new BigIntConversionError(error instanceof Error ? error.message : String(error))
+      return new BigIntConversionError(
+        error instanceof Error ? error.message : String(error),
+      )
     }
   }
 
@@ -191,7 +194,7 @@ export class BtcAmount extends MoneyAmount {
 }
 
 export class USDTAmount extends MoneyAmount {
-  static currencyId: IbexCurrencyId = 4 as IbexCurrencyId
+  static currencyId: IbexCurrencyId = 29 as IbexCurrencyId
 
   private constructor(amount: Money | bigint | string | number) {
     super(amount, WalletCurrency.Usdt)

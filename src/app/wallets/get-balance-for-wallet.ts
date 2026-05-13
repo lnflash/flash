@@ -11,19 +11,11 @@ export const getBalanceForWallet = async ({
   currency?: WalletCurrency
 }): Promise<USDAmount | USDTAmount | ApplicationError> => {
   try {
-    if (currency === WalletCurrency.Usdt) {
-      const resp = await Ibex.getCryptoReceiveBalance(walletId)
-      if (resp instanceof IbexError) {
-        if (resp.httpCode === 404) return USDTAmount.ZERO
-        return resp
-      }
-      if (resp === undefined) return new UnexpectedIbexResponse("Balance not found")
-      return resp
-    }
-
-    const resp = await Ibex.getAccountDetails(walletId)
+    const resp = await Ibex.getAccountDetails(walletId, currency)
     if (resp instanceof IbexError) {
-      if (resp.httpCode === 404) return USDAmount.ZERO
+      if (resp.httpCode === 404) {
+        return currency === WalletCurrency.Usdt ? USDTAmount.ZERO : USDAmount.ZERO
+      }
       return resp
     }
     if (resp.balance === undefined) return new UnexpectedIbexResponse("Balance not found")
