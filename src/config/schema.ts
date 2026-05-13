@@ -385,7 +385,7 @@ export const configSchema = {
       additionalProperties: false,
       default: {
         initialStatus: "active",
-        initialWallets: ["USD"],
+        initialWallets: ["USD", "USDT"],
         enablePhoneCheck: false,
         enableIpCheck: false,
         enableIpProxyCheck: false,
@@ -663,7 +663,7 @@ export const configSchema = {
               required: ["kyc", "deposit", "transfer"],
             },
             timestampSkewMs: { type: "integer" },
-            replaySecret: { type: "string" }
+            replaySecret: { type: "string" },
           },
           required: ["port", "publicKeys", "timestampSkewMs"],
         },
