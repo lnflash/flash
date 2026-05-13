@@ -1,4 +1,4 @@
-import { USDAmount } from "@domain/shared"
+import { USDAmount, USDTAmount } from "@domain/shared"
 
 export type PayInvoiceArgs = {
   accountId: IbexAccountId
@@ -7,8 +7,8 @@ export type PayInvoiceArgs = {
 }
 
 export type SendOnchainArgs = {
-  accountId: IbexAccountId, // source of funds
-  address: OnChainAddress, // destination
+  accountId: IbexAccountId // source of funds
+  address: OnChainAddress // destination
   amount: USDAmount
 }
 
@@ -27,7 +27,7 @@ export type IbexAccountDetails = {
   id: string | undefined
   userId: string | undefined
   name: string | undefined
-  balance: USDAmount | undefined
+  balance: USDAmount | USDTAmount | undefined
 }
 
 export type IbexInvoiceArgs = {

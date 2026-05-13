@@ -16,11 +16,13 @@ import Ibex from "@services/ibex/client"
 
 import { IbexError } from "@services/ibex/errors"
 
+import { recordExceptionInCurrentSpan } from "@services/tracing"
+
+import { ErrorLevel, USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
+
 import { toObjectId, fromObjectId, parseRepositoryError } from "./utils"
 import { Wallet } from "./schema"
 import { AccountsRepository } from "./accounts"
-import { recordExceptionInCurrentSpan } from "@services/tracing"
-import { ErrorLevel, USDAmount, WalletCurrency } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
 
 export interface WalletRecord {
@@ -30,6 +32,19 @@ export interface WalletRecord {
   currency: string
   onchain: OnChainMongooseType[]
   lnurlp: string
+}
+
+const getIbexCurrencyId = (
+  currency: WalletCurrency,
+): IbexCurrencyId | UnsupportedCurrencyError => {
+  switch (currency) {
+    case WalletCurrency.Usd:
+      return USDAmount.currencyId
+    case WalletCurrency.Usdt:
+      return USDTAmount.currencyId
+    default:
+      return new UnsupportedCurrencyError(`Unsupported IBEX wallet currency: ${currency}`)
+  }
 }
 
 export const WalletsRepository = (): IWalletsRepository => {
@@ -42,7 +57,8 @@ export const WalletsRepository = (): IWalletsRepository => {
     if (account instanceof Error) return account
 
     try {
-      let currencyId = USDAmount.currencyId
+      const currencyId = getIbexCurrencyId(currency)
+      if (currencyId instanceof Error) return currencyId
 
       const resp = await Ibex.createAccount(accountId, currencyId)
       if (resp instanceof IbexError) return resp
@@ -63,8 +79,7 @@ export const WalletsRepository = (): IWalletsRepository => {
               ibexAccountId,
             },
           })
-        }
-        else lnurlp = lnurlResp.lnurl
+        } else lnurlp = lnurlResp.lnurl
       }
 
       const wallet = new Wallet({
@@ -72,7 +87,7 @@ export const WalletsRepository = (): IWalletsRepository => {
         id: ibexAccountId,
         type,
         currency,
-        lnurlp
+        lnurlp,
       })
       await wallet.save()
       return resultToWallet(wallet)
@@ -162,7 +177,7 @@ export const WalletsRepository = (): IWalletsRepository => {
     lnurlp,
   }: {
     accountId: AccountId
-    currency: WalletCurrency
+    currency?: WalletCurrency
     lnurlp: Lnurl
   }): Promise<Wallet | RepositoryError> => {
     if (!lnurlp.toLowerCase().startsWith("lnurl1")) {
@@ -173,7 +188,7 @@ export const WalletsRepository = (): IWalletsRepository => {
         { _accountId: toObjectId<AccountId>(accountId), type: WalletType.External },
         {
           $set: { lnurlp },
-          $setOnInsert: { id: randomUUID(), currency: currency },
+          $setOnInsert: { id: randomUUID(), currency: currency ?? WalletCurrency.Btc },
         },
         { upsert: true, new: true },
       )
