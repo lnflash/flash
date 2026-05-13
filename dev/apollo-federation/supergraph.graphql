@@ -2043,6 +2043,7 @@ type UsdtWallet implements Wallet
   accountId: ID!
   balance: FractionalCentAmount!
   id: ID!
+  isExternal: Boolean!
   lnurlp: Lnurl
 
   """An unconfirmed incoming onchain balance."""
