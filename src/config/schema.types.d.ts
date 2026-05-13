@@ -45,6 +45,7 @@ type BridgeConfig = {
   enabled: boolean
   apiKey: string
   baseUrl: string
+  minWithdrawalAmount: number
   webhook: BridgeWebhook
 }
 

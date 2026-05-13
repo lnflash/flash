@@ -1,5 +1,6 @@
 import { GT } from "@graphql/index"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
+import IError from "@graphql/shared/types/abstract/error"
 import BridgeVirtualAccount from "@graphql/public/types/object/bridge-virtual-account"
 import { BridgeConfig } from "@config"
 import BridgeService from "@services/bridge"
@@ -8,7 +9,7 @@ import { BridgeDisabledError, BridgeAccountLevelError } from "@services/bridge/e
 const BridgeCreateVirtualAccountPayload = GT.Object({
   name: "BridgeCreateVirtualAccountPayload",
   fields: () => ({
-    errors: { type: GT.List(GT.NonNull(Error)) },
+    errors: { type: GT.NonNullList(IError) },
     virtualAccount: { type: BridgeVirtualAccount },
   }),
 })

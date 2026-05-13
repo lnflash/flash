@@ -89,7 +89,7 @@ type Account = {
   // Bridge integration:
   bridgeCustomerId?: BridgeCustomerId
   bridgeKycStatus?: "pending" | "approved" | "rejected"
-  bridgeTronAddress?: string
+  bridgeEthereumAddress?: string
 }
 
 // deprecated
@@ -180,11 +180,11 @@ interface IAccountsRepository {
     fields: {
       bridgeCustomerId?: BridgeCustomerId
       bridgeKycStatus?: "pending" | "approved" | "rejected"
-      bridgeTronAddress?: string
+      bridgeEthereumAddress?: string
     },
   ): Promise<Account | RepositoryError>
 
-  findByBridgeTronAddress(address: string): Promise<Account | RepositoryError>
+  findByBridgeEthereumAddress(address: string): Promise<Account | RepositoryError>
 
   findByBridgeCustomerId(customerId: BridgeCustomerId): Promise<Account | RepositoryError>
 }

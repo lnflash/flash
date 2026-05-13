@@ -476,6 +476,14 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         logger: baseLogger,
       })
 
+    case "BridgeInvalidAmountError":
+      message = error.message || "Amount must be strictly positive with at most 6 decimal places"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "BridgeBelowMinimumWithdrawalError":
+      message = error.message || "Withdrawal amount is below the minimum"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
     case "BridgeDisabledError":
       message = "Bridge integration is currently disabled"
       return new ValidationInternalError({ message, logger: baseLogger })
