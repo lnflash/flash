@@ -11,18 +11,18 @@ import { LockService } from "@services/lock"
 import { baseLogger } from "@services/logger"
 
 export const depositHandler = async (req: Request, res: Response) => {
-  const { event, data } = req.body
-  const { transfer_id, amount, currency, tx_hash, customer_id } = data
+  const { event_id, event_object } = req.body
+  const { id, amount, deposit_id, currency, subtotal_amount, customer_id, receipt } = event_object
 
-  if (!transfer_id || !event) {
+  if (!id || !event_id) {
     return res.status(400).json({ error: "Invalid payload" })
   }
 
-  // Idempotency check using transfer_id as lock key
-  const lockKey = `bridge-deposit:${transfer_id}`
+  // Idempotency check using deposit_id as lock key
+  const lockKey = `bridge-deposit:${deposit_id}`
   const lockResult = await LockService().lockIdempotencyKey(lockKey as any)
   if (lockResult instanceof Error) {
-    baseLogger.info({ transfer_id }, "Duplicate Bridge deposit webhook")
+    baseLogger.info({ event_id, id }, "Duplicate Bridge deposit webhook")
     return res.status(200).json({ status: "already_processed" })
   }
 
@@ -31,19 +31,29 @@ export const depositHandler = async (req: Request, res: Response) => {
     // The actual balance crediting happens via IBEX crypto webhook
     baseLogger.info(
       {
-        transfer_id,
+        id,
         amount,
+        initial_amount: receipt.initial_amount,
         currency,
-        tx_hash,
+        deposit_id,
+        receipt: {
+          url: receipt.url,
+          initial_amount: receipt.initial_amount,
+          subtotal_amount: receipt.subtotal_amount,
+          final_amount: receipt.final_amount,
+          exchange_fee: receipt.exchange_fee,
+          gas_fee: receipt.gas_fee,
+        },
         customer_id,
-        event,
+        event_id,
+
       },
       "Bridge deposit completed",
     )
 
     return res.status(200).json({ status: "success" })
   } catch (error) {
-    baseLogger.error({ error, transfer_id }, "Error processing Bridge deposit webhook")
+    baseLogger.error({ error, id, event_id, deposit_id }, "Error processing Bridge deposit webhook")
     return res.status(500).json({ error: "Internal server error" })
   }
 }

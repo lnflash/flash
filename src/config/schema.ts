@@ -630,6 +630,7 @@ export const configSchema = {
       type: "object",
       properties: {
         url: { type: "string" },
+        authUrl: { type: "string" },
         email: { type: "string" },
         password: { type: "string" },
         webhook: {

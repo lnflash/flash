@@ -13,10 +13,17 @@ export const createVirtualAccount = async (data: {
   bridgeVirtualAccountId: string
   bankName: string
   routingNumber: string
+  accountNumber: string
   accountNumberLast4: string
 }) => {
   try {
-    const record = await BridgeVirtualAccount.create(data)
+    // Atomic upsert: if a doc for this accountId already exists (concurrent call won the
+    // race), $setOnInsert is skipped and we get back the winner's record — no duplicate.
+    const record = await BridgeVirtualAccount.findOneAndUpdate(
+      { accountId: data.accountId },
+      { $setOnInsert: data },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    )
     return record
   } catch (error) {
     return new RepositoryError(String(error))
@@ -89,7 +96,7 @@ export const updateExternalAccountStatus = async (
 
 export const createWithdrawal = async (data: {
   accountId: string
-  bridgeTransferId: string
+  bridgeTransferId?: string
   amount: string
   currency: string
   externalAccountId: string
@@ -98,6 +105,43 @@ export const createWithdrawal = async (data: {
   try {
     const record = await BridgeWithdrawal.create(data)
     return record
+  } catch (error) {
+    return new RepositoryError(String(error))
+  }
+}
+
+export const findPendingWithdrawalWithoutTransfer = async (
+  accountId: string,
+  externalAccountId: string,
+  amount: string,
+) => {
+  try {
+    const record = await BridgeWithdrawal.findOne({
+      accountId,
+      externalAccountId,
+      amount,
+      bridgeTransferId: { $exists: false },
+      status: "pending",
+    })
+    return record  // null when no in-flight row exists
+  } catch (error) {
+    return new RepositoryError(String(error))
+  }
+}
+
+export const updateWithdrawalTransferId = async (
+  id: string,
+  bridgeTransferId: string,
+  amount: string,
+  currency: string,
+) => {
+  try {
+    const record = await BridgeWithdrawal.findByIdAndUpdate(
+      id,
+      { bridgeTransferId, amount, currency, updatedAt: new Date() },
+      { new: true },
+    )
+    return record || new RepositoryError("Withdrawal not found")
   } catch (error) {
     return new RepositoryError(String(error))
   }

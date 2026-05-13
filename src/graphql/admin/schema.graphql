@@ -614,6 +614,7 @@ interface Wallet {
 enum WalletCurrency {
   BTC
   USD
+  USDT
 }
 
 """Unique identifier of a wallet"""

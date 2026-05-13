@@ -57,6 +57,18 @@ export class BridgeAccountLevelError extends BridgeError {
   }
 }
 
+export class BridgeBelowMinimumWithdrawalError extends BridgeError {
+  constructor(minimum: number) {
+    super(`Withdrawal amount is below the minimum of ${minimum} USDT`)
+  }
+}
+
+export class BridgeInvalidAmountError extends BridgeError {
+  constructor(message: string = "Amount must be strictly positive with at most 6 decimal places") {
+    super(message)
+  }
+}
+
 export class BridgeDisabledError extends BridgeError {
   constructor(message: string = "Bridge integration is currently disabled") {
     super(message)

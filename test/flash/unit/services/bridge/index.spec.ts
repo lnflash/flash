@@ -1,0 +1,260 @@
+import crypto from "crypto"
+
+jest.mock("@services/tracing", () => ({
+  wrapAsyncFunctionsToRunInSpan: ({
+    fns,
+  }: {
+    namespace: string
+    fns: Record<string, (...args: unknown[]) => unknown>
+  }) => fns,
+}))
+
+jest.mock("@config", () => ({
+  BridgeConfig: { enabled: true, minWithdrawalAmount: 10 },
+}))
+
+jest.mock("@services/logger", () => ({
+  baseLogger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+}))
+
+jest.mock("@services/mongoose/bridge-accounts", () => ({
+  createWithdrawal: jest.fn(),
+  findPendingWithdrawalWithoutTransfer: jest.fn(),
+  findExternalAccountsByAccountId: jest.fn(),
+  updateWithdrawalTransferId: jest.fn(),
+}))
+
+jest.mock("@services/bridge/client", () => ({
+  __esModule: true,
+  default: { createTransfer: jest.fn() },
+}))
+
+jest.mock("@services/mongoose/accounts", () => ({
+  AccountsRepository: jest.fn(),
+}))
+
+jest.mock("@services/mongoose/wallets", () => ({
+  WalletsRepository: jest.fn(),
+}))
+
+jest.mock("@app/wallets/get-balance-for-wallet", () => ({
+  getBalanceForWallet: jest.fn(),
+}))
+
+jest.mock("@services/kratos", () => ({
+  IdentityRepository: jest.fn(),
+}))
+
+jest.mock("@domain/primitives/bridge", () => ({
+  toBridgeCustomerId: (id: string) => id,
+  toBridgeExternalAccountId: (id: string) => id,
+}))
+
+// USDTAmount is not re-exported from @domain/shared — provide a minimal stand-in so the
+// service's `instanceof USDTAmount` guard is satisfied during tests.
+// The class is defined inside the factory because jest.mock factories are hoisted before
+// variable declarations; access it at runtime via require("@domain/shared").USDTAmount.
+// USDTAmount is not re-exported from @domain/shared/index.ts (pre-existing issue).
+// Spread the real module and inject a minimal stand-in so the service's
+// `instanceof USDTAmount` guard is satisfied without breaking other domain exports.
+jest.mock("@domain/shared", () => {
+  class USDTAmount {
+    constructor(private readonly ibexValue: number) {}
+    toIbex() {
+      return this.ibexValue
+    }
+  }
+  return { ...jest.requireActual("@domain/shared"), USDTAmount }
+})
+
+import BridgeService, { deriveWithdrawalIdempotencyKey } from "@services/bridge"
+import * as BridgeAccountsRepo from "@services/mongoose/bridge-accounts"
+import BridgeClient from "@services/bridge/client"
+import { AccountsRepository } from "@services/mongoose/accounts"
+import { WalletsRepository } from "@services/mongoose/wallets"
+import { getBalanceForWallet } from "@app/wallets/get-balance-for-wallet"
+
+// ── Fixtures ──────────────────────────────────────────────────────────────────
+
+const ACCOUNT_ID = "account-001" as AccountId
+const EXTERNAL_ACCOUNT_ID = "ext-account-001"
+const AMOUNT = "50"
+const CUSTOMER_ID = "cust-001"
+const ETHEREUM_ADDRESS = "ETH_ADDR_001"
+const TRANSFER_ID = "transfer-bridge-001"
+
+const mockAccount = {
+  id: ACCOUNT_ID,
+  level: 2,
+  bridgeCustomerId: CUSTOMER_ID,
+  bridgeEthereumAddress: ETHEREUM_ADDRESS,
+  bridgeKycStatus: "approved",
+  kratosUserId: "kratos-001",
+}
+
+const makeRow = (id: string) => ({
+  id,
+  accountId: ACCOUNT_ID as string,
+  amount: AMOUNT,
+  currency: "usdt",
+  externalAccountId: EXTERNAL_ACCOUNT_ID,
+  status: "pending" as const,
+  bridgeTransferId: undefined,
+})
+
+const mockTransfer = {
+  id: TRANSFER_ID,
+  amount: AMOUNT,
+  currency: "usd",
+  state: "pending",
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const setupGuards = () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { USDTAmount } = require("@domain/shared")
+  const balance = new USDTAmount(1000) // 1000 USDT — well above minWithdrawalAmount
+
+  ;(AccountsRepository as jest.Mock).mockReturnValue({
+    findById: jest.fn().mockResolvedValue(mockAccount),
+  })
+  ;(WalletsRepository as jest.Mock).mockReturnValue({
+    listByAccountId: jest.fn().mockResolvedValue([{ id: "wallet-001", currency: "USDT" }]),
+  })
+  ;(getBalanceForWallet as jest.Mock).mockResolvedValue(balance)
+  ;(BridgeAccountsRepo.findExternalAccountsByAccountId as jest.Mock).mockResolvedValue([
+    { bridgeExternalAccountId: EXTERNAL_ACCOUNT_ID, status: "verified" },
+  ])
+  ;(BridgeAccountsRepo.updateWithdrawalTransferId as jest.Mock).mockResolvedValue({
+    ...makeRow("any"),
+    bridgeTransferId: TRANSFER_ID,
+  })
+  ;(BridgeClient.createTransfer as jest.Mock).mockResolvedValue(mockTransfer)
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+describe("deriveWithdrawalIdempotencyKey", () => {
+  it("returns sha256(\"withdrawal:<rowId>\") as a hex string", () => {
+    const rowId = "507f1f77bcf86cd799439011"
+    const expected = crypto
+      .createHash("sha256")
+      .update(`withdrawal:${rowId}`)
+      .digest("hex")
+
+    expect(deriveWithdrawalIdempotencyKey(rowId)).toBe(expected)
+  })
+
+  it("produces distinct keys for distinct row IDs", () => {
+    expect(deriveWithdrawalIdempotencyKey("id-alpha")).not.toBe(
+      deriveWithdrawalIdempotencyKey("id-beta"),
+    )
+  })
+
+  it("is deterministic — same input always returns same output", () => {
+    const rowId = "507f1f77bcf86cd799439011"
+    expect(deriveWithdrawalIdempotencyKey(rowId)).toBe(deriveWithdrawalIdempotencyKey(rowId))
+  })
+
+  it("output is a 64-character lowercase hex string (sha256)", () => {
+    const key = deriveWithdrawalIdempotencyKey("any-id")
+    expect(key).toMatch(/^[0-9a-f]{64}$/)
+  })
+})
+
+describe("initiateWithdrawal — idempotency key wiring", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    setupGuards()
+  })
+
+  describe("fresh request (no in-flight row)", () => {
+    it("creates a pending withdrawal row before calling Bridge", async () => {
+      const row = makeRow("fresh-row-001")
+      ;(BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock).mockResolvedValue(
+        null,
+      )
+      ;(BridgeAccountsRepo.createWithdrawal as jest.Mock).mockResolvedValue(row)
+
+      await BridgeService.initiateWithdrawal(ACCOUNT_ID, AMOUNT, EXTERNAL_ACCOUNT_ID)
+
+      const createOrder = (BridgeAccountsRepo.createWithdrawal as jest.Mock).mock
+        .invocationCallOrder[0]
+      const transferOrder = (BridgeClient.createTransfer as jest.Mock).mock.invocationCallOrder[0]
+      expect(createOrder).toBeLessThan(transferOrder)
+    })
+
+    it("derives the idempotency key from the newly created row's id", async () => {
+      const rowId = "fresh-row-id-abc"
+      ;(BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock).mockResolvedValue(
+        null,
+      )
+      ;(BridgeAccountsRepo.createWithdrawal as jest.Mock).mockResolvedValue(makeRow(rowId))
+
+      await BridgeService.initiateWithdrawal(ACCOUNT_ID, AMOUNT, EXTERNAL_ACCOUNT_ID)
+
+      const expectedKey = deriveWithdrawalIdempotencyKey(rowId)
+      expect(BridgeClient.createTransfer).toHaveBeenCalledWith(
+        CUSTOMER_ID,
+        expect.any(Object),
+        expectedKey,
+      )
+    })
+  })
+
+  describe("retry — in-flight row already exists", () => {
+    it("does not create a second withdrawal row", async () => {
+      const existingRow = makeRow("existing-row-001")
+      ;(BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock).mockResolvedValue(
+        existingRow,
+      )
+
+      await BridgeService.initiateWithdrawal(ACCOUNT_ID, AMOUNT, EXTERNAL_ACCOUNT_ID)
+
+      expect(BridgeAccountsRepo.createWithdrawal).not.toHaveBeenCalled()
+    })
+
+    it("derives the key from the existing row's id — identical to the first attempt's key", async () => {
+      const rowId = "existing-row-001"
+      ;(BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock).mockResolvedValue(
+        makeRow(rowId),
+      )
+
+      await BridgeService.initiateWithdrawal(ACCOUNT_ID, AMOUNT, EXTERNAL_ACCOUNT_ID)
+
+      const expectedKey = deriveWithdrawalIdempotencyKey(rowId)
+      expect(BridgeClient.createTransfer).toHaveBeenCalledWith(
+        CUSTOMER_ID,
+        expect.any(Object),
+        expectedKey,
+      )
+    })
+  })
+
+  describe("two rapid calls for the same request", () => {
+    it("pass the same idempotency key to Bridge — collapsing into one transfer", async () => {
+      // Call 1: no in-flight row → creates row A
+      // Call 2: finds row A (created by call 1) → reuses its id
+      const rowId = "shared-row-concurrent"
+      const row = makeRow(rowId)
+
+      ;(BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock)
+        .mockResolvedValueOnce(null) // call 1: nothing in-flight yet
+        .mockResolvedValueOnce(row)  // call 2: row A now visible
+
+      ;(BridgeAccountsRepo.createWithdrawal as jest.Mock).mockResolvedValue(row)
+
+      await BridgeService.initiateWithdrawal(ACCOUNT_ID, AMOUNT, EXTERNAL_ACCOUNT_ID)
+      await BridgeService.initiateWithdrawal(ACCOUNT_ID, AMOUNT, EXTERNAL_ACCOUNT_ID)
+
+      const calls = (BridgeClient.createTransfer as jest.Mock).mock.calls
+      expect(calls).toHaveLength(2)
+
+      const key1 = calls[0][2]
+      const key2 = calls[1][2]
+      expect(key1).toBe(key2)
+      expect(key1).toBe(deriveWithdrawalIdempotencyKey(rowId))
+    })
+  })
+})

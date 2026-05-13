@@ -3,7 +3,7 @@ import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import BridgeVirtualAccount from "@graphql/public/types/object/bridge-virtual-account"
 import { BridgeConfig } from "@config"
 import BridgeService from "@services/bridge"
-import { BridgeDisabledError } from "@services/bridge/errors"
+import { BridgeAccountLevelError, BridgeDisabledError } from "@services/bridge/errors"
 
 const bridgeVirtualAccount = GT.Field({
   type: BridgeVirtualAccount,
@@ -14,6 +14,19 @@ const bridgeVirtualAccount = GT.Field({
 
     if (!domainAccount) return null
 
+    if (domainAccount.level < 2) {
+      throw mapAndParseErrorForGqlResponse(new BridgeAccountLevelError())
+    }
+
+    // KYC exists but not yet approved
+    if (domainAccount.bridgeKycStatus !== "approved") {
+      return {
+        pending: true,
+        message: "KYC verification is pending. Please wait for approval.",
+      }
+    }
+
+    // KYC approved — return existing virtual account
     const result = await BridgeService.getVirtualAccount(domainAccount.id)
     if (result instanceof Error) {
       throw mapAndParseErrorForGqlResponse(result)

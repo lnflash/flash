@@ -28,7 +28,7 @@
     "start-main": ". ./.env && yarn run build && node --inspect -r ./lib/services/tracing.js ./lib/servers/graphql-main-server.js",
     "migrate-mongo-up": "migrate-mongo up -f './src/migrations/migrate-mongo-config.js'",
     "gen-test-jwt": "ts-node ./dev/bin/gen-test-jwt.ts",
-    "bridge-webhook": "ts-node src/servers/bridge-webhook-server.ts"
+    "bridge-webhook": ". ./.env && ts-node --transpile-only -r tsconfig-paths/register src/servers/bridge-webhook-server.ts --configPath dev/config/base-config.yaml"
   },
   "engines": {
     "node": ">=20.18.1 <21"

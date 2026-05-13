@@ -30,9 +30,9 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
 
   const lockResult = await LockService().lockPaymentHash(tx_hash as any, async () => {
     try {
-      const account = await AccountsRepository().findByBridgeTronAddress(address)
+      const account = await AccountsRepository().findByBridgeEthereumAddress(address)
       if (account instanceof Error) {
-        baseLogger.error({ address, tx_hash }, "Account not found for Tron address")
+        baseLogger.error({ address, tx_hash }, "Account not found for Ethereum address")
         return { status: "error", code: "account_not_found" } as CryptoReceiveResult
       }
 

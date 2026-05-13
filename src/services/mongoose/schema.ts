@@ -23,6 +23,7 @@ interface IBridgeVirtualAccountRecord {
   bridgeVirtualAccountId: string
   bankName: string
   routingNumber: string
+  accountNumber: string
   accountNumberLast4: string
   createdAt: Date
 }
@@ -38,7 +39,7 @@ interface IBridgeExternalAccountRecord {
 
 interface IBridgeWithdrawalRecord {
   accountId: string
-  bridgeTransferId: string
+  bridgeTransferId?: string
   amount: string
   currency: string
   status: "pending" | "completed" | "failed"
@@ -335,7 +336,7 @@ const AccountSchema = new Schema<AccountRecord>(
       enum: ["pending", "approved", "rejected"],
       required: false,
     },
-    bridgeTronAddress: {
+    bridgeEthereumAddress: {
       type: String,
       required: false,
     },
@@ -348,7 +349,7 @@ AccountSchema.index({
   coordinates: 1,
 })
 
-AccountSchema.index({ bridgeTronAddress: 1 }, { sparse: true })
+AccountSchema.index({ bridgeEthereumAddress: 1 }, { sparse: true })
 
 export const Account = mongoose.model<AccountRecord>("Account", AccountSchema)
 
@@ -614,10 +615,12 @@ export const WalletOnChainPendingReceive =
   )
 
 const BridgeVirtualAccountSchema = new Schema<IBridgeVirtualAccountRecord>({
-  accountId: { type: String, required: true, index: true },
+  // unique: true enforces one VA per account at the DB layer — idempotency guard
+  accountId: { type: String, required: true, unique: true },
   bridgeVirtualAccountId: { type: String, required: true, unique: true },
   bankName: { type: String, required: true },
   routingNumber: { type: String, required: true },
+  accountNumber: { type: String, required: true },
   accountNumberLast4: { type: String, required: true },
   createdAt: { type: Date, default: Date.now },
 })
@@ -631,9 +634,17 @@ const BridgeExternalAccountSchema = new Schema<IBridgeExternalAccountRecord>({
   createdAt: { type: Date, default: Date.now },
 })
 
+// CRIT-2 (ENG-281): Compound index enforces that a given bridgeExternalAccountId
+// can only be associated with one accountId at the DB layer, preventing cross-account
+// withdrawal attacks even if application-layer ownership checks are bypassed.
+BridgeExternalAccountSchema.index(
+  { accountId: 1, bridgeExternalAccountId: 1 },
+  { unique: true },
+)
+
 const BridgeWithdrawalSchema = new Schema<IBridgeWithdrawalRecord>({
   accountId: { type: String, required: true, index: true },
-  bridgeTransferId: { type: String, required: true, unique: true },
+  bridgeTransferId: { type: String, unique: true, sparse: true },
   amount: { type: String, required: true },
   currency: { type: String, required: true },
   status: { type: String, enum: ["pending", "completed", "failed"], default: "pending" },
