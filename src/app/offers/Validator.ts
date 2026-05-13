@@ -1,7 +1,7 @@
 import { getBalanceForWallet } from "@app/wallets";
 import { Cashout } from "@config";
 import { AccountValidator, hasErpParty, isActiveAccount, walletBelongsToAccount } from "@domain/accounts";
-import { JMDAmount, USDAmount, ValidationError, ValidationFn, validator } from "@domain/shared";
+import { JMDAmount, USDAmount, USDTAmount, ValidationError, ValidationFn, validator } from "@domain/shared";
 import { ValidationInputs } from "./types";
 import ErpNext from "@services/frappe/ErpNext";
 
@@ -36,9 +36,14 @@ const isUsd = async (o: ValidationInputs) => {
 }
 
 const hasSufficientBalance = async (o: ValidationInputs): Promise<true | ValidationError> => {
-  const balance = await getBalanceForWallet({ walletId: o.wallet.id })
+  const balance = await getBalanceForWallet({
+    walletId: o.wallet.id,
+    currency: o.wallet.currency,
+  })
   if (balance instanceof Error)
     return new ValidationError(balance)
+  if (balance instanceof USDTAmount)
+    return new ValidationError("Cash out only supports withdrawals from USD wallets")
   else if (o.payment.amount.isGreaterThan(balance))
     return new ValidationError("Transfer amount is greater than wallet balance.")
   else return true

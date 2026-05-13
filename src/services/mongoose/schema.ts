@@ -17,6 +17,36 @@ import { WalletRecord } from "./wallets"
 
 const Schema = mongoose.Schema
 
+// Bridge Record Interfaces
+interface IBridgeVirtualAccountRecord {
+  accountId: string
+  bridgeVirtualAccountId: string
+  bankName: string
+  routingNumber: string
+  accountNumberLast4: string
+  createdAt: Date
+}
+
+interface IBridgeExternalAccountRecord {
+  accountId: string
+  bridgeExternalAccountId: string
+  bankName: string
+  accountNumberLast4: string
+  status: "pending" | "verified" | "failed"
+  createdAt: Date
+}
+
+interface IBridgeWithdrawalRecord {
+  accountId: string
+  bridgeTransferId: string
+  amount: string
+  currency: string
+  status: "pending" | "completed" | "failed"
+  externalAccountId: string
+  createdAt: Date
+  updatedAt: Date
+}
+
 const dbMetadataSchema = new Schema<DbMetadataRecord>({
   routingFeeLastEntry: Date, // TODO: rename to routingRevenueLastEntry
 })
@@ -295,6 +325,20 @@ const AccountSchema = new Schema<AccountRecord>(
     },
 
     displayCurrency: String, // FIXME: should be an enum
+
+    bridgeCustomerId: {
+      type: String,
+      required: false,
+    },
+    bridgeKycStatus: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      required: false,
+    },
+    bridgeTronAddress: {
+      type: String,
+      required: false,
+    },
   },
   { id: false },
 )
@@ -303,6 +347,8 @@ AccountSchema.index({
   title: 1,
   coordinates: 1,
 })
+
+AccountSchema.index({ bridgeTronAddress: 1 }, { sparse: true })
 
 export const Account = mongoose.model<AccountRecord>("Account", AccountSchema)
 
@@ -566,4 +612,47 @@ export const WalletOnChainPendingReceive =
     "WalletOnChainPendingReceive",
     WalletOnChainPendingReceiveSchema,
   )
-  
+
+const BridgeVirtualAccountSchema = new Schema<IBridgeVirtualAccountRecord>({
+  accountId: { type: String, required: true, index: true },
+  bridgeVirtualAccountId: { type: String, required: true, unique: true },
+  bankName: { type: String, required: true },
+  routingNumber: { type: String, required: true },
+  accountNumberLast4: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now },
+})
+
+const BridgeExternalAccountSchema = new Schema<IBridgeExternalAccountRecord>({
+  accountId: { type: String, required: true, index: true },
+  bridgeExternalAccountId: { type: String, required: true, unique: true },
+  bankName: { type: String, required: true },
+  accountNumberLast4: { type: String, required: true },
+  status: { type: String, enum: ["pending", "verified", "failed"], default: "pending" },
+  createdAt: { type: Date, default: Date.now },
+})
+
+const BridgeWithdrawalSchema = new Schema<IBridgeWithdrawalRecord>({
+  accountId: { type: String, required: true, index: true },
+  bridgeTransferId: { type: String, required: true, unique: true },
+  amount: { type: String, required: true },
+  currency: { type: String, required: true },
+  status: { type: String, enum: ["pending", "completed", "failed"], default: "pending" },
+  externalAccountId: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now },
+})
+
+export const BridgeVirtualAccount = mongoose.model<IBridgeVirtualAccountRecord>(
+  "BridgeVirtualAccount",
+  BridgeVirtualAccountSchema,
+)
+
+export const BridgeExternalAccount = mongoose.model<IBridgeExternalAccountRecord>(
+  "BridgeExternalAccount",
+  BridgeExternalAccountSchema,
+)
+
+export const BridgeWithdrawal = mongoose.model<IBridgeWithdrawalRecord>(
+  "BridgeWithdrawal",
+  BridgeWithdrawalSchema,
+)

@@ -19,8 +19,12 @@ import LnInvoicePaymentStatusQuery from "@graphql/public/root/query/ln-invoice-p
 import NpubByUserNameQuery from "./root/query/username-npub-query"
 import IsFlashNpubQuery from "./root/query/is-flash-npub-query"
 import TransactionDetailsQuery from "./root/query/transaction-details"
-import LatestAccountUpgradeRequestQuery from "./root/query/account-upgrade-request"
+import AccountUpgradeRequestQuery from "./root/query/account-upgrade-request"
 import SupportedBanksQuery from "./root/query/supported-banks"
+import BridgeKycStatusQuery from "./root/query/bridge-kyc-status"
+import BridgeVirtualAccountQuery from "./root/query/bridge-virtual-account"
+import BridgeExternalAccountsQuery from "./root/query/bridge-external-accounts"
+import BridgeWithdrawalsQuery from "./root/query/bridge-withdrawals"
 
 export const queryFields = {
   unauthed: {
@@ -44,7 +48,11 @@ export const queryFields = {
     atAccountLevel: {
       me: MeQuery,
       transactionDetails: TransactionDetailsQuery,
-      latestAccountUpgradeRequest: LatestAccountUpgradeRequestQuery,
+      accountUpgradeRequest: AccountUpgradeRequestQuery,
+      bridgeKycStatus: BridgeKycStatusQuery,
+      bridgeVirtualAccount: BridgeVirtualAccountQuery,
+      bridgeExternalAccounts: BridgeExternalAccountsQuery,
+      bridgeWithdrawals: BridgeWithdrawalsQuery,
     },
     atWalletLevel: {
       onChainTxFee: OnChainTxFeeQuery,

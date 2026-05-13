@@ -5,6 +5,7 @@ export const WalletCurrency = {
   Usd: "USD",
   Jmd: "JMD",
   Btc: "BTC",
+  Usdt: "USDT",
 } as const
 
 export const ExchangeCurrencyUnit = {
