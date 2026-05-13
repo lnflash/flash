@@ -29,6 +29,14 @@ jest.mock("@services/bridge/client", () => ({
   default: { createTransfer: jest.fn() },
 }))
 
+jest.mock("@services/ibex/client", () => ({
+  __esModule: true,
+  default: {
+    getEthereumUsdtOption: jest.fn(),
+    createCryptoReceiveInfo: jest.fn(),
+  },
+}))
+
 jest.mock("@services/mongoose/accounts", () => ({
   AccountsRepository: jest.fn(),
 }))
