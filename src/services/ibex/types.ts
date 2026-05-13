@@ -38,17 +38,27 @@ export type IbexInvoiceArgs = {
 }
 
 export interface CryptoReceiveOption {
-  id: string
-  currency: string
+  id?: string
+  currencyId: number
   network: string
+  name?: string
+}
+
+export interface IbexCurrency {
+  id: IbexCurrencyId
   name: string
+  isFiat: boolean
+  symbol: string
+  accountEnabled: boolean
 }
 
 export interface CryptoReceiveInfo {
   id: string
   wallet_id: string
   option_id: string
-  address: string
+  data: {
+    address: string
+  }
   currency: string
   network: string
   created_at: string
