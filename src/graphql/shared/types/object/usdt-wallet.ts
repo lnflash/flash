@@ -9,18 +9,23 @@ import { mapError } from "@graphql/error-map"
 
 import { Wallets } from "@app"
 
-import { WalletCurrency as WalletCurrencyDomain, USDTAmount } from "@domain/shared"
+import {
+  USDAmount,
+  WalletCurrency as WalletCurrencyDomain,
+  USDTAmount,
+} from "@domain/shared"
+
+import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 
 import IWallet from "../abstract/wallet"
 
 import WalletCurrency from "../scalar/wallet-currency"
 import SignedAmount from "../scalar/signed-amount"
 import OnChainAddress from "../scalar/on-chain-address"
-import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
+
+import Lnurl from "../scalar/lnurl"
 
 import { TransactionConnection } from "./transaction"
-import { baseLogger } from "@services/logger"
-import Lnurl from "../scalar/lnurl"
 
 const UsdtWallet = GT.Object<Wallet>({
   name: "UsdtWallet",
@@ -58,7 +63,10 @@ const UsdtWallet = GT.Object<Wallet>({
         if (balance instanceof USDTAmount) {
           return Number(balance.asSmallestUnits(8))
         }
-        return Number((balance as any).asCents(8))
+        if (balance instanceof USDAmount) {
+          return Number(balance.asCents(8))
+        }
+        throw mapError(balance)
       },
     },
     pendingIncomingBalance: {

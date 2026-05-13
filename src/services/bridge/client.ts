@@ -4,18 +4,10 @@
  */
 
 import crypto from "crypto"
+
 import { BridgeConfig } from "@config"
 
-import {
-  BridgeCustomerId,
-  BridgeVirtualAccountId,
-  BridgeExternalAccountId,
-  BridgeTransferId,
-  toBridgeCustomerId,
-  toBridgeVirtualAccountId,
-  toBridgeExternalAccountId,
-  toBridgeTransferId,
-} from "@domain/primitives/bridge"
+import { BridgeCustomerId, BridgeTransferId } from "@domain/primitives/bridge"
 
 // ============ Error Handling ============
 
@@ -73,7 +65,16 @@ export type CreateCustomerRequest =
 export interface Customer {
   id: string
   type: "individual" | "business"
-  status?: "active" | "awaiting_questionnaire" | "rejected" | "paused" | "under_review" | "offboarded" | "awaiting_ubo" | "incomplete" | "not_started"
+  status?:
+    | "active"
+    | "awaiting_questionnaire"
+    | "rejected"
+    | "paused"
+    | "under_review"
+    | "offboarded"
+    | "awaiting_ubo"
+    | "incomplete"
+    | "not_started"
   has_accepted_terms_of_service?: string
   created_at: string
   updated_at: string
@@ -90,18 +91,44 @@ export interface KycLink {
 }
 
 // Extended payment rails to include Tron
-export type PaymentRail = "ach" | "wire" | "ach_push" | "ach_same_day" | "arbitrum" | "avalanche_c_chain" | "base" | "bre_b" | "co_bank_transfer" | "celo" | "ethereum" | "faster_payments" | "optimism" | "pix" | "polygon" | "sepa" | "solana" | "spei" | "stellar" | "swift" | "tempo" | "tron";
+export type PaymentRail =
+  | "ach"
+  | "wire"
+  | "ach_push"
+  | "ach_same_day"
+  | "arbitrum"
+  | "avalanche_c_chain"
+  | "base"
+  | "bre_b"
+  | "co_bank_transfer"
+  | "celo"
+  | "ethereum"
+  | "faster_payments"
+  | "optimism"
+  | "pix"
+  | "polygon"
+  | "sepa"
+  | "solana"
+  | "spei"
+  | "stellar"
+  | "swift"
+  | "tempo"
+  | "tron"
 
-export type VirtualAccountDestinationPaymentRail = "arbitrum" | "avalanche_c_chain" | "base" | "celo" | "ethereum" | "optimism" | "polygon" | "solana" | "stellar" | "tempo" | "tron"
+export type VirtualAccountDestinationPaymentRail =
+  | "arbitrum"
+  | "avalanche_c_chain"
+  | "base"
+  | "celo"
+  | "ethereum"
+  | "optimism"
+  | "polygon"
+  | "solana"
+  | "stellar"
+  | "tempo"
+  | "tron"
 
-
-export type SourceCurrency =
-  | "usd"
-  | "eur"
-  | "mxn"
-  | "brl"
-  | "gbp"
-  | "cop"
+export type SourceCurrency = "usd" | "eur" | "mxn" | "brl" | "gbp" | "cop"
 
 // Extended currencies to include USDT
 export type Currency = "usdb" | "usdt" | "dai" | "pyusd" | "usdc" | "eurc"
@@ -128,7 +155,7 @@ export interface CreateExternalAccountRequest {
     country: string
   }
   account_type: string | "us" | "iban" | "unknown" | "clabe" | "pix" | "gb"
-  currency: 'usd' | 'gbp' | 'brl' | 'eur' | string
+  currency: "usd" | "gbp" | "brl" | "eur" | string
   account: {
     account_number: string
     routing_number: string
@@ -185,7 +212,19 @@ export interface ListResponse<T> {
   cursor?: string
 }
 
-export type TrasfertSourceCurrency = "brl" | "cop" | "dai" | "eur" | "eurc" | "gbp" | "mxn" | "pyusd" | "usd" | "usdb" | "usdc" | "usdt"
+export type TrasfertSourceCurrency =
+  | "brl"
+  | "cop"
+  | "dai"
+  | "eur"
+  | "eurc"
+  | "gbp"
+  | "mxn"
+  | "pyusd"
+  | "usd"
+  | "usdb"
+  | "usdc"
+  | "usdt"
 export interface CreateTransferRequest {
   amount?: string
   currency?: string
@@ -252,14 +291,17 @@ export interface Transfer {
   updated_at: string
 }
 
-
 export interface BridgeIntiateKyc {
   email: string
   type: "individual" | "business"
   full_name?: string
 }
 
-export type BridgeWebhookEventType = "kyc" | "transfer" | "virtual_account" | "external_account"
+export type BridgeWebhookEventType =
+  | "kyc"
+  | "transfer"
+  | "virtual_account"
+  | "external_account"
 
 export interface BridgeWebhookEvent {
   id: string
@@ -290,7 +332,6 @@ type WebhookEventsApiResponse = {
   has_more?: boolean
   cursor?: string
 }
-
 
 // ============ Bridge Client ============
 
@@ -323,7 +364,6 @@ export class BridgeClient {
         headers["Idempotency-Key"] = crypto.randomUUID()
       }
     }
-
 
     const response = await fetch(url, {
       method,
@@ -359,7 +399,10 @@ export class BridgeClient {
 
   // ============ KYC ============
 
-  async createKycLink(request: BridgeIntiateKyc, idempotencyKey?: string): Promise<KycLink> {
+  async createKycLink(
+    request: BridgeIntiateKyc,
+    idempotencyKey?: string,
+  ): Promise<KycLink> {
     return this.request<KycLink>("POST", "/kyc_links", request, idempotencyKey)
   }
 
@@ -393,7 +436,8 @@ export class BridgeClient {
       "POST",
       `/customers/${customerId}/external_accounts`,
       data,
-      idempotencyKey);
+      idempotencyKey,
+    )
   }
 
   async getExternalAccountLinkUrl(
@@ -437,7 +481,6 @@ export class BridgeClient {
     return this.request<Transfer>("GET", `/transfers/${transferId}`)
   }
 
-
   // ============ List Events ============
 
   async listEvents(params?: ListEventsParams): Promise<ListResponse<BridgeWebhookEvent>> {
@@ -478,7 +521,6 @@ export class BridgeClient {
       cursor,
     }
   }
-
 }
 
 export default new BridgeClient()

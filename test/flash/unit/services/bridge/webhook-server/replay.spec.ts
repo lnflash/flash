@@ -1,5 +1,3 @@
-import crypto from "crypto"
-
 // AC1: Orphan event surfaces in ops tooling with triage context
 // AC2: Replay CLI re-runs a stuck handler against a chosen transfer-id
 
@@ -28,7 +26,10 @@ jest.mock("@services/bridge/webhook-server/routes/transfer", () => ({
 }))
 
 import { Request, Response } from "express"
-import { replayAuthMiddleware, replayHandler } from "@services/bridge/webhook-server/routes/replay"
+import {
+  replayAuthMiddleware,
+  replayHandler,
+} from "@services/bridge/webhook-server/routes/replay"
 import * as ReplayLog from "@services/mongoose/bridge-replay-log"
 import { depositHandler } from "@services/bridge/webhook-server/routes/deposit"
 import { kycHandler } from "@services/bridge/webhook-server/routes/kyc"
@@ -43,8 +44,10 @@ const makeRes = () => {
   return res
 }
 
-const makeReq = (body: Record<string, unknown> = {}, headers: Record<string, string> = {}) =>
-  ({ body, headers } as unknown as Request)
+const makeReq = (
+  body: Record<string, unknown> = {},
+  headers: Record<string, string> = {},
+) => ({ body, headers }) as unknown as Request
 
 const BASE_BODY = {
   event_type: "funds_received",
@@ -69,7 +72,7 @@ describe("replayAuthMiddleware", () => {
     const next = jest.fn()
     replayAuthMiddleware(makeReq({}, {}), res, next)
 
-    expect((res.status as jest.Mock)).toHaveBeenCalledWith(503)
+    expect(res.status as jest.Mock).toHaveBeenCalledWith(503)
     expect(next).not.toHaveBeenCalled()
 
     BridgeConfig.webhook.replaySecret = saved
@@ -78,13 +81,9 @@ describe("replayAuthMiddleware", () => {
   it("returns 401 for a wrong token", () => {
     const res = makeRes()
     const next = jest.fn()
-    replayAuthMiddleware(
-      makeReq({}, { authorization: "Bearer wrong-token" }),
-      res,
-      next,
-    )
+    replayAuthMiddleware(makeReq({}, { authorization: "Bearer wrong-token" }), res, next)
 
-    expect((res.status as jest.Mock)).toHaveBeenCalledWith(401)
+    expect(res.status as jest.Mock).toHaveBeenCalledWith(401)
     expect(next).not.toHaveBeenCalled()
   })
 
@@ -93,7 +92,7 @@ describe("replayAuthMiddleware", () => {
     const next = jest.fn()
     replayAuthMiddleware(makeReq({}, {}), res, next)
 
-    expect((res.status as jest.Mock)).toHaveBeenCalledWith(401)
+    expect(res.status as jest.Mock).toHaveBeenCalledWith(401)
     expect(next).not.toHaveBeenCalled()
   })
 
@@ -107,7 +106,7 @@ describe("replayAuthMiddleware", () => {
     )
 
     expect(next).toHaveBeenCalledTimes(1)
-    expect((res.status as jest.Mock)).not.toHaveBeenCalled()
+    expect(res.status as jest.Mock).not.toHaveBeenCalled()
   })
 
   it("uses timing-safe comparison (different-length token is rejected)", () => {
@@ -120,7 +119,7 @@ describe("replayAuthMiddleware", () => {
       next,
     )
 
-    expect((res.status as jest.Mock)).toHaveBeenCalledWith(401)
+    expect(res.status as jest.Mock).toHaveBeenCalledWith(401)
     expect(next).not.toHaveBeenCalled()
   })
 })
@@ -133,64 +132,72 @@ describe("replayHandler", () => {
   describe("input validation", () => {
     it("returns 400 when event_type is missing", async () => {
       const res = makeRes()
-      const { event_type: _et, ...body } = BASE_BODY
+      const body = { ...BASE_BODY }
+      delete body.event_type
       await replayHandler(makeReq(body), res)
-      expect((res.status as jest.Mock)).toHaveBeenCalledWith(400)
+      expect(res.status as jest.Mock).toHaveBeenCalledWith(400)
     })
 
     it("returns 400 when event_object is missing", async () => {
       const res = makeRes()
-      const { event_object: _eo, ...body } = BASE_BODY
+      const body = { ...BASE_BODY }
+      delete body.event_object
       await replayHandler(makeReq(body), res)
-      expect((res.status as jest.Mock)).toHaveBeenCalledWith(400)
+      expect(res.status as jest.Mock).toHaveBeenCalledWith(400)
     })
 
     it("returns 400 when event_created_at is missing", async () => {
       const res = makeRes()
-      const { event_created_at: _ec, ...body } = BASE_BODY
+      const body = { ...BASE_BODY }
+      delete body.event_created_at
       await replayHandler(makeReq(body), res)
-      expect((res.status as jest.Mock)).toHaveBeenCalledWith(400)
+      expect(res.status as jest.Mock).toHaveBeenCalledWith(400)
     })
 
     it("returns 400 for an unrecognised event_type", async () => {
       const res = makeRes()
       await replayHandler(makeReq({ ...BASE_BODY, event_type: "unknown_event" }), res)
-      expect((res.status as jest.Mock)).toHaveBeenCalledWith(400)
+      expect(res.status as jest.Mock).toHaveBeenCalledWith(400)
     })
   })
 
   describe("event_type → handler routing", () => {
     const cases: Array<[string, jest.Mock]> = [
-      ["funds_received",  depositHandler as jest.Mock],
+      ["funds_received", depositHandler as jest.Mock],
       ["funds_scheduled", depositHandler as jest.Mock],
       ["payment_processed", depositHandler as jest.Mock],
-      ["kyc.approved",   kycHandler as jest.Mock],
-      ["kyc.rejected",   kycHandler as jest.Mock],
+      ["kyc.approved", kycHandler as jest.Mock],
+      ["kyc.rejected", kycHandler as jest.Mock],
       ["transfer.completed", transferHandler as jest.Mock],
-      ["transfer.failed",    transferHandler as jest.Mock],
+      ["transfer.failed", transferHandler as jest.Mock],
     ]
 
     beforeEach(() => {
       ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue({ id: "log-001" })
     })
 
-    test.each(cases)("%s is routed to the correct handler", async (eventType, handler) => {
-      handler.mockImplementation((_req: Request, res: Response) => {
-        ;(res.status as jest.Mock)(200)
-        ;(res.json as jest.Mock)({ status: "success" })
-        return Promise.resolve(res)
-      })
+    test.each(cases)(
+      "%s is routed to the correct handler",
+      async (eventType, handler) => {
+        handler.mockImplementation((_req: Request, res: Response) => {
+          ;(res.status as jest.Mock)(200)
+          ;(res.json as jest.Mock)({ status: "success" })
+          return Promise.resolve(res)
+        })
 
-      const res = makeRes()
-      await replayHandler(makeReq({ ...BASE_BODY, event_type: eventType }), res)
+        const res = makeRes()
+        await replayHandler(makeReq({ ...BASE_BODY, event_type: eventType }), res)
 
-      expect(handler).toHaveBeenCalledTimes(1)
-    })
+        expect(handler).toHaveBeenCalledTimes(1)
+      },
+    )
   })
 
   describe("dry_run mode", () => {
     it("returns 200 without calling any handler", async () => {
-      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue({ id: "log-dry-001" })
+      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue({
+        id: "log-dry-001",
+      })
 
       const res = makeRes()
       await replayHandler(makeReq({ ...BASE_BODY, dry_run: true }), res)
@@ -198,11 +205,13 @@ describe("replayHandler", () => {
       expect(depositHandler).not.toHaveBeenCalled()
       expect(kycHandler).not.toHaveBeenCalled()
       expect(transferHandler).not.toHaveBeenCalled()
-      expect((res.status as jest.Mock)).toHaveBeenCalledWith(200)
+      expect(res.status as jest.Mock).toHaveBeenCalledWith(200)
     })
 
     it("persists a dry-run log entry with httpStatus 0", async () => {
-      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue({ id: "log-dry-002" })
+      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue({
+        id: "log-dry-002",
+      })
 
       const res = makeRes()
       await replayHandler(makeReq({ ...BASE_BODY, dry_run: true }), res)
@@ -213,37 +222,45 @@ describe("replayHandler", () => {
     })
 
     it("returns 500 when dry-run log creation fails", async () => {
-      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue(new Error("db error"))
+      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue(
+        new Error("db error"),
+      )
 
       const res = makeRes()
       await replayHandler(makeReq({ ...BASE_BODY, dry_run: true }), res)
 
-      expect((res.status as jest.Mock)).toHaveBeenCalledWith(500)
+      expect(res.status as jest.Mock).toHaveBeenCalledWith(500)
     })
   })
 
   describe("live replay", () => {
     beforeEach(() => {
-      ;(depositHandler as jest.Mock).mockImplementation((_req: Request, res: Response) => {
-        ;(res.status as jest.Mock)(200)
-        ;(res.json as jest.Mock)({ status: "success" })
-        return Promise.resolve(res)
-      })
+      ;(depositHandler as jest.Mock).mockImplementation(
+        (_req: Request, res: Response) => {
+          ;(res.status as jest.Mock)(200)
+          ;(res.json as jest.Mock)({ status: "success" })
+          return Promise.resolve(res)
+        },
+      )
     })
 
     it("returns the handler's status code and response body", async () => {
-      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue({ id: "log-live-001" })
+      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue({
+        id: "log-live-001",
+      })
 
       const res = makeRes()
       await replayHandler(makeReq(BASE_BODY), res)
 
-      expect((res.status as jest.Mock)).toHaveBeenCalledWith(200)
+      expect(res.status as jest.Mock).toHaveBeenCalledWith(200)
       const jsonArg = (res.json as jest.Mock).mock.calls[0][0]
       expect(jsonArg).toMatchObject({ status: "replayed", handler_status: 200 })
     })
 
     it("persists a replay log with triage context (operator + time window)", async () => {
-      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue({ id: "log-live-002" })
+      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue({
+        id: "log-live-002",
+      })
 
       const res = makeRes()
       await replayHandler(makeReq(BASE_BODY), res)
@@ -261,7 +278,9 @@ describe("replayHandler", () => {
     })
 
     it("includes log_id in the response so ops can trace the replay", async () => {
-      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue({ id: "log-trace-007" })
+      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue({
+        id: "log-trace-007",
+      })
 
       const res = makeRes()
       await replayHandler(makeReq(BASE_BODY), res)
@@ -271,26 +290,30 @@ describe("replayHandler", () => {
     })
 
     it("returns 500 when log creation fails after a successful handler run", async () => {
-      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue(new Error("mongo down"))
+      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue(
+        new Error("mongo down"),
+      )
 
       const res = makeRes()
       await replayHandler(makeReq(BASE_BODY), res)
 
-      expect((res.status as jest.Mock)).toHaveBeenCalledWith(500)
+      expect(res.status as jest.Mock).toHaveBeenCalledWith(500)
     })
 
     it("propagates a handler 4xx back to the caller", async () => {
-      ;(depositHandler as jest.Mock).mockImplementation((_req: Request, res: Response) => {
-        ;(res.status as jest.Mock)(422)
-        ;(res.json as jest.Mock)({ error: "Unprocessable" })
-        return Promise.resolve(res)
-      })
+      ;(depositHandler as jest.Mock).mockImplementation(
+        (_req: Request, res: Response) => {
+          ;(res.status as jest.Mock)(422)
+          ;(res.json as jest.Mock)({ error: "Unprocessable" })
+          return Promise.resolve(res)
+        },
+      )
       ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue({ id: "log-4xx" })
 
       const res = makeRes()
       await replayHandler(makeReq(BASE_BODY), res)
 
-      expect((res.status as jest.Mock)).toHaveBeenCalledWith(422)
+      expect(res.status as jest.Mock).toHaveBeenCalledWith(422)
     })
   })
 })

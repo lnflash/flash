@@ -16,11 +16,11 @@ import { mapError } from "@graphql/error-map"
 
 import { fieldExtensionsEstimator, simpleEstimator } from "graphql-query-complexity"
 
-import { createComplexityPlugin } from "./plugins/complexity"
-
 import jwksRsa from "jwks-rsa"
 
 import { parseUnknownDomainErrorFromUnknown } from "@domain/shared"
+
+import { createComplexityPlugin } from "./plugins/complexity"
 
 import authRouter from "./authorization"
 import kratosCallback from "./event-handlers/kratos"

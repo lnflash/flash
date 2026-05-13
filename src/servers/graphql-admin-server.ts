@@ -1,13 +1,14 @@
+import { createServer } from "http"
+
 import { applyMiddleware } from "graphql-middleware"
-import { and, or, rule, shield } from "graphql-shield"
-import { Rule, RuleAnd, RuleOr } from "graphql-shield/typings/rules"
+import { or, rule, shield } from "graphql-shield"
+import { Rule, RuleOr } from "graphql-shield/typings/rules"
 import { baseLogger } from "@services/logger"
 import { setupMongoConnection } from "@services/mongodb"
 import { adminMutationFields, adminQueryFields, gqlAdminSchema } from "@graphql/admin"
 import { ADMIN_CONFIG } from "@config"
 import { AuthenticationError, AuthorizationError } from "@graphql/error"
 
-import { createServer } from "http"
 import express from "express"
 import { ApolloServerPluginDrainHttpServer } from "apollo-server-core"
 import { ApolloError, ApolloServer, ExpressContext } from "apollo-server-express"
@@ -15,13 +16,18 @@ import { GraphQLError, GraphQLSchema } from "graphql"
 import PinoHttp from "pino-http"
 import { mapError } from "@graphql/error-map"
 import { fieldExtensionsEstimator, simpleEstimator } from "graphql-query-complexity"
-import { createComplexityPlugin } from "./plugins/complexity"
+
 import { parseUnknownDomainErrorFromUnknown } from "@domain/shared"
+
+import requestIp from "request-ip"
+
+import jwt from "jsonwebtoken"
+
+import { ErpNextRole, ErpNextRoles } from "@services/frappe/Roles"
+
+import { createComplexityPlugin } from "./plugins/complexity"
 import healthzHandler from "./middlewares/healthz"
 import { idempotencyMiddleware } from "./middlewares/idempotency"
-import requestIp from "request-ip"
-import jwt from "jsonwebtoken"
-import { ErpNextRole, ErpNextRoles } from "@services/frappe/Roles"
 
 const graphqlLogger = baseLogger.child({ module: "graphql" })
 
@@ -46,13 +52,12 @@ function parseAuthHeader(authHeader: string | undefined): JWTPayload {
   }
 }
 
-export const hasRole = (role: ErpNextRole) => rule({ cache: "contextual" })((
-  parent,
-  args,
-  ctx: GraphQLAdminContext,
-) => {
-  return ctx.user.roles.includes(role) ? true : new AuthorizationError({ logger: graphqlLogger })
-})
+export const hasRole = (role: ErpNextRole) =>
+  rule({ cache: "contextual" })((parent, args, ctx: GraphQLAdminContext) => {
+    return ctx.user.roles.includes(role)
+      ? true
+      : new AuthorizationError({ logger: graphqlLogger })
+  })
 
 //   // const ipString = UNSECURE_IP_FROM_REQUEST_OBJECT
 //   //   ? req.ip
@@ -218,15 +223,17 @@ const startAdminServer = async ({
 }
 
 export async function startApolloServerForAdminSchema() {
-  const defaultRule = or(hasRole(ErpNextRoles.SystemManager), hasRole(ErpNextRoles.AccountsManager))
+  const defaultRule = or(
+    hasRole(ErpNextRoles.SystemManager),
+    hasRole(ErpNextRoles.AccountsManager),
+  )
 
   const authedQueryFields: { [key: string]: RuleOr } = {}
   for (const key of Object.keys(adminQueryFields.authed)) {
     authedQueryFields[key] = defaultRule
   }
 
-
-  const mutationRoleOverrides: { [key: string]: Rule } = {                                                                                               
+  const mutationRoleOverrides: { [key: string]: Rule } = {
     // sendNotification: hasRole(ErpNextRoles.SystemManager)
   }
 
