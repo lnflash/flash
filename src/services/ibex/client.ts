@@ -39,6 +39,7 @@ import {
   CryptoReceiveOption,
   CryptoReceiveInfo,
   CreateCryptoReceiveInfoRequest,
+  UsdWalletAmount,
 } from "./types"
 
 import { errorHandler, IbexError, ParseError, UnexpectedIbexResponse } from "./errors"
@@ -55,6 +56,30 @@ const createAccount = async (
   currencyId: IbexCurrencyId,
 ): Promise<CreateAccountResponse201 | IbexError> => {
   return Ibex.createAccount({ name, currencyId }).then(errorHandler)
+}
+
+const ibexCurrencyIdForUsdAmount = (amount: UsdWalletAmount): IbexCurrencyId => {
+  if (amount instanceof USDAmount) return USDAmount.currencyId
+  return USDTAmount.currencyId
+}
+
+const ibexCurrencyIdForUsdWalletCurrency = (
+  currency?: WalletCurrency,
+): IbexCurrencyId => {
+  if (currency === WalletCurrency.Usdt) return USDTAmount.currencyId
+  return USDAmount.currencyId
+}
+
+const parseIbexUsdAmount = (
+  amount: number | string,
+  currencyId: IbexCurrencyId,
+): UsdWalletAmount | ParseError => {
+  const parsed =
+    currencyId === USDTAmount.currencyId
+      ? USDTAmount.fromNumber(amount.toString())
+      : USDAmount.dollars(amount.toString())
+
+  return parsed instanceof Error ? new ParseError(parsed) : parsed
 }
 
 const parseAccountBalance = (
@@ -131,16 +156,16 @@ const invoiceFromHash = async (
   return Ibex.invoiceFromHash({ invoice_hash }).then(errorHandler)
 }
 
-// Only supports USD for now
 const getLnFeeEstimation = async (
   args: GetFeeEstimateArgs,
-): Promise<IbexFeeEstimation | IbexError> => {
-  const currencyId = USDAmount.currencyId
-  // const amount = (args.send instanceof IbexCurrency) ? args.send.amount.toString() : undefined
+): Promise<IbexFeeEstimation<UsdWalletAmount> | IbexError> => {
+  const currencyId = args.send
+    ? ibexCurrencyIdForUsdAmount(args.send)
+    : ibexCurrencyIdForUsdWalletCurrency(args.currency)
 
   const resp = await Ibex.getFeeEstimation({
     bolt11: args.invoice as string,
-    amount: args.send?.asDollars(8),
+    amount: args.send?.toIbex().toString(),
     currencyId: currencyId.toString(),
   })
   if (resp instanceof Error) return new IbexError(resp)
@@ -149,10 +174,10 @@ const getLnFeeEstimation = async (
   else if (resp.invoiceAmount === null || resp.invoiceAmount === undefined)
     return new UnexpectedIbexResponse("invoiceAmount not found.")
   else {
-    const fee = USDAmount.dollars(resp.amount)
-    if (fee instanceof Error) return new ParseError(fee)
-    const invoiceAmount = USDAmount.dollars(resp.invoiceAmount)
-    if (invoiceAmount instanceof Error) return new ParseError(invoiceAmount)
+    const fee = parseIbexUsdAmount(resp.amount, currencyId)
+    if (fee instanceof Error) return fee
+    const invoiceAmount = parseIbexUsdAmount(resp.invoiceAmount, currencyId)
+    if (invoiceAmount instanceof Error) return invoiceAmount
     return {
       fee,
       invoice: invoiceAmount,
@@ -189,12 +214,12 @@ const sendOnchain = async (
 }
 
 const estimateOnchainFee = async (
-  send: USDAmount,
+  send: UsdWalletAmount,
   address: OnChainAddress,
 ): Promise<EstimateFeeCopyResponse200 | IbexError> => {
   return Ibex.estimateFeeV2({
     "amount": send.toIbex(),
-    "currency-id": USDAmount.currencyId.toString(),
+    "currency-id": ibexCurrencyIdForUsdAmount(send).toString(),
     address,
   }).then(errorHandler)
 }

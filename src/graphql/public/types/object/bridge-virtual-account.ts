@@ -3,7 +3,10 @@ import { GT } from "@graphql/index"
 const BridgeVirtualAccount = GT.Object({
   name: "BridgeVirtualAccount",
   fields: () => ({
-    id: { type: GT.ID, resolve: (src) => src.virtualAccountId ?? src.bridgeVirtualAccountId },
+    id: {
+      type: GT.ID,
+      resolve: (src) => src.virtualAccountId ?? src.bridgeVirtualAccountId,
+    },
     bankName: { type: GT.String },
     routingNumber: { type: GT.String },
     accountNumber: { type: GT.String },

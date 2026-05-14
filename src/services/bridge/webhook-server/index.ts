@@ -9,11 +9,14 @@
 import express from "express"
 import { BridgeConfig } from "@config"
 import { baseLogger } from "@services/logger"
+
 import { verifyBridgeSignature } from "./middleware/verify-signature"
 import { kycHandler } from "./routes/kyc"
 import { depositHandler } from "./routes/deposit"
 import { transferHandler } from "./routes/transfer"
 import { replayAuthMiddleware, replayHandler } from "./routes/replay"
+
+type RawBodyRequest = express.Request & { rawBody?: string }
 
 export const startBridgeWebhookServer = () => {
   const app = express()
@@ -21,8 +24,12 @@ export const startBridgeWebhookServer = () => {
   // Middleware - MUST capture raw body for signature verification
   app.use(
     express.json({
-      verify: (req: any, res, buf) => {
-        req.rawBody = buf.toString("utf8")
+      verify: (req, res, buf) => {
+        if (res.writableEnded) {
+          return
+        }
+        const rawReq = req as RawBodyRequest
+        rawReq.rawBody = buf.toString("utf8")
       },
     }),
   )
@@ -39,7 +46,9 @@ export const startBridgeWebhookServer = () => {
   app.post("/internal/replay", replayAuthMiddleware, replayHandler)
 
   if (!BridgeConfig.webhook.replaySecret && !process.env.BRIDGE_WEBHOOK_REPLAY_SECRET) {
-    baseLogger.warn("replaySecret not configured (neither BridgeConfig.webhook.replaySecret nor BRIDGE_WEBHOOK_REPLAY_SECRET) — /internal/replay will reject all requests with 503")
+    baseLogger.warn(
+      "replaySecret not configured (neither BridgeConfig.webhook.replaySecret nor BRIDGE_WEBHOOK_REPLAY_SECRET) — /internal/replay will reject all requests with 503",
+    )
   }
 
   // Start server

@@ -26,8 +26,7 @@ const makeRes = () => {
   return res
 }
 
-const makeReq = (body: Record<string, unknown>) =>
-  ({ body } as unknown as Request)
+const makeReq = (body: Record<string, unknown>) => ({ body }) as unknown as Request
 
 // Real Bridge deposit event shape
 const VALID_EVENT_OBJECT = {
@@ -85,7 +84,8 @@ beforeEach(() => {
 describe("depositHandler — invalid payload", () => {
   it("returns 400 when event_id is missing", async () => {
     const res = makeRes()
-    const { event_id: _, ...body } = VALID_BODY
+    const body = { ...VALID_BODY }
+    delete body.event_id
     await depositHandler(makeReq(body), res)
     expect(res.status as jest.Mock).toHaveBeenCalledWith(400)
     expect(DepositLog.createBridgeDepositLog).not.toHaveBeenCalled()
@@ -93,7 +93,8 @@ describe("depositHandler — invalid payload", () => {
 
   it("returns 400 when event_object.id is missing", async () => {
     const res = makeRes()
-    const { id: _, ...objWithoutId } = VALID_EVENT_OBJECT
+    const objWithoutId = { ...VALID_EVENT_OBJECT }
+    delete objWithoutId.id
     await depositHandler(makeReq({ ...VALID_BODY, event_object: objWithoutId }), res)
     expect(res.status as jest.Mock).toHaveBeenCalledWith(400)
     expect(DepositLog.createBridgeDepositLog).not.toHaveBeenCalled()

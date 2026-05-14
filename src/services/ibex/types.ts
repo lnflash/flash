@@ -1,26 +1,29 @@
-import { USDAmount, USDTAmount } from "@domain/shared"
+import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
+
+export type UsdWalletAmount = USDAmount | USDTAmount
 
 export type PayInvoiceArgs = {
   accountId: IbexAccountId
   invoice: Bolt11
-  send?: USDAmount // must match currency of account
+  send?: UsdWalletAmount // must match currency of account
 }
 
 export type SendOnchainArgs = {
   accountId: IbexAccountId // source of funds
   address: OnChainAddress // destination
-  amount: USDAmount
+  amount: UsdWalletAmount
 }
 
 // Ibex supports fee estimation in different currencies
 export type GetFeeEstimateArgs = {
   invoice: Bolt11
-  send?: USDAmount
+  send?: UsdWalletAmount
+  currency?: WalletCurrency
 }
 
-export type IbexFeeEstimation = {
-  fee: USDAmount
-  invoice: USDAmount
+export type IbexFeeEstimation<T extends UsdWalletAmount = USDAmount> = {
+  fee: T
+  invoice: T
 }
 
 export type IbexAccountDetails = {
@@ -32,7 +35,7 @@ export type IbexAccountDetails = {
 
 export type IbexInvoiceArgs = {
   accountId: IbexAccountId
-  amount?: USDAmount
+  amount?: UsdWalletAmount
   memo: string
   expiration?: Seconds
 }

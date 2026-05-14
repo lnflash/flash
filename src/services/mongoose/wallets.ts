@@ -1,3 +1,5 @@
+import { randomUUID } from "crypto"
+
 import {
   CouldNotFindWalletFromIdError,
   CouldNotFindWalletFromOnChainAddressError,
@@ -9,7 +11,6 @@ import {
   UnsupportedCurrencyError,
 } from "@domain/errors"
 import { Types } from "mongoose"
-import { randomUUID } from "crypto"
 
 // FLASH FORK: import IBEX routes and helper
 import Ibex from "@services/ibex/client"
@@ -20,10 +21,11 @@ import { recordExceptionInCurrentSpan } from "@services/tracing"
 
 import { ErrorLevel, USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
 
+import { WalletType } from "@domain/wallets"
+
 import { toObjectId, fromObjectId, parseRepositoryError } from "./utils"
 import { Wallet } from "./schema"
 import { AccountsRepository } from "./accounts"
-import { WalletType } from "@domain/wallets"
 
 export interface WalletRecord {
   id: string

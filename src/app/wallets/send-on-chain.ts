@@ -3,7 +3,8 @@ import { NETWORK } from "@config"
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { checkedToOnChainAddress } from "@domain/bitcoin/onchain"
 import { UnsupportedCurrencyError } from "@domain/errors"
-import { ErrorLevel, USDAmount } from "@domain/shared"
+import { ErrorLevel } from "@domain/shared"
+import { UsdWalletAmount } from "@services/ibex/types"
 import { OnchainUsdPaymentValidator } from "@domain/wallets"
 
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
@@ -19,15 +20,15 @@ type PayOnChainByWalletIdWithoutCurrencyArgs = {
   address: string
   speed: PayoutSpeed
   memo: string | null
-  amount?: number | FractionalCentAmount | USDAmount
+  amount?: number | FractionalCentAmount | UsdWalletAmount
 }
 
 type PayOnChainByUsdArgs = PayOnChainByWalletIdWithoutCurrencyArgs & {
-  amount: USDAmount
+  amount: UsdWalletAmount
 }
 
 type PayOnChainByWalletIdForUsdWalletArgs = PayOnChainByWalletIdWithoutCurrencyArgs & {
-  amount: number | FractionalCentAmount | USDAmount
+  amount: number | FractionalCentAmount | UsdWalletAmount
 }
 
 /*

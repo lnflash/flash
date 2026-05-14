@@ -1,22 +1,15 @@
-import { InvalidFeeProbeStateError } from "@domain/bitcoin/lightning"
-
-// import { Payments } from "@app"
+import { usdWalletAmountFromWalletId, UsdWalletAmount } from "@app/wallets"
 
 import { GT } from "@graphql/index"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
-import CentAmount from "@graphql/public/types/scalar/cent-amount"
 import CentAmountPayload from "@graphql/public/types/payload/cent-amount"
 import LnPaymentRequest from "@graphql/shared/types/scalar/ln-payment-request"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 
-import { normalizePaymentAmount } from "../../../shared/root/mutation"
-
 // FLASH FORK: import ibex dependencies
 import Ibex from "@services/ibex/client"
 
-import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
-import { GetFeeEstimateResponse200 } from "ibex-client"
-import { BigIntConversionError, checkedToUsdPaymentAmount, USDAmount, ValidationError } from "@domain/shared"
+import { IbexError } from "@services/ibex/errors"
 import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 import { IbexFeeEstimation } from "@services/ibex/types"
 
@@ -55,9 +48,14 @@ const LnNoAmountUsdInvoiceFeeProbeMutation = GT.Field({
     //   })
 
     // TODO: Move Ibex call to Payments interface
-    const checkedAmount = USDAmount.cents(amount.toString())
-    if (checkedAmount instanceof BigIntConversionError) return checkedAmount
-    const resp: IbexFeeEstimation | IbexError = await Ibex.getLnFeeEstimation({
+    const checkedAmount = await usdWalletAmountFromWalletId({
+      walletId,
+      amount: amount.toString(),
+    })
+    if (checkedAmount instanceof Error) {
+      return { errors: [mapAndParseErrorForGqlResponse(checkedAmount)] }
+    }
+    const resp: IbexFeeEstimation<UsdWalletAmount> | IbexError = await Ibex.getLnFeeEstimation({
       invoice: paymentRequest as Bolt11,
       send: checkedAmount,
     })

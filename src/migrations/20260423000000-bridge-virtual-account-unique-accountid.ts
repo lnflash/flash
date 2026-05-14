@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-nocheck
 /* eslint @typescript-eslint/no-var-requires: "off" */
 

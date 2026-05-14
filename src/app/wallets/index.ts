@@ -17,6 +17,7 @@ export * from "./settle-payout-txn"
 export * from "./update-legacy-on-chain-receipt"
 export * from "./update-pending-invoices"
 export * from "./validate"
+export * from "./usd-wallet-amount"
 
 import { WalletsRepository } from "@services/mongoose"
 

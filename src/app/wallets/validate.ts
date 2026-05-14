@@ -9,7 +9,7 @@ export const validateIsBtcWallet = async (
   const wallet = await WalletsRepository().findById(walletId)
   if (wallet instanceof Error) return wallet
 
-  if (wallet.currency === WalletCurrency.Usd) {
+  if (wallet.currency !== WalletCurrency.Btc) {
     return new MismatchedCurrencyForWalletError()
   }
   return true
@@ -17,11 +17,28 @@ export const validateIsBtcWallet = async (
 
 export const validateIsUsdWallet = async (
   walletId: WalletId,
+  args?: { includeUsdt?: boolean },
 ): Promise<true | ApplicationError> => {
   const wallet = await WalletsRepository().findById(walletId)
   if (wallet instanceof Error) return wallet
 
-  if (wallet.currency === WalletCurrency.Btc) {
+  const isAllowed =
+    wallet.currency === WalletCurrency.Usd ||
+    (args?.includeUsdt === true && wallet.currency === WalletCurrency.Usdt)
+
+  if (!isAllowed) {
+    return new MismatchedCurrencyForWalletError()
+  }
+  return true
+}
+
+export const validateIsUsdtWallet = async (
+  walletId: WalletId,
+): Promise<true | ApplicationError> => {
+  const wallet = await WalletsRepository().findById(walletId)
+  if (wallet instanceof Error) return wallet
+
+  if (wallet.currency !== WalletCurrency.Usdt) {
     return new MismatchedCurrencyForWalletError()
   }
   return true

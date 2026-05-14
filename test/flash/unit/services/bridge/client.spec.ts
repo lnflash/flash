@@ -78,11 +78,23 @@ describe("listAllEvents", () => {
 
   it("passes the cursor from page N as 'after' on page N+1", async () => {
     listEventsSpy
-      .mockResolvedValueOnce({ data: [makeEvent("e1")], has_more: true, cursor: "cur-abc" })
-      .mockResolvedValueOnce({ data: [makeEvent("e2")], has_more: false, cursor: undefined })
+      .mockResolvedValueOnce({
+        data: [makeEvent("e1")],
+        has_more: true,
+        cursor: "cur-abc",
+      })
+      .mockResolvedValueOnce({
+        data: [makeEvent("e2")],
+        has_more: false,
+        cursor: undefined,
+      })
 
-    for await (const _ of listAllEvents()) { /* drain */ }
+    const drained: BridgeWebhookEvent[] = []
+    for await (const event of listAllEvents()) {
+      drained.push(event)
+    }
 
+    expect(drained).toHaveLength(2)
     expect(listEventsSpy).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ after: undefined }),
@@ -96,8 +108,12 @@ describe("listAllEvents", () => {
   it("always requests page_size 100", async () => {
     listEventsSpy.mockResolvedValue({ data: [], has_more: false, cursor: undefined })
 
-    for await (const _ of listAllEvents()) { /* drain */ }
+    const drained: BridgeWebhookEvent[] = []
+    for await (const event of listAllEvents()) {
+      drained.push(event)
+    }
 
+    expect(drained).toHaveLength(0)
     expect(listEventsSpy).toHaveBeenCalledWith(
       expect.objectContaining({ page_size: 100 }),
     )
@@ -106,7 +122,11 @@ describe("listAllEvents", () => {
   it("forwards start_date, end_date and event_type filters to every page", async () => {
     listEventsSpy
       .mockResolvedValueOnce({ data: [makeEvent("e1")], has_more: true, cursor: "c1" })
-      .mockResolvedValueOnce({ data: [makeEvent("e2")], has_more: false, cursor: undefined })
+      .mockResolvedValueOnce({
+        data: [makeEvent("e2")],
+        has_more: false,
+        cursor: undefined,
+      })
 
     const params = {
       start_date: "2026-05-01T00:00:00Z",
@@ -114,8 +134,12 @@ describe("listAllEvents", () => {
       event_type: "transfer.completed",
     }
 
-    for await (const _ of listAllEvents(params)) { /* drain */ }
+    const drained: BridgeWebhookEvent[] = []
+    for await (const event of listAllEvents(params)) {
+      drained.push(event)
+    }
 
+    expect(drained).toHaveLength(2)
     expect(listEventsSpy).toHaveBeenCalledTimes(2)
     for (const call of listEventsSpy.mock.calls) {
       expect(call[0]).toMatchObject(params)

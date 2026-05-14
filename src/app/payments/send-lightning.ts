@@ -172,7 +172,7 @@ export const payNoAmountInvoiceByWalletIdForBtcWallet = async (
 export const payNoAmountInvoiceByWalletIdForUsdWallet = async (
   args: PayNoAmountInvoiceByWalletIdArgs,
 ): Promise<PaymentSendStatus | ApplicationError> => {
-  const validated = await validateIsUsdWallet(args.senderWalletId)
+  const validated = await validateIsUsdWallet(args.senderWalletId, { includeUsdt: true })
   return validated instanceof Error ? validated : payNoAmountInvoiceByWalletId(args)
 }
 
@@ -278,7 +278,10 @@ const validateNoAmountInvoicePaymentInputs = async <S extends WalletCurrency>({
   const inputPaymentAmount =
     senderWallet.currency === WalletCurrency.Btc
       ? checkedToBtcPaymentAmount(amount)
-      : checkedToUsdPaymentAmount(amount)
+      : checkedToUsdPaymentAmount(
+          amount,
+          senderWallet.currency as typeof WalletCurrency.Usd | typeof WalletCurrency.Usdt,
+        )
   if (inputPaymentAmount instanceof Error) return inputPaymentAmount
 
   return {
