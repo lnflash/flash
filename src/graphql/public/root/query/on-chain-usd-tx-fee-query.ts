@@ -1,19 +1,13 @@
 import { PayoutSpeed as DomainPayoutSpeed } from "@domain/bitcoin/onchain"
-import { paymentAmountFromNumber, USDAmount, ValidationError, WalletCurrency } from "@domain/shared"
-
-// import { Wallets } from "@app"
+import { usdWalletAmountFromWalletId } from "@app/wallets"
 
 import { GT } from "@graphql/index"
-import { mapError } from "@graphql/error-map"
-
 import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 import OnChainAddress from "@graphql/shared/types/scalar/on-chain-address"
 import PayoutSpeed from "@graphql/public/types/scalar/payout-speed"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 
 import OnChainUsdTxFee from "@graphql/public/types/object/onchain-usd-tx-fee"
-
-import { normalizePaymentAmount } from "../../../shared/root/mutation"
 
 // FLASH FORK: import ibex dependencies
 import Ibex from "@services/ibex/client"
@@ -46,7 +40,10 @@ const OnChainUsdTxFeeQuery = GT.Field<null, GraphQLPublicContextAuth>({
     //   speed,
     // })
 
-    const send = USDAmount.cents(amount.toString())
+    const send = await usdWalletAmountFromWalletId({
+      walletId,
+      amount: amount.toString(),
+    })
     if (send instanceof Error) return send
     const resp = await Ibex.estimateOnchainFee(send, address)
 

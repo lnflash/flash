@@ -1,7 +1,3 @@
-import { InvalidFeeProbeStateError } from "@domain/bitcoin/lightning"
-
-// import { Payments } from "@app"
-
 import { GT } from "@graphql/index"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import CentAmountPayload from "@graphql/public/types/payload/cent-amount"
@@ -10,17 +6,10 @@ import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 
 import { checkedToWalletId } from "@domain/wallets"
 
-import { normalizePaymentAmount } from "../../../shared/root/mutation"
-
-// FLASH FORK: import ibex dependencies
 import Ibex from "@services/ibex/client"
 
-import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
-import { ValidationError, WalletCurrency } from "@domain/shared"
-import { baseLogger } from "@services/logger"
-import IError from "@graphql/shared/types/abstract/error"
-import USDCentsScalar from "@graphql/shared/types/scalar/usd-cents"
-import CentAmount from "@graphql/public/types/scalar/cent-amount"
+import { IbexError } from "@services/ibex/errors"
+import { WalletsRepository } from "@services/mongoose"
 // import { IbexRoutes } from "../../../../services/ibex/Routes"
 // import { requestIBexPlugin } from "../../../../services/ibex/IbexHelper"
 
@@ -86,9 +75,14 @@ const LnUsdInvoiceFeeProbeMutation = GT.Field<
     //     uncheckedPaymentRequest: paymentRequest,
     //   })
 
+    const wallet = await WalletsRepository().findById(walletIdChecked)
+    if (wallet instanceof Error) {
+      return { errors: [mapAndParseErrorForGqlResponse(wallet)] }
+    }
+
     const resp = await Ibex.getLnFeeEstimation({
       invoice: paymentRequest as Bolt11,
-      // send: { currencyId: USDollars.currencyId },
+      currency: wallet.currency,
     })
     if (resp instanceof IbexError) return { errors: [mapAndParseErrorForGqlResponse(resp)] }     
     

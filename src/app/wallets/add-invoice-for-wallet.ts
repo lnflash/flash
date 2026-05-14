@@ -20,8 +20,10 @@ import {
 import Ibex from "@services/ibex/client"
 import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
 import { decodeInvoice } from "@domain/bitcoin/lightning/ln-invoice"
-import { USDAmount } from "@domain/shared"
+
 import { AddInvoiceResponse201 } from "ibex-client"
+
+import { usdWalletAmountFromInput } from "./usd-wallet-amount"
 
 import { validateIsBtcWallet, validateIsUsdWallet } from "./validate"
 
@@ -46,7 +48,9 @@ const addInvoiceForSelf = async ({
   const limitOk = await checkSelfWalletIdRateLimits(wallet.accountId)
   if (limitOk instanceof Error) return limitOk
 
-  const checkedAmount = amount ? USDAmount.cents(amount.toString()) : undefined
+  const checkedAmount = amount
+    ? usdWalletAmountFromInput(amount.toString(), wallet.currency)
+    : undefined
   if (checkedAmount instanceof Error) return checkedAmount
   const resp = await Ibex.addInvoice({
     amount: checkedAmount,
@@ -77,7 +81,7 @@ export const addInvoiceForSelfForUsdWallet = async (
   const expiresIn = checkedToMinutes(args.expiresIn || defaultUsdExpiration)
   if (expiresIn instanceof Error) return expiresIn
 
-  const validated = await validateIsUsdWallet(walletId)
+  const validated = await validateIsUsdWallet(walletId, { includeUsdt: true })
   if (validated instanceof Error) return validated
   return addInvoiceForSelf({ ...args, walletId, expiresIn })
 }
@@ -133,7 +137,7 @@ const addInvoiceForRecipient = async ({
   const limitOk = await checkRecipientWalletIdRateLimits(wallet.accountId)
   if (limitOk instanceof Error) return limitOk
 
-  const checkedAmount = USDAmount.cents(amount.toString())
+  const checkedAmount = usdWalletAmountFromInput(amount.toString(), wallet.currency)
   if (checkedAmount instanceof Error) return checkedAmount
   const resp = await Ibex.addInvoice({
     amount: checkedAmount,
@@ -163,7 +167,7 @@ export const addInvoiceForRecipientForUsdWallet = async (
   const expiresIn = checkedToMinutes(args.expiresIn || defaultUsdExpiration)
   if (expiresIn instanceof Error) return expiresIn
 
-  const validated = await validateIsUsdWallet(recipientWalletId)
+  const validated = await validateIsUsdWallet(recipientWalletId, { includeUsdt: true })
   if (validated instanceof Error) return validated
 
   return addInvoiceForRecipient({ ...args, recipientWalletId, expiresIn })

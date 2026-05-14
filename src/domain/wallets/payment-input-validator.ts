@@ -1,4 +1,10 @@
-import { USDAmount, ValidationError, isUsdWallet, validator } from "@domain/shared"
+import {
+  USDAmount,
+  USDTAmount,
+  ValidationError,
+  WalletCurrency,
+  validator,
+} from "@domain/shared"
 import { isActiveAccount, walletBelongsToAccount } from "@domain/accounts"
 import { SendOnchainArgs } from "@services/ibex/types"
 
@@ -8,23 +14,35 @@ import { SendOnchainArgs } from "@services/ibex/types"
 //   else return true
 // }
 
-const checkOnchainMin = async (o: { amount: USDAmount }) => {
+const isUsdWalletForOnChainPayment = async (o: { wallet: Wallet }) => {
+  if (
+    o.wallet.currency === WalletCurrency.Usd ||
+    o.wallet.currency === WalletCurrency.Usdt
+  ) {
+    return true
+  }
+  return new ValidationError(`Expected USD, got ${o.wallet.currency}`)
+}
+
+const checkOnchainMin = async (o: { amount: USDAmount | USDTAmount }) => {
   // TODO: Currently relying on Ibex to enforce dust limits
   // const { dustThreshold } = getOnChainWalletConfig()
   // const minBtc = BtcAmount.sats(dustThreshold.toString())
   // const btcPrice = await PriceService().getUsdCentRealTimePrice(_)
   // if (btcPrice instanceof PriceServiceError) return new ValidationError(btcPrice)
   // const minUsd = minBtc.convertAtRate(MoneyAmount.from("50000", WalletCurrency.Usd))
-  const minUsd = USDAmount.ZERO
-  return o.amount.isGreaterThan(minUsd)
-    ? true
-    : new ValidationError(`Amount must be greater than ${minUsd.asDollars()}`)
+  const isGreaterThanZero =
+    o.amount instanceof USDTAmount
+      ? o.amount.isGreaterThan(USDTAmount.ZERO)
+      : o.amount.isGreaterThan(USDAmount.ZERO)
+
+  return isGreaterThanZero ? true : new ValidationError("Amount must be greater than 0")
 }
 
 type SendOnchainArgsWithContext = SendOnchainArgs & { wallet: Wallet; account: Account }
 
 export const OnchainUsdPaymentValidator = validator<SendOnchainArgsWithContext>([
-  isUsdWallet,
+  isUsdWalletForOnChainPayment,
   isActiveAccount,
   walletBelongsToAccount,
   checkOnchainMin,
