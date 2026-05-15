@@ -24,7 +24,7 @@ jest.mock("@services/lock", () => ({
 }))
 
 jest.mock("@services/bridge/reconciliation", () => ({
-  reconcileByTxHash: jest.fn(),
+  reconcileByTxHash: jest.fn().mockResolvedValue({ status: "matched" }),
 }))
 
 import { cryptoReceiveHandler } from "@services/ibex/webhook-server/routes/crypto-receive"
