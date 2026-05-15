@@ -23,6 +23,10 @@ jest.mock("@services/lock", () => ({
   LockService: jest.fn(),
 }))
 
+jest.mock("@services/bridge/reconciliation", () => ({
+  reconcileByTxHash: jest.fn(),
+}))
+
 import { cryptoReceiveHandler } from "@services/ibex/webhook-server/routes/crypto-receive"
 import { AccountsRepository } from "@services/mongoose/accounts"
 import { createIbexCryptoReceiveLog } from "@services/mongoose/ibex-crypto-receive-log"
@@ -47,7 +51,7 @@ describe("cryptoReceiveHandler", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     ;(LockService as jest.Mock).mockReturnValue({
-      lockPaymentHash: jest.fn((_hash, fn) => fn()),
+      lockOnChainTxHash: jest.fn((_hash, fn) => fn()),
     })
     ;(AccountsRepository as jest.Mock).mockReturnValue({
       findByBridgeEthereumAddress: jest.fn().mockResolvedValue({ id: ACCOUNT_ID }),
@@ -105,7 +109,7 @@ describe("cryptoReceiveHandler", () => {
       res as never,
     )
 
-    expect(LockService().lockPaymentHash).not.toHaveBeenCalled()
+    expect(LockService().lockOnChainTxHash).not.toHaveBeenCalled()
     expect(createIbexCryptoReceiveLog).not.toHaveBeenCalled()
     expect(res.status).toHaveBeenCalledWith(400)
     expect(res.json).toHaveBeenCalledWith({ error: "Invalid payload" })

@@ -17,6 +17,7 @@ import { RepositoryError } from "@domain/errors"
 import { toBridgeCustomerId } from "@domain/primitives/bridge"
 import { getBalanceForWallet } from "@app/wallets/get-balance-for-wallet"
 import { USDTAmount, WalletCurrency } from "@domain/shared"
+import { WalletType } from "@domain/wallets"
 import { WalletsRepository } from "@services/mongoose/wallets"
 
 import { IdentityRepository } from "@services/kratos"
@@ -212,28 +213,22 @@ const initiateKyc = async ({
 
     return result
   } catch (error) {
+    const bridgeError = error as { statusCode?: number; response?: { existing_kyc_link?: { kyc_link: string; customer_id: string; tos_link: string } } }
 
-    console.log("Error in initiateKyc:", error);
-
-    if ((error as any)?.statusCode === 400) {
-
-      const result: InitiateKycResult = {
-        kycLink: (error as any).response.existing_kyc_link.kyc_link,
-        customerId: (error as any).response.existing_kyc_link.customer_id,
-        tosLink: (error as any).response.existing_kyc_link.tos_link,
+    if (bridgeError?.statusCode === 400 && bridgeError.response?.existing_kyc_link) {
+      return {
+        kycLink: bridgeError.response.existing_kyc_link.kyc_link,
+        customerId: bridgeError.response.existing_kyc_link.customer_id,
+        tosLink: bridgeError.response.existing_kyc_link.tos_link,
       }
-
-      return result
-
     }
+
     baseLogger.error(
       { accountId, operation: "initiateKyc", error },
       "Bridge operation failed",
     )
-
     return error instanceof Error ? error : new Error(String(error))
   }
-
 }
 
 /**

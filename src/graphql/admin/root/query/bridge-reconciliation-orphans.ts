@@ -9,10 +9,20 @@ const BridgeReconciliationOrphansQuery = GT.Field({
     orphanType: { type: GT.String, defaultValue: null },
     limit: { type: GT.Int, defaultValue: 50 },
   },
-  resolve: async (_: unknown, { status, orphanType, limit }: { status?: string; orphanType?: string; limit?: number }) => {
+  resolve: async (
+    _: unknown,
+    {
+      status,
+      orphanType,
+      limit,
+    }: { status?: string; orphanType?: string; limit?: number },
+  ) => {
     const result = await findOrphans({
       status: status as "unmatched" | "resolved" | undefined,
-      orphanType: orphanType as "bridge_without_ibex" | "ibex_without_bridge" | undefined,
+      orphanType: orphanType as
+        | "bridge_without_ibex"
+        | "ibex_without_bridge"
+        | undefined,
       limit: limit ?? 50,
     })
 

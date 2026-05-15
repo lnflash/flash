@@ -16,7 +16,7 @@ const args = yargs(hideBin(process.argv))
   .parseSync()
 
 const main = async () => {
-  const windowMs = Math.max(1, Math.floor(args["window-hours"])) * 60 * 60 * 1000
+  const windowMs = args["window-hours"] * 60 * 60 * 1000
   const result = await reconcileBridgeAndIbexDeposits({ windowMs })
   if (result instanceof Error) throw result
   baseLogger.info(result, "Bridge↔IBEX reconciliation finished")

@@ -39,8 +39,8 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
     return res.status(400).json({ error: "Invalid payload" })
   }
 
-  const lockResult = await LockService().lockPaymentHash(
-    tx_hash as PaymentHash,
+  const lockResult = await LockService().lockOnChainTxHash(
+    tx_hash as OnChainTxHash,
     async () => {
       try {
         const account = await AccountsRepository().findByBridgeEthereumAddress(address)
