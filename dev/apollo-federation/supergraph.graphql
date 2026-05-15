@@ -1588,7 +1588,7 @@ type Query
   @join__type(graph: PUBLIC)
 {
   accountDefaultWallet(username: Username!, walletCurrency: WalletCurrency): PublicWallet!
-  accountUpgradeRequest: AccountUpgradeRequestPayload!
+  latestAccountUpgradeRequest: AccountUpgradeRequestPayload!
   bridgeExternalAccounts: [BridgeExternalAccount]
   bridgeKycStatus: String
   bridgeVirtualAccount: BridgeVirtualAccount
