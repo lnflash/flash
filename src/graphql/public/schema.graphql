@@ -254,10 +254,12 @@ type BridgeCreateVirtualAccountPayload {
 }
 
 type BridgeExternalAccount {
-  accountNumberLast4: String!
-  bankName: String!
-  id: ID!
-  status: String!
+  accountNumberLast4: String
+  bankName: String
+  expiresAt: Timestamp
+  id: ID
+  linkUrl: String
+  status: String
 }
 
 input BridgeInitiateKycInput {
