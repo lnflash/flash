@@ -1290,7 +1290,6 @@ type PublicWallet {
 
 type Query {
   accountDefaultWallet(username: Username!, walletCurrency: WalletCurrency): PublicWallet!
-  latestAccountUpgradeRequest: AccountUpgradeRequestPayload!
   bridgeExternalAccounts: [BridgeExternalAccount]
   bridgeKycStatus: String
   bridgeVirtualAccount: BridgeVirtualAccount
@@ -1301,6 +1300,7 @@ type Query {
   currencyList: [Currency!]!
   globals: Globals
   isFlashNpub(input: IsFlashNpubInput!): IsFlashNpubPayload
+  latestAccountUpgradeRequest: AccountUpgradeRequestPayload!
   lnInvoicePaymentStatus(input: LnInvoicePaymentStatusInput!): LnInvoicePaymentStatusPayload!
   me: User
   mobileVersions: [MobileVersions]

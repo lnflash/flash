@@ -17,6 +17,7 @@ import { RepositoryError } from "@domain/errors"
 import { toBridgeCustomerId } from "@domain/primitives/bridge"
 import { getBalanceForWallet } from "@app/wallets/get-balance-for-wallet"
 import { USDTAmount, WalletCurrency } from "@domain/shared"
+import { WalletType } from "@domain/wallets"
 import { WalletsRepository } from "@services/mongoose/wallets"
 
 import { IdentityRepository } from "@services/kratos"
@@ -90,6 +91,38 @@ type ExternalAccountResult = {
 
 export const deriveWithdrawalIdempotencyKey = (rowId: string): string =>
   crypto.createHash("sha256").update(`withdrawal:${rowId}`).digest("hex")
+
+const ensureEthUsdtCashWallet = async (
+  account: Account,
+): Promise<Wallet | ApplicationError> => {
+  const wallets = await WalletsRepository().listByAccountId(account.id)
+  if (wallets instanceof Error) return wallets
+
+  let usdtWallet = wallets.find(
+    (wallet) =>
+      wallet.currency === WalletCurrency.Usdt && wallet.type === WalletType.Checking,
+  )
+
+  if (!usdtWallet) {
+    const createdWallet = await WalletsRepository().persistNew({
+      accountId: account.id,
+      type: WalletType.Checking,
+      currency: WalletCurrency.Usdt,
+    })
+    if (createdWallet instanceof Error) return createdWallet
+    usdtWallet = createdWallet
+  }
+
+  if (account.defaultWalletId !== usdtWallet.id) {
+    const updatedAccount = await AccountsRepository().update({
+      ...account,
+      defaultWalletId: usdtWallet.id,
+    })
+    if (updatedAccount instanceof Error) return updatedAccount
+  }
+
+  return usdtWallet
+}
 
 // ============ Guards ============
 
@@ -180,6 +213,16 @@ const initiateKyc = async ({
 
     return result
   } catch (error) {
+    const bridgeError = error as { statusCode?: number; response?: { existing_kyc_link?: { kyc_link: string; customer_id: string; tos_link: string } } }
+
+    if (bridgeError?.statusCode === 400 && bridgeError.response?.existing_kyc_link) {
+      return {
+        kycLink: bridgeError.response.existing_kyc_link.kyc_link,
+        customerId: bridgeError.response.existing_kyc_link.customer_id,
+        tosLink: bridgeError.response.existing_kyc_link.tos_link,
+      }
+    }
+
     baseLogger.error(
       { accountId, operation: "initiateKyc", error },
       "Bridge operation failed",
@@ -191,8 +234,9 @@ const initiateKyc = async ({
 /**
  * Creates a virtual account for receiving USD deposits
  * - Requires approved KYC
- * - Creates IBEX Tron USDT receive address
- * - Creates Bridge virtual account pointing to Tron address
+ * - Ensures an IBEX ETH-USDT Cash Wallet exists and is the account default
+ * - Creates IBEX Ethereum USDT receive address
+ * - Creates Bridge virtual account pointing to Ethereum address
  */
 const createVirtualAccount = async (
   accountId: AccountId,
@@ -227,7 +271,7 @@ const createVirtualAccount = async (
       return new BridgeKycPendingError("KYC not yet completed")
     }
 
-    // Idempotency guard: return the existing VA immediately without touching Bridge
+    // Idempotency guard first: do not mutate wallets/default when a VA already exists
     const existingVa = await BridgeAccountsRepo.findVirtualAccountByAccountId(
       accountId as string,
     )
@@ -241,26 +285,29 @@ const createVirtualAccount = async (
       }
     }
 
-    // Get or create Ethereum address
-    let ethereumAddress =
-      account.bridgeEthereumAddress || "0xaF095D35bfDd462165eA7eCF8AC75351a93d72bD"
+    const usdtCashWallet = await ensureEthUsdtCashWallet(account)
+    if (usdtCashWallet instanceof Error) return usdtCashWallet
+
+    // Get or create Ethereum USDT receive address for the ETH-USDT Cash Wallet
+    let ethereumAddress = account.bridgeEthereumAddress
 
     if (!ethereumAddress) {
-      const option = await IbexClient.getEthereumUsdtOption()
+      let option = await IbexClient.getEthereumUsdtOption()
       if (option instanceof Error) return new BridgeError(option.message)
 
+      option.name = `USDT-ETH ${account.username}-${crypto.randomBytes(4).toString("hex")}`
       const receiveInfo = await IbexClient.createCryptoReceiveInfo(
-        account.defaultWalletId as IbexAccountId,
+        usdtCashWallet.id as IbexAccountId,
         option,
       )
       if (receiveInfo instanceof Error) return new BridgeError(receiveInfo.message)
 
       const updateResult = await AccountsRepository().updateBridgeFields(accountId, {
-        bridgeEthereumAddress: receiveInfo.address,
+        bridgeEthereumAddress: receiveInfo.data.address,
       })
       if (updateResult instanceof Error) return updateResult
 
-      ethereumAddress = receiveInfo.address
+      ethereumAddress = receiveInfo.data.address
     }
 
     // Deterministic key so Bridge deduplicates on their side if two calls race past
@@ -407,7 +454,9 @@ const initiateWithdrawal = async (
 
     const wallets = await WalletsRepository().listByAccountId(accountId)
     if (wallets instanceof Error) return wallets
-    const usdtWallet = wallets.find((w) => w.currency === WalletCurrency.Usdt)
+    const usdtWallet = wallets.find(
+      (w) => w.currency === WalletCurrency.Usdt && w.type === WalletType.Checking,
+    )
     if (!usdtWallet) {
       return new BridgeInsufficientFundsError("No USDT wallet found on account")
     }

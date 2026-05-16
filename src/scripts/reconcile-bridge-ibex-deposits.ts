@@ -9,14 +9,14 @@ import { reconcileBridgeAndIbexDeposits } from "@services/bridge/reconciliation"
 const args = yargs(hideBin(process.argv))
   .option("window-hours", {
     type: "number",
-    default: 24,
-    describe: "Reconciliation window in hours",
+    default: 0.25,
+    describe: "Reconciliation window in hours (default: 15 minutes)",
   })
   .option("configPath", { type: "string", demandOption: true })
   .parseSync()
 
 const main = async () => {
-  const windowMs = Math.max(1, Math.floor(args["window-hours"])) * 60 * 60 * 1000
+  const windowMs = args["window-hours"] * 60 * 60 * 1000
   const result = await reconcileBridgeAndIbexDeposits({ windowMs })
   if (result instanceof Error) throw result
   baseLogger.info(result, "Bridge↔IBEX reconciliation finished")

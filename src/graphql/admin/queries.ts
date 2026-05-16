@@ -15,6 +15,7 @@ import AccountDetailsByAccountId from "./root/query/account-details-by-account-i
 import MerchantsPendingApprovalQuery from "./root/query/merchants-pending-approval-listing"
 import IdDocumentReadUrlQuery from "./root/query/id-document-read-url"
 import NotificationTopicsQuery from "./root/query/notification-topics"
+import BridgeReconciliationOrphansQuery from "./root/query/bridge-reconciliation-orphans"
 
 export const queryFields = {
   unauthed: {},
@@ -34,6 +35,7 @@ export const queryFields = {
     merchantsPendingApproval: MerchantsPendingApprovalQuery,
     idDocumentReadUrl: IdDocumentReadUrlQuery,
     notificationTopics: NotificationTopicsQuery,
+    bridgeReconciliationOrphans: BridgeReconciliationOrphansQuery,
   },
 }
 

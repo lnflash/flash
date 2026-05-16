@@ -18,6 +18,8 @@ jest.mock("@services/logger", () => ({
 }))
 
 jest.mock("@services/mongoose/bridge-accounts", () => ({
+  createVirtualAccount: jest.fn(),
+  findVirtualAccountByAccountId: jest.fn(),
   createWithdrawal: jest.fn(),
   findPendingWithdrawalWithoutTransfer: jest.fn(),
   findExternalAccountsByAccountId: jest.fn(),
@@ -26,7 +28,15 @@ jest.mock("@services/mongoose/bridge-accounts", () => ({
 
 jest.mock("@services/bridge/client", () => ({
   __esModule: true,
-  default: { createTransfer: jest.fn() },
+  default: { createVirtualAccount: jest.fn(), createTransfer: jest.fn() },
+}))
+
+jest.mock("@services/ibex/client", () => ({
+  __esModule: true,
+  default: {
+    getEthereumUsdtOption: jest.fn(),
+    createCryptoReceiveInfo: jest.fn(),
+  },
 }))
 
 jest.mock("@services/ibex/client", () => ({
@@ -83,6 +93,8 @@ import BridgeClient from "@services/bridge/client"
 import { AccountsRepository } from "@services/mongoose/accounts"
 import { WalletsRepository } from "@services/mongoose/wallets"
 import { getBalanceForWallet } from "@app/wallets/get-balance-for-wallet"
+import IbexClient from "@services/ibex/client"
+import { RepositoryError } from "@domain/errors"
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -92,6 +104,9 @@ const AMOUNT = "50"
 const CUSTOMER_ID = "cust-001"
 const ETHEREUM_ADDRESS = "ETH_ADDR_001"
 const TRANSFER_ID = "transfer-bridge-001"
+const USDT_WALLET_ID = "ibex-eth-usdt-wallet-001"
+const RECEIVE_INFO_ID = "receive-info-001"
+const VIRTUAL_ACCOUNT_ID = "virtual-account-001"
 
 const mockAccount = {
   id: ACCOUNT_ID,
@@ -119,6 +134,22 @@ const mockTransfer = {
   state: "pending",
 }
 
+const mockVirtualAccount = {
+  id: VIRTUAL_ACCOUNT_ID,
+  source_deposit_instructions: {
+    bank_name: "Test Bank",
+    bank_routing_number: "123456789",
+    bank_account_number: "123456789012",
+  },
+}
+
+const makeWallet = (id: string, currency: string) => ({
+  id,
+  accountId: ACCOUNT_ID,
+  type: "checking",
+  currency,
+})
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const setupGuards = () => {
@@ -131,9 +162,9 @@ const setupGuards = () => {
     findById: jest.fn().mockResolvedValue(mockAccount),
   })
   ;(WalletsRepository as jest.Mock).mockReturnValue({
-    listByAccountId: jest
-      .fn()
-      .mockResolvedValue([{ id: "wallet-001", currency: "USDT" }]),
+    listByAccountId: jest.fn().mockResolvedValue([
+      { id: "wallet-001", currency: "USDT", type: "checking" },
+    ]),
   })
   ;(getBalanceForWallet as jest.Mock).mockResolvedValue(balance)
   ;(BridgeAccountsRepo.findExternalAccountsByAccountId as jest.Mock).mockResolvedValue([
@@ -175,6 +206,181 @@ describe("deriveWithdrawalIdempotencyKey", () => {
   it("output is a 64-character lowercase hex string (sha256)", () => {
     const key = deriveWithdrawalIdempotencyKey("any-id")
     expect(key).toMatch(/^[0-9a-f]{64}$/)
+  })
+})
+
+/**
+ * Linear ENG-296 — ETH-USDT Cash Wallet + Bridge virtual account
+ * @see https://linear.app/island-bitcoin/issue/ENG-296
+ *
+ * Acceptance ↔ tests (staging steps: `dev/qa/ENG-296-staging-checklist.md`):
+ * - AC1 IBEX ETH-USDT as Cash Wallet: first `it` — USDT checking persisted/reused, Ibex
+ *   `createCryptoReceiveInfo` uses USDT wallet id; account `bridgeEthereumAddress` updated.
+ * - AC2 USD not primary: first `it` — `AccountsRepository.update` sets `defaultWalletId` to USDT wallet.
+ * - AC3 createVirtualAccount E2E: first & second `it` — Bridge + repo; third `it` — idempotent VA return.
+ */
+describe("createVirtualAccount — ETH-USDT Cash Wallet provisioning (ENG-296)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+  })
+
+  it("ENG-296 AC1+AC2+AC3: provisions USDT cash wallet, flips default off USD, persists Ibex ETH receive address, creates Bridge VA", async () => {
+    const usdtWallet = makeWallet(USDT_WALLET_ID, "USDT")
+    const accountWithoutUsdt = {
+      ...mockAccount,
+      defaultWalletId: "legacy-usd-wallet-id",
+      bridgeEthereumAddress: undefined,
+    }
+
+    const accountsRepo = {
+      findById: jest.fn().mockResolvedValue(accountWithoutUsdt),
+      update: jest.fn().mockResolvedValue({
+        ...accountWithoutUsdt,
+        defaultWalletId: USDT_WALLET_ID,
+      }),
+      updateBridgeFields: jest.fn().mockResolvedValue({
+        ...accountWithoutUsdt,
+        defaultWalletId: USDT_WALLET_ID,
+        bridgeEthereumAddress: ETHEREUM_ADDRESS,
+      }),
+    }
+    ;(AccountsRepository as jest.Mock).mockReturnValue(accountsRepo)
+    ;(WalletsRepository as jest.Mock).mockReturnValue({
+      listByAccountId: jest.fn().mockResolvedValue([makeWallet("legacy-usd-wallet-id", "USD")]),
+      persistNew: jest.fn().mockResolvedValue(usdtWallet),
+    })
+    ;(BridgeAccountsRepo.findVirtualAccountByAccountId as jest.Mock).mockResolvedValue(
+      new RepositoryError("not found"),
+    )
+    ;(IbexClient.getEthereumUsdtOption as jest.Mock).mockResolvedValue({
+      id: "eth-usdt-option",
+      currency: "USDT",
+      network: "ethereum",
+      name: "Ethereum USDT",
+    })
+    ;(IbexClient.createCryptoReceiveInfo as jest.Mock).mockResolvedValue({
+      id: RECEIVE_INFO_ID,
+      wallet_id: USDT_WALLET_ID,
+      option_id: "eth-usdt-option",
+      data: { address: ETHEREUM_ADDRESS },
+      currency: "USDT",
+      network: "ethereum",
+      created_at: "2026-05-09T00:00:00Z",
+    })
+    ;(BridgeClient.createVirtualAccount as jest.Mock).mockResolvedValue(mockVirtualAccount)
+    ;(BridgeAccountsRepo.createVirtualAccount as jest.Mock).mockResolvedValue({
+      bridgeVirtualAccountId: VIRTUAL_ACCOUNT_ID,
+    })
+
+    await BridgeService.createVirtualAccount(ACCOUNT_ID)
+
+    expect(WalletsRepository().persistNew).toHaveBeenCalledWith({
+      accountId: ACCOUNT_ID,
+      type: "checking",
+      currency: "USDT",
+    })
+    expect(AccountsRepository().update).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultWalletId: USDT_WALLET_ID }),
+    )
+    expect(IbexClient.createCryptoReceiveInfo).toHaveBeenCalledWith(
+      USDT_WALLET_ID,
+      expect.objectContaining({ network: "ethereum", currency: "USDT" }),
+    )
+    expect(accountsRepo.updateBridgeFields).toHaveBeenCalledWith(
+      ACCOUNT_ID,
+      expect.objectContaining({ bridgeEthereumAddress: ETHEREUM_ADDRESS }),
+    )
+    expect(BridgeClient.createVirtualAccount).toHaveBeenCalledWith(
+      CUSTOMER_ID,
+      expect.objectContaining({
+        destination: expect.objectContaining({
+          currency: "usdt",
+          payment_rail: "ethereum",
+          address: ETHEREUM_ADDRESS,
+        }),
+      }),
+      expect.any(String),
+    )
+  })
+
+  it("ENG-296 AC1+AC3: reuses existing USDT cash wallet and stored Ethereum address (no extra Ibex receive-info call)", async () => {
+    const usdtWallet = makeWallet(USDT_WALLET_ID, "USDT")
+    const accountWithUsdtDefault = {
+      ...mockAccount,
+      defaultWalletId: USDT_WALLET_ID,
+      bridgeEthereumAddress: ETHEREUM_ADDRESS,
+    }
+
+    ;(AccountsRepository as jest.Mock).mockReturnValue({
+      findById: jest.fn().mockResolvedValue(accountWithUsdtDefault),
+      update: jest.fn(),
+      updateBridgeFields: jest.fn(),
+    })
+    ;(WalletsRepository as jest.Mock).mockReturnValue({
+      listByAccountId: jest.fn().mockResolvedValue([usdtWallet]),
+      persistNew: jest.fn(),
+    })
+    ;(BridgeAccountsRepo.findVirtualAccountByAccountId as jest.Mock).mockResolvedValue(
+      new RepositoryError("not found"),
+    )
+    ;(BridgeClient.createVirtualAccount as jest.Mock).mockResolvedValue(mockVirtualAccount)
+    ;(BridgeAccountsRepo.createVirtualAccount as jest.Mock).mockResolvedValue({
+      bridgeVirtualAccountId: VIRTUAL_ACCOUNT_ID,
+    })
+
+    await BridgeService.createVirtualAccount(ACCOUNT_ID)
+
+    expect(WalletsRepository().persistNew).not.toHaveBeenCalled()
+    expect(AccountsRepository().update).not.toHaveBeenCalled()
+    expect(IbexClient.createCryptoReceiveInfo).not.toHaveBeenCalled()
+    expect(BridgeClient.createVirtualAccount).toHaveBeenCalledWith(
+      CUSTOMER_ID,
+      expect.objectContaining({
+        destination: expect.objectContaining({ address: ETHEREUM_ADDRESS }),
+      }),
+      expect.any(String),
+    )
+  })
+
+  it("ENG-296 AC3 (idempotent): existing VA returns stored bank details without wallet or Ibex side effects", async () => {
+    const existingVaRecord = {
+      bridgeVirtualAccountId: VIRTUAL_ACCOUNT_ID,
+      bankName: "Existing Bank",
+      routingNumber: "021000021",
+      accountNumber: "000111222",
+      accountNumberLast4: "0222",
+    }
+
+    ;(AccountsRepository as jest.Mock).mockReturnValue({
+      findById: jest.fn().mockResolvedValue(mockAccount),
+      update: jest.fn(),
+      updateBridgeFields: jest.fn(),
+    })
+    ;(WalletsRepository as jest.Mock).mockReturnValue({
+      listByAccountId: jest.fn(),
+      persistNew: jest.fn(),
+    })
+    ;(BridgeAccountsRepo.findVirtualAccountByAccountId as jest.Mock).mockResolvedValue(
+      existingVaRecord,
+    )
+
+    const result = await BridgeService.createVirtualAccount(ACCOUNT_ID)
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        virtualAccountId: VIRTUAL_ACCOUNT_ID,
+        bankName: "Existing Bank",
+        routingNumber: "021000021",
+        accountNumber: "000111222",
+        accountNumberLast4: "0222",
+      }),
+    )
+    expect(WalletsRepository().listByAccountId).not.toHaveBeenCalled()
+    expect(WalletsRepository().persistNew).not.toHaveBeenCalled()
+    expect(AccountsRepository().update).not.toHaveBeenCalled()
+    expect(IbexClient.getEthereumUsdtOption).not.toHaveBeenCalled()
+    expect(IbexClient.createCryptoReceiveInfo).not.toHaveBeenCalled()
+    expect(BridgeClient.createVirtualAccount).not.toHaveBeenCalled()
   })
 })
 
