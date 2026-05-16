@@ -52,7 +52,10 @@ const BtcWallet = GT.Object<Wallet>({
       description: "A balance stored in BTC.",
       resolve: async (source) => {
         if (source.type === WalletType.External) return null
-        const balanceSats = await Wallets.getBalanceForWallet({ walletId: source.id })
+        const balanceSats = await Wallets.getBalanceForWallet({
+          walletId: source.id,
+          currency: source.currency,
+        })
         if (balanceSats instanceof Error) {
           throw mapError(balanceSats)
         }

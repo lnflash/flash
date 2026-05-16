@@ -10,6 +10,7 @@ import { Request, Response } from "express"
 import { LockService } from "@services/lock"
 import { baseLogger } from "@services/logger"
 import { createBridgeDepositLog } from "@services/mongoose/bridge-deposit-log"
+import { reconcileByTxHash } from "@services/bridge/reconciliation"
 
 export const depositHandler = async (req: Request, res: Response) => {
   const { event_id, event_object } = req.body
@@ -75,6 +76,12 @@ export const depositHandler = async (req: Request, res: Response) => {
         "Failed to persist bridge deposit log",
       )
       return res.status(500).json({ error: "Failed to persist deposit log" })
+    }
+
+    if (state === "payment_processed" && receipt?.destination_tx_hash) {
+      reconcileByTxHash({ txHash: receipt.destination_tx_hash }).catch((err) =>
+        baseLogger.error({ err, event_id, id }, "Real-time reconciliation failed"),
+      )
     }
 
     return res.status(200).json({ status: "success" })

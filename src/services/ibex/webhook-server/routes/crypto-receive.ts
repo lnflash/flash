@@ -5,6 +5,7 @@ import { listWalletsByAccountId } from "@app/wallets"
 import { WalletCurrency, USDTAmount } from "@domain/shared"
 import { baseLogger } from "@services/logger"
 import { LockService } from "@services/lock"
+import { reconcileByTxHash } from "@services/bridge/reconciliation"
 
 import { authenticate, logRequest } from "../middleware"
 
@@ -21,8 +22,16 @@ interface CryptoReceiveResult {
 
 const cryptoReceiveHandler = async (req: Request, res: Response) => {
   const { tx_hash, address, amount, currency, network } = req.body
+  const normalizedCurrency = String(currency || "").toUpperCase()
+  const normalizedNetwork = String(network || "").toLowerCase()
 
-  if (!tx_hash || !address || !amount || currency !== "USDT" || network !== "tron") {
+  if (
+    !tx_hash ||
+    !address ||
+    !amount ||
+    normalizedCurrency !== "USDT" ||
+    normalizedNetwork !== "ethereum"
+  ) {
     baseLogger.warn(
       { tx_hash, address, amount, currency, network },
       "Invalid crypto receive payload",
@@ -30,8 +39,8 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
     return res.status(400).json({ error: "Invalid payload" })
   }
 
-  const lockResult = await LockService().lockPaymentHash(
-    tx_hash as PaymentHash,
+  const lockResult = await LockService().lockOnChainTxHash(
+    tx_hash as OnChainTxHash,
     async () => {
       try {
         const account = await AccountsRepository().findByBridgeEthereumAddress(address)
@@ -44,8 +53,8 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
           txHash: String(tx_hash),
           address: String(address),
           amount: String(amount),
-          currency: String(currency),
-          network: String(network),
+          currency: normalizedCurrency,
+          network: normalizedNetwork,
           accountId: account.id,
         })
         if (ibexLog instanceof Error) {
@@ -55,6 +64,10 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
           )
           return { status: "error", code: "internal_error" } as CryptoReceiveResult
         }
+
+        reconcileByTxHash({ txHash: String(tx_hash) }).catch((err) =>
+          baseLogger.error({ err, tx_hash }, "Real-time reconciliation failed"),
+        )
 
         const wallets = await listWalletsByAccountId(account.id)
         if (wallets instanceof Error) {
@@ -122,4 +135,4 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
 
 router.post(paths.cryptoReceive, authenticate, logRequest, cryptoReceiveHandler)
 
-export { paths, router }
+export { cryptoReceiveHandler, paths, router }

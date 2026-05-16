@@ -65,10 +65,14 @@ const swapOutJob = async () => {
   if (swapResult instanceof Error) throw swapResult
 }
 
+// Window covers 15 min of events — real-time webhook reconciliation handles everything
+// else immediately. This batch pass is only a safety net for missed/delayed webhooks.
+const RECONCILE_WINDOW_MS = 15 * 60 * 1000
+
 const reconcileBridgeDepositsJob = async () => {
   if (!BridgeConfig.enabled) return
 
-  const result = await reconcileBridgeAndIbexDeposits()
+  const result = await reconcileBridgeAndIbexDeposits({ windowMs: RECONCILE_WINDOW_MS })
   if (result instanceof Error) throw result
 }
 

@@ -658,6 +658,18 @@ const BridgeWithdrawalSchema = new Schema<IBridgeWithdrawalRecord>({
   updatedAt: { type: Date, default: Date.now },
 })
 
+// At most one pending row per (account, destination, amount, currency). Partial filter must
+// not use $exists:false — MongoDB rejects it for partial indexes ("$not ... $exists").
+// "pending" alone is enough: completed/failed rows are excluded so the same tuple can repeat
+// after a terminal status.
+BridgeWithdrawalSchema.index(
+  { accountId: 1, externalAccountId: 1, amount: 1, currency: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: "pending" },
+  },
+)
+
 const BridgeDepositLogSchema = new Schema({
   eventId: { type: String, required: true, unique: true },
   transferId: { type: String, required: true },
@@ -703,6 +715,12 @@ const BridgeReconciliationOrphanSchema = new Schema({
     enum: ["bridge_without_ibex", "ibex_without_bridge"],
     required: true,
   },
+  status: {
+    type: String,
+    enum: ["unmatched", "resolved"],
+    default: "unmatched",
+    required: true,
+  },
   transferId: { type: String },
   txHash: { type: String },
   bridgeEventId: { type: String },
@@ -711,10 +729,13 @@ const BridgeReconciliationOrphanSchema = new Schema({
   currency: { type: String },
   triageContext: { type: Schema.Types.Mixed, required: true },
   detectedAt: { type: Date, default: Date.now },
+  resolvedAt: { type: Date },
 })
 
 BridgeReconciliationOrphanSchema.index({ orphanType: 1, detectedAt: -1 })
 BridgeReconciliationOrphanSchema.index({ detectedAt: -1 })
+BridgeReconciliationOrphanSchema.index({ status: 1, detectedAt: -1 })
+BridgeReconciliationOrphanSchema.index({ txHash: 1 })
 
 export const BridgeReconciliationOrphan = mongoose.model(
   "BridgeReconciliationOrphan",

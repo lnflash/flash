@@ -309,7 +309,10 @@ export const loginDeviceUpgradeWithPhone = async ({
   if (deviceWallets instanceof Error) return deviceWallets
   let deviceAccountHasBalance = false
   for (const wallet of deviceWallets) {
-    const balance = await getBalanceForWallet({ walletId: wallet.id })
+    const balance = await getBalanceForWallet({
+      walletId: wallet.id,
+      currency: wallet.currency,
+    })
     if (balance instanceof Error) return balance
     if (!balance.isZero()) {
       deviceAccountHasBalance = true
