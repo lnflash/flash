@@ -4,7 +4,6 @@ import {
   CouldNotFindWalletFromIdError,
   CouldNotFindWalletFromOnChainAddressError,
   CouldNotFindWalletFromOnChainAddressesError,
-  CouldNotListWalletsFromAccountIdError,
   CouldNotListWalletsFromWalletCurrencyError,
   InvalidLnurlError,
   RepositoryError,
@@ -22,6 +21,7 @@ import { recordExceptionInCurrentSpan } from "@services/tracing"
 import { ErrorLevel, USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
 
 import { WalletType } from "@domain/wallets"
+
 
 import { toObjectId, fromObjectId, parseRepositoryError } from "./utils"
 import { Wallet } from "./schema"
@@ -65,6 +65,7 @@ export const WalletsRepository = (): IWalletsRepository => {
       const resp = await Ibex.createAccount(accountId, currencyId)
       if (resp instanceof IbexError) return resp
       const ibexAccountId = resp.id
+
 
       let lnurlp: string | undefined
       if (ibexAccountId !== undefined) {
@@ -118,7 +119,7 @@ export const WalletsRepository = (): IWalletsRepository => {
         _accountId: toObjectId<AccountId>(accountId),
       })
       if (!result || result.length === 0) {
-        return new CouldNotListWalletsFromAccountIdError(`accountId: ${accountId}}`)
+        return []
       }
       return result.map(resultToWallet)
     } catch (err) {
