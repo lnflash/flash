@@ -254,12 +254,10 @@ type BridgeCreateVirtualAccountPayload {
 }
 
 type BridgeExternalAccount {
-  accountNumberLast4: String
-  bankName: String
-  expiresAt: Timestamp
-  id: ID
-  linkUrl: String
-  status: String
+  accountNumberLast4: String!
+  bankName: String!
+  id: ID!
+  status: String!
 }
 
 input BridgeInitiateKycInput {
@@ -1292,7 +1290,6 @@ type PublicWallet {
 
 type Query {
   accountDefaultWallet(username: Username!, walletCurrency: WalletCurrency): PublicWallet!
-  latestAccountUpgradeRequest: AccountUpgradeRequestPayload!
   bridgeExternalAccounts: [BridgeExternalAccount]
   bridgeKycStatus: String
   bridgeVirtualAccount: BridgeVirtualAccount
@@ -1303,6 +1300,7 @@ type Query {
   currencyList: [Currency!]!
   globals: Globals
   isFlashNpub(input: IsFlashNpubInput!): IsFlashNpubPayload
+  latestAccountUpgradeRequest: AccountUpgradeRequestPayload!
   lnInvoicePaymentStatus(input: LnInvoicePaymentStatusInput!): LnInvoicePaymentStatusPayload!
   me: User
   mobileVersions: [MobileVersions]
