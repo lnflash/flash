@@ -219,19 +219,17 @@ type Bank {
 }
 
 type BankAccount {
-  accountName: String!
+  accountName: String
   accountNumber: String!
   accountType: String!
-
-  """Name of the bank institution"""
-  bank: String!
-  branchCode: String!
+  bankBranch: String!
+  bankName: String!
 
   """Account currency (e.g. JMD, USD)"""
   currency: String!
 
   """ERPNext bank account identifier"""
-  id: ID!
+  id: ID
   isDefault: Boolean!
 }
 
