@@ -103,6 +103,51 @@ interface AccountRecord {
   save: () => Promise<AccountRecord>
 }
 
+interface CashWalletCutoverConfigRecord {
+  _id: string
+  state: CashWalletCutoverState
+  scheduledAt?: Date
+  startedAt?: Date
+  completedAt?: Date
+  pausedAt?: Date
+  pauseReason?: string
+  updatedBy?: string
+  cutoverVersion: number
+  runId?: string
+  updatedAt: Date
+}
+
+interface CashWalletMigrationRecord {
+  _id: string
+  accountId: string
+  accountUuid?: string
+  legacyUsdWalletId: string
+  destinationUsdtWalletId: string
+  previousDefaultWalletId?: string
+  cutoverVersion: number
+  runId: string
+  status: CashWalletMigrationStatus
+  sourceBalanceUsdCents?: string
+  destinationAmountUsdtMicros?: string
+  feeAmountUsdCents?: string
+  feeAmountUsdtMicros?: string
+  balanceMoveInvoicePaymentRequest?: string
+  balanceMoveInvoicePaymentHash?: string
+  balanceMovePaymentTransactionId?: string
+  feeReimbursementInvoicePaymentRequest?: string
+  feeReimbursementInvoicePaymentHash?: string
+  feeReimbursementPaymentTransactionId?: string
+  estimatedFee?: boolean
+  idempotencyKey: string
+  attempts: number
+  lastError?: string
+  lockedAt?: Date
+  lockedBy?: string
+  startedAt?: Date
+  completedAt?: Date
+  updatedAt: Date
+}
+
 interface LocationRecord {
   type: "Point"
   coordinates: CoordinateRecord
