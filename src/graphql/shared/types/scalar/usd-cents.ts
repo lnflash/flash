@@ -1,4 +1,4 @@
-import { USDAmount } from "@domain/shared"
+import { USDAmount, USDTAmount } from "@domain/shared"
 import { GT } from "@graphql/index"
 
 const USDCentsScalar = GT.Scalar({
@@ -15,6 +15,9 @@ const USDCentsScalar = GT.Scalar({
     serialize(value: unknown): number {
         if (value instanceof USDAmount) {
             return Number(value.asCents(2)) 
+        }
+        if (value instanceof USDTAmount) {
+            return Number(value.asSmallestUnits())
         }
         else throw new Error(`Failed to serialize USDAmount: ${value}`)
     }
