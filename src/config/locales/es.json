@@ -36,6 +36,17 @@
         "bodyDisplayCurrency": "+{{baseCurrencyAmount}}{{baseCurrencyName}} ({{displayCurrencyAmount}})",
         "title": "Transacción {{walletCurrency}}"
       }
+    },
+    "bridgeWithdrawal": {
+      "completed": {
+        "body": "Su retiro de {{amount}} se envió a su cuenta bancaria.",
+        "title": "Retiro completado"
+      },
+      "failed": {
+        "body": "No se pudo completar su retiro de {{amount}}.",
+        "bodyWithReason": "No se pudo completar su retiro de {{amount}}: {{reason}}.",
+        "title": "Retiro fallido"
+      }
     }
   }
 }

@@ -40,6 +40,17 @@
     "cashout": {
       "body": "Your cashout of {{amount}} has been deposited to your bank account.",
       "title": "Cashout"
+    },
+    "bridgeWithdrawal": {
+      "completed": {
+        "body": "Your withdrawal of {{amount}} has been sent to your bank account.",
+        "title": "Withdrawal complete"
+      },
+      "failed": {
+        "body": "Your withdrawal of {{amount}} could not be completed.",
+        "bodyWithReason": "Your withdrawal of {{amount}} could not be completed: {{reason}}.",
+        "title": "Withdrawal failed"
+      }
     }
   }
 }

@@ -95,6 +95,18 @@ export const updateExternalAccountStatus = async (
 
 // ============ Withdrawals ============
 
+export const BRIDGE_WITHDRAWAL_NOT_FOUND = "Withdrawal not found"
+
+export const BRIDGE_FAILURE_REASON_MAX_LENGTH = 512
+
+export const truncateBridgeFailureReason = (
+  reason: string | undefined,
+): string | undefined => {
+  if (reason === undefined) return undefined
+  if (reason.length <= BRIDGE_FAILURE_REASON_MAX_LENGTH) return reason
+  return `${reason.slice(0, BRIDGE_FAILURE_REASON_MAX_LENGTH - 3)}...`
+}
+
 export const createWithdrawal = async (data: {
   accountId: string
   bridgeTransferId?: string
@@ -175,13 +187,25 @@ export const updateWithdrawalStatus = async (
 ) => {
   try {
     const update: Record<string, unknown> = { status, updatedAt: new Date() }
-    if (failureReason !== undefined) update.failureReason = failureReason
+    const truncatedReason = truncateBridgeFailureReason(failureReason)
+    if (truncatedReason !== undefined) update.failureReason = truncatedReason
+
     const record = await BridgeWithdrawal.findOneAndUpdate(
-      { bridgeTransferId },
+      { bridgeTransferId, status: "pending" },
       update,
       { new: true },
     )
-    return record || new RepositoryError("Withdrawal not found")
+    if (record) return record
+
+    const existing = await BridgeWithdrawal.findOne({ bridgeTransferId })
+    if (!existing) return new RepositoryError(BRIDGE_WITHDRAWAL_NOT_FOUND)
+
+    // Idempotent: duplicate webhook after we already reached this terminal status.
+    if (existing.status === status) return existing
+
+    return new RepositoryError(
+      `Withdrawal already ${existing.status}, cannot transition to ${status}`,
+    )
   } catch (error) {
     return new RepositoryError(String(error))
   }

@@ -8,6 +8,11 @@ import { baseLogger } from "@services/logger"
 
 import { createBridgeReplayLog } from "@services/mongoose/bridge-replay-log"
 
+import {
+  isOutboundBridgeWithdrawal,
+  transferReplayEventTypeForStatus,
+} from "../transfer-direction"
+
 import { depositHandler } from "./deposit"
 import { kycHandler } from "./kyc"
 import { transferHandler } from "./transfer"
@@ -41,14 +46,20 @@ const toRouteKey = (bridgeEventType: string): RouteKey | null => {
 const resolveReplayEventType = ({
   eventType,
   eventObjectStatus,
+  eventObject,
 }: {
   eventType: string
   eventObjectStatus?: string
+  eventObject?: Record<string, unknown>
 }): string => {
   const routeFromEventType = toRouteKey(eventType)
   if (routeFromEventType) return eventType
 
   if (eventObjectStatus && DEPOSIT_EVENT_TYPES.has(eventObjectStatus)) {
+    if (isOutboundBridgeWithdrawal(eventObject)) {
+      const transferEvent = transferReplayEventTypeForStatus(eventObjectStatus)
+      if (transferEvent) return transferEvent
+    }
     return eventObjectStatus
   }
 
@@ -82,6 +93,8 @@ const toHandlerBody = ({
         state: eventObject.state,
         amount: eventObject.amount,
         currency: eventObject.currency,
+        reason: eventObject.reason,
+        return_reason: eventObject.return_reason,
       },
     }
   }
@@ -138,10 +151,13 @@ export const replayHandler = async (req: Request, res: Response) => {
     return res.status(400).json({ error: "event_object must be an object" })
   }
 
+  const eventObjectTyped = event_object as Record<string, unknown>
+
   const normalizedEventType = resolveReplayEventType({
     eventType: event_type,
     eventObjectStatus:
       typeof event_object_status === "string" ? event_object_status : undefined,
+    eventObject: eventObjectTyped,
   })
 
   const routeKey = toRouteKey(normalizedEventType)
@@ -149,8 +165,6 @@ export const replayHandler = async (req: Request, res: Response) => {
   if (!routeKey) {
     return res.status(400).json({ error: "Unsupported event_type for replay" })
   }
-
-  const eventObjectTyped = event_object as Record<string, unknown>
   const eventId: string =
     typeof event_id === "string"
       ? event_id
