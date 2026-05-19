@@ -77,6 +77,12 @@ export class BridgeDisabledError extends BridgeError {
   }
 }
 
+export class BridgeTransferFailedError extends BridgeError {
+  constructor(reason: string = "Transfer failed") {
+    super(reason)
+  }
+}
+
 export class BridgeWebhookValidationError extends BridgeError {
   constructor(message: string = "Invalid webhook signature") {
     super(message)

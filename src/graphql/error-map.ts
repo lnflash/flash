@@ -517,6 +517,10 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = "Request timed out"
       return new ValidationInternalError({ message, logger: baseLogger })
 
+    case "BridgeTransferFailedError":
+      message = error.message || "Transfer failed"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
     case "BridgeWebhookValidationError":
       message = "Invalid webhook signature"
       return new ValidationInternalError({ message, logger: baseLogger })

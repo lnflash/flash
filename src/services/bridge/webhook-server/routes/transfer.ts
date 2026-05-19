@@ -11,7 +11,7 @@ import { toBridgeTransferId } from "@domain/primitives/bridge"
 
 export const transferHandler = async (req: Request, res: Response) => {
   const { event, data } = req.body
-  const { transfer_id, state, amount, currency } = data
+  const { transfer_id, state, amount, currency, reason, return_reason } = data
 
   if (!transfer_id || !event) {
     return res.status(400).json({ error: "Invalid payload" })
@@ -28,8 +28,27 @@ export const transferHandler = async (req: Request, res: Response) => {
   try {
     const bridgeTransferId = toBridgeTransferId(transfer_id)
 
+    const TERMINAL_FAILURE_STATES = new Set([
+      "undeliverable",
+      "returned",
+      "refunded",
+      "refund_in_flight",
+      "refund_failed",
+      "missing_return_policy",
+      "error",
+      "canceled",
+    ])
+
+    const isCompletion =
+      event === "transfer.completed" ||
+      event === "transfer.payment_processed" ||
+      state === "payment_processed"
+
+    const isFailure =
+      event === "transfer.failed" || TERMINAL_FAILURE_STATES.has(state)
+
     // Update withdrawal status based on event
-    if (event === "transfer.completed") {
+    if (isCompletion) {
       const result = await BridgeAccountsRepo.updateWithdrawalStatus(
         bridgeTransferId,
         "completed",
@@ -46,6 +65,7 @@ export const transferHandler = async (req: Request, res: Response) => {
       baseLogger.info(
         {
           transfer_id,
+          state,
           amount,
           currency,
         },
@@ -53,10 +73,18 @@ export const transferHandler = async (req: Request, res: Response) => {
       )
 
       // TODO: Send push notification to user
-    } else if (event === "transfer.failed") {
+    } else if (isFailure) {
+      const failureReason =
+        state === "refund_failed"
+          ? (return_reason as string | undefined)
+          : event === "transfer.failed"
+            ? (reason as string | undefined)
+            : undefined
+
       const result = await BridgeAccountsRepo.updateWithdrawalStatus(
         bridgeTransferId,
         "failed",
+        failureReason,
       )
 
       if (result instanceof Error) {
@@ -73,6 +101,8 @@ export const transferHandler = async (req: Request, res: Response) => {
           state,
           amount,
           currency,
+          reason,
+          return_reason,
         },
         "Bridge transfer failed",
       )

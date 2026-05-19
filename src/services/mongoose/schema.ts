@@ -48,6 +48,7 @@ interface IBridgeWithdrawalRecord {
   amount: string
   currency: string
   status: "pending" | "completed" | "failed"
+  failureReason?: string
   externalAccountId: string
   createdAt: Date
   updatedAt: Date
@@ -653,6 +654,7 @@ const BridgeWithdrawalSchema = new Schema<IBridgeWithdrawalRecord>({
   amount: { type: String, required: true },
   currency: { type: String, required: true },
   status: { type: String, enum: ["pending", "completed", "failed"], default: "pending" },
+  failureReason: { type: String },
   externalAccountId: { type: String, required: true },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },

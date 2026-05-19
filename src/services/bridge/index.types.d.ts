@@ -48,7 +48,20 @@ interface BridgeTransfer {
   readonly destinationAccountId: BridgeVirtualAccountId | BridgeExternalAccountId
   readonly amount: number
   readonly currency: string
-  readonly status: "pending" | "processing" | "completed" | "failed" | "cancelled"
+  readonly status:
+    | "awaiting_funds"
+    | "in_review"
+    | "funds_received"
+    | "payment_submitted"
+    | "payment_processed"
+    | "undeliverable"
+    | "returned"
+    | "refund_in_flight"
+    | "refunded"
+    | "refund_failed"
+    | "missing_return_policy"
+    | "error"
+    | "canceled"
   readonly description?: string
   readonly createdAt: string
   readonly updatedAt: string
@@ -95,21 +108,43 @@ interface BridgeDepositCompletedEvent extends BridgeWebhookEvent {
 interface BridgeTransferCompletedEvent extends BridgeWebhookEvent {
   readonly type: "transfer.completed"
   readonly data: {
-    readonly transferId: BridgeTransferId
+    readonly transfer_id: BridgeTransferId
     readonly customerId: BridgeCustomerId
-    readonly amount: number
+    readonly state: "payment_processed"
+    readonly amount: string
     readonly currency: string
-    readonly completedAt: string
+  }
+}
+
+interface BridgeTransferPaymentProcessedEvent extends BridgeWebhookEvent {
+  readonly type: "transfer.payment_processed"
+  readonly data: {
+    readonly transfer_id: BridgeTransferId
+    readonly customerId: BridgeCustomerId
+    readonly state: "payment_processed"
+    readonly amount: string
+    readonly currency: string
   }
 }
 
 interface BridgeTransferFailedEvent extends BridgeWebhookEvent {
   readonly type: "transfer.failed"
   readonly data: {
-    readonly transferId: BridgeTransferId
+    readonly transfer_id: BridgeTransferId
     readonly customerId: BridgeCustomerId
-    readonly reason: string
-    readonly failedAt: string
+    readonly state:
+      | "undeliverable"
+      | "returned"
+      | "refunded"
+      | "refund_in_flight"
+      | "refund_failed"
+      | "missing_return_policy"
+      | "error"
+      | "canceled"
+    readonly reason?: string
+    readonly return_reason?: string
+    readonly amount: string
+    readonly currency: string
   }
 }
 
@@ -118,4 +153,5 @@ type BridgeWebhookEventType =
   | BridgeKycRejectedEvent
   | BridgeDepositCompletedEvent
   | BridgeTransferCompletedEvent
+  | BridgeTransferPaymentProcessedEvent
   | BridgeTransferFailedEvent

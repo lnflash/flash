@@ -7,6 +7,7 @@ const BridgeWithdrawal = GT.Object({
     amount: { type: GT.NonNull(GT.String) },
     currency: { type: GT.NonNull(GT.String) },
     status: { type: GT.NonNull(GT.String) },
+    failureReason: { type: GT.String },
     createdAt: { type: GT.NonNull(GT.String) },
   }),
 })
