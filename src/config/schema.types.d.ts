@@ -175,6 +175,7 @@ type YamlSchema = {
   exchangeRates: StaticRates
   cashout: {
     enabled: boolean
+    skipPayment?: boolean
     minimum: {
       amount: number
       currency: string
@@ -205,15 +206,6 @@ type FrappeConfig = {
   url: string
   sitename: string
   credentials: FrappeCredentials
-  erpnext: {
-    accounts: {
-      ibex: {
-        operating: string
-      }
-      cashout: string
-      serviceFees: string
-    }
-  }
 }
 
 type CurrencyCode = string

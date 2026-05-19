@@ -1,10 +1,11 @@
 import { CashoutDetails } from "@app/offers"
+import { JMDAmount } from "@domain/shared"
 
 type CashoutBodyArgs = CashoutDetails & { username: Username, formattedDate: string }
 
 export const CashoutBody = (args: CashoutBodyArgs) => {
-  const usdString = `${args.flash.liability.usd.asDollars()} USD`  
-  const jmdString = `${args.flash.liability.jmd.asDollars()} JMD`
+  const currency = args.payout.amount instanceof JMDAmount ? "JMD" : "USD"
+  const payoutString = `${args.payout.amount.asDollars()} ${currency}`
 
   return {
     html: `
@@ -29,15 +30,11 @@ export const CashoutBody = (args: CashoutBodyArgs) => {
           <table style="width: 100%; border-collapse: collapse;">
             <tr>
               <td style="padding: 10px 5px; border-bottom: 1px solid #eeeeee; width: 40%; color: #666666; font-weight: 500;">Ibex Payment</td>
-              <td style="padding: 10px 5px; border-bottom: 1px solid #eeeeee; font-weight: 600;">${args.ibexTrx.invoice.paymentHash}</td>
+              <td style="padding: 10px 5px; border-bottom: 1px solid #eeeeee; font-weight: 600;">${args.payment.invoice.paymentHash}</td>
             </tr>
             <tr>
               <td style="padding: 10px 5px; border-bottom: 1px solid #eeeeee; width: 40%; color: #666666; font-weight: 500;">Owed to user</td>
-              <td style="padding: 10px 5px; border-bottom: 1px solid #eeeeee; font-weight: 600;">
-                ${usdString} 
-                OR 
-                ${jmdString} 
-              </td>
+              <td style="padding: 10px 5px; border-bottom: 1px solid #eeeeee; font-weight: 600;">${payoutString}</td>
             </tr>
             <tr>
               <td style="padding: 10px 5px; border-bottom: 1px solid #eeeeee; width: 40%; color: #666666; font-weight: 500;">Date & Time</td>
@@ -54,7 +51,7 @@ export const CashoutBody = (args: CashoutBodyArgs) => {
               </tr>
               <tr>
                 <td style="padding: 8px 5px; color: #666666; font-weight: 500;">Wallet ID</td>
-                <td style="padding: 8px 5px; font-size: 13px; font-family: monospace;">${args.ibexTrx.userAcct}</td>
+                <td style="padding: 8px 5px; font-size: 13px; font-family: monospace;">${args.payment.userAcct}</td>
               </tr>
             </table>
           </div>
@@ -73,15 +70,14 @@ export const CashoutBody = (args: CashoutBodyArgs) => {
 
       Transaction Details:
       --------------------
-      Ibex Payment: ${args.ibexTrx.invoice.paymentHash}
-      Amount owed: ${usdString} 
-        OR ${jmdString} 
+      Ibex Payment: ${args.payment.invoice.paymentHash}
+      Amount owed: ${payoutString}
       Date & Time: ${args.formattedDate}
 
       User Information:
       -------------------
       Username: ${args.username}
-      Wallet ID: ${args.ibexTrx.userAcct}
+      Wallet ID: ${args.payment.userAcct}
 
       ----------------------
       This is an automated notification from Flash. Please do not reply to this email.

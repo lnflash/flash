@@ -2,19 +2,17 @@ import { USDAmount, JMDAmount } from "@domain/shared"
 
 // Full details in a cashout transaction
 export type CashoutDetails = {
-  readonly ibexTrx: {
+  readonly payment: {
     readonly userAcct: WalletId,
     readonly flashAcct: WalletId,
     readonly invoice: LnInvoice,
-    readonly usd: USDAmount,
+    readonly amount: USDAmount,
   },
-  readonly flash: {
-    readonly liability: {
-      readonly usd: USDAmount,
-      readonly jmd: JMDAmount,
-    }
-    readonly fee: USDAmount 
-    readonly exchangeRate: JMDAmount,
+  readonly payout: {
+    readonly bankAccountId: string,
+    readonly amount: USDAmount | JMDAmount,
+    readonly serviceFee: USDAmount,
+    readonly exchangeRate?: JMDAmount,
   },
 }
 

@@ -30,6 +30,24 @@ type AccountDeletePayload {
   success: Boolean!
 }
 
+input AccountDisableNotificationCategoryInput {
+  category: NotificationCategory!
+  channel: NotificationChannel
+}
+
+input AccountDisableNotificationChannelInput {
+  channel: NotificationChannel!
+}
+
+input AccountEnableNotificationCategoryInput {
+  category: NotificationCategory!
+  channel: NotificationChannel
+}
+
+input AccountEnableNotificationChannelInput {
+  channel: NotificationChannel!
+}
+
 enum AccountLevel {
   ONE
   THREE
@@ -80,6 +98,11 @@ input AccountUpdateDisplayCurrencyInput {
 }
 
 type AccountUpdateDisplayCurrencyPayload {
+  account: ConsumerAccount
+  errors: [Error!]!
+}
+
+type AccountUpdateNotificationSettingsPayload {
   account: ConsumerAccount
   errors: [Error!]!
 }
@@ -196,17 +219,17 @@ type Bank {
 }
 
 type BankAccount {
-  accountName: String!
+  accountName: String
   accountNumber: String!
-
-  """Name of the bank institution"""
-  bank: String!
+  accountType: String!
+  bankBranch: String!
+  bankName: String!
 
   """Account currency (e.g. JMD, USD)"""
   currency: String!
 
   """ERPNext bank account identifier"""
-  id: ID!
+  id: ID
   isDefault: Boolean!
 }
 
@@ -273,22 +296,26 @@ input CaptchaRequestAuthCodeInput {
 
 type CashoutOffer {
   """The rate used when withdrawing to a JMD bank account"""
-  exchangeRate: JMDCents!
+  exchangeRate: JMDCents
 
   """The time at which this offer is no longer accepted by Flash"""
   expiresAt: Timestamp!
 
-  """The amount that Flash is charging for it's services"""
+  """The amount that Flash is charging for its services"""
   flashFee: USDCents!
 
   """ID of the offer"""
   offerId: ID!
 
-  """The amount Flash owes to the user denominated in JMD as cents"""
-  receiveJmd: JMDCents!
+  """
+  The amount Flash owes to the user denominated in JMD cents (null for USD payouts)
+  """
+  receiveJmd: JMDCents
 
-  """The amount Flash owes to the user denominated in USD as cents"""
-  receiveUsd: USDCents!
+  """
+  The amount Flash owes to the user denominated in USD cents (null for JMD payouts)
+  """
+  receiveUsd: USDCents
 
   """The amount the user is sending to flash"""
   send: USDCents!
@@ -495,7 +522,7 @@ input InitiateCashoutInput {
 
 type InitiatedCashoutResponse {
   errors: [Error!]!
-  journalId: ID
+  id: ID
 }
 
 union InitiationVia = InitiationViaIntraLedger | InitiationViaLn | InitiationViaOnChain
@@ -820,6 +847,10 @@ type MobileVersions {
 
 type Mutation {
   accountDelete: AccountDeletePayload!
+  accountDisableNotificationCategory(input: AccountDisableNotificationCategoryInput!): AccountUpdateNotificationSettingsPayload!
+  accountDisableNotificationChannel(input: AccountDisableNotificationChannelInput!): AccountUpdateNotificationSettingsPayload!
+  accountEnableNotificationCategory(input: AccountEnableNotificationCategoryInput!): AccountUpdateNotificationSettingsPayload!
+  accountEnableNotificationChannel(input: AccountEnableNotificationChannelInput!): AccountUpdateNotificationSettingsPayload!
   accountUpdateDefaultWalletId(input: AccountUpdateDefaultWalletIdInput!): AccountUpdateDefaultWalletIdPayload!
   accountUpdateDisplayCurrency(input: AccountUpdateDisplayCurrencyInput!): AccountUpdateDisplayCurrencyPayload!
   businessAccountUpgradeRequest(input: BusinessAccountUpgradeRequestInput!): AccountUpgradePayload!
@@ -969,6 +1000,10 @@ enum Network {
 }
 
 scalar NotificationCategory
+
+enum NotificationChannel {
+  PUSH
+}
 
 type NotificationChannelSettings {
   disabledCategories: [NotificationCategory!]!
@@ -1256,6 +1291,9 @@ type RealtimePricePayload {
 input RequestCashoutInput {
   """Amount in USD cents."""
   amount: USDCents!
+
+  """ERPNext bank account identifier to receive the cashout."""
+  bankAccountId: ID!
 
   """ID for a USD wallet belonging to the current user."""
   walletId: WalletId!

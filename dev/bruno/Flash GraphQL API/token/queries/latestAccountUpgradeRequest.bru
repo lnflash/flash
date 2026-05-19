@@ -1,0 +1,56 @@
+meta {
+  name: latestAccountUpgradeRequest
+  type: graphql
+  seq: 10
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+body:graphql {
+  query latestAccountUpgradeRequest {
+    latestAccountUpgradeRequest {
+      errors {
+        message
+      }
+      upgradeRequest {
+        name
+        fullName
+        email
+        phoneNumber
+        username
+        currentLevel
+        requestedLevel
+        status
+        idDocument
+        terminalsRequested
+        address {
+          title
+          line1
+          line2
+          city
+          state
+          postalCode
+          country
+        }
+        bankAccount {
+          id
+          accountName
+          bankName
+          bankBranch
+          accountNumber
+          accountType
+          currency
+          isDefault
+        }
+      }
+    }
+  }
+}
+
+settings {
+  encodeUrl: true
+}

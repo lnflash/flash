@@ -364,6 +364,7 @@ export const ExchangeRates = {
 
 export const Cashout = {
   Enabled: yamlConfig.cashout.enabled as boolean,
+  SkipPayment: (yamlConfig.cashout.skipPayment ?? false) as boolean,
   OfferConfig: {
     fee: BigInt(yamlConfig.cashout.fee) as BasisPoints,
     duration: yamlConfig.cashout.duration as Seconds,

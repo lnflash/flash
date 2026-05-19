@@ -24,6 +24,7 @@ const LatestAccountUpgradeRequestQuery = GT.Field({
     )
     if (result instanceof UpgradeRequestQueryError) return apolloErrorResponse(new InternalServerError({ message: result.message }))
     if (result.length === 0) return apolloErrorResponse(new NotFoundError({ message: "No upgrade requests found for account." }))
+    console.log({ ...result }, "LatestAccountUpgradeRequestQuery result")
     return { upgradeRequest: result[0] }
   },
 })

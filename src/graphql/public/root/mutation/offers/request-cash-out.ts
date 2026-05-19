@@ -1,4 +1,4 @@
-import OffersManager from "@app/offers/OffersManager"
+import CashoutManager from "@app/offers/CashoutManager"
 import { mapToGqlErrorList } from "@graphql/error-map"
 import { GT } from "@graphql/index"
 import CashoutOffer from "@graphql/public/types/object/cashout-offer"
@@ -7,7 +7,10 @@ import USDCentsScalar from "@graphql/shared/types/scalar/usd-cents"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import dedent from "dedent"
 import { Cashout } from "@config"
-import { NotImplementedError } from "@domain/errors"
+import { NotImplementedError, RepositoryError } from "@domain/errors"
+import ErpNext from "@services/frappe/ErpNext"
+import { AccountsRepository, WalletsRepository } from "@services/mongoose"
+import { ValidationError } from "@domain/shared"
 
 const RequestCashoutInput = GT.Input({
   name: "RequestCashoutInput",
@@ -17,8 +20,12 @@ const RequestCashoutInput = GT.Input({
       description: "ID for a USD wallet belonging to the current user.",
     },
     amount: {
-      type: GT.NonNull(USDCentsScalar), 
-      description: "Amount in USD cents." 
+      type: GT.NonNull(USDCentsScalar),
+      description: "Amount in USD cents."
+    },
+    bankAccountId: {
+      type: GT.NonNull(GT.ID),
+      description: "ERPNext bank account identifier to receive the cashout.",
     },
   }),
 })
@@ -49,16 +56,17 @@ const RequestCashoutMutation = GT.Field({
     if (!Cashout.Enabled)
       return new NotImplementedError("Cashout feature is not enabled")
 
-    const { walletId, amount } = args.input
-    for (const input of [walletId, amount]) {
+    const { walletId, amount, bankAccountId } = args.input
+    for (const input of [walletId, amount, bankAccountId]) {
       if (input instanceof Error) {
         return { errors: [{ message: input.message }] }
       }
     }
 
-    const offer = await (OffersManager.createCashoutOffer(
+    const offer = await (CashoutManager.createOffer(
       walletId,
-      amount, 
+      amount,
+      bankAccountId,
     ))
     if (offer instanceof Error) return { errors: mapToGqlErrorList(offer) }
 

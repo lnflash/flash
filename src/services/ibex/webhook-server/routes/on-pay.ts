@@ -47,11 +47,11 @@ router.get(
       if (account instanceof Error) {
         return resp.status(404).json({ error: "User not found" })
       }
-      const wallet = await WalletsRepository().listByAccountId(account.id)
-      if (!wallet || wallet instanceof Error || wallet.length === 0) {
+      const wallet = await WalletsRepository().findById(account.defaultWalletId)
+      if (!wallet || wallet instanceof Error) {
         return resp.status(404).json({ error: "No wallet found for this user" })
       }
-      const lnurlp = wallet[0].lnurlp
+      const lnurlp = wallet.lnurlp
       if (!lnurlp)
         return resp.status(404).json({ error: "No lnurlp found for this wallet" })
 

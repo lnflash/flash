@@ -1,0 +1,45 @@
+meta {
+  name: accountEnableNotificationChannel
+  type: graphql
+  seq: 36
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:graphql {
+  mutation accountEnableNotificationChannel($input: AccountEnableNotificationChannelInput!) {
+    accountEnableNotificationChannel(input: $input) {
+      errors {
+        message
+      }
+      account {
+        notificationSettings {
+          push {
+            enabled
+            disabledCategories
+          }
+        }
+      }
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "channel": "PUSH"
+    }
+  }
+}
+
+settings {
+  encodeUrl: true
+}
