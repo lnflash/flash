@@ -90,9 +90,16 @@ export const UsdPaymentAmount = (cents: bigint): UsdPaymentAmount => {
   }
 }
 
-export const checkedToUsdPaymentAmount = (
+export function checkedToUsdPaymentAmount(
   amount: number | null,
-): UsdPaymentAmount | ValidationError => {
+): UsdPaymentAmount | ValidationError
+export function checkedToUsdPaymentAmount<
+  T extends typeof WalletCurrency.Usd | typeof WalletCurrency.Usdt,
+>(amount: number | null, currency: T): PaymentAmount<T> | ValidationError
+export function checkedToUsdPaymentAmount(
+  amount: number | null,
+  currency: typeof WalletCurrency.Usd | typeof WalletCurrency.Usdt = WalletCurrency.Usd,
+): UsdPaymentAmount | PaymentAmount<typeof WalletCurrency.Usdt> | ValidationError {
   if (amount === null) {
     return new InvalidUsdPaymentAmountError()
   }
@@ -105,7 +112,7 @@ export const checkedToUsdPaymentAmount = (
     return new InvalidUsdPaymentAmountError()
   }
   if (!(amount && amount > 0)) return new InvalidUsdPaymentAmountError()
-  return paymentAmountFromNumber({ amount, currency: WalletCurrency.Usd })
+  return paymentAmountFromNumber({ amount, currency })
 }
 
 export const paymentAmountFromNumber = <T extends WalletCurrency>({

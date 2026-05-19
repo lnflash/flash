@@ -13,10 +13,10 @@ import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fract
 // FLASH FORK: import ibex dependencies
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 
+import { usdWalletAmountFromWalletId } from "@app/wallets"
 import Ibex from "@services/ibex/client"
 
 import { IbexError } from "@services/ibex/errors"
-import { BigIntConversionError, checkedToUsdPaymentAmount, paymentAmountFromNumber, USDAmount, ValidationError, WalletCurrency } from "@domain/shared"
 
 const LnNoAmountUsdInvoicePaymentInput = GT.Input({
   name: "LnNoAmountUsdInvoicePaymentInput",
@@ -90,9 +90,16 @@ const LnNoAmountUsdInvoicePaymentSendMutation = GT.Field<
     if (!domainAccount) throw new Error("Authentication required")
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
 
-
-    const usCents = USDAmount.cents(amount.toString())
-    if (usCents instanceof BigIntConversionError) return usCents
+    const usCents = await usdWalletAmountFromWalletId({
+      walletId,
+      amount: amount.toString(),
+    })
+    if (usCents instanceof Error) {
+      return {
+        status: "failed",
+        errors: [mapAndParseErrorForGqlResponse(usCents)],
+      }
+    }
     const PayLightningInvoice = await Ibex.payInvoice({
       invoice: paymentRequest as Bolt11,
       accountId: walletId,
@@ -102,7 +109,7 @@ const LnNoAmountUsdInvoicePaymentSendMutation = GT.Field<
     if (PayLightningInvoice instanceof IbexError) {
       return {
         status: "failed",
-        errors: [mapAndParseErrorForGqlResponse(PayLightningInvoice)]
+        errors: [mapAndParseErrorForGqlResponse(PayLightningInvoice)],
       }
     }
 
