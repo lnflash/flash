@@ -8,6 +8,7 @@ import crypto from "crypto"
 import { BridgeConfig } from "@config"
 
 import { BridgeCustomerId, BridgeTransferId } from "@domain/primitives/bridge"
+import { BridgeTimeoutError } from "./errors"
 
 // ============ Error Handling ============
 
@@ -365,23 +366,37 @@ export class BridgeClient {
       }
     }
 
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    })
+    const timeoutMs = BridgeConfig.timeoutMs ?? 10_000
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
-    const responseData = await response.json().catch(() => null)
+    try {
+      const response = await fetch(url, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      })
 
-    if (!response.ok) {
-      throw new BridgeApiError(
-        `Bridge API error: ${response.status} ${response.statusText}`,
-        response.status,
-        responseData,
-      )
+      const responseData = await response.json().catch(() => null)
+
+      if (!response.ok) {
+        throw new BridgeApiError(
+          `Bridge API error: ${response.status} ${response.statusText}`,
+          response.status,
+          responseData,
+        )
+      }
+
+      return responseData as T
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        throw new BridgeTimeoutError()
+      }
+      throw err
+    } finally {
+      clearTimeout(timeoutId)
     }
-
-    return responseData as T
   }
 
   // ============ Customers ============

@@ -49,6 +49,7 @@ type BridgeConfig = {
   apiKey: string
   baseUrl: string
   minWithdrawalAmount: number
+  timeoutMs?: number
   webhook: BridgeWebhook
 }
 
