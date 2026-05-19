@@ -7,6 +7,7 @@ import {
 } from "@app/prices"
 import { removeDeviceTokens } from "@app/users/remove-device-tokens"
 import { validateIsBtcWallet, validateIsUsdWallet } from "@app/wallets"
+import { usdWalletAmountFromInput } from "@app/wallets/usd-wallet-amount"
 
 import {
   InvalidLightningPaymentFlowBuilderStateError,
@@ -15,11 +16,12 @@ import {
 } from "@domain/payments"
 import { AccountLevel, AccountValidator } from "@domain/accounts"
 import { DisplayAmountsConverter } from "@domain/fiat"
-import { BigIntConversionError, checkedToUsdPaymentAmount, ErrorLevel, paymentAmountFromNumber, USDAmount, ValidationError, WalletCurrency } from "@domain/shared"
+import { checkedToUsdPaymentAmount, ErrorLevel, paymentAmountFromNumber, ValidationError, WalletCurrency } from "@domain/shared"
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { ResourceExpiredLockServiceError } from "@domain/lock"
 import { checkedToWalletId, SettlementMethod } from "@domain/wallets"
 import { DeviceTokensNotRegisteredNotificationsServiceError } from "@domain/notifications"
+import { MismatchedCurrencyForWalletError } from "@domain/errors"
 
 import { LockService } from "@services/lock"
 import { LedgerService } from "@services/ledger"
@@ -74,8 +76,12 @@ const intraledgerPaymentSendWalletId = async ({
     kratosUserId: recipientUserId,
   } = recipientAccount
 
-  const amount = USDAmount.cents(uncheckedAmount.toString())
-  if (amount instanceof BigIntConversionError) return amount
+  if (senderWallet.currency !== recipientWallet.currency) {
+    return new MismatchedCurrencyForWalletError()
+  }
+
+  const amount = usdWalletAmountFromInput(uncheckedAmount.toString(), senderWallet.currency)
+  if (amount instanceof Error) return amount
   const invoiceResp = await Ibex.addInvoice({ 
     accountId: recipientWalletId,
     amount, 
@@ -132,7 +138,7 @@ export const intraledgerPaymentSendWalletIdForBtcWallet = async (
 export const intraledgerPaymentSendWalletIdForUsdWallet = async (
   args: IntraLedgerPaymentSendWalletIdArgs,
 ): Promise<PaymentSendStatus | ApplicationError> => {
-  const validated = await validateIsUsdWallet(args.senderWalletId)
+  const validated = await validateIsUsdWallet(args.senderWalletId, { includeUsdt: true })
   return validated instanceof Error ? validated : intraledgerPaymentSendWalletId(args)
 }
 

@@ -1,4 +1,5 @@
 import { PartialResult } from "@app/partial-result"
+import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
 import Ibex from "@services/ibex/client"
 import { IbexError } from "@services/ibex/errors"
 import { baseLogger } from "@services/logger"
@@ -32,9 +33,39 @@ export const getTransactionsForWallets = async ({
   })
 }
 
+const currencyFromIbexCurrencyId = (currencyId: number | undefined): WalletCurrency | undefined => {
+  if (currencyId === USDAmount.currencyId) return WalletCurrency.Usd
+  if (currencyId === USDTAmount.currencyId) return WalletCurrency.Usdt
+  return undefined
+}
+
 export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] => {
   return ibexResp.map(trx => {
-    const currency = (trx.currencyId === 3 ? "USD" : "BTC") as WalletCurrency // WalletCurrency: "USD" | "BTC",
+    const currency = currencyFromIbexCurrencyId(trx.currencyId)
+
+    if (!currency) {
+      baseLogger.error(`Failed to parse Ibex transaction currency. { WalletId: ${trx.accountId}, TransactionId: ${trx.id}, currencyId: ${trx.currencyId} }`)
+      return {
+        walletId: (trx.accountId || "") as WalletId,
+        settlementAmount: 0 as Satoshis,
+        settlementFee: 0 as Satoshis,
+        settlementCurrency: WalletCurrency.Usd,
+        settlementDisplayAmount: `${trx.amount}`,
+        settlementDisplayFee: `${trx.networkFee}`,
+        settlementDisplayPrice: {
+          base: 0n,
+          offset: 0n,
+          displayCurrency: "USD" as DisplayCurrency,
+          walletCurrency: WalletCurrency.Usd,
+        },
+        createdAt: trx.createdAt ? new Date(trx.createdAt) : new Date(),
+        id: trx.id || "null",
+        status: "success" as TxStatus,
+        memo: null,
+        initiationVia: { type: "unknown" },
+        settlementVia: { type: "unknown" },
+      } as UnknownTypeTransaction
+    }
 
     const settlementDisplayPrice: WalletMinorUnitDisplayPrice<WalletCurrency, DisplayCurrency> = {
       base: trx.exchangeRateCurrencySats ? BigInt(Math.floor(trx.exchangeRateCurrencySats)) : 0n,
