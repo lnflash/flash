@@ -1,5 +1,6 @@
 import { assertCanTransition } from "./state-machine"
 import { usdCentsToUsdtMicros } from "./amount-conversion"
+import { InvalidCashWalletCutoverAmountError } from "./errors"
 
 type CashWalletMigrationTransitionRepository = {
   transitionMigration(args: {
@@ -10,6 +11,14 @@ type CashWalletMigrationTransitionRepository = {
     runId: string
     patch?: Partial<CashWalletMigration>
   }): Promise<CashWalletMigration | RepositoryError>
+}
+
+type CashWalletMigrationInvoiceService = {
+  createInvoice(args: {
+    recipientWalletId: WalletId
+    amount: string
+    memo: string
+  }): Promise<LnInvoice | ApplicationError>
 }
 
 export const startCashWalletMigration = async ({
@@ -58,6 +67,44 @@ export const recordCashWalletMigrationBalance = async ({
     patch: {
       sourceBalanceUsdCents,
       destinationAmountUsdtMicros,
+    },
+  })
+}
+
+export const createCashWalletMigrationBalanceMoveInvoice = async ({
+  migration,
+  invoiceService,
+  migrationsRepo,
+}: {
+  migration: CashWalletMigration
+  invoiceService: CashWalletMigrationInvoiceService
+  migrationsRepo: CashWalletMigrationTransitionRepository
+}): Promise<CashWalletMigration | ApplicationError> => {
+  const transition = assertCanTransition(migration.status, "invoice_created")
+  if (transition instanceof Error) return transition
+
+  if (migration.destinationAmountUsdtMicros === undefined) {
+    return new InvalidCashWalletCutoverAmountError(
+      "destinationAmountUsdtMicros is required before balance move invoice creation",
+    )
+  }
+
+  const invoice = await invoiceService.createInvoice({
+    recipientWalletId: migration.destinationUsdtWalletId,
+    amount: migration.destinationAmountUsdtMicros,
+    memo: `cash-wallet-cutover:${migration.runId}:${migration.id}:balance-move`,
+  })
+  if (invoice instanceof Error) return invoice
+
+  return migrationsRepo.transitionMigration({
+    id: migration.id,
+    from: migration.status,
+    to: "invoice_created",
+    cutoverVersion: migration.cutoverVersion,
+    runId: migration.runId,
+    patch: {
+      balanceMoveInvoicePaymentRequest: invoice.paymentRequest,
+      balanceMoveInvoicePaymentHash: invoice.paymentHash,
     },
   })
 }

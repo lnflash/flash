@@ -1,6 +1,7 @@
 import { CouldNotUpdateError } from "@domain/errors"
 
 import {
+  createCashWalletMigrationBalanceMoveInvoice,
   recordCashWalletMigrationBalance,
   startCashWalletMigration,
 } from "@app/cash-wallet-cutover/worker"
@@ -117,6 +118,95 @@ describe("cash wallet migration worker checkpoints", () => {
     })
 
     expect(result).toBeInstanceOf(Error)
+    expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
+  })
+
+  it("creates a balance move invoice on the destination wallet", async () => {
+    const migrationsRepo = {
+      transitionMigration: jest.fn(async () => ({
+        ...migration("invoice_created"),
+        balanceMoveInvoicePaymentRequest: "lnbc1balance-move",
+        balanceMoveInvoicePaymentHash: "paymentHash",
+      })),
+    }
+    const invoice = {
+      paymentRequest: "lnbc1balance-move" as EncodedPaymentRequest,
+      paymentHash: "paymentHash" as PaymentHash,
+    } as LnInvoice
+    const invoiceService = {
+      createInvoice: jest.fn(async () => invoice),
+    }
+
+    const result = await createCashWalletMigrationBalanceMoveInvoice({
+      migration: {
+        ...migration("balance_read"),
+        destinationAmountUsdtMicros: "12340000",
+      },
+      invoiceService,
+      migrationsRepo,
+    })
+
+    expect(result).toMatchObject({
+      status: "invoice_created",
+      balanceMoveInvoicePaymentRequest: "lnbc1balance-move",
+      balanceMoveInvoicePaymentHash: "paymentHash",
+    })
+    expect(invoiceService.createInvoice).toHaveBeenCalledWith({
+      recipientWalletId: "usdt-wallet-id",
+      amount: "12340000",
+      memo: "cash-wallet-cutover:run-7:migration-id:balance-move",
+    })
+    expect(migrationsRepo.transitionMigration).toHaveBeenCalledWith({
+      id: "migration-id",
+      from: "balance_read",
+      to: "invoice_created",
+      cutoverVersion: 7,
+      runId: "run-7",
+      patch: {
+        balanceMoveInvoicePaymentRequest: "lnbc1balance-move",
+        balanceMoveInvoicePaymentHash: "paymentHash",
+      },
+    })
+  })
+
+  it("rejects balance move invoice creation when the destination amount is missing", async () => {
+    const migrationsRepo = {
+      transitionMigration: jest.fn(),
+    }
+    const invoiceService = {
+      createInvoice: jest.fn(),
+    }
+
+    const result = await createCashWalletMigrationBalanceMoveInvoice({
+      migration: migration("balance_read"),
+      invoiceService,
+      migrationsRepo,
+    })
+
+    expect(result).toBeInstanceOf(Error)
+    expect(invoiceService.createInvoice).not.toHaveBeenCalled()
+    expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
+  })
+
+  it("returns balance move invoice creation failures without advancing the checkpoint", async () => {
+    const error = new CouldNotUpdateError("invoice creation failed")
+    const migrationsRepo = {
+      transitionMigration: jest.fn(),
+    }
+    const invoiceService = {
+      createInvoice: jest.fn(async () => error),
+    }
+
+    const result = await createCashWalletMigrationBalanceMoveInvoice({
+      migration: {
+        ...migration("balance_read"),
+        destinationAmountUsdtMicros: "12340000",
+      },
+      invoiceService,
+      migrationsRepo,
+    })
+
+    expect(result).toBe(error)
     expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
   })
 })
