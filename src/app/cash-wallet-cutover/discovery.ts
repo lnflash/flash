@@ -54,3 +54,25 @@ export const classifyCashWalletsForCutover = ({
 
   return { ...base, status: "residual_legacy_usd" }
 }
+
+export const discoverCashWalletCutoverAccounts = async ({
+  accountsRepo,
+  walletsRepo,
+}: {
+  accountsRepo: Pick<IAccountsRepository, "listUnlockedAccounts">
+  walletsRepo: Pick<IWalletsRepository, "listByAccountId">
+}): Promise<CashWalletCutoverDiscovery[] | RepositoryError> => {
+  const accounts = accountsRepo.listUnlockedAccounts()
+  if (accounts instanceof Error) return accounts
+
+  const discoveries: CashWalletCutoverDiscovery[] = []
+
+  for await (const account of accounts) {
+    const wallets = await walletsRepo.listByAccountId(account.id)
+    if (wallets instanceof Error) return wallets
+
+    discoveries.push(classifyCashWalletsForCutover({ account, wallets }))
+  }
+
+  return discoveries
+}
