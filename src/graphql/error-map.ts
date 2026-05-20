@@ -816,6 +816,10 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = error.message
       return new ValidationInternalError({ message, logger: baseLogger })
 
+    case "InvalidCashWalletCutoverStateTransitionError":
+      message = error.message
+      return new ValidationInternalError({ message, logger: baseLogger })
+
     case "UnknownCaptchaError":
       message = `Unknown error occurred (code: ${error.name}${
         error.message ? ": " + error.message : ""
