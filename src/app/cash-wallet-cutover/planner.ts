@@ -9,6 +9,8 @@ type PrimaryCashWalletMigrationPlan = {
   idempotencyKey: string
 }
 
+export type { PrimaryCashWalletMigrationPlan }
+
 export const buildPrimaryCashWalletMigrationPlan = ({
   cutoverVersion,
   runId,
