@@ -1,3 +1,5 @@
+import { CashWalletCutoverDiscovery } from "./discovery"
+
 type CashWalletCutoverPreflightBlocker = {
   accountId: AccountId
   reason: "missing_legacy_usd" | "missing_destination_usdt"

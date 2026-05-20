@@ -35,6 +35,9 @@ const feeAmountUsdCentsFromNumber = (
   return Math.ceil(feeAmount * 100).toString()
 }
 
+const numericFee = (value: unknown): number | undefined =>
+  typeof value === "number" ? value : undefined
+
 export const createCashWalletMigrationRuntimeServices = (
   deps: RuntimeServiceDependencies = {},
 ) => {
@@ -146,11 +149,13 @@ export const createCashWalletMigrationRuntimeServices = (
         }
 
         const transaction = await getTransactionDetails(
-          migration.balanceMovePaymentTransactionId,
+          migration.balanceMovePaymentTransactionId as IbexTransactionId,
         )
         if (transaction instanceof Error) return transaction
 
-        return feeAmountUsdCentsFromNumber(transaction.networkFee ?? transaction.fee)
+        return feeAmountUsdCentsFromNumber(
+          numericFee(transaction.networkFee) ?? numericFee(transaction.fee),
+        )
       },
     },
     pointerService: {

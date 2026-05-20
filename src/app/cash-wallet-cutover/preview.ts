@@ -1,8 +1,14 @@
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 
 import { discoverCashWalletCutoverAccounts } from "./discovery"
-import { buildCashWalletCutoverPreflightReport } from "./preflight"
-import { buildPrimaryCashWalletMigrationPlan } from "./planner"
+import {
+  buildCashWalletCutoverPreflightReport,
+  CashWalletCutoverPreflightReport,
+} from "./preflight"
+import {
+  buildPrimaryCashWalletMigrationPlan,
+  PrimaryCashWalletMigrationPlan,
+} from "./planner"
 
 export const previewPrimaryCashWalletCutover = async ({
   cutoverVersion,

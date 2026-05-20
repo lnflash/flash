@@ -1,3 +1,5 @@
+import { PrimaryCashWalletMigrationPlan } from "./planner"
+
 type CashWalletMigrationRecordsRepository = {
   upsertMigration(
     args: PrimaryCashWalletMigrationPlan,

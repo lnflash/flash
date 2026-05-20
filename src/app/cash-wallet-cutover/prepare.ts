@@ -1,6 +1,12 @@
-import { buildCashWalletCutoverPreflightReport } from "./preflight"
+import {
+  buildCashWalletCutoverPreflightReport,
+  CashWalletCutoverPreflightReport,
+} from "./preflight"
 import { discoverCashWalletCutoverAccounts } from "./discovery"
-import { buildPrimaryCashWalletMigrationPlan } from "./planner"
+import {
+  buildPrimaryCashWalletMigrationPlan,
+  PrimaryCashWalletMigrationPlan,
+} from "./planner"
 import {
   upsertPrimaryCashWalletMigrationRecords,
   CashWalletMigrationRecordsRepository,
