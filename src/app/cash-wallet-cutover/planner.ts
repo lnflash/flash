@@ -1,3 +1,5 @@
+import { CashWalletCutoverDiscovery } from "./discovery"
+
 type PrimaryCashWalletMigrationPlan = {
   accountId: AccountId
   accountUuid?: AccountUuid

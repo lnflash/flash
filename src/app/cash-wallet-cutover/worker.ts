@@ -222,7 +222,7 @@ export const verifyCashWalletMigrationBalanceMove = async ({
     destinationUsdtWalletId: migration.destinationUsdtWalletId,
     sourceBalanceUsdCents: migration.sourceBalanceUsdCents,
     destinationAmountUsdtMicros: migration.destinationAmountUsdtMicros,
-    transactionId: migration.balanceMovePaymentTransactionId,
+    transactionId: migration.balanceMovePaymentTransactionId as IbexTransactionId,
   })
   if (verified instanceof Error) return verified
 
