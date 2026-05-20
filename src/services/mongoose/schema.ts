@@ -672,7 +672,7 @@ BridgeWithdrawalSchema.index(
   },
 )
 
-const BridgeDepositLogSchema = new Schema({
+const BridgeDepositsSchema = new Schema({
   eventId: { type: String, required: true, unique: true },
   transferId: { type: String, required: true },
   customerId: { type: String, required: true },
@@ -687,10 +687,10 @@ const BridgeDepositLogSchema = new Schema({
   createdAt: { type: Date, default: Date.now },
 })
 
-BridgeDepositLogSchema.index({ transferId: 1 })
-BridgeDepositLogSchema.index({ customerId: 1, createdAt: -1 })
+BridgeDepositsSchema.index({ transferId: 1 })
+BridgeDepositsSchema.index({ customerId: 1, createdAt: -1 })
 
-export const BridgeDepositLog = mongoose.model("BridgeDepositLog", BridgeDepositLogSchema)
+export const BridgeDeposits = mongoose.model("BridgeDeposits", BridgeDepositsSchema)
 
 const IbexCryptoReceiveLogSchema = new Schema({
   txHash: { type: String, required: true, unique: true },

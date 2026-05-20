@@ -9,7 +9,7 @@
 import { Request, Response } from "express"
 import { LockService } from "@services/lock"
 import { baseLogger } from "@services/logger"
-import { createBridgeDepositLog } from "@services/mongoose/bridge-deposit-log"
+import { createBridgeDeposit } from "@services/mongoose/bridge-deposit-log"
 import { reconcileByTxHash } from "@services/bridge/reconciliation"
 
 export const depositHandler = async (req: Request, res: Response) => {
@@ -48,7 +48,7 @@ export const depositHandler = async (req: Request, res: Response) => {
       "Bridge deposit event",
     )
 
-    const depositLog = await createBridgeDepositLog({
+    const depositLog = await createBridgeDeposit({
       eventId: event_id,
       transferId: id,
       customerId: on_behalf_of ?? "",
