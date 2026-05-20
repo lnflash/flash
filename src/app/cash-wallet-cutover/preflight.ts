@@ -15,6 +15,8 @@ type CashWalletCutoverPreflightReport = {
   canStart: boolean
 }
 
+export type { CashWalletCutoverPreflightReport }
+
 export const buildCashWalletCutoverPreflightReport = ({
   cutoverVersion,
   runId,
