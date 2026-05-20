@@ -49,7 +49,9 @@ const defaultConfig = (): CashWalletCutoverConfig => ({
   updatedAt: new Date(0),
 })
 
-const resultToConfig = (record: CashWalletCutoverConfigRecord): CashWalletCutoverConfig => ({
+const resultToConfig = (
+  record: CashWalletCutoverConfigRecord,
+): CashWalletCutoverConfig => ({
   state: record.state,
   scheduledAt: record.scheduledAt,
   startedAt: record.startedAt,
@@ -154,7 +156,11 @@ export const CashWalletCutoverRepository = () => {
     runId: string
   }): Promise<CashWalletMigration | RepositoryError | null> => {
     try {
-      const result = await CashWalletMigration.findOne({ accountId, cutoverVersion, runId })
+      const result = await CashWalletMigration.findOne({
+        accountId,
+        cutoverVersion,
+        runId,
+      })
       if (!result) return null
       return resultToMigration(result)
     } catch (err) {
@@ -176,7 +182,8 @@ export const CashWalletCutoverRepository = () => {
         { $set: { ...patch, status: to, updatedAt: new Date() } },
         { new: true },
       )
-      if (!result) return new CouldNotUpdateError("Could not transition cash wallet migration")
+      if (!result)
+        return new CouldNotUpdateError("Could not transition cash wallet migration")
       return resultToMigration(result)
     } catch (err) {
       return parseRepositoryError(err)
@@ -201,7 +208,8 @@ export const CashWalletCutoverRepository = () => {
         { $set: { lockedAt: new Date(), lockedBy: workerId, updatedAt: new Date() } },
         { new: true },
       )
-      if (!result) return new CouldNotUpdateError("Could not acquire cash wallet migration lock")
+      if (!result)
+        return new CouldNotUpdateError("Could not acquire cash wallet migration lock")
       return resultToMigration(result)
     } catch (err) {
       return parseRepositoryError(err)
@@ -213,14 +221,17 @@ export const CashWalletCutoverRepository = () => {
     workerId,
     cutoverVersion,
     runId,
-  }: Omit<LockMigrationArgs, "staleBefore">): Promise<CashWalletMigration | RepositoryError> => {
+  }: Omit<LockMigrationArgs, "staleBefore">): Promise<
+    CashWalletMigration | RepositoryError
+  > => {
     try {
       const result = await CashWalletMigration.findOneAndUpdate(
         { _id: id, lockedBy: workerId, cutoverVersion, runId },
         { $set: { lockedAt: null, lockedBy: null, updatedAt: new Date() } },
         { new: true },
       )
-      if (!result) return new CouldNotUpdateError("Could not release cash wallet migration lock")
+      if (!result)
+        return new CouldNotUpdateError("Could not release cash wallet migration lock")
       return resultToMigration(result)
     } catch (err) {
       return parseRepositoryError(err)
@@ -242,7 +253,9 @@ export const CashWalletCutoverRepository = () => {
         runId,
         status: { $nin: TERMINAL_STATUSES },
       })
-      return results.slice(0, limit).map(resultToMigration)
+        .sort({ updatedAt: 1 })
+        .limit(limit ?? 0)
+      return results.map(resultToMigration)
     } catch (err) {
       return parseRepositoryError(err)
     }

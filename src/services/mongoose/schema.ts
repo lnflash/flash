@@ -670,7 +670,6 @@ const CashWalletMigrationSchema = new Schema<CashWalletMigrationRecord>({
   updatedAt: { type: Date, default: Date.now, index: true },
 })
 
-CashWalletMigrationSchema.index({ accountId: 1, cutoverVersion: 1 }, { unique: true })
 CashWalletMigrationSchema.index({ accountId: 1, runId: 1 }, { unique: true })
 CashWalletMigrationSchema.index({ idempotencyKey: 1 }, { unique: true })
 CashWalletMigrationSchema.index({ cutoverVersion: 1, status: 1, updatedAt: 1 })
