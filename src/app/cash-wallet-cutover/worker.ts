@@ -54,6 +54,13 @@ type CashWalletMigrationLegacyWalletVerifier = {
   }): Promise<true | ApplicationError>
 }
 
+type CashWalletMigrationProvisioningService = {
+  ensureDestinationWallet(args: {
+    accountId: AccountId
+    destinationUsdtWalletId: WalletId
+  }): Promise<true | ApplicationError>
+}
+
 export const startCashWalletMigration = async ({
   migration,
   migrationsRepo,
@@ -73,6 +80,33 @@ export const startCashWalletMigration = async ({
     cutoverVersion: migration.cutoverVersion,
     runId: migration.runId,
     patch: { startedAt },
+  })
+}
+
+export const provisionCashWalletMigrationDestination = async ({
+  migration,
+  provisioningService,
+  migrationsRepo,
+}: {
+  migration: CashWalletMigration
+  provisioningService: CashWalletMigrationProvisioningService
+  migrationsRepo: CashWalletMigrationTransitionRepository
+}): Promise<CashWalletMigration | ApplicationError> => {
+  const transition = assertCanTransition(migration.status, "provisioned")
+  if (transition instanceof Error) return transition
+
+  const provisioned = await provisioningService.ensureDestinationWallet({
+    accountId: migration.accountId,
+    destinationUsdtWalletId: migration.destinationUsdtWalletId,
+  })
+  if (provisioned instanceof Error) return provisioned
+
+  return migrationsRepo.transitionMigration({
+    id: migration.id,
+    from: migration.status,
+    to: "provisioned",
+    cutoverVersion: migration.cutoverVersion,
+    runId: migration.runId,
   })
 }
 
