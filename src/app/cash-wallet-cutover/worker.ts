@@ -48,6 +48,12 @@ type CashWalletMigrationPointerService = {
   }): Promise<{ previousDefaultWalletId: WalletId } | ApplicationError>
 }
 
+type CashWalletMigrationLegacyWalletVerifier = {
+  verifyLegacyWalletZero(args: {
+    legacyUsdWalletId: WalletId
+  }): Promise<true | ApplicationError>
+}
+
 export const startCashWalletMigration = async ({
   migration,
   migrationsRepo,
@@ -363,5 +369,53 @@ export const flipCashWalletMigrationDefaultPointer = async ({
     patch: {
       previousDefaultWalletId: pointer.previousDefaultWalletId,
     },
+  })
+}
+
+export const verifyCashWalletMigrationLegacyZero = async ({
+  migration,
+  legacyWalletVerifier,
+  migrationsRepo,
+}: {
+  migration: CashWalletMigration
+  legacyWalletVerifier: CashWalletMigrationLegacyWalletVerifier
+  migrationsRepo: CashWalletMigrationTransitionRepository
+}): Promise<CashWalletMigration | ApplicationError> => {
+  const transition = assertCanTransition(migration.status, "legacy_zero_verified")
+  if (transition instanceof Error) return transition
+
+  const verified = await legacyWalletVerifier.verifyLegacyWalletZero({
+    legacyUsdWalletId: migration.legacyUsdWalletId,
+  })
+  if (verified instanceof Error) return verified
+
+  return migrationsRepo.transitionMigration({
+    id: migration.id,
+    from: migration.status,
+    to: "legacy_zero_verified",
+    cutoverVersion: migration.cutoverVersion,
+    runId: migration.runId,
+  })
+}
+
+export const completeCashWalletMigration = async ({
+  migration,
+  migrationsRepo,
+  completedAt,
+}: {
+  migration: CashWalletMigration
+  migrationsRepo: CashWalletMigrationTransitionRepository
+  completedAt: Date
+}): Promise<CashWalletMigration | ApplicationError> => {
+  const transition = assertCanTransition(migration.status, "complete")
+  if (transition instanceof Error) return transition
+
+  return migrationsRepo.transitionMigration({
+    id: migration.id,
+    from: migration.status,
+    to: "complete",
+    cutoverVersion: migration.cutoverVersion,
+    runId: migration.runId,
+    patch: { completedAt },
   })
 }

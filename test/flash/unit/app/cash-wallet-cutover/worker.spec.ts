@@ -4,6 +4,7 @@ import {
   createCashWalletMigrationBalanceMoveInvoice,
   createCashWalletMigrationFeeReimbursementInvoice,
   flipCashWalletMigrationDefaultPointer,
+  completeCashWalletMigration,
   markCashWalletMigrationFeeReimbursed,
   markCashWalletMigrationBalanceMoveSent,
   recordCashWalletMigrationBalance,
@@ -11,6 +12,7 @@ import {
   sendCashWalletMigrationFeeReimbursementPayment,
   startCashWalletMigration,
   verifyCashWalletMigrationBalanceMove,
+  verifyCashWalletMigrationLegacyZero,
 } from "@app/cash-wallet-cutover/worker"
 
 const migration = (status: CashWalletMigrationStatus): CashWalletMigration => ({
@@ -670,5 +672,80 @@ describe("cash wallet migration worker checkpoints", () => {
 
     expect(result).toBe(error)
     expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
+  })
+
+  it("verifies the legacy USD wallet is zero after the pointer flip", async () => {
+    const migrationsRepo = {
+      transitionMigration: jest.fn(async () => migration("legacy_zero_verified")),
+    }
+    const legacyWalletVerifier = {
+      verifyLegacyWalletZero: jest.fn(async () => true),
+    }
+
+    const result = await verifyCashWalletMigrationLegacyZero({
+      migration: migration("pointer_flipped"),
+      legacyWalletVerifier,
+      migrationsRepo,
+    })
+
+    expect(result).toMatchObject({ status: "legacy_zero_verified" })
+    expect(legacyWalletVerifier.verifyLegacyWalletZero).toHaveBeenCalledWith({
+      legacyUsdWalletId: "legacy-usd-wallet-id",
+    })
+    expect(migrationsRepo.transitionMigration).toHaveBeenCalledWith({
+      id: "migration-id",
+      from: "pointer_flipped",
+      to: "legacy_zero_verified",
+      cutoverVersion: 7,
+      runId: "run-7",
+    })
+  })
+
+  it("returns legacy zero verification failures without advancing", async () => {
+    const error = new CouldNotUpdateError("legacy wallet still has a balance")
+    const migrationsRepo = {
+      transitionMigration: jest.fn(),
+    }
+    const legacyWalletVerifier = {
+      verifyLegacyWalletZero: jest.fn(async () => error),
+    }
+
+    const result = await verifyCashWalletMigrationLegacyZero({
+      migration: migration("pointer_flipped"),
+      legacyWalletVerifier,
+      migrationsRepo,
+    })
+
+    expect(result).toBe(error)
+    expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
+  })
+
+  it("completes the migration after legacy zero verification", async () => {
+    const completedAt = new Date("2026-05-20T15:30:00Z")
+    const migrationsRepo = {
+      transitionMigration: jest.fn(async () => ({
+        ...migration("complete"),
+        completedAt,
+      })),
+    }
+
+    const result = await completeCashWalletMigration({
+      migration: migration("legacy_zero_verified"),
+      migrationsRepo,
+      completedAt,
+    })
+
+    expect(result).toMatchObject({
+      status: "complete",
+      completedAt,
+    })
+    expect(migrationsRepo.transitionMigration).toHaveBeenCalledWith({
+      id: "migration-id",
+      from: "legacy_zero_verified",
+      to: "complete",
+      cutoverVersion: 7,
+      runId: "run-7",
+      patch: { completedAt },
+    })
   })
 })
