@@ -41,6 +41,13 @@ type CashWalletMigrationBalanceVerifier = {
   }): Promise<true | ApplicationError>
 }
 
+type CashWalletMigrationPointerService = {
+  flipDefaultWallet(args: {
+    accountId: AccountId
+    destinationWalletId: WalletId
+  }): Promise<{ previousDefaultWalletId: WalletId } | ApplicationError>
+}
+
 export const startCashWalletMigration = async ({
   migration,
   migrationsRepo,
@@ -326,5 +333,35 @@ export const markCashWalletMigrationFeeReimbursed = async ({
     to: "fee_reimbursed",
     cutoverVersion: migration.cutoverVersion,
     runId: migration.runId,
+  })
+}
+
+export const flipCashWalletMigrationDefaultPointer = async ({
+  migration,
+  pointerService,
+  migrationsRepo,
+}: {
+  migration: CashWalletMigration
+  pointerService: CashWalletMigrationPointerService
+  migrationsRepo: CashWalletMigrationTransitionRepository
+}): Promise<CashWalletMigration | ApplicationError> => {
+  const transition = assertCanTransition(migration.status, "pointer_flipped")
+  if (transition instanceof Error) return transition
+
+  const pointer = await pointerService.flipDefaultWallet({
+    accountId: migration.accountId,
+    destinationWalletId: migration.destinationUsdtWalletId,
+  })
+  if (pointer instanceof Error) return pointer
+
+  return migrationsRepo.transitionMigration({
+    id: migration.id,
+    from: migration.status,
+    to: "pointer_flipped",
+    cutoverVersion: migration.cutoverVersion,
+    runId: migration.runId,
+    patch: {
+      previousDefaultWalletId: pointer.previousDefaultWalletId,
+    },
   })
 }

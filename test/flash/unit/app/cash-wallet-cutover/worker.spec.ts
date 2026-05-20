@@ -3,6 +3,7 @@ import { CouldNotUpdateError } from "@domain/errors"
 import {
   createCashWalletMigrationBalanceMoveInvoice,
   createCashWalletMigrationFeeReimbursementInvoice,
+  flipCashWalletMigrationDefaultPointer,
   markCashWalletMigrationFeeReimbursed,
   markCashWalletMigrationBalanceMoveSent,
   recordCashWalletMigrationBalance,
@@ -610,6 +611,64 @@ describe("cash wallet migration worker checkpoints", () => {
     })
 
     expect(result).toBeInstanceOf(Error)
+    expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
+  })
+
+  it("flips the account default pointer to the destination USDT wallet", async () => {
+    const migrationsRepo = {
+      transitionMigration: jest.fn(async () => ({
+        ...migration("pointer_flipped"),
+        previousDefaultWalletId: "legacy-usd-wallet-id" as WalletId,
+      })),
+    }
+    const pointerService = {
+      flipDefaultWallet: jest.fn(async () => ({
+        previousDefaultWalletId: "legacy-usd-wallet-id" as WalletId,
+      })),
+    }
+
+    const result = await flipCashWalletMigrationDefaultPointer({
+      migration: migration("fee_reimbursed"),
+      pointerService,
+      migrationsRepo,
+    })
+
+    expect(result).toMatchObject({
+      status: "pointer_flipped",
+      previousDefaultWalletId: "legacy-usd-wallet-id",
+    })
+    expect(pointerService.flipDefaultWallet).toHaveBeenCalledWith({
+      accountId: "account-id",
+      destinationWalletId: "usdt-wallet-id",
+    })
+    expect(migrationsRepo.transitionMigration).toHaveBeenCalledWith({
+      id: "migration-id",
+      from: "fee_reimbursed",
+      to: "pointer_flipped",
+      cutoverVersion: 7,
+      runId: "run-7",
+      patch: {
+        previousDefaultWalletId: "legacy-usd-wallet-id",
+      },
+    })
+  })
+
+  it("returns pointer flip failures without advancing", async () => {
+    const error = new CouldNotUpdateError("default wallet update failed")
+    const migrationsRepo = {
+      transitionMigration: jest.fn(),
+    }
+    const pointerService = {
+      flipDefaultWallet: jest.fn(async () => error),
+    }
+
+    const result = await flipCashWalletMigrationDefaultPointer({
+      migration: migration("fee_reimbursed"),
+      pointerService,
+      migrationsRepo,
+    })
+
+    expect(result).toBe(error)
     expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
   })
 })
