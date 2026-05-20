@@ -692,7 +692,7 @@ BridgeDepositsSchema.index({ customerId: 1, createdAt: -1 })
 
 export const BridgeDeposits = mongoose.model("BridgeDeposits", BridgeDepositsSchema)
 
-const IbexCryptoReceiveLogSchema = new Schema({
+const IbexCryptoReceiveSchema = new Schema({
   txHash: { type: String, required: true, unique: true },
   address: { type: String, required: true },
   amount: { type: String, required: true },
@@ -702,12 +702,12 @@ const IbexCryptoReceiveLogSchema = new Schema({
   receivedAt: { type: Date, default: Date.now },
 })
 
-IbexCryptoReceiveLogSchema.index({ receivedAt: -1 })
-IbexCryptoReceiveLogSchema.index({ address: 1, receivedAt: -1 })
+IbexCryptoReceiveSchema.index({ receivedAt: -1 })
+IbexCryptoReceiveSchema.index({ address: 1, receivedAt: -1 })
 
-export const IbexCryptoReceiveLog = mongoose.model(
-  "IbexCryptoReceiveLog",
-  IbexCryptoReceiveLogSchema,
+export const IbexCryptoReceive = mongoose.model(
+  "IbexCryptoReceive",
+  IbexCryptoReceiveSchema,
 )
 
 const BridgeReconciliationOrphanSchema = new Schema({
