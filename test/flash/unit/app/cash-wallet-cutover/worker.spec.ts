@@ -3,6 +3,7 @@ import { CouldNotUpdateError } from "@domain/errors"
 import {
   createCashWalletMigrationBalanceMoveInvoice,
   recordCashWalletMigrationBalance,
+  sendCashWalletMigrationBalanceMovePayment,
   startCashWalletMigration,
 } from "@app/cash-wallet-cutover/worker"
 
@@ -207,6 +208,67 @@ describe("cash wallet migration worker checkpoints", () => {
     })
 
     expect(result).toBe(error)
+    expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
+  })
+
+  it("sends the balance move payment from the legacy wallet", async () => {
+    const migrationsRepo = {
+      transitionMigration: jest.fn(async () => ({
+        ...migration("balance_move_sending"),
+        balanceMovePaymentTransactionId: "ibex-tx-id",
+      })),
+    }
+    const paymentService = {
+      payInvoice: jest.fn(async () => ({
+        transactionId: "ibex-tx-id" as IbexTransactionId,
+      })),
+    }
+
+    const result = await sendCashWalletMigrationBalanceMovePayment({
+      migration: {
+        ...migration("invoice_created"),
+        balanceMoveInvoicePaymentRequest: "lnbc1balance-move",
+      },
+      paymentService,
+      migrationsRepo,
+    })
+
+    expect(result).toMatchObject({
+      status: "balance_move_sending",
+      balanceMovePaymentTransactionId: "ibex-tx-id",
+    })
+    expect(paymentService.payInvoice).toHaveBeenCalledWith({
+      senderWalletId: "legacy-usd-wallet-id",
+      paymentRequest: "lnbc1balance-move",
+    })
+    expect(migrationsRepo.transitionMigration).toHaveBeenCalledWith({
+      id: "migration-id",
+      from: "invoice_created",
+      to: "balance_move_sending",
+      cutoverVersion: 7,
+      runId: "run-7",
+      patch: {
+        balanceMovePaymentTransactionId: "ibex-tx-id",
+      },
+    })
+  })
+
+  it("rejects balance move payment sending when the invoice payment request is missing", async () => {
+    const migrationsRepo = {
+      transitionMigration: jest.fn(),
+    }
+    const paymentService = {
+      payInvoice: jest.fn(),
+    }
+
+    const result = await sendCashWalletMigrationBalanceMovePayment({
+      migration: migration("invoice_created"),
+      paymentService,
+      migrationsRepo,
+    })
+
+    expect(result).toBeInstanceOf(Error)
+    expect(paymentService.payInvoice).not.toHaveBeenCalled()
     expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
   })
 })

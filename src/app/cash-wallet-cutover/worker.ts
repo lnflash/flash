@@ -1,6 +1,9 @@
 import { assertCanTransition } from "./state-machine"
 import { usdCentsToUsdtMicros } from "./amount-conversion"
-import { InvalidCashWalletCutoverAmountError } from "./errors"
+import {
+  InvalidCashWalletCutoverAmountError,
+  InvalidCashWalletMigrationTransitionError,
+} from "./errors"
 
 type CashWalletMigrationTransitionRepository = {
   transitionMigration(args: {
@@ -19,6 +22,13 @@ type CashWalletMigrationInvoiceService = {
     amount: string
     memo: string
   }): Promise<LnInvoice | ApplicationError>
+}
+
+type CashWalletMigrationPaymentService = {
+  payInvoice(args: {
+    senderWalletId: WalletId
+    paymentRequest: string
+  }): Promise<{ transactionId: IbexTransactionId } | ApplicationError>
 }
 
 export const startCashWalletMigration = async ({
@@ -67,6 +77,42 @@ export const recordCashWalletMigrationBalance = async ({
     patch: {
       sourceBalanceUsdCents,
       destinationAmountUsdtMicros,
+    },
+  })
+}
+
+export const sendCashWalletMigrationBalanceMovePayment = async ({
+  migration,
+  paymentService,
+  migrationsRepo,
+}: {
+  migration: CashWalletMigration
+  paymentService: CashWalletMigrationPaymentService
+  migrationsRepo: CashWalletMigrationTransitionRepository
+}): Promise<CashWalletMigration | ApplicationError> => {
+  const transition = assertCanTransition(migration.status, "balance_move_sending")
+  if (transition instanceof Error) return transition
+
+  if (migration.balanceMoveInvoicePaymentRequest === undefined) {
+    return new InvalidCashWalletMigrationTransitionError(
+      "balanceMoveInvoicePaymentRequest is required before balance move payment sending",
+    )
+  }
+
+  const payment = await paymentService.payInvoice({
+    senderWalletId: migration.legacyUsdWalletId,
+    paymentRequest: migration.balanceMoveInvoicePaymentRequest,
+  })
+  if (payment instanceof Error) return payment
+
+  return migrationsRepo.transitionMigration({
+    id: migration.id,
+    from: migration.status,
+    to: "balance_move_sending",
+    cutoverVersion: migration.cutoverVersion,
+    runId: migration.runId,
+    patch: {
+      balanceMovePaymentTransactionId: payment.transactionId,
     },
   })
 }
