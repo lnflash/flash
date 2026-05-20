@@ -1,6 +1,9 @@
 import { CouldNotUpdateError } from "@domain/errors"
 
-import { startCashWalletMigration } from "@app/cash-wallet-cutover/worker"
+import {
+  recordCashWalletMigrationBalance,
+  startCashWalletMigration,
+} from "@app/cash-wallet-cutover/worker"
 
 const migration = (status: CashWalletMigrationStatus): CashWalletMigration => ({
   id: "migration-id",
@@ -67,5 +70,53 @@ describe("cash wallet migration worker checkpoints", () => {
     })
 
     expect(result).toBe(error)
+  })
+
+  it("records source balance and destination amount before creating invoices", async () => {
+    const migrationsRepo = {
+      transitionMigration: jest.fn(async () => ({
+        ...migration("balance_read"),
+        sourceBalanceUsdCents: "1234",
+        destinationAmountUsdtMicros: "12340000",
+      })),
+    }
+
+    const result = await recordCashWalletMigrationBalance({
+      migration: migration("provisioned"),
+      migrationsRepo,
+      sourceBalanceUsdCents: "1234",
+    })
+
+    expect(result).toMatchObject({
+      status: "balance_read",
+      sourceBalanceUsdCents: "1234",
+      destinationAmountUsdtMicros: "12340000",
+    })
+    expect(migrationsRepo.transitionMigration).toHaveBeenCalledWith({
+      id: "migration-id",
+      from: "provisioned",
+      to: "balance_read",
+      cutoverVersion: 7,
+      runId: "run-7",
+      patch: {
+        sourceBalanceUsdCents: "1234",
+        destinationAmountUsdtMicros: "12340000",
+      },
+    })
+  })
+
+  it("rejects invalid balance amounts before touching the repository", async () => {
+    const migrationsRepo = {
+      transitionMigration: jest.fn(),
+    }
+
+    const result = await recordCashWalletMigrationBalance({
+      migration: migration("provisioned"),
+      migrationsRepo,
+      sourceBalanceUsdCents: "12.34",
+    })
+
+    expect(result).toBeInstanceOf(Error)
+    expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
   })
 })
