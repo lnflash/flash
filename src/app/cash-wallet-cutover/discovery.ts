@@ -1,14 +1,14 @@
 import { WalletCurrency } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
 
-type CashWalletCutoverDiscoveryStatus =
+export type CashWalletCutoverDiscoveryStatus =
   | "legacy_default"
   | "already_usdt"
   | "residual_legacy_usd"
   | "missing_legacy_usd"
   | "missing_destination_usdt"
 
-type CashWalletCutoverDiscovery = {
+export type CashWalletCutoverDiscovery = {
   status: CashWalletCutoverDiscoveryStatus
   accountId: AccountId
   accountUuid?: AccountUuid
