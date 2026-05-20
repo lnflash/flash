@@ -267,3 +267,64 @@ export const createCashWalletMigrationFeeReimbursementInvoice = async ({
     },
   })
 }
+
+export const sendCashWalletMigrationFeeReimbursementPayment = async ({
+  migration,
+  paymentService,
+  migrationsRepo,
+}: {
+  migration: CashWalletMigration
+  paymentService: CashWalletMigrationPaymentService
+  migrationsRepo: CashWalletMigrationTransitionRepository
+}): Promise<CashWalletMigration | ApplicationError> => {
+  const transition = assertCanTransition(migration.status, "fee_reimbursement_sending")
+  if (transition instanceof Error) return transition
+
+  if (migration.feeReimbursementInvoicePaymentRequest === undefined) {
+    return new InvalidCashWalletMigrationTransitionError(
+      "feeReimbursementInvoicePaymentRequest is required before fee reimbursement sending",
+    )
+  }
+
+  const payment = await paymentService.payInvoice({
+    senderWalletId: migration.destinationUsdtWalletId,
+    paymentRequest: migration.feeReimbursementInvoicePaymentRequest,
+  })
+  if (payment instanceof Error) return payment
+
+  return migrationsRepo.transitionMigration({
+    id: migration.id,
+    from: migration.status,
+    to: "fee_reimbursement_sending",
+    cutoverVersion: migration.cutoverVersion,
+    runId: migration.runId,
+    patch: {
+      feeReimbursementPaymentTransactionId: payment.transactionId,
+    },
+  })
+}
+
+export const markCashWalletMigrationFeeReimbursed = async ({
+  migration,
+  migrationsRepo,
+}: {
+  migration: CashWalletMigration
+  migrationsRepo: CashWalletMigrationTransitionRepository
+}): Promise<CashWalletMigration | ApplicationError> => {
+  const transition = assertCanTransition(migration.status, "fee_reimbursed")
+  if (transition instanceof Error) return transition
+
+  if (migration.feeReimbursementPaymentTransactionId === undefined) {
+    return new InvalidCashWalletMigrationTransitionError(
+      "feeReimbursementPaymentTransactionId is required before marking fee reimbursed",
+    )
+  }
+
+  return migrationsRepo.transitionMigration({
+    id: migration.id,
+    from: migration.status,
+    to: "fee_reimbursed",
+    cutoverVersion: migration.cutoverVersion,
+    runId: migration.runId,
+  })
+}
