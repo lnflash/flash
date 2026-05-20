@@ -3,9 +3,11 @@ import { CouldNotUpdateError } from "@domain/errors"
 import {
   createCashWalletMigrationBalanceMoveInvoice,
   createCashWalletMigrationFeeReimbursementInvoice,
+  markCashWalletMigrationFeeReimbursed,
   markCashWalletMigrationBalanceMoveSent,
   recordCashWalletMigrationBalance,
   sendCashWalletMigrationBalanceMovePayment,
+  sendCashWalletMigrationFeeReimbursementPayment,
   startCashWalletMigration,
   verifyCashWalletMigrationBalanceMove,
 } from "@app/cash-wallet-cutover/worker"
@@ -482,6 +484,132 @@ describe("cash wallet migration worker checkpoints", () => {
     })
 
     expect(result).toBe(error)
+    expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
+  })
+
+  it("sends the fee reimbursement payment from the destination wallet", async () => {
+    const migrationsRepo = {
+      transitionMigration: jest.fn(async () => ({
+        ...migration("fee_reimbursement_sending"),
+        feeReimbursementPaymentTransactionId: "fee-ibex-tx-id",
+      })),
+    }
+    const paymentService = {
+      payInvoice: jest.fn(async () => ({
+        transactionId: "fee-ibex-tx-id" as IbexTransactionId,
+      })),
+    }
+
+    const result = await sendCashWalletMigrationFeeReimbursementPayment({
+      migration: {
+        ...migration("fee_reimbursement_invoice_created"),
+        feeReimbursementInvoicePaymentRequest: "lnbc1fee-reimbursement",
+      },
+      paymentService,
+      migrationsRepo,
+    })
+
+    expect(result).toMatchObject({
+      status: "fee_reimbursement_sending",
+      feeReimbursementPaymentTransactionId: "fee-ibex-tx-id",
+    })
+    expect(paymentService.payInvoice).toHaveBeenCalledWith({
+      senderWalletId: "usdt-wallet-id",
+      paymentRequest: "lnbc1fee-reimbursement",
+    })
+    expect(migrationsRepo.transitionMigration).toHaveBeenCalledWith({
+      id: "migration-id",
+      from: "fee_reimbursement_invoice_created",
+      to: "fee_reimbursement_sending",
+      cutoverVersion: 7,
+      runId: "run-7",
+      patch: {
+        feeReimbursementPaymentTransactionId: "fee-ibex-tx-id",
+      },
+    })
+  })
+
+  it("rejects fee reimbursement sending when the invoice payment request is missing", async () => {
+    const migrationsRepo = {
+      transitionMigration: jest.fn(),
+    }
+    const paymentService = {
+      payInvoice: jest.fn(),
+    }
+
+    const result = await sendCashWalletMigrationFeeReimbursementPayment({
+      migration: migration("fee_reimbursement_invoice_created"),
+      paymentService,
+      migrationsRepo,
+    })
+
+    expect(result).toBeInstanceOf(Error)
+    expect(paymentService.payInvoice).not.toHaveBeenCalled()
+    expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
+  })
+
+  it("returns fee reimbursement payment failures without advancing", async () => {
+    const error = new CouldNotUpdateError("fee payment failed")
+    const migrationsRepo = {
+      transitionMigration: jest.fn(),
+    }
+    const paymentService = {
+      payInvoice: jest.fn(async () => error),
+    }
+
+    const result = await sendCashWalletMigrationFeeReimbursementPayment({
+      migration: {
+        ...migration("fee_reimbursement_invoice_created"),
+        feeReimbursementInvoicePaymentRequest: "lnbc1fee-reimbursement",
+      },
+      paymentService,
+      migrationsRepo,
+    })
+
+    expect(result).toBe(error)
+    expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
+  })
+
+  it("marks the fee reimbursement as complete after a transaction id is recorded", async () => {
+    const migrationsRepo = {
+      transitionMigration: jest.fn(async () => ({
+        ...migration("fee_reimbursed"),
+        feeReimbursementPaymentTransactionId: "fee-ibex-tx-id",
+      })),
+    }
+
+    const result = await markCashWalletMigrationFeeReimbursed({
+      migration: {
+        ...migration("fee_reimbursement_sending"),
+        feeReimbursementPaymentTransactionId: "fee-ibex-tx-id",
+      },
+      migrationsRepo,
+    })
+
+    expect(result).toMatchObject({
+      status: "fee_reimbursed",
+      feeReimbursementPaymentTransactionId: "fee-ibex-tx-id",
+    })
+    expect(migrationsRepo.transitionMigration).toHaveBeenCalledWith({
+      id: "migration-id",
+      from: "fee_reimbursement_sending",
+      to: "fee_reimbursed",
+      cutoverVersion: 7,
+      runId: "run-7",
+    })
+  })
+
+  it("rejects marking fee reimbursement complete before a transaction id exists", async () => {
+    const migrationsRepo = {
+      transitionMigration: jest.fn(),
+    }
+
+    const result = await markCashWalletMigrationFeeReimbursed({
+      migration: migration("fee_reimbursement_sending"),
+      migrationsRepo,
+    })
+
+    expect(result).toBeInstanceOf(Error)
     expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
   })
 })
