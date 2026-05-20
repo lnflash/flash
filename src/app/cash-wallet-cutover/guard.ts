@@ -31,7 +31,10 @@ export const evaluateCashWalletCutoverGuard = ({
   if (cutover.state === "complete") return { route: "eth_usdt" }
 
   if (!migration || migration.status === "not_started") return { route: "legacy_usd" }
-  if (migration.status === "complete" || migration.status === "skipped_already_migrated") {
+  if (
+    migration.status === "complete" ||
+    migration.status === "skipped_already_migrated"
+  ) {
     return { route: "eth_usdt" }
   }
   if (migration.status === "failed" || migration.status === "requires_operator_review") {

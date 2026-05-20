@@ -1,6 +1,8 @@
 import { InvalidCashWalletMigrationTransitionError } from "./errors"
 
-const transitions: Partial<Record<CashWalletMigrationStatus, CashWalletMigrationStatus[]>> = {
+const transitions: Partial<
+  Record<CashWalletMigrationStatus, CashWalletMigrationStatus[]>
+> = {
   not_started: ["started"],
   started: ["provisioned", "failed"],
   provisioned: ["balance_read", "failed", "skipped_already_migrated"],
