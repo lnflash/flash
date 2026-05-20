@@ -4,6 +4,8 @@ type CashWalletMigrationRecordsRepository = {
   ): Promise<CashWalletMigration | RepositoryError>
 }
 
+export type { CashWalletMigrationRecordsRepository }
+
 export const upsertPrimaryCashWalletMigrationRecords = async ({
   migrationsRepo,
   plans,
