@@ -7,6 +7,7 @@ import {
   completeCashWalletMigration,
   markCashWalletMigrationFeeReimbursed,
   markCashWalletMigrationBalanceMoveSent,
+  provisionCashWalletMigrationDestination,
   recordCashWalletMigrationBalance,
   sendCashWalletMigrationBalanceMovePayment,
   sendCashWalletMigrationFeeReimbursementPayment,
@@ -80,6 +81,53 @@ describe("cash wallet migration worker checkpoints", () => {
     })
 
     expect(result).toBe(error)
+  })
+
+  it("provisions the destination wallet before reading balances", async () => {
+    const migrationsRepo = {
+      transitionMigration: jest.fn(async () => migration("provisioned")),
+    }
+    const provisioningService = {
+      ensureDestinationWallet: jest.fn(async () => true),
+    }
+
+    const result = await provisionCashWalletMigrationDestination({
+      migration: migration("started"),
+      provisioningService,
+      migrationsRepo,
+    })
+
+    expect(result).toMatchObject({ status: "provisioned" })
+    expect(provisioningService.ensureDestinationWallet).toHaveBeenCalledWith({
+      accountId: "account-id",
+      destinationUsdtWalletId: "usdt-wallet-id",
+    })
+    expect(migrationsRepo.transitionMigration).toHaveBeenCalledWith({
+      id: "migration-id",
+      from: "started",
+      to: "provisioned",
+      cutoverVersion: 7,
+      runId: "run-7",
+    })
+  })
+
+  it("returns destination wallet provisioning failures without advancing", async () => {
+    const error = new CouldNotUpdateError("destination wallet missing")
+    const migrationsRepo = {
+      transitionMigration: jest.fn(),
+    }
+    const provisioningService = {
+      ensureDestinationWallet: jest.fn(async () => error),
+    }
+
+    const result = await provisionCashWalletMigrationDestination({
+      migration: migration("started"),
+      provisioningService,
+      migrationsRepo,
+    })
+
+    expect(result).toBe(error)
+    expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
   })
 
   it("records source balance and destination amount before creating invoices", async () => {
