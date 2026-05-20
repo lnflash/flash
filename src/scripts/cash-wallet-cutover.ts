@@ -13,6 +13,7 @@ import {
 import { baseLogger } from "@services/logger"
 
 const args = yargs(hideBin(process.argv))
+  .command("preview", "discover accounts and print the migration plan without writes")
   .command("prepare", "discover accounts and upsert migration records")
   .command("start", "mark a prepared cutover run in progress")
   .command("run-batch", "run one locked migration worker batch")
@@ -40,6 +41,16 @@ const run = async () => {
   const runId = args["run-id"]
 
   switch (command) {
+    case "preview": {
+      const result = await CashWalletCutover.previewPrimaryCashWalletCutover({
+        cutoverVersion,
+        runId,
+      })
+      if (result instanceof Error) throw result
+      toJson(result)
+      return
+    }
+
     case "prepare": {
       const result = await CashWalletCutover.preparePrimaryCashWalletCutover({
         cutoverVersion,
