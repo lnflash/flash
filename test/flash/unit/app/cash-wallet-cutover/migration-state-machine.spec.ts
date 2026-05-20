@@ -28,18 +28,24 @@ describe("cash wallet cutover migration state machine", () => {
   })
 
   it("rejects pointer flip before fee reimbursement", () => {
-    expect(assertCanTransition("balance_move_verified", "pointer_flipped")).toBeInstanceOf(Error)
+    expect(
+      assertCanTransition("balance_move_verified", "pointer_flipped"),
+    ).toBeInstanceOf(Error)
   })
 
   it("resumes from stored checkpoint without repeating completed side effects", () => {
     expect(nextResumeStatus("invoice_created")).toBe("invoice_created")
     expect(nextResumeStatus("balance_move_sent")).toBe("balance_move_sent")
-    expect(nextResumeStatus("fee_reimbursement_invoice_created")).toBe("fee_reimbursement_invoice_created")
+    expect(nextResumeStatus("fee_reimbursement_invoice_created")).toBe(
+      "fee_reimbursement_invoice_created",
+    )
   })
 
   it("does not progress terminal/manual-review states without override", () => {
     expect(assertCanTransition("complete", "started")).toBeInstanceOf(Error)
     expect(assertCanTransition("failed", "started")).toBeInstanceOf(Error)
-    expect(assertCanTransition("requires_operator_review", "started")).toBeInstanceOf(Error)
+    expect(assertCanTransition("requires_operator_review", "started")).toBeInstanceOf(
+      Error,
+    )
   })
 })
