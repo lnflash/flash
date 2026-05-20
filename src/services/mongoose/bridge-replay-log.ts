@@ -1,6 +1,6 @@
-import { BridgeReplayLog } from "./schema"
+import { BridgeReplay } from "./schema"
 
-export const createBridgeReplayLog = async (data: {
+export const createBridgeReplay = async (data: {
   eventId: string
   eventType: string
   eventPayload: Record<string, unknown>
@@ -14,7 +14,7 @@ export const createBridgeReplayLog = async (data: {
   dryRun?: boolean
 }): Promise<{ id: string } | Error> => {
   try {
-    const log = await BridgeReplayLog.create(data)
+    const log = await BridgeReplay.create(data)
 
     return { id: log._id.toString() }
   } catch (error) {
@@ -22,7 +22,7 @@ export const createBridgeReplayLog = async (data: {
   }
 }
 
-export const findBridgeReplayLogs = async (filter?: {
+export const findBridgeReplays = async (filter?: {
   eventType?: string
   dryRun?: boolean
   limit?: number
@@ -32,7 +32,7 @@ export const findBridgeReplayLogs = async (filter?: {
     if (filter?.eventType !== undefined) queryFilter.eventType = filter.eventType
     if (filter?.dryRun !== undefined) queryFilter.dryRun = filter.dryRun
 
-    return await BridgeReplayLog.find(queryFilter)
+    return await BridgeReplay.find(queryFilter)
       .sort({ replayedAt: -1 })
       .limit(filter?.limit ?? 100)
       .lean()

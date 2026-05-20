@@ -6,7 +6,7 @@ import { BridgeConfig } from "@config"
 
 import { baseLogger } from "@services/logger"
 
-import { createBridgeReplayLog } from "@services/mongoose/bridge-replay-log"
+import { createBridgeReplay } from "@services/mongoose/bridge-replay-log"
 
 import {
   isOutboundBridgeWithdrawal,
@@ -198,7 +198,7 @@ export const replayHandler = async (req: Request, res: Response) => {
   }
 
   if (dry_run) {
-    const dryRunLog = await createBridgeReplayLog({
+    const dryRunLog = await createBridgeReplay({
       ...logBase,
       httpStatus: 0,
       httpResponse: { dry_run: true },
@@ -242,7 +242,7 @@ export const replayHandler = async (req: Request, res: Response) => {
 
   await HANDLERS[routeKey](fakeReq, fakeRes)
 
-  const logResult = await createBridgeReplayLog({
+  const logResult = await createBridgeReplay({
     ...logBase,
     httpStatus: handlerStatus,
     httpResponse: handlerBody,

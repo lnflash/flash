@@ -744,7 +744,7 @@ export const BridgeReconciliationOrphan = mongoose.model(
   BridgeReconciliationOrphanSchema,
 )
 
-const BridgeReplayLogSchema = new Schema({
+const BridgeReplaySchema = new Schema({
   eventId: { type: String, required: true },
   eventType: { type: String, required: true },
   eventPayload: { type: Schema.Types.Mixed, required: true },
@@ -758,11 +758,11 @@ const BridgeReplayLogSchema = new Schema({
   dryRun: { type: Boolean, required: true, default: false },
 })
 
-BridgeReplayLogSchema.index({ eventId: 1 })
-BridgeReplayLogSchema.index({ replayedAt: -1 })
-BridgeReplayLogSchema.index({ eventType: 1, replayedAt: -1 })
+BridgeReplaySchema.index({ eventId: 1 })
+BridgeReplaySchema.index({ replayedAt: -1 })
+BridgeReplaySchema.index({ eventType: 1, replayedAt: -1 })
 
-export const BridgeReplayLog = mongoose.model("BridgeReplayLog", BridgeReplayLogSchema)
+export const BridgeReplay = mongoose.model("BridgeReplay", BridgeReplaySchema)
 
 export const BridgeVirtualAccount = mongoose.model<IBridgeVirtualAccountRecord>(
   "BridgeVirtualAccount",
