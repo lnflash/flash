@@ -501,6 +501,10 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = "KYC verification was rejected"
       return new ValidationInternalError({ message, logger: baseLogger })
 
+    case "BridgeKycOffboardedError":
+      message = "Your account has been offboarded from Bridge. Please contact support."
+      return new ValidationInternalError({ message, logger: baseLogger })
+
     case "BridgeCustomerNotFoundError":
       message = "Bridge customer not found"
       return new ValidationInternalError({ message, logger: baseLogger })

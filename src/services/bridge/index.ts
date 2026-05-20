@@ -30,6 +30,7 @@ import {
   BridgeAccountLevelError,
   BridgeKycPendingError,
   BridgeKycRejectedError,
+  BridgeKycOffboardedError,
   BridgeCustomerNotFoundError,
 } from "./errors"
 import BridgeApiClient from "./client"
@@ -70,7 +71,7 @@ type WithdrawalResult = {
   createdAt: string
 }
 
-type KycStatusResult = "pending" | "approved" | "rejected" | null
+type KycStatusResult = "open" | "pending" | "approved" | "rejected" | "offboarded" | null
 
 type VirtualAccountResult = {
   bridgeVirtualAccountId: string
@@ -199,7 +200,7 @@ const initiateKyc = async ({
 
     const updateResult = await AccountsRepository().updateBridgeFields(accountId, {
       bridgeCustomerId: customerId,
-      bridgeKycStatus: "pending",
+      bridgeKycStatus: "open",
     })
 
     if (updateResult instanceof Error) {
@@ -261,11 +262,14 @@ const createVirtualAccount = async (
     }
 
     // Check KYC status
-    if (account.bridgeKycStatus === "pending") {
-      return new BridgeKycPendingError()
+    if (account.bridgeKycStatus === "offboarded") {
+      return new BridgeKycOffboardedError()
     }
     if (account.bridgeKycStatus === "rejected") {
       return new BridgeKycRejectedError()
+    }
+    if (account.bridgeKycStatus === "pending" || account.bridgeKycStatus === "open") {
+      return new BridgeKycPendingError()
     }
     if (account.bridgeKycStatus !== "approved") {
       return new BridgeKycPendingError("KYC not yet completed")

@@ -63,7 +63,18 @@ const resolveReplayEventType = ({
     return eventObjectStatus
   }
 
-  if (eventObjectStatus === "approved" || eventObjectStatus === "rejected") {
+  const KYC_BRIDGE_STATUSES = new Set([
+    "not_started",
+    "incomplete",
+    "awaiting_questionnaire",
+    "awaiting_ubo",
+    "under_review",
+    "approved",
+    "rejected",
+    "paused",
+    "offboarded",
+  ])
+  if (eventObjectStatus && KYC_BRIDGE_STATUSES.has(eventObjectStatus)) {
     return `kyc.${eventObjectStatus}`
   }
 

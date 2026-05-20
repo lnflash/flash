@@ -339,7 +339,7 @@ const AccountSchema = new Schema<AccountRecord>(
     },
     bridgeKycStatus: {
       type: String,
-      enum: ["pending", "approved", "rejected"],
+      enum: ["open", "pending", "approved", "rejected", "offboarded"],
       required: false,
     },
     bridgeEthereumAddress: {

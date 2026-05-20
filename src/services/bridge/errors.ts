@@ -45,6 +45,12 @@ export class BridgeKycRejectedError extends BridgeError {
   }
 }
 
+export class BridgeKycOffboardedError extends BridgeError {
+  constructor(message: string = "Your account has been offboarded from Bridge. Please contact support.") {
+    super(message)
+  }
+}
+
 export class BridgeInsufficientFundsError extends BridgeError {
   constructor(message: string = "Insufficient funds for withdrawal") {
     super(message)
