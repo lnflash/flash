@@ -1,5 +1,5 @@
 import { assertCanTransition } from "./state-machine"
-import { usdCentsToUsdtMicros } from "./amount-conversion"
+import { feeUsdCentsToUsdtMicros, usdCentsToUsdtMicros } from "./amount-conversion"
 import {
   InvalidCashWalletCutoverAmountError,
   InvalidCashWalletMigrationTransitionError,
@@ -222,6 +222,48 @@ export const createCashWalletMigrationBalanceMoveInvoice = async ({
     patch: {
       balanceMoveInvoicePaymentRequest: invoice.paymentRequest,
       balanceMoveInvoicePaymentHash: invoice.paymentHash,
+    },
+  })
+}
+
+export const createCashWalletMigrationFeeReimbursementInvoice = async ({
+  migration,
+  invoiceService,
+  migrationsRepo,
+  feeAmountUsdCents,
+}: {
+  migration: CashWalletMigration
+  invoiceService: CashWalletMigrationInvoiceService
+  migrationsRepo: CashWalletMigrationTransitionRepository
+  feeAmountUsdCents: string
+}): Promise<CashWalletMigration | ApplicationError> => {
+  const feeAmountUsdtMicros = feeUsdCentsToUsdtMicros(feeAmountUsdCents)
+  if (feeAmountUsdtMicros instanceof Error) return feeAmountUsdtMicros
+
+  const transition = assertCanTransition(
+    migration.status,
+    "fee_reimbursement_invoice_created",
+  )
+  if (transition instanceof Error) return transition
+
+  const invoice = await invoiceService.createInvoice({
+    recipientWalletId: migration.legacyUsdWalletId,
+    amount: feeAmountUsdCents,
+    memo: `cash-wallet-cutover:${migration.runId}:${migration.id}:fee-reimbursement`,
+  })
+  if (invoice instanceof Error) return invoice
+
+  return migrationsRepo.transitionMigration({
+    id: migration.id,
+    from: migration.status,
+    to: "fee_reimbursement_invoice_created",
+    cutoverVersion: migration.cutoverVersion,
+    runId: migration.runId,
+    patch: {
+      feeAmountUsdCents,
+      feeAmountUsdtMicros,
+      feeReimbursementInvoicePaymentRequest: invoice.paymentRequest,
+      feeReimbursementInvoicePaymentHash: invoice.paymentHash,
     },
   })
 }
