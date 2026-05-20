@@ -2,6 +2,7 @@ import { CouldNotUpdateError } from "@domain/errors"
 
 import {
   createCashWalletMigrationBalanceMoveInvoice,
+  createCashWalletMigrationFeeReimbursementInvoice,
   markCashWalletMigrationBalanceMoveSent,
   recordCashWalletMigrationBalance,
   sendCashWalletMigrationBalanceMovePayment,
@@ -389,6 +390,98 @@ describe("cash wallet migration worker checkpoints", () => {
 
     expect(result).toBeInstanceOf(Error)
     expect(balanceVerifier.verifyBalanceMove).not.toHaveBeenCalled()
+    expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
+  })
+
+  it("creates a fee reimbursement invoice on the legacy wallet", async () => {
+    const migrationsRepo = {
+      transitionMigration: jest.fn(async () => ({
+        ...migration("fee_reimbursement_invoice_created"),
+        feeAmountUsdCents: "7",
+        feeAmountUsdtMicros: "70000",
+        feeReimbursementInvoicePaymentRequest: "lnbc1fee-reimbursement",
+        feeReimbursementInvoicePaymentHash: "feePaymentHash",
+      })),
+    }
+    const invoice = {
+      paymentRequest: "lnbc1fee-reimbursement" as EncodedPaymentRequest,
+      paymentHash: "feePaymentHash" as PaymentHash,
+    } as LnInvoice
+    const invoiceService = {
+      createInvoice: jest.fn(async () => invoice),
+    }
+
+    const result = await createCashWalletMigrationFeeReimbursementInvoice({
+      migration: migration("balance_move_verified"),
+      invoiceService,
+      migrationsRepo,
+      feeAmountUsdCents: "7",
+    })
+
+    expect(result).toMatchObject({
+      status: "fee_reimbursement_invoice_created",
+      feeAmountUsdCents: "7",
+      feeAmountUsdtMicros: "70000",
+      feeReimbursementInvoicePaymentRequest: "lnbc1fee-reimbursement",
+      feeReimbursementInvoicePaymentHash: "feePaymentHash",
+    })
+    expect(invoiceService.createInvoice).toHaveBeenCalledWith({
+      recipientWalletId: "legacy-usd-wallet-id",
+      amount: "7",
+      memo: "cash-wallet-cutover:run-7:migration-id:fee-reimbursement",
+    })
+    expect(migrationsRepo.transitionMigration).toHaveBeenCalledWith({
+      id: "migration-id",
+      from: "balance_move_verified",
+      to: "fee_reimbursement_invoice_created",
+      cutoverVersion: 7,
+      runId: "run-7",
+      patch: {
+        feeAmountUsdCents: "7",
+        feeAmountUsdtMicros: "70000",
+        feeReimbursementInvoicePaymentRequest: "lnbc1fee-reimbursement",
+        feeReimbursementInvoicePaymentHash: "feePaymentHash",
+      },
+    })
+  })
+
+  it("rejects invalid fee reimbursement amounts before creating an invoice", async () => {
+    const migrationsRepo = {
+      transitionMigration: jest.fn(),
+    }
+    const invoiceService = {
+      createInvoice: jest.fn(),
+    }
+
+    const result = await createCashWalletMigrationFeeReimbursementInvoice({
+      migration: migration("balance_move_verified"),
+      invoiceService,
+      migrationsRepo,
+      feeAmountUsdCents: "0.07",
+    })
+
+    expect(result).toBeInstanceOf(Error)
+    expect(invoiceService.createInvoice).not.toHaveBeenCalled()
+    expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
+  })
+
+  it("returns fee reimbursement invoice creation failures without advancing", async () => {
+    const error = new CouldNotUpdateError("fee invoice failed")
+    const migrationsRepo = {
+      transitionMigration: jest.fn(),
+    }
+    const invoiceService = {
+      createInvoice: jest.fn(async () => error),
+    }
+
+    const result = await createCashWalletMigrationFeeReimbursementInvoice({
+      migration: migration("balance_move_verified"),
+      invoiceService,
+      migrationsRepo,
+      feeAmountUsdCents: "7",
+    })
+
+    expect(result).toBe(error)
     expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
   })
 })
