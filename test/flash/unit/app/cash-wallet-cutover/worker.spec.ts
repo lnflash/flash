@@ -2,9 +2,11 @@ import { CouldNotUpdateError } from "@domain/errors"
 
 import {
   createCashWalletMigrationBalanceMoveInvoice,
+  markCashWalletMigrationBalanceMoveSent,
   recordCashWalletMigrationBalance,
   sendCashWalletMigrationBalanceMovePayment,
   startCashWalletMigration,
+  verifyCashWalletMigrationBalanceMove,
 } from "@app/cash-wallet-cutover/worker"
 
 const migration = (status: CashWalletMigrationStatus): CashWalletMigration => ({
@@ -269,6 +271,124 @@ describe("cash wallet migration worker checkpoints", () => {
 
     expect(result).toBeInstanceOf(Error)
     expect(paymentService.payInvoice).not.toHaveBeenCalled()
+    expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
+  })
+
+  it("marks the balance move payment as sent after a transaction id is recorded", async () => {
+    const migrationsRepo = {
+      transitionMigration: jest.fn(async () => ({
+        ...migration("balance_move_sent"),
+        balanceMovePaymentTransactionId: "ibex-tx-id",
+      })),
+    }
+
+    const result = await markCashWalletMigrationBalanceMoveSent({
+      migration: {
+        ...migration("balance_move_sending"),
+        balanceMovePaymentTransactionId: "ibex-tx-id",
+      },
+      migrationsRepo,
+    })
+
+    expect(result).toMatchObject({
+      status: "balance_move_sent",
+      balanceMovePaymentTransactionId: "ibex-tx-id",
+    })
+    expect(migrationsRepo.transitionMigration).toHaveBeenCalledWith({
+      id: "migration-id",
+      from: "balance_move_sending",
+      to: "balance_move_sent",
+      cutoverVersion: 7,
+      runId: "run-7",
+    })
+  })
+
+  it("rejects marking the balance move payment as sent before a transaction id exists", async () => {
+    const migrationsRepo = {
+      transitionMigration: jest.fn(),
+    }
+
+    const result = await markCashWalletMigrationBalanceMoveSent({
+      migration: migration("balance_move_sending"),
+      migrationsRepo,
+    })
+
+    expect(result).toBeInstanceOf(Error)
+    expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
+  })
+
+  it("verifies the balance move before fee reimbursement", async () => {
+    const migrationsRepo = {
+      transitionMigration: jest.fn(async () => migration("balance_move_verified")),
+    }
+    const balanceVerifier = {
+      verifyBalanceMove: jest.fn(async () => true),
+    }
+
+    const result = await verifyCashWalletMigrationBalanceMove({
+      migration: {
+        ...migration("balance_move_sent"),
+        balanceMovePaymentTransactionId: "ibex-tx-id",
+      },
+      balanceVerifier,
+      migrationsRepo,
+    })
+
+    expect(result).toMatchObject({ status: "balance_move_verified" })
+    expect(balanceVerifier.verifyBalanceMove).toHaveBeenCalledWith({
+      legacyUsdWalletId: "legacy-usd-wallet-id",
+      destinationUsdtWalletId: "usdt-wallet-id",
+      sourceBalanceUsdCents: undefined,
+      destinationAmountUsdtMicros: undefined,
+      transactionId: "ibex-tx-id",
+    })
+    expect(migrationsRepo.transitionMigration).toHaveBeenCalledWith({
+      id: "migration-id",
+      from: "balance_move_sent",
+      to: "balance_move_verified",
+      cutoverVersion: 7,
+      runId: "run-7",
+    })
+  })
+
+  it("returns balance move verification failures without advancing the checkpoint", async () => {
+    const error = new CouldNotUpdateError("balance move not settled")
+    const migrationsRepo = {
+      transitionMigration: jest.fn(),
+    }
+    const balanceVerifier = {
+      verifyBalanceMove: jest.fn(async () => error),
+    }
+
+    const result = await verifyCashWalletMigrationBalanceMove({
+      migration: {
+        ...migration("balance_move_sent"),
+        balanceMovePaymentTransactionId: "ibex-tx-id",
+      },
+      balanceVerifier,
+      migrationsRepo,
+    })
+
+    expect(result).toBe(error)
+    expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
+  })
+
+  it("rejects balance move verification before a transaction id exists", async () => {
+    const migrationsRepo = {
+      transitionMigration: jest.fn(),
+    }
+    const balanceVerifier = {
+      verifyBalanceMove: jest.fn(),
+    }
+
+    const result = await verifyCashWalletMigrationBalanceMove({
+      migration: migration("balance_move_sent"),
+      balanceVerifier,
+      migrationsRepo,
+    })
+
+    expect(result).toBeInstanceOf(Error)
+    expect(balanceVerifier.verifyBalanceMove).not.toHaveBeenCalled()
     expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
   })
 })

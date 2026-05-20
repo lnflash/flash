@@ -31,6 +31,16 @@ type CashWalletMigrationPaymentService = {
   }): Promise<{ transactionId: IbexTransactionId } | ApplicationError>
 }
 
+type CashWalletMigrationBalanceVerifier = {
+  verifyBalanceMove(args: {
+    legacyUsdWalletId: WalletId
+    destinationUsdtWalletId: WalletId
+    sourceBalanceUsdCents?: string
+    destinationAmountUsdtMicros?: string
+    transactionId: IbexTransactionId
+  }): Promise<true | ApplicationError>
+}
+
 export const startCashWalletMigration = async ({
   migration,
   migrationsRepo,
@@ -114,6 +124,67 @@ export const sendCashWalletMigrationBalanceMovePayment = async ({
     patch: {
       balanceMovePaymentTransactionId: payment.transactionId,
     },
+  })
+}
+
+export const markCashWalletMigrationBalanceMoveSent = async ({
+  migration,
+  migrationsRepo,
+}: {
+  migration: CashWalletMigration
+  migrationsRepo: CashWalletMigrationTransitionRepository
+}): Promise<CashWalletMigration | ApplicationError> => {
+  const transition = assertCanTransition(migration.status, "balance_move_sent")
+  if (transition instanceof Error) return transition
+
+  if (migration.balanceMovePaymentTransactionId === undefined) {
+    return new InvalidCashWalletMigrationTransitionError(
+      "balanceMovePaymentTransactionId is required before marking balance move sent",
+    )
+  }
+
+  return migrationsRepo.transitionMigration({
+    id: migration.id,
+    from: migration.status,
+    to: "balance_move_sent",
+    cutoverVersion: migration.cutoverVersion,
+    runId: migration.runId,
+  })
+}
+
+export const verifyCashWalletMigrationBalanceMove = async ({
+  migration,
+  balanceVerifier,
+  migrationsRepo,
+}: {
+  migration: CashWalletMigration
+  balanceVerifier: CashWalletMigrationBalanceVerifier
+  migrationsRepo: CashWalletMigrationTransitionRepository
+}): Promise<CashWalletMigration | ApplicationError> => {
+  const transition = assertCanTransition(migration.status, "balance_move_verified")
+  if (transition instanceof Error) return transition
+
+  if (migration.balanceMovePaymentTransactionId === undefined) {
+    return new InvalidCashWalletMigrationTransitionError(
+      "balanceMovePaymentTransactionId is required before verifying balance move",
+    )
+  }
+
+  const verified = await balanceVerifier.verifyBalanceMove({
+    legacyUsdWalletId: migration.legacyUsdWalletId,
+    destinationUsdtWalletId: migration.destinationUsdtWalletId,
+    sourceBalanceUsdCents: migration.sourceBalanceUsdCents,
+    destinationAmountUsdtMicros: migration.destinationAmountUsdtMicros,
+    transactionId: migration.balanceMovePaymentTransactionId,
+  })
+  if (verified instanceof Error) return verified
+
+  return migrationsRepo.transitionMigration({
+    id: migration.id,
+    from: migration.status,
+    to: "balance_move_verified",
+    cutoverVersion: migration.cutoverVersion,
+    runId: migration.runId,
   })
 }
 
