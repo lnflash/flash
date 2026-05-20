@@ -61,7 +61,11 @@ describe("CashWalletCutoverRepository", () => {
       }),
       { upsert: true, new: true },
     )
-    expect(result).toMatchObject({ state: "in_progress", cutoverVersion: 2, runId: "run-2" })
+    expect(result).toMatchObject({
+      state: "in_progress",
+      cutoverVersion: 2,
+      runId: "run-2",
+    })
   })
 
   it("creates one migration record per account id and run", async () => {
@@ -151,24 +155,40 @@ describe("CashWalletCutoverRepository", () => {
         runId: "run-2",
         $or: [{ lockedAt: null }, { lockedAt: { $lt: staleBefore } }],
       },
-      expect.objectContaining({ $set: expect.objectContaining({ lockedBy: "worker-1" }) }),
+      expect.objectContaining({
+        $set: expect.objectContaining({ lockedBy: "worker-1" }),
+      }),
       { new: true },
     )
     expect(result).toBeInstanceOf(Error)
   })
 
   it("finds resumable non-terminal migrations for the current run", async () => {
-    jest.mocked(CashWalletMigration.find).mockResolvedValue([] as never)
+    const limit = jest.fn().mockResolvedValue([])
+    const sort = jest.fn(() => ({ limit }))
+    jest.mocked(CashWalletMigration.find).mockReturnValue({ sort } as never)
 
-    const result = await repo.listRunnableMigrations({ cutoverVersion: 2, runId: "run-2", limit: 10 })
+    const result = await repo.listRunnableMigrations({
+      cutoverVersion: 2,
+      runId: "run-2",
+      limit: 10,
+    })
 
     expect(CashWalletMigration.find).toHaveBeenCalledWith(
       expect.objectContaining({
         cutoverVersion: 2,
         runId: "run-2",
-        status: { $nin: expect.arrayContaining(["complete", "failed", "requires_operator_review"]) },
+        status: {
+          $nin: expect.arrayContaining([
+            "complete",
+            "failed",
+            "requires_operator_review",
+          ]),
+        },
       }),
     )
+    expect(sort).toHaveBeenCalledWith({ updatedAt: 1 })
+    expect(limit).toHaveBeenCalledWith(10)
     expect(result).toEqual([])
   })
 })
