@@ -2,12 +2,12 @@
  * Bridge KYC Webhook Handler
  * Handles all kyc.* events from Bridge.xyz
  *
-  * Bridge kyc_status → internal bridgeKycStatus mapping:
-  *   not_started                                          → "open"
-  *   incomplete | awaiting_questionnaire | awaiting_ubo
-  *     | under_review | paused                            → "pending"
-  *   approved                                             → "approved"
-  *   rejected                                             → "rejected"
+ * Bridge kyc_status → internal bridgeKycStatus mapping:
+ *   not_started                                          → "open"
+ *   incomplete | awaiting_questionnaire | awaiting_ubo
+ *     | under_review | paused                            → "pending"
+ *   approved                                             → "approved"
+ *   rejected                                             → "rejected"
  *   offboarded                                           → "offboarded"
  */
 
@@ -26,14 +26,6 @@ export const kycHandler = async (req: Request, res: Response) => {
     return res.status(400).json({ error: "Invalid payload" })
   }
 
-  // Idempotency check using customer_id + event as lock key
-  const lockKey = `bridge-kyc:${customer_id}:${event_object.kyc_status}:${event_object.id}`
-  const lockResult = await LockService().lockIdempotencyKey(lockKey as IdempotencyKey)
-  if (lockResult instanceof Error) {
-    baseLogger.info({ customer_id, event_id }, "Duplicate Bridge KYC webhook")
-    return res.status(200).json({ status: "already_processed" })
-  }
-
   try {
     const bridgeCustomerId = toBridgeCustomerId(customer_id)
     const account = await AccountsRepository().findByBridgeCustomerId(bridgeCustomerId)
@@ -43,6 +35,14 @@ export const kycHandler = async (req: Request, res: Response) => {
         "Account not found for Bridge customer — may be a timing issue, Bridge will retry",
       )
       return res.status(503).json({ error: "Account not ready" })
+    }
+
+    // Idempotency check — acquire lock after account is found so 503 retries are not blocked
+    const lockKey = `bridge-kyc:${event_id}`
+    const lockResult = await LockService().lockIdempotencyKey(lockKey as IdempotencyKey)
+    if (lockResult instanceof Error) {
+      baseLogger.info({ customer_id, event_id }, "Duplicate Bridge KYC webhook")
+      return res.status(200).json({ status: "already_processed" })
     }
 
     const PENDING_BRIDGE_STATUSES = new Set([
@@ -56,7 +56,7 @@ export const kycHandler = async (req: Request, res: Response) => {
     // Update KYC status based on event
     if (kyc_status === "not_started") {
       const result = await AccountsRepository().updateBridgeFields(account.id, {
-        bridgeKycStatus: "open",
+        bridgeKycStatus: "not_started",
       })
 
       if (result instanceof Error) {
@@ -70,7 +70,7 @@ export const kycHandler = async (req: Request, res: Response) => {
       baseLogger.info({ accountId: account.id, customer_id }, "Bridge KYC not started")
     } else if (PENDING_BRIDGE_STATUSES.has(kyc_status)) {
       const result = await AccountsRepository().updateBridgeFields(account.id, {
-        bridgeKycStatus: "pending",
+        bridgeKycStatus: kyc_status,
       })
 
       if (result instanceof Error) {
