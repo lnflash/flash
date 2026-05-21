@@ -9,23 +9,15 @@
 import { Request, Response } from "express"
 import { LockService } from "@services/lock"
 import { baseLogger } from "@services/logger"
-import { createBridgeDepositLog } from "@services/mongoose/bridge-deposit-log"
+import { createBridgeDeposit } from "@services/mongoose/bridge-deposit-log"
 import { reconcileByTxHash } from "@services/bridge/reconciliation"
 
 export const depositHandler = async (req: Request, res: Response) => {
   const { event_id, event_object } = req.body
   const { id, state, amount, currency, on_behalf_of, receipt } = event_object ?? {}
 
-  if (!id || !event_id) {
+  if (!id || !event_id || !amount || !on_behalf_of) {
     return res.status(400).json({ error: "Invalid payload" })
-  }
-
-  // Idempotency: lock on the transfer id + state so each state transition is processed once
-  const lockKey = `bridge-deposit:${id}:${state}`
-  const lockResult = await LockService().lockIdempotencyKey(lockKey as IdempotencyKey)
-  if (lockResult instanceof Error) {
-    baseLogger.info({ event_id, id, state }, "Duplicate Bridge deposit webhook")
-    return res.status(200).json({ status: "already_processed" })
   }
 
   try {
@@ -48,10 +40,10 @@ export const depositHandler = async (req: Request, res: Response) => {
       "Bridge deposit event",
     )
 
-    const depositLog = await createBridgeDepositLog({
+    const depositLog = await createBridgeDeposit({
       eventId: event_id,
       transferId: id,
-      customerId: on_behalf_of ?? "",
+      customerId: on_behalf_of,
       state,
       amount: String(amount),
       currency,
@@ -76,6 +68,15 @@ export const depositHandler = async (req: Request, res: Response) => {
         "Failed to persist bridge deposit log",
       )
       return res.status(500).json({ error: "Failed to persist deposit log" })
+    }
+
+    // Idempotency: lock on event_id after successful DB write — aligns with the DB unique
+    // constraint on eventId and ensures Bridge retries are not blocked on transient failures
+    const lockKey = `bridge-deposit:${event_id}`
+    const lockResult = await LockService().lockIdempotencyKey(lockKey as IdempotencyKey)
+    if (lockResult instanceof Error) {
+      baseLogger.info({ event_id, id, state }, "Duplicate Bridge deposit webhook")
+      return res.status(200).json({ status: "already_processed" })
     }
 
     if (state === "payment_processed" && receipt?.destination_tx_hash) {

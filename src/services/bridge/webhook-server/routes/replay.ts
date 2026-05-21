@@ -6,7 +6,12 @@ import { BridgeConfig } from "@config"
 
 import { baseLogger } from "@services/logger"
 
-import { createBridgeReplayLog } from "@services/mongoose/bridge-replay-log"
+import { createBridgeReplay } from "@services/mongoose/bridge-replay-log"
+
+import {
+  isOutboundBridgeWithdrawal,
+  transferReplayEventTypeForStatus,
+} from "../transfer-direction"
 
 import { depositHandler } from "./deposit"
 import { kycHandler } from "./kyc"
@@ -41,18 +46,35 @@ const toRouteKey = (bridgeEventType: string): RouteKey | null => {
 const resolveReplayEventType = ({
   eventType,
   eventObjectStatus,
+  eventObject,
 }: {
   eventType: string
   eventObjectStatus?: string
+  eventObject?: Record<string, unknown>
 }): string => {
   const routeFromEventType = toRouteKey(eventType)
   if (routeFromEventType) return eventType
 
   if (eventObjectStatus && DEPOSIT_EVENT_TYPES.has(eventObjectStatus)) {
+    if (isOutboundBridgeWithdrawal(eventObject)) {
+      const transferEvent = transferReplayEventTypeForStatus(eventObjectStatus)
+      if (transferEvent) return transferEvent
+    }
     return eventObjectStatus
   }
 
-  if (eventObjectStatus === "approved" || eventObjectStatus === "rejected") {
+  const KYC_BRIDGE_STATUSES = new Set([
+    "not_started",
+    "incomplete",
+    "awaiting_questionnaire",
+    "awaiting_ubo",
+    "under_review",
+    "approved",
+    "rejected",
+    "paused",
+    "offboarded",
+  ])
+  if (eventObjectStatus && KYC_BRIDGE_STATUSES.has(eventObjectStatus)) {
     return `kyc.${eventObjectStatus}`
   }
 
@@ -82,6 +104,8 @@ const toHandlerBody = ({
         state: eventObject.state,
         amount: eventObject.amount,
         currency: eventObject.currency,
+        reason: eventObject.reason,
+        return_reason: eventObject.return_reason,
       },
     }
   }
@@ -138,10 +162,13 @@ export const replayHandler = async (req: Request, res: Response) => {
     return res.status(400).json({ error: "event_object must be an object" })
   }
 
+  const eventObjectTyped = event_object as Record<string, unknown>
+
   const normalizedEventType = resolveReplayEventType({
     eventType: event_type,
     eventObjectStatus:
       typeof event_object_status === "string" ? event_object_status : undefined,
+    eventObject: eventObjectTyped,
   })
 
   const routeKey = toRouteKey(normalizedEventType)
@@ -149,8 +176,6 @@ export const replayHandler = async (req: Request, res: Response) => {
   if (!routeKey) {
     return res.status(400).json({ error: "Unsupported event_type for replay" })
   }
-
-  const eventObjectTyped = event_object as Record<string, unknown>
   const eventId: string =
     typeof event_id === "string"
       ? event_id
@@ -173,7 +198,7 @@ export const replayHandler = async (req: Request, res: Response) => {
   }
 
   if (dry_run) {
-    const dryRunLog = await createBridgeReplayLog({
+    const dryRunLog = await createBridgeReplay({
       ...logBase,
       httpStatus: 0,
       httpResponse: { dry_run: true },
@@ -217,7 +242,7 @@ export const replayHandler = async (req: Request, res: Response) => {
 
   await HANDLERS[routeKey](fakeReq, fakeRes)
 
-  const logResult = await createBridgeReplayLog({
+  const logResult = await createBridgeReplay({
     ...logBase,
     httpStatus: handlerStatus,
     httpResponse: handlerBody,

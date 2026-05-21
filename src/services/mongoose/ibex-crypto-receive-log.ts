@@ -1,6 +1,6 @@
-import { IbexCryptoReceiveLog } from "./schema"
+import { IbexCryptoReceive } from "./schema"
 
-export const createIbexCryptoReceiveLog = async (data: {
+export const createIbexCryptoReceive = async (data: {
   txHash: string
   address: string
   amount: string
@@ -9,7 +9,7 @@ export const createIbexCryptoReceiveLog = async (data: {
   accountId?: string
 }): Promise<{ id: string } | Error> => {
   try {
-    const log = await IbexCryptoReceiveLog.findOneAndUpdate(
+    const log = await IbexCryptoReceive.findOneAndUpdate(
       { txHash: data.txHash },
       { ...data, receivedAt: new Date() },
       { upsert: true, new: true, setDefaultsOnInsert: true },
@@ -21,7 +21,7 @@ export const createIbexCryptoReceiveLog = async (data: {
   }
 }
 
-export const findIbexCryptoReceiveLogsSince = async ({
+export const findIbexCryptoReceivesSince = async ({
   since,
   until = new Date(),
 }: {
@@ -40,7 +40,7 @@ export const findIbexCryptoReceiveLogsSince = async ({
   | Error
 > => {
   try {
-    return await IbexCryptoReceiveLog.find({
+    return await IbexCryptoReceive.find({
       receivedAt: { $gte: since, $lte: until },
     })
       .sort({ receivedAt: -1 })

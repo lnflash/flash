@@ -45,6 +45,12 @@ export class BridgeKycRejectedError extends BridgeError {
   }
 }
 
+export class BridgeKycOffboardedError extends BridgeError {
+  constructor(message: string = "Your account has been offboarded from Bridge. Please contact support.") {
+    super(message)
+  }
+}
+
 export class BridgeInsufficientFundsError extends BridgeError {
   constructor(message: string = "Insufficient funds for withdrawal") {
     super(message)
@@ -74,6 +80,12 @@ export class BridgeInvalidAmountError extends BridgeError {
 export class BridgeDisabledError extends BridgeError {
   constructor(message: string = "Bridge integration is currently disabled") {
     super(message)
+  }
+}
+
+export class BridgeTransferFailedError extends BridgeError {
+  constructor(reason: string = "Transfer failed") {
+    super(reason)
   }
 }
 

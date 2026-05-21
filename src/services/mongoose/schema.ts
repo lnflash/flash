@@ -48,6 +48,7 @@ interface IBridgeWithdrawalRecord {
   amount: string
   currency: string
   status: "pending" | "completed" | "failed"
+  failureReason?: string
   externalAccountId: string
   createdAt: Date
   updatedAt: Date
@@ -338,7 +339,7 @@ const AccountSchema = new Schema<AccountRecord>(
     },
     bridgeKycStatus: {
       type: String,
-      enum: ["pending", "approved", "rejected"],
+      enum: ["open", "not_started", "incomplete", "awaiting_questionnaire", "awaiting_ubo", "under_review", "paused", "approved", "rejected", "offboarded"],
       required: false,
     },
     bridgeEthereumAddress: {
@@ -653,6 +654,7 @@ const BridgeWithdrawalSchema = new Schema<IBridgeWithdrawalRecord>({
   amount: { type: String, required: true },
   currency: { type: String, required: true },
   status: { type: String, enum: ["pending", "completed", "failed"], default: "pending" },
+  failureReason: { type: String, maxlength: 512 },
   externalAccountId: { type: String, required: true },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
@@ -670,7 +672,7 @@ BridgeWithdrawalSchema.index(
   },
 )
 
-const BridgeDepositLogSchema = new Schema({
+const BridgeDepositsSchema = new Schema({
   eventId: { type: String, required: true, unique: true },
   transferId: { type: String, required: true },
   customerId: { type: String, required: true },
@@ -685,12 +687,12 @@ const BridgeDepositLogSchema = new Schema({
   createdAt: { type: Date, default: Date.now },
 })
 
-BridgeDepositLogSchema.index({ transferId: 1 })
-BridgeDepositLogSchema.index({ customerId: 1, createdAt: -1 })
+BridgeDepositsSchema.index({ transferId: 1 })
+BridgeDepositsSchema.index({ customerId: 1, createdAt: -1 })
 
-export const BridgeDepositLog = mongoose.model("BridgeDepositLog", BridgeDepositLogSchema)
+export const BridgeDeposits = mongoose.model("BridgeDeposits", BridgeDepositsSchema)
 
-const IbexCryptoReceiveLogSchema = new Schema({
+const IbexCryptoReceiveSchema = new Schema({
   txHash: { type: String, required: true, unique: true },
   address: { type: String, required: true },
   amount: { type: String, required: true },
@@ -700,12 +702,12 @@ const IbexCryptoReceiveLogSchema = new Schema({
   receivedAt: { type: Date, default: Date.now },
 })
 
-IbexCryptoReceiveLogSchema.index({ receivedAt: -1 })
-IbexCryptoReceiveLogSchema.index({ address: 1, receivedAt: -1 })
+IbexCryptoReceiveSchema.index({ receivedAt: -1 })
+IbexCryptoReceiveSchema.index({ address: 1, receivedAt: -1 })
 
-export const IbexCryptoReceiveLog = mongoose.model(
-  "IbexCryptoReceiveLog",
-  IbexCryptoReceiveLogSchema,
+export const IbexCryptoReceive = mongoose.model(
+  "IbexCryptoReceive",
+  IbexCryptoReceiveSchema,
 )
 
 const BridgeReconciliationOrphanSchema = new Schema({
@@ -742,7 +744,7 @@ export const BridgeReconciliationOrphan = mongoose.model(
   BridgeReconciliationOrphanSchema,
 )
 
-const BridgeReplayLogSchema = new Schema({
+const BridgeReplaySchema = new Schema({
   eventId: { type: String, required: true },
   eventType: { type: String, required: true },
   eventPayload: { type: Schema.Types.Mixed, required: true },
@@ -756,11 +758,11 @@ const BridgeReplayLogSchema = new Schema({
   dryRun: { type: Boolean, required: true, default: false },
 })
 
-BridgeReplayLogSchema.index({ eventId: 1 })
-BridgeReplayLogSchema.index({ replayedAt: -1 })
-BridgeReplayLogSchema.index({ eventType: 1, replayedAt: -1 })
+BridgeReplaySchema.index({ eventId: 1 })
+BridgeReplaySchema.index({ replayedAt: -1 })
+BridgeReplaySchema.index({ eventType: 1, replayedAt: -1 })
 
-export const BridgeReplayLog = mongoose.model("BridgeReplayLog", BridgeReplayLogSchema)
+export const BridgeReplay = mongoose.model("BridgeReplay", BridgeReplaySchema)
 
 export const BridgeVirtualAccount = mongoose.model<IBridgeVirtualAccountRecord>(
   "BridgeVirtualAccount",
