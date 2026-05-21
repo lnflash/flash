@@ -6,26 +6,25 @@ const GraphQLBankAccount: GraphQLObjectType<BankAccount> = GT.Object({
   name: "BankAccount",
   fields: () => ({
     id: {
-      type: GT.NonNullID,
+      type: GT.ID,
       description: "ERPNext bank account identifier",
       resolve: (o) => o.name,
     },
     accountName: {
-      type: GT.NonNull(GT.String),
+      type: GT.String,
       resolve: (o) => o.account_name,
     },
-    bank: {
+    bankName: {
       type: GT.NonNull(GT.String),
-      description: "Name of the bank institution",
       resolve: (o) => o.bank,
+    },
+    bankBranch: {
+      type: GT.NonNull(GT.String),
+      resolve: (o) => o.branch_code,
     },
     accountNumber: {
       type: GT.NonNull(GT.String),
       resolve: (o) => o.bank_account_no,
-    },
-    branchCode: {
-      type: GT.NonNull(GT.String),
-      resolve: (o) => o.branch_code,
     },
     accountType: {
       type: GT.NonNull(GT.String),
