@@ -7,7 +7,7 @@ import crypto from "crypto"
 
 import { BridgeConfig } from "@config"
 
-import { BridgeCustomerId, BridgeTransferId } from "@domain/primitives/bridge"
+import { BridgeCustomerId, BridgeTransferId, BridgeVirtualAccountId } from "@domain/primitives/bridge"
 import { BridgeTimeoutError } from "./errors"
 
 // ============ Error Handling ============
@@ -440,6 +440,28 @@ export class BridgeClient {
     )
   }
 
+  async getVirtualAccount(
+    customerId: BridgeCustomerId, virtualAccountId: BridgeVirtualAccountId, idempotencyKey?: string,
+  ): Promise<VirtualAccount> {
+    return this.request<VirtualAccount>(
+      "GET",
+      `/customers/${customerId}/virtual_accounts/${virtualAccountId}`,
+      undefined,
+      idempotencyKey,
+    )
+  }
+
+
+  async getVirtualAccountByCustomerId(customerId: BridgeCustomerId): Promise<VirtualAccount[]> {
+    const response = await this.request<{ data: VirtualAccount[] }>(
+      "GET",
+      `/customers/${customerId}/virtual_accounts`,
+    )
+
+    return response.data as VirtualAccount[]
+
+
+  }
   // ============ External Accounts ============
 
   async createExternalAccount(
