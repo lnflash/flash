@@ -1,6 +1,6 @@
 import express, { Request, Response } from "express"
 import { AccountsRepository } from "@services/mongoose/accounts"
-import { createIbexCryptoReceiveLog } from "@services/mongoose/ibex-crypto-receive-log"
+import { createIbexCryptoReceive } from "@services/mongoose/ibex-crypto-receive-log"
 import { listWalletsByAccountId } from "@app/wallets"
 import { WalletCurrency, USDTAmount } from "@domain/shared"
 import { baseLogger } from "@services/logger"
@@ -49,7 +49,7 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
           return { status: "error", code: "account_not_found" } as CryptoReceiveResult
         }
 
-        const ibexLog = await createIbexCryptoReceiveLog({
+        const ibexLog = await createIbexCryptoReceive({
           txHash: String(tx_hash),
           address: String(address),
           amount: String(amount),

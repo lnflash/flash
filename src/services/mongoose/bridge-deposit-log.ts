@@ -1,6 +1,6 @@
-import { BridgeDepositLog } from "./schema"
+import { BridgeDeposits } from "./schema"
 
-export const createBridgeDepositLog = async (data: {
+export const createBridgeDeposit = async (data: {
   eventId: string
   transferId: string
   customerId: string
@@ -14,7 +14,7 @@ export const createBridgeDepositLog = async (data: {
   destinationTxHash?: string
 }): Promise<{ id: string } | Error> => {
   try {
-    const log = await BridgeDepositLog.create(data)
+    const log = await BridgeDeposits.create(data)
     return { id: log._id.toString() }
   } catch (error) {
     return error instanceof Error ? error : new Error(String(error))

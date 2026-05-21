@@ -96,7 +96,7 @@ interface AccountRecord {
 
   // Bridge integration:
   bridgeCustomerId?: string
-  bridgeKycStatus?: "pending" | "approved" | "rejected"
+  bridgeKycStatus?: "open" | "pending" | "approved" | "rejected" | "offboarded"
   bridgeEthereumAddress?: string
 
   // mongoose in-built functions

@@ -88,7 +88,7 @@ type Account = {
   erpParty?: string // Lookup key to Customer in ERPNext. Required for Account level > 1
   // Bridge integration:
   bridgeCustomerId?: BridgeCustomerId
-  bridgeKycStatus?: "pending" | "approved" | "rejected"
+  bridgeKycStatus?: "open" | "not_started" | "incomplete" | "awaiting_questionnaire" | "awaiting_ubo" | "under_review" | "paused" | "approved" | "rejected" | "offboarded"
   bridgeEthereumAddress?: string
 }
 
@@ -135,10 +135,10 @@ type LimitsCheckerFn = (args: LimiterCheckInputs) => Promise<true | LimitsExceed
 
 type LimitsVolumesFn = (walletVolumes: TxBaseVolumeAmount<WalletCurrency>[]) => Promise<
   | {
-      volumeTotalLimit: UsdPaymentAmount
-      volumeUsed: UsdPaymentAmount
-      volumeRemaining: UsdPaymentAmount
-    }
+    volumeTotalLimit: UsdPaymentAmount
+    volumeUsed: UsdPaymentAmount
+    volumeRemaining: UsdPaymentAmount
+  }
   | ValidationError
 >
 
@@ -150,10 +150,10 @@ type AccountLimitsChecker = {
 
 type AccountLimitsVolumes =
   | {
-      volumesIntraledger: LimitsVolumesFn
-      volumesWithdrawal: LimitsVolumesFn
-      volumesTradeIntraAccount: LimitsVolumesFn
-    }
+    volumesIntraledger: LimitsVolumesFn
+    volumesWithdrawal: LimitsVolumesFn
+    volumesTradeIntraAccount: LimitsVolumesFn
+  }
   | ValidationError
 
 type AccountValidator = {
@@ -179,7 +179,7 @@ interface IAccountsRepository {
     id: AccountId,
     fields: {
       bridgeCustomerId?: BridgeCustomerId
-      bridgeKycStatus?: "pending" | "approved" | "rejected"
+      bridgeKycStatus?: "open" | "not_started" | "incomplete" | "awaiting_questionnaire" | "awaiting_ubo" | "under_review" | "paused" | "approved" | "rejected" | "offboarded"
       bridgeEthereumAddress?: string
     },
   ): Promise<Account | RepositoryError>

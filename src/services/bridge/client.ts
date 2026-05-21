@@ -7,7 +7,8 @@ import crypto from "crypto"
 
 import { BridgeConfig } from "@config"
 
-import { BridgeCustomerId, BridgeTransferId } from "@domain/primitives/bridge"
+import { BridgeCustomerId, BridgeTransferId, BridgeVirtualAccountId } from "@domain/primitives/bridge"
+import { BridgeTimeoutError } from "./errors"
 
 // ============ Error Handling ============
 
@@ -66,15 +67,15 @@ export interface Customer {
   id: string
   type: "individual" | "business"
   status?:
-    | "active"
-    | "awaiting_questionnaire"
-    | "rejected"
-    | "paused"
-    | "under_review"
-    | "offboarded"
-    | "awaiting_ubo"
-    | "incomplete"
-    | "not_started"
+  | "active"
+  | "awaiting_questionnaire"
+  | "rejected"
+  | "paused"
+  | "under_review"
+  | "offboarded"
+  | "awaiting_ubo"
+  | "incomplete"
+  | "not_started"
   has_accepted_terms_of_service?: string
   created_at: string
   updated_at: string
@@ -365,23 +366,37 @@ export class BridgeClient {
       }
     }
 
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    })
+    const timeoutMs = BridgeConfig.timeoutMs ?? 15_000
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
-    const responseData = await response.json().catch(() => null)
+    try {
+      const response = await fetch(url, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      })
 
-    if (!response.ok) {
-      throw new BridgeApiError(
-        `Bridge API error: ${response.status} ${response.statusText}`,
-        response.status,
-        responseData,
-      )
+      const responseData = await response.json().catch(() => null)
+
+      if (!response.ok) {
+        throw new BridgeApiError(
+          `Bridge API error: ${response.status} ${response.statusText}`,
+          response.status,
+          responseData,
+        )
+      }
+
+      return responseData as T
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        throw new BridgeTimeoutError()
+      }
+      throw err
+    } finally {
+      clearTimeout(timeoutId)
     }
-
-    return responseData as T
   }
 
   // ============ Customers ============
@@ -425,6 +440,28 @@ export class BridgeClient {
     )
   }
 
+  async getVirtualAccount(
+    customerId: BridgeCustomerId, virtualAccountId: BridgeVirtualAccountId, idempotencyKey?: string,
+  ): Promise<VirtualAccount> {
+    return this.request<VirtualAccount>(
+      "GET",
+      `/customers/${customerId}/virtual_accounts/${virtualAccountId}`,
+      undefined,
+      idempotencyKey,
+    )
+  }
+
+
+  async getVirtualAccountByCustomerId(customerId: BridgeCustomerId): Promise<VirtualAccount[]> {
+    const response = await this.request<{ data: VirtualAccount[] }>(
+      "GET",
+      `/customers/${customerId}/virtual_accounts`,
+    )
+
+    return response.data as VirtualAccount[]
+
+
+  }
   // ============ External Accounts ============
 
   async createExternalAccount(
