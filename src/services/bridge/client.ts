@@ -67,15 +67,15 @@ export interface Customer {
   id: string
   type: "individual" | "business"
   status?:
-    | "active"
-    | "awaiting_questionnaire"
-    | "rejected"
-    | "paused"
-    | "under_review"
-    | "offboarded"
-    | "awaiting_ubo"
-    | "incomplete"
-    | "not_started"
+  | "active"
+  | "awaiting_questionnaire"
+  | "rejected"
+  | "paused"
+  | "under_review"
+  | "offboarded"
+  | "awaiting_ubo"
+  | "incomplete"
+  | "not_started"
   has_accepted_terms_of_service?: string
   created_at: string
   updated_at: string
@@ -366,7 +366,7 @@ export class BridgeClient {
       }
     }
 
-    const timeoutMs = BridgeConfig.timeoutMs ?? 10_000
+    const timeoutMs = BridgeConfig.timeoutMs ?? 15_000
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
