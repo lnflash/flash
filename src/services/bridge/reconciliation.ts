@@ -1,10 +1,10 @@
 import { baseLogger } from "@services/logger"
-import { findIbexCryptoReceiveLogsSince } from "@services/mongoose/ibex-crypto-receive-log"
+import { findIbexCryptoReceivesSince } from "@services/mongoose/ibex-crypto-receive-log"
 import {
   upsertBridgeReconciliationOrphan,
   resolveOrphansByTxHash,
 } from "@services/mongoose/bridge-reconciliation-orphan"
-import { BridgeDepositLog, IbexCryptoReceiveLog } from "@services/mongoose/schema"
+import { BridgeDeposits, IbexCryptoReceive } from "@services/mongoose/schema"
 import { PubSubService } from "@services/pubsub"
 import { PubSubDefaultTriggers } from "@domain/pubsub"
 
@@ -50,14 +50,14 @@ export const reconcileBridgeAndIbexDeposits = async ({
     const now = new Date()
     const since = new Date(now.getTime() - windowMs)
 
-    const bridgeDeposits = (await BridgeDepositLog.find({
+    const bridgeDeposits = (await BridgeDeposits.find({
       createdAt: { $gte: since, $lte: now },
       state: "payment_processed",
     })
       .lean()
       .exec()) as BridgeDepositLike[]
 
-    const ibexReceivesResult = await findIbexCryptoReceiveLogsSince({ since, until: now })
+    const ibexReceivesResult = await findIbexCryptoReceivesSince({ since, until: now })
     if (ibexReceivesResult instanceof Error) return ibexReceivesResult
     const ibexReceives = ibexReceivesResult as IbexReceiveLike[]
 
@@ -180,13 +180,13 @@ export const reconcileByTxHash = async ({
 
   try {
     const [bridgeDeposit, ibexReceive] = await Promise.all([
-      BridgeDepositLog.findOne({
+      BridgeDeposits.findOne({
         destinationTxHash: { $regex: new RegExp(`^${normalizedHash}$`, "i") },
         state: "payment_processed",
       })
         .lean()
         .exec(),
-      IbexCryptoReceiveLog.findOne({
+      IbexCryptoReceive.findOne({
         txHash: { $regex: new RegExp(`^${normalizedHash}$`, "i") },
       })
         .lean()

@@ -14,7 +14,7 @@ import { wrapAsyncFunctionsToRunInSpan } from "@services/tracing"
 import { baseLogger } from "@services/logger"
 
 import { RepositoryError } from "@domain/errors"
-import { toBridgeCustomerId } from "@domain/primitives/bridge"
+import { toBridgeCustomerId, toBridgeVirtualAccountId } from "@domain/primitives/bridge"
 import { getBalanceForWallet } from "@app/wallets/get-balance-for-wallet"
 import { USDTAmount, WalletCurrency } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
@@ -30,9 +30,11 @@ import {
   BridgeAccountLevelError,
   BridgeKycPendingError,
   BridgeKycRejectedError,
+  BridgeKycOffboardedError,
   BridgeCustomerNotFoundError,
 } from "./errors"
-import BridgeApiClient from "./client"
+import BridgeApiClient, { BridgeClient } from "./client"
+import { BridgeVirtualAccount } from "@services/mongoose/schema"
 
 // ============ Types ============
 
@@ -70,7 +72,7 @@ type WithdrawalResult = {
   createdAt: string
 }
 
-type KycStatusResult = "pending" | "approved" | "rejected" | null
+type KycStatusResult = "open" | "not_started" | "incomplete" | "awaiting_questionnaire" | "awaiting_ubo" | "under_review" | "paused" | "approved" | "rejected" | "offboarded" | null
 
 type VirtualAccountResult = {
   bridgeVirtualAccountId: string
@@ -199,7 +201,7 @@ const initiateKyc = async ({
 
     const updateResult = await AccountsRepository().updateBridgeFields(accountId, {
       bridgeCustomerId: customerId,
-      bridgeKycStatus: "pending",
+      bridgeKycStatus: "open",
     })
 
     if (updateResult instanceof Error) {
@@ -216,6 +218,14 @@ const initiateKyc = async ({
     const bridgeError = error as { statusCode?: number; response?: { existing_kyc_link?: { kyc_link: string; customer_id: string; tos_link: string } } }
 
     if (bridgeError?.statusCode === 400 && bridgeError.response?.existing_kyc_link) {
+
+      // store the customer id and the kyc status 
+      const customerId = toBridgeCustomerId(bridgeError.response.existing_kyc_link.customer_id)
+      const updateResult = await AccountsRepository().updateBridgeFields(accountId, {
+        bridgeCustomerId: customerId,
+        bridgeKycStatus: "not_started",
+      })
+
       return {
         kycLink: bridgeError.response.existing_kyc_link.kyc_link,
         customerId: bridgeError.response.existing_kyc_link.customer_id,
@@ -252,22 +262,53 @@ const createVirtualAccount = async (
   const account = await checkAccountLevel(accountId)
   if (account instanceof Error) return account
 
+
+  const PENDING_BRIDGE_STATUSES = new Set([
+    "incomplete",
+    "awaiting_questionnaire",
+    "awaiting_ubo",
+    "under_review",
+    "paused",
+  ])
+
   try {
-    const customerId = account.bridgeCustomerId
-    if (!customerId) {
+
+    if (!account.bridgeCustomerId) {
+      return new BridgeCustomerNotFoundError(
+        "Account has no Bridge customer ID. Complete KYC first.",
+      )
+    }
+    const customerId = toBridgeCustomerId(account.bridgeCustomerId)
+    if (!customerId && !account.bridgeKycStatus) {
       return new BridgeCustomerNotFoundError(
         "Account has no Bridge customer ID. Complete KYC first.",
       )
     }
 
-    // Check KYC status
-    if (account.bridgeKycStatus === "pending") {
-      return new BridgeKycPendingError()
+    const customer = await BridgeApiClient.getCustomer(customerId);
+
+    if (customer instanceof Error) {
+      baseLogger.error(
+        { accountId, error: customer },
+        "Failed to retrieve Bridge customer status"
+      )
+      return customer
     }
-    if (account.bridgeKycStatus === "rejected") {
+
+    let kycStatus = customer.status
+
+
+    // Check KYC status
+    if (kycStatus === "offboarded") {
+      return new BridgeKycOffboardedError()
+    }
+    if (kycStatus === "rejected") {
       return new BridgeKycRejectedError()
     }
-    if (account.bridgeKycStatus !== "approved") {
+    if (PENDING_BRIDGE_STATUSES.has(kycStatus!) || kycStatus as string === "open") {
+      return new BridgeKycPendingError()
+    }
+    if (kycStatus !== "active" && kycStatus as string !== "approved") {
       return new BridgeKycPendingError("KYC not yet completed")
     }
 
@@ -310,12 +351,7 @@ const createVirtualAccount = async (
       ethereumAddress = receiveInfo.data.address
     }
 
-    // Deterministic key so Bridge deduplicates on their side if two calls race past
-    // the check above before either has written to the repo.
-    const vaIdempotencyKey = crypto
-      .createHash("sha256")
-      .update(`va:${accountId}`)
-      .digest("hex")
+    const vaIdempotencyKey = `${accountId}:${crypto.randomUUID()}`
 
     // Create Bridge virtual account
     const virtualAccount = await BridgeApiClient.createVirtualAccount(
@@ -593,14 +629,123 @@ const getKycStatus = async (accountId: AccountId): Promise<KycStatusResult | Err
   const account = await checkAccountLevel(accountId)
   if (account instanceof Error) return account
 
-  const result = account.bridgeKycStatus || null
 
-  baseLogger.info(
-    { accountId, operation: "getKycStatus", status: result },
-    "Bridge operation completed",
-  )
 
-  return result
+  if (!account.bridgeCustomerId) {
+    return null
+  }
+
+  const customerId = toBridgeCustomerId(account.bridgeCustomerId)
+
+  // get the customer status from Bridge API to ensure we have the latest status (in case of updates via Bridge dashboard or webhook events)
+
+  try {
+    const customer = await BridgeApiClient.getCustomer(customerId)
+
+    if (customer instanceof Error) return customer
+
+    let kycStatus: KycStatusResult = null
+
+    switch (customer.status) {
+      case "active":
+        kycStatus = "approved"
+        break
+      case "awaiting_questionnaire":
+      case "not_started":
+      case "incomplete":
+      case "under_review":
+      case "rejected":
+      case "offboarded":
+      case "paused":
+      case "awaiting_ubo":
+        kycStatus = customer.status
+        break
+      default:
+        kycStatus = "open"
+    }
+    if (account.bridgeKycStatus !== kycStatus) {
+      const updateResult = await AccountsRepository().updateBridgeFields(accountId, {
+        bridgeKycStatus: kycStatus,
+      })
+      if (updateResult instanceof Error) return updateResult
+    }
+
+
+    // check if the customer is approved and don't have the virtual account yet, create the virtual account proactively so that the user doesn't have to wait for it when they try to make a deposit
+    if (kycStatus === "approved") {
+
+      // check if the user has active virtual account, if not create one proactively to avoid delay when user tries to make a deposit
+      const bridgeVirtualAccounts = await BridgeApiClient.getVirtualAccountByCustomerId(customerId)
+
+      if (bridgeVirtualAccounts instanceof Error) {
+        baseLogger.error(
+          { accountId, operation: "getKycStatus", error: bridgeVirtualAccounts },
+          "Failed to retrieve virtual accounts for customer after KYC approval",
+        )
+      }
+
+      const existingVa = await BridgeAccountsRepo.findVirtualAccountByAccountId(
+        accountId as string,
+      )
+
+      const relatedVa = bridgeVirtualAccounts.find((va) => va.destination.address === account.bridgeEthereumAddress)
+
+      if (relatedVa?.status === "activated") {
+
+        // if there's a related VA on Bridge side but it's not in our repo, create it in our repo to keep them in sync
+        if (existingVa instanceof RepositoryError) {
+          const repoResult = await BridgeAccountsRepo.createVirtualAccount({
+            accountId: accountId as string,
+            bridgeVirtualAccountId: relatedVa.id,
+            bankName: relatedVa.source_deposit_instructions.bank_name || "",
+            routingNumber: relatedVa.source_deposit_instructions.bank_routing_number || "",
+            accountNumber: relatedVa.source_deposit_instructions.bank_account_number || "",
+            accountNumberLast4: relatedVa.source_deposit_instructions.bank_account_number?.slice(-4) || "",
+          })
+          if (repoResult instanceof Error) {
+            baseLogger.error(
+              { accountId, operation: "getKycStatus", error: repoResult },
+              "Failed to create virtual account in repo after KYC approval",
+            )
+          } else {
+            baseLogger.info(
+              { accountId, operation: "getKycStatus", virtualAccountId: relatedVa.id },
+              "Proactively updated virtual account in repo after KYC approval",
+            )
+          }
+        }
+      } else {
+
+        const vaResult = await createVirtualAccount(accountId)
+        if (vaResult instanceof Error) {
+          baseLogger.error(
+            { accountId, operation: "getKycStatus", error: vaResult },
+            "Failed to create virtual account after KYC approval",
+          )
+        } else {
+          baseLogger.info(
+            { accountId, operation: "getKycStatus", virtualAccountId: vaResult.virtualAccountId },
+            "Proactively created virtual account after KYC approval",
+          )
+        }
+      }
+    }
+
+    baseLogger.info(
+      { accountId, operation: "getKycStatus", kycStatus: kycStatus },
+      "Bridge operation completed",
+    )
+
+    return kycStatus
+  } catch (error) {
+    baseLogger.error(
+      { accountId, operation: "getKycStatus", error },
+      "Bridge operation failed",
+    )
+    return error instanceof Error ? error : new Error(String(error))
+  }
+
+
 }
 
 /**
@@ -633,6 +778,27 @@ const getVirtualAccount = async (
       )
       return null
     }
+
+    // check if the virtual account still exists on Bridge side - if not, delete it from our repo and return null
+    const bridgeVa = await BridgeApiClient.getVirtualAccount(account.bridgeCustomerId!, toBridgeVirtualAccountId(virtualAccount.bridgeVirtualAccountId!))
+
+    if (bridgeVa instanceof Error) {
+      return new BridgeError(`Failed to retrieve virtual account from Bridge: ${bridgeVa.message}`)
+    }
+
+    // check if the virtual account is still activated on Bridge side - if not, delete it from our repo and return null
+    if (bridgeVa.status !== "activated") {
+
+      // delete the virtual account from our repo since it's no longer valid
+
+      const deleteResult = await BridgeVirtualAccount.deleteOne({
+        bridgeVirtualAccountId: virtualAccount.bridgeVirtualAccountId! as string
+      })
+
+
+      return null
+    }
+
 
     const result: VirtualAccountResult = {
       bridgeVirtualAccountId: virtualAccount.bridgeVirtualAccountId!,

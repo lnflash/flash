@@ -176,6 +176,38 @@ describe("replayHandler", () => {
       ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue({ id: "log-001" })
     })
 
+    it("routes outbound withdrawal payment_processed replay to transfer handler", async () => {
+      ;(transferHandler as jest.Mock).mockImplementation((_req: Request, res: Response) => {
+        ;(res.status as jest.Mock)(200)
+        ;(res.json as jest.Mock)({ status: "success" })
+        return Promise.resolve(res)
+      })
+      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue({ id: "log-wd-001" })
+
+      const res = makeRes()
+      await replayHandler(
+        makeReq({
+          ...BASE_BODY,
+          event_type: "updated.status_transitioned",
+          event_object_status: "payment_processed",
+          event_object: {
+            id: "tr-withdraw-001",
+            state: "payment_processed",
+            amount: "100.00",
+            currency: "usd",
+            source: { payment_rail: "ethereum", currency: "usdt" },
+            destination: { payment_rail: "ach", currency: "usd" },
+          },
+        }),
+        res,
+      )
+
+      expect(transferHandler).toHaveBeenCalledTimes(1)
+      expect(depositHandler).not.toHaveBeenCalled()
+      const handlerReq = (transferHandler as jest.Mock).mock.calls[0][0]
+      expect(handlerReq.body.event).toBe("transfer.payment_processed")
+    })
+
     test.each(cases)(
       "%s is routed to the correct handler",
       async (eventType, handler) => {

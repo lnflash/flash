@@ -648,6 +648,8 @@ export const configSchema = {
         enabled: { type: "boolean" },
         apiKey: { type: "string" },
         baseUrl: { type: "string" },
+        minWithdrawalAmount: { type: "number" },
+        timeoutMs: { type: "integer", default: 10000 },
         webhook: {
           type: "object",
           properties: {
