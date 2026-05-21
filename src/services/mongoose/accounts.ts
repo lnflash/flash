@@ -176,7 +176,7 @@ export const AccountsRepository = (): IAccountsRepository => {
     id: AccountId,
     fields: {
       bridgeCustomerId?: BridgeCustomerId
-      bridgeKycStatus?: "pending" | "approved" | "rejected"
+      bridgeKycStatus?: "open" | "not_started" | "incomplete" | "awaiting_questionnaire" | "awaiting_ubo" | "under_review" | "paused" | "approved" | "rejected" | "offboarded"
       bridgeEthereumAddress?: string
     },
   ): Promise<Account | RepositoryError> => {
@@ -291,6 +291,6 @@ const translateToAccount = (result: AccountRecord): Account => ({
   kratosUserId: result.kratosUserId as UserId,
   displayCurrency: (result.displayCurrency || UsdDisplayCurrency) as DisplayCurrency,
   bridgeCustomerId: result.bridgeCustomerId as BridgeCustomerId | undefined,
-  bridgeKycStatus: result.bridgeKycStatus,
+  bridgeKycStatus: (result.bridgeKycStatus === "pending" ? "open" : result.bridgeKycStatus) as Account["bridgeKycStatus"],
   bridgeEthereumAddress: result.bridgeEthereumAddress,
 })

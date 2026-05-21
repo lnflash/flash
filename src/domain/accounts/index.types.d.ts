@@ -88,7 +88,7 @@ type Account = {
   erpParty?: string // Lookup key to Customer in ERPNext. Required for Account level > 1
   // Bridge integration:
   bridgeCustomerId?: BridgeCustomerId
-  bridgeKycStatus?: "open" | "pending" | "approved" | "rejected" | "offboarded"
+  bridgeKycStatus?: "open" | "not_started" | "incomplete" | "awaiting_questionnaire" | "awaiting_ubo" | "under_review" | "paused" | "approved" | "rejected" | "offboarded"
   bridgeEthereumAddress?: string
 }
 
@@ -179,7 +179,7 @@ interface IAccountsRepository {
     id: AccountId,
     fields: {
       bridgeCustomerId?: BridgeCustomerId
-      bridgeKycStatus?: "open" | "pending" | "approved" | "rejected" | "offboarded"
+      bridgeKycStatus?: "open" | "not_started" | "incomplete" | "awaiting_questionnaire" | "awaiting_ubo" | "under_review" | "paused" | "approved" | "rejected" | "offboarded"
       bridgeEthereumAddress?: string
     },
   ): Promise<Account | RepositoryError>

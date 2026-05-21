@@ -300,6 +300,7 @@ type BridgeWithdrawal {
   amount: String!
   createdAt: String!
   currency: String!
+  failureReason: String
   id: ID!
   status: String!
 }

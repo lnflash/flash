@@ -2,12 +2,12 @@
  * Bridge KYC Webhook Handler
  * Handles all kyc.* events from Bridge.xyz
  *
- * Bridge kyc_status → internal bridgeKycStatus mapping:
- *   not_started                                          → "open"
- *   incomplete | awaiting_questionnaire | awaiting_ubo
- *     | under_review | paused                            → "pending"
- *   approved                                             → "approved"
- *   rejected                                             → "rejected"
+  * Bridge kyc_status → internal bridgeKycStatus mapping:
+  *   not_started                                          → "open"
+  *   incomplete | awaiting_questionnaire | awaiting_ubo
+  *     | under_review | paused                            → "pending"
+  *   approved                                             → "approved"
+  *   rejected                                             → "rejected"
  *   offboarded                                           → "offboarded"
  */
 
