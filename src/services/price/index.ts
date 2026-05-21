@@ -12,9 +12,15 @@ import { SATS_PER_BTC } from "@domain/bitcoin"
 
 import { WalletCurrency } from "@domain/shared"
 
-import { CENTS_PER_USD, UsdDisplayCurrency } from "@domain/fiat"
+import { CENTS_PER_USD, UsdDisplayCurrency, JmdDisplayCurrency } from "@domain/fiat"
 
-import { PRICE_HISTORY_HOST, PRICE_HISTORY_PORT, PRICE_HOST, PRICE_PORT } from "@config"
+import {
+  PRICE_HISTORY_HOST,
+  PRICE_HISTORY_PORT,
+  PRICE_HOST,
+  PRICE_PORT,
+  ExchangeRates,
+} from "@config"
 
 import { baseLogger } from "../logger"
 
@@ -73,6 +79,34 @@ export const PriceService = (): IPriceService => {
         return {
           timestamp: new Date(),
           price: 1 / offset,
+          currency: displayCurrency,
+        }
+      }
+
+      // For JMD display currency, use the static exchange rate from config
+      // instead of triangulating through BTC via the price server.
+      // This avoids compounding float precision errors across two gRPC calls.
+      if (displayCurrency === JmdDisplayCurrency) {
+        const jmdSellRate = ExchangeRates.jmd.sell
+        if (jmdSellRate instanceof Error) return new PriceNotAvailableError()
+
+        let displayCurrencyPrice: number
+        if (walletCurrency === WalletCurrency.Btc) {
+          // JMD per sat: JMD cents per USD cent * (USD/BTC) / SATS_PER_BTC / CENTS_PER_USD
+          const usdPrice = await getPrice({ currency: UsdDisplayCurrency })
+          if (!usdPrice.price) return new PriceNotAvailableError()
+          displayCurrencyPrice =
+            (Number(jmdSellRate.asDollars()) * usdPrice.price) /
+            SATS_PER_BTC /
+            CENTS_PER_USD
+        } else {
+          // JMD per USD cent: static rate in dollars / CENTS_PER_USD
+          displayCurrencyPrice = Number(jmdSellRate.asDollars()) / CENTS_PER_USD
+        }
+
+        return {
+          timestamp: new Date(),
+          price: displayCurrencyPrice,
           currency: displayCurrency,
         }
       }
