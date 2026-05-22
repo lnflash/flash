@@ -12,15 +12,17 @@ import { Wallets } from "@app"
 import { WalletCurrency as WalletCurrencyDomain } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
 
+import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
+
 import IWallet from "../abstract/wallet"
 
 import SignedAmount from "../scalar/signed-amount"
 import WalletCurrency from "../scalar/wallet-currency"
 import OnChainAddress from "../scalar/on-chain-address"
-import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
+
+import Lnurl from "../scalar/lnurl"
 
 import { TransactionConnection } from "./transaction"
-import Lnurl from "../scalar/lnurl"
 
 const BtcWallet = GT.Object<Wallet>({
   name: "BTCWallet",
@@ -52,11 +54,11 @@ const BtcWallet = GT.Object<Wallet>({
       description: "A balance stored in BTC.",
       resolve: async (source) => {
         if (source.type === WalletType.External) return null
-        const balanceSats = await Wallets.getBalanceForWallet({ walletId: source.id })
-        if (balanceSats instanceof Error) {
-          throw mapError(balanceSats)
+        const balance = await Wallets.getBalanceForWallet({ walletId: source.id })
+        if (balance instanceof Error) {
+          throw mapError(balance)
         }
-        return balanceSats
+        return typeof balance === "number" ? balance : Number(balance.asCents(8))
       },
     },
     pendingIncomingBalance: {
