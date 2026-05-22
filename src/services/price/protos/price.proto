@@ -6,7 +6,7 @@ service PriceFeed {
 }
 
 message PriceResponse {
-  float price = 1;
+  double price = 1;
 }
 
 message PriceQuery {
