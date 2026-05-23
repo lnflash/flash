@@ -34,12 +34,13 @@ export const getTransactionsForWallets = async ({
 
 export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] => {
   return ibexResp.map(trx => {
+    const displayCurrency = ((trx as { displayCurrency?: string }).displayCurrency || (trx as { settlementDisplayCurrency?: string }).settlementDisplayCurrency || "USD") as DisplayCurrency
     const currency = (trx.currencyId === 3 ? "USD" : "BTC") as WalletCurrency // WalletCurrency: "USD" | "BTC",
 
     const settlementDisplayPrice: WalletMinorUnitDisplayPrice<WalletCurrency, DisplayCurrency> = {
-      base: trx.exchangeRateCurrencySats ? BigInt(Math.floor(trx.exchangeRateCurrencySats)) : 0n,
-      offset: 0n, // what is this?
-      displayCurrency: "USD" as DisplayCurrency,
+      base: trx.exchangeRateCurrencySats ? BigInt(Math.round(trx.exchangeRateCurrencySats)) : 0n,
+      offset: 0n,
+      displayCurrency,
       walletCurrency: currency
     }
 
@@ -48,8 +49,8 @@ export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] 
       settlementAmount: toSettlementAmount(trx.amount, trx.transactionTypeId, currency),
       settlementFee: asCurrency(trx.networkFee, currency),
       settlementCurrency: currency, 
-      settlementDisplayAmount: `${trx.amount}`, 
-      settlementDisplayFee: `${trx.networkFee}`, 
+      settlementDisplayAmount: `${(trx as { settlementDisplayAmount?: number | string }).settlementDisplayAmount ?? trx.amount}`, 
+      settlementDisplayFee: `${(trx as { settlementDisplayFee?: number | string }).settlementDisplayFee ?? trx.networkFee}`, 
       settlementDisplayPrice: settlementDisplayPrice,
       createdAt: trx.createdAt ? new Date(trx.createdAt) : new Date(), // should always return
       id: trx.id || "null", // "LedgerTransactionId" - this is likely unused 
