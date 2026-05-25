@@ -56,7 +56,7 @@ const UsdtWallet = GT.Object<Wallet>({
     },
 
     balance: {
-      type: GT.NonNull(FractionalCentAmount),
+      type: FractionalCentAmount,
       resolve: async (source) => {
         const balance = await Wallets.getBalanceForWallet({
           walletId: source.id,

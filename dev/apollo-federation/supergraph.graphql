@@ -2039,7 +2039,7 @@ type UsdtWallet implements Wallet
   @join__type(graph: PUBLIC)
 {
   accountId: ID!
-  balance: FractionalCentAmount!
+  balance: FractionalCentAmount
   id: ID!
   isExternal: Boolean!
   lnurlp: Lnurl
