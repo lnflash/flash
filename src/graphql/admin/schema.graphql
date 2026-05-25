@@ -572,7 +572,7 @@ A wallet belonging to an account which contains a USDT balance and a list of tra
 """
 type UsdtWallet implements Wallet {
   accountId: ID!
-  balance: FractionalCentAmount!
+  balance: FractionalCentAmount
   id: ID!
   isExternal: Boolean!
   lnurlp: Lnurl
