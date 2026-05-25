@@ -358,6 +358,25 @@ input CaptchaRequestAuthCodeInput {
   validationCode: String!
 }
 
+type CashWalletCutover {
+  completedAt: Timestamp
+  cutoverVersion: Int!
+  pauseReason: String
+  pausedAt: Timestamp
+  runId: String
+  scheduledAt: Timestamp
+  startedAt: Timestamp
+  state: CashWalletCutoverState!
+  updatedAt: Timestamp!
+  updatedBy: String
+}
+
+enum CashWalletCutoverState {
+  COMPLETE
+  IN_PROGRESS
+  PRE
+}
+
 type CashoutOffer {
   """The rate used when withdrawing to a JMD bank account"""
   exchangeRate: JMDCents
@@ -1296,6 +1315,7 @@ type Query {
   btcPrice(currency: DisplayCurrency! = "USD"): Price @deprecated(reason: "Deprecated in favor of realtimePrice")
   btcPriceList(range: PriceGraphRange!): [PricePoint]
   businessMapMarkers: [MapMarker!]!
+  cashWalletCutover: CashWalletCutover!
   currencyList: [Currency!]!
   globals: Globals
   isFlashNpub(input: IsFlashNpubInput!): IsFlashNpubPayload

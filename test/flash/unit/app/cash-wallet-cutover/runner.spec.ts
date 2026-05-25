@@ -26,6 +26,7 @@ describe("cash wallet migration batch runner", () => {
     const migrationsRepo = {
       listRunnableMigrations: jest.fn(async () => runnable),
       acquireMigrationLock: jest.fn(async () => locked),
+      markMigrationFailed: jest.fn(),
       releaseMigrationLock: jest.fn(async () => locked),
     }
     const executor = jest.fn(async () => completedStep)
@@ -67,6 +68,7 @@ describe("cash wallet migration batch runner", () => {
     const migrationsRepo = {
       listRunnableMigrations: jest.fn(async () => [migration("started", "migration-1")]),
       acquireMigrationLock: jest.fn(async () => lockError),
+      markMigrationFailed: jest.fn(),
       releaseMigrationLock: jest.fn(),
     }
     const executor = jest.fn()
@@ -92,6 +94,10 @@ describe("cash wallet migration batch runner", () => {
     const migrationsRepo = {
       listRunnableMigrations: jest.fn(async () => [locked]),
       acquireMigrationLock: jest.fn(async () => locked),
+      markMigrationFailed: jest.fn(async () => ({
+        ...locked,
+        status: "requires_operator_review" as const,
+      })),
       releaseMigrationLock: jest.fn(async () => locked),
     }
     const executor = jest.fn(async () => executionError)
@@ -107,11 +113,14 @@ describe("cash wallet migration batch runner", () => {
     })
 
     expect(result).toEqual({ attempted: 1, advanced: 0, failed: 1, skipped: 0 })
-    expect(migrationsRepo.releaseMigrationLock).toHaveBeenCalledWith({
+    expect(migrationsRepo.markMigrationFailed).toHaveBeenCalledWith({
       id: "migration-1",
       workerId: "worker-1",
       cutoverVersion: 7,
       runId: "run-7",
+      error: executionError,
+      status: "requires_operator_review",
     })
+    expect(migrationsRepo.releaseMigrationLock).not.toHaveBeenCalled()
   })
 })

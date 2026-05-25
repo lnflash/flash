@@ -11,6 +11,7 @@ import {
   recordCashWalletMigrationBalance,
   sendCashWalletMigrationBalanceMovePayment,
   sendCashWalletMigrationFeeReimbursementPayment,
+  skipCashWalletMigrationFeeReimbursement,
   startCashWalletMigration,
   verifyCashWalletMigrationBalanceMove,
   verifyCashWalletMigrationLegacyZero,
@@ -136,6 +137,7 @@ describe("cash wallet migration worker checkpoints", () => {
         ...migration("balance_read"),
         sourceBalanceUsdCents: "1234",
         destinationAmountUsdtMicros: "12340000",
+        destinationStartingBalanceUsdtMicros: "5000000",
       })),
     }
 
@@ -143,12 +145,14 @@ describe("cash wallet migration worker checkpoints", () => {
       migration: migration("provisioned"),
       migrationsRepo,
       sourceBalanceUsdCents: "1234",
+      destinationStartingBalanceUsdtMicros: "5000000",
     })
 
     expect(result).toMatchObject({
       status: "balance_read",
       sourceBalanceUsdCents: "1234",
       destinationAmountUsdtMicros: "12340000",
+      destinationStartingBalanceUsdtMicros: "5000000",
     })
     expect(migrationsRepo.transitionMigration).toHaveBeenCalledWith({
       id: "migration-id",
@@ -159,6 +163,7 @@ describe("cash wallet migration worker checkpoints", () => {
       patch: {
         sourceBalanceUsdCents: "1234",
         destinationAmountUsdtMicros: "12340000",
+        destinationStartingBalanceUsdtMicros: "5000000",
       },
     })
   })
@@ -178,7 +183,7 @@ describe("cash wallet migration worker checkpoints", () => {
     expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
   })
 
-  it("creates a balance move invoice on the destination wallet", async () => {
+  it("creates a no-amount balance move invoice on the destination wallet", async () => {
     const migrationsRepo = {
       transitionMigration: jest.fn(async () => ({
         ...migration("invoice_created"),
@@ -191,7 +196,7 @@ describe("cash wallet migration worker checkpoints", () => {
       paymentHash: "paymentHash" as PaymentHash,
     } as LnInvoice
     const invoiceService = {
-      createInvoice: jest.fn(async () => invoice),
+      createNoAmountInvoice: jest.fn(async () => invoice),
     }
 
     const result = await createCashWalletMigrationBalanceMoveInvoice({
@@ -208,9 +213,8 @@ describe("cash wallet migration worker checkpoints", () => {
       balanceMoveInvoicePaymentRequest: "lnbc1balance-move",
       balanceMoveInvoicePaymentHash: "paymentHash",
     })
-    expect(invoiceService.createInvoice).toHaveBeenCalledWith({
+    expect(invoiceService.createNoAmountInvoice).toHaveBeenCalledWith({
       recipientWalletId: "usdt-wallet-id",
-      amount: "12340000",
       memo: "cash-wallet-cutover:run-7:migration-id:balance-move",
     })
     expect(migrationsRepo.transitionMigration).toHaveBeenCalledWith({
@@ -231,7 +235,7 @@ describe("cash wallet migration worker checkpoints", () => {
       transitionMigration: jest.fn(),
     }
     const invoiceService = {
-      createInvoice: jest.fn(),
+      createNoAmountInvoice: jest.fn(),
     }
 
     const result = await createCashWalletMigrationBalanceMoveInvoice({
@@ -241,7 +245,7 @@ describe("cash wallet migration worker checkpoints", () => {
     })
 
     expect(result).toBeInstanceOf(Error)
-    expect(invoiceService.createInvoice).not.toHaveBeenCalled()
+    expect(invoiceService.createNoAmountInvoice).not.toHaveBeenCalled()
     expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
   })
 
@@ -251,7 +255,7 @@ describe("cash wallet migration worker checkpoints", () => {
       transitionMigration: jest.fn(),
     }
     const invoiceService = {
-      createInvoice: jest.fn(async () => error),
+      createNoAmountInvoice: jest.fn(async () => error),
     }
 
     const result = await createCashWalletMigrationBalanceMoveInvoice({
@@ -267,7 +271,7 @@ describe("cash wallet migration worker checkpoints", () => {
     expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
   })
 
-  it("sends the balance move payment from the legacy wallet", async () => {
+  it("sends the balance move payment from the legacy wallet capped to the recorded source balance", async () => {
     const migrationsRepo = {
       transitionMigration: jest.fn(async () => ({
         ...migration("balance_move_sending"),
@@ -284,6 +288,7 @@ describe("cash wallet migration worker checkpoints", () => {
       migration: {
         ...migration("invoice_created"),
         balanceMoveInvoicePaymentRequest: "lnbc1balance-move",
+        sourceBalanceUsdCents: "1000",
       },
       paymentService,
       migrationsRepo,
@@ -296,6 +301,7 @@ describe("cash wallet migration worker checkpoints", () => {
     expect(paymentService.payInvoice).toHaveBeenCalledWith({
       senderWalletId: "legacy-usd-wallet-id",
       paymentRequest: "lnbc1balance-move",
+      senderAmountUsdCents: "1000",
     })
     expect(migrationsRepo.transitionMigration).toHaveBeenCalledWith({
       id: "migration-id",
@@ -319,6 +325,28 @@ describe("cash wallet migration worker checkpoints", () => {
 
     const result = await sendCashWalletMigrationBalanceMovePayment({
       migration: migration("invoice_created"),
+      paymentService,
+      migrationsRepo,
+    })
+
+    expect(result).toBeInstanceOf(Error)
+    expect(paymentService.payInvoice).not.toHaveBeenCalled()
+    expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
+  })
+
+  it("rejects balance move payment sending when the source balance is missing", async () => {
+    const migrationsRepo = {
+      transitionMigration: jest.fn(),
+    }
+    const paymentService = {
+      payInvoice: jest.fn(),
+    }
+
+    const result = await sendCashWalletMigrationBalanceMovePayment({
+      migration: {
+        ...migration("invoice_created"),
+        balanceMoveInvoicePaymentRequest: "lnbc1balance-move",
+      },
       paymentService,
       migrationsRepo,
     })
@@ -446,12 +474,12 @@ describe("cash wallet migration worker checkpoints", () => {
     expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
   })
 
-  it("creates a fee reimbursement invoice on the legacy wallet", async () => {
+  it("creates a fee reimbursement invoice on the destination wallet for the exact USDT shortfall", async () => {
     const migrationsRepo = {
       transitionMigration: jest.fn(async () => ({
         ...migration("fee_reimbursement_invoice_created"),
-        feeAmountUsdCents: "7",
-        feeAmountUsdtMicros: "70000",
+        feeAmountUsdCents: "8",
+        feeAmountUsdtMicros: "70001",
         feeReimbursementInvoicePaymentRequest: "lnbc1fee-reimbursement",
         feeReimbursementInvoicePaymentHash: "feePaymentHash",
       })),
@@ -468,19 +496,19 @@ describe("cash wallet migration worker checkpoints", () => {
       migration: migration("balance_move_verified"),
       invoiceService,
       migrationsRepo,
-      feeAmountUsdCents: "7",
+      feeAmountUsdtMicros: "70001",
     })
 
     expect(result).toMatchObject({
       status: "fee_reimbursement_invoice_created",
-      feeAmountUsdCents: "7",
-      feeAmountUsdtMicros: "70000",
+      feeAmountUsdCents: "8",
+      feeAmountUsdtMicros: "70001",
       feeReimbursementInvoicePaymentRequest: "lnbc1fee-reimbursement",
       feeReimbursementInvoicePaymentHash: "feePaymentHash",
     })
     expect(invoiceService.createInvoice).toHaveBeenCalledWith({
-      recipientWalletId: "legacy-usd-wallet-id",
-      amount: "7",
+      recipientWalletId: "usdt-wallet-id",
+      amount: "70001",
       memo: "cash-wallet-cutover:run-7:migration-id:fee-reimbursement",
     })
     expect(migrationsRepo.transitionMigration).toHaveBeenCalledWith({
@@ -490,8 +518,8 @@ describe("cash wallet migration worker checkpoints", () => {
       cutoverVersion: 7,
       runId: "run-7",
       patch: {
-        feeAmountUsdCents: "7",
-        feeAmountUsdtMicros: "70000",
+        feeAmountUsdCents: "8",
+        feeAmountUsdtMicros: "70001",
         feeReimbursementInvoicePaymentRequest: "lnbc1fee-reimbursement",
         feeReimbursementInvoicePaymentHash: "feePaymentHash",
       },
@@ -510,7 +538,7 @@ describe("cash wallet migration worker checkpoints", () => {
       migration: migration("balance_move_verified"),
       invoiceService,
       migrationsRepo,
-      feeAmountUsdCents: "0.07",
+      feeAmountUsdtMicros: "0.07",
     })
 
     expect(result).toBeInstanceOf(Error)
@@ -531,14 +559,46 @@ describe("cash wallet migration worker checkpoints", () => {
       migration: migration("balance_move_verified"),
       invoiceService,
       migrationsRepo,
-      feeAmountUsdCents: "7",
+      feeAmountUsdtMicros: "70000",
     })
 
     expect(result).toBe(error)
     expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
   })
 
-  it("sends the fee reimbursement payment from the destination wallet", async () => {
+  it("skips fee reimbursement when there is no destination shortfall", async () => {
+    const migrationsRepo = {
+      transitionMigration: jest.fn(async () => ({
+        ...migration("fee_reimbursed"),
+        feeAmountUsdCents: "0",
+        feeAmountUsdtMicros: "0",
+      })),
+    }
+
+    const result = await skipCashWalletMigrationFeeReimbursement({
+      migration: migration("balance_move_verified"),
+      migrationsRepo,
+    })
+
+    expect(result).toMatchObject({
+      status: "fee_reimbursed",
+      feeAmountUsdCents: "0",
+      feeAmountUsdtMicros: "0",
+    })
+    expect(migrationsRepo.transitionMigration).toHaveBeenCalledWith({
+      id: "migration-id",
+      from: "balance_move_verified",
+      to: "fee_reimbursed",
+      cutoverVersion: 7,
+      runId: "run-7",
+      patch: {
+        feeAmountUsdCents: "0",
+        feeAmountUsdtMicros: "0",
+      },
+    })
+  })
+
+  it("sends the fee reimbursement payment from the treasury wallet", async () => {
     const migrationsRepo = {
       transitionMigration: jest.fn(async () => ({
         ...migration("fee_reimbursement_sending"),
@@ -556,6 +616,7 @@ describe("cash wallet migration worker checkpoints", () => {
         ...migration("fee_reimbursement_invoice_created"),
         feeReimbursementInvoicePaymentRequest: "lnbc1fee-reimbursement",
       },
+      treasuryWalletId: "treasury-wallet-id" as WalletId,
       paymentService,
       migrationsRepo,
     })
@@ -565,7 +626,7 @@ describe("cash wallet migration worker checkpoints", () => {
       feeReimbursementPaymentTransactionId: "fee-ibex-tx-id",
     })
     expect(paymentService.payInvoice).toHaveBeenCalledWith({
-      senderWalletId: "usdt-wallet-id",
+      senderWalletId: "treasury-wallet-id",
       paymentRequest: "lnbc1fee-reimbursement",
     })
     expect(migrationsRepo.transitionMigration).toHaveBeenCalledWith({

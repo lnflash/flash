@@ -4,6 +4,7 @@ jest.mock("@app/accounts", () => ({
 }))
 jest.mock("@app/wallets", () => ({
   addInvoiceForRecipientForUsdWallet: jest.fn(),
+  addInvoiceNoAmountForRecipient: jest.fn(),
   getBalanceForWallet: jest.fn(),
 }))
 jest.mock("@services/mongoose", () => ({
@@ -41,16 +42,21 @@ describe("primary cash wallet cutover orchestrator", () => {
       transitionMigration: jest.fn(async () => migration("started")),
       listRunnableMigrations: jest.fn(async () => [started]),
       acquireMigrationLock: jest.fn(async () => locked),
+      markMigrationFailed: jest.fn(),
       releaseMigrationLock: jest.fn(async () => locked),
     }
     const runtimeServices = {
       now: jest.fn(() => new Date("2026-05-20T16:00:00Z")),
       provisioningService: { ensureDestinationWallet: jest.fn() },
-      balanceReader: { readSourceBalanceUsdCents: jest.fn() },
-      invoiceService: { createInvoice: jest.fn() },
+      balanceReader: {
+        readSourceBalanceUsdCents: jest.fn(),
+        readDestinationBalanceUsdtMicros: jest.fn(),
+      },
+      invoiceService: { createInvoice: jest.fn(), createNoAmountInvoice: jest.fn() },
       paymentService: { payInvoice: jest.fn() },
       balanceVerifier: { verifyBalanceMove: jest.fn() },
-      feeService: { readFeeAmountUsdCents: jest.fn() },
+      feeService: { readFeeAmountUsdtMicros: jest.fn() },
+      treasuryService: { getTreasuryWalletId: jest.fn() },
       pointerService: { flipDefaultWallet: jest.fn() },
       legacyWalletVerifier: { verifyLegacyWalletZero: jest.fn() },
     }

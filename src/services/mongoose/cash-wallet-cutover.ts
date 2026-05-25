@@ -43,6 +43,11 @@ type LockMigrationArgs = {
   runId: string
 }
 
+type MarkMigrationFailedArgs = Omit<LockMigrationArgs, "staleBefore"> & {
+  error: Error
+  status: "failed" | "requires_operator_review"
+}
+
 const defaultConfig = (): CashWalletCutoverConfig => ({
   state: "pre",
   cutoverVersion: 1,
@@ -76,6 +81,7 @@ const resultToMigration = (record: CashWalletMigrationRecord): CashWalletMigrati
   status: record.status,
   sourceBalanceUsdCents: record.sourceBalanceUsdCents,
   destinationAmountUsdtMicros: record.destinationAmountUsdtMicros,
+  destinationStartingBalanceUsdtMicros: record.destinationStartingBalanceUsdtMicros,
   feeAmountUsdCents: record.feeAmountUsdCents,
   feeAmountUsdtMicros: record.feeAmountUsdtMicros,
   balanceMoveInvoicePaymentRequest: record.balanceMoveInvoicePaymentRequest,
@@ -238,6 +244,37 @@ export const CashWalletCutoverRepository = () => {
     }
   }
 
+  const markMigrationFailed = async ({
+    id,
+    workerId,
+    cutoverVersion,
+    runId,
+    error,
+    status,
+  }: MarkMigrationFailedArgs): Promise<CashWalletMigration | RepositoryError> => {
+    try {
+      const result = await CashWalletMigration.findOneAndUpdate(
+        { _id: id, lockedBy: workerId, cutoverVersion, runId },
+        {
+          $set: {
+            status,
+            lastError: error.message,
+            lockedAt: null,
+            lockedBy: null,
+            updatedAt: new Date(),
+          },
+          $inc: { attempts: 1 },
+        },
+        { new: true },
+      )
+      if (!result)
+        return new CouldNotUpdateError("Could not mark cash wallet migration failed")
+      return resultToMigration(result)
+    } catch (err) {
+      return parseRepositoryError(err)
+    }
+  }
+
   const listRunnableMigrations = async ({
     cutoverVersion,
     runId,
@@ -285,6 +322,7 @@ export const CashWalletCutoverRepository = () => {
     transitionMigration,
     acquireMigrationLock,
     releaseMigrationLock,
+    markMigrationFailed,
     listRunnableMigrations,
     countByStatus,
   }

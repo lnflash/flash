@@ -129,6 +129,7 @@ interface CashWalletMigrationRecord {
   status: CashWalletMigrationStatus
   sourceBalanceUsdCents?: string
   destinationAmountUsdtMicros?: string
+  destinationStartingBalanceUsdtMicros?: string
   feeAmountUsdCents?: string
   feeAmountUsdtMicros?: string
   balanceMoveInvoicePaymentRequest?: string

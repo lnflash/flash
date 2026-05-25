@@ -136,6 +136,38 @@ input BusinessUpdateMapInfoInput {
   username: Username!
 }
 
+type CashWalletCutover {
+  completedAt: Timestamp
+  cutoverVersion: Int!
+  pauseReason: String
+  pausedAt: Timestamp
+  runId: String
+  scheduledAt: Timestamp
+  startedAt: Timestamp
+  state: CashWalletCutoverState!
+  updatedAt: Timestamp!
+  updatedBy: String
+}
+
+type CashWalletCutoverPayload {
+  cashWalletCutover: CashWalletCutover
+  errors: [Error!]!
+}
+
+enum CashWalletCutoverState {
+  COMPLETE
+  IN_PROGRESS
+  PRE
+}
+
+input CashWalletCutoverUpdateInput {
+  cutoverVersion: Int
+  pauseReason: String
+  runId: String
+  scheduledAt: Timestamp
+  state: CashWalletCutoverState!
+}
+
 input CashoutNotificationSendInput {
   accountId: String!
   amount: Int!
@@ -278,6 +310,7 @@ type Mutation {
   accountUpdateStatus(input: AccountUpdateStatusInput!): AccountDetailPayload!
   businessDeleteMapInfo(input: BusinessDeleteMapInfoInput!): AccountDetailPayload!
   businessUpdateMapInfo(input: BusinessUpdateMapInfoInput!): AccountDetailPayload!
+  cashWalletCutoverUpdate(input: CashWalletCutoverUpdateInput!): CashWalletCutoverPayload!
   cashoutNotificationSend(input: CashoutNotificationSendInput!): SuccessPayload!
   merchantMapDelete(input: MerchantMapDeleteInput!): MerchantPayload!
   merchantMapValidate(input: MerchantMapValidateInput!): MerchantPayload!
@@ -335,6 +368,7 @@ type Query {
   accountDetailsByUsername(username: Username!): AuditedAccount!
   allLevels: [AccountLevel!]!
   bridgeReconciliationOrphans(limit: Int = 50, orphanType: String = null, status: String = null): [BridgeReconciliationOrphan!]!
+  cashWalletCutover: CashWalletCutover!
   idDocumentReadUrl(
     """Storage key of the ID document file"""
     fileKey: String!

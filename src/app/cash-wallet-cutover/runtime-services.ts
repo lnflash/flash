@@ -1,17 +1,25 @@
 import { addWalletIfNonexistent, updateDefaultWalletId } from "@app/accounts"
-import { addInvoiceForRecipientForUsdWallet, getBalanceForWallet } from "@app/wallets"
+import {
+  addInvoiceForRecipientForUsdWallet,
+  getBalanceForWallet,
+} from "@app/wallets"
+import { decodeInvoice } from "@domain/bitcoin/lightning"
 import { InvalidWalletId } from "@domain/errors"
-import { USDAmount, WalletCurrency } from "@domain/shared"
+import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
 import { AccountsRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
 import { UnexpectedIbexResponse } from "@services/ibex/errors"
+import { getFunderWalletId } from "@services/ledger/caching"
 
 import {
   CashWalletMigrationFailedError,
   InvalidCashWalletCutoverAmountError,
   InvalidCashWalletMigrationTransitionError,
 } from "./errors"
+import { destinationShortfallUsdtMicros } from "./amount-conversion"
+
+const CUTOVER_IBEX_INVOICE_EXPIRATION_SECONDS = 15 * 60
 
 type RuntimeServiceDependencies = {
   now?: () => Date
@@ -19,24 +27,27 @@ type RuntimeServiceDependencies = {
   updateDefaultWalletId?: typeof updateDefaultWalletId
   getBalanceForWallet?: typeof getBalanceForWallet
   createInvoice?: typeof addInvoiceForRecipientForUsdWallet
+  createNoAmountInvoice?: typeof Ibex.addInvoice
   payInvoice?: typeof Ibex.payInvoice
-  getTransactionDetails?: typeof Ibex.getTransactionDetails
   accountsRepo?: Pick<ReturnType<typeof AccountsRepository>, "findById">
+  getTreasuryWalletId?: () => Promise<WalletId | ApplicationError>
 }
 
 const isUsdAmount = (amount: unknown): amount is USDAmount => amount instanceof USDAmount
+const isUsdtAmount = (amount: unknown): amount is USDTAmount =>
+  amount instanceof USDTAmount
 
-const feeAmountUsdCentsFromNumber = (
-  feeAmount: number | undefined,
-): string | InvalidCashWalletCutoverAmountError => {
-  if (feeAmount === undefined || Number.isNaN(feeAmount) || feeAmount < 0) {
-    return new InvalidCashWalletCutoverAmountError("Invalid fee amount")
-  }
-  return Math.ceil(feeAmount * 100).toString()
+const ibexInvoiceToDomainInvoice = (response: Awaited<ReturnType<typeof Ibex.addInvoice>>) => {
+  if (response instanceof Error) return response
+
+  const invoiceString = response.invoice?.bolt11
+  if (!invoiceString) return new UnexpectedIbexResponse("Could not find invoice.")
+
+  const decodedInvoice = decodeInvoice(invoiceString)
+  if (decodedInvoice instanceof Error) return decodedInvoice
+
+  return decodedInvoice
 }
-
-const numericFee = (value: unknown): number | undefined =>
-  typeof value === "number" ? value : undefined
 
 export const createCashWalletMigrationRuntimeServices = (
   deps: RuntimeServiceDependencies = {},
@@ -45,8 +56,8 @@ export const createCashWalletMigrationRuntimeServices = (
   const updateDefaultWallet = deps.updateDefaultWalletId ?? updateDefaultWalletId
   const balanceForWallet = deps.getBalanceForWallet ?? getBalanceForWallet
   const invoiceForRecipient = deps.createInvoice ?? addInvoiceForRecipientForUsdWallet
+  const noAmountInvoiceForRecipient = deps.createNoAmountInvoice ?? Ibex.addInvoice
   const payInvoice = deps.payInvoice ?? Ibex.payInvoice
-  const getTransactionDetails = deps.getTransactionDetails ?? Ibex.getTransactionDetails
   const accountsRepo = deps.accountsRepo ?? AccountsRepository()
 
   return {
@@ -83,6 +94,19 @@ export const createCashWalletMigrationRuntimeServices = (
         }
         return balance.asCents()
       },
+      readDestinationBalanceUsdtMicros: async (
+        migration: CashWalletMigration,
+      ): Promise<string | ApplicationError> => {
+        const balance = await balanceForWallet({
+          walletId: migration.destinationUsdtWalletId,
+          currency: WalletCurrency.Usdt,
+        })
+        if (balance instanceof Error) return balance
+        if (!isUsdtAmount(balance)) {
+          return new InvalidCashWalletCutoverAmountError("Expected USDT balance")
+        }
+        return balance.asSmallestUnits()
+      },
     },
     invoiceService: {
       createInvoice: ({
@@ -99,18 +123,39 @@ export const createCashWalletMigrationRuntimeServices = (
           amount: amount as FractionalCentAmount,
           memo,
         }),
+      createNoAmountInvoice: ({
+        recipientWalletId,
+        memo,
+      }: {
+        recipientWalletId: WalletId
+        memo: string
+      }) =>
+        noAmountInvoiceForRecipient({
+          accountId: recipientWalletId,
+          memo,
+          expiration: CUTOVER_IBEX_INVOICE_EXPIRATION_SECONDS as Seconds,
+        }).then(ibexInvoiceToDomainInvoice),
     },
     paymentService: {
       payInvoice: async ({
         senderWalletId,
         paymentRequest,
+        senderAmountUsdCents,
       }: {
         senderWalletId: WalletId
         paymentRequest: string
+        senderAmountUsdCents?: string
       }): Promise<{ transactionId: IbexTransactionId } | ApplicationError> => {
+        const send =
+          senderAmountUsdCents === undefined
+            ? undefined
+            : USDAmount.cents(senderAmountUsdCents)
+        if (send instanceof Error) return send
+
         const payment = await payInvoice({
           accountId: senderWalletId as IbexAccountId,
           invoice: paymentRequest as Bolt11,
+          send,
         })
         if (payment instanceof Error) return payment
 
@@ -139,7 +184,7 @@ export const createCashWalletMigrationRuntimeServices = (
       },
     },
     feeService: {
-      readFeeAmountUsdCents: async (
+      readFeeAmountUsdtMicros: async (
         migration: CashWalletMigration,
       ): Promise<string | ApplicationError> => {
         if (migration.balanceMovePaymentTransactionId === undefined) {
@@ -148,15 +193,36 @@ export const createCashWalletMigrationRuntimeServices = (
           )
         }
 
-        const transaction = await getTransactionDetails(
-          migration.balanceMovePaymentTransactionId as IbexTransactionId,
-        )
-        if (transaction instanceof Error) return transaction
+        if (migration.destinationAmountUsdtMicros === undefined) {
+          return new InvalidCashWalletMigrationTransitionError(
+            "destinationAmountUsdtMicros is required before reading fee amount",
+          )
+        }
 
-        return feeAmountUsdCentsFromNumber(
-          numericFee(transaction.networkFee) ?? numericFee(transaction.fee),
-        )
+        if (migration.destinationStartingBalanceUsdtMicros === undefined) {
+          return new InvalidCashWalletMigrationTransitionError(
+            "destinationStartingBalanceUsdtMicros is required before reading fee amount",
+          )
+        }
+
+        const currentBalance = await balanceForWallet({
+          walletId: migration.destinationUsdtWalletId,
+          currency: WalletCurrency.Usdt,
+        })
+        if (currentBalance instanceof Error) return currentBalance
+        if (!isUsdtAmount(currentBalance)) {
+          return new InvalidCashWalletCutoverAmountError("Expected USDT balance")
+        }
+
+        return destinationShortfallUsdtMicros({
+          targetUsdtMicros: migration.destinationAmountUsdtMicros,
+          startingUsdtMicros: migration.destinationStartingBalanceUsdtMicros,
+          currentUsdtMicros: currentBalance.asSmallestUnits(),
+        })
       },
+    },
+    treasuryService: {
+      getTreasuryWalletId: deps.getTreasuryWalletId ?? getFunderWalletId,
     },
     pointerService: {
       flipDefaultWallet: async ({
