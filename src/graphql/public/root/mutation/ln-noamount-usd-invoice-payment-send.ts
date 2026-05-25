@@ -14,6 +14,7 @@ import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fract
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 
 import { usdWalletAmountFromWalletId } from "@app/wallets"
+import { resolveCashWalletMutationWalletIdForAccount } from "@app/cash-wallet-cutover"
 import Ibex from "@services/ibex/client"
 
 import { IbexError } from "@services/ibex/errors"
@@ -63,7 +64,7 @@ const LnNoAmountUsdInvoicePaymentSendMutation = GT.Field<
   args: {
     input: { type: GT.NonNull(LnNoAmountUsdInvoicePaymentInput) },
   },
-  resolve: async (_, args, { domainAccount }) => {
+  resolve: async (_, args, { domainAccount, cashWalletClientCapabilities }) => {
     const { walletId, paymentRequest, amount, memo } = args.input
 
     if (walletId instanceof InputValidationError) {
@@ -90,8 +91,20 @@ const LnNoAmountUsdInvoicePaymentSendMutation = GT.Field<
     if (!domainAccount) throw new Error("Authentication required")
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
 
-    const usCents = await usdWalletAmountFromWalletId({
+    const routedWalletId = await resolveCashWalletMutationWalletIdForAccount({
+      account: domainAccount,
       walletId,
+      client: cashWalletClientCapabilities,
+    })
+    if (routedWalletId instanceof Error) {
+      return {
+        status: "failed",
+        errors: [mapAndParseErrorForGqlResponse(routedWalletId)],
+      }
+    }
+
+    const usCents = await usdWalletAmountFromWalletId({
+      walletId: routedWalletId,
       amount: amount.toString(),
     })
     if (usCents instanceof Error) {
@@ -102,7 +115,7 @@ const LnNoAmountUsdInvoicePaymentSendMutation = GT.Field<
     }
     const PayLightningInvoice = await Ibex.payInvoice({
       invoice: paymentRequest as Bolt11,
-      accountId: walletId,
+      accountId: routedWalletId,
       send: usCents,
     })
 

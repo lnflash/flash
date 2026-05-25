@@ -139,7 +139,7 @@ describe("cash wallet migration runtime services", () => {
     })
 
     expect(result).toEqual({ transactionId: "ibex-tx-id" })
-    const paymentArgs = deps.payInvoice.mock.calls[0][0]
+    const paymentArgs = deps.payInvoice.mock.calls[0][0]!
     expect(paymentArgs.accountId).toBe("legacy-usd-wallet-id")
     expect(paymentArgs.invoice).toBe("lnbc1payment")
     expect(paymentArgs.send).toBeInstanceOf(USDAmount)
@@ -188,7 +188,7 @@ describe("cash wallet migration runtime services", () => {
           defaultWalletId: "legacy-usd-wallet-id" as WalletId,
         })),
       },
-      updateDefaultWalletId: jest.fn(async () => ({})),
+      updateDefaultWalletId: jest.fn(async () => ({ defaultWalletId: "usdt-wallet-id" })),
     }
 
     const services = createCashWalletMigrationRuntimeServices(deps)

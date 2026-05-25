@@ -2,6 +2,7 @@ import {
   CashWalletCutoverInProgressError,
   CashWalletMigrationFailedError,
   evaluateCashWalletCutoverGuard,
+  evaluateCashWalletCutoverPresentation,
 } from "@app/cash-wallet-cutover/guard"
 
 const config = (state: CashWalletCutoverState): CashWalletCutoverConfig => ({
@@ -23,6 +24,16 @@ const migration = (status: CashWalletMigrationStatus): CashWalletMigration => ({
   attempts: 0,
   updatedAt: new Date("2026-05-19T00:00:00Z"),
 })
+
+const legacyClient = {
+  cashWalletPresentation: "legacy_compat" as const,
+  hasUsdtCashWalletSupport: false,
+}
+
+const usdtClient = {
+  cashWalletPresentation: "usdt" as const,
+  hasUsdtCashWalletSupport: true,
+}
 
 describe("cash wallet cutover guard", () => {
   it("allows legacy route before cutover starts", () => {
@@ -58,13 +69,13 @@ describe("cash wallet cutover guard", () => {
     }
   })
 
-  it("routes completed accounts to ETH-USDT during cutover", () => {
+  it("routes completed accounts to USDT during cutover", () => {
     expect(
       evaluateCashWalletCutoverGuard({
         cutover: config("in_progress"),
         migration: migration("complete"),
       }),
-    ).toEqual({ route: "eth_usdt" })
+    ).toEqual({ route: "usdt" })
   })
 
   it("rejects failed and manual-review migrations", () => {
@@ -78,9 +89,66 @@ describe("cash wallet cutover guard", () => {
     }
   })
 
-  it("routes all accounts to ETH-USDT after global completion", () => {
+  it("routes all accounts to USDT after global completion", () => {
     expect(evaluateCashWalletCutoverGuard({ cutover: config("complete") })).toEqual({
-      route: "eth_usdt",
+      route: "usdt",
+    })
+  })
+})
+
+describe("cash wallet cutover presentation", () => {
+  it("presents legacy USD before cutover starts", () => {
+    expect(
+      evaluateCashWalletCutoverPresentation({
+        cutover: config("pre"),
+        client: usdtClient,
+      }),
+    ).toEqual({
+      presentation: "legacy_usd",
+    })
+  })
+
+  it("presents completed accounts as legacy-compatible for old clients", () => {
+    expect(
+      evaluateCashWalletCutoverPresentation({
+        cutover: config("in_progress"),
+        migration: migration("complete"),
+        client: legacyClient,
+      }),
+    ).toEqual({
+      presentation: "legacy_usd_compat",
+    })
+  })
+
+  it("presents completed accounts as USDT for capable clients", () => {
+    expect(
+      evaluateCashWalletCutoverPresentation({
+        cutover: config("in_progress"),
+        migration: migration("complete"),
+        client: usdtClient,
+      }),
+    ).toEqual({
+      presentation: "usdt",
+    })
+  })
+
+  it("uses client capability after global completion", () => {
+    expect(
+      evaluateCashWalletCutoverPresentation({
+        cutover: config("complete"),
+        client: legacyClient,
+      }),
+    ).toEqual({
+      presentation: "legacy_usd_compat",
+    })
+
+    expect(
+      evaluateCashWalletCutoverPresentation({
+        cutover: config("complete"),
+        client: usdtClient,
+      }),
+    ).toEqual({
+      presentation: "usdt",
     })
   })
 })

@@ -1,7 +1,13 @@
 export * from "./amount-conversion"
+export * from "./client-capability"
 export * from "./errors"
+export * from "./presentation"
+export * from "./presentation-for-account"
 export * from "./state-machine"
-export { evaluateCashWalletCutoverGuard } from "./guard"
+export {
+  evaluateCashWalletCutoverGuard,
+  evaluateCashWalletCutoverPresentation,
+} from "./guard"
 export * from "./discovery"
 export * from "./preflight"
 export * from "./planner"

@@ -24,7 +24,7 @@ describe("cash wallet cutover GraphQL surface", () => {
     jest.mocked(CashWalletCutoverRepository).mockReturnValue({ getConfig } as never)
 
     const result = await CashWalletCutoverQuery.resolve?.(
-      undefined,
+      null,
       {},
       {} as GraphQLPublicContext,
       {} as never,
@@ -49,7 +49,7 @@ describe("cash wallet cutover GraphQL surface", () => {
     jest.mocked(CashWalletCutoverRepository).mockReturnValue({ updateConfig } as never)
 
     const result = await CashWalletCutoverUpdateMutation.resolve?.(
-      undefined,
+      null,
       {
         input: {
           state: "in_progress",

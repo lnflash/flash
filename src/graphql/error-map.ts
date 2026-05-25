@@ -808,6 +808,14 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = error.message
       return new ValidationInternalError({ message, logger: baseLogger })
 
+    case "CashWalletMissingLegacyUsdWalletError":
+      message = "Legacy USD Cash Wallet is missing for this account."
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "CashWalletMissingUsdtWalletError":
+      message = "USDT Cash Wallet is missing for this account."
+      return new ValidationInternalError({ message, logger: baseLogger })
+
     case "InvalidCashWalletCutoverAmountError":
       message = error.message
       return new ValidationInternalError({ message, logger: baseLogger })
