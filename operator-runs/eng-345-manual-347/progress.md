@@ -6,12 +6,12 @@
 - 2026-05-23T13:37:48.713Z created account 5: 6a11adabe55310755eeb02bf USD=9756a443-d30d-4b1c-a797-933ec2ced1d0 USDT=fa7c7780-9246-4088-beb6-56fcd98e3209 funding=25
 - 2026-05-23T13:37:49.430Z created account 6: 6a11adace55310755eeb02d9 USD=ecaf103c-d024-419a-8bad-b0c61e8068be USDT=53884f7a-0a55-4406-8b60-3c6d68a6c180 funding=25
 - 2026-05-23T13:37:50.263Z created account 7: 6a11adade55310755eeb02f3 USD=8a3e1bd4-4d2d-4f97-b201-d58d3723a53c USDT=80f0de1f-b4e6-4904-8c3f-d90bad763ce2 funding=25
-- 2026-05-23T13:37:50.789Z ERROR 
-- 2026-05-23T13:39:59.481Z ERROR 
-- 2026-05-23T13:41:36.710Z ERROR 
+- 2026-05-23T13:37:50.789Z ERROR
+- 2026-05-23T13:39:59.481Z ERROR
+- 2026-05-23T13:41:36.710Z ERROR
 - 2026-05-23T13:42:04.155Z wrote verification results to /Users/dread/Documents/Island-Bitcoin/Flash/flash/.worktrees/eng-345-review/operator-runs/eng-345-manual-347/results.json
-- 2026-05-23T13:42:26.832Z ERROR 
-- 2026-05-23T13:44:28.884Z ERROR 
+- 2026-05-23T13:42:26.832Z ERROR
+- 2026-05-23T13:44:28.884Z ERROR
 - 2026-05-23T13:50:13.799Z preview planned=7
 - 2026-05-23T13:50:27.921Z prepared migrations=7
 - 2026-05-23T13:50:44.208Z reset singleton cutover config to pre for manual-eng-347
