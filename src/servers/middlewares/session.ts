@@ -1,6 +1,7 @@
 import DataLoader from "dataloader"
 
 import { Accounts, Transactions } from "@app"
+import { DEFAULT_CASH_WALLET_CLIENT_CAPABILITIES } from "@app/cash-wallet-cutover"
 import { recordExceptionInCurrentSpan } from "@services/tracing"
 import jsonwebtoken from "jsonwebtoken"
 
@@ -67,8 +68,7 @@ export const sessionPublicContext = async ({
           error: txnMetadata,
         })
         return keys.map(() => undefined)
-      }
-      else if (txnMetadata instanceof Error) {
+      } else if (txnMetadata instanceof Error) {
         recordExceptionInCurrentSpan({
           error: txnMetadata,
           level: txnMetadata.level,
@@ -88,5 +88,6 @@ export const sessionPublicContext = async ({
     domainAccount,
     ip,
     sessionId,
+    cashWalletClientCapabilities: DEFAULT_CASH_WALLET_CLIENT_CAPABILITIES,
   }
 }

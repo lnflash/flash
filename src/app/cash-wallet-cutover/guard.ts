@@ -2,8 +2,16 @@ import {
   CashWalletCutoverInProgressError,
   CashWalletMigrationFailedError,
 } from "./errors"
+import { CashWalletClientCapabilities } from "./client-capability"
 
 export { CashWalletCutoverInProgressError, CashWalletMigrationFailedError }
+
+export type CashWalletCutoverRoute = "legacy_usd" | "usdt"
+export type CashWalletCutoverPresentation = "legacy_usd" | "legacy_usd_compat" | "usdt"
+
+export type CashWalletCutoverDecision = {
+  presentation: CashWalletCutoverPresentation
+}
 
 const ACTIVE_STATUSES: CashWalletMigrationStatus[] = [
   "started",
@@ -26,16 +34,16 @@ export const evaluateCashWalletCutoverGuard = ({
 }: {
   cutover: CashWalletCutoverConfig
   migration?: CashWalletMigration | null
-}): { route: "legacy_usd" | "eth_usdt" } | ApplicationError => {
+}): { route: CashWalletCutoverRoute } | ApplicationError => {
   if (cutover.state === "pre") return { route: "legacy_usd" }
-  if (cutover.state === "complete") return { route: "eth_usdt" }
+  if (cutover.state === "complete") return { route: "usdt" }
 
   if (!migration || migration.status === "not_started") return { route: "legacy_usd" }
   if (
     migration.status === "complete" ||
     migration.status === "skipped_already_migrated"
   ) {
-    return { route: "eth_usdt" }
+    return { route: "usdt" }
   }
   if (migration.status === "failed" || migration.status === "requires_operator_review") {
     return new CashWalletMigrationFailedError()
@@ -45,4 +53,25 @@ export const evaluateCashWalletCutoverGuard = ({
   }
 
   return { route: "legacy_usd" }
+}
+
+export const evaluateCashWalletCutoverPresentation = ({
+  cutover,
+  migration,
+  client,
+}: {
+  cutover: CashWalletCutoverConfig
+  migration?: CashWalletMigration | null
+  client: CashWalletClientCapabilities
+}): CashWalletCutoverDecision | ApplicationError => {
+  const guard = evaluateCashWalletCutoverGuard({ cutover, migration })
+  if (guard instanceof Error) return guard
+
+  if (guard.route === "legacy_usd") {
+    return { presentation: "legacy_usd" }
+  }
+
+  return {
+    presentation: client.hasUsdtCashWalletSupport ? "usdt" : "legacy_usd_compat",
+  }
 }

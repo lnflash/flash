@@ -1,4 +1,5 @@
 import { usdWalletAmountFromWalletId, UsdWalletAmount } from "@app/wallets"
+import { resolveCashWalletMutationWalletIdForAccount } from "@app/cash-wallet-cutover"
 
 import { GT } from "@graphql/index"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
@@ -22,7 +23,7 @@ const LnNoAmountUsdInvoiceFeeProbeInput = GT.Input({
   }),
 })
 
-const LnNoAmountUsdInvoiceFeeProbeMutation = GT.Field({
+const LnNoAmountUsdInvoiceFeeProbeMutation = GT.Field<null, GraphQLPublicContextAuth>({
   extensions: {
     complexity: 120,
   },
@@ -30,13 +31,22 @@ const LnNoAmountUsdInvoiceFeeProbeMutation = GT.Field({
   args: {
     input: { type: GT.NonNull(LnNoAmountUsdInvoiceFeeProbeInput) },
   },
-  resolve: async (_, args) => {
+  resolve: async (_, args, { domainAccount, cashWalletClientCapabilities }) => {
     const { walletId, paymentRequest, amount } = args.input
 
     for (const input of [walletId, paymentRequest, amount]) {
       if (input instanceof Error) {
         return { errors: [{ message: input.message }] }
       }
+    }
+
+    const routedWalletId = await resolveCashWalletMutationWalletIdForAccount({
+      account: domainAccount,
+      walletId,
+      client: cashWalletClientCapabilities,
+    })
+    if (routedWalletId instanceof Error) {
+      return { errors: [mapAndParseErrorForGqlResponse(routedWalletId)] }
     }
 
     // FLASH FORK: create IBEX fee estimation instead of Galoy fee estimation
@@ -49,17 +59,19 @@ const LnNoAmountUsdInvoiceFeeProbeMutation = GT.Field({
 
     // TODO: Move Ibex call to Payments interface
     const checkedAmount = await usdWalletAmountFromWalletId({
-      walletId,
+      walletId: routedWalletId,
       amount: amount.toString(),
     })
     if (checkedAmount instanceof Error) {
       return { errors: [mapAndParseErrorForGqlResponse(checkedAmount)] }
     }
-    const resp: IbexFeeEstimation<UsdWalletAmount> | IbexError = await Ibex.getLnFeeEstimation({
-      invoice: paymentRequest as Bolt11,
-      send: checkedAmount,
-    })
-    if (resp instanceof IbexError) return { errors: [mapAndParseErrorForGqlResponse(resp)] }     
+    const resp: IbexFeeEstimation<UsdWalletAmount> | IbexError =
+      await Ibex.getLnFeeEstimation({
+        invoice: paymentRequest as Bolt11,
+        send: checkedAmount,
+      })
+    if (resp instanceof IbexError)
+      return { errors: [mapAndParseErrorForGqlResponse(resp)] }
 
     // if (resp.amount === undefined) return new UnexpectedIbexResponse("Unable to parse fee.")
     // const feeSatAmount: PaymentAmount<WalletCurrency> = {

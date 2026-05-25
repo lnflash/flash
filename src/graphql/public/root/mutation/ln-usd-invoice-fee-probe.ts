@@ -3,6 +3,7 @@ import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import CentAmountPayload from "@graphql/public/types/payload/cent-amount"
 import LnPaymentRequest from "@graphql/shared/types/scalar/ln-payment-request"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
+import { resolveCashWalletMutationWalletIdForAccount } from "@app/cash-wallet-cutover"
 
 import { checkedToWalletId } from "@domain/wallets"
 
@@ -53,7 +54,7 @@ const LnUsdInvoiceFeeProbeMutation = GT.Field<
   args: {
     input: { type: GT.NonNull(LnUsdInvoiceFeeProbeInput) },
   },
-  resolve: async (_, args) => {
+  resolve: async (_, args, { domainAccount, cashWalletClientCapabilities }) => {
     const { walletId, paymentRequest } = args.input
 
     if (walletId instanceof Error) {
@@ -68,6 +69,15 @@ const LnUsdInvoiceFeeProbeMutation = GT.Field<
     if (walletIdChecked instanceof Error)
       return { errors: [mapAndParseErrorForGqlResponse(walletIdChecked)] }
 
+    const routedWalletId = await resolveCashWalletMutationWalletIdForAccount({
+      account: domainAccount,
+      walletId: walletIdChecked,
+      client: cashWalletClientCapabilities,
+    })
+    if (routedWalletId instanceof Error) {
+      return { errors: [mapAndParseErrorForGqlResponse(routedWalletId)] }
+    }
+
     // FLASH FORK: create IBEX fee estimation instead of Galoy fee estimation
     // const { result: feeSatAmount, error } =
     //   await Payments.getLightningFeeEstimationForUsdWallet({
@@ -75,7 +85,7 @@ const LnUsdInvoiceFeeProbeMutation = GT.Field<
     //     uncheckedPaymentRequest: paymentRequest,
     //   })
 
-    const wallet = await WalletsRepository().findById(walletIdChecked)
+    const wallet = await WalletsRepository().findById(routedWalletId)
     if (wallet instanceof Error) {
       return { errors: [mapAndParseErrorForGqlResponse(wallet)] }
     }
@@ -84,8 +94,9 @@ const LnUsdInvoiceFeeProbeMutation = GT.Field<
       invoice: paymentRequest as Bolt11,
       currency: wallet.currency,
     })
-    if (resp instanceof IbexError) return { errors: [mapAndParseErrorForGqlResponse(resp)] }     
-    
+    if (resp instanceof IbexError)
+      return { errors: [mapAndParseErrorForGqlResponse(resp)] }
+
     return {
       errors: [],
       invoiceAmount: resp.invoice,

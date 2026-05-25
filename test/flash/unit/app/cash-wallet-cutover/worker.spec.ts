@@ -89,7 +89,7 @@ describe("cash wallet migration worker checkpoints", () => {
       transitionMigration: jest.fn(async () => migration("provisioned")),
     }
     const provisioningService = {
-      ensureDestinationWallet: jest.fn(async () => true),
+      ensureDestinationWallet: jest.fn(async () => true as const),
     }
 
     const result = await provisionCashWalletMigrationDestination({
@@ -177,6 +177,7 @@ describe("cash wallet migration worker checkpoints", () => {
       migration: migration("provisioned"),
       migrationsRepo,
       sourceBalanceUsdCents: "12.34",
+      destinationStartingBalanceUsdtMicros: "0",
     })
 
     expect(result).toBeInstanceOf(Error)
@@ -404,7 +405,7 @@ describe("cash wallet migration worker checkpoints", () => {
       transitionMigration: jest.fn(async () => migration("balance_move_verified")),
     }
     const balanceVerifier = {
-      verifyBalanceMove: jest.fn(async () => true),
+      verifyBalanceMove: jest.fn(async () => true as const),
     }
 
     const result = await verifyCashWalletMigrationBalanceMove({
@@ -651,6 +652,7 @@ describe("cash wallet migration worker checkpoints", () => {
 
     const result = await sendCashWalletMigrationFeeReimbursementPayment({
       migration: migration("fee_reimbursement_invoice_created"),
+      treasuryWalletId: "treasury-wallet-id" as WalletId,
       paymentService,
       migrationsRepo,
     })
@@ -674,6 +676,7 @@ describe("cash wallet migration worker checkpoints", () => {
         ...migration("fee_reimbursement_invoice_created"),
         feeReimbursementInvoicePaymentRequest: "lnbc1fee-reimbursement",
       },
+      treasuryWalletId: "treasury-wallet-id" as WalletId,
       paymentService,
       migrationsRepo,
     })
@@ -788,7 +791,7 @@ describe("cash wallet migration worker checkpoints", () => {
       transitionMigration: jest.fn(async () => migration("legacy_zero_verified")),
     }
     const legacyWalletVerifier = {
-      verifyLegacyWalletZero: jest.fn(async () => true),
+      verifyLegacyWalletZero: jest.fn(async () => true as const),
     }
 
     const result = await verifyCashWalletMigrationLegacyZero({
