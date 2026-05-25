@@ -9,6 +9,7 @@ import { mapError } from "@graphql/error-map"
 import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 
 import { Wallets } from "@app"
+import { resolveCashWalletPresentationForAccount } from "@app/cash-wallet-cutover"
 
 import { WalletCurrency as WalletCurrencyDomain, USDTAmount } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
@@ -21,6 +22,15 @@ import OnChainAddress from "../scalar/on-chain-address"
 import Lnurl from "../scalar/lnurl"
 
 import { TransactionConnection } from "./transaction"
+
+export const usdtMicrosToUsdCents = (usdtMicros: bigint | number | string): number => {
+  const [wholeMicros, fractionalMicros] = usdtMicros.toString().split(".")
+  if (fractionalMicros && !/^0+$/.test(fractionalMicros)) {
+    throw new Error(`Cannot convert fractional USDT micros ${usdtMicros} to USD cents`)
+  }
+
+  return Number(BigInt(wholeMicros) / 10_000n)
+}
 
 const UsdWallet = GT.Object<Wallet>({
   name: "UsdWallet",
@@ -49,17 +59,34 @@ const UsdWallet = GT.Object<Wallet>({
     },
     balance: {
       type: FractionalCentAmount,
-      resolve: async (source) => {
+      resolve: async (source, args, ctx) => {
         if (source.type === WalletType.External) return null
+        let balanceWallet = source
+
+        if (
+          "cashWalletClientCapabilities" in ctx &&
+          ctx.domainAccount?.id === source.accountId
+        ) {
+          const presentation = await resolveCashWalletPresentationForAccount({
+            account: ctx.domainAccount,
+            client: ctx.cashWalletClientCapabilities,
+          })
+          if (presentation instanceof Error) throw mapError(presentation)
+
+          if (source.id === presentation.legacyUsdWallet?.id) {
+            balanceWallet = presentation.activeSettlementWallet
+          }
+        }
+
         const balance = await Wallets.getBalanceForWallet({
-          walletId: source.id,
-          currency: source.currency,
+          walletId: balanceWallet.id,
+          currency: balanceWallet.currency,
         })
         if (balance instanceof Error) {
           throw mapError(balance)
         }
         if (balance instanceof USDTAmount) {
-          return Number(balance.asSmallestUnits(8))
+          return usdtMicrosToUsdCents(balance.asSmallestUnits())
         }
         return Number(balance.asCents(8))
       },

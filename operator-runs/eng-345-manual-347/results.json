@@ -1,0 +1,95 @@
+{
+  "status": {
+    "config": {
+      "state": "complete",
+      "startedAt": "2026-05-23T13:50:48.355Z",
+      "completedAt": "2026-05-23T13:51:25.254Z",
+      "updatedBy": "manual-local",
+      "cutoverVersion": 347,
+      "runId": "manual-eng-347",
+      "updatedAt": "2026-05-23T13:51:25.281Z"
+    },
+    "countsByStatus": {
+      "complete": 7
+    }
+  },
+  "accounts": [
+    {
+      "index": 1,
+      "accountId": "6a11ada7e55310755eeb0257",
+      "expectedFundingCents": 25,
+      "defaultWalletId": "8a97ec4c-bf67-4a74-a5c2-bc8cf28e99c6",
+      "defaultIsDestinationUsdt": true,
+      "legacyUsdWalletId": "0a4d1c55-d8ec-4685-8457-216d41569d61",
+      "destinationUsdtWalletId": "8a97ec4c-bf67-4a74-a5c2-bc8cf28e99c6",
+      "legacyUsdBalanceCents": "25",
+      "destinationUsdtBalanceMicros": "0"
+    },
+    {
+      "index": 2,
+      "accountId": "6a11ada8e55310755eeb0271",
+      "expectedFundingCents": 25,
+      "defaultWalletId": "741a97b0-9612-4f34-af32-ed28c0a3b5fd",
+      "defaultIsDestinationUsdt": true,
+      "legacyUsdWalletId": "08ee5f13-b4c3-4ff5-835a-55dd786d3887",
+      "destinationUsdtWalletId": "741a97b0-9612-4f34-af32-ed28c0a3b5fd",
+      "legacyUsdBalanceCents": "25",
+      "destinationUsdtBalanceMicros": "0"
+    },
+    {
+      "index": 3,
+      "accountId": "6a11ada9e55310755eeb028b",
+      "expectedFundingCents": 25,
+      "defaultWalletId": "144db453-fdb8-4180-b405-097104637644",
+      "defaultIsDestinationUsdt": true,
+      "legacyUsdWalletId": "697b8583-6e1d-47d5-aba0-8b2c8aa6bc32",
+      "destinationUsdtWalletId": "144db453-fdb8-4180-b405-097104637644",
+      "legacyUsdBalanceCents": "25",
+      "destinationUsdtBalanceMicros": "0"
+    },
+    {
+      "index": 4,
+      "accountId": "6a11ada9e55310755eeb02a5",
+      "expectedFundingCents": 25,
+      "defaultWalletId": "ae3bddb2-1bb7-4019-8390-39694881c91b",
+      "defaultIsDestinationUsdt": true,
+      "legacyUsdWalletId": "dbdfba0c-ead0-4c94-96f8-e15130b7f796",
+      "destinationUsdtWalletId": "ae3bddb2-1bb7-4019-8390-39694881c91b",
+      "legacyUsdBalanceCents": "25",
+      "destinationUsdtBalanceMicros": "0"
+    },
+    {
+      "index": 5,
+      "accountId": "6a11adabe55310755eeb02bf",
+      "expectedFundingCents": 25,
+      "defaultWalletId": "fa7c7780-9246-4088-beb6-56fcd98e3209",
+      "defaultIsDestinationUsdt": true,
+      "legacyUsdWalletId": "9756a443-d30d-4b1c-a797-933ec2ced1d0",
+      "destinationUsdtWalletId": "fa7c7780-9246-4088-beb6-56fcd98e3209",
+      "legacyUsdBalanceCents": "25",
+      "destinationUsdtBalanceMicros": "0"
+    },
+    {
+      "index": 6,
+      "accountId": "6a11adace55310755eeb02d9",
+      "expectedFundingCents": 25,
+      "defaultWalletId": "53884f7a-0a55-4406-8b60-3c6d68a6c180",
+      "defaultIsDestinationUsdt": true,
+      "legacyUsdWalletId": "ecaf103c-d024-419a-8bad-b0c61e8068be",
+      "destinationUsdtWalletId": "53884f7a-0a55-4406-8b60-3c6d68a6c180",
+      "legacyUsdBalanceCents": "25",
+      "destinationUsdtBalanceMicros": "0"
+    },
+    {
+      "index": 7,
+      "accountId": "6a11adade55310755eeb02f3",
+      "expectedFundingCents": 25,
+      "defaultWalletId": "80f0de1f-b4e6-4904-8c3f-d90bad763ce2",
+      "defaultIsDestinationUsdt": true,
+      "legacyUsdWalletId": "8a3e1bd4-4d2d-4f97-b201-d58d3723a53c",
+      "destinationUsdtWalletId": "80f0de1f-b4e6-4904-8c3f-d90bad763ce2",
+      "legacyUsdBalanceCents": "25",
+      "destinationUsdtBalanceMicros": "0"
+    }
+  ]
+}

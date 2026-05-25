@@ -1,0 +1,60 @@
+meta {
+  name: 03-set-in-progress
+  type: graphql
+  seq: 3
+}
+
+post {
+  url: {{admin_url}}
+  body: graphql
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{admin_token}}
+}
+
+body:graphql {
+  mutation CashWalletCutoverSetInProgress($input: CashWalletCutoverUpdateInput!) {
+    cashWalletCutoverUpdate(input: $input) {
+      errors {
+        message
+      }
+      cashWalletCutover {
+        state
+        scheduledAt
+        startedAt
+        completedAt
+        pauseReason
+        cutoverVersion
+        runId
+        updatedBy
+        updatedAt
+      }
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "state": "IN_PROGRESS",
+      "cutoverVersion": 345,
+      "runId": "manual-eng-345",
+      "pauseReason": "manual ENG-345 in-progress test"
+    }
+  }
+}
+
+script:post-response {
+  test("sets cutover config to IN_PROGRESS", function () {
+    const jsonData = res.getBody()
+    expect(jsonData.errors).to.be.undefined
+    expect(jsonData.data.cashWalletCutoverUpdate.errors).to.eql([])
+
+    const config = jsonData.data.cashWalletCutoverUpdate.cashWalletCutover
+    expect(config.state).to.eql("IN_PROGRESS")
+    expect(config.cutoverVersion).to.eql(345)
+    expect(config.runId).to.eql("manual-eng-345")
+  })
+}
