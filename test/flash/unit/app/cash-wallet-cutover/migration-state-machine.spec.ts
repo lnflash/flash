@@ -33,6 +33,10 @@ describe("cash wallet cutover migration state machine", () => {
     ).toBeInstanceOf(Error)
   })
 
+  it("allows skipping fee reimbursement when there is no shortfall", () => {
+    expect(assertCanTransition("balance_move_verified", "fee_reimbursed")).toBe(true)
+  })
+
   it("resumes from stored checkpoint without repeating completed side effects", () => {
     expect(nextResumeStatus("invoice_created")).toBe("invoice_created")
     expect(nextResumeStatus("balance_move_sent")).toBe("balance_move_sent")

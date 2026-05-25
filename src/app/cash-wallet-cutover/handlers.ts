@@ -9,6 +9,7 @@ import {
   recordCashWalletMigrationBalance,
   sendCashWalletMigrationBalanceMovePayment,
   sendCashWalletMigrationFeeReimbursementPayment,
+  skipCashWalletMigrationFeeReimbursement,
   startCashWalletMigration,
   verifyCashWalletMigrationBalanceMove,
   verifyCashWalletMigrationLegacyZero,
@@ -28,10 +29,14 @@ type CashWalletMigrationHandlerServices = {
     readSourceBalanceUsdCents(
       migration: CashWalletMigration,
     ): Promise<string | ApplicationError>
+    readDestinationBalanceUsdtMicros(
+      migration: CashWalletMigration,
+    ): Promise<string | ApplicationError>
   }
   invoiceService: Parameters<
     typeof createCashWalletMigrationBalanceMoveInvoice
-  >[0]["invoiceService"]
+  >[0]["invoiceService"] &
+    Parameters<typeof createCashWalletMigrationFeeReimbursementInvoice>[0]["invoiceService"]
   paymentService: Parameters<
     typeof sendCashWalletMigrationBalanceMovePayment
   >[0]["paymentService"]
@@ -39,9 +44,12 @@ type CashWalletMigrationHandlerServices = {
     typeof verifyCashWalletMigrationBalanceMove
   >[0]["balanceVerifier"]
   feeService: {
-    readFeeAmountUsdCents(
+    readFeeAmountUsdtMicros(
       migration: CashWalletMigration,
     ): Promise<string | ApplicationError>
+  }
+  treasuryService: {
+    getTreasuryWalletId(): Promise<WalletId | ApplicationError>
   }
   pointerService: Parameters<
     typeof flipCashWalletMigrationDefaultPointer
@@ -74,18 +82,33 @@ export const createCashWalletMigrationStepHandlers = ({
     const sourceBalanceUsdCents =
       await services.balanceReader.readSourceBalanceUsdCents(migration)
     if (sourceBalanceUsdCents instanceof Error) return sourceBalanceUsdCents
+    const destinationStartingBalanceUsdtMicros =
+      await services.balanceReader.readDestinationBalanceUsdtMicros(migration)
+    if (destinationStartingBalanceUsdtMicros instanceof Error) {
+      return destinationStartingBalanceUsdtMicros
+    }
     return recordCashWalletMigrationBalance({
       migration,
       migrationsRepo,
       sourceBalanceUsdCents,
+      destinationStartingBalanceUsdtMicros,
     })
   },
-  balance_read: (migration) =>
-    createCashWalletMigrationBalanceMoveInvoice({
+  balance_read: (migration) => {
+    if (migration.destinationAmountUsdtMicros === "0") {
+      return flipCashWalletMigrationDefaultPointer({
+        migration,
+        migrationsRepo,
+        pointerService: services.pointerService,
+      })
+    }
+
+    return createCashWalletMigrationBalanceMoveInvoice({
       migration,
       migrationsRepo,
       invoiceService: services.invoiceService,
-    }),
+    })
+  },
   invoice_created: (migration) =>
     sendCashWalletMigrationBalanceMovePayment({
       migration,
@@ -101,21 +124,32 @@ export const createCashWalletMigrationStepHandlers = ({
       balanceVerifier: services.balanceVerifier,
     }),
   balance_move_verified: async (migration) => {
-    const feeAmountUsdCents = await services.feeService.readFeeAmountUsdCents(migration)
-    if (feeAmountUsdCents instanceof Error) return feeAmountUsdCents
+    const feeAmountUsdtMicros =
+      await services.feeService.readFeeAmountUsdtMicros(migration)
+    if (feeAmountUsdtMicros instanceof Error) return feeAmountUsdtMicros
+    if (feeAmountUsdtMicros === "0") {
+      return skipCashWalletMigrationFeeReimbursement({
+        migration,
+        migrationsRepo,
+      })
+    }
     return createCashWalletMigrationFeeReimbursementInvoice({
       migration,
       migrationsRepo,
       invoiceService: services.invoiceService,
-      feeAmountUsdCents,
+      feeAmountUsdtMicros,
     })
   },
-  fee_reimbursement_invoice_created: (migration) =>
-    sendCashWalletMigrationFeeReimbursementPayment({
+  fee_reimbursement_invoice_created: async (migration) => {
+    const treasuryWalletId = await services.treasuryService.getTreasuryWalletId()
+    if (treasuryWalletId instanceof Error) return treasuryWalletId
+    return sendCashWalletMigrationFeeReimbursementPayment({
       migration,
       migrationsRepo,
       paymentService: services.paymentService,
-    }),
+      treasuryWalletId,
+    })
+  },
   fee_reimbursement_sending: (migration) =>
     markCashWalletMigrationFeeReimbursed({ migration, migrationsRepo }),
   fee_reimbursed: (migration) =>

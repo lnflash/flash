@@ -1,3 +1,4 @@
+import { CouldNotUpdateError } from "@domain/errors"
 import { CashWalletCutoverRepository } from "@services/mongoose/cash-wallet-cutover"
 import { CashWalletCutoverConfig, CashWalletMigration } from "@services/mongoose/schema"
 
@@ -190,5 +191,52 @@ describe("CashWalletCutoverRepository", () => {
     expect(sort).toHaveBeenCalledWith({ updatedAt: 1 })
     expect(limit).toHaveBeenCalledWith(10)
     expect(result).toEqual([])
+  })
+
+  it("marks migration failures durably and clears the worker lock", async () => {
+    jest.mocked(CashWalletMigration.findOneAndUpdate).mockResolvedValue({
+      _id: "migration-id",
+      accountId: "account-id",
+      legacyUsdWalletId: "usd-wallet-id",
+      destinationUsdtWalletId: "usdt-wallet-id",
+      cutoverVersion: 2,
+      runId: "run-2",
+      status: "requires_operator_review",
+      idempotencyKey: "run-2:account-id",
+      attempts: 2,
+      lastError: "execution failed",
+      lockedAt: null,
+      lockedBy: null,
+      updatedAt,
+    } as never)
+
+    const error = new CouldNotUpdateError("execution failed")
+    const result = await repo.markMigrationFailed({
+      id: "migration-id",
+      workerId: "worker-1",
+      cutoverVersion: 2,
+      runId: "run-2",
+      status: "requires_operator_review",
+      error,
+    })
+
+    expect(CashWalletMigration.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: "migration-id", lockedBy: "worker-1", cutoverVersion: 2, runId: "run-2" },
+      expect.objectContaining({
+        $set: expect.objectContaining({
+          status: "requires_operator_review",
+          lastError: "execution failed",
+          lockedAt: null,
+          lockedBy: null,
+        }),
+        $inc: { attempts: 1 },
+      }),
+      { new: true },
+    )
+    expect(result).toMatchObject({
+      status: "requires_operator_review",
+      attempts: 2,
+      lastError: "execution failed",
+    })
   })
 })

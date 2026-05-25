@@ -501,6 +501,29 @@ type CashoutOffer
   walletId: WalletId!
 }
 
+type CashWalletCutover
+  @join__type(graph: PUBLIC)
+{
+  completedAt: Timestamp
+  cutoverVersion: Int!
+  pauseReason: String
+  pausedAt: Timestamp
+  runId: String
+  scheduledAt: Timestamp
+  startedAt: Timestamp
+  state: CashWalletCutoverState!
+  updatedAt: Timestamp!
+  updatedBy: String
+}
+
+enum CashWalletCutoverState
+  @join__type(graph: PUBLIC)
+{
+  COMPLETE @join__enumValue(graph: PUBLIC)
+  IN_PROGRESS @join__enumValue(graph: PUBLIC)
+  PRE @join__enumValue(graph: PUBLIC)
+}
+
 """(Positive) Cent amount (1/100 of a dollar)"""
 scalar CentAmount
   @join__type(graph: PUBLIC)
@@ -1651,6 +1674,7 @@ type Query
   btcPrice(currency: DisplayCurrency! = "USD"): Price @deprecated(reason: "Deprecated in favor of realtimePrice")
   btcPriceList(range: PriceGraphRange!): [PricePoint]
   businessMapMarkers: [MapMarker!]!
+  cashWalletCutover: CashWalletCutover!
   currencyList: [Currency!]!
   globals: Globals
   isFlashNpub(input: IsFlashNpubInput!): IsFlashNpubPayload

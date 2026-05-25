@@ -17,6 +17,14 @@ type CashWalletMigrationBatchRepository = {
     cutoverVersion: number
     runId: string
   }): Promise<CashWalletMigration | RepositoryError>
+  markMigrationFailed(args: {
+    id: string
+    workerId: string
+    cutoverVersion: number
+    runId: string
+    error: Error
+    status: "failed" | "requires_operator_review"
+  }): Promise<CashWalletMigration | RepositoryError>
 }
 
 type CashWalletMigrationBatchExecutor = (
@@ -29,6 +37,22 @@ type CashWalletMigrationBatchResult = {
   failed: number
   skipped: number
 }
+
+const AMBIGUOUS_SIDE_EFFECT_STATUSES: CashWalletMigrationStatus[] = [
+  "invoice_created",
+  "balance_move_sending",
+  "balance_move_sent",
+  "balance_move_verified",
+  "fee_reimbursement_invoice_created",
+  "fee_reimbursement_sending",
+  "fee_reimbursed",
+  "pointer_flipped",
+]
+
+const failureStatusForMigration = (
+  status: CashWalletMigrationStatus,
+): "failed" | "requires_operator_review" =>
+  AMBIGUOUS_SIDE_EFFECT_STATUSES.includes(status) ? "requires_operator_review" : "failed"
 
 export const runCashWalletMigrationBatch = async ({
   cutoverVersion,
@@ -79,6 +103,16 @@ export const runCashWalletMigrationBatch = async ({
     const step = await executor(locked)
     if (step instanceof Error) {
       result.failed += 1
+      const marked = await migrationsRepo.markMigrationFailed({
+        id: locked.id,
+        workerId,
+        cutoverVersion,
+        runId,
+        error: step,
+        status: failureStatusForMigration(locked.status),
+      })
+      if (marked instanceof Error) return marked
+      continue
     } else {
       result.advanced += 1
     }

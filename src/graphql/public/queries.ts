@@ -1,4 +1,5 @@
 import { GT } from "@graphql/index"
+import CashWalletCutoverQuery from "@graphql/shared/root/query/cash-wallet-cutover"
 
 import MeQuery from "@graphql/public/root/query/me"
 import GlobalsQuery from "@graphql/public/root/query/globals"
@@ -44,6 +45,7 @@ export const queryFields = {
     npubByUsername: NpubByUserNameQuery,
     isFlashNpub: IsFlashNpubQuery,
     supportedBanks: SupportedBanksQuery,
+    cashWalletCutover: CashWalletCutoverQuery,
   },
   authed: {
     atAccountLevel: {

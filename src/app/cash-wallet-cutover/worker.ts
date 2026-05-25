@@ -1,5 +1,5 @@
 import { assertCanTransition } from "./state-machine"
-import { feeUsdCentsToUsdtMicros, usdCentsToUsdtMicros } from "./amount-conversion"
+import { usdCentsToUsdtMicros, usdtMicrosToUsdCentsCeil } from "./amount-conversion"
 import {
   InvalidCashWalletCutoverAmountError,
   InvalidCashWalletMigrationTransitionError,
@@ -24,10 +24,18 @@ type CashWalletMigrationInvoiceService = {
   }): Promise<LnInvoice | ApplicationError>
 }
 
+type CashWalletMigrationNoAmountInvoiceService = {
+  createNoAmountInvoice(args: {
+    recipientWalletId: WalletId
+    memo: string
+  }): Promise<LnInvoice | ApplicationError>
+}
+
 type CashWalletMigrationPaymentService = {
   payInvoice(args: {
     senderWalletId: WalletId
     paymentRequest: string
+    senderAmountUsdCents?: string
   }): Promise<{ transactionId: IbexTransactionId } | ApplicationError>
 }
 
@@ -114,10 +122,12 @@ export const recordCashWalletMigrationBalance = async ({
   migration,
   migrationsRepo,
   sourceBalanceUsdCents,
+  destinationStartingBalanceUsdtMicros,
 }: {
   migration: CashWalletMigration
   migrationsRepo: CashWalletMigrationTransitionRepository
   sourceBalanceUsdCents: string
+  destinationStartingBalanceUsdtMicros: string
 }): Promise<CashWalletMigration | ApplicationError> => {
   const destinationAmountUsdtMicros = usdCentsToUsdtMicros(sourceBalanceUsdCents)
   if (destinationAmountUsdtMicros instanceof Error) return destinationAmountUsdtMicros
@@ -134,6 +144,7 @@ export const recordCashWalletMigrationBalance = async ({
     patch: {
       sourceBalanceUsdCents,
       destinationAmountUsdtMicros,
+      destinationStartingBalanceUsdtMicros,
     },
   })
 }
@@ -156,9 +167,16 @@ export const sendCashWalletMigrationBalanceMovePayment = async ({
     )
   }
 
+  if (migration.sourceBalanceUsdCents === undefined) {
+    return new InvalidCashWalletMigrationTransitionError(
+      "sourceBalanceUsdCents is required before balance move payment sending",
+    )
+  }
+
   const payment = await paymentService.payInvoice({
     senderWalletId: migration.legacyUsdWalletId,
     paymentRequest: migration.balanceMoveInvoicePaymentRequest,
+    senderAmountUsdCents: migration.sourceBalanceUsdCents,
   })
   if (payment instanceof Error) return payment
 
@@ -241,7 +259,7 @@ export const createCashWalletMigrationBalanceMoveInvoice = async ({
   migrationsRepo,
 }: {
   migration: CashWalletMigration
-  invoiceService: CashWalletMigrationInvoiceService
+  invoiceService: CashWalletMigrationNoAmountInvoiceService
   migrationsRepo: CashWalletMigrationTransitionRepository
 }): Promise<CashWalletMigration | ApplicationError> => {
   const transition = assertCanTransition(migration.status, "invoice_created")
@@ -253,9 +271,8 @@ export const createCashWalletMigrationBalanceMoveInvoice = async ({
     )
   }
 
-  const invoice = await invoiceService.createInvoice({
+  const invoice = await invoiceService.createNoAmountInvoice({
     recipientWalletId: migration.destinationUsdtWalletId,
-    amount: migration.destinationAmountUsdtMicros,
     memo: `cash-wallet-cutover:${migration.runId}:${migration.id}:balance-move`,
   })
   if (invoice instanceof Error) return invoice
@@ -277,15 +294,15 @@ export const createCashWalletMigrationFeeReimbursementInvoice = async ({
   migration,
   invoiceService,
   migrationsRepo,
-  feeAmountUsdCents,
+  feeAmountUsdtMicros,
 }: {
   migration: CashWalletMigration
   invoiceService: CashWalletMigrationInvoiceService
   migrationsRepo: CashWalletMigrationTransitionRepository
-  feeAmountUsdCents: string
+  feeAmountUsdtMicros: string
 }): Promise<CashWalletMigration | ApplicationError> => {
-  const feeAmountUsdtMicros = feeUsdCentsToUsdtMicros(feeAmountUsdCents)
-  if (feeAmountUsdtMicros instanceof Error) return feeAmountUsdtMicros
+  const feeAmountUsdCents = usdtMicrosToUsdCentsCeil(feeAmountUsdtMicros)
+  if (feeAmountUsdCents instanceof Error) return feeAmountUsdCents
 
   const transition = assertCanTransition(
     migration.status,
@@ -294,8 +311,8 @@ export const createCashWalletMigrationFeeReimbursementInvoice = async ({
   if (transition instanceof Error) return transition
 
   const invoice = await invoiceService.createInvoice({
-    recipientWalletId: migration.legacyUsdWalletId,
-    amount: feeAmountUsdCents,
+    recipientWalletId: migration.destinationUsdtWalletId,
+    amount: feeAmountUsdtMicros,
     memo: `cash-wallet-cutover:${migration.runId}:${migration.id}:fee-reimbursement`,
   })
   if (invoice instanceof Error) return invoice
@@ -315,12 +332,37 @@ export const createCashWalletMigrationFeeReimbursementInvoice = async ({
   })
 }
 
+export const skipCashWalletMigrationFeeReimbursement = async ({
+  migration,
+  migrationsRepo,
+}: {
+  migration: CashWalletMigration
+  migrationsRepo: CashWalletMigrationTransitionRepository
+}): Promise<CashWalletMigration | ApplicationError> => {
+  const transition = assertCanTransition(migration.status, "fee_reimbursed")
+  if (transition instanceof Error) return transition
+
+  return migrationsRepo.transitionMigration({
+    id: migration.id,
+    from: migration.status,
+    to: "fee_reimbursed",
+    cutoverVersion: migration.cutoverVersion,
+    runId: migration.runId,
+    patch: {
+      feeAmountUsdCents: "0",
+      feeAmountUsdtMicros: "0",
+    },
+  })
+}
+
 export const sendCashWalletMigrationFeeReimbursementPayment = async ({
   migration,
+  treasuryWalletId,
   paymentService,
   migrationsRepo,
 }: {
   migration: CashWalletMigration
+  treasuryWalletId: WalletId
   paymentService: CashWalletMigrationPaymentService
   migrationsRepo: CashWalletMigrationTransitionRepository
 }): Promise<CashWalletMigration | ApplicationError> => {
@@ -334,7 +376,7 @@ export const sendCashWalletMigrationFeeReimbursementPayment = async ({
   }
 
   const payment = await paymentService.payInvoice({
-    senderWalletId: migration.destinationUsdtWalletId,
+    senderWalletId: treasuryWalletId,
     paymentRequest: migration.feeReimbursementInvoicePaymentRequest,
   })
   if (payment instanceof Error) return payment

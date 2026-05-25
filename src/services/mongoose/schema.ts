@@ -651,6 +651,7 @@ const CashWalletMigrationSchema = new Schema<CashWalletMigrationRecord>({
   status: { type: String, required: true, index: true },
   sourceBalanceUsdCents: String,
   destinationAmountUsdtMicros: String,
+  destinationStartingBalanceUsdtMicros: String,
   feeAmountUsdCents: String,
   feeAmountUsdtMicros: String,
   balanceMoveInvoicePaymentRequest: String,

@@ -12,6 +12,7 @@ const transitions: Partial<
   balance_move_sent: ["balance_move_verified", "failed", "requires_operator_review"],
   balance_move_verified: [
     "fee_reimbursement_invoice_created",
+    "fee_reimbursed",
     "failed",
     "requires_operator_review",
   ],

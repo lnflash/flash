@@ -3,6 +3,7 @@ import { GT } from "@graphql/index"
 import AccountUpdateLevelMutation from "@graphql/admin/root/mutation/account-update-level"
 import AccountUpdateStatusMutation from "@graphql/admin/root/mutation/account-update-status"
 import BusinessUpdateMapInfoMutation from "@graphql/admin/root/mutation/business-update-map-info"
+import CashWalletCutoverUpdateMutation from "@graphql/admin/root/mutation/cash-wallet-cutover-update"
 
 import UserUpdatePhoneMutation from "./root/mutation/user-update-phone"
 import BusinessDeleteMapInfoMutation from "./root/mutation/delete-business-map"
@@ -13,8 +14,7 @@ import MerchantMapDeleteMutation from "./root/mutation/merchant-map-delete"
 import MerchantMapValidateMutation from "./root/mutation/merchant-map-validate"
 
 export const mutationFields = {
-  unauthed: {
-  },
+  unauthed: {},
   authed: {
     userUpdatePhone: UserUpdatePhoneMutation,
     accountUpdateLevel: AccountUpdateLevelMutation,
@@ -25,6 +25,7 @@ export const mutationFields = {
     businessDeleteMapInfo: BusinessDeleteMapInfoMutation,
     sendNotification: SendNotificationMutation,
     cashoutNotificationSend: sendCashoutSettledNotification,
+    cashWalletCutoverUpdate: CashWalletCutoverUpdateMutation,
   },
 }
 
