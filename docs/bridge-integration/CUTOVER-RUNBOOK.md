@@ -180,9 +180,20 @@ Hard abort criteria:
 
 Use one shared operator log. Record timestamps, operator, command/tool used, and result for each step.
 
+Set these variables once and record them in the operator log:
+
+```bash
+export CUTOVER_VERSION=345
+export CUTOVER_RUN_ID="<production-run-id>"
+export OPERATOR="<operator-email>"
+export PROD_CONFIG_PATH="<production-config-path>"
+```
+
+Before running any command, confirm `git rev-parse HEAD`, `PROD_CONFIG_PATH`, and the config snapshot's Bridge environment/base URL match the target production environment.
+
 ### 1. Confirm Starting State
 
-Query current cutover state:
+Query current admin cutover state:
 
 ```graphql
 query CashWalletCutoverState {
@@ -233,7 +244,31 @@ Do not proceed if either presentation check fails.
 
 ### 3. Set Cutover `IN_PROGRESS`
 
-Set the cutover state to `IN_PROGRESS` using the approved admin operation or Bruno operator file.
+Preview and prepare the production cohort before setting `IN_PROGRESS`:
+
+```bash
+node lib/scripts/cash-wallet-cutover.js preview \
+  --configPath "$PROD_CONFIG_PATH" \
+  --cutover-version "$CUTOVER_VERSION" \
+  --run-id "$CUTOVER_RUN_ID" \
+  --operator "$OPERATOR"
+
+node lib/scripts/cash-wallet-cutover.js prepare \
+  --configPath "$PROD_CONFIG_PATH" \
+  --cutover-version "$CUTOVER_VERSION" \
+  --run-id "$CUTOVER_RUN_ID" \
+  --operator "$OPERATOR"
+```
+
+Use the admin `cashWalletCutoverUpdate` mutation, Bruno operator file `03-set-in-progress.bru`, or the operator CLI:
+
+```bash
+node lib/scripts/cash-wallet-cutover.js start \
+  --configPath "$PROD_CONFIG_PATH" \
+  --cutover-version "$CUTOVER_VERSION" \
+  --run-id "$CUTOVER_RUN_ID" \
+  --operator "$OPERATOR"
+```
 
 Record:
 
@@ -252,11 +287,29 @@ Expected:
 
 ### 4. Run Migration
 
-Run the approved migration job or operator flow for the production cohort.
+Run one batch at a time and inspect status after each batch:
+
+```bash
+node lib/scripts/cash-wallet-cutover.js run-batch \
+  --configPath "$PROD_CONFIG_PATH" \
+  --cutover-version "$CUTOVER_VERSION" \
+  --run-id "$CUTOVER_RUN_ID" \
+  --operator "$OPERATOR" \
+  --worker-id "$OPERATOR-manual-1" \
+  --limit 25
+
+node lib/scripts/cash-wallet-cutover.js status \
+  --configPath "$PROD_CONFIG_PATH" \
+  --cutover-version "$CUTOVER_VERSION" \
+  --run-id "$CUTOVER_RUN_ID" \
+  --operator "$OPERATOR"
+```
+
+Repeat `run-batch` until `status` shows no remaining runnable migration records. Preserve each JSON output in the operator log. If a batch exits non-zero or reports `failed` or `requires_operator_review`, stop and invoke the abort/rollback handoff below.
 
 Record:
 
-- Command/tool name.
+- Command/tool name and exact args.
 - Start timestamp.
 - End timestamp.
 - Cohort size.
@@ -294,6 +347,16 @@ Do not set `COMPLETE` if any check fails.
 ### 6. Set Cutover `COMPLETE`
 
 Set the cutover state to `COMPLETE` only after the `IN_PROGRESS` verification passes.
+
+Use the admin `cashWalletCutoverUpdate` mutation, Bruno operator file `04-set-complete.bru`, or the operator CLI:
+
+```bash
+node lib/scripts/cash-wallet-cutover.js complete \
+  --configPath "$PROD_CONFIG_PATH" \
+  --cutover-version "$CUTOVER_VERSION" \
+  --run-id "$CUTOVER_RUN_ID" \
+  --operator "$OPERATOR"
+```
 
 Record:
 
@@ -404,10 +467,18 @@ Minimum rehearsal evidence:
 - `PRE` state verified.
 - `IN_PROGRESS` state set.
 - Migration/cutover flow exercised.
+- Preview and prepare outputs preserved.
+- At least one partial batch run exercised.
+- Resume after a stopped or stale worker lock exercised.
+- Failed batch handling exercised, including `failed` or `requires_operator_review` operator decision.
+- Abort before irreversible changes exercised.
+- Abort after partial irreversible changes tabletop completed.
 - `COMPLETE` state set.
 - No-header wallet check passed.
 - Capability-header wallet check passed.
+- Old-client compatibility checked during partial migration.
 - Reconciliation ran.
+- Reconciliation orphan triage path exercised.
 - Abort/rollback tabletop completed.
 
 ## Production Signoff

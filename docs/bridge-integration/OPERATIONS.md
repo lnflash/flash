@@ -168,10 +168,15 @@ Expected response:
 
 Bridge webhooks must include:
 
-- `Bridge-Signature`
-- `Bridge-Timestamp`
+- `X-Webhook-Signature`
 
-Flash verifies `timestamp.rawBody` using RSA-SHA256 and the configured public key for the event family. Expected behavior:
+The expected header format is:
+
+```text
+X-Webhook-Signature: t=<timestamp_ms>,v0=<base64_signature>
+```
+
+Flash verifies `<timestamp_ms>.<raw_body>` using RSA-SHA256 and the configured public key for the event family. Expected behavior:
 
 - `200`: accepted or idempotent duplicate.
 - `400`: malformed payload.
@@ -190,13 +195,27 @@ Build first:
 yarn build
 ```
 
+Production replay must use the target environment config. Do not use `dev/config/base-config.yaml` for production; that file is for local/non-production testing.
+
+Before any replay, record these values in the operator log:
+
+```bash
+test -n "$PROD_CONFIG_PATH"
+test -n "$BRIDGE_WEBHOOK_URL"
+git rev-parse HEAD
+printf 'configPath=%s\nwebhookUrl=%s\ndryRun=%s\n' \
+  "$PROD_CONFIG_PATH" "$BRIDGE_WEBHOOK_URL" "true"
+```
+
+Also confirm the config snapshot's `bridge.baseUrl` and environment name match the target environment before continuing.
+
 Dry run:
 
 ```bash
 BRIDGE_WEBHOOK_REPLAY_SECRET="$BRIDGE_WEBHOOK_REPLAY_SECRET" \
 BRIDGE_WEBHOOK_URL="$BRIDGE_WEBHOOK_URL" \
 node lib/scripts/replay-bridge-events.js \
-  --configPath dev/config/base-config.yaml \
+  --configPath "$PROD_CONFIG_PATH" \
   --start 2026-05-01T00:00:00Z \
   --end 2026-05-02T00:00:00Z \
   --event-type deposit \
@@ -210,7 +229,7 @@ Live replay:
 BRIDGE_WEBHOOK_REPLAY_SECRET="$BRIDGE_WEBHOOK_REPLAY_SECRET" \
 BRIDGE_WEBHOOK_URL="$BRIDGE_WEBHOOK_URL" \
 node lib/scripts/replay-bridge-events.js \
-  --configPath dev/config/base-config.yaml \
+  --configPath "$PROD_CONFIG_PATH" \
   --start 2026-05-01T00:00:00Z \
   --end 2026-05-02T00:00:00Z \
   --event-type deposit \
@@ -233,7 +252,7 @@ Run reconciliation after deploy, after replay, and during incidents involving de
 ```bash
 yarn build
 node lib/scripts/reconcile-bridge-ibex-deposits.js \
-  --configPath dev/config/base-config.yaml \
+  --configPath "$PROD_CONFIG_PATH" \
   --window-hours 24
 ```
 
@@ -279,6 +298,8 @@ Operator Bruno files from ENG-345:
 - `dev/bruno/Flash GraphQL API/admin/cash-wallet-cutover/04-set-complete.bru`
 - `dev/bruno/Flash GraphQL API/notoken/queries/cash-wallet-cutover.bru`
 
+The no-token Bruno file is an operator smoke check. Client-facing docs and support snippets should use the minimal public query below unless wider operational field exposure has been explicitly approved.
+
 Cutover states:
 
 - `PRE`: migration not active, schedule metadata may be present.
@@ -304,24 +325,18 @@ query CashWalletCutoverAdminState {
 }
 ```
 
-Public state query:
+Public/client state query:
 
 ```graphql
 query CashWalletCutoverPublicState {
   cashWalletCutover {
     state
     scheduledAt
-    startedAt
-    completedAt
-    pausedAt
-    pauseReason
-    cutoverVersion
-    runId
-    updatedBy
-    updatedAt
   }
 }
 ```
+
+The schema may expose additional operational fields for shared resolver reuse. Do not rely on, publish, or paste `runId`, `updatedBy`, `updatedAt`, `pauseReason`, or migration audit fields in client-facing artifacts without explicit approval.
 
 ### Cutover Preflight
 
@@ -338,16 +353,79 @@ Before moving to `IN_PROGRESS`:
 
 ### Cutover Execution
 
-1. Set `PRE` with schedule metadata.
-2. Re-run no-header and capable-client wallet smoke checks.
-3. Set `IN_PROGRESS`.
-4. Monitor batch/checkpoint logs and GraphQL error rate.
-5. Re-run wallet smoke checks during migration.
-6. Run reconciliation.
-7. Set `COMPLETE` only after migration and presentation checks pass.
-8. Re-run old-client and capable-client wallet checks after `COMPLETE`.
+Set the operator variables once and reuse them:
 
-Expected smoke result for the $10 test account used during review:
+```bash
+export CUTOVER_VERSION=345
+export CUTOVER_RUN_ID="<production-run-id>"
+export OPERATOR="<operator-email>"
+export PROD_CONFIG_PATH="<production-config-path>"
+```
+
+1. Set `PRE` with schedule metadata using the admin `cashWalletCutoverUpdate` mutation or the Bruno operator file `02-set-scheduled-pre.bru`.
+2. Re-run no-header and capable-client wallet smoke checks.
+3. Preview and prepare migration records:
+
+```bash
+node lib/scripts/cash-wallet-cutover.js preview \
+  --configPath "$PROD_CONFIG_PATH" \
+  --cutover-version "$CUTOVER_VERSION" \
+  --run-id "$CUTOVER_RUN_ID" \
+  --operator "$OPERATOR"
+
+node lib/scripts/cash-wallet-cutover.js prepare \
+  --configPath "$PROD_CONFIG_PATH" \
+  --cutover-version "$CUTOVER_VERSION" \
+  --run-id "$CUTOVER_RUN_ID" \
+  --operator "$OPERATOR"
+```
+
+4. Set `IN_PROGRESS` with the admin `cashWalletCutoverUpdate` mutation, Bruno `03-set-in-progress.bru`, or the CLI:
+
+```bash
+node lib/scripts/cash-wallet-cutover.js start \
+  --configPath "$PROD_CONFIG_PATH" \
+  --cutover-version "$CUTOVER_VERSION" \
+  --run-id "$CUTOVER_RUN_ID" \
+  --operator "$OPERATOR"
+```
+
+5. Run migration batches and inspect status after each batch:
+
+```bash
+node lib/scripts/cash-wallet-cutover.js run-batch \
+  --configPath "$PROD_CONFIG_PATH" \
+  --cutover-version "$CUTOVER_VERSION" \
+  --run-id "$CUTOVER_RUN_ID" \
+  --operator "$OPERATOR" \
+  --worker-id "$OPERATOR-manual-1" \
+  --limit 25
+
+node lib/scripts/cash-wallet-cutover.js status \
+  --configPath "$PROD_CONFIG_PATH" \
+  --cutover-version "$CUTOVER_VERSION" \
+  --run-id "$CUTOVER_RUN_ID" \
+  --operator "$OPERATOR"
+```
+
+Repeat `run-batch` until `status` shows no remaining runnable migration records. Preserve every JSON output in the operator log.
+
+6. Monitor batch/checkpoint logs and GraphQL error rate.
+7. Re-run wallet smoke checks during migration.
+8. Run reconciliation.
+9. Set `COMPLETE` only after migration and presentation checks pass:
+
+```bash
+node lib/scripts/cash-wallet-cutover.js complete \
+  --configPath "$PROD_CONFIG_PATH" \
+  --cutover-version "$CUTOVER_VERSION" \
+  --run-id "$CUTOVER_RUN_ID" \
+  --operator "$OPERATOR"
+```
+
+10. Re-run old-client and capable-client wallet checks after `COMPLETE`.
+
+For a controlled canary account, record the expected balances before execution. Example from the review canary:
 
 - No capability header: legacy `USD` wallet, `balance: 1000`.
 - `X-Flash-Client-Capabilities: cash-wallet-usdt-v1`: `USDT` wallet, `balance: 10000000`.
@@ -416,7 +494,7 @@ Actions:
 
 1. Confirm public keys for the affected event family.
 2. Confirm proxy preserves raw body.
-3. Confirm `Bridge-Timestamp` skew is inside `timestampSkewMs`.
+3. Confirm the timestamp in `X-Webhook-Signature` is inside `timestampSkewMs`.
 4. Do not bypass signature verification in production.
 5. After fixing, replay the affected event window.
 
