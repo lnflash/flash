@@ -176,7 +176,9 @@ The expected header format is:
 X-Webhook-Signature: t=<timestamp_ms>,v0=<base64_signature>
 ```
 
-Flash verifies `<timestamp_ms>.<raw_body>` using RSA-SHA256 and the configured public key for the event family. Expected behavior:
+Flash is intended to verify the Bridge signature for `<timestamp_ms>.<raw_body>` using RSA-SHA256 and the configured public key for the event family. Before production cutover, verify this behavior with a Bridge-provided fixture or captured sandbox webhook because the current middleware must match Bridge's exact signing input. Track this through ENG-402.
+
+Expected behavior:
 
 - `200`: accepted or idempotent duplicate.
 - `400`: malformed payload.
@@ -286,9 +288,9 @@ ENG-345 introduces client-aware wallet presentation during the cash wallet migra
 
 Compatibility rule:
 
-- Old clients without `X-Flash-Client-Capabilities: cash-wallet-usdt-v1` continue to see legacy `USD`.
-- Capable clients with `X-Flash-Client-Capabilities: cash-wallet-usdt-v1` see `USDT`.
-- This must hold during `PRE`, `IN_PROGRESS`, and `COMPLETE`.
+- `PRE`: old clients and capable clients both see legacy `USD`.
+- `IN_PROGRESS`: not-started accounts stay legacy `USD`; active migrations may block; accounts with migration status `complete` or `skipped_already_migrated` show `USDT` to capable clients and legacy-compatible `USD` to old clients.
+- `COMPLETE`: capable clients see `USDT`; old clients continue to see legacy-compatible `USD`.
 
 Operator Bruno files from ENG-345:
 
@@ -347,7 +349,7 @@ Before moving to `IN_PROGRESS`:
 3. Run Bridge deposit reconciliation.
 4. Confirm no unresolved high-severity `bridge_without_ibex` orphan.
 5. Confirm old-client no-header wallet query returns legacy `USD`.
-6. Confirm capable-client wallet query returns `USDT`.
+6. Confirm capable-client wallet query also returns legacy `USD`; `USDT` should not appear before cutover starts unless using a separately completed canary environment.
 7. Confirm support and mobile teams know the scheduled window.
 8. Save the exact run ID, operator, commit SHA, and config snapshot location.
 
@@ -380,7 +382,7 @@ node lib/scripts/cash-wallet-cutover.js prepare \
   --operator "$OPERATOR"
 ```
 
-4. Set `IN_PROGRESS` with the admin `cashWalletCutoverUpdate` mutation, Bruno `03-set-in-progress.bru`, or the CLI:
+4. Set `IN_PROGRESS` with the CLI:
 
 ```bash
 node lib/scripts/cash-wallet-cutover.js start \
@@ -389,6 +391,8 @@ node lib/scripts/cash-wallet-cutover.js start \
   --run-id "$CUTOVER_RUN_ID" \
   --operator "$OPERATOR"
 ```
+
+The admin `cashWalletCutoverUpdate` mutation and Bruno `03-set-in-progress.bru` file directly mutate state and bypass CLI lifecycle checks. Use them for production `IN_PROGRESS` only as an emergency override with backend-owner approval and a written operator-log entry. Track additional start lifecycle hardening through ENG-403.
 
 5. Run migration batches and inspect status after each batch:
 
@@ -413,7 +417,7 @@ Repeat `run-batch` until `status` shows no remaining runnable migration records.
 6. Monitor batch/checkpoint logs and GraphQL error rate.
 7. Re-run wallet smoke checks during migration.
 8. Run reconciliation.
-9. Set `COMPLETE` only after migration and presentation checks pass:
+9. Set `COMPLETE` only after migration and presentation checks pass, using the CLI:
 
 ```bash
 node lib/scripts/cash-wallet-cutover.js complete \
@@ -422,6 +426,8 @@ node lib/scripts/cash-wallet-cutover.js complete \
   --run-id "$CUTOVER_RUN_ID" \
   --operator "$OPERATOR"
 ```
+
+The admin `cashWalletCutoverUpdate` mutation and Bruno `04-set-complete.bru` file directly mutate state and bypass completion checks. Use them for production `COMPLETE` only as an emergency override with backend-owner approval, a written operator-log entry, and preserved `status` output proving why the override is safe.
 
 10. Re-run old-client and capable-client wallet checks after `COMPLETE`.
 
@@ -600,7 +606,7 @@ After deploy:
 1. `GET /health` on webhook server returns OK.
 2. Bridge GraphQL smoke queries return without GraphQL errors.
 3. A no-header wallet query shows legacy `USD`.
-4. A capable-client wallet query shows `USDT`.
+4. A capable-client wallet query matches the active phase: `USD` during `PRE`, `USDT` only for migrated accounts during `IN_PROGRESS`, and `USDT` after `COMPLETE`.
 5. Replay dry-run succeeds for a narrow recent window.
 6. Reconciliation completes.
 7. No new unresolved high-severity orphans appear.

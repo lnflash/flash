@@ -29,7 +29,7 @@ Out of scope:
 - No silent ambiguity: every go/no-go decision needs a named owner and timestamp.
 - Do not manually mutate user wallet state during cutover without a written repair plan and second reviewer.
 - Keep old-client compatibility intact throughout the cutover. Clients without `X-Flash-Client-Capabilities: cash-wallet-usdt-v1` must continue to see legacy `USD`.
-- Capable clients with `X-Flash-Client-Capabilities: cash-wallet-usdt-v1` must see `USDT`.
+- Capable clients with `X-Flash-Client-Capabilities: cash-wallet-usdt-v1` see `USDT` only after their account has completed migration, or after global cutover is `COMPLETE`.
 - Do not mark cutover `COMPLETE` until migration, wallet presentation, reconciliation, and support readiness all pass.
 - If rollback is needed after irreversible wallet/default changes, treat it as a data repair project, not a normal deploy rollback.
 
@@ -110,7 +110,7 @@ Exit criteria:
 - Run Bridge reconciliation with a 24-hour window.
 - Verify no unresolved high-severity `bridge_without_ibex` orphan.
 - Verify old-client no-header wallet query returns legacy `USD`.
-- Verify capable-client wallet query returns `USDT`.
+- Verify capable-client wallet query matches the staged cutover phase: `USD` before `IN_PROGRESS`, `USDT` only for migrated accounts during `IN_PROGRESS`, and `USDT` after `COMPLETE`.
 - Verify admin `cashWalletCutover` query works.
 - Confirm dashboards show webhook status, reconciliation orphan counts, Bridge API errors, and cutover state changes.
 - Confirm support can identify and escalate cutover issues.
@@ -153,7 +153,7 @@ Record the decision in the issue, deployment channel, or operator log before tou
 | Bridge API | Normal latency/error rate | Bridge outage or auth failures | Ops | TBD |
 | Reconciliation | No high-severity unresolved orphan | New critical orphan growth | Backend/Ops | TBD |
 | Old-client compatibility | No-header query returns `USD` | No-header query returns `USDT` or errors | Backend | TBD |
-| Capable-client behavior | Capability query returns `USDT` | Capability query returns `USD` or errors | Backend/Mobile | TBD |
+| Capable-client behavior | Before `IN_PROGRESS`, capability query returns legacy `USD`; during cutover, migrated canary returns `USDT`; after `COMPLETE`, capability query returns `USDT` | Result does not match current cutover phase, or query errors | Backend/Mobile | TBD |
 | Mobile readiness | ENG-346 status accepted | Unknown or unacceptable rollout risk | Mobile | TBD |
 | Support readiness | Support lead online | Support not staffed | Support | TBD |
 | On-call | PagerDuty/Slack rotation active | No accountable responder | Ops | TBD |
@@ -222,7 +222,7 @@ If unexpected, stop and resolve before proceeding.
 
 ### 2. Run Final Pre-Migration Smoke Checks
 
-Run both wallet presentation checks against a known migrated test account or controlled production canary.
+Run both wallet presentation checks against a controlled production canary. Before `IN_PROGRESS`, both no-header and capability-header requests are expected to remain on legacy `USD`; this verifies the cutover has not started early.
 
 No capability header expected result:
 
@@ -231,8 +231,10 @@ No capability header expected result:
 
 Capability header expected result:
 
-- Cash wallet presents as `USDT`.
-- Balance uses USDT smallest-unit semantics.
+- Before `IN_PROGRESS`: cash wallet still presents as `USD`.
+- During `IN_PROGRESS`: only accounts with migration status `complete` or `skipped_already_migrated` present as `USDT`; not-started accounts remain `USD`, and active migrations may block.
+- After `COMPLETE`: cash wallet presents as `USDT`.
+- When presented as `USDT`, balance uses USDT smallest-unit semantics.
 
 Example header:
 
@@ -260,7 +262,7 @@ node lib/scripts/cash-wallet-cutover.js prepare \
   --operator "$OPERATOR"
 ```
 
-Use the admin `cashWalletCutoverUpdate` mutation, Bruno operator file `03-set-in-progress.bru`, or the operator CLI:
+Use the operator CLI for production `IN_PROGRESS`; it preserves the lifecycle path used by the cutover worker:
 
 ```bash
 node lib/scripts/cash-wallet-cutover.js start \
@@ -269,6 +271,8 @@ node lib/scripts/cash-wallet-cutover.js start \
   --run-id "$CUTOVER_RUN_ID" \
   --operator "$OPERATOR"
 ```
+
+The admin `cashWalletCutoverUpdate` mutation and Bruno `03-set-in-progress.bru` file directly mutate state and bypass CLI lifecycle checks. Use them for production `IN_PROGRESS` only as an emergency override with backend-owner approval, a written operator-log entry, and the reason the CLI cannot be used. Track additional start lifecycle hardening through ENG-403.
 
 Record:
 
@@ -348,7 +352,7 @@ Do not set `COMPLETE` if any check fails.
 
 Set the cutover state to `COMPLETE` only after the `IN_PROGRESS` verification passes.
 
-Use the admin `cashWalletCutoverUpdate` mutation, Bruno operator file `04-set-complete.bru`, or the operator CLI:
+Use the operator CLI for production `COMPLETE`; it checks failed, manual-review, and runnable migration counts before completing:
 
 ```bash
 node lib/scripts/cash-wallet-cutover.js complete \
@@ -357,6 +361,8 @@ node lib/scripts/cash-wallet-cutover.js complete \
   --run-id "$CUTOVER_RUN_ID" \
   --operator "$OPERATOR"
 ```
+
+The admin `cashWalletCutoverUpdate` mutation and Bruno `04-set-complete.bru` file directly mutate state and bypass completion checks. Use them for production `COMPLETE` only as an emergency override with backend-owner approval, a written operator-log entry, and preserved `status` output proving why the override is safe.
 
 Record:
 
