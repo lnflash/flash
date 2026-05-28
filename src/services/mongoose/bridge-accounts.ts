@@ -61,7 +61,12 @@ export const createExternalAccount = async (data: {
   status?: "pending" | "verified" | "failed"
 }) => {
   try {
-    const record = await BridgeExternalAccount.create(data)
+    const { bridgeExternalAccountId, accountId, status, ...immutable } = data
+    const record = await BridgeExternalAccount.findOneAndUpdate(
+      { bridgeExternalAccountId, accountId },
+      { $setOnInsert: { bridgeExternalAccountId, accountId, ...immutable }, $set: { status: status ?? "pending" } },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    )
     return record
   } catch (error) {
     return new RepositoryError(String(error))
