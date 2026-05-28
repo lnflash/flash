@@ -14,6 +14,7 @@ import { verifyBridgeSignature } from "./middleware/verify-signature"
 import { kycHandler } from "./routes/kyc"
 import { depositHandler } from "./routes/deposit"
 import { transferHandler } from "./routes/transfer"
+import { externalAccountHandler } from "./routes/external-account"
 import { replayAuthMiddleware, replayHandler } from "./routes/replay"
 
 type RawBodyRequest = express.Request & { rawBody?: string }
@@ -43,6 +44,7 @@ export const startBridgeWebhookServer = () => {
   app.post("/kyc", verifyBridgeSignature("kyc"), kycHandler)
   app.post("/deposit", verifyBridgeSignature("deposit"), depositHandler)
   app.post("/transfer", verifyBridgeSignature("transfer"), transferHandler)
+  app.post("/external-account", verifyBridgeSignature("external_account"), externalAccountHandler)
   app.post("/internal/replay", replayAuthMiddleware, replayHandler)
 
   if (!BridgeConfig.webhook.replaySecret && !process.env.BRIDGE_WEBHOOK_REPLAY_SECRET) {
