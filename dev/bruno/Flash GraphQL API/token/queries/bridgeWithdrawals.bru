@@ -1,0 +1,32 @@
+meta {
+  name: bridgeWithdrawals
+  type: graphql
+  seq: 20
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:graphql {
+  query BridgeWithdrawals {
+    bridgeWithdrawals {
+      id
+      amount
+      currency
+      status
+      createdAt
+    }
+  }
+}
+
+settings {
+  encodeUrl: false
+  timeout: 30000
+}
