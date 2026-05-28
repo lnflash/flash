@@ -1,6 +1,6 @@
 /**
  * Bridge Transfer Webhook Handler
- * Handles transfer.completed and transfer.failed events from Bridge.xyz
+ * Handles transfer webhook events from Bridge.xyz (transfer.completed, transfer.updated.status_transitioned)
  */
 
 import { Request, Response } from "express"
@@ -65,7 +65,7 @@ export const transferHandler = async (req: Request, res: Response) => {
       event === "transfer.payment_processed" ||
       state === "payment_processed"
 
-    const isFailure = event === "transfer.failed" || TERMINAL_FAILURE_STATES.has(state)
+    const isFailure = TERMINAL_FAILURE_STATES.has(state)
 
     if (!isCompletion && !isFailure) {
       baseLogger.info({ transfer_id, state, event }, "Bridge transfer event not handled")
@@ -118,9 +118,7 @@ export const transferHandler = async (req: Request, res: Response) => {
       const failureReason =
         state === "refund_failed"
           ? (return_reason as string | undefined)
-          : event === "transfer.failed"
-            ? (reason as string | undefined)
-            : ((reason as string | undefined) ?? (return_reason as string | undefined))
+          : ((reason as string | undefined) ?? (return_reason as string | undefined))
 
       const result = await BridgeAccountsRepo.updateWithdrawalStatus(
         bridgeTransferId,

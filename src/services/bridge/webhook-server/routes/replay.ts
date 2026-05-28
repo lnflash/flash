@@ -14,14 +14,16 @@ import {
 } from "../transfer-direction"
 
 import { depositHandler } from "./deposit"
+import { externalAccountHandler } from "./external-account"
 import { kycHandler } from "./kyc"
 import { transferHandler } from "./transfer"
-type RouteKey = "kyc" | "deposit" | "transfer"
+type RouteKey = "kyc" | "deposit" | "transfer" | "external_account"
 
 const HANDLERS: Record<RouteKey, (req: Request, res: Response) => Promise<Response>> = {
   kyc: kycHandler,
   deposit: depositHandler,
   transfer: transferHandler,
+  external_account: externalAccountHandler,
 }
 
 const DEPOSIT_EVENT_TYPES = new Set([
@@ -39,6 +41,7 @@ const DEPOSIT_EVENT_TYPES = new Set([
 const toRouteKey = (bridgeEventType: string): RouteKey | null => {
   if (bridgeEventType.startsWith("kyc")) return "kyc"
   if (bridgeEventType.startsWith("transfer")) return "transfer"
+  if (bridgeEventType.startsWith("external_account")) return "external_account"
   if (DEPOSIT_EVENT_TYPES.has(bridgeEventType)) return "deposit"
   return null
 }
@@ -114,6 +117,7 @@ const toHandlerBody = ({
     event_id: eventId,
     event_object: eventObject,
   }
+
 }
 
 export const replayAuthMiddleware = (req: Request, res: Response, next: () => void) => {
