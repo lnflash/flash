@@ -1,0 +1,35 @@
+meta {
+  name: bridgeAddExternalAccount
+  type: graphql
+  seq: 38
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:graphql {
+  mutation BridgeAddExternalAccount {
+    bridgeAddExternalAccount {
+      errors {
+        message
+        code
+      }
+      externalAccount {
+        linkUrl
+        expiresAt
+      }
+    }
+  }
+}
+
+settings {
+  encodeUrl: false
+  timeout: 30000
+}

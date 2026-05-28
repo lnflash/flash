@@ -10,6 +10,7 @@ vars:pre-request {
   protocol: http
   domain: localhost
   port: 4000
+  bridgeExternalAccountId: ext_plaid_a4a2b7e0175c
 }
 
 docs {
@@ -32,7 +33,7 @@ docs {
   ```
   ERPNEXT_JWT_SECRET=<admin-api-secret> node -e "const c=require('crypto'),b=o=>Buffer.from(JSON.stringify(o)).toString('base64url'),h=b({alg:'HS256',typ:'JWT'}),p=b({userId:'admin',roles:['Accounts Manager']}),s=c.createHmac('sha256',process.env.ERPNEXT_JWT_SECRET).update(h+'.'+p).digest('base64url');console.log(h+'.'+p+'.'+s)"
   ```
-
+  
   # Extra Resources
   If you use Postman, we have a collection you can import to test the API. Download it here: [galoy_graphql_main_api.postman_collection.json](https://github.com/GaloyMoney/galoy/tree/main/src/graphql/docs/galoy_graphql_main_api.postman_collection.json)
 }
