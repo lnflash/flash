@@ -157,19 +157,30 @@ describe("Money Amount", () => {
       expect(amount.toIbex()).toBe(0.01)
     })
 
-    it("preserves provider-originated sub-cent USDT as fractional cents", () => {
+    it("rounds provider-originated sub-cent USDT to integer USD cents", () => {
       const amount = USDTAmount.smallestUnits("19446")
       if (amount instanceof Error) throw amount
 
-      expect(amount.asUsdCents(4)).toBe("1.9446")
+      expect(amount.asUsdCents()).toBe("2")
     })
 
-    it("keeps generic MoneyAmount USDT construction on the app-facing cent contract", () => {
+    it("keeps generic MoneyAmount USDT construction on internal micro-units", () => {
       const amount = MoneyAmount.from("100", WalletCurrency.Usdt)
       if (amount instanceof Error) throw amount
 
       expect(amount).toBeInstanceOf(USDTAmount)
-      expect((amount as USDTAmount).asSmallestUnits()).toBe("1000000")
+      expect((amount as USDTAmount).asSmallestUnits()).toBe("100")
+    })
+
+    it("round-trips USDT JSON without reinterpreting micros as app cents", () => {
+      const amount = USDTAmount.smallestUnits("19446")
+      if (amount instanceof Error) throw amount
+
+      const restored = MoneyAmount.fromJSON(amount.toJson())
+      if (restored instanceof Error) throw restored
+
+      expect(restored).toBeInstanceOf(USDTAmount)
+      expect((restored as USDTAmount).asSmallestUnits()).toBe("19446")
     })
   })
 })

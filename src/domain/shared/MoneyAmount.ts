@@ -60,7 +60,8 @@ export abstract class MoneyAmount {
   static from(amount: number | string, currency: WalletCurrency): MoneyAmount | Error {
     if (currency === WalletCurrency.Usd) return USDAmount.cents(amount.toString())
     else if (currency === WalletCurrency.Jmd) return JMDAmount.cents(amount.toString())
-    else if (currency === WalletCurrency.Usdt) return USDTAmount.usdCents(amount.toString())
+    else if (currency === WalletCurrency.Usdt)
+      return USDTAmount.smallestUnits(amount.toString())
     else return new UnsupportedCurrencyError(`Could not read currency: ${currency}`)
   }
 }
@@ -244,8 +245,8 @@ export class USDTAmount extends MoneyAmount {
     return this.money.toFixed(precision)
   }
 
-  asUsdCents(precision: number = 0): string {
-    return this.money.divide(USDT_MICROS_PER_USD_CENT.toString()).toFixed(precision)
+  asUsdCents(): string {
+    return this.money.divide(USDT_MICROS_PER_USD_CENT.toString()).toFixed(0)
   }
 
   asNumber(precision: number = 6): string {

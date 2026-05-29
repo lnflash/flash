@@ -154,12 +154,12 @@ If `Money.multiply(...)` does not accept the value cleanly in this form, use the
 Add:
 
 ```ts
-asUsdCents(precision: number = 0): string {
-  return this.money.divide(USDT_MICROS_PER_USD_CENT.toString()).toFixed(precision)
+asUsdCents(): string {
+  return this.money.divide(USDT_MICROS_PER_USD_CENT.toString()).toFixed(0)
 }
 ```
 
-The default precision mirrors the integer-cent expectation. Call `asUsdCents(4)` only for fields whose schema explicitly allows fractional cents, such as `FractionalCentAmount` wallet balances.
+Public app/API output should stay integer-cent based. Provider-originated sub-cent USDT remains exact internally as micro-USDT and is rounded when crossing into public cent fields.
 
 **Step 4: Run the domain compile target indirectly**
 
@@ -240,7 +240,7 @@ return Number(value.asSmallestUnits())
 With:
 
 ```ts
-return Number(value.asUsdCents(4))
+return Number(value.asUsdCents())
 ```
 
 **Step 2: Update USDT wallet balance resolver**
@@ -254,7 +254,7 @@ return Number(balance.asSmallestUnits(8))
 With:
 
 ```ts
-return Number(balance.asUsdCents(4))
+return Number(balance.asUsdCents())
 ```
 
 **Step 3: Run scalar test**
@@ -334,8 +334,8 @@ Add tests for:
 - `USDTAmount.usdCents("1")` -> `10000` micros -> `0.01` IBEX.
 - `USDTAmount.usdCents("100")` -> `1000000` micros -> `1` IBEX.
 - negative input behavior, matching existing `Money`/amount class conventions.
-- `USDTAmount.smallestUnits("19446").asUsdCents(4)` -> `"1.9446"`.
-- `USDTAmount.smallestUnits("19999").asUsdCents(4)` -> `"1.9999"`.
+- `USDTAmount.smallestUnits("19446").asUsdCents()` -> `"2"`.
+- `USDTAmount.smallestUnits("19999").asUsdCents()` -> `"2"`.
 - A large amount that remains within GraphQL number safety if the API still returns `number`; if the realistic upper bound is unsafe, change the plan to use a string scalar before implementing.
 
 **Step 2: Generic constructor/parser tests**

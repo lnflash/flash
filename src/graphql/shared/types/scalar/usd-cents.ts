@@ -17,7 +17,7 @@ const USDCentsScalar = GT.Scalar({
             return Number(value.asCents(2)) 
         }
         if (value instanceof USDTAmount) {
-            return Number(value.asUsdCents(4))
+            return Number(value.asUsdCents())
         }
         else throw new Error(`Failed to serialize USDAmount: ${value}`)
     }

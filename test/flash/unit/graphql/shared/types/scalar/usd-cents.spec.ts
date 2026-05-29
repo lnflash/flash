@@ -16,10 +16,10 @@ describe("USDCentsScalar", () => {
     expect(USDCentsScalar.serialize(amount)).toBe(123)
   })
 
-  it("serializes USDT sub-cent amounts as fractional USD cents", () => {
+  it("serializes USDT sub-cent amounts as rounded integer USD cents", () => {
     const amount = USDTAmount.smallestUnits("9147993")
     if (amount instanceof Error) throw amount
 
-    expect(USDCentsScalar.serialize(amount)).toBe(914.7993)
+    expect(USDCentsScalar.serialize(amount)).toBe(915)
   })
 })
