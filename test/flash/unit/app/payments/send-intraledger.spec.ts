@@ -167,7 +167,7 @@ describe("intraledgerPaymentSendWalletIdForUsdWallet", () => {
     })
   })
 
-  it("sends USDT to USDT using USDT micro-unit amount semantics", async () => {
+  it("sends USDT to USDT using USD-cent amount semantics", async () => {
     mockFindWalletById.mockImplementation(async (walletId: WalletId) => {
       if (walletId === senderUsdtWalletId) {
         return wallet({
@@ -196,8 +196,8 @@ describe("intraledgerPaymentSendWalletIdForUsdWallet", () => {
       amount: expect.any(USDTAmount),
       memo: "USDT intraledger",
     })
-    expect(mockAddInvoice.mock.calls[0][0].amount.asSmallestUnits()).toBe("19446")
-    expect(mockAddInvoice.mock.calls[0][0].amount.toIbex()).toBe(0.019446)
+    expect(mockAddInvoice.mock.calls[0][0].amount.asSmallestUnits()).toBe("194460000")
+    expect(mockAddInvoice.mock.calls[0][0].amount.toIbex()).toBe(194.46)
     expect(mockPayInvoice).toHaveBeenCalledWith({
       accountId: senderUsdtWalletId,
       invoice: "lnbc1recipient",

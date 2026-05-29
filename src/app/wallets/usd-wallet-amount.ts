@@ -12,7 +12,7 @@ export const usdWalletAmountFromInput = (
   const raw = amount.toString()
 
   if (currency === WalletCurrency.Usd) return USDAmount.cents(raw)
-  if (currency === WalletCurrency.Usdt) return USDTAmount.smallestUnits(raw)
+  if (currency === WalletCurrency.Usdt) return USDTAmount.usdCents(raw)
 
   return new UnsupportedCurrencyError(`USD wallet amount unsupported for ${currency}`)
 }

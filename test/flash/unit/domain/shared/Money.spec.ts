@@ -1,4 +1,5 @@
-import { JMDAmount, USDAmount, WalletCurrency } from "@domain/shared"
+import { JMDAmount, USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
+import { MoneyAmount } from "@domain/shared/MoneyAmount"
 import JmdAmount from "@graphql/shared/types/scalar/jmd-amount"
 
 describe("Money Amount", () => {
@@ -133,6 +134,42 @@ describe("Money Amount", () => {
         expect(paymentAmount.amount).toBe(54321n)
         expect(paymentAmount.currency).toBe(WalletCurrency.Jmd)
       })
+    })
+  })
+
+  describe("USDT Amount", () => {
+    it("converts USD cents into USDT micro-units", () => {
+      const amount = USDTAmount.usdCents("100")
+      if (amount instanceof Error) throw amount
+
+      expect(amount.asSmallestUnits()).toBe("1000000")
+      expect(amount.asNumber()).toBe("1.000000")
+      expect(amount.asUsdCents()).toBe("100")
+      expect(amount.toIbex()).toBe(1)
+    })
+
+    it("converts one USD cent into ten thousand USDT micro-units", () => {
+      const amount = USDTAmount.usdCents("1")
+      if (amount instanceof Error) throw amount
+
+      expect(amount.asSmallestUnits()).toBe("10000")
+      expect(amount.asUsdCents()).toBe("1")
+      expect(amount.toIbex()).toBe(0.01)
+    })
+
+    it("preserves provider-originated sub-cent USDT as fractional cents", () => {
+      const amount = USDTAmount.smallestUnits("19446")
+      if (amount instanceof Error) throw amount
+
+      expect(amount.asUsdCents(4)).toBe("1.9446")
+    })
+
+    it("keeps generic MoneyAmount USDT construction on the app-facing cent contract", () => {
+      const amount = MoneyAmount.from("100", WalletCurrency.Usdt)
+      if (amount instanceof Error) throw amount
+
+      expect(amount).toBeInstanceOf(USDTAmount)
+      expect((amount as USDTAmount).asSmallestUnits()).toBe("1000000")
     })
   })
 })

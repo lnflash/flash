@@ -60,8 +60,7 @@ export abstract class MoneyAmount {
   static from(amount: number | string, currency: WalletCurrency): MoneyAmount | Error {
     if (currency === WalletCurrency.Usd) return USDAmount.cents(amount.toString())
     else if (currency === WalletCurrency.Jmd) return JMDAmount.cents(amount.toString())
-    else if (currency === WalletCurrency.Usdt)
-      return USDTAmount.smallestUnits(amount.toString())
+    else if (currency === WalletCurrency.Usdt) return USDTAmount.usdCents(amount.toString())
     else return new UnsupportedCurrencyError(`Could not read currency: ${currency}`)
   }
 }
@@ -193,6 +192,9 @@ export class BtcAmount extends MoneyAmount {
   }
 }
 
+const USDT_MICROS_PER_MAJOR_UNIT = 1_000_000n
+const USDT_MICROS_PER_USD_CENT = 10_000n
+
 export class USDTAmount extends MoneyAmount {
   static currencyId: IbexCurrencyId = 29 as IbexCurrencyId
 
@@ -210,10 +212,23 @@ export class USDTAmount extends MoneyAmount {
     }
   }
 
+  static usdCents(cents: string | bigint): USDTAmount | BigIntConversionError {
+    try {
+      const centAmt = new Money(cents.toString(), "USDTUsdCents", Round.HALF_TO_EVEN)
+      const multiplier = USDTAmount.smallestUnits(USDT_MICROS_PER_USD_CENT)
+      if (multiplier instanceof BigIntConversionError) return multiplier
+      return new USDTAmount(multiplier.money.multiply(centAmt).toFixed(0))
+    } catch (error) {
+      return new BigIntConversionError(
+        error instanceof Error ? error.message : String(error),
+      )
+    }
+  }
+
   static fromNumber(d: number | string): USDTAmount | BigIntConversionError {
     try {
       const usdtAmt = new Money(d.toString(), "USDT", Round.HALF_TO_EVEN)
-      const multiplier = USDTAmount.smallestUnits(1_000_000n)
+      const multiplier = USDTAmount.smallestUnits(USDT_MICROS_PER_MAJOR_UNIT)
       if (multiplier instanceof BigIntConversionError) return multiplier
       return new USDTAmount(multiplier.money.multiply(usdtAmt).toFixed(0))
     } catch (error) {
@@ -229,8 +244,12 @@ export class USDTAmount extends MoneyAmount {
     return this.money.toFixed(precision)
   }
 
+  asUsdCents(precision: number = 0): string {
+    return this.money.divide(USDT_MICROS_PER_USD_CENT.toString()).toFixed(precision)
+  }
+
   asNumber(precision: number = 6): string {
-    return this.money.divide(1_000_000).toFixed(precision)
+    return this.money.divide(USDT_MICROS_PER_MAJOR_UNIT.toString()).toFixed(precision)
   }
 
   toIbex(): number {
