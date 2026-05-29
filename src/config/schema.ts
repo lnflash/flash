@@ -629,9 +629,9 @@ export const configSchema = {
     ibex: {
       type: "object",
       properties: {
-        url: { type: "string" },
-        email: { type: "string" },
-        password: { type: "string" },
+        clientId: { type: "string" },
+        clientSecret: { type: "string" },
+        environment: { type: "string", enum: ["production", "sandbox"] },
         webhook: {
           type: "object",
           properties: {
