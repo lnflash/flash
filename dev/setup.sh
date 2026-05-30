@@ -73,24 +73,24 @@ echo ""
 # ── 5. Configure Ibex credentials ────────────────────
 echo "Checking Ibex credentials..."
 
-if [ -f .env.local ] && grep -q "IBEX_CLIENT_ID" .env.local 2>/dev/null; then
+if [ -f .env.local ] && grep -q "IBEX_PASSWORD" .env.local 2>/dev/null; then
   info "Ibex credentials found in .env.local"
 else
   echo ""
-  echo "Flash requires Ibex sandbox credentials (OAuth2 client credentials) to connect to the payment backend."
+  echo "Flash requires Ibex sandbox credentials to connect to the payment backend."
   echo "If you don't have credentials, ask your team lead."
   echo ""
-  read -rp "Ibex client ID (or press Enter to skip): " IBEX_CLIENT_ID
-  if [ -n "$IBEX_CLIENT_ID" ]; then
-    read -rsp "Ibex client secret: " IBEX_CLIENT_SECRET
+  read -rp "Ibex email (or press Enter to skip): " IBEX_EMAIL
+  if [ -n "$IBEX_EMAIL" ]; then
+    read -rsp "Ibex password: " IBEX_PASSWORD
     echo ""
     cat > .env.local << EOF
-export IBEX_CLIENT_ID='${IBEX_CLIENT_ID}'
-export IBEX_CLIENT_SECRET='${IBEX_CLIENT_SECRET}'
+export IBEX_EMAIL='${IBEX_EMAIL}'
+export IBEX_PASSWORD='${IBEX_PASSWORD}'
 EOF
     info "Credentials saved to .env.local (git-ignored)"
   else
-    warn "Skipped — you'll need to create .env.local with IBEX_CLIENT_ID and IBEX_CLIENT_SECRET before starting"
+    warn "Skipped — you'll need to create .env.local with IBEX_EMAIL and IBEX_PASSWORD before starting"
   fi
 fi
 
@@ -109,12 +109,11 @@ else
   if [ -f .env.local ]; then
     source .env.local 2>/dev/null || true
   fi
-  if [ -n "${IBEX_CLIENT_ID:-}" ] && [ -n "${IBEX_CLIENT_SECRET:-}" ]; then
+  if [ -n "${IBEX_EMAIL:-}" ] && [ -n "${IBEX_PASSWORD:-}" ]; then
     cat > "$OVERRIDES" << EOF
 ibex:
-  clientId: ${IBEX_CLIENT_ID}
-  clientSecret: ${IBEX_CLIENT_SECRET}
-  environment: sandbox
+  email: ${IBEX_EMAIL}
+  password: ${IBEX_PASSWORD}
 EOF
     info "Generated $OVERRIDES with Ibex credentials"
   else
