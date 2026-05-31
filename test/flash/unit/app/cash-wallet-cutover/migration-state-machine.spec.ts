@@ -37,6 +37,16 @@ describe("cash wallet cutover migration state machine", () => {
     expect(assertCanTransition("balance_move_verified", "fee_reimbursed")).toBe(true)
   })
 
+  it("allows invoice refreshes before paying resumable invoices", () => {
+    expect(assertCanTransition("invoice_created", "invoice_created")).toBe(true)
+    expect(
+      assertCanTransition(
+        "fee_reimbursement_invoice_created",
+        "fee_reimbursement_invoice_created",
+      ),
+    ).toBe(true)
+  })
+
   it("resumes from stored checkpoint without repeating completed side effects", () => {
     expect(nextResumeStatus("invoice_created")).toBe("invoice_created")
     expect(nextResumeStatus("balance_move_sent")).toBe("balance_move_sent")

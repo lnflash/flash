@@ -7,7 +7,12 @@ const transitions: Partial<
   started: ["provisioned", "failed"],
   provisioned: ["balance_read", "failed", "skipped_already_migrated"],
   balance_read: ["invoice_created", "pointer_flipped", "failed"],
-  invoice_created: ["balance_move_sending", "failed", "requires_operator_review"],
+  invoice_created: [
+    "invoice_created",
+    "balance_move_sending",
+    "failed",
+    "requires_operator_review",
+  ],
   balance_move_sending: ["balance_move_sent", "failed", "requires_operator_review"],
   balance_move_sent: ["balance_move_verified", "failed", "requires_operator_review"],
   balance_move_verified: [
@@ -17,6 +22,7 @@ const transitions: Partial<
     "requires_operator_review",
   ],
   fee_reimbursement_invoice_created: [
+    "fee_reimbursement_invoice_created",
     "fee_reimbursement_sending",
     "failed",
     "requires_operator_review",

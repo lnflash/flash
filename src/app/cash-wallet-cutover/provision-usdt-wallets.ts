@@ -49,6 +49,9 @@ const errorMessage = (error: unknown): string => {
   return String(error)
 }
 
+const isRateLimitError = (error: unknown): boolean =>
+  errorMessage(error).toLowerCase().includes("too many requests")
+
 export type { ProvisionPrimaryCashWalletUsdtWalletsResult }
 
 export const provisionPrimaryCashWalletUsdtWallets = async ({
@@ -60,6 +63,8 @@ export const provisionPrimaryCashWalletUsdtWallets = async ({
   addWalletIfNonexistent,
   provisionLimit,
   provisionDelayMs = 0,
+  provisionRetryDelayMs = 60_000,
+  maxProvisionAttempts = 5,
   dryRun = false,
   sleep = defaultSleep,
 }: {
@@ -71,6 +76,8 @@ export const provisionPrimaryCashWalletUsdtWallets = async ({
   addWalletIfNonexistent: AddWalletIfNonexistent
   provisionLimit?: number
   provisionDelayMs?: number
+  provisionRetryDelayMs?: number
+  maxProvisionAttempts?: number
   dryRun?: boolean
   sleep?: (delayMs: number) => Promise<void>
 }): Promise<ProvisionPrimaryCashWalletUsdtWalletsResult | ApplicationError> => {
@@ -103,11 +110,21 @@ export const provisionPrimaryCashWalletUsdtWallets = async ({
 
   if (!dryRun) {
     for (const [index, discovery] of eligibleDiscoveries.entries()) {
-      const wallet = await addWalletIfNonexistent({
-        accountId: discovery.accountId,
-        type: WalletType.Checking,
-        currency: WalletCurrency.Usdt,
-      })
+      let wallet: Wallet | ApplicationError = new Error("Provisioning was not attempted")
+      const attempts = Math.max(1, maxProvisionAttempts)
+
+      for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        wallet = await addWalletIfNonexistent({
+          accountId: discovery.accountId,
+          type: WalletType.Checking,
+          currency: WalletCurrency.Usdt,
+        })
+
+        if (!(wallet instanceof Error)) break
+        if (!isRateLimitError(wallet) || attempt === attempts) break
+
+        await sleep(provisionRetryDelayMs)
+      }
 
       if (wallet instanceof Error) {
         failed.push({ accountId: discovery.accountId, error: errorMessage(wallet) })

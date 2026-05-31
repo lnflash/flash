@@ -1,3 +1,5 @@
+import { decodeInvoice } from "@domain/bitcoin/lightning"
+
 import { assertCanTransition } from "./state-machine"
 import {
   feeUsdCentsToUsdtMicros,
@@ -71,6 +73,23 @@ type CashWalletMigrationProvisioningService = {
     accountId: AccountId
     destinationUsdtWalletId: WalletId
   }): Promise<true | ApplicationError>
+}
+
+const CUTOVER_INVOICE_PAYMENT_SAFETY_WINDOW_MS = 30 * 1000
+
+const isInvoicePaymentRequestStale = ({
+  paymentRequest,
+  now,
+  safetyWindowMs = CUTOVER_INVOICE_PAYMENT_SAFETY_WINDOW_MS,
+}: {
+  paymentRequest: string
+  now: Date
+  safetyWindowMs?: number
+}): boolean => {
+  const invoice = decodeInvoice(paymentRequest)
+  if (invoice instanceof Error) return true
+
+  return invoice.expiresAt.getTime() <= now.getTime() + safetyWindowMs
 }
 
 export const startCashWalletMigration = async ({
@@ -156,11 +175,17 @@ export const recordCashWalletMigrationBalance = async ({
 export const sendCashWalletMigrationBalanceMovePayment = async ({
   migration,
   paymentService,
+  invoiceService,
   migrationsRepo,
+  now = () => new Date(),
+  invoicePaymentSafetyWindowMs = CUTOVER_INVOICE_PAYMENT_SAFETY_WINDOW_MS,
 }: {
   migration: CashWalletMigration
   paymentService: CashWalletMigrationPaymentService
+  invoiceService?: CashWalletMigrationNoAmountInvoiceService
   migrationsRepo: CashWalletMigrationTransitionRepository
+  now?: () => Date
+  invoicePaymentSafetyWindowMs?: number
 }): Promise<CashWalletMigration | ApplicationError> => {
   const transition = assertCanTransition(migration.status, "balance_move_sending")
   if (transition instanceof Error) return transition
@@ -177,19 +202,49 @@ export const sendCashWalletMigrationBalanceMovePayment = async ({
     )
   }
 
+  let payableMigration = migration
+  if (
+    invoiceService &&
+    isInvoicePaymentRequestStale({
+      paymentRequest: migration.balanceMoveInvoicePaymentRequest,
+      now: now(),
+      safetyWindowMs: invoicePaymentSafetyWindowMs,
+    })
+  ) {
+    const refreshedMigration = await createCashWalletMigrationBalanceMoveInvoice({
+      migration,
+      invoiceService,
+      migrationsRepo,
+    })
+    if (refreshedMigration instanceof Error) return refreshedMigration
+    payableMigration = refreshedMigration
+  }
+
+  if (payableMigration.balanceMoveInvoicePaymentRequest === undefined) {
+    return new InvalidCashWalletMigrationTransitionError(
+      "balanceMoveInvoicePaymentRequest is required before balance move payment sending",
+    )
+  }
+
+  if (payableMigration.sourceBalanceUsdCents === undefined) {
+    return new InvalidCashWalletMigrationTransitionError(
+      "sourceBalanceUsdCents is required before balance move payment sending",
+    )
+  }
+
   const payment = await paymentService.payInvoice({
-    senderWalletId: migration.legacyUsdWalletId,
-    paymentRequest: migration.balanceMoveInvoicePaymentRequest,
-    senderAmountUsdCents: migration.sourceBalanceUsdCents,
+    senderWalletId: payableMigration.legacyUsdWalletId,
+    paymentRequest: payableMigration.balanceMoveInvoicePaymentRequest,
+    senderAmountUsdCents: payableMigration.sourceBalanceUsdCents,
   })
   if (payment instanceof Error) return payment
 
   return migrationsRepo.transitionMigration({
-    id: migration.id,
-    from: migration.status,
+    id: payableMigration.id,
+    from: payableMigration.status,
     to: "balance_move_sending",
-    cutoverVersion: migration.cutoverVersion,
-    runId: migration.runId,
+    cutoverVersion: payableMigration.cutoverVersion,
+    runId: payableMigration.runId,
     patch: {
       balanceMovePaymentTransactionId: payment.transactionId,
     },
@@ -367,12 +422,18 @@ export const sendCashWalletMigrationFeeReimbursementPayment = async ({
   migration,
   treasuryWalletId,
   paymentService,
+  invoiceService,
   migrationsRepo,
+  now = () => new Date(),
+  invoicePaymentSafetyWindowMs = CUTOVER_INVOICE_PAYMENT_SAFETY_WINDOW_MS,
 }: {
   migration: CashWalletMigration
   treasuryWalletId: WalletId
   paymentService: CashWalletMigrationPaymentService
+  invoiceService?: CashWalletMigrationInvoiceService
   migrationsRepo: CashWalletMigrationTransitionRepository
+  now?: () => Date
+  invoicePaymentSafetyWindowMs?: number
 }): Promise<CashWalletMigration | ApplicationError> => {
   const transition = assertCanTransition(migration.status, "fee_reimbursement_sending")
   if (transition instanceof Error) return transition
@@ -383,18 +444,49 @@ export const sendCashWalletMigrationFeeReimbursementPayment = async ({
     )
   }
 
+  let payableMigration = migration
+  if (
+    invoiceService &&
+    isInvoicePaymentRequestStale({
+      paymentRequest: migration.feeReimbursementInvoicePaymentRequest,
+      now: now(),
+      safetyWindowMs: invoicePaymentSafetyWindowMs,
+    })
+  ) {
+    if (migration.feeAmountUsdtMicros === undefined) {
+      return new InvalidCashWalletMigrationTransitionError(
+        "feeAmountUsdtMicros is required before fee reimbursement invoice refresh",
+      )
+    }
+
+    const refreshedMigration = await createCashWalletMigrationFeeReimbursementInvoice({
+      migration,
+      invoiceService,
+      migrationsRepo,
+      feeAmountUsdtMicros: migration.feeAmountUsdtMicros,
+    })
+    if (refreshedMigration instanceof Error) return refreshedMigration
+    payableMigration = refreshedMigration
+  }
+
+  if (payableMigration.feeReimbursementInvoicePaymentRequest === undefined) {
+    return new InvalidCashWalletMigrationTransitionError(
+      "feeReimbursementInvoicePaymentRequest is required before fee reimbursement sending",
+    )
+  }
+
   const payment = await paymentService.payInvoice({
     senderWalletId: treasuryWalletId,
-    paymentRequest: migration.feeReimbursementInvoicePaymentRequest,
+    paymentRequest: payableMigration.feeReimbursementInvoicePaymentRequest,
   })
   if (payment instanceof Error) return payment
 
   return migrationsRepo.transitionMigration({
-    id: migration.id,
-    from: migration.status,
+    id: payableMigration.id,
+    from: payableMigration.status,
     to: "fee_reimbursement_sending",
-    cutoverVersion: migration.cutoverVersion,
-    runId: migration.runId,
+    cutoverVersion: payableMigration.cutoverVersion,
+    runId: payableMigration.runId,
     patch: {
       feeReimbursementPaymentTransactionId: payment.transactionId,
     },

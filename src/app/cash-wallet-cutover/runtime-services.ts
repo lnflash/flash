@@ -134,6 +134,7 @@ export const createCashWalletMigrationRuntimeServices = (
       }) =>
         noAmountInvoiceForRecipient({
           accountId: recipientWalletId,
+          amount: USDTAmount.ZERO,
           memo,
           expiration: CUTOVER_IBEX_INVOICE_EXPIRATION_SECONDS as Seconds,
         }).then(ibexInvoiceToDomainInvoice),

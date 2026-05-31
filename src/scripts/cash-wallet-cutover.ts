@@ -33,6 +33,8 @@ const args = yargs(hideBin(process.argv))
   .option("step-delay-ms", { type: "number", default: 0 })
   .option("provision-limit", { type: "number" })
   .option("provision-delay-ms", { type: "number", default: 12_500 })
+  .option("provision-retry-delay-ms", { type: "number", default: 60_000 })
+  .option("max-provision-attempts", { type: "number", default: 5 })
   .option("dry-run", { type: "boolean", default: false })
   .option("lock-stale-seconds", { type: "number", default: 300 })
   .option("configPath", { type: "string", demandOption: true })
@@ -70,6 +72,8 @@ const run = async () => {
         addWalletIfNonexistent,
         provisionLimit: args["provision-limit"],
         provisionDelayMs: args["provision-delay-ms"],
+        provisionRetryDelayMs: args["provision-retry-delay-ms"],
+        maxProvisionAttempts: args["max-provision-attempts"],
         dryRun: args["dry-run"],
       })
       if (result instanceof Error) throw result
