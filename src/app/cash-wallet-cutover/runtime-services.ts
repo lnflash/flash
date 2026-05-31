@@ -1,8 +1,5 @@
 import { addWalletIfNonexistent, updateDefaultWalletId } from "@app/accounts"
-import {
-  addInvoiceForRecipientForUsdWallet,
-  getBalanceForWallet,
-} from "@app/wallets"
+import { getBalanceForWallet } from "@app/wallets"
 import { decodeInvoice } from "@domain/bitcoin/lightning"
 import { InvalidWalletId } from "@domain/errors"
 import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
@@ -26,7 +23,7 @@ type RuntimeServiceDependencies = {
   addWalletIfNonexistent?: typeof addWalletIfNonexistent
   updateDefaultWalletId?: typeof updateDefaultWalletId
   getBalanceForWallet?: typeof getBalanceForWallet
-  createInvoice?: typeof addInvoiceForRecipientForUsdWallet
+  createInvoice?: typeof Ibex.addInvoice
   createNoAmountInvoice?: typeof Ibex.addInvoice
   payInvoice?: typeof Ibex.payInvoice
   accountsRepo?: Pick<ReturnType<typeof AccountsRepository>, "findById">
@@ -55,7 +52,7 @@ export const createCashWalletMigrationRuntimeServices = (
   const addWallet = deps.addWalletIfNonexistent ?? addWalletIfNonexistent
   const updateDefaultWallet = deps.updateDefaultWalletId ?? updateDefaultWalletId
   const balanceForWallet = deps.getBalanceForWallet ?? getBalanceForWallet
-  const invoiceForRecipient = deps.createInvoice ?? addInvoiceForRecipientForUsdWallet
+  const invoiceForRecipient = deps.createInvoice ?? Ibex.addInvoice
   const noAmountInvoiceForRecipient = deps.createNoAmountInvoice ?? Ibex.addInvoice
   const payInvoice = deps.payInvoice ?? Ibex.payInvoice
   const accountsRepo = deps.accountsRepo ?? AccountsRepository()
@@ -117,12 +114,17 @@ export const createCashWalletMigrationRuntimeServices = (
         recipientWalletId: WalletId
         amount: string
         memo: string
-      }) =>
-        invoiceForRecipient({
-          recipientWalletId,
-          amount: amount as FractionalCentAmount,
+      }) => {
+        const usdtAmount = USDTAmount.smallestUnits(amount)
+        if (usdtAmount instanceof Error) return Promise.resolve(usdtAmount)
+
+        return invoiceForRecipient({
+          accountId: recipientWalletId as IbexAccountId,
+          amount: usdtAmount,
           memo,
-        }),
+          expiration: CUTOVER_IBEX_INVOICE_EXPIRATION_SECONDS as Seconds,
+        }).then(ibexInvoiceToDomainInvoice)
+      },
       createNoAmountInvoice: ({
         recipientWalletId,
         memo,

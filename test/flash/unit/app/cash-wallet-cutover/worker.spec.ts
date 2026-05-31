@@ -475,7 +475,7 @@ describe("cash wallet migration worker checkpoints", () => {
     expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
   })
 
-  it("creates a fee reimbursement invoice on the destination wallet for the exact USDT shortfall", async () => {
+  it("creates a fee reimbursement invoice rounded up to USD-cent USDT micros", async () => {
     const migrationsRepo = {
       transitionMigration: jest.fn(async () => ({
         ...migration("fee_reimbursement_invoice_created"),
@@ -509,7 +509,7 @@ describe("cash wallet migration worker checkpoints", () => {
     })
     expect(invoiceService.createInvoice).toHaveBeenCalledWith({
       recipientWalletId: "usdt-wallet-id",
-      amount: "70001",
+      amount: "80000",
       memo: "cash-wallet-cutover:run-7:migration-id:fee-reimbursement",
     })
     expect(migrationsRepo.transitionMigration).toHaveBeenCalledWith({

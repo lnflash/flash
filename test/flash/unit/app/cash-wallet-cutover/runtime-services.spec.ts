@@ -48,6 +48,10 @@ const migration = (patch: Partial<CashWalletMigration> = {}): CashWalletMigratio
 })
 
 describe("cash wallet migration runtime services", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+  })
+
   it("reads source USD balances as cents", async () => {
     const deps = {
       getBalanceForWallet: jest.fn(async () => USDAmount.cents("1234")),
@@ -121,6 +125,29 @@ describe("cash wallet migration runtime services", () => {
       memo: "cash-wallet-cutover:run-7:migration-id:balance-move",
       expiration: 900,
     })
+  })
+
+  it("creates amount destination invoices in exact USDT micros through IBEX", async () => {
+    jest.mocked(Ibex.addInvoice).mockResolvedValue(ibexAddInvoiceResponse as never)
+
+    const services = createCashWalletMigrationRuntimeServices()
+
+    const result = await services.invoiceService.createInvoice({
+      recipientWalletId: "usdt-wallet-id" as WalletId,
+      amount: "4711",
+      memo: "cash-wallet-cutover:run-7:migration-id:fee-reimbursement",
+    })
+
+    expect(result).toMatchObject({
+      paymentRequest: ibexAddInvoiceResponse.invoice.bolt11,
+    })
+    const args = jest.mocked(Ibex.addInvoice).mock.calls[0][0]!
+    expect(args.accountId).toBe("usdt-wallet-id")
+    expect(args.memo).toBe("cash-wallet-cutover:run-7:migration-id:fee-reimbursement")
+    expect(args.expiration).toBe(900)
+    expect(args.amount).toBeInstanceOf(USDTAmount)
+    expect((args.amount as USDTAmount).asSmallestUnits()).toBe("4711")
+    expect((args.amount as USDTAmount).toIbex()).toBe(0.004711)
   })
 
   it("extracts the IBEX transaction id after paying an invoice with a sender-side USD cap", async () => {

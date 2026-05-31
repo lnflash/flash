@@ -1,5 +1,9 @@
 import { assertCanTransition } from "./state-machine"
-import { usdCentsToUsdtMicros, usdtMicrosToUsdCentsCeil } from "./amount-conversion"
+import {
+  feeUsdCentsToUsdtMicros,
+  usdCentsToUsdtMicros,
+  usdtMicrosToUsdCentsCeil,
+} from "./amount-conversion"
 import {
   InvalidCashWalletCutoverAmountError,
   InvalidCashWalletMigrationTransitionError,
@@ -304,6 +308,10 @@ export const createCashWalletMigrationFeeReimbursementInvoice = async ({
   const feeAmountUsdCents = usdtMicrosToUsdCentsCeil(feeAmountUsdtMicros)
   if (feeAmountUsdCents instanceof Error) return feeAmountUsdCents
 
+  const reimbursableFeeAmountUsdtMicros = feeUsdCentsToUsdtMicros(feeAmountUsdCents)
+  if (reimbursableFeeAmountUsdtMicros instanceof Error)
+    return reimbursableFeeAmountUsdtMicros
+
   const transition = assertCanTransition(
     migration.status,
     "fee_reimbursement_invoice_created",
@@ -312,7 +320,7 @@ export const createCashWalletMigrationFeeReimbursementInvoice = async ({
 
   const invoice = await invoiceService.createInvoice({
     recipientWalletId: migration.destinationUsdtWalletId,
-    amount: feeAmountUsdtMicros,
+    amount: reimbursableFeeAmountUsdtMicros,
     memo: `cash-wallet-cutover:${migration.runId}:${migration.id}:fee-reimbursement`,
   })
   if (invoice instanceof Error) return invoice

@@ -4,6 +4,7 @@ import yargs from "yargs"
 import { hideBin } from "yargs/helpers"
 
 import { CashWalletCutover } from "@app"
+import { addWalletIfNonexistent } from "@app/accounts"
 import { setupMongoConnection } from "@services/mongodb"
 import {
   AccountsRepository,
@@ -14,6 +15,10 @@ import { baseLogger } from "@services/logger"
 
 const args = yargs(hideBin(process.argv))
   .command("preview", "discover accounts and print the migration plan without writes")
+  .command(
+    "provision-usdt-wallets",
+    "create missing destination USDT wallets before preparing migrations",
+  )
   .command("prepare", "discover accounts and upsert migration records")
   .command("start", "mark a prepared cutover run in progress")
   .command("run-batch", "run one locked migration worker batch")
@@ -25,6 +30,10 @@ const args = yargs(hideBin(process.argv))
   .option("operator", { type: "string", default: "unknown" })
   .option("worker-id", { type: "string", default: `worker-${process.pid}` })
   .option("limit", { type: "number", default: 25 })
+  .option("step-delay-ms", { type: "number", default: 0 })
+  .option("provision-limit", { type: "number" })
+  .option("provision-delay-ms", { type: "number", default: 12_500 })
+  .option("dry-run", { type: "boolean", default: false })
   .option("lock-stale-seconds", { type: "number", default: 300 })
   .option("configPath", { type: "string", demandOption: true })
   .parseSync()
@@ -48,6 +57,28 @@ const run = async () => {
       })
       if (result instanceof Error) throw result
       toJson(result)
+      return
+    }
+
+    case "provision-usdt-wallets": {
+      const result = await CashWalletCutover.provisionPrimaryCashWalletUsdtWallets({
+        cutoverVersion,
+        runId,
+        accountsRepo: AccountsRepository(),
+        walletsRepo: WalletsRepository(),
+        migrationsRepo: repository,
+        addWalletIfNonexistent,
+        provisionLimit: args["provision-limit"],
+        provisionDelayMs: args["provision-delay-ms"],
+        dryRun: args["dry-run"],
+      })
+      if (result instanceof Error) throw result
+      toJson(result)
+      if (result.failed.length > 0) {
+        throw new Error(
+          `Failed to provision ${result.failed.length} destination USDT wallet(s)`,
+        )
+      }
       return
     }
 
@@ -82,6 +113,7 @@ const run = async () => {
         runId,
         workerId: args["worker-id"],
         limit: args.limit,
+        stepDelayMs: args["step-delay-ms"],
         lockStaleBefore: new Date(Date.now() - args["lock-stale-seconds"] * 1000),
         migrationsRepo: repository,
       })
