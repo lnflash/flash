@@ -175,6 +175,33 @@ describe("cash wallet migration runtime services", () => {
     expect(paymentArgs.send.asCents()).toBe("1000")
   })
 
+  it("backs off and retries IBEX rate limits while paying cutover invoices", async () => {
+    const rateLimit = new Error("FetchError: Too Many Requests")
+    const sleep = jest.fn(async () => undefined)
+    const deps = {
+      payInvoice: jest
+        .fn()
+        .mockResolvedValueOnce(rateLimit)
+        .mockResolvedValueOnce(rateLimit)
+        .mockResolvedValueOnce({ transaction: { id: "ibex-tx-id" } }),
+      maxRateLimitAttempts: 3,
+      rateLimitRetryDelayMs: 1234,
+      sleep,
+    } as any
+
+    const services = createCashWalletMigrationRuntimeServices(deps)
+
+    const result = await services.paymentService.payInvoice({
+      senderWalletId: "treasury-wallet-id" as WalletId,
+      paymentRequest: "lnbc1payment",
+    })
+
+    expect(result).toEqual({ transactionId: "ibex-tx-id" })
+    expect(deps.payInvoice).toHaveBeenCalledTimes(3)
+    expect(sleep).toHaveBeenCalledTimes(2)
+    expect(sleep).toHaveBeenCalledWith(1234)
+  })
+
   it("returns an error when IBEX payment response has no transaction id", async () => {
     const services = createCashWalletMigrationRuntimeServices({
       payInvoice: jest.fn(async () => ({})),

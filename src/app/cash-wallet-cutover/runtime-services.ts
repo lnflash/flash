@@ -17,6 +17,10 @@ import {
 import { destinationShortfallUsdtMicros } from "./amount-conversion"
 
 const CUTOVER_IBEX_INVOICE_EXPIRATION_SECONDS = 15 * 60
+const CUTOVER_IBEX_RATE_LIMIT_RETRY_DELAY_MS = 60_000
+const CUTOVER_IBEX_RATE_LIMIT_MAX_ATTEMPTS = 5
+
+type SleepFn = (delayMs: number) => Promise<void>
 
 type RuntimeServiceDependencies = {
   now?: () => Date
@@ -28,6 +32,9 @@ type RuntimeServiceDependencies = {
   payInvoice?: typeof Ibex.payInvoice
   accountsRepo?: Pick<ReturnType<typeof AccountsRepository>, "findById">
   getTreasuryWalletId?: () => Promise<WalletId | ApplicationError>
+  maxRateLimitAttempts?: number
+  rateLimitRetryDelayMs?: number
+  sleep?: SleepFn
 }
 
 const isUsdAmount = (amount: unknown): amount is USDAmount => amount instanceof USDAmount
@@ -46,6 +53,40 @@ const ibexInvoiceToDomainInvoice = (response: Awaited<ReturnType<typeof Ibex.add
   return decodedInvoice
 }
 
+const sleep: SleepFn = (delayMs: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, delayMs))
+
+const errorMessage = (error: Error): string => error.message || String(error)
+
+const isIbexRateLimitError = (error: Error): boolean =>
+  errorMessage(error).toLowerCase().includes("too many requests")
+
+const withIbexRateLimitRetry = async <T>({
+  operation,
+  maxAttempts,
+  retryDelayMs,
+  sleepFn,
+}: {
+  operation: () => Promise<T>
+  maxAttempts: number
+  retryDelayMs: number
+  sleepFn: SleepFn
+}): Promise<T> => {
+  for (let attempt = 1; ; attempt += 1) {
+    const result = await operation()
+
+    if (
+      !(result instanceof Error) ||
+      !isIbexRateLimitError(result) ||
+      attempt >= maxAttempts
+    ) {
+      return result
+    }
+
+    await sleepFn(retryDelayMs)
+  }
+}
+
 export const createCashWalletMigrationRuntimeServices = (
   deps: RuntimeServiceDependencies = {},
 ) => {
@@ -56,6 +97,15 @@ export const createCashWalletMigrationRuntimeServices = (
   const noAmountInvoiceForRecipient = deps.createNoAmountInvoice ?? Ibex.addInvoice
   const payInvoice = deps.payInvoice ?? Ibex.payInvoice
   const accountsRepo = deps.accountsRepo ?? AccountsRepository()
+  const rateLimitRetry = {
+    maxAttempts: Math.max(
+      1,
+      deps.maxRateLimitAttempts ?? CUTOVER_IBEX_RATE_LIMIT_MAX_ATTEMPTS,
+    ),
+    retryDelayMs:
+      deps.rateLimitRetryDelayMs ?? CUTOVER_IBEX_RATE_LIMIT_RETRY_DELAY_MS,
+    sleepFn: deps.sleep ?? sleep,
+  }
 
   return {
     now: deps.now ?? (() => new Date()),
@@ -118,11 +168,15 @@ export const createCashWalletMigrationRuntimeServices = (
         const usdtAmount = USDTAmount.smallestUnits(amount)
         if (usdtAmount instanceof Error) return Promise.resolve(usdtAmount)
 
-        return invoiceForRecipient({
-          accountId: recipientWalletId as IbexAccountId,
-          amount: usdtAmount,
-          memo,
-          expiration: CUTOVER_IBEX_INVOICE_EXPIRATION_SECONDS as Seconds,
+        return withIbexRateLimitRetry({
+          ...rateLimitRetry,
+          operation: () =>
+            invoiceForRecipient({
+              accountId: recipientWalletId as IbexAccountId,
+              amount: usdtAmount,
+              memo,
+              expiration: CUTOVER_IBEX_INVOICE_EXPIRATION_SECONDS as Seconds,
+            }),
         }).then(ibexInvoiceToDomainInvoice)
       },
       createNoAmountInvoice: ({
@@ -132,11 +186,15 @@ export const createCashWalletMigrationRuntimeServices = (
         recipientWalletId: WalletId
         memo: string
       }) =>
-        noAmountInvoiceForRecipient({
-          accountId: recipientWalletId,
-          amount: USDTAmount.ZERO,
-          memo,
-          expiration: CUTOVER_IBEX_INVOICE_EXPIRATION_SECONDS as Seconds,
+        withIbexRateLimitRetry({
+          ...rateLimitRetry,
+          operation: () =>
+            noAmountInvoiceForRecipient({
+              accountId: recipientWalletId,
+              amount: USDTAmount.ZERO,
+              memo,
+              expiration: CUTOVER_IBEX_INVOICE_EXPIRATION_SECONDS as Seconds,
+            }),
         }).then(ibexInvoiceToDomainInvoice),
     },
     paymentService: {
@@ -155,10 +213,14 @@ export const createCashWalletMigrationRuntimeServices = (
             : USDAmount.cents(senderAmountUsdCents)
         if (send instanceof Error) return send
 
-        const payment = await payInvoice({
-          accountId: senderWalletId as IbexAccountId,
-          invoice: paymentRequest as Bolt11,
-          send,
+        const payment = await withIbexRateLimitRetry({
+          ...rateLimitRetry,
+          operation: () =>
+            payInvoice({
+              accountId: senderWalletId as IbexAccountId,
+              invoice: paymentRequest as Bolt11,
+              send,
+            }),
         })
         if (payment instanceof Error) return payment
 
