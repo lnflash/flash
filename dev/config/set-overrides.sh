@@ -7,8 +7,9 @@ mkdir -p "$(dirname "$OUTPUT_FILE")"
 
 # Define YAML paths and their descriptions directly in the script
 declare -a yaml_paths=(
-  "ibex.email, Email address to Ibex Account"
-  "ibex.password, Password to Ibex Account"
+  "ibex.clientId, OAuth2 client ID for the Ibex account"
+  "ibex.clientSecret, OAuth2 client secret for the Ibex account"
+  "ibex.environment, Ibex environment: sandbox or production"
   "ibex.webhook.uri, The URI where Ibex will send payment events"
   "sendgrid.apiKey, API key to SendGrid email service (from Twilio)"
   "cashout.email.to, Recipient email address for cashout notifications"
