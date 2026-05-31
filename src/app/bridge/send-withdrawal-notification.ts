@@ -70,7 +70,7 @@ export const sendBridgeWithdrawalNotification = async ({
     data: {
       type: `bridge_withdrawal_${outcome}`,
       amount,
-      currency,
+      currency: currency == "usdt" ? "USD" : currency.toUpperCase(),
       ...(failureReason ? { failureReason } : {}),
     },
   })
