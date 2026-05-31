@@ -631,8 +631,9 @@ export const configSchema = {
       properties: {
         url: { type: "string" },
         authUrl: { type: "string" },
-        email: { type: "string" },
-        password: { type: "string" },
+        clientId: { type: "string" },
+        clientSecret: { type: "string" },
+        environment: { type: "string", enum: ["production", "sandbox"] },
         webhook: {
           type: "object",
           properties: {

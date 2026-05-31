@@ -6,9 +6,9 @@ admin_accounts:
 ibex:
   url: "https://api-sandbox.poweredbyibex.io"
   authUrl: "https://auth.hub.sandbox.poweredbyibex.io"
-  email: ""
-  password: "Ibex@1234"
-  apiKey: "sk-test-3bd6463c9cd77c3d8858c60b9997d0c6"
+  clientId: "your-m2m-client-id"
+  clientSecret: "your-m2m-client-secret"
+  environment: "sandbox"
   webhook:
     uri: "" # external uri defined in overrides
     port: 4008
@@ -45,6 +45,7 @@ bridge:
         dwIDAQAB
         -----END PUBLIC KEY-----
       transfer: "<replace>"
+      external_account: "<replace>"
     timestampSkewMs: 300000
 
 # See Foreign Exchange Rates: https://www.firstglobal-bank.com/
