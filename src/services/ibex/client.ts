@@ -47,8 +47,11 @@ import { errorHandler, IbexError, ParseError, UnexpectedIbexResponse } from "./e
 import WebhookServer from "./webhook-server"
 
 const Ibex = new IbexClient(
-  IbexConfig.url,
-  { email: IbexConfig.email, password: IbexConfig.password },
+  {
+    clientId: IbexConfig.clientId,
+    clientSecret: IbexConfig.clientSecret,
+    environment: IbexConfig.environment,
+  },
   Redis,
 )
 
@@ -255,15 +258,27 @@ const payToLnurl = async (
   }).then(errorHandler)
 }
 
-const getIbexToken = async (): Promise<string | IbexError> => {
-  const cached = await Ibex.authentication.storage.getAccessToken()
-  if (typeof cached === "string") return `${cached}`
+let m2mTokenCache: { token: string; expiresAt: number } | undefined
 
-  // The SDK uses a single base URL for all calls, but the sandbox auth domain is separate
-  const resp = await fetch(`${IbexConfig.url}/auth/signin`, {
+const getIbexToken = async (): Promise<string | IbexError> => {
+  if (m2mTokenCache && Date.now() < m2mTokenCache.expiresAt) {
+    return m2mTokenCache.token
+  }
+
+  const audience =
+    IbexConfig.environment === "sandbox"
+      ? "https://api-sandbox.poweredbyibex.io"
+      : "https://ibexhub.ibexmercado.com"
+
+  const resp = await fetch(`${IbexConfig.authUrl}/oauth/token`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: IbexConfig.email, password: IbexConfig.password }),
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "client_credentials",
+      client_id: IbexConfig.clientId,
+      client_secret: IbexConfig.clientSecret,
+      audience,
+    }).toString(),
   }).catch(
     (err: unknown) => new IbexError(err instanceof Error ? err : new Error(String(err))),
   )
@@ -271,30 +286,19 @@ const getIbexToken = async (): Promise<string | IbexError> => {
   if (resp instanceof IbexError) return resp
   if (!resp.ok) {
     const body = await resp.text().catch(() => "")
-    return new IbexError(new Error(`IBEX sign-in failed: ${resp.status} — ${body}`))
+    return new IbexError(new Error(`IBEX M2M auth failed: ${resp.status} — ${body}`))
   }
 
-  const data = (await resp.json()) as {
-    accessToken?: string
-    accessTokenExpiresAt?: number
-    refreshToken?: string
-    refreshTokenExpiresAt?: number
-  }
-  if (!data.accessToken)
-    return new IbexError(new Error("IBEX sign-in: no access token in response"))
+  const data = (await resp.json()) as { access_token?: string; expires_in?: number }
+  if (!data.access_token)
+    return new IbexError(new Error("IBEX M2M auth: no access_token in response"))
 
-  await Ibex.authentication.storage.setAccessToken(
-    data.accessToken,
-    data.accessTokenExpiresAt,
-  )
-  if (data.refreshToken) {
-    await Ibex.authentication.storage.setRefreshToken(
-      data.refreshToken,
-      data.refreshTokenExpiresAt,
-    )
+  const expiresIn = data.expires_in ?? 3600
+  m2mTokenCache = {
+    token: data.access_token,
+    expiresAt: Date.now() + (expiresIn - 60) * 1000,
   }
-
-  return data.accessToken as string
+  return data.access_token
 }
 
 const ibexFetch = async <T>(
