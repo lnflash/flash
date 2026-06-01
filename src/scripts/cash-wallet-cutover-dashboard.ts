@@ -30,18 +30,13 @@ import {
 import { baseLogger } from "@services/logger"
 import { getFunderWalletId } from "@services/ledger/caching"
 
-const DEFAULT_MANIFESTS = [
-  "/tmp/eng345usd-20260526115410-local-backend-accounts.json",
-  "/tmp/eng345usdonly-20260526195758-accounts.json",
-]
-
 const BALANCE_TIMEOUT_MS = 7_500
 const BALANCE_READ_ATTEMPTS = 3
 const BALANCE_READ_SPACING_MS = 1_000
 
 const args = yargs(hideBin(process.argv))
   .option("port", { type: "number", default: 3450 })
-  .option("manifest", { type: "array", string: true, default: DEFAULT_MANIFESTS })
+  .option("manifest", { type: "array", string: true, demandOption: true })
   .option("expected-accounts", { type: "number", default: 60 })
   .option("snapshot-ttl-ms", { type: "number", default: 5_000 })
   .option("run-id", { type: "string" })

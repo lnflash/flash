@@ -38,11 +38,30 @@ If you prefer to set things up yourself, or if the setup script fails:
 
 ### 1. Environment Variables
 
-Flash uses YAML config files. Ibex OAuth2 credentials go in local config overrides, not env vars.
+The project loads environment variables from `.env` (committed) and `.env.local` (git-ignored, for secrets).
+
+Create `.env.local` with your Ibex sandbox credentials:
+
+```bash
+echo "export IBEX_EMAIL='your-ibex-email'" >> .env.local
+echo "export IBEX_PASSWORD='your-ibex-password'" >> .env.local
+```
+
+If you use direnv, allow it:
+
+```bash
+direnv allow
+```
+
+If not using direnv, source the env files manually before running commands:
+
+```bash
+source .env && source .env.local
+```
 
 ### 2. App Config Overrides
 
-The base config is at `dev/config/base-config.yaml`. Secrets and local overrides go in `$CONFIG_PATH/dev-overrides.yaml` (default: `~/.config/flash/dev-overrides.yaml`).
+Flash uses YAML config files. The base config is at `dev/config/base-config.yaml`. Secrets and local overrides go in `$CONFIG_PATH/dev-overrides.yaml` (default: `~/.config/flash/dev-overrides.yaml`).
 
 **Option A — Run the interactive script:**
 
@@ -55,9 +74,8 @@ The base config is at `dev/config/base-config.yaml`. Secrets and local overrides
 ```yaml
 # ~/.config/flash/dev-overrides.yaml
 ibex:
-  clientId: your-sandbox-client-id
-  clientSecret: your-sandbox-client-secret
-  environment: sandbox
+  email: your-ibex-email
+  password: your-ibex-password
 ```
 
 Additional overrides you might need:
