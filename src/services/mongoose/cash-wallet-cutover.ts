@@ -118,11 +118,29 @@ export const CashWalletCutoverRepository = () => {
     actor?: string,
   ): Promise<CashWalletCutoverConfig | RepositoryError> => {
     try {
+      const $set: Record<string, unknown> = { updatedBy: actor, updatedAt: new Date() }
+      const $unset: Record<string, 1> = {}
+
+      for (const [key, value] of Object.entries(patch)) {
+        if (value === undefined) {
+          $unset[key] = 1
+        } else {
+          $set[key] = value
+        }
+      }
+
+      const update = Object.keys($unset).length > 0 ? { $set, $unset } : { $set }
+
       const result = await CashWalletCutoverConfig.findOneAndUpdate(
         { _id: CONFIG_ID },
-        { $set: { ...patch, updatedBy: actor, updatedAt: new Date() } },
+        update,
         { upsert: true, new: true },
       )
+      return resultToConfig(result)
+    } catch (err) {
+      return parseRepositoryError(err)
+    }
+  }
       return resultToConfig(result)
     } catch (err) {
       return parseRepositoryError(err)
