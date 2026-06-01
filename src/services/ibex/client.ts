@@ -9,8 +9,7 @@ import { GetFeeEstimateArgs, IbexAccountDetails, IbexFeeEstimation, IbexInvoiceA
 import { USDAmount } from "@domain/shared";
 
 const Ibex = new IbexClient(
-  IbexConfig.url, 
-  { email: IbexConfig.email, password: IbexConfig.password }, 
+  { clientId: IbexConfig.clientId, clientSecret: IbexConfig.clientSecret, environment: IbexConfig.environment },
   Redis
 )
 

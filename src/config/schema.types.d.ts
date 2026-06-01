@@ -23,9 +23,9 @@ type WebhookServer = {
 }
 
 type IbexConfig = {
-  url: string
-  email: string
-  password: string
+  clientId: string
+  clientSecret: string
+  environment: 'production' | 'sandbox'
   webhook: WebhookServer
 }
 

@@ -4,9 +4,9 @@ admin_accounts:
     phone: "+16505554334"
 
 ibex:
-  url: "https://api-sandbox.poweredbyibex.io"
-  email: ""
-  password: ""
+  clientId: ""
+  clientSecret: ""
+  environment: "sandbox"
   webhook:
     uri: "" # external uri defined in overrides
     port: 4008

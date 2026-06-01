@@ -75,7 +75,9 @@ class ErpNext {
       );
       return response.data.data.name as CashoutId
     } catch (err) {
-      baseLogger.error({ err }, "Error drafting Cashout in ERPNext")
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error({ err, responseData }, "Error drafting Cashout in ERPNext")
+      recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
       return new CashoutDraftError(err)
     }
   }
@@ -91,6 +93,7 @@ class ErpNext {
     } catch (err) {
       const responseData = isAxiosError(err) ? err.response?.data : undefined
       baseLogger.error({ err, responseData }, "Error submitting Cashout in ERPNext")
+      recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
       return new CashoutSubmitError(err)
     }
   }
@@ -101,7 +104,9 @@ class ErpNext {
         headers: this.headers,
       })
     } catch (err) {
-      baseLogger.error({ err, jeName }, "Error deleting JE in ERPNext")
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error({ err, responseData, jeName }, "Error deleting JE in ERPNext")
+      recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
       return new JournalEntryDeleteError(err)
     }
   }
@@ -141,10 +146,9 @@ class ErpNext {
 
       return resp.data?.data.map((r: { name: string }) => r.name)
     } catch (err) {
-      baseLogger.error(
-        { err, filters },
-        "Error querying Account Upgrade Request from ERPNext",
-      )
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error({ err, responseData, filters }, "Error querying Account Upgrade Request from ERPNext")
+      recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
       return new UpgradeRequestQueryError(err)
     }
   }
@@ -162,10 +166,9 @@ class ErpNext {
       if (!request) return new UpgradeRequestQueryError("No data in detail response")
       return AccountUpgradeRequest.fromErpnext(request)
     } catch (err) {
-      baseLogger.error(
-        { err, id },
-        "Error querying Account Upgrade Request from ERPNext",
-      )
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error({ err, responseData, id }, "Error querying Account Upgrade Request from ERPNext")
+      recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
       return new UpgradeRequestQueryError(err)
     }
   }
@@ -193,7 +196,9 @@ class ErpNext {
           return new SetDocTypeValueError(failedDocs)
         }
       } catch (err) {
-        baseLogger.error({ err, names, status }, "Error bulk updating upgrade request status")
+        const responseData = isAxiosError(err) ? err.response?.data : undefined
+        baseLogger.error({ err, responseData, names, status }, "Error bulk updating upgrade request status")
+        recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
         return new SetDocTypeValueError(err)
       }
     }
@@ -211,7 +216,9 @@ class ErpNext {
       )
       return resp.data?.data ?? []
     } catch (err) {
-      baseLogger.error({ err, customerName }, "Error querying Bank Account from ERPNext")
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error({ err, responseData, customerName }, "Error querying Bank Account from ERPNext")
+      recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
       return new BankAccountQueryError(err)
     }
   }
@@ -227,7 +234,9 @@ class ErpNext {
 
       return data
     } catch (err) {
-      baseLogger.error({ err }, "Error querying Banks from ERPNext")
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error({ err, responseData }, "Error querying Banks from ERPNext")
+      recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
       return new BanksQueryError(err)
     }
   }
