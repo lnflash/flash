@@ -33,7 +33,7 @@ type TransitionMigrationArgs = {
   to: CashWalletMigrationStatus
   cutoverVersion: number
   runId: string
-  patch?: Partial<CashWalletMigration>
+  patch?: Partial<Omit<CashWalletMigration, "id">>
 }
 
 type LockMigrationArgs = {
