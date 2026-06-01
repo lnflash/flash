@@ -30,6 +30,9 @@ const migration = (status: CashWalletMigrationStatus): CashWalletMigration => ({
   updatedAt: new Date("2026-05-20T00:00:00Z"),
 })
 
+const expiredCutoverPaymentRequest =
+  "lnbc1p4pcau7pp5gaweqhcssvpgcnmqemwhr2vy024yyc9a9lggu2mq9dmxfla939nsdyqvdshx6pdwaskcmr9wskkxat5damx2u36d4skuatpdsknxdfn8geryvesv5cnwepdxuerswfdxsmnxd3dvgenvc3dv9nr2enzxsek2etpxvcr5cnpd3skucm994kk7an9cqzzsxqzpusp5dxuvs8zkzt0tdjkz5ezuea6j49p7yhu43kurz8wcf2xryryp0anq9qxpqysgqnypt73d64vpk74kgdk26s0r7c3yufn2yxpyae3h6zagved5dy2hjek3hxsa3nxqqe5pppqygcrxt6t99tgqc66zet4m99yldkq6muysqvvdhu9" as EncodedPaymentRequest
+
 describe("cash wallet migration worker checkpoints", () => {
   it("starts a not-started migration with an atomic repository transition", async () => {
     const startedAt = new Date("2026-05-20T13:00:00Z")
@@ -316,6 +319,88 @@ describe("cash wallet migration worker checkpoints", () => {
     })
   })
 
+  it("regenerates an expired balance move invoice before paying it", async () => {
+    const refreshedInvoice = {
+      paymentRequest: "lnbc1fresh-balance-move" as EncodedPaymentRequest,
+      paymentHash: "freshBalanceMoveHash" as PaymentHash,
+    } as LnInvoice
+    const refreshedMigration = {
+      ...migration("invoice_created"),
+      balanceMoveInvoicePaymentRequest: refreshedInvoice.paymentRequest,
+      balanceMoveInvoicePaymentHash: refreshedInvoice.paymentHash,
+      sourceBalanceUsdCents: "1000",
+      destinationAmountUsdtMicros: "10000000",
+    }
+    const migrationsRepo = {
+      transitionMigration: jest
+        .fn()
+        .mockResolvedValueOnce(refreshedMigration)
+        .mockResolvedValueOnce({
+          ...refreshedMigration,
+          status: "balance_move_sending",
+          balanceMovePaymentTransactionId: "ibex-tx-id",
+        }),
+    }
+    const invoiceService = {
+      createNoAmountInvoice: jest.fn(async () => refreshedInvoice),
+    }
+    const paymentService = {
+      payInvoice: jest.fn(async () => ({
+        transactionId: "ibex-tx-id" as IbexTransactionId,
+      })),
+    }
+
+    const args = {
+      migration: {
+        ...migration("invoice_created"),
+        balanceMoveInvoicePaymentRequest: expiredCutoverPaymentRequest,
+        balanceMoveInvoicePaymentHash: "expiredBalanceMoveHash" as PaymentHash,
+        sourceBalanceUsdCents: "1000",
+        destinationAmountUsdtMicros: "10000000",
+      },
+      paymentService,
+      invoiceService,
+      migrationsRepo,
+      now: () => new Date("2026-05-31T18:04:00Z"),
+    }
+    const result = await sendCashWalletMigrationBalanceMovePayment(args)
+
+    expect(result).toMatchObject({
+      status: "balance_move_sending",
+      balanceMovePaymentTransactionId: "ibex-tx-id",
+    })
+    expect(invoiceService.createNoAmountInvoice).toHaveBeenCalledWith({
+      recipientWalletId: "usdt-wallet-id",
+      memo: "cash-wallet-cutover:run-7:migration-id:balance-move",
+    })
+    expect(paymentService.payInvoice).toHaveBeenCalledWith({
+      senderWalletId: "legacy-usd-wallet-id",
+      paymentRequest: "lnbc1fresh-balance-move",
+      senderAmountUsdCents: "1000",
+    })
+    expect(migrationsRepo.transitionMigration).toHaveBeenNthCalledWith(1, {
+      id: "migration-id",
+      from: "invoice_created",
+      to: "invoice_created",
+      cutoverVersion: 7,
+      runId: "run-7",
+      patch: {
+        balanceMoveInvoicePaymentRequest: "lnbc1fresh-balance-move",
+        balanceMoveInvoicePaymentHash: "freshBalanceMoveHash",
+      },
+    })
+    expect(migrationsRepo.transitionMigration).toHaveBeenNthCalledWith(2, {
+      id: "migration-id",
+      from: "invoice_created",
+      to: "balance_move_sending",
+      cutoverVersion: 7,
+      runId: "run-7",
+      patch: {
+        balanceMovePaymentTransactionId: "ibex-tx-id",
+      },
+    })
+  })
+
   it("rejects balance move payment sending when the invoice payment request is missing", async () => {
     const migrationsRepo = {
       transitionMigration: jest.fn(),
@@ -475,7 +560,7 @@ describe("cash wallet migration worker checkpoints", () => {
     expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
   })
 
-  it("creates a fee reimbursement invoice on the destination wallet for the exact USDT shortfall", async () => {
+  it("creates a fee reimbursement invoice rounded up to USD-cent USDT micros", async () => {
     const migrationsRepo = {
       transitionMigration: jest.fn(async () => ({
         ...migration("fee_reimbursement_invoice_created"),
@@ -509,7 +594,7 @@ describe("cash wallet migration worker checkpoints", () => {
     })
     expect(invoiceService.createInvoice).toHaveBeenCalledWith({
       recipientWalletId: "usdt-wallet-id",
-      amount: "70001",
+      amount: "80000",
       memo: "cash-wallet-cutover:run-7:migration-id:fee-reimbursement",
     })
     expect(migrationsRepo.transitionMigration).toHaveBeenCalledWith({
@@ -631,6 +716,91 @@ describe("cash wallet migration worker checkpoints", () => {
       paymentRequest: "lnbc1fee-reimbursement",
     })
     expect(migrationsRepo.transitionMigration).toHaveBeenCalledWith({
+      id: "migration-id",
+      from: "fee_reimbursement_invoice_created",
+      to: "fee_reimbursement_sending",
+      cutoverVersion: 7,
+      runId: "run-7",
+      patch: {
+        feeReimbursementPaymentTransactionId: "fee-ibex-tx-id",
+      },
+    })
+  })
+
+  it("regenerates an expired fee reimbursement invoice before paying it", async () => {
+    const refreshedInvoice = {
+      paymentRequest: "lnbc1fresh-fee-reimbursement" as EncodedPaymentRequest,
+      paymentHash: "freshFeeReimbursementHash" as PaymentHash,
+    } as LnInvoice
+    const refreshedMigration = {
+      ...migration("fee_reimbursement_invoice_created"),
+      feeAmountUsdCents: "8",
+      feeAmountUsdtMicros: "70001",
+      feeReimbursementInvoicePaymentRequest: refreshedInvoice.paymentRequest,
+      feeReimbursementInvoicePaymentHash: refreshedInvoice.paymentHash,
+    }
+    const migrationsRepo = {
+      transitionMigration: jest
+        .fn()
+        .mockResolvedValueOnce(refreshedMigration)
+        .mockResolvedValueOnce({
+          ...refreshedMigration,
+          status: "fee_reimbursement_sending",
+          feeReimbursementPaymentTransactionId: "fee-ibex-tx-id",
+        }),
+    }
+    const invoiceService = {
+      createInvoice: jest.fn(async () => refreshedInvoice),
+    }
+    const paymentService = {
+      payInvoice: jest.fn(async () => ({
+        transactionId: "fee-ibex-tx-id" as IbexTransactionId,
+      })),
+    }
+
+    const args = {
+      migration: {
+        ...migration("fee_reimbursement_invoice_created"),
+        feeAmountUsdCents: "8",
+        feeAmountUsdtMicros: "70001",
+        feeReimbursementInvoicePaymentRequest: expiredCutoverPaymentRequest,
+        feeReimbursementInvoicePaymentHash: "expiredFeeReimbursementHash" as PaymentHash,
+      },
+      treasuryWalletId: "treasury-wallet-id" as WalletId,
+      paymentService,
+      invoiceService,
+      migrationsRepo,
+      now: () => new Date("2026-05-31T18:04:00Z"),
+    }
+    const result = await sendCashWalletMigrationFeeReimbursementPayment(args)
+
+    expect(result).toMatchObject({
+      status: "fee_reimbursement_sending",
+      feeReimbursementPaymentTransactionId: "fee-ibex-tx-id",
+    })
+    expect(invoiceService.createInvoice).toHaveBeenCalledWith({
+      recipientWalletId: "usdt-wallet-id",
+      amount: "80000",
+      memo: "cash-wallet-cutover:run-7:migration-id:fee-reimbursement",
+    })
+    expect(paymentService.payInvoice).toHaveBeenCalledWith({
+      senderWalletId: "treasury-wallet-id",
+      paymentRequest: "lnbc1fresh-fee-reimbursement",
+    })
+    expect(migrationsRepo.transitionMigration).toHaveBeenNthCalledWith(1, {
+      id: "migration-id",
+      from: "fee_reimbursement_invoice_created",
+      to: "fee_reimbursement_invoice_created",
+      cutoverVersion: 7,
+      runId: "run-7",
+      patch: {
+        feeAmountUsdCents: "8",
+        feeAmountUsdtMicros: "70001",
+        feeReimbursementInvoicePaymentRequest: "lnbc1fresh-fee-reimbursement",
+        feeReimbursementInvoicePaymentHash: "freshFeeReimbursementHash",
+      },
+    })
+    expect(migrationsRepo.transitionMigration).toHaveBeenNthCalledWith(2, {
       id: "migration-id",
       from: "fee_reimbursement_invoice_created",
       to: "fee_reimbursement_sending",

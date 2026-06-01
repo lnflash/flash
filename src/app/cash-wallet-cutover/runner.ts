@@ -38,6 +38,11 @@ type CashWalletMigrationBatchResult = {
   skipped: number
 }
 
+type SleepFn = (delayMs: number) => Promise<void>
+
+const sleep = (delayMs: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, delayMs))
+
 const AMBIGUOUS_SIDE_EFFECT_STATUSES: CashWalletMigrationStatus[] = [
   "invoice_created",
   "balance_move_sending",
@@ -62,6 +67,8 @@ export const runCashWalletMigrationBatch = async ({
   lockStaleBefore,
   migrationsRepo,
   executor,
+  stepDelayMs = 0,
+  sleep: sleepFn = sleep,
 }: {
   cutoverVersion: number
   runId: string
@@ -70,6 +77,8 @@ export const runCashWalletMigrationBatch = async ({
   lockStaleBefore: Date
   migrationsRepo: CashWalletMigrationBatchRepository
   executor: CashWalletMigrationBatchExecutor
+  stepDelayMs?: number
+  sleep?: SleepFn
 }): Promise<CashWalletMigrationBatchResult | RepositoryError> => {
   const migrations = await migrationsRepo.listRunnableMigrations({
     cutoverVersion,
@@ -85,7 +94,7 @@ export const runCashWalletMigrationBatch = async ({
     skipped: 0,
   }
 
-  for (const migration of migrations) {
+  for (const [index, migration] of migrations.entries()) {
     result.attempted += 1
 
     const locked = await migrationsRepo.acquireMigrationLock({
@@ -123,6 +132,10 @@ export const runCashWalletMigrationBatch = async ({
       cutoverVersion,
       runId,
     })
+
+    if (stepDelayMs > 0 && index < migrations.length - 1) {
+      await sleepFn(stepDelayMs)
+    }
   }
 
   return result

@@ -114,6 +114,8 @@ export const createCashWalletMigrationStepHandlers = ({
       migration,
       migrationsRepo,
       paymentService: services.paymentService,
+      invoiceService: services.invoiceService,
+      now: services.now,
     }),
   balance_move_sending: (migration) =>
     markCashWalletMigrationBalanceMoveSent({ migration, migrationsRepo }),
@@ -147,6 +149,8 @@ export const createCashWalletMigrationStepHandlers = ({
       migration,
       migrationsRepo,
       paymentService: services.paymentService,
+      invoiceService: services.invoiceService,
+      now: services.now,
       treasuryWalletId,
     })
   },

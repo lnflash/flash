@@ -19,6 +19,7 @@ export const runPrimaryCashWalletCutoverBatch = ({
   runId,
   workerId,
   limit,
+  stepDelayMs,
   lockStaleBefore,
   migrationsRepo = CashWalletCutoverRepository(),
   runtimeServices = createCashWalletMigrationRuntimeServices(),
@@ -27,6 +28,7 @@ export const runPrimaryCashWalletCutoverBatch = ({
   runId: string
   workerId: string
   limit?: number
+  stepDelayMs?: number
   lockStaleBefore: Date
   migrationsRepo?: PrimaryCashWalletCutoverBatchRepository
   runtimeServices?: PrimaryCashWalletCutoverRuntimeServices
@@ -41,6 +43,7 @@ export const runPrimaryCashWalletCutoverBatch = ({
     runId,
     workerId,
     limit,
+    stepDelayMs,
     lockStaleBefore,
     migrationsRepo,
     executor: (migration) =>

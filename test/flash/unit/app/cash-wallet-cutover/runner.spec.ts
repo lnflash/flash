@@ -123,4 +123,41 @@ describe("cash wallet migration batch runner", () => {
     })
     expect(migrationsRepo.releaseMigrationLock).not.toHaveBeenCalled()
   })
+
+  it("waits between attempted migrations when step delay is configured", async () => {
+    const runnable = [
+      migration("provisioned", "migration-1"),
+      migration("provisioned", "migration-2"),
+      migration("provisioned", "migration-3"),
+    ]
+    const migrationsRepo = {
+      listRunnableMigrations: jest.fn(async () => runnable),
+      acquireMigrationLock: jest.fn(async (args: { id: string }) =>
+        migration("provisioned", args.id),
+      ),
+      markMigrationFailed: jest.fn(),
+      releaseMigrationLock: jest.fn(async () => migration("balance_read")),
+    }
+    const executor = jest.fn(async (locked: CashWalletMigration) =>
+      migration("balance_read", locked.id),
+    )
+    const sleep = jest.fn(async () => undefined)
+
+    const result = await runCashWalletMigrationBatch({
+      cutoverVersion: 7,
+      runId: "run-7",
+      workerId: "worker-1",
+      limit: 3,
+      lockStaleBefore: new Date("2026-05-20T15:00:00Z"),
+      migrationsRepo,
+      executor,
+      stepDelayMs: 1_000,
+      sleep,
+    })
+
+    expect(result).toEqual({ attempted: 3, advanced: 3, failed: 0, skipped: 0 })
+    expect(sleep).toHaveBeenCalledTimes(2)
+    expect(sleep).toHaveBeenNthCalledWith(1, 1_000)
+    expect(sleep).toHaveBeenNthCalledWith(2, 1_000)
+  })
 })
