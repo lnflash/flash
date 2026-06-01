@@ -12,6 +12,7 @@ const TERMINAL_STATUSES: CashWalletMigrationStatus[] = [
   "failed",
   "requires_operator_review",
   "skipped_already_migrated",
+  "rollback_started",
   "rolled_back",
 ]
 
