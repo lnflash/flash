@@ -10,6 +10,7 @@ import jsonwebtoken from "jsonwebtoken"
 
 import { parseIps } from "@domain/accounts-ips"
 import { ErrorLevel } from "@domain/shared"
+import { parseCashWalletClientCapabilities } from "@app/cash-wallet-cutover"
 
 import jwksRsa from "jwks-rsa"
 
@@ -60,12 +61,16 @@ const getContext = async (
     fnName: "getContext",
     fn: async () => {
       const connectionParams = ctx.connectionParams
+      const cashWalletClientCapabilities = parseCashWalletClientCapabilities({
+        ...ctx.extra?.request?.headers,
+        ...connectionParams,
+      })
 
       // TODO: check if nginx pass the ip to the header
       // TODO: ip not been used currently for subscription.
       // implement some rate limiting.
       const ipString = UNSECURE_IP_FROM_REQUEST_OBJECT
-        ? connectionParams?.ip ?? ctx.extra?.request?.socket?.remoteAddress
+        ? (connectionParams?.ip ?? ctx.extra?.request?.socket?.remoteAddress)
         : connectionParams?.["x-real-ip"] || connectionParams?.["x-forwarded-for"]
 
       const ip = parseIps(ipString)
@@ -82,10 +87,14 @@ const getContext = async (
           sub: kratosCookieRes.kratosUserId,
         }
 
-        return sessionPublicContext({
+        const context = await sessionPublicContext({
           tokenPayload,
           ip,
         })
+        return {
+          ...context,
+          cashWalletClientCapabilities,
+        }
       }
 
       const kratosToken = authz?.slice(7) as AuthToken
@@ -106,10 +115,14 @@ const getContext = async (
         return false
       }
 
-      return sessionPublicContext({
+      const context = await sessionPublicContext({
         tokenPayload,
         ip,
       })
+      return {
+        ...context,
+        cashWalletClientCapabilities,
+      }
     },
   })()
 }

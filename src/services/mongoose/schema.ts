@@ -620,6 +620,68 @@ export const WalletOnChainPendingReceive =
     WalletOnChainPendingReceiveSchema,
   )
 
+const CashWalletCutoverConfigSchema = new Schema<CashWalletCutoverConfigRecord>({
+  _id: { type: String, default: "cash_wallet_cutover" },
+  state: { type: String, enum: ["pre", "in_progress", "complete"], required: true },
+  scheduledAt: Date,
+  startedAt: Date,
+  completedAt: Date,
+  pausedAt: Date,
+  pauseReason: String,
+  updatedBy: String,
+  cutoverVersion: { type: Number, required: true, default: 1 },
+  runId: String,
+  updatedAt: { type: Date, default: Date.now },
+})
+
+export const CashWalletCutoverConfig = mongoose.model<CashWalletCutoverConfigRecord>(
+  "CashWalletCutoverConfig",
+  CashWalletCutoverConfigSchema,
+)
+
+const CashWalletMigrationSchema = new Schema<CashWalletMigrationRecord>({
+  _id: { type: String, required: true },
+  accountId: { type: String, required: true, index: true },
+  accountUuid: String,
+  legacyUsdWalletId: { type: String, required: true },
+  destinationUsdtWalletId: { type: String, required: true },
+  previousDefaultWalletId: String,
+  cutoverVersion: { type: Number, required: true, index: true },
+  runId: { type: String, required: true, index: true },
+  status: { type: String, required: true, index: true },
+  sourceBalanceUsdCents: String,
+  destinationAmountUsdtMicros: String,
+  destinationStartingBalanceUsdtMicros: String,
+  feeAmountUsdCents: String,
+  feeAmountUsdtMicros: String,
+  balanceMoveInvoicePaymentRequest: String,
+  balanceMoveInvoicePaymentHash: String,
+  balanceMovePaymentTransactionId: String,
+  feeReimbursementInvoicePaymentRequest: String,
+  feeReimbursementInvoicePaymentHash: String,
+  feeReimbursementPaymentTransactionId: String,
+  estimatedFee: Boolean,
+  idempotencyKey: { type: String, required: true },
+  attempts: { type: Number, default: 0 },
+  lastError: String,
+  lockedAt: Date,
+  lockedBy: String,
+  startedAt: Date,
+  completedAt: Date,
+  updatedAt: { type: Date, default: Date.now, index: true },
+})
+
+CashWalletMigrationSchema.index({ accountId: 1, runId: 1 }, { unique: true })
+CashWalletMigrationSchema.index({ idempotencyKey: 1 }, { unique: true })
+CashWalletMigrationSchema.index({ cutoverVersion: 1, status: 1, updatedAt: 1 })
+CashWalletMigrationSchema.index({ runId: 1, status: 1 })
+CashWalletMigrationSchema.index({ lockedAt: 1 })
+
+export const CashWalletMigration = mongoose.model<CashWalletMigrationRecord>(
+  "CashWalletMigration",
+  CashWalletMigrationSchema,
+)
+
 const BridgeVirtualAccountSchema = new Schema<IBridgeVirtualAccountRecord>({
   // unique: true enforces one VA per account at the DB layer — idempotency guard
   accountId: { type: String, required: true, unique: true },

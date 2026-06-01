@@ -1,4 +1,5 @@
 import { GT } from "@graphql/index"
+import CashWalletCutoverQuery from "@graphql/shared/root/query/cash-wallet-cutover"
 
 import AllLevelsQuery from "./root/query/all-levels"
 import LightningInvoiceQuery from "./root/query/lightning-invoice"
@@ -36,6 +37,7 @@ export const queryFields = {
     idDocumentReadUrl: IdDocumentReadUrlQuery,
     notificationTopics: NotificationTopicsQuery,
     bridgeReconciliationOrphans: BridgeReconciliationOrphansQuery,
+    cashWalletCutover: CashWalletCutoverQuery,
   },
 }
 

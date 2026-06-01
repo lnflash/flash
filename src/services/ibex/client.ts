@@ -17,6 +17,7 @@ import IbexClient, {
   PayToALnurlPayResponse201,
   SendToAddressCopyBodyParam,
   SendToAddressCopyResponse200,
+  IbexUrls,
 } from "ibex-client"
 
 import { IbexConfig } from "@config"
@@ -54,6 +55,8 @@ const Ibex = new IbexClient(
   },
   Redis,
 )
+
+const IbexUrlConfig = IbexUrls[IbexConfig.environment]
 
 const createAccount = async (
   name: string,
@@ -262,42 +265,39 @@ const getIbexToken = async (): Promise<string | IbexError> => {
   const cached = await Ibex.authentication.storage.getAccessToken()
   if (typeof cached === "string") return `${cached}`
 
-  // The SDK uses a single base URL for all calls, but the sandbox auth domain is separate
-  const resp = await fetch(`${IbexConfig.url}/auth/signin`, {
+  const body = new URLSearchParams({
+    grant_type: "client_credentials",
+    client_id: IbexConfig.clientId,
+    client_secret: IbexConfig.clientSecret,
+    audience: IbexUrlConfig.audience,
+  })
+
+  const resp = await fetch(`${IbexUrlConfig.authDomain}/oauth/token`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: IbexConfig.email, password: IbexConfig.password }),
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
   }).catch(
     (err: unknown) => new IbexError(err instanceof Error ? err : new Error(String(err))),
   )
 
   if (resp instanceof IbexError) return resp
   if (!resp.ok) {
-    const body = await resp.text().catch(() => "")
-    return new IbexError(new Error(`IBEX sign-in failed: ${resp.status} — ${body}`))
-  }
-
-  const data = (await resp.json()) as {
-    accessToken?: string
-    accessTokenExpiresAt?: number
-    refreshToken?: string
-    refreshTokenExpiresAt?: number
-  }
-  if (!data.accessToken)
-    return new IbexError(new Error("IBEX sign-in: no access token in response"))
-
-  await Ibex.authentication.storage.setAccessToken(
-    data.accessToken,
-    data.accessTokenExpiresAt,
-  )
-  if (data.refreshToken) {
-    await Ibex.authentication.storage.setRefreshToken(
-      data.refreshToken,
-      data.refreshTokenExpiresAt,
+    const responseBody = await resp.text().catch(() => "")
+    return new IbexError(
+      new Error(`IBEX token request failed: ${resp.status} — ${responseBody}`),
     )
   }
 
-  return data.accessToken as string
+  const data = (await resp.json()) as {
+    access_token?: string
+    expires_in?: number
+  }
+  if (!data.access_token)
+    return new IbexError(new Error("IBEX token request: no access_token in response"))
+
+  await Ibex.authentication.storage.setAccessToken(data.access_token, data.expires_in)
+
+  return data.access_token
 }
 
 const ibexFetch = async <T>(
@@ -305,7 +305,7 @@ const ibexFetch = async <T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T | IbexError> => {
-  const url = `${IbexConfig.url}${path}`
+  const url = `${IbexUrlConfig.hubUrl}${path}`
   const resp = await fetch(url, {
     ...init,
     headers: {
@@ -439,7 +439,10 @@ const getEthereumUsdtOption = async (): Promise<CryptoReceiveOption | IbexError>
 const getIbexCurrencyId = async (
   currency: WalletCurrency,
 ): Promise<IbexCurrencyId | IbexError> => {
-  const data = await ibexGet<{ currencies: IbexCurrency[] }>("", "/currency/all")
+  const token = await getIbexToken()
+  if (token instanceof IbexError) return token
+
+  const data = await ibexGet<{ currencies: IbexCurrency[] }>(token, "/currency/all")
   if (data instanceof IbexError) return data
   const currencyId = data.currencies.find((c) => c.name === currency)?.id
   if (!currencyId) return new IbexError(new Error(`Currency ${currency} not found`))

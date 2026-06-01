@@ -1,4 +1,5 @@
 import { Payments } from "@app"
+import { resolveCashWalletMutationWalletIdForAccount } from "@app/cash-wallet-cutover"
 import { checkedToWalletId } from "@domain/wallets"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { GT } from "@graphql/index"
@@ -9,7 +10,6 @@ import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import dedent from "dedent"
 import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 // import { RequestInit, Response } from 'node-fetch'
-import { EmailService } from "@services/email"
 
 const IntraLedgerUsdPaymentSendInput = GT.Input({
   name: "IntraLedgerUsdPaymentSendInput",
@@ -34,7 +34,11 @@ const IntraLedgerUsdPaymentSendMutation = GT.Field<null, GraphQLPublicContextAut
   args: {
     input: { type: GT.NonNull(IntraLedgerUsdPaymentSendInput) },
   },
-  resolve: async (_, args, { domainAccount }: GraphQLPublicContextAuth) => {
+  resolve: async (
+    _,
+    args,
+    { domainAccount, cashWalletClientCapabilities }: GraphQLPublicContextAuth,
+  ) => {
     const { walletId, recipientWalletId, amount, memo } = args.input
     for (const input of [walletId, recipientWalletId, amount, memo]) {
       if (input instanceof Error) {
@@ -52,11 +56,23 @@ const IntraLedgerUsdPaymentSendMutation = GT.Field<null, GraphQLPublicContextAut
       return { errors: [mapAndParseErrorForGqlResponse(recipientWalletIdChecked)] }
     }
 
+    const routedSenderWalletId = await resolveCashWalletMutationWalletIdForAccount({
+      account: domainAccount,
+      walletId: senderWalletId,
+      client: cashWalletClientCapabilities,
+    })
+    if (routedSenderWalletId instanceof Error) {
+      return {
+        status: "failed",
+        errors: [mapAndParseErrorForGqlResponse(routedSenderWalletId)],
+      }
+    }
+
     const status = await Payments.intraledgerPaymentSendWalletIdForUsdWallet({
       recipientWalletId,
       memo,
       amount,
-      senderWalletId: walletId,
+      senderWalletId: routedSenderWalletId,
       senderAccount: domainAccount,
     })
     if (status instanceof Error) {

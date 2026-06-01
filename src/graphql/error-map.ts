@@ -792,6 +792,42 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "InvalidLnurlError":
       return new InvalidLnurlError({ message: error.message, logger: baseLogger })
 
+    case "CashWalletCutoverInProgressError":
+      message = "Cash Wallet cutover is in progress. Please try again shortly."
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "CashWalletMigrationFailedError":
+      message = "Cash Wallet migration needs support review."
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "CashWalletCutoverPreflightError":
+      message = error.message
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "CashWalletCutoverTreasuryInsufficientBalanceError":
+      message = error.message
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "CashWalletMissingLegacyUsdWalletError":
+      message = "Legacy USD Cash Wallet is missing for this account."
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "CashWalletMissingUsdtWalletError":
+      message = "USDT Cash Wallet is missing for this account."
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "InvalidCashWalletCutoverAmountError":
+      message = error.message
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "InvalidCashWalletMigrationTransitionError":
+      message = error.message
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "InvalidCashWalletCutoverStateTransitionError":
+      message = error.message
+      return new ValidationInternalError({ message, logger: baseLogger })
+
     case "UnknownCaptchaError":
       message = `Unknown error occurred (code: ${error.name}${
         error.message ? ": " + error.message : ""
