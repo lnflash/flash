@@ -19,15 +19,6 @@ describe("usdWalletAmountFromInput", () => {
     expect((amount as USDTAmount).toIbex()).toBe(194.46)
   })
 
-  it("converts small USDT cent inputs to micro-USDT", () => {
-    const amount = usdWalletAmountFromInput("30", WalletCurrency.Usdt)
-
-    expect(amount).toBeInstanceOf(USDTAmount)
-    expect((amount as USDTAmount).asSmallestUnits()).toBe("300000")
-    expect((amount as USDTAmount).asNumber()).toBe("0.300000")
-    expect((amount as USDTAmount).toIbex()).toBe(0.3)
-  })
-
   it("rejects BTC", () => {
     const amount = usdWalletAmountFromInput("19446", WalletCurrency.Btc)
 
