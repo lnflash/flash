@@ -405,6 +405,10 @@ const html = `<!doctype html>
     const auditText = (audit) => {
       if (!audit) return "-"
       const cls = audit.status === "verified" ? "ok" : audit.status === "shortfall" ? "bad" : "warn"
+      if (audit.status === "loading") {
+        return '<span class="badge ' + cls + '">loading</span>' +
+          '<div class="muted">waiting for balance</div>'
+      }
       return '<span class="badge ' + cls + '">' + audit.status + '</span>' +
         '<div class="muted">delta ' + usdt(audit.finalDeltaUsdtMicros) + '</div>' +
         '<div class="muted">subsidy ' + usdt(audit.roundingSubsidyUsdtMicros) + '</div>' +
@@ -417,12 +421,22 @@ const html = `<!doctype html>
         account.usdtWallets.find((w) => w.expected) ||
         account.usdtWallets[0]
       if (!wallet) return
+      if (wallet.balance.status === "loading") {
+        account.cutoverBalanceAudit = Object.assign({}, audit, {
+          status: "loading",
+          currentDestinationBalanceUsdtMicros: 0,
+          finalDeltaUsdtMicros: 0,
+          roundingSubsidyUsdtMicros: 0,
+          shortfallUsdtMicros: 0,
+        })
+        return
+      }
       const current = wallet.balance.minorUnitsNumber
       const finalDelta = Math.max(0, current - audit.destinationStartingBalanceUsdtMicros)
       const shortfall = Math.max(0, audit.expectedMinimumUsdtMicros - finalDelta)
       const subsidy = Math.max(0, finalDelta - audit.expectedMinimumUsdtMicros)
       account.cutoverBalanceAudit = Object.assign({}, audit, {
-        status: wallet.balance.status === "loading" ? "loading" : shortfall > 0 ? "shortfall" : "verified",
+        status: shortfall > 0 ? "shortfall" : "verified",
         currentDestinationBalanceUsdtMicros: current,
         finalDeltaUsdtMicros: finalDelta,
         roundingSubsidyUsdtMicros: subsidy,
@@ -469,7 +483,8 @@ const html = `<!doctype html>
         metric("Treasury USDT", usdt(s.treasury.usdtTotalMicros)),
         metric("Customer Total", money(s.reconciliation.customerTotalCents)),
         metric("System Total", money(s.reconciliation.systemTotalCents)),
-        metric("Anomalies", s.anomalies, s.anomalies ? "bad" : "ok"),
+        metric("Run anomalies", s.watchlistAnomalies || 0, s.watchlistAnomalies ? "bad" : "ok"),
+        metric("Global anomalies", s.anomalies, s.anomalies ? "bad" : "ok"),
       ].join("")
     }
 

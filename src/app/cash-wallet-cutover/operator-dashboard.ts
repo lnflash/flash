@@ -112,6 +112,7 @@ export type CashWalletCutoverOperatorSnapshot = {
     usdTotalCents: number
     usdtTotalMicros: number
     anomalies: number
+    watchlistAnomalies: number
     canStart: boolean
     blockers: number
     watchlistAccounts: number
@@ -520,6 +521,19 @@ const computeCutoverBalanceAudit = ({
   )
   if (!destinationWallet) return undefined
 
+  if (destinationWallet.balance.status === "loading") {
+    return {
+      status: "loading",
+      sourceUsdCents,
+      expectedMinimumUsdtMicros,
+      destinationStartingBalanceUsdtMicros,
+      currentDestinationBalanceUsdtMicros: 0,
+      finalDeltaUsdtMicros: 0,
+      roundingSubsidyUsdtMicros: 0,
+      shortfallUsdtMicros: 0,
+    }
+  }
+
   const currentDestinationBalanceUsdtMicros =
     destinationWallet.balance.minorUnitsNumber
   const finalDeltaUsdtMicros = Math.max(
@@ -536,12 +550,7 @@ const computeCutoverBalanceAudit = ({
   )
 
   return {
-    status:
-      destinationWallet.balance.status === "loading"
-        ? "loading"
-        : shortfallUsdtMicros > 0
-          ? "shortfall"
-          : "verified",
+    status: shortfallUsdtMicros > 0 ? "shortfall" : "verified",
     sourceUsdCents,
     expectedMinimumUsdtMicros,
     destinationStartingBalanceUsdtMicros,
@@ -570,6 +579,20 @@ export const refreshOperatorAccountCutoverBalanceAudit = <
     account.usdtWallets[0]
   if (!destinationWallet) return account
 
+  if (destinationWallet.balance.status === "loading") {
+    return {
+      ...account,
+      cutoverBalanceAudit: {
+        ...audit,
+        status: "loading",
+        currentDestinationBalanceUsdtMicros: 0,
+        finalDeltaUsdtMicros: 0,
+        roundingSubsidyUsdtMicros: 0,
+        shortfallUsdtMicros: 0,
+      },
+    }
+  }
+
   const currentDestinationBalanceUsdtMicros =
     destinationWallet.balance.minorUnitsNumber
   const finalDeltaUsdtMicros = Math.max(
@@ -590,12 +613,7 @@ export const refreshOperatorAccountCutoverBalanceAudit = <
     ...account,
     cutoverBalanceAudit: {
       ...audit,
-      status:
-        destinationWallet.balance.status === "loading"
-          ? "loading"
-          : shortfallUsdtMicros > 0
-            ? "shortfall"
-            : "verified",
+      status: shortfallUsdtMicros > 0 ? "shortfall" : "verified",
       currentDestinationBalanceUsdtMicros,
       finalDeltaUsdtMicros,
       roundingSubsidyUsdtMicros,
@@ -915,6 +933,9 @@ export const buildCashWalletCutoverOperatorSnapshot = async ({
       usdTotalCents,
       usdtTotalMicros,
       anomalies: accounts.filter((account) => account.anomalies.length > 0).length,
+      watchlistAnomalies: accounts.filter(
+        (account) => account.watchlisted && account.anomalies.length > 0,
+      ).length,
       canStart: blockers === 0,
       blockers,
       watchlistAccounts: accounts.filter((account) => account.watchlisted).length,

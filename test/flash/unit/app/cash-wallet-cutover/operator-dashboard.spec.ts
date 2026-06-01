@@ -115,6 +115,7 @@ describe("cash wallet cutover operator dashboard", () => {
         usdTotalCents: 123,
         usdtTotalMicros: 456_000,
         anomalies: 1,
+        watchlistAnomalies: 1,
         canStart: false,
         blockers: 0,
         watchlistAccounts: 1,
@@ -435,6 +436,74 @@ describe("cash wallet cutover operator dashboard", () => {
     })
   })
 
+  it("does not report an audit shortfall while destination balances are still loading", async () => {
+    const snapshot = await buildCashWalletCutoverOperatorSnapshot({
+      manifestAccounts: [
+        {
+          index: 1,
+          accountId: "account-1" as AccountId,
+          expectedUsdWalletId: "usd-1" as WalletId,
+          expectedUsdtWalletId: "usdt-1" as WalletId,
+        },
+      ],
+      accountsRepo: {
+        findById: jest.fn(async () =>
+          account({
+            id: "account-1" as AccountId,
+            defaultWalletId: "usdt-1" as WalletId,
+          }),
+        ),
+      },
+      walletsRepo: {
+        listByAccountId: jest.fn(async () => [
+          wallet({
+            id: "usd-1" as WalletId,
+            accountId: "account-1" as AccountId,
+            currency: WalletCurrency.Usd,
+          }),
+          wallet({
+            id: "usdt-1" as WalletId,
+            accountId: "account-1" as AccountId,
+            currency: WalletCurrency.Usdt,
+          }),
+        ]),
+      },
+      migrationsRepo: {
+        getConfig: jest.fn(async () => ({
+          state: "complete" as CashWalletCutoverState,
+          cutoverVersion: 7,
+          runId: "run-7",
+          updatedAt: new Date("2026-05-26T20:00:00.000Z"),
+        })),
+        findMigrationByAccountId: jest.fn(async () => ({
+          id: "migration-1",
+          accountId: "account-1" as AccountId,
+          legacyUsdWalletId: "usd-1" as WalletId,
+          destinationUsdtWalletId: "usdt-1" as WalletId,
+          cutoverVersion: 7,
+          runId: "run-7",
+          status: "complete" as CashWalletMigrationStatus,
+          sourceBalanceUsdCents: "10",
+          destinationAmountUsdtMicros: "100000",
+          destinationStartingBalanceUsdtMicros: "0",
+          idempotencyKey: "key",
+          attempts: 1,
+          updatedAt: new Date("2026-05-26T20:00:00.000Z"),
+        })),
+      },
+      getBalanceForWallet: jest.fn(),
+      balanceMode: "structural",
+      now: new Date("2026-05-26T20:01:00.000Z"),
+    })
+
+    expect(snapshot.accounts[0].cutoverBalanceAudit).toMatchObject({
+      status: "loading",
+      finalDeltaUsdtMicros: 0,
+      roundingSubsidyUsdtMicros: 0,
+      shortfallUsdtMicros: 0,
+    })
+  })
+
   it("includes funder balances in reconciliation without adding migration rows", async () => {
     const customerUsd = USDAmount.cents(452n)
     const customerUsdt = USDTAmount.smallestUnits(45_200_00n)
@@ -601,6 +670,11 @@ describe("cash wallet cutover operator dashboard", () => {
             accountId: "global-account" as AccountId,
             currency: WalletCurrency.Usdt,
           }),
+          wallet({
+            id: "global-extra-usd" as WalletId,
+            accountId: "global-account" as AccountId,
+            currency: WalletCurrency.Usd,
+          }),
         ],
       ],
     ])
@@ -657,6 +731,8 @@ describe("cash wallet cutover operator dashboard", () => {
 
     expect(snapshot.summary.accounts).toBe(2)
     expect(snapshot.summary.watchlistAccounts).toBe(1)
+    expect(snapshot.summary.anomalies).toBe(1)
+    expect(snapshot.summary.watchlistAnomalies).toBe(0)
     expect(snapshot.accounts.map((row) => row.accountId)).toEqual([
       "watchlist-account",
       "global-account",
@@ -666,7 +742,8 @@ describe("cash wallet cutover operator dashboard", () => {
     expect(snapshot.accounts[1].watchlisted).toBe(false)
     expect(snapshot.accounts[1].expectedUsdWalletId).toBe("global-usd")
     expect(snapshot.accounts[1].expectedUsdtWalletId).toBe("global-usdt")
-    expect(snapshot.accounts[1].anomalies).not.toContain("unexpected_wallet_id")
+    expect(snapshot.accounts[1].anomalies).toContain("duplicate_usd")
+    expect(snapshot.accounts[1].anomalies).toContain("unexpected_wallet_id")
   })
 
   it("retries transient balance read errors before marking a wallet anomalous", async () => {
