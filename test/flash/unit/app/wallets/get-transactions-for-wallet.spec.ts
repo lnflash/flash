@@ -28,20 +28,69 @@ const wallet = ({ id, currency }: { id: string; currency: WalletCurrency }): Wal
   }) as Wallet
 
 describe("toWalletTransactions", () => {
-  it("maps IBEX USDT currency id to USDT wallet currency", () => {
-    const [transaction] = toWalletTransactions([
+  it("maps IBEX USDT currency id to USDT wallet currency with integer micros", () => {
+    const transactions = toWalletTransactions([
       {
-        id: "trx-id",
+        id: "trx-id-1",
         accountId: "wallet-id",
-        amount: 19446,
+        amount: 0.17531,
+        currencyId: 29,
+        transactionTypeId: 1,
+        createdAt: "2026-05-13T00:00:00.000Z",
+      },
+      {
+        id: "trx-id-2",
+        accountId: "wallet-id",
+        amount: 9.824690376349,
         currencyId: 29,
         transactionTypeId: 1,
         createdAt: "2026-05-13T00:00:00.000Z",
       },
     ] as GResponse200)
 
+    expect(transactions).toHaveLength(2)
+    expect(transactions[0].settlementCurrency).toBe(WalletCurrency.Usdt)
+    expect(transactions[0].settlementAmount).toBe(175_310)
+    expect(transactions[1].settlementAmount).toBe(9_824_690)
+    expect(
+      transactions.reduce((sum, transaction) => sum + transaction.settlementAmount, 0),
+    ).toBe(10_000_000)
+  })
+
+  it("maps IBEX USDT send amounts to negative integer micros", () => {
+    const [transaction] = toWalletTransactions([
+      {
+        id: "trx-id",
+        accountId: "wallet-id",
+        amount: 0.5,
+        networkFee: 0.000001,
+        currencyId: 29,
+        transactionTypeId: 2,
+        createdAt: "2026-05-13T00:00:00.000Z",
+      },
+    ] as GResponse200)
+
     expect(transaction.settlementCurrency).toBe(WalletCurrency.Usdt)
-    expect(transaction.settlementAmount).toBe(19446)
+    expect(transaction.settlementAmount).toBe(-500_000)
+    expect(transaction.settlementFee).toBe(1)
+  })
+
+  it("keeps IBEX USD amounts in integer cents", () => {
+    const [transaction] = toWalletTransactions([
+      {
+        id: "trx-id",
+        accountId: "wallet-id",
+        amount: 500,
+        networkFee: 12,
+        currencyId: 3,
+        transactionTypeId: 1,
+        createdAt: "2026-05-13T00:00:00.000Z",
+      },
+    ] as GResponse200)
+
+    expect(transaction.settlementCurrency).toBe(WalletCurrency.Usd)
+    expect(transaction.settlementAmount).toBe(500)
+    expect(transaction.settlementFee).toBe(12)
   })
 
   it("does not silently classify unknown IBEX currency ids as BTC", () => {

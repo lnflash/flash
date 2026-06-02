@@ -4,7 +4,7 @@ import Ibex from "@services/ibex/client"
 import { IbexError } from "@services/ibex/errors"
 import { baseLogger } from "@services/logger"
 import { GResponse200 } from "ibex-client"
-import { ConnectionArguments, ConnectionCursor } from "graphql-relay"
+import { ConnectionArguments } from "graphql-relay"
 
 export const getTransactionsForWallets = async ({
   wallets,
@@ -77,7 +77,7 @@ export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] 
     const baseTrx: BaseWalletTransaction = {
       walletId: (trx.accountId || "") as WalletId, 
       settlementAmount: toSettlementAmount(trx.amount, trx.transactionTypeId, currency),
-      settlementFee: asCurrency(trx.networkFee, currency),
+      settlementFee: toSettlementMinorUnit(trx.networkFee, currency),
       settlementCurrency: currency, 
       settlementDisplayAmount: `${trx.amount}`, 
       settlementDisplayFee: `${trx.networkFee}`, 
@@ -118,24 +118,41 @@ export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] 
   })
 }
 
-const asCurrency = (amount: number | undefined, currency: WalletCurrency): Satoshis | UsdCents => {
-  return currency === "USD" ? amount as UsdCents : amount as Satoshis
+type SettlementMinorUnitAmount = Satoshis | UsdCents | UsdtMicros
+
+const toUsdtMicros = (amount: number): UsdtMicros => {
+  const usdtAmount = USDTAmount.fromNumber(amount.toString())
+  if (usdtAmount instanceof Error) {
+    baseLogger.error(`Failed to parse IBEX USDT amount. { amount: ${amount} }`)
+    return 0 as UsdtMicros
+  }
+  return Number(usdtAmount.asSmallestUnits()) as UsdtMicros
+}
+
+const toSettlementMinorUnit = (
+  amount: number | undefined,
+  currency: WalletCurrency,
+): SettlementMinorUnitAmount => {
+  if (amount === undefined) return amount as unknown as SettlementMinorUnitAmount
+  if (currency === WalletCurrency.Usd) return amount as UsdCents
+  if (currency === WalletCurrency.Usdt) return toUsdtMicros(amount)
+  return amount as Satoshis
 }
 
 const toSettlementAmount = (
   ibexAmount: number | undefined, 
   transactionTypeId: number | undefined, 
   currency: WalletCurrency
-): Satoshis | UsdCents => {
+): SettlementMinorUnitAmount => {
   if (ibexAmount === undefined) {
     baseLogger.warn("Ibex did not return transaction amount")
-    return asCurrency(ibexAmount, currency) 
+    return toSettlementMinorUnit(ibexAmount, currency)
   }
   // When sending, make negative
   const amt = (transactionTypeId === 2 || transactionTypeId === 4) 
     ? -1 * ibexAmount 
     : ibexAmount
-  return asCurrency(amt, currency)
+  return toSettlementMinorUnit(amt, currency)
 }
 
 enum SortOrder {
