@@ -141,11 +141,6 @@ export const CashWalletCutoverRepository = () => {
       return parseRepositoryError(err)
     }
   }
-      return resultToConfig(result)
-    } catch (err) {
-      return parseRepositoryError(err)
-    }
-  }
 
   const upsertMigration = async (
     args: UpsertMigrationArgs,
