@@ -1,6 +1,7 @@
 import dedent from "dedent"
 
 import { Wallets } from "@app"
+import { resolveCashWalletRecipientMutationWalletId } from "@app/cash-wallet-cutover"
 
 import { GT } from "@graphql/index"
 import Memo from "@graphql/shared/types/scalar/memo"
@@ -36,7 +37,10 @@ const LnUsdInvoiceCreateOnBehalfOfRecipientInput = GT.Input({
   }),
 })
 
-const LnUsdInvoiceCreateOnBehalfOfRecipientMutation = GT.Field({
+const LnUsdInvoiceCreateOnBehalfOfRecipientMutation = GT.Field<
+  null,
+  GraphQLPublicContext
+>({
   extensions: {
     complexity: 120,
   },
@@ -48,7 +52,7 @@ const LnUsdInvoiceCreateOnBehalfOfRecipientMutation = GT.Field({
   args: {
     input: { type: GT.NonNull(LnUsdInvoiceCreateOnBehalfOfRecipientInput) },
   },
-  resolve: async (_, args) => {
+  resolve: async (_, args, { cashWalletClientCapabilities }) => {
     const { recipientWalletId, amount, memo, descriptionHash, expiresIn } = args.input
     for (const input of [recipientWalletId, amount, memo, descriptionHash, expiresIn]) {
       if (input instanceof Error) {
@@ -56,8 +60,16 @@ const LnUsdInvoiceCreateOnBehalfOfRecipientMutation = GT.Field({
       }
     }
 
-    const invoice = await Wallets.addInvoiceForRecipientForUsdWallet({
+    const routedRecipientWalletId = await resolveCashWalletRecipientMutationWalletId({
       recipientWalletId,
+      client: cashWalletClientCapabilities,
+    })
+    if (routedRecipientWalletId instanceof Error) {
+      return { errors: [mapAndParseErrorForGqlResponse(routedRecipientWalletId)] }
+    }
+
+    const invoice = await Wallets.addInvoiceForRecipientForUsdWallet({
+      recipientWalletId: routedRecipientWalletId,
       amount,
       memo,
       descriptionHash,

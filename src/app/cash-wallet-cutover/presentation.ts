@@ -59,7 +59,30 @@ export const resolveCashWalletPresentation = ({
   }
 }
 
-export const cashWalletTransactionWalletIdsForPresentation = ({
+const cashWalletHistoryWalletIds = ({
+  selectedWalletIds,
+  presentation,
+}: {
+  selectedWalletIds: WalletId[]
+  presentation: CashWalletPresentationResult
+}): WalletId[] => {
+  const { legacyUsdWallet, activeSettlementWallet } = presentation
+  if (!legacyUsdWallet) return Array.from(new Set(selectedWalletIds))
+
+  const cashWalletIds = new Set([legacyUsdWallet.id, activeSettlementWallet.id])
+
+  return Array.from(
+    new Set(
+      selectedWalletIds.flatMap((walletId) =>
+        cashWalletIds.has(walletId)
+          ? [activeSettlementWallet.id, legacyUsdWallet.id]
+          : [walletId],
+      ),
+    ),
+  )
+}
+
+export const cashWalletHistoryWalletIdsForPresentation = ({
   walletIds,
   presentation,
 }: {
@@ -68,15 +91,33 @@ export const cashWalletTransactionWalletIdsForPresentation = ({
 }): WalletId[] => {
   const selectedWalletIds = walletIds ?? presentation.wallets.map((wallet) => wallet.id)
 
-  if (!presentation.legacyUsdWallet) return selectedWalletIds
+  return cashWalletHistoryWalletIds({ selectedWalletIds, presentation })
+}
 
-  return Array.from(
-    new Set(
-      selectedWalletIds.map((walletId) =>
-        walletId === presentation.legacyUsdWallet?.id
-          ? presentation.activeSettlementWallet.id
-          : walletId,
-      ),
-    ),
+export const cashWalletHistoryWalletsForPresentation = ({
+  wallets,
+  presentation,
+}: {
+  wallets: Wallet[]
+  presentation: CashWalletPresentationResult
+}): Wallet[] => {
+  const historyWalletIds = cashWalletHistoryWalletIds({
+    selectedWalletIds: wallets.map((wallet) => wallet.id),
+    presentation,
+  })
+
+  const walletById = new Map(
+    [
+      ...presentation.wallets,
+      presentation.legacyUsdWallet,
+      presentation.activeSettlementWallet,
+      ...wallets,
+    ]
+      .filter((wallet): wallet is Wallet => Boolean(wallet))
+      .map((wallet) => [wallet.id, wallet]),
   )
+
+  return historyWalletIds
+    .map((walletId) => walletById.get(walletId))
+    .filter((wallet): wallet is Wallet => Boolean(wallet))
 }

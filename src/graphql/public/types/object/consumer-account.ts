@@ -1,6 +1,6 @@
 import { Accounts, Prices } from "@app"
 import {
-  cashWalletTransactionWalletIdsForPresentation,
+  cashWalletHistoryWalletIdsForPresentation,
   resolveCashWalletPresentationForAccount,
 } from "@app/cash-wallet-cutover"
 
@@ -175,7 +175,7 @@ const ConsumerAccount = GT.Object<Account, GraphQLPublicContextAuth>({
 
         let { walletIds } = args
 
-        walletIds = cashWalletTransactionWalletIdsForPresentation({
+        walletIds = cashWalletHistoryWalletIdsForPresentation({
           walletIds,
           presentation,
         })
