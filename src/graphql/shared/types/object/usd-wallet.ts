@@ -21,6 +21,7 @@ import SignedAmount from "../scalar/signed-amount"
 import OnChainAddress from "../scalar/on-chain-address"
 import Lnurl from "../scalar/lnurl"
 
+import { resolveCashWalletHistoryWalletsForWalletObject } from "./cash-wallet-history"
 import { TransactionConnection } from "./transaction"
 
 export const usdtMicrosToUsdCents = (usdtMicros: bigint | number | string): number => {
@@ -108,14 +109,19 @@ const UsdWallet = GT.Object<Wallet>({
     transactions: {
       type: TransactionConnection,
       args: connectionArgs,
-      resolve: async (source, args) => {
+      resolve: async (source, args, ctx) => {
         const paginationArgs = checkedConnectionArgs(args)
         if (paginationArgs instanceof Error) {
           throw paginationArgs
         }
 
+        const wallets = await resolveCashWalletHistoryWalletsForWalletObject({
+          source,
+          ctx,
+        })
+
         const { result, error } = await Wallets.getTransactionsForWallets({
-          wallets: [source],
+          wallets,
           paginationArgs,
         })
         if (error instanceof Error) {
@@ -141,7 +147,7 @@ const UsdWallet = GT.Object<Wallet>({
           description: "Returns the items that include this address.",
         },
       },
-      resolve: async (source, args) => {
+      resolve: async (source, args, ctx) => {
         const paginationArgs = checkedConnectionArgs(args)
         if (paginationArgs instanceof Error) {
           throw paginationArgs
@@ -150,8 +156,13 @@ const UsdWallet = GT.Object<Wallet>({
         const { address } = args
         if (address instanceof Error) throw address
 
+        const wallets = await resolveCashWalletHistoryWalletsForWalletObject({
+          source,
+          ctx,
+        })
+
         const { result, error } = await Wallets.getTransactionsForWalletsByAddresses({
-          wallets: [source],
+          wallets,
           addresses: [address],
           paginationArgs,
         })
