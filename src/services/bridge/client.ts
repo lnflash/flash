@@ -312,8 +312,6 @@ export interface BridgeWebhookEvent {
 }
 
 export interface ListEventsParams {
-  start_date?: string
-  end_date?: string
   event_type?: string
   after?: string
   page_size?: number
@@ -563,16 +561,24 @@ export class BridgeClient {
 export default new BridgeClient()
 
 export async function* listAllEvents(
-  params?: Omit<ListEventsParams, "after">,
+  params?: Omit<ListEventsParams, "after"> & { start?: string; end?: string },
 ): AsyncGenerator<BridgeWebhookEvent> {
   const client = new BridgeClient()
+  const startMs = params?.start ? new Date(params.start).getTime() : -Infinity
+  const endMs = params?.end ? new Date(params.end).getTime() : Infinity
+
+  // Strip start/end — Bridge /webhook_events only supports cursor params; filter locally.
+  const { start: _s, end: _e, ...apiParams } = params ?? {}
 
   let cursor: string | undefined
   do {
-    const page = await client.listEvents({ ...params, after: cursor, page_size: 100 })
+    const page = await client.listEvents({ ...apiParams, after: cursor, page_size: 100 })
 
     for (const event of page.data) {
-      yield event
+      const eventMs = new Date(event.created_at).getTime()
+      if (eventMs >= startMs && eventMs <= endMs) {
+        yield event
+      }
     }
 
     cursor = page.has_more ? page.cursor : undefined

@@ -119,30 +119,34 @@ describe("listAllEvents", () => {
     )
   })
 
-  it("forwards start_date, end_date and event_type filters to every page", async () => {
-    listEventsSpy
-      .mockResolvedValueOnce({ data: [makeEvent("e1")], has_more: true, cursor: "c1" })
-      .mockResolvedValueOnce({
-        data: [makeEvent("e2")],
-        has_more: false,
-        cursor: undefined,
-      })
+  it("filters events locally by start/end window and does not forward start/end to Bridge API", async () => {
+    const inWindow = makeEvent("e1") // created_at: "2026-05-01T10:00:00Z" — inside window
+    const tooEarly = { ...makeEvent("e2"), created_at: "2026-04-30T23:59:59Z" }
 
-    const params = {
-      start_date: "2026-05-01T00:00:00Z",
-      end_date: "2026-05-02T00:00:00Z",
-      event_type: "transfer.completed",
-    }
+    listEventsSpy
+      .mockResolvedValueOnce({ data: [inWindow, tooEarly], has_more: true, cursor: "c1" })
+      .mockResolvedValueOnce({ data: [makeEvent("e3")], has_more: false, cursor: undefined })
 
     const drained: BridgeWebhookEvent[] = []
-    for await (const event of listAllEvents(params)) {
+    for await (const event of listAllEvents({
+      start: "2026-05-01T00:00:00Z",
+      end: "2026-05-02T00:00:00Z",
+      event_type: "transfer.completed",
+    })) {
       drained.push(event)
     }
 
-    expect(drained).toHaveLength(2)
+    // e2 is before the window start — only e1 and e3 pass through
+    expect(drained.map((e) => e.id)).toEqual(["e1", "e3"])
     expect(listEventsSpy).toHaveBeenCalledTimes(2)
     for (const call of listEventsSpy.mock.calls) {
-      expect(call[0]).toMatchObject(params)
+      // start/end must NOT be sent to Bridge — it only understands cursor params
+      expect(call[0]).not.toHaveProperty("start")
+      expect(call[0]).not.toHaveProperty("end")
+      expect(call[0]).not.toHaveProperty("start_date")
+      expect(call[0]).not.toHaveProperty("end_date")
+      // event_type is still forwarded (mapped to category inside listEvents)
+      expect(call[0]).toMatchObject({ event_type: "transfer.completed" })
     }
   })
 

@@ -12,7 +12,7 @@ jest.mock("@services/logger", () => ({
 }))
 
 jest.mock("@services/mongoose/bridge-replay-log", () => ({
-  createBridgeReplayLog: jest.fn(),
+  createBridgeReplay: jest.fn(),
 }))
 
 jest.mock("@services/bridge/webhook-server/routes/deposit", () => ({
@@ -173,7 +173,7 @@ describe("replayHandler", () => {
     ]
 
     beforeEach(() => {
-      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue({ id: "log-001" })
+      ;(ReplayLog.createBridgeReplay as jest.Mock).mockResolvedValue({ id: "log-001" })
     })
 
     it("routes outbound withdrawal payment_processed replay to transfer handler", async () => {
@@ -182,7 +182,7 @@ describe("replayHandler", () => {
         ;(res.json as jest.Mock)({ status: "success" })
         return Promise.resolve(res)
       })
-      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue({ id: "log-wd-001" })
+      ;(ReplayLog.createBridgeReplay as jest.Mock).mockResolvedValue({ id: "log-wd-001" })
 
       const res = makeRes()
       await replayHandler(
@@ -227,7 +227,7 @@ describe("replayHandler", () => {
 
   describe("dry_run mode", () => {
     it("returns 200 without calling any handler", async () => {
-      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue({
+      ;(ReplayLog.createBridgeReplay as jest.Mock).mockResolvedValue({
         id: "log-dry-001",
       })
 
@@ -241,20 +241,20 @@ describe("replayHandler", () => {
     })
 
     it("persists a dry-run log entry with httpStatus 0", async () => {
-      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue({
+      ;(ReplayLog.createBridgeReplay as jest.Mock).mockResolvedValue({
         id: "log-dry-002",
       })
 
       const res = makeRes()
       await replayHandler(makeReq({ ...BASE_BODY, dry_run: true }), res)
 
-      expect(ReplayLog.createBridgeReplayLog).toHaveBeenCalledWith(
+      expect(ReplayLog.createBridgeReplay).toHaveBeenCalledWith(
         expect.objectContaining({ httpStatus: 0, dryRun: true }),
       )
     })
 
     it("returns 500 when dry-run log creation fails", async () => {
-      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue(
+      ;(ReplayLog.createBridgeReplay as jest.Mock).mockResolvedValue(
         new Error("db error"),
       )
 
@@ -277,7 +277,7 @@ describe("replayHandler", () => {
     })
 
     it("returns the handler's status code and response body", async () => {
-      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue({
+      ;(ReplayLog.createBridgeReplay as jest.Mock).mockResolvedValue({
         id: "log-live-001",
       })
 
@@ -290,14 +290,14 @@ describe("replayHandler", () => {
     })
 
     it("persists a replay log with triage context (operator + time window)", async () => {
-      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue({
+      ;(ReplayLog.createBridgeReplay as jest.Mock).mockResolvedValue({
         id: "log-live-002",
       })
 
       const res = makeRes()
       await replayHandler(makeReq(BASE_BODY), res)
 
-      expect(ReplayLog.createBridgeReplayLog).toHaveBeenCalledWith(
+      expect(ReplayLog.createBridgeReplay).toHaveBeenCalledWith(
         expect.objectContaining({
           operator: "ops@example.com",
           timeWindowStart: new Date("2026-05-01T00:00:00Z"),
@@ -310,7 +310,7 @@ describe("replayHandler", () => {
     })
 
     it("includes log_id in the response so ops can trace the replay", async () => {
-      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue({
+      ;(ReplayLog.createBridgeReplay as jest.Mock).mockResolvedValue({
         id: "log-trace-007",
       })
 
@@ -322,7 +322,7 @@ describe("replayHandler", () => {
     })
 
     it("returns 500 when log creation fails after a successful handler run", async () => {
-      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue(
+      ;(ReplayLog.createBridgeReplay as jest.Mock).mockResolvedValue(
         new Error("mongo down"),
       )
 
@@ -340,7 +340,7 @@ describe("replayHandler", () => {
           return Promise.resolve(res)
         },
       )
-      ;(ReplayLog.createBridgeReplayLog as jest.Mock).mockResolvedValue({ id: "log-4xx" })
+      ;(ReplayLog.createBridgeReplay as jest.Mock).mockResolvedValue({ id: "log-4xx" })
 
       const res = makeRes()
       await replayHandler(makeReq(BASE_BODY), res)
