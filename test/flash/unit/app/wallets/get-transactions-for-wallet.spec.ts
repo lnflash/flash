@@ -12,6 +12,7 @@ import {
 import { WalletCurrency } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
 import Ibex from "@services/ibex/client"
+import { baseLogger } from "@services/logger"
 import { GResponse200 } from "ibex-client"
 
 const accountId = "account-id" as AccountId
@@ -73,6 +74,45 @@ describe("toWalletTransactions", () => {
     expect(transaction.settlementCurrency).toBe(WalletCurrency.Usdt)
     expect(transaction.settlementAmount).toBe(-500_000)
     expect(transaction.settlementFee).toBe(1)
+  })
+
+  it("defaults omitted IBEX USDT amount and network fee to zero micros", () => {
+    const [transaction] = toWalletTransactions([
+      {
+        id: "trx-id",
+        accountId: "wallet-id",
+        currencyId: 29,
+        transactionTypeId: 1,
+        createdAt: "2026-05-13T00:00:00.000Z",
+      },
+    ] as GResponse200)
+
+    expect(transaction.settlementCurrency).toBe(WalletCurrency.Usdt)
+    expect(transaction.settlementAmount).toBe(0)
+    expect(transaction.settlementFee).toBe(0)
+  })
+
+  it("logs USDT conversion errors with error details", () => {
+    const errorSpy = jest.spyOn(baseLogger, "error").mockImplementation()
+
+    const [transaction] = toWalletTransactions([
+      {
+        id: "trx-id",
+        accountId: "wallet-id",
+        amount: Number.NaN,
+        currencyId: 29,
+        transactionTypeId: 1,
+        createdAt: "2026-05-13T00:00:00.000Z",
+      },
+    ] as GResponse200)
+
+    expect(transaction.settlementAmount).toBe(0)
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error), amount: expect.any(Number) }),
+      "Failed to parse IBEX USDT amount",
+    )
+
+    errorSpy.mockRestore()
   })
 
   it("keeps IBEX USD amounts in integer cents", () => {

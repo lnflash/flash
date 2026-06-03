@@ -123,17 +123,25 @@ type SettlementMinorUnitAmount = Satoshis | UsdCents | UsdtMicros
 const toUsdtMicros = (amount: number): UsdtMicros => {
   const usdtAmount = USDTAmount.fromNumber(amount.toString())
   if (usdtAmount instanceof Error) {
-    baseLogger.error(`Failed to parse IBEX USDT amount. { amount: ${amount} }`)
+    baseLogger.error({ err: usdtAmount, amount }, "Failed to parse IBEX USDT amount")
     return 0 as UsdtMicros
   }
   return Number(usdtAmount.asSmallestUnits()) as UsdtMicros
+}
+
+const zeroSettlementMinorUnit = (
+  currency: WalletCurrency,
+): SettlementMinorUnitAmount => {
+  if (currency === WalletCurrency.Usd) return 0 as UsdCents
+  if (currency === WalletCurrency.Usdt) return 0 as UsdtMicros
+  return 0 as Satoshis
 }
 
 const toSettlementMinorUnit = (
   amount: number | undefined,
   currency: WalletCurrency,
 ): SettlementMinorUnitAmount => {
-  if (amount === undefined) return amount as unknown as SettlementMinorUnitAmount
+  if (amount === undefined) return zeroSettlementMinorUnit(currency)
   if (currency === WalletCurrency.Usd) return amount as UsdCents
   if (currency === WalletCurrency.Usdt) return toUsdtMicros(amount)
   return amount as Satoshis
