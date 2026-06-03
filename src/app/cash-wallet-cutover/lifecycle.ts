@@ -97,7 +97,7 @@ export const startPrimaryCashWalletCutover = async ({
   if (runnable instanceof Error) return runnable
   if (runnable.length === 0) {
     return new CashWalletCutoverPreflightError(
-      "Cash wallet cutover has no prepared migrations for this run",
+      `Cash wallet cutover has no runnable migrations for runId=${runId} cutoverVersion=${cutoverVersion}. Run 'prepare' before starting.`,
     )
   }
 
