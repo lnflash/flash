@@ -33,6 +33,7 @@ type BridgeWebhookPublicKeys = {
   kyc: string
   deposit: string
   transfer: string
+  external_account: string
 }
 
 type BridgeWebhook = {
