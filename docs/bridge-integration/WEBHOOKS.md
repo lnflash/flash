@@ -4,11 +4,12 @@ Flash receives real-time updates from Bridge.xyz via webhooks. These webhooks ar
 
 ## Webhook Endpoint
 
-The webhook server listens on the configured port (default: `3005`) and expects POST requests at the following endpoints:
+The webhook server listens on the configured port (default: `4009`) and expects POST requests at the following endpoints:
 
--   `POST /bridge/webhooks/kyc`
--   `POST /bridge/webhooks/deposit`
--   `POST /bridge/webhooks/transfer`
+-   `POST /kyc`
+-   `POST /deposit`
+-   `POST /transfer`
+-   `POST /external-account`
 
 ## Signature Verification
 
@@ -16,11 +17,14 @@ All incoming webhooks from Bridge.xyz are signed using asymmetric RSA-SHA256. Fl
 
 ### Verification Process
 
-1.  Retrieve the signature from the `Bridge-Signature` header.
-2.  Retrieve the timestamp from the `Bridge-Timestamp` header.
+1.  Retrieve the signature header from `X-Webhook-Signature`.
+2.  Parse the timestamp and signature from the header format: `t=<timestamp_ms>,v0=<base64_signature>`.
 3.  Verify that the timestamp is within the allowed skew (default: 5 minutes) to prevent replay attacks.
-4.  Construct the signed payload by concatenating the timestamp and the raw request body: `timestamp + "." + rawBody`.
-5.  Verify the signature against the signed payload using the appropriate public key (KYC, Deposit, or Transfer).
+4.  Construct the signed payload by concatenating the timestamp and the exact raw request body: `timestamp + "." + rawBody`.
+5.  Hash the signed payload with SHA-256.
+6.  Verify the Base64 `v0` signature against that digest using RSA-SHA256 and the appropriate Bridge public key (KYC, Deposit, Transfer, or External Account).
+
+Flash must verify against the raw body captured before JSON parsing. Re-serializing the parsed JSON body changes the signed bytes and must fail signature verification.
 
 ## Event Types
 
