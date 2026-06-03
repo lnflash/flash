@@ -4,7 +4,7 @@ import Ibex from "@services/ibex/client"
 import { IbexError } from "@services/ibex/errors"
 import { baseLogger } from "@services/logger"
 import { GResponse200 } from "ibex-client"
-import { ConnectionArguments } from "graphql-relay"
+import { ConnectionArguments, ConnectionCursor } from "graphql-relay"
 
 export const getTransactionsForWallets = async ({
   wallets,
