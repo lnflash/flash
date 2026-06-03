@@ -2,6 +2,7 @@ import { CashWalletCutoverRepository } from "@services/mongoose"
 
 import {
   CashWalletCutoverInProgressError,
+  CashWalletCutoverPreflightError,
   CashWalletMigrationFailedError,
   InvalidCashWalletCutoverStateTransitionError,
 } from "./errors"
@@ -85,6 +86,18 @@ export const startPrimaryCashWalletCutover = async ({
     if (config.runId === runId && config.cutoverVersion === cutoverVersion) return config
     return new CashWalletCutoverInProgressError(
       "Cash wallet cutover is already in progress",
+    )
+  }
+
+  const runnable = await migrationsRepo.listRunnableMigrations({
+    cutoverVersion,
+    runId,
+    limit: 1,
+  })
+  if (runnable instanceof Error) return runnable
+  if (runnable.length === 0) {
+    return new CashWalletCutoverPreflightError(
+      `Cash wallet cutover has no runnable migrations for runId=${runId} cutoverVersion=${cutoverVersion}. Run 'prepare' before starting.`,
     )
   }
 
