@@ -58,7 +58,7 @@ export class BridgeInsufficientFundsError extends BridgeError {
 }
 
 export class BridgeAccountLevelError extends BridgeError {
-  constructor(message: string = "Bridge requires at least a Basic account (Level 1+)") {
+  constructor(message: string = "Bridge requires at least a Personal account (Level 1+)") {
     super(message)
   }
 }
