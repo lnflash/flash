@@ -14,7 +14,11 @@ export const createBridgeDeposit = async (data: {
   destinationTxHash?: string
 }): Promise<{ id: string } | Error> => {
   try {
-    const log = await BridgeDeposits.create(data)
+    const log = await BridgeDeposits.findOneAndUpdate(
+      { eventId: data.eventId },
+      { $setOnInsert: data },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    )
     return { id: log._id.toString() }
   } catch (error) {
     return error instanceof Error ? error : new Error(String(error))

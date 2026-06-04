@@ -11,6 +11,7 @@ import { LockService } from "@services/lock"
 import { baseLogger } from "@services/logger"
 import { createBridgeDeposit } from "@services/mongoose/bridge-deposit-log"
 import { reconcileByTxHash } from "@services/bridge/reconciliation"
+import { writeBridgeDepositRequest } from "@services/frappe/BridgeTransferRequestWriter"
 
 export const depositHandler = async (req: Request, res: Response) => {
   const { event_id, event_object } = req.body
@@ -70,19 +71,32 @@ export const depositHandler = async (req: Request, res: Response) => {
       return res.status(500).json({ error: "Failed to persist deposit log" })
     }
 
-    // Idempotency: lock on event_id after successful DB write — aligns with the DB unique
-    // constraint on eventId and ensures Bridge retries are not blocked on transient failures
+    if (state === "payment_processed" && receipt?.destination_tx_hash) {
+      reconcileByTxHash({ txHash: receipt.destination_tx_hash }).catch((err) =>
+        baseLogger.error({ err, event_id, id }, "Real-time reconciliation failed"),
+      )
+    }
+
+    const auditResult = await writeBridgeDepositRequest({
+      eventId: event_id,
+      eventObject: event_object,
+      rawPayload: req.body,
+    })
+    if (auditResult instanceof Error) {
+      baseLogger.error(
+        { error: auditResult, event_id, id },
+        "Failed to persist Bridge deposit ERPNext audit row",
+      )
+      return res.status(500).json({ error: "Failed to persist ERPNext audit row" })
+    }
+
+    // Idempotency: mark processed only after local and ERPNext writes succeed, so
+    // provider retries can recover audit gaps after transient ERPNext failures.
     const lockKey = `bridge-deposit:${event_id}`
     const lockResult = await LockService().lockIdempotencyKey(lockKey as IdempotencyKey)
     if (lockResult instanceof Error) {
       baseLogger.info({ event_id, id, state }, "Duplicate Bridge deposit webhook")
       return res.status(200).json({ status: "already_processed" })
-    }
-
-    if (state === "payment_processed" && receipt?.destination_tx_hash) {
-      reconcileByTxHash({ txHash: receipt.destination_tx_hash }).catch((err) =>
-        baseLogger.error({ err, event_id, id }, "Real-time reconciliation failed"),
-      )
     }
 
     return res.status(200).json({ status: "success" })

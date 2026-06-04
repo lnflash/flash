@@ -14,6 +14,7 @@ import {
   BanksQueryError,
   BankAccountQueryError,
   SetDocTypeValueError,
+  BridgeTransferRequestUpsertError,
 } from "./errors"
 import {
   AccountUpgradeRequest,
@@ -21,6 +22,7 @@ import {
 } from "./models/AccountUpgradeRequest"
 import { Bank } from "./models/Bank"
 import { BankAccount } from "./models/BankAccount"
+import { BridgeTransferRequest } from "./models/BridgeTransferRequest"
 import { Filter } from "./SearchFilters"
 
 export type AccountUpgradeRequestFilters = { username?: Filter, status?: Filter }
@@ -37,7 +39,7 @@ const erpUsd = (usd: USDAmount): number => Number(usd.asCents(2))
 
 export type CashoutId = string & { readonly brand: unique symbol }
 
-class ErpNext {
+export class ErpNext {
   url: string
   headers: Record<string, string>
 
@@ -239,6 +241,93 @@ class ErpNext {
       recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
       return new BanksQueryError(err)
     }
+  }
+
+  async upsertBridgeTransferRequest(
+    request: BridgeTransferRequest,
+  ): Promise<true | BridgeTransferRequestUpsertError> {
+    const payload = request.toErpnext()
+    const requestId = payload.request_id
+
+    try {
+      const existingName = await this.findBridgeTransferRequestName(requestId)
+      if (existingName instanceof BridgeTransferRequestUpsertError) return existingName
+
+      if (existingName) {
+        await axios.put(
+          `${this.url}/api/resource/${encodeURIComponent(BridgeTransferRequest.doctype)}/${encodeURIComponent(existingName)}`,
+          payload,
+          { headers: this.headers },
+        )
+        return true
+      }
+
+      try {
+        await axios.post(
+          `${this.url}/api/resource/${BridgeTransferRequest.doctype}`,
+          payload,
+          { headers: this.headers },
+        )
+        return true
+      } catch (err) {
+        if (!this.isDuplicateRequestError(err)) throw err
+
+        const racedName = await this.findBridgeTransferRequestName(requestId)
+        if (racedName instanceof BridgeTransferRequestUpsertError) return racedName
+        if (!racedName) throw err
+
+        await axios.put(
+          `${this.url}/api/resource/${encodeURIComponent(BridgeTransferRequest.doctype)}/${encodeURIComponent(racedName)}`,
+          payload,
+          { headers: this.headers },
+        )
+        return true
+      }
+    } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error(
+        { err, responseData, requestId },
+        "Error upserting Bridge Transfer Request in ERPNext",
+      )
+      recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
+      return new BridgeTransferRequestUpsertError(err)
+    }
+  }
+
+  private async findBridgeTransferRequestName(
+    requestId: string,
+  ): Promise<string | undefined | BridgeTransferRequestUpsertError> {
+    try {
+      const filters = JSON.stringify([
+        [BridgeTransferRequest.doctype, "request_id", "=", requestId],
+      ])
+      const fields = JSON.stringify(["name"])
+      const resp = await axios.get(
+        `${this.url}/api/resource/${encodeURIComponent(BridgeTransferRequest.doctype)}`,
+        {
+          params: { filters, fields, limit_page_length: 1 },
+          headers: this.headers,
+        },
+      )
+
+      return resp.data?.data?.[0]?.name
+    } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error(
+        { err, responseData, requestId },
+        "Error querying Bridge Transfer Request from ERPNext",
+      )
+      recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
+      return new BridgeTransferRequestUpsertError(err)
+    }
+  }
+
+  private isDuplicateRequestError(err: unknown): boolean {
+    if (!isAxiosError(err)) return false
+    const status = err.response?.status
+    const responseData = err.response?.data
+    const message = JSON.stringify(responseData ?? err.message).toLowerCase()
+    return status === 409 || message.includes("duplicate") || message.includes("unique")
   }
 }
 
