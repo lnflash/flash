@@ -15,10 +15,19 @@ jest.mock("@app/bridge/send-withdrawal-notification", () => ({
   sendBridgeWithdrawalNotificationBestEffort: jest.fn().mockResolvedValue(undefined),
 }))
 
+jest.mock("@services/frappe/BridgeTransferRequestWriter", () => ({
+  writeBridgeCashoutCompleted: jest.fn(),
+  writeBridgeCashoutFailed: jest.fn(),
+}))
+
 import { Request, Response } from "express"
 import { LockService } from "@services/lock"
 import * as BridgeAccountsRepo from "@services/mongoose/bridge-accounts"
 import { sendBridgeWithdrawalNotificationBestEffort } from "@app/bridge/send-withdrawal-notification"
+import {
+  writeBridgeCashoutCompleted,
+  writeBridgeCashoutFailed,
+} from "@services/frappe/BridgeTransferRequestWriter"
 import { transferHandler } from "@services/bridge/webhook-server/routes/transfer"
 
 const makeRes = () => {
@@ -40,6 +49,8 @@ beforeEach(() => {
   lockFn = jest.fn().mockResolvedValue({})
   updateFn.mockResolvedValue({ ...WITHDRAWAL_RECORD, status: "completed" })
   ;(LockService as jest.Mock).mockReturnValue({ lockIdempotencyKey: lockFn })
+  ;(writeBridgeCashoutCompleted as jest.Mock).mockResolvedValue(true)
+  ;(writeBridgeCashoutFailed as jest.Mock).mockResolvedValue(true)
 })
 
 describe("transferHandler", () => {
@@ -60,18 +71,35 @@ describe("transferHandler", () => {
     expect(lockFn).not.toHaveBeenCalled()
   })
 
-  it("acquires idempotency lock only after a successful status update", async () => {
+  it("acquires idempotency lock only after a successful status and audit update", async () => {
     const res = makeRes()
     await transferHandler(
       makeReq({
         event: "transfer.completed",
-        data: { transfer_id: "tr-abc", state: "payment_processed" },
+        event_id: "wh-transfer-1",
+        data: {
+          transfer_id: "tr-abc",
+          state: "payment_processed",
+          amount: "25.00",
+          currency: "usdt",
+        },
       }),
       res,
     )
 
     expect(updateFn).toHaveBeenCalled()
-    expect(lockFn).toHaveBeenCalledWith("bridge-transfer:tr-abc:transfer.completed:payment_processed")
+    expect(writeBridgeCashoutCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transferId: "tr-abc",
+        amount: "25.00",
+        currency: "usdt",
+        sourceEventId: "wh-transfer-1",
+        sourceEventType: "transfer.completed",
+      }),
+    )
+    expect(lockFn).toHaveBeenCalledWith(
+      "bridge-transfer:tr-abc:transfer.completed:payment_processed",
+    )
     expect(res.status as jest.Mock).toHaveBeenCalledWith(200)
   })
 
@@ -165,6 +193,73 @@ describe("transferHandler", () => {
     )
 
     expect(sendBridgeWithdrawalNotificationBestEffort).not.toHaveBeenCalled()
+  })
+
+  it("returns 500 and does not mark processed when the completed audit write fails", async () => {
+    ;(writeBridgeCashoutCompleted as jest.Mock).mockResolvedValue(
+      new Error("erpnext timeout"),
+    )
+
+    const res = makeRes()
+    await transferHandler(
+      makeReq({
+        event: "transfer.completed",
+        data: {
+          transfer_id: "tr-abc",
+          state: "payment_processed",
+          amount: "25.00",
+          currency: "usdt",
+        },
+      }),
+      res,
+    )
+
+    expect(res.status as jest.Mock).toHaveBeenCalledWith(500)
+    expect(res.json as jest.Mock).toHaveBeenCalledWith({
+      error: "Failed to persist ERPNext audit row",
+    })
+    expect(lockFn).not.toHaveBeenCalled()
+    expect(sendBridgeWithdrawalNotificationBestEffort).not.toHaveBeenCalled()
+  })
+
+  it("writes a failed cashout audit row before marking a failed transfer processed", async () => {
+    updateFn.mockResolvedValue({
+      ...WITHDRAWAL_RECORD,
+      status: "failed",
+      accountId: "acct-1",
+      amount: "25.00",
+      currency: "usdt",
+      failureReason: "ACH return",
+    })
+
+    const res = makeRes()
+    await transferHandler(
+      makeReq({
+        event: "transfer.failed",
+        event_id: "wh-transfer-2",
+        data: {
+          transfer_id: "tr-abc",
+          state: "returned",
+          reason: "ACH return",
+          amount: "25.00",
+          currency: "usdt",
+        },
+      }),
+      res,
+    )
+
+    expect(writeBridgeCashoutFailed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transferId: "tr-abc",
+        amount: "25.00",
+        currency: "usdt",
+        accountId: "acct-1",
+        failureReason: "ACH return",
+        sourceEventId: "wh-transfer-2",
+      }),
+    )
+    expect(lockFn).toHaveBeenCalled()
+    expect(res.status as jest.Mock).toHaveBeenCalledWith(200)
   })
 
   it("returns 200 already_terminal when failure arrives after completion", async () => {

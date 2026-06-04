@@ -9,12 +9,21 @@ jest.mock("@services/logger", () => ({
 }))
 
 jest.mock("@services/mongoose/bridge-deposit-log", () => ({
-  createBridgeDepositLog: jest.fn(),
+  createBridgeDeposit: jest.fn(),
+}))
+
+jest.mock("@services/bridge/reconciliation", () => ({
+  reconcileByTxHash: jest.fn().mockResolvedValue({ status: "matched" }),
+}))
+
+jest.mock("@services/frappe/BridgeTransferRequestWriter", () => ({
+  writeBridgeDepositRequest: jest.fn(),
 }))
 
 import { Request, Response } from "express"
 import { LockService } from "@services/lock"
 import * as DepositLog from "@services/mongoose/bridge-deposit-log"
+import { writeBridgeDepositRequest } from "@services/frappe/BridgeTransferRequestWriter"
 import { depositHandler } from "@services/bridge/webhook-server/routes/deposit"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -77,6 +86,7 @@ const mockLockService = (acquired = true) => {
 beforeEach(() => {
   jest.clearAllMocks()
   mockLockService(true)
+  ;(writeBridgeDepositRequest as jest.Mock).mockResolvedValue(true)
 })
 
 // ── Invalid payload ───────────────────────────────────────────────────────────
@@ -88,7 +98,7 @@ describe("depositHandler — invalid payload", () => {
     delete body.event_id
     await depositHandler(makeReq(body), res)
     expect(res.status as jest.Mock).toHaveBeenCalledWith(400)
-    expect(DepositLog.createBridgeDepositLog).not.toHaveBeenCalled()
+    expect(DepositLog.createBridgeDeposit).not.toHaveBeenCalled()
   })
 
   it("returns 400 when event_object.id is missing", async () => {
@@ -97,42 +107,33 @@ describe("depositHandler — invalid payload", () => {
     delete objWithoutId.id
     await depositHandler(makeReq({ ...VALID_BODY, event_object: objWithoutId }), res)
     expect(res.status as jest.Mock).toHaveBeenCalledWith(400)
-    expect(DepositLog.createBridgeDepositLog).not.toHaveBeenCalled()
+    expect(DepositLog.createBridgeDeposit).not.toHaveBeenCalled()
   })
 })
 
 // ── Idempotency ───────────────────────────────────────────────────────────────
 
 describe("depositHandler — idempotency", () => {
-  it("returns already_processed without persisting on duplicate state transition", async () => {
+  it("returns already_processed after idempotent local and audit writes on duplicate delivery", async () => {
     mockLockService(false)
+    ;(DepositLog.createBridgeDeposit as jest.Mock).mockResolvedValue({ id: "log-dup" })
 
     const res = makeRes()
     await depositHandler(makeReq(VALID_BODY), res)
 
     expect(res.json as jest.Mock).toHaveBeenCalledWith({ status: "already_processed" })
-    expect(DepositLog.createBridgeDepositLog).not.toHaveBeenCalled()
+    expect(DepositLog.createBridgeDeposit).toHaveBeenCalledTimes(1)
+    expect(writeBridgeDepositRequest).toHaveBeenCalledTimes(1)
   })
 
-  it("locks on transfer id + state so different states for same transfer are processed", async () => {
-    ;(DepositLog.createBridgeDepositLog as jest.Mock).mockResolvedValue({ id: "log-1" })
+  it("locks on the event id after writing the audit row", async () => {
+    ;(DepositLog.createBridgeDeposit as jest.Mock).mockResolvedValue({ id: "log-1" })
 
     const lockFn = jest.fn().mockResolvedValue({})
     ;(LockService as jest.Mock).mockReturnValue({ lockIdempotencyKey: lockFn })
 
     await depositHandler(makeReq(VALID_BODY), makeRes())
-    expect(lockFn).toHaveBeenCalledWith("bridge-deposit:tr_xyz789abc123:funds_received")
-
-    await depositHandler(
-      makeReq({
-        ...VALID_BODY,
-        event_object: { ...VALID_EVENT_OBJECT, state: "payment_processed" },
-      }),
-      makeRes(),
-    )
-    expect(lockFn).toHaveBeenCalledWith(
-      "bridge-deposit:tr_xyz789abc123:payment_processed",
-    )
+    expect(lockFn).toHaveBeenCalledWith("bridge-deposit:wh_789xyz654mno")
   })
 })
 
@@ -140,15 +141,15 @@ describe("depositHandler — idempotency", () => {
 
 describe("depositHandler — fee persistence (AC3)", () => {
   it("persists developer_fee from the receipt on every deposit event", async () => {
-    ;(DepositLog.createBridgeDepositLog as jest.Mock).mockResolvedValue({
+    ;(DepositLog.createBridgeDeposit as jest.Mock).mockResolvedValue({
       id: "log-fee-001",
     })
 
     const res = makeRes()
     await depositHandler(makeReq(VALID_BODY), res)
 
-    expect(DepositLog.createBridgeDepositLog).toHaveBeenCalledTimes(1)
-    expect(DepositLog.createBridgeDepositLog).toHaveBeenCalledWith(
+    expect(DepositLog.createBridgeDeposit).toHaveBeenCalledTimes(1)
+    expect(DepositLog.createBridgeDeposit).toHaveBeenCalledWith(
       expect.objectContaining({
         developerFee: "0.0",
       }),
@@ -156,14 +157,14 @@ describe("depositHandler — fee persistence (AC3)", () => {
   })
 
   it("persists the full deposit record with transfer id, customer, state and receipt breakdown", async () => {
-    ;(DepositLog.createBridgeDepositLog as jest.Mock).mockResolvedValue({
+    ;(DepositLog.createBridgeDeposit as jest.Mock).mockResolvedValue({
       id: "log-fee-002",
     })
 
     const res = makeRes()
     await depositHandler(makeReq(VALID_BODY), res)
 
-    expect(DepositLog.createBridgeDepositLog).toHaveBeenCalledWith(
+    expect(DepositLog.createBridgeDeposit).toHaveBeenCalledWith(
       expect.objectContaining({
         eventId: "wh_789xyz654mno",
         transferId: "tr_xyz789abc123",
@@ -180,7 +181,7 @@ describe("depositHandler — fee persistence (AC3)", () => {
   })
 
   it("returns 200 success after persisting the deposit log", async () => {
-    ;(DepositLog.createBridgeDepositLog as jest.Mock).mockResolvedValue({
+    ;(DepositLog.createBridgeDeposit as jest.Mock).mockResolvedValue({
       id: "log-fee-003",
     })
 
@@ -192,7 +193,7 @@ describe("depositHandler — fee persistence (AC3)", () => {
   })
 
   it("returns 500 when log persistence fails", async () => {
-    ;(DepositLog.createBridgeDepositLog as jest.Mock).mockResolvedValue(
+    ;(DepositLog.createBridgeDeposit as jest.Mock).mockResolvedValue(
       new Error("mongo timeout"),
     )
 
@@ -203,7 +204,7 @@ describe("depositHandler — fee persistence (AC3)", () => {
   })
 
   it("handles null developer_fee gracefully", async () => {
-    ;(DepositLog.createBridgeDepositLog as jest.Mock).mockResolvedValue({
+    ;(DepositLog.createBridgeDeposit as jest.Mock).mockResolvedValue({
       id: "log-fee-004",
     })
 
@@ -218,9 +219,42 @@ describe("depositHandler — fee persistence (AC3)", () => {
     const res = makeRes()
     await depositHandler(makeReq(body), res)
 
-    expect(DepositLog.createBridgeDepositLog).toHaveBeenCalledWith(
+    expect(DepositLog.createBridgeDeposit).toHaveBeenCalledWith(
       expect.objectContaining({ developerFee: "0.0" }),
     )
     expect(res.status as jest.Mock).toHaveBeenCalledWith(200)
+  })
+
+  it("writes an ERPNext audit row after the deposit log is persisted", async () => {
+    ;(DepositLog.createBridgeDeposit as jest.Mock).mockResolvedValue({
+      id: "log-audit-001",
+    })
+
+    const res = makeRes()
+    await depositHandler(makeReq(VALID_BODY), res)
+
+    expect(writeBridgeDepositRequest).toHaveBeenCalledWith({
+      eventId: "wh_789xyz654mno",
+      eventObject: VALID_EVENT_OBJECT,
+      rawPayload: VALID_BODY,
+    })
+    expect(res.status as jest.Mock).toHaveBeenCalledWith(200)
+  })
+
+  it("returns 500 when the ERPNext audit write fails", async () => {
+    ;(DepositLog.createBridgeDeposit as jest.Mock).mockResolvedValue({
+      id: "log-audit-002",
+    })
+    ;(writeBridgeDepositRequest as jest.Mock).mockResolvedValue(
+      new Error("erpnext timeout"),
+    )
+
+    const res = makeRes()
+    await depositHandler(makeReq(VALID_BODY), res)
+
+    expect(res.status as jest.Mock).toHaveBeenCalledWith(500)
+    expect(res.json as jest.Mock).toHaveBeenCalledWith({
+      error: "Failed to persist ERPNext audit row",
+    })
   })
 })

@@ -8,7 +8,7 @@ jest.mock("@services/mongoose/accounts", () => ({
 }))
 
 jest.mock("@services/mongoose/ibex-crypto-receive-log", () => ({
-  createIbexCryptoReceiveLog: jest.fn(),
+  createIbexCryptoReceive: jest.fn(),
 }))
 
 jest.mock("@app/wallets", () => ({
@@ -27,12 +27,17 @@ jest.mock("@services/bridge/reconciliation", () => ({
   reconcileByTxHash: jest.fn().mockResolvedValue({ status: "matched" }),
 }))
 
+jest.mock("@services/frappe/BridgeTransferRequestWriter", () => ({
+  writeIbexCryptoReceiveRequest: jest.fn(),
+}))
+
 import { cryptoReceiveHandler } from "@services/ibex/webhook-server/routes/crypto-receive"
 import { AccountsRepository } from "@services/mongoose/accounts"
-import { createIbexCryptoReceiveLog } from "@services/mongoose/ibex-crypto-receive-log"
+import { createIbexCryptoReceive } from "@services/mongoose/ibex-crypto-receive-log"
 import { listWalletsByAccountId } from "@app/wallets"
 import { LockService } from "@services/lock"
 import { WalletCurrency } from "@domain/shared"
+import { writeIbexCryptoReceiveRequest } from "@services/frappe/BridgeTransferRequestWriter"
 
 const ACCOUNT_ID = "account-001" as AccountId
 const WALLET_ID = "wallet-usdt-001" as WalletId
@@ -56,10 +61,11 @@ describe("cryptoReceiveHandler", () => {
     ;(AccountsRepository as jest.Mock).mockReturnValue({
       findByBridgeEthereumAddress: jest.fn().mockResolvedValue({ id: ACCOUNT_ID }),
     })
-    ;(createIbexCryptoReceiveLog as jest.Mock).mockResolvedValue({ id: "log-001" })
+    ;(createIbexCryptoReceive as jest.Mock).mockResolvedValue({ id: "log-001" })
     ;(listWalletsByAccountId as jest.Mock).mockResolvedValue([
       { id: WALLET_ID, currency: WalletCurrency.Usdt },
     ])
+    ;(writeIbexCryptoReceiveRequest as jest.Mock).mockResolvedValue(true)
   })
 
   it("accepts Ethereum USDT receive webhooks and normalizes persisted currency/network", async () => {
@@ -79,7 +85,7 @@ describe("cryptoReceiveHandler", () => {
     )
 
     expect(AccountsRepository().findByBridgeEthereumAddress).toHaveBeenCalledWith(ADDRESS)
-    expect(createIbexCryptoReceiveLog).toHaveBeenCalledWith(
+    expect(createIbexCryptoReceive).toHaveBeenCalledWith(
       expect.objectContaining({
         txHash: TX_HASH,
         address: ADDRESS,
@@ -91,6 +97,64 @@ describe("cryptoReceiveHandler", () => {
     )
     expect(res.status).toHaveBeenCalledWith(200)
     expect(res.json).toHaveBeenCalledWith({ status: "success" })
+  })
+
+  it("writes an ERPNext audit row after resolving the account and USDT wallet", async () => {
+    const res = makeResponse()
+
+    await cryptoReceiveHandler(
+      {
+        body: {
+          tx_hash: TX_HASH,
+          address: ADDRESS,
+          amount: "12.345678",
+          currency: "USDT",
+          network: "ethereum",
+        },
+      } as never,
+      res as never,
+    )
+
+    expect(writeIbexCryptoReceiveRequest).toHaveBeenCalledWith({
+      txHash: TX_HASH,
+      address: ADDRESS,
+      amount: "12.345678",
+      currency: "USDT",
+      network: "Ethereum",
+      accountId: ACCOUNT_ID,
+      walletId: WALLET_ID,
+      rawPayload: {
+        tx_hash: TX_HASH,
+        address: ADDRESS,
+        amount: "12.345678",
+        currency: "USDT",
+        network: "ethereum",
+      },
+    })
+    expect(res.status).toHaveBeenCalledWith(200)
+  })
+
+  it("returns 500 when the ERPNext audit write fails", async () => {
+    ;(writeIbexCryptoReceiveRequest as jest.Mock).mockResolvedValue(
+      new Error("erpnext timeout"),
+    )
+    const res = makeResponse()
+
+    await cryptoReceiveHandler(
+      {
+        body: {
+          tx_hash: TX_HASH,
+          address: ADDRESS,
+          amount: "12.345678",
+          currency: "USDT",
+          network: "ethereum",
+        },
+      } as never,
+      res as never,
+    )
+
+    expect(res.status).toHaveBeenCalledWith(500)
+    expect(res.json).toHaveBeenCalledWith({ error: "erpnext_audit_failed" })
   })
 
   it("rejects legacy Tron USDT receive webhooks for the ETH-USDT Cash Wallet path", async () => {
@@ -110,7 +174,7 @@ describe("cryptoReceiveHandler", () => {
     )
 
     expect(LockService().lockOnChainTxHash).not.toHaveBeenCalled()
-    expect(createIbexCryptoReceiveLog).not.toHaveBeenCalled()
+    expect(createIbexCryptoReceive).not.toHaveBeenCalled()
     expect(res.status).toHaveBeenCalledWith(400)
     expect(res.json).toHaveBeenCalledWith({ error: "Invalid payload" })
   })
