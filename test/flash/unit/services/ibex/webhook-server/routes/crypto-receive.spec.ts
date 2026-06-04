@@ -120,7 +120,7 @@ describe("cryptoReceiveHandler", () => {
       address: ADDRESS,
       amount: "12.345678",
       currency: "USDT",
-      network: "ethereum",
+      network: "Ethereum",
       accountId: ACCOUNT_ID,
       walletId: WALLET_ID,
       rawPayload: {

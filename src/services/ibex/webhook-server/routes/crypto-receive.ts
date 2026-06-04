@@ -107,7 +107,7 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
           address: String(address),
           amount: String(amount),
           currency: normalizedCurrency,
-          network: normalizedNetwork,
+          network: normalizedNetwork.charAt(0).toUpperCase() + normalizedNetwork.slice(1),
           accountId: account.id,
           walletId: usdtWallet.id,
           rawPayload: req.body,
