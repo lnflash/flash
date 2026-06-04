@@ -57,7 +57,7 @@ const bridgeInitiateWithdrawal = GT.Field({
       return { errors: [mapAndParseErrorForGqlResponse(new BridgeDisabledError())] }
     }
 
-    if (!domainAccount || domainAccount.level < 2) {
+    if (!domainAccount || domainAccount.level <= 0) {
       return { errors: [mapAndParseErrorForGqlResponse(new BridgeAccountLevelError())] }
     }
 

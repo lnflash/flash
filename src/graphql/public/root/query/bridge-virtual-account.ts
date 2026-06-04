@@ -14,7 +14,7 @@ const bridgeVirtualAccount = GT.Field({
 
     if (!domainAccount) return null
 
-    if (domainAccount.level < 2) {
+    if (domainAccount.level <= 0) {
       throw mapAndParseErrorForGqlResponse(new BridgeAccountLevelError())
     }
 
