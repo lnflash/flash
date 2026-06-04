@@ -131,8 +131,8 @@ const main = async () => {
     : undefined
 
   for await (const event of listAllEvents({
-    start_date: args.start,
-    end_date: args.end,
+    start: args.start,
+    end: args.end,
     event_type: bridgeFilter,
   })) {
     const replayEventObject: BridgeReplayEventEnvelope = {
