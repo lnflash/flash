@@ -6,6 +6,7 @@ import { WalletCurrency, USDTAmount } from "@domain/shared"
 import { baseLogger } from "@services/logger"
 import { LockService } from "@services/lock"
 import { reconcileByTxHash } from "@services/bridge/reconciliation"
+import { writeIbexCryptoReceiveRequest } from "@services/frappe/BridgeTransferRequestWriter"
 
 import { authenticate, logRequest } from "../middleware"
 
@@ -101,6 +102,29 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
           "USDT deposit received",
         )
 
+        const auditResult = await writeIbexCryptoReceiveRequest({
+          txHash: String(tx_hash),
+          address: String(address),
+          amount: String(amount),
+          currency: normalizedCurrency,
+          network: normalizedNetwork,
+          accountId: account.id,
+          walletId: usdtWallet.id,
+          rawPayload: req.body,
+        })
+        if (auditResult instanceof Error) {
+          baseLogger.error(
+            {
+              error: auditResult,
+              tx_hash,
+              accountId: account.id,
+              walletId: usdtWallet.id,
+            },
+            "Failed to persist IBEX crypto receive ERPNext audit row",
+          )
+          return { status: "error", code: "erpnext_audit_failed" } as CryptoReceiveResult
+        }
+
         return { status: "success" } as CryptoReceiveResult
       } catch (error) {
         baseLogger.error({ error, tx_hash }, "Error processing crypto receive webhook")
@@ -126,6 +150,7 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
     wallet_list_failed: 500,
     usdt_wallet_not_found: 404,
     invalid_amount: 400,
+    erpnext_audit_failed: 500,
     internal_error: 500,
   }
 

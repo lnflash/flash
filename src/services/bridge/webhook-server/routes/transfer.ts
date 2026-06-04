@@ -9,6 +9,10 @@ import * as BridgeAccountsRepo from "@services/mongoose/bridge-accounts"
 import { LockService } from "@services/lock"
 import { baseLogger } from "@services/logger"
 import { toBridgeTransferId } from "@domain/primitives/bridge"
+import {
+  writeBridgeCashoutCompleted,
+  writeBridgeCashoutFailed,
+} from "@services/frappe/BridgeTransferRequestWriter"
 
 const TERMINAL_FAILURE_STATES = new Set([
   "undeliverable",
@@ -42,7 +46,7 @@ const markProcessed = async (
 }
 
 export const transferHandler = async (req: Request, res: Response) => {
-  const { event, data } = req.body
+  const { event, event_id, data } = req.body
   const { transfer_id, state, amount, currency, reason, return_reason } = data
 
   if (!transfer_id || !event) {
@@ -93,11 +97,6 @@ export const transferHandler = async (req: Request, res: Response) => {
         return res.status(500).json({ error: "Failed to update status" })
       }
 
-      const lockStatus = await markProcessed(transfer_id, event, state)
-      if (lockStatus === "already_processed") {
-        return res.status(200).json({ status: "already_processed" })
-      }
-
       baseLogger.info(
         {
           transfer_id,
@@ -107,6 +106,28 @@ export const transferHandler = async (req: Request, res: Response) => {
         },
         "Bridge transfer completed",
       )
+
+      const auditResult = await writeBridgeCashoutCompleted({
+        transferId: transfer_id,
+        amount: String(result.amount ?? amount ?? ""),
+        currency: String(result.currency ?? currency ?? ""),
+        accountId: result.accountId,
+        sourceEventId: event_id,
+        sourceEventType: event,
+        rawPayload: req.body,
+      })
+      if (auditResult instanceof Error) {
+        baseLogger.error(
+          { transfer_id, error: auditResult },
+          "Failed to persist Bridge transfer ERPNext audit row",
+        )
+        return res.status(500).json({ error: "Failed to persist ERPNext audit row" })
+      }
+
+      const lockStatus = await markProcessed(transfer_id, event, state)
+      if (lockStatus === "already_processed") {
+        return res.status(200).json({ status: "already_processed" })
+      }
 
       await sendBridgeWithdrawalNotificationBestEffort({
         accountId: result.accountId,
@@ -148,11 +169,6 @@ export const transferHandler = async (req: Request, res: Response) => {
         return res.status(500).json({ error: "Failed to update status" })
       }
 
-      const lockStatus = await markProcessed(transfer_id, event, state)
-      if (lockStatus === "already_processed") {
-        return res.status(200).json({ status: "already_processed" })
-      }
-
       baseLogger.warn(
         {
           transfer_id,
@@ -164,6 +180,29 @@ export const transferHandler = async (req: Request, res: Response) => {
         },
         "Bridge transfer failed",
       )
+
+      const auditResult = await writeBridgeCashoutFailed({
+        transferId: transfer_id,
+        amount: String(result.amount ?? amount ?? ""),
+        currency: String(result.currency ?? currency ?? ""),
+        accountId: result.accountId,
+        sourceEventId: event_id,
+        sourceEventType: event,
+        failureReason: result.failureReason ?? failureReason,
+        rawPayload: req.body,
+      })
+      if (auditResult instanceof Error) {
+        baseLogger.error(
+          { transfer_id, error: auditResult },
+          "Failed to persist Bridge transfer failure ERPNext audit row",
+        )
+        return res.status(500).json({ error: "Failed to persist ERPNext audit row" })
+      }
+
+      const lockStatus = await markProcessed(transfer_id, event, state)
+      if (lockStatus === "already_processed") {
+        return res.status(200).json({ status: "already_processed" })
+      }
 
       await sendBridgeWithdrawalNotificationBestEffort({
         accountId: result.accountId,
