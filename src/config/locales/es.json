@@ -38,6 +38,10 @@
       }
     },
     "bridgeWithdrawal": {
+      "cancelled": {
+        "body": "Su retiro de {{amount}} ha sido cancelado.",
+        "title": "Retiro cancelado"
+      },
       "completed": {
         "body": "Su retiro de {{amount}} se envió a su cuenta bancaria.",
         "title": "Retiro completado"

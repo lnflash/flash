@@ -95,6 +95,18 @@ export class BridgeWebhookValidationError extends BridgeError {
   }
 }
 
+export class BridgeWithdrawalNotFoundError extends BridgeError {
+  constructor(message: string = "Withdrawal request not found") {
+    super(message)
+  }
+}
+
+export class BridgeWithdrawalAlreadyInitiatedError extends BridgeError {
+  constructor(message: string = "Withdrawal has already been submitted to Bridge and cannot be cancelled") {
+    super(message)
+  }
+}
+
 /**
  * Maps HTTP status codes from Bridge API to domain error types
  */

@@ -6,25 +6,25 @@ import { BridgeConfig } from "@config"
 import BridgeService from "@services/bridge"
 import { BridgeDisabledError, BridgeAccountLevelError } from "@services/bridge/errors"
 
-const BridgeInitiateWithdrawalInput = GT.Input({
-  name: "BridgeInitiateWithdrawalInput",
+const BridgeCancelWithdrawalRequestInput = GT.Input({
+  name: "BridgeCancelWithdrawalRequestInput",
   fields: () => ({
     withdrawalId: { type: GT.NonNull(GT.ID) },
   }),
 })
 
-const BridgeInitiateWithdrawalPayload = GT.Object({
-  name: "BridgeInitiateWithdrawalPayload",
+const BridgeCancelWithdrawalRequestPayload = GT.Object({
+  name: "BridgeCancelWithdrawalRequestPayload",
   fields: () => ({
     errors: { type: GT.NonNullList(IError) },
     withdrawal: { type: BridgeWithdrawal },
   }),
 })
 
-const bridgeInitiateWithdrawal = GT.Field({
-  type: GT.NonNull(BridgeInitiateWithdrawalPayload),
+const bridgeCancelWithdrawalRequest = GT.Field({
+  type: GT.NonNull(BridgeCancelWithdrawalRequestPayload),
   args: {
-    input: { type: GT.NonNull(BridgeInitiateWithdrawalInput) },
+    input: { type: GT.NonNull(BridgeCancelWithdrawalRequestInput) },
   },
   resolve: async (_, args, { domainAccount }: GraphQLPublicContextAuth) => {
     const { withdrawalId } = args.input
@@ -37,7 +37,10 @@ const bridgeInitiateWithdrawal = GT.Field({
       return { errors: [mapAndParseErrorForGqlResponse(new BridgeAccountLevelError())] }
     }
 
-    const result = await BridgeService.initiateWithdrawal(domainAccount.id, withdrawalId)
+    const result = await BridgeService.cancelWithdrawalRequest(
+      domainAccount.id,
+      withdrawalId,
+    )
     if (result instanceof Error) {
       return { errors: [mapAndParseErrorForGqlResponse(result)] }
     }
@@ -46,4 +49,4 @@ const bridgeInitiateWithdrawal = GT.Field({
   },
 })
 
-export default bridgeInitiateWithdrawal
+export default bridgeCancelWithdrawalRequest

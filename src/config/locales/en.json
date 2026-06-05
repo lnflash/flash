@@ -42,6 +42,10 @@
       "title": "Cashout"
     },
     "bridgeWithdrawal": {
+      "cancelled": {
+        "body": "Your withdrawal of {{amount}} has been cancelled.",
+        "title": "Withdrawal cancelled"
+      },
       "completed": {
         "body": "Your withdrawal of {{amount}} has been sent to your bank account.",
         "title": "Withdrawal complete"

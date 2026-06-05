@@ -243,7 +243,16 @@ input BankAccountInput {
 
 type BridgeAddExternalAccountPayload {
   errors: [Error!]!
-  externalAccount: BridgeExternalAccount
+  externalAccount: BridgeExternalAccountLink
+}
+
+input BridgeCancelWithdrawalRequestInput {
+  withdrawalId: ID!
+}
+
+type BridgeCancelWithdrawalRequestPayload {
+  errors: [Error!]!
+  withdrawal: BridgeWithdrawal
 }
 
 type BridgeCreateVirtualAccountPayload {
@@ -258,6 +267,11 @@ type BridgeExternalAccount {
   status: String!
 }
 
+type BridgeExternalAccountLink {
+  expiresAt: String!
+  linkUrl: String!
+}
+
 input BridgeInitiateKycInput {
   email: String
   full_name: String
@@ -270,8 +284,7 @@ type BridgeInitiateKycPayload {
 }
 
 input BridgeInitiateWithdrawalInput {
-  amount: String!
-  externalAccountId: ID!
+  withdrawalId: ID!
 }
 
 type BridgeInitiateWithdrawalPayload {
@@ -282,6 +295,16 @@ type BridgeInitiateWithdrawalPayload {
 type BridgeKycLink {
   kycLink: String!
   tosLink: String!
+}
+
+input BridgeRequestWithdrawalInput {
+  amount: String!
+  externalAccountId: ID!
+}
+
+type BridgeRequestWithdrawalPayload {
+  errors: [Error!]!
+  withdrawal: BridgeWithdrawal
 }
 
 type BridgeVirtualAccount {
@@ -300,6 +323,7 @@ type BridgeWithdrawal {
   amount: String!
   createdAt: String!
   currency: String!
+  externalAccountId: String
   failureReason: String
   id: ID!
   status: String!
@@ -937,9 +961,11 @@ type Mutation {
   accountUpdateDefaultWalletId(input: AccountUpdateDefaultWalletIdInput!): AccountUpdateDefaultWalletIdPayload!
   accountUpdateDisplayCurrency(input: AccountUpdateDisplayCurrencyInput!): AccountUpdateDisplayCurrencyPayload!
   bridgeAddExternalAccount: BridgeAddExternalAccountPayload!
+  bridgeCancelWithdrawalRequest(input: BridgeCancelWithdrawalRequestInput!): BridgeCancelWithdrawalRequestPayload!
   bridgeCreateVirtualAccount: BridgeCreateVirtualAccountPayload!
   bridgeInitiateKyc(input: BridgeInitiateKycInput!): BridgeInitiateKycPayload!
   bridgeInitiateWithdrawal(input: BridgeInitiateWithdrawalInput!): BridgeInitiateWithdrawalPayload!
+  bridgeRequestWithdrawal(input: BridgeRequestWithdrawalInput!): BridgeRequestWithdrawalPayload!
   businessAccountUpgradeRequest(input: BusinessAccountUpgradeRequestInput!): AccountUpgradePayload!
   callbackEndpointAdd(input: CallbackEndpointAddInput!): CallbackEndpointAddPayload!
   callbackEndpointDelete(input: CallbackEndpointDeleteInput!): SuccessPayload!
@@ -1311,6 +1337,7 @@ type Query {
   bridgeExternalAccounts: [BridgeExternalAccount]
   bridgeKycStatus: String
   bridgeVirtualAccount: BridgeVirtualAccount
+  bridgeWithdrawalRequest(id: ID!): BridgeWithdrawal
   bridgeWithdrawals: [BridgeWithdrawal]
   btcPrice(currency: DisplayCurrency! = "USD"): Price @deprecated(reason: "Deprecated in favor of realtimePrice")
   btcPriceList(range: PriceGraphRange!): [PricePoint]
