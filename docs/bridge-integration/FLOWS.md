@@ -96,17 +96,23 @@ User            Flash App          Flash Backend          Bridge.xyz            
  |                  |                   | 13. ext_acc.verified|                   |
  |                  |                   |<--------------------|                   |
  | 14. Withdraw     |                   |                     |                   |
- |----------------->| 15. bridgeInitWith|                     |                   |
- |                  |------------------>| 16. Create Transfer |                   |
- |                  |                   |-------------------->|                   |
- |                  | 17. Pending       |                     |                   |
+ |----------------->| 15. bridgeRequest |                     |                   |
+ |                  |     Withdrawal    |                     |                   |
+ |                  |------------------>| 16. Store pending   |                   |
+ |                  | 17. Confirm screen|     withdrawal      |                   |
+ |                  |<------------------|                     |                   |
+ | 18. Confirm      |                   |                     |                   |
+ |----------------->| 19. bridgeInitWith|                     |                   |
+ |                  |     (withdrawalId)| 20. Create Transfer |                   |
+ |                  |------------------>|-------------------->|                   |
+ |                  | 21. Pending       |                     |                   |
  |<-----------------|                   |                     |                   |
- |                  |                   |                     | 18. Convert USDT  |
- |                  |                   |                     | 19. Send ACH      |
+ |                  |                   |                     | 22. Convert USDT  |
+ |                  |                   |                     | 23. Send ACH      |
  |                  |                   |                     |------------------>|
- |                  |                   | 20. trans.completed |                   |
+ |                  |                   | 24. trans.completed |                   |
  |                  |                   |<--------------------|                   |
- | 21. Funds Arrive |                   |                     |                   |
+ | 25. Funds Arrive |                   |                     |                   |
  |<-------------------------------------------------------------------------------|
 ```
 
@@ -118,14 +124,18 @@ User            Flash App          Flash Backend          Bridge.xyz            
 4.  **Redirect**: App opens the Bridge/Plaid flow.
 5.  **Authentication**: User logs into their bank and selects an account.
 6.  **Verification Webhook**: Bridge notifies Flash when the external account is verified.
-7.  **Initiate Withdrawal**: User enters amount and selects the linked bank account.
-8.  **GraphQL Mutation**: App calls `bridgeInitiateWithdrawal`.
-9.  **Bridge Transfer**: Flash creates a transfer in Bridge from the user's Tron address to the external account.
-10. **Confirmation**: App shows the withdrawal as "Pending".
-11. **Conversion**: Bridge converts USDT from the user's balance to USD.
-12. **ACH Transfer**: Bridge sends USD to the user's bank via ACH.
-13. **Transfer Webhook**: Bridge sends `transfer.completed` webhook to Flash.
-14. **Completion**: User receives funds in their bank account (usually 1-3 business days).
+7.  **Request Withdrawal**: User enters amount and selects the linked bank account.
+8.  **GraphQL Mutation**: App calls `bridgeRequestWithdrawal` with `amount` and `externalAccountId`.
+9.  **Validation**: Flash checks USDT balance, account level, and external account ownership/verification. A `pending` withdrawal record is stored in MongoDB. If an identical pending request already exists (same account, amount, and bank account), the existing record is reused.
+10. **Confirmation Screen**: App fetches the pending withdrawal via `bridgeWithdrawalRequest(id)` and displays amount, bank account, and fees for user review.
+11. **User Confirms or Cancels**:
+    - **Confirm**: App calls `bridgeInitiateWithdrawal` with `withdrawalId`. Flash re-checks balance, then creates a transfer in Bridge from the user's Ethereum USDT address to the external account.
+    - **Cancel**: App calls `bridgeCancelWithdrawalRequest` with `withdrawalId`. The pending record is marked `cancelled` and a push notification is sent.
+12. **Pending State**: After initiation, app shows the withdrawal as "Pending".
+13. **Conversion**: Bridge converts USDT from the user's balance to USD.
+14. **ACH Transfer**: Bridge sends USD to the user's bank via ACH.
+15. **Transfer Webhook**: Bridge sends `transfer.completed` (or failure) webhook to Flash.
+16. **Completion**: User receives funds in their bank account (usually 1-3 business days).
 
 ## Fee Structure
 
