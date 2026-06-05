@@ -119,4 +119,33 @@ describe("sendBridgeWithdrawalNotification", () => {
 
     expect(result).toBe(true)
   })
+
+  it("sends a cancelled withdrawal notification with the correct phrase key and data type", async () => {
+    const result = await sendBridgeWithdrawalNotification({
+      accountId,
+      amount: "25.00",
+      currency: "usdt",
+      outcome: "cancelled",
+    })
+
+    expect(result).toBe(true)
+    expect(sendFilteredNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deviceTokens: mockUser.deviceTokens,
+        notificationCategory: "Cashout",
+        data: expect.objectContaining({ type: "bridge_withdrawal_cancelled" }),
+      }),
+    )
+    expect(mockI18n.__).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phrase: "notification.bridgeWithdrawal.cancelled.title",
+      }),
+    )
+    expect(mockI18n.__).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phrase: "notification.bridgeWithdrawal.cancelled.body",
+      }),
+      expect.objectContaining({ amount: "25.00 USDT" }),
+    )
+  })
 })

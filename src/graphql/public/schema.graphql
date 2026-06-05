@@ -246,6 +246,15 @@ type BridgeAddExternalAccountPayload {
   externalAccount: BridgeExternalAccountLink
 }
 
+input BridgeCancelWithdrawalRequestInput {
+  withdrawalId: ID!
+}
+
+type BridgeCancelWithdrawalRequestPayload {
+  errors: [Error!]!
+  withdrawal: BridgeWithdrawal
+}
+
 type BridgeCreateVirtualAccountPayload {
   errors: [Error!]!
   virtualAccount: BridgeVirtualAccount
@@ -275,8 +284,7 @@ type BridgeInitiateKycPayload {
 }
 
 input BridgeInitiateWithdrawalInput {
-  amount: String!
-  externalAccountId: ID!
+  withdrawalId: ID!
 }
 
 type BridgeInitiateWithdrawalPayload {
@@ -287,6 +295,16 @@ type BridgeInitiateWithdrawalPayload {
 type BridgeKycLink {
   kycLink: String!
   tosLink: String!
+}
+
+input BridgeRequestWithdrawalInput {
+  amount: String!
+  externalAccountId: ID!
+}
+
+type BridgeRequestWithdrawalPayload {
+  errors: [Error!]!
+  withdrawal: BridgeWithdrawal
 }
 
 type BridgeVirtualAccount {
@@ -305,9 +323,10 @@ type BridgeWithdrawal {
   amount: String!
   createdAt: String!
   currency: String!
+  externalAccountId: String
   failureReason: String
-  state: String!
-  transferId: ID!
+  id: ID!
+  status: String!
 }
 
 type BuildInformation {
@@ -883,20 +902,6 @@ A bech32-encoded HTTPS/Onion URL that can be interacted with automatically by a 
 """
 scalar Lnurl
 
-input LnurlPaymentSendInput {
-  """Amount to spend from the USD/USDT wallet, in USD cents."""
-  amount: FractionalCentAmount!
-
-  """LNURL-pay value to decode and pay."""
-  lnurl: Lnurl!
-
-  """Optional memo for the Lightning payment."""
-  memo: Memo
-
-  """Wallet ID with sufficient balance. Must belong to the current user."""
-  walletId: WalletId!
-}
-
 type MapInfo {
   coordinates: Coordinates!
   title: String!
@@ -956,9 +961,11 @@ type Mutation {
   accountUpdateDefaultWalletId(input: AccountUpdateDefaultWalletIdInput!): AccountUpdateDefaultWalletIdPayload!
   accountUpdateDisplayCurrency(input: AccountUpdateDisplayCurrencyInput!): AccountUpdateDisplayCurrencyPayload!
   bridgeAddExternalAccount: BridgeAddExternalAccountPayload!
+  bridgeCancelWithdrawalRequest(input: BridgeCancelWithdrawalRequestInput!): BridgeCancelWithdrawalRequestPayload!
   bridgeCreateVirtualAccount: BridgeCreateVirtualAccountPayload!
   bridgeInitiateKyc(input: BridgeInitiateKycInput!): BridgeInitiateKycPayload!
   bridgeInitiateWithdrawal(input: BridgeInitiateWithdrawalInput!): BridgeInitiateWithdrawalPayload!
+  bridgeRequestWithdrawal(input: BridgeRequestWithdrawalInput!): BridgeRequestWithdrawalPayload!
   businessAccountUpgradeRequest(input: BusinessAccountUpgradeRequestInput!): AccountUpgradePayload!
   callbackEndpointAdd(input: CallbackEndpointAddInput!): CallbackEndpointAddPayload!
   callbackEndpointDelete(input: CallbackEndpointDeleteInput!): SuccessPayload!
@@ -1058,12 +1065,6 @@ type Mutation {
   """
   lnUsdInvoiceCreateOnBehalfOfRecipient(input: LnUsdInvoiceCreateOnBehalfOfRecipientInput!): LnInvoicePayload!
   lnUsdInvoiceFeeProbe(input: LnUsdInvoiceFeeProbeInput!): CentAmountPayload!
-
-  """
-  Pay a LNURL-pay endpoint using a USD/USDT wallet balance.
-  The wallet amount is converted to whole-satoshi millisatoshis before calling IBEX.
-  """
-  lnurlPaymentSend(input: LnurlPaymentSendInput!): PaymentSendPayload!
   merchantMapSuggest(input: MerchantMapSuggestInput!): MerchantPayload!
   onChainAddressCreate(input: OnChainAddressCreateInput!): OnChainAddressPayload!
   onChainAddressCurrent(input: OnChainAddressCurrentInput!): OnChainAddressPayload!
@@ -1336,6 +1337,7 @@ type Query {
   bridgeExternalAccounts: [BridgeExternalAccount]
   bridgeKycStatus: String
   bridgeVirtualAccount: BridgeVirtualAccount
+  bridgeWithdrawalRequest(id: ID!): BridgeWithdrawal
   bridgeWithdrawals: [BridgeWithdrawal]
   btcPrice(currency: DisplayCurrency! = "USD"): Price @deprecated(reason: "Deprecated in favor of realtimePrice")
   btcPriceList(range: PriceGraphRange!): [PricePoint]

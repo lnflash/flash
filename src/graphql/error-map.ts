@@ -555,6 +555,14 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         message,
       })
 
+    case "BridgeWithdrawalNotFoundError":
+      message = error.message || "Withdrawal request not found"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "BridgeWithdrawalAlreadyInitiatedError":
+      message = error.message || "Withdrawal has already been submitted and cannot be cancelled"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
     case "BridgeRateLimitError":
       message = "Rate limit exceeded, please try again later"
       return bridgeGqlError({

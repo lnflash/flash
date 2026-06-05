@@ -224,3 +224,25 @@ export const findWithdrawalByBridgeTransferId = async (transferId: BridgeTransfe
     return new RepositoryError(String(error))
   }
 }
+
+export const findWithdrawalById = async (id: string) => {
+  try {
+    const record = await BridgeWithdrawal.findById(id)
+    return record || new RepositoryError("Withdrawal not found")
+  } catch (error) {
+    return new RepositoryError(String(error))
+  }
+}
+
+export const cancelWithdrawal = async (accountId: string, withdrawalId: string) => {
+  try {
+    const record = await BridgeWithdrawal.findOneAndUpdate(
+      { _id: withdrawalId, accountId, status: "pending", bridgeTransferId: { $exists: false } },
+      { status: "cancelled", updatedAt: new Date() },
+      { new: true },
+    )
+    return record || new RepositoryError("Withdrawal not found or cannot be cancelled")
+  } catch (error) {
+    return new RepositoryError(String(error))
+  }
+}
