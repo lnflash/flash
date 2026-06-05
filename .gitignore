@@ -53,3 +53,8 @@ junit.xml
 .yarnrc.yml
 
 docker-compose.local.yml
+
+# Planning scratch files
+findings.md
+progress.md
+task_plan.md

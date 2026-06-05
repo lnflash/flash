@@ -21,6 +21,8 @@
     "test:unit": ". ./.env && LOGLEVEL=warn jest --config ./test/flash/unit/jest.config.js --bail --verbose $TEST",
     "test:legacy-integration": ". ./.env && LOGLEVEL=warn jest --config ./test/flash/legacy-integration/jest.config.js --bail --runInBand --verbose $TEST | yarn pino-pretty -c -l",
     "test:integration": ". ./.env && LOGLEVEL=warn jest --config ./test/flash/integration/jest.config.js --bail --runInBand --verbose $TEST",
+    "test:bridge-sandbox-e2e": ". ./.env && RUN_BRIDGE_SANDBOX_E2E=true LOGLEVEL=warn jest --config ./test/flash/bridge-sandbox-e2e/jest.config.js --bail --runInBand --verbose $TEST | yarn pino-pretty -c -l",
+    "test:bridge-sandbox-e2e:ci": ". ./.env && RUN_BRIDGE_SANDBOX_E2E=true LOGLEVEL=warn jest --config ./test/flash/bridge-sandbox-e2e/jest.config.js --bail --runInBand --verbose $TEST",
     "build-docs": "npx spectaql spectaql-config.yml -1",
     "fix-yaml": "prettier --write '**/*.(yaml|yml)'",
     "check-yaml": "prettier --check '**/*.(yaml|yml)'",

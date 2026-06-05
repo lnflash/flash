@@ -1,6 +1,6 @@
 # Bridge.xyz GraphQL API Reference
 
-All Bridge-related operations require the user to be authenticated and have an **Account Level 2** or higher.
+All Bridge-related operations require the user to be authenticated and have an **Account Level 1** or higher.
 
 ## Mutations
 
@@ -289,7 +289,7 @@ query BridgeWithdrawals {
 | Code | Description |
 | --- | --- |
 | `BRIDGE_DISABLED` | Bridge integration is disabled in configuration. |
-| `BRIDGE_ACCOUNT_LEVEL_ERROR` | User account level is below the required Bridge access level. |
+| `BRIDGE_ACCOUNT_LEVEL_ERROR` | User account level is below 1. |
 | `BRIDGE_INVALID_AMOUNT` | Withdrawal amount is malformed or not positive. |
 | `BRIDGE_BELOW_MINIMUM_WITHDRAWAL` | Withdrawal amount is below the configured minimum. |
 | `BRIDGE_KYC_PENDING` | Operation requires approved KYC, but it is still pending. |

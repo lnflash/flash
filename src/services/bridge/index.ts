@@ -166,9 +166,15 @@ const checkAccountLevel = async (
 ): Promise<Account | BridgeAccountLevelError | RepositoryError> => {
   const account = await AccountsRepository().findById(accountId)
   if (account instanceof Error) return account
-  if (account.level < 2) {
-    return new BridgeAccountLevelError()
+  if (account.level < 1) {
+    const err = new BridgeAccountLevelError()
+    baseLogger.warn(
+      { accountId, level: account.level, requiredLevel: 1 },
+      "Bridge account level too low",
+    )
+    return err
   }
+
   return account
 }
 

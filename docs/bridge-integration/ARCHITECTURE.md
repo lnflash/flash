@@ -2,7 +2,7 @@
 
 ## System Overview
 
-The Bridge.xyz integration enables USD on-ramp and off-ramp functionality for Flash users. It allows users to convert between USD (via bank transfers) and USDT (on the Tron network), which is then integrated into the Flash ecosystem via IBEX.
+The Bridge.xyz integration enables USD on-ramp and off-ramp functionality for Flash users. It allows users to convert between USD (via bank transfers) and USDT (Ethereum), which is then integrated into the Flash ecosystem via IBEX.
 
 ## Component Architecture
 
@@ -10,7 +10,7 @@ The integration consists of three main components:
 
 1.  **Flash Backend**: The core service that orchestrates the flow between users, Bridge.xyz, and IBEX. It exposes a GraphQL API for the mobile app and handles webhooks from Bridge.xyz.
 2.  **Bridge.xyz API**: An external service that provides virtual bank accounts, KYC processing, and USD/USDT conversion.
-3.  **IBEX**: An external service used by Flash to manage Bitcoin and Lightning wallets, and in this context, to provide Tron USDT receive addresses and handle USDT deposits.
+3.  **IBEX**: An external service used by Flash to manage Bitcoin and Lightning wallets, and in this context, to provide USDT receive addresses and handle USDT deposits.
 
 ### Component Diagram
 
@@ -29,7 +29,7 @@ The integration consists of three main components:
                                       | USD/USDT      | USDT
                                       v               v
                                +----------------------------+
-                               |       Tron Network         |
+                               |       Ethereum Network        |
                                +----------------------------+
 ```
 
@@ -38,16 +38,16 @@ The integration consists of three main components:
 ### On-Ramp (USD -> USDT)
 
 1.  **KYC**: User initiates KYC via Flash, which creates a Bridge customer and returns a KYC link (Persona).
-2.  **Virtual Account**: Once KYC is approved, Flash creates a Tron USDT address via IBEX and a Bridge virtual account pointing to that address.
+2.  **Virtual Account**: Once KYC is approved, Flash creates a Bridge virtual account for receiving USD deposits.
 3.  **Deposit**: User sends USD to the virtual account.
-4.  **Conversion**: Bridge converts USD to USDT and sends it to the Tron address.
+4.  **Conversion**: Bridge converts USD to USDT and sends it to the user's on-chain address.
 5.  **Credit**: IBEX detects the USDT deposit and notifies Flash via webhook, which credits the user's wallet.
 
 ### Off-Ramp (USDT -> USD)
 
 1.  **Link Bank**: User links an external bank account via Bridge's hosted UI.
 2.  **Withdrawal**: User initiates a withdrawal in Flash.
-3.  **Transfer**: Flash creates a Bridge transfer from the user's Tron address to the linked bank account.
+3.  **Transfer**: Flash initiates a Bridge transfer from the user's Bridge balance to the linked external bank account.
 4.  **Conversion**: Bridge converts USDT to USD and sends it to the bank via ACH.
 
 ## Technology Stack
@@ -60,7 +60,7 @@ The integration consists of three main components:
 
 ## Security Model
 
--   **Account Level**: Bridge functionality is restricted to users with Account Level 2 or higher.
+-   **Account Level**: Bridge functionality is restricted to users with Account Level 1 or higher.
 -   **KYC**: All users must pass Bridge's KYC process (powered by Persona).
 -   **Webhook Verification**: All incoming webhooks from Bridge.xyz are verified using asymmetric RSA-SHA256 signatures.
 -   **Idempotency**: All critical API calls to Bridge include an `Idempotency-Key` to prevent duplicate transactions.
