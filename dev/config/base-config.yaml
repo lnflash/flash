@@ -43,6 +43,7 @@ bridge:
         dwIDAQAB
         -----END PUBLIC KEY-----
       transfer: "<replace>"
+      external_account: "<replace>"
     timestampSkewMs: 300000
 
 # See Foreign Exchange Rates: https://www.firstglobal-bank.com/
