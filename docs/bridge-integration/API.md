@@ -199,6 +199,7 @@ query BridgeWithdrawals {
 | `BRIDGE_KYC_PENDING` | Operation requires approved KYC, but it is still pending. |
 | `BRIDGE_KYC_REJECTED` | KYC was rejected. |
 | `BRIDGE_KYC_OFFBOARDED` | Bridge offboarded the customer. |
+| `BRIDGE_KYC_TIER_CEILING_EXCEEDED` | Withdrawal amount exceeds the KYC tier ceiling. |
 | `BRIDGE_CUSTOMER_NOT_FOUND` | Bridge customer record not found for the user. |
 | `BRIDGE_INSUFFICIENT_FUNDS` | USDT balance is insufficient for the withdrawal. |
 | `BRIDGE_RATE_LIMIT` | Bridge rate-limited the request. |

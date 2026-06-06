@@ -11,10 +11,12 @@ import {
   BridgeKycOffboardedError,
   BridgeKycPendingError,
   BridgeKycRejectedError,
+  BridgeKycTierCeilingExceededError,
   BridgeRateLimitError,
   BridgeTimeoutError,
   BridgeTransferFailedError,
   BridgeWebhookValidationError,
+  mapBridgeHttpError,
 } from "@services/bridge/errors"
 
 describe("error-map: Bridge errors", () => {
@@ -32,6 +34,7 @@ describe("error-map: Bridge errors", () => {
     [new BridgeTimeoutError(), "BRIDGE_TIMEOUT"],
     [new BridgeTransferFailedError(), "BRIDGE_TRANSFER_FAILED"],
     [new BridgeWebhookValidationError(), "BRIDGE_WEBHOOK_VALIDATION"],
+    [new BridgeKycTierCeilingExceededError(), "BRIDGE_KYC_TIER_CEILING_EXCEEDED"],
     [new BridgeApiError("Bridge API error", 500), "BRIDGE_API_ERROR"],
     [new BridgeError("Bridge unavailable"), "BRIDGE_ERROR"],
   ]
@@ -50,5 +53,42 @@ describe("error-map: Bridge errors", () => {
     expect(result.code).toBe(expectedCode)
     expect(result.code).not.toBe("INVALID_INPUT")
     expect(result.message).toBeTruthy()
+  })
+})
+
+describe("error-map: mapBridgeHttpError KYC tier ceiling detection", () => {
+  it("detects KYC tier ceiling via error.type", () => {
+    const result = mapBridgeHttpError(422, {
+      error: { type: "kyc_tier_limit_exceeded", message: "KYC tier limit reached" },
+    })
+    expect(result).toBeInstanceOf(BridgeKycTierCeilingExceededError)
+  })
+
+  it("detects KYC tier ceiling via error.type kyc_limit", () => {
+    const result = mapBridgeHttpError(400, {
+      error: { type: "kyc_limit_exceeded", message: "KYC limit exceeded" },
+    })
+    expect(result).toBeInstanceOf(BridgeKycTierCeilingExceededError)
+  })
+
+  it("detects KYC tier ceiling via response.message", () => {
+    const result = mapBridgeHttpError(422, {
+      message: "exceeds kyc ceiling",
+    })
+    expect(result).toBeInstanceOf(BridgeKycTierCeilingExceededError)
+  })
+
+  it("does not detect on unrelated 422 errors", () => {
+    const result = mapBridgeHttpError(422, {
+      error: { type: "validation_error", message: "Invalid amount" },
+    })
+    expect(result).not.toBeInstanceOf(BridgeKycTierCeilingExceededError)
+  })
+
+  it("does not detect on non-422/400 errors", () => {
+    const result = mapBridgeHttpError(500, {
+      error: { type: "kyc_tier_limit_exceeded", message: "KYC tier limit" },
+    })
+    expect(result).not.toBeInstanceOf(BridgeKycTierCeilingExceededError)
   })
 })

@@ -541,6 +541,13 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         message,
       })
 
+    case "BridgeKycTierCeilingExceededError":
+      message = error.message || "Withdrawal amount exceeds the KYC tier ceiling"
+      return bridgeGqlError({
+        code: "BRIDGE_KYC_TIER_CEILING_EXCEEDED",
+        message,
+      })
+
     case "BridgeCustomerNotFoundError":
       message = "Bridge customer not found"
       return bridgeGqlError({
