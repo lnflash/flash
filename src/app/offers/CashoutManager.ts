@@ -1,7 +1,8 @@
 import Storage from "./storage/Redis"
 import ValidOffer, { InitiatedCashout } from "./ValidOffer"
-import { USDAmount, ValidationError } from "@domain/shared"
+import { USDAmount, USDTAmount, ValidationError } from "@domain/shared"
 import { CacheServiceError } from "@domain/cache"
+import { resolveCashoutWalletSelection } from "@app/cash-wallet-cutover/cashout-routing"
 import { getBankOwnerIbexAccount } from "@services/ledger/caching"
 import Ibex from "@services/ibex/client"
 import { UnexpectedIbexResponse } from "@services/ibex/errors"
@@ -25,12 +26,36 @@ const CashoutManager = {
     userPayment: USDAmount, 
     bankAccountId: string,
   ): Promise<PersistedOffer | Error> => {
-    const flashWallet = await getBankOwnerIbexAccount()
+    const bankOwnerUsdWalletId = await getBankOwnerIbexAccount()
 
-    const invoiceResp = await Ibex.addInvoice({ 
-      accountId: flashWallet,
+    const wallet = await WalletsRepository().findById(walletId)
+    if (wallet instanceof RepositoryError) return new ValidationError(wallet)
+    const account = await AccountsRepository().findById(wallet.accountId)
+    if (account instanceof RepositoryError) return new ValidationError(account)
+    if (!account.erpParty) return new Error("Could not find erpParty for account")
+
+    // Source (user) and destination (Flash bank-owner) wallets are resolved from the
+    // cutover guard — not from the client-supplied walletId, which is trusted only for
+    // wallet-level auth. Post-cutover this routes the debit to the account's USDT wallet
+    // and the bank-owner's USDT wallet; pre-cutover it stays on the legacy USD wallets.
+    const selection = await resolveCashoutWalletSelection({
+      accountId: account.id,
+      requestedUserWalletId: walletId,
+      bankOwnerUsdWalletId,
+    })
+    if (selection instanceof Error) return selection
+
+    // 1 USDT = 1 USD; the JMD/USD payout math below stays USD-denominated regardless.
+    const paymentAmount =
+      selection.route === "usdt"
+        ? USDTAmount.usdCents(userPayment.asCents())
+        : userPayment
+    if (paymentAmount instanceof Error) return paymentAmount
+
+    const invoiceResp = await Ibex.addInvoice({
+      accountId: selection.flashWalletId,
       memo: "User withdraw to bank",
-      amount: userPayment, 
+      amount: paymentAmount,
       expiration: config.duration,
     })
     if (invoiceResp instanceof Error) return invoiceResp
@@ -42,12 +67,6 @@ const CashoutManager = {
     const usdPayout = userPayment.subtract(serviceFee)
     const exchangeRate = config.jmd.sell // todo: get from price server
     const jmdPayout = usdPayout.convertAtRate(exchangeRate)
-
-    const wallet = await WalletsRepository().findById(walletId)
-    if (wallet instanceof RepositoryError) return new ValidationError(wallet)
-    const account = await AccountsRepository().findById(wallet.accountId)
-    if (account instanceof RepositoryError) return new ValidationError(account)
-    if (!account.erpParty) return new Error("Could not find erpParty for account")
 
     const bankAccounts = await ErpNext.getBankAccountsByCustomer(account.erpParty!)
     if (bankAccounts instanceof BankAccountQueryError) return bankAccounts
@@ -61,10 +80,10 @@ const CashoutManager = {
 
     const validated = await ValidOffer.from({
       payment: {
-        userAcct: walletId,
-        flashAcct: flashWallet,
+        userAcct: selection.userWalletId,
+        flashAcct: selection.flashWalletId,
         invoice,
-        amount: userPayment,
+        amount: paymentAmount,
       },
       payout,
     })
@@ -78,8 +97,16 @@ const CashoutManager = {
   executeCashout: async (id: OfferId, walletId: WalletId): Promise<InitiatedCashout | Error> => {
     const offer = await Storage.get(id)
     if (offer instanceof Error) return offer
-  
-    if (walletId !== offer.details.payment.userAcct) return new ValidationError("Offer is not good for provided wallet.")
+
+    // walletId authenticates the caller at the wallet level; the offer's settlement wallet
+    // may differ from it (e.g. a USDT cash wallet post-cutover while an older client still
+    // presents the legacy USD walletId). Authorize when both belong to the same account.
+    const providedWallet = await WalletsRepository().findById(walletId)
+    if (providedWallet instanceof RepositoryError) return new ValidationError(providedWallet)
+    const settlementWallet = await WalletsRepository().findById(offer.details.payment.userAcct)
+    if (settlementWallet instanceof RepositoryError) return new ValidationError(settlementWallet)
+    if (providedWallet.accountId !== settlementWallet.accountId)
+      return new ValidationError("Offer is not good for provided wallet.")
 
     const validOffer = await ValidOffer.from(offer.details)
     if (validOffer instanceof Error) return validOffer

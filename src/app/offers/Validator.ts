@@ -27,6 +27,13 @@ const isBeforeExpiry = async (o: ValidationInputs): Promise<true | ValidationErr
 }
 
 const cashoutMin = async (o: ValidationInputs): Promise<true | ValidationError> => {
+  if (o.payment.amount instanceof USDTAmount) {
+    const min = USDTAmount.usdCents(config.minimum.amount)
+    if (min instanceof Error) return new ValidationError(min)
+    if (o.payment.amount.isLesserThan(min))
+      return new ValidationError(`Minimum cashout is $${min.asNumber(2)}`)
+    return true
+  }
   const min = USDAmount.cents(config.minimum.amount)
   if (min instanceof Error) return new ValidationError(min)
   if (o.payment.amount.isLesserThan(min))
@@ -37,6 +44,13 @@ const cashoutMin = async (o: ValidationInputs): Promise<true | ValidationError> 
 const cashoutMax: ValidationFn<ValidationInputs> = async (
   o: ValidationInputs,
 ): Promise<true | ValidationError> => {
+  if (o.payment.amount instanceof USDTAmount) {
+    const max = USDTAmount.usdCents(config.maximum.amount)
+    if (max instanceof Error) return new ValidationError(max)
+    if (o.payment.amount.isGreaterThan(max))
+      return new ValidationError(`Maximum cashout is $${max.asNumber(2)}`)
+    return true
+  }
   const max = USDAmount.cents(config.maximum.amount)
   if (max instanceof Error) return new ValidationError(max)
   if (o.payment.amount.isGreaterThan(max))
@@ -44,9 +58,17 @@ const cashoutMax: ValidationFn<ValidationInputs> = async (
   else return true
 }
 
-const isUsd = async (o: ValidationInputs) => {
-  if (o.wallet.currency !== "USD")
-    return new ValidationError("Cash out only supports withdrawals from USD wallets")
+// Cash out supports a USD source wallet (pre-cutover) or a USDT source wallet
+// (post-cutover). The amount currency must match the resolved source wallet.
+const isSupportedCashoutWallet = async (o: ValidationInputs) => {
+  const { currency } = o.wallet
+  if (currency !== "USD" && currency !== "USDT")
+    return new ValidationError(
+      "Cash out only supports withdrawals from USD or USDT wallets",
+    )
+  const amountIsUsdt = o.payment.amount instanceof USDTAmount
+  if (amountIsUsdt !== (currency === "USDT"))
+    return new ValidationError("Cashout amount currency does not match the source wallet")
   return true
 }
 
@@ -58,8 +80,17 @@ const hasSufficientBalance = async (
     currency: o.wallet.currency,
   })
   if (balance instanceof Error) return new ValidationError(balance)
-  if (balance instanceof USDTAmount)
-    return new ValidationError("Cash out only supports withdrawals from USD wallets")
+  if (balance instanceof USDTAmount) {
+    if (!(o.payment.amount instanceof USDTAmount))
+      return new ValidationError(
+        "Cashout amount currency does not match the source wallet",
+      )
+    if (o.payment.amount.isGreaterThan(balance))
+      return new ValidationError("Transfer amount is greater than wallet balance.")
+    return true
+  }
+  if (o.payment.amount instanceof USDTAmount)
+    return new ValidationError("Cashout amount currency does not match the source wallet")
   else if (o.payment.amount.isGreaterThan(balance))
     return new ValidationError("Transfer amount is greater than wallet balance.")
   else return true
@@ -90,7 +121,7 @@ const verifyBankAccount = async (
 }
 
 export const CashoutValidator = validator<ValidationInputs>([
-  isUsd,
+  isSupportedCashoutWallet,
   cashoutMin,
   cashoutMax,
   isActiveAccount,

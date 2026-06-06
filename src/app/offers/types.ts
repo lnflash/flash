@@ -1,4 +1,4 @@
-import { USDAmount, JMDAmount } from "@domain/shared"
+import { USDAmount, USDTAmount, JMDAmount } from "@domain/shared"
 
 // Full details in a cashout transaction
 export type CashoutDetails = {
@@ -6,7 +6,8 @@ export type CashoutDetails = {
     readonly userAcct: WalletId,
     readonly flashAcct: WalletId,
     readonly invoice: LnInvoice,
-    readonly amount: USDAmount,
+    // USD pre-cutover; USDT once the source account has migrated to the cash wallet.
+    readonly amount: USDAmount | USDTAmount,
   },
   readonly payout: {
     readonly bankAccountId: string,
