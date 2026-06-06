@@ -254,7 +254,7 @@ const payToLnurl = async (
 ): Promise<PayToALnurlPayResponse201 | IbexError> => {
   return Ibex.payToLnurl({
     accountId: args.accountId,
-    amount: args.send.amount,
+    amount: args.amountMsat,
     params: args.params,
     webhookUrl: WebhookServer.endpoints.onPay.lnurl,
     webhookSecret: WebhookServer.secret,

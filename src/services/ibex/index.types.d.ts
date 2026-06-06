@@ -25,7 +25,7 @@ type IbexTransactionId = string & { readonly brand: unique symbol }
 
 type PayLnurlArgs = {
   accountId: IbexAccountId,
-  send: IbexCurrency,
+  amountMsat: number,
   params: string, // what is this?
 }
 
