@@ -13,6 +13,7 @@ import {
   writeBridgeCashoutCompleted,
   writeBridgeCashoutFailed,
 } from "@services/frappe/BridgeTransferRequestWriter"
+import { alertBridge } from "@services/alerts"
 
 const TERMINAL_FAILURE_STATES = new Set([
   "undeliverable",
@@ -121,6 +122,13 @@ export const transferHandler = async (req: Request, res: Response) => {
           { transfer_id, error: auditResult },
           "Failed to persist Bridge transfer ERPNext audit row",
         )
+        alertBridge({
+          source: "erpnext-audit",
+          severity: "critical",
+          title: "Bridge transfer ERPNext audit write failed",
+          detail: auditResult.message,
+          context: { transfer_id, event },
+        })
         return res.status(500).json({ error: "Failed to persist ERPNext audit row" })
       }
 
@@ -196,6 +204,13 @@ export const transferHandler = async (req: Request, res: Response) => {
           { transfer_id, error: auditResult },
           "Failed to persist Bridge transfer failure ERPNext audit row",
         )
+        alertBridge({
+          source: "erpnext-audit",
+          severity: "critical",
+          title: "Bridge transfer-failure ERPNext audit write failed",
+          detail: auditResult.message,
+          context: { transfer_id, event },
+        })
         return res.status(500).json({ error: "Failed to persist ERPNext audit row" })
       }
 
@@ -216,6 +231,13 @@ export const transferHandler = async (req: Request, res: Response) => {
     return res.status(200).json({ status: "success" })
   } catch (error) {
     baseLogger.error({ error, transfer_id }, "Error processing Bridge transfer webhook")
+    alertBridge({
+      source: "bridge-webhook",
+      severity: "critical",
+      title: "Bridge transfer webhook processing error",
+      detail: error instanceof Error ? error.message : String(error),
+      context: { transfer_id, event },
+    })
     return res.status(500).json({ error: "Internal server error" })
   }
 }

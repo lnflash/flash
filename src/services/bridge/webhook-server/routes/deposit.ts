@@ -12,6 +12,7 @@ import { baseLogger } from "@services/logger"
 import { createBridgeDeposit } from "@services/mongoose/bridge-deposit-log"
 import { reconcileByTxHash } from "@services/bridge/reconciliation"
 import { writeBridgeDepositRequest } from "@services/frappe/BridgeTransferRequestWriter"
+import { alertBridge } from "@services/alerts"
 
 export const depositHandler = async (req: Request, res: Response) => {
   const { event_id, event_object } = req.body
@@ -94,6 +95,13 @@ export const depositHandler = async (req: Request, res: Response) => {
         { error: auditResult, event_id, id },
         "Failed to persist Bridge deposit ERPNext audit row",
       )
+      alertBridge({
+        source: "erpnext-audit",
+        severity: "critical",
+        title: "Bridge deposit ERPNext audit write failed",
+        detail: auditResult.message,
+        context: { event_id, transfer_id: id },
+      })
       return res.status(500).json({ error: "Failed to persist ERPNext audit row" })
     }
 
@@ -109,6 +117,13 @@ export const depositHandler = async (req: Request, res: Response) => {
     return res.status(200).json({ status: "success" })
   } catch (error) {
     baseLogger.error({ error, id, event_id }, "Error processing Bridge deposit webhook")
+    alertBridge({
+      source: "bridge-webhook",
+      severity: "critical",
+      title: "Bridge deposit webhook processing error",
+      detail: error instanceof Error ? error.message : String(error),
+      context: { event_id, transfer_id: id },
+    })
     return res.status(500).json({ error: "Internal server error" })
   }
 }

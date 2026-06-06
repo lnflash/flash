@@ -8,6 +8,7 @@ import crypto from "crypto"
 import { BridgeConfig } from "@config"
 
 import { BridgeCustomerId, BridgeTransferId, BridgeVirtualAccountId } from "@domain/primitives/bridge"
+import { alertBridge } from "@services/alerts"
 import { BridgeTimeoutError } from "./errors"
 
 // ============ Error Handling ============
@@ -379,6 +380,16 @@ export class BridgeClient {
       const responseData = await response.json().catch(() => null)
 
       if (!response.ok) {
+        // Only 5xx indicates a Bridge-side outage; 4xx are normal API rejections.
+        if (response.status >= 500) {
+          alertBridge({
+            source: "bridge-api",
+            severity: "critical",
+            title: `Bridge API ${response.status} on ${method} ${path}`,
+            detail: response.statusText,
+            context: { method, path, status: response.status },
+          })
+        }
         throw new BridgeApiError(
           `Bridge API error: ${response.status} ${response.statusText}`,
           response.status,
@@ -389,7 +400,23 @@ export class BridgeClient {
       return responseData as T
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
+        alertBridge({
+          source: "bridge-api",
+          severity: "critical",
+          title: `Bridge API timeout on ${method} ${path}`,
+          context: { method, path, timeoutMs },
+        })
         throw new BridgeTimeoutError()
+      }
+      // Network/connectivity failures (5xx already alerted above).
+      if (!(err instanceof BridgeApiError)) {
+        alertBridge({
+          source: "bridge-api",
+          severity: "critical",
+          title: `Bridge API request failed on ${method} ${path}`,
+          detail: err instanceof Error ? err.message : String(err),
+          context: { method, path },
+        })
       }
       throw err
     } finally {
