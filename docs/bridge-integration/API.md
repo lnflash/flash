@@ -193,7 +193,17 @@ query BridgeWithdrawals {
 | Code | Description |
 | --- | --- |
 | `BRIDGE_DISABLED` | Bridge integration is disabled in configuration. |
-| `BRIDGE_ACCOUNT_LEVEL_ERROR` | User account level is below 2. |
+| `BRIDGE_ACCOUNT_LEVEL_ERROR` | User account level is below the required Bridge access level. |
+| `BRIDGE_INVALID_AMOUNT` | Withdrawal amount is malformed or not positive. |
+| `BRIDGE_BELOW_MINIMUM_WITHDRAWAL` | Withdrawal amount is below the configured minimum. |
 | `BRIDGE_KYC_PENDING` | Operation requires approved KYC, but it is still pending. |
 | `BRIDGE_KYC_REJECTED` | KYC was rejected. |
+| `BRIDGE_KYC_OFFBOARDED` | Bridge offboarded the customer. |
 | `BRIDGE_CUSTOMER_NOT_FOUND` | Bridge customer record not found for the user. |
+| `BRIDGE_INSUFFICIENT_FUNDS` | USDT balance is insufficient for the withdrawal. |
+| `BRIDGE_RATE_LIMIT` | Bridge rate-limited the request. |
+| `BRIDGE_TIMEOUT` | Bridge request timed out. |
+| `BRIDGE_TRANSFER_FAILED` | Bridge transfer failed. |
+| `BRIDGE_WEBHOOK_VALIDATION` | Bridge webhook signature validation failed. |
+| `BRIDGE_API_ERROR` | Bridge API returned an unclassified provider error. |
+| `BRIDGE_ERROR` | Unclassified Bridge domain error. |

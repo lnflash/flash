@@ -306,8 +306,8 @@ type BridgeWithdrawal {
   createdAt: String!
   currency: String!
   failureReason: String
-  id: ID!
-  status: String!
+  state: String!
+  transferId: ID!
 }
 
 type BuildInformation {
