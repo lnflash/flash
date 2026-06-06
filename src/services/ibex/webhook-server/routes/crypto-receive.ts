@@ -2,6 +2,7 @@ import express, { Request, Response } from "express"
 import { AccountsRepository } from "@services/mongoose/accounts"
 import { createIbexCryptoReceive } from "@services/mongoose/ibex-crypto-receive-log"
 import { listWalletsByAccountId } from "@app/wallets"
+import { sendBridgeDepositNotificationBestEffort } from "@app/bridge/send-deposit-notification"
 import { WalletCurrency, USDTAmount } from "@domain/shared"
 import { baseLogger } from "@services/logger"
 import { LockService } from "@services/lock"
@@ -124,6 +125,12 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
           )
           return { status: "error", code: "erpnext_audit_failed" } as CryptoReceiveResult
         }
+
+        await sendBridgeDepositNotificationBestEffort({
+          accountId: account.id,
+          amount: String(usdtAmount.asNumber()),
+          currency: normalizedCurrency,
+        })
 
         return { status: "success" } as CryptoReceiveResult
       } catch (error) {
