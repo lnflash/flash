@@ -792,6 +792,9 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "InvalidLnurlError":
       return new InvalidLnurlError({ message: error.message, logger: baseLogger })
 
+    case "InvalidLnurlAmountError":
+      return new InvalidLnurlError({ message: error.message, logger: baseLogger })
+
     case "CashWalletCutoverInProgressError":
       message = "Cash Wallet cutover is in progress. Please try again shortly."
       return new ValidationInternalError({ message, logger: baseLogger })

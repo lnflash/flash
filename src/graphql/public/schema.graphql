@@ -243,7 +243,7 @@ input BankAccountInput {
 
 type BridgeAddExternalAccountPayload {
   errors: [Error!]!
-  externalAccount: BridgeExternalAccount
+  externalAccount: BridgeExternalAccountLink
 }
 
 type BridgeCreateVirtualAccountPayload {
@@ -256,6 +256,11 @@ type BridgeExternalAccount {
   bankName: String!
   id: ID!
   status: String!
+}
+
+type BridgeExternalAccountLink {
+  expiresAt: String!
+  linkUrl: String!
 }
 
 input BridgeInitiateKycInput {
@@ -878,6 +883,20 @@ A bech32-encoded HTTPS/Onion URL that can be interacted with automatically by a 
 """
 scalar Lnurl
 
+input LnurlPaymentSendInput {
+  """Amount to spend from the USD/USDT wallet, in USD cents."""
+  amount: FractionalCentAmount!
+
+  """LNURL-pay value to decode and pay."""
+  lnurl: Lnurl!
+
+  """Optional memo for the Lightning payment."""
+  memo: Memo
+
+  """Wallet ID with sufficient balance. Must belong to the current user."""
+  walletId: WalletId!
+}
+
 type MapInfo {
   coordinates: Coordinates!
   title: String!
@@ -1039,6 +1058,12 @@ type Mutation {
   """
   lnUsdInvoiceCreateOnBehalfOfRecipient(input: LnUsdInvoiceCreateOnBehalfOfRecipientInput!): LnInvoicePayload!
   lnUsdInvoiceFeeProbe(input: LnUsdInvoiceFeeProbeInput!): CentAmountPayload!
+
+  """
+  Pay a LNURL-pay endpoint using a USD/USDT wallet balance.
+  The wallet amount is converted to whole-satoshi millisatoshis before calling IBEX.
+  """
+  lnurlPaymentSend(input: LnurlPaymentSendInput!): PaymentSendPayload!
   merchantMapSuggest(input: MerchantMapSuggestInput!): MerchantPayload!
   onChainAddressCreate(input: OnChainAddressCreateInput!): OnChainAddressPayload!
   onChainAddressCurrent(input: OnChainAddressCurrentInput!): OnChainAddressPayload!
