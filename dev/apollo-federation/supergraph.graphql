@@ -268,7 +268,7 @@ type BridgeAddExternalAccountPayload
   @join__type(graph: PUBLIC)
 {
   errors: [Error!]!
-  externalAccount: BridgeExternalAccount
+  externalAccount: BridgeExternalAccountLink
 }
 
 type BridgeCreateVirtualAccountPayload
@@ -285,6 +285,13 @@ type BridgeExternalAccount
   bankName: String!
   id: ID!
   status: String!
+}
+
+type BridgeExternalAccountLink
+  @join__type(graph: PUBLIC)
+{
+  expiresAt: String!
+  linkUrl: String!
 }
 
 input BridgeInitiateKycInput
