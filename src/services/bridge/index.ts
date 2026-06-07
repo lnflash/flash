@@ -1069,16 +1069,18 @@ const getWithdrawals = async (
     )
     if (withdrawals instanceof Error) return withdrawals
 
-    const result: WithdrawalResult[] = withdrawals.map((w) => ({
-      id: w.id,
-      amount: w.amount,
-      currency: w.currency,
-      externalAccountId: w.externalAccountId,
-      status: w.status,
-      bridgeTransferId: w.bridgeTransferId,
-      failureReason: w.failureReason,
-      createdAt: w.createdAt.toISOString(),
-    }))
+    const result: WithdrawalResult[] = withdrawals
+      .filter((w) => w.bridgeTransferId !== null && w.bridgeTransferId !== undefined)
+      .map((w) => ({
+        id: w.id,
+        amount: w.amount,
+        currency: w.currency,
+        externalAccountId: w.externalAccountId,
+        status: w.status,
+        bridgeTransferId: w.bridgeTransferId,
+        failureReason: w.failureReason,
+        createdAt: w.createdAt.toISOString(),
+      }))
 
     baseLogger.info(
       { accountId, operation: "getWithdrawals", count: result.length },

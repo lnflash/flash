@@ -786,9 +786,9 @@ describe("getWithdrawals", () => {
     })
   })
 
-  it("maps each row to id and status — not transferId or state", async () => {
+  it("maps submitted rows to id/status — not transferId or state", async () => {
     ;(BridgeAccountsRepo.findWithdrawalsByAccountId as jest.Mock).mockResolvedValue([
-      makeRow(WITHDRAWAL_ID),
+      makeRow(WITHDRAWAL_ID, { bridgeTransferId: TRANSFER_ID, status: "submitted" }),
     ])
 
     const result = await BridgeService.getWithdrawals(ACCOUNT_ID)
@@ -797,12 +797,12 @@ describe("getWithdrawals", () => {
     if (result instanceof Error) return
     expect(result).toHaveLength(1)
     expect(result[0].id).toBe(WITHDRAWAL_ID)
-    expect(result[0].status).toBe("pending")
+    expect(result[0].status).toBe("submitted")
     expect((result[0] as Record<string, unknown>).transferId).toBeUndefined()
     expect((result[0] as Record<string, unknown>).state).toBeUndefined()
   })
 
-  it("includes bridgeTransferId when the transfer has been submitted", async () => {
+  it("includes bridgeTransferId for submitted/completed rows", async () => {
     ;(BridgeAccountsRepo.findWithdrawalsByAccountId as jest.Mock).mockResolvedValue([
       makeRow(WITHDRAWAL_ID, { bridgeTransferId: TRANSFER_ID, status: "completed" }),
     ])
@@ -815,23 +815,25 @@ describe("getWithdrawals", () => {
     expect(result[0].status).toBe("completed")
   })
 
-  it("returns undefined bridgeTransferId for pending (pre-initiation) rows", async () => {
+  it("excludes pending rows that have no bridgeTransferId (pre-initiation)", async () => {
     ;(BridgeAccountsRepo.findWithdrawalsByAccountId as jest.Mock).mockResolvedValue([
-      makeRow(WITHDRAWAL_ID), // bridgeTransferId: undefined
+      makeRow(WITHDRAWAL_ID), // bridgeTransferId: undefined — pre-approval
     ])
 
     const result = await BridgeService.getWithdrawals(ACCOUNT_ID)
 
     expect(result).not.toBeInstanceOf(Error)
     if (result instanceof Error) return
-    expect(result[0].bridgeTransferId).toBeUndefined()
+    expect(result).toHaveLength(0)
   })
 
-  it("returns all rows regardless of status — pending, cancelled, completed", async () => {
+  it("excludes cancelled rows without a bridgeTransferId, includes submitted/completed/failed", async () => {
     ;(BridgeAccountsRepo.findWithdrawalsByAccountId as jest.Mock).mockResolvedValue([
-      makeRow("w-1", { status: "pending" }),
-      makeRow("w-2", { status: "cancelled" }),
-      makeRow("w-3", { status: "completed", bridgeTransferId: TRANSFER_ID }),
+      makeRow("w-1", { status: "pending" }),                                           // excluded
+      makeRow("w-2", { status: "cancelled" }),                                         // excluded (no transferId)
+      makeRow("w-3", { status: "submitted",  bridgeTransferId: TRANSFER_ID }),
+      makeRow("w-4", { status: "completed",  bridgeTransferId: "t-completed" }),
+      makeRow("w-5", { status: "failed",     bridgeTransferId: "t-failed" }),
     ])
 
     const result = await BridgeService.getWithdrawals(ACCOUNT_ID)
@@ -839,12 +841,12 @@ describe("getWithdrawals", () => {
     expect(result).not.toBeInstanceOf(Error)
     if (result instanceof Error) return
     expect(result).toHaveLength(3)
-    expect(result.map((r) => r.status)).toEqual(["pending", "cancelled", "completed"])
+    expect(result.map((r) => r.status)).toEqual(["submitted", "completed", "failed"])
   })
 
   it("formats createdAt as an ISO string", async () => {
     ;(BridgeAccountsRepo.findWithdrawalsByAccountId as jest.Mock).mockResolvedValue([
-      makeRow(WITHDRAWAL_ID),
+      makeRow(WITHDRAWAL_ID, { bridgeTransferId: TRANSFER_ID, status: "submitted" }),
     ])
 
     const result = await BridgeService.getWithdrawals(ACCOUNT_ID)
