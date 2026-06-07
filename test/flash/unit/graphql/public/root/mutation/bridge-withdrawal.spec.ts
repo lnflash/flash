@@ -74,6 +74,8 @@ describe("bridgeRequestWithdrawal resolver", () => {
     )
     expect(result?.errors).toEqual([])
     expect(result?.withdrawal).toEqual(pendingRow)
+    expect(result?.withdrawal?.status).toBe("pending")
+    expect(result?.withdrawal?.externalAccountId).toBe(EXTERNAL_ACCOUNT_ID)
   })
 
   it("returns an existing pending row when the service deduplicates the request", async () => {
@@ -111,6 +113,7 @@ describe("bridgeInitiateWithdrawal resolver", () => {
 
     expect(BridgeService.initiateWithdrawal).toHaveBeenCalledWith(ACCOUNT_ID, WITHDRAWAL_ID)
     expect(result?.errors).toEqual([])
+    expect(result?.withdrawal?.status).toBe("submitted")
     expect(result?.withdrawal?.bridgeTransferId).toBe(TRANSFER_ID)
   })
 
@@ -154,7 +157,7 @@ describe("bridgeInitiateWithdrawal resolver", () => {
 describe("bridgeCancelWithdrawalRequest resolver", () => {
   beforeEach(() => jest.clearAllMocks())
 
-  it("marks the pending row cancelled and returns the updated withdrawal", async () => {
+  it("delegates to cancelWithdrawalRequest and returns the cancelled withdrawal", async () => {
     const cancelledRow = makePendingRow({ status: "cancelled" })
     ;(BridgeService.cancelWithdrawalRequest as jest.Mock).mockResolvedValue(cancelledRow)
 
@@ -171,6 +174,8 @@ describe("bridgeCancelWithdrawalRequest resolver", () => {
     )
     expect(result?.errors).toEqual([])
     expect(result?.withdrawal?.status).toBe("cancelled")
+    expect(result?.withdrawal?.id).toBe(WITHDRAWAL_ID)
+    expect(result?.withdrawal?.amount).toBe(AMOUNT)
   })
 
   it("maps BridgeWithdrawalNotFoundError to BRIDGE_WITHDRAWAL_NOT_FOUND when ID is missing or wrong-owner", async () => {
