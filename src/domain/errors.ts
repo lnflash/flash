@@ -158,3 +158,4 @@ export class MultipleCurrenciesForSingleCurrencyOperationError extends Validatio
 export class InvalidIdempotencyKeyError extends ValidationError {}
 
 export class InvalidLnurlError extends ValidationError {}
+export class InvalidLnurlAmountError extends ValidationError {}

@@ -16,6 +16,7 @@ import LnNoAmountInvoiceFeeProbeMutation from "@graphql/public/root/mutation/ln-
 import LnNoAmountUsdInvoiceFeeProbeMutation from "@graphql/public/root/mutation/ln-noamount-usd-invoice-fee-probe"
 import LnNoAmountInvoicePaymentSendMutation from "@graphql/public/root/mutation/ln-noamount-invoice-payment-send"
 import LnNoAmountUsdInvoicePaymentSendMutation from "@graphql/public/root/mutation/ln-noamount-usd-invoice-payment-send"
+import LnurlPaymentSendMutation from "@graphql/public/root/mutation/lnurl-payment-send"
 import OnChainAddressCreateMutation from "@graphql/public/root/mutation/on-chain-address-create"
 import OnChainAddressCurrentMutation from "@graphql/public/root/mutation/on-chain-address-current"
 import UserLoginMutation from "@graphql/shared/root/mutation/user-login"
@@ -145,6 +146,7 @@ export const mutationFields = {
       lnInvoicePaymentSend: LnInvoicePaymentSendMutation,
       lnNoAmountInvoicePaymentSend: LnNoAmountInvoicePaymentSendMutation,
       lnNoAmountUsdInvoicePaymentSend: LnNoAmountUsdInvoicePaymentSendMutation,
+      lnurlPaymentSend: LnurlPaymentSendMutation,
 
       onChainAddressCreate: OnChainAddressCreateMutation,
       onChainAddressCurrent: OnChainAddressCurrentMutation,

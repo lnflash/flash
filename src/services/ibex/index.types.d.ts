@@ -13,20 +13,19 @@ interface IbexAccount {
 
 type IbexAccountId = WalletId
 
-// type IbexInvoiceArgs = { 
+// type IbexInvoiceArgs = {
 //   accountId: IbexAccountId,
 //   amount?: IbexAmount
 //   memo: string
-//   expiration?: Seconds 
+//   expiration?: Seconds
 // };
-type AccountArgs = { name: string, currency: WalletCurrency }
+type AccountArgs = { name: string; currency: WalletCurrency }
 type IbexTransactionId = string & { readonly brand: unique symbol }
 
-
 type PayLnurlArgs = {
-  accountId: IbexAccountId,
-  send: IbexCurrency,
-  params: string, // what is this?
+  accountId: IbexAccountId
+  amountMsat: MilliSatoshis
+  params: string // what is this?
 }
 
 // Flash types
@@ -34,4 +33,3 @@ type PayLnurlArgs = {
 //   fee: T,
 // }
 type Bolt11 = string & { readonly brand: unique symbol }
-

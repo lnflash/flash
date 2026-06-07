@@ -37,6 +37,10 @@
         "title": "Transacción {{walletCurrency}}"
       }
     },
+    "bridgeDeposit": {
+      "body": "Su depósito de {{amount}} se agregó a su cuenta.",
+      "title": "Depósito recibido"
+    },
     "bridgeWithdrawal": {
       "cancelled": {
         "body": "Su retiro de {{amount}} ha sido cancelado.",
