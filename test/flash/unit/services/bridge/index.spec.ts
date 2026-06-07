@@ -31,6 +31,7 @@ jest.mock("@services/mongoose/bridge-accounts", () => ({
   findExternalAccountsByAccountId: jest.fn(),
   updateWithdrawalTransferId: jest.fn(),
   findWithdrawalById: jest.fn(),
+  findWithdrawalsByAccountId: jest.fn(),
   cancelWithdrawal: jest.fn(),
 }))
 
@@ -762,5 +763,88 @@ describe("cancelWithdrawalRequest", () => {
     const { BridgeWithdrawalNotFoundError } = jest.requireActual("@services/bridge/errors")
     expect(result).toBeInstanceOf(BridgeWithdrawalNotFoundError)
     expect(sendBridgeWithdrawalNotificationBestEffort).not.toHaveBeenCalled()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getWithdrawals
+// Returns the account's withdrawal history mapped to the GQL-facing shape
+// (id/status/bridgeTransferId — NOT the old transferId/state fields).
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("getWithdrawals", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    ;(AccountsRepository as jest.Mock).mockReturnValue({
+      findById: jest.fn().mockResolvedValue(mockAccount),
+    })
+  })
+
+  it("maps each row to id and status — not transferId or state", async () => {
+    ;(BridgeAccountsRepo.findWithdrawalsByAccountId as jest.Mock).mockResolvedValue([
+      makeRow(WITHDRAWAL_ID),
+    ])
+
+    const result = await BridgeService.getWithdrawals(ACCOUNT_ID)
+
+    expect(result).not.toBeInstanceOf(Error)
+    if (result instanceof Error) return
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe(WITHDRAWAL_ID)
+    expect(result[0].status).toBe("pending")
+    expect((result[0] as Record<string, unknown>).transferId).toBeUndefined()
+    expect((result[0] as Record<string, unknown>).state).toBeUndefined()
+  })
+
+  it("includes bridgeTransferId when the transfer has been submitted", async () => {
+    ;(BridgeAccountsRepo.findWithdrawalsByAccountId as jest.Mock).mockResolvedValue([
+      makeRow(WITHDRAWAL_ID, { bridgeTransferId: TRANSFER_ID, status: "completed" }),
+    ])
+
+    const result = await BridgeService.getWithdrawals(ACCOUNT_ID)
+
+    expect(result).not.toBeInstanceOf(Error)
+    if (result instanceof Error) return
+    expect(result[0].bridgeTransferId).toBe(TRANSFER_ID)
+    expect(result[0].status).toBe("completed")
+  })
+
+  it("returns undefined bridgeTransferId for pending (pre-initiation) rows", async () => {
+    ;(BridgeAccountsRepo.findWithdrawalsByAccountId as jest.Mock).mockResolvedValue([
+      makeRow(WITHDRAWAL_ID), // bridgeTransferId: undefined
+    ])
+
+    const result = await BridgeService.getWithdrawals(ACCOUNT_ID)
+
+    expect(result).not.toBeInstanceOf(Error)
+    if (result instanceof Error) return
+    expect(result[0].bridgeTransferId).toBeUndefined()
+  })
+
+  it("returns all rows regardless of status — pending, cancelled, completed", async () => {
+    ;(BridgeAccountsRepo.findWithdrawalsByAccountId as jest.Mock).mockResolvedValue([
+      makeRow("w-1", { status: "pending" }),
+      makeRow("w-2", { status: "cancelled" }),
+      makeRow("w-3", { status: "completed", bridgeTransferId: TRANSFER_ID }),
+    ])
+
+    const result = await BridgeService.getWithdrawals(ACCOUNT_ID)
+
+    expect(result).not.toBeInstanceOf(Error)
+    if (result instanceof Error) return
+    expect(result).toHaveLength(3)
+    expect(result.map((r) => r.status)).toEqual(["pending", "cancelled", "completed"])
+  })
+
+  it("formats createdAt as an ISO string", async () => {
+    ;(BridgeAccountsRepo.findWithdrawalsByAccountId as jest.Mock).mockResolvedValue([
+      makeRow(WITHDRAWAL_ID),
+    ])
+
+    const result = await BridgeService.getWithdrawals(ACCOUNT_ID)
+
+    expect(result).not.toBeInstanceOf(Error)
+    if (result instanceof Error) return
+    expect(result[0].createdAt).toBe(CREATED_AT.toISOString())
   })
 })
