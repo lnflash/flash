@@ -188,6 +188,7 @@ const setupGuards = () => {
   ;(BridgeAccountsRepo.updateWithdrawalTransferId as jest.Mock).mockResolvedValue({
     ...makeRow(WITHDRAWAL_ID),
     bridgeTransferId: TRANSFER_ID,
+    status: "submitted" as const,
   })
   ;(BridgeClient.createTransfer as jest.Mock).mockResolvedValue(mockTransfer)
 }
@@ -583,8 +584,8 @@ describe("initiateWithdrawal — takes withdrawalId (step 2A)", () => {
     expect(calls[0][2]).toBe(deriveWithdrawalIdempotencyKey(WITHDRAWAL_ID))
   })
 
-  it("updates the withdrawal record with the Bridge transfer ID", async () => {
-    await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
+  it("updates the withdrawal record with the Bridge transfer ID and transitions status to submitted", async () => {
+    const result = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
 
     expect(BridgeAccountsRepo.updateWithdrawalTransferId).toHaveBeenCalledWith(
       WITHDRAWAL_ID,
@@ -592,6 +593,11 @@ describe("initiateWithdrawal — takes withdrawalId (step 2A)", () => {
       AMOUNT,
       "usd",
     )
+    expect(result).not.toBeInstanceOf(Error)
+    if (!(result instanceof Error)) {
+      expect(result.status).toBe("submitted")
+      expect(result.bridgeTransferId).toBe(TRANSFER_ID)
+    }
   })
 
   it("returns BridgeWithdrawalNotFoundError when the withdrawal ID does not exist", async () => {

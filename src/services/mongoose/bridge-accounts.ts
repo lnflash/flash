@@ -167,7 +167,7 @@ export const updateWithdrawalTransferId = async (
   try {
     const record = await BridgeWithdrawal.findByIdAndUpdate(
       id,
-      { bridgeTransferId, amount, currency, updatedAt: new Date() },
+      { bridgeTransferId, amount, currency, status: "submitted", updatedAt: new Date() },
       { new: true },
     )
     return record || new RepositoryError("Withdrawal not found")
@@ -196,7 +196,7 @@ export const updateWithdrawalStatus = async (
     if (truncatedReason !== undefined) update.failureReason = truncatedReason
 
     const record = await BridgeWithdrawal.findOneAndUpdate(
-      { bridgeTransferId, status: "pending" },
+      { bridgeTransferId, status: "submitted" },
       update,
       { new: true },
     )
