@@ -62,6 +62,8 @@ type InitiateWithdrawalResult = {
   amount: string
   currency: string
   state: string
+  failureReason?: string
+  createdAt: string
 }
 
 type WithdrawalResult = {
@@ -69,6 +71,7 @@ type WithdrawalResult = {
   amount: string
   currency: string
   state: string
+  failureReason?: string
   createdAt: string
 }
 
@@ -591,6 +594,7 @@ const initiateWithdrawal = async (
       amount: transfer.amount,
       currency: transfer.currency,
       state: transfer.state,
+      createdAt: transfer.created_at,
     }
 
     const withdrawalResult = await BridgeAccountsRepo.updateWithdrawalTransferId(
@@ -893,12 +897,13 @@ const getWithdrawals = async (
     if (withdrawals instanceof Error) return withdrawals
 
     const result: WithdrawalResult[] = withdrawals
-      .filter((w) => w.bridgeTransferId !== null || w.bridgeTransferId !== undefined)
+      .filter((w) => w.bridgeTransferId !== null && w.bridgeTransferId !== undefined)
       .map((w) => ({
         transferId: w.bridgeTransferId!,
         amount: w.amount,
         currency: w.currency,
         state: w.status,
+        failureReason: w.failureReason,
         createdAt: w.createdAt.toISOString(),
       }))
 
