@@ -374,12 +374,13 @@ type BridgeWithdrawal
   @join__type(graph: PUBLIC)
 {
   amount: String!
+  bridgeTransferId: String
   createdAt: String!
   currency: String!
   externalAccountId: String
   failureReason: String
-  state: String!
-  transferId: ID!
+  id: ID!
+  status: String!
 }
 
 """
