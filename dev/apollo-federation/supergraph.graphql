@@ -1099,6 +1099,22 @@ A bech32-encoded HTTPS/Onion URL that can be interacted with automatically by a 
 scalar Lnurl
   @join__type(graph: PUBLIC)
 
+input LnurlPaymentSendInput
+  @join__type(graph: PUBLIC)
+{
+  """Amount to spend from the USD/USDT wallet, in USD cents."""
+  amount: FractionalCentAmount!
+
+  """LNURL-pay value to decode and pay."""
+  lnurl: Lnurl!
+
+  """Optional memo for the Lightning payment."""
+  memo: Memo
+
+  """Wallet ID with sufficient balance. Must belong to the current user."""
+  walletId: WalletId!
+}
+
 input LnUsdInvoiceCreateInput
   @join__type(graph: PUBLIC)
 {
@@ -1318,6 +1334,12 @@ type Mutation
   """
   lnUsdInvoiceCreateOnBehalfOfRecipient(input: LnUsdInvoiceCreateOnBehalfOfRecipientInput!): LnInvoicePayload!
   lnUsdInvoiceFeeProbe(input: LnUsdInvoiceFeeProbeInput!): CentAmountPayload!
+
+  """
+  Pay a LNURL-pay endpoint using a USD/USDT wallet balance.
+  The wallet amount is converted to whole-satoshi millisatoshis before calling IBEX.
+  """
+  lnurlPaymentSend(input: LnurlPaymentSendInput!): PaymentSendPayload!
   merchantMapSuggest(input: MerchantMapSuggestInput!): MerchantPayload!
   onChainAddressCreate(input: OnChainAddressCreateInput!): OnChainAddressPayload!
   onChainAddressCurrent(input: OnChainAddressCurrentInput!): OnChainAddressPayload!
