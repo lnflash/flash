@@ -37,6 +37,8 @@ import {
   UnauthorizedIPMetadataCountryError,
   IbexError,
   InvalidLnurlError,
+  BridgeWithdrawalNotFoundError,
+  BridgeWithdrawalAlreadyInitiatedError,
 } from "@graphql/error"
 import { baseLogger } from "@services/logger"
 
@@ -515,11 +517,11 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
 
     case "BridgeWithdrawalNotFoundError":
       message = error.message || "Withdrawal request not found"
-      return new ValidationInternalError({ message, logger: baseLogger })
+      return new BridgeWithdrawalNotFoundError({ message, logger: baseLogger })
 
     case "BridgeWithdrawalAlreadyInitiatedError":
       message = error.message || "Withdrawal has already been submitted and cannot be cancelled"
-      return new ValidationInternalError({ message, logger: baseLogger })
+      return new BridgeWithdrawalAlreadyInitiatedError({ message, logger: baseLogger })
 
     case "BridgeRateLimitError":
       message = "Rate limit exceeded, please try again later"
@@ -742,9 +744,8 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "InvalidCarrierForPhoneMetadataError":
     case "InvalidCarrierTypeForPhoneMetadataError":
     case "InvalidCountryCodeForPhoneMetadataError":
-      message = `Unexpected error occurred, please try again or contact support if it persists (code: ${
-        error.name
-      }${error.message ? ": " + error.message : ""})`
+      message = `Unexpected error occurred, please try again or contact support if it persists (code: ${error.name
+        }${error.message ? ": " + error.message : ""})`
       return new UnexpectedClientError({ message, logger: baseLogger })
 
     case "MissingSessionIdError":
@@ -837,9 +838,8 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       return new ValidationInternalError({ message, logger: baseLogger })
 
     case "UnknownCaptchaError":
-      message = `Unknown error occurred (code: ${error.name}${
-        error.message ? ": " + error.message : ""
-      })`
+      message = `Unknown error occurred (code: ${error.name}${error.message ? ": " + error.message : ""
+        })`
       return new UnknownClientError({ message, logger: baseLogger })
 
     default:

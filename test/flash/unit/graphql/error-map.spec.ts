@@ -6,17 +6,17 @@ import {
 } from "@services/bridge/errors"
 
 describe("error-map", () => {
-  it("maps BridgeWithdrawalNotFoundError to ValidationInternalError", () => {
+  it("maps BridgeWithdrawalNotFoundError to BRIDGE_WITHDRAWAL_NOT_FOUND", () => {
     const result = mapError(new BridgeWithdrawalNotFoundError())
 
-    expect(result.extensions.code).toBe("VALIDATION_ERROR")
+    expect(result.extensions.code).toBe("BRIDGE_WITHDRAWAL_NOT_FOUND")
     expect(result.message).toContain("Withdrawal request not found")
   })
 
-  it("maps BridgeWithdrawalAlreadyInitiatedError to ValidationInternalError", () => {
+  it("maps BridgeWithdrawalAlreadyInitiatedError to BRIDGE_WITHDRAWAL_ALREADY_INITIATED", () => {
     const result = mapError(new BridgeWithdrawalAlreadyInitiatedError())
 
-    expect(result.extensions.code).toBe("VALIDATION_ERROR")
+    expect(result.extensions.code).toBe("BRIDGE_WITHDRAWAL_ALREADY_INITIATED")
     expect(result.message).toContain("already been submitted")
   })
 
