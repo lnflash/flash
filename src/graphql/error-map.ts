@@ -37,8 +37,6 @@ import {
   UnauthorizedIPMetadataCountryError,
   IbexError,
   InvalidLnurlError,
-  BridgeWithdrawalNotFoundError,
-  BridgeWithdrawalAlreadyInitiatedError,
   CustomApolloError,
 } from "@graphql/error"
 import { baseLogger } from "@services/logger"
@@ -559,11 +557,19 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
 
     case "BridgeWithdrawalNotFoundError":
       message = error.message || "Withdrawal request not found"
-      return new BridgeWithdrawalNotFoundError({ message, logger: baseLogger })
+      return bridgeGqlError({
+        code: "BRIDGE_WITHDRAWAL_NOT_FOUND",
+        message,
+      })
 
     case "BridgeWithdrawalAlreadyInitiatedError":
-      message = error.message || "Withdrawal has already been submitted and cannot be cancelled"
-      return new BridgeWithdrawalAlreadyInitiatedError({ message, logger: baseLogger })
+      message =
+        error.message ||
+        "Withdrawal has already been submitted to Bridge and cannot be cancelled"
+      return bridgeGqlError({
+        code: "BRIDGE_WITHDRAWAL_ALREADY_INITIATED",
+        message,
+      })
 
     case "BridgeRateLimitError":
       message = "Rate limit exceeded, please try again later"

@@ -490,28 +490,6 @@ export class IbexError extends CustomApolloError {
   }
 }
 
-export class BridgeWithdrawalNotFoundError extends CustomApolloError {
-  constructor(errData: CustomApolloErrorData) {
-    super({
-      message: "Withdrawal request not found",
-      forwardToClient: true,
-      code: "BRIDGE_WITHDRAWAL_NOT_FOUND",
-      ...errData,
-    })
-  }
-}
-
-export class BridgeWithdrawalAlreadyInitiatedError extends CustomApolloError {
-  constructor(errData: CustomApolloErrorData) {
-    super({
-      message: "Withdrawal has already been submitted and cannot be cancelled",
-      forwardToClient: true,
-      code: "BRIDGE_WITHDRAWAL_ALREADY_INITIATED",
-      ...errData,
-    })
-  }
-}
-
 export class InternalServerError extends CustomApolloError {
   constructor(errData: CustomApolloErrorData) {
     super({ level: "error", code: "INTERNAL_SERVER_ERROR", forwardToClient: false, ...errData })
