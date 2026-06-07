@@ -75,6 +75,7 @@ type InitiateWithdrawalResult = {
   amount: string
   currency: string
   status: string
+  bridgeTransferId?: string
   createdAt: string
 }
 
@@ -87,10 +88,13 @@ type CancelWithdrawalResult = {
 }
 
 type WithdrawalResult = {
-  transferId: string
+  id: string
   amount: string
   currency: string
-  state: string
+  externalAccountId: string
+  status: string
+  bridgeTransferId?: string
+  failureReason?: string
   createdAt: string
 }
 
@@ -710,6 +714,7 @@ const initiateWithdrawal = async (
       amount: updated.amount,
       currency: updated.currency,
       status: updated.status,
+      bridgeTransferId: updated.bridgeTransferId,
       createdAt: updated.createdAt.toISOString(),
     }
   } catch (error) {
@@ -1064,15 +1069,16 @@ const getWithdrawals = async (
     )
     if (withdrawals instanceof Error) return withdrawals
 
-    const result: WithdrawalResult[] = withdrawals
-      .filter((w) => w.bridgeTransferId !== null || w.bridgeTransferId !== undefined)
-      .map((w) => ({
-        transferId: w.bridgeTransferId!,
-        amount: w.amount,
-        currency: w.currency,
-        state: w.status,
-        createdAt: w.createdAt.toISOString(),
-      }))
+    const result: WithdrawalResult[] = withdrawals.map((w) => ({
+      id: w.id,
+      amount: w.amount,
+      currency: w.currency,
+      externalAccountId: w.externalAccountId,
+      status: w.status,
+      bridgeTransferId: w.bridgeTransferId,
+      failureReason: w.failureReason,
+      createdAt: w.createdAt.toISOString(),
+    }))
 
     baseLogger.info(
       { accountId, operation: "getWithdrawals", count: result.length },

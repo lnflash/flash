@@ -6,31 +6,39 @@ describe("Bridge public GraphQL object contract", () => {
   it("exposes withdrawal fields returned by BridgeService", () => {
     const fields = BridgeWithdrawal.getFields()
 
-    expect(fields).toHaveProperty("transferId")
+    expect(fields).toHaveProperty("id")
     expect(fields).toHaveProperty("amount")
     expect(fields).toHaveProperty("currency")
-    expect(fields).toHaveProperty("state")
+    expect(fields).toHaveProperty("externalAccountId")
+    expect(fields).toHaveProperty("status")
+    expect(fields).toHaveProperty("bridgeTransferId")
+    expect(fields).toHaveProperty("failureReason")
     expect(fields).toHaveProperty("createdAt")
-    expect(fields).not.toHaveProperty("id")
-    expect(fields).not.toHaveProperty("status")
+    expect(fields).not.toHaveProperty("transferId")
+    expect(fields).not.toHaveProperty("state")
   })
 
-  it("resolves withdrawal transferId and state from service-shaped results", () => {
+  it("resolves withdrawal id and status from service-shaped results", () => {
     const fields = BridgeWithdrawal.getFields()
     const withdrawal = {
-      transferId: "transfer-001",
+      id: "withdrawal-001",
       amount: "25.00",
       currency: "usdt",
-      state: "pending",
+      externalAccountId: "ext-001",
+      status: "pending",
+      bridgeTransferId: undefined,
       createdAt: "2026-06-05T00:00:00.000Z",
     }
 
     expect(
-      defaultFieldResolver(withdrawal, {}, {}, { fieldName: "transferId" } as never),
-    ).toBe("transfer-001")
+      defaultFieldResolver(withdrawal, {}, {}, { fieldName: "id" } as never),
+    ).toBe("withdrawal-001")
     expect(
-      defaultFieldResolver(withdrawal, {}, {}, { fieldName: "state" } as never),
+      defaultFieldResolver(withdrawal, {}, {}, { fieldName: "status" } as never),
     ).toBe("pending")
+    expect(
+      defaultFieldResolver(withdrawal, {}, {}, { fieldName: "bridgeTransferId" } as never),
+    ).toBeUndefined()
   })
 
   it("uses bridgeVirtualAccountId as the virtual account id returned by read queries", () => {

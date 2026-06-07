@@ -30,6 +30,7 @@ const bridgeWithdrawalRequest = GT.Field({
       currency: withdrawal.currency,
       externalAccountId: withdrawal.externalAccountId,
       status: withdrawal.status,
+      bridgeTransferId: withdrawal.bridgeTransferId,
       failureReason: withdrawal.failureReason,
       createdAt: withdrawal.createdAt.toISOString(),
     }
