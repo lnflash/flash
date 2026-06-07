@@ -10,6 +10,7 @@ import { BridgeConfig } from "@config"
 
 import * as BridgeAccountsRepo from "@services/mongoose/bridge-accounts"
 import { AccountsRepository } from "@services/mongoose/accounts"
+import { BridgeVirtualAccount } from "@services/mongoose/schema"
 import { wrapAsyncFunctionsToRunInSpan } from "@services/tracing"
 import { baseLogger } from "@services/logger"
 
@@ -36,8 +37,7 @@ import {
   BridgeWithdrawalNotFoundError,
   BridgeWithdrawalAlreadyInitiatedError,
 } from "./errors"
-import BridgeApiClient, { BridgeClient } from "./client"
-import { BridgeVirtualAccount } from "@services/mongoose/schema"
+import BridgeApiClient from "./client"
 
 // ============ Types ============
 
@@ -247,7 +247,7 @@ const initiateKyc = async ({
 
       // store the customer id and the kyc status 
       const customerId = toBridgeCustomerId(bridgeError.response.existing_kyc_link.customer_id)
-      const updateResult = await AccountsRepository().updateBridgeFields(accountId, {
+      await AccountsRepository().updateBridgeFields(accountId, {
         bridgeCustomerId: customerId,
         bridgeKycStatus: "not_started",
       })
@@ -968,10 +968,9 @@ const getVirtualAccount = async (
 
       // delete the virtual account from our repo since it's no longer valid
 
-      const deleteResult = await BridgeVirtualAccount.deleteOne({
+      await BridgeVirtualAccount.deleteOne({
         bridgeVirtualAccountId: virtualAccount.bridgeVirtualAccountId! as string
       })
-
 
       return null
     }

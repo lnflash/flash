@@ -30,14 +30,28 @@ describe("Bridge public GraphQL object contract", () => {
       createdAt: "2026-06-05T00:00:00.000Z",
     }
 
+    expect(fields.id).toBeDefined()
+    expect(fields.status).toBeDefined()
+    expect(fields.bridgeTransferId).toBeDefined()
+
     expect(
-      defaultFieldResolver(withdrawal, {}, {}, { fieldName: "id" } as never),
+      defaultFieldResolver(withdrawal, {}, {}, { fieldName: "id", field: fields.id } as never),
     ).toBe("withdrawal-001")
     expect(
-      defaultFieldResolver(withdrawal, {}, {}, { fieldName: "status" } as never),
+      defaultFieldResolver(
+        withdrawal,
+        {},
+        {},
+        { fieldName: "status", field: fields.status } as never,
+      ),
     ).toBe("pending")
     expect(
-      defaultFieldResolver(withdrawal, {}, {}, { fieldName: "bridgeTransferId" } as never),
+      defaultFieldResolver(
+        withdrawal,
+        {},
+        {},
+        { fieldName: "bridgeTransferId", field: fields.bridgeTransferId } as never,
+      ),
     ).toBeUndefined()
   })
 

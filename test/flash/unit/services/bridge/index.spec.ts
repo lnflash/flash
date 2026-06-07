@@ -78,7 +78,12 @@ jest.mock("@domain/primitives/bridge", () => ({
 // guards in the service are satisfied during tests.
 jest.mock("@domain/shared", () => {
   class USDTAmount {
-    constructor(private readonly ibexValue: number) {}
+    ibexValue: number
+
+    constructor(ibexValue: number) {
+      this.ibexValue = ibexValue
+    }
+
     toIbex() {
       return this.ibexValue
     }
@@ -166,6 +171,12 @@ const getUSDTAmount = (ibex: number) => {
     USDTAmount: new (ibexValue: number) => { toIbex: () => number }
   }
   return new USDTAmount(ibex)
+}
+
+const expectSuccess = <T>(result: T | Error): T => {
+  expect(result).not.toBeInstanceOf(Error)
+  if (result instanceof Error) throw result
+  return result
 }
 
 /** Sets up the guards common to requestWithdrawal and initiateWithdrawal. */
@@ -418,7 +429,6 @@ describe("requestWithdrawal", () => {
       EXTERNAL_ACCOUNT_ID,
     )
 
-    expect(result).not.toBeInstanceOf(Error)
     expect(BridgeAccountsRepo.createWithdrawal).toHaveBeenCalledWith({
       accountId: ACCOUNT_ID as string,
       amount: AMOUNT,
@@ -426,14 +436,14 @@ describe("requestWithdrawal", () => {
       externalAccountId: EXTERNAL_ACCOUNT_ID,
       status: "pending",
     })
-    if (!(result instanceof Error)) {
-      expect(result.id).toBe(WITHDRAWAL_ID)
-      expect(result.amount).toBe(AMOUNT)
-      expect(result.currency).toBe("usdt")
-      expect(result.externalAccountId).toBe(EXTERNAL_ACCOUNT_ID)
-      expect(result.status).toBe("pending")
-      expect(result.createdAt).toBeDefined()
-    }
+    expect(expectSuccess(result)).toMatchObject({
+      id: WITHDRAWAL_ID,
+      amount: AMOUNT,
+      currency: "usdt",
+      externalAccountId: EXTERNAL_ACCOUNT_ID,
+      status: "pending",
+      createdAt: expect.any(String),
+    })
   })
 
   it("never calls the Bridge API", async () => {
@@ -454,11 +464,10 @@ describe("requestWithdrawal", () => {
     )
 
     expect(BridgeAccountsRepo.createWithdrawal).not.toHaveBeenCalled()
-    expect(result).not.toBeInstanceOf(Error)
-    if (!(result instanceof Error)) {
-      expect(result.id).toBe("withdrawal-existing-001")
-      expect(result.status).toBe("pending")
-    }
+    expect(expectSuccess(result)).toMatchObject({
+      id: "withdrawal-existing-001",
+      status: "pending",
+    })
   })
 
   it("returns an error when the external account does not belong to the caller (CRIT-2)", async () => {
@@ -593,11 +602,10 @@ describe("initiateWithdrawal — takes withdrawalId (step 2A)", () => {
       AMOUNT,
       "usd",
     )
-    expect(result).not.toBeInstanceOf(Error)
-    if (!(result instanceof Error)) {
-      expect(result.status).toBe("submitted")
-      expect(result.bridgeTransferId).toBe(TRANSFER_ID)
-    }
+    expect(expectSuccess(result)).toMatchObject({
+      status: "submitted",
+      bridgeTransferId: TRANSFER_ID,
+    })
   })
 
   it("returns BridgeWithdrawalNotFoundError when the withdrawal ID does not exist", async () => {
@@ -686,12 +694,11 @@ describe("cancelWithdrawalRequest", () => {
   it("cancels the pending withdrawal and returns status cancelled", async () => {
     const result = await BridgeService.cancelWithdrawalRequest(ACCOUNT_ID, WITHDRAWAL_ID)
 
-    expect(result).not.toBeInstanceOf(Error)
-    if (!(result instanceof Error)) {
-      expect(result.status).toBe("cancelled")
-      expect(result.id).toBe(WITHDRAWAL_ID)
-      expect(result.amount).toBe(AMOUNT)
-    }
+    expect(expectSuccess(result)).toMatchObject({
+      status: "cancelled",
+      id: WITHDRAWAL_ID,
+      amount: AMOUNT,
+    })
   })
 
   it("calls cancelWithdrawal with the correct accountId and withdrawalId", async () => {
@@ -806,16 +813,16 @@ describe("withdrawal request → confirm/cancel flow", () => {
       AMOUNT,
       EXTERNAL_ACCOUNT_ID,
     )
-    expect(requested).not.toBeInstanceOf(Error)
-    if (requested instanceof Error) return
-    expect(requested.status).toBe("pending")
-    expect(requested.id).toBe(WITHDRAWAL_ID)
+    const pending = expectSuccess(requested)
+    expect(pending).toMatchObject({ status: "pending", id: WITHDRAWAL_ID })
 
-    const initiated = await BridgeService.initiateWithdrawal(ACCOUNT_ID, requested.id)
-    expect(initiated).not.toBeInstanceOf(Error)
-    if (initiated instanceof Error) return
-    expect(initiated.status).toBe("submitted")
-    expect(initiated.bridgeTransferId).toBe(TRANSFER_ID)
+    const initiated = expectSuccess(
+      await BridgeService.initiateWithdrawal(ACCOUNT_ID, pending.id),
+    )
+    expect(initiated).toMatchObject({
+      status: "submitted",
+      bridgeTransferId: TRANSFER_ID,
+    })
     expect(BridgeClient.createTransfer).toHaveBeenCalledTimes(1)
     expect(BridgeAccountsRepo.updateWithdrawalTransferId).toHaveBeenCalledWith(
       WITHDRAWAL_ID,
@@ -849,15 +856,14 @@ describe("withdrawal request → confirm/cancel flow", () => {
     )
 
     expect(BridgeAccountsRepo.createWithdrawal).not.toHaveBeenCalled()
-    expect(first).not.toBeInstanceOf(Error)
-    expect(second).not.toBeInstanceOf(Error)
-    if (first instanceof Error || second instanceof Error) return
-    expect(first.id).toBe("deduped-withdrawal-001")
-    expect(second.id).toBe("deduped-withdrawal-001")
+    const firstPending = expectSuccess(first)
+    const secondPending = expectSuccess(second)
+    expect(firstPending).toMatchObject({ id: "deduped-withdrawal-001" })
+    expect(secondPending).toMatchObject({ id: "deduped-withdrawal-001" })
 
-    const initiated = await BridgeService.initiateWithdrawal(ACCOUNT_ID, first.id)
-    expect(initiated).not.toBeInstanceOf(Error)
-    if (initiated instanceof Error) return
+    const initiated = expectSuccess(
+      await BridgeService.initiateWithdrawal(ACCOUNT_ID, firstPending.id),
+    )
     expect(initiated.bridgeTransferId).toBe(TRANSFER_ID)
     expect(BridgeAccountsRepo.updateWithdrawalTransferId).toHaveBeenCalledWith(
       "deduped-withdrawal-001",
@@ -873,12 +879,10 @@ describe("withdrawal request → confirm/cancel flow", () => {
       AMOUNT,
       EXTERNAL_ACCOUNT_ID,
     )
-    expect(requested).not.toBeInstanceOf(Error)
-    if (requested instanceof Error) return
-
-    const cancelled = await BridgeService.cancelWithdrawalRequest(ACCOUNT_ID, requested.id)
-    expect(cancelled).not.toBeInstanceOf(Error)
-    if (cancelled instanceof Error) return
+    const pending = expectSuccess(requested)
+    const cancelled = expectSuccess(
+      await BridgeService.cancelWithdrawalRequest(ACCOUNT_ID, pending.id),
+    )
 
     expect(cancelled.status).toBe("cancelled")
     expect(BridgeAccountsRepo.cancelWithdrawal).toHaveBeenCalledWith(
@@ -982,13 +986,10 @@ describe("getWithdrawals", () => {
       makeRow(WITHDRAWAL_ID, { bridgeTransferId: TRANSFER_ID, status: "submitted" }),
     ])
 
-    const result = await BridgeService.getWithdrawals(ACCOUNT_ID)
+    const result = expectSuccess(await BridgeService.getWithdrawals(ACCOUNT_ID))
 
-    expect(result).not.toBeInstanceOf(Error)
-    if (result instanceof Error) return
     expect(result).toHaveLength(1)
-    expect(result[0].id).toBe(WITHDRAWAL_ID)
-    expect(result[0].status).toBe("submitted")
+    expect(result[0]).toMatchObject({ id: WITHDRAWAL_ID, status: "submitted" })
     expect((result[0] as Record<string, unknown>).transferId).toBeUndefined()
     expect((result[0] as Record<string, unknown>).state).toBeUndefined()
   })
@@ -998,12 +999,12 @@ describe("getWithdrawals", () => {
       makeRow(WITHDRAWAL_ID, { bridgeTransferId: TRANSFER_ID, status: "completed" }),
     ])
 
-    const result = await BridgeService.getWithdrawals(ACCOUNT_ID)
+    const result = expectSuccess(await BridgeService.getWithdrawals(ACCOUNT_ID))
 
-    expect(result).not.toBeInstanceOf(Error)
-    if (result instanceof Error) return
-    expect(result[0].bridgeTransferId).toBe(TRANSFER_ID)
-    expect(result[0].status).toBe("completed")
+    expect(result[0]).toMatchObject({
+      bridgeTransferId: TRANSFER_ID,
+      status: "completed",
+    })
   })
 
   it("excludes pending rows that have no bridgeTransferId (pre-initiation)", async () => {
@@ -1011,10 +1012,8 @@ describe("getWithdrawals", () => {
       makeRow(WITHDRAWAL_ID), // bridgeTransferId: undefined — pre-approval
     ])
 
-    const result = await BridgeService.getWithdrawals(ACCOUNT_ID)
+    const result = expectSuccess(await BridgeService.getWithdrawals(ACCOUNT_ID))
 
-    expect(result).not.toBeInstanceOf(Error)
-    if (result instanceof Error) return
     expect(result).toHaveLength(0)
   })
 
@@ -1027,10 +1026,8 @@ describe("getWithdrawals", () => {
       makeRow("w-5", { status: "failed",     bridgeTransferId: "t-failed" }),
     ])
 
-    const result = await BridgeService.getWithdrawals(ACCOUNT_ID)
+    const result = expectSuccess(await BridgeService.getWithdrawals(ACCOUNT_ID))
 
-    expect(result).not.toBeInstanceOf(Error)
-    if (result instanceof Error) return
     expect(result).toHaveLength(3)
     expect(result.map((r) => r.status)).toEqual(["submitted", "completed", "failed"])
   })
@@ -1040,10 +1037,8 @@ describe("getWithdrawals", () => {
       makeRow(WITHDRAWAL_ID, { bridgeTransferId: TRANSFER_ID, status: "submitted" }),
     ])
 
-    const result = await BridgeService.getWithdrawals(ACCOUNT_ID)
+    const result = expectSuccess(await BridgeService.getWithdrawals(ACCOUNT_ID))
 
-    expect(result).not.toBeInstanceOf(Error)
-    if (result instanceof Error) return
     expect(result[0].createdAt).toBe(CREATED_AT.toISOString())
   })
 })
