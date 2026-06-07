@@ -41,6 +41,10 @@
       "body": "Your cashout of {{amount}} has been deposited to your bank account.",
       "title": "Cashout"
     },
+    "bridgeDeposit": {
+      "body": "Your deposit of {{amount}} has been added to your account.",
+      "title": "Deposit received"
+    },
     "bridgeWithdrawal": {
       "completed": {
         "body": "Your withdrawal of {{amount}} has been sent to your bank account.",
