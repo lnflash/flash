@@ -38,22 +38,41 @@ export BRIDGE_BASE_URL=https://api.sandbox.bridge.xyz
 export BRIDGE_WEBHOOK_URL=http://localhost:4009
 ```
 
+### Bridge Webhook Setup
+
+For localhost testing, use ngrok and the setup helper:
+
+```bash
+./dev/setup.sh --webhook
+```
+
+The helper:
+
+1. Starts or reuses `ngrok http 4009`.
+2. Lists existing Bridge sandbox webhooks.
+3. Deletes old active/disabled Bridge sandbox webhooks.
+4. Creates fresh `kyc`, `deposit`, `transfer`, and `external_account` webhooks.
+5. Copies the returned Bridge webhook public keys into `~/.config/flash/dev-overrides.yaml`.
+6. Prints the command to start the local Bridge webhook server.
+
+The helper writes local secrets and public keys to `~/.config/flash/dev-overrides.yaml`; do not hard-code them in `dev/config/base-config.yaml`.
+
 ### Required Setup
 
 - Node dependencies installed or available in the worktree (`yarn install`).
 - `.env` present and sourceable by the package script.
 - MongoDB available using the repo's normal test configuration.
 - `IBEX_ENVIRONMENT=sandbox` in `.env`.
-- Bridge sandbox webhook secrets populated in `dev/config/base-config.yaml`:
+- Bridge sandbox webhook public keys populated in `~/.config/flash/dev-overrides.yaml`:
 
   ```yaml
   bridge:
     webhook:
-      secrets:
-        kyc: "<sandbox-webhook-secret>"
-        deposit: "<sandbox-webhook-secret>"
-        transfer: "<sandbox-webhook-secret>"
-        external_account: "<sandbox-webhook-secret>"
+      publicKeys:
+        kyc: "<sandbox-webhook-public-key>"
+        deposit: "<sandbox-webhook-public-key>"
+        transfer: "<sandbox-webhook-public-key>"
+        external_account: "<sandbox-webhook-public-key>"
   ```
 
 - `src/services/bridge/index.ts` service guard allowing Level 1 accounts (✅ already applied in this PR).
@@ -91,7 +110,7 @@ IBEX_ENVIRONMENT=sandbox yarn test:bridge-sandbox-e2e
 
 1. Check `IBEX_ENVIRONMENT` is `sandbox` (not `production`)
 2. Confirm MongoDB is running: `mongosh --eval "db.adminCommand('ping')"`
-3. Verify sandbox webhook secrets in `dev/config/base-config.yaml` match Bridge dashboard
+3. Run `./dev/setup.sh --webhook` again to refresh ngrok, Bridge webhook endpoints, and local public keys
 4. Preflight failure → `src/services/bridge/index.ts` still has `level < 2` — apply the Task 0 fix
 5. KYC/VA failures → confirm the corresponding ENG issue is deployed to sandbox
 

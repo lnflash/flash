@@ -10,12 +10,12 @@
 
 // Must mock yargs BEFORE any config imports so yaml.ts gets a valid --configPath
 jest.mock("yargs", () => {
+  const defaultOverridesPath = `${process.env.CONFIG_PATH ?? `${process.env.HOME}/.config/flash`}/dev-overrides.yaml`
+  const overridePath = process.env.BRIDGE_SANDBOX_CONFIG_PATH ?? defaultOverridesPath
   const yargsMock = {
     option: jest.fn().mockReturnThis(),
     argv: {
-      configPath: [
-        "./dev/config/base-config.yaml",
-      ],
+      configPath: ["./dev/config/base-config.yaml", overridePath],
     },
   }
   return jest.fn(() => yargsMock)
