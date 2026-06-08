@@ -46,7 +46,9 @@ export class BridgeKycRejectedError extends BridgeError {
 }
 
 export class BridgeKycOffboardedError extends BridgeError {
-  constructor(message: string = "Your account has been offboarded from Bridge. Please contact support.") {
+  constructor(
+    message: string = "Your account has been offboarded from Bridge. Please contact support.",
+  ) {
     super(message)
   }
 }
@@ -58,7 +60,9 @@ export class BridgeInsufficientFundsError extends BridgeError {
 }
 
 export class BridgeAccountLevelError extends BridgeError {
-  constructor(message: string = "Bridge requires at least a Personal account (Level 1+)") {
+  constructor(
+    message: string = "Bridge requires at least a Personal account (Level 1+)",
+  ) {
     super(message)
   }
 }
@@ -95,6 +99,12 @@ export class BridgeWebhookValidationError extends BridgeError {
   }
 }
 
+export class BridgeKycTierCeilingExceededError extends BridgeError {
+  constructor(message: string = "Withdrawal amount exceeds the KYC tier ceiling") {
+    super(message)
+  }
+}
+
 export class BridgeWithdrawalNotFoundError extends BridgeError {
   constructor(message: string = "Withdrawal request not found") {
     super(message)
@@ -102,18 +112,52 @@ export class BridgeWithdrawalNotFoundError extends BridgeError {
 }
 
 export class BridgeWithdrawalAlreadyInitiatedError extends BridgeError {
-  constructor(message: string = "Withdrawal has already been submitted to Bridge and cannot be cancelled") {
+  constructor(
+    message: string = "Withdrawal has already been submitted to Bridge and cannot be cancelled",
+  ) {
     super(message)
   }
 }
 
 /**
  * Maps HTTP status codes from Bridge API to domain error types
+ *
+ * Checks the response body for specific Bridge error types when applicable.
  */
 export const mapBridgeHttpError = (
   statusCode: number,
   response?: unknown,
 ): BridgeError => {
+  // Bridge returns 422/400 with a specific error type for KYC tier ceiling violations.
+  if (
+    (statusCode === 422 || statusCode === 400) &&
+    typeof response === "object" &&
+    response !== null
+  ) {
+    const resp = response as Record<string, unknown>
+    const errorObj = (resp.error ?? resp) as Record<string, unknown> | undefined
+    const errorType = String(errorObj?.type ?? "").toLowerCase()
+    const errorMessage = String(errorObj?.message ?? resp?.message ?? "").toLowerCase()
+
+    if (
+      errorType.includes("kyc_tier_limit") ||
+      errorType.includes("kyc_limit") ||
+      errorType.includes("tier_ceiling") ||
+      (errorMessage.includes("kyc") &&
+        (errorMessage.includes("limit") ||
+          errorMessage.includes("ceiling") ||
+          errorMessage.includes("tier")))
+    ) {
+      const message =
+        typeof errorObj?.message === "string"
+          ? errorObj.message
+          : typeof resp.message === "string"
+            ? resp.message
+            : undefined
+      return new BridgeKycTierCeilingExceededError(message)
+    }
+  }
+
   switch (statusCode) {
     case 404:
       return new BridgeCustomerNotFoundError()

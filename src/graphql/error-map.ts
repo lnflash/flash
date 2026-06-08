@@ -541,6 +541,13 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         message,
       })
 
+    case "BridgeKycTierCeilingExceededError":
+      message = error.message || "Withdrawal amount exceeds the KYC tier ceiling"
+      return bridgeGqlError({
+        code: "BRIDGE_KYC_TIER_CEILING_EXCEEDED",
+        message,
+      })
+
     case "BridgeCustomerNotFoundError":
       message = "Bridge customer not found"
       return bridgeGqlError({
@@ -810,8 +817,9 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "InvalidCarrierForPhoneMetadataError":
     case "InvalidCarrierTypeForPhoneMetadataError":
     case "InvalidCountryCodeForPhoneMetadataError":
-      message = `Unexpected error occurred, please try again or contact support if it persists (code: ${error.name
-        }${error.message ? ": " + error.message : ""})`
+      message = `Unexpected error occurred, please try again or contact support if it persists (code: ${
+        error.name
+      }${error.message ? ": " + error.message : ""})`
       return new UnexpectedClientError({ message, logger: baseLogger })
 
     case "MissingSessionIdError":
@@ -907,8 +915,9 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       return new ValidationInternalError({ message, logger: baseLogger })
 
     case "UnknownCaptchaError":
-      message = `Unknown error occurred (code: ${error.name}${error.message ? ": " + error.message : ""
-        })`
+      message = `Unknown error occurred (code: ${error.name}${
+        error.message ? ": " + error.message : ""
+      })`
       return new UnknownClientError({ message, logger: baseLogger })
 
     default:
