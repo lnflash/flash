@@ -22,19 +22,13 @@ import path from "path"
  * @returns true if the guard is correctly configured (level >= 1 allowed)
  */
 export function preflightServiceLevelGuard(): boolean {
-  const servicePath = path.resolve(
-    __dirname,
-    "../../../src/services/bridge/index.ts",
-  )
+  const servicePath = path.resolve(__dirname, "../../../src/services/bridge/index.ts")
 
   let content: string
   try {
     content = fs.readFileSync(servicePath, "utf-8")
   } catch {
-    console.warn(
-      "PREFLIGHT WARN: Could not read BridgeService source at",
-      servicePath,
-    )
+    console.warn("PREFLIGHT WARN: Could not read BridgeService source at", servicePath)
     return true // Skip check — assume fixed in build artifact
   }
 

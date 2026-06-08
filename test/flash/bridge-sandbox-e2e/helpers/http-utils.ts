@@ -5,7 +5,7 @@
 import { EventEmitter } from "events"
 
 interface MockRequestOptions {
-  body?: Record<string, any>
+  body?: Record<string, unknown>
   headers?: Record<string, string>
   method?: string
   path?: string
@@ -13,7 +13,7 @@ interface MockRequestOptions {
 
 class MockResponse extends EventEmitter {
   public statusCode: number = 200
-  public _body: any = null
+  public _body: unknown = null
   public _headers: Record<string, string> = {}
   public _ended: boolean = false
 
@@ -22,14 +22,14 @@ class MockResponse extends EventEmitter {
     return this
   }
 
-  json(data: any): this {
+  json(data: unknown): this {
     this._body = data
     this._ended = true
     this.emit("finish")
     return this
   }
 
-  send(data: any): this {
+  send(data: unknown): this {
     this._body = data
     this._ended = true
     this.emit("finish")
@@ -49,10 +49,10 @@ class MockResponse extends EventEmitter {
 }
 
 export function createReqRes(options: MockRequestOptions = {}): {
-  req: any
+  req: Record<string, unknown>
   res: MockResponse
 } {
-  const req: any = {
+  const req: Record<string, unknown> = {
     body: options.body || {},
     headers: options.headers || { "content-type": "application/json" },
     method: options.method || "POST",

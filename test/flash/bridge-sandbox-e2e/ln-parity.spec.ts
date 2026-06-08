@@ -43,14 +43,17 @@ const LN_PARITY_TESTS = process.env.LN_PARITY_TESTS === "true"
 
       expect(response.lnUsdInvoiceCreate).toBeDefined()
 
-      if (response.lnUsdInvoiceCreate?.errors?.length) {
+      const errors = response.lnUsdInvoiceCreate?.errors
+      if (errors?.length) {
         // Log known missing-infrastructure errors without failing
-        console.warn("LN invoice creation returned errors:", response.lnUsdInvoiceCreate.errors)
-      } else {
-        expect(response.lnUsdInvoiceCreate.invoice.paymentRequest).toBeTruthy()
-        expect(response.lnUsdInvoiceCreate.invoice.paymentRequest).toMatch(/^lnb\d+/)
-        expect(response.lnUsdInvoiceCreate.invoice.paymentHash).toBeTruthy()
+        console.warn("LN invoice creation returned errors:", errors)
+        return
       }
+
+      const invoice = response.lnUsdInvoiceCreate.invoice
+      expect(invoice.paymentRequest).toBeTruthy()
+      expect(invoice.paymentRequest).toMatch(/^lnb\d+/)
+      expect(invoice.paymentHash).toBeTruthy()
     })
   })
 })

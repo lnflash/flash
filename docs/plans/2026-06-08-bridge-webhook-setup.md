@@ -59,4 +59,3 @@
 - `npx eslint --resolve-plugins-relative-to "$PWD" --no-ignore test/flash/unit/dev/setup-bridge-webhooks.spec.ts`
 - `bash -n dev/setup.sh`
 - `node dev/setup-bridge-webhooks.js --help`
-
