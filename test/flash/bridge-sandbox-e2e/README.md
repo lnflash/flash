@@ -5,8 +5,8 @@ This suite exercises Bridge sandbox flows through the public GraphQL schema and 
 ## What It Covers
 
 - Bridge KYC initiation
-- Bridge virtual account creation
-- External account link URL generation
+- Optional Bridge virtual account creation
+- Optional external account link URL generation
 - External-account webhook handling
 - Deposit webhook handling and idempotency
 - Withdrawal validation error paths
@@ -100,8 +100,8 @@ IBEX_ENVIRONMENT=sandbox yarn test:bridge-sandbox-e2e
 |-------|---------------|------------|
 | Preflight | Source-code check of `checkAccountLevel()` allows level ≥ 1 | `src/services/bridge/index.ts` guard must be `level < 1`, not `level < 2` |
 | KYC spec | `bridgeInitiateKyc` returns `{kycLink, tosLink}` URLs | Ensure ENG-345 deployed, sandbox has Bridge customer API set up |
-| Virtual account | `bridgeCreateVirtualAccount` returns account details | Ensure ENG-297 deployed |
-| External account | `bridgeAddExternalAccount` returns `{linkUrl, expiresAt}` | Check sandbox Plaid configuration |
+| Virtual account | Skipped by default; with `BRIDGE_SANDBOX_VIRTUAL_ACCOUNT_CONFIRMED=true`, `bridgeCreateVirtualAccount` returns account details | Requires a Bridge-side KYC-approved sandbox customer; local webhook injection alone does not approve the hosted Bridge customer |
+| External account | Skipped by default; with `BRIDGE_SANDBOX_EXTERNAL_ACCOUNT_LINK_CONFIRMED=true`, `bridgeAddExternalAccount` returns `{linkUrl, expiresAt}` | Requires Bridge sandbox API key/customer entitlement for hosted bank-linking |
 | Deposit webhook | Injected webhook processes and persists deposit | Verify webhook secret in config.yaml |
 | Withdrawal error paths | Validation errors returned for invalid inputs | Check withdrawal schema deployed (ENG-348) |
 | Withdrawal **success** path | ⚠️ **Not expected to pass first run** — requires real KYC-approved sandbox customer, funded wallet, and verified external account. | The full withdrawal flow only runs with `BRIDGE_SANDBOX_WITHDRAWAL_CONFIRMED=true`; error-path tests run without it |
@@ -158,6 +158,19 @@ export IBEX_ENVIRONMENT=sandbox
 LN_PARITY_TESTS=true yarn test:bridge-sandbox-e2e:ci
 ```
 
+These Bridge-hosted success paths are also skipped unless explicitly enabled because
+they require sandbox state/entitlements outside the local test harness:
+
+```bash
+export IBEX_ENVIRONMENT=sandbox
+BRIDGE_SANDBOX_VIRTUAL_ACCOUNT_CONFIRMED=true yarn test:bridge-sandbox-e2e:ci
+```
+
+```bash
+export IBEX_ENVIRONMENT=sandbox
+BRIDGE_SANDBOX_EXTERNAL_ACCOUNT_LINK_CONFIRMED=true yarn test:bridge-sandbox-e2e:ci
+```
+
 ## Files
 
 - `jest.config.js` - Jest config scoped to this suite.
@@ -173,11 +186,11 @@ LN_PARITY_TESTS=true yarn test:bridge-sandbox-e2e:ci
 
 ## Known Limitations
 
-- KYC webhook assertions currently use a synthetic customer ID. To assert persisted KYC state, extract the real `bridgeCustomerId` created during sandbox KYC initiation.
-- The external account spec verifies the link URL and injected webhook behavior, but it does not automate Plaid's browser flow.
+- The external account spec verifies injected webhook behavior by default. Link URL generation is gated because some Bridge sandbox keys/customers are not authorized for hosted bank-linking.
 - The deposit tests validate webhook handling and persistence. Full wallet-balance reconciliation depends on sandbox deposit state and is not asserted yet.
-- Withdrawal success is not covered yet because it requires a real KYC-approved sandbox customer, funded wallet, and verified external account.
-- ERPNext audit verification is available through `verifyErpnextAuditRow()`, but the current specs do not assert a successful `BridgeTransferRequest` row until the withdrawal success path is runnable.
+- Virtual account and withdrawal success are not covered by default because they require a real Bridge-side KYC-approved sandbox customer, funded wallet, and verified external account.
+- Deposit webhook processing writes `BridgeTransferRequest` audit rows to the local ERPNext instance when `~/.config/flash/dev-overrides.yaml` points Frappe at the local Docker site.
+- The suite uses Jest `forceExit` because importing the public GraphQL schema creates app-wide Redis clients; teardown calls `disconnectAll()`, but ioredis TCP handles can otherwise keep the opt-in E2E process alive after the tests finish.
 
 ## Troubleshooting
 

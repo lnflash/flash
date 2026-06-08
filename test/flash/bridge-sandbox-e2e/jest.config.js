@@ -11,6 +11,7 @@ module.exports = {
   testRegex: ".*\\.spec\\.ts$",
   setupFilesAfterEnv: ["<rootDir>/test/flash/bridge-sandbox-e2e/jest.setup.ts"],
   testEnvironment: "node",
+  forceExit: true,
   moduleNameMapper: {
     "^@config$": ["<rootDir>src/config/index"],
     "^@app$": ["<rootDir>src/app/index"],

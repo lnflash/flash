@@ -29,6 +29,9 @@ import {
   BridgeTestUser,
 } from "./helpers"
 
+const EXTERNAL_ACCOUNT_LINK_TESTS =
+  process.env.BRIDGE_SANDBOX_EXTERNAL_ACCOUNT_LINK_CONFIRMED === "true"
+
 describe("Bridge External Account", () => {
   let user: BridgeTestUser
 
@@ -59,32 +62,36 @@ describe("Bridge External Account", () => {
       throw new Error(`KYC webhook failed with status ${webhookResult.status}`)
     }
   })
+  ;(EXTERNAL_ACCOUNT_LINK_TESTS ? describe : describe.skip)(
+    "Plaid Link URL Generation",
+    () => {
+      it("generates a Plaid link URL when called", async () => {
+        const result = await addExternalAccount(user.accountId)
 
-  describe("Plaid Link URL Generation", () => {
-    it("generates a Plaid link URL when called", async () => {
-      const result = await addExternalAccount(user.accountId)
+        expect(result.errors).toBeDefined()
+        expect(result.errors).toHaveLength(0)
+        expect(result.externalAccount).toBeDefined()
+        expect(result.externalAccount!.linkUrl).toBeTruthy()
+        expect(result.externalAccount!.linkUrl).toMatch(/^https:\/\//)
+        expect(result.externalAccount!.expiresAt).toBeTruthy()
+      })
 
-      expect(result.errors).toBeDefined()
-      expect(result.errors).toHaveLength(0)
-      expect(result.externalAccount).toBeDefined()
-      expect(result.externalAccount!.linkUrl).toBeTruthy()
-      expect(result.externalAccount!.linkUrl).toMatch(/^https:\/\//)
-      expect(result.externalAccount!.expiresAt).toBeTruthy()
-    })
+      it("link URL is different on each call (one-time use tokens)", async () => {
+        const result1 = await addExternalAccount(user.accountId)
+        const result2 = await addExternalAccount(user.accountId)
 
-    it("link URL is different on each call (one-time use tokens)", async () => {
-      const result1 = await addExternalAccount(user.accountId)
-      const result2 = await addExternalAccount(user.accountId)
+        expect(result1.errors).toHaveLength(0)
+        expect(result2.errors).toHaveLength(0)
 
-      expect(result1.errors).toHaveLength(0)
-      expect(result2.errors).toHaveLength(0)
-
-      // Plaid link tokens are one-time use; consecutive calls should differ
-      expect(result1.externalAccount?.linkUrl).toBeTruthy()
-      expect(result2.externalAccount?.linkUrl).toBeTruthy()
-      expect(result1.externalAccount!.linkUrl).not.toBe(result2.externalAccount!.linkUrl)
-    })
-  })
+        // Plaid link tokens are one-time use; consecutive calls should differ
+        expect(result1.externalAccount?.linkUrl).toBeTruthy()
+        expect(result2.externalAccount?.linkUrl).toBeTruthy()
+        expect(result1.externalAccount!.linkUrl).not.toBe(
+          result2.externalAccount!.linkUrl,
+        )
+      })
+    },
+  )
 
   describe("External Account Webhook Processing", () => {
     it("processes a valid external-account webhook and returns success", async () => {

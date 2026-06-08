@@ -18,6 +18,9 @@ import {
   BridgeTestUser,
 } from "./helpers"
 
+const VIRTUAL_ACCOUNT_TESTS =
+  process.env.BRIDGE_SANDBOX_VIRTUAL_ACCOUNT_CONFIRMED === "true"
+
 describe("Bridge KYC → Virtual Account", () => {
   let user: BridgeTestUser
 
@@ -73,8 +76,7 @@ describe("Bridge KYC → Virtual Account", () => {
       expect(response.status).toBe(200)
     })
   })
-
-  describe("Virtual Account Creation", () => {
+  ;(VIRTUAL_ACCOUNT_TESTS ? describe : describe.skip)("Virtual Account Creation", () => {
     it("creates a virtual account after KYC approval", async () => {
       const result = await createVirtualAccount(user.accountId)
 
