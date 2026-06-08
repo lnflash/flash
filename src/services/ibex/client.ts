@@ -254,7 +254,7 @@ const payToLnurl = async (
 ): Promise<PayToALnurlPayResponse201 | IbexError> => {
   return Ibex.payToLnurl({
     accountId: args.accountId,
-    amount: args.send.amount,
+    amount: args.amountMsat,
     params: args.params,
     webhookUrl: WebhookServer.endpoints.onPay.lnurl,
     webhookSecret: WebhookServer.secret,
@@ -328,7 +328,6 @@ const ibexGet = <T>(token: string, path: string) =>
 const ibexPost = <T>(token: string, path: string, body: unknown) =>
   ibexFetch<T>(token, path, { method: "POST", body: JSON.stringify(body) })
 
-
 const createIbexAccount = async (
   name: string,
   currencyId: IbexCurrencyId,
@@ -336,10 +335,10 @@ const createIbexAccount = async (
   try {
     const token = await getIbexToken()
     if (token instanceof IbexError) return token
-    const data = await ibexPost<CreateAccountResponse201>(
-      token,
-      "/account/create"
-      , { name, currencyId })
+    const data = await ibexPost<CreateAccountResponse201>(token, "/account/create", {
+      name,
+      currencyId,
+    })
     if (data instanceof IbexError) return data
     return data
   } catch (err) {

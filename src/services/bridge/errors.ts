@@ -105,6 +105,20 @@ export class BridgeKycTierCeilingExceededError extends BridgeError {
   }
 }
 
+export class BridgeWithdrawalNotFoundError extends BridgeError {
+  constructor(message: string = "Withdrawal request not found") {
+    super(message)
+  }
+}
+
+export class BridgeWithdrawalAlreadyInitiatedError extends BridgeError {
+  constructor(
+    message: string = "Withdrawal has already been submitted to Bridge and cannot be cancelled",
+  ) {
+    super(message)
+  }
+}
+
 /**
  * Maps HTTP status codes from Bridge API to domain error types
  *
@@ -134,7 +148,12 @@ export const mapBridgeHttpError = (
           errorMessage.includes("ceiling") ||
           errorMessage.includes("tier")))
     ) {
-      const message = typeof resp.message === "string" ? resp.message : undefined
+      const message =
+        typeof errorObj?.message === "string"
+          ? errorObj.message
+          : typeof resp.message === "string"
+            ? resp.message
+            : undefined
       return new BridgeKycTierCeilingExceededError(message)
     }
   }

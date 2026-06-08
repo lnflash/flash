@@ -83,9 +83,43 @@ mutation BridgeAddExternalAccount {
 
 ---
 
+### `bridgeRequestWithdrawal`
+
+Validates a withdrawal and creates a pending record for the confirmation screen. Does **not** call the Bridge API. If an identical pending request already exists (same account, amount, and external account), the existing record is returned.
+
+**Request:**
+```graphql
+mutation BridgeRequestWithdrawal($input: BridgeRequestWithdrawalInput!) {
+  bridgeRequestWithdrawal(input: $input) {
+    errors {
+      message
+    }
+    withdrawal {
+      id
+      amount
+      currency
+      externalAccountId
+      status
+      createdAt
+    }
+  }
+}
+```
+
+**Input:**
+- `amount`: String representation of the amount (e.g., "100.00"). Must be positive with at most 6 decimal places and above the configured minimum.
+- `externalAccountId`: The ID of the linked bank account.
+
+**Response:**
+- `id`: MongoDB withdrawal record ID — pass this to `bridgeInitiateWithdrawal` or `bridgeCancelWithdrawalRequest`.
+- `status`: Always `"pending"` on success.
+- `externalAccountId`: Linked bank account used for the withdrawal.
+
+---
+
 ### `bridgeInitiateWithdrawal`
 
-Initiates a withdrawal from the user's USDT balance to a linked external bank account.
+Submits a previously requested withdrawal to Bridge. Re-checks USDT balance at execution time.
 
 **Request:**
 ```graphql
@@ -95,22 +129,61 @@ mutation BridgeInitiateWithdrawal($input: BridgeInitiateWithdrawalInput!) {
       message
     }
     withdrawal {
-      transferId
+      id
       amount
       currency
-      state
+      status
+      createdAt
     }
   }
 }
 ```
 
 **Input:**
-- `amount`: String representation of the amount (e.g., "100.00").
-- `externalAccountId`: The ID of the linked bank account.
+- `withdrawalId`: The `id` returned by `bridgeRequestWithdrawal`.
 
 **Response:**
-- `transferId`: Unique identifier for the transfer.
-- `state`: Current state of the transfer (e.g., "pending", "processing").
+- `id`: Withdrawal record ID.
+- `status`: Withdrawal status after Bridge transfer creation (typically `"pending"` until the webhook settles).
+
+**Errors:**
+- `BridgeWithdrawalNotFoundError`: Withdrawal ID does not exist or belongs to another account.
+- `BridgeWithdrawalAlreadyInitiatedError`: Withdrawal was already submitted to Bridge.
+- `BridgeInsufficientFundsError`: Balance dropped between request and confirm.
+
+---
+
+### `bridgeCancelWithdrawalRequest`
+
+Cancels a pending withdrawal before it has been submitted to Bridge.
+
+**Request:**
+```graphql
+mutation BridgeCancelWithdrawalRequest($input: BridgeCancelWithdrawalRequestInput!) {
+  bridgeCancelWithdrawalRequest(input: $input) {
+    errors {
+      message
+    }
+    withdrawal {
+      id
+      amount
+      currency
+      status
+      createdAt
+    }
+  }
+}
+```
+
+**Input:**
+- `withdrawalId`: The `id` returned by `bridgeRequestWithdrawal`.
+
+**Response:**
+- `status`: `"cancelled"` on success.
+
+**Errors:**
+- `BridgeWithdrawalNotFoundError`: Withdrawal ID does not exist or belongs to another account.
+- `BridgeWithdrawalAlreadyInitiatedError`: Transfer was already submitted to Bridge and cannot be cancelled.
 
 ---
 
@@ -171,18 +244,41 @@ query BridgeExternalAccounts {
 
 ---
 
+### `bridgeWithdrawalRequest`
+
+Fetches a single withdrawal record by ID for the confirmation screen. Returns `null` if the ID does not exist or belongs to another account (no cross-account leakage).
+
+**Request:**
+```graphql
+query BridgeWithdrawalRequest($id: ID!) {
+  bridgeWithdrawalRequest(id: $id) {
+    id
+    amount
+    currency
+    externalAccountId
+    status
+    failureReason
+    createdAt
+  }
+}
+```
+
+---
+
 ### `bridgeWithdrawals`
 
-Lists the user's withdrawal history.
+Lists the user's withdrawal history (submitted transfers only).
 
 **Request:**
 ```graphql
 query BridgeWithdrawals {
   bridgeWithdrawals {
-    transferId
+    id
     amount
     currency
-    state
+    status
+    bridgeTransferId
+    failureReason
     createdAt
   }
 }
@@ -201,6 +297,8 @@ query BridgeWithdrawals {
 | `BRIDGE_KYC_OFFBOARDED` | Bridge offboarded the customer. |
 | `BRIDGE_KYC_TIER_CEILING_EXCEEDED` | Withdrawal amount exceeds the KYC tier ceiling. |
 | `BRIDGE_CUSTOMER_NOT_FOUND` | Bridge customer record not found for the user. |
+| `BRIDGE_WITHDRAWAL_NOT_FOUND` | Withdrawal request not found or does not belong to the caller. |
+| `BRIDGE_WITHDRAWAL_ALREADY_INITIATED` | Withdrawal was already submitted to Bridge. |
 | `BRIDGE_INSUFFICIENT_FUNDS` | USDT balance is insufficient for the withdrawal. |
 | `BRIDGE_RATE_LIMIT` | Bridge rate-limited the request. |
 | `BRIDGE_TIMEOUT` | Bridge request timed out. |

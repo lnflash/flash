@@ -1,0 +1,40 @@
+meta {
+  name: bridgeWithdrawalRequest
+  type: graphql
+  seq: 33
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:graphql {
+  query BridgeWithdrawalRequest($id: ID!) {
+    bridgeWithdrawalRequest(id: $id) {
+      id
+      amount
+      currency
+      externalAccountId
+      status
+      failureReason
+      createdAt
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "id": "{{bridgeWithdrawalId}}"
+  }
+}
+
+settings {
+  encodeUrl: false
+  timeout: 30000
+}

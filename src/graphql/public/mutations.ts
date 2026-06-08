@@ -16,6 +16,7 @@ import LnNoAmountInvoiceFeeProbeMutation from "@graphql/public/root/mutation/ln-
 import LnNoAmountUsdInvoiceFeeProbeMutation from "@graphql/public/root/mutation/ln-noamount-usd-invoice-fee-probe"
 import LnNoAmountInvoicePaymentSendMutation from "@graphql/public/root/mutation/ln-noamount-invoice-payment-send"
 import LnNoAmountUsdInvoicePaymentSendMutation from "@graphql/public/root/mutation/ln-noamount-usd-invoice-payment-send"
+import LnurlPaymentSendMutation from "@graphql/public/root/mutation/lnurl-payment-send"
 import OnChainAddressCreateMutation from "@graphql/public/root/mutation/on-chain-address-create"
 import OnChainAddressCurrentMutation from "@graphql/public/root/mutation/on-chain-address-current"
 import UserLoginMutation from "@graphql/shared/root/mutation/user-login"
@@ -64,7 +65,9 @@ import UpdateExternalWalletMutation from "./root/mutation/update-external-wallet
 import BridgeInitiateKycMutation from "./root/mutation/bridge-initiate-kyc"
 import BridgeCreateVirtualAccountMutation from "./root/mutation/bridge-create-virtual-account"
 import BridgeAddExternalAccountMutation from "./root/mutation/bridge-add-external-account"
+import BridgeRequestWithdrawalMutation from "./root/mutation/bridge-request-withdrawal"
 import BridgeInitiateWithdrawalMutation from "./root/mutation/bridge-initiate-withdrawal"
+import BridgeCancelWithdrawalRequestMutation from "./root/mutation/bridge-cancel-withdrawal-request"
 
 // TODO: // const fields: { [key: string]: GraphQLFieldConfig<any, GraphQLPublicContext> }
 export const mutationFields = {
@@ -122,7 +125,9 @@ export const mutationFields = {
       bridgeInitiateKyc: BridgeInitiateKycMutation,
       bridgeCreateVirtualAccount: BridgeCreateVirtualAccountMutation,
       bridgeAddExternalAccount: BridgeAddExternalAccountMutation,
+      bridgeRequestWithdrawal: BridgeRequestWithdrawalMutation,
       bridgeInitiateWithdrawal: BridgeInitiateWithdrawalMutation,
+      bridgeCancelWithdrawalRequest: BridgeCancelWithdrawalRequestMutation,
     },
 
     atWalletLevel: {
@@ -141,6 +146,7 @@ export const mutationFields = {
       lnInvoicePaymentSend: LnInvoicePaymentSendMutation,
       lnNoAmountInvoicePaymentSend: LnNoAmountInvoicePaymentSendMutation,
       lnNoAmountUsdInvoicePaymentSend: LnNoAmountUsdInvoicePaymentSendMutation,
+      lnurlPaymentSend: LnurlPaymentSendMutation,
 
       onChainAddressCreate: OnChainAddressCreateMutation,
       onChainAddressCurrent: OnChainAddressCurrentMutation,

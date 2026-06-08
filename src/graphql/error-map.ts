@@ -562,6 +562,22 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         message,
       })
 
+    case "BridgeWithdrawalNotFoundError":
+      message = error.message || "Withdrawal request not found"
+      return bridgeGqlError({
+        code: "BRIDGE_WITHDRAWAL_NOT_FOUND",
+        message,
+      })
+
+    case "BridgeWithdrawalAlreadyInitiatedError":
+      message =
+        error.message ||
+        "Withdrawal has already been submitted to Bridge and cannot be cancelled"
+      return bridgeGqlError({
+        code: "BRIDGE_WITHDRAWAL_ALREADY_INITIATED",
+        message,
+      })
+
     case "BridgeRateLimitError":
       message = "Rate limit exceeded, please try again later"
       return bridgeGqlError({
@@ -857,6 +873,9 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       return new NotFoundError({ message, logger: baseLogger })
 
     case "InvalidLnurlError":
+      return new InvalidLnurlError({ message: error.message, logger: baseLogger })
+
+    case "InvalidLnurlAmountError":
       return new InvalidLnurlError({ message: error.message, logger: baseLogger })
 
     case "CashWalletCutoverInProgressError":

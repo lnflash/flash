@@ -1,0 +1,45 @@
+meta {
+  name: bridgeCancelWithdrawalRequest
+  type: graphql
+  seq: 39
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:graphql {
+  mutation BridgeCancelWithdrawalRequest($input: BridgeCancelWithdrawalRequestInput!) {
+    bridgeCancelWithdrawalRequest(input: $input) {
+      errors {
+        message
+      }
+      withdrawal {
+        id
+        amount
+        currency
+        status
+        createdAt
+      }
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "withdrawalId": "{{bridgeWithdrawalId}}"
+    }
+  }
+}
+
+settings {
+  encodeUrl: false
+  timeout: 30000
+}

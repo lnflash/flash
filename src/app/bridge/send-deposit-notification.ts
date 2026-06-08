@@ -17,23 +17,17 @@ import {
 
 const i18n = getI18nInstance()
 
-const formatWithdrawalAmount = (amount: string, currency: string): string =>
+const formatDepositAmount = (amount: string, currency: string): string =>
   `${amount} ${currency.toUpperCase()}`
 
-export type BridgeWithdrawalNotificationOutcome = "completed" | "failed" | "cancelled"
-
-export const sendBridgeWithdrawalNotification = async ({
+export const sendBridgeDepositNotification = async ({
   accountId: accountIdRaw,
   amount,
   currency,
-  outcome,
-  failureReason,
 }: {
   accountId: string
   amount: string
   currency: string
-  outcome: BridgeWithdrawalNotificationOutcome
-  failureReason?: string
 }): Promise<true | ApplicationError> => {
   const accountId = checkedToAccountId(accountIdRaw)
   if (accountId instanceof Error) return accountId
@@ -45,33 +39,25 @@ export const sendBridgeWithdrawalNotification = async ({
   if (user instanceof Error) return user
 
   const locale = getLanguageOrDefault(user.language)
-  const formattedAmount = formatWithdrawalAmount(amount, currency)
-  const phraseBase = `notification.bridgeWithdrawal.${outcome}`
+  const formattedAmount = formatDepositAmount(amount, currency)
+  const phraseBase = "notification.bridgeDeposit"
 
   const title = i18n.__({ phrase: `${phraseBase}.title`, locale })
-  const bodyPhrase =
-    outcome === "failed" && failureReason
-      ? `${phraseBase}.bodyWithReason`
-      : `${phraseBase}.body`
   const body = i18n.__(
-    { phrase: bodyPhrase, locale },
-    {
-      amount: formattedAmount,
-      reason: failureReason ?? "",
-    },
+    { phrase: `${phraseBase}.body`, locale },
+    { amount: formattedAmount },
   )
 
   const result = await PushNotificationsService().sendFilteredNotification({
     deviceTokens: user.deviceTokens,
     title,
     body,
-    notificationCategory: FlashNotificationCategories.Cashout,
+    notificationCategory: FlashNotificationCategories.Payments,
     notificationSettings: account.notificationSettings,
     data: {
-      type: `bridge_withdrawal_${outcome}`,
+      type: "bridge_deposit_completed",
       amount,
       currency: currency == "usdt" ? "USD" : currency.toUpperCase(),
-      ...(failureReason ? { failureReason } : {}),
     },
   })
 
@@ -84,10 +70,10 @@ export const sendBridgeWithdrawalNotification = async ({
   return true
 }
 
-export const sendBridgeWithdrawalNotificationBestEffort = async (
-  args: Parameters<typeof sendBridgeWithdrawalNotification>[0],
+export const sendBridgeDepositNotificationBestEffort = async (
+  args: Parameters<typeof sendBridgeDepositNotification>[0],
 ): Promise<void> => {
-  const result = await sendBridgeWithdrawalNotification(args)
+  const result = await sendBridgeDepositNotification(args)
 
   if (result instanceof DeviceTokensNotRegisteredNotificationsServiceError) {
     const accountId = checkedToAccountId(args.accountId)
@@ -105,8 +91,8 @@ export const sendBridgeWithdrawalNotificationBestEffort = async (
 
   if (result instanceof Error) {
     baseLogger.warn(
-      { accountId: args.accountId, outcome: args.outcome, error: result },
-      "Failed to send Bridge withdrawal push notification",
+      { accountId: args.accountId, error: result },
+      "Failed to send Bridge deposit push notification",
     )
   }
 }

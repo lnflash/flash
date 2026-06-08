@@ -62,6 +62,7 @@ describe("error-map: mapBridgeHttpError KYC tier ceiling detection", () => {
       error: { type: "kyc_tier_limit_exceeded", message: "KYC tier limit reached" },
     })
     expect(result).toBeInstanceOf(BridgeKycTierCeilingExceededError)
+    expect(result.message).toBe("KYC tier limit reached")
   })
 
   it("detects KYC tier ceiling via error.type kyc_limit", () => {
