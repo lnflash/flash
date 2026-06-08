@@ -62,4 +62,23 @@ describe("BridgeTransferRequest", () => {
 
     expect(request.toErpnext().source_systems_seen).toBe("ibex_crypto_receive")
   })
+
+  it("serializes datetimes in the format accepted by Frappe", () => {
+    const request = new BridgeTransferRequest({
+      requestId: "tr_123",
+      transactionType: BridgeTransferRequestTransactionType.Topup,
+      status: BridgeTransferRequestStatus.Settled,
+      amount: "2.500000",
+      currency: "USDT",
+      firstSeenAt: "2026-06-08T20:30:01.373Z",
+      lastSeenAt: "2026-06-08T20:31:02.540Z",
+    })
+
+    expect(request.toErpnext()).toEqual(
+      expect.objectContaining({
+        first_seen_at: "2026-06-08 20:30:01",
+        last_seen_at: "2026-06-08 20:31:02",
+      }),
+    )
+  })
 })

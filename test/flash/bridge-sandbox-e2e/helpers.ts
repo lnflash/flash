@@ -11,25 +11,29 @@
 
 import { graphql, Source } from "graphql"
 
-import { UsersRepository } from "@services/mongoose"
-import { AccountsRepository, WalletsRepository } from "@services/mongoose"
-import { Account as AccountModel } from "@services/mongoose/schema"
-import { AccountsRepository as AccountsRepo } from "@services/mongoose/accounts"
 import { createAccountWithPhoneIdentifier } from "@app/accounts"
 import { addWalletIfNonexistent } from "@app/accounts/add-wallet"
 import { getDefaultAccountsConfig } from "@config"
-import { CouldNotFindAccountFromKratosIdError, RepositoryError } from "@domain/errors"
 import { AccountLevel } from "@domain/accounts"
+import { CouldNotFindAccountFromKratosIdError, RepositoryError } from "@domain/errors"
 import { WalletCurrency } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
-import { randomPhone, randomUserId } from "test/galoy/helpers"
-
 import { gqlMainSchema } from "@graphql/public"
-import { kycHandler } from "@services/bridge/webhook-server/routes/kyc"
-import { externalAccountHandler } from "@services/bridge/webhook-server/routes/external-account"
 import { depositHandler } from "@services/bridge/webhook-server/routes/deposit"
-import { BridgeDeposits } from "@services/mongoose/schema"
+import { externalAccountHandler } from "@services/bridge/webhook-server/routes/external-account"
+import { kycHandler } from "@services/bridge/webhook-server/routes/kyc"
+import { AuthWithPhonePasswordlessService } from "@services/kratos"
+import {
+  AccountsRepository,
+  UsersRepository,
+  WalletsRepository,
+} from "@services/mongoose"
+import { AccountsRepository as AccountsRepo } from "@services/mongoose/accounts"
+import { Account as AccountModel, BridgeDeposits } from "@services/mongoose/schema"
+
 import { createReqRes } from "./helpers/http-utils"
+
+import { randomPhone } from "test/galoy/helpers"
 
 // ============ Types ============
 
@@ -39,6 +43,31 @@ export interface BridgeTestUser {
   customerId?: string
   virtualAccountId?: string
   level: AccountLevel
+}
+
+type GraphQlErrorResponse = {
+  errors: Array<{ message: string }>
+}
+
+type KycInitiationResult = GraphQlErrorResponse & {
+  kycLink?: { kycLink: string; tosLink: string }
+}
+
+type VirtualAccountResult = GraphQlErrorResponse & {
+  virtualAccount?: Record<string, unknown>
+}
+
+type ExternalAccountResult = GraphQlErrorResponse & {
+  externalAccount?: { linkUrl: string; expiresAt: string }
+}
+
+type WithdrawalResult = GraphQlErrorResponse & {
+  withdrawal?: Record<string, unknown> | null
+}
+
+type HandlerResponse = {
+  status: number
+  body?: unknown
 }
 
 // ============ Schema Execution ============
@@ -52,8 +81,8 @@ function buildContext(accountId: string): GraphQLPublicContextAuth {
 export async function execQuery(
   source: string,
   accountId: string,
-  variableValues?: Record<string, any>,
-): Promise<any> {
+  variableValues?: Record<string, unknown>,
+): Promise<Record<string, unknown> | GraphQlErrorResponse> {
   const result = await graphql({
     schema: gqlMainSchema,
     source: new Source(source),
@@ -61,9 +90,9 @@ export async function execQuery(
     variableValues,
   })
   if (result.errors) {
-    return { errors: result.errors.map((e: any) => ({ message: e.message })) }
+    return { errors: result.errors.map((error) => ({ message: error.message })) }
   }
-  return result.data
+  return result.data ?? {}
 }
 
 // ============ User Creation ============
@@ -76,7 +105,10 @@ export async function createBridgeSandboxUser(
   level: AccountLevel = AccountLevel.One,
 ): Promise<BridgeTestUser> {
   const phone = randomPhone()
-  const kratosUserId = randomUserId()
+  const kratosUserId = await AuthWithPhonePasswordlessService().createIdentityNoSession({
+    phone,
+  })
+  if (kratosUserId instanceof Error) throw kratosUserId
 
   // Create Kratos user
   const user = await UsersRepository().update({
@@ -108,10 +140,7 @@ export async function createBridgeSandboxUser(
     if (usdtWallet instanceof Error) throw usdtWallet
 
     // Set account level directly (createAccountWithPhoneIdentifier may not enforce initialLevel)
-    await AccountModel.updateOne(
-      { _id: account.id },
-      { $set: { level } },
-    )
+    await AccountModel.updateOne({ _id: account.id }, { $set: { level } })
   }
 
   if (account instanceof Error) throw account
@@ -120,7 +149,8 @@ export async function createBridgeSandboxUser(
   const walletsResult = await WalletsRepository().listByAccountId(account.id)
   if (walletsResult instanceof RepositoryError) throw walletsResult
   const usdtWallet = walletsResult.find(
-    (w: any) => w.currency === WalletCurrency.Usdt && w.type === WalletType.Checking,
+    (wallet) =>
+      wallet.currency === WalletCurrency.Usdt && wallet.type === WalletType.Checking,
   )
   if (!usdtWallet) throw new Error("No USDT wallet created for sandbox user")
 
@@ -160,9 +190,9 @@ const BRIDGE_ADD_EXTERNAL_ACCOUNT = `
   }
 `
 
-const BRIDGE_INITIATE_WITHDRAWAL = `
-  mutation BridgeInitiateWithdrawal($input: BridgeInitiateWithdrawalInput!) {
-    bridgeInitiateWithdrawal(input: $input) {
+const BRIDGE_REQUEST_WITHDRAWAL = `
+  mutation BridgeRequestWithdrawal($input: BridgeRequestWithdrawalInput!) {
+    bridgeRequestWithdrawal(input: $input) {
       errors { message }
       withdrawal { id amount currency status failureReason createdAt }
     }
@@ -176,13 +206,10 @@ const BRIDGE_INITIATE_WITHDRAWAL = `
 export async function initiateKyc(
   accountId: string,
   email: string,
-): Promise<{
-  errors: Array<{ message: string }>
-  kycLink?: { kycLink: string; tosLink: string }
-}> {
-  const data = await execQuery(BRIDGE_INITIATE_KYC, accountId, {
+): Promise<KycInitiationResult> {
+  const data = (await execQuery(BRIDGE_INITIATE_KYC, accountId, {
     input: { email },
-  })
+  })) as { bridgeInitiateKyc?: KycInitiationResult }
   return data?.bridgeInitiateKyc ?? { errors: [{ message: "No data returned" }] }
 }
 
@@ -192,11 +219,10 @@ export async function initiateKyc(
  */
 export async function createVirtualAccount(
   accountId: string,
-): Promise<{
-  errors: Array<{ message: string }>
-  virtualAccount?: Record<string, any>
-}> {
-  const data = await execQuery(BRIDGE_CREATE_VIRTUAL_ACCOUNT, accountId)
+): Promise<VirtualAccountResult> {
+  const data = (await execQuery(BRIDGE_CREATE_VIRTUAL_ACCOUNT, accountId)) as {
+    bridgeCreateVirtualAccount?: VirtualAccountResult
+  }
   return data?.bridgeCreateVirtualAccount ?? { errors: [{ message: "No data returned" }] }
 }
 
@@ -206,11 +232,10 @@ export async function createVirtualAccount(
  */
 export async function addExternalAccount(
   accountId: string,
-): Promise<{
-  errors: Array<{ message: string }>
-  externalAccount?: { linkUrl: string; expiresAt: string }
-}> {
-  const data = await execQuery(BRIDGE_ADD_EXTERNAL_ACCOUNT, accountId)
+): Promise<ExternalAccountResult> {
+  const data = (await execQuery(BRIDGE_ADD_EXTERNAL_ACCOUNT, accountId)) as {
+    bridgeAddExternalAccount?: ExternalAccountResult
+  }
   return data?.bridgeAddExternalAccount ?? { errors: [{ message: "No data returned" }] }
 }
 
@@ -220,14 +245,11 @@ export async function addExternalAccount(
 export async function initiateWithdrawal(
   accountId: string,
   input: { amount: string; externalAccountId: string },
-): Promise<{
-  errors: Array<{ message: string }>
-  withdrawal?: Record<string, any>
-}> {
-  const data = await execQuery(BRIDGE_INITIATE_WITHDRAWAL, accountId, {
+): Promise<WithdrawalResult> {
+  const data = (await execQuery(BRIDGE_REQUEST_WITHDRAWAL, accountId, {
     input,
-  })
-  return data?.bridgeInitiateWithdrawal ?? { errors: [{ message: "No data returned" }] }
+  })) as { bridgeRequestWithdrawal?: WithdrawalResult }
+  return data?.bridgeRequestWithdrawal ?? { errors: [{ message: "No data returned" }] }
 }
 
 // ============ Webhook Injection ============
@@ -239,9 +261,12 @@ export async function initiateWithdrawal(
 export async function injectKycWebhook(payload: {
   event_id: string
   event_object: { customer_id: string; kyc_status: string }
-}): Promise<{ status: number; body?: any }> {
+}): Promise<HandlerResponse> {
   const { req, res } = createReqRes({ body: payload })
-  await kycHandler(req as any, res as any)
+  await kycHandler(
+    req as Parameters<typeof kycHandler>[0],
+    res as Parameters<typeof kycHandler>[1],
+  )
   return { status: res.statusCode, body: res._body }
 }
 
@@ -258,9 +283,12 @@ export async function injectExternalAccountWebhook(payload: {
     last_4?: string
     active?: boolean
   }
-}): Promise<{ status: number; body?: any }> {
+}): Promise<HandlerResponse> {
   const { req, res } = createReqRes({ body: payload })
-  await externalAccountHandler(req as any, res as any)
+  await externalAccountHandler(
+    req as Parameters<typeof externalAccountHandler>[0],
+    res as Parameters<typeof externalAccountHandler>[1],
+  )
   return { status: res.statusCode, body: res._body }
 }
 
@@ -284,9 +312,12 @@ export async function injectDepositWebhook(payload: {
       destination_tx_hash?: string
     }
   }
-}): Promise<{ status: number; body?: any }> {
+}): Promise<HandlerResponse> {
   const { req, res } = createReqRes({ body: payload })
-  await depositHandler(req as any, res as any)
+  await depositHandler(
+    req as Parameters<typeof depositHandler>[0],
+    res as Parameters<typeof depositHandler>[1],
+  )
   return { status: res.statusCode, body: res._body }
 }
 
@@ -327,9 +358,9 @@ export async function verifyErpnextAuditRow(
  */
 export async function findDepositLogByEventId(
   eventId: string,
-): Promise<Record<string, any> | null> {
+): Promise<Record<string, unknown> | null> {
   const doc = await BridgeDeposits.findOne({ eventId }).lean().exec()
-  return (doc as Record<string, any>) ?? null
+  return (doc as Record<string, unknown>) ?? null
 }
 
 // ============ Account Lookup ============

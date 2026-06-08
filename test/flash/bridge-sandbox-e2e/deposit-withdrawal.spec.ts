@@ -25,10 +25,7 @@
 
 import {
   createBridgeSandboxUser,
-  initiateKyc,
-  createVirtualAccount,
   initiateWithdrawal,
-  injectKycWebhook,
   injectDepositWebhook,
   findDepositLogByEventId,
   BridgeTestUser,
@@ -167,7 +164,7 @@ describe("Bridge Deposit → Withdrawal", () => {
       expect(result.errors).toBeDefined()
       expect(result.errors.length).toBeGreaterThan(0)
       expect(result.errors[0].message).toMatch(/minimum/i)
-      expect(result.withdrawal).toBeUndefined()
+      expect(result.withdrawal).toBeNull()
     })
 
     it("rejects withdrawal when amount is invalid (non-numeric)", async () => {
@@ -178,7 +175,7 @@ describe("Bridge Deposit → Withdrawal", () => {
 
       expect(result.errors).toBeDefined()
       expect(result.errors.length).toBeGreaterThan(0)
-      expect(result.withdrawal).toBeUndefined()
+      expect(result.withdrawal).toBeNull()
     })
 
     it("rejects withdrawal when account has no Bridge customer ID", async () => {
@@ -191,7 +188,7 @@ describe("Bridge Deposit → Withdrawal", () => {
       expect(result.errors).toBeDefined()
       expect(result.errors.length).toBeGreaterThan(0)
       expect(result.errors[0].message).toMatch(/customer|KYC/i)
-      expect(result.withdrawal).toBeUndefined()
+      expect(result.withdrawal).toBeNull()
     })
   })
 })

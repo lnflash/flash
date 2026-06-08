@@ -22,10 +22,10 @@
 import {
   createBridgeSandboxUser,
   initiateKyc,
-  createVirtualAccount,
   addExternalAccount,
   injectKycWebhook,
   injectExternalAccountWebhook,
+  getAccountById,
   BridgeTestUser,
 } from "./helpers"
 
@@ -44,15 +44,20 @@ describe("Bridge External Account", () => {
       throw new Error(`KYC initiation failed: ${kycResult.errors[0].message}`)
     }
 
-    // Approve KYC via webhook injection
-    // TODO: Extract real bridgeCustomerId from KYC initiation response
-    const webhookCustomerId = `sandbox_cus_${user.accountId.slice(-8)}`
+    // Approve KYC via webhook injection using the customer ID persisted by KYC initiation.
+    const account = await getAccountById(user.accountId)
+    const webhookCustomerId = account.bridgeCustomerId
+    if (!webhookCustomerId) {
+      throw new Error("KYC initiation did not persist a Bridge customer ID")
+    }
+    user.customerId = webhookCustomerId
     const webhookResult = await injectKycWebhook({
       event_id: `ext-acct-kyc-${Date.now()}`,
       event_object: { customer_id: webhookCustomerId, kyc_status: "approved" },
     })
-    // 200 indicates the handler accepted the payload
-    expect(webhookResult.status).toBe(200)
+    if (webhookResult.status !== 200) {
+      throw new Error(`KYC webhook failed with status ${webhookResult.status}`)
+    }
   })
 
   describe("Plaid Link URL Generation", () => {
@@ -75,11 +80,9 @@ describe("Bridge External Account", () => {
       expect(result2.errors).toHaveLength(0)
 
       // Plaid link tokens are one-time use; consecutive calls should differ
-      if (result1.externalAccount?.linkUrl && result2.externalAccount?.linkUrl) {
-        expect(result1.externalAccount.linkUrl).not.toBe(
-          result2.externalAccount.linkUrl,
-        )
-      }
+      expect(result1.externalAccount?.linkUrl).toBeTruthy()
+      expect(result2.externalAccount?.linkUrl).toBeTruthy()
+      expect(result1.externalAccount!.linkUrl).not.toBe(result2.externalAccount!.linkUrl)
     })
   })
 
@@ -90,7 +93,7 @@ describe("Bridge External Account", () => {
         event_id: `ext-created-${Date.now()}`,
         event_object: {
           id: `ext_acct_test_${Date.now()}`,
-          customer_id: `sandbox_cus_${user.accountId.slice(-8)}`,
+          customer_id: user.customerId!,
           bank_name: "Test Bank",
           last_4: "1234",
           active: true,
@@ -108,7 +111,7 @@ describe("Bridge External Account", () => {
         event_id: eventId,
         event_object: {
           id: `ext_acct_dup_${Date.now()}`,
-          customer_id: `sandbox_cus_${user.accountId.slice(-8)}`,
+          customer_id: user.customerId!,
           bank_name: "Test Bank",
           last_4: "9999",
           active: true,
