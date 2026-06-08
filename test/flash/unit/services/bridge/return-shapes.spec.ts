@@ -81,7 +81,12 @@ jest.mock("@domain/primitives/bridge", () => ({
 
 jest.mock("@domain/shared", () => {
   class USDTAmount {
-    constructor(private readonly ibexValue: number) {}
+    private readonly ibexValue: number
+
+    constructor(ibexValue: number) {
+      this.ibexValue = ibexValue
+    }
+
     toIbex() {
       return this.ibexValue
     }

@@ -321,7 +321,7 @@ const createVirtualAccount = async (
       return customer
     }
 
-    let kycStatus = customer.status
+    const kycStatus = customer.status
 
 
     // Check KYC status
@@ -359,7 +359,7 @@ const createVirtualAccount = async (
     let ethereumAddress = account.bridgeEthereumAddress
 
     if (!ethereumAddress) {
-      let option = await IbexClient.getEthereumUsdtOption()
+      const option = await IbexClient.getEthereumUsdtOption()
       if (option instanceof Error) return new BridgeError(option.message)
 
       option.name = `USDT-ETH ${account.username}-${crypto.randomBytes(4).toString("hex")}`

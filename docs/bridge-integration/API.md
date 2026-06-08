@@ -273,10 +273,12 @@ Lists the user's withdrawal history (submitted transfers only).
 ```graphql
 query BridgeWithdrawals {
   bridgeWithdrawals {
-    transferId
+    id
     amount
     currency
-    state
+    status
+    bridgeTransferId
+    failureReason
     createdAt
   }
 }
