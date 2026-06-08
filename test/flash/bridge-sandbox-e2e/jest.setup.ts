@@ -15,17 +15,31 @@ jest.mock("yargs", () => {
   const yargsMock = {
     option: jest.fn().mockReturnThis(),
     argv: {
-      configPath: ["./dev/config/base-config.yaml", overridePath],
+      configPath: [
+        "./dev/config/base-config.yaml",
+        overridePath,
+        "./test/flash/bridge-sandbox-e2e/config-overrides.yaml",
+      ],
     },
   }
   return jest.fn(() => yargsMock)
 })
 
+jest.mock("@services/notifications/firebase", () => ({
+  __esModule: true,
+  default: {
+    isDeviceTokenValid: jest.fn(async () => true),
+    subscribeToTopics: jest.fn(async () => undefined),
+  },
+  messaging: null,
+}))
+
 import { setupMongoConnection } from "@services/mongodb"
 import { disconnectAll } from "@services/redis"
+
 import { preflightServiceLevelGuard } from "./preflight"
 
-let mongoose: any
+let mongoose: Awaited<ReturnType<typeof setupMongoConnection>> | undefined
 
 beforeAll(async () => {
   // === Guard: Must be explicitly opted in ===

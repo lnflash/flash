@@ -25,7 +25,7 @@ cd /path/to/your/repo
 
 ### `.env` Setup (First Run)
 
-The package scripts source `.env` from the project root. Create or update `.env` with at minimum:
+The package scripts source `.env` from the project root, then source `.env.local` when it exists. Create or update `.env` with at minimum:
 
 ```bash
 # Required
@@ -175,6 +175,7 @@ BRIDGE_SANDBOX_EXTERNAL_ACCOUNT_LINK_CONFIRMED=true yarn test:bridge-sandbox-e2e
 
 - `jest.config.js` - Jest config scoped to this suite.
 - `jest.setup.ts` - opt-in guards, yargs config-path mock, MongoDB setup, Redis/Mongo cleanup.
+- `config-overrides.yaml` - sandbox-only non-secret overrides used by Jest after local dev overrides.
 - `preflight.ts` - source check that verifies Bridge Level 1 access is not blocked by the service guard.
 - `helpers.ts` - test user creation, GraphQL execution, Bridge mutation wrappers, webhook injection, ERPNext lookup, deposit lookup.
 - `helpers/http-utils.ts` - mock Express request/response objects for route-handler injection.
