@@ -555,6 +555,22 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         message,
       })
 
+    case "BridgeWithdrawalNotFoundError":
+      message = error.message || "Withdrawal request not found"
+      return bridgeGqlError({
+        code: "BRIDGE_WITHDRAWAL_NOT_FOUND",
+        message,
+      })
+
+    case "BridgeWithdrawalAlreadyInitiatedError":
+      message =
+        error.message ||
+        "Withdrawal has already been submitted to Bridge and cannot be cancelled"
+      return bridgeGqlError({
+        code: "BRIDGE_WITHDRAWAL_ALREADY_INITIATED",
+        message,
+      })
+
     case "BridgeRateLimitError":
       message = "Rate limit exceeded, please try again later"
       return bridgeGqlError({
@@ -794,9 +810,8 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "InvalidCarrierForPhoneMetadataError":
     case "InvalidCarrierTypeForPhoneMetadataError":
     case "InvalidCountryCodeForPhoneMetadataError":
-      message = `Unexpected error occurred, please try again or contact support if it persists (code: ${
-        error.name
-      }${error.message ? ": " + error.message : ""})`
+      message = `Unexpected error occurred, please try again or contact support if it persists (code: ${error.name
+        }${error.message ? ": " + error.message : ""})`
       return new UnexpectedClientError({ message, logger: baseLogger })
 
     case "MissingSessionIdError":
@@ -892,9 +907,8 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       return new ValidationInternalError({ message, logger: baseLogger })
 
     case "UnknownCaptchaError":
-      message = `Unknown error occurred (code: ${error.name}${
-        error.message ? ": " + error.message : ""
-      })`
+      message = `Unknown error occurred (code: ${error.name}${error.message ? ": " + error.message : ""
+        })`
       return new UnknownClientError({ message, logger: baseLogger })
 
     default:

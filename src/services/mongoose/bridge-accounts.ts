@@ -167,7 +167,7 @@ export const updateWithdrawalTransferId = async (
   try {
     const record = await BridgeWithdrawal.findByIdAndUpdate(
       id,
-      { bridgeTransferId, amount, currency, updatedAt: new Date() },
+      { bridgeTransferId, amount, currency, status: "submitted", updatedAt: new Date() },
       { new: true },
     )
     return record || new RepositoryError("Withdrawal not found")
@@ -196,7 +196,7 @@ export const updateWithdrawalStatus = async (
     if (truncatedReason !== undefined) update.failureReason = truncatedReason
 
     const record = await BridgeWithdrawal.findOneAndUpdate(
-      { bridgeTransferId, status: "pending" },
+      { bridgeTransferId, status: "submitted" },
       update,
       { new: true },
     )
@@ -220,6 +220,28 @@ export const findWithdrawalByBridgeTransferId = async (transferId: BridgeTransfe
   try {
     const record = await BridgeWithdrawal.findOne({ bridgeTransferId: transferId })
     return record || new RepositoryError("Withdrawal not found")
+  } catch (error) {
+    return new RepositoryError(String(error))
+  }
+}
+
+export const findWithdrawalById = async (id: string) => {
+  try {
+    const record = await BridgeWithdrawal.findById(id)
+    return record || new RepositoryError("Withdrawal not found")
+  } catch (error) {
+    return new RepositoryError(String(error))
+  }
+}
+
+export const cancelWithdrawal = async (accountId: string, withdrawalId: string) => {
+  try {
+    const record = await BridgeWithdrawal.findOneAndUpdate(
+      { _id: withdrawalId, accountId, status: "pending", bridgeTransferId: { $exists: false } },
+      { status: "cancelled", updatedAt: new Date() },
+      { new: true },
+    )
+    return record || new RepositoryError("Withdrawal not found or cannot be cancelled")
   } catch (error) {
     return new RepositoryError(String(error))
   }

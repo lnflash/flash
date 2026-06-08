@@ -1,0 +1,47 @@
+meta {
+  name: bridgeRequestWithdrawal
+  type: graphql
+  seq: 37
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:graphql {
+  mutation BridgeRequestWithdrawal($input: BridgeRequestWithdrawalInput!) {
+    bridgeRequestWithdrawal(input: $input) {
+      errors {
+        message
+      }
+      withdrawal {
+        id
+        amount
+        currency
+        externalAccountId
+        status
+        createdAt
+      }
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "amount": "50.00",
+      "externalAccountId": "{{bridgeExternalAccountId}}"
+    }
+  }
+}
+
+settings {
+  encodeUrl: false
+  timeout: 30000
+}

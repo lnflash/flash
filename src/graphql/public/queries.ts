@@ -26,6 +26,7 @@ import SupportedBanksQuery from "./root/query/supported-banks"
 import BridgeKycStatusQuery from "./root/query/bridge-kyc-status"
 import BridgeVirtualAccountQuery from "./root/query/bridge-virtual-account"
 import BridgeExternalAccountsQuery from "./root/query/bridge-external-accounts"
+import BridgeWithdrawalRequestQuery from "./root/query/bridge-withdrawal-request"
 import BridgeWithdrawalsQuery from "./root/query/bridge-withdrawals"
 
 export const queryFields = {
@@ -55,6 +56,7 @@ export const queryFields = {
       bridgeKycStatus: BridgeKycStatusQuery,
       bridgeVirtualAccount: BridgeVirtualAccountQuery,
       bridgeExternalAccounts: BridgeExternalAccountsQuery,
+      bridgeWithdrawalRequest: BridgeWithdrawalRequestQuery,
       bridgeWithdrawals: BridgeWithdrawalsQuery,
     },
     atWalletLevel: {
