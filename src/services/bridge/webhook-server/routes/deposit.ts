@@ -108,7 +108,9 @@ export const depositHandler = async (req: Request, res: Response) => {
     // Idempotency: mark processed only after local and ERPNext writes succeed, so
     // provider retries can recover audit gaps after transient ERPNext failures.
     const auditLockKey = `bridge-deposit:${event_id}`
-    const auditLockResult = await LockService().lockIdempotencyKey(auditLockKey as IdempotencyKey)
+    const auditLockResult = await LockService().lockIdempotencyKey(
+      auditLockKey as IdempotencyKey,
+    )
     if (auditLockResult instanceof Error) {
       baseLogger.info({ event_id, id, state }, "Duplicate Bridge deposit webhook")
       return res.status(200).json({ status: "already_processed" })

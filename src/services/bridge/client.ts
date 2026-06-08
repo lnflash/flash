@@ -7,8 +7,13 @@ import crypto from "crypto"
 
 import { BridgeConfig } from "@config"
 
-import { BridgeCustomerId, BridgeTransferId, BridgeVirtualAccountId } from "@domain/primitives/bridge"
+import {
+  BridgeCustomerId,
+  BridgeTransferId,
+  BridgeVirtualAccountId,
+} from "@domain/primitives/bridge"
 import { alertBridge } from "@services/alerts"
+
 import { BridgeTimeoutError } from "./errors"
 
 // ============ Error Handling ============
@@ -68,15 +73,15 @@ export interface Customer {
   id: string
   type: "individual" | "business"
   status?:
-  | "active"
-  | "awaiting_questionnaire"
-  | "rejected"
-  | "paused"
-  | "under_review"
-  | "offboarded"
-  | "awaiting_ubo"
-  | "incomplete"
-  | "not_started"
+    | "active"
+    | "awaiting_questionnaire"
+    | "rejected"
+    | "paused"
+    | "under_review"
+    | "offboarded"
+    | "awaiting_ubo"
+    | "incomplete"
+    | "not_started"
   has_accepted_terms_of_service?: string
   created_at: string
   updated_at: string
@@ -466,7 +471,9 @@ export class BridgeClient {
   }
 
   async getVirtualAccount(
-    customerId: BridgeCustomerId, virtualAccountId: BridgeVirtualAccountId, idempotencyKey?: string,
+    customerId: BridgeCustomerId,
+    virtualAccountId: BridgeVirtualAccountId,
+    idempotencyKey?: string,
   ): Promise<VirtualAccount> {
     return this.request<VirtualAccount>(
       "GET",
@@ -476,16 +483,15 @@ export class BridgeClient {
     )
   }
 
-
-  async getVirtualAccountByCustomerId(customerId: BridgeCustomerId): Promise<VirtualAccount[]> {
+  async getVirtualAccountByCustomerId(
+    customerId: BridgeCustomerId,
+  ): Promise<VirtualAccount[]> {
     const response = await this.request<{ data: VirtualAccount[] }>(
       "GET",
       `/customers/${customerId}/virtual_accounts`,
     )
 
     return response.data as VirtualAccount[]
-
-
   }
   // ============ External Accounts ============
 
@@ -594,8 +600,10 @@ export async function* listAllEvents(
   const startMs = params?.start ? new Date(params.start).getTime() : -Infinity
   const endMs = params?.end ? new Date(params.end).getTime() : Infinity
 
-  // Strip start/end — Bridge /webhook_events only supports cursor params; filter locally.
-  const { start: _s, end: _e, ...apiParams } = params ?? {}
+  // Strip start/end: Bridge /webhook_events only supports cursor params; filter locally.
+  const apiParams = { ...(params ?? {}) }
+  delete apiParams.start
+  delete apiParams.end
 
   let cursor: string | undefined
   do {
