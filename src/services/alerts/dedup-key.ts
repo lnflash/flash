@@ -28,7 +28,8 @@ export const generateDedupKey = {
     `ibex:reconcile:bridge-without-ibex:transfer:${transferId}`,
   ibexReconcileIbexWithoutBridge: (txHash: string) =>
     `ibex:reconcile:ibex-without-bridge:${txHash.toLowerCase()}`,
-  ibexReconcileFailed: (txHash: string) => `ibex:reconcile:failed:${txHash.toLowerCase()}`,
+  ibexReconcileFailed: (txHash: string) =>
+    `ibex:reconcile:failed:${txHash.toLowerCase()}`,
 }
 
 const truncateDedupKey = (key: string): string =>
@@ -43,11 +44,13 @@ export const resolveDedupKey = (alert: BridgeAlert): string => {
   switch (alert.source) {
     case "bridge-api":
       if (alert.title.includes("timeout")) return generateDedupKey.bridgeApiTimeout()
-      if (alert.title.includes("request failed")) return generateDedupKey.bridgeApiNetwork()
+      if (alert.title.includes("request failed"))
+        return generateDedupKey.bridgeApiNetwork()
       return generateDedupKey.bridgeApi5xx()
     case "erpnext-audit": {
       const transferId = String(ctx.transfer_id ?? "unknown")
-      if (alert.title.includes("deposit")) return generateDedupKey.erpnextDepositAudit(transferId)
+      if (alert.title.includes("deposit"))
+        return generateDedupKey.erpnextDepositAudit(transferId)
       if (alert.title.includes("failure")) {
         return generateDedupKey.erpnextTransferFailedAudit(transferId)
       }

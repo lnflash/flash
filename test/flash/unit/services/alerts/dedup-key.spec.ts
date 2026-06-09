@@ -27,9 +27,7 @@ describe("generateDedupKey", () => {
   })
 
   it("scopes IBEX Bridge movement keys per tx hash or transfer", () => {
-    expect(generateDedupKey.ibexCryptoReceive("0XABC")).toBe(
-      "ibex:crypto-receive:0xabc",
-    )
+    expect(generateDedupKey.ibexCryptoReceive("0XABC")).toBe("ibex:crypto-receive:0xabc")
     expect(generateDedupKey.ibexReconcileBridgeWithoutIbex("0xabc")).toBe(
       "ibex:reconcile:bridge-without-ibex:0xabc",
     )

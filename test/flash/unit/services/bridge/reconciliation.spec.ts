@@ -97,8 +97,12 @@ beforeEach(() => {
 describe("reconcileByTxHash", () => {
   describe("both sides found → matched", () => {
     beforeEach(() => {
-      ;(BridgeDeposits.findOne as jest.Mock).mockReturnValue(makeLeanQuery(BRIDGE_DEPOSIT))
-      ;(IbexCryptoReceive.findOne as jest.Mock).mockReturnValue(makeLeanQuery(IBEX_RECEIVE))
+      ;(BridgeDeposits.findOne as jest.Mock).mockReturnValue(
+        makeLeanQuery(BRIDGE_DEPOSIT),
+      )
+      ;(IbexCryptoReceive.findOne as jest.Mock).mockReturnValue(
+        makeLeanQuery(IBEX_RECEIVE),
+      )
     })
 
     it("returns status matched", async () => {
@@ -147,7 +151,9 @@ describe("reconcileByTxHash", () => {
 
   describe("only Bridge found → bridge_without_ibex", () => {
     beforeEach(() => {
-      ;(BridgeDeposits.findOne as jest.Mock).mockReturnValue(makeLeanQuery(BRIDGE_DEPOSIT))
+      ;(BridgeDeposits.findOne as jest.Mock).mockReturnValue(
+        makeLeanQuery(BRIDGE_DEPOSIT),
+      )
       ;(IbexCryptoReceive.findOne as jest.Mock).mockReturnValue(makeLeanQuery(null))
     })
 
@@ -204,7 +210,9 @@ describe("reconcileByTxHash", () => {
   describe("only IBEX found → ibex_without_bridge", () => {
     beforeEach(() => {
       ;(BridgeDeposits.findOne as jest.Mock).mockReturnValue(makeLeanQuery(null))
-      ;(IbexCryptoReceive.findOne as jest.Mock).mockReturnValue(makeLeanQuery(IBEX_RECEIVE))
+      ;(IbexCryptoReceive.findOne as jest.Mock).mockReturnValue(
+        makeLeanQuery(IBEX_RECEIVE),
+      )
     })
 
     it("returns status unmatched with correct orphanType", async () => {
@@ -240,7 +248,9 @@ describe("reconcileByTxHash", () => {
   describe("self-healing: second call with both sides resolves orphan", () => {
     it("resolves orphan when called again after missing side arrives", async () => {
       // First call: only Bridge
-      ;(BridgeDeposits.findOne as jest.Mock).mockReturnValue(makeLeanQuery(BRIDGE_DEPOSIT))
+      ;(BridgeDeposits.findOne as jest.Mock).mockReturnValue(
+        makeLeanQuery(BRIDGE_DEPOSIT),
+      )
       ;(IbexCryptoReceive.findOne as jest.Mock).mockReturnValue(makeLeanQuery(null))
       await reconcileByTxHash({ txHash: TX_HASH })
       expect(upsertBridgeReconciliationOrphan).toHaveBeenCalledTimes(1)
@@ -250,8 +260,12 @@ describe("reconcileByTxHash", () => {
       ;(resolveOrphansByTxHash as jest.Mock).mockResolvedValue({ resolvedCount: 1 })
 
       // Second call: both sides present (IBEX webhook arrived)
-      ;(BridgeDeposits.findOne as jest.Mock).mockReturnValue(makeLeanQuery(BRIDGE_DEPOSIT))
-      ;(IbexCryptoReceive.findOne as jest.Mock).mockReturnValue(makeLeanQuery(IBEX_RECEIVE))
+      ;(BridgeDeposits.findOne as jest.Mock).mockReturnValue(
+        makeLeanQuery(BRIDGE_DEPOSIT),
+      )
+      ;(IbexCryptoReceive.findOne as jest.Mock).mockReturnValue(
+        makeLeanQuery(IBEX_RECEIVE),
+      )
       const result = await reconcileByTxHash({ txHash: TX_HASH })
 
       expect(result).not.toBeInstanceOf(Error)
@@ -283,7 +297,9 @@ describe("reconcileBridgeAndIbexDeposits", () => {
 
   describe("all deposits matched", () => {
     it("returns zero orphans when every Bridge deposit has a matching IBEX receive", async () => {
-      ;(BridgeDeposits.find as jest.Mock).mockReturnValue(makeBridgeFind([BRIDGE_DEPOSIT]))
+      ;(BridgeDeposits.find as jest.Mock).mockReturnValue(
+        makeBridgeFind([BRIDGE_DEPOSIT]),
+      )
       ;(findIbexCryptoReceivesSince as jest.Mock).mockResolvedValue([IBEX_RECEIVE])
 
       const result = await reconcileBridgeAndIbexDeposits()
@@ -299,7 +315,9 @@ describe("reconcileBridgeAndIbexDeposits", () => {
 
   describe("Bridge deposit with no matching IBEX receive", () => {
     it("flags as bridge_without_ibex orphan", async () => {
-      ;(BridgeDeposits.find as jest.Mock).mockReturnValue(makeBridgeFind([BRIDGE_DEPOSIT]))
+      ;(BridgeDeposits.find as jest.Mock).mockReturnValue(
+        makeBridgeFind([BRIDGE_DEPOSIT]),
+      )
       ;(findIbexCryptoReceivesSince as jest.Mock).mockResolvedValue([])
 
       const result = await reconcileBridgeAndIbexDeposits()
@@ -369,7 +387,11 @@ describe("reconcileBridgeAndIbexDeposits", () => {
 
   describe("mixed scenario", () => {
     it("counts matched and unmatched independently", async () => {
-      const deposit2 = { ...BRIDGE_DEPOSIT, transferId: "tr_002", destinationTxHash: "0xother" }
+      const deposit2 = {
+        ...BRIDGE_DEPOSIT,
+        transferId: "tr_002",
+        destinationTxHash: "0xother",
+      }
       const ibex2 = { ...IBEX_RECEIVE, txHash: "0xorphan_ibex" }
 
       ;(BridgeDeposits.find as jest.Mock).mockReturnValue(

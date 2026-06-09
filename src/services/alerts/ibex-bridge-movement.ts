@@ -1,5 +1,6 @@
-import { alertBridge } from "./index"
 import { generateDedupKey } from "./dedup-key"
+
+import { alertBridge } from "./index"
 
 type IbexMovementAlert = {
   title: string
