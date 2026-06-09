@@ -1,5 +1,3 @@
-import { BridgeAlert } from "./index.types"
-
 export const PAGERDUTY_DEDUP_KEY_MAX = 255
 
 const OUTAGE_TTL_MS = 30 * 60 * 1000
@@ -32,59 +30,5 @@ export const generateDedupKey = {
     `ibex:reconcile:failed:${txHash.toLowerCase()}`,
 }
 
-const truncateDedupKey = (key: string): string =>
+export const normalizeDedupKey = (key: string): string =>
   key.length <= PAGERDUTY_DEDUP_KEY_MAX ? key : key.slice(0, PAGERDUTY_DEDUP_KEY_MAX)
-
-/** Stable PagerDuty / inform dedup key; prefers explicit alert.dedupKey. */
-export const resolveDedupKey = (alert: BridgeAlert): string => {
-  if (alert.dedupKey) return truncateDedupKey(alert.dedupKey)
-
-  const ctx = alert.context ?? {}
-
-  switch (alert.source) {
-    case "bridge-api":
-      if (alert.title.includes("timeout")) return generateDedupKey.bridgeApiTimeout()
-      if (alert.title.includes("request failed"))
-        return generateDedupKey.bridgeApiNetwork()
-      return generateDedupKey.bridgeApi5xx()
-    case "erpnext-audit": {
-      const transferId = String(ctx.transfer_id ?? "unknown")
-      if (alert.title.includes("deposit"))
-        return generateDedupKey.erpnextDepositAudit(transferId)
-      if (alert.title.includes("failure")) {
-        return generateDedupKey.erpnextTransferFailedAudit(transferId)
-      }
-      return generateDedupKey.erpnextTransferCompletedAudit(transferId)
-    }
-    case "bridge-webhook": {
-      const eventId = String(ctx.event_id ?? ctx.transfer_id ?? "unknown")
-      const transferId = String(ctx.transfer_id ?? "unknown")
-      const event = String(ctx.event ?? "unknown")
-      if (alert.title.includes("deposit")) {
-        return generateDedupKey.bridgeWebhookDeposit(eventId)
-      }
-      return generateDedupKey.bridgeWebhookTransfer(transferId, event)
-    }
-    case "ibex": {
-      const txHash = String(ctx.tx_hash ?? ctx.txHash ?? "unknown")
-      const orphanType = String(ctx.orphan_type ?? "")
-      if (orphanType === "ibex_without_bridge") {
-        return generateDedupKey.ibexReconcileIbexWithoutBridge(txHash)
-      }
-      if (orphanType === "bridge_without_ibex") {
-        if (txHash !== "unknown") {
-          return generateDedupKey.ibexReconcileBridgeWithoutIbex(txHash)
-        }
-        return generateDedupKey.ibexReconcileBridgeWithoutIbexTransfer(
-          String(ctx.transfer_id ?? "unknown"),
-        )
-      }
-      if (alert.title.includes("reconciliation failed")) {
-        return generateDedupKey.ibexReconcileFailed(txHash)
-      }
-      return generateDedupKey.ibexCryptoReceive(txHash)
-    }
-    default:
-      return truncateDedupKey(`bridge:${alert.source}:${alert.title}`)
-  }
-}

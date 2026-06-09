@@ -11,7 +11,7 @@ export const sendSlack = async (alert: BridgeAlert): Promise<void> => {
 
   const icon = alert.severity === "critical" ? ":rotating_light:" : ":warning:"
   const lines = [
-    `${icon} *Bridge alert* — ${alert.title}`,
+    `${icon} *Bridge alert* - ${alert.title}`,
     `*source:* \`${alert.source}\`  *severity:* \`${alert.severity}\``,
   ]
   if (alert.detail) lines.push(alert.detail)

@@ -1,7 +1,7 @@
 import {
   generateDedupKey,
   informDedupTtlMs,
-  resolveDedupKey,
+  normalizeDedupKey,
 } from "@services/alerts/dedup-key"
 
 describe("generateDedupKey", () => {
@@ -47,61 +47,8 @@ describe("informDedupTtlMs", () => {
   })
 })
 
-describe("resolveDedupKey", () => {
-  it("prefers an explicit dedupKey", () => {
-    expect(
-      resolveDedupKey({
-        dedupKey: "custom-key",
-        source: "bridge-api",
-        severity: "critical",
-        title: "anything",
-      }),
-    ).toBe("custom-key")
-  })
-
-  it("falls back to outage keys for bridge-api alerts", () => {
-    expect(
-      resolveDedupKey({
-        source: "bridge-api",
-        severity: "critical",
-        title: "Bridge API timeout on GET /transfers",
-      }),
-    ).toBe("bridge-api:timeout")
-
-    expect(
-      resolveDedupKey({
-        source: "bridge-api",
-        severity: "critical",
-        title: "Bridge API request failed on POST /customers",
-      }),
-    ).toBe("bridge-api:network")
-
-    expect(
-      resolveDedupKey({
-        source: "bridge-api",
-        severity: "critical",
-        title: "Bridge API 502 on GET /transfers",
-      }),
-    ).toBe("bridge-api:5xx")
-  })
-
-  it("falls back to IBEX movement keys", () => {
-    expect(
-      resolveDedupKey({
-        source: "ibex",
-        severity: "warning",
-        title: "IBEX crypto receive ERPNext audit write failed",
-        context: { tx_hash: "0xabc" },
-      }),
-    ).toBe("ibex:crypto-receive:0xabc")
-
-    expect(
-      resolveDedupKey({
-        source: "ibex",
-        severity: "warning",
-        title: "Bridge deposit without matching IBEX crypto receive",
-        context: { orphan_type: "bridge_without_ibex", tx_hash: "0xabc" },
-      }),
-    ).toBe("ibex:reconcile:bridge-without-ibex:0xabc")
+describe("normalizeDedupKey", () => {
+  it("truncates keys to PagerDuty's maximum dedup_key length", () => {
+    expect(normalizeDedupKey("a".repeat(300))).toHaveLength(255)
   })
 })

@@ -7,7 +7,7 @@ import { BridgeAlert } from "./index.types"
 
 const PAGERDUTY_EVENTS_URL = "https://events.pagerduty.com/v2/enqueue"
 
-// PagerDuty Events API v2 — triggers a paging incident. "critical" and
+// PagerDuty Events API v2 triggers a paging incident. "critical" and
 // "warning" are both valid PD payload severities, so we pass them through.
 export const sendPagerDuty = async (alert: BridgeAlert): Promise<void> => {
   if (!ALERT_PAGERDUTY_ROUTING_KEY) return
