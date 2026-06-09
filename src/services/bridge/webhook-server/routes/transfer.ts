@@ -13,7 +13,7 @@ import {
   writeBridgeCashoutCompleted,
   writeBridgeCashoutFailed,
 } from "@services/frappe/BridgeTransferRequestWriter"
-import { alertBridge } from "@services/alerts"
+import { alertBridge, generateDedupKey } from "@services/alerts"
 
 const TERMINAL_FAILURE_STATES = new Set([
   "undeliverable",
@@ -123,6 +123,7 @@ export const transferHandler = async (req: Request, res: Response) => {
           "Failed to persist Bridge transfer ERPNext audit row",
         )
         alertBridge({
+          dedupKey: generateDedupKey.erpnextTransferCompletedAudit(transfer_id),
           source: "erpnext-audit",
           severity: "critical",
           title: "Bridge transfer ERPNext audit write failed",
@@ -205,6 +206,7 @@ export const transferHandler = async (req: Request, res: Response) => {
           "Failed to persist Bridge transfer failure ERPNext audit row",
         )
         alertBridge({
+          dedupKey: generateDedupKey.erpnextTransferFailedAudit(transfer_id),
           source: "erpnext-audit",
           severity: "critical",
           title: "Bridge transfer-failure ERPNext audit write failed",
@@ -232,6 +234,7 @@ export const transferHandler = async (req: Request, res: Response) => {
   } catch (error) {
     baseLogger.error({ error, transfer_id }, "Error processing Bridge transfer webhook")
     alertBridge({
+      dedupKey: generateDedupKey.bridgeWebhookTransfer(transfer_id, event),
       source: "bridge-webhook",
       severity: "critical",
       title: "Bridge transfer webhook processing error",

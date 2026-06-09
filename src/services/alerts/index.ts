@@ -1,9 +1,12 @@
 import { sendPagerDuty } from "./pagerduty"
 import { sendSlack } from "./slack"
 import { sendDiscord } from "./discord"
+import { resolveDedupKey } from "./dedup-key"
+import { claimInformSlot } from "./inform-dedup"
 import { BridgeAlert } from "./index.types"
 
 export * from "./index.types"
+export { generateDedupKey } from "./dedup-key"
 
 /**
  * Fire-and-forget fan-out of a Bridge alert to the configured destinations
@@ -14,14 +17,30 @@ export * from "./index.types"
  * Routing:
  *   - critical → page on-call (PagerDuty) + inform (Slack/Mattermost, Discord)
  *   - warning  → inform (Slack/Mattermost, Discord) only
+ *
+ * Dedup:
+ *   - PagerDuty: Events API v2 dedup_key groups triggers into one incident.
+ *   - Slack / Discord: first alert per dedup key within TTL only.
  */
 export const alertBridge = (alert: BridgeAlert): void => {
+  const dedupKey = resolveDedupKey(alert)
+  const alertWithKey: BridgeAlert = { ...alert, dedupKey }
+
   const deliver = async () => {
-    const senders = [sendSlack(alert), sendDiscord(alert)]
-    if (alert.severity === "critical") {
-      senders.push(sendPagerDuty(alert))
+    const senders: Promise<void>[] = []
+
+    if (claimInformSlot(dedupKey)) {
+      senders.push(sendSlack(alertWithKey), sendDiscord(alertWithKey))
     }
-    await Promise.allSettled(senders)
+
+    if (alert.severity === "critical") {
+      senders.push(sendPagerDuty(alertWithKey))
+    }
+
+    if (senders.length > 0) {
+      await Promise.allSettled(senders)
+    }
   }
+
   deliver().catch(() => undefined)
 }

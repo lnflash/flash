@@ -5,6 +5,7 @@ export type AlertSeverity = "critical" | "warning"
 export type AlertSource = "bridge-webhook" | "bridge-api" | "ibex" | "erpnext-audit"
 
 export interface BridgeAlert {
+  dedupKey?: string
   source: AlertSource
   severity: AlertSeverity
   title: string

@@ -1,3 +1,4 @@
+import { alertIbexReconciliationOrphan } from "@services/alerts/ibex-bridge-movement"
 import { baseLogger } from "@services/logger"
 import { findIbexCryptoReceivesSince } from "@services/mongoose/ibex-crypto-receive-log"
 import {
@@ -78,6 +79,7 @@ export const reconcileBridgeAndIbexDeposits = async ({
     for (const deposit of bridgeDeposits) {
       if (!deposit.destinationTxHash) {
         bridgeWithoutIbex++
+        const reason = "Bridge payment_processed has no destinationTxHash"
         await upsertBridgeReconciliationOrphan({
           orphanKey: toOrphanKey("bridge-no-tx", deposit.transferId),
           orphanType: "bridge_without_ibex",
@@ -87,11 +89,22 @@ export const reconcileBridgeAndIbexDeposits = async ({
           amount: deposit.amount,
           currency: deposit.currency,
           triageContext: {
-            reason: "Bridge payment_processed has no destinationTxHash",
+            reason,
             windowStart: since.toISOString(),
             windowEnd: now.toISOString(),
             depositState: deposit.state,
             createdAt: deposit.createdAt.toISOString(),
+          },
+        })
+        alertIbexReconciliationOrphan({
+          orphanType: "bridge_without_ibex",
+          transferId: deposit.transferId,
+          reason,
+          context: {
+            bridge_event_id: deposit.eventId,
+            customer_id: deposit.customerId,
+            amount: deposit.amount,
+            currency: deposit.currency,
           },
         })
         continue
@@ -101,6 +114,8 @@ export const reconcileBridgeAndIbexDeposits = async ({
       if (matchedIbex) continue
 
       bridgeWithoutIbex++
+      const reason =
+        "No IBEX crypto.receive found for Bridge destinationTxHash within window"
       await upsertBridgeReconciliationOrphan({
         orphanKey: toOrphanKey("bridge", deposit.destinationTxHash),
         orphanType: "bridge_without_ibex",
@@ -111,12 +126,23 @@ export const reconcileBridgeAndIbexDeposits = async ({
         amount: deposit.amount,
         currency: deposit.currency,
         triageContext: {
-          reason:
-            "No IBEX crypto.receive found for Bridge destinationTxHash within window",
+          reason,
           windowStart: since.toISOString(),
           windowEnd: now.toISOString(),
           depositState: deposit.state,
           createdAt: deposit.createdAt.toISOString(),
+        },
+      })
+      alertIbexReconciliationOrphan({
+        orphanType: "bridge_without_ibex",
+        txHash: deposit.destinationTxHash,
+        transferId: deposit.transferId,
+        reason,
+        context: {
+          bridge_event_id: deposit.eventId,
+          customer_id: deposit.customerId,
+          amount: deposit.amount,
+          currency: deposit.currency,
         },
       })
     }
@@ -126,6 +152,8 @@ export const reconcileBridgeAndIbexDeposits = async ({
       if (matchedBridge) continue
 
       ibexWithoutBridge++
+      const reason =
+        "No Bridge deposit payment_processed found for IBEX tx hash within window"
       await upsertBridgeReconciliationOrphan({
         orphanKey: toOrphanKey("ibex", receive.txHash),
         orphanType: "ibex_without_bridge",
@@ -133,14 +161,25 @@ export const reconcileBridgeAndIbexDeposits = async ({
         amount: receive.amount,
         currency: receive.currency,
         triageContext: {
-          reason:
-            "No Bridge deposit payment_processed found for IBEX tx hash within window",
+          reason,
           windowStart: since.toISOString(),
           windowEnd: now.toISOString(),
           address: receive.address,
           network: receive.network,
           accountId: receive.accountId,
           receivedAt: receive.receivedAt.toISOString(),
+        },
+      })
+      alertIbexReconciliationOrphan({
+        orphanType: "ibex_without_bridge",
+        txHash: receive.txHash,
+        reason,
+        context: {
+          amount: receive.amount,
+          currency: receive.currency,
+          address: receive.address,
+          network: receive.network,
+          account_id: receive.accountId,
         },
       })
     }
@@ -261,6 +300,18 @@ export const reconcileByTxHash = async ({
       amount,
       currency,
       triageContext,
+    })
+
+    alertIbexReconciliationOrphan({
+      orphanType,
+      txHash: normalizedHash,
+      transferId,
+      reason: String(triageContext.reason),
+      context: {
+        customer_id: customerId,
+        amount,
+        currency,
+      },
     })
 
     const event: ReconcileByTxHashResult = {

@@ -18,6 +18,7 @@ export const sendPagerDuty = async (alert: BridgeAlert): Promise<void> => {
       {
         routing_key: ALERT_PAGERDUTY_ROUTING_KEY,
         event_action: "trigger",
+        dedup_key: alert.dedupKey,
         payload: {
           summary: `[bridge:${alert.source}] ${alert.title}`,
           severity: alert.severity,

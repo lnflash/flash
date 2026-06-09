@@ -12,7 +12,7 @@ import {
   BridgeTransferId,
   BridgeVirtualAccountId,
 } from "@domain/primitives/bridge"
-import { alertBridge } from "@services/alerts"
+import { alertBridge, generateDedupKey } from "@services/alerts"
 
 import { BridgeTimeoutError } from "./errors"
 
@@ -388,6 +388,7 @@ export class BridgeClient {
         // Only 5xx indicates a Bridge-side outage; 4xx are normal API rejections.
         if (response.status >= 500) {
           alertBridge({
+            dedupKey: generateDedupKey.bridgeApi5xx(),
             source: "bridge-api",
             severity: "critical",
             title: `Bridge API ${response.status} on ${method} ${path}`,
@@ -406,6 +407,7 @@ export class BridgeClient {
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
         alertBridge({
+          dedupKey: generateDedupKey.bridgeApiTimeout(),
           source: "bridge-api",
           severity: "critical",
           title: `Bridge API timeout on ${method} ${path}`,
@@ -416,6 +418,7 @@ export class BridgeClient {
       // Network/connectivity failures (5xx already alerted above).
       if (!(err instanceof BridgeApiError)) {
         alertBridge({
+          dedupKey: generateDedupKey.bridgeApiNetwork(),
           source: "bridge-api",
           severity: "critical",
           title: `Bridge API request failed on ${method} ${path}`,

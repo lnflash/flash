@@ -17,6 +17,27 @@ destination never blocks or fails the webhook/request path. **A destination
 with no configured credential is silently skipped**, so channels can be enabled
 incrementally.
 
+### Deduplication
+
+Alerts carry a stable `dedupKey` so repeated failures do not spam on-call or chat:
+
+| Destination | Behavior |
+| ----------- | -------- |
+| **PagerDuty** | Events API v2 `dedup_key` groups triggers into one incident |
+| **Slack / Discord** | First message per `dedupKey` within TTL; duplicates are skipped |
+
+Key classes (see `src/services/alerts/dedup-key.ts`):
+
+- `bridge-api:5xx` / `bridge-api:timeout` / `bridge-api:network` — coarse outage keys (30 min inform TTL)
+- `erpnext-audit:deposit:{transfer_id}` — per deposit audit failure (1 h inform TTL)
+- `erpnext-audit:transfer-complete:{transfer_id}` / `transfer-failed:{transfer_id}` — per transfer audit failure
+- `bridge-webhook:deposit:{event_id}` / `bridge-webhook:transfer:{transfer_id}:{event}` — per webhook processing error
+- `ibex:crypto-receive:{tx_hash}` — per IBEX crypto receive webhook failure (1 h inform TTL)
+- `ibex:reconcile:bridge-without-ibex:{tx_hash}` / `ibex:reconcile:ibex-without-bridge:{tx_hash}` — per reconciliation orphan
+- `ibex:reconcile:failed:{tx_hash}` — reconciliation handler threw
+
+Inform dedup is in-process per pod; PagerDuty dedup is global to the service integration.
+
 ## Alert sources
 
 | Source                                            | Severity | Where                                                       |
@@ -24,7 +45,8 @@ incrementally.
 | ERPNext audit-write failure (deposit + transfer)  | critical | `services/bridge/webhook-server/routes/{deposit,transfer}.ts` |
 | Bridge webhook processing exception               | critical | same routes (catch block)                                   |
 | Bridge API outage — 5xx / timeout / network       | critical | `services/bridge/client.ts`                                 |
-| IBEX error on a Bridge↔IBEX movement              | warning  | _follow-up — not yet wired_                                 |
+| IBEX crypto receive webhook failure               | warning  | `services/ibex/webhook-server/routes/crypto-receive.ts`     |
+| Bridge↔IBEX reconciliation orphan / failure         | warning  | `services/bridge/reconciliation.ts`, deposit/crypto catch |
 
 `4xx` responses from Bridge are normal API rejections and are **not** alerted.
 

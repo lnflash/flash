@@ -12,7 +12,8 @@ import { baseLogger } from "@services/logger"
 import { createBridgeDeposit } from "@services/mongoose/bridge-deposit-log"
 import { reconcileByTxHash } from "@services/bridge/reconciliation"
 import { writeBridgeDepositRequest } from "@services/frappe/BridgeTransferRequestWriter"
-import { alertBridge } from "@services/alerts"
+import { alertBridge, generateDedupKey } from "@services/alerts"
+import { alertIbexReconciliationFailed } from "@services/alerts/ibex-bridge-movement"
 
 export const depositHandler = async (req: Request, res: Response) => {
   const { event_id, event_object } = req.body
@@ -80,9 +81,13 @@ export const depositHandler = async (req: Request, res: Response) => {
     }
 
     if (state === "payment_processed" && receipt?.destination_tx_hash) {
-      reconcileByTxHash({ txHash: receipt.destination_tx_hash }).catch((err) =>
-        baseLogger.error({ err, event_id, id }, "Real-time reconciliation failed"),
-      )
+      reconcileByTxHash({ txHash: receipt.destination_tx_hash }).catch((err) => {
+        baseLogger.error({ err, event_id, id }, "Real-time reconciliation failed")
+        alertIbexReconciliationFailed({
+          txHash: receipt.destination_tx_hash,
+          detail: err instanceof Error ? err.message : String(err),
+        })
+      })
     }
 
     const auditResult = await writeBridgeDepositRequest({
@@ -96,6 +101,7 @@ export const depositHandler = async (req: Request, res: Response) => {
         "Failed to persist Bridge deposit ERPNext audit row",
       )
       alertBridge({
+        dedupKey: generateDedupKey.erpnextDepositAudit(id),
         source: "erpnext-audit",
         severity: "critical",
         title: "Bridge deposit ERPNext audit write failed",
@@ -120,6 +126,7 @@ export const depositHandler = async (req: Request, res: Response) => {
   } catch (error) {
     baseLogger.error({ error, id, event_id }, "Error processing Bridge deposit webhook")
     alertBridge({
+      dedupKey: generateDedupKey.bridgeWebhookDeposit(event_id),
       source: "bridge-webhook",
       severity: "critical",
       title: "Bridge deposit webhook processing error",

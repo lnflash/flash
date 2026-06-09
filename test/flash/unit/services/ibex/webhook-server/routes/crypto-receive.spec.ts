@@ -27,8 +27,17 @@ jest.mock("@services/bridge/reconciliation", () => ({
   reconcileByTxHash: jest.fn().mockResolvedValue({ status: "matched" }),
 }))
 
+jest.mock("@app/bridge/send-deposit-notification", () => ({
+  sendBridgeDepositNotificationBestEffort: jest.fn().mockResolvedValue(undefined),
+}))
+
 jest.mock("@services/frappe/BridgeTransferRequestWriter", () => ({
   writeIbexCryptoReceiveRequest: jest.fn(),
+}))
+
+jest.mock("@services/alerts/ibex-bridge-movement", () => ({
+  alertIbexCryptoReceiveFailure: jest.fn(),
+  alertIbexReconciliationFailed: jest.fn(),
 }))
 
 import { cryptoReceiveHandler } from "@services/ibex/webhook-server/routes/crypto-receive"
@@ -38,6 +47,7 @@ import { listWalletsByAccountId } from "@app/wallets"
 import { LockService } from "@services/lock"
 import { WalletCurrency } from "@domain/shared"
 import { writeIbexCryptoReceiveRequest } from "@services/frappe/BridgeTransferRequestWriter"
+import { alertIbexCryptoReceiveFailure } from "@services/alerts/ibex-bridge-movement"
 
 const ACCOUNT_ID = "account-001" as AccountId
 const WALLET_ID = "wallet-usdt-001" as WalletId
@@ -155,6 +165,13 @@ describe("cryptoReceiveHandler", () => {
 
     expect(res.status).toHaveBeenCalledWith(500)
     expect(res.json).toHaveBeenCalledWith({ error: "erpnext_audit_failed" })
+    expect(alertIbexCryptoReceiveFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        txHash: TX_HASH,
+        code: "erpnext_audit_failed",
+        title: "IBEX crypto receive ERPNext audit write failed",
+      }),
+    )
   })
 
   it("rejects legacy Tron USDT receive webhooks for the ETH-USDT Cash Wallet path", async () => {
