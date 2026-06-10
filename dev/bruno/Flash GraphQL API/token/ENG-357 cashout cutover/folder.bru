@@ -1,0 +1,33 @@
+meta {
+  name: ENG-357 cashout cutover
+  seq: 4
+}
+
+auth {
+  mode: inherit
+}
+
+docs {
+  # ENG-357 Cashout V1 cutover smoke
+
+  Focused local Bruno flow for PR #395.
+
+  Run order:
+  1. `login flow/userLogin`
+  2. `token/ENG-357 cashout cutover/01 discover legacy cashout wallet`
+  3. `token/ENG-357 cashout cutover/02 discover USDT cashout inputs`
+  4. `token/ENG-357 cashout cutover/03 request cashout offer`
+  5. `token/ENG-357 cashout cutover/04 initiate cashout offer`
+
+  This intentionally requests cashout with the legacy USD wallet from the old-client
+  view, then verifies the offer settles against the post-cutover USDT cash wallet.
+  Step 01 omits `X-Flash-Client-Capabilities` to discover the legacy USD wallet.
+  Step 02 sends `X-Flash-Client-Capabilities: cash-wallet-usdt-v1` to discover the
+  USDT wallet and bank account. PR #395 should return an offer whose `walletId` is
+  the account's USDT wallet, then `initiateCashout` should successfully reload that
+  offer from Redis while authenticating with the legacy wallet id.
+
+  If step 03 returns the USD wallet instead of USDT, the local account/config is not
+  exercising the post-cutover route. If step 04 returns a server error after step 03
+  succeeds, that strongly points at the USDT offer Redis serialization round-trip.
+}
