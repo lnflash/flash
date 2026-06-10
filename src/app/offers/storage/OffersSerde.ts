@@ -22,13 +22,18 @@ export const OffersSerde = {
 
   deserialize: (json: string): CashoutDetails => {
     return JSON.parse(json, (key: string, value: unknown) => {
+      if (key === "expiresAt" && typeof value === "string") return new Date(value)
+
       if (
         ["amount", "servicefee", "exchangerate"].includes(key.toLowerCase()) &&
         Array.isArray(value)
       ) {
-        if (value[1] === WalletCurrency.Usdt)
-          return USDTAmount.smallestUnits(value[0] as string)
-        return toMoneyAmountFromJSON(value as [string, string])
+        const amount =
+          value[1] === WalletCurrency.Usdt
+            ? USDTAmount.smallestUnits(value[0] as string)
+            : toMoneyAmountFromJSON(value as [string, string])
+        if (amount instanceof Error) throw amount
+        return amount
       }
       return value
     })

@@ -44,7 +44,30 @@ describe("OffersSerde", () => {
 
     expect(parsed.payment.amount).toBeInstanceOf(USDTAmount)
     expect(parsed.payment.amount.isLesserThan(usdt("101"))).toBe(true)
+    expect(parsed.payment.invoice.expiresAt).toBeInstanceOf(Date)
     expect(parsed.payout.amount).toBeInstanceOf(JMDAmount)
     expect(parsed.payout.serviceFee).toBeInstanceOf(USDAmount)
+  })
+
+  it("throws instead of hydrating invalid amount tuples into Error objects", () => {
+    const invalidSerializedOffer = JSON.stringify({
+      payment: {
+        userAcct: "22222222-2222-4222-8222-222222222222",
+        flashAcct: "44444444-4444-4444-8444-444444444444",
+        invoice: {
+          paymentRequest: "lnbc1test",
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        },
+        amount: ["not-a-number", "USDT"],
+      },
+      payout: {
+        bankAccountId: "12345 - First Global",
+        amount: ["15500", "JMD"],
+        serviceFee: ["0", "USD"],
+        exchangeRate: ["15500", "JMD"],
+      },
+    })
+
+    expect(() => OffersSerde.deserialize(invalidSerializedOffer)).toThrow()
   })
 })
