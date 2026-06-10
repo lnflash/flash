@@ -1,0 +1,78 @@
+meta {
+  name: 03 request cashout offer
+  type: graphql
+  seq: 3
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  ~X-Flash-Client-Capabilities: cash-wallet-usdt-v1
+}
+
+body:graphql {
+  mutation Eng357RequestCashout($input: RequestCashoutInput!) {
+    requestCashout(input: $input) {
+      offer {
+        offerId
+        walletId
+        send
+        receiveUsd
+        receiveJmd
+        flashFee
+        expiresAt
+      }
+      errors {
+        ... on GraphQLApplicationError {
+          code
+          message
+          path
+        }
+      }
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "walletId": "{{legacyUsdWalletId}}",
+      "amount": 100,
+      "bankAccountId": "{{cashoutBankAccountId}}"
+    }
+  }
+}
+
+script:post-response {
+  test("creates a post-cutover USDT-settled cashout offer from the legacy USD wallet input", function () {
+    const body = res.getBody();
+    const graphqlErrors = body.errors ?? [];
+    expect(graphqlErrors, JSON.stringify(graphqlErrors)).to.be.empty;
+
+    const payload = body.data?.requestCashout;
+    const appErrors = payload?.errors ?? [];
+    expect(appErrors, JSON.stringify(appErrors)).to.be.empty;
+
+    const offer = payload?.offer;
+    expect(offer?.offerId, "offerId").to.exist;
+    expect(offer.walletId, "offer walletId should be the resolved USDT wallet").to.eql(
+      bru.getEnvVar("usdtWalletId"),
+    );
+    expect(offer.walletId, "offer walletId should not stay on legacy USD").to.not.eql(
+      bru.getEnvVar("legacyUsdWalletId"),
+    );
+
+    bru.setEnvVar("cashoutOfferId", offer.offerId);
+    console.log("cashoutOfferId:", offer.offerId);
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

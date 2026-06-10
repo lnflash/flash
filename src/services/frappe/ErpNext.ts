@@ -1,6 +1,6 @@
 import ValidOffer from "@app/offers/ValidOffer"
 import { FrappeConfig } from "@config"
-import { JMDAmount, USDAmount, Validated } from "@domain/shared"
+import { JMDAmount, USDAmount, USDTAmount, Validated } from "@domain/shared"
 import { baseLogger } from "@services/logger"
 import { recordExceptionInCurrentSpan } from "@services/tracing"
 import axios, { isAxiosError } from "axios"
@@ -68,7 +68,12 @@ export class ErpNext {
           wallet_id: payment.userAcct,
           flash_wallet: payment.flashAcct,
           user_receives: Number(payout.amount.asDollars()),
-          user_pays: Number(payment.amount.asDollars()),
+          // 1 USDT = 1 USD; USDTAmount exposes major units via asNumber (no asDollars).
+          user_pays: Number(
+            payment.amount instanceof USDTAmount
+              ? payment.amount.asNumber(2)
+              : payment.amount.asDollars(),
+          ),
           currency: payout.amount.currencyCode,
           exchange_rate: payout.exchangeRate ? Number(payout.exchangeRate.asDollars()) : undefined,
           flash_fee: Number(payout.serviceFee.asDollars()),
