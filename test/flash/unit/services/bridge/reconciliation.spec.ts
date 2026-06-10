@@ -10,12 +10,12 @@ jest.mock("@services/logger", () => ({
 }))
 
 jest.mock("@services/mongoose/schema", () => ({
-  BridgeDepositLog: { findOne: jest.fn(), find: jest.fn() },
-  IbexCryptoReceiveLog: { findOne: jest.fn() },
+  BridgeDeposits: { findOne: jest.fn(), find: jest.fn() },
+  IbexCryptoReceive: { findOne: jest.fn() },
 }))
 
 jest.mock("@services/mongoose/ibex-crypto-receive-log", () => ({
-  findIbexCryptoReceiveLogsSince: jest.fn(),
+  findIbexCryptoReceivesSince: jest.fn(),
 }))
 
 jest.mock("@services/mongoose/bridge-reconciliation-orphan", () => ({
@@ -33,13 +33,19 @@ jest.mock("@domain/pubsub", () => ({
   },
 }))
 
-import { BridgeDepositLog, IbexCryptoReceiveLog } from "@services/mongoose/schema"
-import { findIbexCryptoReceiveLogsSince } from "@services/mongoose/ibex-crypto-receive-log"
+jest.mock("@services/alerts/ibex-bridge-movement", () => ({
+  alertIbexReconciliationOrphan: jest.fn(),
+  alertIbexReconciliationFailed: jest.fn(),
+}))
+
+import { BridgeDeposits, IbexCryptoReceive } from "@services/mongoose/schema"
+import { findIbexCryptoReceivesSince } from "@services/mongoose/ibex-crypto-receive-log"
 import {
   upsertBridgeReconciliationOrphan,
   resolveOrphansByTxHash,
 } from "@services/mongoose/bridge-reconciliation-orphan"
 import { PubSubService } from "@services/pubsub"
+import { alertIbexReconciliationOrphan } from "@services/alerts/ibex-bridge-movement"
 import {
   reconcileByTxHash,
   reconcileBridgeAndIbexDeposits,
@@ -91,8 +97,12 @@ beforeEach(() => {
 describe("reconcileByTxHash", () => {
   describe("both sides found → matched", () => {
     beforeEach(() => {
-      ;(BridgeDepositLog.findOne as jest.Mock).mockReturnValue(makeLeanQuery(BRIDGE_DEPOSIT))
-      ;(IbexCryptoReceiveLog.findOne as jest.Mock).mockReturnValue(makeLeanQuery(IBEX_RECEIVE))
+      ;(BridgeDeposits.findOne as jest.Mock).mockReturnValue(
+        makeLeanQuery(BRIDGE_DEPOSIT),
+      )
+      ;(IbexCryptoReceive.findOne as jest.Mock).mockReturnValue(
+        makeLeanQuery(IBEX_RECEIVE),
+      )
     })
 
     it("returns status matched", async () => {
@@ -134,15 +144,17 @@ describe("reconcileByTxHash", () => {
       expect(result).not.toBeInstanceOf(Error)
       if (result instanceof Error) return
       expect(result.txHash).toBe(NORM_HASH)
-      const [bridgeCall] = (BridgeDepositLog.findOne as jest.Mock).mock.calls
+      const [bridgeCall] = (BridgeDeposits.findOne as jest.Mock).mock.calls
       expect(bridgeCall[0].destinationTxHash.$regex.flags).toContain("i")
     })
   })
 
   describe("only Bridge found → bridge_without_ibex", () => {
     beforeEach(() => {
-      ;(BridgeDepositLog.findOne as jest.Mock).mockReturnValue(makeLeanQuery(BRIDGE_DEPOSIT))
-      ;(IbexCryptoReceiveLog.findOne as jest.Mock).mockReturnValue(makeLeanQuery(null))
+      ;(BridgeDeposits.findOne as jest.Mock).mockReturnValue(
+        makeLeanQuery(BRIDGE_DEPOSIT),
+      )
+      ;(IbexCryptoReceive.findOne as jest.Mock).mockReturnValue(makeLeanQuery(null))
     })
 
     it("returns status unmatched with correct orphanType", async () => {
@@ -182,12 +194,25 @@ describe("reconcileByTxHash", () => {
         }),
       )
     })
+
+    it("alerts ops when Bridge has no matching IBEX receive", async () => {
+      await reconcileByTxHash({ txHash: TX_HASH })
+      expect(alertIbexReconciliationOrphan).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orphanType: "bridge_without_ibex",
+          txHash: NORM_HASH,
+          transferId: BRIDGE_DEPOSIT.transferId,
+        }),
+      )
+    })
   })
 
   describe("only IBEX found → ibex_without_bridge", () => {
     beforeEach(() => {
-      ;(BridgeDepositLog.findOne as jest.Mock).mockReturnValue(makeLeanQuery(null))
-      ;(IbexCryptoReceiveLog.findOne as jest.Mock).mockReturnValue(makeLeanQuery(IBEX_RECEIVE))
+      ;(BridgeDeposits.findOne as jest.Mock).mockReturnValue(makeLeanQuery(null))
+      ;(IbexCryptoReceive.findOne as jest.Mock).mockReturnValue(
+        makeLeanQuery(IBEX_RECEIVE),
+      )
     })
 
     it("returns status unmatched with correct orphanType", async () => {
@@ -208,13 +233,25 @@ describe("reconcileByTxHash", () => {
         }),
       )
     })
+
+    it("alerts ops when IBEX has no matching Bridge deposit", async () => {
+      await reconcileByTxHash({ txHash: TX_HASH })
+      expect(alertIbexReconciliationOrphan).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orphanType: "ibex_without_bridge",
+          txHash: NORM_HASH,
+        }),
+      )
+    })
   })
 
   describe("self-healing: second call with both sides resolves orphan", () => {
     it("resolves orphan when called again after missing side arrives", async () => {
       // First call: only Bridge
-      ;(BridgeDepositLog.findOne as jest.Mock).mockReturnValue(makeLeanQuery(BRIDGE_DEPOSIT))
-      ;(IbexCryptoReceiveLog.findOne as jest.Mock).mockReturnValue(makeLeanQuery(null))
+      ;(BridgeDeposits.findOne as jest.Mock).mockReturnValue(
+        makeLeanQuery(BRIDGE_DEPOSIT),
+      )
+      ;(IbexCryptoReceive.findOne as jest.Mock).mockReturnValue(makeLeanQuery(null))
       await reconcileByTxHash({ txHash: TX_HASH })
       expect(upsertBridgeReconciliationOrphan).toHaveBeenCalledTimes(1)
 
@@ -223,8 +260,12 @@ describe("reconcileByTxHash", () => {
       ;(resolveOrphansByTxHash as jest.Mock).mockResolvedValue({ resolvedCount: 1 })
 
       // Second call: both sides present (IBEX webhook arrived)
-      ;(BridgeDepositLog.findOne as jest.Mock).mockReturnValue(makeLeanQuery(BRIDGE_DEPOSIT))
-      ;(IbexCryptoReceiveLog.findOne as jest.Mock).mockReturnValue(makeLeanQuery(IBEX_RECEIVE))
+      ;(BridgeDeposits.findOne as jest.Mock).mockReturnValue(
+        makeLeanQuery(BRIDGE_DEPOSIT),
+      )
+      ;(IbexCryptoReceive.findOne as jest.Mock).mockReturnValue(
+        makeLeanQuery(IBEX_RECEIVE),
+      )
       const result = await reconcileByTxHash({ txHash: TX_HASH })
 
       expect(result).not.toBeInstanceOf(Error)
@@ -236,11 +277,11 @@ describe("reconcileByTxHash", () => {
   })
 
   describe("Bridge query uses payment_processed state filter", () => {
-    it("passes state: payment_processed to BridgeDepositLog.findOne", async () => {
-      ;(BridgeDepositLog.findOne as jest.Mock).mockReturnValue(makeLeanQuery(null))
-      ;(IbexCryptoReceiveLog.findOne as jest.Mock).mockReturnValue(makeLeanQuery(null))
+    it("passes state: payment_processed to BridgeDeposits.findOne", async () => {
+      ;(BridgeDeposits.findOne as jest.Mock).mockReturnValue(makeLeanQuery(null))
+      ;(IbexCryptoReceive.findOne as jest.Mock).mockReturnValue(makeLeanQuery(null))
       await reconcileByTxHash({ txHash: TX_HASH })
-      expect(BridgeDepositLog.findOne).toHaveBeenCalledWith(
+      expect(BridgeDeposits.findOne).toHaveBeenCalledWith(
         expect.objectContaining({ state: "payment_processed" }),
       )
     })
@@ -256,8 +297,10 @@ describe("reconcileBridgeAndIbexDeposits", () => {
 
   describe("all deposits matched", () => {
     it("returns zero orphans when every Bridge deposit has a matching IBEX receive", async () => {
-      ;(BridgeDepositLog.find as jest.Mock).mockReturnValue(makeBridgeFind([BRIDGE_DEPOSIT]))
-      ;(findIbexCryptoReceiveLogsSince as jest.Mock).mockResolvedValue([IBEX_RECEIVE])
+      ;(BridgeDeposits.find as jest.Mock).mockReturnValue(
+        makeBridgeFind([BRIDGE_DEPOSIT]),
+      )
+      ;(findIbexCryptoReceivesSince as jest.Mock).mockResolvedValue([IBEX_RECEIVE])
 
       const result = await reconcileBridgeAndIbexDeposits()
       expect(result).not.toBeInstanceOf(Error)
@@ -272,8 +315,10 @@ describe("reconcileBridgeAndIbexDeposits", () => {
 
   describe("Bridge deposit with no matching IBEX receive", () => {
     it("flags as bridge_without_ibex orphan", async () => {
-      ;(BridgeDepositLog.find as jest.Mock).mockReturnValue(makeBridgeFind([BRIDGE_DEPOSIT]))
-      ;(findIbexCryptoReceiveLogsSince as jest.Mock).mockResolvedValue([])
+      ;(BridgeDeposits.find as jest.Mock).mockReturnValue(
+        makeBridgeFind([BRIDGE_DEPOSIT]),
+      )
+      ;(findIbexCryptoReceivesSince as jest.Mock).mockResolvedValue([])
 
       const result = await reconcileBridgeAndIbexDeposits()
       expect(result).not.toBeInstanceOf(Error)
@@ -293,8 +338,8 @@ describe("reconcileBridgeAndIbexDeposits", () => {
   describe("Bridge deposit with no destinationTxHash", () => {
     it("flags as bridge-no-tx:{transferId} orphan", async () => {
       const depositNoHash = { ...BRIDGE_DEPOSIT, destinationTxHash: undefined }
-      ;(BridgeDepositLog.find as jest.Mock).mockReturnValue(makeBridgeFind([depositNoHash]))
-      ;(findIbexCryptoReceiveLogsSince as jest.Mock).mockResolvedValue([])
+      ;(BridgeDeposits.find as jest.Mock).mockReturnValue(makeBridgeFind([depositNoHash]))
+      ;(findIbexCryptoReceivesSince as jest.Mock).mockResolvedValue([])
 
       const result = await reconcileBridgeAndIbexDeposits()
       expect(result).not.toBeInstanceOf(Error)
@@ -311,8 +356,8 @@ describe("reconcileBridgeAndIbexDeposits", () => {
 
   describe("IBEX receive with no matching Bridge deposit", () => {
     it("flags as ibex_without_bridge orphan", async () => {
-      ;(BridgeDepositLog.find as jest.Mock).mockReturnValue(makeBridgeFind([]))
-      ;(findIbexCryptoReceiveLogsSince as jest.Mock).mockResolvedValue([IBEX_RECEIVE])
+      ;(BridgeDeposits.find as jest.Mock).mockReturnValue(makeBridgeFind([]))
+      ;(findIbexCryptoReceivesSince as jest.Mock).mockResolvedValue([IBEX_RECEIVE])
 
       const result = await reconcileBridgeAndIbexDeposits()
       expect(result).not.toBeInstanceOf(Error)
@@ -329,12 +374,12 @@ describe("reconcileBridgeAndIbexDeposits", () => {
   })
 
   describe("batch uses payment_processed state filter", () => {
-    it("passes state: payment_processed to BridgeDepositLog.find", async () => {
-      ;(BridgeDepositLog.find as jest.Mock).mockReturnValue(makeBridgeFind([]))
-      ;(findIbexCryptoReceiveLogsSince as jest.Mock).mockResolvedValue([])
+    it("passes state: payment_processed to BridgeDeposits.find", async () => {
+      ;(BridgeDeposits.find as jest.Mock).mockReturnValue(makeBridgeFind([]))
+      ;(findIbexCryptoReceivesSince as jest.Mock).mockResolvedValue([])
 
       await reconcileBridgeAndIbexDeposits()
-      expect(BridgeDepositLog.find).toHaveBeenCalledWith(
+      expect(BridgeDeposits.find).toHaveBeenCalledWith(
         expect.objectContaining({ state: "payment_processed" }),
       )
     })
@@ -342,13 +387,17 @@ describe("reconcileBridgeAndIbexDeposits", () => {
 
   describe("mixed scenario", () => {
     it("counts matched and unmatched independently", async () => {
-      const deposit2 = { ...BRIDGE_DEPOSIT, transferId: "tr_002", destinationTxHash: "0xother" }
+      const deposit2 = {
+        ...BRIDGE_DEPOSIT,
+        transferId: "tr_002",
+        destinationTxHash: "0xother",
+      }
       const ibex2 = { ...IBEX_RECEIVE, txHash: "0xorphan_ibex" }
 
-      ;(BridgeDepositLog.find as jest.Mock).mockReturnValue(
+      ;(BridgeDeposits.find as jest.Mock).mockReturnValue(
         makeBridgeFind([BRIDGE_DEPOSIT, deposit2]),
       )
-      ;(findIbexCryptoReceiveLogsSince as jest.Mock).mockResolvedValue([IBEX_RECEIVE, ibex2])
+      ;(findIbexCryptoReceivesSince as jest.Mock).mockResolvedValue([IBEX_RECEIVE, ibex2])
 
       const result = await reconcileBridgeAndIbexDeposits()
       expect(result).not.toBeInstanceOf(Error)
@@ -365,9 +414,9 @@ describe("reconcileBridgeAndIbexDeposits", () => {
   })
 
   describe("error handling", () => {
-    it("returns an Error when findIbexCryptoReceiveLogsSince fails", async () => {
-      ;(BridgeDepositLog.find as jest.Mock).mockReturnValue(makeBridgeFind([]))
-      ;(findIbexCryptoReceiveLogsSince as jest.Mock).mockResolvedValue(
+    it("returns an Error when findIbexCryptoReceivesSince fails", async () => {
+      ;(BridgeDeposits.find as jest.Mock).mockReturnValue(makeBridgeFind([]))
+      ;(findIbexCryptoReceivesSince as jest.Mock).mockResolvedValue(
         new Error("mongo connection lost"),
       )
 

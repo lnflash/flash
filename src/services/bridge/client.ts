@@ -7,7 +7,13 @@ import crypto from "crypto"
 
 import { BridgeConfig } from "@config"
 
-import { BridgeCustomerId, BridgeTransferId, BridgeVirtualAccountId } from "@domain/primitives/bridge"
+import {
+  BridgeCustomerId,
+  BridgeTransferId,
+  BridgeVirtualAccountId,
+} from "@domain/primitives/bridge"
+import { alertBridge, generateDedupKey } from "@services/alerts"
+
 import { BridgeTimeoutError } from "./errors"
 
 // ============ Error Handling ============
@@ -67,15 +73,15 @@ export interface Customer {
   id: string
   type: "individual" | "business"
   status?:
-  | "active"
-  | "awaiting_questionnaire"
-  | "rejected"
-  | "paused"
-  | "under_review"
-  | "offboarded"
-  | "awaiting_ubo"
-  | "incomplete"
-  | "not_started"
+    | "active"
+    | "awaiting_questionnaire"
+    | "rejected"
+    | "paused"
+    | "under_review"
+    | "offboarded"
+    | "awaiting_ubo"
+    | "incomplete"
+    | "not_started"
   has_accepted_terms_of_service?: string
   created_at: string
   updated_at: string
@@ -379,6 +385,17 @@ export class BridgeClient {
       const responseData = await response.json().catch(() => null)
 
       if (!response.ok) {
+        // Only 5xx indicates a Bridge-side outage; 4xx are normal API rejections.
+        if (response.status >= 500) {
+          alertBridge({
+            dedupKey: generateDedupKey.bridgeApi5xx(),
+            source: "bridge-api",
+            severity: "critical",
+            title: `Bridge API ${response.status} on ${method} ${path}`,
+            detail: response.statusText,
+            context: { method, path, status: response.status },
+          })
+        }
         throw new BridgeApiError(
           `Bridge API error: ${response.status} ${response.statusText}`,
           response.status,
@@ -389,7 +406,25 @@ export class BridgeClient {
       return responseData as T
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
+        alertBridge({
+          dedupKey: generateDedupKey.bridgeApiTimeout(),
+          source: "bridge-api",
+          severity: "critical",
+          title: `Bridge API timeout on ${method} ${path}`,
+          context: { method, path, timeoutMs },
+        })
         throw new BridgeTimeoutError()
+      }
+      // Network/connectivity failures (5xx already alerted above).
+      if (!(err instanceof BridgeApiError)) {
+        alertBridge({
+          dedupKey: generateDedupKey.bridgeApiNetwork(),
+          source: "bridge-api",
+          severity: "critical",
+          title: `Bridge API request failed on ${method} ${path}`,
+          detail: err instanceof Error ? err.message : String(err),
+          context: { method, path },
+        })
       }
       throw err
     } finally {
@@ -439,7 +474,9 @@ export class BridgeClient {
   }
 
   async getVirtualAccount(
-    customerId: BridgeCustomerId, virtualAccountId: BridgeVirtualAccountId, idempotencyKey?: string,
+    customerId: BridgeCustomerId,
+    virtualAccountId: BridgeVirtualAccountId,
+    idempotencyKey?: string,
   ): Promise<VirtualAccount> {
     return this.request<VirtualAccount>(
       "GET",
@@ -449,16 +486,15 @@ export class BridgeClient {
     )
   }
 
-
-  async getVirtualAccountByCustomerId(customerId: BridgeCustomerId): Promise<VirtualAccount[]> {
+  async getVirtualAccountByCustomerId(
+    customerId: BridgeCustomerId,
+  ): Promise<VirtualAccount[]> {
     const response = await this.request<{ data: VirtualAccount[] }>(
       "GET",
       `/customers/${customerId}/virtual_accounts`,
     )
 
     return response.data as VirtualAccount[]
-
-
   }
   // ============ External Accounts ============
 
@@ -567,8 +603,10 @@ export async function* listAllEvents(
   const startMs = params?.start ? new Date(params.start).getTime() : -Infinity
   const endMs = params?.end ? new Date(params.end).getTime() : Infinity
 
-  // Strip start/end — Bridge /webhook_events only supports cursor params; filter locally.
-  const { start: _s, end: _e, ...apiParams } = params ?? {}
+  // Strip start/end: Bridge /webhook_events only supports cursor params; filter locally.
+  const apiParams = { ...(params ?? {}) }
+  delete apiParams.start
+  delete apiParams.end
 
   let cursor: string | undefined
   do {

@@ -7,6 +7,10 @@ import { WalletCurrency, USDTAmount } from "@domain/shared"
 import { baseLogger } from "@services/logger"
 import { LockService } from "@services/lock"
 import { reconcileByTxHash } from "@services/bridge/reconciliation"
+import {
+  alertIbexCryptoReceiveFailure,
+  alertIbexReconciliationFailed,
+} from "@services/alerts/ibex-bridge-movement"
 import { writeIbexCryptoReceiveRequest } from "@services/frappe/BridgeTransferRequestWriter"
 
 import { authenticate, logRequest } from "../middleware"
@@ -48,6 +52,12 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
         const account = await AccountsRepository().findByBridgeEthereumAddress(address)
         if (account instanceof Error) {
           baseLogger.error({ address, tx_hash }, "Account not found for Ethereum address")
+          alertIbexCryptoReceiveFailure({
+            txHash: String(tx_hash),
+            code: "account_not_found",
+            title: "IBEX crypto receive: account not found for Bridge Ethereum address",
+            context: { address },
+          })
           return { status: "error", code: "account_not_found" } as CryptoReceiveResult
         }
 
@@ -64,12 +74,23 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
             { error: ibexLog, tx_hash },
             "Failed to persist IBEX crypto receive log",
           )
+          alertIbexCryptoReceiveFailure({
+            txHash: String(tx_hash),
+            code: "persist_failed",
+            title: "IBEX crypto receive log persistence failed",
+            detail: ibexLog.message,
+            context: { address },
+          })
           return { status: "error", code: "internal_error" } as CryptoReceiveResult
         }
 
-        reconcileByTxHash({ txHash: String(tx_hash) }).catch((err) =>
-          baseLogger.error({ err, tx_hash }, "Real-time reconciliation failed"),
-        )
+        reconcileByTxHash({ txHash: String(tx_hash) }).catch((err) => {
+          baseLogger.error({ err, tx_hash }, "Real-time reconciliation failed")
+          alertIbexReconciliationFailed({
+            txHash: String(tx_hash),
+            detail: err instanceof Error ? err.message : String(err),
+          })
+        })
 
         const wallets = await listWalletsByAccountId(account.id)
         if (wallets instanceof Error) {
@@ -77,18 +98,38 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
             { accountId: account.id, error: wallets },
             "Failed to list wallets",
           )
+          alertIbexCryptoReceiveFailure({
+            txHash: String(tx_hash),
+            code: "wallet_list_failed",
+            title: "IBEX crypto receive: wallet list failed",
+            detail: wallets.message,
+            context: { accountId: account.id, address },
+          })
           return { status: "error", code: "wallet_list_failed" } as CryptoReceiveResult
         }
 
         const usdtWallet = wallets.find((w) => w.currency === WalletCurrency.Usdt)
         if (!usdtWallet) {
           baseLogger.error({ accountId: account.id }, "USDT wallet not found")
+          alertIbexCryptoReceiveFailure({
+            txHash: String(tx_hash),
+            code: "usdt_wallet_not_found",
+            title: "IBEX crypto receive: USDT wallet not found",
+            context: { accountId: account.id, address },
+          })
           return { status: "error", code: "usdt_wallet_not_found" } as CryptoReceiveResult
         }
 
         const usdtAmount = USDTAmount.fromNumber(amount)
         if (usdtAmount instanceof Error) {
           baseLogger.error({ amount, error: usdtAmount }, "Invalid USDT amount")
+          alertIbexCryptoReceiveFailure({
+            txHash: String(tx_hash),
+            code: "invalid_amount",
+            title: "IBEX crypto receive: invalid USDT amount",
+            detail: usdtAmount.message,
+            context: { accountId: account.id, address, amount },
+          })
           return { status: "error", code: "invalid_amount" } as CryptoReceiveResult
         }
 
@@ -123,6 +164,17 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
             },
             "Failed to persist IBEX crypto receive ERPNext audit row",
           )
+          alertIbexCryptoReceiveFailure({
+            txHash: String(tx_hash),
+            code: "erpnext_audit_failed",
+            title: "IBEX crypto receive ERPNext audit write failed",
+            detail: auditResult.message,
+            context: {
+              accountId: account.id,
+              walletId: usdtWallet.id,
+              address,
+            },
+          })
           return { status: "error", code: "erpnext_audit_failed" } as CryptoReceiveResult
         }
 
@@ -135,6 +187,12 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
         return { status: "success" } as CryptoReceiveResult
       } catch (error) {
         baseLogger.error({ error, tx_hash }, "Error processing crypto receive webhook")
+        alertIbexCryptoReceiveFailure({
+          txHash: String(tx_hash),
+          code: "internal_error",
+          title: "IBEX crypto receive webhook processing error",
+          detail: error instanceof Error ? error.message : String(error),
+        })
         return { status: "error", code: "internal_error" } as CryptoReceiveResult
       }
     },

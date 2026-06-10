@@ -115,7 +115,11 @@ describe("depositHandler — invalid payload", () => {
 
 describe("depositHandler — idempotency", () => {
   it("returns already_processed after idempotent local and audit writes on duplicate delivery", async () => {
-    mockLockService(false)
+    const lockFn = jest
+      .fn()
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce(new Error("already locked"))
+    ;(LockService as jest.Mock).mockReturnValue({ lockIdempotencyKey: lockFn })
     ;(DepositLog.createBridgeDeposit as jest.Mock).mockResolvedValue({ id: "log-dup" })
 
     const res = makeRes()
@@ -124,6 +128,7 @@ describe("depositHandler — idempotency", () => {
     expect(res.json as jest.Mock).toHaveBeenCalledWith({ status: "already_processed" })
     expect(DepositLog.createBridgeDeposit).toHaveBeenCalledTimes(1)
     expect(writeBridgeDepositRequest).toHaveBeenCalledTimes(1)
+    expect(lockFn).toHaveBeenCalledTimes(2)
   })
 
   it("locks on the event id after writing the audit row", async () => {

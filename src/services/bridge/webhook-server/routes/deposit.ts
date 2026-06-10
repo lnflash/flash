@@ -12,6 +12,8 @@ import { baseLogger } from "@services/logger"
 import { createBridgeDeposit } from "@services/mongoose/bridge-deposit-log"
 import { reconcileByTxHash } from "@services/bridge/reconciliation"
 import { writeBridgeDepositRequest } from "@services/frappe/BridgeTransferRequestWriter"
+import { alertBridge, generateDedupKey } from "@services/alerts"
+import { alertIbexReconciliationFailed } from "@services/alerts/ibex-bridge-movement"
 
 export const depositHandler = async (req: Request, res: Response) => {
   const { event_id, event_object } = req.body
@@ -79,9 +81,13 @@ export const depositHandler = async (req: Request, res: Response) => {
     }
 
     if (state === "payment_processed" && receipt?.destination_tx_hash) {
-      reconcileByTxHash({ txHash: receipt.destination_tx_hash }).catch((err) =>
-        baseLogger.error({ err, event_id, id }, "Real-time reconciliation failed"),
-      )
+      reconcileByTxHash({ txHash: receipt.destination_tx_hash }).catch((err) => {
+        baseLogger.error({ err, event_id, id }, "Real-time reconciliation failed")
+        alertIbexReconciliationFailed({
+          txHash: receipt.destination_tx_hash,
+          detail: err instanceof Error ? err.message : String(err),
+        })
+      })
     }
 
     const auditResult = await writeBridgeDepositRequest({
@@ -94,13 +100,23 @@ export const depositHandler = async (req: Request, res: Response) => {
         { error: auditResult, event_id, id },
         "Failed to persist Bridge deposit ERPNext audit row",
       )
+      alertBridge({
+        dedupKey: generateDedupKey.erpnextDepositAudit(id),
+        source: "erpnext-audit",
+        severity: "critical",
+        title: "Bridge deposit ERPNext audit write failed",
+        detail: auditResult.message,
+        context: { event_id, transfer_id: id },
+      })
       return res.status(500).json({ error: "Failed to persist ERPNext audit row" })
     }
 
     // Idempotency: mark processed only after local and ERPNext writes succeed, so
     // provider retries can recover audit gaps after transient ERPNext failures.
     const auditLockKey = `bridge-deposit:${event_id}`
-    const auditLockResult = await LockService().lockIdempotencyKey(auditLockKey as IdempotencyKey)
+    const auditLockResult = await LockService().lockIdempotencyKey(
+      auditLockKey as IdempotencyKey,
+    )
     if (auditLockResult instanceof Error) {
       baseLogger.info({ event_id, id, state }, "Duplicate Bridge deposit webhook")
       return res.status(200).json({ status: "already_processed" })
@@ -109,6 +125,14 @@ export const depositHandler = async (req: Request, res: Response) => {
     return res.status(200).json({ status: "success" })
   } catch (error) {
     baseLogger.error({ error, id, event_id }, "Error processing Bridge deposit webhook")
+    alertBridge({
+      dedupKey: generateDedupKey.bridgeWebhookDeposit(event_id),
+      source: "bridge-webhook",
+      severity: "critical",
+      title: "Bridge deposit webhook processing error",
+      detail: error instanceof Error ? error.message : String(error),
+      context: { event_id, transfer_id: id },
+    })
     return res.status(500).json({ error: "Internal server error" })
   }
 }
