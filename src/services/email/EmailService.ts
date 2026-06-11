@@ -1,11 +1,9 @@
 import sgMail from "@sendgrid/mail"
 
-import { Cashout, SendGridConfig } from "@config"
+import { Cashout, FrappeConfig, SendGridConfig } from "@config"
 import { baseLogger } from "@services/logger"
-import { CashoutDetails } from "@app/offers"
 
 import { CashoutBody } from "./templates/cashout"
-import Offer from "@app/offers/Offer"
 import { InitiatedCashout } from "@app/offers/ValidOffer"
 
 type EmailHeaders = {
@@ -21,12 +19,19 @@ sgMail.setApiKey(SendGridConfig.apiKey)
 
 class EmailService {
   sendCashoutInitiatedEmail = async (cashout: InitiatedCashout) => {
-    const username = cashout.offer.account.username
-    const offer = cashout.offer.details
+    const account = cashout.offer.account
+
+    const username = account.username ?? ""
+    const customerName = account.erpParty ?? username
+    const cashoutId = cashout.cashoutId
+    const erpNextLink = `${FrappeConfig.url}/app/cashout/${cashoutId}`
 
     const body = CashoutBody({
-      ...offer,
+      ...cashout.offer.details,
       username,
+      customerName,
+      cashoutId,
+      erpNextLink,
       formattedDate: new Date().toLocaleString("en-US", {
         month: "short",
         day: "numeric",
