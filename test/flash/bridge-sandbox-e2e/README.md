@@ -34,7 +34,7 @@ export MONGODB_CON=mongodb://localhost:27017/flash
 
 # Bridge sandbox — fill from Bridge dashboard
 # These are the API key and webhook secret, not stored in .env directly in production:
-export BRIDGE_BASE_URL=https://api.sandbox.bridge.xyz
+export BRIDGE_BASE_URL=https://api.sandbox.bridge.xyz/v0
 export BRIDGE_WEBHOOK_URL=http://localhost:4009
 ```
 

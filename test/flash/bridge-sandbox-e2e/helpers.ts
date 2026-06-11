@@ -13,6 +13,7 @@ import { graphql, Source } from "graphql"
 
 import { createAccountWithPhoneIdentifier } from "@app/accounts"
 import { addWalletIfNonexistent } from "@app/accounts/add-wallet"
+import { DEFAULT_CASH_WALLET_CLIENT_CAPABILITIES } from "@app/cash-wallet-cutover/client-capability"
 import { getDefaultAccountsConfig } from "@config"
 import { AccountLevel } from "@domain/accounts"
 import { CouldNotFindAccountFromKratosIdError, RepositoryError } from "@domain/errors"
@@ -75,6 +76,7 @@ type HandlerResponse = {
 function buildContext(accountId: string): GraphQLPublicContextAuth {
   return {
     domainAccount: { id: accountId, level: 1 },
+    cashWalletClientCapabilities: DEFAULT_CASH_WALLET_CLIENT_CAPABILITIES,
   } as GraphQLPublicContextAuth
 }
 

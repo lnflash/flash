@@ -28,8 +28,8 @@ export function preflightServiceLevelGuard(): boolean {
   try {
     content = fs.readFileSync(servicePath, "utf-8")
   } catch {
-    console.warn("PREFLIGHT WARN: Could not read BridgeService source at", servicePath)
-    return true // Skip check — assume fixed in build artifact
+    console.error("PREFLIGHT FAILED: Could not read BridgeService source at", servicePath)
+    return false
   }
 
   // Extract the guard comparison value from checkAccountLevel.
@@ -39,10 +39,10 @@ export function preflightServiceLevelGuard(): boolean {
   )
 
   if (!funcMatch) {
-    console.warn(
-      "PREFLIGHT WARN: Could not detect service-level guard pattern in BridgeService.",
+    console.error(
+      "PREFLIGHT FAILED: Could not detect service-level guard pattern in BridgeService.",
     )
-    return true // Pattern not found — skip
+    return false
   }
 
   const guardLevel = parseInt(funcMatch[1], 10)
