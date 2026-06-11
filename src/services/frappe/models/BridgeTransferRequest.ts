@@ -39,6 +39,19 @@ export type BridgeTransferRequestInput = {
   failureReason?: string
 }
 
+const toFrappeDatetime = (value?: string): string => {
+  const date = value ? new Date(value) : new Date()
+
+  if (Number.isNaN(date.getTime())) return value ?? ""
+
+  const pad = (part: number) => String(part).padStart(2, "0")
+
+  return [
+    `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`,
+    `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`,
+  ].join(" ")
+}
+
 export class BridgeTransferRequest {
   static doctype = "Bridge Transfer Request"
   readonly input: BridgeTransferRequestInput
@@ -73,8 +86,10 @@ export class BridgeTransferRequest {
       source_event_id: this.input.sourceEventId,
       source_event_type: this.input.sourceEventType,
       source_systems_seen: sourceSystemsSeen || undefined,
-      first_seen_at: this.input.firstSeenAt,
-      last_seen_at: this.input.lastSeenAt ?? new Date().toISOString(),
+      first_seen_at: this.input.firstSeenAt
+        ? toFrappeDatetime(this.input.firstSeenAt)
+        : undefined,
+      last_seen_at: toFrappeDatetime(this.input.lastSeenAt),
       raw_payload_json:
         this.input.rawPayload === undefined
           ? undefined

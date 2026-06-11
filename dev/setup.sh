@@ -1,6 +1,6 @@
 #!/bin/bash
 # Flash Dev Environment Setup
-# Usage: ./dev/setup.sh
+# Usage: ./dev/setup.sh [--dev|--webhook]
 #
 # This script validates your environment, installs dependencies,
 # configures credentials, and starts the development server.
@@ -15,6 +15,52 @@ NC='\033[0m' # No Color
 info()  { echo -e "${GREEN}✓${NC} $1"; }
 warn()  { echo -e "${YELLOW}⚠${NC} $1"; }
 fail()  { echo -e "${RED}✗${NC} $1"; exit 1; }
+
+RUN_WEBHOOK_SETUP=false
+WEBHOOK_ONLY=false
+
+usage() {
+  cat << EOF
+Usage: ./dev/setup.sh [--dev|--webhook]
+
+Options:
+  --dev      Run normal dev setup, then configure Bridge sandbox webhooks.
+  --webhook  Only configure Bridge sandbox webhooks and local dev overrides.
+  --help     Show this help message.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dev)
+      RUN_WEBHOOK_SETUP=true
+      shift
+      ;;
+    --webhook)
+      RUN_WEBHOOK_SETUP=true
+      WEBHOOK_ONLY=true
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      fail "Unknown argument: $1"
+      ;;
+  esac
+done
+
+run_bridge_webhook_setup() {
+  echo ""
+  echo "Configuring Bridge sandbox webhooks..."
+  node dev/setup-bridge-webhooks.js
+}
+
+if [ "$WEBHOOK_ONLY" = true ]; then
+  run_bridge_webhook_setup
+  exit 0
+fi
 
 echo ""
 echo "═══════════════════════════════════════════════════"
@@ -134,6 +180,10 @@ echo ""
 echo "Starting Docker dependencies..."
 docker compose up bats-deps -d 2>&1 | grep -E '(Created|Started|Running)' || true
 info "Docker dependencies running"
+
+if [ "$RUN_WEBHOOK_SETUP" = true ]; then
+  run_bridge_webhook_setup
+fi
 
 echo ""
 echo "═══════════════════════════════════════════════════"

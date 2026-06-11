@@ -41,7 +41,7 @@ Sent when a user's KYC application is rejected.
 ### Deposit Events
 
 #### `deposit.completed`
-Sent when a USD deposit to a virtual account is successfully converted to USDT and sent to the destination Tron address.
+Sent when a USD deposit to a virtual account is successfully converted to USDT and sent to the user's on-chain address.
 -   **Action**: This event is primarily for tracking. The actual crediting of the user's wallet is handled by the IBEX webhook when the USDT arrives.
 
 ### Transfer Events
