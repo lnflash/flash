@@ -57,7 +57,7 @@ export function preflightServiceLevelGuard(): boolean {
       `but the e2e suite requires level >= 1 to pass through.\n` +
       `Fix required in src/services/bridge/index.ts:\n` +
       `  if (account.level < ${guardLevel}) -> if (account.level < 1)\n` +
-      `See docs/plans/2026-06-04-eng-274-bridge-sandbox-e2e.md for context.`,
+      `See test/flash/bridge-sandbox-e2e/README.md for setup details.`,
   )
 
   return false
