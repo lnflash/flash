@@ -1,0 +1,43 @@
+meta {
+  name: bridge withdrawal fees
+  seq: 5
+}
+
+auth {
+  mode: inherit
+}
+
+docs {
+  # Bridge withdrawal fee estimates (Bruno smoke)
+
+  Verifies pending withdrawal fee fields:
+  `flashFee`, `flashFeePercent`, `flashFeeIsEstimate`, `flashFeeNotice`,
+  `subtotalAmount`, and `finalAmount`.
+
+  Prerequisites (local dev):
+  - Bridge enabled in `dev/config/base-config.yaml` with a valid sandbox `apiKey`
+  - `developerFeePercent` set (default `2.0`)
+  - Account with Bridge KYC approved, USDT balance, and a **verified** external account
+
+  Run order:
+  1. `login flow/userLogin`
+  2. `token/bridge withdrawal fees/01 discover bridge withdrawal inputs`
+  3. `token/bridge withdrawal fees/02 request withdrawal fee estimates`
+  4. `token/bridge withdrawal fees/03 query pending withdrawal fees`
+
+  Step 02 creates a pending withdrawal only — it does **not** call `bridgeInitiateWithdrawal`.
+  Fee estimate formula (USDT on Ethereum -> USD ACH):
+  - `flashFee = amount * developerFeePercent / 100` (Flash fee, config default 2%)
+  - `estimatedBridgeFee = amount * 0.006` (Bridge 0.60%)
+  - `estimatedGasBuffer = 65000 * gasPriceGwei * ethUsd / 1e9 * 1.5`
+  - `estimatedCustomerFee = flashFee + estimatedBridgeFee + estimatedGasBuffer`
+  - ACH rail cost is not shown separately (assumed $0 in estimate)
+
+  Set `bridgeExternalAccountId` manually in the local environment if step 01 finds none.
+
+  Troubleshooting `bridgeRequestWithdrawal` errors:
+  - `IBEX_ERROR` / balance message: IBEX is down or the USDT wallet is not funded in IBEX
+  - `BRIDGE_INSUFFICIENT_FUNDS`: USDT balance lower than requested amount
+  - `BRIDGE_ERROR` + external account message: wrong `bridgeExternalAccountId` or account not verified
+  - `BRIDGE_CUSTOMER_NOT_FOUND`: complete Bridge KYC + virtual account first
+}

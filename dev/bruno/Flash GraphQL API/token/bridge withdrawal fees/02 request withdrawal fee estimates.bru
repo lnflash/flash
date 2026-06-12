@@ -1,0 +1,128 @@
+meta {
+  name: 02 request withdrawal fee estimates
+  type: graphql
+  seq: 2
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:graphql {
+  mutation BridgeRequestWithdrawalFeeEstimates($input: BridgeRequestWithdrawalInput!) {
+    bridgeRequestWithdrawal(input: $input) {
+      errors {
+        message
+        code
+        ... on GraphQLApplicationError {
+          code
+          message
+        }
+      }
+      withdrawal {
+        id
+        amount
+        currency
+        externalAccountId
+        status
+        estimatedBridgeFeePercent
+        estimatedBridgeFee
+        estimatedGasBuffer
+        estimatedCustomerFee
+        flashFeePercent
+        flashFee
+        flashFeeIsEstimate
+        flashFeeNotice
+        subtotalAmount
+        finalAmount
+        bridgeDeveloperFee
+        bridgeExchangeFee
+        createdAt
+      }
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "amount": "{{bridgeWithdrawalAmount}}",
+      "externalAccountId": "{{bridgeExternalAccountId}}"
+    }
+  }
+}
+
+script:post-response {
+  test("returns pending withdrawal with estimated fee and amount fields", function () {
+    const body = res.getBody();
+    const graphqlErrors = body.errors ?? [];
+    expect(graphqlErrors, JSON.stringify(graphqlErrors)).to.be.empty;
+
+    const payload = body.data?.bridgeRequestWithdrawal;
+    const appErrors = payload?.errors ?? [];
+    if (appErrors.length) {
+      console.log("bridgeRequestWithdrawal error code:", appErrors[0]?.code);
+      console.log("bridgeRequestWithdrawal error message:", appErrors[0]?.message);
+    }
+    expect(appErrors, JSON.stringify(appErrors)).to.be.empty;
+
+    const withdrawal = payload?.withdrawal;
+    const amount = parseFloat(bru.getEnvVar("bridgeWithdrawalAmount"));
+    const bridgePercent = parseFloat(bru.getEnvVar("bridgeFixedFeePercent"));
+    const flashPercent = parseFloat(bru.getEnvVar("flashDeveloperFeePercent"));
+    const expectedFlashFee = ((amount * flashPercent) / 100).toFixed(2);
+    const expectedBridgeFee = ((amount * bridgePercent) / 100).toFixed(2);
+
+    expect(withdrawal?.id, "withdrawal id").to.exist;
+    expect(withdrawal?.status, "status").to.eql("pending");
+    expect(withdrawal?.amount, "amount").to.eql(bru.getEnvVar("bridgeWithdrawalAmount"));
+    expect(withdrawal?.externalAccountId, "externalAccountId").to.eql(
+      bru.getEnvVar("bridgeExternalAccountId"),
+    );
+
+    expect(withdrawal?.flashFeeIsEstimate, "flashFeeIsEstimate").to.eql(true);
+    expect(withdrawal?.flashFeePercent, "flashFeePercent").to.eql(
+      bru.getEnvVar("flashDeveloperFeePercent"),
+    );
+    expect(withdrawal?.flashFee, "flashFee").to.eql(expectedFlashFee);
+    expect(withdrawal?.estimatedBridgeFeePercent, "estimatedBridgeFeePercent").to.eql(
+      bru.getEnvVar("bridgeFixedFeePercent"),
+    );
+    expect(withdrawal?.estimatedBridgeFee, "estimatedBridgeFee").to.eql(expectedBridgeFee);
+    expect(parseFloat(withdrawal?.estimatedGasBuffer), "estimatedGasBuffer").to.be.greaterThan(0);
+    expect(withdrawal?.estimatedCustomerFee, "estimatedCustomerFee").to.eql(
+      (
+        parseFloat(withdrawal.flashFee) +
+        parseFloat(withdrawal.estimatedBridgeFee) +
+        parseFloat(withdrawal.estimatedGasBuffer)
+      ).toFixed(2),
+    );
+    expect(withdrawal?.subtotalAmount, "subtotalAmount").to.eql(
+      (amount - parseFloat(withdrawal.estimatedCustomerFee)).toFixed(2),
+    );
+    expect(withdrawal?.finalAmount, "finalAmount").to.eql(withdrawal?.subtotalAmount);
+    expect(withdrawal?.flashFeeNotice, "flashFeeNotice").to.be.a("string").and.not.empty;
+    expect(withdrawal?.bridgeDeveloperFee, "bridgeDeveloperFee before initiate").to.be.oneOf([
+      null,
+      undefined,
+    ]);
+
+    bru.setEnvVar("bridgeWithdrawalId", withdrawal.id);
+    console.log("bridgeWithdrawalId:", withdrawal.id);
+    console.log("estimatedBridgeFee:", withdrawal.estimatedBridgeFee);
+    console.log("estimatedGasBuffer:", withdrawal.estimatedGasBuffer);
+    console.log("estimatedCustomerFee:", withdrawal.estimatedCustomerFee);
+    console.log("flashFeeNotice:", withdrawal.flashFeeNotice);
+  });
+}
+
+settings {
+  encodeUrl: false
+  timeout: 30000
+}

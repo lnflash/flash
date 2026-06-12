@@ -1,0 +1,77 @@
+meta {
+  name: 01 discover bridge withdrawal inputs
+  type: graphql
+  seq: 1
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:graphql {
+  query BridgeWithdrawalFeeInputs {
+    bridgeKycStatus
+    bridgeExternalAccounts {
+      id
+      status
+      bankName
+      accountNumberLast4
+    }
+    me {
+      defaultAccount {
+        id
+        wallets {
+          id
+          walletCurrency
+          balance
+        }
+      }
+    }
+  }
+}
+
+script:post-response {
+  test("discovers a verified Bridge external account for withdrawal tests", function () {
+    const body = res.getBody();
+    const graphqlErrors = body.errors ?? [];
+    expect(graphqlErrors, JSON.stringify(graphqlErrors)).to.be.empty;
+
+    const kycStatus = body.data?.bridgeKycStatus;
+    console.log("bridgeKycStatus:", kycStatus);
+
+    const accounts = body.data?.bridgeExternalAccounts ?? [];
+    const verified = accounts.filter((account) => account.status === "verified");
+    expect(
+      verified.length,
+      "need at least one verified bridgeExternalAccounts row; complete Bridge KYC + external account linking first",
+    ).to.be.greaterThan(0);
+
+    const externalAccountId = bru.getEnvVar("bridgeExternalAccountId") || verified[0].id;
+    bru.setEnvVar("bridgeExternalAccountId", externalAccountId);
+    console.log("bridgeExternalAccountId:", externalAccountId);
+
+    const wallets = body.data?.me?.defaultAccount?.wallets ?? [];
+    const usdtWallet = wallets.find((wallet) => wallet.walletCurrency === "USDT");
+    expect(usdtWallet, "USDT Cash Wallet must exist on the account").to.exist;
+
+    const withdrawalAmount = parseFloat(bru.getEnvVar("bridgeWithdrawalAmount"));
+    expect(
+      usdtWallet.balance,
+      `USDT balance must be at least ${withdrawalAmount} before requesting withdrawal`,
+    ).to.be.at.least(withdrawalAmount);
+
+    bru.setEnvVar("bridgeUsdtWalletId", usdtWallet.id);
+    console.log("USDT wallet balance:", usdtWallet.balance, "walletId:", usdtWallet.id);
+  });
+}
+
+settings {
+  encodeUrl: false
+  timeout: 30000
+}

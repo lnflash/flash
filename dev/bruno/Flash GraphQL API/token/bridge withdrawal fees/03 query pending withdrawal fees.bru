@@ -1,0 +1,85 @@
+meta {
+  name: 03 query pending withdrawal fees
+  type: graphql
+  seq: 3
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:graphql {
+  query BridgeWithdrawalRequestFeeEstimates($id: ID!) {
+    bridgeWithdrawalRequest(id: $id) {
+      id
+      amount
+      currency
+      status
+      estimatedBridgeFeePercent
+      estimatedBridgeFee
+      estimatedGasBuffer
+      estimatedCustomerFee
+      flashFeePercent
+      flashFee
+      flashFeeIsEstimate
+      flashFeeNotice
+      subtotalAmount
+      finalAmount
+      bridgeDeveloperFee
+      bridgeExchangeFee
+      bridgeTransferId
+      createdAt
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "id": "{{bridgeWithdrawalId}}"
+  }
+}
+
+script:post-response {
+  test("re-reads the pending withdrawal with the same estimated fee fields", function () {
+    const body = res.getBody();
+    const graphqlErrors = body.errors ?? [];
+    expect(graphqlErrors, JSON.stringify(graphqlErrors)).to.be.empty;
+
+    const withdrawal = body.data?.bridgeWithdrawalRequest;
+    expect(withdrawal, "bridgeWithdrawalRequest").to.exist;
+    expect(withdrawal.id, "id").to.eql(bru.getEnvVar("bridgeWithdrawalId"));
+    expect(withdrawal.status, "status").to.eql("pending");
+
+    expect(withdrawal.flashFeeIsEstimate, "flashFeeIsEstimate").to.eql(true);
+    expect(withdrawal.estimatedCustomerFee, "estimatedCustomerFee").to.eql(
+      (
+        parseFloat(withdrawal.flashFee) +
+        parseFloat(withdrawal.estimatedBridgeFee) +
+        parseFloat(withdrawal.estimatedGasBuffer)
+      ).toFixed(2),
+    );
+    expect(parseFloat(withdrawal.estimatedGasBuffer), "estimatedGasBuffer").to.be.greaterThan(0);
+    expect(withdrawal.subtotalAmount, "subtotalAmount").to.eql(
+      (
+        parseFloat(withdrawal.amount) - parseFloat(withdrawal.estimatedCustomerFee)
+      ).toFixed(2),
+    );
+    expect(withdrawal.finalAmount, "finalAmount").to.eql(withdrawal.subtotalAmount);
+    expect(withdrawal.flashFeeNotice, "flashFeeNotice").to.be.a("string").and.not.empty;
+    expect(withdrawal.bridgeTransferId, "bridgeTransferId before initiate").to.be.oneOf([
+      null,
+      undefined,
+    ]);
+  });
+}
+
+settings {
+  encodeUrl: false
+  timeout: 30000
+}
