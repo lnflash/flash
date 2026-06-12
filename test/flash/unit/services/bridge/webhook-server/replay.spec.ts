@@ -2,6 +2,7 @@
 // AC2: Replay CLI re-runs a stuck handler against a chosen transfer-id
 
 jest.mock("@config", () => ({
+  ...jest.requireActual("@config"),
   BridgeConfig: {
     webhook: { replaySecret: "super-secret-replay-token-xyz" },
   },

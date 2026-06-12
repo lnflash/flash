@@ -938,6 +938,7 @@ describe("withdrawal request → confirm/cancel flow", () => {
     ;(BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock).mockResolvedValue(
       existingRow,
     )
+    ;(BridgeAccountsRepo.updateWithdrawalFeeEstimates as jest.Mock).mockResolvedValue(existingRow)
     ;(BridgeAccountsRepo.findWithdrawalById as jest.Mock).mockResolvedValue(existingRow)
     ;(BridgeAccountsRepo.updateWithdrawalTransferId as jest.Mock).mockResolvedValue({
       ...existingRow,

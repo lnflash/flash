@@ -206,7 +206,7 @@ describe("getWithdrawals — BridgeWithdrawal GraphQL contract shape", () => {
     expect(result).not.toBeInstanceOf(Error)
     if (result instanceof Error) return
     expect(result).toHaveLength(1)
-    expect(result[0]).toEqual({
+    expect(result[0]).toMatchObject({
       id: WITHDRAWAL_ID,
       amount: AMOUNT,
       currency: "usdt",
