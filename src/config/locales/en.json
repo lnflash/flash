@@ -46,6 +46,7 @@
       "title": "Deposit received"
     },
     "bridgeWithdrawal": {
+      "flashFeeNotice": "Shown fees and amounts are estimates. Final fees may differ.",
       "cancelled": {
         "body": "Your withdrawal of {{amount}} has been cancelled.",
         "title": "Withdrawal cancelled"
