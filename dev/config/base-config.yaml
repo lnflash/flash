@@ -17,6 +17,14 @@ bridge:
   apiKey: "sk-test-3bd6463c9cd77c3d8858c60b9997d0c6"
   baseUrl: "https://api.sandbox.bridge.xyz/v0"
   minWithdrawalAmount: 2
+  developerFeePercent: 2.0
+  withdrawalFeeEstimate:
+    bridgeFixedFeePercent: 0.6
+    usdtTransferGasLimit: 65000
+    gasPriceBufferMultiplier: 1.5
+    ethereumGasRpcUrl: "https://cloudflare-eth.com"
+    fallbackGasPriceGwei: 30
+    ethUsdFallback: 3000
   timeoutMs: 15000
   webhook:
     port: 4009
