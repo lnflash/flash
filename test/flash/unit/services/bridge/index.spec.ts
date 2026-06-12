@@ -10,7 +10,7 @@ jest.mock("@services/tracing", () => ({
 }))
 
 jest.mock("@config", () => ({
-  BridgeConfig: { enabled: true, minWithdrawalAmount: 10 },
+  BridgeConfig: { enabled: true, minWithdrawalAmount: 10, developerFeePercent: 2 },
   // Minimal stubs so schema.ts can run its module-level initialisation
   getFeesConfig: jest.fn().mockReturnValue({ depositFeeVariable: 0, depositFeeFixed: 0, withdrawFeeVariable: 0, withdrawFeeFixed: 0 }),
   getDefaultAccountsConfig: jest.fn().mockReturnValue({ initialStatus: "active", initialLevel: 0, maxCurrencies: 5 }),
@@ -23,12 +23,32 @@ jest.mock("@services/logger", () => ({
   baseLogger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }))
 
+const MOCK_WITHDRAWAL_FEE_ESTIMATE = {
+  flashFeePercent: "2",
+  flashFee: "1.00",
+  estimatedBridgeFeePercent: "0.6",
+  estimatedBridgeFee: "0.30",
+  estimatedGasBuffer: "1.00",
+  estimatedCustomerFee: "2.30",
+}
+
+jest.mock("@services/bridge/withdrawal-fees", () => {
+  const actual = jest.requireActual("@services/bridge/withdrawal-fees")
+  return {
+    ...actual,
+    resolveWithdrawalCustomerFeeEstimate: jest.fn(),
+  }
+})
+
 jest.mock("@services/mongoose/bridge-accounts", () => ({
   createVirtualAccount: jest.fn(),
   findVirtualAccountByAccountId: jest.fn(),
   createWithdrawal: jest.fn(),
   findPendingWithdrawalWithoutTransfer: jest.fn(),
   findExternalAccountsByAccountId: jest.fn(),
+  updateWithdrawalFeeEstimates: jest.fn(),
+  bridgeWithdrawalRecordId: jest.requireActual("@services/mongoose/bridge-accounts")
+    .bridgeWithdrawalRecordId,
   updateWithdrawalTransferId: jest.fn(),
   findWithdrawalById: jest.fn(),
   findWithdrawalsByAccountId: jest.fn(),
@@ -135,6 +155,12 @@ const makeRow = (id: string, overrides: Record<string, unknown> = {}) => ({
   currency: "usdt",
   externalAccountId: EXTERNAL_ACCOUNT_ID,
   status: "pending" as const,
+  flashFeePercent: "2",
+  flashFee: "1.00",
+  estimatedBridgeFeePercent: "0.6",
+  estimatedBridgeFee: "0.30",
+  estimatedGasBuffer: "1.00",
+  estimatedCustomerFee: "2.30",
   bridgeTransferId: undefined,
   failureReason: undefined,
   createdAt: CREATED_AT,
@@ -146,6 +172,13 @@ const mockTransfer = {
   amount: AMOUNT,
   currency: "usd",
   state: "pending",
+  receipt: {
+    initial_amount: AMOUNT,
+    developer_fee: "1.00",
+    exchange_fee: "0.10",
+    subtotal_amount: "48.90",
+    final_amount: "48.90",
+  },
 }
 
 const mockVirtualAccount = {
@@ -200,6 +233,10 @@ const setupGuards = () => {
     ...makeRow(WITHDRAWAL_ID),
     bridgeTransferId: TRANSFER_ID,
     status: "submitted" as const,
+    bridgeDeveloperFee: "1.00",
+    bridgeExchangeFee: "0.10",
+    subtotalAmount: "48.90",
+    finalAmount: "48.90",
   })
   ;(BridgeClient.createTransfer as jest.Mock).mockResolvedValue(mockTransfer)
 }
@@ -414,6 +451,10 @@ describe("requestWithdrawal", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     setupGuards()
+    const { resolveWithdrawalCustomerFeeEstimate } = jest.requireMock(
+      "@services/bridge/withdrawal-fees",
+    )
+    resolveWithdrawalCustomerFeeEstimate.mockResolvedValue(MOCK_WITHDRAWAL_FEE_ESTIMATE)
     ;(BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock).mockResolvedValue(
       null,
     )
@@ -434,6 +475,12 @@ describe("requestWithdrawal", () => {
       amount: AMOUNT,
       currency: "usdt",
       externalAccountId: EXTERNAL_ACCOUNT_ID,
+      flashFeePercent: "2",
+      flashFee: "1.00",
+      estimatedBridgeFeePercent: "0.6",
+      estimatedBridgeFee: "0.30",
+      estimatedGasBuffer: "1.00",
+      estimatedCustomerFee: "2.30",
       status: "pending",
     })
     expect(expectSuccess(result)).toMatchObject({
@@ -442,6 +489,15 @@ describe("requestWithdrawal", () => {
       currency: "usdt",
       externalAccountId: EXTERNAL_ACCOUNT_ID,
       status: "pending",
+      flashFeePercent: "2",
+      flashFee: "1.00",
+      estimatedBridgeFeePercent: "0.6",
+      estimatedBridgeFee: "0.30",
+      estimatedGasBuffer: "1.00",
+      estimatedCustomerFee: "2.30",
+      flashFeeIsEstimate: true,
+      subtotalAmount: "47.70",
+      finalAmount: "47.70",
       createdAt: expect.any(String),
     })
   })
@@ -452,9 +508,17 @@ describe("requestWithdrawal", () => {
   })
 
   it("reuses an existing pending withdrawal for the same account, amount, and external account", async () => {
-    const existingRow = makeRow("withdrawal-existing-001")
+    const existingRow = makeRow("withdrawal-existing-001", {
+      estimatedBridgeFeePercent: undefined,
+      estimatedBridgeFee: undefined,
+      estimatedGasBuffer: undefined,
+      estimatedCustomerFee: undefined,
+    })
     ;(BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock).mockResolvedValue(
       existingRow,
+    )
+    ;(BridgeAccountsRepo.updateWithdrawalFeeEstimates as jest.Mock).mockResolvedValue(
+      makeRow("withdrawal-existing-001"),
     )
 
     const result = await BridgeService.requestWithdrawal(
@@ -464,9 +528,19 @@ describe("requestWithdrawal", () => {
     )
 
     expect(BridgeAccountsRepo.createWithdrawal).not.toHaveBeenCalled()
+    expect(BridgeAccountsRepo.updateWithdrawalFeeEstimates).toHaveBeenCalledWith(
+      "withdrawal-existing-001",
+      MOCK_WITHDRAWAL_FEE_ESTIMATE,
+    )
     expect(expectSuccess(result)).toMatchObject({
       id: "withdrawal-existing-001",
       status: "pending",
+      estimatedBridgeFeePercent: "0.6",
+      estimatedBridgeFee: "0.30",
+      estimatedGasBuffer: "1.00",
+      estimatedCustomerFee: "2.30",
+      subtotalAmount: "47.70",
+      finalAmount: "47.70",
     })
   })
 
@@ -501,7 +575,9 @@ describe("requestWithdrawal", () => {
   })
 
   it("returns BridgeInsufficientFundsError when USDT balance is below the requested amount", async () => {
-    ;(getBalanceForWallet as jest.Mock).mockResolvedValue(getUSDTAmount(5)) // < AMOUNT=50
+    ;(getBalanceForWallet as jest.Mock).mockImplementation(() =>
+      Promise.resolve(getUSDTAmount(5)),
+    )
 
     const result = await BridgeService.requestWithdrawal(
       ACCOUNT_ID,
@@ -509,8 +585,10 @@ describe("requestWithdrawal", () => {
       EXTERNAL_ACCOUNT_ID,
     )
 
-    const { BridgeInsufficientFundsError } = jest.requireActual("@services/bridge/errors")
-    expect(result).toBeInstanceOf(BridgeInsufficientFundsError)
+    expect(result).toMatchObject({
+      name: "BridgeInsufficientFundsError",
+      message: expect.stringContaining("Insufficient USDT balance"),
+    })
     expect(BridgeAccountsRepo.createWithdrawal).not.toHaveBeenCalled()
   })
 
@@ -601,10 +679,19 @@ describe("initiateWithdrawal — takes withdrawalId (step 2A)", () => {
       TRANSFER_ID,
       AMOUNT,
       "usd",
+      {
+        bridgeDeveloperFee: "1.00",
+        bridgeExchangeFee: "0.10",
+        subtotalAmount: "48.90",
+        finalAmount: "48.90",
+      },
     )
     expect(expectSuccess(result)).toMatchObject({
       status: "submitted",
       bridgeTransferId: TRANSFER_ID,
+      flashFeeIsEstimate: false,
+      bridgeDeveloperFee: "1.00",
+      bridgeExchangeFee: "0.10",
     })
   })
 
@@ -788,6 +875,10 @@ describe("withdrawal request → confirm/cancel flow", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     setupGuards()
+    const { resolveWithdrawalCustomerFeeEstimate } = jest.requireMock(
+      "@services/bridge/withdrawal-fees",
+    )
+    resolveWithdrawalCustomerFeeEstimate.mockResolvedValue(MOCK_WITHDRAWAL_FEE_ESTIMATE)
     ;(BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock).mockResolvedValue(
       null,
     )
@@ -804,6 +895,10 @@ describe("withdrawal request → confirm/cancel flow", () => {
       ...makeRow(WITHDRAWAL_ID),
       bridgeTransferId: TRANSFER_ID,
       status: "submitted" as const,
+      bridgeDeveloperFee: "1.00",
+      bridgeExchangeFee: "0.10",
+      subtotalAmount: "48.90",
+      finalAmount: "48.90",
     })
   })
 
@@ -829,6 +924,12 @@ describe("withdrawal request → confirm/cancel flow", () => {
       TRANSFER_ID,
       AMOUNT,
       "usd",
+      {
+        bridgeDeveloperFee: "1.00",
+        bridgeExchangeFee: "0.10",
+        subtotalAmount: "48.90",
+        finalAmount: "48.90",
+      },
     )
   })
 
@@ -842,6 +943,10 @@ describe("withdrawal request → confirm/cancel flow", () => {
       ...existingRow,
       bridgeTransferId: TRANSFER_ID,
       status: "submitted" as const,
+      bridgeDeveloperFee: "1.00",
+      bridgeExchangeFee: "0.10",
+      subtotalAmount: "48.90",
+      finalAmount: "48.90",
     })
 
     const first = await BridgeService.requestWithdrawal(
@@ -870,6 +975,12 @@ describe("withdrawal request → confirm/cancel flow", () => {
       TRANSFER_ID,
       AMOUNT,
       "usd",
+      {
+        bridgeDeveloperFee: "1.00",
+        bridgeExchangeFee: "0.10",
+        subtotalAmount: "48.90",
+        finalAmount: "48.90",
+      },
     )
   })
 
