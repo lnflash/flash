@@ -321,13 +321,25 @@ type BridgeVirtualAccount {
 
 type BridgeWithdrawal {
   amount: String!
+  bridgeDeveloperFee: String
+  bridgeExchangeFee: String
   bridgeTransferId: String
   createdAt: String!
   currency: String!
   externalAccountId: String
   failureReason: String
+  finalAmount: String
+  estimatedBridgeFee: String
+  estimatedBridgeFeePercent: String
+  estimatedCustomerFee: String
+  estimatedGasBuffer: String
+  flashFee: String
+  flashFeeIsEstimate: Boolean!
+  flashFeeNotice: String
+  flashFeePercent: String
   id: ID!
   status: String!
+  subtotalAmount: String
 }
 
 type BuildInformation {
