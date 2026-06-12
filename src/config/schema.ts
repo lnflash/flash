@@ -649,6 +649,18 @@ export const configSchema = {
         apiKey: { type: "string" },
         baseUrl: { type: "string" },
         minWithdrawalAmount: { type: "number" },
+        developerFeePercent: { type: "number", default: 2.0 },
+        withdrawalFeeEstimate: {
+          type: "object",
+          properties: {
+            bridgeFixedFeePercent: { type: "number", default: 0.6 },
+            usdtTransferGasLimit: { type: "integer", default: 65000 },
+            gasPriceBufferMultiplier: { type: "number", default: 1.5 },
+            ethereumGasRpcUrl: { type: "string", default: "https://cloudflare-eth.com" },
+            fallbackGasPriceGwei: { type: "number", default: 30 },
+            ethUsdFallback: { type: "number", default: 3000 },
+          },
+        },
         timeoutMs: { type: "integer", default: 10000 },
         webhook: {
           type: "object",

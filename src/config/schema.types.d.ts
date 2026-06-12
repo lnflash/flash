@@ -43,11 +43,22 @@ type BridgeWebhook = {
   replaySecret?: string
 }
 
+type BridgeWithdrawalFeeEstimateConfig = {
+  bridgeFixedFeePercent?: number
+  usdtTransferGasLimit?: number
+  gasPriceBufferMultiplier?: number
+  ethereumGasRpcUrl?: string
+  fallbackGasPriceGwei?: number
+  ethUsdFallback?: number
+}
+
 type BridgeConfig = {
   enabled: boolean
   apiKey: string
   baseUrl: string
   minWithdrawalAmount: number
+  developerFeePercent: number
+  withdrawalFeeEstimate?: BridgeWithdrawalFeeEstimateConfig
   timeoutMs?: number
   webhook: BridgeWebhook
 }
