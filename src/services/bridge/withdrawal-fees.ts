@@ -51,7 +51,7 @@ export const computeCustomerFeeEstimateFromGasMarket = ({
   amount,
   gasMarket,
   config = getWithdrawalFeeEstimateConfig(),
-  developerFeePercent = BridgeConfig.developerFeePercent ?? 2,
+  developerFeePercent = BridgeConfig.developerFeePercent,
 }: {
   amount: string
   gasMarket: EthereumGasMarketSnapshot
