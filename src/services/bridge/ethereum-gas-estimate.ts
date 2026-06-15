@@ -83,6 +83,31 @@ export const fetchEthereumGasPriceGwei = async ({
   }
 }
 
+export const fetchEthereumGasPriceGweiAverage = async ({
+  rpcUrls,
+  timeoutMs,
+}: {
+  rpcUrls: string[]
+  timeoutMs: number
+}): Promise<number | Error> => {
+  if (rpcUrls.length === 0) {
+    return new Error("No Ethereum RPC URLs configured for gas price estimate")
+  }
+
+  const gasPriceResults = await Promise.all(
+    rpcUrls.map((rpcUrl) => fetchEthereumGasPriceGwei({ rpcUrl, timeoutMs })),
+  )
+  const gasPrices = gasPriceResults.filter(
+    (result): result is number => !(result instanceof Error),
+  )
+
+  if (gasPrices.length === 0) {
+    return new Error("All Ethereum RPC gas price requests failed")
+  }
+
+  return gasPrices.reduce((sum, gasPrice) => sum + gasPrice, 0) / gasPrices.length
+}
+
 export const fetchEthUsdPrice = async ({
   timeoutMs,
 }: {
@@ -115,18 +140,18 @@ export const fetchEthUsdPrice = async ({
 }
 
 export const fetchEthereumGasMarketSnapshot = async ({
-  rpcUrl,
+  rpcUrls,
   timeoutMs,
   fallbackGasPriceGwei,
   ethUsdFallback,
 }: {
-  rpcUrl: string
+  rpcUrls: string[]
   timeoutMs: number
   fallbackGasPriceGwei: number
   ethUsdFallback: number
 }): Promise<EthereumGasMarketSnapshot> => {
   const [gasPriceResult, ethUsdResult] = await Promise.all([
-    fetchEthereumGasPriceGwei({ rpcUrl, timeoutMs }),
+    fetchEthereumGasPriceGweiAverage({ rpcUrls, timeoutMs }),
     fetchEthUsdPrice({ timeoutMs }),
   ])
 

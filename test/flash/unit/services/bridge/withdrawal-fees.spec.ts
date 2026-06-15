@@ -6,7 +6,11 @@ jest.mock("@config", () => ({
       bridgeFixedFeePercent: 0.6,
       usdtTransferGasLimit: 65_000,
       gasPriceBufferMultiplier: 1.5,
-      ethereumGasRpcUrl: "https://cloudflare-eth.com",
+      ethereumGasRpcUrls: [
+        "https://ethereum-rpc.publicnode.com",
+        "https://eth.llamarpc.com",
+        "https://cloudflare-eth.com",
+      ],
       fallbackGasPriceGwei: 30,
       ethUsdFallback: 3000,
     },
@@ -24,7 +28,11 @@ const feeConfig = {
   bridgeFixedFeePercent: 0.6,
   usdtTransferGasLimit: 65_000,
   gasPriceBufferMultiplier: 1.5,
-  ethereumGasRpcUrl: "https://cloudflare-eth.com",
+  ethereumGasRpcUrls: [
+    "https://ethereum-rpc.publicnode.com",
+    "https://eth.llamarpc.com",
+    "https://cloudflare-eth.com",
+  ],
   fallbackGasPriceGwei: 30,
   ethUsdFallback: 3000,
 }

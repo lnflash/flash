@@ -649,14 +649,22 @@ export const configSchema = {
         apiKey: { type: "string" },
         baseUrl: { type: "string" },
         minWithdrawalAmount: { type: "number" },
-        developerFeePercent: { type: "number", default: 2.0 },
+        developerFeePercent: { type: "number" },
         withdrawalFeeEstimate: {
           type: "object",
           properties: {
             bridgeFixedFeePercent: { type: "number", default: 0.6 },
             usdtTransferGasLimit: { type: "integer", default: 65000 },
             gasPriceBufferMultiplier: { type: "number", default: 1.5 },
-            ethereumGasRpcUrl: { type: "string", default: "https://cloudflare-eth.com" },
+            ethereumGasRpcUrls: {
+              type: "array",
+              items: { type: "string" },
+              default: [
+                "https://ethereum-rpc.publicnode.com",
+                "https://eth.llamarpc.com",
+                "https://cloudflare-eth.com",
+              ],
+            },
             fallbackGasPriceGwei: { type: "number", default: 30 },
             ethUsdFallback: { type: "number", default: 3000 },
           },
@@ -682,7 +690,7 @@ export const configSchema = {
           required: ["port", "publicKeys", "timestampSkewMs"],
         },
       },
-      required: ["enabled", "apiKey", "baseUrl", "webhook"],
+      required: ["enabled", "apiKey", "baseUrl", "developerFeePercent", "webhook"],
     },
     exchangeRates: {
       type: "object",

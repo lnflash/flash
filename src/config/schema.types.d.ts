@@ -47,7 +47,7 @@ type BridgeWithdrawalFeeEstimateConfig = {
   bridgeFixedFeePercent?: number
   usdtTransferGasLimit?: number
   gasPriceBufferMultiplier?: number
-  ethereumGasRpcUrl?: string
+  ethereumGasRpcUrls?: string[]
   fallbackGasPriceGwei?: number
   ethUsdFallback?: number
 }

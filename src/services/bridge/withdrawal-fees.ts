@@ -19,7 +19,7 @@ export type BridgeWithdrawalFeeEstimateConfig = {
   bridgeFixedFeePercent: number
   usdtTransferGasLimit: number
   gasPriceBufferMultiplier: number
-  ethereumGasRpcUrl: string
+  ethereumGasRpcUrls: string[]
   fallbackGasPriceGwei: number
   ethUsdFallback: number
 }
@@ -33,14 +33,19 @@ export type CustomerFeeEstimate = {
   flashFee: string
 }
 
-export const defaultWithdrawalFeeEstimateConfig = (): BridgeWithdrawalFeeEstimateConfig => ({
-  bridgeFixedFeePercent: 0.6,
-  usdtTransferGasLimit: 65_000,
-  gasPriceBufferMultiplier: 1.5,
-  ethereumGasRpcUrl: "https://cloudflare-eth.com",
-  fallbackGasPriceGwei: 30,
-  ethUsdFallback: 3000,
-})
+export const defaultWithdrawalFeeEstimateConfig =
+  (): BridgeWithdrawalFeeEstimateConfig => ({
+    bridgeFixedFeePercent: 0.6,
+    usdtTransferGasLimit: 65_000,
+    gasPriceBufferMultiplier: 1.5,
+    ethereumGasRpcUrls: [
+      "https://ethereum-rpc.publicnode.com",
+      "https://eth.llamarpc.com",
+      "https://cloudflare-eth.com",
+    ],
+    fallbackGasPriceGwei: 30,
+    ethUsdFallback: 3000,
+  })
 
 export const getWithdrawalFeeEstimateConfig = (): BridgeWithdrawalFeeEstimateConfig => ({
   ...defaultWithdrawalFeeEstimateConfig(),
@@ -90,7 +95,7 @@ export const resolveWithdrawalCustomerFeeEstimate = async (
 ): Promise<CustomerFeeEstimate> => {
   const config = getWithdrawalFeeEstimateConfig()
   const gasMarket = await fetchEthereumGasMarketSnapshot({
-    rpcUrl: config.ethereumGasRpcUrl,
+    rpcUrls: config.ethereumGasRpcUrls,
     timeoutMs: BridgeConfig.timeoutMs ?? 10_000,
     fallbackGasPriceGwei: config.fallbackGasPriceGwei,
     ethUsdFallback: config.ethUsdFallback,
@@ -140,14 +145,12 @@ export const isFlashFeeEstimate = (
   withdrawal: Pick<BridgeWithdrawalLike, "bridgeDeveloperFee">,
 ): boolean => !withdrawal.bridgeDeveloperFee
 
-export const receiptFeesFromTransfer = (
-  receipt?: {
-    developer_fee?: string
-    exchange_fee?: string
-    subtotal_amount?: string
-    final_amount?: string
-  },
-): BridgeWithdrawalReceiptFees => ({
+export const receiptFeesFromTransfer = (receipt?: {
+  developer_fee?: string
+  exchange_fee?: string
+  subtotal_amount?: string
+  final_amount?: string
+}): BridgeWithdrawalReceiptFees => ({
   bridgeDeveloperFee:
     receipt?.developer_fee != null ? String(receipt.developer_fee) : undefined,
   bridgeExchangeFee:
@@ -180,7 +183,9 @@ export const toBridgeWithdrawalLike = (
   }
 }
 
-const estimatedCustomerFeeFor = (withdrawal: BridgeWithdrawalLike): string | undefined => {
+const estimatedCustomerFeeFor = (
+  withdrawal: BridgeWithdrawalLike,
+): string | undefined => {
   if (withdrawal.estimatedCustomerFee) return withdrawal.estimatedCustomerFee
   if (
     withdrawal.flashFee != null &&
@@ -196,7 +201,10 @@ const estimatedCustomerFeeFor = (withdrawal: BridgeWithdrawalLike): string | und
   return undefined
 }
 
-const resolveAmounts = (withdrawal: BridgeWithdrawalLike, flashFeeIsEstimate: boolean) => {
+const resolveAmounts = (
+  withdrawal: BridgeWithdrawalLike,
+  flashFeeIsEstimate: boolean,
+) => {
   if (withdrawal.subtotalAmount && withdrawal.finalAmount) {
     return {
       subtotalAmount: withdrawal.subtotalAmount,
@@ -239,9 +247,7 @@ export const presentBridgeWithdrawal = (
 ) => {
   const source = withFeeEstimate(withdrawal, feeEstimate)
   const createdAt =
-    source.createdAt instanceof Date
-      ? source.createdAt.toISOString()
-      : source.createdAt
+    source.createdAt instanceof Date ? source.createdAt.toISOString() : source.createdAt
   const flashFeeIsEstimate = isFlashFeeEstimate(source)
   const { subtotalAmount, finalAmount } = resolveAmounts(source, flashFeeIsEstimate)
   const estimatedCustomerFee = estimatedCustomerFeeFor(source)
