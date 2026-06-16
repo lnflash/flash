@@ -171,6 +171,27 @@ make stop-frappe         # stop local Frappe
 
 Update your `dev-overrides.yaml` with local Frappe credentials if running locally.
 
+### Admin Panel API URL
+
+The Frappe Admin Panel uses the Frappe site config key `flash_admin_api_url` to
+call the Flash admin GraphQL API for pages such as `alert-users`.
+
+- **Local Docker Frappe:** use `http://host.docker.internal:4001/graphql` so the
+  Frappe container can reach the backend admin GraphQL server running on the
+  host machine. Compose maps that hostname with Docker's symbolic
+  `host-gateway`, and the value can be overridden locally with
+  `FRAPPE_FLASH_API` if a developer's Docker runtime needs a different host
+  route.
+- **Test / production Kubernetes:** do **not** use `host.docker.internal`. Set
+  `flash_admin_api_url` from the deployment config to the environment-specific
+  Kubernetes-reachable admin GraphQL endpoint, such as an internal service DNS
+  name or routed internal gateway URL. The endpoint should route to the admin
+  GraphQL server's `/graphql` path unless that environment explicitly rewrites a
+  different path.
+
+If a local full Frappe backup includes `site_config_backup.json`, treat this key
+as environment-specific and override it during deployment restore.
+
 ---
 
 ## Testing
