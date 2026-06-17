@@ -122,6 +122,32 @@ type BridgeCashoutWriteInput = {
   rawPayload: unknown
 }
 
+export const writeBridgeCashoutPending = async ({
+  transferId,
+  amount,
+  currency,
+  accountId,
+  sourceEventId,
+  sourceEventType,
+  rawPayload,
+}: BridgeCashoutWriteInput): Promise<true | BridgeTransferRequestUpsertError> => {
+  return upsert(
+    new BridgeTransferRequest({
+      requestId: transferId,
+      transactionType: BridgeTransferRequestTransactionType.Cashout,
+      status: BridgeTransferRequestStatus.Pending,
+      amount: String(amount),
+      currency: String(currency),
+      accountId,
+      bridgeTransferId: transferId,
+      sourceEventId,
+      sourceEventType,
+      sourceSystemsSeen: ["bridge_transfer"],
+      rawPayload,
+    }),
+  )
+}
+
 export const writeBridgeCashoutCompleted = async ({
   transferId,
   amount,

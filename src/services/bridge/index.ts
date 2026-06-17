@@ -24,6 +24,7 @@ import { WalletsRepository } from "@services/mongoose/wallets"
 
 import { IdentityRepository } from "@services/kratos"
 import IbexClient from "@services/ibex/client"
+import { writeBridgeCashoutPending } from "@services/frappe/BridgeTransferRequestWriter"
 
 import {
   BridgeApiError,
@@ -1010,6 +1011,27 @@ const initiateWithdrawal = async (
       ibexTxHashFromSendResponse(sendResult),
     )
     if (updated instanceof Error) return updated
+
+    const auditResult = await writeBridgeCashoutPending({
+      transferId: transfer.id,
+      amount: transfer.amount,
+      currency: transfer.currency,
+      accountId: accountId as string,
+      sourceEventId: updated.id,
+      sourceEventType: "bridge.withdrawal.usdt_sent",
+      rawPayload: {
+        withdrawalId: updated.id,
+        bridgeTransferId: transfer.id,
+        ibexPayoutId,
+        ibexTxHash: updated.ibexTxHash,
+      },
+    })
+    if (auditResult instanceof Error) {
+      baseLogger.warn(
+        { accountId, withdrawalId, transferId: transfer.id, error: auditResult },
+        "Failed to write pending Bridge cashout transfer request",
+      )
+    }
 
     baseLogger.info(
       {
