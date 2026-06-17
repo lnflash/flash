@@ -13,10 +13,18 @@ type BridgeDepositEventObject = {
   amount: string
   currency: string
   on_behalf_of: string
+  deposit_id?: string
+  virtual_account_id?: string
+  product_type?: string
   // Virtual-account/bridge-wallet activity fields
   type?: string
   customer_id?: string
-  payment_route?: { customer_id?: string; type?: string }
+  payment_route?: {
+    customer_id?: string
+    type?: string
+    deposit_id?: string
+    transfer_id?: string
+  }
   destination_payment_rail?: string
   receipt?: {
     developer_fee?: unknown
@@ -60,10 +68,23 @@ export const writeBridgeDepositRequest = async ({
     eventObject.payment_route?.customer_id
   const state = eventObject.state ?? eventObject.type ?? "unknown"
   const currency = eventObject.currency ?? eventObject.destination_payment_rail ?? "usd"
+  const isVirtualAccountActivity =
+    !!eventObject.type ||
+    !!eventObject.virtual_account_id ||
+    eventObject.product_type === "virtual_account"
+  const stableRequestId =
+    eventObject.deposit_id ??
+    eventObject.payment_route?.deposit_id ??
+    eventObject.payment_route?.transfer_id ??
+    (isVirtualAccountActivity ? undefined : eventObject.id)
+
+  if (!stableRequestId) {
+    return true
+  }
 
   return upsert(
     new BridgeTransferRequest({
-      requestId: eventObject.id,
+      requestId: stableRequestId,
       transactionType: BridgeTransferRequestTransactionType.Topup,
       status: BridgeTransferRequestStatus.FiatReceived,
       amount: String(eventObject.amount),
@@ -76,7 +97,7 @@ export const writeBridgeDepositRequest = async ({
       subtotalAmount: asOptionalString(receipt?.subtotal_amount),
       finalAmount: asOptionalString(receipt?.final_amount),
       bridgeCustomerId: customerId ?? "unknown",
-      bridgeTransferId: eventObject.id,
+      bridgeTransferId: stableRequestId,
       ibexTxHash: receipt?.destination_tx_hash,
       sourceEventId: eventId,
       sourceEventType: `deposit.${state}`,

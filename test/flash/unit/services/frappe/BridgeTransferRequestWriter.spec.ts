@@ -51,6 +51,52 @@ describe("BridgeTransferRequestWriter", () => {
     )
   })
 
+  it("skips virtual account activity until Bridge provides a stable deposit id", async () => {
+    await writeBridgeDepositRequest({
+      eventId: "wh_scheduled",
+      eventObject: {
+        id: "activity_123",
+        type: "funds_scheduled",
+        amount: "10.00",
+        currency: "usd",
+        on_behalf_of: "cust_123",
+        customer_id: "cust_123",
+        virtual_account_id: "va_123",
+        product_type: "virtual_account",
+      },
+      rawPayload: { event_id: "wh_scheduled" },
+    })
+
+    expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it("keys virtual account deposits by Bridge deposit id", async () => {
+    await writeBridgeDepositRequest({
+      eventId: "wh_received",
+      eventObject: {
+        id: "activity_456",
+        type: "funds_received",
+        amount: "10.00",
+        currency: "usd",
+        on_behalf_of: "cust_123",
+        customer_id: "cust_123",
+        deposit_id: "deposit_123",
+        virtual_account_id: "va_123",
+        product_type: "virtual_account",
+      },
+      rawPayload: { event_id: "wh_received" },
+    })
+
+    expect(lastRequestInput()).toEqual(
+      expect.objectContaining({
+        requestId: "deposit_123",
+        bridgeTransferId: "deposit_123",
+        sourceEventId: "wh_received",
+        sourceEventType: "deposit.funds_received",
+      }),
+    )
+  })
+
   it("writes IBEX crypto receives as settled topup audit requests", async () => {
     await writeIbexCryptoReceiveRequest({
       txHash: "tx_123",
