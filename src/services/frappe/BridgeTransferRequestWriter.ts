@@ -13,6 +13,11 @@ type BridgeDepositEventObject = {
   amount: string
   currency: string
   on_behalf_of: string
+  // Virtual-account/bridge-wallet activity fields
+  type?: string
+  customer_id?: string
+  payment_route?: { customer_id?: string; type?: string }
+  destination_payment_rail?: string
   receipt?: {
     developer_fee?: unknown
     initial_amount?: unknown
@@ -48,13 +53,21 @@ export const writeBridgeDepositRequest = async ({
 }): Promise<true | BridgeTransferRequestUpsertError> => {
   const receipt = eventObject.receipt
 
+  // Normalise: virtual_account / bridge_wallet events use different field names
+  const customerId =
+    eventObject.on_behalf_of ??
+    eventObject.customer_id ??
+    eventObject.payment_route?.customer_id
+  const state = eventObject.state ?? eventObject.type ?? "unknown"
+  const currency = eventObject.currency ?? eventObject.destination_payment_rail ?? "usd"
+
   return upsert(
     new BridgeTransferRequest({
       requestId: eventObject.id,
       transactionType: BridgeTransferRequestTransactionType.Topup,
       status: BridgeTransferRequestStatus.FiatReceived,
       amount: String(eventObject.amount),
-      currency: String(eventObject.currency),
+      currency: String(currency),
       developerFee:
         asOptionalString(receipt?.developer_fee) ??
         asOptionalString(eventObject.developer_fee) ??
@@ -62,11 +75,11 @@ export const writeBridgeDepositRequest = async ({
       initialAmount: asOptionalString(receipt?.initial_amount),
       subtotalAmount: asOptionalString(receipt?.subtotal_amount),
       finalAmount: asOptionalString(receipt?.final_amount),
-      bridgeCustomerId: eventObject.on_behalf_of,
+      bridgeCustomerId: customerId ?? "unknown",
       bridgeTransferId: eventObject.id,
       ibexTxHash: receipt?.destination_tx_hash,
       sourceEventId: eventId,
-      sourceEventType: `deposit.${eventObject.state ?? "unknown"}`,
+      sourceEventType: `deposit.${state}`,
       sourceSystemsSeen: ["bridge_deposit"],
       rawPayload,
     }),
