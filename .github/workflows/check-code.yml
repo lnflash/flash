@@ -4,8 +4,10 @@
 name: Check Code
 
 on:
+  push:
+    branches: [tmp/bridge-rebase-pr-ready]
   pull_request:
-    branches: [main]
+    branches: [main, tmp/bridge-rebase-pr-ready]
 
 jobs:
   check-code:
