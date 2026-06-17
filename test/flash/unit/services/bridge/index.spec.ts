@@ -12,8 +12,15 @@ jest.mock("@services/tracing", () => ({
 jest.mock("@config", () => ({
   BridgeConfig: { enabled: true, minWithdrawalAmount: 10 },
   // Minimal stubs so schema.ts can run its module-level initialisation
-  getFeesConfig: jest.fn().mockReturnValue({ depositFeeVariable: 0, depositFeeFixed: 0, withdrawFeeVariable: 0, withdrawFeeFixed: 0 }),
-  getDefaultAccountsConfig: jest.fn().mockReturnValue({ initialStatus: "active", initialLevel: 0, maxCurrencies: 5 }),
+  getFeesConfig: jest.fn().mockReturnValue({
+    depositFeeVariable: 0,
+    depositFeeFixed: 0,
+    withdrawFeeVariable: 0,
+    withdrawFeeFixed: 0,
+  }),
+  getDefaultAccountsConfig: jest
+    .fn()
+    .mockReturnValue({ initialStatus: "active", initialLevel: 0, maxCurrencies: 5 }),
   getDefaultFCMTopics: jest.fn().mockReturnValue([]),
   Levels: [0, 1, 2, 3],
   getI18nInstance: jest.fn().mockReturnValue({ __: jest.fn() }),
@@ -26,13 +33,17 @@ jest.mock("@services/logger", () => ({
 jest.mock("@services/mongoose/bridge-accounts", () => ({
   createVirtualAccount: jest.fn(),
   findVirtualAccountByAccountId: jest.fn(),
+  createExternalAccount: jest.fn(),
   createWithdrawal: jest.fn(),
   findPendingWithdrawalWithoutTransfer: jest.fn(),
   findExternalAccountsByAccountId: jest.fn(),
+  markExternalAccountsMissingFromBridge: jest.fn(),
   updateWithdrawalTransferId: jest.fn(),
   findWithdrawalById: jest.fn(),
   findWithdrawalsByAccountId: jest.fn(),
   cancelWithdrawal: jest.fn(),
+  updateWithdrawalOnchainSend: jest.fn(),
+  updateWithdrawalSendFailed: jest.fn(),
 }))
 
 jest.mock("@services/bridge/client", () => ({
@@ -40,6 +51,7 @@ jest.mock("@services/bridge/client", () => ({
   default: {
     createVirtualAccount: jest.fn(),
     createTransfer: jest.fn(),
+    listExternalAccounts: jest.fn(),
     getCustomer: jest.fn().mockResolvedValue({ status: "active" }),
   },
 }))
@@ -49,6 +61,10 @@ jest.mock("@services/ibex/client", () => ({
   default: {
     getEthereumUsdtOption: jest.fn(),
     createCryptoReceiveInfo: jest.fn(),
+    getCryptoSendRequirements: jest.fn(),
+    createCryptoSendInfo: jest.fn(),
+    sendOnchain: jest.fn(),
+    sendCrypto: jest.fn(),
   },
 }))
 
@@ -78,6 +94,8 @@ jest.mock("@domain/primitives/bridge", () => ({
 // guards in the service are satisfied during tests.
 jest.mock("@domain/shared", () => {
   class USDTAmount {
+    static currencyId = 29
+
     ibexValue: number
 
     constructor(ibexValue: number) {
@@ -86,6 +104,10 @@ jest.mock("@domain/shared", () => {
 
     toIbex() {
       return this.ibexValue
+    }
+
+    static fromNumber(value: number | string) {
+      return new USDTAmount(Number(value))
     }
   }
   return { ...jest.requireActual("@domain/shared"), USDTAmount }
@@ -115,9 +137,14 @@ const ETHEREUM_ADDRESS = "ETH_ADDR_001"
 const TRANSFER_ID = "transfer-bridge-001"
 const WITHDRAWAL_ID = "withdrawal-mongo-001"
 const USDT_WALLET_ID = "ibex-eth-usdt-wallet-001"
+const BRIDGE_DEPOSIT_ADDRESS = "0xbridgeDepositAddress"
+const IBEX_PAYOUT_ID = "ibex-payout-001"
+const IBEX_CRYPTO_SEND_REQUIREMENTS_ID = "send-requirements-001"
+const IBEX_CRYPTO_SEND_INFO_ID = "send-info-001"
 const RECEIVE_INFO_ID = "receive-info-001"
 const VIRTUAL_ACCOUNT_ID = "virtual-account-001"
 const CREATED_AT = new Date("2026-01-01T00:00:00Z")
+const STALE_EXTERNAL_ACCOUNT_ID = "stale-ext-account-001"
 
 const mockAccount = {
   id: ACCOUNT_ID,
@@ -146,6 +173,11 @@ const mockTransfer = {
   amount: AMOUNT,
   currency: "usd",
   state: "pending",
+  source_deposit_instructions: {
+    payment_rail: "ethereum",
+    currency: "usdt",
+    to_address: BRIDGE_DEPOSIT_ADDRESS,
+  },
 }
 
 const mockVirtualAccount = {
@@ -155,6 +187,18 @@ const mockVirtualAccount = {
     bank_routing_number: "123456789",
     bank_account_number: "123456789012",
   },
+}
+
+const mockBridgeExternalAccount = {
+  id: EXTERNAL_ACCOUNT_ID,
+  customer_id: CUSTOMER_ID,
+  account_owner_name: "Dread",
+  account_type: "us",
+  currency: "usd",
+  bank_name: "Test Bank",
+  account_number_last_4: "1111",
+  active: true,
+  created_at: "2026-01-01T00:00:00Z",
 }
 
 const makeWallet = (id: string, currency: string) => ({
@@ -187,21 +231,63 @@ const setupGuards = () => {
     updateBridgeFields: jest.fn(),
   })
   ;(WalletsRepository as jest.Mock).mockReturnValue({
-    listByAccountId: jest.fn().mockResolvedValue([
-      { id: USDT_WALLET_ID, currency: "USDT", type: "checking" },
-    ]),
+    listByAccountId: jest
+      .fn()
+      .mockResolvedValue([{ id: USDT_WALLET_ID, currency: "USDT", type: "checking" }]),
     persistNew: jest.fn(),
   })
   ;(getBalanceForWallet as jest.Mock).mockResolvedValue(getUSDTAmount(1000))
   ;(BridgeAccountsRepo.findExternalAccountsByAccountId as jest.Mock).mockResolvedValue([
-    { bridgeExternalAccountId: EXTERNAL_ACCOUNT_ID, status: "verified" },
+    {
+      bridgeExternalAccountId: EXTERNAL_ACCOUNT_ID,
+      bankName: "Test Bank",
+      accountNumberLast4: "1111",
+      status: "verified",
+    },
   ])
+  ;(BridgeAccountsRepo.createExternalAccount as jest.Mock).mockResolvedValue({
+    bridgeExternalAccountId: EXTERNAL_ACCOUNT_ID,
+    bankName: "Test Bank",
+    accountNumberLast4: "1111",
+    status: "verified",
+  })
+  ;(
+    BridgeAccountsRepo.markExternalAccountsMissingFromBridge as jest.Mock
+  ).mockResolvedValue({ modifiedCount: 0 })
+  ;(BridgeClient.listExternalAccounts as jest.Mock).mockResolvedValue({
+    data: [mockBridgeExternalAccount],
+    has_more: false,
+  })
   ;(BridgeAccountsRepo.updateWithdrawalTransferId as jest.Mock).mockResolvedValue({
     ...makeRow(WITHDRAWAL_ID),
     bridgeTransferId: TRANSFER_ID,
     status: "submitted" as const,
+    bridgeDepositAddress: BRIDGE_DEPOSIT_ADDRESS,
+  })
+  ;(BridgeAccountsRepo.updateWithdrawalOnchainSend as jest.Mock).mockResolvedValue({
+    ...makeRow(WITHDRAWAL_ID),
+    bridgeTransferId: TRANSFER_ID,
+    bridgeDepositAddress: BRIDGE_DEPOSIT_ADDRESS,
+    ibexPayoutId: IBEX_PAYOUT_ID,
+    status: "usdt_sent" as const,
   })
   ;(BridgeClient.createTransfer as jest.Mock).mockResolvedValue(mockTransfer)
+  ;(IbexClient.sendOnchain as jest.Mock).mockResolvedValue({
+    status: "PENDING",
+    transactionHub: { id: IBEX_PAYOUT_ID },
+  })
+  ;(IbexClient.getCryptoSendRequirements as jest.Mock).mockResolvedValue({
+    requirementsId: IBEX_CRYPTO_SEND_REQUIREMENTS_ID,
+    data: { address: { required: true } },
+  })
+  ;(IbexClient.createCryptoSendInfo as jest.Mock).mockResolvedValue({
+    id: IBEX_CRYPTO_SEND_INFO_ID,
+    name: `bridge-withdrawal-${WITHDRAWAL_ID}`,
+    data: { address: BRIDGE_DEPOSIT_ADDRESS },
+  })
+  ;(IbexClient.sendCrypto as jest.Mock).mockResolvedValue({
+    transaction: { id: IBEX_PAYOUT_ID, status: "PENDING" },
+  })
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -266,7 +352,9 @@ describe("createVirtualAccount — ETH-USDT Cash Wallet provisioning (ENG-296)",
     }
     ;(AccountsRepository as jest.Mock).mockReturnValue(accountsRepo)
     ;(WalletsRepository as jest.Mock).mockReturnValue({
-      listByAccountId: jest.fn().mockResolvedValue([makeWallet("legacy-usd-wallet-id", "USD")]),
+      listByAccountId: jest
+        .fn()
+        .mockResolvedValue([makeWallet("legacy-usd-wallet-id", "USD")]),
       persistNew: jest.fn().mockResolvedValue(usdtWallet),
     })
     ;(BridgeAccountsRepo.findVirtualAccountByAccountId as jest.Mock).mockResolvedValue(
@@ -287,7 +375,9 @@ describe("createVirtualAccount — ETH-USDT Cash Wallet provisioning (ENG-296)",
       network: "ethereum",
       created_at: "2026-05-09T00:00:00Z",
     })
-    ;(BridgeClient.createVirtualAccount as jest.Mock).mockResolvedValue(mockVirtualAccount)
+    ;(BridgeClient.createVirtualAccount as jest.Mock).mockResolvedValue(
+      mockVirtualAccount,
+    )
     ;(BridgeAccountsRepo.createVirtualAccount as jest.Mock).mockResolvedValue({
       bridgeVirtualAccountId: VIRTUAL_ACCOUNT_ID,
     })
@@ -343,7 +433,9 @@ describe("createVirtualAccount — ETH-USDT Cash Wallet provisioning (ENG-296)",
     ;(BridgeAccountsRepo.findVirtualAccountByAccountId as jest.Mock).mockResolvedValue(
       new RepositoryError("not found"),
     )
-    ;(BridgeClient.createVirtualAccount as jest.Mock).mockResolvedValue(mockVirtualAccount)
+    ;(BridgeClient.createVirtualAccount as jest.Mock).mockResolvedValue(
+      mockVirtualAccount,
+    )
     ;(BridgeAccountsRepo.createVirtualAccount as jest.Mock).mockResolvedValue({
       bridgeVirtualAccountId: VIRTUAL_ACCOUNT_ID,
     })
@@ -414,9 +506,9 @@ describe("requestWithdrawal", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     setupGuards()
-    ;(BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock).mockResolvedValue(
-      null,
-    )
+    ;(
+      BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock
+    ).mockResolvedValue(null)
     ;(BridgeAccountsRepo.createWithdrawal as jest.Mock).mockResolvedValue(
       makeRow(WITHDRAWAL_ID),
     )
@@ -446,16 +538,64 @@ describe("requestWithdrawal", () => {
     })
   })
 
-  it("never calls the Bridge API", async () => {
+  it("syncs Bridge external accounts before accepting a withdrawal request", async () => {
+    await BridgeService.requestWithdrawal(ACCOUNT_ID, AMOUNT, EXTERNAL_ACCOUNT_ID)
+
+    expect(BridgeClient.listExternalAccounts).toHaveBeenCalledWith(CUSTOMER_ID)
+    expect(BridgeAccountsRepo.createExternalAccount).toHaveBeenCalledWith({
+      accountId: ACCOUNT_ID as string,
+      bridgeExternalAccountId: EXTERNAL_ACCOUNT_ID,
+      bankName: "Test Bank",
+      accountNumberLast4: "1111",
+      status: "verified",
+    })
+    expect(BridgeAccountsRepo.markExternalAccountsMissingFromBridge).toHaveBeenCalledWith(
+      ACCOUNT_ID as string,
+      [EXTERNAL_ACCOUNT_ID],
+    )
+  })
+
+  it("rejects a withdrawal when Bridge no longer lists the selected external account", async () => {
+    ;(BridgeClient.listExternalAccounts as jest.Mock).mockResolvedValue({
+      data: [{ ...mockBridgeExternalAccount, id: "bridge-current-account-002" }],
+      has_more: false,
+    })
+    ;(BridgeAccountsRepo.findExternalAccountsByAccountId as jest.Mock).mockResolvedValue([
+      {
+        bridgeExternalAccountId: EXTERNAL_ACCOUNT_ID,
+        bankName: "Deleted Bank",
+        accountNumberLast4: "1111",
+        status: "verified",
+      },
+      {
+        bridgeExternalAccountId: "bridge-current-account-002",
+        bankName: "Current Bank",
+        accountNumberLast4: "2222",
+        status: "verified",
+      },
+    ])
+
+    const result = await BridgeService.requestWithdrawal(
+      ACCOUNT_ID,
+      AMOUNT,
+      EXTERNAL_ACCOUNT_ID,
+    )
+
+    expect(result).toBeInstanceOf(Error)
+    expect((result as Error).message).toBe("External account not found")
+    expect(BridgeAccountsRepo.createWithdrawal).not.toHaveBeenCalled()
+  })
+
+  it("never creates a Bridge transfer", async () => {
     await BridgeService.requestWithdrawal(ACCOUNT_ID, AMOUNT, EXTERNAL_ACCOUNT_ID)
     expect(BridgeClient.createTransfer).not.toHaveBeenCalled()
   })
 
   it("reuses an existing pending withdrawal for the same account, amount, and external account", async () => {
     const existingRow = makeRow("withdrawal-existing-001")
-    ;(BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock).mockResolvedValue(
-      existingRow,
-    )
+    ;(
+      BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock
+    ).mockResolvedValue(existingRow)
 
     const result = await BridgeService.requestWithdrawal(
       ACCOUNT_ID,
@@ -516,7 +656,9 @@ describe("requestWithdrawal", () => {
 
   it("returns BridgeCustomerNotFoundError when account has no Bridge customer ID", async () => {
     ;(AccountsRepository as jest.Mock).mockReturnValue({
-      findById: jest.fn().mockResolvedValue({ ...mockAccount, bridgeCustomerId: undefined }),
+      findById: jest
+        .fn()
+        .mockResolvedValue({ ...mockAccount, bridgeCustomerId: undefined }),
     })
 
     const result = await BridgeService.requestWithdrawal(
@@ -544,6 +686,51 @@ describe("requestWithdrawal", () => {
     )
 
     expect(result).toBeInstanceOf(Error)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getExternalAccounts
+// Bridge is the source of truth so Dashboard-deleted banks cannot remain selectable.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("getExternalAccounts", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    setupGuards()
+  })
+
+  it("syncs from Bridge and returns only external accounts that Bridge still lists", async () => {
+    ;(BridgeAccountsRepo.findExternalAccountsByAccountId as jest.Mock).mockResolvedValue([
+      {
+        bridgeExternalAccountId: STALE_EXTERNAL_ACCOUNT_ID,
+        bankName: "Deleted Bank",
+        accountNumberLast4: "9999",
+        status: "verified",
+      },
+      {
+        bridgeExternalAccountId: EXTERNAL_ACCOUNT_ID,
+        bankName: "Test Bank",
+        accountNumberLast4: "1111",
+        status: "verified",
+      },
+    ])
+
+    const result = await BridgeService.getExternalAccounts(ACCOUNT_ID)
+
+    expect(BridgeClient.listExternalAccounts).toHaveBeenCalledWith(CUSTOMER_ID)
+    expect(BridgeAccountsRepo.markExternalAccountsMissingFromBridge).toHaveBeenCalledWith(
+      ACCOUNT_ID as string,
+      [EXTERNAL_ACCOUNT_ID],
+    )
+    expect(expectSuccess(result)).toEqual([
+      {
+        bridgeExternalAccountId: EXTERNAL_ACCOUNT_ID,
+        bankName: "Test Bank",
+        accountNumberLast4: "1111",
+        status: "verified",
+      },
+    ])
   })
 })
 
@@ -584,16 +771,117 @@ describe("initiateWithdrawal — takes withdrawalId (step 2A)", () => {
     )
   })
 
-  it("calling twice with the same withdrawalId passes the same idempotency key to Bridge", async () => {
-    await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
-    await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
+  it("does not send crypto again when the withdrawal already has an IBEX payout", async () => {
+    ;(BridgeAccountsRepo.findWithdrawalById as jest.Mock).mockResolvedValue(
+      makeRow(WITHDRAWAL_ID, {
+        status: "usdt_sent",
+        bridgeTransferId: TRANSFER_ID,
+        ibexPayoutId: IBEX_PAYOUT_ID,
+      }),
+    )
 
-    const calls = (BridgeClient.createTransfer as jest.Mock).mock.calls
-    expect(calls[0][2]).toBe(calls[1][2])
-    expect(calls[0][2]).toBe(deriveWithdrawalIdempotencyKey(WITHDRAWAL_ID))
+    const result = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
+
+    const { BridgeWithdrawalAlreadyInitiatedError } = jest.requireActual(
+      "@services/bridge/errors",
+    )
+    expect(result).toBeInstanceOf(BridgeWithdrawalAlreadyInitiatedError)
+    expect(BridgeClient.createTransfer).not.toHaveBeenCalled()
+    expect(IbexClient.sendCrypto).not.toHaveBeenCalled()
+    expect(IbexClient.sendOnchain).not.toHaveBeenCalled()
   })
 
-  it("updates the withdrawal record with the Bridge transfer ID and transitions status to submitted", async () => {
+  it("creates a Bridge transfer that asks Bridge for source deposit instructions", async () => {
+    await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
+
+    expect(BridgeClient.createTransfer).toHaveBeenCalledWith(
+      CUSTOMER_ID,
+      expect.objectContaining({
+        amount: AMOUNT,
+        source: {
+          payment_rail: "ethereum",
+          currency: "usdt",
+        },
+        features: expect.objectContaining({
+          allow_any_from_address: true,
+        }),
+      }),
+      deriveWithdrawalIdempotencyKey(WITHDRAWAL_ID),
+    )
+  })
+
+  it("revalidates the pending withdrawal external account against Bridge before creating a transfer", async () => {
+    ;(BridgeClient.listExternalAccounts as jest.Mock).mockResolvedValue({
+      data: [{ ...mockBridgeExternalAccount, id: "bridge-current-account-002" }],
+      has_more: false,
+    })
+    ;(BridgeAccountsRepo.findExternalAccountsByAccountId as jest.Mock).mockResolvedValue([
+      {
+        bridgeExternalAccountId: EXTERNAL_ACCOUNT_ID,
+        bankName: "Deleted Bank",
+        accountNumberLast4: "1111",
+        status: "verified",
+      },
+      {
+        bridgeExternalAccountId: "bridge-current-account-002",
+        bankName: "Current Bank",
+        accountNumberLast4: "2222",
+        status: "verified",
+      },
+    ])
+
+    const result = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
+
+    expect(result).toBeInstanceOf(Error)
+    expect((result as Error).message).toBe("External account not found")
+    expect(BridgeClient.createTransfer).not.toHaveBeenCalled()
+    expect(IbexClient.sendCrypto).not.toHaveBeenCalled()
+    expect(IbexClient.sendOnchain).not.toHaveBeenCalled()
+  })
+
+  it("does not send USDT when Bridge omits source deposit instructions", async () => {
+    ;(BridgeClient.createTransfer as jest.Mock).mockResolvedValue({
+      ...mockTransfer,
+      source_deposit_instructions: undefined,
+    })
+
+    const result = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
+
+    const { BridgeDepositInstructionsMissingError } = jest.requireActual(
+      "@services/bridge/errors",
+    )
+    expect(result).toBeInstanceOf(BridgeDepositInstructionsMissingError)
+    expect(BridgeAccountsRepo.updateWithdrawalTransferId).not.toHaveBeenCalled()
+    expect(IbexClient.sendCrypto).not.toHaveBeenCalled()
+    expect(IbexClient.sendOnchain).not.toHaveBeenCalled()
+  })
+
+  it("creates an IBEX crypto send info for Bridge's deposit address before sending", async () => {
+    await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
+
+    expect(IbexClient.getCryptoSendRequirements).toHaveBeenCalledWith({
+      network: "ethereum",
+      currencyId: 29,
+    })
+    expect(IbexClient.createCryptoSendInfo).toHaveBeenCalledWith({
+      name: `bridge-withdrawal-${WITHDRAWAL_ID}`,
+      requirementsId: IBEX_CRYPTO_SEND_REQUIREMENTS_ID,
+      data: { address: BRIDGE_DEPOSIT_ADDRESS },
+    })
+  })
+
+  it("sends the user's USDT wallet through IBEX crypto send info", async () => {
+    await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
+
+    expect(IbexClient.sendCrypto).toHaveBeenCalledWith({
+      accountId: USDT_WALLET_ID,
+      cryptoSendInfosId: IBEX_CRYPTO_SEND_INFO_ID,
+      amount: Number(AMOUNT),
+    })
+    expect(IbexClient.sendOnchain).not.toHaveBeenCalled()
+  })
+
+  it("updates the withdrawal record with Bridge and IBEX identifiers after the send", async () => {
     const result = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
 
     expect(BridgeAccountsRepo.updateWithdrawalTransferId).toHaveBeenCalledWith(
@@ -601,11 +889,65 @@ describe("initiateWithdrawal — takes withdrawalId (step 2A)", () => {
       TRANSFER_ID,
       AMOUNT,
       "usd",
+      BRIDGE_DEPOSIT_ADDRESS,
+    )
+    expect(BridgeAccountsRepo.updateWithdrawalOnchainSend).toHaveBeenCalledWith(
+      WITHDRAWAL_ID,
+      IBEX_PAYOUT_ID,
+      undefined,
     )
     expect(expectSuccess(result)).toMatchObject({
-      status: "submitted",
+      status: "usdt_sent",
       bridgeTransferId: TRANSFER_ID,
     })
+  })
+
+  it("marks the withdrawal send_failed when IBEX send fails after Bridge transfer creation", async () => {
+    const ibexError = new Error("ibex unavailable")
+    ;(IbexClient.sendCrypto as jest.Mock).mockResolvedValue(ibexError)
+    ;(BridgeAccountsRepo.updateWithdrawalSendFailed as jest.Mock).mockResolvedValue({
+      ...makeRow(WITHDRAWAL_ID),
+      bridgeTransferId: TRANSFER_ID,
+      status: "send_failed" as const,
+      failureReason: ibexError.message,
+    })
+
+    const result = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
+
+    expect(result).toBe(ibexError)
+    expect(BridgeAccountsRepo.updateWithdrawalSendFailed).toHaveBeenCalledWith(
+      WITHDRAWAL_ID,
+      TRANSFER_ID,
+      AMOUNT,
+      "usd",
+      BRIDGE_DEPOSIT_ADDRESS,
+      ibexError.message,
+    )
+  })
+
+  it("marks the withdrawal send_failed when IBEX send info creation fails", async () => {
+    const ibexError = new Error("requirements unavailable")
+    ;(IbexClient.getCryptoSendRequirements as jest.Mock).mockResolvedValue(ibexError)
+    ;(BridgeAccountsRepo.updateWithdrawalSendFailed as jest.Mock).mockResolvedValue({
+      ...makeRow(WITHDRAWAL_ID),
+      bridgeTransferId: TRANSFER_ID,
+      status: "send_failed" as const,
+      failureReason: ibexError.message,
+    })
+
+    const result = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
+
+    expect(result).toBe(ibexError)
+    expect(IbexClient.createCryptoSendInfo).not.toHaveBeenCalled()
+    expect(IbexClient.sendCrypto).not.toHaveBeenCalled()
+    expect(BridgeAccountsRepo.updateWithdrawalSendFailed).toHaveBeenCalledWith(
+      WITHDRAWAL_ID,
+      TRANSFER_ID,
+      AMOUNT,
+      "usd",
+      BRIDGE_DEPOSIT_ADDRESS,
+      ibexError.message,
+    )
   })
 
   it("returns BridgeWithdrawalNotFoundError when the withdrawal ID does not exist", async () => {
@@ -615,7 +957,9 @@ describe("initiateWithdrawal — takes withdrawalId (step 2A)", () => {
 
     const result = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
 
-    const { BridgeWithdrawalNotFoundError } = jest.requireActual("@services/bridge/errors")
+    const { BridgeWithdrawalNotFoundError } = jest.requireActual(
+      "@services/bridge/errors",
+    )
     expect(result).toBeInstanceOf(BridgeWithdrawalNotFoundError)
     expect(BridgeClient.createTransfer).not.toHaveBeenCalled()
   })
@@ -627,7 +971,9 @@ describe("initiateWithdrawal — takes withdrawalId (step 2A)", () => {
 
     const result = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
 
-    const { BridgeWithdrawalNotFoundError } = jest.requireActual("@services/bridge/errors")
+    const { BridgeWithdrawalNotFoundError } = jest.requireActual(
+      "@services/bridge/errors",
+    )
     expect(result).toBeInstanceOf(BridgeWithdrawalNotFoundError)
     expect(BridgeClient.createTransfer).not.toHaveBeenCalled()
   })
@@ -734,7 +1080,9 @@ describe("cancelWithdrawalRequest", () => {
 
     const result = await BridgeService.cancelWithdrawalRequest(ACCOUNT_ID, WITHDRAWAL_ID)
 
-    const { BridgeWithdrawalNotFoundError } = jest.requireActual("@services/bridge/errors")
+    const { BridgeWithdrawalNotFoundError } = jest.requireActual(
+      "@services/bridge/errors",
+    )
     expect(result).toBeInstanceOf(BridgeWithdrawalNotFoundError)
     expect(sendBridgeWithdrawalNotificationBestEffort).not.toHaveBeenCalled()
   })
@@ -746,7 +1094,9 @@ describe("cancelWithdrawalRequest", () => {
 
     const result = await BridgeService.cancelWithdrawalRequest(ACCOUNT_ID, WITHDRAWAL_ID)
 
-    const { BridgeWithdrawalNotFoundError } = jest.requireActual("@services/bridge/errors")
+    const { BridgeWithdrawalNotFoundError } = jest.requireActual(
+      "@services/bridge/errors",
+    )
     expect(result).toBeInstanceOf(BridgeWithdrawalNotFoundError)
     expect(sendBridgeWithdrawalNotificationBestEffort).not.toHaveBeenCalled()
   })
@@ -773,7 +1123,9 @@ describe("cancelWithdrawalRequest", () => {
 
     const result = await BridgeService.cancelWithdrawalRequest(ACCOUNT_ID, WITHDRAWAL_ID)
 
-    const { BridgeWithdrawalNotFoundError } = jest.requireActual("@services/bridge/errors")
+    const { BridgeWithdrawalNotFoundError } = jest.requireActual(
+      "@services/bridge/errors",
+    )
     expect(result).toBeInstanceOf(BridgeWithdrawalNotFoundError)
     expect(sendBridgeWithdrawalNotificationBestEffort).not.toHaveBeenCalled()
   })
@@ -788,9 +1140,9 @@ describe("withdrawal request → confirm/cancel flow", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     setupGuards()
-    ;(BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock).mockResolvedValue(
-      null,
-    )
+    ;(
+      BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock
+    ).mockResolvedValue(null)
     ;(BridgeAccountsRepo.createWithdrawal as jest.Mock).mockResolvedValue(
       makeRow(WITHDRAWAL_ID),
     )
@@ -820,7 +1172,7 @@ describe("withdrawal request → confirm/cancel flow", () => {
       await BridgeService.initiateWithdrawal(ACCOUNT_ID, pending.id),
     )
     expect(initiated).toMatchObject({
-      status: "submitted",
+      status: "usdt_sent",
       bridgeTransferId: TRANSFER_ID,
     })
     expect(BridgeClient.createTransfer).toHaveBeenCalledTimes(1)
@@ -829,14 +1181,15 @@ describe("withdrawal request → confirm/cancel flow", () => {
       TRANSFER_ID,
       AMOUNT,
       "usd",
+      BRIDGE_DEPOSIT_ADDRESS,
     )
   })
 
   it("duplicate request reuses the pending row, then initiate still submits that row", async () => {
     const existingRow = makeRow("deduped-withdrawal-001")
-    ;(BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock).mockResolvedValue(
-      existingRow,
-    )
+    ;(
+      BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock
+    ).mockResolvedValue(existingRow)
     ;(BridgeAccountsRepo.findWithdrawalById as jest.Mock).mockResolvedValue(existingRow)
     ;(BridgeAccountsRepo.updateWithdrawalTransferId as jest.Mock).mockResolvedValue({
       ...existingRow,
@@ -870,6 +1223,7 @@ describe("withdrawal request → confirm/cancel flow", () => {
       TRANSFER_ID,
       AMOUNT,
       "usd",
+      BRIDGE_DEPOSIT_ADDRESS,
     )
   })
 
@@ -899,7 +1253,9 @@ describe("withdrawal request → confirm/cancel flow", () => {
   })
 
   it("initiate returns BridgeWithdrawalNotFoundError for missing or wrong-owner withdrawalId", async () => {
-    const { BridgeWithdrawalNotFoundError } = jest.requireActual("@services/bridge/errors")
+    const { BridgeWithdrawalNotFoundError } = jest.requireActual(
+      "@services/bridge/errors",
+    )
 
     ;(BridgeAccountsRepo.findWithdrawalById as jest.Mock).mockResolvedValue(
       new RepositoryError("Withdrawal not found"),
@@ -907,7 +1263,6 @@ describe("withdrawal request → confirm/cancel flow", () => {
     expect(
       await BridgeService.initiateWithdrawal(ACCOUNT_ID, "missing-withdrawal"),
     ).toBeInstanceOf(BridgeWithdrawalNotFoundError)
-
     ;(BridgeAccountsRepo.findWithdrawalById as jest.Mock).mockResolvedValue(
       makeRow(WITHDRAWAL_ID, { accountId: "other-account" }),
     )
@@ -932,7 +1287,9 @@ describe("withdrawal request → confirm/cancel flow", () => {
   })
 
   it("cancel returns BridgeWithdrawalNotFoundError for missing or wrong-owner withdrawalId", async () => {
-    const { BridgeWithdrawalNotFoundError } = jest.requireActual("@services/bridge/errors")
+    const { BridgeWithdrawalNotFoundError } = jest.requireActual(
+      "@services/bridge/errors",
+    )
 
     ;(BridgeAccountsRepo.findWithdrawalById as jest.Mock).mockResolvedValue(
       new RepositoryError("Withdrawal not found"),
@@ -941,7 +1298,6 @@ describe("withdrawal request → confirm/cancel flow", () => {
       await BridgeService.cancelWithdrawalRequest(ACCOUNT_ID, "missing-withdrawal"),
     ).toBeInstanceOf(BridgeWithdrawalNotFoundError)
     expect(sendBridgeWithdrawalNotificationBestEffort).not.toHaveBeenCalled()
-
     ;(BridgeAccountsRepo.findWithdrawalById as jest.Mock).mockResolvedValue(
       makeRow(WITHDRAWAL_ID, { accountId: "other-account" }),
     )
@@ -1019,11 +1375,11 @@ describe("getWithdrawals", () => {
 
   it("excludes cancelled rows without a bridgeTransferId, includes submitted/completed/failed", async () => {
     ;(BridgeAccountsRepo.findWithdrawalsByAccountId as jest.Mock).mockResolvedValue([
-      makeRow("w-1", { status: "pending" }),                                           // excluded
-      makeRow("w-2", { status: "cancelled" }),                                         // excluded (no transferId)
-      makeRow("w-3", { status: "submitted",  bridgeTransferId: TRANSFER_ID }),
-      makeRow("w-4", { status: "completed",  bridgeTransferId: "t-completed" }),
-      makeRow("w-5", { status: "failed",     bridgeTransferId: "t-failed" }),
+      makeRow("w-1", { status: "pending" }), // excluded
+      makeRow("w-2", { status: "cancelled" }), // excluded (no transferId)
+      makeRow("w-3", { status: "submitted", bridgeTransferId: TRANSFER_ID }),
+      makeRow("w-4", { status: "completed", bridgeTransferId: "t-completed" }),
+      makeRow("w-5", { status: "failed", bridgeTransferId: "t-failed" }),
     ])
 
     const result = expectSuccess(await BridgeService.getWithdrawals(ACCOUNT_ID))

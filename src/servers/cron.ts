@@ -20,7 +20,10 @@ import {
 import { baseLogger } from "@services/logger"
 import { setupMongoConnection } from "@services/mongodb"
 import { activateLndHealthCheck, checkAllLndHealth } from "@services/lnd/health"
-import { reconcileBridgeAndIbexDeposits } from "@services/bridge/reconciliation"
+import {
+  reconcileBridgeAndIbexDeposits,
+  reconcileBridgeAndIbexWithdrawals,
+} from "@services/bridge/reconciliation"
 
 import { elapsedSinceTimestamp, sleep } from "@utils"
 import { rebalancingInternalChannels } from "@services/lnd/rebalancing"
@@ -76,6 +79,15 @@ const reconcileBridgeDepositsJob = async () => {
   if (result instanceof Error) throw result
 }
 
+const reconcileBridgeWithdrawalsJob = async () => {
+  if (!BridgeConfig.enabled) return
+
+  const result = await reconcileBridgeAndIbexWithdrawals({
+    windowMs: RECONCILE_WINDOW_MS,
+  })
+  if (result instanceof Error) throw result
+}
+
 const main = async () => {
   console.log("cronjob started")
   const start = new Date()
@@ -97,6 +109,7 @@ const main = async () => {
     ...(cronConfig.rebalanceEnabled ? [rebalance] : []),
     ...(cronConfig.swapEnabled ? [swapOutJob] : []),
     reconcileBridgeDepositsJob,
+    reconcileBridgeWithdrawalsJob,
     deleteExpiredPaymentFlows,
     deleteExpiredInvoices,
     deleteLndPaymentsBefore2Months,

@@ -599,6 +599,15 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         message,
       })
 
+    case "BridgeDepositInstructionsMissingError":
+      message =
+        error.message ||
+        "Bridge did not return crypto deposit instructions for this withdrawal"
+      return bridgeGqlError({
+        code: "BRIDGE_DEPOSIT_INSTRUCTIONS_MISSING",
+        message,
+      })
+
     case "BridgeWebhookValidationError":
       message = "Invalid webhook signature"
       return bridgeGqlError({
@@ -610,6 +619,13 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = error.message || "Bridge API error"
       return bridgeGqlError({
         code: "BRIDGE_API_ERROR",
+        message,
+      })
+
+    case "BridgePlaidNotAvailableError":
+      message = error.message || "Plaid bank account linking is not available"
+      return bridgeGqlError({
+        code: "BRIDGE_PLAID_NOT_AVAILABLE",
         message,
       })
 

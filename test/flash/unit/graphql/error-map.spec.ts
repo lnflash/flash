@@ -3,6 +3,7 @@ import { PhoneAccountAlreadyExistsCannotUpgradeError } from "@services/kratos"
 import {
   BridgeWithdrawalNotFoundError,
   BridgeWithdrawalAlreadyInitiatedError,
+  BridgeDepositInstructionsMissingError,
 } from "@services/bridge/errors"
 
 describe("error-map", () => {
@@ -18,6 +19,13 @@ describe("error-map", () => {
 
     expect(result.extensions.code).toBe("BRIDGE_WITHDRAWAL_ALREADY_INITIATED")
     expect(result.message).toContain("already been submitted")
+  })
+
+  it("maps BridgeDepositInstructionsMissingError to BRIDGE_DEPOSIT_INSTRUCTIONS_MISSING", () => {
+    const result = mapError(new BridgeDepositInstructionsMissingError())
+
+    expect(result.extensions.code).toBe("BRIDGE_DEPOSIT_INSTRUCTIONS_MISSING")
+    expect(result.message).toContain("deposit instructions")
   })
 
   it("maps PhoneAccountAlreadyExistsCannotUpgradeError to correct GQL error", () => {

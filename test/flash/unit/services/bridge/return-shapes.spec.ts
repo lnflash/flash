@@ -41,21 +41,28 @@ jest.mock("@services/ibex/client", () => ({
   default: {
     getEthereumUsdtOption: jest.fn(),
     createCryptoReceiveInfo: jest.fn(),
+    getCryptoSendRequirements: jest.fn(),
+    createCryptoSendInfo: jest.fn(),
+    sendOnchain: jest.fn(),
+    sendCrypto: jest.fn(),
   },
 }))
 
 jest.mock("@services/mongoose/bridge-accounts", () => ({
+  createExternalAccount: jest.fn(),
   createWithdrawal: jest.fn(),
   findPendingWithdrawalWithoutTransfer: jest.fn(),
   findExternalAccountsByAccountId: jest.fn(),
+  markExternalAccountsMissingFromBridge: jest.fn(),
   findWithdrawalsByAccountId: jest.fn(),
   findWithdrawalById: jest.fn(),
   updateWithdrawalTransferId: jest.fn(),
+  updateWithdrawalOnchainSend: jest.fn(),
 }))
 
 jest.mock("@services/bridge/client", () => ({
   __esModule: true,
-  default: { createTransfer: jest.fn() },
+  default: { createTransfer: jest.fn(), listExternalAccounts: jest.fn() },
 }))
 
 jest.mock("@services/mongoose/accounts", () => ({
@@ -81,6 +88,8 @@ jest.mock("@domain/primitives/bridge", () => ({
 
 jest.mock("@domain/shared", () => {
   class USDTAmount {
+    static currencyId = 29
+
     private readonly ibexValue: number
 
     constructor(ibexValue: number) {
@@ -89,6 +98,10 @@ jest.mock("@domain/shared", () => {
 
     toIbex() {
       return this.ibexValue
+    }
+
+    static fromNumber(value: number | string) {
+      return new USDTAmount(Number(value))
     }
   }
   return { ...jest.requireActual("@domain/shared"), USDTAmount }
@@ -108,6 +121,9 @@ const CUSTOMER_ID = "cust-001"
 const ETHEREUM_ADDRESS = "ETH_ADDR_001"
 const TRANSFER_ID = "transfer-bridge-001"
 const WITHDRAWAL_ID = "withdrawal-mongo-001"
+const BRIDGE_DEPOSIT_ADDRESS = "0xbridgeDepositAddress"
+const IBEX_PAYOUT_ID = "ibex-payout-001"
+const IBEX_CRYPTO_SEND_INFO_ID = "send-info-001"
 const CREATED_AT = new Date("2026-06-05T00:00:00.000Z")
 
 const mockAccount = {
@@ -124,6 +140,11 @@ const mockTransfer = {
   amount: AMOUNT,
   currency: "usd",
   state: "pending",
+  source_deposit_instructions: {
+    payment_rail: "ethereum",
+    currency: "usdt",
+    to_address: BRIDGE_DEPOSIT_ADDRESS,
+  },
 }
 
 const makeRow = (overrides: Record<string, unknown> = {}) => ({
@@ -154,13 +175,65 @@ const setupGuards = () => {
   })
   ;(getBalanceForWallet as jest.Mock).mockResolvedValue(new USDTAmount(1000))
   ;(BridgeAccountsRepo.findExternalAccountsByAccountId as jest.Mock).mockResolvedValue([
-    { bridgeExternalAccountId: EXTERNAL_ACCOUNT_ID, status: "verified" },
+    {
+      bridgeExternalAccountId: EXTERNAL_ACCOUNT_ID,
+      bankName: "Test Bank",
+      accountNumberLast4: "1111",
+      status: "verified",
+    },
   ])
+  ;(BridgeAccountsRepo.createExternalAccount as jest.Mock).mockResolvedValue({
+    bridgeExternalAccountId: EXTERNAL_ACCOUNT_ID,
+    bankName: "Test Bank",
+    accountNumberLast4: "1111",
+    status: "verified",
+  })
+  ;(
+    BridgeAccountsRepo.markExternalAccountsMissingFromBridge as jest.Mock
+  ).mockResolvedValue({ modifiedCount: 0 })
+  ;(BridgeClient.listExternalAccounts as jest.Mock).mockResolvedValue({
+    data: [
+      {
+        id: EXTERNAL_ACCOUNT_ID,
+        customer_id: CUSTOMER_ID,
+        account_owner_name: "Dread",
+        account_type: "us",
+        currency: "usd",
+        bank_name: "Test Bank",
+        account_number_last_4: "1111",
+        active: true,
+        created_at: "2026-06-05T00:00:00.000Z",
+      },
+    ],
+    has_more: false,
+  })
   ;(BridgeAccountsRepo.findWithdrawalById as jest.Mock).mockResolvedValue(makeRow())
   ;(BridgeAccountsRepo.updateWithdrawalTransferId as jest.Mock).mockResolvedValue({
     ...makeRow(),
     bridgeTransferId: TRANSFER_ID,
     status: "submitted" as const,
+  })
+  ;(BridgeAccountsRepo.updateWithdrawalOnchainSend as jest.Mock).mockResolvedValue({
+    ...makeRow(),
+    bridgeTransferId: TRANSFER_ID,
+    ibexPayoutId: IBEX_PAYOUT_ID,
+    status: "usdt_sent" as const,
+  })
+  const IbexClient = jest.requireMock("@services/ibex/client").default
+  ;(IbexClient.getCryptoSendRequirements as jest.Mock).mockResolvedValue({
+    requirementsId: "send-requirements-001",
+    data: { address: { required: true } },
+  })
+  ;(IbexClient.createCryptoSendInfo as jest.Mock).mockResolvedValue({
+    id: IBEX_CRYPTO_SEND_INFO_ID,
+    data: { address: BRIDGE_DEPOSIT_ADDRESS },
+  })
+  ;(IbexClient.sendCrypto as jest.Mock).mockResolvedValue({
+    transaction: { id: IBEX_PAYOUT_ID, status: "PENDING" },
+  })
+  ;(IbexClient.sendOnchain as jest.Mock).mockResolvedValue({
+    status: "PENDING",
+    transactionHub: { id: IBEX_PAYOUT_ID },
   })
   ;(BridgeClient.createTransfer as jest.Mock).mockResolvedValue(mockTransfer)
 }
@@ -180,7 +253,7 @@ describe("initiateWithdrawal — BridgeWithdrawal GraphQL contract shape", () =>
     expect(result.id).toBe(WITHDRAWAL_ID)
     expect(result.amount).toBe(AMOUNT)
     expect(result.currency).toBe("usdt")
-    expect(result.status).toBe("submitted")
+    expect(result.status).toBe("usdt_sent")
     expect(result.createdAt).toBe(CREATED_AT.toISOString())
     expect(result.bridgeTransferId).toBe(TRANSFER_ID)
     expect((result as Record<string, unknown>).transferId).toBeUndefined()
@@ -198,7 +271,11 @@ describe("getWithdrawals — BridgeWithdrawal GraphQL contract shape", () => {
 
   it("maps Mongo rows to id/status (not legacy transferId/state)", async () => {
     ;(BridgeAccountsRepo.findWithdrawalsByAccountId as jest.Mock).mockResolvedValue([
-      makeRow({ bridgeTransferId: TRANSFER_ID, status: "submitted", failureReason: "ACH return" }),
+      makeRow({
+        bridgeTransferId: TRANSFER_ID,
+        status: "submitted",
+        failureReason: "ACH return",
+      }),
     ])
 
     const result = await BridgeService.getWithdrawals(ACCOUNT_ID)

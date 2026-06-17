@@ -11,7 +11,20 @@ jest.mock("@services/logger", () => ({
 
 jest.mock("@services/mongoose/schema", () => ({
   BridgeDeposits: { findOne: jest.fn(), find: jest.fn() },
+  BridgeWithdrawal: { find: jest.fn() },
   IbexCryptoReceive: { findOne: jest.fn() },
+}))
+
+jest.mock("@services/mongoose/bridge-accounts", () => ({
+  updateWithdrawalStatus: jest.fn(),
+}))
+
+jest.mock("@services/bridge/client", () => ({
+  __esModule: true,
+  default: {
+    deleteTransfer: jest.fn(),
+    getTransfer: jest.fn(),
+  },
 }))
 
 jest.mock("@services/mongoose/ibex-crypto-receive-log", () => ({
@@ -38,8 +51,14 @@ jest.mock("@services/alerts/ibex-bridge-movement", () => ({
   alertIbexReconciliationFailed: jest.fn(),
 }))
 
-import { BridgeDeposits, IbexCryptoReceive } from "@services/mongoose/schema"
+import {
+  BridgeDeposits,
+  BridgeWithdrawal,
+  IbexCryptoReceive,
+} from "@services/mongoose/schema"
 import { findIbexCryptoReceivesSince } from "@services/mongoose/ibex-crypto-receive-log"
+import * as BridgeAccountsRepo from "@services/mongoose/bridge-accounts"
+import BridgeApiClient from "@services/bridge/client"
 import {
   upsertBridgeReconciliationOrphan,
   resolveOrphansByTxHash,
@@ -49,6 +68,7 @@ import { alertIbexReconciliationOrphan } from "@services/alerts/ibex-bridge-move
 import {
   reconcileByTxHash,
   reconcileBridgeAndIbexDeposits,
+  reconcileBridgeAndIbexWithdrawals,
 } from "@services/bridge/reconciliation"
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -77,6 +97,28 @@ const IBEX_RECEIVE = {
   receivedAt: new Date("2026-01-01T12:00:02Z"),
 }
 
+const BRIDGE_WITHDRAWAL_USDT_SENT = {
+  _id: "withdrawal_001",
+  accountId: "acct_001",
+  bridgeTransferId: "tr_withdrawal_001",
+  bridgeDepositAddress: "0xbridge",
+  ibexPayoutId: "ibex_payout_001",
+  amount: "25.00",
+  currency: "usdt",
+  status: "usdt_sent",
+  createdAt: new Date("2026-01-01T12:00:00Z"),
+  updatedAt: new Date("2026-01-01T12:00:01Z"),
+}
+
+const BRIDGE_WITHDRAWAL_SEND_FAILED = {
+  ...BRIDGE_WITHDRAWAL_USDT_SENT,
+  _id: "withdrawal_002",
+  bridgeTransferId: "tr_withdrawal_002",
+  ibexPayoutId: undefined,
+  status: "send_failed",
+  failureReason: "ibex unavailable",
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const mockPublish = jest.fn()
@@ -90,6 +132,15 @@ beforeEach(() => {
   ;(PubSubService as jest.Mock).mockReturnValue({ publish: mockPublish })
   ;(resolveOrphansByTxHash as jest.Mock).mockResolvedValue({ resolvedCount: 0 })
   ;(upsertBridgeReconciliationOrphan as jest.Mock).mockResolvedValue({ id: "orphan_001" })
+  ;(BridgeApiClient.deleteTransfer as jest.Mock).mockResolvedValue({ id: "tr_deleted" })
+  ;(BridgeApiClient.getTransfer as jest.Mock).mockResolvedValue({
+    id: "tr_withdrawal_001",
+    state: "awaiting_funds",
+  })
+  ;(BridgeAccountsRepo.updateWithdrawalStatus as jest.Mock).mockResolvedValue({
+    ...BRIDGE_WITHDRAWAL_USDT_SENT,
+    status: "completed",
+  })
 })
 
 // ── reconcileByTxHash ─────────────────────────────────────────────────────────
@@ -423,5 +474,75 @@ describe("reconcileBridgeAndIbexDeposits", () => {
       const result = await reconcileBridgeAndIbexDeposits()
       expect(result).toBeInstanceOf(Error)
     })
+  })
+})
+
+describe("reconcileBridgeAndIbexWithdrawals", () => {
+  const makeWithdrawalFind = (withdrawals: unknown[]) => ({
+    lean: () => ({ exec: () => Promise.resolve(withdrawals) }),
+  })
+
+  it("cancels Bridge transfers when IBEX crypto send failed", async () => {
+    ;(BridgeWithdrawal.find as jest.Mock).mockReturnValue(
+      makeWithdrawalFind([BRIDGE_WITHDRAWAL_SEND_FAILED]),
+    )
+
+    const result = await reconcileBridgeAndIbexWithdrawals()
+
+    expect(result).not.toBeInstanceOf(Error)
+    if (result instanceof Error) return
+    expect(BridgeApiClient.deleteTransfer).toHaveBeenCalledWith("tr_withdrawal_002")
+    expect(result.cancelledSendFailedTransfers).toBe(1)
+    expect(upsertBridgeReconciliationOrphan).not.toHaveBeenCalled()
+  })
+
+  it("self-heals a sent withdrawal when Bridge already reports payment_processed", async () => {
+    ;(BridgeWithdrawal.find as jest.Mock).mockReturnValue(
+      makeWithdrawalFind([BRIDGE_WITHDRAWAL_USDT_SENT]),
+    )
+    ;(BridgeApiClient.getTransfer as jest.Mock).mockResolvedValue({
+      id: "tr_withdrawal_001",
+      state: "payment_processed",
+    })
+
+    const result = await reconcileBridgeAndIbexWithdrawals()
+
+    expect(result).not.toBeInstanceOf(Error)
+    if (result instanceof Error) return
+    expect(BridgeAccountsRepo.updateWithdrawalStatus).toHaveBeenCalledWith(
+      "tr_withdrawal_001",
+      "completed",
+    )
+    expect(result.finalizedCompletedTransfers).toBe(1)
+  })
+
+  it("alerts when IBEX sent funds but Bridge is terminally failed", async () => {
+    ;(BridgeWithdrawal.find as jest.Mock).mockReturnValue(
+      makeWithdrawalFind([BRIDGE_WITHDRAWAL_USDT_SENT]),
+    )
+    ;(BridgeApiClient.getTransfer as jest.Mock).mockResolvedValue({
+      id: "tr_withdrawal_001",
+      state: "error",
+      on_behalf_of: "cust_001",
+    })
+
+    const result = await reconcileBridgeAndIbexWithdrawals()
+
+    expect(result).not.toBeInstanceOf(Error)
+    if (result instanceof Error) return
+    expect(result.ibexSendWithoutBridgeSettlement).toBe(1)
+    expect(upsertBridgeReconciliationOrphan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orphanKey: "withdrawal-ibex-sent:tr_withdrawal_001",
+        orphanType: "ibex_send_without_bridge_settlement",
+        transferId: "tr_withdrawal_001",
+      }),
+    )
+    expect(alertIbexReconciliationOrphan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orphanType: "ibex_send_without_bridge_settlement",
+        transferId: "tr_withdrawal_001",
+      }),
+    )
   })
 })
