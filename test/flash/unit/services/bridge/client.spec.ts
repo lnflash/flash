@@ -178,3 +178,37 @@ describe("listAllEvents", () => {
     expect(listEventsSpy).toHaveBeenCalledTimes(1)
   })
 })
+
+describe("BridgeClient transfer deletion", () => {
+  const originalFetch = global.fetch
+
+  beforeEach(() => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: "tr_123",
+        amount: "2.5",
+        currency: "usd",
+        state: "canceled",
+        source: { payment_rail: "ethereum", currency: "usdt" },
+        destination: { payment_rail: "ach", currency: "usd" },
+        created_at: "2026-06-17T00:00:00Z",
+        updated_at: "2026-06-17T00:00:00Z",
+      }),
+    } as Response)
+  })
+
+  afterEach(() => {
+    global.fetch = originalFetch
+  })
+
+  it("does not send an Idempotency-Key on DELETE transfer requests", async () => {
+    const client = new BridgeClient()
+
+    await client.deleteTransfer("tr_123" as never)
+
+    const [, init] = (global.fetch as jest.Mock).mock.calls[0]
+    expect(init.method).toBe("DELETE")
+    expect(init.headers["Idempotency-Key"]).toBeUndefined()
+  })
+})

@@ -365,8 +365,8 @@ export class BridgeClient {
       "Content-Type": "application/json",
     }
 
-    // Bridge rejects Idempotency-Key on some GET endpoints (e.g. /webhook_events).
-    if (method.toUpperCase() !== "GET") {
+    // Bridge rejects Idempotency-Key on GET and DELETE endpoints.
+    if (!["GET", "DELETE"].includes(method.toUpperCase())) {
       if (idempotencyKey) {
         headers["Idempotency-Key"] = idempotencyKey
       } else {
