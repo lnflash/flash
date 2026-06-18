@@ -11,15 +11,20 @@ jest.mock("@config", () => ({
         "https://eth.llamarpc.com",
         "https://cloudflare-eth.com",
       ],
+      ethUsdPriceUrl: "https://prices.example.invalid/eth-usd",
+      timeoutMs: 1_500,
+      cacheTtlMs: 45_000,
       fallbackGasPriceGwei: 30,
       ethUsdFallback: 3000,
     },
   },
 }))
 
+import * as EthereumGasEstimate from "@services/bridge/ethereum-gas-estimate"
 import {
   computeCustomerFeeEstimateFromGasMarket,
   computePendingAmountEstimates,
+  resolveWithdrawalCustomerFeeEstimate,
   presentBridgeWithdrawal,
   receiptFeesFromTransfer,
 } from "@services/bridge/withdrawal-fees"
@@ -33,11 +38,18 @@ const feeConfig = {
     "https://eth.llamarpc.com",
     "https://cloudflare-eth.com",
   ],
+  ethUsdPriceUrl: "https://prices.example.invalid/eth-usd",
+  timeoutMs: 1_500,
+  cacheTtlMs: 45_000,
   fallbackGasPriceGwei: 30,
   ethUsdFallback: 3000,
 }
 
 describe("bridge withdrawal fees", () => {
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
   it("computes customer fee as flash fee + bridge fee + buffered gas", () => {
     const estimate = computeCustomerFeeEstimateFromGasMarket({
       amount: "50.00",
@@ -51,6 +63,24 @@ describe("bridge withdrawal fees", () => {
     expect(estimate.estimatedBridgeFeePercent).toBe("0.6")
     expect(estimate.estimatedBridgeFee).toBe("0.30")
     expect(estimate.estimatedGasBuffer).toBe("5.85")
+    expect(estimate.estimatedCustomerFee).toBe("7.15")
+  })
+
+  it("resolves estimates using configured gas-market sources and cache settings", async () => {
+    const gasMarketSpy = jest
+      .spyOn(EthereumGasEstimate, "fetchEthereumGasMarketSnapshot")
+      .mockResolvedValue({ gasPriceGwei: 20, ethUsd: 3000 })
+
+    const estimate = await resolveWithdrawalCustomerFeeEstimate("50.00")
+
+    expect(gasMarketSpy).toHaveBeenCalledWith({
+      rpcUrls: feeConfig.ethereumGasRpcUrls,
+      timeoutMs: feeConfig.timeoutMs,
+      fallbackGasPriceGwei: feeConfig.fallbackGasPriceGwei,
+      ethUsdFallback: feeConfig.ethUsdFallback,
+      ethUsdPriceUrl: feeConfig.ethUsdPriceUrl,
+      cacheTtlMs: feeConfig.cacheTtlMs,
+    })
     expect(estimate.estimatedCustomerFee).toBe("7.15")
   })
 

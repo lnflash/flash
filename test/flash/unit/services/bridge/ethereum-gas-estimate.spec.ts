@@ -84,6 +84,36 @@ describe("ethereum gas estimate", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
+  it("caches gas market snapshots for the configured TTL and uses the configured ETH/USD URL", async () => {
+    const fetchMock = jest
+      .spyOn(global, "fetch")
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ result: "0x4a817c800" }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ethereum: { usd: 2500 } }),
+      } as Response)
+
+    const args = {
+      rpcUrls: ["https://cache-rpc.example.invalid"],
+      timeoutMs: 1000,
+      fallbackGasPriceGwei: 30,
+      ethUsdFallback: 3000,
+      ethUsdPriceUrl: "https://prices.example.invalid/eth-usd",
+      cacheTtlMs: 60_000,
+    }
+
+    const first = await fetchEthereumGasMarketSnapshot(args)
+    const second = await fetchEthereumGasMarketSnapshot(args)
+
+    expect(first).toEqual({ gasPriceGwei: 20, ethUsd: 2500 })
+    expect(second).toBe(first)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[1][0]).toBe("https://prices.example.invalid/eth-usd")
+  })
+
   it("reads ETH/USD from CoinGecko", async () => {
     jest.spyOn(global, "fetch").mockResolvedValue({
       ok: true,

@@ -37,6 +37,7 @@ import {
   BridgeCustomerNotFoundError,
   BridgeWithdrawalNotFoundError,
   BridgeWithdrawalAlreadyInitiatedError,
+  BridgeWithdrawalNetAmountTooLowError,
 } from "./errors"
 import BridgeApiClient from "./client"
 import {
@@ -589,6 +590,11 @@ const requestWithdrawal = async (
     }
 
     const feeEstimate = await resolveWithdrawalCustomerFeeEstimate(amount)
+    if (withdrawalAmount <= parseFloat(feeEstimate.estimatedCustomerFee)) {
+      return new BridgeWithdrawalNetAmountTooLowError(
+        `Withdrawal amount ${amount} must exceed estimated customer fees ${feeEstimate.estimatedCustomerFee}`,
+      )
+    }
 
     const existingWithdrawal =
       await BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer(

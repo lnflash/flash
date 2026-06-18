@@ -5,6 +5,17 @@ export type EthereumGasMarketSnapshot = {
   ethUsd: number
 }
 
+const DEFAULT_ETH_USD_PRICE_URL =
+  "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
+
+type CachedGasMarketSnapshot = {
+  key: string
+  expiresAt: number
+  snapshot: EthereumGasMarketSnapshot
+}
+
+let cachedGasMarketSnapshot: CachedGasMarketSnapshot | undefined
+
 export const computeEstimatedGasBufferUsd = ({
   gasLimit,
   gasPriceGwei,
@@ -109,16 +120,16 @@ export const fetchEthereumGasPriceGweiAverage = async ({
 }
 
 export const fetchEthUsdPrice = async ({
+  url = DEFAULT_ETH_USD_PRICE_URL,
   timeoutMs,
 }: {
+  url?: string
   timeoutMs: number
 }): Promise<number | Error> => {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
-    const url =
-      "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
     const response = await fetch(url, { signal: controller.signal })
     if (!response.ok) {
       return new Error(`ETH/USD price request failed: HTTP ${response.status}`)
@@ -132,7 +143,7 @@ export const fetchEthUsdPrice = async ({
 
     return ethUsd
   } catch (error) {
-    baseLogger.warn({ error }, "Failed to fetch ETH/USD price")
+    baseLogger.warn({ error, url }, "Failed to fetch ETH/USD price")
     return error instanceof Error ? error : new Error(String(error))
   } finally {
     clearTimeout(timeout)
@@ -144,15 +155,35 @@ export const fetchEthereumGasMarketSnapshot = async ({
   timeoutMs,
   fallbackGasPriceGwei,
   ethUsdFallback,
+  ethUsdPriceUrl = DEFAULT_ETH_USD_PRICE_URL,
+  cacheTtlMs = 0,
 }: {
   rpcUrls: string[]
   timeoutMs: number
   fallbackGasPriceGwei: number
   ethUsdFallback: number
+  ethUsdPriceUrl?: string
+  cacheTtlMs?: number
 }): Promise<EthereumGasMarketSnapshot> => {
+  const cacheKey = JSON.stringify({
+    rpcUrls,
+    timeoutMs,
+    fallbackGasPriceGwei,
+    ethUsdFallback,
+    ethUsdPriceUrl,
+  })
+  const now = Date.now()
+  if (
+    cacheTtlMs > 0 &&
+    cachedGasMarketSnapshot?.key === cacheKey &&
+    cachedGasMarketSnapshot.expiresAt > now
+  ) {
+    return cachedGasMarketSnapshot.snapshot
+  }
+
   const [gasPriceResult, ethUsdResult] = await Promise.all([
     fetchEthereumGasPriceGweiAverage({ rpcUrls, timeoutMs }),
-    fetchEthUsdPrice({ timeoutMs }),
+    fetchEthUsdPrice({ url: ethUsdPriceUrl, timeoutMs }),
   ])
 
   const gasPriceGwei =
@@ -172,5 +203,14 @@ export const fetchEthereumGasMarketSnapshot = async ({
     )
   }
 
-  return { gasPriceGwei, ethUsd }
+  const snapshot = { gasPriceGwei, ethUsd }
+  if (cacheTtlMs > 0) {
+    cachedGasMarketSnapshot = {
+      key: cacheKey,
+      expiresAt: now + cacheTtlMs,
+      snapshot,
+    }
+  }
+
+  return snapshot
 }

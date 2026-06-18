@@ -592,6 +592,29 @@ describe("requestWithdrawal", () => {
     expect(BridgeAccountsRepo.createWithdrawal).not.toHaveBeenCalled()
   })
 
+  it("rejects withdrawals whose estimated fees consume the full amount", async () => {
+    const { resolveWithdrawalCustomerFeeEstimate } = jest.requireMock(
+      "@services/bridge/withdrawal-fees",
+    )
+    resolveWithdrawalCustomerFeeEstimate.mockResolvedValue({
+      ...MOCK_WITHDRAWAL_FEE_ESTIMATE,
+      estimatedCustomerFee: AMOUNT,
+    })
+
+    const result = await BridgeService.requestWithdrawal(
+      ACCOUNT_ID,
+      AMOUNT,
+      EXTERNAL_ACCOUNT_ID,
+    )
+
+    const { BridgeWithdrawalNetAmountTooLowError } = jest.requireActual(
+      "@services/bridge/errors",
+    )
+    expect(result).toBeInstanceOf(BridgeWithdrawalNetAmountTooLowError)
+    expect(BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer).not.toHaveBeenCalled()
+    expect(BridgeAccountsRepo.createWithdrawal).not.toHaveBeenCalled()
+  })
+
   it("returns BridgeCustomerNotFoundError when account has no Bridge customer ID", async () => {
     ;(AccountsRepository as jest.Mock).mockReturnValue({
       findById: jest.fn().mockResolvedValue({ ...mockAccount, bridgeCustomerId: undefined }),

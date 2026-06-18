@@ -26,6 +26,9 @@ bridge:
       - "https://ethereum-rpc.publicnode.com"
       - "https://eth.llamarpc.com"
       - "https://cloudflare-eth.com"
+    ethUsdPriceUrl: "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
+    timeoutMs: 3000
+    cacheTtlMs: 60000
     fallbackGasPriceGwei: 30
     ethUsdFallback: 3000
   timeoutMs: 15000

@@ -16,6 +16,7 @@ import {
   BridgeTimeoutError,
   BridgeTransferFailedError,
   BridgeWebhookValidationError,
+  BridgeWithdrawalNetAmountTooLowError,
   mapBridgeHttpError,
 } from "@services/bridge/errors"
 
@@ -30,6 +31,10 @@ describe("error-map: Bridge errors", () => {
     [new BridgeKycOffboardedError(), "BRIDGE_KYC_OFFBOARDED"],
     [new BridgeCustomerNotFoundError(), "BRIDGE_CUSTOMER_NOT_FOUND"],
     [new BridgeInsufficientFundsError(), "BRIDGE_INSUFFICIENT_FUNDS"],
+    [
+      new BridgeWithdrawalNetAmountTooLowError(),
+      "BRIDGE_WITHDRAWAL_NET_AMOUNT_TOO_LOW",
+    ],
     [new BridgeRateLimitError(), "BRIDGE_RATE_LIMIT"],
     [new BridgeTimeoutError(), "BRIDGE_TIMEOUT"],
     [new BridgeTransferFailedError(), "BRIDGE_TRANSFER_FAILED"],

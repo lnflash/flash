@@ -20,6 +20,9 @@ export type BridgeWithdrawalFeeEstimateConfig = {
   usdtTransferGasLimit: number
   gasPriceBufferMultiplier: number
   ethereumGasRpcUrls: string[]
+  ethUsdPriceUrl: string
+  timeoutMs: number
+  cacheTtlMs: number
   fallbackGasPriceGwei: number
   ethUsdFallback: number
 }
@@ -43,6 +46,10 @@ export const defaultWithdrawalFeeEstimateConfig =
       "https://eth.llamarpc.com",
       "https://cloudflare-eth.com",
     ],
+    ethUsdPriceUrl:
+      "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
+    timeoutMs: 3_000,
+    cacheTtlMs: 60_000,
     fallbackGasPriceGwei: 30,
     ethUsdFallback: 3000,
   })
@@ -96,9 +103,11 @@ export const resolveWithdrawalCustomerFeeEstimate = async (
   const config = getWithdrawalFeeEstimateConfig()
   const gasMarket = await fetchEthereumGasMarketSnapshot({
     rpcUrls: config.ethereumGasRpcUrls,
-    timeoutMs: BridgeConfig.timeoutMs ?? 10_000,
+    timeoutMs: config.timeoutMs,
     fallbackGasPriceGwei: config.fallbackGasPriceGwei,
     ethUsdFallback: config.ethUsdFallback,
+    ethUsdPriceUrl: config.ethUsdPriceUrl,
+    cacheTtlMs: config.cacheTtlMs,
   })
 
   return computeCustomerFeeEstimateFromGasMarket({ amount, gasMarket, config })

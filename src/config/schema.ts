@@ -665,6 +665,13 @@ export const configSchema = {
                 "https://cloudflare-eth.com",
               ],
             },
+            ethUsdPriceUrl: {
+              type: "string",
+              default:
+                "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
+            },
+            timeoutMs: { type: "integer", default: 3000 },
+            cacheTtlMs: { type: "integer", default: 60000 },
             fallbackGasPriceGwei: { type: "number", default: 30 },
             ethUsdFallback: { type: "number", default: 3000 },
           },

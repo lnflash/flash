@@ -48,6 +48,9 @@ type BridgeWithdrawalFeeEstimateConfig = {
   usdtTransferGasLimit?: number
   gasPriceBufferMultiplier?: number
   ethereumGasRpcUrls?: string[]
+  ethUsdPriceUrl?: string
+  timeoutMs?: number
+  cacheTtlMs?: number
   fallbackGasPriceGwei?: number
   ethUsdFallback?: number
 }
