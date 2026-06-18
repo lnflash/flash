@@ -644,11 +644,10 @@ const createExternalAccount = async (
       crypto.randomUUID(),
     )
 
-    const ea = externalAccount as unknown as { active: boolean; last_4: string }
     const result: ExternalAccountResult = {
       bridgeExternalAccountId: externalAccount.id,
       bankName: externalAccount.bank_name ?? "",
-      accountNumberLast4: ea.last_4 ?? "",
+      accountNumberLast4: bridgeExternalAccountLast4(externalAccount),
       status: "verified",
     }
 
@@ -665,6 +664,7 @@ const createExternalAccount = async (
         { accountId, operation: "createExternalAccount", error: persistResult },
         "Failed to persist external account locally",
       )
+      return persistResult
     }
 
     baseLogger.info(
@@ -993,16 +993,15 @@ const initiateWithdrawal = async (
 
     const ibexPayoutId = ibexPayoutIdFromSendResponse(sendResult)
     if (!ibexPayoutId) {
-      const error = new Error("IBEX crypto send did not return transaction id")
-      await BridgeAccountsRepo.updateWithdrawalSendFailed(
-        pendingWithdrawal.id,
-        transfer.id,
-        transfer.amount,
-        transfer.currency,
-        bridgeDepositAddress,
-        error.message,
+      baseLogger.error(
+        {
+          accountId,
+          withdrawalId: pendingWithdrawal.id,
+          transferId: transfer.id,
+          sendResult,
+        },
+        "IBEX crypto send succeeded without transaction id; manual payout linking required",
       )
-      return error
     }
 
     const updated = await BridgeAccountsRepo.updateWithdrawalOnchainSend(

@@ -213,15 +213,15 @@ export const updateWithdrawalTransferId = async (
 
 export const updateWithdrawalOnchainSend = async (
   id: string,
-  ibexPayoutId: string,
+  ibexPayoutId: string | undefined,
   ibexTxHash?: string,
 ) => {
   try {
     const update: Record<string, unknown> = {
-      ibexPayoutId,
       status: "usdt_sent",
       updatedAt: new Date(),
     }
+    if (ibexPayoutId) update.ibexPayoutId = ibexPayoutId
     if (ibexTxHash) update.ibexTxHash = ibexTxHash
 
     const record = await BridgeWithdrawal.findOneAndUpdate(

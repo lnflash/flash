@@ -50,6 +50,7 @@ jest.mock("@services/bridge/client", () => ({
   __esModule: true,
   default: {
     createVirtualAccount: jest.fn(),
+    createExternalAccount: jest.fn(),
     createTransfer: jest.fn(),
     listExternalAccounts: jest.fn(),
     getCustomer: jest.fn().mockResolvedValue({ status: "active" }),
@@ -496,6 +497,57 @@ describe("createVirtualAccount — ETH-USDT Cash Wallet provisioning (ENG-296)",
   })
 })
 
+describe("createExternalAccount", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    setupGuards()
+    ;(BridgeClient.createExternalAccount as jest.Mock).mockResolvedValue({
+      ...mockBridgeExternalAccount,
+      account_number_last_4: "4321",
+    })
+  })
+
+  const createExternalAccountInput = {
+    account_owner_name: "Dread",
+    address: {
+      street_line_1: "1 Test St",
+      city: "San Francisco",
+      country: "US",
+      state: "CA",
+      postal_code: "94105",
+    },
+    account_type: "us",
+    currency: "usd",
+    account: {
+      account_number: "123456789012",
+      routing_number: "021000021",
+      checking_or_savings: "checking" as const,
+    },
+    bank_name: "Test Bank",
+  }
+
+  it("returns a local persistence error instead of reporting a linked account", async () => {
+    const persistError = new RepositoryError("mongo unavailable")
+    ;(BridgeAccountsRepo.createExternalAccount as jest.Mock).mockResolvedValue(
+      persistError,
+    )
+
+    const result = await BridgeService.createExternalAccount(
+      ACCOUNT_ID,
+      createExternalAccountInput,
+    )
+
+    expect(result).toBe(persistError)
+    expect(BridgeAccountsRepo.createExternalAccount).toHaveBeenCalledWith({
+      accountId: ACCOUNT_ID as string,
+      bridgeExternalAccountId: EXTERNAL_ACCOUNT_ID,
+      bankName: "Test Bank",
+      accountNumberLast4: "4321",
+      status: "verified",
+    })
+  })
+})
+
 // ─────────────────────────────────────────────────────────────────────────────
 // requestWithdrawal
 // Step 1 of the split flow: validates everything and writes a pending MongoDB
@@ -899,6 +951,34 @@ describe("initiateWithdrawal — takes withdrawalId (step 2A)", () => {
     expect(expectSuccess(result)).toMatchObject({
       status: "usdt_sent",
       bridgeTransferId: TRANSFER_ID,
+    })
+  })
+
+  it("preserves successful IBEX sends that do not expose a transaction id", async () => {
+    ;(IbexClient.sendCrypto as jest.Mock).mockResolvedValue({
+      status: "PENDING",
+      accepted: true,
+    })
+    ;(BridgeAccountsRepo.updateWithdrawalOnchainSend as jest.Mock).mockResolvedValue({
+      ...makeRow(WITHDRAWAL_ID),
+      bridgeTransferId: TRANSFER_ID,
+      bridgeDepositAddress: BRIDGE_DEPOSIT_ADDRESS,
+      ibexPayoutId: undefined,
+      status: "usdt_sent" as const,
+    })
+
+    const result = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
+
+    expect(BridgeAccountsRepo.updateWithdrawalSendFailed).not.toHaveBeenCalled()
+    expect(BridgeAccountsRepo.updateWithdrawalOnchainSend).toHaveBeenCalledWith(
+      WITHDRAWAL_ID,
+      undefined,
+      undefined,
+    )
+    expect(expectSuccess(result)).toMatchObject({
+      status: "usdt_sent",
+      bridgeTransferId: TRANSFER_ID,
+      ibexPayoutId: undefined,
     })
   })
 
