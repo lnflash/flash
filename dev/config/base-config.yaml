@@ -14,7 +14,7 @@ ibex:
 
 bridge:
   enabled: true
-  apiKey: "<replace>"
+  apiKey: "" # real key injected via config overrides; never commit a real key
   baseUrl: "https://api.sandbox.bridge.xyz/v0"
   minWithdrawalAmount: 2
   developerFeePercent: 2.0

@@ -203,6 +203,8 @@ services:
     deploy:
       restart_policy:
         condition: on-failure
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - frappe-sites:/home/frappe/frappe-bench/sites
       - frappe-logs:/home/frappe/frappe-bench/logs
@@ -229,7 +231,10 @@ services:
       REDIS_CACHE: redis:6379/1
       REDIS_QUEUE: redis:6379/2
       SOCKETIO_PORT: "9000"
-      FLASH_API: "http://localhost:4002/admin/graphql" ### THIS IS THE HOST MACHINE. NOT DOCKER.
+      # Local Frappe containers use Docker's host alias to reach a backend
+      # running on the host. Test/prod k8s must override this with an internal
+      # service or gateway URL for the admin GraphQL /graphql endpoint.
+      FLASH_API: "${FRAPPE_FLASH_API:-http://host.docker.internal:4001/graphql}"
       FLASH_SECRET: "not-so-secret"
     volumes:
       - frappe-sites:/home/frappe/frappe-bench/sites
@@ -288,6 +293,7 @@ services:
     image: brh28/frappe-flash:${FRAPPE_TAG:-latest}
     ports: [ "8080:8080" ]
     depends_on:
+      - frappe-backend
       - frappe-websocket
     deploy:
       restart_policy:

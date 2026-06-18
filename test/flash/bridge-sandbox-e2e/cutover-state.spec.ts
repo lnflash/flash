@@ -53,7 +53,10 @@ const CUTOVER_TESTS = process.env.CUTOVER_TESTS === "true"
         }
       `
 
-      const response = await execQuery(source, dummyAccountId)
+      const response = await execQuery<{
+        cashWalletCutover: { state: string; cutoverVersion: number; updatedAt: string }
+      }>(source, dummyAccountId)
+      if ("errors" in response) throw new Error(JSON.stringify(response.errors))
 
       expect(response.cashWalletCutover).toBeDefined()
       expect(typeof response.cashWalletCutover.state).toBe("string")
@@ -94,7 +97,10 @@ const CUTOVER_TESTS = process.env.CUTOVER_TESTS === "true"
         }
       `
 
-      const response = await execQuery(source, dummyAccountId)
+      const response = await execQuery<{
+        cashWalletCutover: { state: string }
+      }>(source, dummyAccountId)
+      if ("errors" in response) throw new Error(JSON.stringify(response.errors))
 
       expect(VALID_STATES.has(response.cashWalletCutover?.state)).toBe(true)
     })
