@@ -1,7 +1,7 @@
 import express, { Request, Response, NextFunction } from "express"
 import { baseLogger, baseLogger as logger } from "@services/logger"
 import { NotificationsService } from "@services/notifications"
-import { authenticate, logRequest } from "../middleware"
+import { authenticate, logRequest, validateIbexIp } from "../middleware"
 import {
   AccountsRepository,
   UsersRepository,
@@ -174,6 +174,7 @@ const router = express.Router()
 
 router.post(
   paths.invoice,
+  validateIbexIp,
   authenticate,
   logRequest,
   fetchPaymentContext,
@@ -184,6 +185,7 @@ router.post(
 
 router.post(
   paths.lnurl,
+  validateIbexIp,
   authenticate,
   logRequest,
   fetchPaymentContext,
@@ -194,6 +196,7 @@ router.post(
 
 router.post(
   paths.zap,
+  validateIbexIp,
   authenticate,
   logRequest,
   fetchPaymentContext,
@@ -201,12 +204,12 @@ router.post(
   (_req, resp) => resp.status(200).end(),
 )
 
-router.post(paths.cashout, authenticate, logRequest, (_req, resp) => {
+router.post(paths.cashout, validateIbexIp, authenticate, logRequest, (_req, resp) => {
   baseLogger.info("Received payment for cashout.")
   resp.status(200).end()
 })
 
-router.post(paths.onchain, authenticate, logRequest, fetchPaymentContext, sendOnchainNotification, (_req, resp) => {
+router.post(paths.onchain, validateIbexIp, authenticate, logRequest, fetchPaymentContext, sendOnchainNotification, (_req, resp) => {
   baseLogger.info("Received onchain payment.")
   resp.status(200).end()
 })

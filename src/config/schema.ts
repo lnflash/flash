@@ -638,6 +638,13 @@ export const configSchema = {
             port: { type: "integer" },
             uri: { type: "string" },
             secret: { type: "string" },
+            // Ibex's published source IPs / CIDRs for webhook delivery. Empty
+            // disables the allowlist check (see ISL-112).
+            allowedIps: {
+              type: "array",
+              items: { type: "string" },
+              default: [],
+            },
           },
         },
       },
