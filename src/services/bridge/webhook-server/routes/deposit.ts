@@ -67,9 +67,9 @@ export const depositHandler = async (req: Request, res: Response) => {
   const customerId = obj.on_behalf_of ?? obj.customer_id ?? obj.payment_route?.customer_id
   // "state" for transfers, "type" (funds_received / deposit / etc.) for others
   const state = obj.state ?? obj.type
-  const currency = obj.currency ?? obj.destination_payment_rail ?? "usd"
+  const currency = obj.currency ?? "usd"
 
-  if (!obj.id || !event_id || !obj.amount || !customerId) {
+  if (!obj.id || !event_id) {
     baseLogger.warn(
       { event_id, event_category, event_object_id: obj.id },
       "Bridge deposit webhook rejected: missing required fields",
@@ -77,7 +77,24 @@ export const depositHandler = async (req: Request, res: Response) => {
     return res.status(400).json({
       error: "Invalid payload",
       detail:
-        "Missing one or more required fields: id, event_id, amount, customer identifier",
+        "Missing one or more required fields: id, event_id",
+    })
+  }
+
+  if (!obj.amount || !customerId) {
+    baseLogger.warn(
+      {
+        event_id,
+        event_category,
+        event_object_id: obj.id,
+        has_amount: Boolean(obj.amount),
+        has_customer_identifier: Boolean(customerId),
+      },
+      "Bridge deposit webhook acknowledged without deposit row: missing crediting fields",
+    )
+    return res.status(200).json({
+      status: "skipped",
+      reason: "missing_crediting_fields",
     })
   }
 

@@ -1,4 +1,5 @@
 import ErpNext from "@services/frappe/ErpNext"
+import { baseLogger } from "@services/logger"
 import { BridgeTransferRequestUpsertError } from "@services/frappe/errors"
 
 import {
@@ -67,7 +68,7 @@ export const writeBridgeDepositRequest = async ({
     eventObject.customer_id ??
     eventObject.payment_route?.customer_id
   const state = eventObject.state ?? eventObject.type ?? "unknown"
-  const currency = eventObject.currency ?? eventObject.destination_payment_rail ?? "usd"
+  const currency = eventObject.currency ?? "usd"
   const isVirtualAccountActivity =
     !!eventObject.type ||
     !!eventObject.virtual_account_id ||
@@ -79,6 +80,10 @@ export const writeBridgeDepositRequest = async ({
     (isVirtualAccountActivity ? undefined : eventObject.id)
 
   if (!stableRequestId) {
+    baseLogger.warn(
+      { eventId, bridgeEventObjectId: eventObject.id, state },
+      "Skipping Bridge deposit ERPNext audit row without stable request id",
+    )
     return true
   }
 

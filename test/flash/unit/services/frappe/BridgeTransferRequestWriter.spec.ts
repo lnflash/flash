@@ -2,7 +2,12 @@ jest.mock("@services/frappe/ErpNext", () => ({
   upsertBridgeTransferRequest: jest.fn(),
 }))
 
+jest.mock("@services/logger", () => ({
+  baseLogger: { warn: jest.fn(), info: jest.fn(), error: jest.fn() },
+}))
+
 import ErpNext from "@services/frappe/ErpNext"
+import { baseLogger } from "@services/logger"
 import {
   writeBridgeCashoutCompleted,
   writeBridgeCashoutFailed,
@@ -68,6 +73,35 @@ describe("BridgeTransferRequestWriter", () => {
     })
 
     expect(upsert).not.toHaveBeenCalled()
+    expect(baseLogger.warn).toHaveBeenCalledWith(
+      {
+        eventId: "wh_scheduled",
+        bridgeEventObjectId: "activity_123",
+        state: "funds_scheduled",
+      },
+      "Skipping Bridge deposit ERPNext audit row without stable request id",
+    )
+  })
+
+  it("does not use destination payment rail as a deposit currency fallback", async () => {
+    await writeBridgeDepositRequest({
+      eventId: "wh_rail",
+      eventObject: {
+        id: "tr_rail",
+        state: "funds_received",
+        amount: "10.00",
+        currency: undefined as unknown as string,
+        destination_payment_rail: "wire",
+        on_behalf_of: "cust_123",
+      },
+      rawPayload: { event_id: "wh_rail" },
+    })
+
+    expect(lastRequestInput()).toEqual(
+      expect.objectContaining({
+        currency: "usd",
+      }),
+    )
   })
 
   it("keys virtual account deposits by Bridge deposit id", async () => {
