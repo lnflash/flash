@@ -17,6 +17,7 @@ jest.mock("ibex-client", () => {
   class IbexClientError extends Error {}
 
   return {
+    ...jest.requireActual("ibex-client"),
     __esModule: true,
     default: jest.fn().mockImplementation(() => ({
       authentication: {
