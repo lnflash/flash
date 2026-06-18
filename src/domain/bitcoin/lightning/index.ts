@@ -6,6 +6,9 @@ export { decodeInvoice } from "./ln-invoice"
 export {
   invoiceExpirationForCurrency,
   defaultTimeToExpiryInSeconds,
+  IBEX_RECEIVE_MAX_EXPIRATION_SECONDS,
+  ibexReceiveDefaultExpirationMinutes,
+  cappedIbexReceiveExpiration,
 } from "./invoice-expiration"
 export * from "./errors"
 
