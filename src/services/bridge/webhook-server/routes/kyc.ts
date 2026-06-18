@@ -84,7 +84,7 @@ export const kycHandler = async (req: Request, res: Response) => {
       baseLogger.info({ accountId: account.id, customerId }, "Bridge KYC not started")
     } else if (PENDING_BRIDGE_STATUSES.has(status)) {
       const result = await AccountsRepository().updateBridgeFields(account.id, {
-        bridgeKycStatus: status as BridgeKycStatus,
+        bridgeKycStatus: status as Account["bridgeKycStatus"],
       })
 
       if (result instanceof Error) {
