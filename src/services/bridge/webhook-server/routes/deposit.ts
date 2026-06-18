@@ -1,8 +1,12 @@
 /**
  * Bridge Deposit Webhook Handler
- * Handles transfer state-transition events (deposit flow) from Bridge.xyz
+ * Handles incoming-funds events from Bridge.xyz via the /deposit route.
  *
- * NOTE: This handler only logs the deposit event.
+ * Two event categories land here:
+ *   - virtual_account.activity  — fiat payments hitting a virtual account
+ *   - bridge_wallet.activity    — on-chain/off-chain bridge wallet movements
+ *
+ * Both represent money arriving that needs to be logged for reconciliation.
  * The actual balance crediting happens when IBEX sends its crypto.received webhook.
  */
 
@@ -15,76 +19,153 @@ import { writeBridgeDepositRequest } from "@services/frappe/BridgeTransferReques
 import { alertBridge, generateDedupKey } from "@services/alerts"
 import { alertIbexReconciliationFailed } from "@services/alerts/ibex-bridge-movement"
 
-export const depositHandler = async (req: Request, res: Response) => {
-  const { event_id, event_object } = req.body
-  const { id, state, amount, currency, on_behalf_of, receipt } = event_object ?? {}
+type DepositEventObject = {
+  id: string
+  amount: string
+  currency?: string
+  // Transfer event shape
+  state?: string
+  on_behalf_of?: string
+  developer_fee?: string
+  receipt?: {
+    initial_amount?: string
+    subtotal_amount?: string
+    final_amount?: string
+    developer_fee?: string
+    destination_tx_hash?: string
+  }
+  // Virtual account activity shape
+  type?: string
+  customer_id?: string
+  virtual_account_id?: string
+  deposit_id?: string
+  subtotal_amount?: string
+  developer_fee_amount?: string
+  exchange_fee_amount?: string
+  destination_payment_rail?: string
+  // Bridge wallet activity shape
+  bridge_wallet_id?: string
+  available_balance?: string
+  destination?: {
+    tx_hash?: string
+  }
+  payment_route?: {
+    type?: string
+    customer_id?: string
+    transfer_id?: string
+    deposit_id?: string
+    virtual_account_id?: string
+  }
+}
 
-  if (!id || !event_id || !amount || !on_behalf_of) {
-    return res.status(400).json({ error: "Invalid payload" })
+export const depositHandler = async (req: Request, res: Response) => {
+  const { event_id, event_category, event_object } = req.body
+  const obj = (event_object ?? {}) as DepositEventObject
+
+  // Normalise from either payload shape.
+  // Transfer events use on_behalf_of; virtual_account / bridge_wallet use customer_id.
+  const customerId = obj.on_behalf_of ?? obj.customer_id ?? obj.payment_route?.customer_id
+  // "state" for transfers, "type" (funds_received / deposit / etc.) for others
+  const state = obj.state ?? obj.type
+  const currency = obj.currency ?? "usd"
+
+  if (!obj.id || !event_id) {
+    baseLogger.warn(
+      { event_id, event_category, event_object_id: obj.id },
+      "Bridge deposit webhook rejected: missing required fields",
+    )
+    return res.status(400).json({
+      error: "Invalid payload",
+      detail:
+        "Missing one or more required fields: id, event_id",
+    })
+  }
+
+  if (!obj.amount || !customerId) {
+    baseLogger.warn(
+      {
+        event_id,
+        event_category,
+        event_object_id: obj.id,
+        has_amount: Boolean(obj.amount),
+        has_customer_identifier: Boolean(customerId),
+      },
+      "Bridge deposit webhook acknowledged without deposit row: missing crediting fields",
+    )
+    return res.status(200).json({
+      status: "skipped",
+      reason: "missing_crediting_fields",
+    })
   }
 
   try {
-    const lockKey = `bridge-deposit:${id}:${state}`
+    const lockKey = `bridge-deposit:${obj.id}:${state ?? "unknown"}`
     const lockResult = await LockService().lockIdempotencyKey(lockKey as IdempotencyKey)
     if (lockResult instanceof Error) {
-      baseLogger.info({ event_id, id, state }, "Duplicate Bridge deposit webhook")
+      baseLogger.info({ event_id, id: obj.id, state }, "Duplicate Bridge deposit webhook")
       return res.status(200).json({ status: "already_processed" })
     }
 
+    const rxReceipt = obj.receipt
+
+    const developerFee =
+      asOptionalString(rxReceipt?.developer_fee) ??
+      asOptionalString(obj.developer_fee_amount) ??
+      asOptionalString(obj.developer_fee) ??
+      "0.0"
+
     baseLogger.info(
       {
-        id,
-        state,
-        amount,
-        currency,
-        on_behalf_of,
-        receipt: {
-          initial_amount: receipt?.initial_amount,
-          subtotal_amount: receipt?.subtotal_amount,
-          final_amount: receipt?.final_amount,
-          developer_fee: receipt?.developer_fee,
-          destination_tx_hash: receipt?.destination_tx_hash,
-        },
         event_id,
+        event_category,
+        id: obj.id,
+        state,
+        amount: obj.amount,
+        currency,
+        customerId,
+        developerFee,
+        subtotalAmount: rxReceipt?.subtotal_amount ?? obj.subtotal_amount,
+        destinationTxHash: rxReceipt?.destination_tx_hash ?? obj.destination?.tx_hash,
       },
       "Bridge deposit event",
     )
 
     const depositLog = await createBridgeDeposit({
       eventId: event_id,
-      transferId: id,
-      customerId: on_behalf_of,
-      state,
-      amount: String(amount),
+      transferId: obj.id,
+      customerId,
+      state: state ?? "unknown",
+      amount: String(obj.amount),
       currency,
-      developerFee:
-        receipt?.developer_fee != null
-          ? String(receipt.developer_fee)
-          : event_object?.developer_fee != null
-            ? String(event_object.developer_fee)
-            : "0.0",
+      developerFee,
       subtotalAmount:
-        receipt?.subtotal_amount != null ? String(receipt.subtotal_amount) : undefined,
-      initialAmount:
-        receipt?.initial_amount != null ? String(receipt.initial_amount) : undefined,
-      finalAmount:
-        receipt?.final_amount != null ? String(receipt.final_amount) : undefined,
-      destinationTxHash: receipt?.destination_tx_hash,
+        asOptionalString(rxReceipt?.subtotal_amount) ??
+        asOptionalString(obj.subtotal_amount),
+      initialAmount: asOptionalString(rxReceipt?.initial_amount),
+      finalAmount: asOptionalString(rxReceipt?.final_amount),
+      destinationTxHash: rxReceipt?.destination_tx_hash ?? obj.destination?.tx_hash,
     })
 
     if (depositLog instanceof Error) {
       baseLogger.error(
-        { error: depositLog, event_id, id },
+        { error: depositLog, event_id, id: obj.id },
         "Failed to persist bridge deposit log",
       )
       return res.status(500).json({ error: "Failed to persist deposit log" })
     }
 
-    if (state === "payment_processed" && receipt?.destination_tx_hash) {
-      reconcileByTxHash({ txHash: receipt.destination_tx_hash }).catch((err) => {
-        baseLogger.error({ err, event_id, id }, "Real-time reconciliation failed")
+    // Real-time reconciliation: only trigger for transfer events that have
+    // reached payment_processed with an on-chain tx hash.
+    if (
+      event_category === "transfer" &&
+      state === "payment_processed" &&
+      rxReceipt?.destination_tx_hash
+    ) {
+      const txHash = rxReceipt.destination_tx_hash
+      reconcileByTxHash({ txHash }).catch((err) => {
+        baseLogger.error({ err, event_id, id: obj.id }, "Real-time reconciliation failed")
         alertIbexReconciliationFailed({
-          txHash: receipt.destination_tx_hash,
+          txHash,
           detail: err instanceof Error ? err.message : String(err),
         })
       })
@@ -97,16 +178,16 @@ export const depositHandler = async (req: Request, res: Response) => {
     })
     if (auditResult instanceof Error) {
       baseLogger.error(
-        { error: auditResult, event_id, id },
+        { error: auditResult, event_id, id: obj.id },
         "Failed to persist Bridge deposit ERPNext audit row",
       )
       alertBridge({
-        dedupKey: generateDedupKey.erpnextDepositAudit(id),
+        dedupKey: generateDedupKey.erpnextDepositAudit(obj.id),
         source: "erpnext-audit",
         severity: "critical",
         title: "Bridge deposit ERPNext audit write failed",
         detail: auditResult.message,
-        context: { event_id, transfer_id: id },
+        context: { event_id, transfer_id: obj.id },
       })
       return res.status(500).json({ error: "Failed to persist ERPNext audit row" })
     }
@@ -118,21 +199,29 @@ export const depositHandler = async (req: Request, res: Response) => {
       auditLockKey as IdempotencyKey,
     )
     if (auditLockResult instanceof Error) {
-      baseLogger.info({ event_id, id, state }, "Duplicate Bridge deposit webhook")
+      baseLogger.info({ event_id, id: obj.id, state }, "Duplicate Bridge deposit webhook")
       return res.status(200).json({ status: "already_processed" })
     }
 
     return res.status(200).json({ status: "success" })
   } catch (error) {
-    baseLogger.error({ error, id, event_id }, "Error processing Bridge deposit webhook")
+    baseLogger.error(
+      { error, id: obj.id, event_id },
+      "Error processing Bridge deposit webhook",
+    )
     alertBridge({
       dedupKey: generateDedupKey.bridgeWebhookDeposit(event_id),
       source: "bridge-webhook",
       severity: "critical",
       title: "Bridge deposit webhook processing error",
       detail: error instanceof Error ? error.message : String(error),
-      context: { event_id, transfer_id: id },
+      context: { event_id, transfer_id: obj.id },
     })
     return res.status(500).json({ error: "Internal server error" })
   }
+}
+
+const asOptionalString = (value: unknown): string | undefined => {
+  if (value === undefined || value === null) return undefined
+  return String(value)
 }
