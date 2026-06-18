@@ -73,6 +73,7 @@ describe("toWalletTransactions", () => {
 
     expect(transaction.settlementCurrency).toBe(WalletCurrency.Usdt)
     expect(transaction.settlementAmount).toBe(-500_000)
+    expect(transaction.settlementDisplayAmount).toBe("-0.5")
     expect(transaction.settlementFee).toBe(1)
   })
 
@@ -91,6 +92,7 @@ describe("toWalletTransactions", () => {
 
     expect(transaction.settlementCurrency).toBe(WalletCurrency.Usdt)
     expect(transaction.settlementAmount).toBe(-2_500_000)
+    expect(transaction.settlementDisplayAmount).toBe("-2.5")
     expect(transaction.settlementFee).toBe(179_554)
     expect(transaction.settlementDisplayFee).toBe("0.179554")
     expect(transaction.initiationVia.type).toBe("onchain")

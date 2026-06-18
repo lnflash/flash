@@ -90,7 +90,10 @@ export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] 
       settlementAmount: toSettlementAmount(trx.amount, trx.transactionTypeId, currency),
       settlementFee: toSettlementMinorUnit(trx.networkFee, currency),
       settlementCurrency: currency,
-      settlementDisplayAmount: `${trx.amount}`,
+      settlementDisplayAmount: toSettlementDisplayAmount(
+        trx.amount,
+        trx.transactionTypeId,
+      ),
       settlementDisplayFee: `${trx.networkFee}`,
       settlementDisplayPrice: settlementDisplayPrice,
       createdAt: trx.createdAt ? new Date(trx.createdAt) : new Date(), // should always return
@@ -174,6 +177,18 @@ const toSettlementAmount = (
       ? -1 * ibexAmount
       : ibexAmount
   return toSettlementMinorUnit(amt, currency)
+}
+
+const toSettlementDisplayAmount = (
+  ibexAmount: number | undefined,
+  transactionTypeId: number | undefined,
+): string => {
+  if (ibexAmount === undefined) return `${ibexAmount}`
+  const amount =
+    transactionTypeId === 2 || transactionTypeId === 4 || transactionTypeId === 10
+      ? -1 * ibexAmount
+      : ibexAmount
+  return `${amount}`
 }
 
 enum SortOrder {
