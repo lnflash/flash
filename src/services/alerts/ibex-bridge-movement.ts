@@ -44,7 +44,11 @@ export const alertIbexReconciliationOrphan = ({
   reason,
   context,
 }: {
-  orphanType: "bridge_without_ibex" | "ibex_without_bridge"
+  orphanType:
+    | "bridge_without_ibex"
+    | "ibex_without_bridge"
+    | "bridge_transfer_without_ibex_send"
+    | "ibex_send_without_bridge_settlement"
   txHash?: string
   transferId?: string
   reason: string
@@ -60,7 +64,11 @@ export const alertIbexReconciliationOrphan = ({
   const title =
     orphanType === "ibex_without_bridge"
       ? "IBEX crypto receive without matching Bridge deposit"
-      : "Bridge deposit without matching IBEX crypto receive"
+      : orphanType === "bridge_without_ibex"
+        ? "Bridge deposit without matching IBEX crypto receive"
+        : orphanType === "bridge_transfer_without_ibex_send"
+          ? "Bridge withdrawal transfer without matching IBEX send"
+          : "IBEX withdrawal send without Bridge settlement"
 
   alertIbexMovement(dedupKey, {
     title,

@@ -4,6 +4,11 @@ import IbexClient, {
   CreateAccountResponse201,
   CreateLnurlPayBodyParam,
   CreateLnurlPayResponse201,
+  CreateCryptoSendInfoBodyParam,
+  CryptoSendInfo,
+  CryptoSendBodyParam,
+  CryptoSendRequirements,
+  CryptoSendResponse200,
   DecodeLnurlMetadataParam,
   DecodeLnurlResponse200,
   EstimateFeeCopyResponse200,
@@ -218,6 +223,28 @@ const sendOnchain = async (
   } as SendToAddressCopyBodyParam
   addAttributesToCurrentSpan({ "request.params": JSON.stringify(bodyWithHooks) })
   return Ibex.sendToAddressV2(bodyWithHooks).then(errorHandler)
+}
+
+const sendCrypto = async (
+  body: CryptoSendBodyParam,
+): Promise<CryptoSendResponse200 | IbexError> => {
+  addAttributesToCurrentSpan({ "request.params": JSON.stringify(body) })
+  return Ibex.sendCrypto(body).then(errorHandler)
+}
+
+const getCryptoSendRequirements = async (args: {
+  network: string
+  currencyId: IbexCurrencyId
+}): Promise<CryptoSendRequirements | IbexError> => {
+  addAttributesToCurrentSpan({ "request.params": JSON.stringify(args) })
+  return Ibex.getCryptoSendRequirements(args).then(errorHandler)
+}
+
+const createCryptoSendInfo = async (
+  body: CreateCryptoSendInfoBodyParam,
+): Promise<CryptoSendInfo | IbexError> => {
+  addAttributesToCurrentSpan({ "request.params": JSON.stringify(body) })
+  return Ibex.createCryptoSendInfo(body).then(errorHandler)
 }
 
 const estimateOnchainFee = async (
@@ -481,6 +508,9 @@ export default wrapAsyncFunctionsToRunInSpan({
     getLnFeeEstimation,
     payInvoice,
     sendOnchain,
+    sendCrypto,
+    getCryptoSendRequirements,
+    createCryptoSendInfo,
     estimateOnchainFee,
     createLnurlPay,
     decodeLnurl,

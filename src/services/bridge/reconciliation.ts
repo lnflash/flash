@@ -5,11 +5,29 @@ import {
   upsertBridgeReconciliationOrphan,
   resolveOrphansByTxHash,
 } from "@services/mongoose/bridge-reconciliation-orphan"
-import { BridgeDeposits, IbexCryptoReceive } from "@services/mongoose/schema"
+import {
+  BridgeDeposits,
+  BridgeWithdrawal,
+  IbexCryptoReceive,
+} from "@services/mongoose/schema"
+import * as BridgeAccountsRepo from "@services/mongoose/bridge-accounts"
 import { PubSubService } from "@services/pubsub"
 import { PubSubDefaultTriggers } from "@domain/pubsub"
+import { toBridgeTransferId } from "@domain/primitives/bridge"
+
+import BridgeApiClient from "./client"
 
 const FIFTEEN_MIN_MS = 15 * 60 * 1000
+
+const WITHDRAWAL_TERMINAL_FAILURE_STATES = new Set([
+  "undeliverable",
+  "returned",
+  "refunded",
+  "refund_failed",
+  "missing_return_policy",
+  "error",
+  "canceled",
+])
 
 type BridgeDepositLike = {
   eventId: string
@@ -30,6 +48,21 @@ type IbexReceiveLike = {
   network: string
   accountId?: string
   receivedAt: Date
+}
+
+type BridgeWithdrawalLike = {
+  id?: string
+  _id?: { toString(): string } | string
+  accountId: string
+  bridgeTransferId?: string
+  bridgeDepositAddress?: string
+  ibexPayoutId?: string
+  amount: string
+  currency: string
+  status: "usdt_sent" | "send_failed"
+  failureReason?: string
+  updatedAt: Date
+  createdAt: Date
 }
 
 const toOrphanKey = (prefix: string, value: string) => `${prefix}:${value.toLowerCase()}`
@@ -192,6 +225,138 @@ export const reconcileBridgeAndIbexDeposits = async ({
     }
 
     baseLogger.info(summary, "Bridge↔IBEX reconciliation completed")
+    return summary
+  } catch (error) {
+    return error instanceof Error ? error : new Error(String(error))
+  }
+}
+
+export const reconcileBridgeAndIbexWithdrawals = async ({
+  windowMs = FIFTEEN_MIN_MS,
+}: {
+  windowMs?: number
+} = {}): Promise<
+  | {
+      scannedWithdrawals: number
+      cancelledSendFailedTransfers: number
+      finalizedCompletedTransfers: number
+      ibexSendWithoutBridgeSettlement: number
+      bridgeTransferWithoutIbexSend: number
+    }
+  | Error
+> => {
+  try {
+    const now = new Date()
+    const since = new Date(now.getTime() - windowMs)
+
+    const withdrawals = (await BridgeWithdrawal.find({
+      updatedAt: { $gte: since, $lte: now },
+      status: { $in: ["usdt_sent", "send_failed"] },
+      bridgeTransferId: { $exists: true },
+    })
+      .lean()
+      .exec()) as BridgeWithdrawalLike[]
+
+    let cancelledSendFailedTransfers = 0
+    let finalizedCompletedTransfers = 0
+    let ibexSendWithoutBridgeSettlement = 0
+    let bridgeTransferWithoutIbexSend = 0
+
+    for (const withdrawal of withdrawals) {
+      const transferId = withdrawal.bridgeTransferId
+      if (!transferId) continue
+      const bridgeTransferId = toBridgeTransferId(transferId)
+
+      if (withdrawal.status === "send_failed") {
+        try {
+          await BridgeApiClient.deleteTransfer(bridgeTransferId)
+          cancelledSendFailedTransfers++
+        } catch (error) {
+          bridgeTransferWithoutIbexSend++
+          const reason = "Bridge transfer exists but IBEX crypto send failed"
+          await upsertBridgeReconciliationOrphan({
+            orphanKey: toOrphanKey("withdrawal-send-failed", transferId),
+            orphanType: "bridge_transfer_without_ibex_send",
+            transferId,
+            amount: withdrawal.amount,
+            currency: withdrawal.currency,
+            triageContext: {
+              reason,
+              windowStart: since.toISOString(),
+              windowEnd: now.toISOString(),
+              accountId: withdrawal.accountId,
+              bridgeDepositAddress: withdrawal.bridgeDepositAddress,
+              failureReason: withdrawal.failureReason,
+              deleteTransferError: error instanceof Error ? error.message : String(error),
+            },
+          })
+          alertIbexReconciliationOrphan({
+            orphanType: "bridge_transfer_without_ibex_send",
+            transferId,
+            reason,
+            context: {
+              account_id: withdrawal.accountId,
+              amount: withdrawal.amount,
+              currency: withdrawal.currency,
+            },
+          })
+        }
+        continue
+      }
+
+      const transfer = await BridgeApiClient.getTransfer(bridgeTransferId)
+      if (transfer.state === "payment_processed") {
+        const finalized = await BridgeAccountsRepo.updateWithdrawalStatus(
+          bridgeTransferId,
+          "completed",
+        )
+        if (!(finalized instanceof Error)) finalizedCompletedTransfers++
+        continue
+      }
+
+      if (!WITHDRAWAL_TERMINAL_FAILURE_STATES.has(transfer.state)) continue
+
+      ibexSendWithoutBridgeSettlement++
+      const reason = `IBEX crypto send succeeded but Bridge transfer is ${transfer.state}`
+      await upsertBridgeReconciliationOrphan({
+        orphanKey: toOrphanKey("withdrawal-ibex-sent", transferId),
+        orphanType: "ibex_send_without_bridge_settlement",
+        transferId,
+        customerId: transfer.on_behalf_of,
+        amount: withdrawal.amount,
+        currency: withdrawal.currency,
+        triageContext: {
+          reason,
+          windowStart: since.toISOString(),
+          windowEnd: now.toISOString(),
+          accountId: withdrawal.accountId,
+          ibexPayoutId: withdrawal.ibexPayoutId,
+          bridgeState: transfer.state,
+        },
+      })
+      alertIbexReconciliationOrphan({
+        orphanType: "ibex_send_without_bridge_settlement",
+        transferId,
+        reason,
+        context: {
+          account_id: withdrawal.accountId,
+          ibex_payout_id: withdrawal.ibexPayoutId,
+          bridge_state: transfer.state,
+          amount: withdrawal.amount,
+          currency: withdrawal.currency,
+        },
+      })
+    }
+
+    const summary = {
+      scannedWithdrawals: withdrawals.length,
+      cancelledSendFailedTransfers,
+      finalizedCompletedTransfers,
+      ibexSendWithoutBridgeSettlement,
+      bridgeTransferWithoutIbexSend,
+    }
+
+    baseLogger.info(summary, "Bridge withdrawal reconciliation completed")
     return summary
   } catch (error) {
     return error instanceof Error ? error : new Error(String(error))

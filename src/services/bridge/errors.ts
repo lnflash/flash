@@ -101,6 +101,14 @@ export class BridgeTransferFailedError extends BridgeError {
   }
 }
 
+export class BridgeDepositInstructionsMissingError extends BridgeError {
+  constructor(
+    message: string = "Bridge did not return crypto deposit instructions for this withdrawal",
+  ) {
+    super(message)
+  }
+}
+
 export class BridgeWebhookValidationError extends BridgeError {
   constructor(message: string = "Invalid webhook signature") {
     super(message)
@@ -122,6 +130,14 @@ export class BridgeWithdrawalNotFoundError extends BridgeError {
 export class BridgeWithdrawalAlreadyInitiatedError extends BridgeError {
   constructor(
     message: string = "Withdrawal has already been submitted to Bridge and cannot be cancelled",
+  ) {
+    super(message)
+  }
+}
+
+export class BridgePlaidNotAvailableError extends BridgeError {
+  constructor(
+    message: string = "Bank account linking via Plaid is not available. Please enter your bank details manually.",
   ) {
     super(message)
   }

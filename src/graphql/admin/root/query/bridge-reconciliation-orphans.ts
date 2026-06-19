@@ -22,6 +22,8 @@ const BridgeReconciliationOrphansQuery = GT.Field({
       orphanType: orphanType as
         | "bridge_without_ibex"
         | "ibex_without_bridge"
+        | "bridge_transfer_without_ibex_send"
+        | "ibex_send_without_bridge_settlement"
         | undefined,
       limit: limit ?? 50,
     })

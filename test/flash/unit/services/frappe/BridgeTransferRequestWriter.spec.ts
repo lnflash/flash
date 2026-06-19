@@ -11,6 +11,7 @@ import { baseLogger } from "@services/logger"
 import {
   writeBridgeCashoutCompleted,
   writeBridgeCashoutFailed,
+  writeBridgeCashoutPending,
   writeBridgeDepositRequest,
   writeIbexCryptoReceiveRequest,
 } from "@services/frappe/BridgeTransferRequestWriter"
@@ -168,6 +169,28 @@ describe("BridgeTransferRequestWriter", () => {
         requestId: "tr_cashout",
         status: BridgeTransferRequestStatus.Completed,
         accountId: "acct_123",
+      }),
+    )
+  })
+
+  it("writes pending Bridge transfers as pending cashout audit requests", async () => {
+    await writeBridgeCashoutPending({
+      transferId: "tr_cashout",
+      amount: "5.00",
+      currency: "usdt",
+      accountId: "acct_123" as AccountId,
+      sourceEventId: "withdrawal_123",
+      sourceEventType: "bridge.withdrawal.usdt_sent",
+      rawPayload: { bridgeTransferId: "tr_cashout" },
+    })
+
+    expect(lastRequestInput()).toEqual(
+      expect.objectContaining({
+        requestId: "tr_cashout",
+        status: BridgeTransferRequestStatus.Pending,
+        accountId: "acct_123",
+        sourceEventId: "withdrawal_123",
+        sourceEventType: "bridge.withdrawal.usdt_sent",
       }),
     )
   })

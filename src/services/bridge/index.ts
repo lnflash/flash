@@ -24,9 +24,11 @@ import { WalletsRepository } from "@services/mongoose/wallets"
 
 import { IdentityRepository } from "@services/kratos"
 import IbexClient from "@services/ibex/client"
+import { writeBridgeCashoutPending } from "@services/frappe/BridgeTransferRequestWriter"
 import { IbexError } from "@services/ibex/errors"
 
 import {
+  BridgeApiError,
   BridgeInsufficientFundsError,
   BridgeError,
   BridgeDisabledError,
@@ -37,9 +39,14 @@ import {
   BridgeCustomerNotFoundError,
   BridgeWithdrawalNotFoundError,
   BridgeWithdrawalAlreadyInitiatedError,
+  BridgePlaidNotAvailableError,
+  BridgeDepositInstructionsMissingError,
   BridgeWithdrawalNetAmountTooLowError,
 } from "./errors"
-import BridgeApiClient from "./client"
+import BridgeApiClient, {
+  type CreateExternalAccountRequest,
+  type ExternalAccount,
+} from "./client"
 import {
   presentBridgeWithdrawal,
   receiptFeesFromTransfer,
@@ -128,6 +135,100 @@ type ExternalAccountResult = {
 
 export const deriveWithdrawalIdempotencyKey = (rowId: string): string =>
   crypto.createHash("sha256").update(`withdrawal:${rowId}`).digest("hex")
+
+const bridgeDepositAddressFromTransfer = (transfer: {
+  source_deposit_instructions?: { to_address?: string }
+}) => transfer.source_deposit_instructions?.to_address
+
+const ibexPayoutIdFromSendResponse = (response: unknown): string | undefined => {
+  if (typeof response !== "object" || response === null) return undefined
+  const typed = response as {
+    transaction?: { id?: string }
+    transactionHub?: { id?: string }
+    transactionId?: string
+  }
+  return typed.transaction?.id ?? typed.transactionHub?.id ?? typed.transactionId
+}
+
+const ibexTxHashFromSendResponse = (response: unknown): string | undefined => {
+  if (typeof response !== "object" || response === null) return undefined
+  const typed = response as {
+    txHash?: string
+    transactionHash?: string
+    networkTxId?: string
+    transactionHub?: { txHash?: string; transactionHash?: string; hash?: string }
+    cryptoTransaction?: { txHash?: string; networkTxId?: string }
+  }
+  return (
+    typed.txHash ??
+    typed.transactionHash ??
+    typed.networkTxId ??
+    typed.transactionHub?.txHash ??
+    typed.transactionHub?.transactionHash ??
+    typed.transactionHub?.hash ??
+    typed.cryptoTransaction?.txHash ??
+    typed.cryptoTransaction?.networkTxId
+  )
+}
+
+const bridgeExternalAccountLast4 = (externalAccount: ExternalAccount): string =>
+  externalAccount.account_number_last_4 ?? externalAccount.last_4 ?? ""
+
+const bridgeExternalAccountIsActive = (externalAccount: ExternalAccount): boolean =>
+  externalAccount.active !== false
+
+const externalAccountResultFromRecord = (acc: {
+  bridgeExternalAccountId: string
+  bankName: string
+  accountNumberLast4: string
+  status: string
+}): ExternalAccountResult => ({
+  bridgeExternalAccountId: acc.bridgeExternalAccountId,
+  bankName: acc.bankName,
+  accountNumberLast4: acc.accountNumberLast4,
+  status: acc.status as "pending" | "verified" | "failed",
+})
+
+const syncExternalAccountsFromBridge = async (
+  accountId: string,
+  customerId: string,
+): Promise<ExternalAccountResult[] | Error> => {
+  const bridgeAccounts = await BridgeApiClient.listExternalAccounts(
+    toBridgeCustomerId(customerId),
+  )
+  const activeBridgeAccounts = bridgeAccounts.data.filter(bridgeExternalAccountIsActive)
+  const activeBridgeAccountIds = activeBridgeAccounts.map((acc) => acc.id)
+
+  for (const externalAccount of activeBridgeAccounts) {
+    const persisted = await BridgeAccountsRepo.createExternalAccount({
+      accountId,
+      bridgeExternalAccountId: externalAccount.id,
+      bankName: externalAccount.bank_name ?? "",
+      accountNumberLast4: bridgeExternalAccountLast4(externalAccount),
+      status: "verified",
+    })
+    if (persisted instanceof Error) return persisted
+  }
+
+  const staleMarkResult = await BridgeAccountsRepo.markExternalAccountsMissingFromBridge(
+    accountId,
+    activeBridgeAccountIds,
+  )
+  if (staleMarkResult instanceof Error) return staleMarkResult
+
+  const localAccounts =
+    await BridgeAccountsRepo.findExternalAccountsByAccountId(accountId)
+  if (localAccounts instanceof Error) return localAccounts
+
+  const activeBridgeAccountIdsSet = new Set(activeBridgeAccountIds)
+  return localAccounts
+    .filter(
+      (acc) =>
+        activeBridgeAccountIdsSet.has(acc.bridgeExternalAccountId) &&
+        acc.status === "verified",
+    )
+    .map(externalAccountResultFromRecord)
+}
 
 const ensureEthUsdtCashWallet = async (
   account: Account,
@@ -496,6 +597,85 @@ const addExternalAccount = async (
       { accountId, operation: "addExternalAccount", error },
       "Bridge operation failed",
     )
+
+    if (
+      error instanceof BridgeApiError &&
+      (error.statusCode === 401 || error.statusCode === 403)
+    ) {
+      return new BridgePlaidNotAvailableError()
+    }
+
+    return error instanceof Error ? error : new Error(String(error))
+  }
+}
+
+/**
+ * Creates an external account directly via Bridge API (bypassing Plaid Link).
+ * Used as a fallback when Plaid Link is unavailable.
+ */
+const createExternalAccount = async (
+  accountId: AccountId,
+  data: CreateExternalAccountRequest,
+): Promise<ExternalAccountResult | Error> => {
+  baseLogger.info(
+    { accountId, operation: "createExternalAccount" },
+    "Bridge operation started",
+  )
+
+  const enabledCheck = checkBridgeEnabled()
+  if (enabledCheck instanceof Error) return enabledCheck
+
+  const account = await checkAccountLevel(accountId)
+  if (account instanceof Error) return account
+
+  try {
+    const customerId = account.bridgeCustomerId
+    if (!customerId) {
+      return new BridgeCustomerNotFoundError(
+        "Account has no Bridge customer ID. Complete KYC first.",
+      )
+    }
+
+    const externalAccount = await BridgeApiClient.createExternalAccount(
+      customerId,
+      data,
+      crypto.randomUUID(),
+    )
+
+    const result: ExternalAccountResult = {
+      bridgeExternalAccountId: externalAccount.id,
+      bankName: externalAccount.bank_name ?? "",
+      accountNumberLast4: bridgeExternalAccountLast4(externalAccount),
+      status: "verified",
+    }
+
+    // Persist the external account reference in the local repository
+    const persistResult = await BridgeAccountsRepo.createExternalAccount({
+      accountId,
+      bridgeExternalAccountId: result.bridgeExternalAccountId,
+      bankName: result.bankName,
+      accountNumberLast4: result.accountNumberLast4,
+      status: "verified",
+    })
+    if (persistResult instanceof Error) {
+      baseLogger.error(
+        { accountId, operation: "createExternalAccount", error: persistResult },
+        "Failed to persist external account locally",
+      )
+      return persistResult
+    }
+
+    baseLogger.info(
+      { accountId, operation: "createExternalAccount", result },
+      "Bridge operation completed",
+    )
+
+    return result
+  } catch (error) {
+    baseLogger.error(
+      { accountId, operation: "createExternalAccount", error },
+      "Bridge operation failed",
+    )
     return error instanceof Error ? error : new Error(String(error))
   }
 }
@@ -573,9 +753,11 @@ const requestWithdrawal = async (
       )
     }
 
-    // CRIT-2 (ENG-281): Verify caller owns this external account
-    const externalAccounts = await BridgeAccountsRepo.findExternalAccountsByAccountId(
+    // CRIT-2 (ENG-281): Bridge is the source of truth. Sync first so
+    // Dashboard-deleted external accounts cannot remain locally selectable.
+    const externalAccounts = await syncExternalAccountsFromBridge(
       accountId as string,
+      customerId,
     )
     if (externalAccounts instanceof Error) return externalAccounts
 
@@ -684,11 +866,6 @@ const initiateWithdrawal = async (
       )
     }
 
-    const ethereumAddress = account.bridgeEthereumAddress
-    if (!ethereumAddress) {
-      return new Error("Account has no Ethereum address. Create virtual account first.")
-    }
-
     const pendingWithdrawal = await BridgeAccountsRepo.findWithdrawalById(withdrawalId)
     if (pendingWithdrawal instanceof Error) {
       return new BridgeWithdrawalNotFoundError()
@@ -696,11 +873,27 @@ const initiateWithdrawal = async (
     if (pendingWithdrawal.accountId !== (accountId as string)) {
       return new BridgeWithdrawalNotFoundError()
     }
-    if (pendingWithdrawal.status !== "pending" || pendingWithdrawal.bridgeTransferId) {
+    if (
+      pendingWithdrawal.status !== "pending" ||
+      pendingWithdrawal.bridgeTransferId ||
+      pendingWithdrawal.ibexPayoutId
+    ) {
       return new BridgeWithdrawalAlreadyInitiatedError()
     }
 
     const { amount, externalAccountId } = pendingWithdrawal
+
+    const externalAccounts = await syncExternalAccountsFromBridge(
+      accountId as string,
+      customerId,
+    )
+    if (externalAccounts instanceof Error) return externalAccounts
+    const targetAccount = externalAccounts.find(
+      (acc) => acc.bridgeExternalAccountId === externalAccountId,
+    )
+    if (!targetAccount) {
+      return new Error("External account not found")
+    }
 
     // Re-check balance at execution time — funds may have changed since the request
     const wallets = await WalletsRepository().listByAccountId(accountId)
@@ -726,6 +919,9 @@ const initiateWithdrawal = async (
       )
     }
 
+    const sendAmount = USDTAmount.fromNumber(amount)
+    if (sendAmount instanceof Error) return sendAmount
+
     const idempotencyKey = deriveWithdrawalIdempotencyKey(pendingWithdrawal.id)
 
     const transfer = await BridgeApiClient.createTransfer(
@@ -736,7 +932,6 @@ const initiateWithdrawal = async (
         source: {
           payment_rail: "ethereum",
           currency: "usdt",
-          from_address: ethereumAddress,
         },
         developer_fee_percent: String(BridgeConfig.developerFeePercent),
         destination: {
@@ -744,21 +939,138 @@ const initiateWithdrawal = async (
           currency: "usd",
           external_account_id: externalAccountId,
         },
+        features: {
+          allow_any_from_address: true,
+        },
       },
       idempotencyKey,
     )
 
-    const updated = await BridgeAccountsRepo.updateWithdrawalTransferId(
+    const bridgeDepositAddress = bridgeDepositAddressFromTransfer(transfer)
+    if (!bridgeDepositAddress) {
+      return new BridgeDepositInstructionsMissingError()
+    }
+
+    const submitted = await BridgeAccountsRepo.updateWithdrawalTransferId(
       pendingWithdrawal.id,
       transfer.id,
       transfer.amount,
       transfer.currency,
+      bridgeDepositAddress,
       receiptFeesFromTransfer(transfer.receipt),
+    )
+    if (submitted instanceof Error) return submitted
+
+    const sendRequirements = await IbexClient.getCryptoSendRequirements({
+      network: "ethereum",
+      currencyId: USDTAmount.currencyId,
+    })
+    if (sendRequirements instanceof Error) {
+      await BridgeAccountsRepo.updateWithdrawalSendFailed(
+        pendingWithdrawal.id,
+        transfer.id,
+        transfer.amount,
+        transfer.currency,
+        bridgeDepositAddress,
+        sendRequirements.message,
+      )
+      return sendRequirements
+    }
+
+    const cryptoSendInfo = await IbexClient.createCryptoSendInfo({
+      name: `bridge-withdrawal-${pendingWithdrawal.id}`,
+      requirementsId: sendRequirements.requirementsId,
+      data: { address: bridgeDepositAddress },
+    })
+    if (cryptoSendInfo instanceof Error) {
+      await BridgeAccountsRepo.updateWithdrawalSendFailed(
+        pendingWithdrawal.id,
+        transfer.id,
+        transfer.amount,
+        transfer.currency,
+        bridgeDepositAddress,
+        cryptoSendInfo.message,
+      )
+      return cryptoSendInfo
+    }
+    if (!cryptoSendInfo.id) {
+      const error = new Error("IBEX crypto send info did not return id")
+      await BridgeAccountsRepo.updateWithdrawalSendFailed(
+        pendingWithdrawal.id,
+        transfer.id,
+        transfer.amount,
+        transfer.currency,
+        bridgeDepositAddress,
+        error.message,
+      )
+      return error
+    }
+
+    const sendResult = await IbexClient.sendCrypto({
+      accountId: usdtWallet.id as IbexAccountId,
+      cryptoSendInfosId: cryptoSendInfo.id,
+      amount: sendAmount.toIbex(),
+    })
+    if (sendResult instanceof Error) {
+      await BridgeAccountsRepo.updateWithdrawalSendFailed(
+        pendingWithdrawal.id,
+        transfer.id,
+        transfer.amount,
+        transfer.currency,
+        bridgeDepositAddress,
+        sendResult.message,
+      )
+      return sendResult
+    }
+
+    const ibexPayoutId = ibexPayoutIdFromSendResponse(sendResult)
+    if (!ibexPayoutId) {
+      baseLogger.error(
+        {
+          accountId,
+          withdrawalId: pendingWithdrawal.id,
+          transferId: transfer.id,
+          sendResult,
+        },
+        "IBEX crypto send succeeded without transaction id; manual payout linking required",
+      )
+    }
+
+    const updated = await BridgeAccountsRepo.updateWithdrawalOnchainSend(
+      pendingWithdrawal.id,
+      ibexPayoutId,
+      ibexTxHashFromSendResponse(sendResult),
     )
     if (updated instanceof Error) return updated
 
+    const auditResult = await writeBridgeCashoutPending({
+      transferId: transfer.id,
+      amount: transfer.amount,
+      currency: transfer.currency,
+      accountId: accountId as string,
+      sourceEventId: updated.id,
+      sourceEventType: "bridge.withdrawal.usdt_sent",
+      rawPayload: {
+        withdrawalId: updated.id,
+        bridgeTransferId: transfer.id,
+        ibexPayoutId,
+        ibexTxHash: updated.ibexTxHash,
+      },
+    })
+    if (auditResult instanceof Error) {
+      baseLogger.warn(
+        { accountId, withdrawalId, transferId: transfer.id, error: auditResult },
+        "Failed to write pending Bridge cashout transfer request",
+      )
+    }
+
     baseLogger.info(
-      { accountId, operation: "initiateWithdrawal", transferId: transfer.id },
+      {
+        accountId,
+        operation: "initiateWithdrawal",
+        transferId: transfer.id,
+        ibexPayoutId,
+      },
       "Bridge operation completed",
     )
 
@@ -1072,17 +1384,15 @@ const getExternalAccounts = async (
   if (account instanceof Error) return account
 
   try {
-    const externalAccounts = await BridgeAccountsRepo.findExternalAccountsByAccountId(
-      accountId as string,
-    )
-    if (externalAccounts instanceof Error) return externalAccounts
+    const customerId = account.bridgeCustomerId
+    if (!customerId) {
+      return new BridgeCustomerNotFoundError(
+        "Account has no Bridge customer ID. Complete KYC first.",
+      )
+    }
 
-    const result: ExternalAccountResult[] = externalAccounts.map((acc) => ({
-      bridgeExternalAccountId: acc.bridgeExternalAccountId,
-      bankName: acc.bankName,
-      accountNumberLast4: acc.accountNumberLast4,
-      status: acc.status as "pending" | "verified" | "failed",
-    }))
+    const result = await syncExternalAccountsFromBridge(accountId as string, customerId)
+    if (result instanceof Error) return result
 
     baseLogger.info(
       { accountId, operation: "getExternalAccounts", count: result.length },
@@ -1146,6 +1456,7 @@ export default wrapAsyncFunctionsToRunInSpan({
     initiateKyc,
     createVirtualAccount,
     addExternalAccount,
+    createExternalAccount,
     requestWithdrawal,
     initiateWithdrawal,
     cancelWithdrawalRequest,

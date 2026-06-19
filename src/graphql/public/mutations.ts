@@ -65,6 +65,7 @@ import UpdateExternalWalletMutation from "./root/mutation/update-external-wallet
 import BridgeInitiateKycMutation from "./root/mutation/bridge-initiate-kyc"
 import BridgeCreateVirtualAccountMutation from "./root/mutation/bridge-create-virtual-account"
 import BridgeAddExternalAccountMutation from "./root/mutation/bridge-add-external-account"
+import BridgeCreateExternalAccountMutation from "./root/mutation/bridge-create-external-account"
 import BridgeRequestWithdrawalMutation from "./root/mutation/bridge-request-withdrawal"
 import BridgeInitiateWithdrawalMutation from "./root/mutation/bridge-initiate-withdrawal"
 import BridgeCancelWithdrawalRequestMutation from "./root/mutation/bridge-cancel-withdrawal-request"
@@ -125,6 +126,7 @@ export const mutationFields = {
       bridgeInitiateKyc: BridgeInitiateKycMutation,
       bridgeCreateVirtualAccount: BridgeCreateVirtualAccountMutation,
       bridgeAddExternalAccount: BridgeAddExternalAccountMutation,
+      bridgeCreateExternalAccount: BridgeCreateExternalAccountMutation,
       bridgeRequestWithdrawal: BridgeRequestWithdrawalMutation,
       bridgeInitiateWithdrawal: BridgeInitiateWithdrawalMutation,
       bridgeCancelWithdrawalRequest: BridgeCancelWithdrawalRequestMutation,

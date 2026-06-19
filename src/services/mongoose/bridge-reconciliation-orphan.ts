@@ -1,6 +1,10 @@
 import { BridgeReconciliationOrphan } from "./schema"
 
-type OrphanType = "bridge_without_ibex" | "ibex_without_bridge"
+type OrphanType =
+  | "bridge_without_ibex"
+  | "ibex_without_bridge"
+  | "bridge_transfer_without_ibex_send"
+  | "ibex_send_without_bridge_settlement"
 type OrphanStatus = "unmatched" | "resolved"
 
 export const upsertBridgeReconciliationOrphan = async (data: {

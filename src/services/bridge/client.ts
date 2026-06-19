@@ -160,6 +160,8 @@ export interface CreateExternalAccountRequest {
     street_line_1: string
     city: string
     country: string
+    state?: string
+    postal_code?: string
   }
   account_type: string | "us" | "iban" | "unknown" | "clabe" | "pix" | "gb"
   currency: "usd" | "gbp" | "brl" | "eur" | string
@@ -203,8 +205,10 @@ export interface ExternalAccount {
   currency: string
   bank_name?: string
   account_number_last_4?: string
+  last_4?: string
   routing_number?: string
   iban?: string
+  active?: boolean
   created_at: string
 }
 
@@ -373,8 +377,8 @@ export class BridgeClient {
       "Content-Type": "application/json",
     }
 
-    // Bridge rejects Idempotency-Key on some GET endpoints (e.g. /webhook_events).
-    if (method.toUpperCase() !== "GET") {
+    // Bridge rejects Idempotency-Key on GET and DELETE endpoints.
+    if (!["GET", "DELETE"].includes(method.toUpperCase())) {
       if (idempotencyKey) {
         headers["Idempotency-Key"] = idempotencyKey
       } else {
@@ -556,12 +560,13 @@ export class BridgeClient {
     return this.request<Transfer>("POST", "/transfers", bodyWithCustomer, idempotencyKey)
   }
 
-  async getTransfer(
-    customerId: BridgeCustomerId,
-    transferId: BridgeTransferId,
-  ): Promise<Transfer> {
+  async getTransfer(transferId: BridgeTransferId): Promise<Transfer> {
     // Note: Bridge API uses /transfers/{id} not /customers/{id}/transfers/{id}
     return this.request<Transfer>("GET", `/transfers/${transferId}`)
+  }
+
+  async deleteTransfer(transferId: BridgeTransferId): Promise<Transfer> {
+    return this.request<Transfer>("DELETE", `/transfers/${transferId}`)
   }
 
   // ============ List Events ============

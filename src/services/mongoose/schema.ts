@@ -40,14 +40,25 @@ interface IBridgeExternalAccountRecord {
   accountNumberLast4: string
   status: "pending" | "verified" | "failed"
   createdAt: Date
+  updatedAt: Date
 }
 
 interface IBridgeWithdrawalRecord {
   accountId: string
   bridgeTransferId?: string
+  bridgeDepositAddress?: string
+  ibexPayoutId?: string
+  ibexTxHash?: string
   amount: string
   currency: string
-  status: "pending" | "submitted" | "completed" | "failed" | "cancelled"
+  status:
+    | "pending"
+    | "submitted"
+    | "usdt_sent"
+    | "send_failed"
+    | "completed"
+    | "failed"
+    | "cancelled"
   flashFeePercent: string
   flashFee: string
   estimatedBridgeFeePercent: string
@@ -349,7 +360,18 @@ const AccountSchema = new Schema<AccountRecord>(
     },
     bridgeKycStatus: {
       type: String,
-      enum: ["open", "not_started", "incomplete", "awaiting_questionnaire", "awaiting_ubo", "under_review", "paused", "approved", "rejected", "offboarded"],
+      enum: [
+        "open",
+        "not_started",
+        "incomplete",
+        "awaiting_questionnaire",
+        "awaiting_ubo",
+        "under_review",
+        "paused",
+        "approved",
+        "rejected",
+        "offboarded",
+      ],
       required: false,
     },
     bridgeEthereumAddress: {
@@ -710,6 +732,7 @@ const BridgeExternalAccountSchema = new Schema<IBridgeExternalAccountRecord>({
   accountNumberLast4: { type: String, required: true },
   status: { type: String, enum: ["pending", "verified", "failed"], default: "pending" },
   createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now },
 })
 
 // CRIT-2 (ENG-281): Compound index enforces that a given bridgeExternalAccountId
@@ -723,9 +746,24 @@ BridgeExternalAccountSchema.index(
 const BridgeWithdrawalSchema = new Schema<IBridgeWithdrawalRecord>({
   accountId: { type: String, required: true, index: true },
   bridgeTransferId: { type: String, unique: true, sparse: true },
+  bridgeDepositAddress: { type: String },
+  ibexPayoutId: { type: String, unique: true, sparse: true },
+  ibexTxHash: { type: String },
   amount: { type: String, required: true },
   currency: { type: String, required: true },
-  status: { type: String, enum: ["pending", "submitted", "completed", "failed", "cancelled"], default: "pending" },
+  status: {
+    type: String,
+    enum: [
+      "pending",
+      "submitted",
+      "usdt_sent",
+      "send_failed",
+      "completed",
+      "failed",
+      "cancelled",
+    ],
+    default: "pending",
+  },
   flashFeePercent: { type: String, required: true },
   flashFee: { type: String, required: true },
   estimatedBridgeFeePercent: { type: String, required: true },
@@ -796,7 +834,12 @@ const BridgeReconciliationOrphanSchema = new Schema({
   orphanKey: { type: String, required: true, unique: true },
   orphanType: {
     type: String,
-    enum: ["bridge_without_ibex", "ibex_without_bridge"],
+    enum: [
+      "bridge_without_ibex",
+      "ibex_without_bridge",
+      "bridge_transfer_without_ibex_send",
+      "ibex_send_without_bridge_settlement",
+    ],
     required: true,
   },
   status: {
