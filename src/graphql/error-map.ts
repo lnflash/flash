@@ -562,6 +562,13 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         message,
       })
 
+    case "BridgeWithdrawalNetAmountTooLowError":
+      message = error.message || "Withdrawal amount must exceed estimated customer fees"
+      return bridgeGqlError({
+        code: "BRIDGE_WITHDRAWAL_NET_AMOUNT_TOO_LOW",
+        message,
+      })
+
     case "BridgeWithdrawalNotFoundError":
       message = error.message || "Withdrawal request not found"
       return bridgeGqlError({

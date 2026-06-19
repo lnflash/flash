@@ -1,4 +1,5 @@
 import ErpNext from "@services/frappe/ErpNext"
+import { baseLogger } from "@services/logger"
 import { BridgeTransferRequestUpsertError } from "@services/frappe/errors"
 
 import {
@@ -13,6 +14,19 @@ type BridgeDepositEventObject = {
   amount: string
   currency: string
   on_behalf_of: string
+  deposit_id?: string
+  virtual_account_id?: string
+  product_type?: string
+  // Virtual-account/bridge-wallet activity fields
+  type?: string
+  customer_id?: string
+  payment_route?: {
+    customer_id?: string
+    type?: string
+    deposit_id?: string
+    transfer_id?: string
+  }
+  destination_payment_rail?: string
   receipt?: {
     developer_fee?: unknown
     initial_amount?: unknown
@@ -48,13 +62,38 @@ export const writeBridgeDepositRequest = async ({
 }): Promise<true | BridgeTransferRequestUpsertError> => {
   const receipt = eventObject.receipt
 
+  // Normalise: virtual_account / bridge_wallet events use different field names
+  const customerId =
+    eventObject.on_behalf_of ??
+    eventObject.customer_id ??
+    eventObject.payment_route?.customer_id
+  const state = eventObject.state ?? eventObject.type ?? "unknown"
+  const currency = eventObject.currency ?? "usd"
+  const isVirtualAccountActivity =
+    !!eventObject.type ||
+    !!eventObject.virtual_account_id ||
+    eventObject.product_type === "virtual_account"
+  const stableRequestId =
+    eventObject.deposit_id ??
+    eventObject.payment_route?.deposit_id ??
+    eventObject.payment_route?.transfer_id ??
+    (isVirtualAccountActivity ? undefined : eventObject.id)
+
+  if (!stableRequestId) {
+    baseLogger.warn(
+      { eventId, bridgeEventObjectId: eventObject.id, state },
+      "Skipping Bridge deposit ERPNext audit row without stable request id",
+    )
+    return true
+  }
+
   return upsert(
     new BridgeTransferRequest({
-      requestId: eventObject.id,
+      requestId: stableRequestId,
       transactionType: BridgeTransferRequestTransactionType.Topup,
       status: BridgeTransferRequestStatus.FiatReceived,
       amount: String(eventObject.amount),
-      currency: String(eventObject.currency),
+      currency: String(currency),
       developerFee:
         asOptionalString(receipt?.developer_fee) ??
         asOptionalString(eventObject.developer_fee) ??
@@ -62,11 +101,11 @@ export const writeBridgeDepositRequest = async ({
       initialAmount: asOptionalString(receipt?.initial_amount),
       subtotalAmount: asOptionalString(receipt?.subtotal_amount),
       finalAmount: asOptionalString(receipt?.final_amount),
-      bridgeCustomerId: eventObject.on_behalf_of,
-      bridgeTransferId: eventObject.id,
+      bridgeCustomerId: customerId ?? "unknown",
+      bridgeTransferId: stableRequestId,
       ibexTxHash: receipt?.destination_tx_hash,
       sourceEventId: eventId,
-      sourceEventType: `deposit.${eventObject.state ?? "unknown"}`,
+      sourceEventType: `deposit.${state}`,
       sourceSystemsSeen: ["bridge_deposit"],
       rawPayload,
     }),

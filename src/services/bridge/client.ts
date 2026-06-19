@@ -297,7 +297,19 @@ export interface Transfer {
     bank_routing_number?: string
     to_address?: string
   }
-  receipt?: Record<string, unknown>
+  receipt?: {
+    initial_amount: string
+    developer_fee: string
+    exchange_fee: string
+    subtotal_amount: string
+    gas_fee?: string
+    final_amount?: string
+    exchange_rate?: string
+    source_tx_hash?: string
+    destination_tx_hash?: string
+    remaining_prefunded_balance?: string
+    url?: string
+  }
   created_at: string
   updated_at: string
 }

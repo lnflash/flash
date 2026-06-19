@@ -59,6 +59,16 @@ interface IBridgeWithdrawalRecord {
     | "completed"
     | "failed"
     | "cancelled"
+  flashFeePercent: string
+  flashFee: string
+  estimatedBridgeFeePercent: string
+  estimatedBridgeFee: string
+  estimatedGasBuffer: string
+  estimatedCustomerFee: string
+  bridgeDeveloperFee?: string
+  bridgeExchangeFee?: string
+  subtotalAmount?: string
+  finalAmount?: string
   failureReason?: string
   externalAccountId: string
   createdAt: Date
@@ -754,6 +764,16 @@ const BridgeWithdrawalSchema = new Schema<IBridgeWithdrawalRecord>({
     ],
     default: "pending",
   },
+  flashFeePercent: { type: String, required: true },
+  flashFee: { type: String, required: true },
+  estimatedBridgeFeePercent: { type: String, required: true },
+  estimatedBridgeFee: { type: String, required: true },
+  estimatedGasBuffer: { type: String, required: true },
+  estimatedCustomerFee: { type: String, required: true },
+  bridgeDeveloperFee: { type: String },
+  bridgeExchangeFee: { type: String },
+  subtotalAmount: { type: String },
+  finalAmount: { type: String },
   failureReason: { type: String, maxlength: 512 },
   externalAccountId: { type: String, required: true },
   createdAt: { type: Date, default: Date.now },

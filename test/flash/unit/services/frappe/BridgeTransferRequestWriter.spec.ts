@@ -2,7 +2,12 @@ jest.mock("@services/frappe/ErpNext", () => ({
   upsertBridgeTransferRequest: jest.fn(),
 }))
 
+jest.mock("@services/logger", () => ({
+  baseLogger: { warn: jest.fn(), info: jest.fn(), error: jest.fn() },
+}))
+
 import ErpNext from "@services/frappe/ErpNext"
+import { baseLogger } from "@services/logger"
 import {
   writeBridgeCashoutCompleted,
   writeBridgeCashoutFailed,
@@ -48,6 +53,81 @@ describe("BridgeTransferRequestWriter", () => {
         bridgeCustomerId: "cust_123",
         bridgeTransferId: "tr_123",
         ibexTxHash: "tx_123",
+      }),
+    )
+  })
+
+  it("skips virtual account activity until Bridge provides a stable deposit id", async () => {
+    await writeBridgeDepositRequest({
+      eventId: "wh_scheduled",
+      eventObject: {
+        id: "activity_123",
+        type: "funds_scheduled",
+        amount: "10.00",
+        currency: "usd",
+        on_behalf_of: "cust_123",
+        customer_id: "cust_123",
+        virtual_account_id: "va_123",
+        product_type: "virtual_account",
+      },
+      rawPayload: { event_id: "wh_scheduled" },
+    })
+
+    expect(upsert).not.toHaveBeenCalled()
+    expect(baseLogger.warn).toHaveBeenCalledWith(
+      {
+        eventId: "wh_scheduled",
+        bridgeEventObjectId: "activity_123",
+        state: "funds_scheduled",
+      },
+      "Skipping Bridge deposit ERPNext audit row without stable request id",
+    )
+  })
+
+  it("does not use destination payment rail as a deposit currency fallback", async () => {
+    await writeBridgeDepositRequest({
+      eventId: "wh_rail",
+      eventObject: {
+        id: "tr_rail",
+        state: "funds_received",
+        amount: "10.00",
+        currency: undefined as unknown as string,
+        destination_payment_rail: "wire",
+        on_behalf_of: "cust_123",
+      },
+      rawPayload: { event_id: "wh_rail" },
+    })
+
+    expect(lastRequestInput()).toEqual(
+      expect.objectContaining({
+        currency: "usd",
+      }),
+    )
+  })
+
+  it("keys virtual account deposits by Bridge deposit id", async () => {
+    await writeBridgeDepositRequest({
+      eventId: "wh_received",
+      eventObject: {
+        id: "activity_456",
+        type: "funds_received",
+        amount: "10.00",
+        currency: "usd",
+        on_behalf_of: "cust_123",
+        customer_id: "cust_123",
+        deposit_id: "deposit_123",
+        virtual_account_id: "va_123",
+        product_type: "virtual_account",
+      },
+      rawPayload: { event_id: "wh_received" },
+    })
+
+    expect(lastRequestInput()).toEqual(
+      expect.objectContaining({
+        requestId: "deposit_123",
+        bridgeTransferId: "deposit_123",
+        sourceEventId: "wh_received",
+        sourceEventType: "deposit.funds_received",
       }),
     )
   })

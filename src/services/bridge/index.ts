@@ -25,6 +25,7 @@ import { WalletsRepository } from "@services/mongoose/wallets"
 import { IdentityRepository } from "@services/kratos"
 import IbexClient from "@services/ibex/client"
 import { writeBridgeCashoutPending } from "@services/frappe/BridgeTransferRequestWriter"
+import { IbexError } from "@services/ibex/errors"
 
 import {
   BridgeApiError,
@@ -40,11 +41,32 @@ import {
   BridgeWithdrawalAlreadyInitiatedError,
   BridgePlaidNotAvailableError,
   BridgeDepositInstructionsMissingError,
+  BridgeWithdrawalNetAmountTooLowError,
 } from "./errors"
 import BridgeApiClient, {
   type CreateExternalAccountRequest,
   type ExternalAccount,
 } from "./client"
+import {
+  presentBridgeWithdrawal,
+  receiptFeesFromTransfer,
+  resolveWithdrawalCustomerFeeEstimate,
+  type PresentedBridgeWithdrawal,
+} from "./withdrawal-fees"
+
+const asBridgeRequestWithdrawalError = (error: unknown): BridgeError => {
+  if (error instanceof BridgeError) return error
+  if (error instanceof IbexError) {
+    return new BridgeInsufficientFundsError(
+      "Unable to verify USDT wallet balance. Ensure IBEX is running and the USDT Cash Wallet is funded.",
+    )
+  }
+  if (error instanceof RepositoryError) {
+    return new BridgeError(`Failed to persist withdrawal request: ${error.message}`)
+  }
+  if (error instanceof Error) return new BridgeError(error.message)
+  return new BridgeError(String(error))
+}
 
 // ============ Types ============
 
@@ -67,25 +89,9 @@ type AddExternalAccountResult = {
   expiresAt: string
 }
 
-type WithdrawalRequestResult = {
-  id: string
-  amount: string
-  currency: string
-  externalAccountId: string
-  status: string
-  failureReason?: string
-  createdAt: string
-}
+type WithdrawalRequestResult = PresentedBridgeWithdrawal
 
-type InitiateWithdrawalResult = {
-  id: string
-  amount: string
-  currency: string
-  status: string
-  bridgeTransferId?: string
-  ibexPayoutId?: string
-  createdAt: string
-}
+type InitiateWithdrawalResult = PresentedBridgeWithdrawal
 
 type CancelWithdrawalResult = {
   id: string
@@ -95,16 +101,7 @@ type CancelWithdrawalResult = {
   createdAt: string
 }
 
-type WithdrawalResult = {
-  id: string
-  amount: string
-  currency: string
-  externalAccountId: string
-  status: string
-  bridgeTransferId?: string
-  failureReason?: string
-  createdAt: string
-}
+type WithdrawalResult = PresentedBridgeWithdrawal
 
 type KycStatusResult =
   | "open"
@@ -511,6 +508,7 @@ const createVirtualAccount = async (
           payment_rail: "ethereum",
           address: ethereumAddress,
         },
+        developer_fee_percent: String(BridgeConfig.developerFeePercent),
       },
       vaIdempotencyKey,
     )
@@ -728,7 +726,13 @@ const requestWithdrawal = async (
       walletId: usdtWallet.id,
       currency: WalletCurrency.Usdt,
     })
-    if (balance instanceof Error) return balance
+    if (balance instanceof Error) {
+      baseLogger.error(
+        { accountId, walletId: usdtWallet.id, error: balance, operation: "requestWithdrawal" },
+        "Failed to read USDT wallet balance for withdrawal request",
+      )
+      return asBridgeRequestWithdrawalError(balance)
+    }
 
     if (!(balance instanceof USDTAmount)) {
       return new BridgeInsufficientFundsError("Invalid balance type")
@@ -761,10 +765,17 @@ const requestWithdrawal = async (
       (acc) => acc.bridgeExternalAccountId === externalAccountId,
     )
     if (!targetAccount) {
-      return new Error("External account not found")
+      return new BridgeError("External account not found for this account")
     }
     if (targetAccount.status !== "verified") {
-      return new Error("External account is not verified")
+      return new BridgeError("External account is not verified")
+    }
+
+    const feeEstimate = await resolveWithdrawalCustomerFeeEstimate(amount)
+    if (withdrawalAmount <= parseFloat(feeEstimate.estimatedCustomerFee)) {
+      return new BridgeWithdrawalNetAmountTooLowError(
+        `Withdrawal amount ${amount} must exceed estimated customer fees ${feeEstimate.estimatedCustomerFee}`,
+      )
     }
 
     const existingWithdrawal =
@@ -775,37 +786,56 @@ const requestWithdrawal = async (
       )
     if (existingWithdrawal instanceof Error) return existingWithdrawal
 
-    const pendingWithdrawal =
-      existingWithdrawal ||
-      (await BridgeAccountsRepo.createWithdrawal({
+    let pendingWithdrawal
+    if (existingWithdrawal) {
+      pendingWithdrawal = await BridgeAccountsRepo.updateWithdrawalFeeEstimates(
+        BridgeAccountsRepo.bridgeWithdrawalRecordId(existingWithdrawal),
+        feeEstimate,
+      )
+    } else {
+      pendingWithdrawal = await BridgeAccountsRepo.createWithdrawal({
         accountId: accountId as string,
         amount,
         currency: "usdt",
         externalAccountId,
+        flashFeePercent: feeEstimate.flashFeePercent,
+        flashFee: feeEstimate.flashFee,
+        estimatedBridgeFeePercent: feeEstimate.estimatedBridgeFeePercent,
+        estimatedBridgeFee: feeEstimate.estimatedBridgeFee,
+        estimatedGasBuffer: feeEstimate.estimatedGasBuffer,
+        estimatedCustomerFee: feeEstimate.estimatedCustomerFee,
         status: "pending",
-      }))
-    if (pendingWithdrawal instanceof Error) return pendingWithdrawal
+      })
+      if (
+        !(pendingWithdrawal instanceof Error) &&
+        !pendingWithdrawal.estimatedCustomerFee
+      ) {
+        pendingWithdrawal = await BridgeAccountsRepo.updateWithdrawalFeeEstimates(
+          BridgeAccountsRepo.bridgeWithdrawalRecordId(pendingWithdrawal),
+          feeEstimate,
+        )
+      }
+    }
+    if (pendingWithdrawal instanceof Error) {
+      return asBridgeRequestWithdrawalError(pendingWithdrawal)
+    }
 
     baseLogger.info(
-      { accountId, operation: "requestWithdrawal", withdrawalId: pendingWithdrawal.id },
+      {
+        accountId,
+        operation: "requestWithdrawal",
+        withdrawalId: BridgeAccountsRepo.bridgeWithdrawalRecordId(pendingWithdrawal),
+      },
       "Bridge operation completed",
     )
 
-    return {
-      id: pendingWithdrawal.id,
-      amount: pendingWithdrawal.amount,
-      currency: pendingWithdrawal.currency,
-      externalAccountId: pendingWithdrawal.externalAccountId,
-      status: pendingWithdrawal.status,
-      failureReason: pendingWithdrawal.failureReason,
-      createdAt: pendingWithdrawal.createdAt.toISOString(),
-    }
+    return presentBridgeWithdrawal(pendingWithdrawal, feeEstimate)
   } catch (error) {
     baseLogger.error(
       { accountId, operation: "requestWithdrawal", error },
       "Bridge operation failed",
     )
-    return error instanceof Error ? error : new Error(String(error))
+    return asBridgeRequestWithdrawalError(error)
   }
 }
 
@@ -903,6 +933,7 @@ const initiateWithdrawal = async (
           payment_rail: "ethereum",
           currency: "usdt",
         },
+        developer_fee_percent: String(BridgeConfig.developerFeePercent),
         destination: {
           payment_rail: "ach",
           currency: "usd",
@@ -926,6 +957,7 @@ const initiateWithdrawal = async (
       transfer.amount,
       transfer.currency,
       bridgeDepositAddress,
+      receiptFeesFromTransfer(transfer.receipt),
     )
     if (submitted instanceof Error) return submitted
 
@@ -1042,15 +1074,7 @@ const initiateWithdrawal = async (
       "Bridge operation completed",
     )
 
-    return {
-      id: updated.id,
-      amount: updated.amount,
-      currency: updated.currency,
-      status: updated.status,
-      bridgeTransferId: updated.bridgeTransferId,
-      ibexPayoutId: updated.ibexPayoutId,
-      createdAt: updated.createdAt.toISOString(),
-    }
+    return presentBridgeWithdrawal(updated)
   } catch (error) {
     baseLogger.error(
       { accountId, operation: "initiateWithdrawal", error },
@@ -1407,16 +1431,7 @@ const getWithdrawals = async (
 
     const result: WithdrawalResult[] = withdrawals
       .filter((w) => w.bridgeTransferId !== null && w.bridgeTransferId !== undefined)
-      .map((w) => ({
-        id: w.id,
-        amount: w.amount,
-        currency: w.currency,
-        externalAccountId: w.externalAccountId,
-        status: w.status,
-        bridgeTransferId: w.bridgeTransferId,
-        failureReason: w.failureReason,
-        createdAt: w.createdAt.toISOString(),
-      }))
+      .map((w) => presentBridgeWithdrawal(w))
 
     baseLogger.info(
       { accountId, operation: "getWithdrawals", count: result.length },

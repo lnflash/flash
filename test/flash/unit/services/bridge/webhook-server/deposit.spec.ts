@@ -109,6 +109,32 @@ describe("depositHandler — invalid payload", () => {
     expect(res.status as jest.Mock).toHaveBeenCalledWith(400)
     expect(DepositLog.createBridgeDeposit).not.toHaveBeenCalled()
   })
+
+  it("acknowledges Bridge wallet activity without amount or customer identifiers", async () => {
+    const res = makeRes()
+    await depositHandler(
+      makeReq({
+        ...VALID_BODY,
+        event_category: "bridge_wallet.activity",
+        event_object: {
+          id: "activity_wallet_balance",
+          type: "balance_changed",
+          bridge_wallet_id: "wallet_123",
+          available_balance: "100.00",
+          currency: "usdb",
+        },
+      }),
+      res,
+    )
+
+    expect(res.status as jest.Mock).toHaveBeenCalledWith(200)
+    expect(res.json as jest.Mock).toHaveBeenCalledWith({
+      status: "skipped",
+      reason: "missing_crediting_fields",
+    })
+    expect(DepositLog.createBridgeDeposit).not.toHaveBeenCalled()
+    expect(writeBridgeDepositRequest).not.toHaveBeenCalled()
+  })
 })
 
 // ── Idempotency ───────────────────────────────────────────────────────────────
@@ -181,6 +207,26 @@ describe("depositHandler — fee persistence (AC3)", () => {
         initialAmount: "1.00",
         finalAmount: "1.00",
         destinationTxHash: "4gJH6oXpZUNgC1QLh8mXNPF92LtLKzHZj5eHuQrdQAgB",
+      }),
+    )
+  })
+
+  it("does not use destination payment rail as a currency fallback", async () => {
+    ;(DepositLog.createBridgeDeposit as jest.Mock).mockResolvedValue({
+      id: "log-currency-001",
+    })
+
+    const eventObject = {
+      ...VALID_EVENT_OBJECT,
+      currency: undefined,
+      destination_payment_rail: "ach",
+    }
+
+    await depositHandler(makeReq({ ...VALID_BODY, event_object: eventObject }), makeRes())
+
+    expect(DepositLog.createBridgeDeposit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currency: "usd",
       }),
     )
   })

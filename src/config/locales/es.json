@@ -42,6 +42,7 @@
       "title": "Depósito recibido"
     },
     "bridgeWithdrawal": {
+      "flashFeeNotice": "Las comisiones y montos mostrados son estimados. Las comisiones finales pueden variar.",
       "cancelled": {
         "body": "Su retiro de {{amount}} ha sido cancelado.",
         "title": "Retiro cancelado"

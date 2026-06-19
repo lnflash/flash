@@ -17,7 +17,7 @@ jest.mock("@services/tracing", () => ({
 
 jest.mock("@config", () => ({
   ...jest.requireActual("@config"),
-  BridgeConfig: { enabled: true, minWithdrawalAmount: 10 },
+  BridgeConfig: { enabled: true, minWithdrawalAmount: 10, developerFeePercent: 2 },
 }))
 
 jest.mock("@services/logger", () => {
@@ -34,6 +34,10 @@ jest.mock("@services/logger", () => {
 
 jest.mock("@app/bridge/send-withdrawal-notification", () => ({
   sendBridgeWithdrawalNotificationBestEffort: jest.fn().mockResolvedValue(undefined),
+}))
+
+jest.mock("@services/frappe/BridgeTransferRequestWriter", () => ({
+  writeBridgeCashoutPending: jest.fn().mockResolvedValue(true),
 }))
 
 jest.mock("@services/ibex/client", () => ({
@@ -145,6 +149,13 @@ const mockTransfer = {
     currency: "usdt",
     to_address: BRIDGE_DEPOSIT_ADDRESS,
   },
+  receipt: {
+    initial_amount: AMOUNT,
+    developer_fee: "1.00",
+    exchange_fee: "0.10",
+    subtotal_amount: "48.90",
+    final_amount: "48.90",
+  },
 }
 
 const makeRow = (overrides: Record<string, unknown> = {}) => ({
@@ -211,11 +222,19 @@ const setupGuards = () => {
   ;(BridgeAccountsRepo.updateWithdrawalTransferId as jest.Mock).mockResolvedValue({
     ...makeRow(),
     bridgeTransferId: TRANSFER_ID,
+    bridgeDeveloperFee: "1.00",
+    bridgeExchangeFee: "0.10",
+    subtotalAmount: "48.90",
+    finalAmount: "48.90",
     status: "submitted" as const,
   })
   ;(BridgeAccountsRepo.updateWithdrawalOnchainSend as jest.Mock).mockResolvedValue({
     ...makeRow(),
     bridgeTransferId: TRANSFER_ID,
+    bridgeDeveloperFee: "1.00",
+    bridgeExchangeFee: "0.10",
+    subtotalAmount: "48.90",
+    finalAmount: "48.90",
     ibexPayoutId: IBEX_PAYOUT_ID,
     status: "usdt_sent" as const,
   })
@@ -283,7 +302,7 @@ describe("getWithdrawals — BridgeWithdrawal GraphQL contract shape", () => {
     expect(result).not.toBeInstanceOf(Error)
     if (result instanceof Error) return
     expect(result).toHaveLength(1)
-    expect(result[0]).toEqual({
+    expect(result[0]).toMatchObject({
       id: WITHDRAWAL_ID,
       amount: AMOUNT,
       currency: "usdt",

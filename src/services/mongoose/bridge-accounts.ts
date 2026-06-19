@@ -137,12 +137,27 @@ export const truncateBridgeFailureReason = (
   return `${reason.slice(0, BRIDGE_FAILURE_REASON_MAX_LENGTH - 3)}...`
 }
 
+export const bridgeWithdrawalRecordId = (record: {
+  id?: string
+  _id?: { toString(): string }
+}): string => {
+  if (record.id) return record.id
+  if (record._id) return record._id.toString()
+  return ""
+}
+
 export const createWithdrawal = async (data: {
   accountId: string
   bridgeTransferId?: string
   amount: string
   currency: string
   externalAccountId: string
+  flashFeePercent: string
+  flashFee: string
+  estimatedBridgeFeePercent: string
+  estimatedBridgeFee: string
+  estimatedGasBuffer: string
+  estimatedCustomerFee: string
   status?: "pending" | "completed" | "failed"
 }) => {
   try {
@@ -160,6 +175,37 @@ export const createWithdrawal = async (data: {
       })
       if (record) return record
     }
+    return new RepositoryError(String(error))
+  }
+}
+
+export const updateWithdrawalFeeEstimates = async (
+  id: string,
+  fees: {
+    flashFeePercent: string
+    flashFee: string
+    estimatedBridgeFeePercent: string
+    estimatedBridgeFee: string
+    estimatedGasBuffer: string
+    estimatedCustomerFee: string
+  },
+) => {
+  try {
+    const record = await BridgeWithdrawal.findByIdAndUpdate(
+      id,
+      {
+        flashFeePercent: fees.flashFeePercent,
+        flashFee: fees.flashFee,
+        estimatedBridgeFeePercent: fees.estimatedBridgeFeePercent,
+        estimatedBridgeFee: fees.estimatedBridgeFee,
+        estimatedGasBuffer: fees.estimatedGasBuffer,
+        estimatedCustomerFee: fees.estimatedCustomerFee,
+        updatedAt: new Date(),
+      },
+      { new: true },
+    )
+    return record || new RepositoryError("Withdrawal not found")
+  } catch (error) {
     return new RepositoryError(String(error))
   }
 }
@@ -189,12 +235,22 @@ export const updateWithdrawalTransferId = async (
   amount: string,
   currency: string,
   bridgeDepositAddress?: string,
+  receiptFees?: {
+    bridgeDeveloperFee?: string
+    bridgeExchangeFee?: string
+    subtotalAmount?: string
+    finalAmount?: string
+  },
 ) => {
   try {
     const update: Record<string, unknown> = {
       bridgeTransferId,
       amount,
       currency,
+      bridgeDeveloperFee: receiptFees?.bridgeDeveloperFee,
+      bridgeExchangeFee: receiptFees?.bridgeExchangeFee,
+      subtotalAmount: receiptFees?.subtotalAmount,
+      finalAmount: receiptFees?.finalAmount,
       status: "submitted",
       updatedAt: new Date(),
     }

@@ -61,8 +61,12 @@ describe("transferHandler", () => {
     const res = makeRes()
     await transferHandler(
       makeReq({
-        event: "transfer.failed",
-        data: { transfer_id: "tr-early", state: "canceled", reason: "rejected" },
+        event_type: "transfer.failed",
+        event_object: {
+          id: "tr-early",
+          state: "canceled",
+          source: { failure_reason: "rejected" },
+        },
       }),
       res,
     )
@@ -75,10 +79,10 @@ describe("transferHandler", () => {
     const res = makeRes()
     await transferHandler(
       makeReq({
-        event: "transfer.completed",
+        event_type: "transfer.completed",
         event_id: "wh-transfer-1",
-        data: {
-          transfer_id: "tr-abc",
+        event_object: {
+          id: "tr-abc",
           state: "payment_processed",
           amount: "25.00",
           currency: "usdt",
@@ -110,8 +114,8 @@ describe("transferHandler", () => {
     const res = makeRes()
     await transferHandler(
       makeReq({
-        event: "transfer.failed",
-        data: { transfer_id: "tr-abc", state: "canceled" },
+        event_type: "transfer.failed",
+        event_object: { id: "tr-abc", state: "canceled" },
       }),
       res,
     )
@@ -124,8 +128,8 @@ describe("transferHandler", () => {
     const res = makeRes()
     await transferHandler(
       makeReq({
-        event: "transfer.failed",
-        data: { transfer_id: "tr-abc", state: "refund_in_flight" },
+        event_type: "transfer.failed",
+        event_object: { id: "tr-abc", state: "refund_in_flight" },
       }),
       res,
     )
@@ -144,14 +148,16 @@ describe("transferHandler", () => {
     const res = makeRes()
     await transferHandler(
       makeReq({
-        event: "transfer.completed",
-        data: { transfer_id: "tr-abc", state: "payment_processed" },
+        event_type: "transfer.completed",
+        event_object: { id: "tr-abc", state: "payment_processed" },
       }),
       res,
     )
 
     expect(res.status as jest.Mock).toHaveBeenCalledWith(200)
-    expect((res.json as jest.Mock).mock.calls[0][0]).toEqual({ status: "already_processed" })
+    expect((res.json as jest.Mock).mock.calls[0][0]).toEqual({
+      status: "already_processed",
+    })
   })
 
   it("sends a push notification after a successful completion", async () => {
@@ -166,8 +172,8 @@ describe("transferHandler", () => {
     const res = makeRes()
     await transferHandler(
       makeReq({
-        event: "transfer.completed",
-        data: { transfer_id: "tr-abc", state: "payment_processed" },
+        event_type: "transfer.completed",
+        event_object: { id: "tr-abc", state: "payment_processed" },
       }),
       res,
     )
@@ -186,8 +192,8 @@ describe("transferHandler", () => {
     const res = makeRes()
     await transferHandler(
       makeReq({
-        event: "transfer.completed",
-        data: { transfer_id: "tr-abc", state: "payment_processed" },
+        event_type: "transfer.completed",
+        event_object: { id: "tr-abc", state: "payment_processed" },
       }),
       res,
     )
@@ -203,9 +209,9 @@ describe("transferHandler", () => {
     const res = makeRes()
     await transferHandler(
       makeReq({
-        event: "transfer.completed",
-        data: {
-          transfer_id: "tr-abc",
+        event_type: "transfer.completed",
+        event_object: {
+          id: "tr-abc",
           state: "payment_processed",
           amount: "25.00",
           currency: "usdt",
@@ -235,14 +241,14 @@ describe("transferHandler", () => {
     const res = makeRes()
     await transferHandler(
       makeReq({
-        event: "transfer.failed",
+        event_type: "transfer.failed",
         event_id: "wh-transfer-2",
-        data: {
-          transfer_id: "tr-abc",
+        event_object: {
+          id: "tr-abc",
           state: "returned",
-          reason: "ACH return",
           amount: "25.00",
           currency: "usdt",
+          source: { failure_reason: "ACH return" },
         },
       }),
       res,
@@ -271,14 +277,20 @@ describe("transferHandler", () => {
     const res = makeRes()
     await transferHandler(
       makeReq({
-        event: "transfer.failed",
-        data: { transfer_id: "tr-abc", state: "returned", reason: "ACH return" },
+        event_type: "transfer.failed",
+        event_object: {
+          id: "tr-abc",
+          state: "returned",
+          source: { failure_reason: "ACH return" },
+        },
       }),
       res,
     )
 
     expect(res.status as jest.Mock).toHaveBeenCalledWith(200)
-    expect((res.json as jest.Mock).mock.calls[0][0]).toEqual({ status: "already_terminal" })
+    expect((res.json as jest.Mock).mock.calls[0][0]).toEqual({
+      status: "already_terminal",
+    })
     expect(lockFn).not.toHaveBeenCalled()
   })
 })

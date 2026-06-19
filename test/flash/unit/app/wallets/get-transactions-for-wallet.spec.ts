@@ -73,7 +73,30 @@ describe("toWalletTransactions", () => {
 
     expect(transaction.settlementCurrency).toBe(WalletCurrency.Usdt)
     expect(transaction.settlementAmount).toBe(-500_000)
+    expect(transaction.settlementDisplayAmount).toBe("-0.5")
     expect(transaction.settlementFee).toBe(1)
+  })
+
+  it("maps IBEX crypto send transaction type to outgoing on-chain USDT", () => {
+    const [transaction] = toWalletTransactions([
+      {
+        id: "crypto-send-trx-id",
+        accountId: "wallet-id",
+        amount: 2.5,
+        networkFee: 0.179554,
+        currencyId: 29,
+        transactionTypeId: 10,
+        createdAt: "2026-06-17T05:42:53.512218Z",
+      },
+    ] as GResponse200)
+
+    expect(transaction.settlementCurrency).toBe(WalletCurrency.Usdt)
+    expect(transaction.settlementAmount).toBe(-2_500_000)
+    expect(transaction.settlementDisplayAmount).toBe("-2.5")
+    expect(transaction.settlementFee).toBe(179_554)
+    expect(transaction.settlementDisplayFee).toBe("0.179554")
+    expect(transaction.initiationVia.type).toBe("onchain")
+    expect(transaction.settlementVia.type).toBe("onchain")
   })
 
   it("defaults omitted IBEX USDT amount and network fee to zero micros", () => {

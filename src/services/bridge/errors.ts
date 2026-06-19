@@ -59,6 +59,14 @@ export class BridgeInsufficientFundsError extends BridgeError {
   }
 }
 
+export class BridgeWithdrawalNetAmountTooLowError extends BridgeError {
+  constructor(
+    message: string = "Withdrawal amount must exceed estimated customer fees",
+  ) {
+    super(message)
+  }
+}
+
 export class BridgeAccountLevelError extends BridgeError {
   constructor(
     message: string = "Bridge requires at least a Personal account (Level 1+)",

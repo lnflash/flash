@@ -649,6 +649,33 @@ export const configSchema = {
         apiKey: { type: "string" },
         baseUrl: { type: "string" },
         minWithdrawalAmount: { type: "number" },
+        developerFeePercent: { type: "number" },
+        withdrawalFeeEstimate: {
+          type: "object",
+          properties: {
+            bridgeFixedFeePercent: { type: "number", default: 0.6 },
+            usdtTransferGasLimit: { type: "integer", default: 65000 },
+            gasPriceBufferMultiplier: { type: "number", default: 1.5 },
+            ethereumGasRpcUrls: {
+              type: "array",
+              items: { type: "string" },
+              default: [
+                "https://ethereum-rpc.publicnode.com",
+                "https://eth.llamarpc.com",
+                "https://cloudflare-eth.com",
+              ],
+            },
+            ethUsdPriceUrl: {
+              type: "string",
+              default:
+                "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
+            },
+            timeoutMs: { type: "integer", default: 3000 },
+            cacheTtlMs: { type: "integer", default: 60000 },
+            fallbackGasPriceGwei: { type: "number", default: 30 },
+            ethUsdFallback: { type: "number", default: 3000 },
+          },
+        },
         timeoutMs: { type: "integer", default: 10000 },
         webhook: {
           type: "object",
@@ -670,7 +697,7 @@ export const configSchema = {
           required: ["port", "publicKeys", "timestampSkewMs"],
         },
       },
-      required: ["enabled", "apiKey", "baseUrl", "webhook"],
+      required: ["enabled", "apiKey", "baseUrl", "developerFeePercent", "webhook"],
     },
     exchangeRates: {
       type: "object",

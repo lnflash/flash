@@ -47,17 +47,34 @@ const markProcessed = async (
 }
 
 export const transferHandler = async (req: Request, res: Response) => {
-  const { event, event_id, data } = req.body
-  const { transfer_id, state, amount, currency, reason, return_reason } = data
+  // Bridge webhook payload: { event_id, event_category, event_type, event_object: { id, state, ... } }
+  const { event_type, event_id, event_object } = req.body
+  const obj = (event_object ?? {}) as Record<string, unknown>
+
+  // Normalise from Bridge's webhook envelope
+  const event = event_type ?? req.body.event
+  const transfer_id = (obj.id ?? obj.transfer_id) as string | undefined
+  const state = (obj.state ?? obj.status) as string | undefined
+  const amount = obj.amount as string | undefined
+  const currency = obj.currency as string | undefined
+  // Bridge transfer events nest failure reasons in source.details or destination
+  const source = obj.source as Record<string, unknown> | undefined
+  const destination = obj.destination as Record<string, unknown> | undefined
+  const reason = source?.failure_reason as string | undefined
+  const return_reason = destination?.return_reason as string | undefined
 
   if (!transfer_id || !event) {
+    baseLogger.warn(
+      { event_id, event_category: req.body.event_category, event_type },
+      "Bridge transfer webhook rejected: missing transfer_id or event_type",
+    )
     return res.status(400).json({ error: "Invalid payload" })
   }
 
   try {
-    const bridgeTransferId = toBridgeTransferId(transfer_id)
+    const bridgeTransferId = toBridgeTransferId(transfer_id!)
 
-    if (TRANSIENT_STATES.has(state)) {
+    if (state && TRANSIENT_STATES.has(state)) {
       baseLogger.info(
         { transfer_id, state, event },
         "Bridge transfer in transient state — awaiting terminal event",
@@ -70,10 +87,13 @@ export const transferHandler = async (req: Request, res: Response) => {
       event === "transfer.payment_processed" ||
       state === "payment_processed"
 
-    const isFailure = TERMINAL_FAILURE_STATES.has(state)
+    const isFailure = state != null && TERMINAL_FAILURE_STATES.has(state)
 
     if (!isCompletion && !isFailure) {
-      baseLogger.info({ transfer_id, state, event }, "Bridge transfer event not handled")
+      baseLogger.info(
+        { transfer_id, state: state ?? "unknown", event },
+        "Bridge transfer event not handled",
+      )
       return res.status(200).json({ status: "ignored" })
     }
 

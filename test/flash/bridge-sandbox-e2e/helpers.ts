@@ -68,7 +68,7 @@ type WithdrawalResult = GraphQlErrorResponse & {
 
 type HandlerResponse = {
   status: number
-  body?: unknown
+  body: Record<string, unknown>
 }
 
 // ============ Schema Execution ============
@@ -80,11 +80,11 @@ function buildContext(accountId: string): GraphQLPublicContextAuth {
   } as GraphQLPublicContextAuth
 }
 
-export async function execQuery(
+export async function execQuery<T = Record<string, unknown>>(
   source: string,
   accountId: string,
   variableValues?: Record<string, unknown>,
-): Promise<Record<string, unknown> | GraphQlErrorResponse> {
+): Promise<T | GraphQlErrorResponse> {
   const result = await graphql({
     schema: gqlMainSchema,
     source: new Source(source),
@@ -94,7 +94,7 @@ export async function execQuery(
   if (result.errors) {
     return { errors: result.errors.map((error) => ({ message: error.message })) }
   }
-  return result.data ?? {}
+  return (result.data ?? {}) as T
 }
 
 // ============ User Creation ============
@@ -266,10 +266,10 @@ export async function injectKycWebhook(payload: {
 }): Promise<HandlerResponse> {
   const { req, res } = createReqRes({ body: payload })
   await kycHandler(
-    req as Parameters<typeof kycHandler>[0],
-    res as Parameters<typeof kycHandler>[1],
+    req as unknown as Parameters<typeof kycHandler>[0],
+    res as unknown as Parameters<typeof kycHandler>[1],
   )
-  return { status: res.statusCode, body: res._body }
+  return { status: res.statusCode, body: (res._body ?? {}) as Record<string, unknown> }
 }
 
 /**
@@ -288,10 +288,10 @@ export async function injectExternalAccountWebhook(payload: {
 }): Promise<HandlerResponse> {
   const { req, res } = createReqRes({ body: payload })
   await externalAccountHandler(
-    req as Parameters<typeof externalAccountHandler>[0],
-    res as Parameters<typeof externalAccountHandler>[1],
+    req as unknown as Parameters<typeof externalAccountHandler>[0],
+    res as unknown as Parameters<typeof externalAccountHandler>[1],
   )
-  return { status: res.statusCode, body: res._body }
+  return { status: res.statusCode, body: (res._body ?? {}) as Record<string, unknown> }
 }
 
 /**
@@ -317,10 +317,10 @@ export async function injectDepositWebhook(payload: {
 }): Promise<HandlerResponse> {
   const { req, res } = createReqRes({ body: payload })
   await depositHandler(
-    req as Parameters<typeof depositHandler>[0],
-    res as Parameters<typeof depositHandler>[1],
+    req as unknown as Parameters<typeof depositHandler>[0],
+    res as unknown as Parameters<typeof depositHandler>[1],
   )
-  return { status: res.statusCode, body: res._body }
+  return { status: res.statusCode, body: (res._body ?? {}) as Record<string, unknown> }
 }
 
 // ============ ERPNext Verification ============

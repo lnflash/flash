@@ -14,9 +14,23 @@ ibex:
 
 bridge:
   enabled: true
-  apiKey: "sk-test-3bd6463c9cd77c3d8858c60b9997d0c6"
+  apiKey: "" # real key injected via config overrides; never commit a real key
   baseUrl: "https://api.sandbox.bridge.xyz/v0"
   minWithdrawalAmount: 2
+  developerFeePercent: 2.0
+  withdrawalFeeEstimate:
+    bridgeFixedFeePercent: 0.6
+    usdtTransferGasLimit: 65000
+    gasPriceBufferMultiplier: 1.5
+    ethereumGasRpcUrls:
+      - "https://ethereum-rpc.publicnode.com"
+      - "https://eth.llamarpc.com"
+      - "https://cloudflare-eth.com"
+    ethUsdPriceUrl: "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
+    timeoutMs: 3000
+    cacheTtlMs: 60000
+    fallbackGasPriceGwei: 30
+    ethUsdFallback: 3000
   timeoutMs: 15000
   webhook:
     port: 4009
