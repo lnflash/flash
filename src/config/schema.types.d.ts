@@ -20,6 +20,7 @@ type WebhookServer = {
   uri: string
   port: number
   secret: string
+  allowedIps?: string[]
 }
 
 type IbexConfig = {

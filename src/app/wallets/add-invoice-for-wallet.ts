@@ -5,7 +5,10 @@ import { RateLimitConfig } from "@domain/rate-limit"
 import { checkedToMinutes } from "@domain/primitives"
 import { UnsupportedCurrencyError } from "@domain/errors"
 import { RateLimiterExceededError } from "@domain/rate-limit/errors"
-import { DEFAULT_EXPIRATIONS } from "@domain/bitcoin/lightning/invoice-expiration"
+import {
+  DEFAULT_EXPIRATIONS,
+  ibexReceiveDefaultExpirationMinutes,
+} from "@domain/bitcoin/lightning/invoice-expiration"
 import { WalletInvoiceBuilder } from "@domain/wallet-invoices/wallet-invoice-builder"
 
 import { LndService } from "@services/lnd"
@@ -78,7 +81,7 @@ export const addInvoiceForSelfForUsdWallet = async (
   const walletId = checkedToWalletId(args.walletId)
   if (walletId instanceof Error) return walletId
 
-  const expiresIn = checkedToMinutes(args.expiresIn || defaultUsdExpiration)
+  const expiresIn = checkedToMinutes(args.expiresIn || ibexReceiveDefaultExpirationMinutes)
   if (expiresIn instanceof Error) return expiresIn
 
   const validated = await validateIsUsdWallet(walletId, { includeUsdt: true })
@@ -164,7 +167,7 @@ export const addInvoiceForRecipientForUsdWallet = async (
   const recipientWalletId = checkedToWalletId(args.recipientWalletId)
   if (recipientWalletId instanceof Error) return recipientWalletId
 
-  const expiresIn = checkedToMinutes(args.expiresIn || defaultUsdExpiration)
+  const expiresIn = checkedToMinutes(args.expiresIn || ibexReceiveDefaultExpirationMinutes)
   if (expiresIn instanceof Error) return expiresIn
 
   const validated = await validateIsUsdWallet(recipientWalletId, { includeUsdt: true })

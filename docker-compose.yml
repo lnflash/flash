@@ -79,9 +79,8 @@ services:
       - REDIS_TYPE=standalone
       - REDIS_0_DNS=redis
       - REDIS_0_PORT=6378
-      - IBEX_URL=${IBEX_URL}
-      - IBEX_EMAIL=${IBEX_EMAIL}
-      - IBEX_PASSWORD=${IBEX_PASSWORD}
+      - IBEX_CLIENT_ID=${IBEX_CLIENT_ID:-}
+      - IBEX_CLIENT_SECRET=${IBEX_CLIENT_SECRET:-}
   price-history:
     image: docker.io/lnflash/price-history:edge
     # image: us.gcr.io/galoy-org/price-history:edge

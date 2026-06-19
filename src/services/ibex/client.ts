@@ -51,6 +51,7 @@ import {
 
 import { errorHandler, IbexError, ParseError, UnexpectedIbexResponse } from "./errors"
 import WebhookServer from "./webhook-server"
+import { cappedIbexReceiveExpiration } from "@domain/bitcoin/lightning"
 
 const Ibex = new IbexClient(
   {
@@ -133,14 +134,15 @@ const getAccountTransactions = async (
   return Ibex.getAccountTransactions(params).then(errorHandler)
 }
 
-const addInvoice = async (
-  args: IbexInvoiceArgs,
-): Promise<AddInvoiceResponse201 | IbexError> => {
+const addInvoice = async (args: IbexInvoiceArgs): Promise<AddInvoiceResponse201 | IbexError> => {
   const body = {
-    ...args,
-    amount: args.amount?.toIbex(),
-    webhookUrl: WebhookServer.endpoints.onReceive.invoice,
-    webhookSecret: WebhookServer.secret,
+      ...args,
+      amount: args.amount?.toIbex(),
+      // IBEX silently caps non-msat receive invoices at 60s; never request more.
+      // See IBEX_RECEIVE_MAX_EXPIRATION_SECONDS (ENG-427).
+      expiration: cappedIbexReceiveExpiration(args.expiration),
+      webhookUrl: WebhookServer.endpoints.onReceive.invoice,
+      webhookSecret: WebhookServer.secret,
   } as AddInvoiceBodyParam
   addAttributesToCurrentSpan({ "request.params": JSON.stringify(body) })
   return Ibex.addInvoice(body).then(errorHandler)

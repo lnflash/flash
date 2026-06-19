@@ -1,5 +1,5 @@
 import express, { Request, Response } from "express"
-import { authenticate, logRequest } from "../middleware"
+import { authenticate, logRequest, validateIbexIp } from "../middleware"
 import { WalletsRepository } from "@services/mongoose/wallets"
 import { ZapRequestModel } from "@services/mongoose/zap-request"
 import axios from "axios"
@@ -106,12 +106,21 @@ router.get(
   },
 )
 
-// Keep other routes as stubs
-router.post(paths.invoice, authenticate, logRequest, async (_: Request, resp: Response) =>
-  resp.status(200).end(),
+// Keep other routes as stubs. These are Ibex webhooks (authenticated), so they
+// are IP-restricted; the public GET /pay/lnurl/:username above is not.
+router.post(
+  paths.invoice,
+  validateIbexIp,
+  authenticate,
+  logRequest,
+  async (_: Request, resp: Response) => resp.status(200).end(),
 )
-router.post(paths.onchain, authenticate, logRequest, async (_: Request, resp: Response) =>
-  resp.status(200).end(),
+router.post(
+  paths.onchain,
+  validateIbexIp,
+  authenticate,
+  logRequest,
+  async (_: Request, resp: Response) => resp.status(200).end(),
 )
 
 export { paths, router }
