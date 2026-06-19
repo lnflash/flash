@@ -255,6 +255,24 @@ type BridgeCancelWithdrawalRequestPayload {
   withdrawal: BridgeWithdrawal
 }
 
+input BridgeCreateExternalAccountInput {
+  accountNumber: String!
+  accountOwnerName: String!
+  bankName: String!
+  checkingOrSavings: String = "checking"
+  city: String!
+  country: String!
+  postalCode: String!
+  routingNumber: String!
+  state: String!
+  streetLine1: String!
+}
+
+type BridgeCreateExternalAccountPayload {
+  errors: [Error!]!
+  externalAccount: BridgeExternalAccount
+}
+
 type BridgeCreateVirtualAccountPayload {
   errors: [Error!]!
   virtualAccount: BridgeVirtualAccount
@@ -977,6 +995,7 @@ type Mutation {
   accountUpdateDisplayCurrency(input: AccountUpdateDisplayCurrencyInput!): AccountUpdateDisplayCurrencyPayload!
   bridgeAddExternalAccount: BridgeAddExternalAccountPayload!
   bridgeCancelWithdrawalRequest(input: BridgeCancelWithdrawalRequestInput!): BridgeCancelWithdrawalRequestPayload!
+  bridgeCreateExternalAccount(input: BridgeCreateExternalAccountInput!): BridgeCreateExternalAccountPayload!
   bridgeCreateVirtualAccount: BridgeCreateVirtualAccountPayload!
   bridgeInitiateKyc(input: BridgeInitiateKycInput!): BridgeInitiateKycPayload!
   bridgeInitiateWithdrawal(input: BridgeInitiateWithdrawalInput!): BridgeInitiateWithdrawalPayload!
