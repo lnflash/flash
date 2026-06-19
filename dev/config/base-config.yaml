@@ -11,6 +11,9 @@ ibex:
     uri: "" # external uri defined in overrides
     port: 4008
     secret: "not-so-secret"
+    # Ibex's published source IPs / CIDRs for webhook delivery. Populate in
+    # production overrides to enforce the allowlist; empty disables it (ISL-112).
+    allowedIps: []
 
 # See Foreign Exchange Rates: https://www.firstglobal-bank.com/
 exchangeRates:
