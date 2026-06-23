@@ -42,8 +42,18 @@
       "title": "Cashout"
     },
     "bridgeDeposit": {
-      "body": "Your deposit of {{amount}} has been added to your account.",
-      "title": "Deposit received"
+      "completed": {
+        "body": "Your deposit of {{amount}} has been added to your account.",
+        "title": "Deposit received"
+      },
+      "processing": {
+        "body": "Your deposit of {{amount}} is being sent to your wallet.",
+        "title": "Deposit processing"
+      },
+      "received": {
+        "body": "We received your deposit of {{amount}}.",
+        "title": "Deposit received"
+      }
     },
     "bridgeWithdrawal": {
       "flashFeeNotice": "Shown fees and amounts are estimates. Final fees may differ.",
@@ -59,6 +69,41 @@
         "body": "Your withdrawal of {{amount}} could not be completed.",
         "bodyWithReason": "Your withdrawal of {{amount}} could not be completed: {{reason}}.",
         "title": "Withdrawal failed"
+      },
+      "processing": {
+        "body": "Your withdrawal of {{amount}} is being processed.",
+        "title": "Withdrawal in progress"
+      },
+      "submitted": {
+        "body": "Your withdrawal of {{amount}} has been submitted.",
+        "title": "Withdrawal submitted"
+      },
+      "usdt_sent": {
+        "body": "Your withdrawal of {{amount}} is on its way to your bank.",
+        "title": "Withdrawal processing"
+      }
+    },
+    "bridgeKyc": {
+      "approved": {
+        "body": "Your identity verification has been approved.",
+        "title": "Identity verified"
+      },
+      "in_review": {
+        "body": "Your identity verification is under review. We'll notify you when it's complete.",
+        "title": "Verification in progress"
+      },
+      "incomplete": {
+        "body": "Your identity verification is not finished yet. Please complete it to continue.",
+        "title": "Complete your verification"
+      },
+      "offboarded": {
+        "body": "Your identity verification has been closed.",
+        "title": "Verification closed"
+      },
+      "rejected": {
+        "body": "Your identity verification was not approved.",
+        "bodyWithReason": "Your identity verification was not approved: {{reason}}.",
+        "title": "Verification unsuccessful"
       }
     }
   }
