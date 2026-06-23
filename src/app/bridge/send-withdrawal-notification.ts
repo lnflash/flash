@@ -20,7 +20,13 @@ const i18n = getI18nInstance()
 const formatWithdrawalAmount = (amount: string, currency: string): string =>
   `${amount} ${currency.toUpperCase()}`
 
-export type BridgeWithdrawalNotificationOutcome = "completed" | "failed" | "cancelled"
+export type BridgeWithdrawalNotificationOutcome =
+  | "submitted"
+  | "usdt_sent"
+  | "processing"
+  | "completed"
+  | "failed"
+  | "cancelled"
 
 export const sendBridgeWithdrawalNotification = async ({
   accountId: accountIdRaw,
