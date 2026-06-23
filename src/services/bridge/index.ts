@@ -970,7 +970,8 @@ const initiateWithdrawal = async (
           payment_rail: "ethereum",
           currency: "usdt",
         },
-        developer_fee_percent: String(BridgeConfig.developerFeePercent),
+        // Fixed-amount offramps require developer_fee (USD), not developer_fee_percent.
+        developer_fee: pendingWithdrawal.flashFee,
         destination: {
           payment_rail: "ach",
           currency: "usd",
