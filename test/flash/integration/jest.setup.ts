@@ -1,3 +1,13 @@
+jest.mock("yargs", () => {
+  const yargsMock = {
+    option: jest.fn().mockReturnThis(),
+    argv: {
+      configPath: ["./dev/config/base-config.yaml"],
+    },
+  }
+  return jest.fn(() => yargsMock)
+})
+
 import Ibex from "@services/ibex/client"
 import { setupMongoConnection } from "@services/mongodb"
 import { disconnectAll } from "@services/redis"
