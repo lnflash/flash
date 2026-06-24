@@ -629,6 +629,7 @@ export const configSchema = {
     ibex: {
       type: "object",
       properties: {
+        mock: { type: "boolean", default: false },
         clientId: { type: "string" },
         clientSecret: { type: "string" },
         environment: { type: "string", enum: ["production", "sandbox"] },

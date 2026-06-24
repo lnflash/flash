@@ -63,11 +63,23 @@ const Ibex = new IbexClient(
 )
 
 const IbexUrlConfig = IbexUrls[IbexConfig.environment]
+const mockIbexEnabled =
+  IbexConfig.mock === true && process.env.FLASH_ENABLE_IBEX_MOCK === "true"
+const mockLnurl =
+  "lnurl1dp68gurn8ghj7um9dej8xct5w3skccne9e3k7mf0d3h82unvwqhkxun0wa5kgct5v93kzmmfd3skjmn0wvhxcmmv9u"
 
 const createAccount = async (
   name: string,
   currencyId: IbexCurrencyId,
 ): Promise<CreateAccountResponse201 | IbexError> => {
+  if (mockIbexEnabled) {
+    return {
+      id: `quickstart-${name}-${currencyId}`,
+      name,
+      currencyId,
+    } as CreateAccountResponse201
+  }
+
   return Ibex.createAccount({ name, currencyId }).then(errorHandler)
 }
 
@@ -286,6 +298,10 @@ const estimateOnchainFee = async (
 const createLnurlPay = async (
   body: CreateLnurlPayBodyParam,
 ): Promise<CreateLnurlPayResponse201 | IbexError> => {
+  if (mockIbexEnabled) {
+    return { lnurl: mockLnurl } as CreateLnurlPayResponse201
+  }
+
   const bodyWithHooks = {
     ...body,
     webhookUrl: WebhookServer.endpoints.onReceive.lnurl,

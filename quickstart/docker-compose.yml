@@ -74,7 +74,16 @@ services:
     - -r
     - /app/lib/services/tracing.js
     - lib/servers/graphql-main-server.js
+    - --configPath
+    - /app/dev/config/base-config.yaml
+    - --configPath
+    - /app/quickstart/config/quickstart-config.yaml
     env_file: ${HOST_PROJECT_PATH:-.}/${GALOY_QUICKSTART_PATH:-vendor/galoy-quickstart}/.env.galoy
+    environment:
+    - FLASH_ENABLE_IBEX_MOCK=true
+    volumes:
+    - ${FLASH_PROJECT_PATH:-..}/dev/config:/app/dev/config:ro
+    - ${FLASH_PROJECT_PATH:-..}/quickstart/config:/app/quickstart/config:ro
     depends_on:
     - trigger
     - apollo-router
@@ -92,7 +101,16 @@ services:
     - -r
     - /app/lib/services/tracing.js
     - lib/servers/trigger.js
+    - --configPath
+    - /app/dev/config/base-config.yaml
+    - --configPath
+    - /app/quickstart/config/quickstart-config.yaml
     env_file: ${HOST_PROJECT_PATH:-.}/${GALOY_QUICKSTART_PATH:-vendor/galoy-quickstart}/.env.galoy
+    environment:
+    - FLASH_ENABLE_IBEX_MOCK=true
+    volumes:
+    - ${FLASH_PROJECT_PATH:-..}/dev/config:/app/dev/config:ro
+    - ${FLASH_PROJECT_PATH:-..}/quickstart/config:/app/quickstart/config:ro
     depends_on:
     - lnd1
     - bria
