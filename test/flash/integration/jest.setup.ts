@@ -42,7 +42,12 @@ export let mockedIbex: jest.Mock
 beforeAll(async () => {
   mockedIbex = Ibex as unknown as jest.Mock
   mockedIbexClient = Ibex as jest.Mocked<typeof Ibex>
-  mockedIbexClient.createAccount.mockResolvedValue(IbexMocks.account.response[0])
+  mockedIbexClient.createAccount.mockImplementation(async (accountId, currencyId) => ({
+    ...IbexMocks.account.response[0],
+    id: `${accountId}-${currencyId}`,
+    name: `${accountId}-${currencyId}`,
+    currencyId,
+  }))
   mockedIbexClient.addInvoice.mockResolvedValue(IbexMocks.addInvoice.response)
   mockedIbexClient.createLnurlPay.mockResolvedValue({
     lnurl:
