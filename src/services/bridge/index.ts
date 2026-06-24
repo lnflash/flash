@@ -839,6 +839,43 @@ const requestWithdrawal = async (
   }
 }
 
+const markWithdrawalSendFailed = async ({
+  accountId,
+  withdrawalId,
+  transferId,
+  amount,
+  currency,
+  bridgeDepositAddress,
+  failureReason,
+}: {
+  accountId: string
+  withdrawalId: string
+  transferId: string
+  amount: string
+  currency: string
+  bridgeDepositAddress: string
+  failureReason: string
+}) => {
+  const updated = await BridgeAccountsRepo.updateWithdrawalSendFailed(
+    withdrawalId,
+    transferId,
+    amount,
+    currency,
+    bridgeDepositAddress,
+    failureReason,
+  )
+  if (!(updated instanceof Error)) {
+    await sendBridgeWithdrawalNotificationBestEffort({
+      accountId,
+      amount,
+      currency,
+      outcome: "failed",
+      failureReason,
+    })
+  }
+  return updated
+}
+
 /**
  * Initiates a previously requested withdrawal — fetches the pending record by ID,
  * re-checks balance, then submits the transfer to Bridge.
@@ -933,7 +970,8 @@ const initiateWithdrawal = async (
           payment_rail: "ethereum",
           currency: "usdt",
         },
-        developer_fee_percent: String(BridgeConfig.developerFeePercent),
+        // Fixed-amount offramps require developer_fee (USD), not developer_fee_percent.
+        developer_fee: pendingWithdrawal.flashFee,
         destination: {
           payment_rail: "ach",
           currency: "usd",
@@ -961,19 +999,27 @@ const initiateWithdrawal = async (
     )
     if (submitted instanceof Error) return submitted
 
+    await sendBridgeWithdrawalNotificationBestEffort({
+      accountId: accountId as string,
+      amount: transfer.amount,
+      currency: transfer.currency,
+      outcome: "submitted",
+    })
+
     const sendRequirements = await IbexClient.getCryptoSendRequirements({
       network: "ethereum",
       currencyId: USDTAmount.currencyId,
     })
     if (sendRequirements instanceof Error) {
-      await BridgeAccountsRepo.updateWithdrawalSendFailed(
-        pendingWithdrawal.id,
-        transfer.id,
-        transfer.amount,
-        transfer.currency,
+      await markWithdrawalSendFailed({
+        accountId: accountId as string,
+        withdrawalId: pendingWithdrawal.id,
+        transferId: transfer.id,
+        amount: transfer.amount,
+        currency: transfer.currency,
         bridgeDepositAddress,
-        sendRequirements.message,
-      )
+        failureReason: sendRequirements.message,
+      })
       return sendRequirements
     }
 
@@ -983,26 +1029,28 @@ const initiateWithdrawal = async (
       data: { address: bridgeDepositAddress },
     })
     if (cryptoSendInfo instanceof Error) {
-      await BridgeAccountsRepo.updateWithdrawalSendFailed(
-        pendingWithdrawal.id,
-        transfer.id,
-        transfer.amount,
-        transfer.currency,
+      await markWithdrawalSendFailed({
+        accountId: accountId as string,
+        withdrawalId: pendingWithdrawal.id,
+        transferId: transfer.id,
+        amount: transfer.amount,
+        currency: transfer.currency,
         bridgeDepositAddress,
-        cryptoSendInfo.message,
-      )
+        failureReason: cryptoSendInfo.message,
+      })
       return cryptoSendInfo
     }
     if (!cryptoSendInfo.id) {
       const error = new Error("IBEX crypto send info did not return id")
-      await BridgeAccountsRepo.updateWithdrawalSendFailed(
-        pendingWithdrawal.id,
-        transfer.id,
-        transfer.amount,
-        transfer.currency,
+      await markWithdrawalSendFailed({
+        accountId: accountId as string,
+        withdrawalId: pendingWithdrawal.id,
+        transferId: transfer.id,
+        amount: transfer.amount,
+        currency: transfer.currency,
         bridgeDepositAddress,
-        error.message,
-      )
+        failureReason: error.message,
+      })
       return error
     }
 
@@ -1012,14 +1060,15 @@ const initiateWithdrawal = async (
       amount: sendAmount.toIbex(),
     })
     if (sendResult instanceof Error) {
-      await BridgeAccountsRepo.updateWithdrawalSendFailed(
-        pendingWithdrawal.id,
-        transfer.id,
-        transfer.amount,
-        transfer.currency,
+      await markWithdrawalSendFailed({
+        accountId: accountId as string,
+        withdrawalId: pendingWithdrawal.id,
+        transferId: transfer.id,
+        amount: transfer.amount,
+        currency: transfer.currency,
         bridgeDepositAddress,
-        sendResult.message,
-      )
+        failureReason: sendResult.message,
+      })
       return sendResult
     }
 
@@ -1042,6 +1091,13 @@ const initiateWithdrawal = async (
       ibexTxHashFromSendResponse(sendResult),
     )
     if (updated instanceof Error) return updated
+
+    await sendBridgeWithdrawalNotificationBestEffort({
+      accountId: accountId as string,
+      amount: updated.amount,
+      currency: updated.currency,
+      outcome: "usdt_sent",
+    })
 
     const auditResult = await writeBridgeCashoutPending({
       transferId: transfer.id,

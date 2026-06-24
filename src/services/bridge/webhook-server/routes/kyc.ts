@@ -18,11 +18,41 @@
  */
 
 import { Request, Response } from "express"
+import {
+  isBridgeKycInitiated,
+  sendBridgeKycNotificationBestEffort,
+  toBridgeKycNotificationOutcome,
+} from "@app/bridge/send-kyc-notification"
 import { AccountsRepository } from "@services/mongoose/accounts"
 import { LockService } from "@services/lock"
 import { baseLogger } from "@services/logger"
 import { toBridgeCustomerId } from "@domain/primitives/bridge"
 import BridgeService from "@services/bridge"
+
+const notifyKycStatusChange = async ({
+  account,
+  previousStatus,
+  nextStatus,
+  rejectionReasons,
+}: {
+  account: Account
+  previousStatus: Account["bridgeKycStatus"]
+  nextStatus: NonNullable<Account["bridgeKycStatus"]>
+  rejectionReasons: unknown[]
+}) => {
+  if (previousStatus === nextStatus) return
+  if (!isBridgeKycInitiated(previousStatus)) return
+
+  const outcome = toBridgeKycNotificationOutcome(nextStatus)
+  if (!outcome) return
+
+  await sendBridgeKycNotificationBestEffort({
+    accountId: account.id,
+    outcome,
+    kycStatus: nextStatus,
+    rejectionReasons,
+  })
+}
 
 export const kycHandler = async (req: Request, res: Response) => {
   const { event_id, event_object, event_type } = req.body
@@ -69,8 +99,9 @@ export const kycHandler = async (req: Request, res: Response) => {
     // Map Bridge customer status fields to our internal kyc status
     // Bridge customer.status values: not_started, active (approved), rejected, offboarded
     if (status === "not_started") {
+      const nextStatus = "not_started" as const
       const result = await AccountsRepository().updateBridgeFields(account.id, {
-        bridgeKycStatus: "not_started",
+        bridgeKycStatus: nextStatus,
       })
 
       if (result instanceof Error) {
@@ -83,8 +114,9 @@ export const kycHandler = async (req: Request, res: Response) => {
 
       baseLogger.info({ accountId: account.id, customerId }, "Bridge KYC not started")
     } else if (PENDING_BRIDGE_STATUSES.has(status)) {
+      const nextStatus = status as NonNullable<Account["bridgeKycStatus"]>
       const result = await AccountsRepository().updateBridgeFields(account.id, {
-        bridgeKycStatus: status as Account["bridgeKycStatus"],
+        bridgeKycStatus: nextStatus,
       })
 
       if (result instanceof Error) {
@@ -94,14 +126,22 @@ export const kycHandler = async (req: Request, res: Response) => {
         )
         return res.status(500).json({ error: "Failed to update status" })
       }
+
+      await notifyKycStatusChange({
+        account,
+        previousStatus: account.bridgeKycStatus,
+        nextStatus,
+        rejectionReasons,
+      })
 
       baseLogger.info(
         { accountId: account.id, customerId, status },
         "Bridge KYC moved to pending",
       )
     } else if (status === "active" || status === "approved") {
+      const nextStatus = "approved" as const
       const result = await AccountsRepository().updateBridgeFields(account.id, {
-        bridgeKycStatus: "approved",
+        bridgeKycStatus: nextStatus,
       })
 
       if (result instanceof Error) {
@@ -111,6 +151,13 @@ export const kycHandler = async (req: Request, res: Response) => {
         )
         return res.status(500).json({ error: "Failed to update status" })
       }
+
+      await notifyKycStatusChange({
+        account,
+        previousStatus: account.bridgeKycStatus,
+        nextStatus,
+        rejectionReasons,
+      })
 
       baseLogger.info({ accountId: account.id, customerId }, "Bridge KYC approved")
 
@@ -127,8 +174,9 @@ export const kycHandler = async (req: Request, res: Response) => {
         )
       }
     } else if (status === "rejected") {
+      const nextStatus = "rejected" as const
       const result = await AccountsRepository().updateBridgeFields(account.id, {
-        bridgeKycStatus: "rejected",
+        bridgeKycStatus: nextStatus,
       })
 
       if (result instanceof Error) {
@@ -138,6 +186,13 @@ export const kycHandler = async (req: Request, res: Response) => {
         )
         return res.status(500).json({ error: "Failed to update status" })
       }
+
+      await notifyKycStatusChange({
+        account,
+        previousStatus: account.bridgeKycStatus,
+        nextStatus,
+        rejectionReasons,
+      })
 
       baseLogger.warn(
         {
@@ -148,8 +203,9 @@ export const kycHandler = async (req: Request, res: Response) => {
         "Bridge KYC rejected",
       )
     } else if (status === "offboarded") {
+      const nextStatus = "offboarded" as const
       const result = await AccountsRepository().updateBridgeFields(account.id, {
-        bridgeKycStatus: "offboarded",
+        bridgeKycStatus: nextStatus,
       })
 
       if (result instanceof Error) {
@@ -159,6 +215,13 @@ export const kycHandler = async (req: Request, res: Response) => {
         )
         return res.status(500).json({ error: "Failed to update status" })
       }
+
+      await notifyKycStatusChange({
+        account,
+        previousStatus: account.bridgeKycStatus,
+        nextStatus,
+        rejectionReasons,
+      })
 
       baseLogger.warn({ accountId: account.id, customerId }, "Bridge KYC offboarded")
     } else {

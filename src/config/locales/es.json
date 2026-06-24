@@ -38,8 +38,18 @@
       }
     },
     "bridgeDeposit": {
-      "body": "Su depósito de {{amount}} se agregó a su cuenta.",
-      "title": "Depósito recibido"
+      "completed": {
+        "body": "Su depósito de {{amount}} se agregó a su cuenta.",
+        "title": "Depósito recibido"
+      },
+      "processing": {
+        "body": "Su depósito de {{amount}} se está enviando a su billetera.",
+        "title": "Depósito en proceso"
+      },
+      "received": {
+        "body": "Recibimos su depósito de {{amount}}.",
+        "title": "Depósito recibido"
+      }
     },
     "bridgeWithdrawal": {
       "flashFeeNotice": "Las comisiones y montos mostrados son estimados. Las comisiones finales pueden variar.",
@@ -55,6 +65,41 @@
         "body": "No se pudo completar su retiro de {{amount}}.",
         "bodyWithReason": "No se pudo completar su retiro de {{amount}}: {{reason}}.",
         "title": "Retiro fallido"
+      },
+      "processing": {
+        "body": "Su retiro de {{amount}} está en proceso.",
+        "title": "Retiro en progreso"
+      },
+      "submitted": {
+        "body": "Su retiro de {{amount}} ha sido enviado.",
+        "title": "Retiro enviado"
+      },
+      "usdt_sent": {
+        "body": "Su retiro de {{amount}} está en camino a su banco.",
+        "title": "Retiro en proceso"
+      }
+    },
+    "bridgeKyc": {
+      "approved": {
+        "body": "Su verificación de identidad ha sido aprobada.",
+        "title": "Identidad verificada"
+      },
+      "in_review": {
+        "body": "Su verificación de identidad está en revisión. Le avisaremos cuando esté completa.",
+        "title": "Verificación en progreso"
+      },
+      "incomplete": {
+        "body": "Su verificación de identidad aún no está completa. Complétela para continuar.",
+        "title": "Complete su verificación"
+      },
+      "offboarded": {
+        "body": "Su verificación de identidad ha sido cerrada.",
+        "title": "Verificación cerrada"
+      },
+      "rejected": {
+        "body": "Su verificación de identidad no fue aprobada.",
+        "bodyWithReason": "Su verificación de identidad no fue aprobada: {{reason}}.",
+        "title": "Verificación no exitosa"
       }
     }
   }

@@ -20,14 +20,18 @@ const i18n = getI18nInstance()
 const formatDepositAmount = (amount: string, currency: string): string =>
   `${amount} ${currency.toUpperCase()}`
 
+export type BridgeDepositNotificationOutcome = "received" | "processing" | "completed"
+
 export const sendBridgeDepositNotification = async ({
   accountId: accountIdRaw,
   amount,
   currency,
+  outcome = "completed",
 }: {
   accountId: string
   amount: string
   currency: string
+  outcome?: BridgeDepositNotificationOutcome
 }): Promise<true | ApplicationError> => {
   const accountId = checkedToAccountId(accountIdRaw)
   if (accountId instanceof Error) return accountId
@@ -40,7 +44,7 @@ export const sendBridgeDepositNotification = async ({
 
   const locale = getLanguageOrDefault(user.language)
   const formattedAmount = formatDepositAmount(amount, currency)
-  const phraseBase = "notification.bridgeDeposit"
+  const phraseBase = `notification.bridgeDeposit.${outcome}`
 
   const title = i18n.__({ phrase: `${phraseBase}.title`, locale })
   const body = i18n.__(
@@ -55,7 +59,7 @@ export const sendBridgeDepositNotification = async ({
     notificationCategory: FlashNotificationCategories.Payments,
     notificationSettings: account.notificationSettings,
     data: {
-      type: "bridge_deposit_completed",
+      type: `bridge_deposit_${outcome}`,
       amount,
       currency: currency == "usdt" ? "USD" : currency.toUpperCase(),
     },
@@ -91,7 +95,7 @@ export const sendBridgeDepositNotificationBestEffort = async (
 
   if (result instanceof Error) {
     baseLogger.warn(
-      { accountId: args.accountId, error: result },
+      { accountId: args.accountId, outcome: args.outcome ?? "completed", error: result },
       "Failed to send Bridge deposit push notification",
     )
   }

@@ -955,6 +955,7 @@ describe("initiateWithdrawal — takes withdrawalId (step 2A)", () => {
       CUSTOMER_ID,
       expect.objectContaining({
         amount: AMOUNT,
+        developer_fee: "1.00",
         source: {
           payment_rail: "ethereum",
           currency: "usdt",
@@ -965,6 +966,14 @@ describe("initiateWithdrawal — takes withdrawalId (step 2A)", () => {
       }),
       deriveWithdrawalIdempotencyKey(WITHDRAWAL_ID),
     )
+  })
+
+  it("sends a fixed developer_fee instead of developer_fee_percent for offramps", async () => {
+    await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
+
+    const transferPayload = (BridgeClient.createTransfer as jest.Mock).mock.calls[0][1]
+    expect(transferPayload.developer_fee).toBe("1.00")
+    expect(transferPayload).not.toHaveProperty("developer_fee_percent")
   })
 
   it("revalidates the pending withdrawal external account against Bridge before creating a transfer", async () => {
