@@ -4,11 +4,6 @@ import IbexClient, {
   CreateAccountResponse201,
   CreateLnurlPayBodyParam,
   CreateLnurlPayResponse201,
-  CreateCryptoSendInfoBodyParam,
-  CryptoSendInfo,
-  CryptoSendBodyParam,
-  CryptoSendRequirements,
-  CryptoSendResponse200,
   DecodeLnurlMetadataParam,
   DecodeLnurlResponse200,
   EstimateFeeCopyResponse200,
@@ -45,6 +40,11 @@ import {
   CryptoReceiveOption,
   CryptoReceiveInfo,
   CreateCryptoReceiveInfoRequest,
+  CreateCryptoSendInfoBodyParam,
+  CryptoSendBodyParam,
+  CryptoSendInfo,
+  CryptoSendRequirements,
+  CryptoSendResponse,
   IbexCurrency,
   UsdWalletAmount,
 } from "./types"
@@ -134,15 +134,17 @@ const getAccountTransactions = async (
   return Ibex.getAccountTransactions(params).then(errorHandler)
 }
 
-const addInvoice = async (args: IbexInvoiceArgs): Promise<AddInvoiceResponse201 | IbexError> => {
+const addInvoice = async (
+  args: IbexInvoiceArgs,
+): Promise<AddInvoiceResponse201 | IbexError> => {
   const body = {
-      ...args,
-      amount: args.amount?.toIbex(),
-      // IBEX silently caps non-msat receive invoices at 60s; never request more.
-      // See IBEX_RECEIVE_MAX_EXPIRATION_SECONDS (ENG-427).
-      expiration: cappedIbexReceiveExpiration(args.expiration),
-      webhookUrl: WebhookServer.endpoints.onReceive.invoice,
-      webhookSecret: WebhookServer.secret,
+    ...args,
+    amount: args.amount?.toIbex(),
+    // IBEX silently caps non-msat receive invoices at 60s; never request more.
+    // See IBEX_RECEIVE_MAX_EXPIRATION_SECONDS (ENG-427).
+    expiration: cappedIbexReceiveExpiration(args.expiration),
+    webhookUrl: WebhookServer.endpoints.onReceive.invoice,
+    webhookSecret: WebhookServer.secret,
   } as AddInvoiceBodyParam
   addAttributesToCurrentSpan({ "request.params": JSON.stringify(body) })
   return Ibex.addInvoice(body).then(errorHandler)
@@ -229,9 +231,17 @@ const sendOnchain = async (
 
 const sendCrypto = async (
   body: CryptoSendBodyParam,
-): Promise<CryptoSendResponse200 | IbexError> => {
+): Promise<CryptoSendResponse | IbexError> => {
   addAttributesToCurrentSpan({ "request.params": JSON.stringify(body) })
-  return Ibex.sendCrypto(body).then(errorHandler)
+  const token = await getIbexToken()
+  if (token instanceof IbexError) return token
+
+  const { accountId, ...cryptoSendBody } = body
+  return ibexPost<CryptoSendResponse>(
+    token,
+    `/accounts/${encodeURIComponent(accountId)}/crypto/send`,
+    cryptoSendBody,
+  )
 }
 
 const getCryptoSendRequirements = async (args: {
@@ -239,14 +249,27 @@ const getCryptoSendRequirements = async (args: {
   currencyId: IbexCurrencyId
 }): Promise<CryptoSendRequirements | IbexError> => {
   addAttributesToCurrentSpan({ "request.params": JSON.stringify(args) })
-  return Ibex.getCryptoSendRequirements(args).then(errorHandler)
+  const token = await getIbexToken()
+  if (token instanceof IbexError) return token
+
+  const query = new URLSearchParams()
+  query.set("network", args.network)
+  query.set("currency-id", String(args.currencyId))
+
+  return ibexGet<CryptoSendRequirements>(
+    token,
+    `/crypto/send/requirements?${query.toString()}`,
+  )
 }
 
 const createCryptoSendInfo = async (
   body: CreateCryptoSendInfoBodyParam,
 ): Promise<CryptoSendInfo | IbexError> => {
   addAttributesToCurrentSpan({ "request.params": JSON.stringify(body) })
-  return Ibex.createCryptoSendInfo(body).then(errorHandler)
+  const token = await getIbexToken()
+  if (token instanceof IbexError) return token
+
+  return ibexPost<CryptoSendInfo>(token, "/crypto/send/infos", body)
 }
 
 const estimateOnchainFee = async (

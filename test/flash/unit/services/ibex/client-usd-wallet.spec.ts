@@ -4,6 +4,11 @@ const mockEstimateFeeV2 = jest.fn()
 const mockGetCryptoSendRequirements = jest.fn()
 const mockCreateCryptoSendInfo = jest.fn()
 const mockSendCrypto = jest.fn()
+const mockGetAccessToken = jest.fn()
+const mockSetAccessToken = jest.fn()
+const mockFetch = jest.fn()
+
+global.fetch = mockFetch as unknown as typeof fetch
 
 jest.mock("@services/ibex/cache", () => ({
   Redis: {
@@ -44,8 +49,8 @@ jest.mock("ibex-client", () => {
     default: jest.fn().mockImplementation(() => ({
       authentication: {
         storage: {
-          getAccessToken: jest.fn(),
-          setAccessToken: jest.fn(),
+          getAccessToken: (...args: unknown[]) => mockGetAccessToken(...args),
+          setAccessToken: (...args: unknown[]) => mockSetAccessToken(...args),
           setRefreshToken: jest.fn(),
         },
       },
@@ -77,6 +82,9 @@ import Ibex from "@services/ibex/client"
 describe("IBEX USD wallet amount handling", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    mockFetch.mockReset()
+    mockGetAccessToken.mockResolvedValue("Bearer test-token")
+    mockSetAccessToken.mockResolvedValue(undefined)
   })
 
   it("creates USDT invoices using decimal USDT amount", async () => {
@@ -168,9 +176,12 @@ describe("IBEX USD wallet amount handling", () => {
   })
 
   it("forwards crypto sends to the IBEX crypto send endpoint", async () => {
-    mockSendCrypto.mockResolvedValue({
-      transaction: { id: "ibex-payout-001", status: "PENDING" },
-      cryptoTransaction: { networkTxId: "0xtx" },
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        transaction: { id: "ibex-payout-001", status: "PENDING" },
+        cryptoTransaction: { networkTxId: "0xtx" },
+      }),
     })
 
     await Ibex.sendCrypto({
@@ -179,17 +190,29 @@ describe("IBEX USD wallet amount handling", () => {
       amount: 2.5,
     })
 
-    expect(mockSendCrypto).toHaveBeenCalledWith({
-      accountId: "ibex-usdt-account",
-      cryptoSendInfosId: "send-info-001",
-      amount: 2.5,
-    })
+    expect(mockFetch).toHaveBeenCalledWith(
+      "https://api.sandbox.example/accounts/ibex-usdt-account/crypto/send",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "Authorization": "Bearer test-token",
+          "Content-Type": "application/json",
+        }),
+        body: JSON.stringify({
+          cryptoSendInfosId: "send-info-001",
+          amount: 2.5,
+        }),
+      }),
+    )
   })
 
   it("fetches crypto send requirements", async () => {
-    mockGetCryptoSendRequirements.mockResolvedValue({
-      requirementsId: "requirements-001",
-      data: { address: { required: true } },
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        requirementsId: "requirements-001",
+        data: { address: { required: true } },
+      }),
     })
 
     await Ibex.getCryptoSendRequirements({
@@ -197,17 +220,26 @@ describe("IBEX USD wallet amount handling", () => {
       currencyId: USDTAmount.currencyId,
     })
 
-    expect(mockGetCryptoSendRequirements).toHaveBeenCalledWith({
-      network: "ethereum",
-      currencyId: USDTAmount.currencyId,
-    })
+    expect(mockFetch).toHaveBeenCalledWith(
+      "https://api.sandbox.example/crypto/send/requirements?network=ethereum&currency-id=29",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({
+          "Authorization": "Bearer test-token",
+          "Content-Type": "application/json",
+        }),
+      }),
+    )
   })
 
   it("creates crypto send info", async () => {
-    mockCreateCryptoSendInfo.mockResolvedValue({
-      id: "send-info-001",
-      name: "bridge-withdrawal-001",
-      data: { address: "0xbridge" },
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: "send-info-001",
+        name: "bridge-withdrawal-001",
+        data: { address: "0xbridge" },
+      }),
     })
 
     await Ibex.createCryptoSendInfo({
@@ -216,10 +248,20 @@ describe("IBEX USD wallet amount handling", () => {
       data: { address: "0xbridge" },
     })
 
-    expect(mockCreateCryptoSendInfo).toHaveBeenCalledWith({
-      name: "bridge-withdrawal-001",
-      requirementsId: "requirements-001",
-      data: { address: "0xbridge" },
-    })
+    expect(mockFetch).toHaveBeenCalledWith(
+      "https://api.sandbox.example/crypto/send/infos",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "Authorization": "Bearer test-token",
+          "Content-Type": "application/json",
+        }),
+        body: JSON.stringify({
+          name: "bridge-withdrawal-001",
+          requirementsId: "requirements-001",
+          data: { address: "0xbridge" },
+        }),
+      }),
+    )
   })
 })

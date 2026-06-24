@@ -71,3 +71,80 @@ export interface CreateCryptoReceiveInfoRequest {
   name: string
   network: string
 }
+
+export interface CryptoSendRequirements {
+  requirementsId: string
+  type?: string
+  currencyId?: number
+  data: Record<string, unknown>
+  [key: string]: unknown
+}
+
+export interface CreateCryptoSendInfoBodyParam {
+  name: string
+  requirementsId: string
+  data: Record<string, unknown>
+}
+
+export interface CryptoSendInfo {
+  id: string
+  name: string
+  currencyId?: number
+  network?: string
+  data?: Record<string, unknown>
+  [key: string]: unknown
+}
+
+export interface CryptoSendBodyParam {
+  accountId: string
+  cryptoSendInfosId: string
+  amount: number
+}
+
+export interface CryptoSendResponse {
+  transaction?: {
+    id?: string
+    createdAt?: string
+    settledAt?: string | null
+    accountId?: string
+    amount?: number
+    networkFee?: number
+    onChainSendFee?: number
+    exchangeRateCurrencySats?: number
+    currencyId?: number
+    transactionTypeId?: string | number
+    status?: string
+    [key: string]: unknown
+  }
+  transactionHub?: {
+    id?: string
+    createdAt?: string
+    settledAt?: string | null
+    accountId?: string
+    amount?: number
+    networkFee?: number
+    currencyId?: number
+    transactionTypeId?: number
+    txHash?: string
+    transactionHash?: string
+    hash?: string
+    [key: string]: unknown
+  }
+  cryptoTransaction?: {
+    id?: string
+    network?: string
+    address?: string
+    amount?: number
+    status?: string
+    txHash?: string
+    networkTxId?: string
+    [key: string]: unknown
+  }
+  transactionId?: string
+  txHash?: string
+  transactionHash?: string
+  networkTxId?: string
+  status?: string
+  amount?: number
+  [key: string]: unknown
+}
