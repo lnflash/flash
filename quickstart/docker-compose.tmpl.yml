@@ -12,7 +12,7 @@ services:
       - oathkeeper
       - kratos
       - kratos-pg
-      - galoy
+      - flash
       - trigger
       - redis
       - mongodb
@@ -37,7 +37,7 @@ services:
   kratos: #@ data.values.services["kratos"]
   kratos-pg: #@ data.values.services["kratos-pg"]
 
-  galoy:
+  flash:
 #@ if galoy_image_digest == "local":
     build:
       context: ../
@@ -62,10 +62,6 @@ services:
     - mongodb
     - redis
     - stablesats
-    networks:
-      default:
-        aliases:
-        - bats-tests
   trigger:
 #@ if galoy_image_digest == "local":
     build:

@@ -1,6 +1,6 @@
 - id: anonymous-rest-auth
   upstream:
-    url: "http://bats-tests:4012"
+    url: "http://flash:4012"
   match:
     url: "<(http|https)>://<[a-zA-Z0-9-.:]+>/auth/<(clearCookies|login|logout|email/code|email/login|totp/validate|email/login/cookie)>"
     methods: ["GET", "POST", "OPTIONS"]
@@ -13,7 +13,7 @@
 
 - id: device-login
   upstream:
-    url: "http://bats-tests:4012"
+    url: "http://flash:4012"
   match:
     url: "<(http|https)>://<[a-zA-Z0-9-.:]+>/auth/create/device-account"
     methods: ["POST"]
@@ -34,9 +34,9 @@
   mutators:
     - handler: noop
 
-- id: galoy-ws
+- id: flash-ws
   upstream:
-    url: "http://bats-tests:4000/graphql"
+    url: "http://flash:4000/graphql"
     strip_path: /graphqlws # ONLY FOR DEV, in prod should resolve to /graphql, like ws.blink.sv/graphql
   match:
     url: "<(http|https)>://<[a-zA-Z0-9-.:]+>/graphqlws" # ONLY FOR DEV, in prod should resolve to /graphql
@@ -48,7 +48,7 @@
   mutators:
     - handler: noop
 
-- id: galoy-backend
+- id: flash-backend
   upstream:
     url: "http://apollo-router:4004"
   match:
@@ -79,7 +79,7 @@
 
 - id: admin-backend
   upstream:
-    url: "http://bats-tests:4001"
+    url: "http://flash:4001"
     strip_path: /admin
   match:
     url: "<(http|https)>://<.*><[0-9]+>/admin<.*>"

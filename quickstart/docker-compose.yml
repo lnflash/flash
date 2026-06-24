@@ -7,7 +7,7 @@ services:
     - oathkeeper
     - kratos
     - kratos-pg
-    - galoy
+    - flash
     - trigger
     - redis
     - mongodb
@@ -68,7 +68,7 @@ services:
     - POSTGRES_USER=dbuser
     - POSTGRES_PASSWORD=secret
     - POSTGRES_DB=default
-  galoy:
+  flash:
     image: us.gcr.io/galoy-org/galoy-app@sha256:61eec2c0747ce8e20e1a45f1d0492e955631e6d89f25cf2364c0727b27786cfe
     command:
     - -r
@@ -86,10 +86,6 @@ services:
     - mongodb
     - redis
     - stablesats
-    networks:
-      default:
-        aliases:
-        - bats-tests
   trigger:
     image: us.gcr.io/galoy-org/galoy-app@sha256:61eec2c0747ce8e20e1a45f1d0492e955631e6d89f25cf2364c0727b27786cfe
     command:
