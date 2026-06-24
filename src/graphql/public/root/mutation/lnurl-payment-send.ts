@@ -76,8 +76,22 @@ const paramsFromMetadata = ({
     tag: "payRequest",
   })
 
-const paymentStatusFromIbex = (payment: Record<string, any>): PaymentSendStatus => {
-  switch (payment.transaction?.payment?.status?.id) {
+type IbexPaymentStatus = {
+  transaction?: {
+    payment?: {
+      status?: {
+        id?: number
+      }
+      statusId?: number
+    }
+  }
+}
+
+const paymentStatusFromIbex = (payment: IbexPaymentStatus): PaymentSendStatus => {
+  switch (
+    payment.transaction?.payment?.status?.id ??
+    payment.transaction?.payment?.statusId
+  ) {
     case 1:
       return PaymentSendStatus.Pending
     case 2:

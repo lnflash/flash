@@ -54,8 +54,10 @@ const AccountUpdateLevelMutation = GT.Field<
 
     const account = await Accounts.updateAccountLevel({ id: uid, level, erpParty })
 
-    if (account instanceof ValidationError) return apolloErrorResponse(new InputValidationError({ message: account.message })) 
-    if (account instanceof Error) return { errors: [mapAndParseErrorForGqlResponse(account)] }
+    if (account instanceof ValidationError)
+      return apolloErrorResponse(new InputValidationError({ message: account.message }))
+    if (account instanceof Error)
+      return { errors: [mapAndParseErrorForGqlResponse(account)] }
     return { errors: [], accountDetails: account }
   },
 })

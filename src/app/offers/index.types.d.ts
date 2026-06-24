@@ -1,6 +1,5 @@
 type OfferId = string & { readonly brand: unique symbol }
 
-
 // type IbexCashout = CashoutDetails & {
 //   readonly walletId: WalletId
 // }
@@ -10,8 +9,8 @@ type OfferId = string & { readonly brand: unique symbol }
 type BasisPoints = bigint & { readonly brand: unique symbol }
 
 type CashoutConfig = {
-  fee: BasisPoints,
-  duration: Seconds,
+  fee: BasisPoints
+  duration: Seconds
 }
 
 type ValidationConfig = {
@@ -19,4 +18,3 @@ type ValidationConfig = {
   maximum: Amount<"USD">
   accountLevel: AccountLevel
 }
-

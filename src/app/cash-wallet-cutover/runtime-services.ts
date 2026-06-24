@@ -41,7 +41,9 @@ const isUsdAmount = (amount: unknown): amount is USDAmount => amount instanceof 
 const isUsdtAmount = (amount: unknown): amount is USDTAmount =>
   amount instanceof USDTAmount
 
-const ibexInvoiceToDomainInvoice = (response: Awaited<ReturnType<typeof Ibex.addInvoice>>) => {
+const ibexInvoiceToDomainInvoice = (
+  response: Awaited<ReturnType<typeof Ibex.addInvoice>>,
+) => {
   if (response instanceof Error) return response
 
   const invoiceString = response.invoice?.bolt11
@@ -102,8 +104,7 @@ export const createCashWalletMigrationRuntimeServices = (
       1,
       deps.maxRateLimitAttempts ?? CUTOVER_IBEX_RATE_LIMIT_MAX_ATTEMPTS,
     ),
-    retryDelayMs:
-      deps.rateLimitRetryDelayMs ?? CUTOVER_IBEX_RATE_LIMIT_RETRY_DELAY_MS,
+    retryDelayMs: deps.rateLimitRetryDelayMs ?? CUTOVER_IBEX_RATE_LIMIT_RETRY_DELAY_MS,
     sleepFn: deps.sleep ?? sleep,
   }
 

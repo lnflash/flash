@@ -27,7 +27,7 @@ type IbexConfig = {
   mock?: boolean
   clientId: string
   clientSecret: string
-  environment: 'production' | 'sandbox'
+  environment: "production" | "sandbox"
   webhook: WebhookServer
 }
 

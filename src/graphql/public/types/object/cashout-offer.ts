@@ -27,13 +27,17 @@ const CashoutOffer: GraphQLObjectType<PersistedOffer, GraphQLPublicContext> = GT
     },
     receiveUsd: {
       type: USDCentsScalar,
-      description: "The amount Flash owes to the user denominated in USD cents (null for JMD payouts)",
-      resolve: (o) => o.details.payout.amount instanceof USDAmount ? o.details.payout.amount : null,
+      description:
+        "The amount Flash owes to the user denominated in USD cents (null for JMD payouts)",
+      resolve: (o) =>
+        o.details.payout.amount instanceof USDAmount ? o.details.payout.amount : null,
     },
     receiveJmd: {
       type: JMDCentsScalar,
-      description: "The amount Flash owes to the user denominated in JMD cents (null for USD payouts)",
-      resolve: (o) => o.details.payout.amount instanceof JMDAmount ? o.details.payout.amount : null,
+      description:
+        "The amount Flash owes to the user denominated in JMD cents (null for USD payouts)",
+      resolve: (o) =>
+        o.details.payout.amount instanceof JMDAmount ? o.details.payout.amount : null,
     },
     exchangeRate: {
       type: JMDCentsScalar,

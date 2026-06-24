@@ -6,8 +6,6 @@ import {
   getLightningAddressDomainAliases,
 } from "@config"
 
-import { Lightning } from "@app"
-
 import { getSupportedCountries } from "@app/authentication/get-supported-countries"
 
 import { GT } from "@graphql/index"

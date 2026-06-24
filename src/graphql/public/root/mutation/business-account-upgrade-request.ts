@@ -18,8 +18,20 @@ const BankAccountInput = GT.Input({
   }),
 })
 
-type BankAccountInputType = { bankName: string, bankBranch: string, accountType: string, currency: string, accountNumber: string }
-const parseBankAccountInput = ({ bankName, bankBranch, accountType, currency, accountNumber }: BankAccountInputType) => ({
+type BankAccountInputType = {
+  bankName: string
+  bankBranch: string
+  accountType: string
+  currency: string
+  accountNumber: string
+}
+const parseBankAccountInput = ({
+  bankName,
+  bankBranch,
+  accountType,
+  currency,
+  accountNumber,
+}: BankAccountInputType) => ({
   bank: bankName,
   branch_code: bankBranch,
   account_type: accountType,
@@ -81,7 +93,12 @@ const BusinessAccountUpgradeRequestMutation = GT.Field({
       ...rest,
       bankAccount: bankAccount ? parseBankAccountInput(bankAccount) : undefined,
     })
-    if (result instanceof SetDocTypeValueError) return apolloErrorResponse(new InternalServerError({ message: "Pending upgrade request(s) failed to update." }))
+    if (result instanceof SetDocTypeValueError)
+      return apolloErrorResponse(
+        new InternalServerError({
+          message: "Pending upgrade request(s) failed to update.",
+        }),
+      )
     if (result instanceof Error) return { errors: mapToGqlErrorList(result) }
     else return result
   },

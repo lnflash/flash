@@ -197,11 +197,13 @@ describe("replayHandler", () => {
     })
 
     it("routes outbound withdrawal payment_processed replay to transfer handler", async () => {
-      ;(transferHandler as jest.Mock).mockImplementation((_req: Request, res: Response) => {
-        ;(res.status as jest.Mock)(200)
-        ;(res.json as jest.Mock)({ status: "success" })
-        return Promise.resolve(res)
-      })
+      ;(transferHandler as jest.Mock).mockImplementation(
+        (_req: Request, res: Response) => {
+          ;(res.status as jest.Mock)(200)
+          ;(res.json as jest.Mock)({ status: "success" })
+          return Promise.resolve(res)
+        },
+      )
       ;(ReplayLog.createBridgeReplay as jest.Mock).mockResolvedValue({ id: "log-wd-001" })
 
       const res = makeRes()

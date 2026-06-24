@@ -1,41 +1,43 @@
 import ValidOffer from "@app/offers/ValidOffer"
 import { FrappeConfig } from "@config"
-import { JMDAmount, USDAmount, USDTAmount, Validated } from "@domain/shared"
+import { USDTAmount, Validated } from "@domain/shared"
 import { baseLogger } from "@services/logger"
 import { recordExceptionInCurrentSpan } from "@services/tracing"
 import axios, { isAxiosError } from "axios"
 
 import {
+  BankAccountQueryError,
+  BanksQueryError,
+  BridgeTransferRequestUpsertError,
   CashoutDraftError,
   CashoutSubmitError,
   JournalEntryDeleteError,
+  SetDocTypeValueError,
   UpgradeRequestCreateError,
   UpgradeRequestQueryError,
-  BanksQueryError,
-  BankAccountQueryError,
-  SetDocTypeValueError,
-  BridgeTransferRequestUpsertError,
 } from "./errors"
-import {
-  AccountUpgradeRequest,
-  RequestStatus,
-} from "./models/AccountUpgradeRequest"
+import { AccountUpgradeRequest, RequestStatus } from "./models/AccountUpgradeRequest"
 import { Bank } from "./models/Bank"
 import { BankAccount } from "./models/BankAccount"
 import { BridgeTransferRequest } from "./models/BridgeTransferRequest"
 import { Filter } from "./SearchFilters"
 
-export type AccountUpgradeRequestFilters = { username?: Filter, status?: Filter }
+export type AccountUpgradeRequestFilters = { username?: Filter; status?: Filter }
 type ErpNextFilter = [string, string, string, string[]]
 export const toJson = (filters: AccountUpgradeRequestFilters): string => {
   const erpNextFilters = Object.entries(filters)
     .filter((entry): entry is [string, Filter] => entry[1] !== undefined)
-    .map(([key, filter]) => [AccountUpgradeRequest.doctype, key, filter.operator, filter.value] as ErpNextFilter)
+    .map(
+      ([key, filter]) =>
+        [
+          AccountUpgradeRequest.doctype,
+          key,
+          filter.operator,
+          filter.value,
+        ] as ErpNextFilter,
+    )
   return JSON.stringify(erpNextFilters)
 }
-
-// Move to MoneyAmount
-const erpUsd = (usd: USDAmount): number => Number(usd.asCents(2))
 
 export type CashoutId = string & { readonly brand: unique symbol }
 
@@ -49,7 +51,7 @@ export class ErpNext {
       "Content-Type": "application/json",
       "Authorization": `token ${creds.apiKey}:${creds.apiSecret}`,
       "Host": sitename,
-      "Expect": ""
+      "Expect": "",
     }
   }
 
@@ -75,16 +77,21 @@ export class ErpNext {
               : payment.amount.asDollars(),
           ),
           currency: payout.amount.currencyCode,
-          exchange_rate: payout.exchangeRate ? Number(payout.exchangeRate.asDollars()) : undefined,
+          exchange_rate: payout.exchangeRate
+            ? Number(payout.exchangeRate.asDollars())
+            : undefined,
           flash_fee: Number(payout.serviceFee.asDollars()),
-        },           
+        },
         { headers: this.headers },
-      );
+      )
       return response.data.data.name as CashoutId
     } catch (err) {
       const responseData = isAxiosError(err) ? err.response?.data : undefined
       baseLogger.error({ err, responseData }, "Error drafting Cashout in ERPNext")
-      recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
       return new CashoutDraftError(err)
     }
   }
@@ -100,7 +107,10 @@ export class ErpNext {
     } catch (err) {
       const responseData = isAxiosError(err) ? err.response?.data : undefined
       baseLogger.error({ err, responseData }, "Error submitting Cashout in ERPNext")
-      recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
       return new CashoutSubmitError(err)
     }
   }
@@ -113,7 +123,10 @@ export class ErpNext {
     } catch (err) {
       const responseData = isAxiosError(err) ? err.response?.data : undefined
       baseLogger.error({ err, responseData, jeName }, "Error deleting JE in ERPNext")
-      recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
       return new JournalEntryDeleteError(err)
     }
   }
@@ -134,7 +147,10 @@ export class ErpNext {
         { err, responseData, ...req.toErpnext() },
         "Error creating Account Upgrade Request in ERPNext",
       )
-      recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
       return new UpgradeRequestCreateError(err)
     }
   }
@@ -143,19 +159,28 @@ export class ErpNext {
     filters: AccountUpgradeRequestFilters,
   ): Promise<string[] | UpgradeRequestQueryError> {
     try {
-      const resp = await axios.get(`${this.url}/api/resource/${AccountUpgradeRequest.doctype}`, {
-        params: { 
-          filters: toJson(filters),
-          order_by: "creation desc",
+      const resp = await axios.get(
+        `${this.url}/api/resource/${AccountUpgradeRequest.doctype}`,
+        {
+          params: {
+            filters: toJson(filters),
+            order_by: "creation desc",
+          },
+          headers: this.headers,
         },
-        headers: this.headers,
-      })
+      )
 
       return resp.data?.data.map((r: { name: string }) => r.name)
     } catch (err) {
       const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error({ err, responseData, filters }, "Error querying Account Upgrade Request from ERPNext")
-      recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
+      baseLogger.error(
+        { err, responseData, filters },
+        "Error querying Account Upgrade Request from ERPNext",
+      )
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
       return new UpgradeRequestQueryError(err)
     }
   }
@@ -174,8 +199,14 @@ export class ErpNext {
       return AccountUpgradeRequest.fromErpnext(request)
     } catch (err) {
       const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error({ err, responseData, id }, "Error querying Account Upgrade Request from ERPNext")
-      recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
+      baseLogger.error(
+        { err, responseData, id },
+        "Error querying Account Upgrade Request from ERPNext",
+      )
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
       return new UpgradeRequestQueryError(err)
     }
   }
@@ -199,13 +230,22 @@ export class ErpNext {
 
         const failedDocs = resp.data?.message?.failed_docs
         if (failedDocs?.length) {
-          baseLogger.error({ failedDocs, names, status }, "Bulk update failed for some docs")
+          baseLogger.error(
+            { failedDocs, names, status },
+            "Bulk update failed for some docs",
+          )
           return new SetDocTypeValueError(failedDocs)
         }
       } catch (err) {
         const responseData = isAxiosError(err) ? err.response?.data : undefined
-        baseLogger.error({ err, responseData, names, status }, "Error bulk updating upgrade request status")
-        recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
+        baseLogger.error(
+          { err, responseData, names, status },
+          "Error bulk updating upgrade request status",
+        )
+        recordExceptionInCurrentSpan({
+          error: err,
+          attributes: { "erpnext.exception": responseData?.exception },
+        })
         return new SetDocTypeValueError(err)
       }
     }
@@ -224,8 +264,14 @@ export class ErpNext {
       return resp.data?.data ?? []
     } catch (err) {
       const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error({ err, responseData, customerName }, "Error querying Bank Account from ERPNext")
-      recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
+      baseLogger.error(
+        { err, responseData, customerName },
+        "Error querying Bank Account from ERPNext",
+      )
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
       return new BankAccountQueryError(err)
     }
   }
@@ -243,7 +289,10 @@ export class ErpNext {
     } catch (err) {
       const responseData = isAxiosError(err) ? err.response?.data : undefined
       baseLogger.error({ err, responseData }, "Error querying Banks from ERPNext")
-      recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
       return new BanksQueryError(err)
     }
   }
@@ -294,7 +343,10 @@ export class ErpNext {
         { err, responseData, requestId },
         "Error upserting Bridge Transfer Request in ERPNext",
       )
-      recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
       return new BridgeTransferRequestUpsertError(err)
     }
   }
@@ -322,7 +374,10 @@ export class ErpNext {
         { err, responseData, requestId },
         "Error querying Bridge Transfer Request from ERPNext",
       )
-      recordExceptionInCurrentSpan({ error: err, attributes: { "erpnext.exception": responseData?.exception } })
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
       return new BridgeTransferRequestUpsertError(err)
     }
   }

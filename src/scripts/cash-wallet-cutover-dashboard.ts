@@ -7,6 +7,7 @@ import express from "express"
 import yargs from "yargs"
 import { hideBin } from "yargs/helpers"
 
+import { discoverCashWalletCutoverAccounts } from "@app/cash-wallet-cutover/discovery"
 import {
   buildCashWalletCutoverOperatorSnapshot,
   CashWalletCutoverOperatorManifestAccount,
@@ -17,18 +18,17 @@ import {
   parseCashWalletCutoverOperatorManifest,
   refreshOperatorAccountCutoverBalanceAudit,
 } from "@app/cash-wallet-cutover/operator-dashboard"
-import { discoverCashWalletCutoverAccounts } from "@app/cash-wallet-cutover/discovery"
 import { buildCashWalletCutoverPreflightReport } from "@app/cash-wallet-cutover/preflight"
 import { getBalanceForWallet } from "@app/wallets"
 import { WalletCurrency } from "@domain/shared"
+import { getFunderWalletId } from "@services/ledger/caching"
+import { baseLogger } from "@services/logger"
 import { setupMongoConnection } from "@services/mongodb"
 import {
   AccountsRepository,
   CashWalletCutoverRepository,
   WalletsRepository,
 } from "@services/mongoose"
-import { baseLogger } from "@services/logger"
-import { getFunderWalletId } from "@services/ledger/caching"
 
 const BALANCE_TIMEOUT_MS = 7_500
 const BALANCE_READ_ATTEMPTS = 3
@@ -95,8 +95,6 @@ const readBalanceThrottled = async (
 
   return withBalanceTimeout(getBalanceForWallet(request))
 }
-
-const shortId = (value?: string) => (value ? value.slice(0, 8) : "-")
 
 type CachedBalance = OperatorBalance & {
   walletId: WalletId

@@ -534,8 +534,7 @@ const computeCutoverBalanceAudit = ({
     }
   }
 
-  const currentDestinationBalanceUsdtMicros =
-    destinationWallet.balance.minorUnitsNumber
+  const currentDestinationBalanceUsdtMicros = destinationWallet.balance.minorUnitsNumber
   const finalDeltaUsdtMicros = Math.max(
     0,
     currentDestinationBalanceUsdtMicros - destinationStartingBalanceUsdtMicros,
@@ -593,12 +592,10 @@ export const refreshOperatorAccountCutoverBalanceAudit = <
     }
   }
 
-  const currentDestinationBalanceUsdtMicros =
-    destinationWallet.balance.minorUnitsNumber
+  const currentDestinationBalanceUsdtMicros = destinationWallet.balance.minorUnitsNumber
   const finalDeltaUsdtMicros = Math.max(
     0,
-    currentDestinationBalanceUsdtMicros -
-      audit.destinationStartingBalanceUsdtMicros,
+    currentDestinationBalanceUsdtMicros - audit.destinationStartingBalanceUsdtMicros,
   )
   const shortfallUsdtMicros = Math.max(
     0,
@@ -699,7 +696,9 @@ const summarizeTreasuryAccount = async ({
   const usdtWalletsRaw = cashWallets.filter(
     (wallet) => wallet.currency === WalletCurrency.Usdt,
   )
-  const defaultWallet = cashWallets.find((wallet) => wallet.id === account.defaultWalletId)
+  const defaultWallet = cashWallets.find(
+    (wallet) => wallet.id === account.defaultWalletId,
+  )
 
   const [usdWallets, usdtWallets] = await Promise.all([
     Promise.all(

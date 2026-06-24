@@ -1,7 +1,9 @@
-import Money, { Round } from "../bigint-money"
-import { MoneyAmount } from "./MoneyAmount"
-import { WalletCurrency } from "../primitives"
+import Money from "../bigint-money"
+
 import { BigIntConversionError } from "../errors"
+import { WalletCurrency } from "../primitives"
+
+import { MoneyAmount } from "./MoneyAmount"
 
 export class BtcAmount extends MoneyAmount {
   currencyCode = WalletCurrency.Btc as WalletCurrency
@@ -14,7 +16,9 @@ export class BtcAmount extends MoneyAmount {
     try {
       return new BtcAmount(c)
     } catch (error) {
-      return new BigIntConversionError(error instanceof Error ? error.message : String(error))
+      return new BigIntConversionError(
+        error instanceof Error ? error.message : String(error),
+      )
     }
   }
 
@@ -27,9 +31,11 @@ export class BtcAmount extends MoneyAmount {
   }
 
   i18n(): string {
-    return new Intl.NumberFormat("en", {
+    return (
+      new Intl.NumberFormat("en", {
         minimumFractionDigits: 0,
         maximumFractionDigits: 0,
-    }).format(Number(this.asSats())) + " sats";
+      }).format(Number(this.asSats())) + " sats"
+    )
   }
 }

@@ -1,11 +1,10 @@
-
-import { createAdmin } from "./create-admin"
 import { getAdminAccounts } from "@config"
 
+import { createAdmin } from "./create-admin"
 
 export const bootstrap = async () => {
   getAdminAccounts().forEach(async (_) => createAdmin(_))
-  
+
   // const adminAccountIds = await initialStaticAccountIds()
 
   // for (const accountNameString of Object.keys(adminAccountIds)) {
@@ -32,6 +31,5 @@ export const bootstrap = async () => {
   //     return new ConfigError("Missing required admin account config")
   //   }
 }
-
 
 // statusHistory: { $push: AccountStatus.Closed } }

@@ -52,6 +52,3 @@ export abstract class MoneyAmount {
     return this.getInstance(new Money(val, currency, Round.HALF_TO_EVEN))
   }
 }
-
-
-

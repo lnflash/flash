@@ -1,13 +1,10 @@
-
-// Set yaml configurations 
+// Set yaml configurations
 jest.mock("yargs", () => {
   const yargsMock = {
     option: jest.fn().mockReturnThis(),
     argv: {
-      configPath: [
-        "./dev/config/base-config.yaml", 
-      ],
+      configPath: ["./dev/config/base-config.yaml"],
     },
-  };
-  return jest.fn(() => yargsMock);
-});
+  }
+  return jest.fn(() => yargsMock)
+})

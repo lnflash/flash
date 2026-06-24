@@ -7,7 +7,9 @@ const FractionalCentAmount = GT.Scalar({
   description: "Cent amount (1/100 of a dollar) as a float, can be positive or negative",
   parseValue(value) {
     if (typeof value !== "string" && typeof value !== "number") {
-      return new InputValidationError({ message: "Invalid type for FractionalCentAmount" })
+      return new InputValidationError({
+        message: "Invalid type for FractionalCentAmount",
+      })
     }
     return validFractionalCentAmount(value)
   },
@@ -33,7 +35,9 @@ function validFractionalCentAmount(value: string | number) {
 
   const maxCents = Number(MAX_CENTS.amount)
   if (floatValue > maxCents || floatValue < -maxCents) {
-    return new InputValidationError({ message: "Value out of range for FractionalCentAmount" })
+    return new InputValidationError({
+      message: "Value out of range for FractionalCentAmount",
+    })
   }
 
   return floatValue

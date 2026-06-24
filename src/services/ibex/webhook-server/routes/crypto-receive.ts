@@ -12,12 +12,11 @@ import {
   alertIbexReconciliationFailed,
 } from "@services/alerts/ibex-bridge-movement"
 import { writeIbexCryptoReceiveRequest } from "@services/frappe/BridgeTransferRequestWriter"
+import { ibexWebhookPaths } from "@services/ibex/webhook-config"
 
 import { authenticate, logRequest } from "../middleware"
 
-const paths = {
-  cryptoReceive: "/crypto/receive",
-}
+const paths = ibexWebhookPaths.cryptoReceive
 
 const router = express.Router()
 

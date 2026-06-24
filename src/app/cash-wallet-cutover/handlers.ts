@@ -36,7 +36,9 @@ type CashWalletMigrationHandlerServices = {
   invoiceService: Parameters<
     typeof createCashWalletMigrationBalanceMoveInvoice
   >[0]["invoiceService"] &
-    Parameters<typeof createCashWalletMigrationFeeReimbursementInvoice>[0]["invoiceService"]
+    Parameters<
+      typeof createCashWalletMigrationFeeReimbursementInvoice
+    >[0]["invoiceService"]
   paymentService: Parameters<
     typeof sendCashWalletMigrationBalanceMovePayment
   >[0]["paymentService"]

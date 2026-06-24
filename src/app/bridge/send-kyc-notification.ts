@@ -92,10 +92,7 @@ export const sendBridgeKycNotification = async ({
     outcome === "rejected" && rejectionReason
       ? `${phraseBase}.bodyWithReason`
       : `${phraseBase}.body`
-  const body = i18n.__(
-    { phrase: bodyPhrase, locale },
-    { reason: rejectionReason ?? "" },
-  )
+  const body = i18n.__({ phrase: bodyPhrase, locale }, { reason: rejectionReason ?? "" })
 
   const result = await PushNotificationsService().sendFilteredNotification({
     deviceTokens: user.deviceTokens,

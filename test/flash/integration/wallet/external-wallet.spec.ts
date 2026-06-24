@@ -1,10 +1,11 @@
-import { alice, bob } from "../jest.setup"
 import { WalletsRepository } from "@services/mongoose"
-import { InvalidLnurlError } from "@domain/errors"
-import { CouldNotFindWalletFromIdError } from "@domain/errors"
+import { InvalidLnurlError, CouldNotFindWalletFromIdError } from "@domain/errors"
+
+import { alice, bob } from "../jest.setup"
 
 const VALID_LNURL = "LNURL1DP68GURN8GHJ7MRWW4EXCTNZD9NHXATW9EU8J730D3H82UNV94MKJ4RF9DZ"
-const UPDATED_LNURL = "lnurl1dp68gurn8ghj7mrww4exctnzd9nhxatw9eu8j730d3h82unv94mkj4rf9dz99"
+const UPDATED_LNURL =
+  "lnurl1dp68gurn8ghj7mrww4exctnzd9nhxatw9eu8j730d3h82unv94mkj4rf9dz99"
 
 afterEach(() => jest.clearAllMocks())
 

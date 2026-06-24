@@ -1,13 +1,11 @@
 import { getI18nInstance } from "@config"
-import {
-  NotificationsServiceError,
-} from "@domain/notifications"
+import { NotificationsServiceError } from "@domain/notifications"
 import { MoneyAmount } from "@domain/shared"
 import { AccountsRepository } from "@services/mongoose/accounts"
 import { UsersRepository } from "@services/mongoose/users"
 import { PushNotificationsService } from "@services/notifications/push-notifications"
 
-const i18n = getI18nInstance();
+const i18n = getI18nInstance()
 
 export const sendCashoutNotification = async (
   accountId: AccountUuid,
@@ -27,7 +25,10 @@ export const sendCashoutNotification = async (
   const result = PushNotificationsService().sendNotification({
     deviceTokens: user.deviceTokens,
     title: i18n.__({ phrase: "notification.cashout.title", locale: "en" }, { currency }),
-    body: i18n.__({ phrase: "notification.cashout.body", locale: "en" }, { amount: amount.i18n() }),
+    body: i18n.__(
+      { phrase: "notification.cashout.body", locale: "en" },
+      { amount: amount.i18n() },
+    ),
     data: { amount: String(amount), currency },
   })
   if (result instanceof NotificationsServiceError) return result

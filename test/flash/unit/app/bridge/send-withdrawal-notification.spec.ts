@@ -29,7 +29,11 @@ jest.mock("@app/users/remove-device-tokens", () => ({
 
 jest.mock("@config", () => {
   const mockI18n = {
-    __: jest.fn().mockImplementation(({ phrase }, options) => `${phrase} ${JSON.stringify(options)}`),
+    __: jest
+      .fn()
+      .mockImplementation(
+        ({ phrase }, options) => `${phrase} ${JSON.stringify(options)}`,
+      ),
   }
   return {
     getI18nInstance: jest.fn(() => mockI18n),
@@ -84,7 +88,9 @@ describe("sendBridgeWithdrawalNotification", () => {
       }),
     )
     expect(mockI18n.__).toHaveBeenCalledWith(
-      expect.objectContaining({ phrase: "notification.bridgeWithdrawal.completed.title" }),
+      expect.objectContaining({
+        phrase: "notification.bridgeWithdrawal.completed.title",
+      }),
     )
   })
 

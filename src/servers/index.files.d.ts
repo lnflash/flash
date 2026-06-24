@@ -24,7 +24,7 @@ type GraphQLPublicContextAuth = Omit<GraphQLPublicContext, "user" | "domainAccou
 type GraphQLAdminContext = {
   logger: Logger
   user: {
-    id: UserId,
+    id: UserId
     roles: string[]
     ip: IpAddress
   }

@@ -30,6 +30,8 @@ import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
 
 import { baseLogger } from "@services/logger"
 
+import { cappedIbexReceiveExpiration } from "@domain/bitcoin/lightning"
+
 import { Redis } from "./cache"
 import {
   GetFeeEstimateArgs,
@@ -50,8 +52,7 @@ import {
 } from "./types"
 
 import { errorHandler, IbexError, ParseError, UnexpectedIbexResponse } from "./errors"
-import WebhookServer from "./webhook-server"
-import { cappedIbexReceiveExpiration } from "@domain/bitcoin/lightning"
+import { ibexWebhookEndpoints, ibexWebhookSecret } from "./webhook-config"
 
 const Ibex = new IbexClient(
   {
@@ -155,8 +156,8 @@ const addInvoice = async (
     // IBEX silently caps non-msat receive invoices at 60s; never request more.
     // See IBEX_RECEIVE_MAX_EXPIRATION_SECONDS (ENG-427).
     expiration: cappedIbexReceiveExpiration(args.expiration),
-    webhookUrl: WebhookServer.endpoints.onReceive.invoice,
-    webhookSecret: WebhookServer.secret,
+    webhookUrl: ibexWebhookEndpoints.onReceive.invoice,
+    webhookSecret: ibexWebhookSecret,
   } as AddInvoiceBodyParam
   addAttributesToCurrentSpan({ "request.params": JSON.stringify(body) })
   return Ibex.addInvoice(body).then(errorHandler)
@@ -173,8 +174,8 @@ const generateBitcoinAddress = async (
 ): Promise<GenerateBitcoinAddressResponse201 | IbexError> => {
   return Ibex.generateBitcoinAddress({
     accountId,
-    webhookUrl: WebhookServer.endpoints.onReceive.onchain,
-    webhookSecret: WebhookServer.secret,
+    webhookUrl: ibexWebhookEndpoints.onReceive.onchain,
+    webhookSecret: ibexWebhookSecret,
   }).then(errorHandler)
 }
 
@@ -220,8 +221,8 @@ const payInvoice = async (
     accountId: args.accountId,
     bolt11: args.invoice,
     amount: args.send?.toIbex(),
-    webhookUrl: WebhookServer.endpoints.onPay.invoice,
-    webhookSecret: WebhookServer.secret,
+    webhookUrl: ibexWebhookEndpoints.onPay.invoice,
+    webhookSecret: ibexWebhookSecret,
   } as PayInvoiceV2BodyParam
   addAttributesToCurrentSpan({ "request.params": JSON.stringify(bodyWithHooks) })
   return Ibex.payInvoiceV2(bodyWithHooks).then(errorHandler)
@@ -234,8 +235,8 @@ const sendOnchain = async (
 ): Promise<SendToAddressCopyResponse200 | IbexError> => {
   const bodyWithHooks = {
     ...body,
-    webhookUrl: WebhookServer.endpoints.onPay.onchain,
-    webhookSecret: WebhookServer.secret,
+    webhookUrl: ibexWebhookEndpoints.onPay.onchain,
+    webhookSecret: ibexWebhookSecret,
   } as SendToAddressCopyBodyParam
   addAttributesToCurrentSpan({ "request.params": JSON.stringify(bodyWithHooks) })
   return Ibex.sendToAddressV2(bodyWithHooks).then(errorHandler)
@@ -304,8 +305,8 @@ const createLnurlPay = async (
 
   const bodyWithHooks = {
     ...body,
-    webhookUrl: WebhookServer.endpoints.onReceive.lnurl,
-    webhookSecret: WebhookServer.secret,
+    webhookUrl: ibexWebhookEndpoints.onReceive.lnurl,
+    webhookSecret: ibexWebhookSecret,
   } as CreateLnurlPayBodyParam
   addAttributesToCurrentSpan({ "request.params": JSON.stringify(bodyWithHooks) })
   return Ibex.createLnurlPay(bodyWithHooks).then(errorHandler)
@@ -324,8 +325,8 @@ const payToLnurl = async (
     accountId: args.accountId,
     amount: args.amountMsat,
     params: args.params,
-    webhookUrl: WebhookServer.endpoints.onPay.lnurl,
-    webhookSecret: WebhookServer.secret,
+    webhookUrl: ibexWebhookEndpoints.onPay.lnurl,
+    webhookSecret: ibexWebhookSecret,
   }).then(errorHandler)
 }
 

@@ -14,7 +14,9 @@ import { baseLogger } from "@services/logger"
 
 type RawBodyRequest = Request & { rawBody?: string }
 
-export const verifyBridgeSignature = (publicKeyType: "kyc" | "deposit" | "transfer" | "external_account") => {
+export const verifyBridgeSignature = (
+  publicKeyType: "kyc" | "deposit" | "transfer" | "external_account",
+) => {
   return (req: Request, res: Response, next: NextFunction) => {
     const signature = req.headers["x-webhook-signature"] as string
 

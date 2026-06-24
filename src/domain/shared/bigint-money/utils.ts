@@ -3,7 +3,16 @@
  */
 
 import { UnsafeIntegerError } from "./errors"
-import { Money } from "./money"
+
+type MoneyLike = {
+  toSource(): bigint
+}
+
+const isMoneyLike = (input: unknown): input is MoneyLike =>
+  typeof input === "object" &&
+  input !== null &&
+  "toSource" in input &&
+  typeof input.toSource === "function"
 
 // How many digits we support
 export const PRECISION_I = 20
@@ -35,10 +44,10 @@ export enum Round {
  * with adjusted precision.
  */
 export function moneyValueToBigInt(
-  input: Money | string | number | bigint,
+  input: MoneyLike | string | number | bigint,
   round: Round,
 ): bigint {
-  if (input instanceof Money) {
+  if (isMoneyLike(input)) {
     return input.toSource()
   }
 

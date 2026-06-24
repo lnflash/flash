@@ -60,9 +60,7 @@ export class BridgeInsufficientFundsError extends BridgeError {
 }
 
 export class BridgeWithdrawalNetAmountTooLowError extends BridgeError {
-  constructor(
-    message: string = "Withdrawal amount must exceed estimated customer fees",
-  ) {
+  constructor(message: string = "Withdrawal amount must exceed estimated customer fees") {
     super(message)
   }
 }

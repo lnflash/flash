@@ -1,24 +1,23 @@
 import express, { Request, Response } from "express"
-import { authenticate, logRequest, validateIbexIp } from "../middleware"
+
 import { WalletsRepository } from "@services/mongoose/wallets"
 import { ZapRequestModel } from "@services/mongoose/zap-request"
 import axios from "axios"
 import { baseLogger as logger } from "@services/logger"
 import { AccountsRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
+import { ibexWebhookPaths } from "@services/ibex/webhook-config"
 import { extractPaymentHashFromBolt11 } from "@utils"
 import cors from "cors"
+
+import { authenticate, logRequest, validateIbexIp } from "../middleware"
 
 const lnurlCorsOptions = {
   origin: "*", // allow all origins; or a specific list: ["https://example.com"]
   methods: ["GET"],
 }
 
-const paths = {
-  invoice: "/pay/invoice",
-  lnurl: "/pay/lnurl/:username",
-  onchain: "/pay/onchain",
-}
+const paths = ibexWebhookPaths.onPay
 
 const router = express.Router()
 
@@ -33,7 +32,7 @@ router.get(
       if (!username) return resp.status(400).json({ error: "username is required" })
       if (!amount) return resp.status(400).json({ error: "amount is required" })
 
-      let requestEvent: any | null = null
+      let requestEvent: unknown = null
       if (nostr) {
         try {
           requestEvent = JSON.parse(decodeURIComponent(nostr as string))

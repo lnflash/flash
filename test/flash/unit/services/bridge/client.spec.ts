@@ -125,7 +125,11 @@ describe("listAllEvents", () => {
 
     listEventsSpy
       .mockResolvedValueOnce({ data: [inWindow, tooEarly], has_more: true, cursor: "c1" })
-      .mockResolvedValueOnce({ data: [makeEvent("e3")], has_more: false, cursor: undefined })
+      .mockResolvedValueOnce({
+        data: [makeEvent("e3")],
+        has_more: false,
+        cursor: undefined,
+      })
 
     const drained: BridgeWebhookEvent[] = []
     for await (const event of listAllEvents({

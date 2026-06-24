@@ -1,5 +1,4 @@
 import { InputValidationError } from "@graphql/error"
-import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { GT } from "@graphql/index"
 import PaymentSendPayload from "@graphql/public/types/payload/payment-send"
 import LnPaymentRequest from "@graphql/shared/types/scalar/ln-payment-request"
@@ -10,7 +9,7 @@ import dedent from "dedent"
 // FLASH FORK: import ibex dependencies
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import Ibex from "@services/ibex/client"
-import { IbexError } from "@services/ibex/errors" 
+import { IbexError } from "@services/ibex/errors"
 
 const LnInvoicePaymentInput = GT.Input({
   name: "LnInvoicePaymentInput",
@@ -66,12 +65,12 @@ const LnInvoicePaymentSendMutation = GT.Field<
 
     // FLASH FORK: create IBEX invoice instead of Galoy invoice
     /* Todo: reintroduce Payments.payInvoiceByWalletId
-    * const status = await Payments.payInvoiceByWalletId({
-    *   senderWalletId: walletId,
-    *   uncheckedPaymentRequest: paymentRequest,
-    *   memo: memo ?? null,
-    *   senderAccount: domainAccount,
-    */
+     * const status = await Payments.payInvoiceByWalletId({
+     *   senderWalletId: walletId,
+     *   uncheckedPaymentRequest: paymentRequest,
+     *   memo: memo ?? null,
+     *   senderAccount: domainAccount,
+     */
 
     if (!domainAccount) throw new Error("Authentication required")
     const PayLightningInvoice = await Ibex.payInvoice({
@@ -93,29 +92,29 @@ const LnInvoicePaymentSendMutation = GT.Field<
     // }
 
     if (PayLightningInvoice instanceof IbexError) {
-      return { 
-        status: "failed", 
+      return {
+        status: "failed",
         errors: [{ message: "An unexpected error occurred. Please try again later." }],
         // errors: [mapAndParseErrorForGqlResponse(PayLightningInvoice)] }
       }
     }
-    
+
     let status: PaymentSendStatus = PaymentSendStatus.Pending
-    switch(PayLightningInvoice.transaction?.payment?.status?.id) {
-      case 1: 
+    switch (PayLightningInvoice.transaction?.payment?.status?.id) {
+      case 1:
         status = PaymentSendStatus.Pending
-        break;
-      case 2: 
+        break
+      case 2:
         status = PaymentSendStatus.Success
-        break;
-      case 3: 
+        break
+      case 3:
         status = PaymentSendStatus.Failure
-        break;
+        break
     }
 
     return {
       errors: [],
-      status: status.value
+      status: status.value,
     }
   },
 })

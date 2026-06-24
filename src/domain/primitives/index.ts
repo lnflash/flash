@@ -13,4 +13,3 @@ export const checkedToMinutes = (minutes: number): Minutes | ValidationError => 
   if (!isMinutes) return new InvalidMinutesError(`Invalid value for minutes: ${minutes}`)
   return minutes as Minutes
 }
-

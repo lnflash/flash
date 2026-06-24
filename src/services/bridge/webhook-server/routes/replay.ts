@@ -119,7 +119,6 @@ const toHandlerBody = ({
     event_id: eventId,
     event_object: eventObject,
   }
-
 }
 
 export const replayAuthMiddleware = (req: Request, res: Response, next: () => void) => {

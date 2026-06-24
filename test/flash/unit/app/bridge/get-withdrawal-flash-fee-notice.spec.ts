@@ -1,6 +1,6 @@
 jest.mock("@config", () => {
-  const path = require("path")
-  const { I18n } = require("i18n")
+  const path = jest.requireActual<typeof import("path")>("path")
+  const { I18n } = jest.requireActual<typeof import("i18n")>("i18n")
   const i18n = new I18n()
   i18n.configure({
     objectNotation: true,

@@ -81,7 +81,9 @@ export const addInvoiceForSelfForUsdWallet = async (
   const walletId = checkedToWalletId(args.walletId)
   if (walletId instanceof Error) return walletId
 
-  const expiresIn = checkedToMinutes(args.expiresIn || ibexReceiveDefaultExpirationMinutes)
+  const expiresIn = checkedToMinutes(
+    args.expiresIn || ibexReceiveDefaultExpirationMinutes,
+  )
   if (expiresIn instanceof Error) return expiresIn
 
   const validated = await validateIsUsdWallet(walletId, { includeUsdt: true })
@@ -167,7 +169,9 @@ export const addInvoiceForRecipientForUsdWallet = async (
   const recipientWalletId = checkedToWalletId(args.recipientWalletId)
   if (recipientWalletId instanceof Error) return recipientWalletId
 
-  const expiresIn = checkedToMinutes(args.expiresIn || ibexReceiveDefaultExpirationMinutes)
+  const expiresIn = checkedToMinutes(
+    args.expiresIn || ibexReceiveDefaultExpirationMinutes,
+  )
   if (expiresIn instanceof Error) return expiresIn
 
   const validated = await validateIsUsdWallet(recipientWalletId, { includeUsdt: true })

@@ -1,15 +1,13 @@
 import { PayoutSpeed as DomainPayoutSpeed } from "@domain/bitcoin/onchain"
 
 import { GT } from "@graphql/index"
-import Memo from "@graphql/shared/types/scalar/memo"
-import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
-import OnChainAddress from "@graphql/shared/types/scalar/on-chain-address"
 import PaymentSendPayload from "@graphql/public/types/payload/payment-send"
 import PayoutSpeed from "@graphql/public/types/scalar/payout-speed"
+import Memo from "@graphql/shared/types/scalar/memo"
+import OnChainAddress from "@graphql/shared/types/scalar/on-chain-address"
 import SatAmount from "@graphql/shared/types/scalar/sat-amount"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 
-import { Wallets } from "@app"
 import { UnsupportedCurrencyError } from "@domain/errors"
 
 const OnChainPaymentSendInput = GT.Input({
@@ -46,7 +44,7 @@ const OnChainPaymentSendMutation = GT.Field<
   args: {
     input: { type: GT.NonNull(OnChainPaymentSendInput) },
   },
-  resolve: async (_, args, { domainAccount }) => {
+  resolve: async () => {
     return new UnsupportedCurrencyError("BTC amount is not supported")
     // const { walletId, address, amount, memo, speed } = args.input
 

@@ -1,29 +1,31 @@
-import Storage from "./storage/Redis"
-import ValidOffer, { InitiatedCashout } from "./ValidOffer"
-import { USDAmount, USDTAmount, ValidationError } from "@domain/shared"
-import { CacheServiceError } from "@domain/cache"
 import { resolveCashoutWalletSelection } from "@app/cash-wallet-cutover/cashout-routing"
-import { getBankOwnerIbexAccount } from "@services/ledger/caching"
+import { Cashout, ExchangeRates } from "@config"
+import { decodeInvoice } from "@domain/bitcoin/lightning"
+import { CacheServiceError } from "@domain/cache"
+import { USDAmount, USDTAmount, ValidationError } from "@domain/shared"
 import Ibex from "@services/ibex/client"
 import { UnexpectedIbexResponse } from "@services/ibex/errors"
-import { decodeInvoice, PaymentSendStatus } from "@domain/bitcoin/lightning"
-import { Cashout, ExchangeRates } from "@config"
-import PersistedOffer from "./storage/PersistedOffer"
-import { EmailService } from "@services/email"
-import { AccountsRepository, WalletsRepository } from "@services/mongoose"
+import { getBankOwnerIbexAccount } from "@services/ledger/caching"
+
 import { RepositoryError } from "@domain/errors"
+import { EmailService } from "@services/email"
 import ErpNext from "@services/frappe/ErpNext"
 import { BankAccountQueryError } from "@services/frappe/errors"
+import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 
-const config = { 
+import PersistedOffer from "./storage/PersistedOffer"
+import Storage from "./storage/Redis"
+import ValidOffer, { InitiatedCashout } from "./ValidOffer"
+
+const config = {
   ...Cashout.OfferConfig,
   ...ExchangeRates,
 }
 
 const CashoutManager = {
   createOffer: async (
-    walletId: WalletId, 
-    userPayment: USDAmount, 
+    walletId: WalletId,
+    userPayment: USDAmount,
     bankAccountId: string,
   ): Promise<PersistedOffer | Error> => {
     const bankOwnerUsdWalletId = await getBankOwnerIbexAccount()
@@ -59,7 +61,8 @@ const CashoutManager = {
       expiration: config.duration,
     })
     if (invoiceResp instanceof Error) return invoiceResp
-    if (invoiceResp.invoice?.bolt11 === undefined) return new UnexpectedIbexResponse("Bolt11 field not found.")
+    if (invoiceResp.invoice?.bolt11 === undefined)
+      return new UnexpectedIbexResponse("Bolt11 field not found.")
     const invoice = decodeInvoice(invoiceResp.invoice.bolt11)
     if (invoice instanceof Error) return invoice
 
@@ -70,8 +73,9 @@ const CashoutManager = {
 
     const bankAccounts = await ErpNext.getBankAccountsByCustomer(account.erpParty!)
     if (bankAccounts instanceof BankAccountQueryError) return bankAccounts
-    const bankAccount = bankAccounts.find(b => b.name === bankAccountId)
-    if (!bankAccount) return new ValidationError(`Bank account not found: ${bankAccountId}`)
+    const bankAccount = bankAccounts.find((b) => b.name === bankAccountId)
+    if (!bankAccount)
+      return new ValidationError(`Bank account not found: ${bankAccountId}`)
 
     const isJmdPayout = bankAccount.currency === "JMD"
     const payout = isJmdPayout
@@ -94,7 +98,10 @@ const CashoutManager = {
     return persistedOffer
   },
 
-  executeCashout: async (id: OfferId, walletId: WalletId): Promise<InitiatedCashout | Error> => {
+  executeCashout: async (
+    id: OfferId,
+    walletId: WalletId,
+  ): Promise<InitiatedCashout | Error> => {
     const offer = await Storage.get(id)
     if (offer instanceof Error) return offer
 
@@ -102,23 +109,26 @@ const CashoutManager = {
     // may differ from it (e.g. a USDT cash wallet post-cutover while an older client still
     // presents the legacy USD walletId). Authorize when both belong to the same account.
     const providedWallet = await WalletsRepository().findById(walletId)
-    if (providedWallet instanceof RepositoryError) return new ValidationError(providedWallet)
-    const settlementWallet = await WalletsRepository().findById(offer.details.payment.userAcct)
-    if (settlementWallet instanceof RepositoryError) return new ValidationError(settlementWallet)
+    if (providedWallet instanceof RepositoryError)
+      return new ValidationError(providedWallet)
+    const settlementWallet = await WalletsRepository().findById(
+      offer.details.payment.userAcct,
+    )
+    if (settlementWallet instanceof RepositoryError)
+      return new ValidationError(settlementWallet)
     if (providedWallet.accountId !== settlementWallet.accountId)
       return new ValidationError("Offer is not good for provided wallet.")
 
     const validOffer = await ValidOffer.from(offer.details)
     if (validOffer instanceof Error) return validOffer
 
-    const executedOffer = await validOffer.execute() 
+    const executedOffer = await validOffer.execute()
     if (executedOffer instanceof Error) return executedOffer
     else {
       EmailService.sendCashoutInitiatedEmail(executedOffer)
       return executedOffer
     }
   },
-
 }
 
 export default CashoutManager

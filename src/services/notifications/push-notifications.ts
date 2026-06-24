@@ -12,14 +12,12 @@ import {
 } from "@domain/notifications"
 import { ErrorLevel, parseErrorMessageFromUnknown } from "@domain/shared"
 import { baseLogger } from "@services/logger"
-import {
-  addAttributesToCurrentSpan,
-  recordExceptionInCurrentSpan,
-  wrapAsyncToRunInSpan,
-} from "@services/tracing"
-import { messaging } from "./firebase"
+import { recordExceptionInCurrentSpan, wrapAsyncToRunInSpan } from "@services/tracing"
+
 import { FirebaseError } from "firebase-admin"
 import { Message } from "firebase-admin/lib/messaging/messaging-api"
+
+import { messaging } from "./firebase"
 
 const logger = baseLogger.child({ module: "notifications" })
 
@@ -43,19 +41,24 @@ const sendToDevice = async (
     const batchResp = await messaging.sendEachForMulticast({ tokens, ...message }, false)
 
     const invalidTokens: DeviceToken[] = []
-    batchResp.responses
-      .forEach((r, idx) => {
-        if (!r.success) {
-          logger.warn({ error: r.error, token: tokens[idx] }, "Error sending notification to device")
-          recordExceptionInCurrentSpan({
-            error: new FirebaseMessageError(r.error as unknown as FirebaseError, tokens[idx]),
-            level: ErrorLevel.Warn,
-          })
-        }
-        if (r.error?.code === "messaging/registration-token-not-registered") {
-          invalidTokens.push(tokens[idx])
-        }
-      })
+    batchResp.responses.forEach((r, idx) => {
+      if (!r.success) {
+        logger.warn(
+          { error: r.error, token: tokens[idx] },
+          "Error sending notification to device",
+        )
+        recordExceptionInCurrentSpan({
+          error: new FirebaseMessageError(
+            r.error as unknown as FirebaseError,
+            tokens[idx],
+          ),
+          level: ErrorLevel.Warn,
+        })
+      }
+      if (r.error?.code === "messaging/registration-token-not-registered") {
+        invalidTokens.push(tokens[idx])
+      }
+    })
 
     logger.info(
       { successCount: batchResp.successCount, failureCount: batchResp.failureCount },
@@ -88,7 +91,7 @@ export const PushNotificationsService = (): IPushNotificationsService => {
       return new NotificationsServiceError("Firebase messaging module not loaded")
     }
 
-    return await messaging.send(message)
+    return messaging.send(message)
   }
 
   const sendNotification = async ({

@@ -1,6 +1,5 @@
 import {
   InvalidDeviceId,
-  InvalidDeviceTokenError,
   InvalidEmailAddress,
   InvalidIdentityPassword,
   InvalidIdentityUsername,
@@ -9,9 +8,10 @@ import {
 } from "@domain/errors"
 import Firebase from "@services/notifications/firebase"
 
-import { Languages } from "./languages"
-import { ValidationError } from "@domain/shared"
 import { NotificationsServiceError } from "@domain/notifications"
+import { ValidationError } from "@domain/shared"
+
+import { Languages } from "./languages"
 
 export * from "./phone-metadata-authorizer"
 export * from "./phone-metadata-validator"
@@ -51,11 +51,13 @@ export const checkedToLanguage = (
   return new InvalidLanguageError()
 }
 
-export const checkedToDeviceToken = async (token: string): Promise<DeviceToken | ValidationError> => {
+export const checkedToDeviceToken = async (
+  token: string,
+): Promise<DeviceToken | ValidationError> => {
   const r = await Firebase.isDeviceTokenValid(token)
   if (r instanceof NotificationsServiceError) return new ValidationError(r)
   else if (!r) return new ValidationError("FCM token is not valid.")
-  else return token as DeviceToken 
+  else return token as DeviceToken
 }
 
 // https://github.com/react-native-device-info/react-native-device-info#getuniqueid

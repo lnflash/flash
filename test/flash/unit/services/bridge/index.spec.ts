@@ -603,9 +603,9 @@ describe("requestWithdrawal", () => {
       "@services/bridge/withdrawal-fees",
     )
     resolveWithdrawalCustomerFeeEstimate.mockResolvedValue(MOCK_WITHDRAWAL_FEE_ESTIMATE)
-    ;(BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock).mockResolvedValue(
-      null,
-    )
+    ;(
+      BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock
+    ).mockResolvedValue(null)
     ;(BridgeAccountsRepo.createWithdrawal as jest.Mock).mockResolvedValue(
       makeRow(WITHDRAWAL_ID),
     )
@@ -710,9 +710,9 @@ describe("requestWithdrawal", () => {
       estimatedGasBuffer: undefined,
       estimatedCustomerFee: undefined,
     })
-    ;(BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock).mockResolvedValue(
-      existingRow,
-    )
+    ;(
+      BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock
+    ).mockResolvedValue(existingRow)
     ;(BridgeAccountsRepo.updateWithdrawalFeeEstimates as jest.Mock).mockResolvedValue(
       makeRow("withdrawal-existing-001"),
     )
@@ -1346,9 +1346,9 @@ describe("withdrawal request → confirm/cancel flow", () => {
       "@services/bridge/withdrawal-fees",
     )
     resolveWithdrawalCustomerFeeEstimate.mockResolvedValue(MOCK_WITHDRAWAL_FEE_ESTIMATE)
-    ;(BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock).mockResolvedValue(
-      null,
-    )
+    ;(
+      BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock
+    ).mockResolvedValue(null)
     ;(BridgeAccountsRepo.createWithdrawal as jest.Mock).mockResolvedValue(
       makeRow(WITHDRAWAL_ID),
     )
@@ -1403,10 +1403,12 @@ describe("withdrawal request → confirm/cancel flow", () => {
 
   it("duplicate request reuses the pending row, then initiate still submits that row", async () => {
     const existingRow = makeRow("deduped-withdrawal-001")
-    ;(BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock).mockResolvedValue(
+    ;(
+      BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock
+    ).mockResolvedValue(existingRow)
+    ;(BridgeAccountsRepo.updateWithdrawalFeeEstimates as jest.Mock).mockResolvedValue(
       existingRow,
     )
-    ;(BridgeAccountsRepo.updateWithdrawalFeeEstimates as jest.Mock).mockResolvedValue(existingRow)
     ;(BridgeAccountsRepo.findWithdrawalById as jest.Mock).mockResolvedValue(existingRow)
     ;(BridgeAccountsRepo.updateWithdrawalTransferId as jest.Mock).mockResolvedValue({
       ...existingRow,

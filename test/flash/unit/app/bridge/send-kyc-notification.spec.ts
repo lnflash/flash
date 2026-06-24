@@ -34,7 +34,11 @@ jest.mock("@app/users/remove-device-tokens", () => ({
 
 jest.mock("@config", () => {
   const mockI18n = {
-    __: jest.fn().mockImplementation(({ phrase }, options) => `${phrase} ${JSON.stringify(options)}`),
+    __: jest
+      .fn()
+      .mockImplementation(
+        ({ phrase }, options) => `${phrase} ${JSON.stringify(options)}`,
+      ),
   }
   return {
     getI18nInstance: jest.fn(() => mockI18n),
@@ -55,16 +59,17 @@ describe("isBridgeKycInitiated", () => {
 })
 
 describe("toBridgeKycNotificationOutcome", () => {
-  const cases: Array<[Account["bridgeKycStatus"], BridgeKycNotificationOutcome | null]> = [
-    ["approved", "approved"],
-    ["rejected", "rejected"],
-    ["offboarded", "offboarded"],
-    ["under_review", "in_review"],
-    ["incomplete", "incomplete"],
-    ["open", "in_review"],
-    ["not_started", null],
-    [undefined, null],
-  ]
+  const cases: Array<[Account["bridgeKycStatus"], BridgeKycNotificationOutcome | null]> =
+    [
+      ["approved", "approved"],
+      ["rejected", "rejected"],
+      ["offboarded", "offboarded"],
+      ["under_review", "in_review"],
+      ["incomplete", "incomplete"],
+      ["open", "in_review"],
+      ["not_started", null],
+      [undefined, null],
+    ]
 
   it.each(cases)("maps %s to %s", (status, expected) => {
     expect(toBridgeKycNotificationOutcome(status)).toBe(expected)
@@ -116,7 +121,10 @@ describe("sendBridgeKycNotification", () => {
       expect.objectContaining({
         deviceTokens: mockUser.deviceTokens,
         notificationCategory: "Payments",
-        data: expect.objectContaining({ type: "bridge_kyc_approved", status: "approved" }),
+        data: expect.objectContaining({
+          type: "bridge_kyc_approved",
+          status: "approved",
+        }),
       }),
     )
     expect(mockI18n.__).toHaveBeenCalledWith(
@@ -172,7 +180,10 @@ describe("sendBridgeKycNotification", () => {
 
     expect(sendFilteredNotification).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ type: "bridge_kyc_in_review", status: "under_review" }),
+        data: expect.objectContaining({
+          type: "bridge_kyc_in_review",
+          status: "under_review",
+        }),
       }),
     )
   })

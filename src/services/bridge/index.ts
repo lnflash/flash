@@ -728,7 +728,12 @@ const requestWithdrawal = async (
     })
     if (balance instanceof Error) {
       baseLogger.error(
-        { accountId, walletId: usdtWallet.id, error: balance, operation: "requestWithdrawal" },
+        {
+          accountId,
+          walletId: usdtWallet.id,
+          error: balance,
+          operation: "requestWithdrawal",
+        },
         "Failed to read USDT wallet balance for withdrawal request",
       )
       return asBridgeRequestWithdrawalError(balance)

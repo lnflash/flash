@@ -3,8 +3,14 @@
 /* eslint @typescript-eslint/no-var-requires: "off" */
 
 const topicsEnv = process.env.NOTIFICATION_TOPICS
-if (!topicsEnv) throw new Error("NOTIFICATION_TOPICS env var is required (comma-separated list of FCM topic names)")
-const topics = topicsEnv.split(",").map(t => t.trim()).filter(Boolean)
+if (!topicsEnv)
+  throw new Error(
+    "NOTIFICATION_TOPICS env var is required (comma-separated list of FCM topic names)",
+  )
+const topics = topicsEnv
+  .split(",")
+  .map((t) => t.trim())
+  .filter(Boolean)
 
 module.exports = {
   async up(db) {
@@ -20,7 +26,9 @@ module.exports = {
       .collection("users")
       .updateMany({}, { $set: { notificationTopics: topics } })
 
-    console.log(`Migration complete: deviceTopics removed, notificationTopics set for ${result.modifiedCount} users`)
+    console.log(
+      `Migration complete: deviceTopics removed, notificationTopics set for ${result.modifiedCount} users`,
+    )
   },
 
   async down(db) {
@@ -28,8 +36,13 @@ module.exports = {
 
     const result = await db
       .collection("users")
-      .updateMany({ notificationTopics: { $exists: true } }, { $unset: { notificationTopics: 1 } })
+      .updateMany(
+        { notificationTopics: { $exists: true } },
+        { $unset: { notificationTopics: 1 } },
+      )
 
-    console.log(`Rollback complete: notificationTopics removed from ${result.modifiedCount} users`)
+    console.log(
+      `Rollback complete: notificationTopics removed from ${result.modifiedCount} users`,
+    )
   },
 }

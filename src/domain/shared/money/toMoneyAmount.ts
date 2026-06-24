@@ -1,5 +1,6 @@
 import { WalletCurrency } from "../primitives"
 import { UnsupportedCurrencyError } from "../errors"
+
 import { MoneyAmount } from "./MoneyAmount"
 import { USDAmount } from "./USDAmount"
 import { JMDAmount } from "./JMDAmount"

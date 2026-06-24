@@ -3,4 +3,9 @@ import GraphQLApplicationError from "@graphql/shared/types/object/graphql-applic
 import UsdWallet from "@graphql/shared/types/object/usd-wallet"
 import UsdtWallet from "@graphql/shared/types/object/usdt-wallet"
 
-export const ALL_INTERFACE_TYPES = [GraphQLApplicationError, BtcWallet, UsdWallet, UsdtWallet]
+export const ALL_INTERFACE_TYPES = [
+  GraphQLApplicationError,
+  BtcWallet,
+  UsdWallet,
+  UsdtWallet,
+]

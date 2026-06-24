@@ -1,6 +1,7 @@
 import express, { Request, Response } from "express"
 import { IbexConfig } from "@config"
 import { baseLogger as logger } from "@services/logger"
+import { ibexWebhookEndpoints, ibexWebhookSecret } from "@services/ibex/webhook-config"
 
 import { onPay, onReceive, cryptoReceive } from "./routes"
 
@@ -22,22 +23,6 @@ const start = () => {
 
 export default {
   start,
-  endpoints: {
-    onReceive: {
-      invoice: IbexConfig.webhook.uri + onReceive.paths.invoice,
-      lnurl: IbexConfig.webhook.uri + onReceive.paths.lnurl,
-      onchain: IbexConfig.webhook.uri + onReceive.paths.onchain,
-      cashout: IbexConfig.webhook.uri + onReceive.paths.cashout,
-      zap: IbexConfig.webhook.uri + onReceive.paths.zap,
-    },
-    onPay: {
-      invoice: IbexConfig.webhook.uri + onPay.paths.invoice,
-      lnurl: IbexConfig.webhook.uri + onPay.paths.lnurl,
-      onchain: IbexConfig.webhook.uri + onPay.paths.onchain,
-    },
-    cryptoReceive: {
-      cryptoReceive: IbexConfig.webhook.uri + cryptoReceive.paths.cryptoReceive,
-    },
-  },
-  secret: IbexConfig.webhook.secret,
+  endpoints: ibexWebhookEndpoints,
+  secret: ibexWebhookSecret,
 }

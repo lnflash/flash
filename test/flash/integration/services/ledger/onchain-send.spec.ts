@@ -1,19 +1,17 @@
- import crypto from "crypto"
+import crypto from "crypto"
 
-import { BtcWalletDescriptor, UsdWalletDescriptor, WalletCurrency } from "@domain/shared"
 import { LedgerTransactionType } from "@domain/ledger"
+import { BtcWalletDescriptor, WalletCurrency } from "@domain/shared"
 
 import { LedgerService } from "@services/ledger"
 
+import { recordSendOnChainPayment } from "test/flash/helpers/ledger"
 import { createMandatoryUsers } from "test/galoy/helpers"
-import {  
-  recordSendOnChainPayment
-} from "test/flash/helpers/ledger"
 
 beforeAll(async () => {
   await createMandatoryUsers()
 })
-    
+
 describe("Ledger", () => {
   const receiveAmount = {
     usd: { amount: 100n, currency: WalletCurrency.Usd },

@@ -4,13 +4,19 @@ import { GT } from "@graphql/index"
 
 import { Accounts } from "@app"
 
-import { mapError } from "@graphql/error-map"
 import { UnknownClientError } from "@graphql/error"
+import { mapError } from "@graphql/error-map"
 
 import { baseLogger } from "@services/logger"
 
 // FIXME should not use service
 import { IdentityRepository } from "@services/kratos"
+
+import Npub from "@graphql/shared/types/scalar/npub"
+
+import ErpNext from "@services/frappe/ErpNext"
+
+import { BankAccountQueryError } from "@services/frappe/errors"
 
 import Account from "../abstract/account"
 
@@ -18,16 +24,12 @@ import Language from "../../../shared/types/scalar/language"
 import Phone from "../../../shared/types/scalar/phone"
 import Timestamp from "../../../shared/types/scalar/timestamp"
 
-import Username from "../../../shared/types/scalar/username"
-import Lnurl from "../../../shared/types/scalar/lnurl"
 import GraphQLEmail from "../../../shared/types/object/email"
+import Username from "../../../shared/types/scalar/username"
 
 import AccountContact from "./account-contact"
-import UserQuizQuestion from "./user-quiz-question"
-import Npub from "@graphql/shared/types/scalar/npub"
 import GraphQLBankAccount from "./bank-account"
-import ErpNext from "@services/frappe/ErpNext"
-import { BankAccountQueryError } from "@services/frappe/errors"
+import UserQuizQuestion from "./user-quiz-question"
 
 const GraphQLUser = GT.Object<User, GraphQLPublicContextAuth>({
   name: "User",

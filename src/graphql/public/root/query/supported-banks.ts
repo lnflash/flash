@@ -10,7 +10,8 @@ const SupportedBanksQuery = GT.Field({
   type: GT.NonNullList(Bank),
   resolve: async () => {
     const banks = await Accounts.getSupportedBanks()
-    if (banks instanceof BanksQueryError) return new InternalServerError({ logger: baseLogger })
+    if (banks instanceof BanksQueryError)
+      return new InternalServerError({ logger: baseLogger })
     return banks
   },
 })

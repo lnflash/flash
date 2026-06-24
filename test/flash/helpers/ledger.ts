@@ -2,13 +2,12 @@ import crypto from "crypto"
 
 import mongoose from "mongoose"
 
-import { paymentAmountFromNumber, WalletCurrency, ZERO_CENTS, ZERO_SATS } from "@domain/shared"
 import { toSats } from "@domain/bitcoin"
 import { LedgerTransactionType, toLiabilitiesWalletId } from "@domain/ledger"
+import { WalletCurrency, ZERO_CENTS, ZERO_SATS } from "@domain/shared"
 
-import { toObjectId } from "@services/mongoose/utils"
-import { MainBook } from "@services/ledger/books"
 import { translateToLedgerJournal } from "@services/ledger"
+import { MainBook } from "@services/ledger/books"
 import { getBankOwnerWalletId } from "@services/ledger/caching"
 import {
   coldStorageAccountId,
@@ -16,6 +15,7 @@ import {
   lndLedgerAccountId,
 } from "@services/ledger/domain"
 import * as LedgerFacade from "@services/ledger/facade"
+import { toObjectId } from "@services/mongoose/utils"
 
 import { generateHash } from "./generate-hash"
 
@@ -677,7 +677,6 @@ export const recordColdStorageTxSend = async ({
 
   return translateToLedgerJournal(savedEntry)
 }
-
 
 // Rtgs refers to Jamaican bank transfer
 // export const recordRtgsPayment()

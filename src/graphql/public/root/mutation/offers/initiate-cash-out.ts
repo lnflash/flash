@@ -1,9 +1,8 @@
-
 import CashoutManager from "@app/offers/CashoutManager"
 import { Cashout } from "@config"
 import { NotImplementedError } from "@domain/errors"
 import { ErrorLevel } from "@domain/shared"
-import { InternalServerError, LightningPaymentError } from "@graphql/error"
+import { InternalServerError } from "@graphql/error"
 import { GT } from "@graphql/index"
 import IError from "@graphql/shared/types/abstract/error"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
@@ -45,8 +44,7 @@ const InitiateCashoutMutation = GT.Field({
     complexity: 60,
   },
   resolve: async (_, args) => {
-    if (!Cashout.Enabled)
-      return new NotImplementedError("Cashout feature is not enabled")
+    if (!Cashout.Enabled) return new NotImplementedError("Cashout feature is not enabled")
 
     const { offerId, walletId } = args.input
     // Parse for input errors
@@ -54,10 +52,17 @@ const InitiateCashoutMutation = GT.Field({
       if (f instanceof Error) return { errors: [{ message: f.message, success: false }] }
     }
 
-    const offer = await (CashoutManager.executeCashout(offerId, walletId))
+    const offer = await CashoutManager.executeCashout(offerId, walletId)
     if (offer instanceof Error) {
-      recordExceptionInCurrentSpan({ error: offer, level: ErrorLevel.Critical, attributes: { offerId} })
-      return new InternalServerError({ message: "Server error. Please contact support", logger: baseLogger })
+      recordExceptionInCurrentSpan({
+        error: offer,
+        level: ErrorLevel.Critical,
+        attributes: { offerId },
+      })
+      return new InternalServerError({
+        message: "Server error. Please contact support",
+        logger: baseLogger,
+      })
     }
 
     return { errors: [], id: offer.cashoutId }

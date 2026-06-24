@@ -7,11 +7,8 @@ import { Lightning, OnChain } from "@app"
 
 import { toSeconds } from "@domain/primitives"
 
-import {
-  asyncRunInSpan,
-  addAttributesToCurrentSpan,
-  wrapAsyncToRunInSpan,
-} from "@services/tracing"
+import { LocalCacheService } from "@services/cache"
+import { LedgerService } from "@services/ledger"
 import {
   getBankOwnerWalletId,
   getDealerBtcWalletId,
@@ -20,11 +17,13 @@ import {
 } from "@services/ledger/caching"
 import { LndService } from "@services/lnd"
 import { baseLogger } from "@services/logger"
-import { LedgerService } from "@services/ledger"
-import { Account } from "@services/mongoose/schema"
-import { LocalCacheService } from "@services/cache"
-import { activateLndHealthCheck } from "@services/lnd/health"
 import { ledgerAdmin, setupMongoConnection } from "@services/mongodb"
+import { Account } from "@services/mongoose/schema"
+import {
+  addAttributesToCurrentSpan,
+  asyncRunInSpan,
+  wrapAsyncToRunInSpan,
+} from "@services/tracing"
 
 import { timeoutWithCancel } from "@utils"
 

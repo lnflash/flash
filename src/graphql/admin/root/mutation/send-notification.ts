@@ -33,7 +33,6 @@ const SendNotificationPayload = GT.Object({
   }),
 })
 
-
 const SendNotificationMutation = GT.Field<
   null,
   GraphQLAdminContext,
@@ -60,7 +59,13 @@ const SendNotificationMutation = GT.Field<
       topic,
       notification: { title, body },
     })
-    if (res instanceof Error) return apolloErrorResponse(new PushNotificationError({ message: "Failed to send push notification(s)", error: res }))
+    if (res instanceof Error)
+      return apolloErrorResponse(
+        new PushNotificationError({
+          message: "Failed to send push notification(s)",
+          error: res,
+        }),
+      )
 
     return SUCCESS_RESPONSE
   },
