@@ -30,7 +30,7 @@ The package scripts source `.env` from the project root, then source `.env.local
 ```bash
 # Required
 export IBEX_ENVIRONMENT=sandbox
-export MONGODB_CON=mongodb://localhost:27017/flash
+export MONGODB_CON=mongodb://localhost:27017/galoy
 
 # Bridge sandbox — fill from Bridge dashboard
 # These are the API key and webhook secret, not stored in .env directly in production:

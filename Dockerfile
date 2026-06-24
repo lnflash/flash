@@ -10,6 +10,8 @@ RUN yarn install --frozen-lockfile
 
 COPY ./src ./src
 
+RUN chmod -R a+rX /app/src
+
 RUN yarn build
 
 RUN yarn install --frozen-lockfile --production
