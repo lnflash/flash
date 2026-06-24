@@ -2,7 +2,7 @@ name: "Quickstart"
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, tmp/bridge-rebase-pr-ready]
 
 jobs:
   integration:
