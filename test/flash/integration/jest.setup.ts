@@ -23,6 +23,7 @@ let mongoose
 export let flash // : TestUser
 export let alice // : TestUser
 export let bob //: TestUser
+let mockedIbexClient: jest.Mocked<typeof Ibex>
 
 // Mock prices
 jest.mock("@app/prices/get-current-price", () =>
@@ -30,20 +31,18 @@ jest.mock("@app/prices/get-current-price", () =>
 )
 
 import * as IbexMocks from "test/flash/mocks/ibex"
-jest.mock(
-  "@services/ibex/client",
-  // () => require("test/flash/mocks/ibex"),
-)
+jest.mock("@services/ibex/client", () => ({
+  createAccount: jest.fn(),
+  addInvoice: jest.fn(),
+  getAccountDetails: jest.fn(),
+}))
 export let mockedIbex: jest.Mock
 
 beforeAll(async () => {
   mockedIbex = Ibex as unknown as jest.Mock
-  mockedIbex.mockReturnValue({
-    createAccount: jest.fn().mockResolvedValue(IbexMocks.account.response),
-
-    // addInvoice: jest.fn().mockResolvedValue(addInvoice.response),
-    // payInvoiceV2: jest.fn().mockResolvedValue(payInvoiceV2.response)
-  })
+  mockedIbexClient = Ibex as jest.Mocked<typeof Ibex>
+  mockedIbexClient.createAccount.mockResolvedValue(IbexMocks.account.response[0])
+  mockedIbexClient.addInvoice.mockResolvedValue(IbexMocks.addInvoice.response)
 
   mongoose = await setupMongoConnection(true)
   const admins = await createMandatoryUsers()

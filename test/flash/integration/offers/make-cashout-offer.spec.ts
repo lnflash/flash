@@ -10,29 +10,23 @@ import * as Mocks from "test/flash/mocks/ibex"
 
 const send = USDAmount.cents("101") as USDAmount
 
-jest.mock(
-  "@services/ibex/client",
-  // () => require("test/flash/mocks/ibex"),
-)
-let mockedIbex: jest.Mock
+jest.mock("@services/ibex/client", () => ({
+  getAccountDetails: jest.fn(),
+  addInvoice: jest.fn(),
+  createAccount: jest.fn(),
+}))
+let mockedIbex: jest.Mocked<typeof Ibex>
 beforeAll(async () => {
   // Mocking the http call would be more useful, but adds complexity to tests
-  mockedIbex = Ibex as unknown as jest.Mock // move to beforeAll
-
-  //  await Ibex().getAccountDetails({ accountId: walletId })
-  // mockedIbex.mockReset()
-
-  // jest.spyOn(mockedIbex, 'getAccountDetails').mockImplementation(() => {
-  // });
+  mockedIbex = Ibex as jest.Mocked<typeof Ibex> // move to beforeAll
 })
 
 beforeEach(async () => {
   const getAccountDetailsMock = jest.fn().mockResolvedValue(
     Mocks.account.response, // override the balance
   )
-  mockedIbex.mockReturnValue({
-    getAccountDetails: getAccountDetailsMock,
-  })
+  mockedIbex.getAccountDetails.mockImplementation(getAccountDetailsMock)
+  mockedIbex.addInvoice.mockResolvedValue(Mocks.addInvoice.response)
 })
 
 afterEach(async () => {
