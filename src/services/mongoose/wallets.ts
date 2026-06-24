@@ -22,7 +22,6 @@ import { ErrorLevel, USDAmount, USDTAmount, WalletCurrency } from "@domain/share
 
 import { WalletType } from "@domain/wallets"
 
-
 import { toObjectId, fromObjectId, parseRepositoryError } from "./utils"
 import { Wallet } from "./schema"
 import { AccountsRepository } from "./accounts"
@@ -66,7 +65,6 @@ export const WalletsRepository = (): IWalletsRepository => {
       if (resp instanceof IbexError) return resp
       const ibexAccountId = resp.id
 
-
       let lnurlp: string | undefined
       if (ibexAccountId !== undefined) {
         const lnurlResp = await Ibex.createLnurlPay({
@@ -101,7 +99,9 @@ export const WalletsRepository = (): IWalletsRepository => {
 
   const findById = async (walletId: WalletId): Promise<Wallet | RepositoryError> => {
     try {
-      const result: WalletRecord | null = await Wallet.findOne({ id: walletId })
+      const result: WalletRecord | null = await Wallet.findOne({
+        id: { $eq: walletId },
+      })
       if (!result) {
         return new CouldNotFindWalletFromIdError()
       }

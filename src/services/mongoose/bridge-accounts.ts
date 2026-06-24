@@ -63,7 +63,10 @@ export const createExternalAccount = async (data: {
   try {
     const { bridgeExternalAccountId, accountId, status, ...metadata } = data
     const record = await BridgeExternalAccount.findOneAndUpdate(
-      { bridgeExternalAccountId, accountId },
+      {
+        bridgeExternalAccountId: { $eq: bridgeExternalAccountId },
+        accountId: { $eq: accountId },
+      },
       {
         $setOnInsert: { bridgeExternalAccountId, accountId },
         $set: { ...metadata, status: status ?? "pending", updatedAt: new Date() },
@@ -339,13 +342,18 @@ export const updateWithdrawalStatus = async (
     if (truncatedReason !== undefined) update.failureReason = truncatedReason
 
     const record = await BridgeWithdrawal.findOneAndUpdate(
-      { bridgeTransferId, status: { $in: ["submitted", "usdt_sent"] } },
+      {
+        bridgeTransferId: { $eq: bridgeTransferId },
+        status: { $in: ["submitted", "usdt_sent"] },
+      },
       update,
       { new: true },
     )
     if (record) return record
 
-    const existing = await BridgeWithdrawal.findOne({ bridgeTransferId })
+    const existing = await BridgeWithdrawal.findOne({
+      bridgeTransferId: { $eq: bridgeTransferId },
+    })
     if (!existing) return new RepositoryError(BRIDGE_WITHDRAWAL_NOT_FOUND)
 
     // Idempotent: duplicate webhook after we already reached this terminal status.

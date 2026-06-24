@@ -7,6 +7,7 @@
  */
 
 import express from "express"
+import rateLimitMiddleware from "express-rate-limit"
 import { BridgeConfig } from "@config"
 import { baseLogger } from "@services/logger"
 
@@ -18,6 +19,20 @@ import { externalAccountHandler } from "./routes/external-account"
 import { replayAuthMiddleware, replayHandler } from "./routes/replay"
 
 type RawBodyRequest = express.Request & { rawBody?: string }
+
+const webhookRateLimit = rateLimitMiddleware({
+  windowMs: 60_000,
+  limit: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+})
+
+const replayRateLimit = rateLimitMiddleware({
+  windowMs: 60_000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+})
 
 export const startBridgeWebhookServer = () => {
   const app = express()
@@ -41,11 +56,21 @@ export const startBridgeWebhookServer = () => {
   })
 
   // Webhook routes with signature verification
-  app.post("/kyc", verifyBridgeSignature("kyc"), kycHandler)
-  app.post("/deposit", verifyBridgeSignature("deposit"), depositHandler)
-  app.post("/transfer", verifyBridgeSignature("transfer"), transferHandler)
-  app.post("/external-account", verifyBridgeSignature("external_account"), externalAccountHandler)
-  app.post("/internal/replay", replayAuthMiddleware, replayHandler)
+  app.post("/kyc", webhookRateLimit, verifyBridgeSignature("kyc"), kycHandler)
+  app.post("/deposit", webhookRateLimit, verifyBridgeSignature("deposit"), depositHandler)
+  app.post(
+    "/transfer",
+    webhookRateLimit,
+    verifyBridgeSignature("transfer"),
+    transferHandler,
+  )
+  app.post(
+    "/external-account",
+    webhookRateLimit,
+    verifyBridgeSignature("external_account"),
+    externalAccountHandler,
+  )
+  app.post("/internal/replay", replayRateLimit, replayAuthMiddleware, replayHandler)
 
   if (!(process.env.BRIDGE_WEBHOOK_REPLAY_SECRET || BridgeConfig.webhook.replaySecret)) {
     baseLogger.warn(

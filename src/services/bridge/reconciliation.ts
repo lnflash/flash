@@ -385,14 +385,16 @@ export const reconcileByTxHash = async ({
   try {
     const [bridgeDeposit, ibexReceive] = await Promise.all([
       BridgeDeposits.findOne({
-        destinationTxHash: { $regex: new RegExp(`^${normalizedHash}$`, "i") },
+        destinationTxHash: { $eq: normalizedHash },
         state: "payment_processed",
       })
+        .collation({ locale: "en", strength: 2 })
         .lean()
         .exec(),
       IbexCryptoReceive.findOne({
-        txHash: { $regex: new RegExp(`^${normalizedHash}$`, "i") },
+        txHash: { $eq: normalizedHash },
       })
+        .collation({ locale: "en", strength: 2 })
         .lean()
         .exec(),
     ])

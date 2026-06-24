@@ -123,9 +123,13 @@ const BRIDGE_WITHDRAWAL_SEND_FAILED = {
 
 const mockPublish = jest.fn()
 
-const makeLeanQuery = (result: unknown) => ({
-  lean: () => ({ exec: () => Promise.resolve(result) }),
-})
+const makeLeanQuery = (result: unknown) => {
+  const query = {
+    collation: jest.fn(() => query),
+    lean: () => ({ exec: () => Promise.resolve(result) }),
+  }
+  return query
+}
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -196,7 +200,7 @@ describe("reconcileByTxHash", () => {
       if (result instanceof Error) return
       expect(result.txHash).toBe(NORM_HASH)
       const [bridgeCall] = (BridgeDeposits.findOne as jest.Mock).mock.calls
-      expect(bridgeCall[0].destinationTxHash.$regex.flags).toContain("i")
+      expect(bridgeCall[0].destinationTxHash).toEqual({ $eq: NORM_HASH })
     })
   })
 

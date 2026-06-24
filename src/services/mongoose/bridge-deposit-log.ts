@@ -15,7 +15,7 @@ export const createBridgeDeposit = async (data: {
 }): Promise<{ id: string } | Error> => {
   try {
     const log = await BridgeDeposits.findOneAndUpdate(
-      { eventId: data.eventId },
+      { eventId: { $eq: data.eventId } },
       { $setOnInsert: data },
       { upsert: true, new: true, setDefaultsOnInsert: true },
     )

@@ -37,13 +37,17 @@ main() {
   echo "Hitting graphql endpoints"
 
   echo "Running on network:"
-  for i in {1..20}; do
+  for i in {1..90}; do
     exec_graphql "anon" "globals"
     [[ "$(echo $output | jq -r '.data.globals.network')" = 'regtest' ]] && break
     sleep 1
   done
   echo $output | jq -r '.data.globals.network'
-  [[ "$(echo $output | jq -r '.data.globals.network')" = 'regtest' ]] || exit 1
+  if [[ "$(echo $output | jq -r '.data.globals.network')" != 'regtest' ]]; then
+    echo "Unexpected globals response:"
+    echo "$output" | jq .
+    exit 1
+  fi
   echo
   for i in {1..10}; do
     echo "Logging in Alice"

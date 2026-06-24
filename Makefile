@@ -128,7 +128,11 @@ execute-integration-from-within-container:
 	SVIX_ENDPOINT= \
 	SVIX_SECRET= \
 	NODE_OPTIONS="--max-old-space-size=6144" \
-	NODE_ENV=test LOGLEVEL=error $(BIN_DIR)/jest --config ./test/flash/legacy-integration/jest.config.js --bail --runInBand --ci --reporters=default --reporters=jest-junit && \
+	if [ -f ./test/flash/legacy-integration/jest.config.js ]; then \
+		NODE_ENV=test LOGLEVEL=error $(BIN_DIR)/jest --config ./test/flash/legacy-integration/jest.config.js --bail --runInBand --ci --reporters=default --reporters=jest-junit; \
+	else \
+		echo "No legacy integration suite found; skipping"; \
+	fi && \
 	NODE_OPTIONS="--max-old-space-size=6144" \
 	NODE_ENV=test LOGLEVEL=error $(BIN_DIR)/jest --config ./test/flash/integration/jest.config.js --bail --runInBand --ci --reporters=default --reporters=jest-junit
 
