@@ -34,6 +34,7 @@ import * as IbexMocks from "test/flash/mocks/ibex"
 jest.mock("@services/ibex/client", () => ({
   createAccount: jest.fn(),
   addInvoice: jest.fn(),
+  createLnurlPay: jest.fn(),
   getAccountDetails: jest.fn(),
 }))
 export let mockedIbex: jest.Mock
@@ -43,6 +44,10 @@ beforeAll(async () => {
   mockedIbexClient = Ibex as jest.Mocked<typeof Ibex>
   mockedIbexClient.createAccount.mockResolvedValue(IbexMocks.account.response[0])
   mockedIbexClient.addInvoice.mockResolvedValue(IbexMocks.addInvoice.response)
+  mockedIbexClient.createLnurlPay.mockResolvedValue({
+    lnurl:
+      "lnurl1dp68gurn8ghj7um9dej8xct5w3skccne9e3k7mf0d3h82unvwqhkxun0wa5kgct5v93kzmmfd3skjmn0wvhxcmmv9u",
+  })
 
   mongoose = await setupMongoConnection(true)
   const admins = await createMandatoryUsers()

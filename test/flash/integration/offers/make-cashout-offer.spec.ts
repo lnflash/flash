@@ -13,6 +13,7 @@ const send = USDAmount.cents("101") as USDAmount
 jest.mock("@services/ibex/client", () => ({
   getAccountDetails: jest.fn(),
   addInvoice: jest.fn(),
+  createLnurlPay: jest.fn(),
   createAccount: jest.fn(),
 }))
 let mockedIbex: jest.Mocked<typeof Ibex>
@@ -27,6 +28,10 @@ beforeEach(async () => {
   )
   mockedIbex.getAccountDetails.mockImplementation(getAccountDetailsMock)
   mockedIbex.addInvoice.mockResolvedValue(Mocks.addInvoice.response)
+  mockedIbex.createLnurlPay.mockResolvedValue({
+    lnurl:
+      "lnurl1dp68gurn8ghj7um9dej8xct5w3skccne9e3k7mf0d3h82unvwqhkxun0wa5kgct5v93kzmmfd3skjmn0wvhxcmmv9u",
+  })
 })
 
 afterEach(async () => {
