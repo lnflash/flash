@@ -79,6 +79,25 @@ describe("replayAuthMiddleware", () => {
     BridgeConfig.webhook.replaySecret = saved
   })
 
+  it("returns 503 when replaySecret is a known placeholder", () => {
+    const { BridgeConfig } = jest.requireMock("@config")
+    const saved = BridgeConfig.webhook.replaySecret
+    BridgeConfig.webhook.replaySecret = "also-not-so-secret"
+
+    const res = makeRes()
+    const next = jest.fn()
+    replayAuthMiddleware(
+      makeReq({}, { authorization: "Bearer also-not-so-secret" }),
+      res,
+      next,
+    )
+
+    expect(res.status as jest.Mock).toHaveBeenCalledWith(503)
+    expect(next).not.toHaveBeenCalled()
+
+    BridgeConfig.webhook.replaySecret = saved
+  })
+
   it("returns 401 for a wrong token", () => {
     const res = makeRes()
     const next = jest.fn()
@@ -133,7 +152,7 @@ describe("replayHandler", () => {
   describe("input validation", () => {
     it("returns 400 when event_type is missing", async () => {
       const res = makeRes()
-      const body = { ...BASE_BODY }
+      const body: Record<string, unknown> = { ...BASE_BODY }
       delete body.event_type
       await replayHandler(makeReq(body), res)
       expect(res.status as jest.Mock).toHaveBeenCalledWith(400)
@@ -141,7 +160,7 @@ describe("replayHandler", () => {
 
     it("returns 400 when event_object is missing", async () => {
       const res = makeRes()
-      const body = { ...BASE_BODY }
+      const body: Record<string, unknown> = { ...BASE_BODY }
       delete body.event_object
       await replayHandler(makeReq(body), res)
       expect(res.status as jest.Mock).toHaveBeenCalledWith(400)
@@ -149,7 +168,7 @@ describe("replayHandler", () => {
 
     it("returns 400 when event_created_at is missing", async () => {
       const res = makeRes()
-      const body = { ...BASE_BODY }
+      const body: Record<string, unknown> = { ...BASE_BODY }
       delete body.event_created_at
       await replayHandler(makeReq(body), res)
       expect(res.status as jest.Mock).toHaveBeenCalledWith(400)

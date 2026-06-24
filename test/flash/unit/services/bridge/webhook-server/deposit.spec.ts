@@ -94,7 +94,7 @@ beforeEach(() => {
 describe("depositHandler — invalid payload", () => {
   it("returns 400 when event_id is missing", async () => {
     const res = makeRes()
-    const body = { ...VALID_BODY }
+    const body: Record<string, unknown> = { ...VALID_BODY }
     delete body.event_id
     await depositHandler(makeReq(body), res)
     expect(res.status as jest.Mock).toHaveBeenCalledWith(400)
@@ -103,7 +103,7 @@ describe("depositHandler — invalid payload", () => {
 
   it("returns 400 when event_object.id is missing", async () => {
     const res = makeRes()
-    const objWithoutId = { ...VALID_EVENT_OBJECT }
+    const objWithoutId: Record<string, unknown> = { ...VALID_EVENT_OBJECT }
     delete objWithoutId.id
     await depositHandler(makeReq({ ...VALID_BODY, event_object: objWithoutId }), res)
     expect(res.status as jest.Mock).toHaveBeenCalledWith(400)
@@ -140,11 +140,8 @@ describe("depositHandler — invalid payload", () => {
 // ── Idempotency ───────────────────────────────────────────────────────────────
 
 describe("depositHandler — idempotency", () => {
-  it("returns already_processed after idempotent local and audit writes on duplicate delivery", async () => {
-    const lockFn = jest
-      .fn()
-      .mockResolvedValueOnce({})
-      .mockResolvedValueOnce(new Error("already locked"))
+  it("returns already_processed only after idempotent local and audit writes on duplicate delivery", async () => {
+    const lockFn = jest.fn().mockResolvedValueOnce(new Error("already locked"))
     ;(LockService as jest.Mock).mockReturnValue({ lockIdempotencyKey: lockFn })
     ;(DepositLog.createBridgeDeposit as jest.Mock).mockResolvedValue({ id: "log-dup" })
 
@@ -154,7 +151,7 @@ describe("depositHandler — idempotency", () => {
     expect(res.json as jest.Mock).toHaveBeenCalledWith({ status: "already_processed" })
     expect(DepositLog.createBridgeDeposit).toHaveBeenCalledTimes(1)
     expect(writeBridgeDepositRequest).toHaveBeenCalledTimes(1)
-    expect(lockFn).toHaveBeenCalledTimes(2)
+    expect(lockFn).toHaveBeenCalledTimes(1)
   })
 
   it("locks on the event id after writing the audit row", async () => {
@@ -299,6 +296,8 @@ describe("depositHandler — fee persistence (AC3)", () => {
     ;(writeBridgeDepositRequest as jest.Mock).mockResolvedValue(
       new Error("erpnext timeout"),
     )
+    const lockFn = jest.fn().mockResolvedValue({})
+    ;(LockService as jest.Mock).mockReturnValue({ lockIdempotencyKey: lockFn })
 
     const res = makeRes()
     await depositHandler(makeReq(VALID_BODY), res)
@@ -307,5 +306,6 @@ describe("depositHandler — fee persistence (AC3)", () => {
     expect(res.json as jest.Mock).toHaveBeenCalledWith({
       error: "Failed to persist ERPNext audit row",
     })
+    expect(lockFn).not.toHaveBeenCalled()
   })
 })

@@ -47,7 +47,7 @@ export const startBridgeWebhookServer = () => {
   app.post("/external-account", verifyBridgeSignature("external_account"), externalAccountHandler)
   app.post("/internal/replay", replayAuthMiddleware, replayHandler)
 
-  if (!BridgeConfig.webhook.replaySecret && !process.env.BRIDGE_WEBHOOK_REPLAY_SECRET) {
+  if (!(process.env.BRIDGE_WEBHOOK_REPLAY_SECRET || BridgeConfig.webhook.replaySecret)) {
     baseLogger.warn(
       "replaySecret not configured (neither BridgeConfig.webhook.replaySecret nor BRIDGE_WEBHOOK_REPLAY_SECRET) — /internal/replay will reject all requests with 503",
     )

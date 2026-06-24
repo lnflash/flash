@@ -99,13 +99,6 @@ export const depositHandler = async (req: Request, res: Response) => {
   }
 
   try {
-    const lockKey = `bridge-deposit:${obj.id}:${state ?? "unknown"}`
-    const lockResult = await LockService().lockIdempotencyKey(lockKey as IdempotencyKey)
-    if (lockResult instanceof Error) {
-      baseLogger.info({ event_id, id: obj.id, state }, "Duplicate Bridge deposit webhook")
-      return res.status(200).json({ status: "already_processed" })
-    }
-
     const rxReceipt = obj.receipt
 
     const developerFee =
@@ -192,8 +185,8 @@ export const depositHandler = async (req: Request, res: Response) => {
       return res.status(500).json({ error: "Failed to persist ERPNext audit row" })
     }
 
-    // Idempotency: mark processed only after local and ERPNext writes succeed, so
-    // provider retries can recover audit gaps after transient ERPNext failures.
+    // Mark processed only after local and ERPNext writes succeed, so provider
+    // retries can recover audit gaps after transient persistence failures.
     const auditLockKey = `bridge-deposit:${event_id}`
     const auditLockResult = await LockService().lockIdempotencyKey(
       auditLockKey as IdempotencyKey,

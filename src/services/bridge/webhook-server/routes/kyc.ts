@@ -80,14 +80,6 @@ export const kycHandler = async (req: Request, res: Response) => {
       return res.status(503).json({ error: "Account not ready" })
     }
 
-    // Idempotency check — acquire lock after account is found so 503 retries are not blocked
-    const lockKey = `bridge-kyc:${event_id}`
-    const lockResult = await LockService().lockIdempotencyKey(lockKey as IdempotencyKey)
-    if (lockResult instanceof Error) {
-      baseLogger.info({ customerId, event_id }, "Duplicate Bridge KYC webhook")
-      return res.status(200).json({ status: "already_processed" })
-    }
-
     const PENDING_BRIDGE_STATUSES = new Set([
       "incomplete",
       "awaiting_questionnaire",
@@ -229,6 +221,13 @@ export const kycHandler = async (req: Request, res: Response) => {
         { accountId: account.id, customerId, status, event_type },
         "Unhandled Bridge customer status — no action taken",
       )
+    }
+
+    const lockKey = `bridge-kyc:${event_id}`
+    const lockResult = await LockService().lockIdempotencyKey(lockKey as IdempotencyKey)
+    if (lockResult instanceof Error) {
+      baseLogger.info({ customerId, event_id }, "Duplicate Bridge KYC webhook")
+      return res.status(200).json({ status: "already_processed" })
     }
 
     return res.status(200).json({ status: "success" })

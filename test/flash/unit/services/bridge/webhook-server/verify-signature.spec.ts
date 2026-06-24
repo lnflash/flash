@@ -25,6 +25,7 @@ import crypto from "crypto"
 import { NextFunction, Request, Response } from "express"
 
 import { verifyBridgeSignature } from "@services/bridge/webhook-server/middleware/verify-signature"
+import { baseLogger } from "@services/logger"
 
 type RawBodyRequest = Request & { rawBody?: string }
 
@@ -53,7 +54,7 @@ const makeReq = (signature: string, rawBody = RAW_BODY) =>
   ({
     headers: { "x-webhook-signature": signature },
     rawBody,
-  }) as RawBodyRequest
+  }) as unknown as RawBodyRequest
 
 const signBridgeDigestFixture = (timestamp: string, rawBody = RAW_BODY) => {
   const signedPayload = `${timestamp}.${rawBody}`
@@ -93,6 +94,21 @@ describe("verifyBridgeSignature", () => {
 
     expect(next).toHaveBeenCalledTimes(1)
     expect(res.status as jest.Mock).not.toHaveBeenCalled()
+  })
+
+  it("does not log the raw signed payload while verifying signatures", () => {
+    const timestamp = Date.now().toString()
+    const signature = signBridgeDigestFixture(timestamp)
+    const req = makeReq(signatureHeader(timestamp, signature))
+    const res = makeRes()
+    const next = jest.fn() as NextFunction
+
+    verifyBridgeSignature("kyc")(req, res, next)
+
+    expect(baseLogger.debug).toHaveBeenCalledWith(
+      expect.not.objectContaining({ signedPayload: expect.any(String) }),
+      "Verifying Bridge webhook signature",
+    )
   })
 
   it("rejects signatures created over the raw timestamp/body payload directly", () => {

@@ -26,6 +26,8 @@ const HANDLERS: Record<RouteKey, (req: Request, res: Response) => Promise<Respon
   external_account: externalAccountHandler,
 }
 
+const WEAK_REPLAY_SECRETS = new Set(["also-not-so-secret", "change-me", "<replace>"])
+
 const DEPOSIT_EVENT_TYPES = new Set([
   "funds_scheduled",
   "funds_received",
@@ -121,10 +123,17 @@ const toHandlerBody = ({
 }
 
 export const replayAuthMiddleware = (req: Request, res: Response, next: () => void) => {
-  const secret =
-    BridgeConfig.webhook.replaySecret ?? process.env.BRIDGE_WEBHOOK_REPLAY_SECRET
+  const secret = (
+    process.env.BRIDGE_WEBHOOK_REPLAY_SECRET ||
+    BridgeConfig.webhook.replaySecret ||
+    ""
+  ).trim()
   if (!secret) {
     baseLogger.warn("Replay secret not configured, rejecting replay request")
+    return res.status(503).json({ error: "Replay secret not configured" })
+  }
+  if (WEAK_REPLAY_SECRETS.has(secret)) {
+    baseLogger.warn("Weak replay secret configured, rejecting replay request")
     return res.status(503).json({ error: "Replay secret not configured" })
   }
 

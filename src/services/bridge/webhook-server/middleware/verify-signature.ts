@@ -67,7 +67,7 @@ export const verifyBridgeSignature = (publicKeyType: "kyc" | "deposit" | "transf
 
     const digest = crypto.createHash("sha256").update(signedPayload).digest()
     baseLogger.debug(
-      { signedPayload, digest: digest.toString("hex") },
+      { timestamp, digest: digest.toString("hex") },
       "Verifying Bridge webhook signature",
     )
 

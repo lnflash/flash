@@ -37,7 +37,7 @@ bridge:
   timeoutMs: 15000
   webhook:
     port: 4009
-    replaySecret: "also-not-so-secret"
+    replaySecret: "" # set BRIDGE_WEBHOOK_REPLAY_SECRET or a local override to enable /internal/replay
     publicKeys:
       kyc: |
         -----BEGIN PUBLIC KEY-----

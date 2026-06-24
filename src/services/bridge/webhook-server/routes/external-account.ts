@@ -42,13 +42,6 @@ export const externalAccountHandler = async (req: Request, res: Response) => {
       return res.status(503).json({ error: "Account not ready" })
     }
 
-    const lockKey = `bridge-external-account:${event_id}`
-    const lockResult = await LockService().lockIdempotencyKey(lockKey as IdempotencyKey)
-    if (lockResult instanceof Error) {
-      baseLogger.info({ customer_id, event_id, id }, "Duplicate Bridge external account webhook")
-      return res.status(200).json({ status: "already_processed" })
-    }
-
     const status = toStatus(active)
 
     const result = await BridgeAccountsRepo.createExternalAccount({
@@ -71,6 +64,13 @@ export const externalAccountHandler = async (req: Request, res: Response) => {
       { accountId: account.id, bridgeExternalAccountId: id, status },
       "Bridge external account persisted",
     )
+
+    const lockKey = `bridge-external-account:${event_id}`
+    const lockResult = await LockService().lockIdempotencyKey(lockKey as IdempotencyKey)
+    if (lockResult instanceof Error) {
+      baseLogger.info({ customer_id, event_id, id }, "Duplicate Bridge external account webhook")
+      return res.status(200).json({ status: "already_processed" })
+    }
 
     return res.status(200).json({ status: "success" })
   } catch (error) {

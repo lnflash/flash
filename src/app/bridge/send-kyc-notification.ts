@@ -7,8 +7,6 @@ import {
   NotificationsServiceError,
 } from "@domain/notifications"
 import { removeDeviceTokens } from "@app/users/remove-device-tokens"
-import { toBridgeCustomerId } from "@domain/primitives/bridge"
-import BridgeApiClient from "@services/bridge/client"
 import { baseLogger } from "@services/logger"
 import { AccountsRepository } from "@services/mongoose/accounts"
 import { UsersRepository } from "@services/mongoose/users"
@@ -65,33 +63,6 @@ const formatRejectionReason = (rejectionReasons: unknown[]): string | undefined 
   return reasons.length > 0 ? reasons.join(", ") : undefined
 }
 
-const fetchIncompleteKycLinks = async (
-  account: Account,
-): Promise<{ kycLink?: string; tosLink?: string }> => {
-  if (!account.bridgeCustomerId) {
-    baseLogger.warn(
-      { accountId: account.id },
-      "Cannot attach KYC links to incomplete notification: no Bridge customer ID",
-    )
-    return {}
-  }
-
-  try {
-    const customerId = toBridgeCustomerId(account.bridgeCustomerId)
-    const kycLinkResult = await BridgeApiClient.getKycLatestLink(customerId)
-    return {
-      kycLink: kycLinkResult.kyc_link,
-      tosLink: kycLinkResult.tos_link,
-    }
-  } catch (error) {
-    baseLogger.warn(
-      { accountId: account.id, error },
-      "Failed to fetch KYC links for incomplete notification",
-    )
-    return {}
-  }
-}
-
 export const sendBridgeKycNotification = async ({
   accountId: accountIdRaw,
   outcome,
@@ -126,9 +97,6 @@ export const sendBridgeKycNotification = async ({
     { reason: rejectionReason ?? "" },
   )
 
-  const incompleteKycLinks =
-    outcome === "incomplete" ? await fetchIncompleteKycLinks(account) : {}
-
   const result = await PushNotificationsService().sendFilteredNotification({
     deviceTokens: user.deviceTokens,
     title,
@@ -139,7 +107,6 @@ export const sendBridgeKycNotification = async ({
       type: `bridge_kyc_${outcome}`,
       status: kycStatus,
       ...(rejectionReason ? { rejectionReason } : {}),
-      ...incompleteKycLinks,
     },
   })
 
