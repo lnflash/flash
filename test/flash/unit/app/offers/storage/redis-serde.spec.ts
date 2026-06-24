@@ -29,7 +29,7 @@ describe("OffersSerde", () => {
         invoice: {
           paymentRequest: "lnbc1test" as Bolt11,
           expiresAt: new Date(Date.now() + 60_000),
-        } as LnInvoice,
+        } as unknown as LnInvoice,
         amount: usdt("100"),
       },
       payout: {
@@ -43,7 +43,8 @@ describe("OffersSerde", () => {
     const parsed = OffersSerde.deserialize(OffersSerde.serialize(details))
 
     expect(parsed.payment.amount).toBeInstanceOf(USDTAmount)
-    expect(parsed.payment.amount.isLesserThan(usdt("101"))).toBe(true)
+    const paymentAmount = parsed.payment.amount as USDTAmount
+    expect(paymentAmount.isLesserThan(usdt("101"))).toBe(true)
     expect(parsed.payment.invoice.expiresAt).toBeInstanceOf(Date)
     expect(parsed.payout.amount).toBeInstanceOf(JMDAmount)
     expect(parsed.payout.serviceFee).toBeInstanceOf(USDAmount)

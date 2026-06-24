@@ -1,6 +1,6 @@
 jest.mock("@config", () => {
-  const path = require("path")
-  const { I18n } = require("i18n")
+  const path = jest.requireActual<typeof import("path")>("path")
+  const { I18n } = jest.requireActual<typeof import("i18n")>("i18n")
   const i18n = new I18n()
   i18n.configure({
     objectNotation: true,
@@ -69,23 +69,22 @@ describe("Bridge public GraphQL object contract", () => {
     expect(fields.bridgeTransferId).toBeDefined()
 
     expect(
-      defaultFieldResolver(withdrawal, {}, {}, { fieldName: "id", field: fields.id } as never),
+      defaultFieldResolver(withdrawal, {}, {}, {
+        fieldName: "id",
+        field: fields.id,
+      } as never),
     ).toBe("withdrawal-001")
     expect(
-      defaultFieldResolver(
-        withdrawal,
-        {},
-        {},
-        { fieldName: "status", field: fields.status } as never,
-      ),
+      defaultFieldResolver(withdrawal, {}, {}, {
+        fieldName: "status",
+        field: fields.status,
+      } as never),
     ).toBe("pending")
     expect(
-      defaultFieldResolver(
-        withdrawal,
-        {},
-        {},
-        { fieldName: "bridgeTransferId", field: fields.bridgeTransferId } as never,
-      ),
+      defaultFieldResolver(withdrawal, {}, {}, {
+        fieldName: "bridgeTransferId",
+        field: fields.bridgeTransferId,
+      } as never),
     ).toBeUndefined()
   })
 
@@ -96,7 +95,7 @@ describe("Bridge public GraphQL object contract", () => {
     }
     const ctx = { user: { language: "es" } } as GraphQLPublicContextAuth
 
-    expect(fields.flashFeeNotice.resolve?.(withdrawal, {}, ctx, {})).toBe(
+    expect(fields.flashFeeNotice.resolve?.(withdrawal, {}, ctx, {} as never)).toBe(
       getBridgeWithdrawalFlashFeeNotice("es"),
     )
   })
@@ -111,6 +110,8 @@ describe("Bridge public GraphQL object contract", () => {
       accountNumberLast4: "9012",
     }
 
-    expect(idField.resolve?.(virtualAccount, {}, {}, {})).toBe("bridge-va-001")
+    expect(
+      idField.resolve?.(virtualAccount, {}, {} as GraphQLPublicContext, {} as never),
+    ).toBe("bridge-va-001")
   })
 })

@@ -117,15 +117,26 @@ const resolveField = async ({
   source,
   args,
 }: {
-  objectType: typeof ConsumerAccount
+  objectType:
+    | typeof ConsumerAccount
+    | typeof BusinessAccount
+    | typeof UsdWallet
+    | typeof UsdtWallet
   field: string
   source: unknown
   args: Record<string, unknown>
 }) => {
-  const resolver = objectType.getFields()[field].resolve
+  const resolver = objectType.getFields()[field].resolve as
+    | ((
+        source: unknown,
+        args: Record<string, unknown>,
+        context: GraphQLPublicContextAuth,
+        info: never,
+      ) => unknown)
+    | undefined
   if (!resolver) throw new Error(`Missing resolver for ${field}`)
 
-  return resolver(source, args, context, {} as never, {} as never)
+  return resolver(source, args, context, {} as never)
 }
 
 describe("account Cash Wallet transaction resolvers", () => {

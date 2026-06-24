@@ -1,15 +1,15 @@
 import * as admin from "firebase-admin"
+import { FirebaseError } from "firebase-admin"
 import { Messaging } from "firebase-admin/lib/messaging/messaging"
 import { GOOGLE_APPLICATION_CREDENTIALS } from "@config"
 import { FirebaseMessageError, FirebaseNotAvailable } from "@domain/notifications"
 import { baseLogger } from "@services/logger"
 
-
 let messaging: Messaging | null = null
 
 if (GOOGLE_APPLICATION_CREDENTIALS) {
   try {
-    baseLogger.info("Firebase initalization")
+    baseLogger.info("Firebase initialization")
     admin.initializeApp({
       credential: admin.credential.applicationDefault(),
     })
@@ -23,7 +23,9 @@ if (GOOGLE_APPLICATION_CREDENTIALS) {
   baseLogger.warn("GOOGLE_APPLICATION_CREDENTIALS not set")
 }
 
-const isDeviceTokenValid = async (token: string): Promise<boolean | NotificationsServiceError> => {
+const isDeviceTokenValid = async (
+  token: string,
+): Promise<boolean | NotificationsServiceError> => {
   if (!messaging) return new FirebaseNotAvailable()
   try {
     await messaging.send(
@@ -35,24 +37,31 @@ const isDeviceTokenValid = async (token: string): Promise<boolean | Notification
         },
       },
       true, // dryrun - for token validation purposes only
-    );
+    )
     return true
-  } catch (e: any) {
-    if (e.code === "messaging/registration-token-not-registered") {
-      baseLogger.warn(`Invalid or expired FCM token: ${token}`);
+  } catch (e: unknown) {
+    const error = e as FirebaseError
+    if (error.code === "messaging/registration-token-not-registered") {
+      baseLogger.warn(`Invalid or expired FCM token: ${token}`)
       return false
     } else {
-      baseLogger.error(`Error checking device token: ${e.message}`);
-      return new FirebaseMessageError(e, token as DeviceToken)
+      baseLogger.error(`Error checking device token: ${error.message}`)
+      return new FirebaseMessageError(error, token as DeviceToken)
     }
   }
 }
 
 // Failed subscriptions need a retry mechanism
-const subscribeToTopics = async (tokens: string | string[], topics: string[]): Promise<void> => {
+const subscribeToTopics = async (
+  tokens: string | string[],
+  topics: string[],
+): Promise<void> => {
   topics.forEach(async (t) => {
     if (!messaging) {
-      baseLogger.error({ tokens, topic: t }, "Firebase messaging module not loaded, skipping topic subscription") 
+      baseLogger.error(
+        { tokens, topic: t },
+        "Firebase messaging module not loaded, skipping topic subscription",
+      )
       return new FirebaseNotAvailable()
     }
     const result = await messaging.subscribeToTopic(tokens, t)
@@ -61,4 +70,4 @@ const subscribeToTopics = async (tokens: string | string[], topics: string[]): P
 }
 
 export default { isDeviceTokenValid, subscribeToTopics }
-export { messaging } 
+export { messaging }

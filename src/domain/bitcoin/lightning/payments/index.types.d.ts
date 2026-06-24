@@ -5,11 +5,11 @@ type LnPaymentPartial = {
 }
 
 // Makes all properties non-readonly except the properties passed in as K
-type Writeable<T, K extends keyof T> = Pick<T, K> & {
+type Writable<T, K extends keyof T> = Pick<T, K> & {
   -readonly [P in keyof T as Exclude<P, K>]: T[P]
 }
 
-type PersistedLnPaymentLookup = Writeable<LnPaymentLookup, "paymentHash"> & {
+type PersistedLnPaymentLookup = Writable<LnPaymentLookup, "paymentHash"> & {
   readonly sentFromPubkey: Pubkey
   isCompleteRecord: boolean
 }

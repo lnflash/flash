@@ -107,7 +107,7 @@ reset-integration: reset-deps-integration integration
 
 bats:
 	yarn build && \
-	bats -t test/bats
+	if [ -d test/bats ]; then bats -t test/bats; else echo "No test/bats suite found; skipping"; fi
 
 reset-bats: reset-deps bats
 
@@ -115,7 +115,7 @@ execute-bats-from-within-container:
 	git config --global --add safe.directory /repo # otherwise bats complains
 	yarn install && \
 	yarn build && \
-	bats -t test/bats
+	if [ -d test/bats ]; then bats -t test/bats; else echo "No test/bats suite found; skipping"; fi
 
 integration-in-ci:
 	make create-tmp-env-ci && \

@@ -36,8 +36,7 @@ afterEach(async () => {
 
 describe("Offers", () => {
   it("successfully makes and executes an offer", async () => {
-    const manager = new CashoutManager()
-    const offer = await manager.makeCashoutOffer(alice.usdWalletD.id, send)
+    const offer = await CashoutManager.createOffer(alice.usdWalletD.id, send, "")
     if (offer instanceof Error) throw offer
 
     const { id } = offer

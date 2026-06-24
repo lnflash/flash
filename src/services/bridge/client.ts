@@ -314,7 +314,7 @@ export interface Transfer {
   updated_at: string
 }
 
-export interface BridgeIntiateKyc {
+export interface BridgeInitiateKyc {
   email: string
   type: "individual" | "business"
   full_name?: string
@@ -464,7 +464,7 @@ export class BridgeClient {
   // ============ KYC ============
 
   async createKycLink(
-    request: BridgeIntiateKyc,
+    request: BridgeInitiateKyc,
     idempotencyKey?: string,
   ): Promise<KycLink> {
     return this.request<KycLink>("POST", "/kyc_links", request, idempotencyKey)

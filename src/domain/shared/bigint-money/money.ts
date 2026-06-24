@@ -1,4 +1,4 @@
-import { IncompatibleCurrencyError } from './errors';
+import { IncompatibleCurrencyError } from "./errors"
 import {
   bigintToFixed,
   divide,
@@ -7,20 +7,21 @@ import {
   PRECISION_I,
   PRECISION_M,
   Round,
-} from './utils';
+} from "./utils"
 
 export class Money {
+  currency: string
+  private value: bigint
+  private round: Round
 
-  currency: string;
-  private value: bigint;
-  private round: Round;
-
-  constructor(value: number | bigint | string, currency: string, round: Round = Round.HALF_TO_EVEN) {
-
-    this.currency = currency;
-    this.round = round;
-    this.value = moneyValueToBigInt(value, this.round);
-
+  constructor(
+    value: number | bigint | string,
+    currency: string,
+    round: Round = Round.HALF_TO_EVEN,
+  ) {
+    this.currency = currency
+    this.round = round
+    this.value = moneyValueToBigInt(value, this.round)
   }
 
   /**
@@ -32,32 +33,30 @@ export class Money {
    * This function rounds to even, a.k.a. it uses bankers rounding.
    */
   toFixed(precision: number): string {
-
-    return bigintToFixed(this.value, precision, this.round);
-
+    return bigintToFixed(this.value, precision, this.round)
   }
 
   add(val: Money | number | string): Money {
-
     if (val instanceof Money && val.currency !== this.currency) {
-      throw new IncompatibleCurrencyError('You cannot add Money from different currencies. Convert first');
+      throw new IncompatibleCurrencyError(
+        "You cannot add Money from different currencies. Convert first",
+      )
     }
 
-    const addVal = moneyValueToBigInt(val, this.round);
-    const r = Money.fromSource(addVal + this.value, this.currency, this.round);
-    return r;
-
+    const addVal = moneyValueToBigInt(val, this.round)
+    const r = Money.fromSource(addVal + this.value, this.currency, this.round)
+    return r
   }
 
   subtract(val: Money | number | string): Money {
-
     if (val instanceof Money && val.currency !== this.currency) {
-      throw new IncompatibleCurrencyError('You cannot subtract Money from different currencies. Convert first');
+      throw new IncompatibleCurrencyError(
+        "You cannot subtract Money from different currencies. Convert first",
+      )
     }
 
-    const subVal = moneyValueToBigInt(val, this.round);
-    return Money.fromSource(this.value - subVal, this.currency, this.round);
-
+    const subVal = moneyValueToBigInt(val, this.round)
+    return Money.fromSource(this.value - subVal, this.currency, this.round)
   }
 
   /**
@@ -70,22 +69,16 @@ export class Money {
    * be used for the resulting object.
    */
   divide(val: number | string | Money): Money {
-
     // Even though val1 was already in 'bigint' format, we run this
     // again as otherwise we will lose precision.
     //
     // This means for an original of $1 this would now be $1 * 10**24.
-    const val1 = moneyValueToBigInt(this.value, this.round);
+    const val1 = moneyValueToBigInt(this.value, this.round)
 
-    // Converting the dividor.
-    const val2 = moneyValueToBigInt(val, this.round);
+    // Converting the divisor.
+    const val2 = moneyValueToBigInt(val, this.round)
 
-    return Money.fromSource(
-      divide(val1, val2, this.round),
-      this.currency,
-      this.round,
-    );
-
+    return Money.fromSource(divide(val1, val2, this.round), this.currency, this.round)
   }
 
   /**
@@ -96,18 +89,16 @@ export class Money {
    * be used for the resulting object.
    */
   multiply(val: number | string | Money): Money {
+    const valBig = moneyValueToBigInt(val, this.round)
 
-    const valBig = moneyValueToBigInt(val, this.round);
-
-    // Converting the dividor.
-    const resultBig = valBig * this.value;
+    // Converting the multiplier.
+    const resultBig = valBig * this.value
 
     return Money.fromSource(
       divide(resultBig, PRECISION_M, this.round),
       this.currency,
       this.round,
-    );
-
+    )
   }
 
   /**
@@ -116,24 +107,23 @@ export class Money {
    * pow currently only supports whole numbers.
    */
   pow(exponent: number | bigint): Money {
-
-    if (typeof exponent === 'number' && !Number.isInteger(exponent)) {
-      throw new Error('You can currently only use pow() with whole numbers');
+    if (typeof exponent === "number" && !Number.isInteger(exponent)) {
+      throw new Error("You can currently only use pow() with whole numbers")
     }
 
     if (exponent > 1) {
-      const resultBig = this.value ** BigInt(exponent);
+      const resultBig = this.value ** BigInt(exponent)
       return Money.fromSource(
-        divide(resultBig, PRECISION_M ** (BigInt(exponent)-1n), this.round),
+        divide(resultBig, PRECISION_M ** (BigInt(exponent) - 1n), this.round),
         this.currency,
-        this.round
-      );
+        this.round,
+      )
     } else if (exponent < 0) {
-      return new Money(1, this.currency, this.round).divide(this.pow(-exponent));
+      return new Money(1, this.currency, this.round).divide(this.pow(-exponent))
     } else if (exponent === 1) {
-      return this;
+      return this
     } else {
-      return new Money(1, this.currency, this.round);
+      return new Money(1, this.currency, this.round)
     }
   }
 
@@ -141,63 +131,49 @@ export class Money {
    * Returns the absolute value.
    */
   abs(): Money {
-
-    return this.multiply(this.sign());
-
+    return this.multiply(this.sign())
   }
 
   /**
    * Return -1 if the value is less than zero, 0 if zero, and 1 if more than zero.
    */
   sign(): number {
-
-    return this.compare(0);
-
+    return this.compare(0)
   }
 
   /**
    * Returns true if this Money object is _less_ than the passed value
    */
   isLesserThan(val: number | string | Money): boolean {
-
-    return this.compare(val) === -1;
-
+    return this.compare(val) === -1
   }
 
   /**
    * Returns true if this Money object is _more_ than the passed value
    */
   isGreaterThan(val: number | string | Money): boolean {
-
-    return this.compare(val) === 1;
-
+    return this.compare(val) === 1
   }
 
   /**
    * Returns true if this Money object is _more_ than the passed value
    */
   isEqual(val: number | string | Money): boolean {
-
-    return this.compare(val) === 0;
-
+    return this.compare(val) === 0
   }
 
   /**
    * Returns true if this Money object is _more_ than the passed value
    */
   isLesserThanOrEqual(val: number | string | Money): boolean {
-
-    return this.compare(val) < 1;
-
+    return this.compare(val) < 1
   }
 
   /**
    * Returns true if this Money object is _more_ than the passed value
    */
   isGreaterThanOrEqual(val: number | string | Money): boolean {
-
-    return this.compare(val) > -1;
-
+    return this.compare(val) > -1
   }
 
   /**
@@ -208,17 +184,16 @@ export class Money {
    * If this object is considered to be higher, 1 is returned.
    */
   compare(val: number | string | Money): -1 | 0 | 1 {
-
     if (val instanceof Money && val.currency !== this.currency) {
-      throw new IncompatibleCurrencyError('You cannot compare different currencies.');
+      throw new IncompatibleCurrencyError("You cannot compare different currencies.")
     }
 
-    const bigVal = moneyValueToBigInt(val, this.round);
-    if (bigVal === this.value) { return 0; }
-    return this.value < bigVal ? -1 : 1;
-
+    const bigVal = moneyValueToBigInt(val, this.round)
+    if (bigVal === this.value) {
+      return 0
+    }
+    return this.value < bigVal ? -1 : 1
   }
-
 
   /**
    * Allocate this value to different parts.
@@ -237,43 +212,36 @@ export class Money {
    *
    */
   allocate(parts: number, precision: number): Money[] {
-
-    const bParts = BigInt(parts);
+    const bParts = BigInt(parts)
 
     // Javascript will round to 0.
-    const fraction = this.value / bParts;
-    const remainder = this.value % bParts;
+    const fraction = this.value / bParts
+    const remainder = this.value % bParts
 
     // This value is used for rounding to the desired precision
-    const precisionRounder = BigInt(10) ** (PRECISION - BigInt(precision));
+    const precisionRounder = BigInt(10) ** (PRECISION - BigInt(precision))
 
-    const roundedFraction = (fraction / precisionRounder);
-    const roundedRemainder = fraction % precisionRounder;
+    const roundedFraction = fraction / precisionRounder
+    const roundedRemainder = fraction % precisionRounder
 
     // We had 2 division operators, and we want to keep remainders for both
     // of them.
-    const totalRoundedRemainder = ((roundedRemainder + remainder) * bParts) / precisionRounder;
+    const totalRoundedRemainder =
+      ((roundedRemainder + remainder) * bParts) / precisionRounder
 
-    const result: bigint[] = Array(parts).fill(roundedFraction);
+    const result: bigint[] = Array(parts).fill(roundedFraction)
 
     // Figure out how many spare 'cents' we need to distribute. If the number
     // is negative, we need to spread debt instead.
-    const add = BigInt(totalRoundedRemainder > 0 ? 1 : -1);
+    const add = BigInt(totalRoundedRemainder > 0 ? 1 : -1)
 
     for (let i = 0; i < Math.abs(Number(totalRoundedRemainder)); i++) {
-      result[i] += add;
+      result[i] += add
     }
 
-    return result.map( item => {
-
-      return Money.fromSource(
-        item * precisionRounder,
-        this.currency,
-        this.round
-      );
-
-    });
-
+    return result.map((item) => {
+      return Money.fromSource(item * precisionRounder, this.currency, this.round)
+    })
   }
 
   /**
@@ -282,9 +250,7 @@ export class Money {
    * This is the current value of the object, multiplied by 10 ** 12.
    */
   toSource(): bigint {
-
-    return this.value;
-
+    return this.value
   }
 
   /**
@@ -293,40 +259,35 @@ export class Money {
    * The source value is just the underlying bigint used in the Money
    * class and can be obtained by calling Money.getSource().
    */
-  static fromSource(val: bigint, currency: string, round: Round = Round.HALF_TO_EVEN): Money {
+  static fromSource(
+    val: bigint,
+    currency: string,
+    round: Round = Round.HALF_TO_EVEN,
+  ): Money {
+    const m = new Money(0, currency, round)
+    m.value = val
 
-    const m = new Money(0, currency, round);
-    m.value = val;
-
-    return m;
-
+    return m
   }
 
   /**
    * This function creates custom output in console.log statements.
    */
-  [Symbol.for('nodejs.util.inspect.custom')](): string {
-
-    return this.format() + ' ' + this.currency;
-
+  [Symbol.for("nodejs.util.inspect.custom")](): string {
+    return this.format() + " " + this.currency
   }
 
   /**
    * A default output for serializing to JSON
    */
   toJSON(): [string, string] {
-
-    return [this.format(), this.currency];
-
+    return [this.format(), this.currency]
   }
 
   /**
    * This function will return a string with all irrelevant 0's removed.
    */
   format(): string {
-
-    return this.toFixed(PRECISION_I).replace(/\.?0+$/, '');
-
+    return this.toFixed(PRECISION_I).replace(/\.?0+$/, "")
   }
-
 }

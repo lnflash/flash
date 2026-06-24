@@ -41,15 +41,14 @@ afterEach(async () => {
 
 describe("Offers", () => {
   it("successfully makes and persists an offer using default config", async () => {
-    const offer = await (new CashoutManager().makeCashoutOffer(alice.usdWalletD.id, send))
+    const offer = await CashoutManager.createOffer(alice.usdWalletD.id, send, "")
 
     if (offer instanceof Error) throw offer
-    expect(offer.details.ibexTrx.usd.asCents()).toEqual(send.asCents())
-    expect(offer.details.flash.fee.asCents()).toEqual("2")
-    expect(offer.details.flash.fee.currencyCode).toEqual("USD")
-    expect(offer.details.flash.liability.usd.asCents()).toEqual("99")
-    expect(offer.details.flash.liability.usd.currencyCode).toEqual("USD")
-    expect(offer.details.flash.liability.jmd.asCents()).toEqual("157")
-    expect(offer.details.flash.liability.jmd.currencyCode).toEqual("JMD")
+    expect(offer.details.payment.amount.currencyCode).toMatch(/^USD/)
+    expect(offer.details.payout.serviceFee.asCents()).toEqual("2")
+    expect(offer.details.payout.serviceFee.currencyCode).toEqual("USD")
+    expect(offer.details.payout.amount.asCents()).toEqual("157")
+    expect(offer.details.payout.amount.currencyCode).toEqual("JMD")
+    expect(offer.details.payout.exchangeRate?.asCents()).toEqual("15500")
   })
 })

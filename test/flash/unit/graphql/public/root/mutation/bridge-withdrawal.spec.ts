@@ -51,6 +51,39 @@ const makePendingRow = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 })
 
+type BridgeWithdrawalMutationResult = {
+  errors: Array<{ code?: string; message?: string }>
+  withdrawal?: {
+    id?: string
+    amount?: string
+    externalAccountId?: string
+    status?: string
+    bridgeTransferId?: string
+  }
+}
+
+type BridgeWithdrawalMutation = {
+  resolve?: (
+    source: null,
+    args: { input: Record<string, unknown> },
+    context: GraphQLPublicContextAuth,
+    info: never,
+  ) => Promise<unknown> | unknown
+}
+
+const resolveBridgeMutation = async (
+  mutation: BridgeWithdrawalMutation,
+  input: Record<string, unknown>,
+): Promise<BridgeWithdrawalMutationResult> => {
+  if (!mutation.resolve) throw new Error("Missing resolver")
+  return (await mutation.resolve(
+    null,
+    { input },
+    ctx,
+    {} as never,
+  )) as BridgeWithdrawalMutationResult
+}
+
 // ── bridgeRequestWithdrawal ───────────────────────────────────────────────────
 
 describe("bridgeRequestWithdrawal resolver", () => {
@@ -60,11 +93,9 @@ describe("bridgeRequestWithdrawal resolver", () => {
     const pendingRow = makePendingRow()
     ;(BridgeService.requestWithdrawal as jest.Mock).mockResolvedValue(pendingRow)
 
-    const result = await BridgeRequestWithdrawalMutation.resolve?.(
-      null,
-      { input: { amount: AMOUNT, externalAccountId: EXTERNAL_ACCOUNT_ID } },
-      ctx,
-      {} as never,
+    const result = await resolveBridgeMutation(
+      BridgeRequestWithdrawalMutation as BridgeWithdrawalMutation,
+      { amount: AMOUNT, externalAccountId: EXTERNAL_ACCOUNT_ID },
     )
 
     expect(BridgeService.requestWithdrawal).toHaveBeenCalledWith(
@@ -82,11 +113,9 @@ describe("bridgeRequestWithdrawal resolver", () => {
     const existingRow = makePendingRow({ id: "existing-withdrawal-001" })
     ;(BridgeService.requestWithdrawal as jest.Mock).mockResolvedValue(existingRow)
 
-    const result = await BridgeRequestWithdrawalMutation.resolve?.(
-      null,
-      { input: { amount: AMOUNT, externalAccountId: EXTERNAL_ACCOUNT_ID } },
-      ctx,
-      {} as never,
+    const result = await resolveBridgeMutation(
+      BridgeRequestWithdrawalMutation as BridgeWithdrawalMutation,
+      { amount: AMOUNT, externalAccountId: EXTERNAL_ACCOUNT_ID },
     )
 
     expect(result?.errors).toEqual([])
@@ -101,17 +130,21 @@ describe("bridgeInitiateWithdrawal resolver", () => {
   beforeEach(() => jest.clearAllMocks())
 
   it("submits the pending row and returns the withdrawal with bridgeTransferId recorded", async () => {
-    const initiatedRow = makePendingRow({ bridgeTransferId: TRANSFER_ID, status: "submitted" })
+    const initiatedRow = makePendingRow({
+      bridgeTransferId: TRANSFER_ID,
+      status: "submitted",
+    })
     ;(BridgeService.initiateWithdrawal as jest.Mock).mockResolvedValue(initiatedRow)
 
-    const result = await BridgeInitiateWithdrawalMutation.resolve?.(
-      null,
-      { input: { withdrawalId: WITHDRAWAL_ID } },
-      ctx,
-      {} as never,
+    const result = await resolveBridgeMutation(
+      BridgeInitiateWithdrawalMutation as BridgeWithdrawalMutation,
+      { withdrawalId: WITHDRAWAL_ID },
     )
 
-    expect(BridgeService.initiateWithdrawal).toHaveBeenCalledWith(ACCOUNT_ID, WITHDRAWAL_ID)
+    expect(BridgeService.initiateWithdrawal).toHaveBeenCalledWith(
+      ACCOUNT_ID,
+      WITHDRAWAL_ID,
+    )
     expect(result?.errors).toEqual([])
     expect(result?.withdrawal?.status).toBe("submitted")
     expect(result?.withdrawal?.bridgeTransferId).toBe(TRANSFER_ID)
@@ -122,11 +155,9 @@ describe("bridgeInitiateWithdrawal resolver", () => {
       new BridgeWithdrawalNotFoundError(),
     )
 
-    const result = await BridgeInitiateWithdrawalMutation.resolve?.(
-      null,
-      { input: { withdrawalId: WITHDRAWAL_ID } },
-      ctx,
-      {} as never,
+    const result = await resolveBridgeMutation(
+      BridgeInitiateWithdrawalMutation as BridgeWithdrawalMutation,
+      { withdrawalId: WITHDRAWAL_ID },
     )
 
     expect(result?.errors).toHaveLength(1)
@@ -139,11 +170,9 @@ describe("bridgeInitiateWithdrawal resolver", () => {
       new BridgeWithdrawalAlreadyInitiatedError(),
     )
 
-    const result = await BridgeInitiateWithdrawalMutation.resolve?.(
-      null,
-      { input: { withdrawalId: WITHDRAWAL_ID } },
-      ctx,
-      {} as never,
+    const result = await resolveBridgeMutation(
+      BridgeInitiateWithdrawalMutation as BridgeWithdrawalMutation,
+      { withdrawalId: WITHDRAWAL_ID },
     )
 
     expect(result?.errors).toHaveLength(1)
@@ -161,11 +190,9 @@ describe("bridgeCancelWithdrawalRequest resolver", () => {
     const cancelledRow = makePendingRow({ status: "cancelled" })
     ;(BridgeService.cancelWithdrawalRequest as jest.Mock).mockResolvedValue(cancelledRow)
 
-    const result = await BridgeCancelWithdrawalRequestMutation.resolve?.(
-      null,
-      { input: { withdrawalId: WITHDRAWAL_ID } },
-      ctx,
-      {} as never,
+    const result = await resolveBridgeMutation(
+      BridgeCancelWithdrawalRequestMutation as BridgeWithdrawalMutation,
+      { withdrawalId: WITHDRAWAL_ID },
     )
 
     expect(BridgeService.cancelWithdrawalRequest).toHaveBeenCalledWith(
@@ -183,11 +210,9 @@ describe("bridgeCancelWithdrawalRequest resolver", () => {
       new BridgeWithdrawalNotFoundError(),
     )
 
-    const result = await BridgeCancelWithdrawalRequestMutation.resolve?.(
-      null,
-      { input: { withdrawalId: WITHDRAWAL_ID } },
-      ctx,
-      {} as never,
+    const result = await resolveBridgeMutation(
+      BridgeCancelWithdrawalRequestMutation as BridgeWithdrawalMutation,
+      { withdrawalId: WITHDRAWAL_ID },
     )
 
     expect(result?.errors).toHaveLength(1)
@@ -200,11 +225,9 @@ describe("bridgeCancelWithdrawalRequest resolver", () => {
       new BridgeWithdrawalAlreadyInitiatedError(),
     )
 
-    const result = await BridgeCancelWithdrawalRequestMutation.resolve?.(
-      null,
-      { input: { withdrawalId: WITHDRAWAL_ID } },
-      ctx,
-      {} as never,
+    const result = await resolveBridgeMutation(
+      BridgeCancelWithdrawalRequestMutation as BridgeWithdrawalMutation,
+      { withdrawalId: WITHDRAWAL_ID },
     )
 
     expect(result?.errors).toHaveLength(1)

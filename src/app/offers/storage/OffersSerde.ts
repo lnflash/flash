@@ -8,7 +8,7 @@ import {
 import { CashoutDetails } from "../types"
 
 /**
- * Custom SerDe for CashoutDetails
+ * Custom serializer/deserializer for CashoutDetails
  */
 export const OffersSerde = {
   serialize: (data: CashoutDetails): string => {
