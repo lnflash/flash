@@ -32,6 +32,11 @@ services:
     - APOLLO_ROUTER_CONFIG_PATH=/repo/dev/apollo-federation/router.yaml
     volumes:
     - ${HOST_PROJECT_PATH:-.}/${GALOY_QUICKSTART_PATH:-vendor/galoy-quickstart}/dev:/repo/dev
+    command:
+    - --config
+    - /repo/dev/apollo-federation/router.yaml
+    - --supergraph
+    - /repo/dev/apollo-federation/supergraph.graphql
   oathkeeper:
     image: oryd/oathkeeper:v0.40.4-distroless
     ports:

@@ -146,6 +146,14 @@ services:
 #@overlay/match by=overlay.all
 ---
 services:
+  apollo-router:
+    #@overlay/match missing_ok=True
+    command:
+      - "--config"
+      - "/repo/dev/apollo-federation/router.yaml"
+      - "--supergraph"
+      - "/repo/dev/apollo-federation/supergraph.graphql"
+
   svix:
     #@overlay/match missing_ok=True
     extra_hosts:

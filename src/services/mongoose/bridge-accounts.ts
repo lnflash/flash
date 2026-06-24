@@ -337,9 +337,11 @@ export const updateWithdrawalStatus = async (
   failureReason?: string,
 ) => {
   try {
-    const update: Record<string, unknown> = { status, updatedAt: new Date() }
     const truncatedReason = truncateBridgeFailureReason(failureReason)
-    if (truncatedReason !== undefined) update.failureReason = truncatedReason
+    const update =
+      truncatedReason === undefined
+        ? { $set: { status, updatedAt: new Date() } }
+        : { $set: { status, updatedAt: new Date(), failureReason: truncatedReason } }
 
     const record = await BridgeWithdrawal.findOneAndUpdate(
       {

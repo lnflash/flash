@@ -125,16 +125,12 @@ integration-in-ci:
 # heap allocation issue has been resolved in dependencies (fails at 2048).
 execute-integration-from-within-container:
 	yarn install && \
-	SVIX_ENDPOINT= \
-	SVIX_SECRET= \
-	NODE_OPTIONS="--max-old-space-size=6144" \
 	if [ -f ./test/flash/legacy-integration/jest.config.js ]; then \
-		NODE_ENV=test LOGLEVEL=error $(BIN_DIR)/jest --config ./test/flash/legacy-integration/jest.config.js --bail --runInBand --ci --reporters=default --reporters=jest-junit; \
+		SVIX_ENDPOINT= SVIX_SECRET= NODE_OPTIONS="--max-old-space-size=6144" NODE_ENV=test LOGLEVEL=error $(BIN_DIR)/jest --config ./test/flash/legacy-integration/jest.config.js --bail --runInBand --ci --reporters=default --reporters=jest-junit; \
 	else \
 		echo "No legacy integration suite found; skipping"; \
 	fi && \
-	NODE_OPTIONS="--max-old-space-size=6144" \
-	NODE_ENV=test LOGLEVEL=error $(BIN_DIR)/jest --config ./test/flash/integration/jest.config.js --bail --runInBand --ci --reporters=default --reporters=jest-junit
+	SVIX_ENDPOINT= SVIX_SECRET= NODE_OPTIONS="--max-old-space-size=6144" NODE_ENV=test LOGLEVEL=error $(BIN_DIR)/jest --config ./test/flash/integration/jest.config.js --bail --runInBand --ci --reporters=default --reporters=jest-junit
 
 unit-in-ci:
 	. ./.env && \
