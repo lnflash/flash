@@ -131,6 +131,7 @@ export const env = createEnv({
 
     ERPNEXT_JWT_SECRET: z.string().min(1).optional(),
     NOSTR_PRIVATE_KEY: z.string().min(63).optional(),
+    RELAY_WEBHOOK_SECRET: z.string().min(1).optional(),
 
     // DigitalOcean Spaces
     DO_SPACES_ENDPOINT: z.string().url().optional(),
@@ -238,6 +239,7 @@ export const env = createEnv({
 
     ERPNEXT_JWT_SECRET: process.env.ERPNEXT_JWT_SECRET,
     NOSTR_PRIVATE_KEY: process.env.NOSTR_PRIVATE_KEY,
+    RELAY_WEBHOOK_SECRET: process.env.RELAY_WEBHOOK_SECRET,
 
     DO_SPACES_ENDPOINT: process.env.DO_SPACES_ENDPOINT,
     DO_SPACES_REGION: process.env.DO_SPACES_REGION,

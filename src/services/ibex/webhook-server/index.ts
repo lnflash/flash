@@ -1,7 +1,7 @@
 import express, { Request, Response } from "express"
 import { IbexConfig } from "@config"
 import { baseLogger as logger } from "@services/logger"
-import { onPay, onReceive } from "./routes"
+import { onPay, onReceive, relayNotify } from "./routes"
 
 const start = () => {
   const app = express()
@@ -13,6 +13,7 @@ const start = () => {
   app.get("/health", (_: Request, resp: Response) => resp.send("Ibex server is running"))
   app.use(onReceive.router)
   app.use(onPay.router)
+  app.use(relayNotify.router)
   app.listen(IbexConfig.webhook.port, () =>
     logger.info(
       `Listening for ibex events on port ${IbexConfig.webhook.port}. Can be reached at ${IbexConfig.webhook.uri}`,
