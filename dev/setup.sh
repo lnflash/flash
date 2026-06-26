@@ -31,16 +31,16 @@ if [[ "$NODE_VERSION" == "none" ]]; then
 fi
 
 NODE_MAJOR=$(echo "$NODE_VERSION" | sed 's/v//' | cut -d. -f1)
-if [[ "$NODE_MAJOR" != "20" ]]; then
-  warn "Node.js $NODE_VERSION detected — Flash requires Node 20.x"
+if [[ "$NODE_MAJOR" != "24" ]]; then
+  warn "Node.js $NODE_VERSION detected — Flash requires Node 24.x"
   if command -v nvm &>/dev/null || [ -f "$HOME/.nvm/nvm.sh" ]; then
-    echo "  Attempting: nvm use 20..."
+    echo "  Attempting: nvm use 24..."
     export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
     [ -s "$NVM_DIR/nvm.sh" ] && source "$NVM_DIR/nvm.sh"
-    nvm use 20 2>/dev/null || nvm install 20
+    nvm use 24 2>/dev/null || nvm install 24
     info "Now using $(node --version)"
   else
-    fail "Please install Node 20.x. Recommended: use nvm (https://github.com/nvm-sh/nvm)"
+    fail "Please install Node 24.x. Recommended: use nvm (https://github.com/nvm-sh/nvm)"
   fi
 else
   info "Node.js $NODE_VERSION"

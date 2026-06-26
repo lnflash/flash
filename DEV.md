@@ -29,12 +29,12 @@ If you prefer to set things up yourself, or if the setup script fails:
 
 | Tool | Required Version | Install |
 |------|-----------------|---------|
-| Node.js | 20.x (20.18.1+ recommended) | [nvm](https://github.com/nvm-sh/nvm): `nvm install 20` |
+| Node.js | 24.x (24.0.0+ required) | [nvm](https://github.com/nvm-sh/nvm): `nvm install 24` |
 | yarn | 1.x | `corepack enable && corepack prepare yarn@1 --activate` |
 | Docker | 20+ with compose v2 | [Docker Desktop](https://www.docker.com/products/docker-desktop) |
 | direnv | any (optional) | [direnv.net](https://direnv.net) |
 
-> **Note:** The project specifies `"node": "20"` in `package.json`. Node 22+ will fail on `yarn install` due to transitive dependency engine checks. Use `--ignore-engines` if you need to override, but Node 20.x is recommended.
+> **Note:** The project specifies `"node": ">=24.0.0 <25"` in `package.json`. The repo's `.yarnrc` sets `ignore-engines true`, so transitive dependency engine checks are bypassed and `yarn install` succeeds on Node 24. Node 24.x (LTS) is required.
 
 ### 1. Environment Variables
 
@@ -221,7 +221,7 @@ You're hitting the GraphQL server directly (port 4012). Use the oathkeeper proxy
 
 ### `The engine "node" is incompatible`
 
-Flash requires Node 20.x. Switch with `nvm use 20` or run `yarn install --ignore-engines`.
+Flash requires Node 24.x. Switch with `nvm use 24` or run `yarn install --ignore-engines`.
 
 ### Docker warnings about unset variables
 
