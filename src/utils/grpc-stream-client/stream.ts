@@ -87,7 +87,7 @@ export class Stream<T extends GrpcData, R extends GrpcData> {
     const onceListeners = [] as GrpcStreamEventsListener<T, R, K>[]
     listeners.forEach((l) => {
       l.listener(this, ev)
-      if (l.options !== undefined && (l.options as AddEventListenerOptions).once)
+      if (l.options !== undefined && (l.options as { once?: boolean }).once)
         onceListeners.push(l)
     })
     onceListeners.forEach((l) => this.removeEventListener(type, l.listener, l.options))
