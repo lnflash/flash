@@ -14,20 +14,7 @@ import {
 } from "@domain/primitives/bridge"
 import { alertBridge, generateDedupKey } from "@services/alerts"
 
-import { BridgeTimeoutError } from "./errors"
-
-// ============ Error Handling ============
-
-export class BridgeApiError extends Error {
-  constructor(
-    message: string,
-    public statusCode: number,
-    public response?: unknown,
-  ) {
-    super(message)
-    this.name = "BridgeApiError"
-  }
-}
+import { BridgeApiError, BridgeTimeoutError } from "./errors"
 
 // ============ Request/Response Types ============
 
