@@ -462,7 +462,8 @@ const findEthereumUsdtReceiveOption = (
 ): CryptoReceiveOption | IbexError => {
   const ethereumUsdt = options.find(
     (opt) =>
-      opt.currencyId === USDTAmount.currencyId && opt.network.toLowerCase() === "ethereum",
+      opt.currencyId === USDTAmount.currencyId &&
+      opt.network.toLowerCase() === "ethereum",
   )
 
   if (!ethereumUsdt) {
