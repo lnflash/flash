@@ -75,7 +75,46 @@ cashout:
     to: your-email@example.com  # for cashout notification testing
 ```
 
-### 3. Install Dependencies
+### 3. Push Notifications (Firebase)
+
+Firebase is optional for most local backend development. If `GOOGLE_APPLICATION_CREDENTIALS` is not set, the server starts but push notification delivery is disabled and logs that Firebase messaging is not loaded.
+
+To test real push notifications locally, you need a Firebase service account JSON for the same Firebase project used by your mobile app build:
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/firebase-service-account.json
+make start
+```
+
+Do not commit the Firebase service account JSON. Keep it outside the repo, for example under `~/.config/flash/`.
+
+The local dev config defines default FCM topic names in `dev/config/base-config.yaml`:
+
+```yaml
+fcmTopics:
+  - name: "dev-EMERGENCY"
+    default: true
+  - name: "dev-ATTENTION"
+    default: true
+  - name: "dev-INFO"
+    default: false
+  - name: "dev-MARKETING"
+    default: false
+```
+
+If you override these topics, use a unique local prefix so your local instance cannot accidentally target another environment's topics.
+
+Real push delivery also requires the mobile app to register an FCM device token from the same Firebase project as the service account. A local backend can only send to device tokens stored for users in MongoDB.
+
+To subscribe existing local device tokens to their configured FCM topics:
+
+```bash
+MONGODB_CON=mongodb://localhost:27017/galoy \
+GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/firebase-service-account.json \
+node scripts/subscribe-device-tokens-to-topics.js
+```
+
+### 4. Install Dependencies
 
 ```bash
 yarn install
@@ -83,7 +122,7 @@ yarn install
 
 > If you hit engine compatibility errors, use `yarn install --ignore-engines`.
 
-### 4. Start Docker Dependencies
+### 5. Start Docker Dependencies
 
 ```bash
 make start-deps
@@ -99,7 +138,7 @@ make reset-deps
 
 > **Note:** After restarting dependencies, reload environment variables with `direnv reload` (or re-source your `.env` files).
 
-### 5. Start the Server
+### 6. Start the Server
 
 ```bash
 make start
