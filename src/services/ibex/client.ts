@@ -37,6 +37,7 @@ import {
   GetFeeEstimateArgs,
   IbexAccountDetails,
   IbexFeeEstimation,
+  IbexRawAccountDetails,
   IbexInvoiceArgs,
   PayInvoiceArgs,
   CryptoReceiveOption,
@@ -135,6 +136,23 @@ const getAccountDetails = async (
         userId: resp.userId,
         name: resp.name,
         balance: parseAccountBalance(resp.balance, currency),
+      }
+    })
+    .then(errorHandler)
+}
+
+const getRawAccountDetails = async (
+  accountId: IbexAccountId,
+): Promise<IbexRawAccountDetails | IbexError> => {
+  return Ibex.getAccountDetails({ accountId })
+    .then((resp) => {
+      if (resp instanceof Error) return resp
+
+      return {
+        id: resp.id,
+        userId: resp.userId,
+        name: resp.name,
+        balance: resp.balance,
       }
     })
     .then(errorHandler)
@@ -544,6 +562,7 @@ export default wrapAsyncFunctionsToRunInSpan({
     getTransactionDetails,
     createAccount,
     getAccountDetails,
+    getRawAccountDetails,
     generateBitcoinAddress,
     addInvoice,
     invoiceFromHash,

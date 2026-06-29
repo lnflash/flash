@@ -1,5 +1,4 @@
 import { addWalletIfNonexistent, updateDefaultWalletId } from "@app/accounts"
-import { getBalanceForWallet } from "@app/wallets"
 import { decodeInvoice } from "@domain/bitcoin/lightning"
 import { InvalidWalletId } from "@domain/errors"
 import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
@@ -26,7 +25,7 @@ type RuntimeServiceDependencies = {
   now?: () => Date
   addWalletIfNonexistent?: typeof addWalletIfNonexistent
   updateDefaultWalletId?: typeof updateDefaultWalletId
-  getBalanceForWallet?: typeof getBalanceForWallet
+  getRawAccountDetails?: typeof Ibex.getRawAccountDetails
   createInvoice?: typeof Ibex.addInvoice
   createNoAmountInvoice?: typeof Ibex.addInvoice
   payInvoice?: typeof Ibex.payInvoice
@@ -37,9 +36,74 @@ type RuntimeServiceDependencies = {
   sleep?: SleepFn
 }
 
-const isUsdAmount = (amount: unknown): amount is USDAmount => amount instanceof USDAmount
-const isUsdtAmount = (amount: unknown): amount is USDTAmount =>
-  amount instanceof USDTAmount
+const normalizeDecimalString = (amount: number | string): string =>
+  (typeof amount === "number" ? amount.toFixed(12) : amount).replace(/\.?0+$/, "") || "0"
+
+const decimalToScaledInteger = ({
+  amount,
+  scale,
+  round = true,
+}: {
+  amount: number | string
+  scale: number
+  round?: boolean
+}): string | InvalidCashWalletCutoverAmountError => {
+  const normalized = normalizeDecimalString(amount)
+  if (!/^\d+(\.\d+)?$/.test(normalized)) {
+    return new InvalidCashWalletCutoverAmountError(
+      `Invalid non-negative decimal amount: ${normalized}`,
+    )
+  }
+
+  const [whole, fraction = ""] = normalized.split(".")
+  const scaleFactor = 10n ** BigInt(scale)
+  const paddedFraction = `${fraction}${"0".repeat(scale + 1)}`.slice(0, scale + 1)
+  const scaledFraction = paddedFraction.slice(0, scale)
+  const roundingDigit = Number(paddedFraction[scale] ?? "0")
+  const scaled =
+    BigInt(whole) * scaleFactor + BigInt(scaledFraction === "" ? "0" : scaledFraction)
+
+  return (scaled + (round && roundingDigit >= 5 ? 1n : 0n)).toString()
+}
+
+const scaledIntegerToDecimal = ({
+  amount,
+  scale,
+}: {
+  amount: string
+  scale: number
+}): string => {
+  if (scale === 0) return amount
+
+  const padded = amount.padStart(scale + 1, "0")
+  const whole = padded.slice(0, -scale)
+  const fraction = padded.slice(-scale).replace(/0+$/, "")
+  return fraction ? `${whole}.${fraction}` : whole
+}
+
+const ibexUsdDollarsToPreciseCents = (
+  amount: number | string,
+): string | InvalidCashWalletCutoverAmountError => {
+  const dollarsScaledToEightDecimals = decimalToScaledInteger({
+    amount,
+    scale: 8,
+    round: false,
+  })
+  if (dollarsScaledToEightDecimals instanceof Error) return dollarsScaledToEightDecimals
+
+  return scaledIntegerToDecimal({
+    amount: dollarsScaledToEightDecimals,
+    scale: 6,
+  })
+}
+
+const ibexMajorUnitsToUsdtMicros = (
+  amount: number | string,
+): string | InvalidCashWalletCutoverAmountError =>
+  decimalToScaledInteger({ amount, scale: 6 })
+
+const hasOnlySubMicroMajorUnitDust = (amount: number | string | undefined): boolean =>
+  amount === undefined || Number(normalizeDecimalString(amount)) < 0.000001
 
 const ibexInvoiceToDomainInvoice = (
   response: Awaited<ReturnType<typeof Ibex.addInvoice>>,
@@ -94,7 +158,7 @@ export const createCashWalletMigrationRuntimeServices = (
 ) => {
   const addWallet = deps.addWalletIfNonexistent ?? addWalletIfNonexistent
   const updateDefaultWallet = deps.updateDefaultWalletId ?? updateDefaultWalletId
-  const balanceForWallet = deps.getBalanceForWallet ?? getBalanceForWallet
+  const rawAccountDetails = deps.getRawAccountDetails ?? Ibex.getRawAccountDetails
   const invoiceForRecipient = deps.createInvoice ?? Ibex.addInvoice
   const noAmountInvoiceForRecipient = deps.createNoAmountInvoice ?? Ibex.addInvoice
   const payInvoice = deps.payInvoice ?? Ibex.payInvoice
@@ -132,28 +196,20 @@ export const createCashWalletMigrationRuntimeServices = (
       readSourceBalanceUsdCents: async (
         migration: CashWalletMigration,
       ): Promise<string | ApplicationError> => {
-        const balance = await balanceForWallet({
-          walletId: migration.legacyUsdWalletId,
-          currency: WalletCurrency.Usd,
-        })
-        if (balance instanceof Error) return balance
-        if (!isUsdAmount(balance)) {
-          return new InvalidCashWalletCutoverAmountError("Expected USD balance")
-        }
-        return balance.asCents()
+        const account = await rawAccountDetails(
+          migration.legacyUsdWalletId as IbexAccountId,
+        )
+        if (account instanceof Error) return account
+        return ibexUsdDollarsToPreciseCents(account.balance ?? 0)
       },
       readDestinationBalanceUsdtMicros: async (
         migration: CashWalletMigration,
       ): Promise<string | ApplicationError> => {
-        const balance = await balanceForWallet({
-          walletId: migration.destinationUsdtWalletId,
-          currency: WalletCurrency.Usdt,
-        })
-        if (balance instanceof Error) return balance
-        if (!isUsdtAmount(balance)) {
-          return new InvalidCashWalletCutoverAmountError("Expected USDT balance")
-        }
-        return balance.asSmallestUnits()
+        const account = await rawAccountDetails(
+          migration.destinationUsdtWalletId as IbexAccountId,
+        )
+        if (account instanceof Error) return account
+        return ibexMajorUnitsToUsdtMicros(account.balance ?? 0)
       },
     },
     invoiceService: {
@@ -203,15 +259,25 @@ export const createCashWalletMigrationRuntimeServices = (
         senderWalletId,
         paymentRequest,
         senderAmountUsdCents,
+        senderAmountUsdtMicros,
       }: {
         senderWalletId: WalletId
         paymentRequest: string
         senderAmountUsdCents?: string
+        senderAmountUsdtMicros?: string
       }): Promise<{ transactionId: IbexTransactionId } | ApplicationError> => {
+        if (senderAmountUsdCents !== undefined && senderAmountUsdtMicros !== undefined) {
+          return new InvalidCashWalletCutoverAmountError(
+            "Only one explicit sender amount can be provided",
+          )
+        }
+
         const send =
-          senderAmountUsdCents === undefined
-            ? undefined
-            : USDAmount.cents(senderAmountUsdCents)
+          senderAmountUsdCents !== undefined
+            ? USDAmount.cents(senderAmountUsdCents)
+            : senderAmountUsdtMicros !== undefined
+              ? USDTAmount.smallestUnits(senderAmountUsdtMicros)
+              : undefined
         if (send instanceof Error) return send
 
         const payment = await withIbexRateLimitRetry({
@@ -238,12 +304,9 @@ export const createCashWalletMigrationRuntimeServices = (
       }: {
         legacyUsdWalletId: WalletId
       }): Promise<true | ApplicationError> => {
-        const balance = await balanceForWallet({
-          walletId: legacyUsdWalletId,
-          currency: WalletCurrency.Usd,
-        })
-        if (balance instanceof Error) return balance
-        if (!isUsdAmount(balance) || !balance.isZero()) {
+        const account = await rawAccountDetails(legacyUsdWalletId as IbexAccountId)
+        if (account instanceof Error) return account
+        if (!hasOnlySubMicroMajorUnitDust(account.balance)) {
           return new CashWalletMigrationFailedError("Legacy USD wallet is not zero")
         }
         return true
@@ -271,19 +334,18 @@ export const createCashWalletMigrationRuntimeServices = (
           )
         }
 
-        const currentBalance = await balanceForWallet({
-          walletId: migration.destinationUsdtWalletId,
-          currency: WalletCurrency.Usdt,
-        })
-        if (currentBalance instanceof Error) return currentBalance
-        if (!isUsdtAmount(currentBalance)) {
-          return new InvalidCashWalletCutoverAmountError("Expected USDT balance")
-        }
+        const currentAccount = await rawAccountDetails(
+          migration.destinationUsdtWalletId as IbexAccountId,
+        )
+        if (currentAccount instanceof Error) return currentAccount
+
+        const currentUsdtMicros = ibexMajorUnitsToUsdtMicros(currentAccount.balance ?? 0)
+        if (currentUsdtMicros instanceof Error) return currentUsdtMicros
 
         return destinationShortfallUsdtMicros({
           targetUsdtMicros: migration.destinationAmountUsdtMicros,
           startingUsdtMicros: migration.destinationStartingBalanceUsdtMicros,
-          currentUsdtMicros: currentBalance.asSmallestUnits(),
+          currentUsdtMicros,
         })
       },
     },
@@ -317,12 +379,9 @@ export const createCashWalletMigrationRuntimeServices = (
       }: {
         legacyUsdWalletId: WalletId
       }): Promise<true | ApplicationError> => {
-        const balance = await balanceForWallet({
-          walletId: legacyUsdWalletId,
-          currency: WalletCurrency.Usd,
-        })
-        if (balance instanceof Error) return balance
-        if (!isUsdAmount(balance) || !balance.isZero()) {
+        const account = await rawAccountDetails(legacyUsdWalletId as IbexAccountId)
+        if (account instanceof Error) return account
+        if (!hasOnlySubMicroMajorUnitDust(account.balance)) {
           return new CashWalletMigrationFailedError("Legacy USD wallet is not zero")
         }
         return true

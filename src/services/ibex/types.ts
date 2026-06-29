@@ -33,6 +33,13 @@ export type IbexAccountDetails = {
   balance: USDAmount | USDTAmount | undefined
 }
 
+export type IbexRawAccountDetails = {
+  id: string | undefined
+  userId: string | undefined
+  name: string | undefined
+  balance: number | undefined
+}
+
 export type IbexInvoiceArgs = {
   accountId: IbexAccountId
   amount?: UsdWalletAmount
