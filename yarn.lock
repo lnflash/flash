@@ -8867,10 +8867,10 @@ i18n@^0.15.1:
     math-interval-parser "^2.0.1"
     mustache "^4.2.0"
 
-ibex-client@^3.0.0:
-  version "3.0.0"
-  resolved "https://registry.yarnpkg.com/ibex-client/-/ibex-client-3.0.0.tgz#963ced9561b1e2cea0cec876ebf282f62ef69540"
-  integrity sha512-ATfB1qptJLv2C7K0bzzZCjTSYgJO/ihx059FCT+DjngfSkijJLOdFdFepQTcy7Cadh1ij5TdFa5+jYbr3ZiViw==
+ibex-client@^3.1.0:
+  version "3.1.1"
+  resolved "https://registry.yarnpkg.com/ibex-client/-/ibex-client-3.1.1.tgz#8fe11b40f2b51d03fb6f5f613f558a06097d525b"
+  integrity sha512-9L2aYU+40GU1u0fQ1Ag0C1f3ncfJL0+d7YzkBEDSw1uqfaILc+Zeg23B9U3jssurJZJ+pJN2QFCWN0Ww0bsJZg==
   dependencies:
     api "^6.1.2"
     node-cache "^5.1.2"
