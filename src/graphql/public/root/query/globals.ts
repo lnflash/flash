@@ -1,5 +1,6 @@
 import {
   NETWORK,
+  Topup,
   getFeesConfig,
   getGaloyBuildInformation,
   getLightningAddressDomain,
@@ -33,6 +34,7 @@ const GlobalsQuery = GT.Field({
           ratio: `${feesConfig.depositRatioAsBasisPoints}`,
         },
       },
+      topupEnabled: Topup.Enabled,
     }
   },
 })
