@@ -1,11 +1,7 @@
 import { decodeInvoice } from "@domain/bitcoin/lightning"
 
 import { assertCanTransition } from "./state-machine"
-import {
-  feeUsdCentsToUsdtMicros,
-  usdCentsToUsdtMicros,
-  usdtMicrosToUsdCentsCeil,
-} from "./amount-conversion"
+import { usdCentsToUsdtMicros, usdtMicrosToUsdCentsCeil } from "./amount-conversion"
 import {
   InvalidCashWalletCutoverAmountError,
   InvalidCashWalletMigrationTransitionError,
@@ -28,6 +24,10 @@ type CashWalletMigrationInvoiceService = {
     amount: string
     memo: string
   }): Promise<LnInvoice | ApplicationError>
+  createNoAmountInvoice(args: {
+    recipientWalletId: WalletId
+    memo: string
+  }): Promise<LnInvoice | ApplicationError>
 }
 
 type CashWalletMigrationNoAmountInvoiceService = {
@@ -42,6 +42,7 @@ type CashWalletMigrationPaymentService = {
     senderWalletId: WalletId
     paymentRequest: string
     senderAmountUsdCents?: string
+    senderAmountUsdtMicros?: string
   }): Promise<{ transactionId: IbexTransactionId } | ApplicationError>
 }
 
@@ -76,6 +77,19 @@ type CashWalletMigrationProvisioningService = {
 }
 
 const CUTOVER_INVOICE_PAYMENT_SAFETY_WINDOW_MS = 30 * 1000
+const CUTOVER_MIN_FIXED_USDT_INVOICE_MICROS = 10_000n
+
+const usesNoAmountFeeReimbursementInvoice = (
+  feeAmountUsdtMicros: string,
+): boolean | InvalidCashWalletCutoverAmountError => {
+  if (!/^\d+$/.test(feeAmountUsdtMicros)) {
+    return new InvalidCashWalletCutoverAmountError(
+      `Invalid non-negative integer amount: ${feeAmountUsdtMicros}`,
+    )
+  }
+
+  return BigInt(feeAmountUsdtMicros) < CUTOVER_MIN_FIXED_USDT_INVOICE_MICROS
+}
 
 const isInvoicePaymentRequestStale = ({
   paymentRequest,
@@ -332,7 +346,7 @@ export const createCashWalletMigrationBalanceMoveInvoice = async ({
 
   const invoice = await invoiceService.createNoAmountInvoice({
     recipientWalletId: migration.destinationUsdtWalletId,
-    memo: `cash-wallet-cutover:${migration.runId}:${migration.id}:balance-move`,
+    memo: `cwco:${migration.runId}:${migration.id}:move`,
   })
   if (invoice instanceof Error) return invoice
 
@@ -363,21 +377,26 @@ export const createCashWalletMigrationFeeReimbursementInvoice = async ({
   const feeAmountUsdCents = usdtMicrosToUsdCentsCeil(feeAmountUsdtMicros)
   if (feeAmountUsdCents instanceof Error) return feeAmountUsdCents
 
-  const reimbursableFeeAmountUsdtMicros = feeUsdCentsToUsdtMicros(feeAmountUsdCents)
-  if (reimbursableFeeAmountUsdtMicros instanceof Error)
-    return reimbursableFeeAmountUsdtMicros
-
   const transition = assertCanTransition(
     migration.status,
     "fee_reimbursement_invoice_created",
   )
   if (transition instanceof Error) return transition
 
-  const invoice = await invoiceService.createInvoice({
-    recipientWalletId: migration.destinationUsdtWalletId,
-    amount: reimbursableFeeAmountUsdtMicros,
-    memo: `cash-wallet-cutover:${migration.runId}:${migration.id}:fee-reimbursement`,
-  })
+  const useNoAmountInvoice = usesNoAmountFeeReimbursementInvoice(feeAmountUsdtMicros)
+  if (useNoAmountInvoice instanceof Error) return useNoAmountInvoice
+
+  const invoiceMemo = `cwco:${migration.runId}:${migration.id}:fee`
+  const invoice = useNoAmountInvoice
+    ? await invoiceService.createNoAmountInvoice({
+        recipientWalletId: migration.destinationUsdtWalletId,
+        memo: invoiceMemo,
+      })
+    : await invoiceService.createInvoice({
+        recipientWalletId: migration.destinationUsdtWalletId,
+        amount: feeAmountUsdtMicros,
+        memo: invoiceMemo,
+      })
   if (invoice instanceof Error) return invoice
 
   return migrationsRepo.transitionMigration({
@@ -475,9 +494,23 @@ export const sendCashWalletMigrationFeeReimbursementPayment = async ({
     )
   }
 
+  if (payableMigration.feeAmountUsdtMicros === undefined) {
+    return new InvalidCashWalletMigrationTransitionError(
+      "feeAmountUsdtMicros is required before fee reimbursement sending",
+    )
+  }
+
+  const useNoAmountInvoice = usesNoAmountFeeReimbursementInvoice(
+    payableMigration.feeAmountUsdtMicros,
+  )
+  if (useNoAmountInvoice instanceof Error) return useNoAmountInvoice
+
   const payment = await paymentService.payInvoice({
     senderWalletId: treasuryWalletId,
     paymentRequest: payableMigration.feeReimbursementInvoicePaymentRequest,
+    senderAmountUsdtMicros: useNoAmountInvoice
+      ? payableMigration.feeAmountUsdtMicros
+      : undefined,
   })
   if (payment instanceof Error) return payment
 
