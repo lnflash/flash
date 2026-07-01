@@ -45,8 +45,8 @@ export const PaymentFlowStateRepository = (
     const hash = paymentHash
       ? { paymentHash }
       : intraLedgerHash
-      ? { intraLedgerHash }
-      : new BadInputsForFindError(JSON.stringify(args))
+        ? { intraLedgerHash }
+        : new BadInputsForFindError(JSON.stringify(args))
     if (hash instanceof Error) return hash
 
     try {
@@ -191,10 +191,10 @@ const paymentFlowFromRaw = <S extends WalletCurrency, R extends WalletCurrency>(
   const hash = paymentHash
     ? { paymentHash: paymentHash as PaymentHash }
     : intraLedgerHash
-    ? { intraLedgerHash: intraLedgerHash as IntraLedgerHash }
-    : new InvalidLightningPaymentFlowStateError(
-        "Missing valid 'paymentHash' or 'intraLedgerHash'",
-      )
+      ? { intraLedgerHash: intraLedgerHash as IntraLedgerHash }
+      : new InvalidLightningPaymentFlowStateError(
+          "Missing valid 'paymentHash' or 'intraLedgerHash'",
+        )
   if (hash instanceof Error) return hash
 
   const btcPaymentAmount = paymentAmountFromNumber({
@@ -261,10 +261,10 @@ const rawFromPaymentFlow = <S extends WalletCurrency, R extends WalletCurrency>(
   const hash = paymentHash
     ? { paymentHash }
     : intraLedgerHash
-    ? { intraLedgerHash }
-    : new InvalidLightningPaymentFlowStateError(
-        "Missing valid 'paymentHash' or 'intraLedgerHash'",
-      )
+      ? { intraLedgerHash }
+      : new InvalidLightningPaymentFlowStateError(
+          "Missing valid 'paymentHash' or 'intraLedgerHash'",
+        )
   if (hash instanceof Error) return hash
 
   return {
@@ -306,10 +306,10 @@ const rawIndexFromPaymentFlowIndex = (
   const hash = paymentHash
     ? { paymentHash }
     : intraLedgerHash
-    ? { intraLedgerHash }
-    : new InvalidLightningPaymentFlowStateError(
-        "Missing valid 'paymentHash' or 'intraLedgerHash'",
-      )
+      ? { intraLedgerHash }
+      : new InvalidLightningPaymentFlowStateError(
+          "Missing valid 'paymentHash' or 'intraLedgerHash'",
+        )
   if (hash instanceof Error) return hash
 
   return {

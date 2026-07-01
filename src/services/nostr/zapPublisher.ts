@@ -1,11 +1,13 @@
 // services/nostr/zap-publisher.ts
 import { baseLogger as logger } from "@services/logger"
 import { Event, finalizeEvent, getPublicKey, nip19 } from "nostr-tools"
-import { pool } from "../../utils/nostr"
+
 import WebSocket from "ws"
 import { NOSTR_PRIVATE_KEY } from "@config"
 
-// @ts-ignore
+import { pool } from "../../utils/nostr"
+
+// @ts-expect-error ws WebSocket is compatible enough for nostr-tools in Node.
 globalThis.WebSocket = WebSocket
 
 export interface PublishFromWebhookArgs {

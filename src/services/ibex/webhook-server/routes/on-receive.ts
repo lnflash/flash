@@ -1,7 +1,8 @@
 import express, { Request, Response, NextFunction } from "express"
+import rateLimitMiddleware from "express-rate-limit"
 import { baseLogger, baseLogger as logger } from "@services/logger"
 import { NotificationsService } from "@services/notifications"
-import { authenticate, logRequest, validateIbexIp } from "../middleware"
+
 import {
   AccountsRepository,
   UsersRepository,
@@ -17,6 +18,11 @@ import { getCurrentPriceAsDisplayPriceRatio } from "@app/prices"
 import { removeDeviceTokens } from "@app/users/remove-device-tokens"
 import { ZapRequestModel } from "@services/mongoose/zap-request"
 import { ZapPublisher } from "@services/nostr/zapPublisher"
+import { ibexWebhookPaths } from "@services/ibex/webhook-config"
+
+import { authenticate, logRequest, validateIbexIp } from "../middleware"
+
+const USDT_MICROS_PER_MAJOR_UNIT = 1_000_000
 
 interface PaymentContext {
   receiverWallet: Wallet
@@ -99,29 +105,31 @@ const sendLightningNotification = async (
 const sendOnchainNotification = async (
   req: PaymentRequest,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   if (!req.paymentContext) return next()
 
-  const { transaction } = req.body;
+  const { transaction } = req.body
 
-  const { receiverWallet, recipientAccount, recipientUser } = req.paymentContext;
+  const { receiverWallet, recipientAccount, recipientUser } = req.paymentContext
 
-  const usdAmount = USDAmount.dollars(transaction.amount);
+  const usdAmount = USDAmount.dollars(transaction.amount)
   if (usdAmount instanceof Error) {
-    logger.error(usdAmount, "Invalid transaction amount");
-    return next();
+    logger.error(usdAmount, "Invalid transaction amount")
+    return next()
   }
 
   const nResp = await NotificationsService().onChainTxReceived({
     recipientAccountId: recipientAccount.id,
     recipientWalletId: receiverWallet.id,
     paymentAmount: usdAmount.asPaymentAmount(),
-    displayPaymentAmount: await toDisplayAmount(recipientAccount.displayCurrency)(transaction.amount),
+    displayPaymentAmount: await toDisplayAmount(recipientAccount.displayCurrency)(
+      transaction.amount,
+    ),
     recipientDeviceTokens: recipientUser.deviceTokens,
     recipientNotificationSettings: recipientAccount.notificationSettings,
     recipientLanguage: recipientUser.language,
-    txHash: transaction.hash
+    txHash: transaction.hash,
   })
 
   if (nResp instanceof DeviceTokensNotRegisteredNotificationsServiceError) {
@@ -141,9 +149,13 @@ const sendZapReceipt = async (
   if (!req.paymentContext) return next()
 
   const { transaction } = req.body
-  const paymentHash = transaction.invoice.hash
+  const paymentHash = parsePaymentHash(transaction?.invoice?.hash)
+  if (!paymentHash) {
+    logger.warn("Skipping zap receipt for invalid payment hash")
+    return next()
+  }
 
-  const zapRequest = await ZapRequestModel.findOne({ invoiceHash: paymentHash })
+  const zapRequest = await ZapRequestModel.findOne({ invoiceHash: { $eq: paymentHash } })
   if (!zapRequest) return next()
 
   try {
@@ -162,18 +174,20 @@ const sendZapReceipt = async (
 }
 
 // --- Routes ---
-const paths = {
-  invoice: "/receive/invoice",
-  lnurl: "/receive/lnurlp",
-  zap: "/receive/zap",
-  onchain: "/receive/onchain",
-  cashout: "/receive/cashout",
-}
+const paths = ibexWebhookPaths.onReceive
 
 const router = express.Router()
 
+const webhookRateLimit = rateLimitMiddleware({
+  windowMs: 60_000,
+  limit: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+})
+
 router.post(
   paths.invoice,
+  webhookRateLimit,
   validateIbexIp,
   authenticate,
   logRequest,
@@ -185,6 +199,7 @@ router.post(
 
 router.post(
   paths.lnurl,
+  webhookRateLimit,
   validateIbexIp,
   authenticate,
   logRequest,
@@ -196,6 +211,7 @@ router.post(
 
 router.post(
   paths.zap,
+  webhookRateLimit,
   validateIbexIp,
   authenticate,
   logRequest,
@@ -204,23 +220,46 @@ router.post(
   (_req, resp) => resp.status(200).end(),
 )
 
-router.post(paths.cashout, validateIbexIp, authenticate, logRequest, (_req, resp) => {
-  baseLogger.info("Received payment for cashout.")
-  resp.status(200).end()
-})
+router.post(
+  paths.cashout,
+  webhookRateLimit,
+  validateIbexIp,
+  authenticate,
+  logRequest,
+  (_req, resp) => {
+    baseLogger.info("Received payment for cashout.")
+    resp.status(200).end()
+  },
+)
 
-router.post(paths.onchain, validateIbexIp, authenticate, logRequest, fetchPaymentContext, sendOnchainNotification, (_req, resp) => {
-  baseLogger.info("Received onchain payment.")
-  resp.status(200).end()
-})
+router.post(
+  paths.onchain,
+  webhookRateLimit,
+  validateIbexIp,
+  authenticate,
+  logRequest,
+  fetchPaymentContext,
+  sendOnchainNotification,
+  (_req, resp) => {
+    baseLogger.info("Received onchain payment.")
+    resp.status(200).end()
+  },
+)
 
 export { paths, router }
 
 // --- Helper functions ---
+const PaymentHashRegex = /^[0-9a-f]{64}$/i
+
+const parsePaymentHash = (hash: unknown) =>
+  typeof hash === "string" && PaymentHashRegex.test(hash) ? hash : undefined
+
 const toPaymentAmount = (currency: WalletCurrency) => (dollarAmount: number) => {
-  let amount
-  if (currency === WalletCurrency.Usd) amount = (dollarAmount * 100) as any
-  return { amount, currency }
+  let amount: PaymentAmount<WalletCurrency>["amount"] | undefined
+  if (currency === WalletCurrency.Usd) amount = BigInt(Math.round(dollarAmount * 100))
+  if (currency === WalletCurrency.Usdt)
+    amount = BigInt(Math.round(dollarAmount * USDT_MICROS_PER_MAJOR_UNIT))
+  return { amount: amount as PaymentAmount<WalletCurrency>["amount"], currency }
 }
 
 const toDisplayAmount = (currency: DisplayCurrency) => async (sats: number) => {

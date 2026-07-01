@@ -14,10 +14,6 @@ import { Account } from "@services/mongoose/schema"
 
 import { fromObjectId, parseRepositoryError, toObjectId } from "./utils"
 
-const caseInsensitiveRegex = (input: string) => {
-  return new RegExp(`^${input}$`, "i")
-}
-
 export const AccountsRepository = (): IAccountsRepository => {
   const listUnlockedAccounts = async function* ():
     | AsyncGenerator<Account>
@@ -66,7 +62,10 @@ export const AccountsRepository = (): IAccountsRepository => {
     username: Username,
   ): Promise<Account | RepositoryError> => {
     try {
-      const result = await Account.findOne({ username: caseInsensitiveRegex(username) })
+      const result = await Account.findOne({ username: { $eq: username } }).collation({
+        locale: "en",
+        strength: 2,
+      })
       if (!result) {
         return new CouldNotFindAccountFromUsernameError(username)
       }
@@ -78,11 +77,13 @@ export const AccountsRepository = (): IAccountsRepository => {
 
   const findByNpub = async (npub: Npub): Promise<Account | RepositoryError> => {
     try {
-      const result = await Account.findOne({ npub: caseInsensitiveRegex(npub) })
+      const result = await Account.findOne({ npub: { $eq: npub } }).collation({
+        locale: "en",
+        strength: 2,
+      })
       if (!result) {
         return new CouldNotFindAccountFromUsernameError(npub)
       }
-      let account = translateToAccount(result)
       return translateToAccount(result)
     } catch (err) {
       return parseRepositoryError(err)
@@ -173,6 +174,61 @@ export const AccountsRepository = (): IAccountsRepository => {
     }
   }
 
+  const updateBridgeFields = async (
+    id: AccountId,
+    fields: {
+      bridgeCustomerId?: BridgeCustomerId
+      bridgeKycStatus?:
+        | "open"
+        | "not_started"
+        | "incomplete"
+        | "awaiting_questionnaire"
+        | "awaiting_ubo"
+        | "under_review"
+        | "paused"
+        | "approved"
+        | "rejected"
+        | "offboarded"
+      bridgeEthereumAddress?: string
+    },
+  ): Promise<Account | RepositoryError> => {
+    try {
+      const result = await Account.findByIdAndUpdate(
+        toObjectId<AccountId>(id),
+        { $set: fields },
+        { new: true },
+      )
+      if (!result) return new RepositoryError("Account not found")
+      return translateToAccount(result)
+    } catch (error) {
+      return parseRepositoryError(error)
+    }
+  }
+
+  const findByBridgeEthereumAddress = async (
+    address: string,
+  ): Promise<Account | RepositoryError> => {
+    try {
+      const result = await Account.findOne({ bridgeEthereumAddress: { $eq: address } })
+      if (!result) return new RepositoryError("Account not found for Ethereum address")
+      return translateToAccount(result)
+    } catch (error) {
+      return parseRepositoryError(error)
+    }
+  }
+
+  const findByBridgeCustomerId = async (
+    customerId: BridgeCustomerId,
+  ): Promise<Account | RepositoryError> => {
+    try {
+      const result = await Account.findOne({ bridgeCustomerId: { $eq: customerId } })
+      if (!result) return new RepositoryError("Account not found for Bridge customer ID")
+      return translateToAccount(result)
+    } catch (error) {
+      return parseRepositoryError(error)
+    }
+  }
+
   return {
     persistNew,
     findByUserId,
@@ -182,6 +238,9 @@ export const AccountsRepository = (): IAccountsRepository => {
     findByUsername,
     findByNpub,
     update,
+    updateBridgeFields,
+    findByBridgeEthereumAddress,
+    findByBridgeCustomerId,
   }
 }
 
@@ -243,4 +302,9 @@ const translateToAccount = (result: AccountRecord): Account => ({
 
   kratosUserId: result.kratosUserId as UserId,
   displayCurrency: (result.displayCurrency || UsdDisplayCurrency) as DisplayCurrency,
+  bridgeCustomerId: result.bridgeCustomerId as BridgeCustomerId | undefined,
+  bridgeKycStatus: (result.bridgeKycStatus === "pending"
+    ? "open"
+    : result.bridgeKycStatus) as Account["bridgeKycStatus"],
+  bridgeEthereumAddress: result.bridgeEthereumAddress,
 })

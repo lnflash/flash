@@ -37,6 +37,15 @@ describe("checkedToBtcPaymentAmount", () => {
 })
 
 describe("checkedToUsdPaymentAmount", () => {
+  it("returns USDT payment amounts when called with a USDT wallet currency", () => {
+    expect(checkedToUsdPaymentAmount(19446, WalletCurrency.Usdt)).toEqual(
+      expect.objectContaining({
+        currency: WalletCurrency.Usdt,
+        amount: 19446n,
+      }),
+    )
+  })
+
   it("errors on null", () => {
     expect(checkedToUsdPaymentAmount(null)).toBeInstanceOf(InvalidUsdPaymentAmountError)
   })

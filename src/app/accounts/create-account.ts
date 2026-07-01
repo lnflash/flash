@@ -10,8 +10,13 @@ import {
 } from "@services/mongoose"
 
 import { recordExceptionInCurrentSpan } from "@services/tracing"
-import { ErrorLevel } from "@domain/shared"
-import { RepositoryError } from "@domain/errors"
+import { ErrorLevel, WalletCurrency } from "@domain/shared"
+
+const requiredCashWalletCurrencies: WalletCurrency[] = [
+  WalletCurrency.Usd,
+  WalletCurrency.Usdt,
+]
+const defaultCashWalletCurrency = WalletCurrency.Usdt
 
 const initializeCreatedAccount = async ({
   account,
@@ -29,24 +34,29 @@ const initializeCreatedAccount = async ({
       currency,
     })
 
-  const walletsEnabledConfig = config.initialWallets
+  const walletsEnabledConfig = Array.from(
+    new Set([...config.initialWallets, ...requiredCashWalletCurrencies]),
+  )
 
   // Create all wallets
   const enabledWallets: Partial<Record<WalletCurrency, Wallet>> = {}
   for (const currency of walletsEnabledConfig) {
     const wallet = await newWallet(currency)
-    if (wallet instanceof RepositoryError) {
+    if (wallet instanceof Error) {
       recordExceptionInCurrentSpan({
         error: wallet,
         level: ErrorLevel.Critical,
-        attributes: { accountId: account.id }
+        attributes: { accountId: account.id, currency },
       })
+      if (requiredCashWalletCurrencies.includes(currency)) return wallet
+      continue
     }
-    else enabledWallets[currency] = wallet
+
+    enabledWallets[currency] = wallet
   }
 
-  // Set default wallet to USD
-  const defaultWalletId = enabledWallets[walletsEnabledConfig[0]]?.id
+  // Set ETH-USDT as the active Cash Wallet while preserving USD for migration.
+  const defaultWalletId = enabledWallets[defaultCashWalletCurrency]?.id
 
   if (defaultWalletId === undefined) {
     return new ConfigError("NoWalletsEnabledInConfigError")

@@ -3,8 +3,9 @@ import sgMail from "@sendgrid/mail"
 import { Cashout, FrappeConfig, SendGridConfig } from "@config"
 import { baseLogger } from "@services/logger"
 
-import { CashoutBody } from "./templates/cashout"
 import { InitiatedCashout } from "@app/offers/ValidOffer"
+
+import { CashoutBody } from "./templates/cashout"
 
 type EmailHeaders = {
   to: string

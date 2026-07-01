@@ -3,12 +3,13 @@ import dedent from "dedent"
 import { GT } from "@graphql/index"
 import { connectionArgs } from "@graphql/connections"
 
+import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
+
 import { TransactionConnection } from "../object/transaction"
 import WalletCurrency from "../scalar/wallet-currency"
 import SignedAmount from "../scalar/signed-amount"
 import OnChainAddress from "../scalar/on-chain-address"
 import Lnurl from "../scalar/lnurl"
-import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 
 const IWallet = GT.Interface({
   name: "Wallet",

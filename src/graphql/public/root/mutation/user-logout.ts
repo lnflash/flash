@@ -2,7 +2,9 @@ import { GT } from "@graphql/index"
 
 import { logoutToken } from "@app/authentication"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
-import SuccessPayload, { SUCCESS_RESPONSE } from "@graphql/shared/types/payload/success-payload"
+import SuccessPayload, {
+  SUCCESS_RESPONSE,
+} from "@graphql/shared/types/payload/success-payload"
 
 const UserLogoutInput = GT.Input({
   name: "UserLogoutInput",

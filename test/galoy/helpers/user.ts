@@ -208,8 +208,7 @@ export const createAccount = async ({
 }
 
 export const createRandomUserAndBtcWallet = async () => {
-  const { btcWalletDescriptor } = await createRandomUserAndWallets()
-  return btcWalletDescriptor
+  throw new Error("Flash integration tests do not support BTC wallets")
 }
 
 export type TestUser = {
@@ -231,17 +230,9 @@ export const getUser = async <T extends WalletCurrency>(walletD: WalletDescripto
 
 export const createRandomUserAndWallets = async (): Promise<{
   usdWalletDescriptor: WalletDescriptor<"USD">
-  btcWalletDescriptor: WalletDescriptor<"BTC">
 }> => {
   const phone = randomPhone()
   const usdWalletDescriptor = await createUserAndWallet(phone)
-
-  const btcWallet = await addWalletIfNonexistent({
-    currency: WalletCurrency.Btc,
-    accountId: usdWalletDescriptor.accountId,
-    type: WalletType.Checking,
-  })
-  if (btcWallet instanceof Error) throw btcWallet
 
   const usdWallet = await addWalletIfNonexistent({
     currency: WalletCurrency.Usd,
@@ -251,11 +242,6 @@ export const createRandomUserAndWallets = async (): Promise<{
   if (usdWallet instanceof Error) throw usdWallet
 
   return {
-    btcWalletDescriptor: {
-      id: btcWallet.id,
-      currency: WalletCurrency.Btc,
-      accountId: btcWallet.accountId,
-    },
     usdWalletDescriptor: {
       id: usdWallet.id,
       currency: WalletCurrency.Usd,
@@ -313,27 +299,29 @@ export const createUserAndWallet = async (
     const accountIP = await AccountsIpsRepository().update(accountIp)
     if (!(accountIP instanceof CouldNotFindError) && accountIP instanceof Error)
       throw accountIP
-
-    await addWalletIfNonexistent({
-      currency: WalletCurrency.Usd,
-      accountId: account.id,
-      type: WalletType.Checking,
-    })
   }
 
   if (account instanceof Error) throw account
 
-  const wallet = await WalletsRepository().findById(account.defaultWalletId)
+  const wallet = await addWalletIfNonexistent({
+    currency: WalletCurrency.Usd,
+    accountId: account.id,
+    type: WalletType.Checking,
+  })
   if (wallet instanceof Error) throw wallet
-  // Flash uses USD wallet as default
-  if (wallet.currency !== WalletCurrency.Usd) {
-    throw new Error("Expected USD-currency default wallet")
+
+  if (!account.erpParty) {
+    account = await accounts.update({
+      ...account,
+      erpParty: `test-${kratosUserId}`,
+    })
+    if (account instanceof Error) throw account
   }
 
   return {
     accountId: account.id,
-    id: account.defaultWalletId,
-    currency: wallet.currency,
+    id: wallet.id,
+    currency: WalletCurrency.Usd,
   }
 }
 

@@ -1,5 +1,5 @@
-import Offer from "../Offer";
-import { CashoutDetails } from "../types";
+import Offer from "../Offer"
+import { CashoutDetails } from "../types"
 
 class PersistedOffer extends Offer {
   readonly id: OfferId

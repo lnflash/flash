@@ -10,26 +10,26 @@ spec:
     spec:
       restartPolicy: Never
       containers:
-      - name: subscribe-device-tokens
-        # Replace with the current digest from charts/charts/flash/values.yaml
-        image: "docker.io/lnflash/galoy-app-migrate@sha256:b6e1788965022d14585d39f336563102576b50ed815195c12aabc784a7fc8c4e"
-        workingDir: /app
-        command: ["node", "scripts/subscribe-device-tokens-to-topics.js"]
-        env:
-        - name: MONGODB_CON
-          valueFrom:
-            secretKeyRef:
-              name: galoy-mongodb-connection-string
-              key: mongodb-con
-        - name: GOOGLE_APPLICATION_CREDENTIALS
-          value: "/tmp/firebase-service-account/service-account.json"
-        volumeMounts:
-        - name: firebase-service-account
-          mountPath: /tmp/firebase-service-account/
+        - name: subscribe-device-tokens
+          # Replace with the current digest from charts/charts/flash/values.yaml
+          image: "docker.io/lnflash/galoy-app-migrate@sha256:b6e1788965022d14585d39f336563102576b50ed815195c12aabc784a7fc8c4e"
+          workingDir: /app
+          command: ["node", "scripts/subscribe-device-tokens-to-topics.js"]
+          env:
+            - name: MONGODB_CON
+              valueFrom:
+                secretKeyRef:
+                  name: galoy-mongodb-connection-string
+                  key: mongodb-con
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: "/tmp/firebase-service-account/service-account.json"
+          volumeMounts:
+            - name: firebase-service-account
+              mountPath: /tmp/firebase-service-account/
       volumes:
-      - name: firebase-service-account
-        secret:
-          secretName: galoyapp-firebase-serviceaccount
-          items:
-          - key: galoyapp-firebase-serviceaccount.json
-            path: service-account.json
+        - name: firebase-service-account
+          secret:
+            secretName: galoyapp-firebase-serviceaccount
+            items:
+              - key: galoyapp-firebase-serviceaccount.json
+                path: service-account.json

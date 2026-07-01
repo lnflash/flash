@@ -155,7 +155,12 @@ export const LockService = (): ILockService => {
   ): Promise<void | ExecutionError> => {
     const path = getIdempotencyKeyLockResource(idempotencyKey)
 
-    await timelock({ resource: path, duration: durationLockIdempotencyKey })
+    try {
+      await timelock({ resource: path, duration: durationLockIdempotencyKey })
+    } catch (error) {
+      if (error instanceof ExecutionError) return error
+      throw error
+    }
   }
 
   return wrapAsyncFunctionsToRunInSpan({

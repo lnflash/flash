@@ -10,7 +10,7 @@ import LnNoAmountInvoicePayload from "@graphql/public/types/payload/ln-noamount-
 import { decodeInvoice } from "@domain/bitcoin/lightning"
 import Ibex from "@services/ibex/client"
 
-import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors" 
+import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
 
 const LnNoAmountInvoiceCreateInput = GT.Input({
   name: "LnNoAmountInvoiceCreateInput",
@@ -54,7 +54,7 @@ const LnNoAmountInvoiceCreateMutation = GT.Field({
     const resp = await Ibex.addInvoice({
       accountId: walletId,
       memo,
-      expiration: expiresIn * 60 as Seconds,
+      expiration: (expiresIn * 60) as Seconds,
     })
 
     if (resp instanceof IbexError) {
@@ -63,13 +63,19 @@ const LnNoAmountInvoiceCreateMutation = GT.Field({
 
     const invoiceString: string | undefined = resp.invoice?.bolt11
     if (!invoiceString) {
-      return { errors: [mapAndParseErrorForGqlResponse(new UnexpectedIbexResponse("Could not find invoice."))] }
+      return {
+        errors: [
+          mapAndParseErrorForGqlResponse(
+            new UnexpectedIbexResponse("Could not find invoice."),
+          ),
+        ],
+      }
     }
     const decodedInvoice = decodeInvoice(invoiceString)
     if (decodedInvoice instanceof Error) {
       return { errors: [mapAndParseErrorForGqlResponse(decodedInvoice)] }
     }
-    
+
     return {
       errors: [],
       invoice: {

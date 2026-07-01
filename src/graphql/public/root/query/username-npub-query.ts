@@ -1,10 +1,8 @@
 import { GT } from "@graphql/index"
 
-import { mapError } from "@graphql/error-map"
-
 import { Accounts } from "@app"
-import Username from "@graphql/shared/types/scalar/username"
 import npubByUsername from "@graphql/public/types/object/npub-by-username"
+import Username from "@graphql/shared/types/scalar/username"
 
 const NpubByUserNameQuery = GT.Field({
   type: npubByUsername,

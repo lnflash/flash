@@ -7,7 +7,7 @@
 // // const toWalletCurrency = (currencyId: number): WalletCurrency | UnsupportedCurrencyError => {
 // //   if (currencyId === 3) return WalletCurrency.Usd
 // //   else return new UnsupportedCurrencyError("Account is not a supported currency.")
-// // } 
+// // }
 
 // class IbexAccount {
 //   readonly id: WalletId

@@ -1,4 +1,6 @@
 import CashoutManager from "@app/offers/CashoutManager"
+import { Cashout } from "@config"
+import { NotImplementedError } from "@domain/errors"
 import { mapToGqlErrorList } from "@graphql/error-map"
 import { GT } from "@graphql/index"
 import CashoutOffer from "@graphql/public/types/object/cashout-offer"
@@ -6,11 +8,6 @@ import IError from "@graphql/shared/types/abstract/error"
 import USDCentsScalar from "@graphql/shared/types/scalar/usd-cents"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import dedent from "dedent"
-import { Cashout } from "@config"
-import { NotImplementedError, RepositoryError } from "@domain/errors"
-import ErpNext from "@services/frappe/ErpNext"
-import { AccountsRepository, WalletsRepository } from "@services/mongoose"
-import { ValidationError } from "@domain/shared"
 
 const RequestCashoutInput = GT.Input({
   name: "RequestCashoutInput",
@@ -21,7 +18,7 @@ const RequestCashoutInput = GT.Input({
     },
     amount: {
       type: GT.NonNull(USDCentsScalar),
-      description: "Amount in USD cents."
+      description: "Amount in USD cents.",
     },
     bankAccountId: {
       type: GT.NonNull(GT.ID),
@@ -53,8 +50,7 @@ const RequestCashoutMutation = GT.Field({
     complexity: 120,
   },
   resolve: async (_, args) => {
-    if (!Cashout.Enabled)
-      return new NotImplementedError("Cashout feature is not enabled")
+    if (!Cashout.Enabled) return new NotImplementedError("Cashout feature is not enabled")
 
     const { walletId, amount, bankAccountId } = args.input
     for (const input of [walletId, amount, bankAccountId]) {
@@ -63,16 +59,12 @@ const RequestCashoutMutation = GT.Field({
       }
     }
 
-    const offer = await (CashoutManager.createOffer(
-      walletId,
-      amount,
-      bankAccountId,
-    ))
+    const offer = await CashoutManager.createOffer(walletId, amount, bankAccountId)
     if (offer instanceof Error) return { errors: mapToGqlErrorList(offer) }
 
     return {
       errors: [],
-      offer
+      offer,
     }
   },
 })

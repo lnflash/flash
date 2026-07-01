@@ -110,6 +110,21 @@ type BTCWallet implements Wallet {
   walletCurrency: WalletCurrency!
 }
 
+type BridgeReconciliationOrphan {
+  amount: String
+  currency: String
+  customerId: String
+  detectedAt: String!
+  id: ID!
+  orphanKey: String!
+  orphanType: String!
+  resolvedAt: String
+  status: String!
+  transferId: String
+  triageContext: String!
+  txHash: String
+}
+
 input BusinessDeleteMapInfoInput {
   username: Username!
 }
@@ -119,6 +134,38 @@ input BusinessUpdateMapInfoInput {
   longitude: Float!
   title: String!
   username: Username!
+}
+
+type CashWalletCutover {
+  completedAt: Timestamp
+  cutoverVersion: Int!
+  pauseReason: String
+  pausedAt: Timestamp
+  runId: String
+  scheduledAt: Timestamp
+  startedAt: Timestamp
+  state: CashWalletCutoverState!
+  updatedAt: Timestamp!
+  updatedBy: String
+}
+
+type CashWalletCutoverPayload {
+  cashWalletCutover: CashWalletCutover
+  errors: [Error!]!
+}
+
+enum CashWalletCutoverState {
+  COMPLETE
+  IN_PROGRESS
+  PRE
+}
+
+input CashWalletCutoverUpdateInput {
+  cutoverVersion: Int
+  pauseReason: String
+  runId: String
+  scheduledAt: Timestamp
+  state: CashWalletCutoverState!
 }
 
 input CashoutNotificationSendInput {
@@ -263,6 +310,7 @@ type Mutation {
   accountUpdateStatus(input: AccountUpdateStatusInput!): AccountDetailPayload!
   businessDeleteMapInfo(input: BusinessDeleteMapInfoInput!): AccountDetailPayload!
   businessUpdateMapInfo(input: BusinessUpdateMapInfoInput!): AccountDetailPayload!
+  cashWalletCutoverUpdate(input: CashWalletCutoverUpdateInput!): CashWalletCutoverPayload!
   cashoutNotificationSend(input: CashoutNotificationSendInput!): SuccessPayload!
   merchantMapDelete(input: MerchantMapDeleteInput!): MerchantPayload!
   merchantMapValidate(input: MerchantMapValidateInput!): MerchantPayload!
@@ -319,6 +367,8 @@ type Query {
   accountDetailsByUserPhone(phone: Phone!): AuditedAccount!
   accountDetailsByUsername(username: Username!): AuditedAccount!
   allLevels: [AccountLevel!]!
+  bridgeReconciliationOrphans(limit: Int = 50, orphanType: String = null, status: String = null): [BridgeReconciliationOrphan!]!
+  cashWalletCutover: CashWalletCutover!
   idDocumentReadUrl(
     """Storage key of the ID document file"""
     fileKey: String!
@@ -551,6 +601,50 @@ type UsdWallet implements Wallet {
   walletCurrency: WalletCurrency!
 }
 
+"""
+A wallet belonging to an account which contains a USDT balance and a list of transactions.
+"""
+type UsdtWallet implements Wallet {
+  accountId: ID!
+  balance: FractionalCentAmount
+  id: ID!
+  isExternal: Boolean!
+  lnurlp: Lnurl
+
+  """An unconfirmed incoming onchain balance."""
+  pendingIncomingBalance: SignedAmount!
+  transactions(
+    """Returns the items in the list that come after the specified cursor."""
+    after: String
+
+    """Returns the items in the list that come before the specified cursor."""
+    before: String
+
+    """Returns the first n items from the list."""
+    first: Int
+
+    """Returns the last n items from the list."""
+    last: Int
+  ): TransactionConnection
+  transactionsByAddress(
+    """Returns the items that include this address."""
+    address: OnChainAddress!
+
+    """Returns the items in the list that come after the specified cursor."""
+    after: String
+
+    """Returns the items in the list that come before the specified cursor."""
+    before: String
+
+    """Returns the first n items from the list."""
+    first: Int
+
+    """Returns the last n items from the list."""
+    last: Int
+  ): TransactionConnection
+  walletCurrency: WalletCurrency!
+}
+
 input UserUpdatePhoneInput {
   accountUuid: ID!
   phone: Phone!
@@ -614,6 +708,7 @@ interface Wallet {
 enum WalletCurrency {
   BTC
   USD
+  USDT
 }
 
 """Unique identifier of a wallet"""

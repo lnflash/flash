@@ -1,5 +1,3 @@
-import { IbexError } from "@services/ibex/errors"
-
 let cacheDealerBtcWalletId: WalletId
 let cacheDealerUsdWalletId: WalletId
 let cacheBankOwnerWalletId: WalletId

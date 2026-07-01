@@ -1,21 +1,21 @@
 import { toSats } from "@domain/bitcoin"
-import { WalletCurrency } from "@domain/shared"
 import { toCents, UsdDisplayCurrency } from "@domain/fiat"
-import { customPubSubTrigger, PubSubDefaultTriggers, PubSubServiceError } from "@domain/pubsub"
 import {
   FlashNotificationCategories,
   NotificationsServiceError,
   NotificationType,
 } from "@domain/notifications"
+import { customPubSubTrigger, PubSubDefaultTriggers } from "@domain/pubsub"
+import { WalletCurrency } from "@domain/shared"
 
 import { PubSubService } from "@services/pubsub"
 import { wrapAsyncFunctionsToRunInSpan } from "@services/tracing"
 
+import { createPushNotificationContent } from "./create-push-notification-content"
 import {
   handleCommonNotificationErrors,
   PushNotificationsService,
 } from "./push-notifications"
-import { createPushNotificationContent } from "./create-push-notification-content"
 
 export const NotificationsService = (): INotificationsService => {
   const pubsub = PubSubService()

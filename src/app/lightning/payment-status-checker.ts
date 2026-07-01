@@ -1,8 +1,7 @@
 import { decodeInvoice } from "@domain/bitcoin/lightning"
-import { baseLogger } from "@services/logger"
 import Ibex from "@services/ibex/client"
 import { IbexError } from "@services/ibex/errors"
-import { ErrorLevel } from "@domain/shared"
+import { baseLogger } from "@services/logger"
 
 export const PaymentStatusChecker = async (uncheckedPaymentRequest: string) => {
   const decodedInvoice = decodeInvoice(uncheckedPaymentRequest)

@@ -1,29 +1,51 @@
 import express, { Request, Response } from "express"
-import { authenticate, logRequest, validateIbexIp } from "../middleware"
+import cors, { CorsOptions } from "cors"
+import rateLimitMiddleware from "express-rate-limit"
+
 import { WalletsRepository } from "@services/mongoose/wallets"
 import { ZapRequestModel } from "@services/mongoose/zap-request"
 import axios from "axios"
 import { baseLogger as logger } from "@services/logger"
 import { AccountsRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
+import { ibexWebhookPaths } from "@services/ibex/webhook-config"
 import { extractPaymentHashFromBolt11 } from "@utils"
-import cors from "cors"
 
-const lnurlCorsOptions = {
-  origin: "*", // allow all origins; or a specific list: ["https://example.com"]
+import { authenticate, logRequest, validateIbexIp } from "../middleware"
+
+const lnurlCorsOptions: CorsOptions = {
+  origin: [
+    "https://flashapp.me",
+    "https://www.flashapp.me",
+    "https://getflash.io",
+    "https://www.getflash.io",
+    "http://localhost:3000",
+    "http://localhost:4002",
+  ],
   methods: ["GET"],
 }
 
-const paths = {
-  invoice: "/pay/invoice",
-  lnurl: "/pay/lnurl/:username",
-  onchain: "/pay/onchain",
-}
+const publicLnurlRateLimit = rateLimitMiddleware({
+  windowMs: 60_000,
+  limit: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+})
+
+const webhookRateLimit = rateLimitMiddleware({
+  windowMs: 60_000,
+  limit: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+})
+
+const paths = ibexWebhookPaths.onPay
 
 const router = express.Router()
 
 router.get(
   paths.lnurl,
+  publicLnurlRateLimit,
   cors(lnurlCorsOptions),
   logRequest,
   async (req: Request, resp: Response) => {
@@ -33,7 +55,7 @@ router.get(
       if (!username) return resp.status(400).json({ error: "username is required" })
       if (!amount) return resp.status(400).json({ error: "amount is required" })
 
-      let requestEvent: any | null = null
+      let requestEvent: unknown = null
       if (nostr) {
         try {
           requestEvent = JSON.parse(decodeURIComponent(nostr as string))
@@ -110,6 +132,7 @@ router.get(
 // are IP-restricted; the public GET /pay/lnurl/:username above is not.
 router.post(
   paths.invoice,
+  webhookRateLimit,
   validateIbexIp,
   authenticate,
   logRequest,
@@ -117,6 +140,7 @@ router.post(
 )
 router.post(
   paths.onchain,
+  webhookRateLimit,
   validateIbexIp,
   authenticate,
   logRequest,

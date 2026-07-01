@@ -492,7 +492,12 @@ export class IbexError extends CustomApolloError {
 
 export class InternalServerError extends CustomApolloError {
   constructor(errData: CustomApolloErrorData) {
-    super({ level: "error", code: "INTERNAL_SERVER_ERROR", forwardToClient: false, ...errData })
+    super({
+      level: "error",
+      code: "INTERNAL_SERVER_ERROR",
+      forwardToClient: false,
+      ...errData,
+    })
   }
 }
 
@@ -502,4 +507,3 @@ export class PushNotificationError extends CustomApolloError {
     super({ level: "error", code: "FIREBASE_ERROR", forwardToClient: true, ...errData })
   }
 }
-

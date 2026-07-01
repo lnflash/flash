@@ -218,11 +218,9 @@ declare module "medici/build/helper/parse/parseFilterQuery"
 //   liability: Amount<"JMD"> | Amount<"USD">,
 // }
 
-
-
 // type RecordFlashWithdrawFromIbex {
 //   description: string
-//   // accountId: // Flash Ibex account 
+//   // accountId: // Flash Ibex account
 //   // withdrawAmount: UsdPaymentAmount,
 //   // settleAmount: UsdPaymentAmount,
 //   bankFee?: {
@@ -234,7 +232,7 @@ declare module "medici/build/helper/parse/parseFilterQuery"
 
 // }
 
-// transfer into Jamaican bank 
+// transfer into Jamaican bank
 // type RecordWireTransfer {
 // would be nice to have for revenue tracking
 // }

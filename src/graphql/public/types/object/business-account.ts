@@ -1,4 +1,8 @@
-import { Accounts, Prices, Wallets } from "@app"
+import { Accounts, Prices } from "@app"
+import {
+  cashWalletHistoryWalletIdsForPresentation,
+  resolveCashWalletPresentationForAccount,
+} from "@app/cash-wallet-cutover"
 
 import {
   majorToMinorUnit,
@@ -15,8 +19,6 @@ import {
   checkedConnectionArgs,
 } from "@graphql/connections"
 
-import { WalletsRepository } from "@services/mongoose"
-
 import IAccount from "../abstract/account"
 import Wallet from "../../../shared/types/abstract/wallet"
 
@@ -30,7 +32,7 @@ import { TransactionConnection } from "../../../shared/types/object/transaction"
 import RealtimePrice from "./realtime-price"
 import { NotificationSettings } from "./notification-settings"
 
-const BusinessAccount = GT.Object({
+const BusinessAccount = GT.Object<Account, GraphQLPublicContextAuth>({
   name: "BusinessAccount",
   interfaces: () => [IAccount],
   isTypeOf: () => false,
@@ -42,15 +44,36 @@ const BusinessAccount = GT.Object({
 
     wallets: {
       type: GT.NonNullList(Wallet),
-      resolve: async (source: Account) => {
-        return Wallets.listWalletsByAccountId(source.id)
+      resolve: async (
+        source: Account,
+        args,
+        { cashWalletClientCapabilities }: GraphQLPublicContextAuth,
+      ) => {
+        const presentation = await resolveCashWalletPresentationForAccount({
+          account: source,
+          client: cashWalletClientCapabilities,
+        })
+        if (presentation instanceof Error) throw mapError(presentation)
+
+        return presentation.wallets
       },
     },
 
     defaultWalletId: {
       type: GT.NonNull(WalletId),
-      resolve: (source, args, { domainAccount }: { domainAccount: Account }) =>
-        domainAccount.defaultWalletId,
+      resolve: async (
+        source: Account,
+        args,
+        { cashWalletClientCapabilities }: GraphQLPublicContextAuth,
+      ) => {
+        const presentation = await resolveCashWalletPresentationForAccount({
+          account: source,
+          client: cashWalletClientCapabilities,
+        })
+        if (presentation instanceof Error) throw mapError(presentation)
+
+        return presentation.defaultWalletId
+      },
     },
 
     level: {
@@ -60,8 +83,7 @@ const BusinessAccount = GT.Object({
 
     displayCurrency: {
       type: GT.NonNull(DisplayCurrency),
-      resolve: (source, args, { domainAccount }: { domainAccount: Account }) =>
-        domainAccount.displayCurrency,
+      resolve: (source, args, { domainAccount }) => domainAccount.displayCurrency,
     },
 
     realtimePrice: {
@@ -123,21 +145,28 @@ const BusinessAccount = GT.Object({
           type: GT.List(WalletId),
         },
       },
-      resolve: async (source, args) => {
+      resolve: async (
+        source: Account,
+        args,
+        { cashWalletClientCapabilities }: GraphQLPublicContextAuth,
+      ) => {
         const paginationArgs = checkedConnectionArgs(args)
         if (paginationArgs instanceof Error) {
           throw paginationArgs
         }
 
+        const presentation = await resolveCashWalletPresentationForAccount({
+          account: source,
+          client: cashWalletClientCapabilities,
+        })
+        if (presentation instanceof Error) throw mapError(presentation)
+
         let { walletIds } = args
 
-        if (!walletIds) {
-          const wallets = await WalletsRepository().listByAccountId(source.id)
-          if (wallets instanceof Error) {
-            throw mapError(wallets)
-          }
-          walletIds = wallets.map((wallet) => wallet.id)
-        }
+        walletIds = cashWalletHistoryWalletIdsForPresentation({
+          walletIds,
+          presentation,
+        })
 
         const { result, error } = await Accounts.getTransactionsForAccountByWalletIds({
           account: source,

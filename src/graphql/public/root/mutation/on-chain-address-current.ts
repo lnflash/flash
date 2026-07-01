@@ -37,9 +37,9 @@ const OnChainAddressCurrentMutation = GT.Field({
     const resp = await Ibex.generateBitcoinAddress(walletId)
 
     if (resp instanceof IbexError) {
-      return { errors: [mapAndParseErrorForGqlResponse(resp)] } 
+      return { errors: [mapAndParseErrorForGqlResponse(resp)] }
     }
-    
+
     return {
       errors: [],
       address: resp.address,

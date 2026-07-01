@@ -1,9 +1,10 @@
 import { PartialResult } from "@app/partial-result"
+import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
 import Ibex from "@services/ibex/client"
 import { IbexError } from "@services/ibex/errors"
 import { baseLogger } from "@services/logger"
 import { GResponse200 } from "ibex-client"
-import { ConnectionArguments, ConnectionCursor } from "graphql-relay"
+import { ConnectionArguments } from "graphql-relay"
 
 export const getTransactionsForWallets = async ({
   wallets,
@@ -13,46 +14,90 @@ export const getTransactionsForWallets = async ({
   paginationArgs?: PaginationArgs
 }): Promise<PartialResult<PaginatedArray<IbexTransaction>>> => {
   const walletIds = wallets.map((wallet) => wallet.id)
-  
-  const ibexCalls = await Promise.all(walletIds
-    .map(id => Ibex.getAccountTransactions({ 
-      account_id: id,
-      ...toIbexPaginationArgs(paginationArgs)
-    }))
+
+  const ibexCalls = await Promise.all(
+    walletIds.map((id) =>
+      Ibex.getAccountTransactions({
+        account_id: id,
+        ...toIbexPaginationArgs(paginationArgs),
+      }),
+    ),
   )
 
-  const transactions = ibexCalls.flatMap(resp => {
-    if (resp instanceof IbexError) return [] 
+  const transactions = ibexCalls.flatMap((resp) => {
+    if (resp instanceof IbexError) return []
     else return toWalletTransactions(resp)
   })
 
   return PartialResult.ok({
     slice: transactions,
-    total: transactions.length
+    total: transactions.length,
   })
 }
 
-export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] => {
-  return ibexResp.map(trx => {
-    const currency = (trx.currencyId === 3 ? "USD" : "BTC") as WalletCurrency // WalletCurrency: "USD" | "BTC",
+const currencyFromIbexCurrencyId = (
+  currencyId: number | undefined,
+): WalletCurrency | undefined => {
+  if (currencyId === USDAmount.currencyId) return WalletCurrency.Usd
+  if (currencyId === USDTAmount.currencyId) return WalletCurrency.Usdt
+  return undefined
+}
 
-    const settlementDisplayPrice: WalletMinorUnitDisplayPrice<WalletCurrency, DisplayCurrency> = {
-      base: trx.exchangeRateCurrencySats ? BigInt(Math.floor(trx.exchangeRateCurrencySats)) : 0n,
+export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] => {
+  return ibexResp.map((trx) => {
+    const currency = currencyFromIbexCurrencyId(trx.currencyId)
+
+    if (!currency) {
+      baseLogger.error(
+        `Failed to parse Ibex transaction currency. { WalletId: ${trx.accountId}, TransactionId: ${trx.id}, currencyId: ${trx.currencyId} }`,
+      )
+      return {
+        walletId: (trx.accountId || "") as WalletId,
+        settlementAmount: 0 as Satoshis,
+        settlementFee: 0 as Satoshis,
+        settlementCurrency: WalletCurrency.Usd,
+        settlementDisplayAmount: `${trx.amount}`,
+        settlementDisplayFee: `${trx.networkFee}`,
+        settlementDisplayPrice: {
+          base: 0n,
+          offset: 0n,
+          displayCurrency: "USD" as DisplayCurrency,
+          walletCurrency: WalletCurrency.Usd,
+        },
+        createdAt: trx.createdAt ? new Date(trx.createdAt) : new Date(),
+        id: trx.id || "null",
+        status: "success" as TxStatus,
+        memo: null,
+        initiationVia: { type: "unknown" },
+        settlementVia: { type: "unknown" },
+      } as UnknownTypeTransaction
+    }
+
+    const settlementDisplayPrice: WalletMinorUnitDisplayPrice<
+      WalletCurrency,
+      DisplayCurrency
+    > = {
+      base: trx.exchangeRateCurrencySats
+        ? BigInt(Math.floor(trx.exchangeRateCurrencySats))
+        : 0n,
       offset: 0n, // what is this?
       displayCurrency: "USD" as DisplayCurrency,
-      walletCurrency: currency
+      walletCurrency: currency,
     }
 
     const baseTrx: BaseWalletTransaction = {
-      walletId: (trx.accountId || "") as WalletId, 
+      walletId: (trx.accountId || "") as WalletId,
       settlementAmount: toSettlementAmount(trx.amount, trx.transactionTypeId, currency),
-      settlementFee: asCurrency(trx.networkFee, currency),
-      settlementCurrency: currency, 
-      settlementDisplayAmount: `${trx.amount}`, 
-      settlementDisplayFee: `${trx.networkFee}`, 
+      settlementFee: toSettlementMinorUnit(trx.networkFee, currency),
+      settlementCurrency: currency,
+      settlementDisplayAmount: toSettlementDisplayAmount(
+        trx.amount,
+        trx.transactionTypeId,
+      ),
+      settlementDisplayFee: `${trx.networkFee}`,
       settlementDisplayPrice: settlementDisplayPrice,
       createdAt: trx.createdAt ? new Date(trx.createdAt) : new Date(), // should always return
-      id: trx.id || "null", // "LedgerTransactionId" - this is likely unused 
+      id: trx.id || "null", // "LedgerTransactionId" - this is likely unused
       status: "success" as TxStatus, // assuming Ibex returns on completed
       memo: null, // query transaction details
     }
@@ -63,68 +108,107 @@ export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] 
         return {
           ...baseTrx,
           // Ibex does not provide paymentHash, pubkey and preimage in transactions endpoint. To get these fields,
-          // we need to query the transaction details for each trx individually. 
-          initiationVia: { type: 'lightning', paymentHash: "", pubkey: "" },
-          settlementVia: { type: 'lightning', revealedPreImage: undefined }
+          // we need to query the transaction details for each trx individually.
+          initiationVia: { type: "lightning", paymentHash: "", pubkey: "" },
+          settlementVia: { type: "lightning", revealedPreImage: undefined },
         } as WalletLnSettledTransaction
       case 3:
       case 4:
+      case 10:
         return {
           ...baseTrx,
           // Ibex does not provide paymentHash, pubkey and preimage in transactions endpoint. To get these fields,
-          // we need to query the transaction details for each trx individually. 
-          initiationVia: { type: 'onchain', address: "" },
-          settlementVia: { type: 'onchain', transactionHash: '', vout: undefined }
+          // we need to query the transaction details for each trx individually.
+          initiationVia: { type: "onchain", address: "" },
+          settlementVia: { type: "onchain", transactionHash: "", vout: undefined },
         } as WalletOnChainSettledTransaction // assuming Ibex only gives us settled
       default:
-        baseLogger.error(`Failed to parse Ibex transaction type. { WalletId: ${baseTrx.walletId}, TransactionId: ${trx.id}, transactionTypeId: ${trx.transactionTypeId}`)
-        return { 
+        baseLogger.error(
+          `Failed to parse Ibex transaction type. { WalletId: ${baseTrx.walletId}, TransactionId: ${trx.id}, transactionTypeId: ${trx.transactionTypeId}`,
+        )
+        return {
           ...baseTrx,
-          initiationVia: { type: 'unknown' },
-          settlementVia: { type: 'unknown' }
+          initiationVia: { type: "unknown" },
+          settlementVia: { type: "unknown" },
         } as UnknownTypeTransaction
     }
   })
 }
 
-const asCurrency = (amount: number | undefined, currency: WalletCurrency): Satoshis | UsdCents => {
-  return currency === "USD" ? amount as UsdCents : amount as Satoshis
+type SettlementMinorUnitAmount = Satoshis | UsdCents | UsdtCents
+
+const toUsdtCents = (amount: number): UsdtCents => {
+  const usdtAmount = USDTAmount.fromNumber(amount.toString())
+  if (usdtAmount instanceof Error) {
+    baseLogger.error({ err: usdtAmount, amount }, "Failed to parse IBEX USDT amount")
+    return 0 as UsdtCents
+  }
+  return Number(usdtAmount.asUsdCents()) as UsdtCents
+}
+
+const zeroSettlementMinorUnit = (currency: WalletCurrency): SettlementMinorUnitAmount => {
+  if (currency === WalletCurrency.Usd) return 0 as UsdCents
+  if (currency === WalletCurrency.Usdt) return 0 as UsdtCents
+  return 0 as Satoshis
+}
+
+const toSettlementMinorUnit = (
+  amount: number | undefined,
+  currency: WalletCurrency,
+): SettlementMinorUnitAmount => {
+  if (amount === undefined) return zeroSettlementMinorUnit(currency)
+  if (currency === WalletCurrency.Usd) return amount as UsdCents
+  if (currency === WalletCurrency.Usdt) return toUsdtCents(amount)
+  return amount as Satoshis
 }
 
 const toSettlementAmount = (
-  ibexAmount: number | undefined, 
-  transactionTypeId: number | undefined, 
-  currency: WalletCurrency
-): Satoshis | UsdCents => {
+  ibexAmount: number | undefined,
+  transactionTypeId: number | undefined,
+  currency: WalletCurrency,
+): SettlementMinorUnitAmount => {
   if (ibexAmount === undefined) {
     baseLogger.warn("Ibex did not return transaction amount")
-    return asCurrency(ibexAmount, currency) 
+    return toSettlementMinorUnit(ibexAmount, currency)
   }
   // When sending, make negative
-  const amt = (transactionTypeId === 2 || transactionTypeId === 4) 
-    ? -1 * ibexAmount 
-    : ibexAmount
-  return asCurrency(amt, currency)
+  const amt =
+    transactionTypeId === 2 || transactionTypeId === 4 || transactionTypeId === 10
+      ? -1 * ibexAmount
+      : ibexAmount
+  return toSettlementMinorUnit(amt, currency)
+}
+
+const toSettlementDisplayAmount = (
+  ibexAmount: number | undefined,
+  transactionTypeId: number | undefined,
+): string => {
+  if (ibexAmount === undefined) return `${ibexAmount}`
+  const amount =
+    transactionTypeId === 2 || transactionTypeId === 4 || transactionTypeId === 10
+      ? -1 * ibexAmount
+      : ibexAmount
+  return `${amount}`
 }
 
 enum SortOrder {
   RECENT = "settledAt",
-  OLDEST = "-settledAt"
+  OLDEST = "-settledAt",
 }
 
 type IbexPaginationArgs = {
-  page?: number | undefined; // ibex default (0) start at page 0
-  limit?: number | undefined; // ibex default (0) returns all
-  sort?: SortOrder | undefined; // defaults to SortOrder.RECENT
+  page?: number | undefined // ibex default (0) start at page 0
+  limit?: number | undefined // ibex default (0) returns all
+  sort?: SortOrder | undefined // defaults to SortOrder.RECENT
 }
 
 export function toIbexPaginationArgs(
-  args: ConnectionArguments | undefined
+  args: ConnectionArguments | undefined,
 ): IbexPaginationArgs {
   const DEFAULTS = {
-    page: 0, 
-    limit: 0, 
-    sort: SortOrder.RECENT, 
+    page: 0,
+    limit: 0,
+    sort: SortOrder.RECENT,
   }
 
   // Prefer 'first' over 'last')
@@ -132,13 +216,13 @@ export function toIbexPaginationArgs(
     return {
       ...DEFAULTS,
       limit: args.first,
-      sort: SortOrder.RECENT, 
+      sort: SortOrder.RECENT,
     }
   } else if (args && args.last != null) {
     return {
       ...DEFAULTS,
       limit: args.last,
-      sort: SortOrder.OLDEST, 
+      sort: SortOrder.OLDEST,
     }
   } else return DEFAULTS
 }

@@ -11,8 +11,8 @@ import {
   SubscribeToInvoiceInvoiceUpdatedEvent,
   subscribeToInvoices,
   SubscribeToInvoicesInvoiceUpdatedEvent,
-  subscribeToPayments,
   SubscribeToPastPaymentsPaymentEvent,
+  subscribeToPayments,
   subscribeToTransactions,
   SubscribeToTransactionsChainTransactionEvent,
 } from "lightning"
@@ -30,25 +30,24 @@ import { uploadBackup } from "@app/admin/backup"
 import { lnd1LoopConfig, lnd2LoopConfig } from "@app/swap/get-active-loopd"
 import * as Wallets from "@app/wallets"
 
+import {
+  DEFAULT_EXPIRATIONS,
+  invoiceExpirationForCurrency,
+} from "@domain/bitcoin/lightning/invoice-expiration"
 import { TxDecoder } from "@domain/bitcoin/onchain"
 import { CacheKeys } from "@domain/cache"
 import {
   CouldNotFindWalletFromOnChainAddressError,
   CouldNotFindWalletInvoiceError,
 } from "@domain/errors"
-import { SwapTriggerError } from "@domain/swap/errors"
 import { checkedToDisplayCurrency } from "@domain/fiat"
-import {
-  DEFAULT_EXPIRATIONS,
-  invoiceExpirationForCurrency,
-} from "@domain/bitcoin/lightning/invoice-expiration"
 import { ErrorLevel, paymentAmountFromNumber, WalletCurrency } from "@domain/shared"
+import { SwapTriggerError } from "@domain/swap/errors"
 
 import { BriaSubscriber } from "@services/bria"
 import { RedisCacheService } from "@services/cache"
 import { LedgerService } from "@services/ledger"
 import { LndService } from "@services/lnd"
-import { activateLndHealthCheck, lndStatusEvent } from "@services/lnd/health"
 import { onChannelUpdated } from "@services/lnd/utils"
 import { baseLogger } from "@services/logger"
 import { LoopService } from "@services/loopd"
@@ -192,7 +191,7 @@ const publishCurrentPrice = () => {
   }, interval)
 }
 
-const listenerOnchain = (lnd: AuthenticatedLnd) => {
+export const listenerOnchain = (lnd: AuthenticatedLnd) => {
   const subTransactions = subscribeToTransactions({ lnd })
   const onChainTxHandler = wrapAsyncToRunInSpan({
     root: true,
@@ -397,7 +396,13 @@ export const setupPaymentSubscribe = async ({
   Payments.updatePendingPayments(logger)
 }
 
-const listenerOffchain = ({ lnd, pubkey }: { lnd: AuthenticatedLnd; pubkey: Pubkey }) => {
+export const listenerOffchain = ({
+  lnd,
+  pubkey,
+}: {
+  lnd: AuthenticatedLnd
+  pubkey: Pubkey
+}) => {
   const subInvoices = subscribeToInvoices({ lnd })
   setupAndProcessInvoiceSubscribe({ lnd, pubkey, subInvoices })
 
@@ -464,7 +469,7 @@ const listenerSwapMonitor = async () => {
   }
 }
 
-const listenerBria = async () => {
+export const listenerBria = async () => {
   const wrappedBriaEventHandler = wrapAsyncToRunInSpan({
     namespace: "servers.trigger",
     fn: briaEventHandler,
@@ -520,8 +525,6 @@ const healthCheck = () => {
   )
   app.listen(port, () => logger.info(`Health check listening on port ${port}!`))
 }
-
-
 
 // only execute if it is the main module
 if (require.main === module) {

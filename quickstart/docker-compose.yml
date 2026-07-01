@@ -7,7 +7,7 @@ services:
     - oathkeeper
     - kratos
     - kratos-pg
-    - galoy
+    - flash
     - trigger
     - redis
     - mongodb
@@ -32,6 +32,11 @@ services:
     - APOLLO_ROUTER_CONFIG_PATH=/repo/dev/apollo-federation/router.yaml
     volumes:
     - ${HOST_PROJECT_PATH:-.}/${GALOY_QUICKSTART_PATH:-vendor/galoy-quickstart}/dev:/repo/dev
+    command:
+    - --config
+    - /repo/dev/apollo-federation/router.yaml
+    - --supergraph
+    - /repo/dev/apollo-federation/supergraph.graphql
   oathkeeper:
     image: oryd/oathkeeper:v0.40.4-distroless
     ports:
@@ -63,13 +68,22 @@ services:
     - POSTGRES_USER=dbuser
     - POSTGRES_PASSWORD=secret
     - POSTGRES_DB=default
-  galoy:
+  flash:
     image: us.gcr.io/galoy-org/galoy-app@sha256:61eec2c0747ce8e20e1a45f1d0492e955631e6d89f25cf2364c0727b27786cfe
     command:
     - -r
     - /app/lib/services/tracing.js
     - lib/servers/graphql-main-server.js
+    - --configPath
+    - /app/dev/config/base-config.yaml
+    - --configPath
+    - /app/quickstart/config/quickstart-config.yaml
     env_file: ${HOST_PROJECT_PATH:-.}/${GALOY_QUICKSTART_PATH:-vendor/galoy-quickstart}/.env.galoy
+    environment:
+    - FLASH_ENABLE_IBEX_MOCK=true
+    volumes:
+    - ${FLASH_PROJECT_PATH:-..}/dev/config:/app/dev/config:ro
+    - ${FLASH_PROJECT_PATH:-..}/quickstart/config:/app/quickstart/config:ro
     depends_on:
     - trigger
     - apollo-router
@@ -81,17 +95,22 @@ services:
     - mongodb
     - redis
     - stablesats
-    networks:
-      default:
-        aliases:
-        - bats-tests
   trigger:
     image: us.gcr.io/galoy-org/galoy-app@sha256:61eec2c0747ce8e20e1a45f1d0492e955631e6d89f25cf2364c0727b27786cfe
     command:
     - -r
     - /app/lib/services/tracing.js
     - lib/servers/trigger.js
+    - --configPath
+    - /app/dev/config/base-config.yaml
+    - --configPath
+    - /app/quickstart/config/quickstart-config.yaml
     env_file: ${HOST_PROJECT_PATH:-.}/${GALOY_QUICKSTART_PATH:-vendor/galoy-quickstart}/.env.galoy
+    environment:
+    - FLASH_ENABLE_IBEX_MOCK=true
+    volumes:
+    - ${FLASH_PROJECT_PATH:-..}/dev/config:/app/dev/config:ro
+    - ${FLASH_PROJECT_PATH:-..}/quickstart/config:/app/quickstart/config:ro
     depends_on:
     - lnd1
     - bria

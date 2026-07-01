@@ -15,6 +15,54 @@ ibex:
     # production overrides to enforce the allowlist; empty disables it (ISL-112).
     allowedIps: []
 
+bridge:
+  enabled: true
+  apiKey: "" # real key injected via config overrides; never commit a real key
+  baseUrl: "https://api.sandbox.bridge.xyz/v0"
+  minWithdrawalAmount: 2
+  developerFeePercent: 2.0
+  withdrawalFeeEstimate:
+    bridgeFixedFeePercent: 0.6
+    usdtTransferGasLimit: 65000
+    gasPriceBufferMultiplier: 1.5
+    ethereumGasRpcUrls:
+      - "https://ethereum-rpc.publicnode.com"
+      - "https://eth.llamarpc.com"
+      - "https://cloudflare-eth.com"
+    ethUsdPriceUrl: "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
+    timeoutMs: 3000
+    cacheTtlMs: 60000
+    fallbackGasPriceGwei: 30
+    ethUsdFallback: 3000
+  timeoutMs: 15000
+  webhook:
+    port: 4009
+    replaySecret: "" # set BRIDGE_WEBHOOK_REPLAY_SECRET or a local override to enable /internal/replay
+    publicKeys:
+      kyc: |
+        -----BEGIN PUBLIC KEY-----
+        MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxrV+s8CvC0+s1W6vZG52
+        5eozo6W6HzkTcLQMWDoEzQX+ulEoYH2fPuXeupi11MdVLpEqNqYas8LD3BIf/c9H
+        kK54V8vnXNwoHa5ROp/Gjp3B17q3wGfjLa8bQJoJZFWd9W+e3TjUohCDNpeD/qv+
+        bkY2y3b1QixmXKK3REw35sfiEe5NkGMU4aEfXhZieIZ1mKXLsIgsgrIpv9BFwQr5
+        +h3R7Vv3hGKVgSZHnRMa9F1/go8v5Au8gj+9w0LxxRJikoJCubI6igaTCivibxuo
+        QXWfFylw6m7eQTvZDQz70pnUEakofRlvKasetbyKmvLzMhuRHeqsxgi8C4ZCx7MP
+        dwIDAQAB
+        -----END PUBLIC KEY-----
+      deposit: |
+        -----BEGIN PUBLIC KEY-----
+        MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxrV+s8CvC0+s1W6vZG52
+        5eozo6W6HzkTcLQMWDoEzQX+ulEoYH2fPuXeupi11MdVLpEqNqYas8LD3BIf/c9H
+        kK54V8vnXNwoHa5ROp/Gjp3B17q3wGfjLa8bQJoJZFWd9W+e3TjUohCDNpeD/qv+
+        bkY2y3b1QixmXKK3REw35sfiEe5NkGMU4aEfXhZieIZ1mKXLsIgsgrIpv9BFwQr5
+        +h3R7Vv3hGKVgSZHnRMa9F1/go8v5Au8gj+9w0LxxRJikoJCubI6igaTCivibxuo
+        QXWfFylw6m7eQTvZDQz70pnUEakofRlvKasetbyKmvLzMhuRHeqsxgi8C4ZCx7MP
+        dwIDAQAB
+        -----END PUBLIC KEY-----
+      transfer: "<replace>"
+      external_account: "<replace>"
+    timestampSkewMs: 300000
+
 # See Foreign Exchange Rates: https://www.firstglobal-bank.com/
 exchangeRates:
   USD:
@@ -38,6 +86,9 @@ cashout:
     to: "" # add to the overrides.yaml
     from: "notifications@getflash.io"
     subject: "New Cashout"
+
+topup:
+  enabled: false
 
 frappe:
   url: http://flashapp.me.localhost:8000

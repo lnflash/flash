@@ -1,9 +1,11 @@
-import Money, { Round } from "../bigint-money"
-import { MoneyAmount } from "./MoneyAmount"
-import { WalletCurrency } from "../primitives"
-import { BigIntConversionError } from "../errors"
 import { getCurrencyMajorExponent } from "@domain/fiat/display-currency"
 
+import Money from "../bigint-money"
+
+import { BigIntConversionError } from "../errors"
+import { WalletCurrency } from "../primitives"
+
+import { MoneyAmount } from "./MoneyAmount"
 
 export class JMDAmount extends MoneyAmount {
   currencyCode = WalletCurrency.Jmd as WalletCurrency
@@ -16,7 +18,9 @@ export class JMDAmount extends MoneyAmount {
     try {
       return new JMDAmount(c)
     } catch (error) {
-      return new BigIntConversionError(error instanceof Error ? error.message : String(error))
+      return new BigIntConversionError(
+        error instanceof Error ? error.message : String(error),
+      )
     }
   }
 
@@ -24,9 +28,10 @@ export class JMDAmount extends MoneyAmount {
     try {
       return new JMDAmount(BigInt(d) * 100n)
     } catch (error) {
-      return new BigIntConversionError(error instanceof Error ? error.message : String(error))
+      return new BigIntConversionError(
+        error instanceof Error ? error.message : String(error),
+      )
     }
-
   }
 
   asCents(precision: number = 0): string {
@@ -42,13 +47,13 @@ export class JMDAmount extends MoneyAmount {
   }
 
   i18n(): string {
-    const exponent = getCurrencyMajorExponent(this.currencyCode as DisplayCurrency);
+    const exponent = getCurrencyMajorExponent(this.currencyCode as DisplayCurrency)
     return new Intl.NumberFormat("en", {
-        style: "currency",
-        currency: this.currencyCode,
-        currencyDisplay: "narrowSymbol",
-        minimumFractionDigits: exponent,
-        maximumFractionDigits: exponent,
-    }).format(Number(this.asDollars()));
+      style: "currency",
+      currency: this.currencyCode,
+      currencyDisplay: "narrowSymbol",
+      minimumFractionDigits: exponent,
+      maximumFractionDigits: exponent,
+    }).format(Number(this.asDollars()))
   }
 }

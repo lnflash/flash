@@ -9,6 +9,7 @@ import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import LnInvoicePayload from "@graphql/public/types/payload/ln-invoice"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { Wallets } from "@app/index"
+import { resolveCashWalletMutationWalletIdForAccount } from "@app/cash-wallet-cutover"
 import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 
 const LnUsdInvoiceCreateInput = GT.Input({
@@ -18,7 +19,10 @@ const LnUsdInvoiceCreateInput = GT.Input({
       type: GT.NonNull(WalletId),
       description: "Wallet ID for a USD wallet belonging to the current user.",
     },
-    amount: { type: GT.NonNull(FractionalCentAmount), description: "Amount in USD cents." },
+    amount: {
+      type: GT.NonNull(FractionalCentAmount),
+      description: "Amount in USD cents.",
+    },
     memo: { type: Memo, description: "Optional memo for the lightning invoice." },
     expiresIn: {
       type: Minutes,
@@ -27,7 +31,7 @@ const LnUsdInvoiceCreateInput = GT.Input({
   }),
 })
 
-const LnUsdInvoiceCreateMutation = GT.Field({
+const LnUsdInvoiceCreateMutation = GT.Field<null, GraphQLPublicContextAuth>({
   extensions: {
     complexity: 120,
   },
@@ -39,7 +43,7 @@ const LnUsdInvoiceCreateMutation = GT.Field({
   args: {
     input: { type: GT.NonNull(LnUsdInvoiceCreateInput) },
   },
-  resolve: async (_, args) => {
+  resolve: async (_, args, { domainAccount, cashWalletClientCapabilities }) => {
     const { walletId, amount, memo, expiresIn } = args.input
 
     for (const input of [walletId, amount, memo, expiresIn]) {
@@ -48,8 +52,17 @@ const LnUsdInvoiceCreateMutation = GT.Field({
       }
     }
 
-    const invoice = await Wallets.addInvoiceForSelfForUsdWallet({
+    const routedWalletId = await resolveCashWalletMutationWalletIdForAccount({
+      account: domainAccount,
       walletId,
+      client: cashWalletClientCapabilities,
+    })
+    if (routedWalletId instanceof Error) {
+      return { errors: [mapAndParseErrorForGqlResponse(routedWalletId)] }
+    }
+
+    const invoice = await Wallets.addInvoiceForSelfForUsdWallet({
+      walletId: routedWalletId,
       amount,
       memo,
       expiresIn,

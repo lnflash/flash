@@ -1,7 +1,7 @@
 // For bugs involving onchain transactions:
 // 1. Check Honeycomb for full responses from Ibex service
 // 2. Copy response here and use test case
-  
+
 // sample 200 response from Ibex().sendToAddressV2
 // consider moving data to a .json
 const response = {

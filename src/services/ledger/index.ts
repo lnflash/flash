@@ -2,8 +2,8 @@
  * an accounting reminder:
  * https://en.wikipedia.org/wiki/Double-entry_bookkeeping
  */
-import { Types } from "mongoose"
 import { toSats } from "@domain/bitcoin"
+import { BalanceLessThanZeroError } from "@domain/errors"
 import { toCents } from "@domain/fiat"
 import {
   LedgerTransactionType,
@@ -11,7 +11,6 @@ import {
   toLiabilitiesWalletId,
   toWalletId,
 } from "@domain/ledger"
-import { BalanceLessThanZeroError } from "@domain/errors"
 import {
   CouldNotFindTransactionError,
   LedgerError,
@@ -22,7 +21,6 @@ import {
   balanceAmountFromNumber,
   BigIntFloatConversionError,
   ErrorLevel,
-  USDAmount,
   WalletCurrency,
 } from "@domain/shared"
 import { fromObjectId, toObjectId } from "@services/mongoose/utils"
@@ -30,19 +28,19 @@ import {
   recordExceptionInCurrentSpan,
   wrapAsyncFunctionsToRunInSpan,
 } from "@services/tracing"
+
+import { IbexError } from "@services/ibex/errors"
+
 import { admin } from "./admin"
 import * as adminLegacy from "./admin-legacy"
 import { MainBook, Transaction } from "./books"
-import { paginatedLedger } from "./paginated-ledger"
 import * as caching from "./caching"
-import { TransactionsMetadataRepository } from "./services"
+import { paginatedLedger } from "./paginated-ledger"
 import { send } from "./send"
+import { TransactionsMetadataRepository } from "./services"
 import { volume } from "./volume"
 
 // FLASH FORK: import ibex dependencies
-import Ibex from "@services/ibex/client"
-import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
-import { ApiError, AuthenticationError } from "ibex-client"
 
 export { getNonEndUserWalletIds } from "./caching"
 export { translateToLedgerJournal } from "./helpers"
@@ -289,7 +287,7 @@ export const LedgerService = (): ILedgerService => {
   ): Promise<Satoshis | LedgerError | IbexError> => {
     const liabilitiesWalletId = toLiabilitiesWalletId(walletId)
     try {
-      let { balance } = await MainBook.balance({
+      const { balance } = await MainBook.balance({
         account: liabilitiesWalletId,
       })
       if (balance < 0) {

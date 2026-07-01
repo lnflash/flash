@@ -1,0 +1,628 @@
+/**
+ * Bridge.xyz API Client
+ * Ported from bridge-mcp and extended with Tron/USDT support
+ */
+
+import crypto from "crypto"
+
+import { BridgeConfig } from "@config"
+
+import {
+  BridgeCustomerId,
+  BridgeTransferId,
+  BridgeVirtualAccountId,
+} from "@domain/primitives/bridge"
+import { alertBridge, generateDedupKey } from "@services/alerts"
+
+import { BridgeApiError, BridgeTimeoutError } from "./errors"
+
+// ============ Request/Response Types ============
+
+export interface CreateIndividualCustomerRequest {
+  type: "individual"
+  first_name: string
+  last_name: string
+  email: string
+  phone?: string
+  residential_address?: {
+    street_line_1: string
+    street_line_2?: string
+    city: string
+    subdivision?: string
+    postal_code: string
+    country: string
+  }
+  birth_date?: string
+  signed_agreement_id?: string
+}
+
+export interface CreateBusinessCustomerRequest {
+  type: "business"
+  business_name: string
+  email: string
+  phone?: string
+  residential_address?: {
+    street_line_1: string
+    street_line_2?: string
+    city: string
+    subdivision?: string
+    postal_code: string
+    country: string
+  }
+  signed_agreement_id?: string
+}
+
+export type CreateCustomerRequest =
+  | CreateIndividualCustomerRequest
+  | CreateBusinessCustomerRequest
+
+export interface Customer {
+  id: string
+  type: "individual" | "business"
+  status?:
+    | "active"
+    | "awaiting_questionnaire"
+    | "rejected"
+    | "paused"
+    | "under_review"
+    | "offboarded"
+    | "awaiting_ubo"
+    | "incomplete"
+    | "not_started"
+  has_accepted_terms_of_service?: string
+  created_at: string
+  updated_at: string
+  first_name?: string
+  last_name?: string
+  email?: string
+  business_name?: string
+}
+
+export interface KycLink {
+  kyc_link: string
+  tos_link: string
+  customer_id: string
+}
+
+// Extended payment rails to include Tron
+export type PaymentRail =
+  | "ach"
+  | "wire"
+  | "ach_push"
+  | "ach_same_day"
+  | "arbitrum"
+  | "avalanche_c_chain"
+  | "base"
+  | "bre_b"
+  | "co_bank_transfer"
+  | "celo"
+  | "ethereum"
+  | "faster_payments"
+  | "optimism"
+  | "pix"
+  | "polygon"
+  | "sepa"
+  | "solana"
+  | "spei"
+  | "stellar"
+  | "swift"
+  | "tempo"
+  | "tron"
+
+export type VirtualAccountDestinationPaymentRail =
+  | "arbitrum"
+  | "avalanche_c_chain"
+  | "base"
+  | "celo"
+  | "ethereum"
+  | "optimism"
+  | "polygon"
+  | "solana"
+  | "stellar"
+  | "tempo"
+  | "tron"
+
+export type SourceCurrency = "usd" | "eur" | "mxn" | "brl" | "gbp" | "cop"
+
+// Extended currencies to include USDT
+export type Currency = "usdb" | "usdt" | "dai" | "pyusd" | "usdc" | "eurc"
+
+export interface CreateVirtualAccountRequest {
+  developer_fee_percent?: string
+  source: {
+    currency: SourceCurrency
+  }
+  destination: {
+    currency: Currency
+    payment_rail: VirtualAccountDestinationPaymentRail
+    address?: string
+    blockchain_memo?: string
+    bridge_wallet_id?: string
+  }
+}
+
+export interface CreateExternalAccountRequest {
+  account_owner_name: string
+  address: {
+    street_line_1: string
+    city: string
+    country: string
+    state?: string
+    postal_code?: string
+  }
+  account_type: string | "us" | "iban" | "unknown" | "clabe" | "pix" | "gb"
+  currency: "usd" | "gbp" | "brl" | "eur" | string
+  account: {
+    account_number: string
+    routing_number: string
+    checking_or_savings?: "checking" | "savings"
+  }
+  bank_name?: string
+}
+
+export interface VirtualAccount {
+  id: string
+  status: string
+  customer_id: string
+  developer_fee_percent?: string
+  source_deposit_instructions: {
+    currency: string
+    payment_rails: string[]
+    bank_name: string
+    bank_beneficiary_address: string
+    bank_beneficiary_name: string
+    bank_account_number: string
+    bank_routing_number: string
+  }
+  destination: {
+    currency: string
+    payment_rail: string
+    address?: string
+    blockchain_memo?: string
+    bridge_wallet_id?: string
+  }
+  created_at: string
+}
+
+export interface ExternalAccount {
+  id: string
+  customer_id: string
+  account_owner_name: string
+  account_type: string
+  currency: string
+  bank_name?: string
+  account_number_last_4?: string
+  last_4?: string
+  routing_number?: string
+  iban?: string
+  active?: boolean
+  created_at: string
+}
+
+export interface ExternalAccountLinkUrl {
+  link_url: string
+  expires_at: string
+}
+
+export interface ListResponse<T> {
+  data: T[]
+  has_more: boolean
+  cursor?: string
+}
+
+export type TrasfertSourceCurrency =
+  | "brl"
+  | "cop"
+  | "dai"
+  | "eur"
+  | "eurc"
+  | "gbp"
+  | "mxn"
+  | "pyusd"
+  | "usd"
+  | "usdb"
+  | "usdc"
+  | "usdt"
+export interface CreateTransferRequest {
+  amount?: string
+  currency?: string
+  on_behalf_of: string
+  developer_fee?: string
+  developer_fee_percent?: string
+  source: {
+    payment_rail: PaymentRail | "bridge_wallet"
+    currency: TrasfertSourceCurrency
+    from_address?: string
+    external_account_id?: string
+    bridge_wallet_id?: string
+  }
+  destination: {
+    payment_rail: PaymentRail | "bridge_wallet" | "ach"
+    currency: string
+    to_address?: string
+    external_account_id?: string
+    bridge_wallet_id?: string
+    wire_message?: string
+  }
+  dry_run?: boolean
+  features?: {
+    flexible_amount?: boolean
+    static_template?: boolean
+    allow_any_from_address?: boolean
+  }
+}
+
+export interface Transfer {
+  id: string
+  client_reference_id?: string
+  amount: string
+  currency: string
+  on_behalf_of: string
+  developer_fee?: string
+  source: {
+    payment_rail: string
+    currency: string
+    from_address?: string
+    external_account_id?: string
+    bridge_wallet_id?: string
+  }
+  destination: {
+    payment_rail: string
+    currency: string
+    to_address?: string
+    external_account_id?: string
+    bridge_wallet_id?: string
+  }
+  state: string
+  source_deposit_instructions?: {
+    payment_rail: string
+    currency: string
+    amount?: string
+    bank_name?: string
+    bank_address?: string
+    bank_account_number?: string
+    bank_routing_number?: string
+    to_address?: string
+  }
+  receipt?: {
+    initial_amount: string
+    developer_fee: string
+    exchange_fee: string
+    subtotal_amount: string
+    gas_fee?: string
+    final_amount?: string
+    exchange_rate?: string
+    source_tx_hash?: string
+    destination_tx_hash?: string
+    remaining_prefunded_balance?: string
+    url?: string
+  }
+  created_at: string
+  updated_at: string
+}
+
+export interface BridgeInitiateKyc {
+  email: string
+  type: "individual" | "business"
+  full_name?: string
+}
+
+export type BridgeWebhookEventType =
+  | "kyc"
+  | "transfer"
+  | "virtual_account"
+  | "external_account"
+
+export interface BridgeWebhookEvent {
+  id: string
+  event_type: string
+  payload: unknown
+  created_at: string
+}
+
+export interface ListEventsParams {
+  event_type?: string
+  after?: string
+  page_size?: number
+}
+
+type WebhookEventsApiResponse = {
+  data: Array<{
+    event_id?: string
+    event_type?: string
+    event_created_at?: string
+    event_object?: unknown
+    id?: string
+    created_at?: string
+    payload?: unknown
+  }>
+  count?: number
+  has_more?: boolean
+  cursor?: string
+}
+
+// ============ Bridge Client ============
+
+export class BridgeClient {
+  private apiKey: string
+  private baseUrl: string
+
+  constructor() {
+    this.apiKey = BridgeConfig.apiKey
+    this.baseUrl = BridgeConfig.baseUrl || "https://api.sandbox.bridge.xyz/v0"
+  }
+
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    idempotencyKey?: string,
+  ): Promise<T> {
+    const url = `${this.baseUrl}${path}`
+    const headers: Record<string, string> = {
+      "Api-Key": this.apiKey,
+      "Content-Type": "application/json",
+    }
+
+    // Bridge rejects Idempotency-Key on GET and DELETE endpoints.
+    if (!["GET", "DELETE"].includes(method.toUpperCase())) {
+      if (idempotencyKey) {
+        headers["Idempotency-Key"] = idempotencyKey
+      } else {
+        headers["Idempotency-Key"] = crypto.randomUUID()
+      }
+    }
+
+    const timeoutMs = BridgeConfig.timeoutMs ?? 15_000
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+    try {
+      const response = await fetch(url, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      })
+
+      const responseData = await response.json().catch(() => null)
+
+      if (!response.ok) {
+        // Only 5xx indicates a Bridge-side outage; 4xx are normal API rejections.
+        if (response.status >= 500) {
+          alertBridge({
+            dedupKey: generateDedupKey.bridgeApi5xx(),
+            source: "bridge-api",
+            severity: "critical",
+            title: `Bridge API ${response.status} on ${method} ${path}`,
+            detail: response.statusText,
+            context: { method, path, status: response.status },
+          })
+        }
+        throw new BridgeApiError(
+          `Bridge API error: ${response.status} ${response.statusText}`,
+          response.status,
+          responseData,
+        )
+      }
+
+      return responseData as T
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        alertBridge({
+          dedupKey: generateDedupKey.bridgeApiTimeout(),
+          source: "bridge-api",
+          severity: "critical",
+          title: `Bridge API timeout on ${method} ${path}`,
+          context: { method, path, timeoutMs },
+        })
+        throw new BridgeTimeoutError()
+      }
+      // Network/connectivity failures (5xx already alerted above).
+      if (!(err instanceof BridgeApiError)) {
+        alertBridge({
+          dedupKey: generateDedupKey.bridgeApiNetwork(),
+          source: "bridge-api",
+          severity: "critical",
+          title: `Bridge API request failed on ${method} ${path}`,
+          detail: err instanceof Error ? err.message : String(err),
+          context: { method, path },
+        })
+      }
+      throw err
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  }
+
+  // ============ Customers ============
+
+  async createCustomer(
+    data: CreateCustomerRequest,
+    idempotencyKey?: string,
+  ): Promise<Customer> {
+    return this.request<Customer>("POST", "/customers", data, idempotencyKey)
+  }
+
+  async getCustomer(customerId: BridgeCustomerId): Promise<Customer> {
+    return this.request<Customer>("GET", `/customers/${customerId}`)
+  }
+
+  // ============ KYC ============
+
+  async createKycLink(
+    request: BridgeInitiateKyc,
+    idempotencyKey?: string,
+  ): Promise<KycLink> {
+    return this.request<KycLink>("POST", "/kyc_links", request, idempotencyKey)
+  }
+
+  async getKycLatestLink(customerId: BridgeCustomerId): Promise<KycLink> {
+    return this.request<KycLink>("GET", `/customers/${customerId}/kyc_links/latest`)
+  }
+
+  // ============ Virtual Accounts ============
+
+  async createVirtualAccount(
+    customerId: BridgeCustomerId,
+    data: CreateVirtualAccountRequest,
+    idempotencyKey?: string,
+  ): Promise<VirtualAccount> {
+    return this.request<VirtualAccount>(
+      "POST",
+      `/customers/${customerId}/virtual_accounts`,
+      data,
+      idempotencyKey,
+    )
+  }
+
+  async getVirtualAccount(
+    customerId: BridgeCustomerId,
+    virtualAccountId: BridgeVirtualAccountId,
+    idempotencyKey?: string,
+  ): Promise<VirtualAccount> {
+    return this.request<VirtualAccount>(
+      "GET",
+      `/customers/${customerId}/virtual_accounts/${virtualAccountId}`,
+      undefined,
+      idempotencyKey,
+    )
+  }
+
+  async getVirtualAccountByCustomerId(
+    customerId: BridgeCustomerId,
+  ): Promise<VirtualAccount[]> {
+    const response = await this.request<{ data: VirtualAccount[] }>(
+      "GET",
+      `/customers/${customerId}/virtual_accounts`,
+    )
+
+    return response.data as VirtualAccount[]
+  }
+  // ============ External Accounts ============
+
+  async createExternalAccount(
+    customerId: BridgeCustomerId,
+    data: CreateExternalAccountRequest,
+    idempotencyKey: string,
+  ): Promise<ExternalAccount> {
+    return this.request<ExternalAccount>(
+      "POST",
+      `/customers/${customerId}/external_accounts`,
+      data,
+      idempotencyKey,
+    )
+  }
+
+  async getExternalAccountLinkUrl(
+    customerId: BridgeCustomerId,
+  ): Promise<ExternalAccountLinkUrl> {
+    return this.request<ExternalAccountLinkUrl>(
+      "POST",
+      `/customers/${customerId}/external_accounts/link`,
+    )
+  }
+
+  async listExternalAccounts(
+    customerId: BridgeCustomerId,
+  ): Promise<ListResponse<ExternalAccount>> {
+    return this.request<ListResponse<ExternalAccount>>(
+      "GET",
+      `/customers/${customerId}/external_accounts`,
+    )
+  }
+
+  // ============ Transfers ============
+
+  async createTransfer(
+    customerId: BridgeCustomerId,
+    data: CreateTransferRequest,
+    idempotencyKey?: string,
+  ): Promise<Transfer> {
+    // Note: Bridge API expects on_behalf_of in the body, not in the path
+    const bodyWithCustomer = {
+      ...data,
+      on_behalf_of: customerId,
+    }
+    return this.request<Transfer>("POST", "/transfers", bodyWithCustomer, idempotencyKey)
+  }
+
+  async getTransfer(transferId: BridgeTransferId): Promise<Transfer> {
+    // Note: Bridge API uses /transfers/{id} not /customers/{id}/transfers/{id}
+    return this.request<Transfer>("GET", `/transfers/${transferId}`)
+  }
+
+  async deleteTransfer(transferId: BridgeTransferId): Promise<Transfer> {
+    return this.request<Transfer>("DELETE", `/transfers/${transferId}`)
+  }
+
+  // ============ List Events ============
+
+  async listEvents(params?: ListEventsParams): Promise<ListResponse<BridgeWebhookEvent>> {
+    const queryParams = new URLSearchParams()
+
+    // Bridge webhook events endpoint uses cursor pagination via starting_after.
+    if (params?.after) queryParams.append("starting_after", params.after)
+    if (params?.page_size) queryParams.append("limit", params.page_size.toString())
+    // Preserve call-site compatibility: derive category from event_type when possible.
+    if (params?.event_type) {
+      const category = params.event_type.split(".")[0]
+      if (category) queryParams.append("category", category)
+    }
+
+    const suffix = queryParams.toString() ? `?${queryParams.toString()}` : ""
+
+    const response = await this.request<WebhookEventsApiResponse>(
+      "GET",
+      `/webhook_events${suffix}`,
+    )
+
+    const mappedData: BridgeWebhookEvent[] = (response.data ?? []).map((event) => ({
+      id: event.event_id ?? event.id ?? "",
+      event_type: event.event_type ?? "",
+      created_at: event.event_created_at ?? event.created_at ?? "",
+      payload: event.event_object ?? event.payload ?? {},
+    }))
+
+    // Keep legacy ListResponse shape for existing callers.
+    const limit = params?.page_size ?? 100
+    const hasMoreFromCount = typeof response.count === "number" && response.count >= limit
+    const hasMore = response.has_more ?? hasMoreFromCount
+    const cursor = response.cursor ?? mappedData[mappedData.length - 1]?.id
+
+    return {
+      data: mappedData,
+      has_more: Boolean(hasMore && cursor),
+      cursor,
+    }
+  }
+}
+
+export default new BridgeClient()
+
+export async function* listAllEvents(
+  params?: Omit<ListEventsParams, "after"> & { start?: string; end?: string },
+): AsyncGenerator<BridgeWebhookEvent> {
+  const client = new BridgeClient()
+  const startMs = params?.start ? new Date(params.start).getTime() : -Infinity
+  const endMs = params?.end ? new Date(params.end).getTime() : Infinity
+
+  // Strip start/end: Bridge /webhook_events only supports cursor params; filter locally.
+  const apiParams = { ...(params ?? {}) }
+  delete apiParams.start
+  delete apiParams.end
+
+  let cursor: string | undefined
+  do {
+    const page = await client.listEvents({ ...apiParams, after: cursor, page_size: 100 })
+
+    for (const event of page.data) {
+      const eventMs = new Date(event.created_at).getTime()
+      if (eventMs >= startMs && eventMs <= endMs) {
+        yield event
+      }
+    }
+
+    cursor = page.has_more ? page.cursor : undefined
+  } while (cursor)
+}

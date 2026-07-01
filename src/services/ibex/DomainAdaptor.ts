@@ -3,6 +3,7 @@
  * Flash (Galoy) types
  */
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
+
 import { UnexpectedIbexResponse } from "./errors"
 
 // https://docs.ibexmercado.com/reference/get-transaction-details

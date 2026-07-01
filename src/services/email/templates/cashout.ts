@@ -13,13 +13,12 @@ export const CashoutBody = (args: CashoutBodyArgs) => {
   const payoutCurrency = args.payout.amount instanceof JMDAmount ? "JMD" : "USD"
   const payoutString = `${args.payout.amount.asDollars()} ${payoutCurrency}`
 
-  const serviceFeeString = args.payout.serviceFee instanceof USDAmount
-    ? args.payout.serviceFee.asDollars()
-    : null
+  const serviceFeeString =
+    args.payout.serviceFee instanceof USDAmount
+      ? args.payout.serviceFee.asDollars()
+      : null
 
-  const feeDetails = serviceFeeString
-    ? `Service fee: $${serviceFeeString} USD`
-    : ""
+  const feeDetails = serviceFeeString ? `Service fee: $${serviceFeeString} USD` : ""
 
   return {
     html: `
@@ -58,11 +57,15 @@ export const CashoutBody = (args: CashoutBodyArgs) => {
               <td style="padding: 10px 5px; border-bottom: 1px solid #eeeeee; width: 40%; color: #666666; font-weight: 500;">Payout Amount</td>
               <td style="padding: 10px 5px; border-bottom: 1px solid #eeeeee; font-weight: 600;">${payoutString}</td>
             </tr>
-            ${serviceFeeString ? `
+            ${
+              serviceFeeString
+                ? `
             <tr>
               <td style="padding: 10px 5px; border-bottom: 1px solid #eeeeee; width: 40%; color: #666666; font-weight: 500;">Service Fee</td>
               <td style="padding: 10px 5px; border-bottom: 1px solid #eeeeee;">$${serviceFeeString} USD</td>
-            </tr>` : ""}
+            </tr>`
+                : ""
+            }
             <tr>
               <td style="padding: 10px 5px; border-bottom: 1px solid #eeeeee; width: 40%; color: #666666; font-weight: 500;">Date & Time</td>
               <td style="padding: 10px 5px; border-bottom: 1px solid #eeeeee;">${args.formattedDate}</td>
@@ -118,6 +121,6 @@ export const CashoutBody = (args: CashoutBodyArgs) => {
       ----------------------
       This is an automated notification from Flash. Please do not reply to this email.
       © ${new Date().getFullYear()} Flash. All rights reserved.
-    `
+    `,
   }
 }

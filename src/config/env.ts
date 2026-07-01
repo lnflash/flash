@@ -124,6 +124,10 @@ export const env = createEnv({
 
     MATTERMOST_WEBHOOK_URL: z.string().min(1).optional(),
 
+    ALERT_PAGERDUTY_ROUTING_KEY: z.string().min(1).optional(),
+    ALERT_SLACK_WEBHOOK_URL: z.string().url().optional(),
+    ALERT_DISCORD_WEBHOOK_URL: z.string().url().optional(),
+
     PROXY_CHECK_APIKEY: z.string().min(1).optional(),
 
     SVIX_SECRET: z.string().optional(),
@@ -230,6 +234,10 @@ export const env = createEnv({
     NEXTCLOUD_PASSWORD: process.env.NEXTCLOUD_PASSWORD,
 
     MATTERMOST_WEBHOOK_URL: process.env.MATTERMOST_WEBHOOK_URL,
+
+    ALERT_PAGERDUTY_ROUTING_KEY: process.env.ALERT_PAGERDUTY_ROUTING_KEY,
+    ALERT_SLACK_WEBHOOK_URL: process.env.ALERT_SLACK_WEBHOOK_URL,
+    ALERT_DISCORD_WEBHOOK_URL: process.env.ALERT_DISCORD_WEBHOOK_URL,
 
     PROXY_CHECK_APIKEY: process.env.PROXY_CHECK_APIKEY,
 

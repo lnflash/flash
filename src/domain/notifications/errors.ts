@@ -24,9 +24,11 @@ export class InvalidPushNotificationSettingError extends NotificationsError {}
 export class FirebaseNotAvailable extends NotificationsServiceError {}
 export class FirebaseMessageError extends NotificationsServiceError {
   constructor(error: FirebaseError, token: DeviceToken) {
-    super(JSON.stringify({
-      ...error,
-      token,
-    }))
+    super(
+      JSON.stringify({
+        ...error,
+        token,
+      }),
+    )
   }
 }
