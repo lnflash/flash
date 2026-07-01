@@ -22,6 +22,8 @@ import { ibexWebhookPaths } from "@services/ibex/webhook-config"
 
 import { authenticate, logRequest, validateIbexIp } from "../middleware"
 
+const USDT_MICROS_PER_MAJOR_UNIT = 1_000_000
+
 interface PaymentContext {
   receiverWallet: Wallet
   recipientAccount: Account
@@ -255,6 +257,8 @@ const parsePaymentHash = (hash: unknown) =>
 const toPaymentAmount = (currency: WalletCurrency) => (dollarAmount: number) => {
   let amount: PaymentAmount<WalletCurrency>["amount"] | undefined
   if (currency === WalletCurrency.Usd) amount = BigInt(Math.round(dollarAmount * 100))
+  if (currency === WalletCurrency.Usdt)
+    amount = BigInt(Math.round(dollarAmount * USDT_MICROS_PER_MAJOR_UNIT))
   return { amount: amount as PaymentAmount<WalletCurrency>["amount"], currency }
 }
 
