@@ -719,6 +719,17 @@ export const configSchema = {
       required: ["enabled", "minimum", "maximum", "accountLevel"],
       default: { enabled: true },
     },
+    topup: {
+      type: "object",
+      properties: {
+        enabled: { type: "boolean" },
+      },
+      required: ["enabled"],
+      additionalProperties: false,
+      // Default OFF: top-up entry points (card webview, bank-transfer-to-support)
+      // stay hidden unless explicitly enabled per the v0.6.0 flag ramp.
+      default: { enabled: false },
+    },
     frappe: {
       type: "object",
       properties: {

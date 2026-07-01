@@ -87,6 +87,9 @@ cashout:
     from: "notifications@getflash.io"
     subject: "New Cashout"
 
+topup:
+  enabled: false
+
 frappe:
   url: http://flashapp.me.localhost:8000
   sitename: flashapp.me.localhost # default sitename for frappe docker container

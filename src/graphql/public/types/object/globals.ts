@@ -36,6 +36,12 @@ const Globals = GT.Object({
     feesInformation: {
       type: GT.NonNull(FeesInformation),
     },
+    topupEnabled: {
+      type: GT.NonNull(GT.Boolean),
+      description: dedent`Whether wallet top-up entry points (card webview and
+        bank-transfer-to-support) should be shown to the user. Controlled by the
+        instance-wide topup feature flag.`,
+    },
   }),
 })
 

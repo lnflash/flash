@@ -388,6 +388,10 @@ export const Cashout = {
   },
 }
 
+export const Topup = {
+  Enabled: (yamlConfig.topup?.enabled ?? false) as boolean,
+}
+
 export const SendGridConfig = yamlConfig.sendgrid as SendGridConfig
 
 export const IbexConfig = yamlConfig.ibex as IbexConfig

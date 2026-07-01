@@ -229,6 +229,9 @@ type YamlSchema = {
     duration: number
     email: CashoutEmail
   }
+  topup: {
+    enabled: boolean
+  }
   sendgrid: SendGridConfig
   frappe: FrappeConfig
   fcmTopics: {
