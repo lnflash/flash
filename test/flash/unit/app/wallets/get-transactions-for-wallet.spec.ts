@@ -29,7 +29,7 @@ const wallet = ({ id, currency }: { id: string; currency: WalletCurrency }): Wal
   }) as Wallet
 
 describe("toWalletTransactions", () => {
-  it("maps IBEX USDT currency id to USDT wallet currency with integer micros", () => {
+  it("maps IBEX USDT currency id to USDT wallet currency with integer cents", () => {
     const transactions = toWalletTransactions([
       {
         id: "trx-id-1",
@@ -51,14 +51,14 @@ describe("toWalletTransactions", () => {
 
     expect(transactions).toHaveLength(2)
     expect(transactions[0].settlementCurrency).toBe(WalletCurrency.Usdt)
-    expect(transactions[0].settlementAmount).toBe(175_310)
-    expect(transactions[1].settlementAmount).toBe(9_824_690)
+    expect(transactions[0].settlementAmount).toBe(18)
+    expect(transactions[1].settlementAmount).toBe(982)
     expect(
       transactions.reduce((sum, transaction) => sum + transaction.settlementAmount, 0),
-    ).toBe(10_000_000)
+    ).toBe(1_000)
   })
 
-  it("maps IBEX USDT send amounts to negative integer micros", () => {
+  it("maps IBEX USDT send amounts to negative integer cents", () => {
     const [transaction] = toWalletTransactions([
       {
         id: "trx-id",
@@ -72,9 +72,9 @@ describe("toWalletTransactions", () => {
     ] as GResponse200)
 
     expect(transaction.settlementCurrency).toBe(WalletCurrency.Usdt)
-    expect(transaction.settlementAmount).toBe(-500_000)
+    expect(transaction.settlementAmount).toBe(-50)
     expect(transaction.settlementDisplayAmount).toBe("-0.5")
-    expect(transaction.settlementFee).toBe(1)
+    expect(transaction.settlementFee).toBe(0)
   })
 
   it("maps IBEX crypto send transaction type to outgoing on-chain USDT", () => {
@@ -91,15 +91,15 @@ describe("toWalletTransactions", () => {
     ] as GResponse200)
 
     expect(transaction.settlementCurrency).toBe(WalletCurrency.Usdt)
-    expect(transaction.settlementAmount).toBe(-2_500_000)
+    expect(transaction.settlementAmount).toBe(-250)
     expect(transaction.settlementDisplayAmount).toBe("-2.5")
-    expect(transaction.settlementFee).toBe(179_554)
+    expect(transaction.settlementFee).toBe(18)
     expect(transaction.settlementDisplayFee).toBe("0.179554")
     expect(transaction.initiationVia.type).toBe("onchain")
     expect(transaction.settlementVia.type).toBe("onchain")
   })
 
-  it("defaults omitted IBEX USDT amount and network fee to zero micros", () => {
+  it("defaults omitted IBEX USDT amount and network fee to zero cents", () => {
     const [transaction] = toWalletTransactions([
       {
         id: "trx-id",

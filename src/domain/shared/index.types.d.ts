@@ -49,7 +49,7 @@ type WalletDescriptor<T extends WalletCurrency> = PartialWalletDescriptor<T> & {
 
 type BtcPaymentAmount = PaymentAmount<"BTC">
 type UsdPaymentAmount = PaymentAmount<"USD">
-type UsdtMicros = number & { readonly brand: unique symbol }
+type UsdtCents = number & { readonly brand: unique symbol }
 
 type RequireField<T, K extends keyof T> = T & Required<Pick<T, K>>
 
