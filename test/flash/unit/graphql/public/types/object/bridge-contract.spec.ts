@@ -17,6 +17,7 @@ jest.mock("@config", () => {
 })
 
 import BridgeVirtualAccount from "@graphql/public/types/object/bridge-virtual-account"
+import BridgeExternalAccount from "@graphql/public/types/object/bridge-external-account"
 import BridgeWithdrawal from "@graphql/public/types/object/bridge-withdrawal"
 import { defaultFieldResolver } from "graphql"
 import { getBridgeWithdrawalFlashFeeNotice } from "@app/bridge/get-withdrawal-flash-fee-notice"
@@ -113,5 +114,15 @@ describe("Bridge public GraphQL object contract", () => {
     expect(
       idField.resolve?.(virtualAccount, {}, {} as GraphQLPublicContext, {} as never),
     ).toBe("bridge-va-001")
+  })
+
+  it("exposes Bridge external account default status", () => {
+    const fields = BridgeExternalAccount.getFields()
+
+    expect(fields).toHaveProperty("id")
+    expect(fields).toHaveProperty("bankName")
+    expect(fields).toHaveProperty("accountNumberLast4")
+    expect(fields).toHaveProperty("status")
+    expect(fields).toHaveProperty("isDefault")
   })
 })

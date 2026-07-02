@@ -15,7 +15,11 @@ import { wrapAsyncFunctionsToRunInSpan } from "@services/tracing"
 import { baseLogger } from "@services/logger"
 
 import { RepositoryError } from "@domain/errors"
-import { toBridgeCustomerId, toBridgeVirtualAccountId } from "@domain/primitives/bridge"
+import {
+  toBridgeCustomerId,
+  toBridgeExternalAccountId,
+  toBridgeVirtualAccountId,
+} from "@domain/primitives/bridge"
 import { getBalanceForWallet } from "@app/wallets/get-balance-for-wallet"
 import { sendBridgeWithdrawalNotificationBestEffort } from "@app/bridge/send-withdrawal-notification"
 import { USDTAmount, WalletCurrency } from "@domain/shared"
@@ -129,6 +133,7 @@ type ExternalAccountResult = {
   bankName: string
   accountNumberLast4: string
   status: "pending" | "verified" | "failed"
+  isDefault: boolean
 }
 
 // ============ Helpers ============
@@ -182,11 +187,13 @@ const externalAccountResultFromRecord = (acc: {
   bankName: string
   accountNumberLast4: string
   status: string
+  isDefault?: boolean
 }): ExternalAccountResult => ({
   bridgeExternalAccountId: acc.bridgeExternalAccountId,
   bankName: acc.bankName,
   accountNumberLast4: acc.accountNumberLast4,
   status: acc.status as "pending" | "verified" | "failed",
+  isDefault: Boolean(acc.isDefault),
 })
 
 const syncExternalAccountsFromBridge = async (
@@ -215,6 +222,9 @@ const syncExternalAccountsFromBridge = async (
     activeBridgeAccountIds,
   )
   if (staleMarkResult instanceof Error) return staleMarkResult
+
+  const defaultResult = await BridgeAccountsRepo.ensureDefaultExternalAccount(accountId)
+  if (defaultResult instanceof Error) return defaultResult
 
   const localAccounts =
     await BridgeAccountsRepo.findExternalAccountsByAccountId(accountId)
@@ -672,7 +682,7 @@ const createExternalAccount = async (
       crypto.randomUUID(),
     )
 
-    const result: ExternalAccountResult = {
+    const bridgeExternalAccountResult = {
       bridgeExternalAccountId: externalAccount.id,
       bankName: externalAccount.bank_name ?? "",
       accountNumberLast4: bridgeExternalAccountLast4(externalAccount),
@@ -682,9 +692,9 @@ const createExternalAccount = async (
     // Persist the external account reference in the local repository
     const persistResult = await BridgeAccountsRepo.createExternalAccount({
       accountId,
-      bridgeExternalAccountId: result.bridgeExternalAccountId,
-      bankName: result.bankName,
-      accountNumberLast4: result.accountNumberLast4,
+      bridgeExternalAccountId: bridgeExternalAccountResult.bridgeExternalAccountId,
+      bankName: bridgeExternalAccountResult.bankName,
+      accountNumberLast4: bridgeExternalAccountResult.accountNumberLast4,
       status: "verified",
     })
     if (persistResult instanceof Error) {
@@ -695,6 +705,8 @@ const createExternalAccount = async (
       return persistResult
     }
 
+    const result = externalAccountResultFromRecord(persistResult)
+
     baseLogger.info(
       { accountId, operation: "createExternalAccount", result },
       "Bridge operation completed",
@@ -704,6 +716,127 @@ const createExternalAccount = async (
   } catch (error) {
     baseLogger.error(
       { accountId, operation: "createExternalAccount", error },
+      "Bridge operation failed",
+    )
+    return error instanceof Error ? error : new Error(String(error))
+  }
+}
+
+const setDefaultExternalAccount = async (
+  accountId: AccountId,
+  externalAccountId: string,
+): Promise<ExternalAccountResult | Error> => {
+  baseLogger.info(
+    { accountId, externalAccountId, operation: "setDefaultExternalAccount" },
+    "Bridge operation started",
+  )
+
+  const enabledCheck = checkBridgeEnabled()
+  if (enabledCheck instanceof Error) return enabledCheck
+
+  const account = await checkAccountLevel(accountId)
+  if (account instanceof Error) return account
+
+  try {
+    const customerId = account.bridgeCustomerId
+    if (!customerId) {
+      return new BridgeCustomerNotFoundError(
+        "Account has no Bridge customer ID. Complete KYC first.",
+      )
+    }
+
+    const externalAccounts = await syncExternalAccountsFromBridge(
+      accountId as string,
+      customerId,
+    )
+    if (externalAccounts instanceof Error) return externalAccounts
+
+    const targetAccount = externalAccounts.find(
+      (acc) => acc.bridgeExternalAccountId === externalAccountId,
+    )
+    if (!targetAccount) {
+      return new BridgeError("External account not found for this account")
+    }
+
+    const result = await BridgeAccountsRepo.setDefaultExternalAccount(
+      accountId as string,
+      externalAccountId,
+    )
+    if (result instanceof Error) return result
+
+    const presented = externalAccountResultFromRecord(result)
+    baseLogger.info(
+      { accountId, externalAccountId, operation: "setDefaultExternalAccount" },
+      "Bridge operation completed",
+    )
+
+    return presented
+  } catch (error) {
+    baseLogger.error(
+      { accountId, externalAccountId, operation: "setDefaultExternalAccount", error },
+      "Bridge operation failed",
+    )
+    return error instanceof Error ? error : new Error(String(error))
+  }
+}
+
+const deleteExternalAccount = async (
+  accountId: AccountId,
+  externalAccountId: string,
+): Promise<ExternalAccountResult | Error> => {
+  baseLogger.info(
+    { accountId, externalAccountId, operation: "deleteExternalAccount" },
+    "Bridge operation started",
+  )
+
+  const enabledCheck = checkBridgeEnabled()
+  if (enabledCheck instanceof Error) return enabledCheck
+
+  const account = await checkAccountLevel(accountId)
+  if (account instanceof Error) return account
+
+  try {
+    const customerId = account.bridgeCustomerId
+    if (!customerId) {
+      return new BridgeCustomerNotFoundError(
+        "Account has no Bridge customer ID. Complete KYC first.",
+      )
+    }
+
+    const externalAccounts = await syncExternalAccountsFromBridge(
+      accountId as string,
+      customerId,
+    )
+    if (externalAccounts instanceof Error) return externalAccounts
+
+    const targetAccount = externalAccounts.find(
+      (acc) => acc.bridgeExternalAccountId === externalAccountId,
+    )
+    if (!targetAccount) {
+      return new BridgeError("External account not found for this account")
+    }
+
+    await BridgeApiClient.deleteExternalAccount(
+      toBridgeCustomerId(customerId),
+      toBridgeExternalAccountId(externalAccountId),
+    )
+
+    const result = await BridgeAccountsRepo.deleteExternalAccount(
+      accountId as string,
+      externalAccountId,
+    )
+    if (result instanceof Error) return result
+
+    const presented = externalAccountResultFromRecord(result)
+    baseLogger.info(
+      { accountId, externalAccountId, operation: "deleteExternalAccount" },
+      "Bridge operation completed",
+    )
+
+    return presented
+  } catch (error) {
+    baseLogger.error(
+      { accountId, externalAccountId, operation: "deleteExternalAccount", error },
       "Bridge operation failed",
     )
     return error instanceof Error ? error : new Error(String(error))
@@ -1546,6 +1679,8 @@ export default wrapAsyncFunctionsToRunInSpan({
     createVirtualAccount,
     addExternalAccount,
     createExternalAccount,
+    setDefaultExternalAccount,
+    deleteExternalAccount,
     requestWithdrawal,
     initiateWithdrawal,
     cancelWithdrawalRequest,

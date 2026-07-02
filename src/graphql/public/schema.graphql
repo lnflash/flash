@@ -278,10 +278,20 @@ type BridgeCreateVirtualAccountPayload {
   virtualAccount: BridgeVirtualAccount
 }
 
+input BridgeDeleteExternalAccountInput {
+  externalAccountId: ID!
+}
+
+type BridgeDeleteExternalAccountPayload {
+  errors: [Error!]!
+  externalAccount: BridgeExternalAccount
+}
+
 type BridgeExternalAccount {
   accountNumberLast4: String!
   bankName: String!
   id: ID!
+  isDefault: Boolean!
   status: String!
 }
 
@@ -323,6 +333,15 @@ input BridgeRequestWithdrawalInput {
 type BridgeRequestWithdrawalPayload {
   errors: [Error!]!
   withdrawal: BridgeWithdrawal
+}
+
+input BridgeSetDefaultExternalAccountInput {
+  externalAccountId: ID!
+}
+
+type BridgeSetDefaultExternalAccountPayload {
+  errors: [Error!]!
+  externalAccount: BridgeExternalAccount
 }
 
 type BridgeVirtualAccount {
@@ -1016,9 +1035,11 @@ type Mutation {
   bridgeCancelWithdrawalRequest(input: BridgeCancelWithdrawalRequestInput!): BridgeCancelWithdrawalRequestPayload!
   bridgeCreateExternalAccount(input: BridgeCreateExternalAccountInput!): BridgeCreateExternalAccountPayload!
   bridgeCreateVirtualAccount: BridgeCreateVirtualAccountPayload!
+  bridgeDeleteExternalAccount(input: BridgeDeleteExternalAccountInput!): BridgeDeleteExternalAccountPayload!
   bridgeInitiateKyc(input: BridgeInitiateKycInput!): BridgeInitiateKycPayload!
   bridgeInitiateWithdrawal(input: BridgeInitiateWithdrawalInput!): BridgeInitiateWithdrawalPayload!
   bridgeRequestWithdrawal(input: BridgeRequestWithdrawalInput!): BridgeRequestWithdrawalPayload!
+  bridgeSetDefaultExternalAccount(input: BridgeSetDefaultExternalAccountInput!): BridgeSetDefaultExternalAccountPayload!
   businessAccountUpgradeRequest(input: BusinessAccountUpgradeRequestInput!): AccountUpgradePayload!
   callbackEndpointAdd(input: CallbackEndpointAddInput!): CallbackEndpointAddPayload!
   callbackEndpointDelete(input: CallbackEndpointDeleteInput!): SuccessPayload!

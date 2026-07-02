@@ -73,7 +73,15 @@ export const createExternalAccount = async (data: {
       },
       { upsert: true, new: true, setDefaultsOnInsert: true },
     )
-    return record
+    const defaultResult = await ensureDefaultExternalAccount(data.accountId)
+    if (defaultResult instanceof Error) return defaultResult
+
+    return (
+      (await BridgeExternalAccount.findOne({
+        accountId: data.accountId,
+        bridgeExternalAccountId,
+      })) ?? record
+    )
   } catch (error) {
     return new RepositoryError(String(error))
   }
@@ -83,6 +91,100 @@ export const findExternalAccountsByAccountId = async (accountId: string) => {
   try {
     const records = await BridgeExternalAccount.find({ accountId })
     return records
+  } catch (error) {
+    return new RepositoryError(String(error))
+  }
+}
+
+export const ensureDefaultExternalAccount = async (accountId: string) => {
+  try {
+    const currentDefault = await BridgeExternalAccount.findOne({
+      accountId,
+      isDefault: true,
+      status: { $ne: "failed" },
+    })
+    if (currentDefault) return currentDefault
+
+    const nextDefault = await BridgeExternalAccount.findOne({
+      accountId,
+      status: { $ne: "failed" },
+    }).sort({ createdAt: 1 })
+    if (!nextDefault) {
+      await BridgeExternalAccount.updateMany(
+        { accountId },
+        { isDefault: false, updatedAt: new Date() },
+      )
+      return null
+    }
+
+    await BridgeExternalAccount.updateMany(
+      { accountId },
+      { isDefault: false, updatedAt: new Date() },
+    )
+
+    return await BridgeExternalAccount.findOneAndUpdate(
+      { _id: nextDefault._id },
+      { isDefault: true, updatedAt: new Date() },
+      { new: true },
+    )
+  } catch (error) {
+    return new RepositoryError(String(error))
+  }
+}
+
+export const setDefaultExternalAccount = async (
+  accountId: string,
+  bridgeExternalAccountId: string,
+) => {
+  try {
+    const target = await BridgeExternalAccount.findOne({
+      accountId,
+      bridgeExternalAccountId,
+      status: { $ne: "failed" },
+    })
+    if (!target) return new RepositoryError("External account not found")
+
+    await BridgeExternalAccount.updateMany(
+      { accountId },
+      { isDefault: false, updatedAt: new Date() },
+    )
+
+    const record = await BridgeExternalAccount.findOneAndUpdate(
+      { _id: target._id },
+      { isDefault: true, updatedAt: new Date() },
+      { new: true },
+    )
+    return record || new RepositoryError("External account not found")
+  } catch (error) {
+    return new RepositoryError(String(error))
+  }
+}
+
+export const deleteExternalAccount = async (
+  accountId: string,
+  bridgeExternalAccountId: string,
+) => {
+  try {
+    const target = await BridgeExternalAccount.findOne({
+      accountId,
+      bridgeExternalAccountId,
+      status: { $ne: "failed" },
+    })
+    if (!target) return new RepositoryError("External account not found")
+
+    const record = await BridgeExternalAccount.findOneAndUpdate(
+      { _id: target._id },
+      { status: "failed", isDefault: false, updatedAt: new Date() },
+      { new: true },
+    )
+    if (!record) return new RepositoryError("External account not found")
+
+    if (target.isDefault) {
+      const defaultResult = await ensureDefaultExternalAccount(accountId)
+      if (defaultResult instanceof Error) return defaultResult
+    }
+
+    return record
   } catch (error) {
     return new RepositoryError(String(error))
   }
@@ -103,6 +205,7 @@ export const markExternalAccountsMissingFromBridge = async (
 
     return await BridgeExternalAccount.updateMany(filter, {
       status: "failed",
+      isDefault: false,
       updatedAt: new Date(),
     })
   } catch (error) {
@@ -117,10 +220,21 @@ export const updateExternalAccountStatus = async (
   try {
     const record = await BridgeExternalAccount.findOneAndUpdate(
       { bridgeExternalAccountId: bridgeId },
-      { status },
+      {
+        status,
+        ...(status === "failed" ? { isDefault: false } : {}),
+        updatedAt: new Date(),
+      },
       { new: true },
     )
-    return record || new RepositoryError("External account not found")
+    if (!record) return new RepositoryError("External account not found")
+
+    if (status === "failed") {
+      const defaultResult = await ensureDefaultExternalAccount(record.accountId)
+      if (defaultResult instanceof Error) return defaultResult
+    }
+
+    return record
   } catch (error) {
     return new RepositoryError(String(error))
   }

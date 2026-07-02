@@ -58,6 +58,7 @@ jest.mock("@services/mongoose/bridge-accounts", () => ({
   findPendingWithdrawalWithoutTransfer: jest.fn(),
   findExternalAccountsByAccountId: jest.fn(),
   markExternalAccountsMissingFromBridge: jest.fn(),
+  ensureDefaultExternalAccount: jest.fn(),
   findWithdrawalsByAccountId: jest.fn(),
   findWithdrawalById: jest.fn(),
   updateWithdrawalTransferId: jest.fn(),
@@ -206,6 +207,13 @@ const setupGuards = () => {
   ;(
     BridgeAccountsRepo.markExternalAccountsMissingFromBridge as jest.Mock
   ).mockResolvedValue({ modifiedCount: 0 })
+  ;(BridgeAccountsRepo.ensureDefaultExternalAccount as jest.Mock).mockResolvedValue({
+    bridgeExternalAccountId: EXTERNAL_ACCOUNT_ID,
+    bankName: "Test Bank",
+    accountNumberLast4: "1111",
+    status: "verified",
+    isDefault: true,
+  })
   ;(BridgeClient.listExternalAccounts as jest.Mock).mockResolvedValue({
     data: [
       {

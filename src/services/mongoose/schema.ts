@@ -39,6 +39,7 @@ interface IBridgeExternalAccountRecord {
   bankName: string
   accountNumberLast4: string
   status: "pending" | "verified" | "failed"
+  isDefault: boolean
   createdAt: Date
   updatedAt: Date
 }
@@ -731,6 +732,7 @@ const BridgeExternalAccountSchema = new Schema<IBridgeExternalAccountRecord>({
   bankName: { type: String, required: true },
   accountNumberLast4: { type: String, required: true },
   status: { type: String, enum: ["pending", "verified", "failed"], default: "pending" },
+  isDefault: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 })
