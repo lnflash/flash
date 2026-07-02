@@ -313,12 +313,26 @@ type BridgeCreateVirtualAccountPayload
   virtualAccount: BridgeVirtualAccount
 }
 
+input BridgeDeleteExternalAccountInput
+  @join__type(graph: PUBLIC)
+{
+  externalAccountId: ID!
+}
+
+type BridgeDeleteExternalAccountPayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error!]!
+  externalAccount: BridgeExternalAccount
+}
+
 type BridgeExternalAccount
   @join__type(graph: PUBLIC)
 {
   accountNumberLast4: String!
   bankName: String!
   id: ID!
+  isDefault: Boolean!
   status: String!
 }
 
@@ -376,6 +390,19 @@ type BridgeRequestWithdrawalPayload
 {
   errors: [Error!]!
   withdrawal: BridgeWithdrawal
+}
+
+input BridgeSetDefaultExternalAccountInput
+  @join__type(graph: PUBLIC)
+{
+  externalAccountId: ID!
+}
+
+type BridgeSetDefaultExternalAccountPayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error!]!
+  externalAccount: BridgeExternalAccount
 }
 
 type BridgeVirtualAccount
@@ -1304,9 +1331,11 @@ type Mutation
   bridgeCancelWithdrawalRequest(input: BridgeCancelWithdrawalRequestInput!): BridgeCancelWithdrawalRequestPayload!
   bridgeCreateExternalAccount(input: BridgeCreateExternalAccountInput!): BridgeCreateExternalAccountPayload!
   bridgeCreateVirtualAccount: BridgeCreateVirtualAccountPayload!
+  bridgeDeleteExternalAccount(input: BridgeDeleteExternalAccountInput!): BridgeDeleteExternalAccountPayload!
   bridgeInitiateKyc(input: BridgeInitiateKycInput!): BridgeInitiateKycPayload!
   bridgeInitiateWithdrawal(input: BridgeInitiateWithdrawalInput!): BridgeInitiateWithdrawalPayload!
   bridgeRequestWithdrawal(input: BridgeRequestWithdrawalInput!): BridgeRequestWithdrawalPayload!
+  bridgeSetDefaultExternalAccount(input: BridgeSetDefaultExternalAccountInput!): BridgeSetDefaultExternalAccountPayload!
   businessAccountUpgradeRequest(input: BusinessAccountUpgradeRequestInput!): AccountUpgradePayload!
   callbackEndpointAdd(input: CallbackEndpointAddInput!): CallbackEndpointAddPayload!
   callbackEndpointDelete(input: CallbackEndpointDeleteInput!): SuccessPayload!

@@ -55,6 +55,9 @@ jest.mock("@services/mongoose/bridge-accounts", () => ({
   findPendingWithdrawalWithoutTransfer: jest.fn(),
   findExternalAccountsByAccountId: jest.fn(),
   markExternalAccountsMissingFromBridge: jest.fn(),
+  ensureDefaultExternalAccount: jest.fn(),
+  setDefaultExternalAccount: jest.fn(),
+  deleteExternalAccount: jest.fn(),
   updateWithdrawalFeeEstimates: jest.fn(),
   bridgeWithdrawalRecordId: jest.requireActual("@services/mongoose/bridge-accounts")
     .bridgeWithdrawalRecordId,
@@ -71,6 +74,7 @@ jest.mock("@services/bridge/client", () => ({
   default: {
     createVirtualAccount: jest.fn(),
     createExternalAccount: jest.fn(),
+    deleteExternalAccount: jest.fn(),
     createTransfer: jest.fn(),
     listExternalAccounts: jest.fn(),
     getCustomer: jest.fn().mockResolvedValue({ status: "active" }),
@@ -277,6 +281,7 @@ const setupGuards = () => {
       bankName: "Test Bank",
       accountNumberLast4: "1111",
       status: "verified",
+      isDefault: true,
     },
   ])
   ;(BridgeAccountsRepo.createExternalAccount as jest.Mock).mockResolvedValue({
@@ -284,10 +289,18 @@ const setupGuards = () => {
     bankName: "Test Bank",
     accountNumberLast4: "1111",
     status: "verified",
+    isDefault: true,
   })
   ;(
     BridgeAccountsRepo.markExternalAccountsMissingFromBridge as jest.Mock
   ).mockResolvedValue({ modifiedCount: 0 })
+  ;(BridgeAccountsRepo.ensureDefaultExternalAccount as jest.Mock).mockResolvedValue({
+    bridgeExternalAccountId: EXTERNAL_ACCOUNT_ID,
+    bankName: "Test Bank",
+    accountNumberLast4: "1111",
+    status: "verified",
+    isDefault: true,
+  })
   ;(BridgeClient.listExternalAccounts as jest.Mock).mockResolvedValue({
     data: [mockBridgeExternalAccount],
     has_more: false,
@@ -864,12 +877,14 @@ describe("getExternalAccounts", () => {
         bankName: "Deleted Bank",
         accountNumberLast4: "9999",
         status: "verified",
+        isDefault: false,
       },
       {
         bridgeExternalAccountId: EXTERNAL_ACCOUNT_ID,
         bankName: "Test Bank",
         accountNumberLast4: "1111",
         status: "verified",
+        isDefault: true,
       },
     ])
 
@@ -886,8 +901,69 @@ describe("getExternalAccounts", () => {
         bankName: "Test Bank",
         accountNumberLast4: "1111",
         status: "verified",
+        isDefault: true,
       },
     ])
+  })
+})
+
+describe("setDefaultExternalAccount", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    setupGuards()
+    ;(BridgeAccountsRepo.setDefaultExternalAccount as jest.Mock).mockResolvedValue({
+      bridgeExternalAccountId: EXTERNAL_ACCOUNT_ID,
+      bankName: "Test Bank",
+      accountNumberLast4: "1111",
+      status: "verified",
+      isDefault: true,
+    })
+  })
+
+  it("syncs with Bridge before setting the default account", async () => {
+    const result = await BridgeService.setDefaultExternalAccount(
+      ACCOUNT_ID,
+      EXTERNAL_ACCOUNT_ID,
+    )
+
+    expect(BridgeClient.listExternalAccounts).toHaveBeenCalledWith(CUSTOMER_ID)
+    expect(BridgeAccountsRepo.setDefaultExternalAccount).toHaveBeenCalledWith(
+      ACCOUNT_ID as string,
+      EXTERNAL_ACCOUNT_ID,
+    )
+    expect(expectSuccess(result).isDefault).toBe(true)
+  })
+})
+
+describe("deleteExternalAccount", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    setupGuards()
+    ;(BridgeAccountsRepo.deleteExternalAccount as jest.Mock).mockResolvedValue({
+      bridgeExternalAccountId: EXTERNAL_ACCOUNT_ID,
+      bankName: "Test Bank",
+      accountNumberLast4: "1111",
+      status: "failed",
+      isDefault: false,
+    })
+  })
+
+  it("deletes through Bridge before marking the local account failed", async () => {
+    const result = await BridgeService.deleteExternalAccount(
+      ACCOUNT_ID,
+      EXTERNAL_ACCOUNT_ID,
+    )
+
+    expect(BridgeClient.listExternalAccounts).toHaveBeenCalledWith(CUSTOMER_ID)
+    expect(BridgeClient.deleteExternalAccount).toHaveBeenCalledWith(
+      CUSTOMER_ID,
+      EXTERNAL_ACCOUNT_ID,
+    )
+    expect(BridgeAccountsRepo.deleteExternalAccount).toHaveBeenCalledWith(
+      ACCOUNT_ID as string,
+      EXTERNAL_ACCOUNT_ID,
+    )
+    expect(expectSuccess(result).status).toBe("failed")
   })
 })
 

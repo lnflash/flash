@@ -9,6 +9,7 @@ import { BridgeConfig } from "@config"
 
 import {
   BridgeCustomerId,
+  BridgeExternalAccountId,
   BridgeTransferId,
   BridgeVirtualAccountId,
 } from "@domain/primitives/bridge"
@@ -529,6 +530,16 @@ export class BridgeClient {
     return this.request<ListResponse<ExternalAccount>>(
       "GET",
       `/customers/${customerId}/external_accounts`,
+    )
+  }
+
+  async deleteExternalAccount(
+    customerId: BridgeCustomerId,
+    externalAccountId: BridgeExternalAccountId,
+  ): Promise<ExternalAccount> {
+    return this.request<ExternalAccount>(
+      "DELETE",
+      `/customers/${customerId}/external_accounts/${externalAccountId}`,
     )
   }
 
