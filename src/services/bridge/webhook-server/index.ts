@@ -24,11 +24,18 @@ import {
 
 type RawBodyRequest = express.Request & { rawBody?: string }
 
+// `validate: { xForwardedForHeader: false }` on both limiters: without Express
+// `trust proxy`, express-rate-limit v7 throws ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
+// on any request carrying X-Forwarded-For (i.e. anything behind an LB), turning
+// every webhook into a 500. Skipping that validation degrades an unset trust
+// proxy to keying on the LB's socket address (one shared bucket) instead of an
+// outage. Set `trust proxy` in the server for per-sender buckets.
 const webhookRateLimit = rateLimitMiddleware({
   windowMs: 60_000,
   limit: 120,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false },
 })
 
 const replayRateLimit = rateLimitMiddleware({
@@ -36,6 +43,7 @@ const replayRateLimit = rateLimitMiddleware({
   limit: 20,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false },
 })
 
 export const startBridgeWebhookServer = () => {

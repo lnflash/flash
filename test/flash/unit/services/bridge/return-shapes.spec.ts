@@ -66,7 +66,11 @@ jest.mock("@services/mongoose/bridge-accounts", () => ({
 
 jest.mock("@services/bridge/client", () => ({
   __esModule: true,
-  default: { createTransfer: jest.fn(), listExternalAccounts: jest.fn() },
+  default: {
+    createTransfer: jest.fn(),
+    listExternalAccounts: jest.fn(),
+    getCustomer: jest.fn(),
+  },
 }))
 
 jest.mock("@services/mongoose/accounts", () => ({
@@ -255,6 +259,7 @@ const setupGuards = () => {
     transactionHub: { id: IBEX_PAYOUT_ID },
   })
   ;(BridgeClient.createTransfer as jest.Mock).mockResolvedValue(mockTransfer)
+  ;(BridgeClient.getCustomer as jest.Mock).mockResolvedValue({ status: "active" })
 }
 
 describe("initiateWithdrawal — BridgeWithdrawal GraphQL contract shape", () => {

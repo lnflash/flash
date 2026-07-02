@@ -124,7 +124,6 @@ export const isReplayIpAllowed = (
   allowlistEnv: string | undefined = process.env[REPLAY_ALLOWED_IPS_ENV],
 ): boolean => {
   if (!clientIp || !ipaddr.isValid(clientIp)) return false
-  if (isLoopbackIp(clientIp)) return true
 
   const addr = ipaddr.process(clientIp)
   const ranges = parseReplayAllowlist(allowlistEnv)
@@ -145,6 +144,13 @@ export const replayIngressMiddleware = (
   res: Response,
   next: () => void,
 ) => {
+  // Loopback trust must come from the socket address, never from request-ip:
+  // request-ip prefers X-Forwarded-For, which any external caller can set to
+  // "127.0.0.1" and walk through this gate. The allowlist path below still uses
+  // request-ip so operators behind a trusted LB match on their real IP — it is
+  // only meaningful when the ingress strips or overwrites client-supplied XFF.
+  if (isLoopbackIp(req.socket?.remoteAddress)) return next()
+
   const clientIp = requestIp.getClientIp(req)
 
   if (!isReplayIpAllowed(clientIp)) {

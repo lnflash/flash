@@ -26,6 +26,13 @@ const webhookRateLimit = rateLimitMiddleware({
   limit: 120,
   standardHeaders: true,
   legacyHeaders: false,
+  // Without Express `trust proxy`, express-rate-limit v7 throws
+  // ERR_ERL_UNEXPECTED_X_FORWARDED_FOR on any request carrying X-Forwarded-For
+  // (i.e. anything behind an LB), turning every webhook into a 500. Skip that
+  // validation so an unset trust proxy degrades to keying on the LB's socket
+  // address (one shared bucket) instead of an outage. Set `trust proxy` in the
+  // server for per-sender buckets.
+  validate: { xForwardedForHeader: false },
 })
 
 interface CryptoReceiveResult {

@@ -59,7 +59,13 @@ const makeRes = () => {
 const makeReq = (
   body: Record<string, unknown> = {},
   headers: Record<string, string> = {},
-) => ({ body, headers }) as unknown as Request
+  socketRemoteAddress?: string,
+) =>
+  ({
+    body,
+    headers,
+    socket: { remoteAddress: socketRemoteAddress },
+  }) as unknown as Request
 
 const BASE_BODY = {
   event_type: "funds_received",
@@ -88,15 +94,28 @@ describe("replayIngressMiddleware", () => {
     }
   })
 
-  it("allows loopback replay calls without an explicit allowlist", () => {
+  it("allows loopback replay calls (by socket address) without an explicit allowlist", () => {
+    ;(requestIp.getClientIp as jest.Mock).mockReturnValue(null)
+    const res = makeRes()
+    const next = jest.fn()
+
+    replayIngressMiddleware(makeReq({}, {}, "127.0.0.1"), res, next)
+
+    expect(next).toHaveBeenCalledTimes(1)
+    expect(res.status as jest.Mock).not.toHaveBeenCalled()
+  })
+
+  it("rejects a spoofed loopback X-Forwarded-For from a public socket", () => {
+    // request-ip resolves headers like X-Forwarded-For, which the caller
+    // controls — only the socket address may grant the loopback exemption.
     ;(requestIp.getClientIp as jest.Mock).mockReturnValue("127.0.0.1")
     const res = makeRes()
     const next = jest.fn()
 
-    replayIngressMiddleware(makeReq({}, {}), res, next)
+    replayIngressMiddleware(makeReq({}, {}, "198.51.100.9"), res, next)
 
-    expect(next).toHaveBeenCalledTimes(1)
-    expect(res.status as jest.Mock).not.toHaveBeenCalled()
+    expect(next).not.toHaveBeenCalled()
+    expect(res.status as jest.Mock).toHaveBeenCalledWith(403)
   })
 
   it("rejects public replay calls when no allowlist matches", () => {
@@ -104,7 +123,7 @@ describe("replayIngressMiddleware", () => {
     const res = makeRes()
     const next = jest.fn()
 
-    replayIngressMiddleware(makeReq({}, {}), res, next)
+    replayIngressMiddleware(makeReq({}, {}, "198.51.100.9"), res, next)
 
     expect(next).not.toHaveBeenCalled()
     expect(res.status as jest.Mock).toHaveBeenCalledWith(403)
@@ -117,7 +136,7 @@ describe("replayIngressMiddleware", () => {
     const res = makeRes()
     const next = jest.fn()
 
-    replayIngressMiddleware(makeReq({}, {}), res, next)
+    replayIngressMiddleware(makeReq({}, {}, "10.0.0.7"), res, next)
 
     expect(next).toHaveBeenCalledTimes(1)
     expect(res.status as jest.Mock).not.toHaveBeenCalled()

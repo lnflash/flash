@@ -57,4 +57,29 @@ describe("IBEX webhook authenticate middleware", () => {
       expect(res.end).toHaveBeenCalledWith("Invalid secret")
     }
   })
+
+  it("fails closed when the webhook secret is unconfigured", () => {
+    // The old `!==` compare passed when both sides were undefined (or both
+    // empty), silently disabling auth on unconfigured deployments.
+    const { IbexConfig } = jest.requireMock("@config")
+    const configuredSecret = IbexConfig.webhook.secret
+
+    try {
+      for (const unconfigured of [undefined, ""]) {
+        IbexConfig.webhook.secret = unconfigured
+
+        for (const provided of [undefined, ""]) {
+          const res = makeRes()
+          const next = jest.fn()
+
+          authenticate(makeReq(provided), res, next)
+
+          expect(next).not.toHaveBeenCalled()
+          expect(res.status).toHaveBeenCalledWith(401)
+        }
+      }
+    } finally {
+      IbexConfig.webhook.secret = configuredSecret
+    }
+  })
 })
