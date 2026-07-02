@@ -1,0 +1,41 @@
+name: "Smoke test"
+
+# UAT smoke suite: boots the quickstart stack (full API + regtest lightning)
+# and runs test/flash/smoke against it over HTTP — the automated slice of the
+# integrated UAT matrix. See test/flash/smoke/README.md for coverage.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  smoke:
+    name: UAT smoke suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v3
+      - uses: carvel-dev/setup-action@v1
+        with:
+          only: ytt, vendir
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 24
+          cache: "yarn"
+      - run: yarn install --frozen-lockfile
+      - name: Boot quickstart stack
+        run: |
+          cd quickstart
+          ./bin/bump-galoy-image-digest.sh local
+          ./bin/bump-mongodb-migrate-image-digest.sh local
+          make re-render
+          source .envrc
+          docker compose up -d --build
+          ./bin/quickstart.sh
+          ./bin/init-lightning.sh
+      - name: Run smoke suite
+        run: SMOKE_DOCKER_HELPERS=true yarn test:smoke
+      - name: Dump API logs on failure
+        if: failure()
+        run: docker logs quickstart-flash-1 --tail 200 || true
