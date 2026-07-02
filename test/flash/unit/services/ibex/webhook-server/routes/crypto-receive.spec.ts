@@ -1,6 +1,7 @@
 jest.mock("@services/ibex/webhook-server/middleware", () => ({
   authenticate: jest.fn((_req, _res, next) => next()),
   logRequest: jest.fn((_req, _res, next) => next()),
+  validateIbexIp: jest.fn((_req, _res, next) => next()),
 }))
 
 jest.mock("@services/mongoose/accounts", () => ({
@@ -40,7 +41,16 @@ jest.mock("@services/alerts/ibex-bridge-movement", () => ({
   alertIbexReconciliationFailed: jest.fn(),
 }))
 
-import { cryptoReceiveHandler } from "@services/ibex/webhook-server/routes/crypto-receive"
+import {
+  authenticate,
+  logRequest,
+  validateIbexIp,
+} from "@services/ibex/webhook-server/middleware"
+import {
+  cryptoReceiveHandler,
+  paths,
+  router,
+} from "@services/ibex/webhook-server/routes/crypto-receive"
 import { AccountsRepository } from "@services/mongoose/accounts"
 import { createIbexCryptoReceive } from "@services/mongoose/ibex-crypto-receive-log"
 import { listWalletsByAccountId } from "@app/wallets"
@@ -76,6 +86,27 @@ describe("cryptoReceiveHandler", () => {
       { id: WALLET_ID, currency: WalletCurrency.Usdt },
     ])
     ;(writeIbexCryptoReceiveRequest as jest.Mock).mockResolvedValue(true)
+  })
+
+  it("protects the route with rate limit, IP allowlist, auth, and request logging", () => {
+    const routeLayer = (
+      router.stack as Array<{
+        route?: { path: string; stack: Array<{ handle: unknown }> }
+      }>
+    ).find((layer) => layer.route?.path === paths.cryptoReceive)
+
+    expect(routeLayer).toBeDefined()
+    const handles = routeLayer!.route!.stack.map((layer) => layer.handle)
+
+    const validateIndex = handles.indexOf(validateIbexIp)
+    const authIndex = handles.indexOf(authenticate)
+    const logIndex = handles.indexOf(logRequest)
+    const handlerIndex = handles.indexOf(cryptoReceiveHandler)
+
+    expect(validateIndex).toBeGreaterThan(0)
+    expect(authIndex).toBeGreaterThan(validateIndex)
+    expect(logIndex).toBeGreaterThan(authIndex)
+    expect(handlerIndex).toBeGreaterThan(logIndex)
   })
 
   it("accepts Ethereum USDT receive webhooks and normalizes persisted currency/network", async () => {

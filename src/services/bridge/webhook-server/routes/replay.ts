@@ -1,6 +1,8 @@
 import crypto from "crypto"
 
 import { Request, Response } from "express"
+import ipaddr from "ipaddr.js"
+import requestIp from "request-ip"
 
 import { BridgeConfig } from "@config"
 
@@ -18,6 +20,7 @@ import { externalAccountHandler } from "./external-account"
 import { kycHandler } from "./kyc"
 import { transferHandler } from "./transfer"
 type RouteKey = "kyc" | "deposit" | "transfer" | "external_account"
+type ParsedRange = [ipaddr.IPv4 | ipaddr.IPv6, number]
 
 const HANDLERS: Record<RouteKey, (req: Request, res: Response) => Promise<Response>> = {
   kyc: kycHandler,
@@ -27,6 +30,7 @@ const HANDLERS: Record<RouteKey, (req: Request, res: Response) => Promise<Respon
 }
 
 const WEAK_REPLAY_SECRETS = new Set(["also-not-so-secret", "change-me", "<replace>"])
+const REPLAY_ALLOWED_IPS_ENV = "BRIDGE_WEBHOOK_REPLAY_ALLOWED_IPS"
 
 const DEPOSIT_EVENT_TYPES = new Set([
   "funds_scheduled",
@@ -88,6 +92,73 @@ const resolveReplayEventType = ({
   }
 
   return eventType
+}
+
+const parseReplayAllowlistEntry = (entry: string): ParsedRange | null => {
+  const trimmed = entry.trim()
+  if (!trimmed) return null
+
+  try {
+    if (trimmed.includes("/")) return ipaddr.parseCIDR(trimmed)
+    const addr = ipaddr.parse(trimmed)
+    return [addr, addr.kind() === "ipv6" ? 128 : 32]
+  } catch {
+    baseLogger.error({ entry }, "Ignoring invalid Bridge replay IP allowlist entry")
+    return null
+  }
+}
+
+const parseReplayAllowlist = (value: string | undefined): ParsedRange[] =>
+  (value ?? "")
+    .split(",")
+    .map(parseReplayAllowlistEntry)
+    .filter((range): range is ParsedRange => range !== null)
+
+const isLoopbackIp = (clientIp: string | null | undefined): boolean => {
+  if (!clientIp || !ipaddr.isValid(clientIp)) return false
+  return ipaddr.process(clientIp).range() === "loopback"
+}
+
+export const isReplayIpAllowed = (
+  clientIp: string | null | undefined,
+  allowlistEnv: string | undefined = process.env[REPLAY_ALLOWED_IPS_ENV],
+): boolean => {
+  if (!clientIp || !ipaddr.isValid(clientIp)) return false
+
+  const addr = ipaddr.process(clientIp)
+  const ranges = parseReplayAllowlist(allowlistEnv)
+
+  return ranges.some(([rangeAddr, prefix]) => {
+    if (addr.kind() === "ipv4" && rangeAddr.kind() === "ipv4") {
+      return (addr as ipaddr.IPv4).match(rangeAddr as ipaddr.IPv4, prefix)
+    }
+    if (addr.kind() === "ipv6" && rangeAddr.kind() === "ipv6") {
+      return (addr as ipaddr.IPv6).match(rangeAddr as ipaddr.IPv6, prefix)
+    }
+    return false
+  })
+}
+
+export const replayIngressMiddleware = (
+  req: Request,
+  res: Response,
+  next: () => void,
+) => {
+  // Loopback trust must come from the socket address, never from request-ip:
+  // request-ip prefers X-Forwarded-For, which any external caller can set to
+  // "127.0.0.1" and walk through this gate. The allowlist path below still uses
+  // request-ip so operators behind a trusted LB match on their real IP — it is
+  // only meaningful when the ingress strips or overwrites client-supplied XFF.
+  if (isLoopbackIp(req.socket?.remoteAddress)) return next()
+
+  const clientIp = requestIp.getClientIp(req)
+
+  if (!isReplayIpAllowed(clientIp)) {
+    baseLogger.warn({ clientIp, path: req.path }, "Rejected Bridge replay request")
+    return res.status(403).json({ error: "Forbidden" })
+  }
+
+  next()
 }
 
 const toHandlerBody = ({
@@ -163,11 +234,22 @@ export const replayHandler = async (req: Request, res: Response) => {
     dry_run = false,
   } = req.body
 
-  if (!event_type || !event_object || !event_created_at) {
+  if (
+    !event_type ||
+    !event_object ||
+    !event_created_at ||
+    !operator ||
+    !time_window_start ||
+    !time_window_end
+  ) {
     return res.status(400).json({
       error:
         "Missing required fields: event_type, event_object, event_created_at, operator, time_window_start, time_window_end",
     })
+  }
+
+  if (typeof operator !== "string" || operator.trim() === "") {
+    return res.status(400).json({ error: "operator must be a non-empty string" })
   }
 
   if (typeof event_object !== "object" || event_object === null) {
@@ -175,6 +257,20 @@ export const replayHandler = async (req: Request, res: Response) => {
   }
 
   const eventObjectTyped = event_object as Record<string, unknown>
+  const bridgeEventCreatedAt = new Date(event_created_at)
+  const timeWindowStart = new Date(time_window_start)
+  const timeWindowEnd = new Date(time_window_end)
+
+  if (
+    Number.isNaN(bridgeEventCreatedAt.getTime()) ||
+    Number.isNaN(timeWindowStart.getTime()) ||
+    Number.isNaN(timeWindowEnd.getTime())
+  ) {
+    return res.status(400).json({
+      error:
+        "event_created_at, time_window_start, and time_window_end must be valid dates",
+    })
+  }
 
   const normalizedEventType = resolveReplayEventType({
     eventType: event_type,
@@ -201,11 +297,11 @@ export const replayHandler = async (req: Request, res: Response) => {
     eventId,
     eventType: routeKey,
     eventPayload: event_object,
-    bridgeEventCreatedAt: new Date(event_created_at),
+    bridgeEventCreatedAt,
     replayedAt: new Date(),
     operator,
-    timeWindowStart: new Date(time_window_start),
-    timeWindowEnd: new Date(time_window_end),
+    timeWindowStart,
+    timeWindowEnd,
     dryRun: dry_run,
   }
 

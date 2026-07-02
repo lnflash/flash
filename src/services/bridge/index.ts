@@ -288,6 +288,36 @@ const checkAccountLevel = async (
   return account
 }
 
+const requireApprovedBridgeCustomer = async ({
+  account,
+  operation,
+}: {
+  account: Account
+  operation: string
+}): Promise<BridgeCustomerId | Error> => {
+  if (!account.bridgeCustomerId) {
+    return new BridgeCustomerNotFoundError(
+      "Account has no Bridge customer ID. Complete KYC first.",
+    )
+  }
+
+  const customerId = toBridgeCustomerId(account.bridgeCustomerId)
+  const customer = await BridgeApiClient.getCustomer(customerId)
+  const kycStatus = customer.status
+
+  if (kycStatus === "offboarded") return new BridgeKycOffboardedError()
+  if (kycStatus === "rejected") return new BridgeKycRejectedError()
+  if (kycStatus !== "active" && (kycStatus as string) !== "approved") {
+    baseLogger.warn(
+      { accountId: account.id, customerId, kycStatus, operation },
+      "Bridge customer is not approved for withdrawal",
+    )
+    return new BridgeKycPendingError("KYC must be approved before withdrawal")
+  }
+
+  return customerId
+}
+
 // ============ Service Methods ============
 
 /**
@@ -702,12 +732,11 @@ const requestWithdrawal = async (
   if (account instanceof Error) return account
 
   try {
-    const customerId = account.bridgeCustomerId
-    if (!customerId) {
-      return new BridgeCustomerNotFoundError(
-        "Account has no Bridge customer ID. Complete KYC first.",
-      )
-    }
+    const customerId = await requireApprovedBridgeCustomer({
+      account,
+      operation: "requestWithdrawal",
+    })
+    if (customerId instanceof Error) return customerId
 
     const ethereumAddress = account.bridgeEthereumAddress
     if (!ethereumAddress) {
@@ -901,12 +930,11 @@ const initiateWithdrawal = async (
   if (account instanceof Error) return account
 
   try {
-    const customerId = account.bridgeCustomerId
-    if (!customerId) {
-      return new BridgeCustomerNotFoundError(
-        "Account has no Bridge customer ID. Complete KYC first.",
-      )
-    }
+    const customerId = await requireApprovedBridgeCustomer({
+      account,
+      operation: "initiateWithdrawal",
+    })
+    if (customerId instanceof Error) return customerId
 
     const pendingWithdrawal = await BridgeAccountsRepo.findWithdrawalById(withdrawalId)
     if (pendingWithdrawal instanceof Error) {

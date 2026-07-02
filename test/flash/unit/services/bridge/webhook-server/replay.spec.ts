@@ -12,6 +12,11 @@ jest.mock("@services/logger", () => ({
   baseLogger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }))
 
+jest.mock("request-ip", () => ({
+  __esModule: true,
+  default: { getClientIp: jest.fn() },
+}))
+
 jest.mock("@services/mongoose/bridge-replay-log", () => ({
   createBridgeReplay: jest.fn(),
 }))
@@ -25,16 +30,22 @@ jest.mock("@services/bridge/webhook-server/routes/kyc", () => ({
 jest.mock("@services/bridge/webhook-server/routes/transfer", () => ({
   transferHandler: jest.fn(),
 }))
+jest.mock("@services/bridge/webhook-server/routes/external-account", () => ({
+  externalAccountHandler: jest.fn(),
+}))
 
 import { Request, Response } from "express"
 import {
+  isReplayIpAllowed,
   replayAuthMiddleware,
   replayHandler,
+  replayIngressMiddleware,
 } from "@services/bridge/webhook-server/routes/replay"
 import * as ReplayLog from "@services/mongoose/bridge-replay-log"
 import { depositHandler } from "@services/bridge/webhook-server/routes/deposit"
 import { kycHandler } from "@services/bridge/webhook-server/routes/kyc"
 import { transferHandler } from "@services/bridge/webhook-server/routes/transfer"
+import requestIp from "request-ip"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -48,7 +59,13 @@ const makeRes = () => {
 const makeReq = (
   body: Record<string, unknown> = {},
   headers: Record<string, string> = {},
-) => ({ body, headers }) as unknown as Request
+  socketRemoteAddress?: string,
+) =>
+  ({
+    body,
+    headers,
+    socket: { remoteAddress: socketRemoteAddress },
+  }) as unknown as Request
 
 const BASE_BODY = {
   event_type: "funds_received",
@@ -60,6 +77,71 @@ const BASE_BODY = {
 }
 
 // ── replayAuthMiddleware ──────────────────────────────────────────────────────
+
+describe("replayIngressMiddleware", () => {
+  const originalReplayAllowedIps = process.env.BRIDGE_WEBHOOK_REPLAY_ALLOWED_IPS
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    delete process.env.BRIDGE_WEBHOOK_REPLAY_ALLOWED_IPS
+  })
+
+  afterAll(() => {
+    if (originalReplayAllowedIps === undefined) {
+      delete process.env.BRIDGE_WEBHOOK_REPLAY_ALLOWED_IPS
+    } else {
+      process.env.BRIDGE_WEBHOOK_REPLAY_ALLOWED_IPS = originalReplayAllowedIps
+    }
+  })
+
+  it("allows loopback replay calls (by socket address) without an explicit allowlist", () => {
+    ;(requestIp.getClientIp as jest.Mock).mockReturnValue(null)
+    const res = makeRes()
+    const next = jest.fn()
+
+    replayIngressMiddleware(makeReq({}, {}, "127.0.0.1"), res, next)
+
+    expect(next).toHaveBeenCalledTimes(1)
+    expect(res.status as jest.Mock).not.toHaveBeenCalled()
+  })
+
+  it("rejects a spoofed loopback X-Forwarded-For from a public socket", () => {
+    // request-ip resolves headers like X-Forwarded-For, which the caller
+    // controls — only the socket address may grant the loopback exemption.
+    ;(requestIp.getClientIp as jest.Mock).mockReturnValue("127.0.0.1")
+    const res = makeRes()
+    const next = jest.fn()
+
+    replayIngressMiddleware(makeReq({}, {}, "198.51.100.9"), res, next)
+
+    expect(next).not.toHaveBeenCalled()
+    expect(res.status as jest.Mock).toHaveBeenCalledWith(403)
+  })
+
+  it("rejects public replay calls when no allowlist matches", () => {
+    ;(requestIp.getClientIp as jest.Mock).mockReturnValue("198.51.100.9")
+    const res = makeRes()
+    const next = jest.fn()
+
+    replayIngressMiddleware(makeReq({}, {}, "198.51.100.9"), res, next)
+
+    expect(next).not.toHaveBeenCalled()
+    expect(res.status as jest.Mock).toHaveBeenCalledWith(403)
+  })
+
+  it("allows public replay calls from the configured allowlist", () => {
+    expect(isReplayIpAllowed("198.51.100.9", "198.51.100.0/24")).toBe(true)
+    ;(requestIp.getClientIp as jest.Mock).mockReturnValue("198.51.100.9")
+    process.env.BRIDGE_WEBHOOK_REPLAY_ALLOWED_IPS = "198.51.100.0/24"
+    const res = makeRes()
+    const next = jest.fn()
+
+    replayIngressMiddleware(makeReq({}, {}, "10.0.0.7"), res, next)
+
+    expect(next).toHaveBeenCalledTimes(1)
+    expect(res.status as jest.Mock).not.toHaveBeenCalled()
+  })
+})
 
 describe("replayAuthMiddleware", () => {
   beforeEach(() => jest.clearAllMocks())
@@ -171,6 +253,26 @@ describe("replayHandler", () => {
       const body: Record<string, unknown> = { ...BASE_BODY }
       delete body.event_created_at
       await replayHandler(makeReq(body), res)
+      expect(res.status as jest.Mock).toHaveBeenCalledWith(400)
+    })
+
+    it("returns 400 when replay audit fields are missing", async () => {
+      const res = makeRes()
+      const body: Record<string, unknown> = { ...BASE_BODY }
+      delete body.operator
+      await replayHandler(makeReq(body), res)
+      expect(res.status as jest.Mock).toHaveBeenCalledWith(400)
+    })
+
+    it("returns 400 when replay audit dates are invalid", async () => {
+      const res = makeRes()
+      await replayHandler(
+        makeReq({
+          ...BASE_BODY,
+          time_window_start: "not-a-date",
+        }),
+        res,
+      )
       expect(res.status as jest.Mock).toHaveBeenCalledWith(400)
     })
 
