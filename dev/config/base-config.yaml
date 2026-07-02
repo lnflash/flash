@@ -16,7 +16,7 @@ ibex:
     allowedIps: []
 
 bridge:
-  enabled: true
+  enabled: false # flags-off baseline; enable per environment via config overrides
   apiKey: "" # real key injected via config overrides; never commit a real key
   baseUrl: "https://api.sandbox.bridge.xyz/v0"
   minWithdrawalAmount: 2
