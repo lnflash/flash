@@ -21,7 +21,7 @@ export const createVirtualAccount = async (data: {
     // Atomic upsert: if a doc for this accountId already exists (concurrent call won the
     // race), $setOnInsert is skipped and we get back the winner's record — no duplicate.
     const record = await BridgeVirtualAccount.findOneAndUpdate(
-      { accountId: data.accountId },
+      { accountId: { $eq: data.accountId } },
       { $setOnInsert: data },
       { upsert: true, new: true, setDefaultsOnInsert: true },
     )
@@ -33,7 +33,7 @@ export const createVirtualAccount = async (data: {
 
 export const findVirtualAccountByAccountId = async (accountId: string) => {
   try {
-    const record = await BridgeVirtualAccount.findOne({ accountId })
+    const record = await BridgeVirtualAccount.findOne({ accountId: { $eq: accountId } })
     return record || new RepositoryError("Virtual account not found")
   } catch (error) {
     return new RepositoryError(String(error))
@@ -43,7 +43,7 @@ export const findVirtualAccountByAccountId = async (accountId: string) => {
 export const findVirtualAccountByBridgeId = async (bridgeId: BridgeVirtualAccountId) => {
   try {
     const record = await BridgeVirtualAccount.findOne({
-      bridgeVirtualAccountId: bridgeId,
+      bridgeVirtualAccountId: { $eq: bridgeId },
     })
     return record || new RepositoryError("Virtual account not found")
   } catch (error) {
@@ -78,8 +78,8 @@ export const createExternalAccount = async (data: {
 
     return (
       (await BridgeExternalAccount.findOne({
-        accountId: data.accountId,
-        bridgeExternalAccountId,
+        accountId: { $eq: data.accountId },
+        bridgeExternalAccountId: { $eq: bridgeExternalAccountId },
       })) ?? record
     )
   } catch (error) {
@@ -89,7 +89,7 @@ export const createExternalAccount = async (data: {
 
 export const findExternalAccountsByAccountId = async (accountId: string) => {
   try {
-    const records = await BridgeExternalAccount.find({ accountId })
+    const records = await BridgeExternalAccount.find({ accountId: { $eq: accountId } })
     return records
   } catch (error) {
     return new RepositoryError(String(error))
@@ -99,26 +99,26 @@ export const findExternalAccountsByAccountId = async (accountId: string) => {
 export const ensureDefaultExternalAccount = async (accountId: string) => {
   try {
     const currentDefault = await BridgeExternalAccount.findOne({
-      accountId,
+      accountId: { $eq: accountId },
       isDefault: true,
       status: { $ne: "failed" },
     })
     if (currentDefault) return currentDefault
 
     const nextDefault = await BridgeExternalAccount.findOne({
-      accountId,
+      accountId: { $eq: accountId },
       status: { $ne: "failed" },
     }).sort({ createdAt: 1 })
     if (!nextDefault) {
       await BridgeExternalAccount.updateMany(
-        { accountId },
+        { accountId: { $eq: accountId } },
         { isDefault: false, updatedAt: new Date() },
       )
       return null
     }
 
     await BridgeExternalAccount.updateMany(
-      { accountId },
+      { accountId: { $eq: accountId } },
       { isDefault: false, updatedAt: new Date() },
     )
 
@@ -138,14 +138,14 @@ export const setDefaultExternalAccount = async (
 ) => {
   try {
     const target = await BridgeExternalAccount.findOne({
-      accountId,
-      bridgeExternalAccountId,
+      accountId: { $eq: accountId },
+      bridgeExternalAccountId: { $eq: bridgeExternalAccountId },
       status: { $ne: "failed" },
     })
     if (!target) return new RepositoryError("External account not found")
 
     await BridgeExternalAccount.updateMany(
-      { accountId },
+      { accountId: { $eq: accountId } },
       { isDefault: false, updatedAt: new Date() },
     )
 
@@ -166,8 +166,8 @@ export const deleteExternalAccount = async (
 ) => {
   try {
     const target = await BridgeExternalAccount.findOne({
-      accountId,
-      bridgeExternalAccountId,
+      accountId: { $eq: accountId },
+      bridgeExternalAccountId: { $eq: bridgeExternalAccountId },
       status: { $ne: "failed" },
     })
     if (!target) return new RepositoryError("External account not found")
@@ -196,7 +196,7 @@ export const markExternalAccountsMissingFromBridge = async (
 ) => {
   try {
     const filter: Record<string, unknown> = {
-      accountId,
+      accountId: { $eq: accountId },
       status: { $ne: "failed" },
     }
     if (bridgeExternalAccountIds.length > 0) {
@@ -219,7 +219,7 @@ export const updateExternalAccountStatus = async (
 ) => {
   try {
     const record = await BridgeExternalAccount.findOneAndUpdate(
-      { bridgeExternalAccountId: bridgeId },
+      { bridgeExternalAccountId: { $eq: bridgeId } },
       {
         status,
         ...(status === "failed" ? { isDefault: false } : {}),
@@ -284,10 +284,10 @@ export const createWithdrawal = async (data: {
     const mongoErr = error as { code?: number }
     if (mongoErr.code === 11000) {
       const record = await BridgeWithdrawal.findOne({
-        accountId: data.accountId,
-        externalAccountId: data.externalAccountId,
-        amount: data.amount,
-        currency: data.currency,
+        accountId: { $eq: data.accountId },
+        externalAccountId: { $eq: data.externalAccountId },
+        amount: { $eq: data.amount },
+        currency: { $eq: data.currency },
         status: "pending",
       })
       if (record) return record
@@ -334,9 +334,9 @@ export const findPendingWithdrawalWithoutTransfer = async (
 ) => {
   try {
     const record = await BridgeWithdrawal.findOne({
-      accountId,
-      externalAccountId,
-      amount,
+      accountId: { $eq: accountId },
+      externalAccountId: { $eq: externalAccountId },
+      amount: { $eq: amount },
       bridgeTransferId: { $exists: false },
       status: "pending",
     })
@@ -374,7 +374,7 @@ export const updateWithdrawalTransferId = async (
     if (bridgeDepositAddress) update.bridgeDepositAddress = bridgeDepositAddress
 
     const record = await BridgeWithdrawal.findOneAndUpdate(
-      { _id: id, status: "pending", bridgeTransferId: { $exists: false } },
+      { _id: { $eq: id }, status: "pending", bridgeTransferId: { $exists: false } },
       update,
       { new: true },
     )
@@ -398,7 +398,7 @@ export const updateWithdrawalOnchainSend = async (
     if (ibexTxHash) update.ibexTxHash = ibexTxHash
 
     const record = await BridgeWithdrawal.findOneAndUpdate(
-      { _id: id, status: "submitted", ibexPayoutId: { $exists: false } },
+      { _id: { $eq: id }, status: "submitted", ibexPayoutId: { $exists: false } },
       update,
       { new: true },
     )
@@ -418,7 +418,7 @@ export const updateWithdrawalSendFailed = async (
 ) => {
   try {
     const record = await BridgeWithdrawal.findOneAndUpdate(
-      { _id: id, status: "submitted", ibexPayoutId: { $exists: false } },
+      { _id: { $eq: id }, status: "submitted", ibexPayoutId: { $exists: false } },
       {
         bridgeTransferId,
         amount,
@@ -438,7 +438,9 @@ export const updateWithdrawalSendFailed = async (
 
 export const findWithdrawalsByAccountId = async (accountId: string) => {
   try {
-    const records = await BridgeWithdrawal.find({ accountId }).sort({ createdAt: -1 })
+    const records = await BridgeWithdrawal.find({ accountId: { $eq: accountId } }).sort({
+      createdAt: -1,
+    })
     return records
   } catch (error) {
     return new RepositoryError(String(error))
@@ -485,7 +487,9 @@ export const updateWithdrawalStatus = async (
 
 export const findWithdrawalByBridgeTransferId = async (transferId: BridgeTransferId) => {
   try {
-    const record = await BridgeWithdrawal.findOne({ bridgeTransferId: transferId })
+    const record = await BridgeWithdrawal.findOne({
+      bridgeTransferId: { $eq: transferId },
+    })
     return record || new RepositoryError("Withdrawal not found")
   } catch (error) {
     return new RepositoryError(String(error))
@@ -494,7 +498,7 @@ export const findWithdrawalByBridgeTransferId = async (transferId: BridgeTransfe
 
 export const findWithdrawalById = async (id: string) => {
   try {
-    const record = await BridgeWithdrawal.findById(id)
+    const record = await BridgeWithdrawal.findOne({ _id: { $eq: id } })
     return record || new RepositoryError("Withdrawal not found")
   } catch (error) {
     return new RepositoryError(String(error))
@@ -505,8 +509,8 @@ export const cancelWithdrawal = async (accountId: string, withdrawalId: string) 
   try {
     const record = await BridgeWithdrawal.findOneAndUpdate(
       {
-        _id: withdrawalId,
-        accountId,
+        _id: { $eq: withdrawalId },
+        accountId: { $eq: accountId },
         status: "pending",
         bridgeTransferId: { $exists: false },
       },
