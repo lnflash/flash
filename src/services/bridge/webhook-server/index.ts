@@ -16,7 +16,11 @@ import { kycHandler } from "./routes/kyc"
 import { depositHandler } from "./routes/deposit"
 import { transferHandler } from "./routes/transfer"
 import { externalAccountHandler } from "./routes/external-account"
-import { replayAuthMiddleware, replayHandler } from "./routes/replay"
+import {
+  replayAuthMiddleware,
+  replayHandler,
+  replayIngressMiddleware,
+} from "./routes/replay"
 
 type RawBodyRequest = express.Request & { rawBody?: string }
 
@@ -70,7 +74,13 @@ export const startBridgeWebhookServer = () => {
     verifyBridgeSignature("external_account"),
     externalAccountHandler,
   )
-  app.post("/internal/replay", replayRateLimit, replayAuthMiddleware, replayHandler)
+  app.post(
+    "/internal/replay",
+    replayRateLimit,
+    replayIngressMiddleware,
+    replayAuthMiddleware,
+    replayHandler,
+  )
 
   if (!(process.env.BRIDGE_WEBHOOK_REPLAY_SECRET || BridgeConfig.webhook.replaySecret)) {
     baseLogger.warn(

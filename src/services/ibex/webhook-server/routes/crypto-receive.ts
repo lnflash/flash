@@ -1,4 +1,5 @@
 import express, { Request, Response } from "express"
+import rateLimitMiddleware from "express-rate-limit"
 import { AccountsRepository } from "@services/mongoose/accounts"
 import { createIbexCryptoReceive } from "@services/mongoose/ibex-crypto-receive-log"
 import { listWalletsByAccountId } from "@app/wallets"
@@ -14,11 +15,18 @@ import {
 import { writeIbexCryptoReceiveRequest } from "@services/frappe/BridgeTransferRequestWriter"
 import { ibexWebhookPaths } from "@services/ibex/webhook-config"
 
-import { authenticate, logRequest } from "../middleware"
+import { authenticate, logRequest, validateIbexIp } from "../middleware"
 
 const paths = ibexWebhookPaths.cryptoReceive
 
 const router = express.Router()
+
+const webhookRateLimit = rateLimitMiddleware({
+  windowMs: 60_000,
+  limit: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+})
 
 interface CryptoReceiveResult {
   status: "success" | "error"
@@ -222,6 +230,13 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
   return res.status(statusCode).json({ error: lockResult.code })
 }
 
-router.post(paths.cryptoReceive, authenticate, logRequest, cryptoReceiveHandler)
+router.post(
+  paths.cryptoReceive,
+  webhookRateLimit,
+  validateIbexIp,
+  authenticate,
+  logRequest,
+  cryptoReceiveHandler,
+)
 
 export { cryptoReceiveHandler, paths, router }

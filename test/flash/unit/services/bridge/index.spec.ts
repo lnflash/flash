@@ -828,6 +828,40 @@ describe("requestWithdrawal", () => {
     expect(result).toBeInstanceOf(BridgeCustomerNotFoundError)
   })
 
+  it("rejects withdrawal requests when live Bridge KYC status is offboarded", async () => {
+    ;(BridgeClient.getCustomer as jest.Mock).mockResolvedValueOnce({
+      status: "offboarded",
+    })
+
+    const result = await BridgeService.requestWithdrawal(
+      ACCOUNT_ID,
+      AMOUNT,
+      EXTERNAL_ACCOUNT_ID,
+    )
+
+    const { BridgeKycOffboardedError } = jest.requireActual("@services/bridge/errors")
+    expect(result).toBeInstanceOf(BridgeKycOffboardedError)
+    expect(BridgeAccountsRepo.createWithdrawal).not.toHaveBeenCalled()
+    expect(BridgeClient.listExternalAccounts).not.toHaveBeenCalled()
+  })
+
+  it("rejects withdrawal requests when live Bridge KYC status is not approved", async () => {
+    ;(BridgeClient.getCustomer as jest.Mock).mockResolvedValueOnce({
+      status: "paused",
+    })
+
+    const result = await BridgeService.requestWithdrawal(
+      ACCOUNT_ID,
+      AMOUNT,
+      EXTERNAL_ACCOUNT_ID,
+    )
+
+    const { BridgeKycPendingError } = jest.requireActual("@services/bridge/errors")
+    expect(result).toBeInstanceOf(BridgeKycPendingError)
+    expect(BridgeAccountsRepo.createWithdrawal).not.toHaveBeenCalled()
+    expect(BridgeClient.listExternalAccounts).not.toHaveBeenCalled()
+  })
+
   it("returns an error when account has no Ethereum address", async () => {
     ;(AccountsRepository as jest.Mock).mockReturnValue({
       findById: jest.fn().mockResolvedValue({
@@ -966,6 +1000,20 @@ describe("initiateWithdrawal — takes withdrawalId (step 2A)", () => {
       }),
       deriveWithdrawalIdempotencyKey(WITHDRAWAL_ID),
     )
+  })
+
+  it("rejects initiation when live Bridge KYC status is rejected", async () => {
+    ;(BridgeClient.getCustomer as jest.Mock).mockResolvedValueOnce({
+      status: "rejected",
+    })
+
+    const result = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
+
+    const { BridgeKycRejectedError } = jest.requireActual("@services/bridge/errors")
+    expect(result).toBeInstanceOf(BridgeKycRejectedError)
+    expect(BridgeAccountsRepo.findWithdrawalById).not.toHaveBeenCalled()
+    expect(BridgeClient.createTransfer).not.toHaveBeenCalled()
+    expect(IbexClient.sendCrypto).not.toHaveBeenCalled()
   })
 
   it("sends a fixed developer_fee instead of developer_fee_percent for offramps", async () => {
