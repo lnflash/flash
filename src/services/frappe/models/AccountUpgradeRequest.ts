@@ -1,7 +1,8 @@
-import { erpStringToLevel, levelToErpString } from "./AccountLevel"
 import { Validated, ValidationError, validator } from "@domain/shared"
 import { isActiveAccount } from "@domain/accounts"
 import { Address } from "@app/accounts"
+
+import { erpStringToLevel, levelToErpString } from "./AccountLevel"
 import { BankAccount } from "./BankAccount"
 
 export enum RequestStatus {
@@ -13,7 +14,9 @@ export enum RequestStatus {
 
 const isRequestedLevelGreater = async (input: AccountUpgradeRequest) => {
   if (input.requestedLevel <= input.currentLevel) {
-    return new ValidationError(`Account is already at requested level or higher. Current level: ${input.currentLevel}")`)
+    return new ValidationError(
+      `Account is already at requested level or higher. Current level: ${input.currentLevel}")`,
+    )
   }
   return true
 }
@@ -40,29 +43,82 @@ const AccountUpgradeRequestValidator = validator<AccountUpgradeRequest & Context
   hasUsername,
 ])
 
-type Context = { account: Account, user: User, kratos: AnyIdentity }
+type Context = { account: Account; user: User; kratos: AnyIdentity }
 
-// Core model representing an account upgrade request 
+type ErpNextAccountUpgradeRequest = {
+  name: string
+  username: string
+  current_level: string
+  requested_level: string
+  status: string
+  full_name: string
+  phone_number: string
+  email?: string
+  id_document: string
+  address_title: string
+  address_line1: string
+  address_line2?: string
+  city: string
+  state: string
+  pincode?: string
+  country: string
+  terminal_requested?: number | string
+  bank_name?: string
+  bank_branch?: string
+  account_type?: string
+  currency?: string
+  account_number?: string
+}
+
+// Core model representing an account upgrade request
 // with methods to build and representation in different contexts
 export class AccountUpgradeRequest {
   static doctype = "Account Upgrade Request"
 
-  constructor(
-    readonly name: string,
-    readonly username: Username,
-    readonly currentLevel: AccountLevel,
-    readonly requestedLevel: AccountLevel,
-    readonly status: string, 
-    readonly fullName: string,
-    readonly phoneNumber: PhoneNumber,
-    readonly email: EmailAddress,
-    readonly idDocument: string,
-    readonly address: Address,
-    readonly terminalsRequested: number,
-    readonly bankAccount?: BankAccount,
-  ) {}
+  readonly name: string
+  readonly username: Username
+  readonly currentLevel: AccountLevel
+  readonly requestedLevel: AccountLevel
+  readonly status: string
+  readonly fullName: string
+  readonly phoneNumber: PhoneNumber
+  readonly email: EmailAddress
+  readonly idDocument: string
+  readonly address: Address
+  readonly terminalsRequested: number
+  readonly bankAccount?: BankAccount
 
-  async validate(context: Context): Promise<Validated<AccountUpgradeRequest> | ValidationError[]> {
+  constructor(
+    name: string,
+    username: Username,
+    currentLevel: AccountLevel,
+    requestedLevel: AccountLevel,
+    status: string,
+    fullName: string,
+    phoneNumber: PhoneNumber,
+    email: EmailAddress,
+    idDocument: string,
+    address: Address,
+    terminalsRequested: number,
+    bankAccount?: BankAccount,
+  ) {
+    this.name = name
+    this.username = username
+    this.currentLevel = currentLevel
+    this.requestedLevel = requestedLevel
+    this.status = status
+    this.fullName = fullName
+    this.phoneNumber = phoneNumber
+    this.email = email
+    this.idDocument = idDocument
+    this.address = address
+    this.terminalsRequested = terminalsRequested
+    this.bankAccount = bankAccount
+  }
+
+  async validate(
+    context: Context,
+  ): Promise<Validated<AccountUpgradeRequest> | ValidationError[]> {
     const result = await AccountUpgradeRequestValidator({ ...this, ...context })
     if (Array.isArray(result)) return result
     return this as unknown as Validated<AccountUpgradeRequest>
@@ -95,16 +151,16 @@ export class AccountUpgradeRequest {
     }
   }
 
-  static fromErpnext(data: any): AccountUpgradeRequest {
+  static fromErpnext(data: ErpNextAccountUpgradeRequest): AccountUpgradeRequest {
     return new AccountUpgradeRequest(
       data.name,
-      data.username,
+      data.username as Username,
       erpStringToLevel(data.current_level),
       erpStringToLevel(data.requested_level),
       data.status,
       data.full_name,
-      data.phone_number,
-      data.email,
+      data.phone_number as PhoneNumber,
+      data.email as EmailAddress,
       data.id_document,
       {
         title: data.address_title,
@@ -116,13 +172,15 @@ export class AccountUpgradeRequest {
         country: data.country,
       },
       Number(data.terminal_requested) || 0,
-      data.bank_name ? {
-        bank: data.bank_name,
-        branch_code: data.bank_branch,
-        account_type: data.account_type,
-        currency: data.currency,
-        bank_account_no: data.account_number,
-      } : undefined
+      data.bank_name
+        ? {
+            bank: data.bank_name,
+            branch_code: data.bank_branch || "",
+            account_type: data.account_type || "",
+            currency: data.currency || "",
+            bank_account_no: data.account_number || "",
+          }
+        : undefined,
     )
   }
 }

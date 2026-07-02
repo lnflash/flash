@@ -1,4 +1,5 @@
-import { safeBigInt, WalletCurrency } from "@domain/shared"
+import { WalletCurrency } from "@domain/shared/primitives"
+import { safeBigInt } from "@domain/shared/safe"
 
 export const CENTS_PER_USD = 100
 
@@ -129,11 +130,15 @@ export const priceAmountFromDisplayPriceRatio = <
 
 // TODO: GET currency symbols from Price server (listCurrencies)
 export class CurrencyFormatter<T extends DisplayCurrency> {
-  constructor(private displayAmount: DisplayAmount<T>) {}
+  private displayAmount: DisplayAmount<T>
+
+  constructor(displayAmount: DisplayAmount<T>) {
+    this.displayAmount = displayAmount
+  }
 
   // Ideally, currency list would be static and not require loading
   toString(): string {
-    const exponent = getCurrencyMajorExponent(this.displayAmount.currency) 
+    const exponent = getCurrencyMajorExponent(this.displayAmount.currency)
     return formatCurrencyHelper({
       amountInMajorUnits: this.displayAmount.displayInMajor,
       // symbol:

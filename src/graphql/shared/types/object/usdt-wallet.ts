@@ -1,0 +1,164 @@
+import { GT } from "@graphql/index"
+import {
+  connectionArgs,
+  connectionFromPaginatedArray,
+  checkedConnectionArgs,
+} from "@graphql/connections"
+import { normalizePaymentAmount } from "@graphql/shared/root/mutation"
+import { mapError } from "@graphql/error-map"
+
+import { Wallets } from "@app"
+
+import {
+  USDAmount,
+  WalletCurrency as WalletCurrencyDomain,
+  USDTAmount,
+} from "@domain/shared"
+import { WalletType } from "@domain/wallets"
+
+import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
+
+import IWallet from "../abstract/wallet"
+
+import WalletCurrency from "../scalar/wallet-currency"
+import SignedAmount from "../scalar/signed-amount"
+import OnChainAddress from "../scalar/on-chain-address"
+
+import Lnurl from "../scalar/lnurl"
+
+import { resolveCashWalletHistoryWalletsForWalletObject } from "./cash-wallet-history"
+import { TransactionConnection } from "./transaction"
+
+const UsdtWallet = GT.Object<Wallet>({
+  name: "UsdtWallet",
+  description:
+    "A wallet belonging to an account which contains a USDT balance and a list of transactions.",
+  interfaces: () => [IWallet],
+  isTypeOf: (source) => source.currency === WalletCurrencyDomain.Usdt,
+  fields: () => ({
+    id: {
+      type: GT.NonNullID,
+    },
+    accountId: {
+      type: GT.NonNullID,
+    },
+    walletCurrency: {
+      type: GT.NonNull(WalletCurrency),
+      resolve: (source) => source.currency,
+    },
+
+    lnurlp: {
+      type: Lnurl,
+      resolve: (source) => source.lnurlp,
+    },
+    isExternal: {
+      type: GT.NonNull(GT.Boolean),
+      resolve: (source) => source.type === WalletType.External,
+    },
+
+    balance: {
+      type: FractionalCentAmount,
+      resolve: async (source) => {
+        const balance = await Wallets.getBalanceForWallet({
+          walletId: source.id,
+          currency: source.currency,
+        })
+        if (balance instanceof Error) {
+          throw mapError(balance)
+        }
+        if (balance instanceof USDTAmount) {
+          return Number(balance.asUsdCents())
+        }
+        if (balance instanceof USDAmount) {
+          return Number(balance.asCents(8))
+        }
+        throw mapError(balance)
+      },
+    },
+    pendingIncomingBalance: {
+      type: GT.NonNull(SignedAmount),
+      description: "An unconfirmed incoming onchain balance.",
+      resolve: async (source) => {
+        const balanceSats = await Wallets.getPendingOnChainBalanceForWallets([source])
+        if (balanceSats instanceof Error) {
+          throw mapError(balanceSats)
+        }
+        return normalizePaymentAmount(balanceSats[source.id]).amount
+      },
+    },
+    transactions: {
+      type: TransactionConnection,
+      args: connectionArgs,
+      resolve: async (source, args, ctx) => {
+        const paginationArgs = checkedConnectionArgs(args)
+        if (paginationArgs instanceof Error) {
+          throw paginationArgs
+        }
+
+        const wallets = await resolveCashWalletHistoryWalletsForWalletObject({
+          source,
+          ctx,
+        })
+
+        const { result, error } = await Wallets.getTransactionsForWallets({
+          wallets,
+          paginationArgs,
+        })
+        if (error instanceof Error) {
+          throw mapError(error)
+        }
+
+        if (!result?.slice) throw error
+
+        return connectionFromPaginatedArray<IbexTransaction>(
+          result.slice,
+          result.total,
+          paginationArgs,
+        )
+      },
+    },
+    transactionsByAddress: {
+      type: TransactionConnection,
+      args: {
+        ...connectionArgs,
+        address: {
+          type: GT.NonNull(OnChainAddress),
+          description: "Returns the items that include this address.",
+        },
+      },
+      resolve: async (source, args, ctx) => {
+        const paginationArgs = checkedConnectionArgs(args)
+        if (paginationArgs instanceof Error) {
+          throw paginationArgs
+        }
+
+        const { address } = args
+        if (address instanceof Error) throw address
+
+        const wallets = await resolveCashWalletHistoryWalletsForWalletObject({
+          source,
+          ctx,
+        })
+
+        const { result, error } = await Wallets.getTransactionsForWalletsByAddresses({
+          wallets,
+          addresses: [address],
+          paginationArgs,
+        })
+        if (error instanceof Error) {
+          throw mapError(error)
+        }
+
+        if (!result?.slice) throw error
+
+        return connectionFromPaginatedArray<BaseWalletTransaction>(
+          result.slice,
+          result.total,
+          paginationArgs,
+        )
+      },
+    },
+  }),
+})
+
+export default UsdtWallet

@@ -8,10 +8,7 @@ import { IORedisInstrumentation } from "@opentelemetry/instrumentation-ioredis"
 import { MongoDBInstrumentation } from "@opentelemetry/instrumentation-mongodb"
 import { Span as SdkSpan, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base"
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node"
-import {
-  SemanticAttributes,
-  SemanticResourceAttributes,
-} from "@opentelemetry/semantic-conventions"
+import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions"
 
 import {
   trace,
@@ -34,6 +31,24 @@ import { Resource } from "@opentelemetry/resources"
 type ExtendedException = Exclude<Exception, string> & {
   level?: ErrorLevel
 }
+
+const ATTR_CODE_FUNCTION = "code.function" as const
+const ATTR_CODE_NAMESPACE = "code.namespace" as const
+const ATTR_ENDUSER_ID = "enduser.id" as const
+const ATTR_HTTP_CLIENT_IP = "http.client_ip" as const
+const ATTR_HTTP_USER_AGENT = "http.user_agent" as const
+
+const SemanticAttributes = {
+  CODE_FUNCTION: ATTR_CODE_FUNCTION,
+  CODE_NAMESPACE: ATTR_CODE_NAMESPACE,
+  ENDUSER_ID: ATTR_ENDUSER_ID,
+  HTTP_CLIENT_IP: ATTR_HTTP_CLIENT_IP,
+  HTTP_USER_AGENT: ATTR_HTTP_USER_AGENT,
+} as const
+
+const SemanticResourceAttributes = {
+  SERVICE_NAME: ATTR_SERVICE_NAME,
+} as const
 
 propagation.setGlobalPropagator(new W3CTraceContextPropagator())
 
@@ -386,7 +401,8 @@ const resolveFunctionSpanOptions = ({
     for (const key in params) {
       // @ts-ignore no-implicit-any error
       const value = params[key]
-      attributes[`${SemanticAttributes.CODE_FUNCTION}.params.${key}`] = value as AttributeValue
+      attributes[`${SemanticAttributes.CODE_FUNCTION}.params.${key}`] =
+        value as AttributeValue
       attributes[`${SemanticAttributes.CODE_FUNCTION}.params.${key}.null`] =
         value === null
       attributes[`${SemanticAttributes.CODE_FUNCTION}.params.${key}.undefined`] =

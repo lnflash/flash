@@ -1,12 +1,11 @@
 import {
   NETWORK,
+  Topup,
   getFeesConfig,
   getGaloyBuildInformation,
   getLightningAddressDomain,
   getLightningAddressDomainAliases,
 } from "@config"
-
-import { Lightning } from "@app"
 
 import { getSupportedCountries } from "@app/authentication/get-supported-countries"
 
@@ -35,6 +34,7 @@ const GlobalsQuery = GT.Field({
           ratio: `${feesConfig.depositRatioAsBasisPoints}`,
         },
       },
+      topupEnabled: Topup.Enabled,
     }
   },
 })

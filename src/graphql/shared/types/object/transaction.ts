@@ -1,26 +1,23 @@
 import dedent from "dedent"
-import getUuidByString from "uuid-by-string"
 
-import { GT } from "@graphql/index"
-import { mapError } from "@graphql/error-map"
 import { connectionDefinitions } from "@graphql/connections"
+import { mapError } from "@graphql/error-map"
+import { GT } from "@graphql/index"
 import { normalizeDisplayPrice } from "@graphql/shared/root/mutation"
 
-import { TxStatus as DomainTxStatus } from "@domain/wallets"
 import { checkedToDisplayCurrency } from "@domain/fiat"
-import { parseErrorFromUnknown } from "@domain/shared"
 
 import InitiationVia from "../abstract/initiation-via"
 import SettlementVia from "../abstract/settlement-via"
 
-import Memo from "../scalar/memo"
-import TxStatus from "../scalar/tx-status"
-import Timestamp from "../scalar/timestamp"
-import SignedAmount from "../scalar/signed-amount"
-import WalletCurrency from "../scalar/wallet-currency"
 import DisplayCurrency from "../scalar/display-currency"
+import Memo from "../scalar/memo"
+import SignedAmount from "../scalar/signed-amount"
 import SignedDisplayMajorAmount from "../scalar/signed-display-amount"
+import Timestamp from "../scalar/timestamp"
 import TxDirection, { txDirectionValues } from "../scalar/tx-direction"
+import TxStatus from "../scalar/tx-status"
+import WalletCurrency from "../scalar/wallet-currency"
 
 import PriceOfOneSettlementMinorUnitInDisplayMinorUnit from "./price-of-one-settlement-minor-unit-in-display-minor-unit"
 

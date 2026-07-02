@@ -9,3 +9,4 @@ export class UpgradeRequestQueryError extends ErpNextError {}
 export class SetDocTypeValueError extends ErpNextError {}
 export class BanksQueryError extends ErpNextError {}
 export class BankAccountQueryError extends ErpNextError {}
+export class BridgeTransferRequestUpsertError extends ErpNextError {}

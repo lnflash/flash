@@ -1,16 +1,19 @@
-import Offer from "./Offer"
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { ValidationError } from "@domain/shared"
-import { CashoutValidator } from "./Validator"
+
 import { RepositoryError } from "@domain/errors"
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
-import { CashoutDetails, ValidationInputs } from "./types"
+
 import ErpNext, { CashoutId } from "@services/frappe/ErpNext"
 import { CashoutDraftError, CashoutSubmitError } from "@services/frappe/errors"
 import { baseLogger } from "@services/logger"
 import { IbexError } from "@services/ibex/errors"
 import { Cashout } from "@config"
+
+import { CashoutDetails, ValidationInputs } from "./types"
+import { CashoutValidator } from "./Validator"
+import Offer from "./Offer"
 
 // Only way to construct a ValidOffer is using the static method which contains validations
 class ValidOffer extends Offer {
@@ -63,7 +66,10 @@ class ValidOffer extends Offer {
       baseLogger.warn({ cashoutId }, "submitCashout failed, retrying")
       submitted = await ErpNext.submitCashout(cashoutId)
       if (submitted instanceof CashoutSubmitError) {
-        baseLogger.error({ cashoutId }, "submitCashout failed after retry — manual intervention required")
+        baseLogger.error(
+          { cashoutId },
+          "submitCashout failed after retry — manual intervention required",
+        )
       }
     }
 
@@ -73,9 +79,13 @@ class ValidOffer extends Offer {
 
 export default ValidOffer
 
-
-
 export class InitiatedCashout {
   readonly status = PaymentSendStatus.Pending
-  constructor(readonly offer: ValidOffer, readonly cashoutId: CashoutId) {}
+  readonly offer: ValidOffer
+  readonly cashoutId: CashoutId
+
+  constructor(offer: ValidOffer, cashoutId: CashoutId) {
+    this.offer = offer
+    this.cashoutId = cashoutId
+  }
 }

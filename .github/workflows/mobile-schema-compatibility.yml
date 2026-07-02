@@ -2,7 +2,7 @@ name: "Mobile Schema Compatibility"
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, tmp/bridge-rebase-pr-ready]
 
 jobs:
   check-secret:

@@ -1,15 +1,12 @@
 import dedent from "dedent"
 
-import { Wallets } from "@app"
-
-import { GT } from "@graphql/index"
-import Memo from "@graphql/shared/types/scalar/memo"
-import Minutes from "@graphql/public/types/scalar/minutes"
-import WalletId from "@graphql/shared/types/scalar/wallet-id"
-import SatAmount from "@graphql/shared/types/scalar/sat-amount"
-import LnInvoicePayload from "@graphql/public/types/payload/ln-invoice"
-import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { NotImplementedError } from "@domain/errors"
+import { GT } from "@graphql/index"
+import LnInvoicePayload from "@graphql/public/types/payload/ln-invoice"
+import Minutes from "@graphql/public/types/scalar/minutes"
+import Memo from "@graphql/shared/types/scalar/memo"
+import SatAmount from "@graphql/shared/types/scalar/sat-amount"
+import WalletId from "@graphql/shared/types/scalar/wallet-id"
 
 const LnInvoiceCreateInput = GT.Input({
   name: "LnInvoiceCreateInput",
@@ -38,7 +35,7 @@ const LnInvoiceCreateMutation = GT.Field({
   args: {
     input: { type: GT.NonNull(LnInvoiceCreateInput) },
   },
-  resolve: async (_, args) => {
+  resolve: async () => {
     return new NotImplementedError("Flash does not support BTC wallets.")
     // const { walletId, amount, memo, expiresIn } = args.input
 

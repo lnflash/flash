@@ -1,6 +1,8 @@
 import { GT } from "@graphql/index"
-import Username from "../../../shared/types/scalar/username"
+
 import Npub from "@graphql/shared/types/scalar/npub"
+
+import Username from "../../../shared/types/scalar/username"
 
 const npubByUsername = GT.Object<User, GraphQLPublicContextAuth>({
   name: "npubByUsername",

@@ -2,13 +2,15 @@ import { AccountsRepository, UsersRepository } from "@services/mongoose"
 import { IdentityRepository } from "@services/kratos"
 import ErpNext from "@services/frappe/ErpNext"
 
-import { AccountUpgradeRequest, RequestStatus } from "@services/frappe/models/AccountUpgradeRequest"
+import {
+  AccountUpgradeRequest,
+  RequestStatus,
+} from "@services/frappe/models/AccountUpgradeRequest"
 import { BankAccount } from "@services/frappe/models/BankAccount"
 import { DomainError, ValidationError } from "@domain/shared"
 import { AccountLevel } from "@domain/accounts"
 import { SetDocTypeValueError, UpgradeRequestQueryError } from "@services/frappe/errors"
 import { SearchFilter } from "@services/frappe/SearchFilters"
-
 
 type RequestId = string & { __brand: "UpgradeRequestId" }
 type UpgradeStatusResponse = {
@@ -19,7 +21,7 @@ type UpgradeStatusResponse = {
 export class CreateUpgradeRequestError extends DomainError {}
 
 export type Address = {
-  title: string,
+  title: string
   line1: string
   line2?: string
   city: string
@@ -60,7 +62,6 @@ export const createUpgradeRequest = async (
   const account = await accountsRepo.findById(accountId)
   if (account instanceof Error) return account
 
-
   const user = await usersRepo.findById(account.kratosUserId)
   if (user instanceof Error) return user
 
@@ -69,12 +70,12 @@ export const createUpgradeRequest = async (
 
   const context = { account, user, kratos: identity }
 
-  const pendingRequests = await ErpNext.getAccountUpgradeRequestList({ 
+  const pendingRequests = await ErpNext.getAccountUpgradeRequestList({
     username: SearchFilter.Eq(account.username),
-    status: SearchFilter.Eq(RequestStatus.Pending)
+    status: SearchFilter.Eq(RequestStatus.Pending),
   })
   if (pendingRequests instanceof UpgradeRequestQueryError) return pendingRequests
-  
+
   const closeResp = await ErpNext.closeAccountUpgradeRequests(pendingRequests)
   if (closeResp instanceof SetDocTypeValueError) return closeResp
 

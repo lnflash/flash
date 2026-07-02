@@ -61,7 +61,7 @@ export class CsvWalletsExport {
     const txs = await this.formatTxs(response.result?.slice)
 
     if (!(txs instanceof Error)) {
-      // @ts-ignore-next-line no-implicit-any error
+      // @ts-expect-error no-implicit-any error
       this.entries.push(...txs)
     }
   }

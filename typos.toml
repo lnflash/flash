@@ -18,3 +18,10 @@ default.extend-ignore-re = ["\"eyJ[a-zA-Z0-9_\\-\\.]+\""]
 # returned from twilio API referenced in src/debug/text-sms.ts
 Ons = "Ons"
 Lsat = "Lsat"
+# Bridge API payment rail token
+bre = "bre"
+# MongoDB query operator
+nin = "nin"
+# Existing money quiz identifiers; changing them would be a cross-client data change.
+Governement = "Governement"
+Aggrement = "Aggrement"

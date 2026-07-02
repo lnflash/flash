@@ -53,3 +53,12 @@ junit.xml
 .yarnrc.yml
 
 docker-compose.local.yml
+
+# Local ERPNext backup outputs
+dev/erpnext/backups/*
+!dev/erpnext/backups/clean-snapshot.sql.gz
+
+# Planning scratch files
+findings.md
+progress.md
+task_plan.md

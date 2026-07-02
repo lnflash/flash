@@ -1,0 +1,80 @@
+meta {
+  name: 02 discover USDT cashout inputs
+  type: graphql
+  seq: 2
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  X-Flash-Client-Capabilities: cash-wallet-usdt-v1
+}
+
+body:graphql {
+  query Eng357CashoutInputs {
+    me {
+      id
+      defaultAccount {
+        id
+        defaultWalletId
+        wallets {
+          id
+          walletCurrency
+          balance
+        }
+      }
+      bankAccounts {
+        id
+        accountName
+        bankName
+        currency
+      }
+    }
+  }
+}
+
+script:post-response {
+  test("discovers the post-cutover USDT wallet and cashout bank account with the cash-wallet capability header", function () {
+    const body = res.getBody();
+    const errors = body.errors ?? [];
+    expect(errors, JSON.stringify(errors)).to.be.empty;
+
+    const me = body.data?.me;
+    expect(me, "me").to.exist;
+
+    const wallets = me.defaultAccount?.wallets ?? [];
+    const cashoutAccountId = me.defaultAccount?.id;
+    const usdtWallet = wallets.find((wallet) => wallet.walletCurrency === "USDT");
+    expect(cashoutAccountId, "cashout account id").to.exist;
+    expect(bru.getEnvVar("legacyUsdWalletId"), "legacy USD wallet id from step 01").to.exist;
+    expect(usdtWallet?.id, "USDT wallet id").to.exist;
+    expect(usdtWallet.id, "USDT wallet should be the post-cutover default wallet").to.eql(
+      me.defaultAccount?.defaultWalletId,
+    );
+
+    const bankAccounts = me.bankAccounts ?? [];
+    const bankAccount =
+      bankAccounts.find((account) => account.currency === "JMD") ?? bankAccounts[0];
+    const cashoutBankAccountId =
+      bankAccount?.id ?? bru.getEnvVar("cashoutBankAccountId") ?? "12345 - First Global";
+    expect(cashoutBankAccountId, "cashout bank account id").to.exist;
+
+    bru.setEnvVar("cashoutAccountId", cashoutAccountId);
+    bru.setEnvVar("usdtWalletId", usdtWallet.id);
+    bru.setEnvVar("cashoutBankAccountId", cashoutBankAccountId);
+
+    console.log("cashoutAccountId:", cashoutAccountId);
+    console.log("usdtWalletId:", usdtWallet.id);
+    console.log("cashoutBankAccountId:", cashoutBankAccountId);
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

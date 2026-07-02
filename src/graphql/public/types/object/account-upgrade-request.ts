@@ -1,5 +1,6 @@
 import { GT } from "@graphql/index"
 import AccountLevel from "@graphql/shared/types/scalar/account-level"
+
 import Address from "./address"
 import BankAccount from "./bank-account"
 

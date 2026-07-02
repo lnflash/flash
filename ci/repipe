@@ -36,7 +36,7 @@ else
     # Set selected_target to only the name field of the chosen target
     target="${target_names[$((selection - 1))]}"
 fi
-echo "Targetting $target"
+echo "Targeting $target"
 
 team=main # dev
 pipeline="${PIPELINE_NAME:-flash-app}"

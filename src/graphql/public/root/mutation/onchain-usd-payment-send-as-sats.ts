@@ -1,21 +1,17 @@
 import { PayoutSpeed as DomainPayoutSpeed } from "@domain/bitcoin/onchain"
 
 import { GT } from "@graphql/index"
-import Memo from "@graphql/shared/types/scalar/memo"
-import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
-import OnChainAddress from "@graphql/shared/types/scalar/on-chain-address"
 import PaymentSendPayload from "@graphql/public/types/payload/payment-send"
 import PayoutSpeed from "@graphql/public/types/scalar/payout-speed"
+import Memo from "@graphql/shared/types/scalar/memo"
+import OnChainAddress from "@graphql/shared/types/scalar/on-chain-address"
 import SatsAmount from "@graphql/shared/types/scalar/sat-amount"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 
 // import { Wallets } from "@app"
 
 // FLASH FORK: import ibex dependencies
-import { toCents } from "@domain/fiat"
-import Ibex from "@services/ibex/client"
 
-import { IbexError } from "@services/ibex/errors"
 import { UnsupportedCurrencyError } from "@domain/errors"
 
 const OnChainUsdPaymentSendAsBtcDenominatedInput = GT.Input({
@@ -52,7 +48,7 @@ const OnChainUsdPaymentSendAsBtcDenominatedMutation = GT.Field<
   args: {
     input: { type: GT.NonNull(OnChainUsdPaymentSendAsBtcDenominatedInput) },
   },
-  resolve: async (_, args, { domainAccount }) => {
+  resolve: async () => {
     return new UnsupportedCurrencyError("Currently do not support Bitcoin denomination.")
     // const { walletId, address, amount, memo, speed } = args.input
 

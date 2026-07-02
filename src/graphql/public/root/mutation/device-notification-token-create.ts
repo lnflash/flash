@@ -1,6 +1,8 @@
 import { GT } from "@graphql/index"
 
-import SuccessPayload, { SUCCESS_RESPONSE } from "@graphql/shared/types/payload/success-payload"
+import SuccessPayload, {
+  SUCCESS_RESPONSE,
+} from "@graphql/shared/types/payload/success-payload"
 
 import { Users } from "@app"
 import { parseErrorMessageFromUnknown } from "@domain/shared"

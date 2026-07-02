@@ -1,6 +1,6 @@
 import { OnChain, Lightning, Wallets, Payments, Swap } from "@app"
 
-import { getCronConfig, TWO_MONTHS_IN_MS } from "@config"
+import { BridgeConfig, getCronConfig, TWO_MONTHS_IN_MS } from "@config"
 
 import { ErrorLevel } from "@domain/shared"
 import { OperationInterruptedError } from "@domain/errors"
@@ -20,6 +20,10 @@ import {
 import { baseLogger } from "@services/logger"
 import { setupMongoConnection } from "@services/mongodb"
 import { activateLndHealthCheck, checkAllLndHealth } from "@services/lnd/health"
+import {
+  reconcileBridgeAndIbexDeposits,
+  reconcileBridgeAndIbexWithdrawals,
+} from "@services/bridge/reconciliation"
 
 import { elapsedSinceTimestamp, sleep } from "@utils"
 import { rebalancingInternalChannels } from "@services/lnd/rebalancing"
@@ -64,6 +68,26 @@ const swapOutJob = async () => {
   if (swapResult instanceof Error) throw swapResult
 }
 
+// Window covers 15 min of events — real-time webhook reconciliation handles everything
+// else immediately. This batch pass is only a safety net for missed/delayed webhooks.
+const RECONCILE_WINDOW_MS = 15 * 60 * 1000
+
+const reconcileBridgeDepositsJob = async () => {
+  if (!BridgeConfig.enabled) return
+
+  const result = await reconcileBridgeAndIbexDeposits({ windowMs: RECONCILE_WINDOW_MS })
+  if (result instanceof Error) throw result
+}
+
+const reconcileBridgeWithdrawalsJob = async () => {
+  if (!BridgeConfig.enabled) return
+
+  const result = await reconcileBridgeAndIbexWithdrawals({
+    windowMs: RECONCILE_WINDOW_MS,
+  })
+  if (result instanceof Error) throw result
+}
+
 const main = async () => {
   console.log("cronjob started")
   const start = new Date()
@@ -84,6 +108,8 @@ const main = async () => {
     updateLegacyOnChainReceipt,
     ...(cronConfig.rebalanceEnabled ? [rebalance] : []),
     ...(cronConfig.swapEnabled ? [swapOutJob] : []),
+    reconcileBridgeDepositsJob,
+    reconcileBridgeWithdrawalsJob,
     deleteExpiredPaymentFlows,
     deleteExpiredInvoices,
     deleteLndPaymentsBefore2Months,

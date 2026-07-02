@@ -5,6 +5,7 @@ import { WalletCurrency } from "@domain/shared"
 import { getLanguageOrDefault } from "@domain/locale"
 
 const i18n = getI18nInstance()
+const USDT_MICROS_PER_MAJOR_UNIT = 1_000_000
 
 const customToLocaleString = (
   number: number,
@@ -36,20 +37,38 @@ export const createPushNotificationContent = <T extends DisplayCurrency>({
 } => {
   const locale = getLanguageOrDefault(userLanguage)
   const baseCurrency = amount.currency
+  const walletCurrencyLabel = baseCurrency === WalletCurrency.Usdt ? "USD" : baseCurrency
   const notificationType = type === "balance" ? type : `transaction.${type}`
   const title = i18n.__(
     { phrase: `notification.${notificationType}.title`, locale },
-    { walletCurrency: baseCurrency },
+    { walletCurrency: walletCurrencyLabel },
   )
-  const baseCurrencyName = baseCurrency === WalletCurrency.Btc ? "sats" : ""
-  const displayedBaseAmount =
-    baseCurrency === WalletCurrency.Usd ? Number(amount.amount) / 100 : amount.amount
+  let baseCurrencyName = ""
+  let displayedBaseAmount: number | bigint = amount.amount
+  let numberFormatOptions: Intl.NumberFormatOptions = { style: "decimal" }
+
+  if (baseCurrency === WalletCurrency.Btc) {
+    baseCurrencyName = "sats"
+  }
+
+  if (baseCurrency === WalletCurrency.Usd) {
+    displayedBaseAmount = Number(amount.amount) / 100
+    numberFormatOptions = {
+      currency: baseCurrency,
+      style: "currency",
+      currencyDisplay: "narrowSymbol",
+    }
+  }
+
+  if (baseCurrency === WalletCurrency.Usdt) {
+    baseCurrencyName = "USD"
+    displayedBaseAmount = Number(amount.amount) / USDT_MICROS_PER_MAJOR_UNIT
+  }
+
   const baseCurrencyAmount = customToLocaleString(Number(displayedBaseAmount), locale, {
     minimumFractionDigits: 0,
     maximumFractionDigits: MajorExponent.STANDARD,
-    currency: baseCurrency,
-    style: baseCurrency === WalletCurrency.Btc ? "decimal" : "currency",
-    currencyDisplay: "narrowSymbol",
+    ...numberFormatOptions,
   })
 
   let body = i18n.__(

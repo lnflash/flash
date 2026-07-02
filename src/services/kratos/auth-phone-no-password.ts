@@ -97,8 +97,10 @@ export const AuthWithPhonePasswordlessService = (): IAuthWithPhonePasswordlessSe
         },
       })
       const resultSetCookieHeader = result.headers["set-cookie"]
-      if (!resultSetCookieHeader) return new KratosError("No set-cookie header in login response")
-      const cookiesToSendBackToClient: Array<SessionCookie> = resultSetCookieHeader as Array<SessionCookie>
+      if (!resultSetCookieHeader)
+        return new KratosError("No set-cookie header in login response")
+      const cookiesToSendBackToClient: Array<SessionCookie> =
+        resultSetCookieHeader as Array<SessionCookie>
 
       if (!result.data.session.identity) return new InvalidIdentitySessionKratosError()
       // note: this only works when whoami: required_aal = aal1
@@ -256,8 +258,10 @@ export const AuthWithPhonePasswordlessService = (): IAuthWithPhonePasswordlessSe
         },
       })
       const resultHeaders = result.headers["set-cookie"]
-      if (!resultHeaders) return new KratosError("No set-cookie header in registration response")
-      const cookiesToSendBackToClient: Array<SessionCookie> = resultHeaders as Array<SessionCookie>
+      if (!resultHeaders)
+        return new KratosError("No set-cookie header in registration response")
+      const cookiesToSendBackToClient: Array<SessionCookie> =
+        resultHeaders as Array<SessionCookie>
       const kratosUserId = result.data.identity.id as UserId
       return { cookiesToSendBackToClient, kratosUserId }
     } catch (err) {

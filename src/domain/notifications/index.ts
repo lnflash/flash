@@ -1,5 +1,6 @@
-import { InvalidPushNotificationSettingError as InvalidNotificationSettingsError } from "./errors"
 import { getDefaultFCMTopics } from "@config"
+
+import { InvalidPushNotificationSettingError as InvalidNotificationSettingsError } from "./errors"
 
 export * from "./errors"
 
@@ -20,15 +21,16 @@ export const FlashNotificationCategories = {
   Payments: "Payments" as NotificationCategory,
   Balance: "Balance" as NotificationCategory,
   AdminPushNotification: "AdminPushNotification" as NotificationCategory,
-  Cashout: "Cashout" as NotificationCategory
+  Cashout: "Cashout" as NotificationCategory,
 } as const
 
 export const checkedToNotificationCategory = (
   notificationCategory: string,
 ): NotificationCategory | ValidationError => {
-
   const validNotificationCategories = Object.values(FlashNotificationCategories)
-  if (!validNotificationCategories.includes(notificationCategory as NotificationCategory)) {
+  if (
+    !validNotificationCategories.includes(notificationCategory as NotificationCategory)
+  ) {
     return new InvalidNotificationSettingsError("Invalid notification category")
   }
 

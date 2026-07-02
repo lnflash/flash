@@ -4,12 +4,20 @@
 
 // Topics vary be environment, must be passed in to match yaml config
 const topicsEnv = process.env.NOTIFICATION_TOPICS
-if (!topicsEnv) throw new Error("NOTIFICATION_TOPICS env var is required (comma-separated list of FCM topic names)")
-const topics = topicsEnv.split(",").map(t => t.trim()).filter(Boolean)
+if (!topicsEnv)
+  throw new Error(
+    "NOTIFICATION_TOPICS env var is required (comma-separated list of FCM topic names)",
+  )
+const topics = topicsEnv
+  .split(",")
+  .map((t) => t.trim())
+  .filter(Boolean)
 
 module.exports = {
   async up(db) {
-    console.log(`Begin migration: write deviceTopics field for topics "${topics.join(", ")}" to all users with device tokens`)
+    console.log(
+      `Begin migration: write deviceTopics field for topics "${topics.join(", ")}" to all users with device tokens`,
+    )
 
     const users = await db
       .collection("users")

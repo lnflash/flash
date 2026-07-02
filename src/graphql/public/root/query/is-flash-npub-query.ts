@@ -1,11 +1,10 @@
-import { GT } from "@graphql/index"
 import { Accounts } from "@app"
+import { RepositoryError } from "@domain/errors"
+import { GT } from "@graphql/index"
 import {
   IsFlashNpubInput,
   IsFlashNpubPayload,
 } from "@graphql/public/types/object/is-flash-npub"
-import Npub from "@graphql/shared/types/scalar/npub"
-import { RepositoryError } from "@domain/errors"
 
 const IsFlashNpubQuery = GT.Field({
   type: IsFlashNpubPayload,

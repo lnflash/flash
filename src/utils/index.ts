@@ -1,5 +1,6 @@
 import { MS_PER_DAY, MS_PER_SEC } from "@config"
 import { NonIntegerError } from "@domain/errors"
+import { decode as decodeBolt11 } from "bolt11"
 
 export * as GrpcStreamClient from "./grpc-stream-client"
 
@@ -122,9 +123,8 @@ export const delayWhile = async ({
  */
 export function extractPaymentHashFromBolt11(bolt11: string): string | null {
   try {
-    const decoded = require("bolt11").decode(bolt11)
-    const hashTag = decoded.tags.find((t: any) => t.tagName === "payment_hash")
-    return hashTag?.data || null
+    const decoded = decodeBolt11(bolt11)
+    return decoded.tagsObject.payment_hash || null
   } catch {
     return null
   }

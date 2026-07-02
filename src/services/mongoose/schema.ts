@@ -1,6 +1,11 @@
 import crypto from "crypto"
 
-import { getDefaultAccountsConfig, getFeesConfig, getDefaultFCMTopics, Levels } from "@config"
+import {
+  getDefaultAccountsConfig,
+  getFeesConfig,
+  getDefaultFCMTopics,
+  Levels,
+} from "@config"
 import { AccountStatus, UsernameRegex } from "@domain/accounts"
 import { WalletIdRegex, WalletType } from "@domain/wallets"
 import { WalletCurrency } from "@domain/shared"
@@ -16,6 +21,60 @@ import { WalletRecord } from "./wallets"
 // mongoose.set("debug", true)
 
 const Schema = mongoose.Schema
+
+// Bridge Record Interfaces
+interface IBridgeVirtualAccountRecord {
+  accountId: string
+  bridgeVirtualAccountId: string
+  bankName: string
+  routingNumber: string
+  accountNumber: string
+  accountNumberLast4: string
+  createdAt: Date
+}
+
+interface IBridgeExternalAccountRecord {
+  accountId: string
+  bridgeExternalAccountId: string
+  bankName: string
+  accountNumberLast4: string
+  status: "pending" | "verified" | "failed"
+  isDefault: boolean
+  createdAt: Date
+  updatedAt: Date
+}
+
+interface IBridgeWithdrawalRecord {
+  accountId: string
+  bridgeTransferId?: string
+  bridgeDepositAddress?: string
+  ibexPayoutId?: string
+  ibexTxHash?: string
+  amount: string
+  currency: string
+  status:
+    | "pending"
+    | "submitted"
+    | "usdt_sent"
+    | "send_failed"
+    | "completed"
+    | "failed"
+    | "cancelled"
+  flashFeePercent: string
+  flashFee: string
+  estimatedBridgeFeePercent: string
+  estimatedBridgeFee: string
+  estimatedGasBuffer: string
+  estimatedCustomerFee: string
+  bridgeDeveloperFee?: string
+  bridgeExchangeFee?: string
+  subtotalAmount?: string
+  finalAmount?: string
+  failureReason?: string
+  externalAccountId: string
+  createdAt: Date
+  updatedAt: Date
+}
 
 const dbMetadataSchema = new Schema<DbMetadataRecord>({
   routingFeeLastEntry: Date, // TODO: rename to routingRevenueLastEntry
@@ -295,6 +354,31 @@ const AccountSchema = new Schema<AccountRecord>(
     },
 
     displayCurrency: String, // FIXME: should be an enum
+
+    bridgeCustomerId: {
+      type: String,
+      required: false,
+    },
+    bridgeKycStatus: {
+      type: String,
+      enum: [
+        "open",
+        "not_started",
+        "incomplete",
+        "awaiting_questionnaire",
+        "awaiting_ubo",
+        "under_review",
+        "paused",
+        "approved",
+        "rejected",
+        "offboarded",
+      ],
+      required: false,
+    },
+    bridgeEthereumAddress: {
+      type: String,
+      required: false,
+    },
   },
   { id: false },
 )
@@ -303,6 +387,8 @@ AccountSchema.index({
   title: 1,
   coordinates: 1,
 })
+
+AccountSchema.index({ bridgeEthereumAddress: 1 }, { sparse: true })
 
 export const Account = mongoose.model<AccountRecord>("Account", AccountSchema)
 
@@ -566,4 +652,256 @@ export const WalletOnChainPendingReceive =
     "WalletOnChainPendingReceive",
     WalletOnChainPendingReceiveSchema,
   )
-  
+
+const CashWalletCutoverConfigSchema = new Schema<CashWalletCutoverConfigRecord>({
+  _id: { type: String, default: "cash_wallet_cutover" },
+  state: { type: String, enum: ["pre", "in_progress", "complete"], required: true },
+  scheduledAt: Date,
+  startedAt: Date,
+  completedAt: Date,
+  pausedAt: Date,
+  pauseReason: String,
+  updatedBy: String,
+  cutoverVersion: { type: Number, required: true, default: 1 },
+  runId: String,
+  updatedAt: { type: Date, default: Date.now },
+})
+
+export const CashWalletCutoverConfig = mongoose.model<CashWalletCutoverConfigRecord>(
+  "CashWalletCutoverConfig",
+  CashWalletCutoverConfigSchema,
+)
+
+const CashWalletMigrationSchema = new Schema<CashWalletMigrationRecord>({
+  _id: { type: String, required: true },
+  accountId: { type: String, required: true, index: true },
+  accountUuid: String,
+  legacyUsdWalletId: { type: String, required: true },
+  destinationUsdtWalletId: { type: String, required: true },
+  previousDefaultWalletId: String,
+  cutoverVersion: { type: Number, required: true, index: true },
+  runId: { type: String, required: true, index: true },
+  status: { type: String, required: true, index: true },
+  sourceBalanceUsdCents: String,
+  destinationAmountUsdtMicros: String,
+  destinationStartingBalanceUsdtMicros: String,
+  feeAmountUsdCents: String,
+  feeAmountUsdtMicros: String,
+  balanceMoveInvoicePaymentRequest: String,
+  balanceMoveInvoicePaymentHash: String,
+  balanceMovePaymentTransactionId: String,
+  feeReimbursementInvoicePaymentRequest: String,
+  feeReimbursementInvoicePaymentHash: String,
+  feeReimbursementPaymentTransactionId: String,
+  estimatedFee: Boolean,
+  idempotencyKey: { type: String, required: true },
+  attempts: { type: Number, default: 0 },
+  lastError: String,
+  lockedAt: Date,
+  lockedBy: String,
+  startedAt: Date,
+  completedAt: Date,
+  updatedAt: { type: Date, default: Date.now, index: true },
+})
+
+CashWalletMigrationSchema.index({ accountId: 1, runId: 1 }, { unique: true })
+CashWalletMigrationSchema.index({ idempotencyKey: 1 }, { unique: true })
+CashWalletMigrationSchema.index({ cutoverVersion: 1, status: 1, updatedAt: 1 })
+CashWalletMigrationSchema.index({ runId: 1, status: 1 })
+CashWalletMigrationSchema.index({ lockedAt: 1 })
+
+export const CashWalletMigration = mongoose.model<CashWalletMigrationRecord>(
+  "CashWalletMigration",
+  CashWalletMigrationSchema,
+)
+
+const BridgeVirtualAccountSchema = new Schema<IBridgeVirtualAccountRecord>({
+  // unique: true enforces one VA per account at the DB layer — idempotency guard
+  accountId: { type: String, required: true, unique: true },
+  bridgeVirtualAccountId: { type: String, required: true, unique: true },
+  bankName: { type: String, required: true },
+  routingNumber: { type: String, required: true },
+  accountNumber: { type: String, required: true },
+  accountNumberLast4: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now },
+})
+
+const BridgeExternalAccountSchema = new Schema<IBridgeExternalAccountRecord>({
+  accountId: { type: String, required: true, index: true },
+  bridgeExternalAccountId: { type: String, required: true, unique: true },
+  bankName: { type: String, required: true },
+  accountNumberLast4: { type: String, required: true },
+  status: { type: String, enum: ["pending", "verified", "failed"], default: "pending" },
+  isDefault: { type: Boolean, default: false },
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now },
+})
+
+// CRIT-2 (ENG-281): Compound index enforces that a given bridgeExternalAccountId
+// can only be associated with one accountId at the DB layer, preventing cross-account
+// withdrawal attacks even if application-layer ownership checks are bypassed.
+BridgeExternalAccountSchema.index(
+  { accountId: 1, bridgeExternalAccountId: 1 },
+  { unique: true },
+)
+
+const BridgeWithdrawalSchema = new Schema<IBridgeWithdrawalRecord>({
+  accountId: { type: String, required: true, index: true },
+  bridgeTransferId: { type: String, unique: true, sparse: true },
+  bridgeDepositAddress: { type: String },
+  ibexPayoutId: { type: String, unique: true, sparse: true },
+  ibexTxHash: { type: String },
+  amount: { type: String, required: true },
+  currency: { type: String, required: true },
+  status: {
+    type: String,
+    enum: [
+      "pending",
+      "submitted",
+      "usdt_sent",
+      "send_failed",
+      "completed",
+      "failed",
+      "cancelled",
+    ],
+    default: "pending",
+  },
+  flashFeePercent: { type: String, required: true },
+  flashFee: { type: String, required: true },
+  estimatedBridgeFeePercent: { type: String, required: true },
+  estimatedBridgeFee: { type: String, required: true },
+  estimatedGasBuffer: { type: String, required: true },
+  estimatedCustomerFee: { type: String, required: true },
+  bridgeDeveloperFee: { type: String },
+  bridgeExchangeFee: { type: String },
+  subtotalAmount: { type: String },
+  finalAmount: { type: String },
+  failureReason: { type: String, maxlength: 512 },
+  externalAccountId: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now },
+})
+
+// At most one pending row per (account, destination, amount, currency). Partial filter must
+// not use $exists:false — MongoDB rejects it for partial indexes ("$not ... $exists").
+// "pending" alone is enough: completed/failed rows are excluded so the same tuple can repeat
+// after a terminal status.
+BridgeWithdrawalSchema.index(
+  { accountId: 1, externalAccountId: 1, amount: 1, currency: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: "pending" },
+  },
+)
+
+const BridgeDepositsSchema = new Schema({
+  eventId: { type: String, required: true, unique: true },
+  transferId: { type: String, required: true },
+  customerId: { type: String, required: true },
+  state: { type: String, required: true },
+  amount: { type: String, required: true },
+  currency: { type: String, required: true },
+  subtotalAmount: { type: String },
+  developerFee: { type: String, required: true, default: "0" },
+  initialAmount: { type: String },
+  finalAmount: { type: String },
+  destinationTxHash: { type: String },
+  createdAt: { type: Date, default: Date.now },
+})
+
+BridgeDepositsSchema.index({ transferId: 1 })
+BridgeDepositsSchema.index({ customerId: 1, createdAt: -1 })
+
+export const BridgeDeposits = mongoose.model("BridgeDeposits", BridgeDepositsSchema)
+
+const IbexCryptoReceiveSchema = new Schema({
+  txHash: { type: String, required: true, unique: true },
+  address: { type: String, required: true },
+  amount: { type: String, required: true },
+  currency: { type: String, required: true },
+  network: { type: String, required: true },
+  accountId: { type: String },
+  receivedAt: { type: Date, default: Date.now },
+})
+
+IbexCryptoReceiveSchema.index({ receivedAt: -1 })
+IbexCryptoReceiveSchema.index({ address: 1, receivedAt: -1 })
+
+export const IbexCryptoReceive = mongoose.model(
+  "IbexCryptoReceive",
+  IbexCryptoReceiveSchema,
+)
+
+const BridgeReconciliationOrphanSchema = new Schema({
+  orphanKey: { type: String, required: true, unique: true },
+  orphanType: {
+    type: String,
+    enum: [
+      "bridge_without_ibex",
+      "ibex_without_bridge",
+      "bridge_transfer_without_ibex_send",
+      "ibex_send_without_bridge_settlement",
+    ],
+    required: true,
+  },
+  status: {
+    type: String,
+    enum: ["unmatched", "resolved"],
+    default: "unmatched",
+    required: true,
+  },
+  transferId: { type: String },
+  txHash: { type: String },
+  bridgeEventId: { type: String },
+  customerId: { type: String },
+  amount: { type: String },
+  currency: { type: String },
+  triageContext: { type: Schema.Types.Mixed, required: true },
+  detectedAt: { type: Date, default: Date.now },
+  resolvedAt: { type: Date },
+})
+
+BridgeReconciliationOrphanSchema.index({ orphanType: 1, detectedAt: -1 })
+BridgeReconciliationOrphanSchema.index({ detectedAt: -1 })
+BridgeReconciliationOrphanSchema.index({ status: 1, detectedAt: -1 })
+BridgeReconciliationOrphanSchema.index({ txHash: 1 })
+
+export const BridgeReconciliationOrphan = mongoose.model(
+  "BridgeReconciliationOrphan",
+  BridgeReconciliationOrphanSchema,
+)
+
+const BridgeReplaySchema = new Schema({
+  eventId: { type: String, required: true },
+  eventType: { type: String, required: true },
+  eventPayload: { type: Schema.Types.Mixed, required: true },
+  bridgeEventCreatedAt: { type: Date, required: true },
+  replayedAt: { type: Date, required: true, default: Date.now },
+  operator: { type: String, required: true },
+  timeWindowStart: { type: Date, required: true },
+  timeWindowEnd: { type: Date, required: true },
+  httpStatus: { type: Number, required: true },
+  httpResponse: { type: Schema.Types.Mixed, required: true },
+  dryRun: { type: Boolean, required: true, default: false },
+})
+
+BridgeReplaySchema.index({ eventId: 1 })
+BridgeReplaySchema.index({ replayedAt: -1 })
+BridgeReplaySchema.index({ eventType: 1, replayedAt: -1 })
+
+export const BridgeReplay = mongoose.model("BridgeReplay", BridgeReplaySchema)
+
+export const BridgeVirtualAccount = mongoose.model<IBridgeVirtualAccountRecord>(
+  "BridgeVirtualAccount",
+  BridgeVirtualAccountSchema,
+)
+
+export const BridgeExternalAccount = mongoose.model<IBridgeExternalAccountRecord>(
+  "BridgeExternalAccount",
+  BridgeExternalAccountSchema,
+)
+
+export const BridgeWithdrawal = mongoose.model<IBridgeWithdrawalRecord>(
+  "BridgeWithdrawal",
+  BridgeWithdrawalSchema,
+)

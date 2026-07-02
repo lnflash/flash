@@ -3,9 +3,8 @@ import crypto from "crypto"
 import { UsdDisplayCurrency } from "@domain/fiat"
 import { AccountLevel, AccountStatus } from "@domain/accounts"
 import { InactiveAccountError } from "@domain/errors"
-import { ValidationError } from "@domain/shared"
+import { ValidationError, WalletCurrency, USDAmount, isValidated } from "@domain/shared"
 import { OnchainUsdPaymentValidator, WalletType } from "@domain/wallets"
-import { WalletCurrency, USDAmount, isValidated } from "@domain/shared"
 
 describe("OnchainUsdPaymentValidator", () => {
   const dummyAccount: Account = {
@@ -36,7 +35,7 @@ describe("OnchainUsdPaymentValidator", () => {
     quiz: [],
     kratosUserId: "kratosUserId" as UserId,
     displayCurrency: UsdDisplayCurrency,
-    npub: "npub..." as Npub
+    npub: "npub..." as Npub,
   }
 
   const dummySenderWallet: Wallet = {
@@ -46,18 +45,18 @@ describe("OnchainUsdPaymentValidator", () => {
     currency: WalletCurrency.Usd,
     onChainAddressIdentifiers: [],
     onChainAddresses: () => [],
-    lnurlp: "LNURLP" as Lnurl
+    lnurlp: "LNURLP" as Lnurl,
   }
 
   it("returns the correct types when everything is valid", async () => {
     const usd = USDAmount.cents(5n)
     if (usd instanceof Error) return usd
-    const result = OnchainUsdPaymentValidator({ 
+    const result = OnchainUsdPaymentValidator({
       wallet: dummySenderWallet,
       account: dummyAccount,
       accountId: dummySenderWallet.id,
       amount: usd,
-      address: "bc1q..." as OnChainAddress
+      address: "bc1q..." as OnChainAddress,
     })
     if (result instanceof Error) throw result
 
@@ -73,7 +72,7 @@ describe("OnchainUsdPaymentValidator", () => {
       account: dummyAccount,
       accountId: dummySenderWallet.id,
       amount: usd,
-      address: "bc1q..." as OnChainAddress
+      address: "bc1q..." as OnChainAddress,
     })
     expect(Array.isArray(result) && result[0]).toBeInstanceOf(ValidationError)
   })
@@ -89,7 +88,7 @@ describe("OnchainUsdPaymentValidator", () => {
       },
       accountId: dummySenderWallet.id,
       amount: usd,
-      address: "bc1q..." as OnChainAddress
+      address: "bc1q..." as OnChainAddress,
     })
     expect(Array.isArray(result) && result[0]).toBeInstanceOf(InactiveAccountError)
   })

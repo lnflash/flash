@@ -10,6 +10,7 @@ import WalletId from "@graphql/shared/types/scalar/wallet-id"
 
 import { Wallets } from "@app"
 import { getBalanceForWallet } from "@app/wallets"
+import { USDAmount, WalletCurrency } from "@domain/shared"
 
 const OnChainPaymentSendAllInput = GT.Input({
   name: "OnChainPaymentSendAllInput",
@@ -62,8 +63,14 @@ const OnChainPaymentSendAllMutation = GT.Field<
       return { errors: [{ message: speed.message }] }
     }
 
-    const amount = await getBalanceForWallet({ walletId })
+    const amount = await getBalanceForWallet({
+      walletId,
+      currency: WalletCurrency.Usd,
+    })
     if (amount instanceof Error) return amount
+    if (!(amount instanceof USDAmount)) {
+      return { errors: [{ message: "Onchain payments require a USD wallet" }] }
+    }
 
     const result = await Wallets.payOnChainByWalletId({
       senderAccount: domainAccount,

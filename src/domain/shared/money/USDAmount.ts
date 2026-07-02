@@ -1,8 +1,11 @@
+import { getCurrencyMajorExponent } from "@domain/fiat/display-currency"
+
 import Money, { Round } from "../bigint-money"
-import { MoneyAmount } from "./MoneyAmount"
+
 import { WalletCurrency } from "../primitives"
 import { BigIntConversionError } from "../errors"
-import { getCurrencyMajorExponent } from "@domain/fiat/display-currency"
+
+import { MoneyAmount } from "./MoneyAmount"
 
 export class USDAmount extends MoneyAmount {
   static currencyId: IbexCurrencyId = 3 as IbexCurrencyId
@@ -15,7 +18,9 @@ export class USDAmount extends MoneyAmount {
     try {
       return new USDAmount(cents)
     } catch (error) {
-      return new BigIntConversionError(error instanceof Error ? error.message : String(error))
+      return new BigIntConversionError(
+        error instanceof Error ? error.message : String(error),
+      )
     }
   }
 
@@ -27,9 +32,10 @@ export class USDAmount extends MoneyAmount {
       if (cents instanceof BigIntConversionError) return cents // should never happen
       return new USDAmount(cents.money.multiply(dollarAmt).toFixed(2))
     } catch (error) {
-      return new BigIntConversionError(error instanceof Error ? error.message : String(error))
+      return new BigIntConversionError(
+        error instanceof Error ? error.message : String(error),
+      )
     }
-
   }
 
   static ZERO = new USDAmount(0)
@@ -43,11 +49,11 @@ export class USDAmount extends MoneyAmount {
   }
 
   // const jmdLiability = {
-  //   amount: BigInt(usdLiability.asCents()) * exchangeRate / 100n, 
+  //   amount: BigInt(usdLiability.asCents()) * exchangeRate / 100n,
   //   currency: "JMD",
   // }
   // Rate is the ratio at which one currency can be exchanged for another.
-  // T:USD  
+  // T:USD
   convertAtRate<T extends MoneyAmount>(rate: T): T {
     const converted = rate.money.multiply(this.money).divide(100)
     return rate.getInstance(converted)
@@ -62,14 +68,13 @@ export class USDAmount extends MoneyAmount {
   }
 
   i18n(): string {
-    const exponent = getCurrencyMajorExponent(this.currencyCode as DisplayCurrency);
+    const exponent = getCurrencyMajorExponent(this.currencyCode as DisplayCurrency)
     return new Intl.NumberFormat("en", {
       style: "currency",
       currency: this.currencyCode,
       currencyDisplay: "narrowSymbol",
       minimumFractionDigits: exponent,
       maximumFractionDigits: exponent,
-    }).format(Number(this.asDollars()));
+    }).format(Number(this.asDollars()))
   }
-
 }

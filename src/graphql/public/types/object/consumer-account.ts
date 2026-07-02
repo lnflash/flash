@@ -1,4 +1,8 @@
-import { Accounts, Prices, Wallets } from "@app"
+import { Accounts, Prices } from "@app"
+import {
+  cashWalletHistoryWalletIdsForPresentation,
+  resolveCashWalletPresentationForAccount,
+} from "@app/cash-wallet-cutover"
 
 import {
   majorToMinorUnit,
@@ -20,8 +24,6 @@ import IAccount from "@graphql/public/types/abstract/account"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import RealtimePrice from "@graphql/public/types/object/realtime-price"
 import DisplayCurrency from "@graphql/shared/types/scalar/display-currency"
-
-import { WalletsRepository } from "@services/mongoose"
 
 import { listEndpoints } from "@app/callback"
 
@@ -54,14 +56,28 @@ const ConsumerAccount = GT.Object<Account, GraphQLPublicContextAuth>({
 
     wallets: {
       type: GT.NonNullList(Wallet),
-      resolve: async (source) => {
-        return Wallets.listWalletsByAccountId(source.id)
+      resolve: async (source, args, { cashWalletClientCapabilities }) => {
+        const presentation = await resolveCashWalletPresentationForAccount({
+          account: source,
+          client: cashWalletClientCapabilities,
+        })
+        if (presentation instanceof Error) throw mapError(presentation)
+
+        return presentation.wallets
       },
     },
 
     defaultWalletId: {
       type: GT.NonNull(WalletId),
-      resolve: (source) => source.defaultWalletId,
+      resolve: async (source, args, { cashWalletClientCapabilities }) => {
+        const presentation = await resolveCashWalletPresentationForAccount({
+          account: source,
+          client: cashWalletClientCapabilities,
+        })
+        if (presentation instanceof Error) throw mapError(presentation)
+
+        return presentation.defaultWalletId
+      },
     },
 
     displayCurrency: {
@@ -145,21 +161,24 @@ const ConsumerAccount = GT.Object<Account, GraphQLPublicContextAuth>({
           type: GT.List(WalletId),
         },
       },
-      resolve: async (source, args) => {
+      resolve: async (source, args, { cashWalletClientCapabilities }) => {
         const paginationArgs = checkedConnectionArgs(args)
         if (paginationArgs instanceof Error) {
           throw paginationArgs
         }
 
+        const presentation = await resolveCashWalletPresentationForAccount({
+          account: source,
+          client: cashWalletClientCapabilities,
+        })
+        if (presentation instanceof Error) throw mapError(presentation)
+
         let { walletIds } = args
 
-        if (!walletIds) {
-          const wallets = await WalletsRepository().listByAccountId(source.id)
-          if (wallets instanceof Error) {
-            throw mapError(wallets)
-          }
-          walletIds = wallets.map((wallet) => wallet.id)
-        }
+        walletIds = cashWalletHistoryWalletIdsForPresentation({
+          walletIds,
+          presentation,
+        })
 
         const { result, error } = await Accounts.getTransactionsForAccountByWalletIds({
           account: source,

@@ -9,8 +9,9 @@ import { mapError } from "@graphql/error-map"
 import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 
 import { Wallets } from "@app"
+import { resolveCashWalletPresentationForAccount } from "@app/cash-wallet-cutover"
 
-import { WalletCurrency as WalletCurrencyDomain } from "@domain/shared"
+import { WalletCurrency as WalletCurrencyDomain, USDTAmount } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
 
 import IWallet from "../abstract/wallet"
@@ -20,7 +21,20 @@ import SignedAmount from "../scalar/signed-amount"
 import OnChainAddress from "../scalar/on-chain-address"
 import Lnurl from "../scalar/lnurl"
 
+import { resolveCashWalletHistoryWalletsForWalletObject } from "./cash-wallet-history"
 import { TransactionConnection } from "./transaction"
+
+export const usdtMicrosToUsdCents = (usdtMicros: bigint | number | string): number => {
+  const [wholeMicros, fractionalMicros] = usdtMicros.toString().split(".")
+  if (fractionalMicros && !/^0+$/.test(fractionalMicros)) {
+    throw new Error(`Cannot convert fractional USDT micros ${usdtMicros} to USD cents`)
+  }
+
+  const amount = USDTAmount.smallestUnits(wholeMicros)
+  if (amount instanceof Error) throw amount
+
+  return Number(amount.asUsdCents())
+}
 
 const UsdWallet = GT.Object<Wallet>({
   name: "UsdWallet",
@@ -49,11 +63,34 @@ const UsdWallet = GT.Object<Wallet>({
     },
     balance: {
       type: FractionalCentAmount,
-      resolve: async (source) => {
+      resolve: async (source, args, ctx) => {
         if (source.type === WalletType.External) return null
-        const balance = await Wallets.getBalanceForWallet({ walletId: source.id })
+        let balanceWallet = source
+
+        if (
+          "cashWalletClientCapabilities" in ctx &&
+          ctx.domainAccount?.id === source.accountId
+        ) {
+          const presentation = await resolveCashWalletPresentationForAccount({
+            account: ctx.domainAccount,
+            client: ctx.cashWalletClientCapabilities,
+          })
+          if (presentation instanceof Error) throw mapError(presentation)
+
+          if (source.id === presentation.legacyUsdWallet?.id) {
+            balanceWallet = presentation.activeSettlementWallet
+          }
+        }
+
+        const balance = await Wallets.getBalanceForWallet({
+          walletId: balanceWallet.id,
+          currency: balanceWallet.currency,
+        })
         if (balance instanceof Error) {
           throw mapError(balance)
+        }
+        if (balance instanceof USDTAmount) {
+          return usdtMicrosToUsdCents(balance.asSmallestUnits())
         }
         return Number(balance.asCents(8))
       },
@@ -72,14 +109,19 @@ const UsdWallet = GT.Object<Wallet>({
     transactions: {
       type: TransactionConnection,
       args: connectionArgs,
-      resolve: async (source, args) => {
+      resolve: async (source, args, ctx) => {
         const paginationArgs = checkedConnectionArgs(args)
         if (paginationArgs instanceof Error) {
           throw paginationArgs
         }
 
+        const wallets = await resolveCashWalletHistoryWalletsForWalletObject({
+          source,
+          ctx,
+        })
+
         const { result, error } = await Wallets.getTransactionsForWallets({
-          wallets: [source],
+          wallets,
           paginationArgs,
         })
         if (error instanceof Error) {
@@ -105,7 +147,7 @@ const UsdWallet = GT.Object<Wallet>({
           description: "Returns the items that include this address.",
         },
       },
-      resolve: async (source, args) => {
+      resolve: async (source, args, ctx) => {
         const paginationArgs = checkedConnectionArgs(args)
         if (paginationArgs instanceof Error) {
           throw paginationArgs
@@ -114,8 +156,13 @@ const UsdWallet = GT.Object<Wallet>({
         const { address } = args
         if (address instanceof Error) throw address
 
+        const wallets = await resolveCashWalletHistoryWalletsForWalletObject({
+          source,
+          ctx,
+        })
+
         const { result, error } = await Wallets.getTransactionsForWalletsByAddresses({
-          wallets: [source],
+          wallets,
           addresses: [address],
           paginationArgs,
         })

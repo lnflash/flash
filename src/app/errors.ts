@@ -19,6 +19,7 @@ import * as PubSubErrors from "@domain/pubsub/errors"
 import * as CaptchaErrors from "@domain/captcha/errors"
 import * as AuthenticationErrors from "@domain/authentication/errors"
 import * as UserErrors from "@domain/users/errors"
+import * as CashWalletCutoverErrors from "@app/cash-wallet-cutover/errors"
 
 import * as LedgerFacadeErrors from "@services/ledger/domain/errors"
 import * as KratosErrors from "@services/kratos/errors"
@@ -27,6 +28,7 @@ import * as SvixErrors from "@services/svix/errors"
 
 import * as IbexErrors from "@services/ibex/errors"
 import * as ErpNextErrors from "@services/frappe/errors"
+import * as BridgeErrors from "@services/bridge/errors"
 
 export const ApplicationErrors = {
   ...SharedErrors,
@@ -50,6 +52,7 @@ export const ApplicationErrors = {
   ...CaptchaErrors,
   ...AuthenticationErrors,
   ...UserErrors,
+  ...CashWalletCutoverErrors,
 
   ...KratosErrors,
   ...LedgerFacadeErrors,
@@ -59,4 +62,5 @@ export const ApplicationErrors = {
   // Flash Errors
   ...IbexErrors,
   ...ErpNextErrors,
+  ...BridgeErrors,
 } as const

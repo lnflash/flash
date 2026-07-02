@@ -1,4 +1,3 @@
-import { NETWORK } from "@config"
 import { checkedToOnChainAddress } from "@domain/bitcoin/onchain"
 import { InputValidationError } from "@graphql/error"
 import { GT } from "@graphql/index"

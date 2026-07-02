@@ -4,7 +4,7 @@ import {
 } from "@domain/errors"
 
 import { Merchant } from "./schema"
-import { caseInsensitiveRegex, parseRepositoryError } from "./utils"
+import { parseRepositoryError } from "./utils"
 
 interface IMerchantRepository {
   listForMap(): Promise<BusinessMapMarker[] | RepositoryError>
@@ -41,7 +41,7 @@ export const MerchantsRepository = (): IMerchantRepository => {
     id: MerchantId,
   ): Promise<BusinessMapMarker | RepositoryError> => {
     try {
-      const result = await Merchant.findOne({ id })
+      const result = await Merchant.findOne({ id: { $eq: id } })
       if (!result) {
         return new CouldNotFindMerchantFromIdError(id)
       }
@@ -55,7 +55,10 @@ export const MerchantsRepository = (): IMerchantRepository => {
     username: Username,
   ): Promise<BusinessMapMarker[] | RepositoryError> => {
     try {
-      const result = await Merchant.find({ username: caseInsensitiveRegex(username) })
+      const result = await Merchant.find({ username: { $eq: username } }).collation({
+        locale: "en",
+        strength: 2,
+      })
       if (result.length === 0) {
         return new CouldNotFindMerchantFromUsernameError(username)
       }
@@ -124,7 +127,7 @@ export const MerchantsRepository = (): IMerchantRepository => {
     validated: boolean
   }) => {
     const result = await Merchant.findOneAndUpdate(
-      { id },
+      { id: { $eq: id } },
       { coordinates, title, username, validated },
       { new: true },
     )
@@ -149,7 +152,7 @@ export const MerchantsRepository = (): IMerchantRepository => {
   }): Promise<BusinessMapMarker | RepositoryError> => {
     try {
       const result = await Merchant.findOneAndUpdate(
-        { id },
+        { id: { $eq: id } },
         { $set: updates },
         { new: true },
       )
@@ -164,7 +167,7 @@ export const MerchantsRepository = (): IMerchantRepository => {
 
   const remove = async (id: MerchantId): Promise<void | RepositoryError> => {
     try {
-      const result = await Merchant.deleteOne({ id })
+      const result = await Merchant.deleteOne({ id: { $eq: id } })
       if (!result) {
         return new CouldNotFindMerchantFromIdError(id)
       }

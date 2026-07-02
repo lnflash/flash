@@ -264,6 +264,186 @@ input BankAccountInput
   currency: String!
 }
 
+type BridgeAddExternalAccountPayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error!]!
+  externalAccount: BridgeExternalAccountLink
+}
+
+input BridgeCancelWithdrawalRequestInput
+  @join__type(graph: PUBLIC)
+{
+  withdrawalId: ID!
+}
+
+type BridgeCancelWithdrawalRequestPayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error!]!
+  withdrawal: BridgeWithdrawal
+}
+
+input BridgeCreateExternalAccountInput
+  @join__type(graph: PUBLIC)
+{
+  accountNumber: String!
+  accountOwnerName: String!
+  bankName: String!
+  checkingOrSavings: String = "checking"
+  city: String!
+  country: String!
+  postalCode: String!
+  routingNumber: String!
+  state: String!
+  streetLine1: String!
+}
+
+type BridgeCreateExternalAccountPayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error!]!
+  externalAccount: BridgeExternalAccount
+}
+
+type BridgeCreateVirtualAccountPayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error!]!
+  virtualAccount: BridgeVirtualAccount
+}
+
+input BridgeDeleteExternalAccountInput
+  @join__type(graph: PUBLIC)
+{
+  externalAccountId: ID!
+}
+
+type BridgeDeleteExternalAccountPayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error!]!
+  externalAccount: BridgeExternalAccount
+}
+
+type BridgeExternalAccount
+  @join__type(graph: PUBLIC)
+{
+  accountNumberLast4: String!
+  bankName: String!
+  id: ID!
+  isDefault: Boolean!
+  status: String!
+}
+
+type BridgeExternalAccountLink
+  @join__type(graph: PUBLIC)
+{
+  expiresAt: String!
+  linkUrl: String!
+}
+
+input BridgeInitiateKycInput
+  @join__type(graph: PUBLIC)
+{
+  email: String
+  full_name: String
+  type: String
+}
+
+type BridgeInitiateKycPayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error!]!
+  kycLink: BridgeKycLink
+}
+
+input BridgeInitiateWithdrawalInput
+  @join__type(graph: PUBLIC)
+{
+  withdrawalId: ID!
+}
+
+type BridgeInitiateWithdrawalPayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error!]!
+  withdrawal: BridgeWithdrawal
+}
+
+type BridgeKycLink
+  @join__type(graph: PUBLIC)
+{
+  kycLink: String!
+  tosLink: String!
+}
+
+input BridgeRequestWithdrawalInput
+  @join__type(graph: PUBLIC)
+{
+  amount: String!
+  externalAccountId: ID!
+}
+
+type BridgeRequestWithdrawalPayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error!]!
+  withdrawal: BridgeWithdrawal
+}
+
+input BridgeSetDefaultExternalAccountInput
+  @join__type(graph: PUBLIC)
+{
+  externalAccountId: ID!
+}
+
+type BridgeSetDefaultExternalAccountPayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error!]!
+  externalAccount: BridgeExternalAccount
+}
+
+type BridgeVirtualAccount
+  @join__type(graph: PUBLIC)
+{
+  accountNumber: String
+  accountNumberLast4: String
+  bankName: String
+  id: ID
+  kycLink: String
+  message: String
+  pending: Boolean
+  routingNumber: String
+  tosLink: String
+}
+
+type BridgeWithdrawal
+  @join__type(graph: PUBLIC)
+{
+  amount: String!
+  bridgeDeveloperFee: String
+  bridgeExchangeFee: String
+  bridgeTransferId: String
+  createdAt: String!
+  currency: String!
+  estimatedBridgeFee: String
+  estimatedBridgeFeePercent: String
+  estimatedCustomerFee: String
+  estimatedGasBuffer: String
+  externalAccountId: String
+  failureReason: String
+  finalAmount: String
+  flashFee: String
+  flashFeeIsEstimate: Boolean!
+  flashFeeNotice: String
+  flashFeePercent: String
+  id: ID!
+  status: String!
+  subtotalAmount: String
+}
+
 """
 A wallet belonging to an account which contains a BTC balance and a list of transactions.
 """
@@ -416,6 +596,29 @@ type CashoutOffer
 
   """ID for the users USD wallet to send from"""
   walletId: WalletId!
+}
+
+type CashWalletCutover
+  @join__type(graph: PUBLIC)
+{
+  completedAt: Timestamp
+  cutoverVersion: Int!
+  pauseReason: String
+  pausedAt: Timestamp
+  runId: String
+  scheduledAt: Timestamp
+  startedAt: Timestamp
+  state: CashWalletCutoverState!
+  updatedAt: Timestamp!
+  updatedBy: String
+}
+
+enum CashWalletCutoverState
+  @join__type(graph: PUBLIC)
+{
+  COMPLETE @join__enumValue(graph: PUBLIC)
+  IN_PROGRESS @join__enumValue(graph: PUBLIC)
+  PRE @join__enumValue(graph: PUBLIC)
 }
 
 """(Positive) Cent amount (1/100 of a dollar)"""
@@ -616,6 +819,13 @@ type Globals
 
   """A list of countries and their supported auth channels"""
   supportedCountries: [Country!]!
+
+  """
+  Whether wallet top-up entry points (card webview and
+  bank-transfer-to-support) should be shown to the user. Controlled by the
+  instance-wide topup feature flag.
+  """
+  topupEnabled: Boolean!
 }
 
 type GraphQLApplicationError implements Error
@@ -985,6 +1195,22 @@ A bech32-encoded HTTPS/Onion URL that can be interacted with automatically by a 
 scalar Lnurl
   @join__type(graph: PUBLIC)
 
+input LnurlPaymentSendInput
+  @join__type(graph: PUBLIC)
+{
+  """Amount to spend from the USD/USDT wallet, in USD cents."""
+  amount: FractionalCentAmount!
+
+  """LNURL-pay value to decode and pay."""
+  lnurl: Lnurl!
+
+  """Optional memo for the Lightning payment."""
+  memo: Memo
+
+  """Wallet ID with sufficient balance. Must belong to the current user."""
+  walletId: WalletId!
+}
+
 input LnUsdInvoiceCreateInput
   @join__type(graph: PUBLIC)
 {
@@ -1101,6 +1327,15 @@ type Mutation
   accountEnableNotificationChannel(input: AccountEnableNotificationChannelInput!): AccountUpdateNotificationSettingsPayload!
   accountUpdateDefaultWalletId(input: AccountUpdateDefaultWalletIdInput!): AccountUpdateDefaultWalletIdPayload!
   accountUpdateDisplayCurrency(input: AccountUpdateDisplayCurrencyInput!): AccountUpdateDisplayCurrencyPayload!
+  bridgeAddExternalAccount: BridgeAddExternalAccountPayload!
+  bridgeCancelWithdrawalRequest(input: BridgeCancelWithdrawalRequestInput!): BridgeCancelWithdrawalRequestPayload!
+  bridgeCreateExternalAccount(input: BridgeCreateExternalAccountInput!): BridgeCreateExternalAccountPayload!
+  bridgeCreateVirtualAccount: BridgeCreateVirtualAccountPayload!
+  bridgeDeleteExternalAccount(input: BridgeDeleteExternalAccountInput!): BridgeDeleteExternalAccountPayload!
+  bridgeInitiateKyc(input: BridgeInitiateKycInput!): BridgeInitiateKycPayload!
+  bridgeInitiateWithdrawal(input: BridgeInitiateWithdrawalInput!): BridgeInitiateWithdrawalPayload!
+  bridgeRequestWithdrawal(input: BridgeRequestWithdrawalInput!): BridgeRequestWithdrawalPayload!
+  bridgeSetDefaultExternalAccount(input: BridgeSetDefaultExternalAccountInput!): BridgeSetDefaultExternalAccountPayload!
   businessAccountUpgradeRequest(input: BusinessAccountUpgradeRequestInput!): AccountUpgradePayload!
   callbackEndpointAdd(input: CallbackEndpointAddInput!): CallbackEndpointAddPayload!
   callbackEndpointDelete(input: CallbackEndpointDeleteInput!): SuccessPayload!
@@ -1200,6 +1435,12 @@ type Mutation
   """
   lnUsdInvoiceCreateOnBehalfOfRecipient(input: LnUsdInvoiceCreateOnBehalfOfRecipientInput!): LnInvoicePayload!
   lnUsdInvoiceFeeProbe(input: LnUsdInvoiceFeeProbeInput!): CentAmountPayload!
+
+  """
+  Pay a LNURL-pay endpoint using a USD/USDT wallet balance.
+  The wallet amount is converted to whole-satoshi millisatoshis before calling IBEX.
+  """
+  lnurlPaymentSend(input: LnurlPaymentSendInput!): PaymentSendPayload!
   merchantMapSuggest(input: MerchantMapSuggestInput!): MerchantPayload!
   onChainAddressCreate(input: OnChainAddressCreateInput!): OnChainAddressPayload!
   onChainAddressCurrent(input: OnChainAddressCurrentInput!): OnChainAddressPayload!
@@ -1557,9 +1798,15 @@ type Query
   @join__type(graph: PUBLIC)
 {
   accountDefaultWallet(username: Username!, walletCurrency: WalletCurrency): PublicWallet!
+  bridgeExternalAccounts: [BridgeExternalAccount]
+  bridgeKycStatus: String
+  bridgeVirtualAccount: BridgeVirtualAccount
+  bridgeWithdrawalRequest(id: ID!): BridgeWithdrawal
+  bridgeWithdrawals: [BridgeWithdrawal]
   btcPrice(currency: DisplayCurrency! = "USD"): Price @deprecated(reason: "Deprecated in favor of realtimePrice")
   btcPriceList(range: PriceGraphRange!): [PricePoint]
   businessMapMarkers: [MapMarker!]!
+  cashWalletCutover: CashWalletCutover!
   currencyList: [Currency!]!
   globals: Globals
   isFlashNpub(input: IsFlashNpubInput!): IsFlashNpubPayload
@@ -1939,6 +2186,53 @@ type UpgradePayload
 """Amount in USD cents"""
 scalar USDCents
   @join__type(graph: PUBLIC)
+
+"""
+A wallet belonging to an account which contains a USDT balance and a list of transactions.
+"""
+type UsdtWallet implements Wallet
+  @join__implements(graph: PUBLIC, interface: "Wallet")
+  @join__type(graph: PUBLIC)
+{
+  accountId: ID!
+  balance: FractionalCentAmount
+  id: ID!
+  isExternal: Boolean!
+  lnurlp: Lnurl
+
+  """An unconfirmed incoming onchain balance."""
+  pendingIncomingBalance: SignedAmount!
+  transactions(
+    """Returns the items in the list that come after the specified cursor."""
+    after: String
+
+    """Returns the items in the list that come before the specified cursor."""
+    before: String
+
+    """Returns the first n items from the list."""
+    first: Int
+
+    """Returns the last n items from the list."""
+    last: Int
+  ): TransactionConnection
+  transactionsByAddress(
+    """Returns the items that include this address."""
+    address: OnChainAddress!
+
+    """Returns the items in the list that come after the specified cursor."""
+    after: String
+
+    """Returns the items in the list that come before the specified cursor."""
+    before: String
+
+    """Returns the first n items from the list."""
+    first: Int
+
+    """Returns the last n items from the list."""
+    last: Int
+  ): TransactionConnection
+  walletCurrency: WalletCurrency!
+}
 
 """
 A wallet belonging to an account which contains a USD balance and a list of transactions.
@@ -2333,6 +2627,7 @@ enum WalletCurrency
 {
   BTC @join__enumValue(graph: PUBLIC)
   USD @join__enumValue(graph: PUBLIC)
+  USDT @join__enumValue(graph: PUBLIC)
 }
 
 """Unique identifier of a wallet"""

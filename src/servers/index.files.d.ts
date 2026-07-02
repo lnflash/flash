@@ -13,6 +13,7 @@ type GraphQLPublicContext = {
   domainAccount: Account | undefined
   ip: IpAddress | undefined
   sessionId: SessionId | undefined
+  cashWalletClientCapabilities: import("@app/cash-wallet-cutover/client-capability").CashWalletClientCapabilities
 }
 
 type GraphQLPublicContextAuth = Omit<GraphQLPublicContext, "user" | "domainAccount"> & {
@@ -23,7 +24,7 @@ type GraphQLPublicContextAuth = Omit<GraphQLPublicContext, "user" | "domainAccou
 type GraphQLAdminContext = {
   logger: Logger
   user: {
-    id: UserId,
+    id: UserId
     roles: string[]
     ip: IpAddress
   }

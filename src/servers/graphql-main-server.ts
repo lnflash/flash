@@ -6,7 +6,6 @@ import { AuthorizationError } from "@graphql/error"
 import { gqlMainSchema, mutationFields, queryFields } from "@graphql/public"
 
 import { bootstrap } from "@app/bootstrap"
-import { activateLndHealthCheck } from "@services/lnd/health"
 import { baseLogger } from "@services/logger"
 import { setupMongoConnection } from "@services/mongodb"
 import { shield } from "graphql-shield"
@@ -20,6 +19,7 @@ import {
 import { NextFunction, Request, Response } from "express"
 
 import { parseIps } from "@domain/accounts-ips"
+import { parseCashWalletClientCapabilities } from "@app/cash-wallet-cutover/client-capability"
 
 import { startApolloServerForAdminSchema } from "./graphql-admin-server"
 import { isAuthenticated, startApolloServer } from "./graphql-server"
@@ -44,8 +44,12 @@ const setGqlContext = async (
     tokenPayload,
     ip,
   })
+  const cashWalletClientCapabilities = parseCashWalletClientCapabilities(req.headers)
 
-  req.gqlContext = gqlContext
+  req.gqlContext = {
+    ...gqlContext,
+    cashWalletClientCapabilities,
+  }
 
   return addAttributesToCurrentSpanAndPropagate(
     {
@@ -56,6 +60,11 @@ const setGqlContext = async (
       [SemanticAttributes.HTTP_USER_AGENT]: req.headers["user-agent"],
       [ACCOUNT_USERNAME]: gqlContext?.domainAccount?.username,
       [SemanticAttributes.ENDUSER_ID]: tokenPayload?.sub,
+      "cash_wallet.client_presentation":
+        cashWalletClientCapabilities.cashWalletPresentation,
+      "cash_wallet.client_usdt_supported": String(
+        cashWalletClientCapabilities.hasUsdtCashWalletSupport,
+      ),
     },
     next,
   )
@@ -101,9 +110,9 @@ export async function startApolloServerForCoreSchema() {
 if (require.main === module) {
   setupMongoConnection(true)
     .then(async () => {
-      // activateLndHealthCheck() // 
+      // activateLndHealthCheck()
 
-      const res = await bootstrap()
+      await bootstrap()
       // if (res instanceof Error) throw res
 
       await Promise.race([

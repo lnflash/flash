@@ -11,7 +11,8 @@ import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { Wallets } from "@app/index"
-import { BigIntConversionError, USDAmount } from "@domain/shared"
+import { usdWalletAmountFromWalletId } from "@app/wallets"
+import { resolveCashWalletMutationWalletIdForAccount } from "@app/cash-wallet-cutover"
 
 const OnChainUsdPaymentSendInput = GT.Input({
   name: "OnChainUsdPaymentSendInput",
@@ -47,7 +48,7 @@ const OnChainUsdPaymentSendMutation = GT.Field<
   args: {
     input: { type: GT.NonNull(OnChainUsdPaymentSendInput) },
   },
-  resolve: async (_, args, { domainAccount }) => {
+  resolve: async (_, args, { domainAccount, cashWalletClientCapabilities }) => {
     const { walletId, address, amount, memo, speed } = args.input
 
     if (walletId instanceof Error) {
@@ -67,26 +68,46 @@ const OnChainUsdPaymentSendMutation = GT.Field<
     }
     if (!domainAccount) throw new Error("Authentication required")
 
-    const usdAmount = USDAmount.cents(amount.toString())
-    if (usdAmount instanceof BigIntConversionError) return usdAmount
- 
+    const routedWalletId = await resolveCashWalletMutationWalletIdForAccount({
+      account: domainAccount,
+      walletId,
+      client: cashWalletClientCapabilities,
+    })
+    if (routedWalletId instanceof Error) {
+      return {
+        status: PaymentSendStatus.Failure.value,
+        errors: [mapAndParseErrorForGqlResponse(routedWalletId)],
+      }
+    }
+
+    const usdAmount = await usdWalletAmountFromWalletId({
+      walletId: routedWalletId,
+      amount: amount.toString(),
+    })
+    if (usdAmount instanceof Error) {
+      return {
+        status: PaymentSendStatus.Failure.value,
+        errors: [mapAndParseErrorForGqlResponse(usdAmount)],
+      }
+    }
+
     const result = await Wallets.payOnChainByWalletId({
       senderAccount: domainAccount,
-      senderWalletId: walletId,
+      senderWalletId: routedWalletId,
       amount: usdAmount,
       address,
       speed,
       memo,
     })
     if (result instanceof Error) {
-      return { 
-        status: PaymentSendStatus.Failure.value, 
-        errors: [mapAndParseErrorForGqlResponse(result)] 
+      return {
+        status: PaymentSendStatus.Failure.value,
+        errors: [mapAndParseErrorForGqlResponse(result)],
       }
     }
     return {
-        status: result.status.value,
-        errors: [] 
+      status: result.status.value,
+      errors: [],
     }
   },
 })

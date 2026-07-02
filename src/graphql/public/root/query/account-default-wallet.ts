@@ -1,4 +1,4 @@
-import { Wallets } from "@app"
+import { resolveCashWalletPresentationForAccount } from "@app/cash-wallet-cutover"
 import { CouldNotFindWalletFromUsernameAndCurrencyError } from "@domain/errors"
 import { mapError } from "@graphql/error-map"
 import { GT } from "@graphql/index"
@@ -7,7 +7,7 @@ import WalletCurrency from "@graphql/shared/types/scalar/wallet-currency"
 import PublicWallet from "@graphql/public/types/abstract/public-wallet"
 import { AccountsRepository } from "@services/mongoose"
 
-const AccountDefaultWalletQuery = GT.Field({
+const AccountDefaultWalletQuery = GT.Field<null, GraphQLPublicContext>({
   type: GT.NonNull(PublicWallet),
   args: {
     username: {
@@ -15,7 +15,7 @@ const AccountDefaultWalletQuery = GT.Field({
     },
     walletCurrency: { type: WalletCurrency },
   },
-  resolve: async (_, args) => {
+  resolve: async (_, args, { cashWalletClientCapabilities }) => {
     const { username, walletCurrency } = args
 
     if (username instanceof Error) {
@@ -27,16 +27,21 @@ const AccountDefaultWalletQuery = GT.Field({
       throw mapError(account)
     }
 
-    const wallets = await Wallets.listWalletsByAccountId(account.id)
-    if (wallets instanceof Error) {
-      throw mapError(wallets)
-    }
+    const presentation = await resolveCashWalletPresentationForAccount({
+      account,
+      client: cashWalletClientCapabilities,
+    })
+    if (presentation instanceof Error) throw mapError(presentation)
 
     if (!walletCurrency) {
-      return wallets.find((wallet) => wallet.id === account.defaultWalletId)
+      return presentation.wallets.find(
+        (wallet) => wallet.id === presentation.defaultWalletId,
+      )
     }
 
-    const wallet = wallets.find((wallet) => wallet.currency === walletCurrency)
+    const wallet = presentation.wallets.find(
+      (wallet) => wallet.currency === walletCurrency,
+    )
     if (!wallet) {
       throw mapError(new CouldNotFindWalletFromUsernameAndCurrencyError(username))
     }

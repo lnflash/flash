@@ -144,7 +144,10 @@ describe("AccountUpgradeRequest", () => {
     })
 
     it("should omit bankAccount when bank_name is absent", () => {
-      const result = AccountUpgradeRequest.fromErpnext({ ...erpNextResponse, bank_name: undefined })
+      const result = AccountUpgradeRequest.fromErpnext({
+        ...erpNextResponse,
+        bank_name: undefined,
+      })
 
       expect(result.bankAccount).toBeUndefined()
     })

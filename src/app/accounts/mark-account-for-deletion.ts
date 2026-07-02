@@ -25,17 +25,26 @@ export const markAccountForDeletion = async ({
   if (wallets instanceof Error) return wallets
 
   for (const wallet of wallets) {
-    const balance = await getBalanceForWallet({ walletId: wallet.id })
+    const balance = await getBalanceForWallet({
+      walletId: wallet.id,
+      currency: wallet.currency,
+    })
     if (balance instanceof Error) return balance
-    if (balance.isGreaterThan(USDAmount.ZERO) && cancelIfPositiveBalance) {
+    if (
+      balance instanceof USDAmount &&
+      balance.isGreaterThan(USDAmount.ZERO) &&
+      cancelIfPositiveBalance
+    ) {
       return new AccountHasPositiveBalanceError(
         `The new phone is associated with an account with a non empty wallet. walletId: ${wallet.id}, balance: ${balance}, accountId: ${account.id}, cancelIfPositiveBalance: ${cancelIfPositiveBalance}`,
       )
     }
+    const balanceDisplay =
+      balance instanceof USDAmount ? balance.asDollars() : balance.asNumber()
     addEventToCurrentSpan(`deleting_wallet`, {
       walletId: wallet.id,
       currency: wallet.currency,
-      balance: balance.asDollars(),
+      balance: balanceDisplay,
     })
   }
 

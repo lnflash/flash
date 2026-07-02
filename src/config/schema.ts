@@ -385,7 +385,7 @@ export const configSchema = {
       additionalProperties: false,
       default: {
         initialStatus: "active",
-        initialWallets: ["USD"],
+        initialWallets: ["USD", "USDT"],
         enablePhoneCheck: false,
         enableIpCheck: false,
         enableIpProxyCheck: false,
@@ -629,6 +629,7 @@ export const configSchema = {
     ibex: {
       type: "object",
       properties: {
+        mock: { type: "boolean", default: false },
         clientId: { type: "string" },
         clientSecret: { type: "string" },
         environment: { type: "string", enum: ["production", "sandbox"] },
@@ -649,6 +650,63 @@ export const configSchema = {
         },
       },
     },
+    bridge: {
+      type: "object",
+      properties: {
+        enabled: { type: "boolean" },
+        apiKey: { type: "string" },
+        baseUrl: { type: "string" },
+        minWithdrawalAmount: { type: "number" },
+        developerFeePercent: { type: "number" },
+        withdrawalFeeEstimate: {
+          type: "object",
+          properties: {
+            bridgeFixedFeePercent: { type: "number", default: 0.6 },
+            usdtTransferGasLimit: { type: "integer", default: 65000 },
+            gasPriceBufferMultiplier: { type: "number", default: 1.5 },
+            ethereumGasRpcUrls: {
+              type: "array",
+              items: { type: "string" },
+              default: [
+                "https://ethereum-rpc.publicnode.com",
+                "https://eth.llamarpc.com",
+                "https://cloudflare-eth.com",
+              ],
+            },
+            ethUsdPriceUrl: {
+              type: "string",
+              default:
+                "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
+            },
+            timeoutMs: { type: "integer", default: 3000 },
+            cacheTtlMs: { type: "integer", default: 60000 },
+            fallbackGasPriceGwei: { type: "number", default: 30 },
+            ethUsdFallback: { type: "number", default: 3000 },
+          },
+        },
+        timeoutMs: { type: "integer", default: 10000 },
+        webhook: {
+          type: "object",
+          properties: {
+            port: { type: "integer" },
+            publicKeys: {
+              type: "object",
+              properties: {
+                kyc: { type: "string" },
+                deposit: { type: "string" },
+                transfer: { type: "string" },
+                external_account: { type: "string" },
+              },
+              required: ["kyc", "deposit", "transfer", "external_account"],
+            },
+            timestampSkewMs: { type: "integer" },
+            replaySecret: { type: "string" },
+          },
+          required: ["port", "publicKeys", "timestampSkewMs"],
+        },
+      },
+      required: ["enabled", "apiKey", "baseUrl", "developerFeePercent", "webhook"],
+    },
     exchangeRates: {
       type: "object",
     },
@@ -661,11 +719,30 @@ export const configSchema = {
       required: ["enabled", "minimum", "maximum", "accountLevel"],
       default: { enabled: true },
     },
+    topup: {
+      type: "object",
+      properties: {
+        enabled: { type: "boolean" },
+      },
+      required: ["enabled"],
+      additionalProperties: false,
+      // Default OFF: top-up entry points (card webview, bank-transfer-to-support)
+      // stay hidden unless explicitly enabled per the v0.6.0 flag ramp.
+      default: { enabled: false },
+    },
     frappe: {
       type: "object",
       properties: {
         url: { type: "string" },
         credentials: { type: "object" },
+        erpnext: {
+          type: "object",
+          properties: {
+            accounts: {
+              type: "object",
+            },
+          },
+        },
       },
       required: ["url", "credentials"],
     },
@@ -718,6 +795,7 @@ export const configSchema = {
     "exchangeRates",
     "cashout",
     "ibex",
+    "bridge",
   ],
   additionalProperties: false,
 } as const

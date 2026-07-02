@@ -37,12 +37,27 @@ import {
   UnauthorizedIPMetadataCountryError,
   IbexError,
   InvalidLnurlError,
+  CustomApolloError,
 } from "@graphql/error"
 import { baseLogger } from "@services/logger"
 
-const assertUnreachable = (x: any): never => {
+const assertUnreachable = (x: unknown): never => {
   throw new Error(`This should never compile with ${x}`)
 }
+
+const bridgeGqlError = ({
+  code,
+  message,
+}: {
+  code: string
+  message: string
+}): CustomApolloError =>
+  new CustomApolloError({
+    code,
+    message,
+    forwardToClient: true,
+    logger: baseLogger,
+  })
 
 export const mapError = (error: ApplicationError): CustomApolloError => {
   const errorName = error.name as ApplicationErrorKey
@@ -471,10 +486,160 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "UnexpectedIbexResponse":
       return new IbexError(baseLogger)
     case "OfferNotFound":
-      return new NotFoundError({ 
-        message: "Offer not available. Try again.", 
-        logger: baseLogger 
+      return new NotFoundError({
+        message: "Offer not available. Try again.",
+        logger: baseLogger,
       })
+
+    case "BridgeInvalidAmountError":
+      message =
+        error.message || "Amount must be strictly positive with at most 6 decimal places"
+      return bridgeGqlError({
+        code: "BRIDGE_INVALID_AMOUNT",
+        message,
+      })
+
+    case "BridgeBelowMinimumWithdrawalError":
+      message = error.message || "Withdrawal amount is below the minimum"
+      return bridgeGqlError({
+        code: "BRIDGE_BELOW_MINIMUM_WITHDRAWAL",
+        message,
+      })
+
+    case "BridgeDisabledError":
+      message = "Bridge integration is currently disabled"
+      return bridgeGqlError({
+        code: "BRIDGE_DISABLED",
+        message,
+      })
+
+    case "BridgeAccountLevelError":
+      message = error.message || "Bridge requires at least a Personal account (Level 1+)"
+      return bridgeGqlError({
+        code: "BRIDGE_ACCOUNT_LEVEL_ERROR",
+        message,
+      })
+
+    case "BridgeKycPendingError":
+      message = "KYC verification is pending"
+      return bridgeGqlError({
+        code: "BRIDGE_KYC_PENDING",
+        message,
+      })
+
+    case "BridgeKycRejectedError":
+      message = "KYC verification was rejected"
+      return bridgeGqlError({
+        code: "BRIDGE_KYC_REJECTED",
+        message,
+      })
+
+    case "BridgeKycOffboardedError":
+      message = "Your account has been offboarded from Bridge. Please contact support."
+      return bridgeGqlError({
+        code: "BRIDGE_KYC_OFFBOARDED",
+        message,
+      })
+
+    case "BridgeKycTierCeilingExceededError":
+      message = error.message || "Withdrawal amount exceeds the KYC tier ceiling"
+      return bridgeGqlError({
+        code: "BRIDGE_KYC_TIER_CEILING_EXCEEDED",
+        message,
+      })
+
+    case "BridgeCustomerNotFoundError":
+      message = "Bridge customer not found"
+      return bridgeGqlError({
+        code: "BRIDGE_CUSTOMER_NOT_FOUND",
+        message,
+      })
+
+    case "BridgeInsufficientFundsError":
+      message = "Insufficient funds for withdrawal"
+      return bridgeGqlError({
+        code: "BRIDGE_INSUFFICIENT_FUNDS",
+        message,
+      })
+
+    case "BridgeWithdrawalNetAmountTooLowError":
+      message = error.message || "Withdrawal amount must exceed estimated customer fees"
+      return bridgeGqlError({
+        code: "BRIDGE_WITHDRAWAL_NET_AMOUNT_TOO_LOW",
+        message,
+      })
+
+    case "BridgeWithdrawalNotFoundError":
+      message = error.message || "Withdrawal request not found"
+      return bridgeGqlError({
+        code: "BRIDGE_WITHDRAWAL_NOT_FOUND",
+        message,
+      })
+
+    case "BridgeWithdrawalAlreadyInitiatedError":
+      message =
+        error.message ||
+        "Withdrawal has already been submitted to Bridge and cannot be cancelled"
+      return bridgeGqlError({
+        code: "BRIDGE_WITHDRAWAL_ALREADY_INITIATED",
+        message,
+      })
+
+    case "BridgeRateLimitError":
+      message = "Rate limit exceeded, please try again later"
+      return bridgeGqlError({
+        code: "BRIDGE_RATE_LIMIT",
+        message,
+      })
+
+    case "BridgeTimeoutError":
+      message = "Request timed out"
+      return bridgeGqlError({
+        code: "BRIDGE_TIMEOUT",
+        message,
+      })
+
+    case "BridgeTransferFailedError":
+      message = error.message || "Transfer failed"
+      return bridgeGqlError({
+        code: "BRIDGE_TRANSFER_FAILED",
+        message,
+      })
+
+    case "BridgeDepositInstructionsMissingError":
+      message =
+        error.message ||
+        "Bridge did not return crypto deposit instructions for this withdrawal"
+      return bridgeGqlError({
+        code: "BRIDGE_DEPOSIT_INSTRUCTIONS_MISSING",
+        message,
+      })
+
+    case "BridgeWebhookValidationError":
+      message = "Invalid webhook signature"
+      return bridgeGqlError({
+        code: "BRIDGE_WEBHOOK_VALIDATION",
+        message,
+      })
+
+    case "BridgeApiError":
+      message = error.message || "Bridge API error"
+      return bridgeGqlError({
+        code: "BRIDGE_API_ERROR",
+        message,
+      })
+
+    case "BridgePlaidNotAvailableError":
+      message = error.message || "Plaid bank account linking is not available"
+      return bridgeGqlError({
+        code: "BRIDGE_PLAID_NOT_AVAILABLE",
+        message,
+      })
+
+    case "BridgeError":
+      message = error.message || "Bridge API error"
+      return bridgeGqlError({ code: "BRIDGE_ERROR", message })
+
     // ----------
     // Unhandled below here
     // ----------
@@ -733,6 +898,45 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "InvalidLnurlError":
       return new InvalidLnurlError({ message: error.message, logger: baseLogger })
 
+    case "InvalidLnurlAmountError":
+      return new InvalidLnurlError({ message: error.message, logger: baseLogger })
+
+    case "CashWalletCutoverInProgressError":
+      message = "Cash Wallet cutover is in progress. Please try again shortly."
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "CashWalletMigrationFailedError":
+      message = "Cash Wallet migration needs support review."
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "CashWalletCutoverPreflightError":
+      message = error.message
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "CashWalletCutoverTreasuryInsufficientBalanceError":
+      message = error.message
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "CashWalletMissingLegacyUsdWalletError":
+      message = "Legacy USD Cash Wallet is missing for this account."
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "CashWalletMissingUsdtWalletError":
+      message = "USDT Cash Wallet is missing for this account."
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "InvalidCashWalletCutoverAmountError":
+      message = error.message
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "InvalidCashWalletMigrationTransitionError":
+      message = error.message
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "InvalidCashWalletCutoverStateTransitionError":
+      message = error.message
+      return new ValidationInternalError({ message, logger: baseLogger })
+
     case "UnknownCaptchaError":
       message = `Unknown error occurred (code: ${error.name}${
         error.message ? ": " + error.message : ""
@@ -745,15 +949,15 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
 }
 
 // Move to CustomApolloError class?
-export const apolloErrorResponse = (e: CustomApolloError): { errors: IError[] } => { 
+export const apolloErrorResponse = (e: CustomApolloError): { errors: IError[] } => {
   return {
     errors: [
       {
         message: e.message,
         path: e.path,
-        code: e.extensions.code 
-      }
-    ]
+        code: e.extensions.code,
+      },
+    ],
   }
 }
 
@@ -762,12 +966,12 @@ export const mapAndParseErrorForGqlResponse = (err: ApplicationError): IError =>
   return {
     message: mappedError.message,
     path: mappedError.path,
-    code: mappedError.extensions.code 
+    code: mappedError.extensions.code,
   }
 }
 
 export const mapToGqlErrorList = (err: ApplicationError): IError[] => {
-  if (err instanceof ValidationError && err.errors) return err.errors.map(mapAndParseErrorForGqlResponse)
+  if (err instanceof ValidationError && err.errors)
+    return err.errors.map(mapAndParseErrorForGqlResponse)
   else return [mapAndParseErrorForGqlResponse(err)]
-
 }

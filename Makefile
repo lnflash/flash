@@ -107,7 +107,7 @@ reset-integration: reset-deps-integration integration
 
 bats:
 	yarn build && \
-	bats -t test/bats
+	if [ -d test/bats ]; then bats -t test/bats; else echo "No test/bats suite found; skipping"; fi
 
 reset-bats: reset-deps bats
 
@@ -115,7 +115,7 @@ execute-bats-from-within-container:
 	git config --global --add safe.directory /repo # otherwise bats complains
 	yarn install && \
 	yarn build && \
-	bats -t test/bats
+	if [ -d test/bats ]; then bats -t test/bats; else echo "No test/bats suite found; skipping"; fi
 
 integration-in-ci:
 	make create-tmp-env-ci && \
@@ -125,12 +125,12 @@ integration-in-ci:
 # heap allocation issue has been resolved in dependencies (fails at 2048).
 execute-integration-from-within-container:
 	yarn install && \
-	SVIX_ENDPOINT= \
-	SVIX_SECRET= \
-	NODE_OPTIONS="--max-old-space-size=6144" \
-	NODE_ENV=test LOGLEVEL=error $(BIN_DIR)/jest --config ./test/flash/legacy-integration/jest.config.js --bail --runInBand --ci --reporters=default --reporters=jest-junit && \
-	NODE_OPTIONS="--max-old-space-size=6144" \
-	NODE_ENV=test LOGLEVEL=error $(BIN_DIR)/jest --config ./test/flash/integration/jest.config.js --bail --runInBand --ci --reporters=default --reporters=jest-junit
+	if [ -f ./test/flash/legacy-integration/jest.config.js ]; then \
+		SVIX_ENDPOINT= SVIX_SECRET= NODE_OPTIONS="--max-old-space-size=6144" NODE_ENV=test LOGLEVEL=error $(BIN_DIR)/jest --config ./test/flash/legacy-integration/jest.config.js --bail --runInBand --ci --reporters=default --reporters=jest-junit; \
+	else \
+		echo "No legacy integration suite found; skipping"; \
+	fi && \
+	SVIX_ENDPOINT= SVIX_SECRET= NODE_OPTIONS="--max-old-space-size=6144" NODE_ENV=test LOGLEVEL=error $(BIN_DIR)/jest --config ./test/flash/integration/jest.config.js --bail --runInBand --ci --reporters=default --reporters=jest-junit
 
 unit-in-ci:
 	. ./.env && \

@@ -1,0 +1,61 @@
+meta {
+  name: 04 initiate cashout offer
+  type: graphql
+  seq: 4
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  X-Flash-Client-Capabilities: cash-wallet-usdt-v1
+}
+
+body:graphql {
+  mutation Eng357InitiateCashout($input: InitiateCashoutInput!) {
+    initiateCashout(input: $input) {
+      id
+      errors {
+        ... on GraphQLApplicationError {
+          code
+          message
+          path
+        }
+      }
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "offerId": "{{cashoutOfferId}}",
+      "walletId": "{{legacyUsdWalletId}}"
+    }
+  }
+}
+
+script:post-response {
+  test("initiates the Redis-loaded USDT cashout offer using the legacy USD wallet for auth", function () {
+    const body = res.getBody();
+    const graphqlErrors = body.errors ?? [];
+    expect(graphqlErrors, JSON.stringify(graphqlErrors)).to.be.empty;
+
+    const payload = body.data?.initiateCashout;
+    const appErrors = payload?.errors ?? [];
+    expect(appErrors, JSON.stringify(appErrors)).to.be.empty;
+    expect(payload?.id, "cashout id").to.exist;
+
+    bru.setEnvVar("cashoutId", payload.id);
+    console.log("cashoutId:", payload.id);
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

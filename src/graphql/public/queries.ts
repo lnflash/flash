@@ -1,4 +1,5 @@
 import { GT } from "@graphql/index"
+import CashWalletCutoverQuery from "@graphql/shared/root/query/cash-wallet-cutover"
 
 import MeQuery from "@graphql/public/root/query/me"
 import GlobalsQuery from "@graphql/public/root/query/globals"
@@ -16,11 +17,17 @@ import BusinessMapMarkersQuery from "@graphql/public/root/query/business-map-mar
 import AccountDefaultWalletQuery from "@graphql/public/root/query/account-default-wallet"
 import AccountDefaultWalletIdQuery from "@graphql/public/root/query/account-default-wallet-id"
 import LnInvoicePaymentStatusQuery from "@graphql/public/root/query/ln-invoice-payment-status"
+
 import NpubByUserNameQuery from "./root/query/username-npub-query"
 import IsFlashNpubQuery from "./root/query/is-flash-npub-query"
 import TransactionDetailsQuery from "./root/query/transaction-details"
 import LatestAccountUpgradeRequestQuery from "./root/query/account-upgrade-request"
 import SupportedBanksQuery from "./root/query/supported-banks"
+import BridgeKycStatusQuery from "./root/query/bridge-kyc-status"
+import BridgeVirtualAccountQuery from "./root/query/bridge-virtual-account"
+import BridgeExternalAccountsQuery from "./root/query/bridge-external-accounts"
+import BridgeWithdrawalRequestQuery from "./root/query/bridge-withdrawal-request"
+import BridgeWithdrawalsQuery from "./root/query/bridge-withdrawals"
 
 export const queryFields = {
   unauthed: {
@@ -39,12 +46,18 @@ export const queryFields = {
     npubByUsername: NpubByUserNameQuery,
     isFlashNpub: IsFlashNpubQuery,
     supportedBanks: SupportedBanksQuery,
+    cashWalletCutover: CashWalletCutoverQuery,
   },
   authed: {
     atAccountLevel: {
       me: MeQuery,
       transactionDetails: TransactionDetailsQuery,
       latestAccountUpgradeRequest: LatestAccountUpgradeRequestQuery,
+      bridgeKycStatus: BridgeKycStatusQuery,
+      bridgeVirtualAccount: BridgeVirtualAccountQuery,
+      bridgeExternalAccounts: BridgeExternalAccountsQuery,
+      bridgeWithdrawalRequest: BridgeWithdrawalRequestQuery,
+      bridgeWithdrawals: BridgeWithdrawalsQuery,
     },
     atWalletLevel: {
       onChainTxFee: OnChainTxFeeQuery,

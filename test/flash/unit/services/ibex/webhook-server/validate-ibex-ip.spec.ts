@@ -19,11 +19,7 @@ describe("Ibex webhook IP allowlist (ISL-112)", () => {
   })
 
   describe("isIpInAllowlist", () => {
-    const ranges = parseAllowlist([
-      "203.0.113.4",
-      "198.51.100.0/24",
-      "2001:db8::/32",
-    ])
+    const ranges = parseAllowlist(["203.0.113.4", "198.51.100.0/24", "2001:db8::/32"])
 
     it("matches an exact IPv4 address", () => {
       expect(isIpInAllowlist("203.0.113.4", ranges)).toBe(true)

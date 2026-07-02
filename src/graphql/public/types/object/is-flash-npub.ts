@@ -1,6 +1,8 @@
 import { GT } from "@graphql/index"
-import IError from "../../../shared/types/abstract/error"
+
 import Npub from "@graphql/shared/types/scalar/npub"
+
+import IError from "../../../shared/types/abstract/error"
 
 const IsFlashNpubInput = GT.Input({
   name: "IsFlashNpubInput",

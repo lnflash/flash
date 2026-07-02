@@ -1,0 +1,44 @@
+meta {
+  name: bridgeInitiateKyc
+  type: graphql
+  seq: 36
+}
+
+post {
+  url: {{flashGraphqlUrl}}
+  body: graphql
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:graphql {
+  mutation BridgeInitiateKyc($input: BridgeInitiateKycInput!) {
+    bridgeInitiateKyc(input: $input) {
+      errors {
+        message
+      }
+      kycLink {
+        kycLink
+        tosLink
+      }
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "email": "{{userEmail}}",
+      "type": "individual",
+      "full_name": "{{userFullName}}"
+    }
+  }
+}
+
+settings {
+  encodeUrl: false
+  timeout: 30000
+}
