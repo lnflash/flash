@@ -34,8 +34,13 @@ jobs:
           docker compose up -d --build
           ./bin/quickstart.sh
           ./bin/init-lightning.sh
-      - name: Run smoke suite
-        run: SMOKE_DOCKER_HELPERS=true yarn test:smoke
+      # The quickstart stack mocks IBEX, so balances/invoices/payments don't
+      # resolve — SMOKE_BACKEND_FULL stays false and those specs skip. This
+      # tier still covers API health, auth/session, identity, validation, and
+      # feature-flag/resolver-crash regressions. Run the full tier against a
+      # provisioned environment (TEST) with SMOKE_BACKEND_FULL=true.
+      - name: Run smoke suite (CI tier)
+        run: yarn test:smoke
       - name: Dump API logs on failure
         if: failure()
         run: docker logs quickstart-flash-1 --tail 200 || true

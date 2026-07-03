@@ -1,4 +1,4 @@
-const swcConfig = require("../../../swc-config.json")
+const swcConfig = require("../../swc-config.json")
 
 // UAT smoke suite: black-box tests against a RUNNING Flash GraphQL endpoint.
 // No app imports, no database access — everything goes through the public API,

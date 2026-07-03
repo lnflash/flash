@@ -58,7 +58,6 @@ export const login = async (phone: string, code: string): Promise<string> => {
 export type WalletInfo = {
   id: string
   walletCurrency: string
-  balance: number
 }
 
 export type MeInfo = {
@@ -71,6 +70,10 @@ export type MeInfo = {
   }
 }
 
+// Identity + wallet shape only. Deliberately omits `balance`: it resolves
+// through IBEX, which the quickstart stack mocks without a balance path, so
+// selecting it would poison every identity/session assertion. Balance is a
+// separate best-effort fetch (getBalance) used only by full-backend specs.
 export const getMe = async (token: string): Promise<MeInfo> => {
   const data = await gqlOk<{ me: MeInfo }>(
     `query smokeMe {
@@ -80,7 +83,7 @@ export const getMe = async (token: string): Promise<MeInfo> => {
         defaultAccount {
           id
           defaultWalletId
-          wallets { id walletCurrency balance }
+          wallets { id walletCurrency }
         }
       }
     }`,
@@ -88,6 +91,25 @@ export const getMe = async (token: string): Promise<MeInfo> => {
     token,
   )
   return data.me
+}
+
+// Best-effort: returns null when the environment can't resolve balances
+// (e.g. IBEX-mock quickstart) instead of throwing.
+export const getBalance = async (
+  token: string,
+  walletId: string,
+): Promise<number | null> => {
+  const res = await gql<{
+    me: { defaultAccount: { wallets: Array<{ id: string; balance: number }> } }
+  }>(
+    `query smokeBalance {
+      me { defaultAccount { wallets { id balance } } }
+    }`,
+    {},
+    token,
+  )
+  const wallet = res.data?.me.defaultAccount.wallets.find((w) => w.id === walletId)
+  return typeof wallet?.balance === "number" ? wallet.balance : null
 }
 
 export type TxNode = {

@@ -3,7 +3,12 @@ import { SMOKE } from "../config"
 
 // UAT: RECV-00 (receive available pre-funding), RECV-03 (fixed invoice),
 //      RECV-04 (flexible/no-amount invoice), RECV-05 (expiry is set/marked)
-describe("Phase 1: receive", () => {
+//
+// Invoice creation routes through IBEX — requires a provisioned backend.
+// Skipped against the IBEX-mock quickstart stack.
+const describeMaybe = SMOKE.backendFull ? describe : describe.skip
+
+describeMaybe("Phase 1: receive", () => {
   let token: string
   let usdWalletId: string
 

@@ -11,6 +11,12 @@
 //                         environments you don't want to mutate.
 //   SMOKE_DOCKER_HELPERS  allow docker-exec funding via the quickstart
 //                         bitcoind/lnd-outside containers (local/CI only).
+//   SMOKE_BACKEND_FULL    the target has a fully-provisioned backend (real IBEX
+//                         wallets, invoice creation, device tokens). Off by
+//                         default because the quickstart stack mocks IBEX and
+//                         cannot resolve balances / create invoices — those
+//                         specs then skip. Set true against TEST/PROD-like
+//                         environments to exercise money-movement + provisioning.
 
 const bool = (v: string | undefined, dflt: boolean): boolean =>
   v === undefined ? dflt : v !== "false" && v !== "0"
@@ -28,6 +34,7 @@ export const SMOKE = {
   expectFlagsOff: bool(process.env.SMOKE_EXPECT_FLAGS_OFF, true),
   allowPayments: bool(process.env.SMOKE_ALLOW_PAYMENTS, true),
   dockerHelpers: bool(process.env.SMOKE_DOCKER_HELPERS, false),
+  backendFull: bool(process.env.SMOKE_BACKEND_FULL, false),
   composeProject: process.env.COMPOSE_PROJECT_NAME || "quickstart",
   usernameA: process.env.SMOKE_USERNAME_A || `smoke_a_${runId}`,
   usernameB: process.env.SMOKE_USERNAME_B || `smoke_b_${runId}`,

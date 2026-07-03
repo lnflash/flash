@@ -1,9 +1,20 @@
-import { getMe, getTransactions, gqlOk, login, retry, usdWalletOf } from "../client"
+import {
+  getBalance,
+  getMe,
+  getTransactions,
+  gqlOk,
+  login,
+  retry,
+  usdWalletOf,
+} from "../client"
 import { SMOKE } from "../config"
 
 // UAT: SEND-01/02 (username/paycode sends both directions with memo),
 //      TX-01 (history both sides), TX-02 (detail fields), CONTACT-01 (contacts)
-const describeMaybe = SMOKE.allowPayments ? describe : describe.skip
+//
+// Requires real balances (funded accounts) — needs a provisioned backend and
+// payments enabled. Skipped against the IBEX-mock quickstart stack.
+const describeMaybe = SMOKE.allowPayments && SMOKE.backendFull ? describe : describe.skip
 
 const MEMO_AB = `smoke SEND-01 ${process.env.SMOKE_RUN_ID || ""}`.trim()
 const MEMO_BA = `smoke SEND-02 ${process.env.SMOKE_RUN_ID || ""}`.trim()
@@ -41,34 +52,40 @@ describeMaybe("Phase 2: two-account internal payments", () => {
     walletB = usdWalletOf(await getMe(tokenB)).id
   })
 
+  const usdBalance = async (token: string, walletId: string): Promise<number> => {
+    const b = await getBalance(token, walletId)
+    if (b === null) throw new Error(`balance unresolved for wallet ${walletId}`)
+    return b
+  }
+
   it("SEND-01: A pays B by wallet with memo; balances update on both sides", async () => {
-    const balanceA = usdWalletOf(await getMe(tokenA)).balance
+    const balanceA = await usdBalance(tokenA, walletA)
     if (balanceA < 10) {
       throw new Error(
         `account A has insufficient smoke balance (${balanceA}); run the funding phase (SMOKE_DOCKER_HELPERS=true) or pre-fund ${SMOKE.phoneA}`,
       )
     }
-    const balanceBBefore = usdWalletOf(await getMe(tokenB)).balance
+    const balanceBBefore = await usdBalance(tokenB, walletB)
 
     const res = await sendUsd(tokenA, walletA, walletB, 5, MEMO_AB)
     expect(res.intraLedgerUsdPaymentSend.errors).toEqual([])
     expect(res.intraLedgerUsdPaymentSend.status).toBe("SUCCESS")
 
     const balanceBAfter = await retry(
-      async () => usdWalletOf(await getMe(tokenB)).balance,
+      async () => usdBalance(tokenB, walletB),
       (b) => b > balanceBBefore,
     )
     expect(balanceBAfter).toBeGreaterThan(balanceBBefore)
   })
 
   it("SEND-02: B pays A back", async () => {
-    const balanceABefore = usdWalletOf(await getMe(tokenA)).balance
+    const balanceABefore = await usdBalance(tokenA, walletA)
     const res = await sendUsd(tokenB, walletB, walletA, 2, MEMO_BA)
     expect(res.intraLedgerUsdPaymentSend.errors).toEqual([])
     expect(res.intraLedgerUsdPaymentSend.status).toBe("SUCCESS")
 
     const balanceAAfter = await retry(
-      async () => usdWalletOf(await getMe(tokenA)).balance,
+      async () => usdBalance(tokenA, walletA),
       (b) => b > balanceABefore,
     )
     expect(balanceAAfter).toBeGreaterThan(balanceABefore)

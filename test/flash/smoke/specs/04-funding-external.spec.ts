@@ -1,12 +1,27 @@
-import { getMe, gqlOk, lndOutside, login, retry, usdWalletOf } from "../client"
+import {
+  getBalance,
+  getMe,
+  gqlOk,
+  lndOutside,
+  login,
+  retry,
+  usdWalletOf,
+} from "../client"
 import { SMOKE } from "../config"
 
 // UAT: FUND-01/02 (seed balances), EXT-02 (external wallet -> Flash),
 //      EXT-01 (Flash -> external wallet)
 //
-// Requires the quickstart docker stack (lnd-outside) — gated behind
-// SMOKE_DOCKER_HELPERS so read-only runs against shared environments skip it.
-const describeMaybe = SMOKE.dockerHelpers ? describe : describe.skip
+// Requires the quickstart docker stack (lnd-outside) AND a backend that
+// actually settles balances. Gated behind SMOKE_DOCKER_HELPERS + a resolvable
+// balance (checked at runtime), so it skips against the IBEX-mock stack.
+const describeMaybe = SMOKE.dockerHelpers && SMOKE.backendFull ? describe : describe.skip
+
+const usdBalance = async (token: string, walletId: string): Promise<number> => {
+  const b = await getBalance(token, walletId)
+  if (b === null) throw new Error(`balance unresolved for wallet ${walletId}`)
+  return b
+}
 
 describeMaybe("Phase 1/3: external funding via lnd-outside", () => {
   let token: string
@@ -18,7 +33,7 @@ describeMaybe("Phase 1/3: external funding via lnd-outside", () => {
   })
 
   it("FUND-01 / EXT-02: paying a Flash invoice from an external wallet credits the balance", async () => {
-    const before = usdWalletOf(await getMe(token)).balance
+    const before = await usdBalance(token, usdWalletId)
 
     const res = await gqlOk<{
       lnUsdInvoiceCreate: {
@@ -42,7 +57,7 @@ describeMaybe("Phase 1/3: external funding via lnd-outside", () => {
     lndOutside(["payinvoice", "--force", `${paymentRequest}`])
 
     const after = await retry(
-      async () => usdWalletOf(await getMe(token)).balance,
+      async () => usdBalance(token, usdWalletId),
       (b) => b > before,
     )
     expect(after).toBeGreaterThan(before)
