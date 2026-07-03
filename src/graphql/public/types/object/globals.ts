@@ -42,6 +42,16 @@ const Globals = GT.Object({
         bank-transfer-to-support) should be shown to the user. Controlled by the
         instance-wide topup feature flag.`,
     },
+    cashoutEnabled: {
+      type: GT.NonNull(GT.Boolean),
+      description: dedent`Whether cashout (settle to local bank account) entry points
+        should be shown to the user. Controlled by the instance-wide cashout feature flag.`,
+    },
+    bridgeEnabled: {
+      type: GT.NonNull(GT.Boolean),
+      description: dedent`Whether Bridge (international bank transfer) entry points
+        should be shown to the user. Controlled by the instance-wide bridge feature flag.`,
+    },
   }),
 })
 
