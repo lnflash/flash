@@ -27,9 +27,9 @@ type RawBodyRequest = express.Request & { rawBody?: string }
 // `validate: { xForwardedForHeader: false }` on both limiters: without Express
 // `trust proxy`, express-rate-limit v7 throws ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
 // on any request carrying X-Forwarded-For (i.e. anything behind an LB), turning
-// every webhook into a 500. Skipping that validation degrades an unset trust
-// proxy to keying on the LB's socket address (one shared bucket) instead of an
-// outage. Set `trust proxy` in the server for per-sender buckets.
+// every webhook into a 500. `trust proxy` is set on the app (see below), which
+// makes this validation moot; the skip stays so a future trust-proxy
+// misconfiguration degrades to one shared bucket instead of an outage.
 const webhookRateLimit = rateLimitMiddleware({
   windowMs: 60_000,
   limit: 120,
@@ -48,6 +48,13 @@ const replayRateLimit = rateLimitMiddleware({
 
 export const startBridgeWebhookServer = () => {
   const app = express()
+
+  // Exactly one XFF-writing hop sits in front of the pod: the nginx ingress
+  // (the DO load balancer is L4 and does not touch headers). Trusting that one
+  // hop makes req.ip the real sender — per-sender rate-limit buckets and a
+  // non-spoofable IP for the replay allowlist — while entries a client forges
+  // into X-Forwarded-For stay untrusted.
+  app.set("trust proxy", 1)
 
   // Middleware - MUST capture raw body for signature verification
   app.use(
