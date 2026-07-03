@@ -40,6 +40,18 @@ export const gqlOk = async <T = Record<string, unknown>>(
   return res.data
 }
 
+// True when the response carries a schema-validation error for `field` — i.e.
+// the target backend predates that field. Lets version-dependent specs skip
+// gracefully instead of failing against an older deployment.
+export const isUnknownFieldError = (
+  errors: Array<{ message: string; extensions?: { code?: string } }> | undefined,
+  field: string,
+): boolean =>
+  (errors ?? []).some(
+    (e) =>
+      e.extensions?.code === "GRAPHQL_VALIDATION_FAILED" && e.message.includes(field),
+  )
+
 export const login = async (phone: string, code: string): Promise<string> => {
   const data = await gqlOk<{
     userLogin: { authToken: string | null; errors: Array<{ message: string }> }
