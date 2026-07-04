@@ -579,12 +579,17 @@ export const configSchema = {
       properties: {
         rebalanceEnabled: { type: "boolean" },
         swapEnabled: { type: "boolean" },
+        // Gates the upstream-galoy LND/bitcoin maintenance tasks in the cron
+        // server. Flash runs IBEX-custodial with no LND, so deployments set
+        // this false; defaults true for upstream parity.
+        lndTasksEnabled: { type: "boolean", default: true },
       },
       required: ["rebalanceEnabled", "swapEnabled"],
       additionalProperties: false,
       default: {
         rebalanceEnabled: true,
         swapEnabled: true,
+        lndTasksEnabled: true,
       },
     },
     captcha: {
