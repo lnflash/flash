@@ -187,27 +187,39 @@ export const completePrimaryCashWalletRollback = async ({
     )
   }
 
-  const inFlight = await migrationsRepo.countByStatus({
+  // Run-level completion requires the ENTIRE run to be accounted for: every
+  // migration either rolled_back or skipped_already_migrated (the latter
+  // stay on USDT by design). Anything else — including migrations still
+  // `complete` after a single-account rollback — blocks completion; a
+  // partial rollback must never flip the run-level config.
+  const unresolved = await migrationsRepo.listMigrationsByStatuses({
     cutoverVersion,
     runId,
-    status: "rollback_started",
+    statuses: [
+      "not_started",
+      "started",
+      "provisioned",
+      "balance_read",
+      "invoice_created",
+      "balance_move_sending",
+      "balance_move_sent",
+      "balance_move_verified",
+      "fee_reimbursement_invoice_created",
+      "fee_reimbursement_sending",
+      "fee_reimbursed",
+      "pointer_flipped",
+      "legacy_zero_verified",
+      "complete",
+      "failed",
+      "requires_operator_review",
+      "rollback_started",
+    ],
+    limit: 1,
   })
-  if (inFlight instanceof Error) return inFlight
-  if (inFlight > 0) {
+  if (unresolved instanceof Error) return unresolved
+  if (unresolved.length > 0) {
     return new CashWalletCutoverInProgressError(
-      `${inFlight} migration(s) still in rollback_started`,
-    )
-  }
-
-  const review = await migrationsRepo.countByStatus({
-    cutoverVersion,
-    runId,
-    status: "requires_operator_review",
-  })
-  if (review instanceof Error) return review
-  if (review > 0) {
-    return new CashWalletMigrationFailedError(
-      `${review} migration(s) require operator review before completing rollback`,
+      `Migration ${unresolved[0].id} is still '${unresolved[0].status}'; run-level rollback completion requires every migration to be rolled_back or skipped_already_migrated. Single-account rollbacks do not complete the run.`,
     )
   }
 

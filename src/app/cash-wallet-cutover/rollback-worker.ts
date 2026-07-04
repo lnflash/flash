@@ -152,21 +152,26 @@ export const executeCashWalletMigrationRollbackStep = async ({
 
   let current = migration
 
-  // 1. Pointer restore — only if the account still defaults to the USDT
-  // wallet. previousDefaultWalletId (captured at forward pointer flip) is
-  // preferred; the legacy USD wallet is the correct fallback by construction.
+  // 1. Pointer restore — only when the forward pipeline actually flipped the
+  // pointer, evidenced by previousDefaultWalletId (the flip is the only
+  // writer of that field). Pre-money migrations never flipped; if such an
+  // account defaults to USDT it got there by other means (e.g. native
+  // USDT-default signup) and the rollback must not touch it. The live
+  // default is still checked so an already-restored pointer is a no-op.
   if (current.rollbackPointerRestoredAt === undefined) {
-    const defaultWalletId = await services.accountReader.getDefaultWalletId(
-      current.accountId,
-    )
-    if (defaultWalletId instanceof Error) return defaultWalletId
+    if (current.previousDefaultWalletId !== undefined) {
+      const defaultWalletId = await services.accountReader.getDefaultWalletId(
+        current.accountId,
+      )
+      if (defaultWalletId instanceof Error) return defaultWalletId
 
-    if (defaultWalletId === current.destinationUsdtWalletId) {
-      const restored = await services.pointerService.flipDefaultWallet({
-        accountId: current.accountId,
-        destinationWalletId: current.previousDefaultWalletId ?? current.legacyUsdWalletId,
-      })
-      if (restored instanceof Error) return restored
+      if (defaultWalletId === current.destinationUsdtWalletId) {
+        const restored = await services.pointerService.flipDefaultWallet({
+          accountId: current.accountId,
+          destinationWalletId: current.previousDefaultWalletId,
+        })
+        if (restored instanceof Error) return restored
+      }
     }
 
     const patched = await patchRollbackProgress({

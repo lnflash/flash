@@ -153,6 +153,22 @@ describe("rollback executor", () => {
     expect(svc.paymentService.payInvoice).not.toHaveBeenCalled()
   })
 
+  it("never flips the pointer for pre-money migrations, even if the account defaults to USDT", async () => {
+    // No previousDefaultWalletId: the forward pipeline never flipped, so a
+    // USDT default came from elsewhere (e.g. native USDT-default signup).
+    const migration = { ...baseMigration }
+    const svc = services({ defaultWalletId: "destination-wallet-id" as WalletId })
+
+    const result = await executeCashWalletMigrationRollbackStep({
+      migration,
+      migrationsRepo: statefulRepo(migration),
+      services: svc,
+    })
+
+    expect(svc.pointerService.flipDefaultWallet).not.toHaveBeenCalled()
+    expect(result).toMatchObject({ status: "rolled_back" })
+  })
+
   it("restores the default pointer when the account still defaults to USDT", async () => {
     const migration = {
       ...baseMigration,
