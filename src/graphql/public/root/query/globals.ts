@@ -1,4 +1,6 @@
 import {
+  BridgeConfig,
+  Cashout,
   NETWORK,
   Topup,
   getFeesConfig,
@@ -35,6 +37,8 @@ const GlobalsQuery = GT.Field({
         },
       },
       topupEnabled: Topup.Enabled,
+      cashoutEnabled: Cashout.Enabled,
+      bridgeEnabled: BridgeConfig.enabled,
     }
   },
 })
