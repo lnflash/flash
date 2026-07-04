@@ -702,6 +702,19 @@ const CashWalletMigrationSchema = new Schema<CashWalletMigrationRecord>({
   startedAt: Date,
   completedAt: Date,
   updatedAt: { type: Date, default: Date.now, index: true },
+  rollbackRequestedAt: Date,
+  rollbackRequestedBy: String,
+  rollbackReason: String,
+  rollbackFromStatus: String,
+  rollbackPointerRestoredAt: Date,
+  rollbackInvoicePaymentRequest: String,
+  rollbackInvoicePaymentHash: String,
+  rollbackPaymentTransactionId: String,
+  rollbackShortfallUsdtMicros: String,
+  rollbackShortfallInvoicePaymentRequest: String,
+  rollbackShortfallInvoicePaymentHash: String,
+  rollbackShortfallPaymentTransactionId: String,
+  rolledBackAt: Date,
 })
 
 CashWalletMigrationSchema.index({ accountId: 1, runId: 1 }, { unique: true })

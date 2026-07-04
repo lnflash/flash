@@ -154,10 +154,28 @@ type CashWalletCutoverPayload {
   errors: [Error!]!
 }
 
+input CashWalletCutoverRollbackInput {
+  accountId: String
+  cutoverVersion: Int!
+  dryRun: Boolean
+  reason: String!
+  runId: String!
+}
+
+type CashWalletCutoverRollbackPayload {
+  dryRun: Boolean
+  eligible: Int
+  errors: [Error!]!
+  migrationIds: [String]
+  requested: Int
+  skippedByStatus: [String]
+}
+
 enum CashWalletCutoverState {
   COMPLETE
   IN_PROGRESS
   PRE
+  ROLLED_BACK
 }
 
 input CashWalletCutoverUpdateInput {
@@ -166,6 +184,38 @@ input CashWalletCutoverUpdateInput {
   runId: String
   scheduledAt: Timestamp
   state: CashWalletCutoverState!
+}
+
+type CashWalletMigration {
+  accountId: String!
+  attempts: Int!
+  balanceMovePaymentTransactionId: String
+  completedAt: Timestamp
+  cutoverVersion: Int!
+  destinationAmountUsdtMicros: String
+  destinationStartingBalanceUsdtMicros: String
+  destinationUsdtWalletId: String!
+  feeAmountUsdCents: String
+  feeAmountUsdtMicros: String
+  feeReimbursementPaymentTransactionId: String
+  id: ID!
+  lastError: String
+  legacyUsdWalletId: String!
+  previousDefaultWalletId: String
+  rollbackFromStatus: String
+  rollbackPaymentTransactionId: String
+  rollbackPointerRestoredAt: Timestamp
+  rollbackReason: String
+  rollbackRequestedAt: Timestamp
+  rollbackRequestedBy: String
+  rollbackShortfallPaymentTransactionId: String
+  rollbackShortfallUsdtMicros: String
+  rolledBackAt: Timestamp
+  runId: String!
+  sourceBalanceUsdCents: String
+  startedAt: Timestamp
+  status: String!
+  updatedAt: Timestamp!
 }
 
 input CashoutNotificationSendInput {
@@ -310,6 +360,7 @@ type Mutation {
   accountUpdateStatus(input: AccountUpdateStatusInput!): AccountDetailPayload!
   businessDeleteMapInfo(input: BusinessDeleteMapInfoInput!): AccountDetailPayload!
   businessUpdateMapInfo(input: BusinessUpdateMapInfoInput!): AccountDetailPayload!
+  cashWalletCutoverRollback(input: CashWalletCutoverRollbackInput!): CashWalletCutoverRollbackPayload!
   cashWalletCutoverUpdate(input: CashWalletCutoverUpdateInput!): CashWalletCutoverPayload!
   cashoutNotificationSend(input: CashoutNotificationSendInput!): SuccessPayload!
   merchantMapDelete(input: MerchantMapDeleteInput!): MerchantPayload!
@@ -369,6 +420,7 @@ type Query {
   allLevels: [AccountLevel!]!
   bridgeReconciliationOrphans(limit: Int = 50, orphanType: String = null, status: String = null): [BridgeReconciliationOrphan!]!
   cashWalletCutover: CashWalletCutover!
+  cashWalletMigrations(cutoverVersion: Int!, runId: String!, statuses: [String]): [CashWalletMigration!]!
   idDocumentReadUrl(
     """Storage key of the ID document file"""
     fileKey: String!

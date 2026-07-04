@@ -53,6 +53,29 @@ export const usdtMicrosToUsdCentsCeil = (
   return ((parsed + USDT_MICROS_PER_USD_CENT - 1n) / USDT_MICROS_PER_USD_CENT).toString()
 }
 
+// Rollback (ENG-401): how much USD (expressed in USDT micros so it can be
+// paid with a sender-side USDT amount) the legacy wallet is still missing
+// versus the balance the account originally migrated with. Both inputs are
+// precise-cent decimal strings (up to 6 decimal places, as produced by
+// ibexUsdDollarsToPreciseCents).
+export const legacyShortfallUsdtMicros = ({
+  sourceUsdCents,
+  currentUsdCents,
+}: {
+  sourceUsdCents: string
+  currentUsdCents: string
+}): string | InvalidCashWalletCutoverAmountError => {
+  const source = usdCentsToUsdtMicros(sourceUsdCents)
+  if (source instanceof Error) return source
+  const current = usdCentsToUsdtMicros(currentUsdCents)
+  if (current instanceof Error) return current
+
+  const sourceMicros = BigInt(source)
+  const currentMicros = BigInt(current)
+  if (currentMicros >= sourceMicros) return "0"
+  return (sourceMicros - currentMicros).toString()
+}
+
 export const destinationShortfallUsdtMicros = ({
   targetUsdtMicros,
   startingUsdtMicros,

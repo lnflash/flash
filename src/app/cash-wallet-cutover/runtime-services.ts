@@ -174,6 +174,17 @@ export const createCashWalletMigrationRuntimeServices = (
 
   return {
     now: deps.now ?? (() => new Date()),
+    accountReader: {
+      // Rollback (ENG-401): read the live default wallet so pointer restore
+      // is a no-op when the account never flipped (or was already restored).
+      getDefaultWalletId: async (
+        accountId: AccountId,
+      ): Promise<WalletId | ApplicationError> => {
+        const account = await accountsRepo.findById(accountId)
+        if (account instanceof Error) return account
+        return account.defaultWalletId
+      },
+    },
     provisioningService: {
       ensureDestinationWallet: async ({
         accountId,

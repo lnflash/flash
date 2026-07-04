@@ -91,7 +91,7 @@ const usesNoAmountFeeReimbursementInvoice = (
   return BigInt(feeAmountUsdtMicros) < CUTOVER_MIN_FIXED_USDT_INVOICE_MICROS
 }
 
-const isInvoicePaymentRequestStale = ({
+export const isInvoicePaymentRequestStale = ({
   paymentRequest,
   now,
   safetyWindowMs = CUTOVER_INVOICE_PAYMENT_SAFETY_WINDOW_MS,
