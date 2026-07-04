@@ -203,6 +203,7 @@ type YamlSchema = {
   cronConfig: {
     rebalanceEnabled: boolean
     swapEnabled: boolean
+    lndTasksEnabled: boolean
   }
   captcha: {
     mandatory: boolean

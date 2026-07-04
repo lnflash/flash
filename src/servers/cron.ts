@@ -91,29 +91,45 @@ const reconcileBridgeWithdrawalsJob = async () => {
 const main = async () => {
   console.log("cronjob started")
   const start = new Date()
-  await checkAllLndHealth()
 
   const cronConfig = getCronConfig()
+
+  // Flash runs IBEX-custodial with no LND nodes, so the upstream-galoy
+  // LND/bitcoin maintenance tasks have nothing to operate on — worse, the
+  // ones that require a reachable node throw OffChainServiceUnavailableError,
+  // failing the whole run (exit 99 → CrashLoopBackOff on the k8s Job).
+  // lndTasksEnabled (default true, for upstream parity) lets deployments
+  // without LND run only the tasks that apply: mongo expiry cleanup and
+  // Bridge↔IBEX reconciliation.
+  if (cronConfig.lndTasksEnabled) {
+    await checkAllLndHealth()
+  }
+
   const results: Array<boolean> = []
   const mongoose = await setupMongoConnection()
 
   const tasks = [
-    // bitcoin related tasks
-    rebalancingInternalChannels,
-    updateEscrows,
-    updatePendingLightningInvoices,
-    updatePendingLightningPayments,
-    updateLnPaymentsCollection,
-    updateRoutingRevenues,
-    updateLegacyOnChainReceipt,
+    // bitcoin/LND tasks — upstream galoy; require LND to do anything useful
+    ...(cronConfig.lndTasksEnabled
+      ? [
+          rebalancingInternalChannels,
+          updateEscrows,
+          updatePendingLightningInvoices,
+          updatePendingLightningPayments,
+          updateLnPaymentsCollection,
+          updateRoutingRevenues,
+          updateLegacyOnChainReceipt,
+        ]
+      : []),
     ...(cronConfig.rebalanceEnabled ? [rebalance] : []),
     ...(cronConfig.swapEnabled ? [swapOutJob] : []),
     reconcileBridgeDepositsJob,
     reconcileBridgeWithdrawalsJob,
     deleteExpiredPaymentFlows,
     deleteExpiredInvoices,
-    deleteLndPaymentsBefore2Months,
-    deleteFailedPaymentsAttemptAllLnds,
+    ...(cronConfig.lndTasksEnabled
+      ? [deleteLndPaymentsBefore2Months, deleteFailedPaymentsAttemptAllLnds]
+      : []),
   ]
 
   const PROCESS_KILL_EVENTS = ["SIGTERM", "SIGINT"]
@@ -198,7 +214,9 @@ const main = async () => {
 }
 
 try {
-  activateLndHealthCheck()
+  if (getCronConfig().lndTasksEnabled) {
+    activateLndHealthCheck()
+  }
   main()
 } catch (err) {
   logger.warn({ err }, "error in the cron job")
