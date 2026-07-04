@@ -17,6 +17,7 @@ import MerchantsPendingApprovalQuery from "./root/query/merchants-pending-approv
 import IdDocumentReadUrlQuery from "./root/query/id-document-read-url"
 import NotificationTopicsQuery from "./root/query/notification-topics"
 import BridgeReconciliationOrphansQuery from "./root/query/bridge-reconciliation-orphans"
+import CashWalletMigrationsQuery from "./root/query/cash-wallet-migrations"
 
 export const queryFields = {
   unauthed: {},
@@ -38,6 +39,7 @@ export const queryFields = {
     notificationTopics: NotificationTopicsQuery,
     bridgeReconciliationOrphans: BridgeReconciliationOrphansQuery,
     cashWalletCutover: CashWalletCutoverQuery,
+    cashWalletMigrations: CashWalletMigrationsQuery,
   },
 }
 

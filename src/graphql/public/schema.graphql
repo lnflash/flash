@@ -449,6 +449,7 @@ enum CashWalletCutoverState {
   COMPLETE
   IN_PROGRESS
   PRE
+  ROLLED_BACK
 }
 
 type CashoutOffer {

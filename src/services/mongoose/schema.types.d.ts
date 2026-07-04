@@ -147,6 +147,19 @@ interface CashWalletMigrationRecord {
   startedAt?: Date
   completedAt?: Date
   updatedAt: Date
+  rollbackRequestedAt?: Date
+  rollbackRequestedBy?: string
+  rollbackReason?: string
+  rollbackFromStatus?: CashWalletMigrationStatus
+  rollbackPointerRestoredAt?: Date
+  rollbackInvoicePaymentRequest?: string
+  rollbackInvoicePaymentHash?: string
+  rollbackPaymentTransactionId?: string
+  rollbackShortfallUsdtMicros?: string
+  rollbackShortfallInvoicePaymentRequest?: string
+  rollbackShortfallInvoicePaymentHash?: string
+  rollbackShortfallPaymentTransactionId?: string
+  rolledBackAt?: Date
 }
 
 interface LocationRecord {

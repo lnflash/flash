@@ -619,6 +619,7 @@ enum CashWalletCutoverState
   COMPLETE @join__enumValue(graph: PUBLIC)
   IN_PROGRESS @join__enumValue(graph: PUBLIC)
   PRE @join__enumValue(graph: PUBLIC)
+  ROLLED_BACK @join__enumValue(graph: PUBLIC)
 }
 
 """(Positive) Cent amount (1/100 of a dollar)"""

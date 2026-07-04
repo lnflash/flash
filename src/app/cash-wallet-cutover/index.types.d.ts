@@ -1,4 +1,4 @@
-type CashWalletCutoverState = "pre" | "in_progress" | "complete"
+type CashWalletCutoverState = "pre" | "in_progress" | "complete" | "rolled_back"
 
 type CashWalletMigrationStatus =
   | "not_started"
@@ -64,4 +64,20 @@ type CashWalletMigration = {
   startedAt?: Date
   completedAt?: Date
   updatedAt: Date
+  // Rollback (ENG-401). Progress inside `rollback_started` is field-driven —
+  // each sub-step records its artifact and is skipped on resume, mirroring
+  // how the forward pipeline guards on field presence.
+  rollbackRequestedAt?: Date
+  rollbackRequestedBy?: string
+  rollbackReason?: string
+  rollbackFromStatus?: CashWalletMigrationStatus
+  rollbackPointerRestoredAt?: Date
+  rollbackInvoicePaymentRequest?: string
+  rollbackInvoicePaymentHash?: string
+  rollbackPaymentTransactionId?: string
+  rollbackShortfallUsdtMicros?: string
+  rollbackShortfallInvoicePaymentRequest?: string
+  rollbackShortfallInvoicePaymentHash?: string
+  rollbackShortfallPaymentTransactionId?: string
+  rolledBackAt?: Date
 }

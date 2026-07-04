@@ -24,6 +24,15 @@ const args = yargs(hideBin(process.argv))
   .command("run-batch", "run one locked migration worker batch")
   .command("status", "print cutover config and migration counts")
   .command("complete", "mark cutover complete after all migrations finish")
+  .command(
+    "rollback-request",
+    "pull eligible migrations into rollback_started (single account with --account-id, else whole run)",
+  )
+  .command("rollback-batch", "run one locked rollback worker batch")
+  .command(
+    "rollback-complete",
+    "mark the cutover config rolled_back once no migrations remain in rollback_started",
+  )
   .demandCommand(1)
   .option("cutover-version", { type: "number", demandOption: true })
   .option("run-id", { type: "string", demandOption: true })
@@ -36,6 +45,8 @@ const args = yargs(hideBin(process.argv))
   .option("provision-retry-delay-ms", { type: "number", default: 60_000 })
   .option("max-provision-attempts", { type: "number", default: 5 })
   .option("dry-run", { type: "boolean", default: false })
+  .option("account-id", { type: "string" })
+  .option("reason", { type: "string", default: "" })
   .option("lock-stale-seconds", { type: "number", default: 300 })
   .option("configPath", { type: "string", demandOption: true })
   .parseSync()
@@ -139,6 +150,51 @@ const run = async () => {
 
     case "complete": {
       const result = await CashWalletCutover.completePrimaryCashWalletCutover({
+        cutoverVersion,
+        runId,
+        actor: args.operator,
+        migrationsRepo: repository,
+      })
+      if (result instanceof Error) throw result
+      toJson(result)
+      return
+    }
+
+    case "rollback-request": {
+      if (!args.reason) {
+        throw new Error("--reason is required for rollback-request")
+      }
+      const result = await CashWalletCutover.requestPrimaryCashWalletRollback({
+        cutoverVersion,
+        runId,
+        accountId: args["account-id"] as AccountId | undefined,
+        reason: args.reason,
+        requestedBy: args.operator,
+        dryRun: args["dry-run"],
+        migrationsRepo: repository,
+      })
+      if (result instanceof Error) throw result
+      toJson(result)
+      return
+    }
+
+    case "rollback-batch": {
+      const result = await CashWalletCutover.runPrimaryCashWalletRollbackBatch({
+        cutoverVersion,
+        runId,
+        workerId: args["worker-id"],
+        limit: args.limit,
+        stepDelayMs: args["step-delay-ms"],
+        lockStaleBefore: new Date(Date.now() - args["lock-stale-seconds"] * 1000),
+        migrationsRepo: repository,
+      })
+      if (result instanceof Error) throw result
+      toJson(result)
+      return
+    }
+
+    case "rollback-complete": {
+      const result = await CashWalletCutover.completePrimaryCashWalletRollback({
         cutoverVersion,
         runId,
         actor: args.operator,
