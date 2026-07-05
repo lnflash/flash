@@ -96,6 +96,7 @@ export type CashWalletCutoverOperatorSnapshot = {
     state: CashWalletCutoverState
     cutoverVersion: number
     runId?: string
+    startedAt?: string
     updatedAt?: string
   }
   preflight?: CashWalletCutoverPreflightReport
@@ -921,6 +922,7 @@ export const buildCashWalletCutoverOperatorSnapshot = async ({
       state: config.state,
       cutoverVersion: config.cutoverVersion,
       runId: config.runId,
+      startedAt: config.startedAt?.toISOString(),
       updatedAt: config.updatedAt?.toISOString(),
     },
     preflight: preflightReport,
@@ -956,4 +958,217 @@ export const buildCashWalletCutoverOperatorSnapshot = async ({
     },
     reconciliation,
   }
+}
+
+// ── Stage pipeline + milestone highlights (operator monitoring) ─────────────
+//
+// Groups the 14-state migration machine into operator-facing stages and
+// derives milestone events by diffing consecutive stage summaries — so the
+// dashboard can show "where is the run" at a glance and a highlights feed of
+// every meaningful transition (run started, provisioning done, 25/50/75/100%
+// migrated, attention spikes, rollback progress).
+
+export type CashWalletCutoverStageKey =
+  | "pending"
+  | "provisioning"
+  | "moving"
+  | "fees"
+  | "finalizing"
+  | "complete"
+  | "skipped"
+  | "attention"
+  | "rollingBack"
+  | "rolledBack"
+
+export const CASH_WALLET_CUTOVER_STAGE_STATUSES: Record<
+  CashWalletCutoverStageKey,
+  (CashWalletMigrationStatus | "none")[]
+> = {
+  pending: ["none", "not_started"],
+  provisioning: ["started", "provisioned"],
+  moving: [
+    "balance_read",
+    "invoice_created",
+    "balance_move_sending",
+    "balance_move_sent",
+    "balance_move_verified",
+  ],
+  fees: [
+    "fee_reimbursement_invoice_created",
+    "fee_reimbursement_sending",
+    "fee_reimbursed",
+  ],
+  finalizing: ["pointer_flipped", "legacy_zero_verified"],
+  complete: ["complete"],
+  skipped: ["skipped_already_migrated"],
+  attention: ["failed", "requires_operator_review"],
+  rollingBack: ["rollback_started"],
+  rolledBack: ["rolled_back"],
+}
+
+export type CashWalletCutoverStageSummary = {
+  total: number
+  /**
+   * Denominator for progress: once a run has started, accounts stuck at
+   * "none" (already_usdt / residual / missing_* discoveries) never get
+   * migration records and can never complete — counting them caps
+   * percentComplete below 100 forever (TEST: 315 manifest vs 297 migrations
+   * ⇒ ceiling of 94%). Before the run starts, everything counts.
+   */
+  eligibleTotal: number
+  counts: Record<CashWalletCutoverStageKey, number>
+  statusCounts: Record<string, number>
+  inFlight: number
+  done: number
+  percentComplete: number
+  missingUsdtWallets: number
+  cutoverState: CashWalletCutoverState
+  runId?: string
+}
+
+export const summarizeCashWalletCutoverStages = ({
+  migrationStatuses,
+  cutoverState,
+  runId,
+  missingUsdtWallets,
+}: {
+  migrationStatuses: (CashWalletMigrationStatus | "none")[]
+  cutoverState: CashWalletCutoverState
+  runId?: string
+  missingUsdtWallets: number
+}): CashWalletCutoverStageSummary => {
+  const counts = Object.fromEntries(
+    Object.keys(CASH_WALLET_CUTOVER_STAGE_STATUSES).map((key) => [key, 0]),
+  ) as Record<CashWalletCutoverStageKey, number>
+  const statusCounts: Record<string, number> = {}
+
+  const stageByStatus = new Map<string, CashWalletCutoverStageKey>()
+  for (const [stage, statuses] of Object.entries(CASH_WALLET_CUTOVER_STAGE_STATUSES)) {
+    for (const status of statuses) {
+      stageByStatus.set(status, stage as CashWalletCutoverStageKey)
+    }
+  }
+
+  for (const status of migrationStatuses) {
+    statusCounts[status] = (statusCounts[status] ?? 0) + 1
+    const stage = stageByStatus.get(status) ?? "pending"
+    counts[stage] += 1
+  }
+
+  const inFlight = counts.provisioning + counts.moving + counts.fees + counts.finalizing
+  const done = counts.complete + counts.skipped
+  const total = migrationStatuses.length
+  const eligibleTotal =
+    cutoverState === "pre" ? total : total - (statusCounts["none"] ?? 0)
+
+  return {
+    total,
+    eligibleTotal,
+    counts,
+    statusCounts,
+    inFlight,
+    done,
+    percentComplete: eligibleTotal > 0 ? Math.floor((done / eligibleTotal) * 100) : 0,
+    missingUsdtWallets,
+    cutoverState,
+    runId,
+  }
+}
+
+export type CashWalletCutoverMilestoneKind = "ok" | "info" | "warn" | "bad"
+
+export type CashWalletCutoverMilestone = {
+  at: string
+  kind: CashWalletCutoverMilestoneKind
+  text: string
+}
+
+const PERCENT_THRESHOLDS = [25, 50, 75] as const
+
+export const deriveCashWalletCutoverMilestones = ({
+  previous,
+  current,
+  at,
+}: {
+  previous?: CashWalletCutoverStageSummary
+  current: CashWalletCutoverStageSummary
+  at: string
+}): CashWalletCutoverMilestone[] => {
+  const milestones: CashWalletCutoverMilestone[] = []
+  const push = (kind: CashWalletCutoverMilestoneKind, text: string) =>
+    milestones.push({ at, kind, text })
+
+  if (!previous) return milestones
+
+  if (previous.cutoverState !== current.cutoverState) {
+    if (current.cutoverState === "in_progress") {
+      push("info", `Cutover run started${current.runId ? ` (${current.runId})` : ""}`)
+    } else if (current.cutoverState === "complete") {
+      push("ok", "Cutover config marked COMPLETE")
+    } else if (current.cutoverState === "rolled_back") {
+      push("warn", "Cutover config marked ROLLED BACK")
+    } else {
+      push("info", `Cutover state: ${previous.cutoverState} -> ${current.cutoverState}`)
+    }
+  }
+
+  if (previous.missingUsdtWallets > 0 && current.missingUsdtWallets === 0) {
+    push("ok", `Provisioning complete: every account has a USDT wallet`)
+  }
+
+  if (previous.inFlight === 0 && current.inFlight > 0) {
+    push("info", `Migration batch running (${current.inFlight} in flight)`)
+  }
+
+  if (previous.counts.complete === 0 && current.counts.complete > 0) {
+    push("ok", "First account fully migrated")
+  }
+
+  for (const threshold of PERCENT_THRESHOLDS) {
+    if (previous.percentComplete < threshold && current.percentComplete >= threshold) {
+      push("info", `${threshold}% migrated (${current.done}/${current.eligibleTotal})`)
+    }
+  }
+
+  // Against eligibleTotal, not total: permanently-"none" accounts never get
+  // migration records, so done === total could never hold on real data and
+  // the reconciliation cue would never fire.
+  const fullyDone =
+    current.eligibleTotal > 0 &&
+    current.done === current.eligibleTotal &&
+    current.counts.attention === 0
+  const previouslyDone =
+    previous.eligibleTotal > 0 &&
+    previous.done === previous.eligibleTotal &&
+    previous.counts.attention === 0
+  if (fullyDone && !previouslyDone) {
+    push(
+      "ok",
+      `100% migrated (${current.done}/${current.eligibleTotal}) — run reconciliation and hold per runbook`,
+    )
+  }
+
+  if (current.counts.attention > previous.counts.attention) {
+    const delta = current.counts.attention - previous.counts.attention
+    push(
+      "bad",
+      `+${delta} account(s) need attention (failed / operator review) — total ${current.counts.attention}`,
+    )
+  }
+  if (previous.counts.attention > 0 && current.counts.attention === 0) {
+    push("ok", "Attention queue cleared")
+  }
+
+  if (previous.counts.rollingBack === 0 && current.counts.rollingBack > 0) {
+    push("warn", `Rollback in progress (${current.counts.rollingBack} account(s))`)
+  }
+  if (
+    previous.counts.rollingBack > 0 &&
+    current.counts.rollingBack === 0 &&
+    current.counts.rolledBack > previous.counts.rolledBack
+  ) {
+    push("ok", `Rollback drained — ${current.counts.rolledBack} account(s) rolled back`)
+  }
+
+  return milestones
 }
