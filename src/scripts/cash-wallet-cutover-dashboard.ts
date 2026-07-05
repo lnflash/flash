@@ -10,13 +10,17 @@ import { hideBin } from "yargs/helpers"
 import { discoverCashWalletCutoverAccounts } from "@app/cash-wallet-cutover/discovery"
 import {
   buildCashWalletCutoverOperatorSnapshot,
+  CashWalletCutoverMilestone,
   CashWalletCutoverOperatorManifestAccount,
   CashWalletCutoverOperatorSnapshot,
+  CashWalletCutoverStageSummary,
+  deriveCashWalletCutoverMilestones,
   formatCashWalletCutoverOperatorSnapshotCsv,
   formatOperatorBalance,
   OperatorBalance,
   parseCashWalletCutoverOperatorManifest,
   refreshOperatorAccountCutoverBalanceAudit,
+  summarizeCashWalletCutoverStages,
 } from "@app/cash-wallet-cutover/operator-dashboard"
 import { buildCashWalletCutoverPreflightReport } from "@app/cash-wallet-cutover/preflight"
 import { getBalanceForWallet } from "@app/wallets"
@@ -329,7 +333,26 @@ const html = `<!doctype html>
     .info { color: var(--blue); background: var(--blue-bg); }
     .right { text-align: right; }
 
+    .stagegrid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 10px; margin-bottom: 14px; }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+    .panel-title { font-weight: 650; margin-bottom: 10px; display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+    .bar { display: flex; height: 22px; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); background: #eef1f6; }
+    .bar div { height: 100%; transition: width .4s ease; min-width: 0; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; cursor: pointer; font-size: 12px; font-weight: 600; background: #fff; }
+    .chip .dot { width: 9px; height: 9px; border-radius: 50%; }
+    .chip.active { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-bg); }
+    .chip .n { color: var(--muted); font-weight: 700; }
+    .chip.zero { opacity: .45; }
+    .feed { list-style: none; margin: 0; padding: 0; max-height: 200px; overflow: auto; font-size: 13px; }
+    .feed li { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; border-bottom: 1px dashed var(--line); }
+    .feed .t { color: var(--muted); font-size: 11px; white-space: nowrap; font-family: ui-monospace, Menlo, monospace; }
+    .feed .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; align-self: center; }
+    .feed .dot.ok { background: var(--green); } .feed .dot.info { background: var(--blue); }
+    .feed .dot.warn { background: var(--yellow); } .feed .dot.bad { background: var(--red); }
+
     @media (max-width: 1100px) {
+      .stagegrid { grid-template-columns: 1fr; }
       .summary { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
       header { align-items: flex-start; flex-direction: column; }
       .table-wrap { max-height: none; }
@@ -350,6 +373,17 @@ const html = `<!doctype html>
     </div>
   </header>
   <main>
+    <section class="stagegrid">
+      <div class="panel">
+        <div class="panel-title">Pipeline <span class="muted" id="pipeline-note"></span></div>
+        <div class="bar" id="stage-bar"></div>
+        <div class="chips" id="stage-chips"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Highlights <span class="muted" id="highlights-note"></span></div>
+        <ol class="feed" id="highlights"></ol>
+      </div>
+    </section>
     <section class="summary" id="summary"></section>
     <section class="controls">
       <label class="filter"><input type="checkbox" id="filter-anomalies">Anomalies</label>
@@ -384,6 +418,21 @@ const html = `<!doctype html>
   </main>
   <script>
     let snapshot = null
+    let stageFilter = ""
+
+    const STAGES = [
+      ["pending", "Pending", "#98a2b3", ["none", "not_started"]],
+      ["provisioning", "Provisioning", "#7a5af8", ["started", "provisioned"]],
+      ["moving", "Moving funds", "#1f5eff", ["balance_read", "invoice_created", "balance_move_sending", "balance_move_sent", "balance_move_verified"]],
+      ["fees", "Fees", "#0ba5ec", ["fee_reimbursement_invoice_created", "fee_reimbursement_sending", "fee_reimbursed"]],
+      ["finalizing", "Finalizing", "#12b76a", ["pointer_flipped", "legacy_zero_verified"]],
+      ["complete", "Complete", "#16794c", ["complete"]],
+      ["skipped", "Skipped (USDT)", "#66c61c", ["skipped_already_migrated"]],
+      ["attention", "Attention", "#b42318", ["failed", "requires_operator_review"]],
+      ["rollingBack", "Rolling back", "#946200", ["rollback_started"]],
+      ["rolledBack", "Rolled back", "#667085", ["rolled_back"]],
+    ]
+    const stageStatuses = (key) => (STAGES.find((s) => s[0] === key) || [null, null, null, []])[3]
 
     const $ = (id) => document.getElementById(id)
     const money = (cents) => "$" + (cents / 100).toFixed(2)
@@ -538,6 +587,7 @@ const html = `<!doctype html>
       if (f.nonzeroUsd && !usd) return false
       if (f.nonzeroUsdt && !usdt) return false
       if (f.migration && account.migrationStatus !== f.migration) return false
+      if (stageFilter && stageStatuses(stageFilter).indexOf(account.migrationStatus) === -1) return false
       return true
     }
 
@@ -571,9 +621,58 @@ const html = `<!doctype html>
       }).join("")
     }
 
+    function elapsedText(startedAt) {
+      if (!startedAt) return ""
+      const ms = Date.now() - new Date(startedAt).getTime()
+      if (ms < 0) return ""
+      const m = Math.floor(ms / 60000), sec = Math.floor((ms % 60000) / 1000)
+      return (m >= 60 ? Math.floor(m / 60) + "h " + (m % 60) + "m" : m + "m " + sec + "s")
+    }
+
+    function renderPipeline() {
+      const st = snapshot.stages
+      const bar = $("stage-bar"), chips = $("stage-chips"), note = $("pipeline-note")
+      if (!st) { bar.innerHTML = ""; chips.innerHTML = '<span class="muted">waiting for first snapshot…</span>'; return }
+      note.textContent = st.cutoverState + (st.runId ? " · " + st.runId : "") +
+        (snapshot.cutover && snapshot.cutover.state === "in_progress" && snapshot.cutover.startedAt
+          ? " · elapsed " + elapsedText(snapshot.cutover.startedAt) : "") +
+        " · " + st.percentComplete + "% done"
+      bar.innerHTML = STAGES.map(([key, label, color]) => {
+        const n = st.counts[key] || 0
+        if (!n) return ""
+        const pct = (n / st.total) * 100
+        return '<div title="' + label + ': ' + n + '" style="width:' + pct + '%;background:' + color + '"></div>'
+      }).join("")
+      chips.innerHTML = STAGES.map(([key, label, color]) => {
+        const n = st.counts[key] || 0
+        return '<span class="chip' + (stageFilter === key ? " active" : "") + (n ? "" : " zero") + '" data-stage="' + key + '">' +
+          '<span class="dot" style="background:' + color + '"></span>' + label + ' <span class="n">' + n + '</span></span>'
+      }).join("")
+      chips.querySelectorAll(".chip").forEach((chip) => {
+        chip.addEventListener("click", () => {
+          stageFilter = stageFilter === chip.dataset.stage ? "" : chip.dataset.stage
+          $("filter-migration").value = ""
+          renderPipeline()
+          renderRows()
+        })
+      })
+    }
+
+    function renderHighlights() {
+      const feed = $("highlights")
+      const items = (snapshot.milestones || []).slice().reverse()
+      $("highlights-note").textContent = items.length + " event(s)"
+      feed.innerHTML = items.map((m) =>
+        '<li><span class="dot ' + m.kind + '"></span><span class="t">' +
+        new Date(m.at).toLocaleTimeString() + '</span><span>' + m.text + '</span></li>'
+      ).join("") || '<li><span class="muted">no events yet</span></li>'
+    }
+
     function render() {
       renderReadiness()
       renderSummary()
+      renderPipeline()
+      renderHighlights()
       renderMigrationFilter()
       renderRows()
     }
@@ -656,12 +755,27 @@ const html = `<!doctype html>
       window.location.href = "/api/export.csv"
     })
 
+    // Adaptive refresh: tight loop while a run (or rollback) is active,
+    // relaxed when idle.
+    function isActiveRun() {
+      if (!snapshot) return false
+      if (snapshot.cutover && snapshot.cutover.state === "in_progress") return true
+      const st = snapshot.stages
+      return !!st && (st.inFlight > 0 || (st.counts && st.counts.rollingBack > 0))
+    }
+    let reloadTimer = null
+    function scheduleReload() {
+      if (reloadTimer) clearTimeout(reloadTimer)
+      reloadTimer = setTimeout(() => {
+        load(false)
+          .catch((error) => { $("status").textContent = error.message })
+          .finally(scheduleReload)
+      }, isActiveRun() ? 15000 : 120000)
+    }
+
     load(false).catch((error) => {
       $("status").textContent = error.message
-    })
-    setInterval(() => load(false).catch((error) => {
-      $("status").textContent = error.message
-    }), 120000)
+    }).finally(scheduleReload)
   </script>
 </body>
 </html>`
@@ -696,6 +810,41 @@ const start = async () => {
       }
     | undefined
   let pending: Promise<CashWalletCutoverOperatorSnapshot> | undefined
+
+  // Stage pipeline + milestone highlights: diff consecutive snapshots and
+  // keep a bounded feed. Also logged, so `kubectl logs` retains the history
+  // across browser sessions.
+  let lastStageSummary: CashWalletCutoverStageSummary | undefined
+  const MILESTONE_LIMIT = 300
+  const milestones: CashWalletCutoverMilestone[] = [
+    {
+      at: new Date().toISOString(),
+      kind: "info",
+      text: `Dashboard online — watching ${manifestAccounts.length} accounts`,
+    },
+  ]
+
+  const observeStageProgress = (result: CashWalletCutoverOperatorSnapshot) => {
+    const current = summarizeCashWalletCutoverStages({
+      migrationStatuses: result.accounts.map((account) => account.migrationStatus),
+      cutoverState: result.cutover.state,
+      runId: result.cutover.runId,
+      missingUsdtWallets: result.summary.wallets.missingUsdt,
+    })
+    const fresh = deriveCashWalletCutoverMilestones({
+      previous: lastStageSummary,
+      current,
+      at: new Date().toISOString(),
+    })
+    for (const milestone of fresh) {
+      milestones.push(milestone)
+      baseLogger.info({ milestone }, "cutover milestone")
+    }
+    if (milestones.length > MILESTONE_LIMIT) {
+      milestones.splice(0, milestones.length - MILESTONE_LIMIT)
+    }
+    lastStageSummary = current
+  }
   const walletCurrencies = new Map<WalletId, WalletCurrency>()
   const balanceCache = new Map<WalletId, CachedBalance>()
   const balanceQueue: Array<{ walletId: WalletId; currency: WalletCurrency }> = []
@@ -858,6 +1007,7 @@ const start = async () => {
         }),
     })
     registerSnapshotWallets(result)
+    observeStageProgress(result)
     return result
   }
 
@@ -879,11 +1029,19 @@ const start = async () => {
     return pending
   }
 
+  // Keep stage/milestone tracking alive even with no browser tab open.
+  setInterval(() => {
+    snapshot(false).catch((error) =>
+      baseLogger.warn({ error }, "cutover dashboard background poll failed"),
+    )
+  }, 30_000)
+
   const app = express()
   app.get("/", (_req, res) => res.type("html").send(html))
   app.get("/api/snapshot", async (req, res) => {
     try {
-      res.json(await snapshot(req.query.refresh === "1"))
+      const result = await snapshot(req.query.refresh === "1")
+      res.json({ ...result, stages: lastStageSummary, milestones })
     } catch (error) {
       baseLogger.error({ error }, "Cash wallet cutover dashboard snapshot failed")
       res.status(500).json({
@@ -945,6 +1103,9 @@ const start = async () => {
         active: activeBalanceId,
       },
     })
+  })
+  app.get("/api/milestones", (_req, res) => {
+    res.json({ stages: lastStageSummary, milestones })
   })
   app.get("/api/export.csv", async (_req, res) => {
     try {
