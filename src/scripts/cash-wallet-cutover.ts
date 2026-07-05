@@ -16,6 +16,10 @@ import { baseLogger } from "@services/logger"
 const args = yargs(hideBin(process.argv))
   .command("preview", "discover accounts and print the migration plan without writes")
   .command(
+    "audit-accounts",
+    "validate every account document; reports accounts that would fail the pointer-flip save (run before prepare)",
+  )
+  .command(
     "provision-usdt-wallets",
     "create missing destination USDT wallets before preparing migrations",
   )
@@ -76,6 +80,12 @@ const run = async () => {
         runId,
       })
       if (result instanceof Error) throw result
+      toJson(result)
+      return
+    }
+
+    case "audit-accounts": {
+      const result = await CashWalletCutover.auditCashWalletCutoverAccounts()
       toJson(result)
       return
     }
