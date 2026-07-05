@@ -22,6 +22,10 @@ const args = yargs(hideBin(process.argv))
   .command("prepare", "discover accounts and upsert migration records")
   .command("start", "mark a prepared cutover run in progress")
   .command("run-batch", "run one locked migration worker batch")
+  .command(
+    "retry-failed",
+    "reset failed migrations to their last safe status for re-running (single account with --account-id, else all failed)",
+  )
   .command("status", "print cutover config and migration counts")
   .command("complete", "mark cutover complete after all migrations finish")
   .command(
@@ -156,6 +160,19 @@ const run = async () => {
         cutoverVersion,
         runId,
         actor: args.operator,
+        migrationsRepo: repository,
+      })
+      if (result instanceof Error) throw result
+      toJson(result)
+      return
+    }
+
+    case "retry-failed": {
+      const result = await CashWalletCutover.retryFailedCashWalletMigrations({
+        cutoverVersion,
+        runId,
+        accountId: args["account-id"] as AccountId | undefined,
+        dryRun: args["dry-run"],
         migrationsRepo: repository,
       })
       if (result instanceof Error) throw result

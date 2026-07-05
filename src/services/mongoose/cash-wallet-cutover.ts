@@ -34,6 +34,8 @@ type TransitionMigrationArgs = {
   cutoverVersion: number
   runId: string
   patch?: Partial<Omit<CashWalletMigration, "id">>
+  /** Fields to $unset — e.g. clearing stale progress on a retry reset (ENG-484). */
+  clear?: (keyof Omit<CashWalletMigration, "id">)[]
 }
 
 type LockMigrationArgs = {
@@ -208,11 +210,17 @@ export const CashWalletCutoverRepository = () => {
     cutoverVersion,
     runId,
     patch = {},
+    clear = [],
   }: TransitionMigrationArgs): Promise<CashWalletMigration | RepositoryError> => {
     try {
       const result = await CashWalletMigration.findOneAndUpdate(
         { _id: id, status: from, cutoverVersion, runId },
-        { $set: { ...patch, status: to, updatedAt: new Date() } },
+        {
+          $set: { ...patch, status: to, updatedAt: new Date() },
+          ...(clear.length > 0
+            ? { $unset: Object.fromEntries(clear.map((field) => [field, ""])) }
+            : {}),
+        },
         { new: true },
       )
       if (!result)

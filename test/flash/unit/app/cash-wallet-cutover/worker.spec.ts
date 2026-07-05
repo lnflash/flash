@@ -1,6 +1,8 @@
 import {
   createCashWalletMigrationFeeReimbursementInvoice,
+  isSubMinimumFeeReimbursementAmount,
   sendCashWalletMigrationFeeReimbursementPayment,
+  skipCashWalletMigrationFeeReimbursement,
 } from "@app/cash-wallet-cutover/worker"
 
 const migration = {
@@ -89,5 +91,36 @@ describe("cash wallet migration worker fee reimbursement", () => {
       paymentRequest: invoice.paymentRequest,
       senderAmountUsdtMicros: "4735",
     })
+  })
+
+  it("classifies sub-cent fees as sub-minimum (absorbed, never paid)", () => {
+    expect(isSubMinimumFeeReimbursementAmount("0")).toBe(true)
+    expect(isSubMinimumFeeReimbursementAmount("515")).toBe(true) // rehearsal dust
+    expect(isSubMinimumFeeReimbursementAmount("9999")).toBe(true)
+    expect(isSubMinimumFeeReimbursementAmount("10000")).toBe(false)
+    expect(isSubMinimumFeeReimbursementAmount("-1")).toBeInstanceOf(Error)
+  })
+
+  it("records the absorbed micros when skipping a dust fee (ENG-484)", async () => {
+    const migrationsRepo = transitionRepo()
+
+    const result = await skipCashWalletMigrationFeeReimbursement({
+      migration,
+      migrationsRepo,
+      feeAmountUsdtMicros: "515",
+    })
+
+    expect(result).toEqual({
+      ...migration,
+      status: "fee_reimbursed",
+      feeAmountUsdCents: "0",
+      feeAmountUsdtMicros: "515",
+    })
+    expect(migrationsRepo.transitionMigration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "fee_reimbursed",
+        patch: { feeAmountUsdCents: "0", feeAmountUsdtMicros: "515" },
+      }),
+    )
   })
 })

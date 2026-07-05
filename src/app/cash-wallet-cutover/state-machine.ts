@@ -75,7 +75,12 @@ const transitions: Partial<
   pointer_flipped: ["legacy_zero_verified", "failed", "rollback_started"],
   legacy_zero_verified: ["complete", "failed", "rollback_started"],
   complete: ["rollback_started"],
-  failed: ["rollback_started"],
+  // Operator retry (ENG-484): `failed` only ever comes from non-ambiguous
+  // statuses (the runner routes ambiguous ones to requires_operator_review),
+  // so re-driving is safe. Two resume points: `not_started` re-walks the whole
+  // pre-money path; `pointer_flipped` resumes a post-pointer failure without
+  // touching previousDefaultWalletId.
+  failed: ["rollback_started", "not_started", "pointer_flipped"],
   requires_operator_review: ["rollback_started"],
   // Self-loop persists sub-step artifacts (invoice/payment ids) mid-rollback,
   // mirroring invoice_created's refresh self-loop. Rollback failures always

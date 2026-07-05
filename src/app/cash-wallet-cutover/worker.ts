@@ -91,6 +91,15 @@ const usesNoAmountFeeReimbursementInvoice = (
   return BigInt(feeAmountUsdtMicros) < CUTOVER_MIN_FIXED_USDT_INVOICE_MICROS
 }
 
+// ENG-484: IBEX rejects payments below its minimum payable amount, so
+// sub-cent fee reimbursements (88–515 micros observed in the ENG-461
+// rehearsal) 400 at the pay step and strand the migration. Fees under one
+// cent are absorbed instead of reimbursed — invisible to users.
+export const isSubMinimumFeeReimbursementAmount = (
+  feeAmountUsdtMicros: string,
+): boolean | InvalidCashWalletCutoverAmountError =>
+  usesNoAmountFeeReimbursementInvoice(feeAmountUsdtMicros)
+
 export const isInvoicePaymentRequestStale = ({
   paymentRequest,
   now,
@@ -417,9 +426,11 @@ export const createCashWalletMigrationFeeReimbursementInvoice = async ({
 export const skipCashWalletMigrationFeeReimbursement = async ({
   migration,
   migrationsRepo,
+  feeAmountUsdtMicros = "0",
 }: {
   migration: CashWalletMigration
   migrationsRepo: CashWalletMigrationTransitionRepository
+  feeAmountUsdtMicros?: string
 }): Promise<CashWalletMigration | ApplicationError> => {
   const transition = assertCanTransition(migration.status, "fee_reimbursed")
   if (transition instanceof Error) return transition
@@ -431,8 +442,10 @@ export const skipCashWalletMigrationFeeReimbursement = async ({
     cutoverVersion: migration.cutoverVersion,
     runId: migration.runId,
     patch: {
+      // A skipped fee is always sub-cent, so cents are 0; the micros record
+      // what was absorbed (no feeReimbursementPaymentTransactionId = unpaid).
       feeAmountUsdCents: "0",
-      feeAmountUsdtMicros: "0",
+      feeAmountUsdtMicros,
     },
   })
 }

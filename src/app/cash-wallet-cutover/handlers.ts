@@ -3,6 +3,7 @@ import {
   createCashWalletMigrationBalanceMoveInvoice,
   createCashWalletMigrationFeeReimbursementInvoice,
   flipCashWalletMigrationDefaultPointer,
+  isSubMinimumFeeReimbursementAmount,
   markCashWalletMigrationBalanceMoveSent,
   markCashWalletMigrationFeeReimbursed,
   provisionCashWalletMigrationDestination,
@@ -131,10 +132,13 @@ export const createCashWalletMigrationStepHandlers = ({
     const feeAmountUsdtMicros =
       await services.feeService.readFeeAmountUsdtMicros(migration)
     if (feeAmountUsdtMicros instanceof Error) return feeAmountUsdtMicros
-    if (feeAmountUsdtMicros === "0") {
+    const subMinimum = isSubMinimumFeeReimbursementAmount(feeAmountUsdtMicros)
+    if (subMinimum instanceof Error) return subMinimum
+    if (subMinimum) {
       return skipCashWalletMigrationFeeReimbursement({
         migration,
         migrationsRepo,
+        feeAmountUsdtMicros,
       })
     }
     return createCashWalletMigrationFeeReimbursementInvoice({
