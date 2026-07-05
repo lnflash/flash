@@ -66,6 +66,72 @@ describe("cutover runtime services — IBEX rate-limit retry (ENG-483)", () => {
     expect(getRawAccountDetails).toHaveBeenCalledTimes(3)
   })
 
+  it("resolves the treasury to the funder's USDT wallet regardless of its default (ENG-482)", async () => {
+    const walletsRepo = {
+      findById: jest.fn().mockResolvedValue({
+        id: "funder-btc-wallet" as WalletId,
+        accountId: "funder-account" as AccountId,
+        currency: "BTC",
+      }),
+      listByAccountId: jest.fn().mockResolvedValue([
+        { id: "funder-btc-wallet", currency: "BTC" },
+        { id: "funder-usdt-wallet", currency: "USDT" },
+      ]),
+    }
+
+    const services = createCashWalletMigrationRuntimeServices({
+      walletsRepo: walletsRepo as never,
+      getFunderWalletId: async () => "funder-btc-wallet" as WalletId,
+    })
+
+    await expect(services.treasuryService.getTreasuryWalletId()).resolves.toBe(
+      "funder-usdt-wallet",
+    )
+  })
+
+  it("short-circuits when the funder default is already the USDT wallet", async () => {
+    const walletsRepo = {
+      findById: jest.fn().mockResolvedValue({
+        id: "funder-usdt-wallet" as WalletId,
+        accountId: "funder-account" as AccountId,
+        currency: "USDT",
+      }),
+      listByAccountId: jest.fn(),
+    }
+
+    const services = createCashWalletMigrationRuntimeServices({
+      walletsRepo: walletsRepo as never,
+      getFunderWalletId: async () => "funder-usdt-wallet" as WalletId,
+    })
+
+    await expect(services.treasuryService.getTreasuryWalletId()).resolves.toBe(
+      "funder-usdt-wallet",
+    )
+    expect(walletsRepo.listByAccountId).not.toHaveBeenCalled()
+  })
+
+  it("returns a descriptive error when the funder has no USDT wallet", async () => {
+    const walletsRepo = {
+      findById: jest.fn().mockResolvedValue({
+        id: "funder-btc-wallet" as WalletId,
+        accountId: "funder-account" as AccountId,
+        currency: "BTC",
+      }),
+      listByAccountId: jest
+        .fn()
+        .mockResolvedValue([{ id: "funder-btc-wallet", currency: "BTC" }]),
+    }
+
+    const services = createCashWalletMigrationRuntimeServices({
+      walletsRepo: walletsRepo as never,
+      getFunderWalletId: async () => "funder-btc-wallet" as WalletId,
+    })
+
+    const result = await services.treasuryService.getTreasuryWalletId()
+    expect(result).toBeInstanceOf(Error)
+    expect((result as Error).message).toMatch(/no USDT wallet/)
+  })
+
   it("does not retry non-rate-limit rejections", async () => {
     const getRawAccountDetails = jest
       .fn()

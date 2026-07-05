@@ -3,7 +3,7 @@ import { decodeInvoice } from "@domain/bitcoin/lightning"
 import { InvalidWalletId } from "@domain/errors"
 import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
-import { AccountsRepository } from "@services/mongoose"
+import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
 import { UnexpectedIbexResponse } from "@services/ibex/errors"
 import { getFunderWalletId } from "@services/ledger/caching"
@@ -30,6 +30,8 @@ type RuntimeServiceDependencies = {
   createNoAmountInvoice?: typeof Ibex.addInvoice
   payInvoice?: typeof Ibex.payInvoice
   accountsRepo?: Pick<ReturnType<typeof AccountsRepository>, "findById">
+  walletsRepo?: Pick<ReturnType<typeof WalletsRepository>, "findById" | "listByAccountId">
+  getFunderWalletId?: typeof getFunderWalletId
   getTreasuryWalletId?: () => Promise<WalletId | ApplicationError>
   maxRateLimitAttempts?: number
   rateLimitRetryDelayMs?: number
@@ -174,6 +176,8 @@ export const createCashWalletMigrationRuntimeServices = (
   const noAmountInvoiceForRecipient = deps.createNoAmountInvoice ?? Ibex.addInvoice
   const payInvoice = deps.payInvoice ?? Ibex.payInvoice
   const accountsRepo = deps.accountsRepo ?? AccountsRepository()
+  const walletsRepo = deps.walletsRepo ?? WalletsRepository()
+  const funderWalletId = deps.getFunderWalletId ?? getFunderWalletId
   const rateLimitRetry = {
     maxAttempts: Math.max(
       1,
@@ -398,7 +402,32 @@ export const createCashWalletMigrationRuntimeServices = (
       },
     },
     treasuryService: {
-      getTreasuryWalletId: deps.getTreasuryWalletId ?? getFunderWalletId,
+      // ENG-482: the treasury must be a USDT wallet — fee reimbursements and
+      // rollback top-ups pay USDT invoices, and paying them from the funder's
+      // BTC default 404s at IBEX (stranded every funded account in the ENG-461
+      // rehearsal). Resolve the funder's USDT wallet regardless of which
+      // wallet is its default, so prod doesn't depend on flipping the funder
+      // default as an operational step.
+      getTreasuryWalletId:
+        deps.getTreasuryWalletId ??
+        (async (): Promise<WalletId | ApplicationError> => {
+          const funderDefaultWalletId = await funderWalletId()
+          const funderWallet = await walletsRepo.findById(funderDefaultWalletId)
+          if (funderWallet instanceof Error) return funderWallet
+          if (funderWallet.currency === WalletCurrency.Usdt) return funderWallet.id
+
+          const funderWallets = await walletsRepo.listByAccountId(funderWallet.accountId)
+          if (funderWallets instanceof Error) return funderWallets
+          const usdtWallet = funderWallets.find(
+            (wallet) => wallet.currency === WalletCurrency.Usdt,
+          )
+          if (usdtWallet === undefined) {
+            return new CashWalletMigrationFailedError(
+              "Funder account has no USDT wallet — create and fund the cutover treasury before running the cutover (ENG-482)",
+            )
+          }
+          return usdtWallet.id
+        }),
     },
     pointerService: {
       flipDefaultWallet: async ({
