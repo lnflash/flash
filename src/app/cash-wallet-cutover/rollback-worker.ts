@@ -40,6 +40,9 @@ type CashWalletRollbackServices = {
     readDestinationBalanceUsdtMicros(
       migration: CashWalletMigration,
     ): Promise<string | ApplicationError>
+    readDestinationSpendableUsdtMicros(
+      migration: CashWalletMigration,
+    ): Promise<string | ApplicationError>
   }
   invoiceService: {
     createNoAmountInvoice(args: {
@@ -194,17 +197,28 @@ export const executeCashWalletMigrationRollbackStep = async ({
     }
 
     if (current.destinationAmountUsdtMicros !== "0") {
-      // Fail closed: if the user transacted on the USDT wallet since the
-      // forward move, reversing the full amount is not possible without
-      // operator judgment.
-      const usdtBalance =
-        await services.balanceReader.readDestinationBalanceUsdtMicros(current)
-      if (usdtBalance instanceof Error) return usdtBalance
-      if (BigInt(usdtBalance) < BigInt(current.destinationAmountUsdtMicros)) {
+      // Reverse the ACTUAL spendable balance (floored), capped at the forward
+      // amount — never the raw target. The USDT wallet legitimately holds
+      // slightly less than target: the un-reimbursed forward routing fee plus
+      // sub-micro rounding. Paying the target verbatim overspends → IBEX 400
+      // (ENG-401). Reversing the spendable balance makes the user whole minus
+      // that sub-cent dust. Fail closed only when the wallet is short by MORE
+      // than tolerance — the signature of the user having spent USDT
+      // post-cutover, which needs operator judgment.
+      const target = BigInt(current.destinationAmountUsdtMicros)
+      const spendableStr =
+        await services.balanceReader.readDestinationSpendableUsdtMicros(current)
+      if (spendableStr instanceof Error) return spendableStr
+      const spendable = BigInt(spendableStr)
+
+      const reverseAmount = spendable < target ? spendable : target
+      const shortfall = target - reverseAmount
+      if (shortfall > ROLLBACK_SHORTFALL_TOLERANCE_USDT_MICROS) {
         return new CashWalletMigrationFailedError(
-          `USDT balance ${usdtBalance} no longer covers reverse amount ${current.destinationAmountUsdtMicros}`,
+          `USDT balance ${spendableStr} is short of reverse target ${target} by ${shortfall} micros (> tolerance) — likely spent post-cutover`,
         )
       }
+      const reverseAmountStr = reverseAmount.toString()
 
       if (
         current.rollbackInvoicePaymentRequest === undefined ||
@@ -240,7 +254,7 @@ export const executeCashWalletMigrationRollbackStep = async ({
       const payment = await services.paymentService.payInvoice({
         senderWalletId: current.destinationUsdtWalletId,
         paymentRequest: current.rollbackInvoicePaymentRequest,
-        senderAmountUsdtMicros: current.destinationAmountUsdtMicros,
+        senderAmountUsdtMicros: reverseAmountStr,
       })
       if (payment instanceof Error) return payment
 

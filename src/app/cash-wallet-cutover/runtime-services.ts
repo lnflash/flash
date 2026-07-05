@@ -222,6 +222,24 @@ export const createCashWalletMigrationRuntimeServices = (
         if (account instanceof Error) return account
         return ibexMajorUnitsToUsdtMicros(account.balance ?? 0)
       },
+      // Rollback (ENG-401): the FLOORED spendable USDT balance. The rounded
+      // read above can round UP past what's actually spendable (e.g. balance
+      // 0.443691959514 → 443692 micros), so paying it back verbatim overspends
+      // and IBEX 400s. Flooring guarantees the reverse amount never exceeds the
+      // real balance.
+      readDestinationSpendableUsdtMicros: async (
+        migration: CashWalletMigration,
+      ): Promise<string | ApplicationError> => {
+        const account = await rawAccountDetails(
+          migration.destinationUsdtWalletId as IbexAccountId,
+        )
+        if (account instanceof Error) return account
+        return decimalToScaledInteger({
+          amount: account.balance ?? 0,
+          scale: 6,
+          round: false,
+        })
+      },
     },
     invoiceService: {
       createInvoice: ({
