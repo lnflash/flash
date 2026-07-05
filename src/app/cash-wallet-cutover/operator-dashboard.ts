@@ -96,6 +96,7 @@ export type CashWalletCutoverOperatorSnapshot = {
     state: CashWalletCutoverState
     cutoverVersion: number
     runId?: string
+    startedAt?: string
     updatedAt?: string
   }
   preflight?: CashWalletCutoverPreflightReport
@@ -912,6 +913,7 @@ export const buildCashWalletCutoverOperatorSnapshot = async ({
       state: config.state,
       cutoverVersion: config.cutoverVersion,
       runId: config.runId,
+      startedAt: config.startedAt?.toISOString(),
       updatedAt: config.updatedAt?.toISOString(),
     },
     preflight: preflightReport,
@@ -997,6 +999,14 @@ export const CASH_WALLET_CUTOVER_STAGE_STATUSES: Record<
 
 export type CashWalletCutoverStageSummary = {
   total: number
+  /**
+   * Denominator for progress: once a run has started, accounts stuck at
+   * "none" (already_usdt / residual / missing_* discoveries) never get
+   * migration records and can never complete — counting them caps
+   * percentComplete below 100 forever (TEST: 315 manifest vs 297 migrations
+   * ⇒ ceiling of 94%). Before the run starts, everything counts.
+   */
+  eligibleTotal: number
   counts: Record<CashWalletCutoverStageKey, number>
   statusCounts: Record<string, number>
   inFlight: number
@@ -1039,14 +1049,17 @@ export const summarizeCashWalletCutoverStages = ({
   const inFlight = counts.provisioning + counts.moving + counts.fees + counts.finalizing
   const done = counts.complete + counts.skipped
   const total = migrationStatuses.length
+  const eligibleTotal =
+    cutoverState === "pre" ? total : total - (statusCounts["none"] ?? 0)
 
   return {
     total,
+    eligibleTotal,
     counts,
     statusCounts,
     inFlight,
     done,
-    percentComplete: total > 0 ? Math.floor((done / total) * 100) : 0,
+    percentComplete: eligibleTotal > 0 ? Math.floor((done / eligibleTotal) * 100) : 0,
     missingUsdtWallets,
     cutoverState,
     runId,
@@ -1104,20 +1117,25 @@ export const deriveCashWalletCutoverMilestones = ({
 
   for (const threshold of PERCENT_THRESHOLDS) {
     if (previous.percentComplete < threshold && current.percentComplete >= threshold) {
-      push("info", `${threshold}% migrated (${current.done}/${current.total})`)
+      push("info", `${threshold}% migrated (${current.done}/${current.eligibleTotal})`)
     }
   }
 
+  // Against eligibleTotal, not total: permanently-"none" accounts never get
+  // migration records, so done === total could never hold on real data and
+  // the reconciliation cue would never fire.
   const fullyDone =
-    current.total > 0 && current.done === current.total && current.counts.attention === 0
+    current.eligibleTotal > 0 &&
+    current.done === current.eligibleTotal &&
+    current.counts.attention === 0
   const previouslyDone =
-    previous.total > 0 &&
-    previous.done === previous.total &&
+    previous.eligibleTotal > 0 &&
+    previous.done === previous.eligibleTotal &&
     previous.counts.attention === 0
   if (fullyDone && !previouslyDone) {
     push(
       "ok",
-      `100% migrated (${current.done}/${current.total}) — run reconciliation and hold per runbook`,
+      `100% migrated (${current.done}/${current.eligibleTotal}) — run reconciliation and hold per runbook`,
     )
   }
 

@@ -11,6 +11,7 @@ import { discoverCashWalletCutoverAccounts } from "@app/cash-wallet-cutover/disc
 import {
   buildCashWalletCutoverOperatorSnapshot,
   CashWalletCutoverMilestone,
+  CASH_WALLET_CUTOVER_STAGE_STATUSES,
   CashWalletCutoverOperatorManifestAccount,
   CashWalletCutoverOperatorSnapshot,
   CashWalletCutoverStageSummary,
@@ -420,19 +421,23 @@ const html = `<!doctype html>
     let snapshot = null
     let stageFilter = ""
 
+    // Status lists interpolated from CASH_WALLET_CUTOVER_STAGE_STATUSES so a
+    // new state-machine status can't silently diverge between server counts
+    // and this client-side chip filter.
+    const STAGE_STATUSES = ${JSON.stringify(CASH_WALLET_CUTOVER_STAGE_STATUSES)}
     const STAGES = [
-      ["pending", "Pending", "#98a2b3", ["none", "not_started"]],
-      ["provisioning", "Provisioning", "#7a5af8", ["started", "provisioned"]],
-      ["moving", "Moving funds", "#1f5eff", ["balance_read", "invoice_created", "balance_move_sending", "balance_move_sent", "balance_move_verified"]],
-      ["fees", "Fees", "#0ba5ec", ["fee_reimbursement_invoice_created", "fee_reimbursement_sending", "fee_reimbursed"]],
-      ["finalizing", "Finalizing", "#12b76a", ["pointer_flipped", "legacy_zero_verified"]],
-      ["complete", "Complete", "#16794c", ["complete"]],
-      ["skipped", "Skipped (USDT)", "#66c61c", ["skipped_already_migrated"]],
-      ["attention", "Attention", "#b42318", ["failed", "requires_operator_review"]],
-      ["rollingBack", "Rolling back", "#946200", ["rollback_started"]],
-      ["rolledBack", "Rolled back", "#667085", ["rolled_back"]],
-    ]
-    const stageStatuses = (key) => (STAGES.find((s) => s[0] === key) || [null, null, null, []])[3]
+      ["pending", "Pending", "#98a2b3"],
+      ["provisioning", "Provisioning", "#7a5af8"],
+      ["moving", "Moving funds", "#1f5eff"],
+      ["fees", "Fees", "#0ba5ec"],
+      ["finalizing", "Finalizing", "#12b76a"],
+      ["complete", "Complete", "#16794c"],
+      ["skipped", "Skipped (USDT)", "#66c61c"],
+      ["attention", "Attention", "#b42318"],
+      ["rollingBack", "Rolling back", "#946200"],
+      ["rolledBack", "Rolled back", "#667085"],
+    ].map(([key, label, color]) => [key, label, color, STAGE_STATUSES[key] || []])
+    const stageStatuses = (key) => STAGE_STATUSES[key] || []
 
     const $ = (id) => document.getElementById(id)
     const money = (cents) => "$" + (cents / 100).toFixed(2)
@@ -586,7 +591,10 @@ const html = `<!doctype html>
       if (f.missingUsdt && account.usdtWallets.length > 0) return false
       if (f.nonzeroUsd && !usd) return false
       if (f.nonzeroUsdt && !usdt) return false
-      if (f.migration && account.migrationStatus !== f.migration) return false
+      // An explicit status pick overrides a stale stage chip (chip clicks
+      // clear the dropdown, but not vice versa — ANDing them can render an
+      // empty table while the chip still shows a nonzero count).
+      if (f.migration) return account.migrationStatus === f.migration
       if (stageFilter && stageStatuses(stageFilter).indexOf(account.migrationStatus) === -1) return false
       return true
     }
@@ -662,9 +670,13 @@ const html = `<!doctype html>
       const feed = $("highlights")
       const items = (snapshot.milestones || []).slice().reverse()
       $("highlights-note").textContent = items.length + " event(s)"
+      // Milestone text embeds the free-form --run-id; escape it — this is the
+      // one innerHTML sink fed by operator input.
+      const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]))
       feed.innerHTML = items.map((m) =>
-        '<li><span class="dot ' + m.kind + '"></span><span class="t">' +
-        new Date(m.at).toLocaleTimeString() + '</span><span>' + m.text + '</span></li>'
+        '<li><span class="dot ' + esc(m.kind) + '"></span><span class="t">' +
+        new Date(m.at).toLocaleTimeString() + '</span><span>' + esc(m.text) + '</span></li>'
       ).join("") || '<li><span class="muted">no events yet</span></li>'
     }
 
@@ -709,14 +721,28 @@ const html = `<!doctype html>
     // stalled every balance at zero. 60 ids/request keeps URLs ~2KB.
     const BALANCE_BATCH = 60
     let balancePollTimer = null
-    async function hydrateBalances(force) {
+    let hydrateGeneration = 0
+    function loadingWalletIds() {
+      const ids = []
+      const collect = (account) => account.usdWallets.concat(account.usdtWallets)
+        .forEach((w) => { if (!w.balance.status || w.balance.status === "loading") ids.push(w.id) })
+      snapshot.accounts.forEach(collect)
+      if (snapshot.treasury) snapshot.treasury.accounts.forEach(collect)
+      return ids
+    }
+    async function hydrateBalances(force, onlyLoading) {
       if (!snapshot) return
-      const walletIds = allWalletIds()
+      // Generation guard: the 15s active-run reload starts a new pass while a
+      // previous multi-batch pass (and its 2s poll chain) may still be
+      // running — without this they stack and interleave renders.
+      const generation = ++hydrateGeneration
+      const walletIds = onlyLoading ? loadingWalletIds() : allWalletIds()
       if (walletIds.length === 0) return
 
       let fresh = 0, errors = 0, loading = 0, pending = 0, active = false
 
       for (let i = 0; i < walletIds.length; i += BALANCE_BATCH) {
+        if (generation !== hydrateGeneration) return // superseded by a newer pass
         const batch = walletIds.slice(i, i + BALANCE_BATCH)
         const url = "/api/balances?walletIds=" + encodeURIComponent(batch.join(",")) +
           (force ? "&refresh=1" : "")
@@ -749,7 +775,9 @@ const html = `<!doctype html>
       if ((loading > 0 || pending > 0 || active) && !balancePollTimer) {
         balancePollTimer = setTimeout(() => {
           balancePollTimer = null
-          hydrateBalances(false).catch((error) => {
+          // Poll passes only re-request wallets still loading — not the full
+          // 600-wallet list every 2s while the server queue drains.
+          hydrateBalances(false, true).catch((error) => {
             $("status").textContent = error.message
           })
         }, 2000)
@@ -759,11 +787,14 @@ const html = `<!doctype html>
     async function load(force) {
       $("status").textContent = force ? "Refreshing..." : "Loading..."
       const response = await fetch("/api/snapshot" + (force ? "?refresh=1" : ""))
-      snapshot = await response.json()
-      if (!response.ok) throw new Error(snapshot.error || "Snapshot failed")
+      // Parse before assigning: a transient 500 must not replace the live
+      // snapshot with {error} and break every subsequent render.
+      const body = await response.json()
+      if (!response.ok) throw new Error(body.error || "Snapshot failed")
+      snapshot = body
       $("status").textContent = "Updated " + new Date(snapshot.generatedAt).toLocaleTimeString()
       render()
-      hydrateBalances(force).catch((error) => {
+      hydrateBalances(force, false).catch((error) => {
         $("status").textContent = error.message
       })
     }
@@ -790,9 +821,13 @@ const html = `<!doctype html>
     function scheduleReload() {
       if (reloadTimer) clearTimeout(reloadTimer)
       reloadTimer = setTimeout(() => {
+        // Watchdog: re-arm even if load() never settles — the server can hang
+        // behind a stuck snapshot build with no timeout, and a dead chain
+        // otherwise never recovers (the old setInterval did by construction).
+        const watchdog = setTimeout(scheduleReload, 60000)
         load(false)
           .catch((error) => { $("status").textContent = error.message })
-          .finally(scheduleReload)
+          .finally(() => { clearTimeout(watchdog); scheduleReload() })
       }, isActiveRun() ? 15000 : 120000)
     }
 
@@ -1053,11 +1088,30 @@ const start = async () => {
   }
 
   // Keep stage/milestone tracking alive even with no browser tab open.
-  setInterval(() => {
-    snapshot(false).catch((error) =>
-      baseLogger.warn({ error }, "cutover dashboard background poll failed"),
-    )
-  }, 30_000)
+  // Tight cadence only while a run/rollback is live; idle polls back off —
+  // each rebuild is a discovery scan over every unlocked account plus
+  // several mongo queries per dashboard account, and pre-PR it only ran
+  // while a browser was actually polling.
+  const BACKGROUND_POLL_ACTIVE_MS = 30_000
+  const BACKGROUND_POLL_IDLE_MS = 5 * 60_000
+  const backgroundPoll = () => {
+    snapshot(false)
+      .catch((error) =>
+        baseLogger.warn({ error }, "cutover dashboard background poll failed"),
+      )
+      .finally(() => {
+        const active =
+          lastStageSummary !== undefined &&
+          (lastStageSummary.cutoverState === "in_progress" ||
+            lastStageSummary.inFlight > 0 ||
+            lastStageSummary.counts.rollingBack > 0)
+        setTimeout(
+          backgroundPoll,
+          active ? BACKGROUND_POLL_ACTIVE_MS : BACKGROUND_POLL_IDLE_MS,
+        )
+      })
+  }
+  setTimeout(backgroundPoll, BACKGROUND_POLL_ACTIVE_MS)
 
   const app = express()
   app.get("/", (_req, res) => res.type("html").send(html))

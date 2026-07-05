@@ -54,8 +54,21 @@ describe("summarizeCashWalletCutoverStages", () => {
     expect(s.total).toBe(12)
   })
 
-  it("computes percentComplete from complete+skipped", () => {
+  it("excludes permanently-none accounts from the denominator once the run started", () => {
+    // "none" accounts (already_usdt / residual / missing_*) never get
+    // migration records — counting them caps percentComplete below 100
+    // forever (TEST: 315 manifest vs 297 migrations ⇒ 94% ceiling).
     const s = summary(["complete", "skipped_already_migrated", "none", "none"])
+    expect(s.total).toBe(4)
+    expect(s.eligibleTotal).toBe(2)
+    expect(s.percentComplete).toBe(100)
+  })
+
+  it("keeps none accounts in the denominator before the run starts", () => {
+    const s = summary(["complete", "skipped_already_migrated", "none", "none"], {
+      state: "pre" as CashWalletCutoverState,
+    })
+    expect(s.eligibleTotal).toBe(4)
     expect(s.percentComplete).toBe(50)
   })
 })
@@ -120,11 +133,22 @@ describe("deriveCashWalletCutoverMilestones", () => {
     expect(firstDone.some((m) => /25% migrated/.test(m.text))).toBe(true)
 
     const allDone = deriveCashWalletCutoverMilestones({
-      previous: summary(["complete", "complete", "complete", "none"]),
+      previous: summary(["complete", "complete", "complete", "pointer_flipped"]),
       current: summary(["complete", "complete", "complete", "complete"]),
       at: AT,
     })
     expect(allDone.some((m) => /100% migrated/.test(m.text))).toBe(true)
+  })
+
+  it("fires the 100% milestone even when permanently-none accounts exist", () => {
+    // The reconciliation cue must fire on real data, where the manifest
+    // always contains accounts that never get migration records.
+    const out = deriveCashWalletCutoverMilestones({
+      previous: summary(["complete", "pointer_flipped", "none", "none"]),
+      current: summary(["complete", "complete", "none", "none"]),
+      at: AT,
+    })
+    expect(out.some((m) => /100% migrated \(2\/2\)/.test(m.text))).toBe(true)
   })
 
   it("announces attention spikes and the queue clearing", () => {
