@@ -39,7 +39,10 @@ const args = yargs(hideBin(process.argv))
   .option("operator", { type: "string", default: "unknown" })
   .option("worker-id", { type: "string", default: `worker-${process.pid}` })
   .option("limit", { type: "number", default: 25 })
-  .option("step-delay-ms", { type: "number", default: 0 })
+  // ENG-483: default throttle ≈30 accounts/min — the empirically safe IBEX
+  // rate from the ENG-461 rehearsal (0 = unthrottled mass-failed 233 accounts
+  // on 429s). Pass --step-delay-ms 0 explicitly to disable.
+  .option("step-delay-ms", { type: "number", default: 2_000 })
   .option("provision-limit", { type: "number" })
   .option("provision-delay-ms", { type: "number", default: 12_500 })
   .option("provision-retry-delay-ms", { type: "number", default: 60_000 })

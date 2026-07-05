@@ -139,7 +139,18 @@ const withIbexRateLimitRetry = async <T>({
   sleepFn: SleepFn
 }): Promise<T> => {
   for (let attempt = 1; ; attempt += 1) {
-    const result = await operation()
+    // The IBEX client surfaces rate limits both ways: some call paths return
+    // an IbexError, others REJECT with a raw FetchError ("Too Many Requests").
+    // Retry both — a thrown 429 killed 233 accounts in the ENG-461 rehearsal.
+    let result: T | Error
+    try {
+      result = await operation()
+    } catch (thrown) {
+      const error = thrown instanceof Error ? thrown : new Error(String(thrown))
+      if (!isIbexRateLimitError(error) || attempt >= maxAttempts) throw thrown
+      await sleepFn(retryDelayMs)
+      continue
+    }
 
     if (
       !(result instanceof Error) ||
@@ -171,6 +182,14 @@ export const createCashWalletMigrationRuntimeServices = (
     retryDelayMs: deps.rateLimitRetryDelayMs ?? CUTOVER_IBEX_RATE_LIMIT_RETRY_DELAY_MS,
     sleepFn: deps.sleep ?? sleep,
   }
+  // ENG-483: balance reads were the one IBEX call path NOT retried on 429 —
+  // an unthrottled batch mass-failed 233 accounts at the balance_read step.
+  // Every account-details read goes through the same retry as invoice/payment.
+  const readRawAccountDetails = (accountId: IbexAccountId) =>
+    withIbexRateLimitRetry({
+      ...rateLimitRetry,
+      operation: () => rawAccountDetails(accountId),
+    })
 
   return {
     now: deps.now ?? (() => new Date()),
@@ -207,7 +226,7 @@ export const createCashWalletMigrationRuntimeServices = (
       readSourceBalanceUsdCents: async (
         migration: CashWalletMigration,
       ): Promise<string | ApplicationError> => {
-        const account = await rawAccountDetails(
+        const account = await readRawAccountDetails(
           migration.legacyUsdWalletId as IbexAccountId,
         )
         if (account instanceof Error) return account
@@ -216,7 +235,7 @@ export const createCashWalletMigrationRuntimeServices = (
       readDestinationBalanceUsdtMicros: async (
         migration: CashWalletMigration,
       ): Promise<string | ApplicationError> => {
-        const account = await rawAccountDetails(
+        const account = await readRawAccountDetails(
           migration.destinationUsdtWalletId as IbexAccountId,
         )
         if (account instanceof Error) return account
@@ -230,7 +249,7 @@ export const createCashWalletMigrationRuntimeServices = (
       readDestinationSpendableUsdtMicros: async (
         migration: CashWalletMigration,
       ): Promise<string | ApplicationError> => {
-        const account = await rawAccountDetails(
+        const account = await readRawAccountDetails(
           migration.destinationUsdtWalletId as IbexAccountId,
         )
         if (account instanceof Error) return account
@@ -333,7 +352,7 @@ export const createCashWalletMigrationRuntimeServices = (
       }: {
         legacyUsdWalletId: WalletId
       }): Promise<true | ApplicationError> => {
-        const account = await rawAccountDetails(legacyUsdWalletId as IbexAccountId)
+        const account = await readRawAccountDetails(legacyUsdWalletId as IbexAccountId)
         if (account instanceof Error) return account
         if (!hasOnlySubMicroMajorUnitDust(account.balance)) {
           return new CashWalletMigrationFailedError("Legacy USD wallet is not zero")
@@ -363,7 +382,7 @@ export const createCashWalletMigrationRuntimeServices = (
           )
         }
 
-        const currentAccount = await rawAccountDetails(
+        const currentAccount = await readRawAccountDetails(
           migration.destinationUsdtWalletId as IbexAccountId,
         )
         if (currentAccount instanceof Error) return currentAccount
@@ -408,7 +427,7 @@ export const createCashWalletMigrationRuntimeServices = (
       }: {
         legacyUsdWalletId: WalletId
       }): Promise<true | ApplicationError> => {
-        const account = await rawAccountDetails(legacyUsdWalletId as IbexAccountId)
+        const account = await readRawAccountDetails(legacyUsdWalletId as IbexAccountId)
         if (account instanceof Error) return account
         if (!hasOnlySubMicroMajorUnitDust(account.balance)) {
           return new CashWalletMigrationFailedError("Legacy USD wallet is not zero")
