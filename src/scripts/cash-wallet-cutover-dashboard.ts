@@ -677,12 +677,16 @@ const html = `<!doctype html>
       renderRows()
     }
 
+    // USD wallets first (the funded legacy balances operators care about
+    // most), then USDT, then treasury — so the meaningful numbers fill in
+    // before the long tail.
     function allWalletIds() {
-      return snapshot.accounts.flatMap((account) =>
-        account.usdWallets.concat(account.usdtWallets).map((wallet) => wallet.id)
-      ).concat((snapshot.treasury ? snapshot.treasury.accounts : []).flatMap((account) =>
-        account.usdWallets.concat(account.usdtWallets).map((wallet) => wallet.id)
-      ))
+      const usd = snapshot.accounts.flatMap((a) => a.usdWallets.map((w) => w.id))
+      const usdt = snapshot.accounts.flatMap((a) => a.usdtWallets.map((w) => w.id))
+      const treasury = (snapshot.treasury ? snapshot.treasury.accounts : []).flatMap(
+        (a) => a.usdWallets.concat(a.usdtWallets).map((w) => w.id),
+      )
+      return usd.concat(usdt).concat(treasury)
     }
 
     function mergeBalances(balances) {
@@ -700,30 +704,49 @@ const html = `<!doctype html>
       }
     }
 
+    // Wallet IDs are batched into small GETs: one URL with the whole fleet
+    // (600+ UUIDs ≈ 22KB) exceeds Node's 16KB header limit and 431s, which
+    // stalled every balance at zero. 60 ids/request keeps URLs ~2KB.
+    const BALANCE_BATCH = 60
     let balancePollTimer = null
     async function hydrateBalances(force) {
       if (!snapshot) return
       const walletIds = allWalletIds()
       if (walletIds.length === 0) return
 
-      const url = "/api/balances?walletIds=" + encodeURIComponent(walletIds.join(",")) + (force ? "&refresh=1" : "")
-      const response = await fetch(url)
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.error || "Balance refresh failed")
+      let fresh = 0, errors = 0, loading = 0, pending = 0, active = false
 
-      mergeBalances(result.balances)
-      renderSummary()
-      renderRows()
+      for (let i = 0; i < walletIds.length; i += BALANCE_BATCH) {
+        const batch = walletIds.slice(i, i + BALANCE_BATCH)
+        const url = "/api/balances?walletIds=" + encodeURIComponent(batch.join(",")) +
+          (force ? "&refresh=1" : "")
+        const response = await fetch(url)
+        if (!response.ok) {
+          throw new Error("Balance refresh failed (" + response.status + ")")
+        }
+        const result = await response.json()
 
-      const total = walletIds.length
-      const fresh = Object.values(result.balances).filter((balance) => balance.status === "fresh").length
-      const errors = Object.values(result.balances).filter((balance) => balance.status === "error").length
-      const loading = Object.values(result.balances).filter((balance) => balance.status === "loading").length
+        mergeBalances(result.balances)
+        for (const balance of Object.values(result.balances)) {
+          if (balance.status === "fresh") fresh++
+          else if (balance.status === "error") errors++
+          else if (balance.status === "loading") loading++
+        }
+        pending = result.queue.pending
+        active = !!result.queue.active
+
+        // Paint incrementally so funded USD balances appear as batches land.
+        renderSummary()
+        renderRows()
+        $("status").textContent = "Loading balances " + Math.min(i + BALANCE_BATCH, walletIds.length) +
+          "/" + walletIds.length + "…"
+      }
+
       $("status").textContent = "Updated " + new Date(snapshot.generatedAt).toLocaleTimeString() +
-        " | balances " + (fresh + errors) + "/" + total +
-        (result.queue.pending || result.queue.active ? " (" + result.queue.pending + " queued)" : "")
+        " | balances " + (fresh + errors) + "/" + walletIds.length +
+        (pending || active ? " (" + pending + " queued)" : "")
 
-      if ((loading > 0 || result.queue.pending > 0 || result.queue.active) && !balancePollTimer) {
+      if ((loading > 0 || pending > 0 || active) && !balancePollTimer) {
         balancePollTimer = setTimeout(() => {
           balancePollTimer = null
           hydrateBalances(false).catch((error) => {
