@@ -1,6 +1,6 @@
 import { assertCanTransition, ROLLBACKABLE_STATUSES } from "./state-machine"
 import { legacyShortfallUsdtMicros } from "./amount-conversion"
-import { isInvoicePaymentRequestStale } from "./worker"
+import { CUTOVER_MIN_PAYABLE_USDT_MICROS, isInvoicePaymentRequestStale } from "./worker"
 import {
   CashWalletMigrationFailedError,
   InvalidCashWalletMigrationTransitionError,
@@ -218,6 +218,15 @@ export const executeCashWalletMigrationRollbackStep = async ({
           `USDT balance ${spendableStr} is short of reverse target ${target} by ${shortfall} micros (> tolerance) — likely spent post-cutover`,
         )
       }
+      // IBEX rejects payments below ~1 sat (ENG-484): a drained or 1-cent
+      // wallet can pass the tolerance gate with a 0- or sub-minimum reverse
+      // amount — fail closed with a clear message instead of a doomed pay
+      // attempt surfacing as a misleading IBEX 400.
+      if (reverseAmount < CUTOVER_MIN_PAYABLE_USDT_MICROS) {
+        return new CashWalletMigrationFailedError(
+          `Reverse amount ${reverseAmount} micros is below IBEX's minimum payable — target ${target}, spendable ${spendableStr}; resolve manually`,
+        )
+      }
       const reverseAmountStr = reverseAmount.toString()
 
       if (
@@ -287,6 +296,14 @@ export const executeCashWalletMigrationRollbackStep = async ({
     })
     if (shortfall instanceof Error) return shortfall
 
+    // Accepted boundary tradeoff: step 2 tolerates up to a 1-cent USDT
+    // shortfall (user spend + un-reimbursed fee), and this top-up covers
+    // whatever the legacy wallet is short vs the original balance — so up to
+    // ~1 cent of a user's own post-cutover spending can be reimbursed by the
+    // treasury (spend ≤ tolerance at step 2, but spend + fee + receive dust
+    // over it here). Exposure is bounded per account at roughly a cent plus
+    // fee plus dust; the old strict fail-closed left every such account in
+    // manual review instead. Documented in ENG-484.
     if (BigInt(shortfall) > ROLLBACK_SHORTFALL_TOLERANCE_USDT_MICROS) {
       if (current.rollbackShortfallPaymentTransactionId !== undefined) {
         // Treasury already topped up once and the user is still short more

@@ -93,11 +93,15 @@ describe("cash wallet migration worker fee reimbursement", () => {
     })
   })
 
-  it("classifies sub-cent fees as sub-minimum (absorbed, never paid)", () => {
+  it("classifies only sub-minimum-payable fees as absorbed", () => {
     expect(isSubMinimumFeeReimbursementAmount("0")).toBe(true)
-    expect(isSubMinimumFeeReimbursementAmount("515")).toBe(true) // rehearsal dust
-    expect(isSubMinimumFeeReimbursementAmount("9999")).toBe(true)
-    expect(isSubMinimumFeeReimbursementAmount("10000")).toBe(false)
+    expect(isSubMinimumFeeReimbursementAmount("515")).toBe(true) // rehearsal dust (observed 400)
+    expect(isSubMinimumFeeReimbursementAmount("2499")).toBe(true)
+    expect(isSubMinimumFeeReimbursementAmount("2500")).toBe(false)
+    // payable via the no-amount invoice path — NOT absorbed (reviewer: the
+    // 2500–9999 band reimbursed successfully before ENG-484)
+    expect(isSubMinimumFeeReimbursementAmount("4735")).toBe(false)
+    expect(isSubMinimumFeeReimbursementAmount("9999")).toBe(false)
     expect(isSubMinimumFeeReimbursementAmount("-1")).toBeInstanceOf(Error)
   })
 

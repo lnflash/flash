@@ -110,6 +110,51 @@ describe("cutover runtime services — IBEX rate-limit retry (ENG-483)", () => {
     expect(walletsRepo.listByAccountId).not.toHaveBeenCalled()
   })
 
+  it("memoizes treasury resolution — one lookup for the whole run", async () => {
+    const walletsRepo = {
+      findById: jest.fn().mockResolvedValue({
+        id: "funder-usdt-wallet" as WalletId,
+        accountId: "funder-account" as AccountId,
+        currency: "USDT",
+      }),
+      listByAccountId: jest.fn(),
+    }
+
+    const services = createCashWalletMigrationRuntimeServices({
+      walletsRepo: walletsRepo as never,
+      getFunderWalletId: async () => "funder-usdt-wallet" as WalletId,
+    })
+
+    await services.treasuryService.getTreasuryWalletId()
+    await services.treasuryService.getTreasuryWalletId()
+    await services.treasuryService.getTreasuryWalletId()
+
+    expect(walletsRepo.findById).toHaveBeenCalledTimes(1)
+  })
+
+  it("fails closed when the funder has duplicate USDT wallets", async () => {
+    const walletsRepo = {
+      findById: jest.fn().mockResolvedValue({
+        id: "funder-btc-wallet" as WalletId,
+        accountId: "funder-account" as AccountId,
+        currency: "BTC",
+      }),
+      listByAccountId: jest.fn().mockResolvedValue([
+        { id: "usdt-1", currency: "USDT" },
+        { id: "usdt-2", currency: "USDT" },
+      ]),
+    }
+
+    const services = createCashWalletMigrationRuntimeServices({
+      walletsRepo: walletsRepo as never,
+      getFunderWalletId: async () => "funder-btc-wallet" as WalletId,
+    })
+
+    const result = await services.treasuryService.getTreasuryWalletId()
+    expect(result).toBeInstanceOf(Error)
+    expect((result as Error).message).toMatch(/2 USDT wallets/)
+  })
+
   it("returns a descriptive error when the funder has no USDT wallet", async () => {
     const walletsRepo = {
       findById: jest.fn().mockResolvedValue({

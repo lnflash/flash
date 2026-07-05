@@ -491,7 +491,7 @@ const parseIntegerAmount = (value?: string): number | undefined => {
   return Number(value)
 }
 
-const computeCutoverBalanceAudit = ({
+export const computeCutoverBalanceAudit = ({
   migration,
   usdtWallets,
 }: {
@@ -539,9 +539,18 @@ const computeCutoverBalanceAudit = ({
     0,
     currentDestinationBalanceUsdtMicros - destinationStartingBalanceUsdtMicros,
   )
+  // ENG-484: an absorbed fee (recorded but never reimbursed — no payment
+  // transaction id) legitimately leaves the destination short of target by
+  // exactly that fee. Without this allowance every dust-fee account renders
+  // as a red "shortfall" row during the post-run reconciliation hold,
+  // drowning real shortfalls.
+  const absorbedFeeUsdtMicros =
+    migration.feeReimbursementPaymentTransactionId === undefined
+      ? (parseIntegerAmount(migration.feeAmountUsdtMicros) ?? 0)
+      : 0
   const shortfallUsdtMicros = Math.max(
     0,
-    expectedMinimumUsdtMicros - finalDeltaUsdtMicros,
+    expectedMinimumUsdtMicros - absorbedFeeUsdtMicros - finalDeltaUsdtMicros,
   )
   const roundingSubsidyUsdtMicros = Math.max(
     0,

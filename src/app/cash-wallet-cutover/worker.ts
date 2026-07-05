@@ -91,14 +91,27 @@ const usesNoAmountFeeReimbursementInvoice = (
   return BigInt(feeAmountUsdtMicros) < CUTOVER_MIN_FIXED_USDT_INVOICE_MICROS
 }
 
-// ENG-484: IBEX rejects payments below its minimum payable amount, so
-// sub-cent fee reimbursements (88–515 micros observed in the ENG-461
-// rehearsal) 400 at the pay step and strand the migration. Fees under one
-// cent are absorbed instead of reimbursed — invisible to users.
+// ENG-484: IBEX rejects Lightning payments below ~1 satoshi. Measured on TEST
+// (2026-07-05, USDT→USDT no-amount invoices): 600 micros → 400 Bad Request,
+// 650+ → paid. A 1-sat floor FLOATS with BTC price, so this margin covers it
+// up to ~$250k/BTC. Fees below this are absorbed instead of reimbursed
+// (≤ ¼ cent — invisible to users); fees above it still pay via the no-amount
+// invoice path (which handles 1–9999 micros, e.g. the 4735-micro case below).
+// Deliberately NOT tied to CUTOVER_MIN_FIXED_USDT_INVOICE_MICROS: that is an
+// invoice-format constant, this is a payability floor + customer-funds policy.
+export const CUTOVER_MIN_PAYABLE_USDT_MICROS = 2_500n
+
 export const isSubMinimumFeeReimbursementAmount = (
   feeAmountUsdtMicros: string,
-): boolean | InvalidCashWalletCutoverAmountError =>
-  usesNoAmountFeeReimbursementInvoice(feeAmountUsdtMicros)
+): boolean | InvalidCashWalletCutoverAmountError => {
+  if (!/^\d+$/.test(feeAmountUsdtMicros)) {
+    return new InvalidCashWalletCutoverAmountError(
+      `Invalid non-negative integer amount: ${feeAmountUsdtMicros}`,
+    )
+  }
+
+  return BigInt(feeAmountUsdtMicros) < CUTOVER_MIN_PAYABLE_USDT_MICROS
+}
 
 export const isInvoicePaymentRequestStale = ({
   paymentRequest,

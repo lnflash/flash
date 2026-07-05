@@ -107,6 +107,32 @@ describe("retryFailedCashWalletMigrations", () => {
     expect(migrationsRepo.transitionMigration).not.toHaveBeenCalled()
   })
 
+  it("skips a lost race and keeps the report of migrations already reset", async () => {
+    const second = {
+      ...baseMigration,
+      id: "migration-2",
+      accountId: "account-2" as AccountId,
+    } as CashWalletMigration
+    const migrationsRepo = repo([baseMigration, second])
+    migrationsRepo.transitionMigration
+      .mockResolvedValueOnce({ ...baseMigration, status: "not_started" })
+      .mockResolvedValueOnce(new Error("Could not transition cash wallet migration"))
+
+    const report = await retryFailedCashWalletMigrations({
+      cutoverVersion: 1,
+      runId: "run-id",
+      migrationsRepo: migrationsRepo as never,
+    })
+
+    expect(report).toMatchObject({
+      retried: 1,
+      conflicts: 1,
+      eligible: 1,
+      migrationIds: ["migration-id"],
+      resumedAt: { not_started: 1 },
+    })
+  })
+
   it("rejects single-account retry when the migration is not failed", async () => {
     const migrationsRepo = repo([
       { ...baseMigration, status: "complete" } as CashWalletMigration,

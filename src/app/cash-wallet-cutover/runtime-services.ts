@@ -408,26 +408,47 @@ export const createCashWalletMigrationRuntimeServices = (
       // rehearsal). Resolve the funder's USDT wallet regardless of which
       // wallet is its default, so prod doesn't depend on flipping the funder
       // default as an operational step.
+      // Memoized: the id is invariant for the life of the run and this is
+      // called per migration at the fee step — without the cache a transient
+      // mongo blip mid-run fails a step the old memoized getFunderWalletId
+      // never would have.
       getTreasuryWalletId:
         deps.getTreasuryWalletId ??
-        (async (): Promise<WalletId | ApplicationError> => {
-          const funderDefaultWalletId = await funderWalletId()
-          const funderWallet = await walletsRepo.findById(funderDefaultWalletId)
-          if (funderWallet instanceof Error) return funderWallet
-          if (funderWallet.currency === WalletCurrency.Usdt) return funderWallet.id
+        (() => {
+          let cached: WalletId | undefined
+          return async (): Promise<WalletId | ApplicationError> => {
+            if (cached !== undefined) return cached
+            const funderDefaultWalletId = await funderWalletId()
+            const funderWallet = await walletsRepo.findById(funderDefaultWalletId)
+            if (funderWallet instanceof Error) return funderWallet
+            if (funderWallet.currency === WalletCurrency.Usdt) {
+              cached = funderWallet.id
+              return cached
+            }
 
-          const funderWallets = await walletsRepo.listByAccountId(funderWallet.accountId)
-          if (funderWallets instanceof Error) return funderWallets
-          const usdtWallet = funderWallets.find(
-            (wallet) => wallet.currency === WalletCurrency.Usdt,
-          )
-          if (usdtWallet === undefined) {
-            return new CashWalletMigrationFailedError(
-              "Funder account has no USDT wallet — create and fund the cutover treasury before running the cutover (ENG-482)",
+            const funderWallets = await walletsRepo.listByAccountId(
+              funderWallet.accountId,
             )
+            if (funderWallets instanceof Error) return funderWallets
+            const usdtWallets = funderWallets.filter(
+              (wallet) => wallet.currency === WalletCurrency.Usdt,
+            )
+            if (usdtWallets.length === 0) {
+              return new CashWalletMigrationFailedError(
+                "Funder account has no USDT wallet — create and fund the cutover treasury before running the cutover (ENG-482)",
+              )
+            }
+            if (usdtWallets.length > 1) {
+              // No unique index enforces one-USDT-wallet-per-account; picking
+              // one blind risks paying from an unfunded duplicate.
+              return new CashWalletMigrationFailedError(
+                `Funder account has ${usdtWallets.length} USDT wallets — resolve the duplicate before running the cutover (ENG-482)`,
+              )
+            }
+            cached = usdtWallets[0].id
+            return cached
           }
-          return usdtWallet.id
-        }),
+        })(),
     },
     pointerService: {
       flipDefaultWallet: async ({

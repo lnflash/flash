@@ -10,6 +10,8 @@ export type CashWalletRetryFailedReport = {
   retried: number
   /** Migrations skipped because money moved — those are operator-review work. */
   skippedMoneyMoved: number
+  /** Lost races: migrations concurrently moved out of `failed` mid-run. */
+  conflicts: number
   resumedAt: Partial<Record<CashWalletMigrationStatus, number>>
   migrationIds: string[]
 }
@@ -77,6 +79,7 @@ export const retryFailedCashWalletMigrations = async ({
     eligible: 0,
     retried: 0,
     skippedMoneyMoved: 0,
+    conflicts: 0,
     resumedAt: {},
     migrationIds: [],
   }
@@ -121,7 +124,17 @@ export const retryFailedCashWalletMigrations = async ({
             ]
           : ["lastError"],
     })
-    if (transitioned instanceof Error) return transitioned
+    if (transitioned instanceof Error) {
+      // Lost a race (e.g. a concurrent rollback-request moved this migration
+      // out of `failed` — the guarded findOneAndUpdate matched nothing).
+      // Skip it and keep going: aborting would discard the report of
+      // migrations already reset by earlier iterations.
+      report.eligible -= 1
+      report.migrationIds.pop()
+      report.resumedAt[resumeStatus] = (report.resumedAt[resumeStatus] ?? 1) - 1
+      report.conflicts += 1
+      continue
+    }
     report.retried += 1
   }
 
