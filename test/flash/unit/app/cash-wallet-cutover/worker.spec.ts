@@ -1,6 +1,8 @@
 import {
   createCashWalletMigrationFeeReimbursementInvoice,
+  isSubMinimumFeeReimbursementAmount,
   sendCashWalletMigrationFeeReimbursementPayment,
+  skipCashWalletMigrationFeeReimbursement,
 } from "@app/cash-wallet-cutover/worker"
 
 const migration = {
@@ -89,5 +91,40 @@ describe("cash wallet migration worker fee reimbursement", () => {
       paymentRequest: invoice.paymentRequest,
       senderAmountUsdtMicros: "4735",
     })
+  })
+
+  it("classifies only sub-minimum-payable fees as absorbed", () => {
+    expect(isSubMinimumFeeReimbursementAmount("0")).toBe(true)
+    expect(isSubMinimumFeeReimbursementAmount("515")).toBe(true) // rehearsal dust (observed 400)
+    expect(isSubMinimumFeeReimbursementAmount("2499")).toBe(true)
+    expect(isSubMinimumFeeReimbursementAmount("2500")).toBe(false)
+    // payable via the no-amount invoice path — NOT absorbed (reviewer: the
+    // 2500–9999 band reimbursed successfully before ENG-484)
+    expect(isSubMinimumFeeReimbursementAmount("4735")).toBe(false)
+    expect(isSubMinimumFeeReimbursementAmount("9999")).toBe(false)
+    expect(isSubMinimumFeeReimbursementAmount("-1")).toBeInstanceOf(Error)
+  })
+
+  it("records the absorbed micros when skipping a dust fee (ENG-484)", async () => {
+    const migrationsRepo = transitionRepo()
+
+    const result = await skipCashWalletMigrationFeeReimbursement({
+      migration,
+      migrationsRepo,
+      feeAmountUsdtMicros: "515",
+    })
+
+    expect(result).toEqual({
+      ...migration,
+      status: "fee_reimbursed",
+      feeAmountUsdCents: "0",
+      feeAmountUsdtMicros: "515",
+    })
+    expect(migrationsRepo.transitionMigration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "fee_reimbursed",
+        patch: { feeAmountUsdCents: "0", feeAmountUsdtMicros: "515" },
+      }),
+    )
   })
 })

@@ -16,12 +16,20 @@ import { baseLogger } from "@services/logger"
 const args = yargs(hideBin(process.argv))
   .command("preview", "discover accounts and print the migration plan without writes")
   .command(
+    "audit-accounts",
+    "validate every account document; reports accounts that would fail the pointer-flip save (run before prepare)",
+  )
+  .command(
     "provision-usdt-wallets",
     "create missing destination USDT wallets before preparing migrations",
   )
   .command("prepare", "discover accounts and upsert migration records")
   .command("start", "mark a prepared cutover run in progress")
   .command("run-batch", "run one locked migration worker batch")
+  .command(
+    "retry-failed",
+    "reset failed migrations to their last safe status for re-running (single account with --account-id, else all failed)",
+  )
   .command("status", "print cutover config and migration counts")
   .command("complete", "mark cutover complete after all migrations finish")
   .command(
@@ -39,7 +47,10 @@ const args = yargs(hideBin(process.argv))
   .option("operator", { type: "string", default: "unknown" })
   .option("worker-id", { type: "string", default: `worker-${process.pid}` })
   .option("limit", { type: "number", default: 25 })
-  .option("step-delay-ms", { type: "number", default: 0 })
+  // ENG-483: default throttle ≈30 accounts/min — the empirically safe IBEX
+  // rate from the ENG-461 rehearsal (0 = unthrottled mass-failed 233 accounts
+  // on 429s). Pass --step-delay-ms 0 explicitly to disable.
+  .option("step-delay-ms", { type: "number", default: 2_000 })
   .option("provision-limit", { type: "number" })
   .option("provision-delay-ms", { type: "number", default: 12_500 })
   .option("provision-retry-delay-ms", { type: "number", default: 60_000 })
@@ -69,6 +80,12 @@ const run = async () => {
         runId,
       })
       if (result instanceof Error) throw result
+      toJson(result)
+      return
+    }
+
+    case "audit-accounts": {
+      const result = await CashWalletCutover.auditCashWalletCutoverAccounts()
       toJson(result)
       return
     }
@@ -153,6 +170,19 @@ const run = async () => {
         cutoverVersion,
         runId,
         actor: args.operator,
+        migrationsRepo: repository,
+      })
+      if (result instanceof Error) throw result
+      toJson(result)
+      return
+    }
+
+    case "retry-failed": {
+      const result = await CashWalletCutover.retryFailedCashWalletMigrations({
+        cutoverVersion,
+        runId,
+        accountId: args["account-id"] as AccountId | undefined,
+        dryRun: args["dry-run"],
         migrationsRepo: repository,
       })
       if (result instanceof Error) throw result

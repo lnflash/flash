@@ -75,7 +75,16 @@ const transitions: Partial<
   pointer_flipped: ["legacy_zero_verified", "failed", "rollback_started"],
   legacy_zero_verified: ["complete", "failed", "rollback_started"],
   complete: ["rollback_started"],
-  failed: ["rollback_started"],
+  // Operator retry (ENG-484). NOTE: `failed` CAN hold money-moved migrations —
+  // a failure during legacy_zero_verified (balance moved AND pointer flipped)
+  // routes to `failed` because that status is not in the runner's
+  // AMBIGUOUS_SIDE_EFFECT_STATUSES (kept that way deliberately: those
+  // failures are usually transient verify reads and stay auto-retryable).
+  // These edges are only safe behind retry-failed's guards: skip any
+  // migration with a recorded payment transaction id, and resume at
+  // `pointer_flipped` (never `not_started`) when previousDefaultWalletId
+  // is set.
+  failed: ["rollback_started", "not_started", "pointer_flipped"],
   requires_operator_review: ["rollback_started"],
   // Self-loop persists sub-step artifacts (invoice/payment ids) mid-rollback,
   // mirroring invoice_created's refresh self-loop. Rollback failures always

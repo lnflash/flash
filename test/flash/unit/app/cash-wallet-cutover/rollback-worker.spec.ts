@@ -45,10 +45,12 @@ const statefulRepo = (initial: CashWalletMigration) => {
 const services = ({
   defaultWalletId = "legacy-wallet-id" as WalletId,
   usdtBalanceMicros = "0",
+  spendableUsdtMicros,
   legacyBalanceUsdCents = "0",
 }: {
   defaultWalletId?: WalletId
   usdtBalanceMicros?: string
+  spendableUsdtMicros?: string
   legacyBalanceUsdCents?: string
 } = {}) => ({
   now: () => NOW,
@@ -63,6 +65,9 @@ const services = ({
   balanceReader: {
     readSourceBalanceUsdCents: jest.fn().mockResolvedValue(legacyBalanceUsdCents),
     readDestinationBalanceUsdtMicros: jest.fn().mockResolvedValue(usdtBalanceMicros),
+    readDestinationSpendableUsdtMicros: jest
+      .fn()
+      .mockResolvedValue(spendableUsdtMicros ?? usdtBalanceMicros),
   },
   invoiceService: {
     createNoAmountInvoice: jest.fn().mockResolvedValue(invoice),
@@ -224,6 +229,58 @@ describe("rollback executor", () => {
     })
   })
 
+  it("reverses the SPENDABLE balance (not the target) when short by only dust (ENG-401)", async () => {
+    // The wallet holds target minus the un-reimbursed forward fee + rounding
+    // (well within the 1-cent tolerance). Reverse the actual spendable amount,
+    // never the target — paying the target would overspend and IBEX 400s.
+    const migration = {
+      ...baseMigration,
+      balanceMovePaymentTransactionId: "forward-txn-id",
+      sourceBalanceUsdCents: "150000",
+      destinationAmountUsdtMicros: "1500000000",
+    }
+    const svc = services({
+      spendableUsdtMicros: "1499996473", // 3527 micros short = forward fee
+      legacyBalanceUsdCents: "150000", // whole again after the reverse pay
+    })
+
+    const result = await executeCashWalletMigrationRollbackStep({
+      migration,
+      migrationsRepo: statefulRepo(migration),
+      services: svc,
+    })
+
+    expect(svc.paymentService.payInvoice).toHaveBeenCalledWith({
+      senderWalletId: migration.destinationUsdtWalletId,
+      paymentRequest: invoice.paymentRequest,
+      senderAmountUsdtMicros: "1499996473", // the spendable balance, not 1500000000
+    })
+    expect(result).toMatchObject({ status: "rolled_back" })
+  })
+
+  it("fails closed when the reverse amount is below IBEX's minimum payable (ENG-484)", async () => {
+    // A 1-cent account with a nearly-drained wallet passes the tolerance gate
+    // (shortfall ≤ 1 cent) but the reverse amount is unpayable — fail closed
+    // with a clear message instead of a doomed pay and a misleading IBEX 400.
+    const migration = {
+      ...baseMigration,
+      balanceMovePaymentTransactionId: "forward-txn-id",
+      sourceBalanceUsdCents: "1",
+      destinationAmountUsdtMicros: "10000",
+    }
+    const svc = services({ spendableUsdtMicros: "2000" }) // below 2500 min payable
+
+    const result = await executeCashWalletMigrationRollbackStep({
+      migration,
+      migrationsRepo: statefulRepo(migration),
+      services: svc,
+    })
+
+    expect(result).toBeInstanceOf(Error)
+    expect((result as Error).message).toMatch(/below IBEX's minimum payable/)
+    expect(svc.paymentService.payInvoice).not.toHaveBeenCalled()
+  })
+
   it("fails closed when the USDT balance no longer covers the reverse amount", async () => {
     const migration = {
       ...baseMigration,
@@ -231,7 +288,7 @@ describe("rollback executor", () => {
       sourceBalanceUsdCents: "150000",
       destinationAmountUsdtMicros: "1500000000",
     }
-    const svc = services({ usdtBalanceMicros: "900000000" }) // user spent funds
+    const svc = services({ spendableUsdtMicros: "900000000" }) // user spent funds
 
     const result = await executeCashWalletMigrationRollbackStep({
       migration,
