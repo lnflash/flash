@@ -91,9 +91,7 @@ export const retryFailedCashWalletMigrations = async ({
     }
 
     const resumeStatus: CashWalletMigrationStatus =
-      migration.previousDefaultWalletId !== undefined
-        ? "pointer_flipped"
-        : "not_started"
+      migration.previousDefaultWalletId !== undefined ? "pointer_flipped" : "not_started"
 
     report.eligible += 1
     report.migrationIds.push(migration.id)
