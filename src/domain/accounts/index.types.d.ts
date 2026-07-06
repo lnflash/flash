@@ -185,6 +185,22 @@ interface IAccountsRepository {
   findByNpub(npub: Npub): Promise<Account | RepositoryError>
   update(account: Account): Promise<Account | RepositoryError>
 
+  transitionBridgeKycStatus(
+    id: AccountId,
+    nextStatus:
+      | "open"
+      | "not_started"
+      | "incomplete"
+      | "awaiting_questionnaire"
+      | "awaiting_ubo"
+      | "under_review"
+      | "paused"
+      | "approved"
+      | "rejected"
+      | "offboarded",
+  ): Promise<
+    { changed: boolean; previousStatus?: Account["bridgeKycStatus"] } | RepositoryError
+  >
   updateBridgeFields(
     id: AccountId,
     fields: {

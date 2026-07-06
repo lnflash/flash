@@ -174,6 +174,48 @@ export const AccountsRepository = (): IAccountsRepository => {
     }
   }
 
+  // Atomic KYC status transition (bridge webhook dedupe): updates only when
+  // the status actually differs, and reports whether THIS call made the
+  // change. Concurrent webhook deliveries for the same target status (Bridge
+  // retries, or customer.created + customer.updated racing) collapse to one
+  // winner — losers see changed:false and must skip notifications and
+  // side effects. Returns the pre-update status of the winning transition.
+  const transitionBridgeKycStatus = async (
+    id: AccountId,
+    nextStatus:
+      | "open"
+      | "not_started"
+      | "incomplete"
+      | "awaiting_questionnaire"
+      | "awaiting_ubo"
+      | "under_review"
+      | "paused"
+      | "approved"
+      | "rejected"
+      | "offboarded",
+  ): Promise<
+    { changed: boolean; previousStatus?: Account["bridgeKycStatus"] } | RepositoryError
+  > => {
+    try {
+      const result = await Account.findOneAndUpdate(
+        { _id: toObjectId<AccountId>(id), bridgeKycStatus: { $ne: nextStatus } },
+        { $set: { bridgeKycStatus: nextStatus } },
+        { new: false },
+      )
+      if (!result) {
+        const exists = await Account.exists({ _id: toObjectId<AccountId>(id) })
+        if (!exists) return new RepositoryError("Account not found")
+        return { changed: false }
+      }
+      return {
+        changed: true,
+        previousStatus: result.bridgeKycStatus as Account["bridgeKycStatus"],
+      }
+    } catch (error) {
+      return parseRepositoryError(error)
+    }
+  }
+
   const updateBridgeFields = async (
     id: AccountId,
     fields: {
@@ -238,6 +280,7 @@ export const AccountsRepository = (): IAccountsRepository => {
     findByUsername,
     findByNpub,
     update,
+    transitionBridgeKycStatus,
     updateBridgeFields,
     findByBridgeEthereumAddress,
     findByBridgeCustomerId,
