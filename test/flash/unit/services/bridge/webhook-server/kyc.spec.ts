@@ -43,6 +43,7 @@ import { Request, Response } from "express"
 import { kycHandler } from "@services/bridge/webhook-server/routes/kyc"
 import { AccountsRepository } from "@services/mongoose/accounts"
 import { LockService } from "@services/lock"
+import BridgeService from "@services/bridge"
 import { sendBridgeKycNotificationBestEffort } from "@app/bridge/send-kyc-notification"
 
 const makeRes = () => {
@@ -66,7 +67,9 @@ describe("kycHandler", () => {
     jest.clearAllMocks()
     ;(AccountsRepository as jest.Mock).mockReturnValue({
       findByBridgeCustomerId: jest.fn().mockResolvedValue(mockAccount),
-      updateBridgeFields: jest.fn().mockResolvedValue(mockAccount),
+      transitionBridgeKycStatus: jest
+        .fn()
+        .mockResolvedValue({ changed: true, previousStatus: "incomplete" }),
     })
     ;(LockService as jest.Mock).mockReturnValue({
       lockIdempotencyKey: jest.fn().mockResolvedValue(true),
@@ -122,7 +125,9 @@ describe("kycHandler", () => {
         ...mockAccount,
         bridgeKycStatus: "open",
       }),
-      updateBridgeFields: jest.fn().mockResolvedValue(mockAccount),
+      transitionBridgeKycStatus: jest
+        .fn()
+        .mockResolvedValue({ changed: true, previousStatus: "open" }),
     })
 
     const req = makeReq({
@@ -151,7 +156,9 @@ describe("kycHandler", () => {
         ...mockAccount,
         bridgeKycStatus: undefined,
       }),
-      updateBridgeFields: jest.fn().mockResolvedValue(mockAccount),
+      transitionBridgeKycStatus: jest
+        .fn()
+        .mockResolvedValue({ changed: true, previousStatus: undefined }),
     })
 
     const req = makeReq({
@@ -175,7 +182,7 @@ describe("kycHandler", () => {
         ...mockAccount,
         bridgeKycStatus: "approved",
       }),
-      updateBridgeFields: jest.fn().mockResolvedValue(mockAccount),
+      transitionBridgeKycStatus: jest.fn().mockResolvedValue({ changed: false }),
     })
 
     const req = makeReq({
@@ -213,5 +220,48 @@ describe("kycHandler", () => {
       kycStatus: "rejected",
       rejectionReasons: [{ reason: "Document expired" }],
     })
+  })
+
+  it("skips side effects when a racing delivery already applied the status", async () => {
+    // customer.created and customer.updated race: the loser's CAS reports
+    // changed:false and must not notify or create a virtual account.
+    ;(AccountsRepository as jest.Mock).mockReturnValue({
+      findByBridgeCustomerId: jest.fn().mockResolvedValue(mockAccount),
+      transitionBridgeKycStatus: jest.fn().mockResolvedValue({ changed: false }),
+    })
+
+    const req = makeReq({
+      event_id: "evt-race-loser",
+      event_type: "customer.created",
+      event_object: { id: customerId, status: "active" },
+    })
+    const res = makeRes()
+
+    await kycHandler(req, res)
+
+    expect(sendBridgeKycNotificationBestEffort).not.toHaveBeenCalled()
+    expect(BridgeService.createVirtualAccount).not.toHaveBeenCalled()
+    expect(res.json).toHaveBeenCalledWith({ status: "already_current" })
+  })
+
+  it("rejects duplicate event ids before touching the account (lock is first)", async () => {
+    const findByBridgeCustomerId = jest.fn()
+    ;(AccountsRepository as jest.Mock).mockReturnValue({ findByBridgeCustomerId })
+    ;(LockService as jest.Mock).mockReturnValue({
+      lockIdempotencyKey: jest.fn().mockResolvedValue(new Error("already locked")),
+    })
+
+    const req = makeReq({
+      event_id: "evt-retry-dup",
+      event_type: "customer.updated.status_transitioned",
+      event_object: { id: customerId, status: "active" },
+    })
+    const res = makeRes()
+
+    await kycHandler(req, res)
+
+    expect(res.json).toHaveBeenCalledWith({ status: "already_processed" })
+    expect(findByBridgeCustomerId).not.toHaveBeenCalled()
+    expect(sendBridgeKycNotificationBestEffort).not.toHaveBeenCalled()
   })
 })

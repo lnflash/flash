@@ -32,6 +32,18 @@ export const externalAccountHandler = async (req: Request, res: Response) => {
   }
 
   try {
+    // Idempotency FIRST: the lock used to be taken after the external-account
+    // upsert, so a retried delivery re-persisted before being detected.
+    const lockKey = `bridge-external-account:${event_id}`
+    const lockResult = await LockService().lockIdempotencyKey(lockKey as IdempotencyKey)
+    if (lockResult instanceof Error) {
+      baseLogger.info(
+        { customer_id, event_id, id },
+        "Duplicate Bridge external account webhook",
+      )
+      return res.status(200).json({ status: "already_processed" })
+    }
+
     const bridgeCustomerId = toBridgeCustomerId(customer_id)
     const account = await AccountsRepository().findByBridgeCustomerId(bridgeCustomerId)
     if (account instanceof Error) {
@@ -64,16 +76,6 @@ export const externalAccountHandler = async (req: Request, res: Response) => {
       { accountId: account.id, bridgeExternalAccountId: id, status },
       "Bridge external account persisted",
     )
-
-    const lockKey = `bridge-external-account:${event_id}`
-    const lockResult = await LockService().lockIdempotencyKey(lockKey as IdempotencyKey)
-    if (lockResult instanceof Error) {
-      baseLogger.info(
-        { customer_id, event_id, id },
-        "Duplicate Bridge external account webhook",
-      )
-      return res.status(200).json({ status: "already_processed" })
-    }
 
     return res.status(200).json({ status: "success" })
   } catch (error) {
