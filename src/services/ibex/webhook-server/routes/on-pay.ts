@@ -4,6 +4,7 @@ import rateLimitMiddleware from "express-rate-limit"
 
 import { WalletsRepository } from "@services/mongoose/wallets"
 import { ZapRequestModel } from "@services/mongoose/zap-request"
+import { LnurlInvoiceModel } from "@services/mongoose/lnurl-invoice"
 import axios from "axios"
 import { baseLogger as logger } from "@services/logger"
 import { AccountsRepository } from "@services/mongoose"
@@ -32,6 +33,15 @@ const publicLnurlRateLimit = rateLimitMiddleware({
   legacyHeaders: false,
 })
 
+// LUD-21 wallets poll verify every 1-2s; a dedicated bucket keeps that
+// polling from ever consuming the payment callback's budget (B3).
+const verifyRateLimit = rateLimitMiddleware({
+  windowMs: 60_000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+})
+
 const webhookRateLimit = rateLimitMiddleware({
   windowMs: 60_000,
   limit: 120,
@@ -43,35 +53,88 @@ const paths = ibexWebhookPaths.onPay
 
 const PAYMENT_HASH_RE = /^[0-9a-f]{64}$/i
 
+// IBEX invoice states: 0 OPEN / 1 SETTLED / 2 CANCEL / 3 ACCEPTED. The
+// preimage is proof of payment, so its release is gated on the single strict
+// signal (state.id === 1), same as payment-status-checker.
+const IBEX_INVOICE_STATE_SETTLED = 1
+
+// Settled results are immutable — cache them so wallet polling and
+// attacker-supplied hashes don't amplify into repeated IBEX calls. Bounded
+// FIFO: at 10k entries the oldest are evicted.
+const settledVerifyCache = new Map<
+  string,
+  { settled: true; preimage: string | null; pr: string }
+>()
+const SETTLED_CACHE_MAX = 10_000
+
 export const buildVerifyUrl = (paymentHash: string): string =>
   ibexWebhookEndpoints.onPay.verify.replace(":paymentHash", paymentHash)
 
-// LUD-21: settlement check for an invoice issued by the LNURL-pay callback
-// above. The payment hash acts as an unguessable capability, so the endpoint
-// is public (permissive CORS — web wallets poll it cross-origin).
+const lnurlVerifyNotFound = (resp: Response) =>
+  // LNURL convention (LUD-06 lineage) is HTTP 200 with a status:ERROR body —
+  // some wallet libs treat non-2xx as transport failure and never parse it.
+  resp.json({ status: "ERROR", reason: "Not found" })
+
+// LUD-21: settlement check, scoped to invoices ISSUED BY the LNURL-pay
+// callback above (recorded in LnurlInvoiceModel). Payment hashes are not
+// secrets — routing nodes and anyone shown the invoice see them — so verify
+// must not answer for arbitrary Flash/IBEX invoices. Public endpoint,
+// permissive CORS: web wallets poll it cross-origin.
 export const lnurlVerifyHandler = async (req: Request, resp: Response) => {
   try {
-    const { paymentHash } = req.params
-    if (!paymentHash || !PAYMENT_HASH_RE.test(paymentHash)) {
-      return resp.status(404).json({ status: "ERROR", reason: "Not found" })
+    const rawHash = req.params.paymentHash
+    if (!rawHash || !PAYMENT_HASH_RE.test(rawHash)) {
+      return lnurlVerifyNotFound(resp)
+    }
+    const paymentHash = rawHash.toLowerCase()
+
+    const cached = settledVerifyCache.get(paymentHash)
+    if (cached) {
+      return resp.json({ status: "OK", ...cached })
+    }
+
+    // Scope check first: unknown hashes never reach IBEX
+    const issued = await LnurlInvoiceModel.exists({ invoiceHash: paymentHash })
+    if (!issued) {
+      logger.info(
+        { route: "lnurl-verify", hashPrefix: paymentHash.slice(0, 8) },
+        "verify: hash not issued by this proxy",
+      )
+      return lnurlVerifyNotFound(resp)
     }
 
     const invoice = await Ibex.invoiceFromHash(paymentHash as PaymentHash)
     if (invoice instanceof Error || !invoice.bolt11) {
-      return resp.status(404).json({ status: "ERROR", reason: "Not found" })
+      logger.warn(
+        { route: "lnurl-verify", hashPrefix: paymentHash.slice(0, 8) },
+        "verify: issued hash not resolvable at IBEX",
+      )
+      return lnurlVerifyNotFound(resp)
     }
 
-    const settled = invoice.state?.name === "SETTLED" || Boolean(invoice.settleDateUtc)
-
-    return resp.json({
-      status: "OK",
+    const settled = invoice.state?.id === IBEX_INVOICE_STATE_SETTLED
+    const result = {
       settled,
       preimage: settled && invoice.preImage ? invoice.preImage : null,
       pr: invoice.bolt11,
-    })
+    }
+
+    if (settled) {
+      if (settledVerifyCache.size >= SETTLED_CACHE_MAX) {
+        const oldest = settledVerifyCache.keys().next().value
+        if (oldest) settledVerifyCache.delete(oldest)
+      }
+      settledVerifyCache.set(paymentHash, { ...result, settled: true })
+    }
+
+    logger.info(
+      { route: "lnurl-verify", hashPrefix: paymentHash.slice(0, 8), settled },
+      "verify: answered",
+    )
+    return resp.json({ status: "OK", ...result })
   } catch (err) {
     logger.error({ err }, "LNURL-pay verify failed")
-    return resp.status(404).json({ status: "ERROR", reason: "Not found" })
+    return lnurlVerifyNotFound(resp)
   }
 }
 
@@ -135,7 +198,21 @@ router.get(
       if (!invoiceHash)
         return resp.status(500).json({ error: "Failed to extract payment hash" })
 
-      // 4. Save zap request in Mongo
+      // 4a. Record the issued hash so LUD-21 verify answers for it (scope
+      // guard — see lnurlVerifyHandler). Never blocks invoice delivery.
+      try {
+        await LnurlInvoiceModel.create({
+          invoiceHash: invoiceHash.toLowerCase(),
+          accountUsername: username,
+        })
+      } catch (err) {
+        logger.warn(
+          { err, hashPrefix: invoiceHash.slice(0, 8) },
+          "Failed to record LNURL invoice for verify — verify will 404 for it",
+        )
+      }
+
+      // 4b. Save zap request in Mongo
       if (requestEvent) {
         const zapRecord = new ZapRequestModel({
           bolt11,
@@ -165,7 +242,7 @@ router.get(
 
 router.get(
   paths.verify,
-  publicLnurlRateLimit,
+  verifyRateLimit,
   cors({ origin: true, methods: ["GET"] }),
   logRequest,
   lnurlVerifyHandler,
