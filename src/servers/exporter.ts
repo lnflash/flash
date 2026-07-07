@@ -6,6 +6,7 @@ import { EXPORTER_PORT, SECS_PER_5_MINS } from "@config"
 import { Lightning, OnChain } from "@app"
 
 import { toSeconds } from "@domain/primitives"
+import { WalletCurrency } from "@domain/shared"
 
 import { LocalCacheService } from "@services/cache"
 import { LedgerService } from "@services/ledger"
@@ -19,6 +20,7 @@ import { LndService } from "@services/lnd"
 import { baseLogger } from "@services/logger"
 import { ledgerAdmin, setupMongoConnection } from "@services/mongodb"
 import { Account } from "@services/mongoose/schema"
+import { WalletsRepository } from "@services/mongoose"
 import {
   addAttributesToCurrentSpan,
   asyncRunInSpan,
@@ -158,11 +160,32 @@ const main = async () => {
     },
   })
 
+  // ENG-485: the cutover treasury is the funder's USDT wallet, resolved by
+  // currency — NOT the funder's default wallet (which the `funder` gauge
+  // above tracks, and which is BTC). Treasury drain during a cutover run is
+  // otherwise invisible to metrics. Mirrors the cutover treasury resolver.
+  const getFunderUsdtWalletId = async (): Promise<WalletId> => {
+    const funderDefaultWalletId = await getFunderWalletId()
+    const funderWallet = await WalletsRepository().findById(funderDefaultWalletId)
+    if (funderWallet instanceof Error) throw funderWallet
+    if (funderWallet.currency === WalletCurrency.Usdt) return funderWallet.id
+    const funderWallets = await WalletsRepository().listByAccountId(
+      funderWallet.accountId,
+    )
+    if (funderWallets instanceof Error) throw funderWallets
+    const usdtWallet = funderWallets.find((w) => w.currency === WalletCurrency.Usdt)
+    if (usdtWallet === undefined) {
+      throw new Error("Funder account has no USDT wallet — treasury not provisioned")
+    }
+    return usdtWallet.id
+  }
+
   const galoyWallets = [
     { name: "dealer_btc", getId: getDealerBtcWalletId },
     { name: "dealer_usd", getId: getDealerUsdWalletId },
     { name: "funder", getId: getFunderWalletId },
     { name: "bankowner", getId: getBankOwnerWalletId },
+    { name: "treasury_usdt", getId: getFunderUsdtWalletId },
   ]
   for (const wallet of galoyWallets) {
     createWalletGauge({ walletName: wallet.name, getId: wallet.getId })
