@@ -44,12 +44,18 @@ export const gqlOk = async <T = Record<string, unknown>>(
 // the target backend predates that field. Lets version-dependent specs skip
 // gracefully instead of failing against an older deployment.
 export const isUnknownFieldError = (
-  errors: Array<{ message: string; extensions?: { code?: string } }> | undefined,
+  errors:
+    | Array<{ message: string; extensions?: { code?: string; field?: string } }>
+    | undefined,
   field: string,
 ): boolean =>
   (errors ?? []).some(
     (e) =>
-      e.extensions?.code === "GRAPHQL_VALIDATION_FAILED" && e.message.includes(field),
+      // Apollo Server validation (direct API endpoints)
+      (e.extensions?.code === "GRAPHQL_VALIDATION_FAILED" &&
+        e.message.includes(field)) ||
+      // galoy custom validation (e.g. quickstart's stale supergraph route)
+      (e.extensions?.code === "INVALID_FIELD" && e.extensions?.field === field),
   )
 
 export const login = async (phone: string, code: string): Promise<string> => {
