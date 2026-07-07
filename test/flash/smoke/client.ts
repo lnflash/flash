@@ -52,8 +52,7 @@ export const isUnknownFieldError = (
   (errors ?? []).some(
     (e) =>
       // Apollo Server validation (direct API endpoints)
-      (e.extensions?.code === "GRAPHQL_VALIDATION_FAILED" &&
-        e.message.includes(field)) ||
+      (e.extensions?.code === "GRAPHQL_VALIDATION_FAILED" && e.message.includes(field)) ||
       // galoy custom validation (e.g. quickstart's stale supergraph route)
       (e.extensions?.code === "INVALID_FIELD" && e.extensions?.field === field),
   )
