@@ -33,6 +33,7 @@ jobs:
           source .envrc
           docker compose up -d --build
           ./bin/quickstart.sh
+          ./bin/init-onchain.sh
           ./bin/init-lightning.sh
       # The quickstart stack mocks IBEX, so balances/invoices/payments don't
       # resolve — SMOKE_BACKEND_FULL stays false and those specs skip. This

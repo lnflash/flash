@@ -17,7 +17,7 @@ import { SMOKE } from "../config"
 const describeMaybe = SMOKE.allowPayments && SMOKE.backendFull ? describe : describe.skip
 
 const MEMO_AB = `smoke SEND-01 ${process.env.SMOKE_RUN_ID || ""}`.trim()
-const MEMO_BA = `smoke SEND-02 ${process.env.SMOKE_RUN_ID || ""}`.trim()
+const MEMO_B_TO_A = `smoke SEND-02 ${process.env.SMOKE_RUN_ID || ""}`.trim()
 
 const sendUsd = async (
   token: string,
@@ -80,7 +80,7 @@ describeMaybe("Phase 2: two-account internal payments", () => {
 
   it("SEND-02: B pays A back", async () => {
     const balanceABefore = await usdBalance(tokenA, walletA)
-    const res = await sendUsd(tokenB, walletB, walletA, 2, MEMO_BA)
+    const res = await sendUsd(tokenB, walletB, walletA, 2, MEMO_B_TO_A)
     expect(res.intraLedgerUsdPaymentSend.errors).toEqual([])
     expect(res.intraLedgerUsdPaymentSend.status).toBe("SUCCESS")
 
