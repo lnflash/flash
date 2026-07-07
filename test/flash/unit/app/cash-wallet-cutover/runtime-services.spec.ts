@@ -31,6 +31,25 @@ describe("cutover runtime services — IBEX rate-limit retry (ENG-483)", () => {
     expect(sleeps).toEqual([7, 7])
   })
 
+  it("retries on structural 429 (httpCode/status) with no rate-limit text (ENG-485)", async () => {
+    const structural = Object.assign(new Error("Request failed"), { status: 429 })
+    const getRawAccountDetails = jest
+      .fn()
+      .mockRejectedValueOnce(structural)
+      .mockResolvedValue({ balance: 1 })
+
+    const services = createCashWalletMigrationRuntimeServices({
+      getRawAccountDetails,
+      rateLimitRetryDelayMs: 1,
+      sleep: async () => undefined,
+    })
+
+    const result = await services.balanceReader.readSourceBalanceUsdCents(migration)
+
+    expect(result).toBe("100")
+    expect(getRawAccountDetails).toHaveBeenCalledTimes(2)
+  })
+
   it("retries balance reads when the read RETURNS a rate-limit error", async () => {
     const getRawAccountDetails = jest
       .fn()

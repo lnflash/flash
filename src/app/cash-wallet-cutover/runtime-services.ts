@@ -126,8 +126,14 @@ const sleep: SleepFn = (delayMs: number) =>
 
 const errorMessage = (error: Error): string => error.message || String(error)
 
-const isIbexRateLimitError = (error: Error): boolean =>
-  errorMessage(error).toLowerCase().includes("too many requests")
+const isIbexRateLimitError = (error: Error): boolean => {
+  // Structural first (ENG-485): IbexError.httpCode (via ibex-client >= 3.2.0
+  // ApiError) for returned errors, .status for raw thrown FetchErrors. Text
+  // match kept as a fallback for anything that carries neither.
+  const candidate = error as { httpCode?: unknown; status?: unknown }
+  if (candidate.httpCode === 429 || candidate.status === 429) return true
+  return errorMessage(error).toLowerCase().includes("too many requests")
+}
 
 const withIbexRateLimitRetry = async <T>({
   operation,
