@@ -12,6 +12,7 @@ import { BridgeConfig } from "@config"
 import { baseLogger } from "@services/logger"
 
 import { verifyBridgeSignature } from "./middleware/verify-signature"
+import { bridgeEnabledGuard } from "./middleware/enabled-guard"
 import { kycHandler } from "./routes/kyc"
 import { depositHandler } from "./routes/deposit"
 import { transferHandler } from "./routes/transfer"
@@ -73,6 +74,12 @@ export const startBridgeWebhookServer = () => {
   app.get("/health", (req, res) => {
     res.status(200).json({ status: "ok", service: "bridge-webhook" })
   })
+
+  // Defense in depth (ENG-466): the chart already gates this workload on
+  // galoy.bridge.webhook.enabled, but if the process ever starts with the
+  // feature OFF (chart/config drift, a local run, a misconfig) it must not
+  // mutate the DB. /health stays up for k8s probes; every other route rejects.
+  app.use(bridgeEnabledGuard)
 
   // Webhook routes with signature verification
   app.post("/kyc", webhookRateLimit, verifyBridgeSignature("kyc"), kycHandler)
