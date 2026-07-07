@@ -57,6 +57,10 @@ const args = yargs(hideBin(process.argv))
   .option("max-provision-attempts", { type: "number", default: 5 })
   .option("dry-run", { type: "boolean", default: false })
   .option("account-id", { type: "string" })
+  .option("account-ids", {
+    type: "string",
+    describe: "comma-separated accountIds — prepare only this cohort (phased cutover)",
+  })
   .option("reason", { type: "string", default: "" })
   .option("lock-stale-seconds", { type: "number", default: 300 })
   .option("configPath", { type: "string", demandOption: true })
@@ -115,12 +119,19 @@ const run = async () => {
     }
 
     case "prepare": {
+      const cohort = args["account-ids"]
+        ? (args["account-ids"]
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean) as AccountId[])
+        : undefined
       const result = await CashWalletCutover.preparePrimaryCashWalletCutover({
         cutoverVersion,
         runId,
         accountsRepo: AccountsRepository(),
         walletsRepo: WalletsRepository(),
         migrationsRepo: repository,
+        accountIds: cohort,
       })
       if (result instanceof Error) throw result
       toJson(result)
