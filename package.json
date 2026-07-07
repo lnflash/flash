@@ -19,6 +19,7 @@
     "daily-notif": "yarn build && node lib/servers/daily-balance-notification.js",
     "test": "export JEST_JUNIT_OUTPUT_DIR=\"./artifacts\" && jest --ci --reporters=default --reporters=jest-junit",
     "test:unit": ". ./.env && LOGLEVEL=warn jest --config ./test/flash/unit/jest.config.js --bail --verbose $TEST",
+    "test:smoke": "jest --config ./test/flash/smoke/jest.config.js --runInBand --verbose $TEST",
     "test:legacy-integration": ". ./.env && LOGLEVEL=warn jest --config ./test/flash/legacy-integration/jest.config.js --bail --runInBand --verbose $TEST | yarn pino-pretty -c -l",
     "test:integration": ". ./.env && LOGLEVEL=warn jest --config ./test/flash/integration/jest.config.js --bail --runInBand --verbose $TEST",
     "test:bridge-sandbox-e2e": ". ./.env && { [ ! -f ./.env.local ] || . ./.env.local; } && RUN_BRIDGE_SANDBOX_E2E=true LOGLEVEL=warn jest --config ./test/flash/bridge-sandbox-e2e/jest.config.js --bail --runInBand --verbose $TEST | yarn pino-pretty -c -l",

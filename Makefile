@@ -105,6 +105,24 @@ integration: reset-deps-integration
 
 reset-integration: reset-deps-integration integration
 
+# UAT smoke suite (test/flash/smoke) — black-box GraphQL tests against a
+# running stack. `make smoke-env-up` boots the quickstart stack (requires
+# ytt/vendir + docker); `make smoke` runs the suite against it.
+smoke-env-up:
+	cd quickstart && \
+	./bin/bump-galoy-image-digest.sh local && \
+	$(MAKE) re-render && \
+	. ./.envrc && \
+	docker compose up -d --build && \
+	./bin/quickstart.sh && \
+	./bin/init-lightning.sh
+
+smoke:
+	SMOKE_DOCKER_HELPERS=$${SMOKE_DOCKER_HELPERS:-true} \
+	$(BIN_DIR)/jest --config ./test/flash/smoke/jest.config.js --runInBand --verbose
+
+smoke-all: smoke-env-up smoke
+
 bats:
 	yarn build && \
 	if [ -d test/bats ]; then bats -t test/bats; else echo "No test/bats suite found; skipping"; fi
