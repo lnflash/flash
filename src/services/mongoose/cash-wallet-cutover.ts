@@ -34,6 +34,8 @@ type TransitionMigrationArgs = {
   cutoverVersion: number
   runId: string
   patch?: Partial<Omit<CashWalletMigration, "id">>
+  /** Fields to $unset — e.g. clearing stale progress on a retry reset (ENG-484). */
+  clear?: (keyof Omit<CashWalletMigration, "id">)[]
 }
 
 type LockMigrationArgs = {
@@ -100,6 +102,19 @@ const resultToMigration = (record: CashWalletMigrationRecord): CashWalletMigrati
   startedAt: record.startedAt,
   completedAt: record.completedAt,
   updatedAt: record.updatedAt,
+  rollbackRequestedAt: record.rollbackRequestedAt,
+  rollbackRequestedBy: record.rollbackRequestedBy,
+  rollbackReason: record.rollbackReason,
+  rollbackFromStatus: record.rollbackFromStatus,
+  rollbackPointerRestoredAt: record.rollbackPointerRestoredAt,
+  rollbackInvoicePaymentRequest: record.rollbackInvoicePaymentRequest,
+  rollbackInvoicePaymentHash: record.rollbackInvoicePaymentHash,
+  rollbackPaymentTransactionId: record.rollbackPaymentTransactionId,
+  rollbackShortfallUsdtMicros: record.rollbackShortfallUsdtMicros,
+  rollbackShortfallInvoicePaymentRequest: record.rollbackShortfallInvoicePaymentRequest,
+  rollbackShortfallInvoicePaymentHash: record.rollbackShortfallInvoicePaymentHash,
+  rollbackShortfallPaymentTransactionId: record.rollbackShortfallPaymentTransactionId,
+  rolledBackAt: record.rolledBackAt,
 })
 
 export const CashWalletCutoverRepository = () => {
@@ -195,11 +210,17 @@ export const CashWalletCutoverRepository = () => {
     cutoverVersion,
     runId,
     patch = {},
+    clear = [],
   }: TransitionMigrationArgs): Promise<CashWalletMigration | RepositoryError> => {
     try {
       const result = await CashWalletMigration.findOneAndUpdate(
         { _id: id, status: from, cutoverVersion, runId },
-        { $set: { ...patch, status: to, updatedAt: new Date() } },
+        {
+          $set: { ...patch, status: to, updatedAt: new Date() },
+          ...(clear.length > 0
+            ? { $unset: Object.fromEntries(clear.map((field) => [field, ""])) }
+            : {}),
+        },
         { new: true },
       )
       if (!result)
@@ -312,6 +333,34 @@ export const CashWalletCutoverRepository = () => {
     }
   }
 
+  // ENG-401: work list for rollback — powers "everything eligible for
+  // rollback in run X" (batch request) and "everything mid-rollback" (batch
+  // execution). Status-set driven so callers own the semantics.
+  const listMigrationsByStatuses = async ({
+    cutoverVersion,
+    runId,
+    statuses,
+    limit,
+  }: {
+    cutoverVersion: number
+    runId: string
+    statuses: CashWalletMigrationStatus[]
+    limit?: number
+  }): Promise<CashWalletMigration[] | RepositoryError> => {
+    try {
+      const results = await CashWalletMigration.find({
+        cutoverVersion,
+        runId,
+        status: { $in: statuses },
+      })
+        .sort({ updatedAt: 1 })
+        .limit(limit ?? 0)
+      return results.map(resultToMigration)
+    } catch (err) {
+      return parseRepositoryError(err)
+    }
+  }
+
   const countByStatus = async ({
     cutoverVersion,
     runId,
@@ -338,6 +387,7 @@ export const CashWalletCutoverRepository = () => {
     releaseMigrationLock,
     markMigrationFailed,
     listRunnableMigrations,
+    listMigrationsByStatuses,
     countByStatus,
   }
 }

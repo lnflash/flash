@@ -8,6 +8,7 @@ type Levels = number[]
 type CronConfig = {
   rebalanceEnabled: boolean
   swapEnabled: boolean
+  lndTasksEnabled: boolean
 }
 
 type CaptchaConfig = {

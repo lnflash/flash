@@ -16,26 +16,52 @@ import { baseLogger } from "@services/logger"
 const args = yargs(hideBin(process.argv))
   .command("preview", "discover accounts and print the migration plan without writes")
   .command(
+    "audit-accounts",
+    "validate every account document; reports accounts that would fail the pointer-flip save (run before prepare)",
+  )
+  .command(
     "provision-usdt-wallets",
     "create missing destination USDT wallets before preparing migrations",
   )
   .command("prepare", "discover accounts and upsert migration records")
   .command("start", "mark a prepared cutover run in progress")
   .command("run-batch", "run one locked migration worker batch")
+  .command(
+    "retry-failed",
+    "reset failed migrations to their last safe status for re-running (single account with --account-id, else all failed)",
+  )
   .command("status", "print cutover config and migration counts")
   .command("complete", "mark cutover complete after all migrations finish")
+  .command(
+    "rollback-request",
+    "pull eligible migrations into rollback_started (single account with --account-id, else whole run)",
+  )
+  .command("rollback-batch", "run one locked rollback worker batch")
+  .command(
+    "rollback-complete",
+    "mark the cutover config rolled_back once no migrations remain in rollback_started",
+  )
   .demandCommand(1)
   .option("cutover-version", { type: "number", demandOption: true })
   .option("run-id", { type: "string", demandOption: true })
   .option("operator", { type: "string", default: "unknown" })
   .option("worker-id", { type: "string", default: `worker-${process.pid}` })
   .option("limit", { type: "number", default: 25 })
-  .option("step-delay-ms", { type: "number", default: 0 })
+  // ENG-483: default throttle ≈30 accounts/min — the empirically safe IBEX
+  // rate from the ENG-461 rehearsal (0 = unthrottled mass-failed 233 accounts
+  // on 429s). Pass --step-delay-ms 0 explicitly to disable.
+  .option("step-delay-ms", { type: "number", default: 2_000 })
   .option("provision-limit", { type: "number" })
   .option("provision-delay-ms", { type: "number", default: 12_500 })
   .option("provision-retry-delay-ms", { type: "number", default: 60_000 })
   .option("max-provision-attempts", { type: "number", default: 5 })
   .option("dry-run", { type: "boolean", default: false })
+  .option("account-id", { type: "string" })
+  .option("account-ids", {
+    type: "string",
+    describe: "comma-separated accountIds — prepare only this cohort (phased cutover)",
+  })
+  .option("reason", { type: "string", default: "" })
   .option("lock-stale-seconds", { type: "number", default: 300 })
   .option("configPath", { type: "string", demandOption: true })
   .parseSync()
@@ -58,6 +84,12 @@ const run = async () => {
         runId,
       })
       if (result instanceof Error) throw result
+      toJson(result)
+      return
+    }
+
+    case "audit-accounts": {
+      const result = await CashWalletCutover.auditCashWalletCutoverAccounts()
       toJson(result)
       return
     }
@@ -87,12 +119,19 @@ const run = async () => {
     }
 
     case "prepare": {
+      const cohort = args["account-ids"]
+        ? (args["account-ids"]
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean) as AccountId[])
+        : undefined
       const result = await CashWalletCutover.preparePrimaryCashWalletCutover({
         cutoverVersion,
         runId,
         accountsRepo: AccountsRepository(),
         walletsRepo: WalletsRepository(),
         migrationsRepo: repository,
+        accountIds: cohort,
       })
       if (result instanceof Error) throw result
       toJson(result)
@@ -139,6 +178,64 @@ const run = async () => {
 
     case "complete": {
       const result = await CashWalletCutover.completePrimaryCashWalletCutover({
+        cutoverVersion,
+        runId,
+        actor: args.operator,
+        migrationsRepo: repository,
+      })
+      if (result instanceof Error) throw result
+      toJson(result)
+      return
+    }
+
+    case "retry-failed": {
+      const result = await CashWalletCutover.retryFailedCashWalletMigrations({
+        cutoverVersion,
+        runId,
+        accountId: args["account-id"] as AccountId | undefined,
+        dryRun: args["dry-run"],
+        migrationsRepo: repository,
+      })
+      if (result instanceof Error) throw result
+      toJson(result)
+      return
+    }
+
+    case "rollback-request": {
+      if (!args.reason) {
+        throw new Error("--reason is required for rollback-request")
+      }
+      const result = await CashWalletCutover.requestPrimaryCashWalletRollback({
+        cutoverVersion,
+        runId,
+        accountId: args["account-id"] as AccountId | undefined,
+        reason: args.reason,
+        requestedBy: args.operator,
+        dryRun: args["dry-run"],
+        migrationsRepo: repository,
+      })
+      if (result instanceof Error) throw result
+      toJson(result)
+      return
+    }
+
+    case "rollback-batch": {
+      const result = await CashWalletCutover.runPrimaryCashWalletRollbackBatch({
+        cutoverVersion,
+        runId,
+        workerId: args["worker-id"],
+        limit: args.limit,
+        stepDelayMs: args["step-delay-ms"],
+        lockStaleBefore: new Date(Date.now() - args["lock-stale-seconds"] * 1000),
+        migrationsRepo: repository,
+      })
+      if (result instanceof Error) throw result
+      toJson(result)
+      return
+    }
+
+    case "rollback-complete": {
+      const result = await CashWalletCutover.completePrimaryCashWalletRollback({
         cutoverVersion,
         runId,
         actor: args.operator,

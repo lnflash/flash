@@ -1,5 +1,4 @@
 import { Request, Response, NextFunction } from "express"
-import requestIp from "request-ip"
 import ipaddr from "ipaddr.js"
 
 import { IbexConfig } from "@config"
@@ -63,7 +62,11 @@ export const isIpInAllowlist = (
 export const validateIbexIp = (req: Request, resp: Response, next: NextFunction) => {
   if (!ibexWebhookIpAllowlistEnabled) return next()
 
-  const clientIp = requestIp.getClientIp(req)
+  // req.ip, not request-ip: with `trust proxy` set on the server, Express
+  // resolves the proxy-appended (rightmost untrusted) X-Forwarded-For entry.
+  // request-ip prefers the LEFTMOST entry, which any caller can forge to an
+  // allowlisted IP and walk through this gate.
+  const clientIp = req.ip ?? req.socket?.remoteAddress
   if (!isIpInAllowlist(clientIp)) {
     logger.warn(
       { clientIp, path: req.path },

@@ -10,13 +10,18 @@ import { hideBin } from "yargs/helpers"
 import { discoverCashWalletCutoverAccounts } from "@app/cash-wallet-cutover/discovery"
 import {
   buildCashWalletCutoverOperatorSnapshot,
+  CashWalletCutoverMilestone,
+  CASH_WALLET_CUTOVER_STAGE_STATUSES,
   CashWalletCutoverOperatorManifestAccount,
   CashWalletCutoverOperatorSnapshot,
+  CashWalletCutoverStageSummary,
+  deriveCashWalletCutoverMilestones,
   formatCashWalletCutoverOperatorSnapshotCsv,
   formatOperatorBalance,
   OperatorBalance,
   parseCashWalletCutoverOperatorManifest,
   refreshOperatorAccountCutoverBalanceAudit,
+  summarizeCashWalletCutoverStages,
 } from "@app/cash-wallet-cutover/operator-dashboard"
 import { buildCashWalletCutoverPreflightReport } from "@app/cash-wallet-cutover/preflight"
 import { getBalanceForWallet } from "@app/wallets"
@@ -329,7 +334,26 @@ const html = `<!doctype html>
     .info { color: var(--blue); background: var(--blue-bg); }
     .right { text-align: right; }
 
+    .stagegrid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 10px; margin-bottom: 14px; }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+    .panel-title { font-weight: 650; margin-bottom: 10px; display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+    .bar { display: flex; height: 22px; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); background: #eef1f6; }
+    .bar div { height: 100%; transition: width .4s ease; min-width: 0; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; cursor: pointer; font-size: 12px; font-weight: 600; background: #fff; }
+    .chip .dot { width: 9px; height: 9px; border-radius: 50%; }
+    .chip.active { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-bg); }
+    .chip .n { color: var(--muted); font-weight: 700; }
+    .chip.zero { opacity: .45; }
+    .feed { list-style: none; margin: 0; padding: 0; max-height: 200px; overflow: auto; font-size: 13px; }
+    .feed li { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; border-bottom: 1px dashed var(--line); }
+    .feed .t { color: var(--muted); font-size: 11px; white-space: nowrap; font-family: ui-monospace, Menlo, monospace; }
+    .feed .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; align-self: center; }
+    .feed .dot.ok { background: var(--green); } .feed .dot.info { background: var(--blue); }
+    .feed .dot.warn { background: var(--yellow); } .feed .dot.bad { background: var(--red); }
+
     @media (max-width: 1100px) {
+      .stagegrid { grid-template-columns: 1fr; }
       .summary { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
       header { align-items: flex-start; flex-direction: column; }
       .table-wrap { max-height: none; }
@@ -350,6 +374,17 @@ const html = `<!doctype html>
     </div>
   </header>
   <main>
+    <section class="stagegrid">
+      <div class="panel">
+        <div class="panel-title">Pipeline <span class="muted" id="pipeline-note"></span></div>
+        <div class="bar" id="stage-bar"></div>
+        <div class="chips" id="stage-chips"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Highlights <span class="muted" id="highlights-note"></span></div>
+        <ol class="feed" id="highlights"></ol>
+      </div>
+    </section>
     <section class="summary" id="summary"></section>
     <section class="controls">
       <label class="filter"><input type="checkbox" id="filter-anomalies">Anomalies</label>
@@ -384,6 +419,25 @@ const html = `<!doctype html>
   </main>
   <script>
     let snapshot = null
+    let stageFilter = ""
+
+    // Status lists interpolated from CASH_WALLET_CUTOVER_STAGE_STATUSES so a
+    // new state-machine status can't silently diverge between server counts
+    // and this client-side chip filter.
+    const STAGE_STATUSES = ${JSON.stringify(CASH_WALLET_CUTOVER_STAGE_STATUSES)}
+    const STAGES = [
+      ["pending", "Pending", "#98a2b3"],
+      ["provisioning", "Provisioning", "#7a5af8"],
+      ["moving", "Moving funds", "#1f5eff"],
+      ["fees", "Fees", "#0ba5ec"],
+      ["finalizing", "Finalizing", "#12b76a"],
+      ["complete", "Complete", "#16794c"],
+      ["skipped", "Skipped (USDT)", "#66c61c"],
+      ["attention", "Attention", "#b42318"],
+      ["rollingBack", "Rolling back", "#946200"],
+      ["rolledBack", "Rolled back", "#667085"],
+    ].map(([key, label, color]) => [key, label, color, STAGE_STATUSES[key] || []])
+    const stageStatuses = (key) => STAGE_STATUSES[key] || []
 
     const $ = (id) => document.getElementById(id)
     const money = (cents) => "$" + (cents / 100).toFixed(2)
@@ -537,7 +591,11 @@ const html = `<!doctype html>
       if (f.missingUsdt && account.usdtWallets.length > 0) return false
       if (f.nonzeroUsd && !usd) return false
       if (f.nonzeroUsdt && !usdt) return false
-      if (f.migration && account.migrationStatus !== f.migration) return false
+      // An explicit status pick overrides a stale stage chip (chip clicks
+      // clear the dropdown, but not vice versa — ANDing them can render an
+      // empty table while the chip still shows a nonzero count).
+      if (f.migration) return account.migrationStatus === f.migration
+      if (stageFilter && stageStatuses(stageFilter).indexOf(account.migrationStatus) === -1) return false
       return true
     }
 
@@ -571,19 +629,76 @@ const html = `<!doctype html>
       }).join("")
     }
 
+    function elapsedText(startedAt) {
+      if (!startedAt) return ""
+      const ms = Date.now() - new Date(startedAt).getTime()
+      if (ms < 0) return ""
+      const m = Math.floor(ms / 60000), sec = Math.floor((ms % 60000) / 1000)
+      return (m >= 60 ? Math.floor(m / 60) + "h " + (m % 60) + "m" : m + "m " + sec + "s")
+    }
+
+    function renderPipeline() {
+      const st = snapshot.stages
+      const bar = $("stage-bar"), chips = $("stage-chips"), note = $("pipeline-note")
+      if (!st) { bar.innerHTML = ""; chips.innerHTML = '<span class="muted">waiting for first snapshot…</span>'; return }
+      note.textContent = st.cutoverState + (st.runId ? " · " + st.runId : "") +
+        (snapshot.cutover && snapshot.cutover.state === "in_progress" && snapshot.cutover.startedAt
+          ? " · elapsed " + elapsedText(snapshot.cutover.startedAt) : "") +
+        " · " + st.percentComplete + "% done"
+      bar.innerHTML = STAGES.map(([key, label, color]) => {
+        const n = st.counts[key] || 0
+        if (!n) return ""
+        const pct = (n / st.total) * 100
+        return '<div title="' + label + ': ' + n + '" style="width:' + pct + '%;background:' + color + '"></div>'
+      }).join("")
+      chips.innerHTML = STAGES.map(([key, label, color]) => {
+        const n = st.counts[key] || 0
+        return '<span class="chip' + (stageFilter === key ? " active" : "") + (n ? "" : " zero") + '" data-stage="' + key + '">' +
+          '<span class="dot" style="background:' + color + '"></span>' + label + ' <span class="n">' + n + '</span></span>'
+      }).join("")
+      chips.querySelectorAll(".chip").forEach((chip) => {
+        chip.addEventListener("click", () => {
+          stageFilter = stageFilter === chip.dataset.stage ? "" : chip.dataset.stage
+          $("filter-migration").value = ""
+          renderPipeline()
+          renderRows()
+        })
+      })
+    }
+
+    function renderHighlights() {
+      const feed = $("highlights")
+      const items = (snapshot.milestones || []).slice().reverse()
+      $("highlights-note").textContent = items.length + " event(s)"
+      // Milestone text embeds the free-form --run-id; escape it — this is the
+      // one innerHTML sink fed by operator input.
+      const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]))
+      feed.innerHTML = items.map((m) =>
+        '<li><span class="dot ' + esc(m.kind) + '"></span><span class="t">' +
+        new Date(m.at).toLocaleTimeString() + '</span><span>' + esc(m.text) + '</span></li>'
+      ).join("") || '<li><span class="muted">no events yet</span></li>'
+    }
+
     function render() {
       renderReadiness()
       renderSummary()
+      renderPipeline()
+      renderHighlights()
       renderMigrationFilter()
       renderRows()
     }
 
+    // USD wallets first (the funded legacy balances operators care about
+    // most), then USDT, then treasury — so the meaningful numbers fill in
+    // before the long tail.
     function allWalletIds() {
-      return snapshot.accounts.flatMap((account) =>
-        account.usdWallets.concat(account.usdtWallets).map((wallet) => wallet.id)
-      ).concat((snapshot.treasury ? snapshot.treasury.accounts : []).flatMap((account) =>
-        account.usdWallets.concat(account.usdtWallets).map((wallet) => wallet.id)
-      ))
+      const usd = snapshot.accounts.flatMap((a) => a.usdWallets.map((w) => w.id))
+      const usdt = snapshot.accounts.flatMap((a) => a.usdtWallets.map((w) => w.id))
+      const treasury = (snapshot.treasury ? snapshot.treasury.accounts : []).flatMap(
+        (a) => a.usdWallets.concat(a.usdtWallets).map((w) => w.id),
+      )
+      return usd.concat(usdt).concat(treasury)
     }
 
     function mergeBalances(balances) {
@@ -601,33 +716,68 @@ const html = `<!doctype html>
       }
     }
 
+    // Wallet IDs are batched into small GETs: one URL with the whole fleet
+    // (600+ UUIDs ≈ 22KB) exceeds Node's 16KB header limit and 431s, which
+    // stalled every balance at zero. 60 ids/request keeps URLs ~2KB.
+    const BALANCE_BATCH = 60
     let balancePollTimer = null
-    async function hydrateBalances(force) {
+    let hydrateGeneration = 0
+    function loadingWalletIds() {
+      const ids = []
+      const collect = (account) => account.usdWallets.concat(account.usdtWallets)
+        .forEach((w) => { if (!w.balance.status || w.balance.status === "loading") ids.push(w.id) })
+      snapshot.accounts.forEach(collect)
+      if (snapshot.treasury) snapshot.treasury.accounts.forEach(collect)
+      return ids
+    }
+    async function hydrateBalances(force, onlyLoading) {
       if (!snapshot) return
-      const walletIds = allWalletIds()
+      // Generation guard: the 15s active-run reload starts a new pass while a
+      // previous multi-batch pass (and its 2s poll chain) may still be
+      // running — without this they stack and interleave renders.
+      const generation = ++hydrateGeneration
+      const walletIds = onlyLoading ? loadingWalletIds() : allWalletIds()
       if (walletIds.length === 0) return
 
-      const url = "/api/balances?walletIds=" + encodeURIComponent(walletIds.join(",")) + (force ? "&refresh=1" : "")
-      const response = await fetch(url)
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.error || "Balance refresh failed")
+      let fresh = 0, errors = 0, loading = 0, pending = 0, active = false
 
-      mergeBalances(result.balances)
-      renderSummary()
-      renderRows()
+      for (let i = 0; i < walletIds.length; i += BALANCE_BATCH) {
+        if (generation !== hydrateGeneration) return // superseded by a newer pass
+        const batch = walletIds.slice(i, i + BALANCE_BATCH)
+        const url = "/api/balances?walletIds=" + encodeURIComponent(batch.join(",")) +
+          (force ? "&refresh=1" : "")
+        const response = await fetch(url)
+        if (!response.ok) {
+          throw new Error("Balance refresh failed (" + response.status + ")")
+        }
+        const result = await response.json()
 
-      const total = walletIds.length
-      const fresh = Object.values(result.balances).filter((balance) => balance.status === "fresh").length
-      const errors = Object.values(result.balances).filter((balance) => balance.status === "error").length
-      const loading = Object.values(result.balances).filter((balance) => balance.status === "loading").length
+        mergeBalances(result.balances)
+        for (const balance of Object.values(result.balances)) {
+          if (balance.status === "fresh") fresh++
+          else if (balance.status === "error") errors++
+          else if (balance.status === "loading") loading++
+        }
+        pending = result.queue.pending
+        active = !!result.queue.active
+
+        // Paint incrementally so funded USD balances appear as batches land.
+        renderSummary()
+        renderRows()
+        $("status").textContent = "Loading balances " + Math.min(i + BALANCE_BATCH, walletIds.length) +
+          "/" + walletIds.length + "…"
+      }
+
       $("status").textContent = "Updated " + new Date(snapshot.generatedAt).toLocaleTimeString() +
-        " | balances " + (fresh + errors) + "/" + total +
-        (result.queue.pending || result.queue.active ? " (" + result.queue.pending + " queued)" : "")
+        " | balances " + (fresh + errors) + "/" + walletIds.length +
+        (pending || active ? " (" + pending + " queued)" : "")
 
-      if ((loading > 0 || result.queue.pending > 0 || result.queue.active) && !balancePollTimer) {
+      if ((loading > 0 || pending > 0 || active) && !balancePollTimer) {
         balancePollTimer = setTimeout(() => {
           balancePollTimer = null
-          hydrateBalances(false).catch((error) => {
+          // Poll passes only re-request wallets still loading — not the full
+          // 600-wallet list every 2s while the server queue drains.
+          hydrateBalances(false, true).catch((error) => {
             $("status").textContent = error.message
           })
         }, 2000)
@@ -637,11 +787,14 @@ const html = `<!doctype html>
     async function load(force) {
       $("status").textContent = force ? "Refreshing..." : "Loading..."
       const response = await fetch("/api/snapshot" + (force ? "?refresh=1" : ""))
-      snapshot = await response.json()
-      if (!response.ok) throw new Error(snapshot.error || "Snapshot failed")
+      // Parse before assigning: a transient 500 must not replace the live
+      // snapshot with {error} and break every subsequent render.
+      const body = await response.json()
+      if (!response.ok) throw new Error(body.error || "Snapshot failed")
+      snapshot = body
       $("status").textContent = "Updated " + new Date(snapshot.generatedAt).toLocaleTimeString()
       render()
-      hydrateBalances(force).catch((error) => {
+      hydrateBalances(force, false).catch((error) => {
         $("status").textContent = error.message
       })
     }
@@ -656,12 +809,31 @@ const html = `<!doctype html>
       window.location.href = "/api/export.csv"
     })
 
+    // Adaptive refresh: tight loop while a run (or rollback) is active,
+    // relaxed when idle.
+    function isActiveRun() {
+      if (!snapshot) return false
+      if (snapshot.cutover && snapshot.cutover.state === "in_progress") return true
+      const st = snapshot.stages
+      return !!st && (st.inFlight > 0 || (st.counts && st.counts.rollingBack > 0))
+    }
+    let reloadTimer = null
+    function scheduleReload() {
+      if (reloadTimer) clearTimeout(reloadTimer)
+      reloadTimer = setTimeout(() => {
+        // Watchdog: re-arm even if load() never settles — the server can hang
+        // behind a stuck snapshot build with no timeout, and a dead chain
+        // otherwise never recovers (the old setInterval did by construction).
+        const watchdog = setTimeout(scheduleReload, 60000)
+        load(false)
+          .catch((error) => { $("status").textContent = error.message })
+          .finally(() => { clearTimeout(watchdog); scheduleReload() })
+      }, isActiveRun() ? 15000 : 120000)
+    }
+
     load(false).catch((error) => {
       $("status").textContent = error.message
-    })
-    setInterval(() => load(false).catch((error) => {
-      $("status").textContent = error.message
-    }), 120000)
+    }).finally(scheduleReload)
   </script>
 </body>
 </html>`
@@ -696,6 +868,41 @@ const start = async () => {
       }
     | undefined
   let pending: Promise<CashWalletCutoverOperatorSnapshot> | undefined
+
+  // Stage pipeline + milestone highlights: diff consecutive snapshots and
+  // keep a bounded feed. Also logged, so `kubectl logs` retains the history
+  // across browser sessions.
+  let lastStageSummary: CashWalletCutoverStageSummary | undefined
+  const MILESTONE_LIMIT = 300
+  const milestones: CashWalletCutoverMilestone[] = [
+    {
+      at: new Date().toISOString(),
+      kind: "info",
+      text: `Dashboard online — watching ${manifestAccounts.length} accounts`,
+    },
+  ]
+
+  const observeStageProgress = (result: CashWalletCutoverOperatorSnapshot) => {
+    const current = summarizeCashWalletCutoverStages({
+      migrationStatuses: result.accounts.map((account) => account.migrationStatus),
+      cutoverState: result.cutover.state,
+      runId: result.cutover.runId,
+      missingUsdtWallets: result.summary.wallets.missingUsdt,
+    })
+    const fresh = deriveCashWalletCutoverMilestones({
+      previous: lastStageSummary,
+      current,
+      at: new Date().toISOString(),
+    })
+    for (const milestone of fresh) {
+      milestones.push(milestone)
+      baseLogger.info({ milestone }, "cutover milestone")
+    }
+    if (milestones.length > MILESTONE_LIMIT) {
+      milestones.splice(0, milestones.length - MILESTONE_LIMIT)
+    }
+    lastStageSummary = current
+  }
   const walletCurrencies = new Map<WalletId, WalletCurrency>()
   const balanceCache = new Map<WalletId, CachedBalance>()
   const balanceQueue: Array<{ walletId: WalletId; currency: WalletCurrency }> = []
@@ -858,6 +1065,7 @@ const start = async () => {
         }),
     })
     registerSnapshotWallets(result)
+    observeStageProgress(result)
     return result
   }
 
@@ -879,11 +1087,38 @@ const start = async () => {
     return pending
   }
 
+  // Keep stage/milestone tracking alive even with no browser tab open.
+  // Tight cadence only while a run/rollback is live; idle polls back off —
+  // each rebuild is a discovery scan over every unlocked account plus
+  // several mongo queries per dashboard account, and pre-PR it only ran
+  // while a browser was actually polling.
+  const BACKGROUND_POLL_ACTIVE_MS = 30_000
+  const BACKGROUND_POLL_IDLE_MS = 5 * 60_000
+  const backgroundPoll = () => {
+    snapshot(false)
+      .catch((error) =>
+        baseLogger.warn({ error }, "cutover dashboard background poll failed"),
+      )
+      .finally(() => {
+        const active =
+          lastStageSummary !== undefined &&
+          (lastStageSummary.cutoverState === "in_progress" ||
+            lastStageSummary.inFlight > 0 ||
+            lastStageSummary.counts.rollingBack > 0)
+        setTimeout(
+          backgroundPoll,
+          active ? BACKGROUND_POLL_ACTIVE_MS : BACKGROUND_POLL_IDLE_MS,
+        )
+      })
+  }
+  setTimeout(backgroundPoll, BACKGROUND_POLL_ACTIVE_MS)
+
   const app = express()
   app.get("/", (_req, res) => res.type("html").send(html))
   app.get("/api/snapshot", async (req, res) => {
     try {
-      res.json(await snapshot(req.query.refresh === "1"))
+      const result = await snapshot(req.query.refresh === "1")
+      res.json({ ...result, stages: lastStageSummary, milestones })
     } catch (error) {
       baseLogger.error({ error }, "Cash wallet cutover dashboard snapshot failed")
       res.status(500).json({
@@ -945,6 +1180,9 @@ const start = async () => {
         active: activeBalanceId,
       },
     })
+  })
+  app.get("/api/milestones", (_req, res) => {
+    res.json({ stages: lastStageSummary, milestones })
   })
   app.get("/api/export.csv", async (_req, res) => {
     try {

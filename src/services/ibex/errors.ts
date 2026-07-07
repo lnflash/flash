@@ -15,7 +15,7 @@ export class IbexError extends DomainError {
     super(err)
     this.type = err.name
     this.level = level
-    // this.httpCode = err instanceof ApiError ? err.code : undefined
+    this.httpCode = err instanceof ApiError ? err.httpCode : undefined
   }
 }
 

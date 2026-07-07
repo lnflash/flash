@@ -12,11 +12,6 @@ jest.mock("@services/logger", () => ({
   baseLogger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }))
 
-jest.mock("request-ip", () => ({
-  __esModule: true,
-  default: { getClientIp: jest.fn() },
-}))
-
 jest.mock("@services/mongoose/bridge-replay-log", () => ({
   createBridgeReplay: jest.fn(),
 }))
@@ -45,7 +40,6 @@ import * as ReplayLog from "@services/mongoose/bridge-replay-log"
 import { depositHandler } from "@services/bridge/webhook-server/routes/deposit"
 import { kycHandler } from "@services/bridge/webhook-server/routes/kyc"
 import { transferHandler } from "@services/bridge/webhook-server/routes/transfer"
-import requestIp from "request-ip"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -60,10 +54,14 @@ const makeReq = (
   body: Record<string, unknown> = {},
   headers: Record<string, string> = {},
   socketRemoteAddress?: string,
+  // Express-resolved client IP (`req.ip`, honoring `trust proxy`); absent on
+  // a bare socket the way it is when Express itself hasn't populated it.
+  ip?: string,
 ) =>
   ({
     body,
     headers,
+    ip,
     socket: { remoteAddress: socketRemoteAddress },
   }) as unknown as Request
 
@@ -95,7 +93,6 @@ describe("replayIngressMiddleware", () => {
   })
 
   it("allows loopback replay calls (by socket address) without an explicit allowlist", () => {
-    ;(requestIp.getClientIp as jest.Mock).mockReturnValue(null)
     const res = makeRes()
     const next = jest.fn()
 
@@ -105,38 +102,47 @@ describe("replayIngressMiddleware", () => {
     expect(res.status as jest.Mock).not.toHaveBeenCalled()
   })
 
-  it("rejects a spoofed loopback X-Forwarded-For from a public socket", () => {
-    // request-ip resolves headers like X-Forwarded-For, which the caller
-    // controls — only the socket address may grant the loopback exemption.
-    ;(requestIp.getClientIp as jest.Mock).mockReturnValue("127.0.0.1")
+  it("rejects a loopback req.ip from a public socket", () => {
+    // req.ip derives from X-Forwarded-For; only the socket address may grant
+    // the loopback exemption, whatever the proxy chain reports.
     const res = makeRes()
     const next = jest.fn()
 
-    replayIngressMiddleware(makeReq({}, {}, "198.51.100.9"), res, next)
+    replayIngressMiddleware(makeReq({}, {}, "198.51.100.9", "127.0.0.1"), res, next)
 
     expect(next).not.toHaveBeenCalled()
     expect(res.status as jest.Mock).toHaveBeenCalledWith(403)
   })
 
   it("rejects public replay calls when no allowlist matches", () => {
-    ;(requestIp.getClientIp as jest.Mock).mockReturnValue("198.51.100.9")
     const res = makeRes()
     const next = jest.fn()
 
-    replayIngressMiddleware(makeReq({}, {}, "198.51.100.9"), res, next)
+    replayIngressMiddleware(makeReq({}, {}, "198.51.100.9", "198.51.100.9"), res, next)
 
     expect(next).not.toHaveBeenCalled()
     expect(res.status as jest.Mock).toHaveBeenCalledWith(403)
   })
 
-  it("allows public replay calls from the configured allowlist", () => {
+  it("allows public replay calls whose req.ip is on the configured allowlist", () => {
     expect(isReplayIpAllowed("198.51.100.9", "198.51.100.0/24")).toBe(true)
-    ;(requestIp.getClientIp as jest.Mock).mockReturnValue("198.51.100.9")
     process.env.BRIDGE_WEBHOOK_REPLAY_ALLOWED_IPS = "198.51.100.0/24"
     const res = makeRes()
     const next = jest.fn()
 
-    replayIngressMiddleware(makeReq({}, {}, "10.0.0.7"), res, next)
+    // Socket is the ingress pod; req.ip (trust proxy) is the real operator IP.
+    replayIngressMiddleware(makeReq({}, {}, "10.0.0.7", "198.51.100.9"), res, next)
+
+    expect(next).toHaveBeenCalledTimes(1)
+    expect(res.status as jest.Mock).not.toHaveBeenCalled()
+  })
+
+  it("falls back to the socket address when req.ip is absent", () => {
+    process.env.BRIDGE_WEBHOOK_REPLAY_ALLOWED_IPS = "198.51.100.0/24"
+    const res = makeRes()
+    const next = jest.fn()
+
+    replayIngressMiddleware(makeReq({}, {}, "198.51.100.9"), res, next)
 
     expect(next).toHaveBeenCalledTimes(1)
     expect(res.status as jest.Mock).not.toHaveBeenCalled()

@@ -619,6 +619,7 @@ enum CashWalletCutoverState
   COMPLETE @join__enumValue(graph: PUBLIC)
   IN_PROGRESS @join__enumValue(graph: PUBLIC)
   PRE @join__enumValue(graph: PUBLIC)
+  ROLLED_BACK @join__enumValue(graph: PUBLIC)
 }
 
 """(Positive) Cent amount (1/100 of a dollar)"""
@@ -797,7 +798,18 @@ Provides global settings for the application which might have an impact for the 
 type Globals
   @join__type(graph: PUBLIC)
 {
+  """
+  Whether Bridge (international bank transfer) entry points
+  should be shown to the user. Controlled by the instance-wide bridge feature flag.
+  """
+  bridgeEnabled: Boolean!
   buildInformation: BuildInformation!
+
+  """
+  Whether cashout (settle to local bank account) entry points
+  should be shown to the user. Controlled by the instance-wide cashout feature flag.
+  """
+  cashoutEnabled: Boolean!
   feesInformation: FeesInformation!
 
   """

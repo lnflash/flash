@@ -3,7 +3,7 @@ import { decodeInvoice } from "@domain/bitcoin/lightning"
 import { InvalidWalletId } from "@domain/errors"
 import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
-import { AccountsRepository } from "@services/mongoose"
+import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
 import { UnexpectedIbexResponse } from "@services/ibex/errors"
 import { getFunderWalletId } from "@services/ledger/caching"
@@ -30,6 +30,8 @@ type RuntimeServiceDependencies = {
   createNoAmountInvoice?: typeof Ibex.addInvoice
   payInvoice?: typeof Ibex.payInvoice
   accountsRepo?: Pick<ReturnType<typeof AccountsRepository>, "findById">
+  walletsRepo?: Pick<ReturnType<typeof WalletsRepository>, "findById" | "listByAccountId">
+  getFunderWalletId?: typeof getFunderWalletId
   getTreasuryWalletId?: () => Promise<WalletId | ApplicationError>
   maxRateLimitAttempts?: number
   rateLimitRetryDelayMs?: number
@@ -124,8 +126,14 @@ const sleep: SleepFn = (delayMs: number) =>
 
 const errorMessage = (error: Error): string => error.message || String(error)
 
-const isIbexRateLimitError = (error: Error): boolean =>
-  errorMessage(error).toLowerCase().includes("too many requests")
+const isIbexRateLimitError = (error: Error): boolean => {
+  // Structural first (ENG-485): IbexError.httpCode (via ibex-client >= 3.2.0
+  // ApiError) for returned errors, .status for raw thrown FetchErrors. Text
+  // match kept as a fallback for anything that carries neither.
+  const candidate = error as { httpCode?: unknown; status?: unknown }
+  if (candidate.httpCode === 429 || candidate.status === 429) return true
+  return errorMessage(error).toLowerCase().includes("too many requests")
+}
 
 const withIbexRateLimitRetry = async <T>({
   operation,
@@ -139,7 +147,18 @@ const withIbexRateLimitRetry = async <T>({
   sleepFn: SleepFn
 }): Promise<T> => {
   for (let attempt = 1; ; attempt += 1) {
-    const result = await operation()
+    // The IBEX client surfaces rate limits both ways: some call paths return
+    // an IbexError, others REJECT with a raw FetchError ("Too Many Requests").
+    // Retry both — a thrown 429 killed 233 accounts in the ENG-461 rehearsal.
+    let result: T | Error
+    try {
+      result = await operation()
+    } catch (thrown) {
+      const error = thrown instanceof Error ? thrown : new Error(String(thrown))
+      if (!isIbexRateLimitError(error) || attempt >= maxAttempts) throw thrown
+      await sleepFn(retryDelayMs)
+      continue
+    }
 
     if (
       !(result instanceof Error) ||
@@ -163,6 +182,8 @@ export const createCashWalletMigrationRuntimeServices = (
   const noAmountInvoiceForRecipient = deps.createNoAmountInvoice ?? Ibex.addInvoice
   const payInvoice = deps.payInvoice ?? Ibex.payInvoice
   const accountsRepo = deps.accountsRepo ?? AccountsRepository()
+  const walletsRepo = deps.walletsRepo ?? WalletsRepository()
+  const funderWalletId = deps.getFunderWalletId ?? getFunderWalletId
   const rateLimitRetry = {
     maxAttempts: Math.max(
       1,
@@ -171,9 +192,28 @@ export const createCashWalletMigrationRuntimeServices = (
     retryDelayMs: deps.rateLimitRetryDelayMs ?? CUTOVER_IBEX_RATE_LIMIT_RETRY_DELAY_MS,
     sleepFn: deps.sleep ?? sleep,
   }
+  // ENG-483: balance reads were the one IBEX call path NOT retried on 429 —
+  // an unthrottled batch mass-failed 233 accounts at the balance_read step.
+  // Every account-details read goes through the same retry as invoice/payment.
+  const readRawAccountDetails = (accountId: IbexAccountId) =>
+    withIbexRateLimitRetry({
+      ...rateLimitRetry,
+      operation: () => rawAccountDetails(accountId),
+    })
 
   return {
     now: deps.now ?? (() => new Date()),
+    accountReader: {
+      // Rollback (ENG-401): read the live default wallet so pointer restore
+      // is a no-op when the account never flipped (or was already restored).
+      getDefaultWalletId: async (
+        accountId: AccountId,
+      ): Promise<WalletId | ApplicationError> => {
+        const account = await accountsRepo.findById(accountId)
+        if (account instanceof Error) return account
+        return account.defaultWalletId
+      },
+    },
     provisioningService: {
       ensureDestinationWallet: async ({
         accountId,
@@ -196,7 +236,7 @@ export const createCashWalletMigrationRuntimeServices = (
       readSourceBalanceUsdCents: async (
         migration: CashWalletMigration,
       ): Promise<string | ApplicationError> => {
-        const account = await rawAccountDetails(
+        const account = await readRawAccountDetails(
           migration.legacyUsdWalletId as IbexAccountId,
         )
         if (account instanceof Error) return account
@@ -205,11 +245,29 @@ export const createCashWalletMigrationRuntimeServices = (
       readDestinationBalanceUsdtMicros: async (
         migration: CashWalletMigration,
       ): Promise<string | ApplicationError> => {
-        const account = await rawAccountDetails(
+        const account = await readRawAccountDetails(
           migration.destinationUsdtWalletId as IbexAccountId,
         )
         if (account instanceof Error) return account
         return ibexMajorUnitsToUsdtMicros(account.balance ?? 0)
+      },
+      // Rollback (ENG-401): the FLOORED spendable USDT balance. The rounded
+      // read above can round UP past what's actually spendable (e.g. balance
+      // 0.443691959514 → 443692 micros), so paying it back verbatim overspends
+      // and IBEX 400s. Flooring guarantees the reverse amount never exceeds the
+      // real balance.
+      readDestinationSpendableUsdtMicros: async (
+        migration: CashWalletMigration,
+      ): Promise<string | ApplicationError> => {
+        const account = await readRawAccountDetails(
+          migration.destinationUsdtWalletId as IbexAccountId,
+        )
+        if (account instanceof Error) return account
+        return decimalToScaledInteger({
+          amount: account.balance ?? 0,
+          scale: 6,
+          round: false,
+        })
       },
     },
     invoiceService: {
@@ -304,7 +362,7 @@ export const createCashWalletMigrationRuntimeServices = (
       }: {
         legacyUsdWalletId: WalletId
       }): Promise<true | ApplicationError> => {
-        const account = await rawAccountDetails(legacyUsdWalletId as IbexAccountId)
+        const account = await readRawAccountDetails(legacyUsdWalletId as IbexAccountId)
         if (account instanceof Error) return account
         if (!hasOnlySubMicroMajorUnitDust(account.balance)) {
           return new CashWalletMigrationFailedError("Legacy USD wallet is not zero")
@@ -334,7 +392,7 @@ export const createCashWalletMigrationRuntimeServices = (
           )
         }
 
-        const currentAccount = await rawAccountDetails(
+        const currentAccount = await readRawAccountDetails(
           migration.destinationUsdtWalletId as IbexAccountId,
         )
         if (currentAccount instanceof Error) return currentAccount
@@ -350,7 +408,53 @@ export const createCashWalletMigrationRuntimeServices = (
       },
     },
     treasuryService: {
-      getTreasuryWalletId: deps.getTreasuryWalletId ?? getFunderWalletId,
+      // ENG-482: the treasury must be a USDT wallet — fee reimbursements and
+      // rollback top-ups pay USDT invoices, and paying them from the funder's
+      // BTC default 404s at IBEX (stranded every funded account in the ENG-461
+      // rehearsal). Resolve the funder's USDT wallet regardless of which
+      // wallet is its default, so prod doesn't depend on flipping the funder
+      // default as an operational step.
+      // Memoized: the id is invariant for the life of the run and this is
+      // called per migration at the fee step — without the cache a transient
+      // mongo blip mid-run fails a step the old memoized getFunderWalletId
+      // never would have.
+      getTreasuryWalletId:
+        deps.getTreasuryWalletId ??
+        (() => {
+          let cached: WalletId | undefined
+          return async (): Promise<WalletId | ApplicationError> => {
+            if (cached !== undefined) return cached
+            const funderDefaultWalletId = await funderWalletId()
+            const funderWallet = await walletsRepo.findById(funderDefaultWalletId)
+            if (funderWallet instanceof Error) return funderWallet
+            if (funderWallet.currency === WalletCurrency.Usdt) {
+              cached = funderWallet.id
+              return cached
+            }
+
+            const funderWallets = await walletsRepo.listByAccountId(
+              funderWallet.accountId,
+            )
+            if (funderWallets instanceof Error) return funderWallets
+            const usdtWallets = funderWallets.filter(
+              (wallet) => wallet.currency === WalletCurrency.Usdt,
+            )
+            if (usdtWallets.length === 0) {
+              return new CashWalletMigrationFailedError(
+                "Funder account has no USDT wallet — create and fund the cutover treasury before running the cutover (ENG-482)",
+              )
+            }
+            if (usdtWallets.length > 1) {
+              // No unique index enforces one-USDT-wallet-per-account; picking
+              // one blind risks paying from an unfunded duplicate.
+              return new CashWalletMigrationFailedError(
+                `Funder account has ${usdtWallets.length} USDT wallets — resolve the duplicate before running the cutover (ENG-482)`,
+              )
+            }
+            cached = usdtWallets[0].id
+            return cached
+          }
+        })(),
     },
     pointerService: {
       flipDefaultWallet: async ({
@@ -379,7 +483,7 @@ export const createCashWalletMigrationRuntimeServices = (
       }: {
         legacyUsdWalletId: WalletId
       }): Promise<true | ApplicationError> => {
-        const account = await rawAccountDetails(legacyUsdWalletId as IbexAccountId)
+        const account = await readRawAccountDetails(legacyUsdWalletId as IbexAccountId)
         if (account instanceof Error) return account
         if (!hasOnlySubMicroMajorUnitDust(account.balance)) {
           return new CashWalletMigrationFailedError("Legacy USD wallet is not zero")

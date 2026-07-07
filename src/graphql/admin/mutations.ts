@@ -4,6 +4,7 @@ import AccountUpdateLevelMutation from "@graphql/admin/root/mutation/account-upd
 import AccountUpdateStatusMutation from "@graphql/admin/root/mutation/account-update-status"
 import BusinessUpdateMapInfoMutation from "@graphql/admin/root/mutation/business-update-map-info"
 import CashWalletCutoverUpdateMutation from "@graphql/admin/root/mutation/cash-wallet-cutover-update"
+import CashWalletCutoverRollbackMutation from "@graphql/admin/root/mutation/cash-wallet-cutover-rollback"
 
 import UserUpdatePhoneMutation from "./root/mutation/user-update-phone"
 import BusinessDeleteMapInfoMutation from "./root/mutation/delete-business-map"
@@ -26,6 +27,7 @@ export const mutationFields = {
     sendNotification: SendNotificationMutation,
     cashoutNotificationSend: sendCashoutSettledNotification,
     cashWalletCutoverUpdate: CashWalletCutoverUpdateMutation,
+    cashWalletCutoverRollback: CashWalletCutoverRollbackMutation,
   },
 }
 

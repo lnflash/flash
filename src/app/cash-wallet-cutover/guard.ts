@@ -36,7 +36,36 @@ export const evaluateCashWalletCutoverGuard = ({
   migration?: CashWalletMigration | null
 }): { route: CashWalletCutoverRoute } | ApplicationError => {
   if (cutover.state === "pre") return { route: "legacy_usd" }
-  if (cutover.state === "complete") return { route: "usdt" }
+
+  if (cutover.state === "complete") {
+    // Single-account rollback can occur after global complete (ENG-364 mode
+    // 3D): those accounts' funds are back on the legacy USD wallet and must
+    // not be blanket-routed to USDT.
+    if (migration?.status === "rollback_started") {
+      return new CashWalletCutoverInProgressError()
+    }
+    if (migration?.status === "rolled_back") return { route: "legacy_usd" }
+    return { route: "usdt" }
+  }
+
+  if (cutover.state === "rolled_back") {
+    // Run-level rollback completion requires every migration to be
+    // rolled_back or skipped_already_migrated (completePrimaryCashWalletRollback
+    // enforces this), so route by where funds actually sit and fail closed
+    // on anything inconsistent with a rolled-back run.
+    if (
+      !migration ||
+      migration.status === "not_started" ||
+      migration.status === "rolled_back"
+    ) {
+      return { route: "legacy_usd" }
+    }
+    if (migration.status === "skipped_already_migrated") return { route: "usdt" }
+    if (migration.status === "rollback_started") {
+      return new CashWalletCutoverInProgressError()
+    }
+    return new CashWalletMigrationFailedError()
+  }
 
   if (!migration || migration.status === "not_started") return { route: "legacy_usd" }
   if (

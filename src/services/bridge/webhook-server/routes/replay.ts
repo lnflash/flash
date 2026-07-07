@@ -2,7 +2,6 @@ import crypto from "crypto"
 
 import { Request, Response } from "express"
 import ipaddr from "ipaddr.js"
-import requestIp from "request-ip"
 
 import { BridgeConfig } from "@config"
 
@@ -144,14 +143,16 @@ export const replayIngressMiddleware = (
   res: Response,
   next: () => void,
 ) => {
-  // Loopback trust must come from the socket address, never from request-ip:
-  // request-ip prefers X-Forwarded-For, which any external caller can set to
-  // "127.0.0.1" and walk through this gate. The allowlist path below still uses
-  // request-ip so operators behind a trusted LB match on their real IP — it is
-  // only meaningful when the ingress strips or overwrites client-supplied XFF.
+  // Loopback trust must come from the socket address, never from a header any
+  // external caller can set to "127.0.0.1" and walk through this gate.
   if (isLoopbackIp(req.socket?.remoteAddress)) return next()
 
-  const clientIp = requestIp.getClientIp(req)
+  // req.ip, not request-ip: with `trust proxy` set on the server, Express
+  // resolves the proxy-appended (rightmost untrusted) X-Forwarded-For entry,
+  // so operators behind the ingress match on their real IP while forged XFF
+  // entries stay untrusted. request-ip prefers the LEFTMOST entry, which a
+  // caller could forge to an allowlisted IP.
+  const clientIp = req.ip ?? req.socket?.remoteAddress
 
   if (!isReplayIpAllowed(clientIp)) {
     baseLogger.warn({ clientIp, path: req.path }, "Rejected Bridge replay request")
