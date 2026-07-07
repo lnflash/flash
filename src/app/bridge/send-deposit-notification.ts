@@ -1,4 +1,4 @@
-import { getI18nInstance } from "@config"
+import { BridgeConfig, getI18nInstance } from "@config"
 import { checkedToAccountId } from "@domain/accounts"
 import { getLanguageOrDefault } from "@domain/locale"
 import {
@@ -77,6 +77,8 @@ export const sendBridgeDepositNotification = async ({
 export const sendBridgeDepositNotificationBestEffort = async (
   args: Parameters<typeof sendBridgeDepositNotification>[0],
 ): Promise<void> => {
+  // ENG-466: never push a Bridge deposit notification when the feature is off.
+  if (!BridgeConfig.enabled) return
   const result = await sendBridgeDepositNotification(args)
 
   if (result instanceof DeviceTokensNotRegisteredNotificationsServiceError) {
