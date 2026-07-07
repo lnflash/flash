@@ -8,7 +8,7 @@ import axios from "axios"
 import { baseLogger as logger } from "@services/logger"
 import { AccountsRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
-import { ibexWebhookPaths } from "@services/ibex/webhook-config"
+import { ibexWebhookPaths, ibexWebhookEndpoints } from "@services/ibex/webhook-config"
 import { extractPaymentHashFromBolt11 } from "@utils"
 
 import { authenticate, logRequest, validateIbexIp } from "../middleware"
@@ -40,6 +40,40 @@ const webhookRateLimit = rateLimitMiddleware({
 })
 
 const paths = ibexWebhookPaths.onPay
+
+const PAYMENT_HASH_RE = /^[0-9a-f]{64}$/i
+
+export const buildVerifyUrl = (paymentHash: string): string =>
+  ibexWebhookEndpoints.onPay.verify.replace(":paymentHash", paymentHash)
+
+// LUD-21: settlement check for an invoice issued by the LNURL-pay callback
+// above. The payment hash acts as an unguessable capability, so the endpoint
+// is public (permissive CORS — web wallets poll it cross-origin).
+export const lnurlVerifyHandler = async (req: Request, resp: Response) => {
+  try {
+    const { paymentHash } = req.params
+    if (!paymentHash || !PAYMENT_HASH_RE.test(paymentHash)) {
+      return resp.status(404).json({ status: "ERROR", reason: "Not found" })
+    }
+
+    const invoice = await Ibex.invoiceFromHash(paymentHash as PaymentHash)
+    if (invoice instanceof Error || !invoice.bolt11) {
+      return resp.status(404).json({ status: "ERROR", reason: "Not found" })
+    }
+
+    const settled = invoice.state?.name === "SETTLED" || Boolean(invoice.settleDateUtc)
+
+    return resp.json({
+      status: "OK",
+      settled,
+      preimage: settled && invoice.preImage ? invoice.preImage : null,
+      pr: invoice.bolt11,
+    })
+  } catch (err) {
+    logger.error({ err }, "LNURL-pay verify failed")
+    return resp.status(404).json({ status: "ERROR", reason: "Not found" })
+  }
+}
 
 const router = express.Router()
 
@@ -115,17 +149,26 @@ router.get(
         await zapRecord.save()
       }
 
-      // 5. Return LNURL-pay JSON
+      // 5. Return LNURL-pay JSON (verify per LUD-21)
       return resp.json({
         pr: bolt11,
         successAction: successAction || null,
         routes: [],
+        verify: buildVerifyUrl(invoiceHash),
       })
     } catch (err) {
       logger.error({ err }, "LNURL-pay proxy callback failed")
       return resp.status(500).json({ error: "Internal server error" })
     }
   },
+)
+
+router.get(
+  paths.verify,
+  publicLnurlRateLimit,
+  cors({ origin: true, methods: ["GET"] }),
+  logRequest,
+  lnurlVerifyHandler,
 )
 
 // Keep other routes as stubs. These are Ibex webhooks (authenticated), so they
