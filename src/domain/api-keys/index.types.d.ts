@@ -60,6 +60,13 @@ type CreateApiKeyArgs = {
   expiresIn?: number | null // seconds until expiration
 }
 
+type VerifiedApiKey = {
+  apiKey: ApiKey
+  // Subject for the oathkeeper-minted id_token — the key owner's kratos
+  // identity, so the backend resolves the account exactly like a session.
+  kratosUserId: UserId
+}
+
 type CreateApiKeyResult = {
   id: ApiKeyId
   keyId: ApiKeyKeyId

@@ -3,6 +3,7 @@ import { createHash } from "crypto"
 import {
   API_KEY_PREFIX,
   API_KEY_SCOPES,
+  InvalidApiKeyFormatError,
   InvalidApiKeyIpConstraintError,
   InvalidApiKeyNameError,
   InvalidApiKeyScopeError,
@@ -11,6 +12,8 @@ import {
   checkedToApiKeyScopes,
   generateApiKey,
   hashApiKeySecret,
+  isApiKeySecretValid,
+  parseApiKey,
 } from "@domain/api-keys"
 
 describe("generateApiKey", () => {
@@ -52,6 +55,48 @@ describe("hashApiKeySecret", () => {
   it("is deterministic and hex-encoded", () => {
     expect(hashApiKeySecret("some-secret")).toBe(hashApiKeySecret("some-secret"))
     expect(hashApiKeySecret("some-secret")).toMatch(/^[0-9a-f]{64}$/)
+  })
+})
+
+describe("parseApiKey", () => {
+  it("round-trips generated keys", () => {
+    const generated = generateApiKey()
+
+    const parsed = parseApiKey(generated.fullKey)
+    if (parsed instanceof Error) throw parsed
+
+    expect(parsed.keyId).toBe(generated.keyId)
+    expect(parsed.secret).toBe(generated.secret)
+  })
+
+  it("rejects malformed keys", () => {
+    const { keyId, secret } = generateApiKey()
+    const malformed = [
+      "",
+      "not-a-key",
+      `flash_${keyId}_${secret}`, // wrong prefix
+      `fk_${keyId}`, // missing secret
+      `fk_${keyId.slice(0, 6)}_${secret}`, // short keyId
+      `fk_${keyId.toUpperCase()}_${secret}`, // keyId must be lowercase hex
+      `fk_${keyId}_${secret.slice(0, 63)}`, // short secret
+      `fk_${keyId}_${secret}x`, // long secret
+    ]
+
+    for (const raw of malformed) {
+      expect(parseApiKey(raw)).toBeInstanceOf(InvalidApiKeyFormatError)
+    }
+  })
+})
+
+describe("isApiKeySecretValid", () => {
+  it("accepts the matching secret and rejects others", () => {
+    const { secret, hashedSecret } = generateApiKey()
+    const other = generateApiKey()
+
+    expect(isApiKeySecretValid({ secret, hashedKey: hashedSecret })).toBe(true)
+    expect(isApiKeySecretValid({ secret: other.secret, hashedKey: hashedSecret })).toBe(
+      false,
+    )
   })
 })
 

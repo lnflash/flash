@@ -1,6 +1,7 @@
-import { createHash, randomBytes } from "crypto"
+import { createHash, randomBytes, timingSafeEqual } from "crypto"
 
 import {
+  InvalidApiKeyFormatError,
   InvalidApiKeyIpConstraintError,
   InvalidApiKeyNameError,
   InvalidApiKeyScopeError,
@@ -39,6 +40,32 @@ export const generateApiKey = (): GeneratedApiKey => {
     fullKey: `${API_KEY_PREFIX}_${keyId}_${secret}`,
     hashedSecret: hashApiKeySecret(secret),
   }
+}
+
+// Anchored lengths keep the parse unambiguous even though the base64url
+// secret may itself contain underscores.
+const API_KEY_REGEX = /^fk_([0-9a-f]{8})_([A-Za-z0-9_-]{64})$/
+
+export const parseApiKey = (
+  rawKey: string,
+): { keyId: ApiKeyKeyId; secret: string } | ValidationError => {
+  const match = rawKey.match(API_KEY_REGEX)
+  if (!match) {
+    return new InvalidApiKeyFormatError()
+  }
+  return { keyId: match[1] as ApiKeyKeyId, secret: match[2] }
+}
+
+export const isApiKeySecretValid = ({
+  secret,
+  hashedKey,
+}: {
+  secret: string
+  hashedKey: ApiKeySecretHash
+}): boolean => {
+  const candidate = Buffer.from(hashApiKeySecret(secret), "hex")
+  const expected = Buffer.from(hashedKey, "hex")
+  return candidate.length === expected.length && timingSafeEqual(candidate, expected)
 }
 
 export const checkedToApiKeyName = (name: string): ApiKeyName | ValidationError => {

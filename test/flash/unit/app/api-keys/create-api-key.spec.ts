@@ -23,6 +23,12 @@ jest.mock("@services/mongoose/api-keys", () => ({
   ApiKeysRepository: jest.fn(),
 }))
 
+// verify-api-key (re-exported by @app/api-keys) pulls in the real mongoose
+// schema tree via @services/mongoose — keep it out of this unit
+jest.mock("@services/mongoose", () => ({
+  AccountsRepository: jest.fn(),
+}))
+
 const mockedApiKeysRepository = ApiKeysRepository as jest.MockedFunction<
   typeof ApiKeysRepository
 >
