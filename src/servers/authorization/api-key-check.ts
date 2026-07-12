@@ -26,7 +26,7 @@ export const apiKeyCheckHandler = async (req: Request, res: Response) => {
   // client-controlled header, on this oathkeeper auth-subrequest path. If that
   // snippet is ever dropped this becomes spoofable — the IP-constraint control
   // depends on it. verifyApiKey fails closed for IP-constrained keys when it is
-  // absent or unparseable.
+  // absent or unparsable.
   const requestIp = parseIps(req.headers["x-real-ip"])
   const verified = await verifyApiKey({ rawKey, requestIp })
   if (verified instanceof Error) {
