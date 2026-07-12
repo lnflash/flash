@@ -769,6 +769,16 @@ export const configSchema = {
       uniqueItems: true,
       default: [],
     },
+    apiKeys: {
+      type: "object",
+      properties: {
+        maxKeysPerAccount: { type: "integer", minimum: 1, maximum: 100, default: 10 },
+      },
+      additionalProperties: false,
+      default: {
+        maxKeysPerAccount: 10,
+      },
+    },
   },
   required: [
     "lightningAddressDomain",

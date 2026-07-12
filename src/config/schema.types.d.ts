@@ -239,6 +239,9 @@ type YamlSchema = {
     default: boolean // whether this topic should be subscribed to by default
     name: string
   }[]
+  apiKeys?: {
+    maxKeysPerAccount?: number
+  }
 }
 
 type FrappeCredentials = {
