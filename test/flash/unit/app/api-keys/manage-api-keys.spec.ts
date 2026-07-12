@@ -36,6 +36,7 @@ const oldKey: ApiKey = {
   status: "active" as ApiKeyStatus,
   ipConstraints: ["10.0.0.0/8"],
   metadata: { env: "prod" },
+  rateLimitPerMinute: 250,
   lastUsedAt: null,
   createdAt: new Date("2026-01-01"),
   expiresAt: new Date("2099-01-01"),
@@ -64,6 +65,7 @@ describe("api key management", () => {
         scopes: k.scopes,
         ipConstraints: k.ipConstraints ?? [],
         metadata: k.metadata ?? {},
+        rateLimitPerMinute: k.rateLimitPerMinute ?? null,
         expiresAt: k.expiresAt,
       })),
       findByKeyId: jest.fn(),
@@ -120,6 +122,8 @@ describe("api key management", () => {
       const created = repo.create.mock.calls[0][0]
       expect(created.ipConstraints).toEqual(oldKey.ipConstraints)
       expect(created.metadata).toEqual(oldKey.metadata)
+      expect(created.rateLimitPerMinute).toBe(oldKey.rateLimitPerMinute)
+      expect(result.rateLimitPerMinute).toBe(oldKey.rateLimitPerMinute)
       expect(repo.revoke).toHaveBeenCalledWith({ id: oldKey.id, accountId })
 
       const createOrder = repo.create.mock.invocationCallOrder[0]

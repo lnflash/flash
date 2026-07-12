@@ -34,6 +34,8 @@ const ApiKeySchema = new Schema({
   // IP whitelisting — single IPs or CIDR ranges
   ipConstraints: { type: [String], default: [] },
   metadata: { type: Schema.Types.Mixed, default: {} },
+  // Requests/minute for this key; null → platform default applies
+  rateLimitPerMinute: { type: Number, default: null, min: 1, max: 10000 },
   lastUsedAt: { type: Date, default: null },
   expiresAt: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now },
@@ -54,6 +56,7 @@ interface ApiKeyDocument {
   status: string
   ipConstraints: string[]
   metadata: Record<string, unknown>
+  rateLimitPerMinute: number | null
   lastUsedAt: Date | null
   expiresAt: Date | null
   createdAt: Date
@@ -70,6 +73,7 @@ const translateToApiKey = (doc: ApiKeyDocument): ApiKey => {
     status: doc.status as ApiKeyStatus,
     ipConstraints: doc.ipConstraints ?? [],
     metadata: (doc.metadata ?? {}) as Record<string, unknown>,
+    rateLimitPerMinute: doc.rateLimitPerMinute ?? null,
     lastUsedAt: doc.lastUsedAt,
     createdAt: doc.createdAt,
     expiresAt: doc.expiresAt,
@@ -88,6 +92,7 @@ export const ApiKeysRepository = (): IApiKeysRepository => {
           scopes: apiKey.scopes,
           ipConstraints: apiKey.ipConstraints ?? [],
           metadata: apiKey.metadata ?? {},
+          rateLimitPerMinute: apiKey.rateLimitPerMinute,
           expiresAt: apiKey.expiresAt,
           status: "active",
         })

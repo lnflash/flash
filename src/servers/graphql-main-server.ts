@@ -8,8 +8,8 @@ import { gqlMainSchema, mutationFields, queryFields } from "@graphql/public"
 import { bootstrap } from "@app/bootstrap"
 import { baseLogger } from "@services/logger"
 import { setupMongoConnection } from "@services/mongodb"
-import { shield } from "graphql-shield"
-import { Rule } from "graphql-shield/typings/rules"
+import { and, shield } from "graphql-shield"
+import { ShieldRule } from "graphql-shield/typings/types"
 import {
   ACCOUNT_USERNAME,
   SemanticAttributes,
@@ -21,8 +21,14 @@ import { NextFunction, Request, Response } from "express"
 import { parseIps } from "@domain/accounts-ips"
 import { parseCashWalletClientCapabilities } from "@app/cash-wallet-cutover/client-capability"
 
+import { startApiKeyMetricsServer } from "./api-key-metrics"
 import { startApolloServerForAdminSchema } from "./graphql-admin-server"
-import { isAuthenticated, startApolloServer } from "./graphql-server"
+import {
+  isAuthenticated,
+  scopedApiKeyAccess,
+  scopedApiKeyTypeField,
+  startApolloServer,
+} from "./graphql-server"
 import { walletIdMiddleware } from "./middlewares/wallet-id"
 
 import { sessionPublicContext } from "./middlewares/session"
@@ -71,26 +77,51 @@ const setGqlContext = async (
 }
 
 export async function startApolloServerForCoreSchema() {
-  const authedQueryFields: { [key: string]: Rule } = {}
+  const authedQueryFields: { [key: string]: ShieldRule } = {}
   for (const key of Object.keys({
     ...queryFields.authed.atAccountLevel,
     ...queryFields.authed.atWalletLevel,
   })) {
-    authedQueryFields[key] = isAuthenticated
+    authedQueryFields[key] = and(isAuthenticated, scopedApiKeyAccess(key))
   }
 
-  const authedMutationFields: { [key: string]: Rule } = {}
+  const authedMutationFields: { [key: string]: ShieldRule } = {}
   for (const key of Object.keys({
     ...mutationFields.authed.atAccountLevel,
     ...mutationFields.authed.atWalletLevel,
   })) {
-    authedMutationFields[key] = isAuthenticated
+    authedMutationFields[key] = and(isAuthenticated, scopedApiKeyAccess(key))
+  }
+
+  // FIP-07 nested-field guard: a root-level grant (e.g. me → read:user) must not
+  // expose wallet balances or transaction history through nested resolvers.
+  // These type-level rules gate the wallet/transaction entry fields; non-API-key
+  // sessions pass through and the root field already enforced isAuthenticated.
+  const apiKeyWalletRead = scopedApiKeyTypeField("read:wallet")
+  const apiKeyTransactionsRead = scopedApiKeyTypeField("read:transactions")
+
+  const walletTypeFields = {
+    balance: apiKeyWalletRead,
+    pendingIncomingBalance: apiKeyWalletRead,
+    transactions: apiKeyTransactionsRead,
+    transactionsByAddress: apiKeyTransactionsRead,
   }
 
   const permissions = shield(
     {
       Query: authedQueryFields,
       Mutation: authedMutationFields,
+      ConsumerAccount: {
+        wallets: apiKeyWalletRead,
+        transactions: apiKeyTransactionsRead,
+        csvTransactions: apiKeyTransactionsRead,
+      },
+      UserContact: {
+        transactions: apiKeyTransactionsRead,
+      },
+      BTCWallet: walletTypeFields,
+      UsdWallet: walletTypeFields,
+      UsdtWallet: walletTypeFields,
     },
     {
       allowExternalErrors: true,
@@ -119,6 +150,11 @@ if (require.main === module) {
         startApolloServerForCoreSchema(),
         startApolloServerForAdminSchema(),
       ])
+
+      // FIP-07 (ENG-103): per-pod prometheus listener for the API key
+      // counters. Main API entrypoint only — the admin/ws/trigger/exporter
+      // processes must never bind this port.
+      startApiKeyMetricsServer()
     })
     .catch((err) => baseLogger.error(err, "server error"))
 }

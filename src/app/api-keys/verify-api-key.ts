@@ -1,7 +1,9 @@
 import {
   isApiKeySecretValid,
+  isIpAllowedByConstraints,
   parseApiKey,
   ApiKeyExpiredError,
+  ApiKeyIpNotAllowedError,
   ApiKeySecretMismatchError,
 } from "@domain/api-keys"
 import { DomainError } from "@domain/shared"
@@ -13,9 +15,13 @@ import { addAttributesToCurrentSpan } from "@services/tracing"
 // write per key per minute so verification stays read-only on hot keys.
 const LAST_USED_AT_THROTTLE_MS = 60_000
 
-export const verifyApiKey = async (
-  rawKey: string,
-): Promise<VerifiedApiKey | DomainError> => {
+export const verifyApiKey = async ({
+  rawKey,
+  requestIp,
+}: {
+  rawKey: string
+  requestIp?: string
+}): Promise<VerifiedApiKey | DomainError> => {
   const parsed = parseApiKey(rawKey)
   if (parsed instanceof Error) {
     return parsed
@@ -35,6 +41,17 @@ export const verifyApiKey = async (
 
   if (!isApiKeySecretValid({ secret: parsed.secret, hashedKey: apiKey.hashedKey })) {
     return new ApiKeySecretMismatchError(apiKey.keyId)
+  }
+
+  if (apiKey.ipConstraints.length > 0) {
+    // Fail closed: an IP-constrained key must never verify when the client
+    // IP can't be determined.
+    if (!requestIp) {
+      return new ApiKeyIpNotAllowedError("client IP unavailable")
+    }
+    if (!isIpAllowedByConstraints({ ip: requestIp, constraints: apiKey.ipConstraints })) {
+      return new ApiKeyIpNotAllowedError(requestIp)
+    }
   }
 
   const account = await AccountsRepository().findById(apiKey.accountId)

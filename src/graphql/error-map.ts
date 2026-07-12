@@ -163,8 +163,10 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "InvalidApiKeyNameError":
     case "InvalidApiKeyScopeError":
     case "InvalidApiKeyIpConstraintError":
+    case "InvalidApiKeyRateLimitError":
     case "InvalidApiKeyFormatError":
     case "MaxApiKeysPerAccountError":
+    case "InsufficientApiKeyScopeError":
       message = error.message
       return new ValidationInternalError({ message, logger: baseLogger })
 
@@ -174,6 +176,10 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
 
     case "ApiKeySecretMismatchError":
       message = "Invalid API key"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "ApiKeyIpNotAllowedError":
+      message = "API key not allowed from this IP"
       return new ValidationInternalError({ message, logger: baseLogger })
 
     case "ApiKeyCannotManageApiKeysError":

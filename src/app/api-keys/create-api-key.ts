@@ -3,10 +3,12 @@ import {
   MaxApiKeysPerAccountError,
   checkedToApiKeyIpConstraints,
   checkedToApiKeyName,
+  checkedToApiKeyRateLimit,
   checkedToApiKeyScopes,
   generateApiKey,
 } from "@domain/api-keys"
 import { DomainError } from "@domain/shared"
+import { auditApiKeyCreated } from "@services/api-keys-audit"
 import { ApiKeysRepository } from "@services/mongoose/api-keys"
 import { addAttributesToCurrentSpan } from "@services/tracing"
 
@@ -16,6 +18,7 @@ export const createApiKey = async ({
   scopes = ["read:user"],
   ipConstraints = [],
   metadata = {},
+  rateLimitPerMinute = null,
   expiresIn = null,
 }: CreateApiKeyArgs): Promise<CreateApiKeyResult | DomainError> => {
   addAttributesToCurrentSpan({
@@ -40,6 +43,16 @@ export const createApiKey = async ({
   const checkedIpConstraints = checkedToApiKeyIpConstraints(ipConstraints)
   if (checkedIpConstraints instanceof Error) {
     return checkedIpConstraints
+  }
+
+  // Per-key request rate limit — null keeps the platform default
+  let checkedRateLimit: number | null = null
+  if (rateLimitPerMinute !== null && rateLimitPerMinute !== undefined) {
+    const checked = checkedToApiKeyRateLimit(rateLimitPerMinute)
+    if (checked instanceof Error) {
+      return checked
+    }
+    checkedRateLimit = checked
   }
 
   // Enforce per-account key limit (prevent abuse)
@@ -68,6 +81,7 @@ export const createApiKey = async ({
     scopes: checkedScopes,
     ipConstraints: checkedIpConstraints,
     metadata,
+    rateLimitPerMinute: checkedRateLimit,
     expiresAt,
   })
 
@@ -81,6 +95,14 @@ export const createApiKey = async ({
     "app.apiKeys.create.keyId": apiKey.keyId,
   })
 
+  auditApiKeyCreated({
+    accountId,
+    keyId: apiKey.keyId,
+    scopes: apiKey.scopes,
+    expiresAt: apiKey.expiresAt,
+    rateLimitPerMinute: apiKey.rateLimitPerMinute,
+  })
+
   // The raw key is returned exactly once — only its hash is persisted
   return {
     id: apiKey.id,
@@ -88,6 +110,7 @@ export const createApiKey = async ({
     name: apiKey.name,
     apiKey: fullKey,
     scopes: apiKey.scopes,
+    rateLimitPerMinute: apiKey.rateLimitPerMinute,
     expiresAt: apiKey.expiresAt,
     warning: "Store this key securely. It won't be shown again.",
   }

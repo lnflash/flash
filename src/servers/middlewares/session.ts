@@ -29,6 +29,10 @@ export const sessionPublicContext = async ({
   const sessionId = tokenPayload?.session_id
   const expiresAt = tokenPayload?.expires_at
 
+  // Space-delimited OAuth-style claim minted for API-key sessions (FIP-07)
+  const scopes =
+    typeof tokenPayload?.scope === "string" ? tokenPayload.scope.split(" ") : undefined
+
   // note: value should match (ie: "anon") if not an accountId
   // settings from dev/ory/oathkeeper.yml/authenticator/anonymous/config/subjet
   const maybeUserId = checkedToUserId(tokenPayload?.sub ?? "")
@@ -88,6 +92,7 @@ export const sessionPublicContext = async ({
     domainAccount,
     ip,
     sessionId,
+    scopes,
     cashWalletClientCapabilities: DEFAULT_CASH_WALLET_CLIENT_CAPABILITIES,
   }
 }

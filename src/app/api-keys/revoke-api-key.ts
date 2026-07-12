@@ -1,4 +1,5 @@
 import { DomainError } from "@domain/shared"
+import { auditApiKeyRevoked } from "@services/api-keys-audit"
 import { ApiKeysRepository } from "@services/mongoose/api-keys"
 import { addAttributesToCurrentSpan } from "@services/tracing"
 
@@ -18,5 +19,6 @@ export const revokeApiKey = async ({
   }
 
   addAttributesToCurrentSpan({ "app.apiKeys.revoke.keyId": revoked.keyId })
+  auditApiKeyRevoked({ accountId, keyId: revoked.keyId })
   return revoked
 }

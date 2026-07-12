@@ -241,6 +241,7 @@ type YamlSchema = {
   }[]
   apiKeys?: {
     maxKeysPerAccount?: number
+    defaultRequestsPerMinute?: number
   }
 }
 

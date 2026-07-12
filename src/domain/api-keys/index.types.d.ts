@@ -27,6 +27,8 @@ type ApiKey = {
   // IP whitelisting — single IPs or CIDR ranges
   ipConstraints: string[]
   metadata: Record<string, unknown>
+  // Requests/minute for this key; null → platform default applies
+  rateLimitPerMinute: number | null
   lastUsedAt: Date | null
   createdAt: Date
   expiresAt: Date | null
@@ -40,6 +42,7 @@ type NewApiKey = {
   scopes: ApiKeyScope[]
   ipConstraints?: string[]
   metadata?: Record<string, unknown>
+  rateLimitPerMinute: number | null
   expiresAt: Date | null
 }
 
@@ -57,6 +60,7 @@ type CreateApiKeyArgs = {
   scopes?: ApiKeyScope[]
   ipConstraints?: string[]
   metadata?: Record<string, unknown>
+  rateLimitPerMinute?: number | null // requests/minute; null → platform default
   expiresIn?: number | null // seconds until expiration
 }
 
@@ -73,6 +77,7 @@ type CreateApiKeyResult = {
   name: ApiKeyName
   apiKey: string // Raw key (fk_{keyId}_{secret}), only returned once
   scopes: ApiKeyScope[]
+  rateLimitPerMinute: number | null
   expiresAt: Date | null
   warning: string
 }

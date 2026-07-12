@@ -230,6 +230,11 @@ type ApiKey
   keyId: String!
   lastUsedAt: Timestamp
   name: String!
+
+  """
+  Per-key request rate limit (requests per minute). Null means the platform default applies.
+  """
+  rateLimitPerMinute: Int
   scopes: [ApiKeyScope!]!
 
   """
@@ -249,6 +254,11 @@ type ApiKeyCreated
   """Public key identifier (the keyId in fk_<keyId>_<secret>)"""
   keyId: String!
   name: String!
+
+  """
+  Per-key request rate limit (requests per minute). Null means the platform default applies.
+  """
+  rateLimitPerMinute: Int
   scopes: [ApiKeyScope!]!
   warning: String!
 }
@@ -263,6 +273,11 @@ input ApiKeyCreateInput
 
   """A descriptive name for the API key (e.g., 'BTCPayServer Integration')"""
   name: String!
+
+  """
+  Optional per-key request rate limit (requests per minute, 1-10000). If not set, the platform default applies.
+  """
+  rateLimitPerMinute: Int
 
   """Permission scopes for the key. Defaults to read-only user access."""
   scopes: [ApiKeyScope!] = [read_user]

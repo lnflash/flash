@@ -15,6 +15,11 @@ const ApiKeyObject = GT.Object<ApiKey>({
     },
     name: { type: GT.NonNull(GT.String) },
     scopes: { type: GT.NonNullList(ApiKeyScope) },
+    rateLimitPerMinute: {
+      type: GT.Int,
+      description:
+        "Per-key request rate limit (requests per minute). Null means the platform default applies.",
+    },
     status: {
       type: GT.NonNull(ApiKeyStatus),
       description:

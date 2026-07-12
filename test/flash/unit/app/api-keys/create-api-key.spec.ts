@@ -3,6 +3,7 @@ import { createHash } from "crypto"
 import { createApiKey } from "@app/api-keys"
 import {
   InvalidApiKeyNameError,
+  InvalidApiKeyRateLimitError,
   InvalidApiKeyScopeError,
   MaxApiKeysPerAccountError,
   toApiKeyId,
@@ -50,6 +51,7 @@ describe("createApiKey", () => {
       status: "active" as ApiKeyStatus,
       ipConstraints: newKey.ipConstraints ?? [],
       metadata: newKey.metadata ?? {},
+      rateLimitPerMinute: newKey.rateLimitPerMinute ?? null,
       lastUsedAt: null,
       createdAt: new Date(),
       expiresAt: newKey.expiresAt,
@@ -99,6 +101,58 @@ describe("createApiKey", () => {
     expect(delta).toBeLessThanOrEqual(3600 * 1000 + 5000)
   })
 
+  it("persists a validated rateLimitPerMinute and returns it", async () => {
+    const result = await createApiKey({
+      accountId,
+      name: "limited",
+      rateLimitPerMinute: 600,
+    })
+    if (result instanceof Error) throw result
+
+    expect(result.rateLimitPerMinute).toBe(600)
+    expect(create.mock.calls[0][0].rateLimitPerMinute).toBe(600)
+  })
+
+  it("defaults rateLimitPerMinute to null (platform default applies)", async () => {
+    const result = await createApiKey({ accountId, name: "unlimited" })
+    if (result instanceof Error) throw result
+
+    expect(result.rateLimitPerMinute).toBeNull()
+    expect(create.mock.calls[0][0].rateLimitPerMinute).toBeNull()
+  })
+
+  it.each([0, 10001, 1.5])(
+    "rejects out-of-range or non-integer rate limit %p without touching the repository",
+    async (rateLimitPerMinute) => {
+      const result = await createApiKey({
+        accountId,
+        name: "bad limit",
+        rateLimitPerMinute,
+      })
+
+      expect(result).toBeInstanceOf(InvalidApiKeyRateLimitError)
+      expect(create).not.toHaveBeenCalled()
+    },
+  )
+
+  it("accepts the rate limit bounds 1 and 10000", async () => {
+    const low = await createApiKey({
+      accountId,
+      name: "low bound",
+      rateLimitPerMinute: 1,
+    })
+    if (low instanceof Error) throw low
+    expect(low.rateLimitPerMinute).toBe(1)
+
+    const high = await createApiKey({
+      accountId,
+      name: "high bound",
+      rateLimitPerMinute: 10000,
+    })
+    if (high instanceof Error) throw high
+    expect(high.rateLimitPerMinute).toBe(10000)
+  })
+
   it("rejects invalid names without touching the repository", async () => {
     const result = await createApiKey({ accountId, name: "x" })
 
@@ -129,6 +183,7 @@ describe("createApiKey", () => {
         status: "active" as ApiKeyStatus,
         ipConstraints: [],
         metadata: {},
+        rateLimitPerMinute: null,
         lastUsedAt: null,
         createdAt: new Date(),
         expiresAt: null,

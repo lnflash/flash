@@ -773,10 +773,17 @@ export const configSchema = {
       type: "object",
       properties: {
         maxKeysPerAccount: { type: "integer", minimum: 1, maximum: 100, default: 10 },
+        defaultRequestsPerMinute: {
+          type: "integer",
+          minimum: 1,
+          maximum: 10000,
+          default: 120,
+        },
       },
       additionalProperties: false,
       default: {
         maxKeysPerAccount: 10,
+        defaultRequestsPerMinute: 120,
       },
     },
   },

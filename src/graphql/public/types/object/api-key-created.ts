@@ -18,6 +18,11 @@ const ApiKeyCreated = GT.Object({
       description: "The raw API key. Store it securely — it won't be shown again.",
     },
     scopes: { type: GT.NonNullList(ApiKeyScope) },
+    rateLimitPerMinute: {
+      type: GT.Int,
+      description:
+        "Per-key request rate limit (requests per minute). Null means the platform default applies.",
+    },
     expiresAt: { type: Timestamp },
     warning: { type: GT.NonNull(GT.String) },
   }),

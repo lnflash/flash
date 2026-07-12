@@ -4,6 +4,7 @@ import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { GT } from "@graphql/index"
 import ApiKeyCreated from "@graphql/public/types/object/api-key-created"
 import IError from "@graphql/shared/types/abstract/error"
+import { incApiKeyManagement } from "@services/api-keys-metrics"
 
 const ApiKeyRotateInput = GT.Input({
   name: "ApiKeyRotateInput",
@@ -33,6 +34,7 @@ const ApiKeyRotateMutation = GT.Field({
   resolve: async (_, args, { domainAccount, sessionId }: GraphQLPublicContextAuth) => {
     // Keys cannot manage keys — management requires a kratos session
     if (isApiKeySessionId(sessionId)) {
+      incApiKeyManagement("rotate", "failure")
       return {
         errors: [mapAndParseErrorForGqlResponse(new ApiKeyCannotManageApiKeysError())],
         apiKey: null,
@@ -45,12 +47,14 @@ const ApiKeyRotateMutation = GT.Field({
     })
 
     if (rotated instanceof Error) {
+      incApiKeyManagement("rotate", "failure")
       return {
         errors: [mapAndParseErrorForGqlResponse(rotated)],
         apiKey: null,
       }
     }
 
+    incApiKeyManagement("rotate", "success")
     return { errors: [], apiKey: rotated }
   },
 })

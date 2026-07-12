@@ -4,10 +4,13 @@ import {
   InvalidApiKeyFormatError,
   InvalidApiKeyIpConstraintError,
   InvalidApiKeyNameError,
+  InvalidApiKeyRateLimitError,
   InvalidApiKeyScopeError,
 } from "./errors"
 
 export * from "./errors"
+export * from "./ip-constraints"
+export * from "./scope-map"
 
 // FIP-07 key format: fk_{keyId}_{randomSecret}
 // keyId is hex (no base64url "_") so the key parses unambiguously;
@@ -125,6 +128,25 @@ export const checkedToApiKeyIpConstraints = (
     }
   }
   return ips
+}
+
+// Per-key request rate limit, requests/minute (ENG-100)
+export const API_KEY_RATE_LIMIT_MIN = 1
+export const API_KEY_RATE_LIMIT_MAX = 10000
+
+export const checkedToApiKeyRateLimit = (
+  rateLimitPerMinute: number,
+): number | ValidationError => {
+  if (
+    !Number.isInteger(rateLimitPerMinute) ||
+    rateLimitPerMinute < API_KEY_RATE_LIMIT_MIN ||
+    rateLimitPerMinute > API_KEY_RATE_LIMIT_MAX
+  ) {
+    return new InvalidApiKeyRateLimitError(
+      `API key rate limit must be an integer between ${API_KEY_RATE_LIMIT_MIN} and ${API_KEY_RATE_LIMIT_MAX} requests per minute`,
+    )
+  }
+  return rateLimitPerMinute
 }
 
 export const toApiKeyId = (id: string): ApiKeyId => id as ApiKeyId

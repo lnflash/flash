@@ -4,6 +4,7 @@ import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { GT } from "@graphql/index"
 import ApiKeyObject from "@graphql/public/types/object/api-key"
 import IError from "@graphql/shared/types/abstract/error"
+import { incApiKeyManagement } from "@services/api-keys-metrics"
 
 const ApiKeyRevokeInput = GT.Input({
   name: "ApiKeyRevokeInput",
@@ -33,6 +34,7 @@ const ApiKeyRevokeMutation = GT.Field({
   resolve: async (_, args, { domainAccount, sessionId }: GraphQLPublicContextAuth) => {
     // Keys cannot manage keys — management requires a kratos session
     if (isApiKeySessionId(sessionId)) {
+      incApiKeyManagement("revoke", "failure")
       return {
         errors: [mapAndParseErrorForGqlResponse(new ApiKeyCannotManageApiKeysError())],
         apiKey: null,
@@ -45,12 +47,14 @@ const ApiKeyRevokeMutation = GT.Field({
     })
 
     if (revoked instanceof Error) {
+      incApiKeyManagement("revoke", "failure")
       return {
         errors: [mapAndParseErrorForGqlResponse(revoked)],
         apiKey: null,
       }
     }
 
+    incApiKeyManagement("revoke", "success")
     return { errors: [], apiKey: revoked }
   },
 })

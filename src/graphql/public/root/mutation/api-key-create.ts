@@ -5,6 +5,7 @@ import { GT } from "@graphql/index"
 import ApiKeyCreated from "@graphql/public/types/object/api-key-created"
 import ApiKeyScope from "@graphql/public/types/scalar/api-key-scope"
 import IError from "@graphql/shared/types/abstract/error"
+import { incApiKeyManagement } from "@services/api-keys-metrics"
 
 const ApiKeyCreateInput = GT.Input({
   name: "ApiKeyCreateInput",
@@ -23,6 +24,11 @@ const ApiKeyCreateInput = GT.Input({
       type: GT.Int,
       description:
         "Optional expiration time in seconds. If not set, the key doesn't expire.",
+    },
+    rateLimitPerMinute: {
+      type: GT.Int,
+      description:
+        "Optional per-key request rate limit (requests per minute, 1-10000). If not set, the platform default applies.",
     },
   }),
 })
@@ -48,6 +54,7 @@ const ApiKeyCreateMutation = GT.Field({
   resolve: async (_, args, { domainAccount, sessionId }: GraphQLPublicContextAuth) => {
     // Keys cannot mint or manage keys — management requires a kratos session
     if (isApiKeySessionId(sessionId)) {
+      incApiKeyManagement("create", "failure")
       return {
         errors: [mapAndParseErrorForGqlResponse(new ApiKeyCannotManageApiKeysError())],
         apiKey: null,
@@ -58,16 +65,19 @@ const ApiKeyCreateMutation = GT.Field({
       accountId: domainAccount.id,
       name: args.input.name,
       scopes: args.input.scopes || ["read:user"],
+      rateLimitPerMinute: args.input.rateLimitPerMinute ?? null,
       expiresIn: args.input.expiresIn || null,
     })
 
     if (result instanceof Error) {
+      incApiKeyManagement("create", "failure")
       return {
         errors: [mapAndParseErrorForGqlResponse(result)],
         apiKey: null,
       }
     }
 
+    incApiKeyManagement("create", "success")
     return { errors: [], apiKey: result }
   },
 })

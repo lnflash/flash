@@ -2,19 +2,25 @@ import { createHash } from "crypto"
 
 import {
   API_KEY_PREFIX,
+  API_KEY_RATE_LIMIT_MAX,
+  API_KEY_RATE_LIMIT_MIN,
   API_KEY_SCOPES,
   InvalidApiKeyFormatError,
   InvalidApiKeyIpConstraintError,
   InvalidApiKeyNameError,
+  InvalidApiKeyRateLimitError,
   InvalidApiKeyScopeError,
   checkedToApiKeyIpConstraints,
   checkedToApiKeyName,
+  checkedToApiKeyRateLimit,
   checkedToApiKeyScopes,
   effectiveApiKeyStatus,
   generateApiKey,
+  hasApiKeyScope,
   hashApiKeySecret,
   isApiKeySecretValid,
   isApiKeySessionId,
+  isIpAllowedByConstraints,
   parseApiKey,
 } from "@domain/api-keys"
 
@@ -200,5 +206,170 @@ describe("checkedToApiKeyIpConstraints", () => {
     expect(checkedToApiKeyIpConstraints(["not-an-ip"])).toBeInstanceOf(
       InvalidApiKeyIpConstraintError,
     )
+  })
+})
+
+describe("checkedToApiKeyRateLimit", () => {
+  it("accepts integers within bounds", () => {
+    expect(checkedToApiKeyRateLimit(API_KEY_RATE_LIMIT_MIN)).toBe(1)
+    expect(checkedToApiKeyRateLimit(120)).toBe(120)
+    expect(checkedToApiKeyRateLimit(API_KEY_RATE_LIMIT_MAX)).toBe(10000)
+  })
+
+  it("rejects values below 1 and above 10000", () => {
+    expect(checkedToApiKeyRateLimit(0)).toBeInstanceOf(InvalidApiKeyRateLimitError)
+    expect(checkedToApiKeyRateLimit(-5)).toBeInstanceOf(InvalidApiKeyRateLimitError)
+    expect(checkedToApiKeyRateLimit(10001)).toBeInstanceOf(InvalidApiKeyRateLimitError)
+  })
+
+  it("rejects non-integer values", () => {
+    expect(checkedToApiKeyRateLimit(1.5)).toBeInstanceOf(InvalidApiKeyRateLimitError)
+    expect(checkedToApiKeyRateLimit(NaN)).toBeInstanceOf(InvalidApiKeyRateLimitError)
+    expect(checkedToApiKeyRateLimit(Infinity)).toBeInstanceOf(InvalidApiKeyRateLimitError)
+  })
+})
+
+describe("isIpAllowedByConstraints", () => {
+  it("allows any IP when constraints are empty", () => {
+    expect(isIpAllowedByConstraints({ ip: "203.0.113.7", constraints: [] })).toBe(true)
+    expect(isIpAllowedByConstraints({ ip: "garbage", constraints: [] })).toBe(true)
+  })
+
+  it("matches an exact IPv4 entry", () => {
+    const constraints = ["203.0.113.7"]
+    expect(isIpAllowedByConstraints({ ip: "203.0.113.7", constraints })).toBe(true)
+    expect(isIpAllowedByConstraints({ ip: "203.0.113.8", constraints })).toBe(false)
+  })
+
+  it("matches IPv4 CIDR ranges", () => {
+    expect(
+      isIpAllowedByConstraints({ ip: "10.20.30.40", constraints: ["10.0.0.0/8"] }),
+    ).toBe(true)
+    expect(
+      isIpAllowedByConstraints({ ip: "11.0.0.1", constraints: ["10.0.0.0/8"] }),
+    ).toBe(false)
+    expect(
+      isIpAllowedByConstraints({ ip: "203.0.113.7", constraints: ["203.0.113.7/32"] }),
+    ).toBe(true)
+    expect(
+      isIpAllowedByConstraints({ ip: "203.0.113.8", constraints: ["203.0.113.7/32"] }),
+    ).toBe(false)
+  })
+
+  it("matches exact IPv6 and IPv6 CIDR entries", () => {
+    expect(
+      isIpAllowedByConstraints({ ip: "2001:db8::1", constraints: ["2001:db8::1"] }),
+    ).toBe(true)
+    expect(
+      isIpAllowedByConstraints({
+        ip: "2001:0db8:0000:0000:0000:0000:0000:0001",
+        constraints: ["2001:db8::1"],
+      }),
+    ).toBe(true)
+    expect(
+      isIpAllowedByConstraints({
+        ip: "2001:db8:1234::1",
+        constraints: ["2001:db8::/32"],
+      }),
+    ).toBe(true)
+    expect(
+      isIpAllowedByConstraints({ ip: "2001:db9::1", constraints: ["2001:db8::/32"] }),
+    ).toBe(false)
+  })
+
+  it("normalizes IPv4-mapped IPv6 client addresses", () => {
+    expect(
+      isIpAllowedByConstraints({ ip: "::ffff:10.0.0.1", constraints: ["10.0.0.0/8"] }),
+    ).toBe(true)
+    expect(
+      isIpAllowedByConstraints({
+        ip: "::ffff:203.0.113.7",
+        constraints: ["203.0.113.7"],
+      }),
+    ).toBe(true)
+  })
+
+  it("never matches across address families", () => {
+    expect(
+      isIpAllowedByConstraints({ ip: "10.0.0.1", constraints: ["2001:db8::/32"] }),
+    ).toBe(false)
+    expect(
+      isIpAllowedByConstraints({ ip: "2001:db8::1", constraints: ["10.0.0.0/8"] }),
+    ).toBe(false)
+  })
+
+  it("returns false for a garbage ip instead of throwing", () => {
+    expect(
+      isIpAllowedByConstraints({ ip: "not-an-ip", constraints: ["10.0.0.0/8"] }),
+    ).toBe(false)
+    expect(isIpAllowedByConstraints({ ip: "", constraints: ["10.0.0.0/8"] })).toBe(false)
+  })
+
+  it("skips malformed constraint entries without throwing", () => {
+    expect(
+      isIpAllowedByConstraints({
+        ip: "10.0.0.1",
+        constraints: ["not-an-ip", "999.0.0.0/8", "10.0.0.1"],
+      }),
+    ).toBe(true)
+    expect(isIpAllowedByConstraints({ ip: "10.0.0.1", constraints: ["not-an-ip"] })).toBe(
+      false,
+    )
+  })
+})
+
+describe("hasApiKeyScope", () => {
+  it("grants nothing on empty scopes", () => {
+    for (const required of API_KEY_SCOPES) {
+      expect(hasApiKeyScope({ grantedScopes: [], required })).toBe(false)
+    }
+  })
+
+  it("grants an exact scope match", () => {
+    expect(hasApiKeyScope({ grantedScopes: ["read:user"], required: "read:user" })).toBe(
+      true,
+    )
+    expect(
+      hasApiKeyScope({ grantedScopes: ["write:wallet"], required: "write:wallet" }),
+    ).toBe(true)
+  })
+
+  it("write implies read for the same resource", () => {
+    expect(
+      hasApiKeyScope({ grantedScopes: ["write:wallet"], required: "read:wallet" }),
+    ).toBe(true)
+    expect(hasApiKeyScope({ grantedScopes: ["write:user"], required: "read:user" })).toBe(
+      true,
+    )
+    expect(
+      hasApiKeyScope({
+        grantedScopes: ["write:transactions"],
+        required: "read:transactions",
+      }),
+    ).toBe(true)
+  })
+
+  it("read does not imply write", () => {
+    expect(
+      hasApiKeyScope({ grantedScopes: ["read:wallet"], required: "write:wallet" }),
+    ).toBe(false)
+  })
+
+  it("does not grant across resources", () => {
+    expect(
+      hasApiKeyScope({ grantedScopes: ["write:wallet"], required: "read:user" }),
+    ).toBe(false)
+    expect(
+      hasApiKeyScope({
+        grantedScopes: ["read:wallet", "read:user"],
+        required: "read:transactions",
+      }),
+    ).toBe(false)
+  })
+
+  it("admin grants every scope", () => {
+    for (const required of API_KEY_SCOPES) {
+      expect(hasApiKeyScope({ grantedScopes: ["admin"], required })).toBe(true)
+    }
   })
 })
