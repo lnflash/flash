@@ -199,7 +199,7 @@
     "prettier": "^3.0.3",
     "protoc-gen-js": "^3.21.2",
     "react": "^18.2.0",
-    "spectaql": "^2.3.0",
+    "spectaql": "^3.0.9",
     "tiny-secp256k1": "^2.2.3",
     "tree-kill": "^1.2.2",
     "ts-node": "^10.9.1",
