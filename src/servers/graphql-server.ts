@@ -18,12 +18,19 @@ import { fieldExtensionsEstimator, simpleEstimator } from "graphql-query-complex
 
 import jwksRsa from "jwks-rsa"
 
+import {
+  InsufficientApiKeyScopeError,
+  apiKeyScopeForField,
+  hasApiKeyScope,
+  isApiKeySessionId,
+} from "@domain/api-keys"
 import { parseUnknownDomainErrorFromUnknown } from "@domain/shared"
 
 import { createComplexityPlugin } from "./plugins/complexity"
 
 import authRouter from "./authorization"
 import kratosCallback from "./event-handlers/kratos"
+import { apiKeyRateLimitMiddleware } from "./middlewares/api-key-rate-limit"
 import healthzHandler from "./middlewares/healthz"
 import { idempotencyMiddleware } from "./middlewares/idempotency"
 
@@ -42,6 +49,37 @@ export const isAuthenticated = rule({ cache: "contextual" })((
     ("domainAccount" in ctx && !!ctx.domainAccount)
   )
 })
+
+// FIP-07 deny-by-default scope enforcement for API-key sessions (ENG-98/99).
+// Kratos and anon sessions pass through untouched — isAuthenticated still gates
+// anon. For API-key sessions the root field must be mapped in apiKeyScopeForField
+// and the key must carry the required scope; unmapped or BLOCKED fields are denied.
+export const scopedApiKeyAccess = (fieldName: string) =>
+  rule({ cache: "contextual" })((parent, args, ctx: GraphQLPublicContext) => {
+    if (!isApiKeySessionId(ctx.sessionId)) return true
+
+    const required = apiKeyScopeForField[fieldName]
+    if (required === undefined || required === "BLOCKED") {
+      return new InsufficientApiKeyScopeError(`API keys cannot access ${fieldName}`)
+    }
+
+    return hasApiKeyScope({ grantedScopes: ctx.scopes ?? [], required })
+      ? true
+      : new InsufficientApiKeyScopeError(`API key missing required scope: ${required}`)
+  })
+
+// Type-level variant for nested wallet/transaction entry fields (e.g.
+// ConsumerAccount.wallets, BTCWallet.balance) so a root-level grant like
+// read:user cannot escalate into wallet or transaction data via `me`.
+// Pass-through for non-API-key sessions; the parent field already gated auth.
+export const scopedApiKeyTypeField = (required: ApiKeyScope) =>
+  rule({ cache: "contextual" })((parent, args, ctx: GraphQLPublicContext) => {
+    if (!isApiKeySessionId(ctx.sessionId)) return true
+
+    return hasApiKeyScope({ grantedScopes: ctx.scopes ?? [], required })
+      ? true
+      : new InsufficientApiKeyScopeError(`API key missing required scope: ${required}`)
+  })
 
 const jwtAlgorithms: jsonwebtoken.Algorithm[] = ["RS256"]
 
@@ -172,6 +210,11 @@ export const startApolloServer = async ({
   )
 
   app.use("/graphql", setGqlContext)
+
+  // FIP-07 per-API-key request rate limiting (ENG-100/101) — after
+  // setGqlContext so the api-key session id is known, before Apollo so
+  // denials short-circuit with a real HTTP 429.
+  app.use("/graphql", apiKeyRateLimitMiddleware)
 
   await apolloServer.start()
 

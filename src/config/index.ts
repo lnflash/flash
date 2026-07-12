@@ -11,6 +11,7 @@ import { env } from "./env"
 export * from "./error"
 export * from "./yaml"
 export * from "./schema"
+export * from "./api-keys"
 
 export const MS_PER_SEC = 1000 as MilliSeconds
 export const MS_PER_HOUR = (60 * 60 * MS_PER_SEC) as MilliSeconds
@@ -128,6 +129,7 @@ export const LOGLEVEL = env.LOGLEVEL
 export const UNSECURE_DEFAULT_LOGIN_CODE = env.UNSECURE_DEFAULT_LOGIN_CODE
 export const UNSECURE_IP_FROM_REQUEST_OBJECT = env.UNSECURE_IP_FROM_REQUEST_OBJECT
 export const EXPORTER_PORT = env.EXPORTER_PORT
+export const API_METRICS_PORT = env.API_METRICS_PORT
 export const TRIGGER_PORT = env.TRIGGER_PORT
 export const WEBSOCKET_PORT = env.WEBSOCKET_PORT
 export const KRATOS_PG_CON = env.KRATOS_PG_CON

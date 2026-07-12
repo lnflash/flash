@@ -219,6 +219,138 @@ input AddressInput
   title: String!
 }
 
+type ApiKey
+  @join__type(graph: PUBLIC)
+{
+  createdAt: Timestamp!
+  expiresAt: Timestamp
+  id: ID!
+
+  """Public key identifier (the keyId in fk_<keyId>_<secret>)"""
+  keyId: String!
+  lastUsedAt: Timestamp
+  name: String!
+
+  """
+  Per-key request rate limit (requests per minute). Null means the platform default applies.
+  """
+  rateLimitPerMinute: Int
+  scopes: [ApiKeyScope!]!
+
+  """
+  Effective status: keys past their expiry report EXPIRED even before the stored status catches up
+  """
+  status: ApiKeyStatus!
+}
+
+type ApiKeyCreated
+  @join__type(graph: PUBLIC)
+{
+  """The raw API key. Store it securely — it won't be shown again."""
+  apiKey: String!
+  expiresAt: Timestamp
+  id: ID!
+
+  """Public key identifier (the keyId in fk_<keyId>_<secret>)"""
+  keyId: String!
+  name: String!
+
+  """
+  Per-key request rate limit (requests per minute). Null means the platform default applies.
+  """
+  rateLimitPerMinute: Int
+  scopes: [ApiKeyScope!]!
+  warning: String!
+}
+
+input ApiKeyCreateInput
+  @join__type(graph: PUBLIC)
+{
+  """
+  Optional expiration time in seconds. If not set, the key doesn't expire.
+  """
+  expiresIn: Int
+
+  """A descriptive name for the API key (e.g., 'BTCPayServer Integration')"""
+  name: String!
+
+  """
+  Optional per-key request rate limit (requests per minute, 1-10000). If not set, the platform default applies.
+  """
+  rateLimitPerMinute: Int
+
+  """Permission scopes for the key. Defaults to read-only user access."""
+  scopes: [ApiKeyScope!] = [read_user]
+}
+
+type ApiKeyCreatePayload
+  @join__type(graph: PUBLIC)
+{
+  apiKey: ApiKeyCreated
+  errors: [Error!]!
+}
+
+input ApiKeyRevokeInput
+  @join__type(graph: PUBLIC)
+{
+  id: ID!
+}
+
+type ApiKeyRevokePayload
+  @join__type(graph: PUBLIC)
+{
+  apiKey: ApiKey
+  errors: [Error!]!
+}
+
+input ApiKeyRotateInput
+  @join__type(graph: PUBLIC)
+{
+  id: ID!
+}
+
+type ApiKeyRotatePayload
+  @join__type(graph: PUBLIC)
+{
+  apiKey: ApiKeyCreated
+  errors: [Error!]!
+}
+
+"""Permission scopes for API keys (FIP-07)"""
+enum ApiKeyScope
+  @join__type(graph: PUBLIC)
+{
+  """Full administrative access"""
+  admin @join__enumValue(graph: PUBLIC)
+
+  """Read transaction history"""
+  read_transactions @join__enumValue(graph: PUBLIC)
+
+  """Read-only access to user/account data"""
+  read_user @join__enumValue(graph: PUBLIC)
+
+  """Read wallet balances and details"""
+  read_wallet @join__enumValue(graph: PUBLIC)
+
+  """Create transactions"""
+  write_transactions @join__enumValue(graph: PUBLIC)
+
+  """Modify user/account data"""
+  write_user @join__enumValue(graph: PUBLIC)
+
+  """Perform wallet operations (send/receive)"""
+  write_wallet @join__enumValue(graph: PUBLIC)
+}
+
+"""Lifecycle status of an API key (FIP-07)"""
+enum ApiKeyStatus
+  @join__type(graph: PUBLIC)
+{
+  ACTIVE @join__enumValue(graph: PUBLIC)
+  EXPIRED @join__enumValue(graph: PUBLIC)
+  REVOKED @join__enumValue(graph: PUBLIC)
+}
+
 """An Opaque Bearer token"""
 scalar AuthToken
   @join__type(graph: PUBLIC)
@@ -1339,6 +1471,21 @@ type Mutation
   accountEnableNotificationChannel(input: AccountEnableNotificationChannelInput!): AccountUpdateNotificationSettingsPayload!
   accountUpdateDefaultWalletId(input: AccountUpdateDefaultWalletIdInput!): AccountUpdateDefaultWalletIdPayload!
   accountUpdateDisplayCurrency(input: AccountUpdateDisplayCurrencyInput!): AccountUpdateDisplayCurrencyPayload!
+
+  """
+  Generate a new API key for external service authentication. The raw key is only shown once and cannot be retrieved later.
+  """
+  apiKeyCreate(input: ApiKeyCreateInput!): ApiKeyCreatePayload!
+
+  """
+  Revoke an API key. Verification stops honoring it immediately; this cannot be undone.
+  """
+  apiKeyRevoke(input: ApiKeyRevokeInput!): ApiKeyRevokePayload!
+
+  """
+  Rotate an API key: a replacement with a new secret (and keyId) is created with the same name, scopes, and expiry, and the old key is revoked. The new raw key is only shown once.
+  """
+  apiKeyRotate(input: ApiKeyRotateInput!): ApiKeyRotatePayload!
   bridgeAddExternalAccount: BridgeAddExternalAccountPayload!
   bridgeCancelWithdrawalRequest(input: BridgeCancelWithdrawalRequestInput!): BridgeCancelWithdrawalRequestPayload!
   bridgeCreateExternalAccount(input: BridgeCreateExternalAccountInput!): BridgeCreateExternalAccountPayload!
@@ -1810,6 +1957,11 @@ type Query
   @join__type(graph: PUBLIC)
 {
   accountDefaultWallet(username: Username!, walletCurrency: WalletCurrency): PublicWallet!
+
+  """
+  All API keys for the calling account, newest first. Never includes secret material.
+  """
+  apiKeys: [ApiKey!]!
   bridgeExternalAccounts: [BridgeExternalAccount]
   bridgeKycStatus: String
   bridgeVirtualAccount: BridgeVirtualAccount

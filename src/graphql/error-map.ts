@@ -160,6 +160,32 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = "There is a pending payment for this invoice"
       return new ValidationInternalError({ message, logger: baseLogger })
 
+    case "InvalidApiKeyNameError":
+    case "InvalidApiKeyScopeError":
+    case "InvalidApiKeyIpConstraintError":
+    case "InvalidApiKeyRateLimitError":
+    case "InvalidApiKeyFormatError":
+    case "MaxApiKeysPerAccountError":
+    case "InsufficientApiKeyScopeError":
+      message = error.message
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "ApiKeyExpiredError":
+      message = "This API key has expired"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "ApiKeySecretMismatchError":
+      message = "Invalid API key"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "ApiKeyIpNotAllowedError":
+      message = "API key not allowed from this IP"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "ApiKeyCannotManageApiKeysError":
+      message = "API keys cannot be managed while authenticated with an API key"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
     case "SatoshiAmountRequiredError":
       message = "An amount is required to complete payment"
       return new ValidationInternalError({ message, logger: baseLogger })

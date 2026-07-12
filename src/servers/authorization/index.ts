@@ -52,6 +52,8 @@ import { UserLoginIpRateLimiterExceededError } from "@domain/rate-limit/errors"
 
 import { registerCaptchaGeetest } from "@app/captcha"
 
+import { apiKeyCheckHandler } from "./api-key-check"
+
 const authRouter = express.Router({ caseSensitive: true })
 
 // FIXME: those directive should only apply if you select a cookie-related route
@@ -60,6 +62,11 @@ authRouter.use(cors({ origin: true, credentials: true }))
 authRouter.use(bodyParser.urlencoded({ extended: true }))
 authRouter.use(bodyParser.json())
 authRouter.use(cookieParser())
+
+// Registered before the IP middleware below: the caller is oathkeeper
+// (cluster-internal session check), which forwards only allowlisted
+// headers — x-real-ip is absent and must not 500 the check.
+authRouter.get("/api-key/check", apiKeyCheckHandler)
 
 authRouter.use((req: Request, res: Response, next: NextFunction) => {
   const ipString = UNSECURE_IP_FROM_REQUEST_OBJECT ? req?.ip : req?.headers["x-real-ip"]
