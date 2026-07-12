@@ -19,6 +19,7 @@ import {
 import { NextFunction, Request, Response } from "express"
 
 import { parseIps } from "@domain/accounts-ips"
+import { apiKeyNestedFieldScopes } from "@domain/api-keys"
 import { parseCashWalletClientCapabilities } from "@app/cash-wallet-cutover/client-capability"
 
 import { startApiKeyMetricsServer } from "./api-key-metrics"
@@ -95,33 +96,28 @@ export async function startApolloServerForCoreSchema() {
 
   // FIP-07 nested-field guard: a root-level grant (e.g. me → read:user) must not
   // expose wallet balances or transaction history through nested resolvers.
-  // These type-level rules gate the wallet/transaction entry fields; non-API-key
-  // sessions pass through and the root field already enforced isAuthenticated.
-  const apiKeyWalletRead = scopedApiKeyTypeField("read:wallet")
-  const apiKeyTransactionsRead = scopedApiKeyTypeField("read:transactions")
-
-  const walletTypeFields = {
-    balance: apiKeyWalletRead,
-    pendingIncomingBalance: apiKeyWalletRead,
-    transactions: apiKeyTransactionsRead,
-    transactionsByAddress: apiKeyTransactionsRead,
-  }
+  // These type-level rules gate the wallet/transaction entry fields reachable
+  // through an authed root field; non-API-key sessions pass through and the root
+  // field already enforced isAuthenticated. The field→scope table lives in
+  // @domain/api-keys (apiKeyNestedFieldScopes) so a completeness test can assert
+  // every sensitive field is covered.
+  const nestedTypeRules = Object.fromEntries(
+    Object.entries(apiKeyNestedFieldScopes).map(([typeName, fieldScopes]) => [
+      typeName,
+      Object.fromEntries(
+        Object.entries(fieldScopes).map(([field, scope]) => [
+          field,
+          scopedApiKeyTypeField(scope),
+        ]),
+      ),
+    ]),
+  )
 
   const permissions = shield(
     {
       Query: authedQueryFields,
       Mutation: authedMutationFields,
-      ConsumerAccount: {
-        wallets: apiKeyWalletRead,
-        transactions: apiKeyTransactionsRead,
-        csvTransactions: apiKeyTransactionsRead,
-      },
-      UserContact: {
-        transactions: apiKeyTransactionsRead,
-      },
-      BTCWallet: walletTypeFields,
-      UsdWallet: walletTypeFields,
-      UsdtWallet: walletTypeFields,
+      ...nestedTypeRules,
     },
     {
       allowExternalErrors: true,

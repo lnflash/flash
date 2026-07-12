@@ -21,8 +21,12 @@ export const apiKeyCheckHandler = async (req: Request, res: Response) => {
     return res.status(401).json({ error: "invalid_api_key" })
   }
 
-  // Ingress-set in prod; verifyApiKey fails closed for IP-constrained keys
-  // when it's absent or unparseable.
+  // X-Real-Ip is forced from $remote_addr by the ingress auth-snippet
+  // (api-ingress.yaml) so it is the trusted ingress-observed peer, not a
+  // client-controlled header, on this oathkeeper auth-subrequest path. If that
+  // snippet is ever dropped this becomes spoofable — the IP-constraint control
+  // depends on it. verifyApiKey fails closed for IP-constrained keys when it is
+  // absent or unparseable.
   const requestIp = parseIps(req.headers["x-real-ip"])
   const verified = await verifyApiKey({ rawKey, requestIp })
   if (verified instanceof Error) {

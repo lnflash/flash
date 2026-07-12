@@ -1,12 +1,14 @@
-import { GraphQLResolveInfo } from "graphql"
+import { GraphQLResolveInfo, GraphQLObjectType } from "graphql"
 import { and } from "graphql-shield"
 import { IOptions, IShieldContext } from "graphql-shield/typings/types"
 
 import {
   API_KEY_SCOPES,
   InsufficientApiKeyScopeError,
+  apiKeyNestedFieldScopes,
   apiKeyScopeForField,
 } from "@domain/api-keys"
+import { gqlMainSchema } from "@graphql/public"
 import { mutationFields } from "@graphql/public/mutations"
 import { queryFields } from "@graphql/public/queries"
 import { disconnectAll } from "@services/redis"
@@ -165,6 +167,43 @@ describe("and(isAuthenticated, scopedApiKeyAccess) composition", () => {
     await expect(
       invoke(composed, { ...kratosCtx, domainAccount: account }),
     ).resolves.toBe(true)
+  })
+})
+
+describe("apiKeyNestedFieldScopes completeness (nested escalation net)", () => {
+  // Any field whose name matches one of these exposes wallet balance or
+  // transaction data and must carry a nested guard so a read:user key can't
+  // reach it through a parent that only required read:user.
+  const SENSITIVE = [
+    "balance",
+    "pendingIncomingBalance",
+    "transactions",
+    "transactionsByAddress",
+    "transactionsCount",
+    "csvTransactions",
+    "wallets",
+  ]
+
+  it("gates every sensitive field on each guarded type", () => {
+    for (const [typeName, fieldScopes] of Object.entries(apiKeyNestedFieldScopes)) {
+      const type = gqlMainSchema.getType(typeName)
+      expect(type).toBeInstanceOf(GraphQLObjectType)
+      const actualFields = Object.keys((type as GraphQLObjectType).getFields())
+      const sensitivePresent = actualFields.filter((f) => SENSITIVE.includes(f))
+      for (const field of sensitivePresent) {
+        expect(fieldScopes[field]).toBeDefined()
+      }
+    }
+  })
+
+  it("does not reference fields absent from the live schema", () => {
+    for (const [typeName, fieldScopes] of Object.entries(apiKeyNestedFieldScopes)) {
+      const type = gqlMainSchema.getType(typeName) as GraphQLObjectType
+      const actualFields = Object.keys(type.getFields())
+      for (const field of Object.keys(fieldScopes)) {
+        expect(actualFields).toContain(field)
+      }
+    }
   })
 })
 

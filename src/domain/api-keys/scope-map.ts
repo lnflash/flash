@@ -99,6 +99,44 @@ export const apiKeyScopeForField: Readonly<Record<string, ApiKeyFieldAccess>> =
     onChainPaymentSendAll: "write:wallet",
   })
 
+// Nested-field guards: a root field like `me` only requires read:user, but the
+// wallet/transaction data reachable through its object graph must each require
+// its own scope so a read:user key can't escalate to balances or transaction
+// history. Keyed by GraphQL type name → field → required scope. The completeness
+// test asserts every sensitive field on these types is listed here.
+export const apiKeyNestedFieldScopes: Record<
+  string,
+  Record<string, ApiKeyScope>
+> = Object.freeze({
+  ConsumerAccount: {
+    wallets: "read:wallet",
+    transactions: "read:transactions",
+    csvTransactions: "read:transactions",
+  },
+  UserContact: {
+    transactions: "read:transactions",
+    transactionsCount: "read:transactions",
+  },
+  BTCWallet: {
+    balance: "read:wallet",
+    pendingIncomingBalance: "read:wallet",
+    transactions: "read:transactions",
+    transactionsByAddress: "read:transactions",
+  },
+  UsdWallet: {
+    balance: "read:wallet",
+    pendingIncomingBalance: "read:wallet",
+    transactions: "read:transactions",
+    transactionsByAddress: "read:transactions",
+  },
+  UsdtWallet: {
+    balance: "read:wallet",
+    pendingIncomingBalance: "read:wallet",
+    transactions: "read:transactions",
+    transactionsByAddress: "read:transactions",
+  },
+})
+
 // admin grants every non-BLOCKED scope; write:X implies read:X.
 // BLOCKED fields never reach this check — they are rejected outright.
 export const hasApiKeyScope = ({
