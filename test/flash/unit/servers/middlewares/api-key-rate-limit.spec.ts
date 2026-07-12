@@ -151,7 +151,7 @@ describe("apiKeyRateLimitMiddleware", () => {
     })
   })
 
-  it("short-circuits with a 429, Retry-After, and a JSON body when denied", async () => {
+  it("short-circuits with a forwardable GraphQL error (HTTP 200 + code + headers) when denied", async () => {
     mockedConsume.mockResolvedValue({
       allowed: false,
       limit: 120,
@@ -172,9 +172,22 @@ describe("apiKeyRateLimitMiddleware", () => {
     expect(res.set).toHaveBeenCalledWith("X-RateLimit-Remaining", "0")
     expect(res.set).toHaveBeenCalledWith("X-RateLimit-Reset", "1760000013")
     expect(res.set).toHaveBeenCalledWith("Retry-After", "13")
-    expect(res.status).toHaveBeenCalledWith(429)
+    // HTTP 200 (not 429): the federation router only forwards subgraph
+    // responses that are 2xx with a GraphQL body; a bare 429 becomes an opaque
+    // SUBREQUEST_HTTP_ERROR at the client.
+    expect(res.status).toHaveBeenCalledWith(200)
     expect(res.json).toHaveBeenCalledWith({
-      error: { code: "TOO_MANY_REQUESTS", message: "API key rate limit exceeded" },
+      data: null,
+      errors: [
+        {
+          message: "API key rate limit exceeded",
+          extensions: {
+            code: "TOO_MANY_REQUESTS",
+            retryAfterSeconds: 13,
+            rateLimit: { limit: 120, remaining: 0 },
+          },
+        },
+      ],
     })
     expect(next).not.toHaveBeenCalled()
     expect(mockedIncRateLimited).toHaveBeenCalledTimes(1)
