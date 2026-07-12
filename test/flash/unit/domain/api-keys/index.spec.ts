@@ -10,9 +10,11 @@ import {
   checkedToApiKeyIpConstraints,
   checkedToApiKeyName,
   checkedToApiKeyScopes,
+  effectiveApiKeyStatus,
   generateApiKey,
   hashApiKeySecret,
   isApiKeySecretValid,
+  isApiKeySessionId,
   parseApiKey,
 } from "@domain/api-keys"
 
@@ -97,6 +99,44 @@ describe("isApiKeySecretValid", () => {
     expect(isApiKeySecretValid({ secret: other.secret, hashedKey: hashedSecret })).toBe(
       false,
     )
+  })
+})
+
+describe("isApiKeySessionId", () => {
+  it("detects api-key session ids and nothing else", () => {
+    expect(isApiKeySessionId("apikey:8e8b4f60")).toBe(true)
+    expect(isApiKeySessionId("fa595e7b-7c7e-485c-be06-d968be32ec64")).toBe(false)
+    expect(isApiKeySessionId(undefined)).toBe(false)
+    expect(isApiKeySessionId("")).toBe(false)
+  })
+})
+
+describe("effectiveApiKeyStatus", () => {
+  const base = {
+    expiresAt: null as Date | null,
+    status: "active" as ApiKeyStatus,
+  }
+
+  it("reports stored status for non-active keys", () => {
+    expect(effectiveApiKeyStatus({ ...base, status: "revoked" } as ApiKey)).toBe(
+      "revoked",
+    )
+  })
+
+  it("reports expired for active keys past their expiry", () => {
+    expect(
+      effectiveApiKeyStatus({
+        ...base,
+        expiresAt: new Date(Date.now() - 1000),
+      } as ApiKey),
+    ).toBe("expired")
+    expect(
+      effectiveApiKeyStatus({
+        ...base,
+        expiresAt: new Date(Date.now() + 60_000),
+      } as ApiKey),
+    ).toBe("active")
+    expect(effectiveApiKeyStatus({ ...base } as ApiKey)).toBe("active")
   })
 })
 

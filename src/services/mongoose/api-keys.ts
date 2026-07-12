@@ -127,6 +127,42 @@ export const ApiKeysRepository = (): IApiKeysRepository => {
       }
     },
 
+    listByAccountId: async (
+      accountId: AccountId,
+    ): Promise<ApiKey[] | RepositoryError> => {
+      try {
+        const docs = await ApiKeyModel.find({ accountId }).sort({ createdAt: -1 })
+
+        return docs.map((doc) => translateToApiKey(doc))
+      } catch (err) {
+        return new UnknownRepositoryError(err)
+      }
+    },
+
+    findActiveByIdForAccount: async ({
+      id,
+      accountId,
+    }: {
+      id: ApiKeyId
+      accountId: AccountId
+    }): Promise<ApiKey | RepositoryError> => {
+      try {
+        const doc = await ApiKeyModel.findOne({
+          _id: toObjectId(id),
+          accountId,
+          status: "active",
+        })
+
+        if (!doc) {
+          return new CouldNotFindError("API key not found")
+        }
+
+        return translateToApiKey(doc)
+      } catch (err) {
+        return new UnknownRepositoryError(err)
+      }
+    },
+
     updateLastUsedAt: async (id: ApiKeyId): Promise<void | RepositoryError> => {
       try {
         await ApiKeyModel.updateOne(
@@ -138,10 +174,16 @@ export const ApiKeysRepository = (): IApiKeysRepository => {
       }
     },
 
-    revoke: async (id: ApiKeyId): Promise<ApiKey | RepositoryError> => {
+    revoke: async ({
+      id,
+      accountId,
+    }: {
+      id: ApiKeyId
+      accountId: AccountId
+    }): Promise<ApiKey | RepositoryError> => {
       try {
         const doc = await ApiKeyModel.findOneAndUpdate(
-          { _id: toObjectId(id) },
+          { _id: toObjectId(id), accountId },
           { $set: { status: "revoked" } },
           { new: true },
         )

@@ -77,11 +77,23 @@ type CreateApiKeyResult = {
   warning: string
 }
 
+type RotatedApiKey = CreateApiKeyResult & {
+  revokedKeyId: ApiKeyKeyId
+}
+
 interface IApiKeysRepository {
   create(apiKey: NewApiKey): Promise<ApiKey | RepositoryError>
   findByKeyId(keyId: ApiKeyKeyId): Promise<ApiKey | RepositoryError>
+  // Active keys only — used by verification and the per-account limit
   findByAccountId(accountId: AccountId): Promise<ApiKey[] | RepositoryError>
+  // Every key regardless of status — management/list surface
+  listByAccountId(accountId: AccountId): Promise<ApiKey[] | RepositoryError>
+  findActiveByIdForAccount(args: {
+    id: ApiKeyId
+    accountId: AccountId
+  }): Promise<ApiKey | RepositoryError>
   updateLastUsedAt(id: ApiKeyId): Promise<void | RepositoryError>
-  revoke(id: ApiKeyId): Promise<ApiKey | RepositoryError>
+  // Account-scoped so a caller can never revoke another account's key
+  revoke(args: { id: ApiKeyId; accountId: AccountId }): Promise<ApiKey | RepositoryError>
   revokeAll(accountId: AccountId): Promise<number | RepositoryError>
 }

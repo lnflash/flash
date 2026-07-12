@@ -8,3 +8,4 @@ export class MaxApiKeysPerAccountError extends ApiKeyError {}
 export class InvalidApiKeyFormatError extends ApiKeyError {}
 export class ApiKeyExpiredError extends ApiKeyError {}
 export class ApiKeySecretMismatchError extends ApiKeyError {}
+export class ApiKeyCannotManageApiKeysError extends ApiKeyError {}

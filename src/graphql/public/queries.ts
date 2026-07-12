@@ -28,6 +28,7 @@ import BridgeVirtualAccountQuery from "./root/query/bridge-virtual-account"
 import BridgeExternalAccountsQuery from "./root/query/bridge-external-accounts"
 import BridgeWithdrawalRequestQuery from "./root/query/bridge-withdrawal-request"
 import BridgeWithdrawalsQuery from "./root/query/bridge-withdrawals"
+import ApiKeysQuery from "./root/query/api-keys"
 
 export const queryFields = {
   unauthed: {
@@ -58,6 +59,7 @@ export const queryFields = {
       bridgeExternalAccounts: BridgeExternalAccountsQuery,
       bridgeWithdrawalRequest: BridgeWithdrawalRequestQuery,
       bridgeWithdrawals: BridgeWithdrawalsQuery,
+      apiKeys: ApiKeysQuery,
     },
     atWalletLevel: {
       onChainTxFee: OnChainTxFeeQuery,

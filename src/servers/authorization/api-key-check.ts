@@ -1,6 +1,7 @@
 import { Request, Response } from "express"
 
 import { verifyApiKey } from "@app/api-keys"
+import { API_KEY_SESSION_PREFIX } from "@domain/api-keys"
 import { addAttributesToCurrentSpan } from "@services/tracing"
 
 // Cluster-internal endpoint backing the oathkeeper `bearer_token`
@@ -27,7 +28,7 @@ export const apiKeyCheckHandler = async (req: Request, res: Response) => {
     identity: { id: kratosUserId },
     // Surfaces as the `session_id` claim — auditable, and clearly not a
     // kratos session id
-    id: `apikey:${apiKey.keyId}`,
+    id: `${API_KEY_SESSION_PREFIX}${apiKey.keyId}`,
     // Always empty: key expiry is enforced here on every verification, and
     // a non-empty value would make session.ts try to kratos-extend the
     // fake apikey session id

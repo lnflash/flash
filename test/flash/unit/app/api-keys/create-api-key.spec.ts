@@ -59,6 +59,8 @@ describe("createApiKey", () => {
       create,
       findByAccountId,
       findByKeyId: jest.fn(),
+      listByAccountId: jest.fn(),
+      findActiveByIdForAccount: jest.fn(),
       updateLastUsedAt: jest.fn(),
       revoke: jest.fn(),
       revokeAll: jest.fn(),

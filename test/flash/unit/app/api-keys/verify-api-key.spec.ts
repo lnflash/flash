@@ -65,6 +65,8 @@ describe("verifyApiKey", () => {
       create: jest.fn(),
       findByKeyId,
       findByAccountId: jest.fn(),
+      listByAccountId: jest.fn(),
+      findActiveByIdForAccount: jest.fn(),
       updateLastUsedAt,
       revoke: jest.fn(),
       revokeAll: jest.fn(),

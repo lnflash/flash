@@ -16,6 +16,21 @@ export const API_KEY_PREFIX = "fk"
 export const API_KEY_ID_BYTES = 4 // → 8 hex chars
 export const API_KEY_SECRET_BYTES = 48 // → 64 base64url chars
 
+// The session_id claim minted for API-key auth: apikey:<keyId>. Lets the
+// backend distinguish key-authed requests from kratos sessions.
+export const API_KEY_SESSION_PREFIX = "apikey:"
+
+export const isApiKeySessionId = (sessionId: string | undefined): boolean =>
+  !!sessionId?.startsWith(API_KEY_SESSION_PREFIX)
+
+// A key's stored status can lag reality: expiry is enforced at verification
+// time, not flipped in the DB. This computes the status to display.
+export const effectiveApiKeyStatus = (apiKey: ApiKey): ApiKeyStatus => {
+  if (apiKey.status !== "active") return apiKey.status
+  if (apiKey.expiresAt && apiKey.expiresAt.getTime() <= Date.now()) return "expired"
+  return "active"
+}
+
 export const API_KEY_SCOPES: readonly ApiKeyScope[] = [
   "read:wallet",
   "write:wallet",

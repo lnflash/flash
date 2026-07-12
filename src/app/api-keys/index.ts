@@ -1,4 +1,5 @@
 export * from "./create-api-key"
 export * from "./verify-api-key"
-
-// Management operations (list / revoke / rotate) land with ENG-97
+export * from "./list-api-keys"
+export * from "./revoke-api-key"
+export * from "./rotate-api-key"
