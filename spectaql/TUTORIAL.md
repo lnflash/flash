@@ -1,7 +1,11 @@
 # Lightning Integration
 
 ## Overview
-The staging API endpoint is: `https://api.staging.galoy.io/graphql`
+Production API endpoint: `https://api.flashapp.me/graphql`
+Test API endpoint: `https://api.test.flashapp.me/graphql`
+
+Use the test environment for integration development; phone numbers and
+balances there are separate from production.
 
 ## Authentication
 To get a new JWT:
@@ -16,7 +20,7 @@ All other methods require a valid JWT set in the header as a bearer token - `Aut
 
 #### query
 ```bash
-export URI=https://api.staging.galoy.io/graphql
+export URI=https://api.test.flashapp.me/graphql
 export PHONE='+12025550148'
 curl --location --request POST $URI --header 'Content-Type: application/json' --data-raw '{"query":"mutation userRequestAuthCode ($input: UserRequestAuthCodeInput!) {\n    userRequestAuthCode (input: $input) {\n        errors {\n            message\n            path\n        }\n        success\n    }\n}","variables":{"input":{"phone":"'"$PHONE"'"}}}'
 ```
@@ -122,8 +126,3 @@ curl --location --request POST $URI --header "$AUTH_TOKEN" --header 'Content-Typ
 }
 ```
 
-## Extra Resources
-
-If you use Postman, we have a collection you can import to test the API.
-
-Download it here: [galoy_graphql_main_api.postman_collection.json](https://github.com/GaloyMoney/galoy/tree/main/src/graphql/docs/galoy_graphql_main_api.postman_collection.json)
