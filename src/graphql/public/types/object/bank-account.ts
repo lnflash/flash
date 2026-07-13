@@ -1,6 +1,9 @@
 import { GT } from "@graphql/index"
 import { BankAccount } from "@services/frappe/models/BankAccount"
+import ErpNext from "@services/frappe/ErpNext"
 import { GraphQLObjectType } from "graphql"
+
+import GraphQLBankAccountUpdateRequest from "./bank-account-update-request"
 
 const GraphQLBankAccount: GraphQLObjectType<BankAccount> = GT.Object({
   name: "BankAccount",
@@ -38,6 +41,17 @@ const GraphQLBankAccount: GraphQLObjectType<BankAccount> = GT.Object({
     isDefault: {
       type: GT.NonNull(GT.Boolean),
       resolve: (o) => o.is_default === 1,
+    },
+    pendingUpdate: {
+      type: GraphQLBankAccountUpdateRequest,
+      description:
+        "An open request to change this account's details, awaiting review. Null when none is pending.",
+      resolve: async (o) => {
+        if (!o.name) return null
+        const requests = await ErpNext.getOpenBankAccountUpdateRequestsForAccount(o.name)
+        if (requests instanceof Error) return null
+        return requests[0] ?? null
+      },
     },
   }),
 })
