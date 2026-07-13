@@ -74,6 +74,7 @@ import BridgeCancelWithdrawalRequestMutation from "./root/mutation/bridge-cancel
 import ApiKeyCreateMutation from "./root/mutation/api-key-create"
 import ApiKeyRevokeMutation from "./root/mutation/api-key-revoke"
 import ApiKeyRotateMutation from "./root/mutation/api-key-rotate"
+import BankAccountUpdateRequestMutation from "./root/mutation/bank-account-update-request"
 
 // TODO: // const fields: { [key: string]: GraphQLFieldConfig<any, GraphQLPublicContext> }
 export const mutationFields = {
@@ -115,6 +116,7 @@ export const mutationFields = {
       accountUpdateDefaultWalletId: AccountUpdateDefaultWalletIdMutation,
       accountUpdateDisplayCurrency: AccountUpdateDisplayCurrencyMutation,
       businessAccountUpgradeRequest: BusinessAccountUpgradeRequestMutation,
+      bankAccountUpdateRequest: BankAccountUpdateRequestMutation,
       accountEnableNotificationCategory: AccountEnableNotificationCategoryMutation,
       accountDisableNotificationCategory: AccountDisableNotificationCategoryMutation,
       accountEnableNotificationChannel: AccountEnableNotificationChannelMutation,

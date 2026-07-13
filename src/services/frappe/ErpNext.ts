@@ -7,6 +7,8 @@ import axios, { isAxiosError } from "axios"
 
 import {
   BankAccountQueryError,
+  BankAccountUpdateRequestCreateError,
+  BankAccountUpdateRequestQueryError,
   BanksQueryError,
   BridgeTransferRequestUpsertError,
   CashoutDraftError,
@@ -19,6 +21,10 @@ import {
 import { AccountUpgradeRequest, RequestStatus } from "./models/AccountUpgradeRequest"
 import { Bank } from "./models/Bank"
 import { BankAccount } from "./models/BankAccount"
+import {
+  BankAccountUpdateRequest,
+  ErpNextBankAccountUpdateRequestData,
+} from "./models/BankAccountUpdateRequest"
 import { BridgeTransferRequest } from "./models/BridgeTransferRequest"
 import { Filter } from "./SearchFilters"
 
@@ -211,13 +217,22 @@ export class ErpNext {
     }
   }
 
-  closeAccountUpgradeRequests = this.setStatusForRequests(RequestStatus.Closed)
+  closeAccountUpgradeRequests = this.setStatusForRequests(
+    AccountUpgradeRequest.doctype,
+    RequestStatus.Closed,
+  )
 
-  private setStatusForRequests(status: RequestStatus) {
+  closeBankAccountUpdateRequests = this.setStatusForRequests(
+    BankAccountUpdateRequest.doctype,
+    RequestStatus.Closed,
+  )
+
+  private setStatusForRequests(doctype: string, status: RequestStatus) {
     return async (names: string[]): Promise<void | SetDocTypeValueError> => {
+      if (names.length === 0) return
       try {
         const docs = names.map((name) => ({
-          doctype: AccountUpgradeRequest.doctype,
+          doctype,
           docname: name,
           status,
         }))
@@ -294,6 +309,116 @@ export class ErpNext {
         attributes: { "erpnext.exception": responseData?.exception },
       })
       return new BanksQueryError(err)
+    }
+  }
+
+  async postBankAccountUpdateRequest(
+    req: BankAccountUpdateRequest,
+  ): Promise<{ name: string } | BankAccountUpdateRequestCreateError> {
+    try {
+      const resp = await axios.post(
+        `${this.url}/api/resource/${encodeURIComponent(BankAccountUpdateRequest.doctype)}`,
+        req.toErpnext(),
+        { headers: this.headers },
+      )
+      return { name: resp.data.data.name }
+    } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error(
+        { err, responseData, ...req.toErpnext() },
+        "Error creating Bank Account Update Request in ERPNext",
+      )
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
+      return new BankAccountUpdateRequestCreateError(err)
+    }
+  }
+
+  async getOpenBankAccountUpdateRequestsForAccount(
+    bankAccountId: string,
+  ): Promise<BankAccountUpdateRequest[] | BankAccountUpdateRequestQueryError> {
+    try {
+      const filters = JSON.stringify([
+        ["bank_account", "=", bankAccountId],
+        ["status", "=", RequestStatus.Pending],
+      ])
+      const fields = JSON.stringify([
+        "name",
+        "party",
+        "bank_account",
+        "status",
+        "bank_name",
+        "bank_branch",
+        "account_type",
+        "currency",
+        "account_number",
+        "support_note",
+      ])
+      const resp = await axios.get(
+        `${this.url}/api/resource/${encodeURIComponent(BankAccountUpdateRequest.doctype)}`,
+        {
+          params: { filters, fields, order_by: "creation desc" },
+          headers: this.headers,
+        },
+      )
+      const rows: ErpNextBankAccountUpdateRequestData[] = resp.data?.data ?? []
+      return rows.map((r) => BankAccountUpdateRequest.fromErpnext(r))
+    } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error(
+        { err, responseData, bankAccountId },
+        "Error querying Bank Account Update Request from ERPNext",
+      )
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
+      return new BankAccountUpdateRequestQueryError(err)
+    }
+  }
+
+  // Most-recent request for an account (any status), so the API can surface
+  // both "Pending" (under review) and "Rejected" (needs the user's attention),
+  // and fall silent once the latest request is Approved or Closed.
+  async getLatestBankAccountUpdateRequestForAccount(
+    bankAccountId: string,
+  ): Promise<BankAccountUpdateRequest | undefined | BankAccountUpdateRequestQueryError> {
+    try {
+      const filters = JSON.stringify([["bank_account", "=", bankAccountId]])
+      const fields = JSON.stringify([
+        "name",
+        "party",
+        "bank_account",
+        "status",
+        "bank_name",
+        "bank_branch",
+        "account_type",
+        "currency",
+        "account_number",
+        "support_note",
+      ])
+      const resp = await axios.get(
+        `${this.url}/api/resource/${encodeURIComponent(BankAccountUpdateRequest.doctype)}`,
+        {
+          params: { filters, fields, order_by: "creation desc", limit_page_length: 1 },
+          headers: this.headers,
+        },
+      )
+      const rows: ErpNextBankAccountUpdateRequestData[] = resp.data?.data ?? []
+      return rows.length ? BankAccountUpdateRequest.fromErpnext(rows[0]) : undefined
+    } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error(
+        { err, responseData, bankAccountId },
+        "Error querying latest Bank Account Update Request from ERPNext",
+      )
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
+      return new BankAccountUpdateRequestQueryError(err)
     }
   }
 
