@@ -1,10 +1,8 @@
 import { Accounts } from "@app"
 import { GT } from "@graphql/index"
-import { apolloErrorResponse, mapToGqlErrorList } from "@graphql/error-map"
+import { mapToGqlErrorList } from "@graphql/error-map"
 import AccountNumber from "@graphql/shared/types/scalar/account-number"
 import IError from "@graphql/shared/types/abstract/error"
-import { SetDocTypeValueError } from "@services/frappe/errors"
-import { InternalServerError } from "@graphql/error"
 
 const BankAccountUpdateRequestInput = GT.Input({
   name: "BankAccountUpdateRequestInput",
@@ -73,12 +71,6 @@ const BankAccountUpdateRequestMutation = GT.Field({
       },
     })
 
-    if (result instanceof SetDocTypeValueError)
-      return apolloErrorResponse(
-        new InternalServerError({
-          message: "Pending bank account update request(s) failed to update.",
-        }),
-      )
     if (result instanceof Error) return { errors: mapToGqlErrorList(result) }
     return { errors: [], status: result.status }
   },

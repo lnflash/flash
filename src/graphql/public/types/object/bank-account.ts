@@ -45,12 +45,15 @@ const GraphQLBankAccount: GraphQLObjectType<BankAccount> = GT.Object({
     pendingUpdate: {
       type: GraphQLBankAccountUpdateRequest,
       description:
-        "An open request to change this account's details, awaiting review. Null when none is pending.",
+        "The account's in-flight update request when it needs the user's attention — Pending (awaiting review) or Rejected (declined). Null once approved/closed, or when none exists.",
       resolve: async (o) => {
         if (!o.name) return null
-        const requests = await ErpNext.getOpenBankAccountUpdateRequestsForAccount(o.name)
-        if (requests instanceof Error) return null
-        return requests[0] ?? null
+        const latest = await ErpNext.getLatestBankAccountUpdateRequestForAccount(o.name)
+        if (latest instanceof Error) return null
+        if (latest && (latest.status === "Pending" || latest.status === "Rejected")) {
+          return latest
+        }
+        return null
       },
     },
   }),

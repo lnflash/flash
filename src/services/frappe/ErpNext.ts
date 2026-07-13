@@ -217,13 +217,22 @@ export class ErpNext {
     }
   }
 
-  closeAccountUpgradeRequests = this.setStatusForRequests(RequestStatus.Closed)
+  closeAccountUpgradeRequests = this.setStatusForRequests(
+    AccountUpgradeRequest.doctype,
+    RequestStatus.Closed,
+  )
 
-  private setStatusForRequests(status: RequestStatus) {
+  closeBankAccountUpdateRequests = this.setStatusForRequests(
+    BankAccountUpdateRequest.doctype,
+    RequestStatus.Closed,
+  )
+
+  private setStatusForRequests(doctype: string, status: RequestStatus) {
     return async (names: string[]): Promise<void | SetDocTypeValueError> => {
+      if (names.length === 0) return
       try {
         const docs = names.map((name) => ({
-          doctype: AccountUpgradeRequest.doctype,
+          doctype,
           docname: name,
           status,
         }))
@@ -370,42 +379,46 @@ export class ErpNext {
     }
   }
 
-  async closeBankAccountUpdateRequests(
-    names: string[],
-  ): Promise<void | SetDocTypeValueError> {
-    if (names.length === 0) return
+  // Most-recent request for an account (any status), so the API can surface
+  // both "Pending" (under review) and "Rejected" (needs the user's attention),
+  // and fall silent once the latest request is Approved or Closed.
+  async getLatestBankAccountUpdateRequestForAccount(
+    bankAccountId: string,
+  ): Promise<BankAccountUpdateRequest | undefined | BankAccountUpdateRequestQueryError> {
     try {
-      const docs = names.map((name) => ({
-        doctype: BankAccountUpdateRequest.doctype,
-        docname: name,
-        status: RequestStatus.Closed,
-      }))
-
-      const resp = await axios.post(
-        `${this.url}/api/method/frappe.client.bulk_update`,
-        { docs: JSON.stringify(docs) },
-        { headers: this.headers },
+      const filters = JSON.stringify([["bank_account", "=", bankAccountId]])
+      const fields = JSON.stringify([
+        "name",
+        "party",
+        "bank_account",
+        "status",
+        "bank_name",
+        "bank_branch",
+        "account_type",
+        "currency",
+        "account_number",
+        "support_note",
+      ])
+      const resp = await axios.get(
+        `${this.url}/api/resource/${encodeURIComponent(BankAccountUpdateRequest.doctype)}`,
+        {
+          params: { filters, fields, order_by: "creation desc", limit_page_length: 1 },
+          headers: this.headers,
+        },
       )
-
-      const failedDocs = resp.data?.message?.failed_docs
-      if (failedDocs?.length) {
-        baseLogger.error(
-          { failedDocs, names },
-          "Bulk close failed for some bank account update requests",
-        )
-        return new SetDocTypeValueError(failedDocs)
-      }
+      const rows: ErpNextBankAccountUpdateRequestData[] = resp.data?.data ?? []
+      return rows.length ? BankAccountUpdateRequest.fromErpnext(rows[0]) : undefined
     } catch (err) {
       const responseData = isAxiosError(err) ? err.response?.data : undefined
       baseLogger.error(
-        { err, responseData, names },
-        "Error closing bank account update requests",
+        { err, responseData, bankAccountId },
+        "Error querying latest Bank Account Update Request from ERPNext",
       )
       recordExceptionInCurrentSpan({
         error: err,
         attributes: { "erpnext.exception": responseData?.exception },
       })
-      return new SetDocTypeValueError(err)
+      return new BankAccountUpdateRequestQueryError(err)
     }
   }
 

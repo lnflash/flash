@@ -121,4 +121,40 @@ describe("ErpNext bank account update requests", () => {
     expect(result).toBeUndefined()
     expect(mockedAxios.post).not.toHaveBeenCalled()
   })
+
+  it("fetches the most recent request for an account, any status", async () => {
+    mockedAxios.get.mockResolvedValue({
+      data: {
+        data: [
+          {
+            name: "BAUR-9",
+            party: "CUST-1",
+            bank_account: "BANK-ACC-1",
+            status: "Rejected",
+            bank_name: "NCB",
+            bank_branch: "Half Way Tree",
+            account_type: "Savings",
+            currency: "JMD",
+            account_number: "123456",
+            support_note: "account number did not match",
+          },
+        ],
+      },
+    })
+
+    const result = await client.getLatestBankAccountUpdateRequestForAccount("BANK-ACC-1")
+
+    expect((result as BankAccountUpdateRequest).status).toBe("Rejected")
+    expect((result as BankAccountUpdateRequest).supportNote).toBe(
+      "account number did not match",
+    )
+  })
+
+  it("returns undefined when the account has no requests", async () => {
+    mockedAxios.get.mockResolvedValue({ data: { data: [] } })
+
+    const result = await client.getLatestBankAccountUpdateRequestForAccount("BANK-ACC-1")
+
+    expect(result).toBeUndefined()
+  })
 })

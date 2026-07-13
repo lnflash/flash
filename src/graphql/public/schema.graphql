@@ -345,7 +345,7 @@ type BankAccount {
   isDefault: Boolean!
 
   """
-  An open request to change this account's details, awaiting review. Null when none is pending.
+  The account's in-flight update request when it needs the user's attention — Pending (awaiting review) or Rejected (declined). Null once approved/closed, or when none exists.
   """
   pendingUpdate: BankAccountUpdateRequest
 }
