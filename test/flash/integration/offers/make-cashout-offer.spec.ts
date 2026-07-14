@@ -2,7 +2,7 @@ import CashoutManager from "@app/offers/CashoutManager"
 
 import ErpNext from "@services/frappe/ErpNext"
 import Ibex from "@services/ibex/client"
-import { USDAmount } from "@domain/shared"
+import { JMDAmount, USDAmount } from "@domain/shared"
 
 import { alice } from "../jest.setup"
 
@@ -57,6 +57,7 @@ jest.mock("@services/frappe/ErpNext", () => ({
   __esModule: true,
   default: {
     getBankAccountsByCustomer: jest.fn(),
+    getCashoutExchangeRate: jest.fn(),
   },
 }))
 let mockedIbex: jest.Mocked<typeof Ibex>
@@ -73,6 +74,9 @@ beforeEach(async () => {
       "lnurl1dp68gurn8ghj7um9dej8xct5w3skccne9e3k7mf0d3h82unvwqhkxun0wa5kgct5v93kzmmfd3skjmn0wvhxcmmv9u",
   })
   mockedErpNext.getBankAccountsByCustomer.mockResolvedValue([bankAccount])
+  mockedErpNext.getCashoutExchangeRate.mockResolvedValue(
+    JMDAmount.dollars(160) as JMDAmount,
+  )
 })
 
 afterEach(async () => {
