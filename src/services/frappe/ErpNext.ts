@@ -1,6 +1,6 @@
 import ValidOffer from "@app/offers/ValidOffer"
 import { FrappeConfig } from "@config"
-import { USDTAmount, Validated } from "@domain/shared"
+import { JMDAmount, USDTAmount, Validated } from "@domain/shared"
 import { baseLogger } from "@services/logger"
 import { recordExceptionInCurrentSpan } from "@services/tracing"
 import axios, { isAxiosError } from "axios"
@@ -13,6 +13,7 @@ import {
   BridgeTransferRequestUpsertError,
   CashoutDraftError,
   CashoutSubmitError,
+  ExchangeRateQueryError,
   JournalEntryDeleteError,
   SetDocTypeValueError,
   UpgradeRequestCreateError,
@@ -288,6 +289,40 @@ export class ErpNext {
         attributes: { "erpnext.exception": responseData?.exception },
       })
       return new BankAccountQueryError(err)
+    }
+  }
+
+  async getCashoutExchangeRate(): Promise<JMDAmount | ExchangeRateQueryError> {
+    try {
+      // Cashout is money-out, so it settles at the bank's *buy* side (for_buying).
+      // The weekly NCB scrape upserts Currency Exchange records; the newest one is
+      // the live rate (ERPNext serves the most recent rate <= posting date).
+      const filters = `[["from_currency","=","USD"],["to_currency","=","JMD"],["for_buying","=",1]]`
+      const fields = `["exchange_rate","date"]`
+      const resp = await axios.get(
+        `${this.url}/api/resource/Currency%20Exchange?filters=${filters}&fields=${fields}&order_by=date%20desc&limit_page_length=1`,
+        { headers: this.headers },
+      )
+
+      const rate = resp.data?.data?.[0]?.exchange_rate
+      if (typeof rate !== "number" || !(rate > 0)) {
+        return new ExchangeRateQueryError("No USD->JMD for_buying rate found in ERPNext")
+      }
+
+      const jmdRate = JMDAmount.dollars(rate)
+      if (jmdRate instanceof Error) return new ExchangeRateQueryError(jmdRate)
+      return jmdRate
+    } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error(
+        { err, responseData },
+        "Error querying Currency Exchange from ERPNext",
+      )
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
+      return new ExchangeRateQueryError(err)
     }
   }
 
