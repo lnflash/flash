@@ -1,6 +1,6 @@
 import CashoutManager from "@app/offers/CashoutManager"
 
-import { USDAmount } from "@domain/shared"
+import { JMDAmount, USDAmount } from "@domain/shared"
 import ErpNext, { CashoutId } from "@services/frappe/ErpNext"
 import Ibex from "@services/ibex/client"
 
@@ -53,6 +53,7 @@ jest.mock("@services/frappe/ErpNext", () => ({
   __esModule: true,
   default: {
     getBankAccountsByCustomer: jest.fn(),
+    getCashoutExchangeRate: jest.fn(),
     draftCashout: jest.fn(),
     submitCashout: jest.fn(),
   },
@@ -77,6 +78,9 @@ beforeEach(async () => {
   })
   mockedIbex.payInvoice.mockResolvedValue(Mocks.payInvoiceV2.response)
   mockedErpNext.getBankAccountsByCustomer.mockResolvedValue([bankAccount])
+  mockedErpNext.getCashoutExchangeRate.mockResolvedValue(
+    JMDAmount.dollars(160) as JMDAmount,
+  )
   mockedErpNext.draftCashout.mockResolvedValue("cashout-test-id" as CashoutId)
   mockedErpNext.submitCashout.mockResolvedValue(true)
 })
