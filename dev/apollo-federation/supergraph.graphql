@@ -384,6 +384,11 @@ type BankAccount
   """ERPNext bank account identifier"""
   id: ID
   isDefault: Boolean!
+
+  """
+  The account's in-flight update request when it needs the user's attention — Pending (awaiting review) or Rejected (declined). Null once approved/closed, or when none exists.
+  """
+  pendingUpdate: BankAccountUpdateRequest
 }
 
 input BankAccountInput
@@ -394,6 +399,58 @@ input BankAccountInput
   bankBranch: String!
   bankName: String!
   currency: String!
+}
+
+"""
+A pending request to change the details of an approved bank account, awaiting admin review.
+"""
+type BankAccountUpdateRequest
+  @join__type(graph: PUBLIC)
+{
+  """Proposed new account number"""
+  accountNumber: String!
+
+  """Proposed new account type"""
+  accountType: String!
+
+  """Proposed new bank branch"""
+  bankBranch: String!
+
+  """Proposed new bank name"""
+  bankName: String!
+
+  """Account currency (unchanged from the current account)"""
+  currency: String!
+
+  """Reviewer note, set when status is Rejected"""
+  rejectionReason: String
+
+  """Pending | Approved | Rejected | Closed"""
+  status: String!
+}
+
+input BankAccountUpdateRequestInput
+  @join__type(graph: PUBLIC)
+{
+  accountNumber: AccountNumber!
+  accountType: String!
+
+  """ERPNext identifier of the account to update"""
+  bankAccountId: ID!
+  bankBranch: String!
+  bankName: String!
+
+  """Must match the account's current currency (currency is locked)"""
+  currency: String!
+}
+
+type BankAccountUpdateRequestPayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error]
+
+  """Status of the created request (Pending on success)"""
+  status: String
 }
 
 type BridgeAddExternalAccountPayload
@@ -1486,6 +1543,7 @@ type Mutation
   Rotate an API key: a replacement with a new secret (and keyId) is created with the same name, scopes, and expiry, and the old key is revoked. The new raw key is only shown once.
   """
   apiKeyRotate(input: ApiKeyRotateInput!): ApiKeyRotatePayload!
+  bankAccountUpdateRequest(input: BankAccountUpdateRequestInput!): BankAccountUpdateRequestPayload!
   bridgeAddExternalAccount: BridgeAddExternalAccountPayload!
   bridgeCancelWithdrawalRequest(input: BridgeCancelWithdrawalRequestInput!): BridgeCancelWithdrawalRequestPayload!
   bridgeCreateExternalAccount(input: BridgeCreateExternalAccountInput!): BridgeCreateExternalAccountPayload!
