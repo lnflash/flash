@@ -662,6 +662,13 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         message,
       })
 
+    case "BridgeInvalidPlaidTokenError":
+      message = error.message || "linkToken and publicToken are required"
+      return bridgeGqlError({
+        code: "BRIDGE_INVALID_PLAID_TOKEN",
+        message,
+      })
+
     case "BridgeError":
       message = error.message || "Bridge API error"
       return bridgeGqlError({ code: "BRIDGE_ERROR", message })

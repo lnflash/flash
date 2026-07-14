@@ -44,6 +44,7 @@ import {
   BridgeWithdrawalNotFoundError,
   BridgeWithdrawalAlreadyInitiatedError,
   BridgePlaidNotAvailableError,
+  BridgeInvalidPlaidTokenError,
   BridgeDepositInstructionsMissingError,
   BridgeWithdrawalNetAmountTooLowError,
 } from "./errors"
@@ -89,8 +90,12 @@ type CreateVirtualAccountResult = {
 }
 
 type AddExternalAccountResult = {
-  linkUrl: string
+  linkToken: string
   expiresAt: string
+}
+
+type ExchangePlaidPublicTokenResult = {
+  message: string
 }
 
 type WithdrawalRequestResult = PresentedBridgeWithdrawal
@@ -595,7 +600,7 @@ const createVirtualAccount = async (
 }
 
 /**
- * Returns Bridge hosted bank linking URL for adding external accounts
+ * Requests a Plaid link_token from Bridge for adding external accounts.
  */
 const addExternalAccount = async (
   accountId: AccountId,
@@ -619,11 +624,11 @@ const addExternalAccount = async (
       )
     }
 
-    const linkUrl = await BridgeApiClient.getExternalAccountLinkUrl(customerId)
+    const plaid = await BridgeApiClient.createPlaidLinkRequest(customerId)
 
     const result: AddExternalAccountResult = {
-      linkUrl: linkUrl.link_url,
-      expiresAt: linkUrl.expires_at,
+      linkToken: plaid.link_token,
+      expiresAt: plaid.link_token_expires_at,
     }
 
     baseLogger.info(
@@ -645,6 +650,64 @@ const addExternalAccount = async (
       return new BridgePlaidNotAvailableError()
     }
 
+    return error instanceof Error ? error : new Error(String(error))
+  }
+}
+
+/**
+ * Exchanges a Plaid public_token with Bridge after the user completes Link.
+ * External accounts are created asynchronously and arrive via webhook.
+ */
+const exchangePlaidPublicToken = async (
+  accountId: AccountId,
+  linkToken: string,
+  publicToken: string,
+): Promise<ExchangePlaidPublicTokenResult | Error> => {
+  baseLogger.info(
+    { accountId, operation: "exchangePlaidPublicToken" },
+    "Bridge operation started",
+  )
+
+  const enabledCheck = checkBridgeEnabled()
+  if (enabledCheck instanceof Error) return enabledCheck
+
+  const account = await checkAccountLevel(accountId)
+  if (account instanceof Error) return account
+
+  const trimmedLinkToken = linkToken?.trim() ?? ""
+  const trimmedPublicToken = publicToken?.trim() ?? ""
+  if (!trimmedLinkToken || !trimmedPublicToken) {
+    return new BridgeInvalidPlaidTokenError()
+  }
+
+  try {
+    const customerId = account.bridgeCustomerId
+    if (!customerId) {
+      return new BridgeCustomerNotFoundError(
+        "Account has no Bridge customer ID. Complete KYC first.",
+      )
+    }
+
+    const exchanged = await BridgeApiClient.exchangePlaidPublicToken(
+      trimmedLinkToken,
+      trimmedPublicToken,
+    )
+
+    const result: ExchangePlaidPublicTokenResult = {
+      message: exchanged.message,
+    }
+
+    baseLogger.info(
+      { accountId, operation: "exchangePlaidPublicToken" },
+      "Bridge operation completed",
+    )
+
+    return result
+  } catch (error) {
+    baseLogger.error(
+      { accountId, operation: "exchangePlaidPublicToken", error },
+      "Bridge operation failed",
+    )
     return error instanceof Error ? error : new Error(String(error))
   }
 }
@@ -1678,6 +1741,7 @@ export default wrapAsyncFunctionsToRunInSpan({
     initiateKyc,
     createVirtualAccount,
     addExternalAccount,
+    exchangePlaidPublicToken,
     createExternalAccount,
     setDefaultExternalAccount,
     deleteExternalAccount,

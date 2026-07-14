@@ -60,7 +60,7 @@ mutation BridgeCreateVirtualAccount {
 
 ### `bridgeAddExternalAccount`
 
-Returns a hosted URL for the user to link their external bank account (via Plaid/Bridge).
+Returns a Plaid `linkToken` so the app can open the Plaid Link SDK and connect a bank account via Bridge.
 
 **Request:**
 ```graphql
@@ -70,7 +70,7 @@ mutation BridgeAddExternalAccount {
       message
     }
     externalAccount {
-      linkUrl
+      linkToken
       expiresAt
     }
   }
@@ -78,8 +78,32 @@ mutation BridgeAddExternalAccount {
 ```
 
 **Response:**
-- `linkUrl`: URL to the bank linking flow.
-- `expiresAt`: Expiration timestamp for the link.
+- `linkToken`: Plaid Link token for the client SDK.
+- `expiresAt`: Expiration timestamp for the token.
+
+---
+
+### `bridgeExchangePlaidPublicToken`
+
+Exchanges the Plaid `publicToken` (from Link `onSuccess`) with Bridge. Call from the app backend path only — Flash keeps the Bridge Api-Key server-side. External accounts are created asynchronously and arrive via webhook.
+
+**Request:**
+```graphql
+mutation BridgeExchangePlaidPublicToken(
+  $input: BridgeExchangePlaidPublicTokenInput!
+) {
+  bridgeExchangePlaidPublicToken(input: $input) {
+    errors {
+      message
+    }
+    message
+  }
+}
+```
+
+**Input:**
+- `linkToken`: Same token returned by `bridgeAddExternalAccount`.
+- `publicToken`: Token from Plaid Link `onSuccess`.
 
 ---
 
