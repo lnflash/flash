@@ -1,4 +1,7 @@
 import { JMDAmount, USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
+// Imported from the file directly, NOT the @domain/shared barrel (which resolves
+// `MoneyAmount` to ./money's base): the tests below exercise THIS file's USDT-scoped
+// base and its `from`/`fromJSON`.
 import { MoneyAmount } from "@domain/shared/MoneyAmount"
 
 describe("Money Amount", () => {

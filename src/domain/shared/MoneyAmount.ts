@@ -2,12 +2,17 @@ import { Money, Round, PRECISION_M } from "./bigint-money"
 import { BigIntConversionError, UnsupportedCurrencyError } from "./errors"
 import { WalletCurrency } from "./primitives"
 
-// This file is the canonical home of the base `MoneyAmount` and `USDTAmount` ONLY.
-// The USD / JMD / BTC amount classes live in ./money and are what the `@domain/shared`
-// barrel resolves to: ./index.ts does `export * from "./money"` and takes only
-// `USDTAmount` from here. Duplicate USD/JMD/BTC classes previously lived here too and
-// shadowed the ./money ones, which let a fix land on the dead copy (ENG-518; cashout
-// #449 → #450). Do NOT re-add currency-amount classes here — extend the ./money ones.
+// A USDT-specific `MoneyAmount` base + `USDTAmount` — nothing else lives here.
+//
+// This is NOT the base the app sees as `MoneyAmount`. The `@domain/shared` barrel does
+// `export * from "./money"`, so ./money/MoneyAmount.ts is the canonical base the rest of
+// the codebase resolves; the barrel takes only `{ USDTAmount }` from this file. Because
+// `USDTAmount` extends THIS base and not ./money's, `x instanceof MoneyAmount` (the
+// barrel's) does NOT match a USDTAmount — call sites that need to catch it add an explicit
+// `|| x instanceof USDTAmount` (e.g. app/offers/storage/OffersSerde.ts). The two bases
+// should be consolidated onto ./money (follow-up); until then, do NOT re-add USD/JMD/BTC
+// classes here — those live in ./money, and duplicating them here is exactly what let a
+// cashout fix land on a dead copy (ENG-518; #449 → #450).
 
 export abstract class MoneyAmount {
   readonly money: Money
