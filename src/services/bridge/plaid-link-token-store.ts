@@ -15,7 +15,7 @@ export type PlaidLinkTokenBinding = {
 }
 
 const KEY_PREFIX = "plaid:link:"
-/** Plaid’s default link_token lifetime when expires_at is unparseable. */
+/** Plaid’s default link_token lifetime when expires_at is unparsable. */
 const FALLBACK_TTL_SECS = 4 * 60 * 60
 
 const cacheKey = (linkToken: string): string => `${KEY_PREFIX}${linkToken}`
