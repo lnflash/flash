@@ -921,6 +921,11 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = "No upgrade request found for this account"
       return new NotFoundError({ message, logger: baseLogger })
 
+    case "ExchangeRateQueryError":
+      message =
+        "Cashout is temporarily unavailable while we refresh the exchange rate. Please try again shortly."
+      return new UnexpectedClientError({ message, logger: baseLogger })
+
     case "InvalidLnurlError":
       return new InvalidLnurlError({ message: error.message, logger: baseLogger })
 
