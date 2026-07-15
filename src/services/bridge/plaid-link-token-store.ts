@@ -1,0 +1,77 @@
+/**
+ * Binds Bridge-issued Plaid link tokens to the Flash account that requested them.
+ * Tokens live only as long as Bridge says they do; exchange rejects strangers / reuse.
+ */
+
+import { CacheServiceError, CacheUndefinedError } from "@domain/cache"
+import { RedisCacheService } from "@services/cache"
+
+import { BridgeInvalidPlaidTokenError } from "./errors"
+
+export type PlaidLinkTokenBinding = {
+  accountId: AccountId
+  bridgeCustomerId: string
+  expiresAt: string
+}
+
+const KEY_PREFIX = "plaid:link:"
+/** Plaid’s default link_token lifetime when expires_at is unparseable. */
+const FALLBACK_TTL_SECS = 4 * 60 * 60
+
+const cacheKey = (linkToken: string): string => `${KEY_PREFIX}${linkToken}`
+
+const ttlSecsFromExpiresAt = (expiresAt: string): Seconds => {
+  const ms = Date.parse(expiresAt)
+  if (Number.isNaN(ms)) return FALLBACK_TTL_SECS as Seconds
+  const secs = Math.floor((ms - Date.now()) / 1000)
+  return Math.max(1, secs) as Seconds
+}
+
+export const PlaidLinkTokenStore = {
+  save: async (
+    linkToken: string,
+    binding: PlaidLinkTokenBinding,
+  ): Promise<true | CacheServiceError> => {
+    const result = await RedisCacheService().set({
+      key: cacheKey(linkToken),
+      value: binding,
+      ttlSecs: ttlSecsFromExpiresAt(binding.expiresAt),
+    })
+    if (result instanceof CacheServiceError) return result
+    return true
+  },
+
+  /** Load binding, enforce ownership, and delete so the token is one-time-use. */
+  consumeForAccount: async (
+    linkToken: string,
+    accountId: AccountId,
+  ): Promise<PlaidLinkTokenBinding | BridgeInvalidPlaidTokenError | CacheServiceError> => {
+    const key = cacheKey(linkToken)
+    const cached = await RedisCacheService().get<PlaidLinkTokenBinding>({ key })
+
+    if (cached instanceof CacheUndefinedError) {
+      return new BridgeInvalidPlaidTokenError(
+        "Unknown or already-used Plaid link token — restart bank linking",
+      )
+    }
+    if (cached instanceof CacheServiceError) return cached
+
+    if (cached.accountId !== accountId) {
+      return new BridgeInvalidPlaidTokenError(
+        "Plaid link token was not issued for this account — restart bank linking",
+      )
+    }
+
+    const expiresMs = Date.parse(cached.expiresAt)
+    if (!Number.isNaN(expiresMs) && expiresMs <= Date.now()) {
+      await RedisCacheService().clear({ key })
+      return new BridgeInvalidPlaidTokenError(
+        "Plaid link token has expired — restart bank linking",
+      )
+    }
+
+    // Consume before the Bridge call so concurrent exchanges can't reuse the token.
+    await RedisCacheService().clear({ key })
+    return cached
+  },
+}

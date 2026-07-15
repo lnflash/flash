@@ -128,10 +128,10 @@ User            Flash App          Flash Backend          Bridge.xyz            
 
 1.  **Link Bank**: User chooses to add a bank account.
 2.  **GraphQL Mutation**: App calls `bridgeAddExternalAccount`.
-3.  **Link Token**: Flash requests a Plaid `link_token` from Bridge (`POST …/plaid_link_requests`) and returns `{ linkToken, expiresAt }`.
+3.  **Link Token**: Flash requests a Plaid `link_token` from Bridge (`POST …/plaid_link_requests`), binds it to the caller’s account in Redis (TTL = `link_token_expires_at`), and returns `{ linkToken, expiresAt }`.
 4.  **Plaid Link SDK**: App opens Plaid Link with `linkToken` (not a hosted Bridge URL).
 5.  **Authentication**: User logs into their bank and selects an account; Plaid returns a `publicToken` via `onSuccess`.
-6.  **Exchange Mutation**: App calls `bridgeExchangePlaidPublicToken` with `linkToken` + `publicToken`. Flash exchanges the token with Bridge server-side (Api-Key never leaves the backend).
+6.  **Exchange Mutation**: App calls `bridgeExchangePlaidPublicToken` with `linkToken` + `publicToken`. Flash verifies the token was issued to this account (and consumes it), then exchanges with Bridge server-side (Api-Key never leaves the backend).
 7.  **Verification Webhook**: Bridge creates External Accounts asynchronously and notifies Flash (`external_account` webhook). App may poll `bridgeExternalAccounts` until the bank appears as verified.
 8.  **Request Withdrawal**: User enters amount and selects the linked bank account.
 9.  **GraphQL Mutation**: App calls `bridgeRequestWithdrawal` with `amount` and `externalAccountId`.

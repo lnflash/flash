@@ -14,6 +14,7 @@ import { BridgeVirtualAccount } from "@services/mongoose/schema"
 import { wrapAsyncFunctionsToRunInSpan } from "@services/tracing"
 import { baseLogger } from "@services/logger"
 
+import { CacheServiceError } from "@domain/cache"
 import { RepositoryError } from "@domain/errors"
 import {
   toBridgeCustomerId,
@@ -52,6 +53,7 @@ import BridgeApiClient, {
   type CreateExternalAccountRequest,
   type ExternalAccount,
 } from "./client"
+import { PlaidLinkTokenStore } from "./plaid-link-token-store"
 import {
   presentBridgeWithdrawal,
   receiptFeesFromTransfer,
@@ -627,6 +629,20 @@ const addExternalAccount = async (
 
     const plaid = await BridgeApiClient.createPlaidLinkRequest(customerId)
 
+    // Bind token → account before returning it so exchange can enforce ownership.
+    const saved = await PlaidLinkTokenStore.save(plaid.link_token, {
+      accountId,
+      bridgeCustomerId: customerId,
+      expiresAt: plaid.link_token_expires_at,
+    })
+    if (saved instanceof CacheServiceError) {
+      baseLogger.error(
+        { accountId, operation: "addExternalAccount", error: saved },
+        "Failed to bind Plaid link token",
+      )
+      return new BridgeError("Unable to start bank linking — please try again")
+    }
+
     // Deployed clients still select the deprecated linkUrl field, so keep
     // serving the hosted flow best-effort until the fleet is on linkToken.
     let linkUrl: string | null = null
@@ -703,6 +719,21 @@ const exchangePlaidPublicToken = async (
       )
     }
 
+    const binding = await PlaidLinkTokenStore.consumeForAccount(
+      trimmedLinkToken,
+      accountId,
+    )
+    if (binding instanceof BridgeInvalidPlaidTokenError) return binding
+    if (binding instanceof CacheServiceError) {
+      baseLogger.error(
+        { accountId, operation: "exchangePlaidPublicToken", error: binding },
+        "Failed to load Plaid link token binding",
+      )
+      return new BridgeInvalidPlaidTokenError(
+        "Unable to verify Plaid link token — restart bank linking",
+      )
+    }
+
     const exchanged = await BridgeApiClient.exchangePlaidPublicToken(
       trimmedLinkToken,
       trimmedPublicToken,
@@ -713,7 +744,11 @@ const exchangePlaidPublicToken = async (
     }
 
     baseLogger.info(
-      { accountId, operation: "exchangePlaidPublicToken" },
+      {
+        accountId,
+        operation: "exchangePlaidPublicToken",
+        bridgeCustomerId: binding.bridgeCustomerId,
+      },
       "Bridge operation completed",
     )
 

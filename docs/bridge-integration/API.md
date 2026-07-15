@@ -103,7 +103,7 @@ mutation BridgeExchangePlaidPublicToken(
 ```
 
 **Input:**
-- `linkToken`: Same token returned by `bridgeAddExternalAccount`.
+- `linkToken`: Same token returned by `bridgeAddExternalAccount` (must be exchanged by the same account that requested it; tokens are one-time-use).
 - `publicToken`: Token from Plaid Link `onSuccess`.
 
 ---
