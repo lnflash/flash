@@ -7,7 +7,7 @@ import IError from "@graphql/shared/types/abstract/error"
 import { SetDocTypeValueError } from "@services/frappe/errors"
 import { InternalServerError } from "@graphql/error"
 
-const BankAccountInput = GT.Input({
+export const BankAccountInput = GT.Input({
   name: "BankAccountInput",
   fields: () => ({
     bankName: { type: GT.NonNull(GT.String) },
@@ -25,7 +25,7 @@ type BankAccountInputType = {
   currency: string
   accountNumber: string
 }
-const parseBankAccountInput = ({
+export const parseBankAccountInput = ({
   bankName,
   bankBranch,
   accountType,
@@ -39,7 +39,7 @@ const parseBankAccountInput = ({
   bank_account_no: accountNumber,
 })
 
-const AddressInput = GT.Input({
+export const AddressInput = GT.Input({
   name: "AddressInput",
   fields: () => ({
     title: { type: GT.NonNull(GT.String) },

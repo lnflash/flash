@@ -9,6 +9,19 @@ type AccountLevel =
 type AccountStatus =
   (typeof import("./index").AccountStatus)[keyof typeof import("./index").AccountStatus]
 
+type AccountStatusHeadline =
+  (typeof import("./index").AccountStatusHeadline)[keyof typeof import("./index").AccountStatusHeadline]
+
+type RequestableCapability =
+  (typeof import("./index").RequestableCapability)[keyof typeof import("./index").RequestableCapability]
+
+type AccountCapabilities = {
+  readonly verified: boolean
+  readonly bankPayout: boolean
+  readonly business: boolean
+  readonly usdAccount: boolean
+}
+
 type AccountLimitsRange =
   (typeof import("./index").AccountLimitsRange)[keyof typeof import("./index").AccountLimitsRange]
 
