@@ -80,6 +80,7 @@ mutation BridgeAddExternalAccount {
 **Response:**
 - `linkToken`: Plaid Link token for the client SDK.
 - `expiresAt`: Expiration timestamp for the token.
+- `linkUrl` *(deprecated)*: Hosted bank-linking URL, served best-effort so already-shipped clients keep working; may be `null`. New clients must use `linkToken`.
 
 ---
 

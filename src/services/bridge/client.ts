@@ -542,15 +542,12 @@ export class BridgeClient {
 
   // ============ Plaid Link ============
 
-  async createPlaidLinkRequest(
-    customerId: BridgeCustomerId,
-    idempotencyKey?: string,
-  ): Promise<PlaidLinkRequest> {
+  async createPlaidLinkRequest(customerId: BridgeCustomerId): Promise<PlaidLinkRequest> {
+    // request() generates a fresh Idempotency-Key per call, so consecutive
+    // calls mint distinct one-time link tokens.
     return this.request<PlaidLinkRequest>(
       "POST",
       `/customers/${customerId}/plaid_link_requests`,
-      undefined,
-      idempotencyKey ?? crypto.randomUUID(),
     )
   }
 

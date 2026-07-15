@@ -91,6 +91,7 @@ type CreateVirtualAccountResult = {
 
 type AddExternalAccountResult = {
   linkToken: string
+  linkUrl: string | null
   expiresAt: string
 }
 
@@ -626,8 +627,22 @@ const addExternalAccount = async (
 
     const plaid = await BridgeApiClient.createPlaidLinkRequest(customerId)
 
+    // Deployed clients still select the deprecated linkUrl field, so keep
+    // serving the hosted flow best-effort until the fleet is on linkToken.
+    let linkUrl: string | null = null
+    try {
+      const hosted = await BridgeApiClient.getExternalAccountLinkUrl(customerId)
+      linkUrl = hosted.link_url
+    } catch (hostedError) {
+      baseLogger.warn(
+        { accountId, operation: "addExternalAccount", error: hostedError },
+        "Hosted link URL unavailable; returning linkToken only",
+      )
+    }
+
     const result: AddExternalAccountResult = {
       linkToken: plaid.link_token,
+      linkUrl,
       expiresAt: plaid.link_token_expires_at,
     }
 
@@ -708,6 +723,21 @@ const exchangePlaidPublicToken = async (
       { accountId, operation: "exchangePlaidPublicToken", error },
       "Bridge operation failed",
     )
+
+    if (error instanceof BridgeApiError) {
+      if (error.statusCode === 401 || error.statusCode === 403) {
+        return new BridgePlaidNotAvailableError()
+      }
+      // These mean the token pair was rejected — expired link_token,
+      // already-exchanged public_token, or a mismatched pair.
+      if ([400, 404, 409, 422].includes(error.statusCode)) {
+        const detail = (error.response as { message?: string } | null)?.message
+        return new BridgeInvalidPlaidTokenError(
+          detail || "Invalid or expired Plaid token — restart bank linking",
+        )
+      }
+    }
+
     return error instanceof Error ? error : new Error(String(error))
   }
 }

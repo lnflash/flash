@@ -544,6 +544,7 @@ type BridgeExternalAccountLink
 {
   expiresAt: String!
   linkToken: String!
+  linkUrl: String @deprecated(reason: "Use linkToken with the Plaid Link SDK. Hosted-URL linking is being retired; this field is best-effort and may be null.")
 }
 
 input BridgeInitiateKycInput
