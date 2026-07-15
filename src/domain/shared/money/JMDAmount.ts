@@ -1,6 +1,6 @@
 import { getCurrencyMajorExponent } from "@domain/fiat/display-currency"
 
-import Money from "../bigint-money"
+import Money, { Round } from "../bigint-money"
 
 import { BigIntConversionError } from "../errors"
 import { WalletCurrency } from "../primitives"
@@ -26,7 +26,13 @@ export class JMDAmount extends MoneyAmount {
 
   static dollars(d: number): JMDAmount | BigIntConversionError {
     try {
-      return new JMDAmount(BigInt(d) * 100n)
+      // Mirror USDAmount.dollars: use the Money lib for a decimal-safe conversion.
+      // BigInt(d) throws on any fractional rate (e.g. an NCB rate of 155.5), which
+      // is what the exchange-rate value virtually always is.
+      const dollarAmt = new Money(d.toString(), "JMDollars", Round.HALF_TO_EVEN)
+      const cents = JMDAmount.cents("100")
+      if (cents instanceof BigIntConversionError) return cents // should never happen
+      return new JMDAmount(cents.money.multiply(dollarAmt).toFixed(2))
     } catch (error) {
       return new BigIntConversionError(
         error instanceof Error ? error.message : String(error),
