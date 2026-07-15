@@ -45,7 +45,9 @@ export const PlaidLinkTokenStore = {
   consumeForAccount: async (
     linkToken: string,
     accountId: AccountId,
-  ): Promise<PlaidLinkTokenBinding | BridgeInvalidPlaidTokenError | CacheServiceError> => {
+  ): Promise<
+    PlaidLinkTokenBinding | BridgeInvalidPlaidTokenError | CacheServiceError
+  > => {
     const key = cacheKey(linkToken)
     const cached = await RedisCacheService().get<PlaidLinkTokenBinding>({ key })
 

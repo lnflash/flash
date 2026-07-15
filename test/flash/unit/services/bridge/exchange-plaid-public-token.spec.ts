@@ -163,11 +163,7 @@ describe("BridgeService.exchangePlaidPublicToken", () => {
   })
 
   it("rejects expired bound tokens without calling Bridge", async () => {
-    bindTokenForAccount(
-      "link-1",
-      ACCOUNT_ID,
-      new Date(Date.now() - 1000).toISOString(),
-    )
+    bindTokenForAccount("link-1", ACCOUNT_ID, new Date(Date.now() - 1000).toISOString())
 
     const result = await BridgeService.exchangePlaidPublicToken(
       ACCOUNT_ID,
