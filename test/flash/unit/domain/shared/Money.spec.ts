@@ -32,6 +32,19 @@ describe("Money Amount", () => {
       const jmdprice = usdAmount.convertAtRate(rate)
       expect(jmdprice.asDollars()).toBe("16000.00")
     })
+
+    // Regression: the live NCB cashout rate is virtually always fractional
+    // (e.g. 155.5, 152.7). The old JMDAmount.dollars did `BigInt(d) * 100n`,
+    // which threw on any non-integer, breaking every JMD cashout offer.
+    // This imports JMDAmount from @domain/shared — the exact barrel-resolved
+    // class the cashout path uses (see ErpNext.getCashoutExchangeRate).
+    it("accepts fractional JMD rates (regression: NCB rate 155.5)", () => {
+      const amt = JMDAmount.dollars(155.5)
+      if (amt instanceof Error) throw amt
+      expect(amt.asDollars()).toBe("155.50")
+      expect(JMDAmount.dollars(152.7)).not.toBeInstanceOf(Error)
+      expect(JMDAmount.dollars(0.5)).not.toBeInstanceOf(Error)
+    })
   })
 
   describe("USD Amount", () => {
