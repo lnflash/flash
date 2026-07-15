@@ -17,8 +17,11 @@ import {
 
 const i18n = getI18nInstance()
 
-const formatWithdrawalAmount = (amount: string, currency: string): string =>
-  `${amount} ${currency.toUpperCase()}`
+const formatWithdrawalAmount = (amount: string, currency: string): string => {
+  const numeric = Number(amount)
+  const display = Number.isFinite(numeric) ? numeric.toFixed(2) : amount
+  return `${display} ${currency.toUpperCase()}`
+}
 
 export type BridgeWithdrawalNotificationOutcome =
   | "submitted"
