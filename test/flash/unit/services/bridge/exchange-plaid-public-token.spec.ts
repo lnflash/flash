@@ -253,9 +253,7 @@ describe("BridgeService.exchangePlaidPublicToken", () => {
     ])
 
     const successes = outcomes.filter((r) => !(r instanceof Error))
-    const rejected = outcomes.filter(
-      (r) => r instanceof BridgeInvalidPlaidTokenError,
-    )
+    const rejected = outcomes.filter((r) => r instanceof BridgeInvalidPlaidTokenError)
     expect(successes).toEqual([{ message: "ok" }])
     expect(rejected).toHaveLength(1)
     // The losing exchange never reaches Bridge.
