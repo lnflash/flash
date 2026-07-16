@@ -25,6 +25,11 @@ export const RequestableCapability = {
   Business: "business",
 } as const
 
+// The one Bridge KYC status that grants the usdAccount capability. Typed
+// against the Account union so a status rename upstream is a compile error
+// here rather than a silently-false capability.
+export const BRIDGE_KYC_APPROVED: NonNullable<Account["bridgeKycStatus"]> = "approved"
+
 // Derive the internal account level from capability flags.
 //
 //   verified (phone + ID)                          → L1
@@ -70,10 +75,10 @@ export const deriveCapabilitiesForAccount = ({
 }: {
   level: AccountLevel
   hasBankAccountOnFile: boolean
-  bridgeKycStatus?: string
+  bridgeKycStatus?: Account["bridgeKycStatus"]
 }): AccountCapabilities => ({
   verified: level >= AccountLevel.One,
   bankPayout: hasBankAccountOnFile || level >= AccountLevel.Two,
   business: level >= AccountLevel.Three,
-  usdAccount: bridgeKycStatus === "approved",
+  usdAccount: bridgeKycStatus === BRIDGE_KYC_APPROVED,
 })

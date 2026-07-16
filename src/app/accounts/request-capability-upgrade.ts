@@ -28,7 +28,7 @@ export type CapabilityUpgradeRequest = {
 export const requestCapabilityUpgrade = async (
   accountId: AccountId,
   input: CapabilityUpgradeRequest,
-): Promise<ReturnType<typeof createUpgradeRequest>> => {
+): ReturnType<typeof createUpgradeRequest> => {
   const account = await AccountsRepository().findById(accountId)
   if (account instanceof Error) return account
 
