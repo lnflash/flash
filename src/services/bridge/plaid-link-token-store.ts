@@ -4,7 +4,7 @@
  */
 
 import { CacheServiceError, CacheUndefinedError } from "@domain/cache"
-import { RedisCacheService } from "@services/cache"
+import { RedisCacheService, consumeCacheKey } from "@services/cache"
 
 import { BridgeInvalidPlaidTokenError } from "./errors"
 
@@ -41,7 +41,12 @@ export const PlaidLinkTokenStore = {
     return true
   },
 
-  /** Load binding, enforce ownership, and delete so the token is one-time-use. */
+  /**
+   * Load binding, enforce ownership, then atomically consume so the token is
+   * one-time-use even under concurrent exchanges (see consumeCacheKey). Ownership
+   * is checked on a non-destructive read, so a stranger cannot burn the owner's
+   * token by attempting to exchange it.
+   */
   consumeForAccount: async (
     linkToken: string,
     accountId: AccountId,
@@ -72,8 +77,19 @@ export const PlaidLinkTokenStore = {
       )
     }
 
-    // Consume before the Bridge call so concurrent exchanges can't reuse the token.
-    await RedisCacheService().clear({ key })
+    // Atomic single-use gate. A plain get-then-clear is a TOCTOU race: two
+    // concurrent exchanges of the same token can both read the binding before
+    // either clears it, so both would proceed. consumeCacheKey issues one DEL
+    // and returns true only for the caller that actually removed the key — among
+    // concurrent exchanges of the same token, exactly one wins; the rest are
+    // rejected here, before the Bridge call.
+    const consumed = await consumeCacheKey({ key })
+    if (consumed instanceof CacheServiceError) return consumed
+    if (!consumed) {
+      return new BridgeInvalidPlaidTokenError(
+        "Unknown or already-used Plaid link token — restart bank linking",
+      )
+    }
     return cached
   },
 }

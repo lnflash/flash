@@ -57,6 +57,7 @@ jest.mock("@services/bridge/client", () => ({
 const mockCacheSet = jest.fn()
 const mockCacheGet = jest.fn()
 const mockCacheClear = jest.fn()
+const mockCacheConsume = jest.fn()
 
 jest.mock("@services/cache", () => ({
   RedisCacheService: () => ({
@@ -64,6 +65,9 @@ jest.mock("@services/cache", () => ({
     get: mockCacheGet,
     clear: mockCacheClear,
   }),
+  // Lazy wrapper: the factory is hoisted above the const, so reference
+  // mockCacheConsume only when called, not at factory-eval time.
+  consumeCacheKey: (args: { key: string }) => mockCacheConsume(args),
 }))
 
 import BridgeService from "@services/bridge"
@@ -93,6 +97,7 @@ const bindTokenForAccount = (
     expiresAt,
   })
   mockCacheClear.mockResolvedValue(true)
+  mockCacheConsume.mockResolvedValue(true)
   return { linkToken, accountId, expiresAt }
 }
 
@@ -113,6 +118,7 @@ describe("BridgeService.exchangePlaidPublicToken", () => {
     mockAccount()
     mockCacheGet.mockResolvedValue(new CacheUndefinedError())
     mockCacheClear.mockResolvedValue(true)
+    mockCacheConsume.mockResolvedValue(true)
   })
 
   it("rejects empty or whitespace tokens with BridgeInvalidPlaidTokenError", async () => {
@@ -159,7 +165,10 @@ describe("BridgeService.exchangePlaidPublicToken", () => {
     expect(result).toBeInstanceOf(BridgeInvalidPlaidTokenError)
     expect((result as Error).message).toMatch(/not issued for this account/)
     expect(BridgeApiClient.exchangePlaidPublicToken).not.toHaveBeenCalled()
+    // A stranger must not be able to burn the owner's token: ownership is
+    // checked on the non-destructive get, before the atomic consume.
     expect(mockCacheClear).not.toHaveBeenCalled()
+    expect(mockCacheConsume).not.toHaveBeenCalled()
   })
 
   it("rejects expired bound tokens without calling Bridge", async () => {
@@ -190,12 +199,67 @@ describe("BridgeService.exchangePlaidPublicToken", () => {
     )
 
     expect(mockCacheGet).toHaveBeenCalledWith({ key: "plaid:link:link-1" })
-    expect(mockCacheClear).toHaveBeenCalledWith({ key: "plaid:link:link-1" })
+    // Consume goes through the atomic gate, not the non-gating clear().
+    expect(mockCacheConsume).toHaveBeenCalledWith({ key: "plaid:link:link-1" })
+    expect(mockCacheClear).not.toHaveBeenCalled()
     expect(BridgeApiClient.exchangePlaidPublicToken).toHaveBeenCalledWith(
       "link-1",
       "public-1",
     )
     expect(result).toEqual({ message: "ok" })
+  })
+
+  it("consumes the token: a second exchange of the same token is rejected", async () => {
+    bindTokenForAccount("link-1")
+    ;(BridgeApiClient.exchangePlaidPublicToken as jest.Mock).mockResolvedValue({
+      message: "ok",
+    })
+
+    // First exchange atomically removes the binding (DEL removed 1 key)...
+    mockCacheConsume.mockResolvedValueOnce(true)
+    const first = await BridgeService.exchangePlaidPublicToken(
+      ACCOUNT_ID,
+      "link-1",
+      "public-1",
+    )
+    expect(first).toEqual({ message: "ok" })
+
+    // ...so the second is rejected because its DEL removes nothing (0 keys),
+    // even though the stateless get still returns a binding.
+    mockCacheConsume.mockResolvedValueOnce(false)
+    const second = await BridgeService.exchangePlaidPublicToken(
+      ACCOUNT_ID,
+      "link-1",
+      "public-1",
+    )
+    expect(second).toBeInstanceOf(BridgeInvalidPlaidTokenError)
+    expect((second as Error).message).toMatch(/Unknown or already-used/)
+    expect(BridgeApiClient.exchangePlaidPublicToken).toHaveBeenCalledTimes(1)
+  })
+
+  it("lets only one of two concurrent exchanges of the same token through", async () => {
+    bindTokenForAccount("link-1")
+    ;(BridgeApiClient.exchangePlaidPublicToken as jest.Mock).mockResolvedValue({
+      message: "ok",
+    })
+    // Model the atomic DEL under concurrency: exactly one caller removes the key.
+    // (With the old get-then-clear this would resolve true for both and both
+    // would reach Bridge — the race this test guards against.)
+    mockCacheConsume.mockResolvedValueOnce(true).mockResolvedValueOnce(false)
+
+    const outcomes = await Promise.all([
+      BridgeService.exchangePlaidPublicToken(ACCOUNT_ID, "link-1", "public-1"),
+      BridgeService.exchangePlaidPublicToken(ACCOUNT_ID, "link-1", "public-1"),
+    ])
+
+    const successes = outcomes.filter((r) => !(r instanceof Error))
+    const rejected = outcomes.filter(
+      (r) => r instanceof BridgeInvalidPlaidTokenError,
+    )
+    expect(successes).toEqual([{ message: "ok" }])
+    expect(rejected).toHaveLength(1)
+    // The losing exchange never reaches Bridge.
+    expect(BridgeApiClient.exchangePlaidPublicToken).toHaveBeenCalledTimes(1)
   })
 
   it("maps Bridge 400 (rejected token pair) to BridgeInvalidPlaidTokenError with detail", async () => {

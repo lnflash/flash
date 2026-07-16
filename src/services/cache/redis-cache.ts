@@ -73,3 +73,25 @@ export const RedisCacheService = (): ICacheService => {
     fns: { set, get, getOrSet, clear },
   })
 }
+
+/**
+ * Atomically deletes `key`, returning `true` only for the caller whose DEL
+ * actually removed it. Redis executes each DEL serially, so among concurrent
+ * callers exactly one sees a removed-count of 1 — the basis for one-time-use
+ * keys (e.g. Plaid link tokens). `false` means the key was already gone: lost
+ * the race, expired, or never existed.
+ *
+ * `clear` cannot express this: it discards the removed-count and always
+ * resolves `true`, so get-then-`clear` is a TOCTOU race in which concurrent
+ * consumers all "succeed". Gate single-use on this function instead.
+ */
+export const consumeCacheKey = async ({
+  key,
+}: LocalCacheClearArgs): Promise<boolean | CacheServiceError> => {
+  try {
+    const removed = await redisCache.deleteCache(key)
+    return removed === 1
+  } catch (err) {
+    return new UnknownCacheServiceError(err)
+  }
+}
