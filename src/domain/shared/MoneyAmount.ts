@@ -10,7 +10,7 @@ import { WalletCurrency } from "./primitives"
 // `USDTAmount` extends THIS base and not ./money's, `x instanceof MoneyAmount` (the
 // barrel's) does NOT match a USDTAmount — call sites that need to catch it add an explicit
 // `|| x instanceof USDTAmount` (e.g. app/offers/storage/OffersSerde.ts). The two bases
-// should be consolidated onto ./money (follow-up); until then, do NOT re-add USD/JMD/BTC
+// should be consolidated onto ./money (follow-up: ENG-523); until then, do NOT re-add USD/JMD/BTC
 // classes here — those live in ./money, and duplicating them here is exactly what let a
 // cashout fix land on a dead copy (ENG-518; #449 → #450).
 
