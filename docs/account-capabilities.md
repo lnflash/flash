@@ -50,6 +50,14 @@ Implementation: `src/domain/accounts/capabilities.ts`
 operational value used by limits and permissions; transitions recompute it
 through the state machine.
 
+> **Note — derived level vs stored `level`.** The read model can imply a
+> level higher than the stored one: an L1 account with an approved bank
+> account on file resolves `bankPayout: true`, which derives to L2. Both the
+> stored `level` and the derived `capabilities`/`statusHeadline` are exposed
+> over GraphQL, so a client may observe `level: 1` alongside `bankPayout: true`.
+> Treat `capabilities` as the source of truth for what the account can do;
+> `level` is internal and retained for backward compatibility.
+
 ## GraphQL surface
 
 On `ConsumerAccount` (public) and `AuditedAccount` (admin):

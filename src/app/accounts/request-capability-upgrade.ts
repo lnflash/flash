@@ -34,6 +34,17 @@ export const requestCapabilityUpgrade = async (
 
   const { capabilities } = await getAccountCapabilities(account)
 
+  // verified (phone + ID) is a prerequisite for every capability upgrade.
+  // deriveLevelFromCapabilities returns L0 for an unverified account, so a
+  // request from one would otherwise be turned into a structurally-invalid,
+  // level-skipping L2 ERPNext request. verified is granted by the identity
+  // flow, not requestable here.
+  if (!capabilities.verified) {
+    return new ValidationError(
+      "Account must complete identity verification before requesting an upgrade",
+    )
+  }
+
   if (capabilities[input.capability]) {
     return new ValidationError(`Account already has the ${input.capability} capability`)
   }
@@ -73,9 +84,9 @@ export const requestCapabilityUpgrade = async (
     return createUpgradeRequest(accountId, {
       ...base,
       level: AccountLevel.Business,
-      // When omitted, the bank account is already on file in ERPNext
-      // (capabilities.bankPayout was checked above).
-      bankAccount: input.bankAccount as BankAccount,
+      // May be undefined: the bank account is already on file in ERPNext
+      // (capabilities.bankPayout was checked above), so none is re-submitted.
+      bankAccount: input.bankAccount,
     })
   }
 
