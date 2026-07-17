@@ -1,3 +1,19 @@
+type AccountCapabilities {
+  """An approved bank account is on file for payouts."""
+  bankPayout: Boolean!
+
+  """Business profile (name and address) on file."""
+  business: Boolean!
+
+  """
+  USD account and routing number available (Bridge KYC approved). Orthogonal to the other capabilities.
+  """
+  usdAccount: Boolean!
+
+  """Phone and identity verified."""
+  verified: Boolean!
+}
+
 type AccountDetailPayload {
   accountDetails: AuditedAccount
   errors: [Error]
@@ -18,6 +34,12 @@ enum AccountStatus {
   PENDING
 }
 
+enum AccountStatusHeadline {
+  BUSINESS
+  TRIAL
+  VERIFIED
+}
+
 input AccountUpdateLevelInput {
   erpParty: String
   level: AccountLevel!
@@ -34,6 +56,8 @@ input AccountUpdateStatusInput {
 Accounts are core to the Galoy architecture. they have users, and own wallets
 """
 type AuditedAccount {
+  capabilities: AccountCapabilities!
+
   """
   GPS coordinates for the account that can be used to place the related business on a map
   """
@@ -46,6 +70,7 @@ type AuditedAccount {
   npub: String
   owner: AuditedUser!
   status: AccountStatus!
+  statusHeadline: AccountStatusHeadline!
   title: String
   username: Username
   uuid: String!

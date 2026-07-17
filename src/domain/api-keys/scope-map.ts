@@ -40,6 +40,7 @@ export const apiKeyScopeForField: Readonly<Record<string, ApiKeyFieldAccess>> =
     quizCompleted: "BLOCKED",
     deviceNotificationTokenCreate: "BLOCKED",
     businessAccountUpgradeRequest: "BLOCKED",
+    accountCapabilityUpgradeRequest: "BLOCKED",
     bankAccountUpdateRequest: "BLOCKED",
     accountDelete: "BLOCKED",
     feedbackSubmit: "BLOCKED",

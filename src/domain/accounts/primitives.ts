@@ -3,8 +3,12 @@ export const AccountLevel = {
   One: 1,
   Two: 2,
   Three: 3,
-  // Semantic aliases
+  // Semantic aliases. "Business" is the current name (ENG-516); "Pro" and
+  // "Merchant" are retired nomenclature kept only for existing call sites.
+  Business: 3,
+  /** @deprecated retired nomenclature (ENG-516) — L2 is bank-payout-capable, no tier name */
   Pro: 2,
+  /** @deprecated renamed to Business (ENG-516) */
   Merchant: 3,
 } as const
 

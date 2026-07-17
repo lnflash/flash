@@ -50,6 +50,50 @@ interface Account
   wallets: [Wallet!]!
 }
 
+type AccountCapabilities
+  @join__type(graph: PUBLIC)
+{
+  """An approved bank account is on file for payouts."""
+  bankPayout: Boolean!
+
+  """Business profile (name and address) on file."""
+  business: Boolean!
+
+  """
+  USD account and routing number available (Bridge KYC approved). Orthogonal to the other capabilities.
+  """
+  usdAccount: Boolean!
+
+  """Phone and identity verified."""
+  verified: Boolean!
+}
+
+enum AccountCapability
+  @join__type(graph: PUBLIC)
+{
+  BANK_PAYOUT @join__enumValue(graph: PUBLIC)
+  BUSINESS @join__enumValue(graph: PUBLIC)
+}
+
+input AccountCapabilityUpgradeRequestInput
+  @join__type(graph: PUBLIC)
+{
+  address: AddressInput!
+  bankAccount: BankAccountInput
+  capability: AccountCapability!
+  fullName: String!
+  idDocument: String
+  terminalsRequested: Int = 0
+}
+
+type AccountCapabilityUpgradeRequestPayload
+  @join__type(graph: PUBLIC)
+{
+  errors: [Error]
+  id: String
+  status: String
+}
+
 type AccountDeletePayload
   @join__type(graph: PUBLIC)
 {
@@ -125,6 +169,14 @@ type AccountLimits
 """Bank account number. Accepts String or Int and coerces to String."""
 scalar AccountNumber
   @join__type(graph: PUBLIC)
+
+enum AccountStatusHeadline
+  @join__type(graph: PUBLIC)
+{
+  BUSINESS @join__enumValue(graph: PUBLIC)
+  TRIAL @join__enumValue(graph: PUBLIC)
+  VERIFIED @join__enumValue(graph: PUBLIC)
+}
 
 input AccountUpdateDefaultWalletIdInput
   @join__type(graph: PUBLIC)
@@ -843,6 +895,7 @@ type ConsumerAccount implements Account
   @join__type(graph: PUBLIC)
 {
   callbackEndpoints: [CallbackEndpoint!]!
+  capabilities: AccountCapabilities!
 
   """
   return CSV stream, base64 encoded, of the list of transactions in the wallet
@@ -851,6 +904,10 @@ type ConsumerAccount implements Account
   defaultWalletId: WalletId!
   displayCurrency: DisplayCurrency!
   id: ID!
+
+  """
+  Internal account level, derived from capabilities (ENG-516). Present capabilities and statusHeadline instead of this.
+  """
   level: AccountLevel!
   limits: AccountLimits!
   notificationSettings: NotificationSettings!
@@ -858,6 +915,7 @@ type ConsumerAccount implements Account
   """List the quiz questions of the consumer account"""
   quiz: [Quiz!]!
   realtimePrice: RealtimePrice!
+  statusHeadline: AccountStatusHeadline!
 
   """
   A list of all transactions associated with walletIds optionally passed.
@@ -1536,6 +1594,7 @@ type MobileVersions
 type Mutation
   @join__type(graph: PUBLIC)
 {
+  accountCapabilityUpgradeRequest(input: AccountCapabilityUpgradeRequestInput!): AccountCapabilityUpgradeRequestPayload!
   accountDelete: AccountDeletePayload!
   accountDisableNotificationCategory(input: AccountDisableNotificationCategoryInput!): AccountUpdateNotificationSettingsPayload!
   accountDisableNotificationChannel(input: AccountDisableNotificationChannelInput!): AccountUpdateNotificationSettingsPayload!

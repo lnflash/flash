@@ -1,4 +1,4 @@
-import { Wallets, Users, Merchants } from "@app"
+import { Accounts, Wallets, Users, Merchants } from "@app"
 import { GT } from "@graphql/index"
 import Coordinates from "@graphql/shared/types/object/coordinates"
 import Timestamp from "@graphql/shared/types/scalar/timestamp"
@@ -8,6 +8,8 @@ import Wallet from "@graphql/shared/types/abstract/wallet"
 import { mapError } from "@graphql/error-map"
 
 import AccountLevel from "@graphql/shared/types/scalar/account-level"
+import AccountCapabilities from "@graphql/shared/types/object/account-capabilities"
+import AccountStatusHeadline from "@graphql/shared/types/scalar/account-status-headline"
 import Merchant from "@graphql/shared/types/object/merchant"
 
 import AccountStatus from "../scalar/account-status"
@@ -24,6 +26,20 @@ const Account: GraphQLObjectType<Account> = GT.Object<Account>({
     username: { type: Username },
     npub: { type: GT.String },
     level: { type: GT.NonNull(AccountLevel) },
+    capabilities: {
+      type: GT.NonNull(AccountCapabilities),
+      resolve: async (source) => {
+        const result = await Accounts.getAccountCapabilities(source)
+        return result.capabilities
+      },
+    },
+    statusHeadline: {
+      type: GT.NonNull(AccountStatusHeadline),
+      resolve: async (source) => {
+        const result = await Accounts.getAccountCapabilities(source)
+        return result.statusHeadline
+      },
+    },
     status: { type: GT.NonNull(AccountStatus) },
     title: { type: GT.String },
     wallets: {
