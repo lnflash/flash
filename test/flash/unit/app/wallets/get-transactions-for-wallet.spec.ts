@@ -275,6 +275,42 @@ describe("toWalletTransactions", () => {
       expect(resolvable).toContain(transaction.settlementVia.type)
     }
   })
+
+  it("keeps IBEX bank/funding ops (5-8) on the logged intraledger fallback", () => {
+    const errorSpy = jest.spyOn(baseLogger, "error").mockImplementation()
+
+    const transactions = toWalletTransactions(
+      [5, 6, 7, 8].map((transactionTypeId) => ({
+        id: `trx-${transactionTypeId}`,
+        accountId: "wallet-id",
+        amount: 10,
+        currencyId: 3,
+        transactionTypeId,
+        createdAt: "2026-05-13T00:00:00.000Z",
+      })) as GResponse200,
+    )
+
+    expect(transactions).toHaveLength(4)
+    for (const transaction of transactions) {
+      expect(transaction.initiationVia.type).toBe("intraledger")
+      expect(transaction.settlementVia.type).toBe("intraledger")
+    }
+
+    const fallbackLogs = errorSpy.mock.calls.filter(
+      ([msg]) =>
+        typeof msg === "string" && msg.includes("Failed to parse Ibex transaction type"),
+    )
+    expect(fallbackLogs).toHaveLength(4)
+    for (const typeId of [5, 6, 7, 8]) {
+      expect(
+        fallbackLogs.some(([msg]) =>
+          (msg as string).includes(`transactionTypeId: ${typeId}`),
+        ),
+      ).toBe(true)
+    }
+
+    errorSpy.mockRestore()
+  })
 })
 
 describe("getTransactionsForWallets", () => {
