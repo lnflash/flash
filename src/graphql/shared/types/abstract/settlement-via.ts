@@ -3,6 +3,7 @@ import dedent from "dedent"
 import { GT } from "@graphql/index"
 
 import { SettlementMethod } from "@domain/wallets"
+import { baseLogger } from "@services/logger"
 
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 
@@ -57,6 +58,25 @@ const SettlementViaOnChain = GT.Object({
 const SettlementVia = GT.Union({
   name: "SettlementVia",
   types: () => [SettlementViaIntraLedger, SettlementViaLn, SettlementViaOnChain],
+  // settlementVia is NonNull on Transaction: a source that fails to resolve
+  // fails the entire transaction list query for the account. Unrecognized
+  // sources degrade to the all-nullable IntraLedger member instead.
+  resolveType: (source) => {
+    switch (source.type) {
+      case SettlementMethod.IntraLedger:
+        return "SettlementViaIntraLedger"
+      case SettlementMethod.Lightning:
+        return "SettlementViaLn"
+      case SettlementMethod.OnChain:
+        return "SettlementViaOnChain"
+      default:
+        baseLogger.error(
+          { settlementViaType: source.type },
+          "Unrecognized settlementVia type; defaulting to SettlementViaIntraLedger",
+        )
+        return "SettlementViaIntraLedger"
+    }
+  },
 })
 
 export default SettlementVia

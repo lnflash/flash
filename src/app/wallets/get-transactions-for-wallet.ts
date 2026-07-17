@@ -44,33 +44,18 @@ const currencyFromIbexCurrencyId = (
 }
 
 export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] => {
-  return ibexResp.map((trx) => {
+  return ibexResp.flatMap((trx) => {
     const currency = currencyFromIbexCurrencyId(trx.currencyId)
 
     if (!currency) {
       baseLogger.error(
-        `Failed to parse Ibex transaction currency. { WalletId: ${trx.accountId}, TransactionId: ${trx.id}, currencyId: ${trx.currencyId} }`,
+        `Failed to parse Ibex transaction currency. Excluding transaction from list. { WalletId: ${trx.accountId}, TransactionId: ${trx.id}, currencyId: ${trx.currencyId} }`,
       )
-      return {
-        walletId: (trx.accountId || "") as WalletId,
-        settlementAmount: 0 as Satoshis,
-        settlementFee: 0 as Satoshis,
-        settlementCurrency: WalletCurrency.Usd,
-        settlementDisplayAmount: `${trx.amount}`,
-        settlementDisplayFee: `${trx.networkFee}`,
-        settlementDisplayPrice: {
-          base: 0n,
-          offset: 0n,
-          displayCurrency: "USD" as DisplayCurrency,
-          walletCurrency: WalletCurrency.Usd,
-        },
-        createdAt: trx.createdAt ? new Date(trx.createdAt) : new Date(),
-        id: trx.id || "null",
-        status: "success" as TxStatus,
-        memo: null,
-        initiationVia: { type: "unknown" },
-        settlementVia: { type: "unknown" },
-      } as UnknownTypeTransaction
+      // A row with an unrecognized currency cannot be represented truthfully;
+      // excluding it beats fabricating a USD row or emitting a source the
+      // NonNull initiationVia/settlementVia unions cannot resolve (which fails
+      // the whole transaction list query for the account).
+      return []
     }
 
     const settlementDisplayPrice: WalletMinorUnitDisplayPrice<
@@ -124,13 +109,25 @@ export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] 
         } as WalletOnChainSettledTransaction // assuming Ibex only gives us settled
       default:
         baseLogger.error(
-          `Failed to parse Ibex transaction type. { WalletId: ${baseTrx.walletId}, TransactionId: ${trx.id}, transactionTypeId: ${trx.transactionTypeId}`,
+          `Failed to parse Ibex transaction type. Rendering as intraledger. { WalletId: ${baseTrx.walletId}, TransactionId: ${trx.id}, transactionTypeId: ${trx.transactionTypeId}`,
         )
+        // Amounts and currency are valid even when the IBEX type id is not
+        // recognized; render as a generic intraledger transaction (all union
+        // fields nullable) rather than hiding money movement or emitting a
+        // source the unions cannot resolve.
         return {
           ...baseTrx,
-          initiationVia: { type: "unknown" },
-          settlementVia: { type: "unknown" },
-        } as UnknownTypeTransaction
+          initiationVia: {
+            type: "intraledger",
+            counterPartyWalletId: undefined as unknown as WalletId,
+            counterPartyUsername: undefined as unknown as Username,
+          },
+          settlementVia: {
+            type: "intraledger",
+            counterPartyWalletId: undefined as unknown as WalletId,
+            counterPartyUsername: null,
+          },
+        } as IntraLedgerTransaction
     }
   })
 }
