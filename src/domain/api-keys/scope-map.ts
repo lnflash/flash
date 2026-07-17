@@ -48,6 +48,7 @@ export const apiKeyScopeForField: Readonly<Record<string, ApiKeyFieldAccess>> =
     bridgeInitiateKyc: "BLOCKED",
     bridgeCreateVirtualAccount: "BLOCKED",
     bridgeAddExternalAccount: "BLOCKED",
+    bridgeExchangePlaidPublicToken: "BLOCKED",
     bridgeCreateExternalAccount: "BLOCKED",
     bridgeSetDefaultExternalAccount: "BLOCKED",
     bridgeDeleteExternalAccount: "BLOCKED",

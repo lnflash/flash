@@ -59,7 +59,7 @@ type VirtualAccountResult = GraphQlErrorResponse & {
 }
 
 type ExternalAccountResult = GraphQlErrorResponse & {
-  externalAccount?: { linkUrl: string; expiresAt: string }
+  externalAccount?: { linkToken: string; expiresAt: string }
 }
 
 type WithdrawalResult = GraphQlErrorResponse & {
@@ -187,7 +187,7 @@ const BRIDGE_ADD_EXTERNAL_ACCOUNT = `
   mutation BridgeAddExternalAccount {
     bridgeAddExternalAccount {
       errors { message }
-      externalAccount { linkUrl expiresAt }
+      externalAccount { linkToken expiresAt }
     }
   }
 `

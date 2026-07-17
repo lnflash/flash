@@ -142,6 +142,15 @@ jest.mock("@app/bridge/send-withdrawal-notification", () => ({
   sendBridgeWithdrawalNotificationBestEffort: jest.fn().mockResolvedValue(undefined),
 }))
 
+// Plaid link-token store pulls RedisCacheService; keep unit suites offline.
+jest.mock("@services/cache", () => ({
+  RedisCacheService: () => ({
+    set: jest.fn().mockResolvedValue(true),
+    get: jest.fn().mockResolvedValue(undefined),
+    clear: jest.fn().mockResolvedValue(true),
+  }),
+}))
+
 import BridgeService, { deriveWithdrawalIdempotencyKey } from "@services/bridge"
 import * as BridgeAccountsRepo from "@services/mongoose/bridge-accounts"
 import BridgeClient from "@services/bridge/client"

@@ -8,6 +8,7 @@ import {
   BridgeError,
   BridgeInsufficientFundsError,
   BridgeInvalidAmountError,
+  BridgeInvalidPlaidTokenError,
   BridgeKycOffboardedError,
   BridgeKycPendingError,
   BridgeKycRejectedError,
@@ -23,6 +24,7 @@ import {
 describe("error-map: Bridge errors", () => {
   const cases: Array<[Error, string]> = [
     [new BridgeInvalidAmountError(), "BRIDGE_INVALID_AMOUNT"],
+    [new BridgeInvalidPlaidTokenError(), "BRIDGE_INVALID_PLAID_TOKEN"],
     [new BridgeBelowMinimumWithdrawalError(10), "BRIDGE_BELOW_MINIMUM_WITHDRAWAL"],
     [new BridgeDisabledError(), "BRIDGE_DISABLED"],
     [new BridgeAccountLevelError(), "BRIDGE_ACCOUNT_LEVEL_ERROR"],

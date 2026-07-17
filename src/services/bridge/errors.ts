@@ -141,6 +141,12 @@ export class BridgePlaidNotAvailableError extends BridgeError {
   }
 }
 
+export class BridgeInvalidPlaidTokenError extends BridgeError {
+  constructor(message: string = "linkToken and publicToken are required") {
+    super(message)
+  }
+}
+
 /**
  * Maps HTTP status codes from Bridge API to domain error types
  *

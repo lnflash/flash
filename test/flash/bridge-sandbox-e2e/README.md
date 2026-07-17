@@ -101,7 +101,7 @@ IBEX_ENVIRONMENT=sandbox yarn test:bridge-sandbox-e2e
 | Preflight | Source-code check of `checkAccountLevel()` allows level ≥ 1 | `src/services/bridge/index.ts` guard must be `level < 1`, not `level < 2` |
 | KYC spec | `bridgeInitiateKyc` returns `{kycLink, tosLink}` URLs | Ensure ENG-345 deployed, sandbox has Bridge customer API set up |
 | Virtual account | Skipped by default; with `BRIDGE_SANDBOX_VIRTUAL_ACCOUNT_CONFIRMED=true`, `bridgeCreateVirtualAccount` returns account details | Requires a Bridge-side KYC-approved sandbox customer; local webhook injection alone does not approve the hosted Bridge customer |
-| External account | Skipped by default; with `BRIDGE_SANDBOX_EXTERNAL_ACCOUNT_LINK_CONFIRMED=true`, `bridgeAddExternalAccount` returns `{linkUrl, expiresAt}` | Requires Bridge sandbox API key/customer entitlement for hosted bank-linking |
+| External account | Skipped by default; with `BRIDGE_SANDBOX_EXTERNAL_ACCOUNT_LINK_CONFIRMED=true`, `bridgeAddExternalAccount` returns `{linkToken, expiresAt}` | Requires Bridge sandbox API key/customer entitlement for Plaid link-token generation |
 | Deposit webhook | Injected webhook processes and persists deposit | Verify webhook secret in config.yaml |
 | Withdrawal error paths | Validation errors returned for invalid inputs | Check withdrawal schema deployed (ENG-348) |
 | Withdrawal **success** path | ⚠️ **Not expected to pass first run** — requires real KYC-approved sandbox customer, funded wallet, and verified external account. | The full withdrawal flow only runs with `BRIDGE_SANDBOX_WITHDRAWAL_CONFIRMED=true`; error-path tests run without it |
