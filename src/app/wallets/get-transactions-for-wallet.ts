@@ -97,9 +97,17 @@ export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] 
           initiationVia: { type: "lightning", paymentHash: "", pubkey: "" },
           settlementVia: { type: "lightning", revealedPreImage: undefined },
         } as WalletLnSettledTransaction
+      // IBEX type ids per GET /v2/transaction-types/all: 1/2 Lightning
+      // receive/send, 3/4 On-Chain receive/send, 5 Fund, 6 Defund, 7 Bank
+      // Deposit, 8 Bank Withdrawal, 9/10 Crypto receive/send (USDT), 11/12
+      // Taproot receive/send. Bank/funding ops (5-8) are org-level and
+      // intentionally left to the logged fallback below.
       case 3:
       case 4:
+      case 9:
       case 10:
+      case 11:
+      case 12:
         return {
           ...baseTrx,
           // Ibex does not provide paymentHash, pubkey and preimage in transactions endpoint. To get these fields,
@@ -162,6 +170,13 @@ const toSettlementMinorUnit = (
   return amount as Satoshis
 }
 
+// Sends render negative: Lightning send (2), On-Chain send (4), Crypto send
+// (10), Taproot send (12).
+const IBEX_SEND_TYPE_IDS = [2, 4, 10, 12]
+
+const isIbexSendType = (transactionTypeId: number | undefined): boolean =>
+  transactionTypeId !== undefined && IBEX_SEND_TYPE_IDS.includes(transactionTypeId)
+
 const toSettlementAmount = (
   ibexAmount: number | undefined,
   transactionTypeId: number | undefined,
@@ -171,11 +186,7 @@ const toSettlementAmount = (
     baseLogger.warn("Ibex did not return transaction amount")
     return toSettlementMinorUnit(ibexAmount, currency)
   }
-  // When sending, make negative
-  const amt =
-    transactionTypeId === 2 || transactionTypeId === 4 || transactionTypeId === 10
-      ? -1 * ibexAmount
-      : ibexAmount
+  const amt = isIbexSendType(transactionTypeId) ? -1 * ibexAmount : ibexAmount
   return toSettlementMinorUnit(amt, currency)
 }
 
@@ -184,10 +195,7 @@ const toSettlementDisplayAmount = (
   transactionTypeId: number | undefined,
 ): string => {
   if (ibexAmount === undefined) return `${ibexAmount}`
-  const amount =
-    transactionTypeId === 2 || transactionTypeId === 4 || transactionTypeId === 10
-      ? -1 * ibexAmount
-      : ibexAmount
+  const amount = isIbexSendType(transactionTypeId) ? -1 * ibexAmount : ibexAmount
   return `${amount}`
 }
 
