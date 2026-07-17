@@ -16,7 +16,6 @@ import LnPaymentSecret from "../scalar/ln-payment-secret"
 
 const SettlementViaIntraLedger = GT.Object({
   name: "SettlementViaIntraLedger",
-  isTypeOf: (source) => source.type === SettlementMethod.IntraLedger,
   fields: () => ({
     counterPartyWalletId: {
       // type: GT.NonNull(WalletId),
@@ -31,7 +30,6 @@ const SettlementViaIntraLedger = GT.Object({
 
 const SettlementViaLn = GT.Object({
   name: "SettlementViaLn",
-  isTypeOf: (source: SettlementViaLn) => source.type === SettlementMethod.Lightning,
   fields: () => ({
     paymentSecret: {
       type: LnPaymentSecret,
@@ -48,7 +46,6 @@ const SettlementViaLn = GT.Object({
 
 const SettlementViaOnChain = GT.Object({
   name: "SettlementViaOnChain",
-  isTypeOf: (source) => source.type === SettlementMethod.OnChain,
   fields: () => ({
     transactionHash: { type: OnChainTxHash },
     vout: { type: GT.Int },

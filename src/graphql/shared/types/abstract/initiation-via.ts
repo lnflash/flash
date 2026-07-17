@@ -10,7 +10,6 @@ import PaymentHash from "../scalar/payment-hash"
 
 const InitiationViaIntraLedger = GT.Object({
   name: "InitiationViaIntraLedger",
-  isTypeOf: (source) => source.type === PaymentInitiationMethod.IntraLedger,
   fields: () => ({
     counterPartyWalletId: {
       // type: GT.NonNull(WalletId),
@@ -24,7 +23,6 @@ const InitiationViaIntraLedger = GT.Object({
 
 const InitiationViaLn = GT.Object({
   name: "InitiationViaLn",
-  isTypeOf: (source) => source.type === PaymentInitiationMethod.Lightning,
   fields: () => ({
     paymentHash: {
       type: GT.NonNull(PaymentHash),
@@ -34,7 +32,6 @@ const InitiationViaLn = GT.Object({
 
 const InitiationViaOnChain = GT.Object({
   name: "InitiationViaOnChain",
-  isTypeOf: (source) => source.type === PaymentInitiationMethod.OnChain,
   fields: () => ({
     address: {
       type: GT.NonNull(OnChainAddress),

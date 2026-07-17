@@ -109,22 +109,25 @@ export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] 
         } as WalletOnChainSettledTransaction // assuming Ibex only gives us settled
       default:
         baseLogger.error(
-          `Failed to parse Ibex transaction type. Rendering as intraledger. { WalletId: ${baseTrx.walletId}, TransactionId: ${trx.id}, transactionTypeId: ${trx.transactionTypeId}`,
+          `Failed to parse Ibex transaction type. Rendering as intraledger. { WalletId: ${baseTrx.walletId}, TransactionId: ${trx.id}, transactionTypeId: ${trx.transactionTypeId} }`,
         )
         // Amounts and currency are valid even when the IBEX type id is not
         // recognized; render as a generic intraledger transaction (all union
         // fields nullable) rather than hiding money movement or emitting a
-        // source the unions cannot resolve.
+        // source the unions cannot resolve. Accepted caveat: the sign
+        // convention (send = negative) is only known for recognized type ids,
+        // so an unrecognized send type renders positive until its id is
+        // added to the switch above.
         return {
           ...baseTrx,
           initiationVia: {
             type: "intraledger",
-            counterPartyWalletId: undefined as unknown as WalletId,
-            counterPartyUsername: undefined as unknown as Username,
+            counterPartyWalletId: undefined,
+            counterPartyUsername: undefined,
           },
           settlementVia: {
             type: "intraledger",
-            counterPartyWalletId: undefined as unknown as WalletId,
+            counterPartyWalletId: undefined,
             counterPartyUsername: null,
           },
         } as IntraLedgerTransaction
