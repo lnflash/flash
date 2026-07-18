@@ -227,6 +227,30 @@ describe("cryptoReceiveHandler", () => {
     expect(alertIbexCryptoReceiveFailure).not.toHaveBeenCalled()
   })
 
+  it("treats an already-completed deposit row as success without alerting", async () => {
+    ;(promoteBridgeDepositForCryptoReceive as jest.Mock).mockResolvedValue(
+      "already_completed",
+    )
+    const res = makeResponse()
+
+    await cryptoReceiveHandler(
+      {
+        body: {
+          tx_hash: TX_HASH,
+          address: ADDRESS,
+          amount: "12.345678",
+          currency: "USDT",
+          network: "ethereum",
+        },
+      } as never,
+      res as never,
+    )
+
+    expect(res.status).toHaveBeenCalledWith(200)
+    expect(res.json).toHaveBeenCalledWith({ status: "success" })
+    expect(alertIbexCryptoReceiveFailure).not.toHaveBeenCalled()
+  })
+
   it("alerts but still succeeds when the deposit-row promotion fails", async () => {
     ;(promoteBridgeDepositForCryptoReceive as jest.Mock).mockResolvedValue(
       new Error("erpnext down"),

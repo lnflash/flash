@@ -1,6 +1,6 @@
 jest.mock("@services/frappe/ErpNext", () => ({
   upsertBridgeTransferRequest: jest.fn(),
-  hasBridgeTransferRequest: jest.fn(),
+  findBridgeTransferRequest: jest.fn(),
   completeBridgeTopupByTxHash: jest.fn(),
 }))
 
@@ -21,7 +21,7 @@ import {
 import { BridgeTransferRequestStatus } from "@services/frappe/models/BridgeTransferRequest"
 
 const upsert = ErpNext.upsertBridgeTransferRequest as jest.Mock
-const hasRow = ErpNext.hasBridgeTransferRequest as jest.Mock
+const findRow = ErpNext.findBridgeTransferRequest as jest.Mock
 const completeByTxHash = ErpNext.completeBridgeTopupByTxHash as jest.Mock
 const lastRequestInput = () => upsert.mock.calls[0][0].input
 
@@ -29,7 +29,7 @@ describe("BridgeTransferRequestWriter", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     upsert.mockResolvedValue(true)
-    hasRow.mockResolvedValue(false)
+    findRow.mockResolvedValue(undefined)
   })
 
   it("writes Bridge deposit events as topup audit requests", async () => {
@@ -61,11 +61,47 @@ describe("BridgeTransferRequestWriter", () => {
         ibexTxHash: "tx_123",
       }),
     )
-    expect(hasRow).toHaveBeenCalledWith("ibex:tx_123")
+    expect(findRow).toHaveBeenCalledWith("ibex:tx_123")
   })
 
-  it("writes the deposit as Completed when the IBEX settle row already exists", async () => {
-    hasRow.mockResolvedValue(true)
+  it("writes the deposit as Completed with account attribution when the IBEX settle row already exists", async () => {
+    findRow.mockResolvedValue({
+      name: "BTR-9",
+      status: BridgeTransferRequestStatus.Settled,
+      account_id: "acct_123",
+      wallet_id: "wallet_123",
+    })
+
+    await writeBridgeDepositRequest({
+      eventId: "wh_123",
+      eventObject: {
+        id: "tr_123",
+        state: "payment_processed",
+        amount: "10.00",
+        currency: "usd",
+        on_behalf_of: "cust_123",
+        receipt: { destination_tx_hash: "tx_123" },
+      },
+      rawPayload: { event_id: "wh_123" },
+    })
+
+    expect(findRow).toHaveBeenCalledWith("ibex:tx_123")
+    expect(lastRequestInput()).toEqual(
+      expect.objectContaining({
+        requestId: "tr_123",
+        status: BridgeTransferRequestStatus.Completed,
+        accountId: "acct_123",
+        walletId: "wallet_123",
+        sourceSystemsSeen: ["bridge_deposit", "ibex_crypto_receive"],
+      }),
+    )
+  })
+
+  it("ignores a settle-row match that is not at Settled status", async () => {
+    findRow.mockResolvedValue({
+      name: "BTR-9",
+      status: BridgeTransferRequestStatus.Pending,
+    })
 
     await writeBridgeDepositRequest({
       eventId: "wh_123",
@@ -82,9 +118,9 @@ describe("BridgeTransferRequestWriter", () => {
 
     expect(lastRequestInput()).toEqual(
       expect.objectContaining({
-        requestId: "tr_123",
-        status: BridgeTransferRequestStatus.Completed,
-        sourceSystemsSeen: ["bridge_deposit", "ibex_crypto_receive"],
+        status: BridgeTransferRequestStatus.FiatReceived,
+        accountId: undefined,
+        walletId: undefined,
       }),
     )
   })
@@ -102,14 +138,14 @@ describe("BridgeTransferRequestWriter", () => {
       rawPayload: { event_id: "wh_123" },
     })
 
-    expect(hasRow).not.toHaveBeenCalled()
+    expect(findRow).not.toHaveBeenCalled()
     expect(lastRequestInput()).toEqual(
       expect.objectContaining({ status: BridgeTransferRequestStatus.FiatReceived }),
     )
   })
 
   it("falls back to Fiat Received when the settle-row check fails", async () => {
-    hasRow.mockResolvedValue(new Error("erpnext down"))
+    findRow.mockResolvedValue(new Error("erpnext down"))
 
     await writeBridgeDepositRequest({
       eventId: "wh_123",

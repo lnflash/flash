@@ -79,10 +79,12 @@ const mergeSourceSystemsSeen = (
   return merged.length ? merged.join(",") : undefined
 }
 
-type ExistingBridgeTransferRequestDoc = {
+export type BridgeTransferRequestDoc = {
   name: string
   status?: string
   source_systems_seen?: string
+  account_id?: string
+  wallet_id?: string
 }
 
 export class ErpNext {
@@ -501,7 +503,7 @@ export class ErpNext {
     const requestId = payload.request_id
 
     try {
-      const existing = await this.findBridgeTransferRequestDoc(requestId)
+      const existing = await this.findBridgeTransferRequest(requestId)
       if (existing instanceof BridgeTransferRequestUpsertError) return existing
 
       if (existing) {
@@ -523,7 +525,7 @@ export class ErpNext {
       } catch (err) {
         if (!this.isDuplicateRequestError(err)) throw err
 
-        const raced = await this.findBridgeTransferRequestDoc(requestId)
+        const raced = await this.findBridgeTransferRequest(requestId)
         if (raced instanceof BridgeTransferRequestUpsertError) return raced
         if (!raced) throw err
 
@@ -546,14 +548,6 @@ export class ErpNext {
       })
       return new BridgeTransferRequestUpsertError(err)
     }
-  }
-
-  async hasBridgeTransferRequest(
-    requestId: string,
-  ): Promise<boolean | BridgeTransferRequestUpsertError> {
-    const existing = await this.findBridgeTransferRequestDoc(requestId)
-    if (existing instanceof BridgeTransferRequestUpsertError) return existing
-    return Boolean(existing)
   }
 
   // Promote the deposit-side Topup audit row (keyed by Bridge deposit id, not
@@ -593,7 +587,7 @@ export class ErpNext {
         },
       )
 
-      const doc: ExistingBridgeTransferRequestDoc | undefined = resp.data?.data?.[0]
+      const doc: BridgeTransferRequestDoc | undefined = resp.data?.data?.[0]
       if (!doc?.name) return "not_found"
       if (doc.status === BridgeTransferRequestStatus.Completed) {
         return "already_completed"
@@ -630,7 +624,7 @@ export class ErpNext {
 
   private applyUpdateGuards(
     payload: ReturnType<BridgeTransferRequest["toErpnext"]>,
-    existing: ExistingBridgeTransferRequestDoc,
+    existing: BridgeTransferRequestDoc,
   ): ReturnType<BridgeTransferRequest["toErpnext"]> {
     const guarded = {
       ...payload,
@@ -652,16 +646,20 @@ export class ErpNext {
     return guarded
   }
 
-  private async findBridgeTransferRequestDoc(
+  async findBridgeTransferRequest(
     requestId: string,
-  ): Promise<
-    ExistingBridgeTransferRequestDoc | undefined | BridgeTransferRequestUpsertError
-  > {
+  ): Promise<BridgeTransferRequestDoc | undefined | BridgeTransferRequestUpsertError> {
     try {
       const filters = JSON.stringify([
         [BridgeTransferRequest.doctype, "request_id", "=", requestId],
       ])
-      const fields = JSON.stringify(["name", "status", "source_systems_seen"])
+      const fields = JSON.stringify([
+        "name",
+        "status",
+        "source_systems_seen",
+        "account_id",
+        "wallet_id",
+      ])
       const resp = await axios.get(
         `${this.url}/api/resource/${encodeURIComponent(BridgeTransferRequest.doctype)}`,
         {

@@ -166,6 +166,75 @@ describe("ErpNext.upsertBridgeTransferRequest", () => {
     )
   })
 
+  it("preserves a promoted status when losing the create race", async () => {
+    mockedAxios.get.mockResolvedValueOnce({ data: { data: [] } }).mockResolvedValueOnce({
+      data: {
+        data: [
+          {
+            name: "BTR-1",
+            status: BridgeTransferRequestStatus.Completed,
+            source_systems_seen: "bridge_deposit,ibex_crypto_receive",
+          },
+        ],
+      },
+    })
+    mockedAxios.post.mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 409, data: { exception: "DuplicateEntryError" } },
+    })
+    mockedAxios.put.mockResolvedValue({ data: { data: { name: "BTR-1" } } })
+
+    const result = await client.upsertBridgeTransferRequest(request)
+
+    expect(result).toBe(true)
+    expect(mockedAxios.put).toHaveBeenCalledWith(
+      "https://erp.example/api/resource/Bridge%20Transfer%20Request/BTR-1",
+      expect.objectContaining({
+        status: BridgeTransferRequestStatus.Completed,
+        source_systems_seen: "bridge_deposit,ibex_crypto_receive",
+      }),
+      expect.any(Object),
+    )
+  })
+
+  it("writes the incoming status when the existing row has none", async () => {
+    mockedAxios.get.mockResolvedValue({ data: { data: [{ name: "BTR-1" }] } })
+    mockedAxios.put.mockResolvedValue({ data: { data: { name: "BTR-1" } } })
+
+    await client.upsertBridgeTransferRequest(request)
+
+    expect(mockedAxios.put).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ status: BridgeTransferRequestStatus.FiatReceived }),
+      expect.any(Object),
+    )
+  })
+
+  it("normalizes whitespace and duplicates when merging source_systems_seen", async () => {
+    mockedAxios.get.mockResolvedValue({
+      data: {
+        data: [
+          {
+            name: "BTR-1",
+            status: BridgeTransferRequestStatus.Completed,
+            source_systems_seen: " bridge_deposit , ibex_crypto_receive ,bridge_deposit",
+          },
+        ],
+      },
+    })
+    mockedAxios.put.mockResolvedValue({ data: { data: { name: "BTR-1" } } })
+
+    await client.upsertBridgeTransferRequest(request)
+
+    expect(mockedAxios.put).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        source_systems_seen: "bridge_deposit,ibex_crypto_receive",
+      }),
+      expect.any(Object),
+    )
+  })
+
   it("keeps last-write-wins semantics for Cashout rows", async () => {
     mockedAxios.get.mockResolvedValue({
       data: {
@@ -191,27 +260,51 @@ describe("ErpNext.upsertBridgeTransferRequest", () => {
   })
 })
 
-describe("ErpNext.hasBridgeTransferRequest", () => {
+describe("ErpNext.findBridgeTransferRequest", () => {
   beforeEach(() => {
     jest.clearAllMocks()
   })
 
-  it("returns true when a row with the request_id exists", async () => {
-    mockedAxios.get.mockResolvedValue({ data: { data: [{ name: "BTR-1" }] } })
+  it("returns the doc with status and account attribution when the row exists", async () => {
+    mockedAxios.get.mockResolvedValue({
+      data: {
+        data: [
+          {
+            name: "BTR-1",
+            status: BridgeTransferRequestStatus.Settled,
+            account_id: "acct_123",
+            wallet_id: "wallet_123",
+          },
+        ],
+      },
+    })
 
-    await expect(client.hasBridgeTransferRequest("ibex:tx_123")).resolves.toBe(true)
+    const result = await client.findBridgeTransferRequest("ibex:tx_123")
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        name: "BTR-1",
+        status: BridgeTransferRequestStatus.Settled,
+        account_id: "acct_123",
+        wallet_id: "wallet_123",
+      }),
+    )
+    const getParams = mockedAxios.get.mock.calls[0][1].params
+    expect(JSON.parse(getParams.fields)).toEqual(
+      expect.arrayContaining(["name", "status", "account_id", "wallet_id"]),
+    )
   })
 
-  it("returns false when no row exists", async () => {
+  it("returns undefined when no row exists", async () => {
     mockedAxios.get.mockResolvedValue({ data: { data: [] } })
 
-    await expect(client.hasBridgeTransferRequest("ibex:tx_123")).resolves.toBe(false)
+    await expect(client.findBridgeTransferRequest("ibex:tx_123")).resolves.toBeUndefined()
   })
 
   it("returns an error when the lookup fails", async () => {
     mockedAxios.get.mockRejectedValue(new Error("network down"))
 
-    const result = await client.hasBridgeTransferRequest("ibex:tx_123")
+    const result = await client.findBridgeTransferRequest("ibex:tx_123")
     expect(result).toBeInstanceOf(Error)
   })
 })
