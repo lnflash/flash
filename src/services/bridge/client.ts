@@ -369,7 +369,8 @@ export class BridgeClient {
     method: string,
     path: string,
     body?: unknown,
-    idempotencyKey?: string,
+    // undefined → auto-generate; null → endpoint does not accept the header
+    idempotencyKey?: string | null,
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`
     const headers: Record<string, string> = {
@@ -377,8 +378,10 @@ export class BridgeClient {
       "Content-Type": "application/json",
     }
 
-    // Bridge rejects Idempotency-Key on GET and DELETE endpoints.
-    if (!["GET", "DELETE"].includes(method.toUpperCase())) {
+    // Bridge rejects Idempotency-Key on GET and DELETE endpoints, and on a
+    // handful of POST resources that disable it explicitly (callers pass
+    // null for those — see exchangePlaidPublicToken).
+    if (!["GET", "DELETE"].includes(method.toUpperCase()) && idempotencyKey !== null) {
       if (idempotencyKey) {
         headers["Idempotency-Key"] = idempotencyKey
       } else {
@@ -555,10 +558,14 @@ export class BridgeClient {
     linkToken: string,
     publicToken: string,
   ): Promise<PlaidExchangePublicTokenResponse> {
+    // Bridge explicitly disables Idempotency-Key on this resource (the
+    // exchange is already idempotent per link token) and 400s when the
+    // header is present: "Cannot set Idempotency-Key on this request".
     return this.request<PlaidExchangePublicTokenResponse>(
       "POST",
       `/plaid_exchange_public_token/${encodeURIComponent(linkToken)}`,
       { public_token: publicToken },
+      null,
     )
   }
 

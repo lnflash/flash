@@ -216,3 +216,47 @@ describe("BridgeClient transfer deletion", () => {
     expect(init.headers["Idempotency-Key"]).toBeUndefined()
   })
 })
+
+describe("BridgeClient Plaid exchange idempotency", () => {
+  const originalFetch = global.fetch
+
+  beforeEach(() => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ message: "ok" }),
+    } as Response)
+  })
+
+  afterEach(() => {
+    global.fetch = originalFetch
+  })
+
+  it("does not send an Idempotency-Key on the plaid public_token exchange", async () => {
+    // Bridge explicitly disables the header on this resource and 400s when it
+    // is present ("Cannot set Idempotency-Key on this request") — found live
+    // on the first production Plaid link (flash-mobile#668 device test).
+    const client = new BridgeClient()
+
+    await client.exchangePlaidPublicToken("lt_abc", "public-token-1")
+
+    const [url, init] = (global.fetch as jest.Mock).mock.calls[0]
+    expect(url).toContain("/plaid_exchange_public_token/lt_abc")
+    expect(init.method).toBe("POST")
+    expect(init.headers["Idempotency-Key"]).toBeUndefined()
+  })
+
+  it("still auto-generates an Idempotency-Key for plaid link-token requests", async () => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ link_token: "lt_abc", expires_at: "later" }),
+    } as Response)
+    const client = new BridgeClient()
+
+    await client.createPlaidLinkRequest("cust_1" as never)
+
+    const [, init] = (global.fetch as jest.Mock).mock.calls[0]
+    expect(init.method).toBe("POST")
+    expect(init.headers["Idempotency-Key"]).toEqual(expect.any(String))
+    expect(init.headers["Idempotency-Key"]).not.toHaveLength(0)
+  })
+})
