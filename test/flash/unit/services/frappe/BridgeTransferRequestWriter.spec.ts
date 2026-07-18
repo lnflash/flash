@@ -144,6 +144,32 @@ describe("BridgeTransferRequestWriter", () => {
     )
   })
 
+  it("omits account attribution from the wire payload when the deposit is not settled", async () => {
+    // A hash-less deposit (or retry) must not carry account_id/wallet_id at
+    // all — an explicit null in the PUT body would wipe the attribution a
+    // prior promotion stamped on the row, and the status guard doesn't cover
+    // those fields. The wire contract is JSON: undefined-valued keys are
+    // dropped, null-valued keys are sent.
+    await writeBridgeDepositRequest({
+      eventId: "wh_123",
+      eventObject: {
+        id: "tr_123",
+        state: "funds_received",
+        amount: "10.00",
+        currency: "usd",
+        on_behalf_of: "cust_123",
+      },
+      rawPayload: { event_id: "wh_123" },
+    })
+
+    expect(lastRequestInput()).toEqual(
+      expect.objectContaining({ accountId: undefined, walletId: undefined }),
+    )
+    const wirePayload = JSON.parse(JSON.stringify(upsert.mock.calls[0][0].toErpnext()))
+    expect(wirePayload).not.toHaveProperty("account_id")
+    expect(wirePayload).not.toHaveProperty("wallet_id")
+  })
+
   it("falls back to Fiat Received when the settle-row check fails", async () => {
     findRow.mockResolvedValue(new Error("erpnext down"))
 
