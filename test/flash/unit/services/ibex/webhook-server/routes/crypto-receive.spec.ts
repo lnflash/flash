@@ -34,6 +34,7 @@ jest.mock("@app/bridge/send-deposit-notification", () => ({
 
 jest.mock("@services/frappe/BridgeTransferRequestWriter", () => ({
   writeIbexCryptoReceiveRequest: jest.fn(),
+  promoteBridgeDepositForCryptoReceive: jest.fn(),
 }))
 
 jest.mock("@services/alerts/ibex-bridge-movement", () => ({
@@ -56,7 +57,10 @@ import { createIbexCryptoReceive } from "@services/mongoose/ibex-crypto-receive-
 import { listWalletsByAccountId } from "@app/wallets"
 import { LockService } from "@services/lock"
 import { WalletCurrency } from "@domain/shared"
-import { writeIbexCryptoReceiveRequest } from "@services/frappe/BridgeTransferRequestWriter"
+import {
+  promoteBridgeDepositForCryptoReceive,
+  writeIbexCryptoReceiveRequest,
+} from "@services/frappe/BridgeTransferRequestWriter"
 import { alertIbexCryptoReceiveFailure } from "@services/alerts/ibex-bridge-movement"
 
 const ACCOUNT_ID = "account-001" as AccountId
@@ -86,6 +90,7 @@ describe("cryptoReceiveHandler", () => {
       { id: WALLET_ID, currency: WalletCurrency.Usdt },
     ])
     ;(writeIbexCryptoReceiveRequest as jest.Mock).mockResolvedValue(true)
+    ;(promoteBridgeDepositForCryptoReceive as jest.Mock).mockResolvedValue("completed")
   })
 
   it("protects the route with rate limit, IP allowlist, auth, and request logging", () => {
@@ -173,6 +178,83 @@ describe("cryptoReceiveHandler", () => {
       },
     })
     expect(res.status).toHaveBeenCalledWith(200)
+  })
+
+  it("promotes the matching Bridge deposit row after writing the settle row", async () => {
+    const res = makeResponse()
+
+    await cryptoReceiveHandler(
+      {
+        body: {
+          tx_hash: TX_HASH,
+          address: ADDRESS,
+          amount: "12.345678",
+          currency: "USDT",
+          network: "ethereum",
+        },
+      } as never,
+      res as never,
+    )
+
+    expect(promoteBridgeDepositForCryptoReceive).toHaveBeenCalledWith({
+      txHash: TX_HASH,
+      accountId: ACCOUNT_ID,
+      walletId: WALLET_ID,
+    })
+    expect(res.status).toHaveBeenCalledWith(200)
+    expect(res.json).toHaveBeenCalledWith({ status: "success" })
+  })
+
+  it("still succeeds when no deposit row matches the tx hash yet", async () => {
+    ;(promoteBridgeDepositForCryptoReceive as jest.Mock).mockResolvedValue("not_found")
+    const res = makeResponse()
+
+    await cryptoReceiveHandler(
+      {
+        body: {
+          tx_hash: TX_HASH,
+          address: ADDRESS,
+          amount: "12.345678",
+          currency: "USDT",
+          network: "ethereum",
+        },
+      } as never,
+      res as never,
+    )
+
+    expect(res.status).toHaveBeenCalledWith(200)
+    expect(res.json).toHaveBeenCalledWith({ status: "success" })
+    expect(alertIbexCryptoReceiveFailure).not.toHaveBeenCalled()
+  })
+
+  it("alerts but still succeeds when the deposit-row promotion fails", async () => {
+    ;(promoteBridgeDepositForCryptoReceive as jest.Mock).mockResolvedValue(
+      new Error("erpnext down"),
+    )
+    const res = makeResponse()
+
+    await cryptoReceiveHandler(
+      {
+        body: {
+          tx_hash: TX_HASH,
+          address: ADDRESS,
+          amount: "12.345678",
+          currency: "USDT",
+          network: "ethereum",
+        },
+      } as never,
+      res as never,
+    )
+
+    expect(res.status).toHaveBeenCalledWith(200)
+    expect(res.json).toHaveBeenCalledWith({ status: "success" })
+    expect(alertIbexCryptoReceiveFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        txHash: TX_HASH,
+        code: "erpnext_promote_failed",
+        title: "Bridge deposit audit row promotion failed",
+      }),
+    )
   })
 
   it("returns 500 when the ERPNext audit write fails", async () => {

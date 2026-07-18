@@ -39,7 +39,7 @@ export type BridgeTransferRequestInput = {
   failureReason?: string
 }
 
-const toFrappeDatetime = (value?: string): string => {
+export const toFrappeDatetime = (value?: string): string => {
   const date = value ? new Date(value) : new Date()
 
   if (Number.isNaN(date.getTime())) return value ?? ""

@@ -1,5 +1,7 @@
 jest.mock("@services/frappe/ErpNext", () => ({
   upsertBridgeTransferRequest: jest.fn(),
+  hasBridgeTransferRequest: jest.fn(),
+  completeBridgeTopupByTxHash: jest.fn(),
 }))
 
 jest.mock("@services/logger", () => ({
@@ -9,6 +11,7 @@ jest.mock("@services/logger", () => ({
 import ErpNext from "@services/frappe/ErpNext"
 import { baseLogger } from "@services/logger"
 import {
+  promoteBridgeDepositForCryptoReceive,
   writeBridgeCashoutCompleted,
   writeBridgeCashoutFailed,
   writeBridgeCashoutPending,
@@ -18,12 +21,15 @@ import {
 import { BridgeTransferRequestStatus } from "@services/frappe/models/BridgeTransferRequest"
 
 const upsert = ErpNext.upsertBridgeTransferRequest as jest.Mock
+const hasRow = ErpNext.hasBridgeTransferRequest as jest.Mock
+const completeByTxHash = ErpNext.completeBridgeTopupByTxHash as jest.Mock
 const lastRequestInput = () => upsert.mock.calls[0][0].input
 
 describe("BridgeTransferRequestWriter", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     upsert.mockResolvedValue(true)
+    hasRow.mockResolvedValue(false)
   })
 
   it("writes Bridge deposit events as topup audit requests", async () => {
@@ -55,6 +61,93 @@ describe("BridgeTransferRequestWriter", () => {
         ibexTxHash: "tx_123",
       }),
     )
+    expect(hasRow).toHaveBeenCalledWith("ibex:tx_123")
+  })
+
+  it("writes the deposit as Completed when the IBEX settle row already exists", async () => {
+    hasRow.mockResolvedValue(true)
+
+    await writeBridgeDepositRequest({
+      eventId: "wh_123",
+      eventObject: {
+        id: "tr_123",
+        state: "payment_processed",
+        amount: "10.00",
+        currency: "usd",
+        on_behalf_of: "cust_123",
+        receipt: { destination_tx_hash: "tx_123" },
+      },
+      rawPayload: { event_id: "wh_123" },
+    })
+
+    expect(lastRequestInput()).toEqual(
+      expect.objectContaining({
+        requestId: "tr_123",
+        status: BridgeTransferRequestStatus.Completed,
+        sourceSystemsSeen: ["bridge_deposit", "ibex_crypto_receive"],
+      }),
+    )
+  })
+
+  it("does not check for a settle row when the deposit has no destination tx hash", async () => {
+    await writeBridgeDepositRequest({
+      eventId: "wh_123",
+      eventObject: {
+        id: "tr_123",
+        state: "funds_received",
+        amount: "10.00",
+        currency: "usd",
+        on_behalf_of: "cust_123",
+      },
+      rawPayload: { event_id: "wh_123" },
+    })
+
+    expect(hasRow).not.toHaveBeenCalled()
+    expect(lastRequestInput()).toEqual(
+      expect.objectContaining({ status: BridgeTransferRequestStatus.FiatReceived }),
+    )
+  })
+
+  it("falls back to Fiat Received when the settle-row check fails", async () => {
+    hasRow.mockResolvedValue(new Error("erpnext down"))
+
+    await writeBridgeDepositRequest({
+      eventId: "wh_123",
+      eventObject: {
+        id: "tr_123",
+        state: "payment_processed",
+        amount: "10.00",
+        currency: "usd",
+        on_behalf_of: "cust_123",
+        receipt: { destination_tx_hash: "tx_123" },
+      },
+      rawPayload: { event_id: "wh_123" },
+    })
+
+    expect(lastRequestInput()).toEqual(
+      expect.objectContaining({ status: BridgeTransferRequestStatus.FiatReceived }),
+    )
+    expect(baseLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ txHash: "tx_123" }),
+      "Failed to check IBEX settle row for Bridge deposit; keeping Fiat Received",
+    )
+  })
+
+  it("promotes the deposit row via ErpNext on crypto receive", async () => {
+    completeByTxHash.mockResolvedValue("completed")
+
+    const result = await promoteBridgeDepositForCryptoReceive({
+      txHash: "tx_123",
+      accountId: "acct_123" as AccountId,
+      walletId: "wallet_123" as WalletId,
+    })
+
+    expect(result).toBe("completed")
+    expect(completeByTxHash).toHaveBeenCalledWith({
+      txHash: "tx_123",
+      accountId: "acct_123",
+      walletId: "wallet_123",
+    })
   })
 
   it("skips virtual account activity until Bridge provides a stable deposit id", async () => {
