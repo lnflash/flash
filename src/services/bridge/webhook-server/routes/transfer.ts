@@ -14,6 +14,7 @@ import {
   writeBridgeCashoutFailed,
 } from "@services/frappe/BridgeTransferRequestWriter"
 import { alertBridge, generateDedupKey } from "@services/alerts"
+import { notifyOpsEvent } from "@services/alerts/ops-events"
 
 const TERMINAL_FAILURE_STATES = new Set([
   "undeliverable",
@@ -158,6 +159,18 @@ export const transferHandler = async (req: Request, res: Response) => {
         return res.status(200).json({ status: "already_processed" })
       }
 
+      notifyOpsEvent({
+        flow: "transfer",
+        phase: "succeeded",
+        status: "success",
+        accountId: result.accountId,
+        amount: {
+          value: String(result.amount ?? amount ?? ""),
+          currency: String(result.currency ?? currency ?? ""),
+        },
+        meta: { transferId: transfer_id },
+      })
+
       await sendBridgeWithdrawalNotificationBestEffort({
         accountId: result.accountId,
         amount: result.amount,
@@ -240,6 +253,19 @@ export const transferHandler = async (req: Request, res: Response) => {
       if (lockStatus === "already_processed") {
         return res.status(200).json({ status: "already_processed" })
       }
+
+      notifyOpsEvent({
+        flow: "transfer",
+        phase: "failed",
+        status: "failed",
+        accountId: result.accountId,
+        error: result.failureReason ?? failureReason ?? state,
+        amount: {
+          value: String(result.amount ?? amount ?? ""),
+          currency: String(result.currency ?? currency ?? ""),
+        },
+        meta: { transferId: transfer_id },
+      })
 
       await sendBridgeWithdrawalNotificationBestEffort({
         accountId: result.accountId,

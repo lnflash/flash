@@ -5,6 +5,7 @@ import { RepositoryError } from "@domain/errors"
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
 
+import { notifyOpsEvent } from "@services/alerts/ops-events"
 import ErpNext, { CashoutId } from "@services/frappe/ErpNext"
 import { CashoutDraftError, CashoutSubmitError } from "@services/frappe/errors"
 import { baseLogger } from "@services/logger"
@@ -44,9 +45,23 @@ class ValidOffer extends Offer {
     return new ValidOffer(validation)
   }
 
+  private notifyStepFailed(step: string, error: Error): void {
+    notifyOpsEvent({
+      flow: "cashout",
+      phase: "failed",
+      status: "failed",
+      accountId: this.account.id,
+      step,
+      error: error.constructor.name,
+    })
+  }
+
   async execute(): Promise<InitiatedCashout | Error> {
     const cashoutId = await ErpNext.draftCashout(this)
-    if (cashoutId instanceof CashoutDraftError) return cashoutId
+    if (cashoutId instanceof CashoutDraftError) {
+      this.notifyStepFailed("draftCashout", cashoutId)
+      return cashoutId
+    }
 
     if (!Cashout.SkipPayment) {
       const resp = await Ibex.payInvoice({
@@ -55,6 +70,7 @@ class ValidOffer extends Offer {
       })
       if (resp instanceof IbexError) {
         baseLogger.error({ resp }, "Failed to pay invoice for cashout")
+        this.notifyStepFailed("payInvoice", resp)
         return resp
       }
     } else {
@@ -70,6 +86,7 @@ class ValidOffer extends Offer {
           { cashoutId },
           "submitCashout failed after retry — manual intervention required",
         )
+        this.notifyStepFailed("submitCashout", submitted)
       }
     }
 

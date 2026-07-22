@@ -8,6 +8,7 @@ import { UnexpectedIbexResponse } from "@services/ibex/errors"
 import { getBankOwnerIbexAccount } from "@services/ledger/caching"
 
 import { RepositoryError } from "@domain/errors"
+import { notifyOpsEvent } from "@services/alerts/ops-events"
 import { EmailService } from "@services/email"
 import ErpNext from "@services/frappe/ErpNext"
 import { BankAccountQueryError } from "@services/frappe/errors"
@@ -119,6 +120,16 @@ const CashoutManager = {
     if (providedWallet.accountId !== settlementWallet.accountId)
       return new ValidationError("Offer is not good for provided wallet.")
 
+    const paymentAmount = offer.details.payment.amount.asPaymentAmount()
+    notifyOpsEvent({
+      flow: "cashout",
+      phase: "initiated",
+      status: "pending",
+      accountId: providedWallet.accountId,
+      amount: { value: paymentAmount.amount, currency: paymentAmount.currency },
+      meta: { offerId: id },
+    })
+
     const validOffer = await ValidOffer.from(offer.details)
     if (validOffer instanceof Error) return validOffer
 
@@ -126,6 +137,14 @@ const CashoutManager = {
     if (executedOffer instanceof Error) return executedOffer
     else {
       EmailService.sendCashoutInitiatedEmail(executedOffer)
+      notifyOpsEvent({
+        flow: "cashout",
+        phase: "succeeded",
+        status: "success",
+        accountId: providedWallet.accountId,
+        amount: { value: paymentAmount.amount, currency: paymentAmount.currency },
+        meta: { offerId: id, cashoutId: executedOffer.cashoutId },
+      })
       return executedOffer
     }
   },

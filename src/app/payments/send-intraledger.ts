@@ -6,13 +6,42 @@ import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { checkedToWalletId } from "@domain/wallets"
 import { MismatchedCurrencyForWalletError } from "@domain/errors"
 
+import { notifyOpsEvent } from "@services/alerts/ops-events"
 import { addAttributesToCurrentSpan } from "@services/tracing"
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 
 import Ibex from "@services/ibex/client"
 import { UnexpectedIbexResponse } from "@services/ibex/errors"
 
-const intraledgerPaymentSendWalletId = async ({
+const intraledgerPaymentSendWalletId = async (
+  args: IntraLedgerPaymentSendWalletIdArgs,
+): Promise<PaymentSendStatus | ApplicationError> => {
+  const result = await executeIntraledgerPaymentSendWalletId(args)
+
+  const meta = {
+    senderWalletId: args.senderWalletId,
+    recipientWalletId: args.recipientWalletId,
+  }
+  if (result instanceof Error) {
+    notifyOpsEvent({
+      flow: "transfer",
+      phase: "failed",
+      status: "failed",
+      error: result.constructor.name,
+      meta,
+    })
+  } else if (result === PaymentSendStatus.Failure) {
+    notifyOpsEvent({ flow: "transfer", phase: "failed", status: "failed", meta })
+  } else if (result === PaymentSendStatus.Pending) {
+    notifyOpsEvent({ flow: "transfer", phase: "pending", status: "pending", meta })
+  } else {
+    notifyOpsEvent({ flow: "transfer", phase: "succeeded", status: "success", meta })
+  }
+
+  return result
+}
+
+const executeIntraledgerPaymentSendWalletId = async ({
   recipientWalletId: uncheckedRecipientWalletId,
   amount: uncheckedAmount,
   memo,

@@ -127,6 +127,7 @@ export const env = createEnv({
     ALERT_PAGERDUTY_ROUTING_KEY: z.string().min(1).optional(),
     ALERT_SLACK_WEBHOOK_URL: z.string().url().optional(),
     ALERT_DISCORD_WEBHOOK_URL: z.string().url().optional(),
+    OPS_DISCORD_WEBHOOK_URL: z.string().url().optional(),
 
     PROXY_CHECK_APIKEY: z.string().min(1).optional(),
 
@@ -238,6 +239,7 @@ export const env = createEnv({
     ALERT_PAGERDUTY_ROUTING_KEY: process.env.ALERT_PAGERDUTY_ROUTING_KEY,
     ALERT_SLACK_WEBHOOK_URL: process.env.ALERT_SLACK_WEBHOOK_URL,
     ALERT_DISCORD_WEBHOOK_URL: process.env.ALERT_DISCORD_WEBHOOK_URL,
+    OPS_DISCORD_WEBHOOK_URL: process.env.OPS_DISCORD_WEBHOOK_URL,
 
     PROXY_CHECK_APIKEY: process.env.PROXY_CHECK_APIKEY,
 

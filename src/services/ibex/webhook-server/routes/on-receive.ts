@@ -1,5 +1,6 @@
 import express, { Request, Response, NextFunction } from "express"
 import rateLimitMiddleware from "express-rate-limit"
+import { notifyOpsEvent } from "@services/alerts/ops-events"
 import { baseLogger, baseLogger as logger } from "@services/logger"
 import { NotificationsService } from "@services/notifications"
 
@@ -99,6 +100,15 @@ const sendLightningNotification = async (
     logger.error(nsResp)
   }
 
+  notifyOpsEvent({
+    flow: "deposit",
+    phase: "succeeded",
+    status: "success",
+    accountId: recipientAccount.id,
+    amount: { value: transaction.amount, currency: receiverWallet.currency },
+    meta: { type: "lightning" },
+  })
+
   next()
 }
 
@@ -137,6 +147,15 @@ const sendOnchainNotification = async (
   } else if (nResp instanceof NotificationsServiceError) {
     logger.error(nResp)
   }
+
+  notifyOpsEvent({
+    flow: "deposit",
+    phase: "succeeded",
+    status: "success",
+    accountId: recipientAccount.id,
+    amount: { value: usdAmount.asDollars(), currency: "USD" },
+    meta: { type: "onchain", txHash: transaction.hash },
+  })
 
   next()
 }

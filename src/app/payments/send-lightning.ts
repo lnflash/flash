@@ -60,6 +60,7 @@ import { DeviceTokensNotRegisteredNotificationsServiceError } from "@domain/noti
 import { CallbackService } from "@services/svix"
 import { getCallbackServiceConfig } from "@config"
 import { CallbackEventType } from "@domain/callback"
+import { notifyOpsEvent } from "@services/alerts/ops-events"
 
 import {
   constructPaymentFlowBuilder,
@@ -75,7 +76,35 @@ import { reimburseFee } from "./reimburse-fee"
 const dealer = DealerPriceService()
 const paymentFlowRepo = PaymentFlowStateRepository(defaultTimeToExpiryInSeconds)
 
-export const payInvoiceByWalletId = async ({
+export const payInvoiceByWalletId = async (
+  args: PayInvoiceByWalletIdArgs,
+): Promise<PaymentSendStatus | ApplicationError> => {
+  const result = await executePayInvoiceByWalletId(args)
+
+  const base = {
+    flow: "transfer" as const,
+    accountId: args.senderAccount.id,
+    meta: { senderWalletId: args.senderWalletId },
+  }
+  if (result instanceof Error) {
+    notifyOpsEvent({
+      ...base,
+      phase: "failed",
+      status: "failed",
+      error: result.constructor.name,
+    })
+  } else if (result === PaymentSendStatus.Failure) {
+    notifyOpsEvent({ ...base, phase: "failed", status: "failed" })
+  } else if (result === PaymentSendStatus.Pending) {
+    notifyOpsEvent({ ...base, phase: "pending", status: "pending" })
+  } else {
+    notifyOpsEvent({ ...base, phase: "succeeded", status: "success" })
+  }
+
+  return result
+}
+
+const executePayInvoiceByWalletId = async ({
   uncheckedPaymentRequest,
   memo,
   senderWalletId: uncheckedSenderWalletId,

@@ -1,4 +1,5 @@
 import { AccountLevel } from "@domain/accounts"
+import { notifyOpsEvent } from "@services/alerts/ops-events"
 import { AccountsRepository, UsersRepository } from "@services/mongoose"
 
 export const upgradeAccountFromDeviceToPhone = async ({
@@ -27,6 +28,16 @@ export const upgradeAccountFromDeviceToPhone = async ({
   accountDevice.level = AccountLevel.One
   const accountUpdated = await AccountsRepository().update(accountDevice)
   if (accountUpdated instanceof Error) return accountUpdated
+
+  notifyOpsEvent({
+    flow: "verification",
+    phase: "promoted",
+    status: "success",
+    accountId: accountUpdated.id,
+    userId,
+    phone,
+    meta: { from: "trial", to: "verified" },
+  })
 
   return accountUpdated
 }
