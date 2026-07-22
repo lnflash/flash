@@ -7,6 +7,12 @@ const mockAddUnverifiedEmailToIdentity = jest.fn()
 const mockSendEmailWithCode = jest.fn()
 const mockValidateCode = jest.fn()
 const mockAddPhoneToIdentity = jest.fn()
+const mockGetCarrier = jest.fn()
+const mockGetUserIdFromIdentifier = jest.fn()
+const mockUpgradeToPhoneSchema = jest.fn()
+const mockListWalletsByAccountId = jest.fn()
+const mockGetBalanceForWallet = jest.fn()
+const mockUpgradeAccountFromDeviceToPhone = jest.fn()
 
 jest.mock("@services/alerts/ops-events", () => ({
   notifyOpsEvent: jest.fn().mockResolvedValue(undefined),
@@ -26,8 +32,34 @@ jest.mock("@config", () => {
     getOnChainAddressCreateAttemptLimits: jest.fn(() => limits),
     getRequestCodePerIpLimits: jest.fn(() => limits),
     getRequestCodePerLoginIdentifierLimits: jest.fn(() => limits),
+    getAccountsOnboardConfig: jest.fn(() => ({
+      phoneMetadataValidationSettings: { enabled: false },
+      ipMetadataValidationSettings: { enabled: false },
+    })),
   }
 })
+
+jest.mock("@services/tracing", () => ({
+  addAttributesToCurrentSpan: jest.fn(),
+  recordExceptionInCurrentSpan: jest.fn(),
+}))
+
+jest.mock("@services/ipfetcher", () => ({
+  IpFetcher: jest.fn(() => ({ fetchIPInfo: jest.fn() })),
+}))
+
+jest.mock("@app/accounts", () => ({
+  upgradeAccountFromDeviceToPhone: (...args: unknown[]) =>
+    mockUpgradeAccountFromDeviceToPhone(...args),
+}))
+
+jest.mock("@app/accounts/create-account", () => ({
+  createAccountForDeviceAccount: jest.fn(),
+}))
+
+jest.mock("@app/wallets", () => ({
+  getBalanceForWallet: (...args: unknown[]) => mockGetBalanceForWallet(...args),
+}))
 
 jest.mock("@services/geetest", () => ({
   __esModule: true,
@@ -53,6 +85,7 @@ jest.mock("@services/twilio", () => ({
   TWILIO_ACCOUNT_TEST: "AC-test",
   TwilioClient: jest.fn(() => ({
     initiateVerify: (...args: unknown[]) => mockInitiateVerify(...args),
+    getCarrier: (...args: unknown[]) => mockGetCarrier(...args),
   })),
   isPhoneCodeValid: (...args: unknown[]) => mockIsPhoneCodeValid(...args),
 }))
@@ -62,22 +95,41 @@ jest.mock("@services/mongoose", () => ({
     findById: (...args: unknown[]) => mockFindUserById(...args),
     update: (...args: unknown[]) => mockUpdateUser(...args),
   })),
-}))
-
-jest.mock("@services/kratos", () => ({
-  AuthWithEmailPasswordlessService: jest.fn(() => ({
-    hasEmail: (...args: unknown[]) => mockHasEmail(...args),
-    addUnverifiedEmailToIdentity: (...args: unknown[]) =>
-      mockAddUnverifiedEmailToIdentity(...args),
-    sendEmailWithCode: (...args: unknown[]) => mockSendEmailWithCode(...args),
-    validateCode: (...args: unknown[]) => mockValidateCode(...args),
-    addPhoneToIdentity: (...args: unknown[]) => mockAddPhoneToIdentity(...args),
+  WalletsRepository: jest.fn(() => ({
+    listByAccountId: (...args: unknown[]) => mockListWalletsByAccountId(...args),
   })),
 }))
+
+jest.mock("@services/kratos", () => {
+  class PhoneAccountAlreadyExistsNeedToSweepFundsError extends Error {}
+  class PhoneAccountAlreadyExistsCannotUpgradeError extends Error {}
+  return {
+    PhoneAccountAlreadyExistsNeedToSweepFundsError,
+    PhoneAccountAlreadyExistsCannotUpgradeError,
+    AuthWithEmailPasswordlessService: jest.fn(() => ({
+      hasEmail: (...args: unknown[]) => mockHasEmail(...args),
+      addUnverifiedEmailToIdentity: (...args: unknown[]) =>
+        mockAddUnverifiedEmailToIdentity(...args),
+      sendEmailWithCode: (...args: unknown[]) => mockSendEmailWithCode(...args),
+      validateCode: (...args: unknown[]) => mockValidateCode(...args),
+      addPhoneToIdentity: (...args: unknown[]) => mockAddPhoneToIdentity(...args),
+    })),
+    AuthWithPhonePasswordlessService: jest.fn(() => ({})),
+    AuthWithUsernamePasswordDeviceIdService: jest.fn(() => ({
+      upgradeToPhoneSchema: (...args: unknown[]) => mockUpgradeToPhoneSchema(...args),
+    })),
+    IdentityRepository: jest.fn(() => ({
+      getUserIdFromIdentifier: (...args: unknown[]) =>
+        mockGetUserIdFromIdentifier(...args),
+    })),
+  }
+})
 
 import { requestPhoneCodeForAuthedUser } from "@app/authentication/request-code"
 import { verifyPhone } from "@app/authentication/phone"
 import { addEmailToIdentity, verifyEmail } from "@app/authentication/email"
+import { loginDeviceUpgradeWithPhone } from "@app/authentication/login"
+import { IdentifierNotFoundError } from "@domain/authentication/errors"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
 
 class PhoneCodeInvalidError extends Error {}
@@ -254,6 +306,127 @@ describe("ops events — verification funnel hooks", () => {
           status: "failed",
           error: "KratosBoomError",
           meta: { emailFlowId: emailRegistrationId },
+        }),
+      )
+    })
+  })
+
+  describe("loginDeviceUpgradeWithPhone", () => {
+    const accountId = "64df1a2b3c4d5e6f78901234" as AccountId
+    const account = { id: accountId, kratosUserId: userId } as unknown as Account
+    const args = { phone, code: "123456" as PhoneCode, ip, account }
+
+    beforeEach(() => {
+      mockIsPhoneCodeValid.mockResolvedValue(true)
+      mockGetCarrier.mockResolvedValue(new Error("carrier lookup disabled"))
+      mockUpgradeToPhoneSchema.mockResolvedValue(true)
+      mockUpgradeAccountFromDeviceToPhone.mockResolvedValue({ id: accountId })
+    })
+
+    it("notifies upgrade-collision when the device account still has balance", async () => {
+      mockGetUserIdFromIdentifier.mockResolvedValue("existing-user-id")
+      mockListWalletsByAccountId.mockResolvedValue([
+        { id: "w1", currency: "USD" },
+        { id: "w2", currency: "USD" },
+      ])
+      mockGetBalanceForWallet
+        .mockResolvedValueOnce({ isZero: () => true })
+        .mockResolvedValueOnce({ isZero: () => false })
+
+      const result = await loginDeviceUpgradeWithPhone(args)
+
+      expect(result).toBeInstanceOf(Error)
+      expect((result as Error).constructor.name).toBe(
+        "PhoneAccountAlreadyExistsNeedToSweepFundsError",
+      )
+      expect(notifyOpsEvent).toHaveBeenCalledTimes(1)
+      expect(notifyOpsEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          flow: "verification",
+          phase: "upgrade-collision",
+          status: "failed",
+          accountId,
+          userId,
+          phone,
+          error: "PhoneAccountAlreadyExistsNeedToSweepFundsError",
+          meta: { deviceHasBalance: "true" },
+        }),
+      )
+    })
+
+    it("notifies upgrade-collision when the device account has zero balance", async () => {
+      mockGetUserIdFromIdentifier.mockResolvedValue("existing-user-id")
+      mockListWalletsByAccountId.mockResolvedValue([{ id: "w1", currency: "USD" }])
+      mockGetBalanceForWallet.mockResolvedValue({ isZero: () => true })
+
+      const result = await loginDeviceUpgradeWithPhone(args)
+
+      expect(result).toBeInstanceOf(Error)
+      expect((result as Error).constructor.name).toBe(
+        "PhoneAccountAlreadyExistsCannotUpgradeError",
+      )
+      expect(notifyOpsEvent).toHaveBeenCalledTimes(1)
+      expect(notifyOpsEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          flow: "verification",
+          phase: "upgrade-collision",
+          status: "failed",
+          accountId,
+          userId,
+          phone,
+          error: "PhoneAccountAlreadyExistsCannotUpgradeError",
+          meta: { deviceHasBalance: "false" },
+        }),
+      )
+    })
+
+    it("does not notify failure events on the successful upgrade path", async () => {
+      // The promotion event itself is emitted inside
+      // upgradeAccountFromDeviceToPhone (mocked here; covered by the
+      // accounts ops-events spec) — this function must add nothing else.
+      mockGetUserIdFromIdentifier.mockResolvedValue(new IdentifierNotFoundError())
+
+      const result = await loginDeviceUpgradeWithPhone(args)
+
+      expect(result).toEqual({ success: true })
+      expect(mockUpgradeAccountFromDeviceToPhone).toHaveBeenCalled()
+      expect(notifyOpsEvent).not.toHaveBeenCalled()
+    })
+
+    it("notifies upgrade-failed when the OTP is invalid", async () => {
+      mockIsPhoneCodeValid.mockResolvedValue(new PhoneCodeInvalidError("bad code"))
+
+      const result = await loginDeviceUpgradeWithPhone(args)
+
+      expect(result).toBeInstanceOf(PhoneCodeInvalidError)
+      expect(notifyOpsEvent).toHaveBeenCalledTimes(1)
+      expect(notifyOpsEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          flow: "verification",
+          phase: "upgrade-failed",
+          status: "failed",
+          accountId,
+          userId,
+          phone,
+          error: "PhoneCodeInvalidError",
+        }),
+      )
+    })
+
+    it("notifies upgrade-failed when the kratos schema upgrade fails", async () => {
+      mockGetUserIdFromIdentifier.mockResolvedValue(new IdentifierNotFoundError())
+      mockUpgradeToPhoneSchema.mockResolvedValue(new KratosBoomError("kratos down"))
+
+      const result = await loginDeviceUpgradeWithPhone(args)
+
+      expect(result).toBeInstanceOf(KratosBoomError)
+      expect(notifyOpsEvent).toHaveBeenCalledTimes(1)
+      expect(notifyOpsEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          flow: "verification",
+          phase: "upgrade-failed",
+          status: "failed",
+          error: "KratosBoomError",
         }),
       )
     })
