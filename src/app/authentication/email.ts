@@ -1,4 +1,5 @@
 import { AccountAlreadyHasEmailError } from "@domain/authentication/errors"
+import { notifyOpsEvent } from "@services/alerts/ops-events"
 import { AuthWithEmailPasswordlessService } from "@services/kratos"
 import { baseLogger } from "@services/logger"
 import { UsersRepository } from "@services/mongoose"
@@ -25,6 +26,14 @@ export const addEmailToIdentity = async ({
   const emailRegistrationId = await authServiceEmail.sendEmailWithCode({ email })
   if (emailRegistrationId instanceof Error) return emailRegistrationId
 
+  notifyOpsEvent({
+    flow: "verification",
+    phase: "otp-sent",
+    status: "pending",
+    userId,
+    email,
+  })
+
   const user = await UsersRepository().findById(userId)
   if (user instanceof Error) return user
 
@@ -40,15 +49,39 @@ export const verifyEmail = async ({
 }): Promise<User | KratosError | RepositoryError> => {
   baseLogger.info({ emailRegistrationId }, "RequestVerifyEmail called")
 
+  const notifyFailed = (error: Error) =>
+    notifyOpsEvent({
+      flow: "verification",
+      phase: "otp-failed",
+      status: "failed",
+      error: error.constructor.name,
+      meta: { emailFlowId: emailRegistrationId },
+    })
+
   const authServiceEmail = AuthWithEmailPasswordlessService()
   const res = await authServiceEmail.validateCode({
     code,
     emailFlowId: emailRegistrationId,
   })
-  if (res instanceof Error) return res
+  if (res instanceof Error) {
+    notifyFailed(res)
+    return res
+  }
 
   const user = await UsersRepository().findById(res.kratosUserId)
-  if (user instanceof Error) return user
+  if (user instanceof Error) {
+    notifyFailed(user)
+    return user
+  }
+
+  notifyOpsEvent({
+    flow: "verification",
+    phase: "otp-verified",
+    status: "success",
+    userId: res.kratosUserId,
+    email: res.email,
+    meta: { emailFlowId: emailRegistrationId },
+  })
 
   return user
 }

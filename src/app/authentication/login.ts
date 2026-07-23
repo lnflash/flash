@@ -22,6 +22,7 @@ import {
   PhoneAccountAlreadyExistsNeedToSweepFundsError,
 } from "@services/kratos"
 
+import { notifyOpsEvent } from "@services/alerts/ops-events"
 import { WalletsRepository } from "@services/mongoose"
 import {
   addAttributesToCurrentSpan,
@@ -261,6 +262,22 @@ export const loginDeviceUpgradeWithPhone = async ({
   ip: IpAddress
   account: Account
 }): Promise<LoginDeviceUpgradeWithPhoneResult | ApplicationError> => {
+  const notifyUpgradeFailed = (
+    phase: string,
+    error: Error,
+    meta?: Record<string, string>,
+  ) =>
+    notifyOpsEvent({
+      flow: "verification",
+      phase,
+      status: "failed",
+      accountId: account.id,
+      userId: account.kratosUserId,
+      phone,
+      error: error.constructor.name,
+      meta,
+    })
+
   {
     const limitOk = await checkFailedLoginAttemptPerIpLimits(ip)
     if (limitOk instanceof Error) return limitOk
@@ -271,7 +288,10 @@ export const loginDeviceUpgradeWithPhone = async ({
   }
 
   const validCode = await isPhoneCodeValid({ phone, code })
-  if (validCode instanceof Error) return validCode
+  if (validCode instanceof Error) {
+    notifyUpgradeFailed("upgrade-failed", validCode)
+    return validCode
+  }
 
   await rewardFailedLoginAttemptPerIpLimits(ip)
   await rewardFailedLoginAttemptPerLoginIdentifierLimits(phone)
@@ -286,20 +306,29 @@ export const loginDeviceUpgradeWithPhone = async ({
 
     // check if account is upgradeable
     const phoneMetadata = await isAllowedToOnboard({ ip, phone })
-    if (phoneMetadata instanceof Error) return phoneMetadata
+    if (phoneMetadata instanceof Error) {
+      notifyUpgradeFailed("upgrade-failed", phoneMetadata)
+      return phoneMetadata
+    }
 
     const success = await AuthWithUsernamePasswordDeviceIdService().upgradeToPhoneSchema({
       phone,
       userId: account.kratosUserId,
     })
-    if (success instanceof Error) return success
+    if (success instanceof Error) {
+      notifyUpgradeFailed("upgrade-failed", success)
+      return success
+    }
 
     const res = await upgradeAccountFromDeviceToPhone({
       userId: account.kratosUserId,
       phone,
       phoneMetadata,
     })
-    if (res instanceof Error) return res
+    if (res instanceof Error) {
+      notifyUpgradeFailed("upgrade-failed", res)
+      return res
+    }
     return { success }
   }
 
@@ -323,7 +352,9 @@ export const loginDeviceUpgradeWithPhone = async ({
       "login.upgrade.collisionRejected": true,
       "login.upgrade.collisionHasDeviceBalance": true,
     })
-    return new PhoneAccountAlreadyExistsNeedToSweepFundsError()
+    const sweepError = new PhoneAccountAlreadyExistsNeedToSweepFundsError()
+    notifyUpgradeFailed("upgrade-collision", sweepError, { deviceHasBalance: "true" })
+    return sweepError
   }
 
   addAttributesToCurrentSpan({
@@ -331,7 +362,9 @@ export const loginDeviceUpgradeWithPhone = async ({
     "login.upgrade.collisionHasDeviceBalance": false,
   })
 
-  return new PhoneAccountAlreadyExistsCannotUpgradeError()
+  const collisionError = new PhoneAccountAlreadyExistsCannotUpgradeError()
+  notifyUpgradeFailed("upgrade-collision", collisionError, { deviceHasBalance: "false" })
+  return collisionError
 }
 
 export const loginWithDevice = async ({

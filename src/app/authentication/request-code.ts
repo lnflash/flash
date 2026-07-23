@@ -9,6 +9,7 @@ import { PhoneAlreadyExistsError } from "@domain/authentication/errors"
 import { NotImplementedError } from "@domain/errors"
 import { RateLimitConfig } from "@domain/rate-limit"
 import { RateLimiterExceededError } from "@domain/rate-limit/errors"
+import { notifyOpsEvent } from "@services/alerts/ops-events"
 import Geetest from "@services/geetest"
 import { AuthWithEmailPasswordlessService } from "@services/kratos"
 import { baseLogger } from "@services/logger"
@@ -104,7 +105,17 @@ export const requestPhoneCodeForAuthedUser = async ({
     return true
   }
 
-  return TwilioClient().initiateVerify({ to: phone, channel })
+  const verifyResp = await TwilioClient().initiateVerify({ to: phone, channel })
+  if (!(verifyResp instanceof Error)) {
+    notifyOpsEvent({
+      flow: "verification",
+      phase: "otp-sent",
+      status: "pending",
+      userId: user.id,
+      phone,
+    })
+  }
+  return verifyResp
 }
 
 export const requestEmailCode = async ({

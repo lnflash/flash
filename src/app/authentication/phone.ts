@@ -1,5 +1,7 @@
 import { PhoneAlreadyExistsError } from "@domain/authentication/errors"
 
+import { notifyOpsEvent } from "@services/alerts/ops-events"
+
 import { isPhoneCodeValid } from "@services/twilio"
 
 import { UsersRepository } from "@services/mongoose"
@@ -13,7 +15,35 @@ import {
   rewardFailedLoginAttemptPerLoginIdentifierLimits,
 } from "./ratelimits"
 
-export const verifyPhone = async ({
+export const verifyPhone = async (args: {
+  userId: UserId
+  phone: PhoneNumber
+  code: PhoneCode
+  ip: IpAddress
+}): Promise<User | ApplicationError> => {
+  const result = await executeVerifyPhone(args)
+  notifyOpsEvent(
+    result instanceof Error
+      ? {
+          flow: "verification",
+          phase: "otp-failed",
+          status: "failed",
+          userId: args.userId,
+          phone: args.phone,
+          error: result.constructor.name,
+        }
+      : {
+          flow: "verification",
+          phase: "otp-verified",
+          status: "success",
+          userId: args.userId,
+          phone: args.phone,
+        },
+  )
+  return result
+}
+
+const executeVerifyPhone = async ({
   userId,
   phone,
   code,

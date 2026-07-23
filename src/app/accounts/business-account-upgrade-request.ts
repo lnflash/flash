@@ -1,5 +1,6 @@
 import { AccountsRepository, UsersRepository } from "@services/mongoose"
 import { IdentityRepository } from "@services/kratos"
+import { notifyOpsEvent } from "@services/alerts/ops-events"
 import ErpNext from "@services/frappe/ErpNext"
 
 import {
@@ -100,6 +101,18 @@ export const createUpgradeRequest = async (
 
   const requestResult = await ErpNext.postUpgradeRequest(req)
   if (requestResult instanceof Error) return requestResult
+
+  notifyOpsEvent({
+    flow: "upgrade",
+    phase: "requested",
+    status: "pending",
+    accountId,
+    meta: {
+      requestId: requestResult.name,
+      from: String(account.level),
+      to: String(input.level),
+    },
+  })
 
   return { id: requestResult.name, status: initialStatus } as UpgradeStatusResponse
 }

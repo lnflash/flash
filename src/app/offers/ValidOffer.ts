@@ -5,6 +5,7 @@ import { RepositoryError } from "@domain/errors"
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
 
+import { notifyOpsEvent } from "@services/alerts/ops-events"
 import ErpNext, { CashoutId } from "@services/frappe/ErpNext"
 import { CashoutDraftError, CashoutSubmitError } from "@services/frappe/errors"
 import { baseLogger } from "@services/logger"
@@ -44,9 +45,23 @@ class ValidOffer extends Offer {
     return new ValidOffer(validation)
   }
 
+  private notifyStepFailed(step: string, error: Error): void {
+    notifyOpsEvent({
+      flow: "cashout",
+      phase: "failed",
+      status: "failed",
+      accountId: this.account.id,
+      step,
+      error: error.constructor.name,
+    })
+  }
+
   async execute(): Promise<InitiatedCashout | Error> {
     const cashoutId = await ErpNext.draftCashout(this)
-    if (cashoutId instanceof CashoutDraftError) return cashoutId
+    if (cashoutId instanceof CashoutDraftError) {
+      this.notifyStepFailed("draftCashout", cashoutId)
+      return cashoutId
+    }
 
     if (!Cashout.SkipPayment) {
       const resp = await Ibex.payInvoice({
@@ -55,6 +70,7 @@ class ValidOffer extends Offer {
       })
       if (resp instanceof IbexError) {
         baseLogger.error({ resp }, "Failed to pay invoice for cashout")
+        this.notifyStepFailed("payInvoice", resp)
         return resp
       }
     } else {
@@ -70,10 +86,12 @@ class ValidOffer extends Offer {
           { cashoutId },
           "submitCashout failed after retry — manual intervention required",
         )
+        this.notifyStepFailed("submitCashout", submitted)
       }
     }
+    const erpSubmitted = !(submitted instanceof CashoutSubmitError)
 
-    return new InitiatedCashout(this, cashoutId)
+    return new InitiatedCashout(this, cashoutId, erpSubmitted)
   }
 }
 
@@ -83,9 +101,14 @@ export class InitiatedCashout {
   readonly status = PaymentSendStatus.Pending
   readonly offer: ValidOffer
   readonly cashoutId: CashoutId
+  // False when the ERPNext submit failed after retry (payment made, manual
+  // intervention pending). Informational for callers/ops — GraphQL output is
+  // unchanged.
+  readonly erpSubmitted: boolean
 
-  constructor(offer: ValidOffer, cashoutId: CashoutId) {
+  constructor(offer: ValidOffer, cashoutId: CashoutId, erpSubmitted = true) {
     this.offer = offer
     this.cashoutId = cashoutId
+    this.erpSubmitted = erpSubmitted
   }
 }

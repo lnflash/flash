@@ -60,6 +60,7 @@ import { DeviceTokensNotRegisteredNotificationsServiceError } from "@domain/noti
 import { CallbackService } from "@services/svix"
 import { getCallbackServiceConfig } from "@config"
 import { CallbackEventType } from "@domain/callback"
+import { notifyOpsEvent } from "@services/alerts/ops-events"
 
 import {
   constructPaymentFlowBuilder,
@@ -75,7 +76,55 @@ import { reimburseFee } from "./reimburse-fee"
 const dealer = DealerPriceService()
 const paymentFlowRepo = PaymentFlowStateRepository(defaultTimeToExpiryInSeconds)
 
-export const payInvoiceByWalletId = async ({
+// Cents for USD/USDT wallets (1 USDT = 1 USD), sats for BTC wallets.
+const usdCentsDisplay = (cents: number) => ({
+  value: (Number(cents) / 100).toFixed(2),
+  currency: "USD",
+})
+const satsDisplay = (sats: number) => ({ value: String(sats), currency: "sats" })
+
+const notifyLightningSendResult = (
+  args: { senderWalletId: WalletId; senderAccount: Account },
+  result: PaymentSendStatus | ApplicationError,
+  amount?: { value: string; currency: string },
+): void => {
+  const base = {
+    flow: "transfer" as const,
+    accountId: args.senderAccount.id,
+    amount,
+    meta: { senderWalletId: args.senderWalletId },
+  }
+  if (result instanceof Error) {
+    notifyOpsEvent({
+      ...base,
+      phase: "failed",
+      status: "failed",
+      error: result.constructor.name,
+      meta: { ...base.meta, reason: "error-return" },
+    })
+  } else if (result === PaymentSendStatus.Failure) {
+    notifyOpsEvent({
+      ...base,
+      phase: "failed",
+      status: "failed",
+      meta: { ...base.meta, reason: "status-failure" },
+    })
+  } else if (result === PaymentSendStatus.Pending) {
+    notifyOpsEvent({ ...base, phase: "pending", status: "pending" })
+  } else {
+    notifyOpsEvent({ ...base, phase: "succeeded", status: "success" })
+  }
+}
+
+export const payInvoiceByWalletId = async (
+  args: PayInvoiceByWalletIdArgs,
+): Promise<PaymentSendStatus | ApplicationError> => {
+  const result = await executePayInvoiceByWalletId(args)
+  notifyLightningSendResult(args, result)
+  return result
+}
+
+const executePayInvoiceByWalletId = async ({
   uncheckedPaymentRequest,
   memo,
   senderWalletId: uncheckedSenderWalletId,
@@ -166,14 +215,20 @@ export const payNoAmountInvoiceByWalletIdForBtcWallet = async (
   args: PayNoAmountInvoiceByWalletIdArgs,
 ): Promise<PaymentSendStatus | ApplicationError> => {
   const validated = await validateIsBtcWallet(args.senderWalletId)
-  return validated instanceof Error ? validated : payNoAmountInvoiceByWalletId(args)
+  const result =
+    validated instanceof Error ? validated : await payNoAmountInvoiceByWalletId(args)
+  notifyLightningSendResult(args, result, satsDisplay(args.amount))
+  return result
 }
 
 export const payNoAmountInvoiceByWalletIdForUsdWallet = async (
   args: PayNoAmountInvoiceByWalletIdArgs,
 ): Promise<PaymentSendStatus | ApplicationError> => {
   const validated = await validateIsUsdWallet(args.senderWalletId, { includeUsdt: true })
-  return validated instanceof Error ? validated : payNoAmountInvoiceByWalletId(args)
+  const result =
+    validated instanceof Error ? validated : await payNoAmountInvoiceByWalletId(args)
+  notifyLightningSendResult(args, result, usdCentsDisplay(args.amount))
+  return result
 }
 
 const validateInvoicePaymentInputs = async ({

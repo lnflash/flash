@@ -18,6 +18,7 @@ import { reconcileByTxHash } from "@services/bridge/reconciliation"
 import { writeBridgeDepositRequest } from "@services/frappe/BridgeTransferRequestWriter"
 import { alertBridge, generateDedupKey } from "@services/alerts"
 import { alertIbexReconciliationFailed } from "@services/alerts/ibex-bridge-movement"
+import { notifyOpsEvent } from "@services/alerts/ops-events"
 
 type DepositEventObject = {
   id: string
@@ -143,6 +144,15 @@ export const depositHandler = async (req: Request, res: Response) => {
         { error: depositLog, event_id, id: obj.id },
         "Failed to persist bridge deposit log",
       )
+      notifyOpsEvent({
+        flow: "deposit",
+        phase: "failed",
+        status: "failed",
+        step: "persist-deposit-log",
+        error: depositLog.constructor.name,
+        amount: { value: String(obj.amount), currency },
+        meta: { customerId, transferId: obj.id },
+      })
       return res.status(500).json({ error: "Failed to persist deposit log" })
     }
 
@@ -181,6 +191,15 @@ export const depositHandler = async (req: Request, res: Response) => {
         detail: auditResult.message,
         context: { event_id, transfer_id: obj.id },
       })
+      notifyOpsEvent({
+        flow: "deposit",
+        phase: "failed",
+        status: "failed",
+        step: "erpnext-audit",
+        error: auditResult.constructor.name,
+        amount: { value: String(obj.amount), currency },
+        meta: { customerId, transferId: obj.id },
+      })
       return res.status(500).json({ error: "Failed to persist ERPNext audit row" })
     }
 
@@ -195,6 +214,14 @@ export const depositHandler = async (req: Request, res: Response) => {
       return res.status(200).json({ status: "already_processed" })
     }
 
+    notifyOpsEvent({
+      flow: "deposit",
+      phase: "succeeded",
+      status: "success",
+      amount: { value: String(obj.amount), currency },
+      meta: { customerId, transferId: obj.id },
+    })
+
     return res.status(200).json({ status: "success" })
   } catch (error) {
     baseLogger.error(
@@ -208,6 +235,14 @@ export const depositHandler = async (req: Request, res: Response) => {
       title: "Bridge deposit webhook processing error",
       detail: error instanceof Error ? error.message : String(error),
       context: { event_id, transfer_id: obj.id },
+    })
+    notifyOpsEvent({
+      flow: "deposit",
+      phase: "failed",
+      status: "failed",
+      step: "exception",
+      error: error instanceof Error ? error.constructor.name : String(error),
+      meta: { transferId: obj.id },
     })
     return res.status(500).json({ error: "Internal server error" })
   }

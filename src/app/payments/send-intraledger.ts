@@ -6,11 +6,54 @@ import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { checkedToWalletId } from "@domain/wallets"
 import { MismatchedCurrencyForWalletError } from "@domain/errors"
 
+import { notifyOpsEvent } from "@services/alerts/ops-events"
 import { addAttributesToCurrentSpan } from "@services/tracing"
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 
 import Ibex from "@services/ibex/client"
 import { UnexpectedIbexResponse } from "@services/ibex/errors"
+
+// Wallet-id intraledger sends are USD/USDT denominated; the unchecked amount
+// is in cents (1 USDT = 1 USD).
+const usdCentsDisplay = (cents: number) => ({
+  value: (Number(cents) / 100).toFixed(2),
+  currency: "USD",
+})
+
+const notifyIntraledgerSendResult = (
+  args: IntraLedgerPaymentSendWalletIdArgs,
+  result: PaymentSendStatus | ApplicationError,
+  amount?: { value: string; currency: string },
+): void => {
+  const base = {
+    flow: "transfer" as const,
+    amount,
+    meta: {
+      senderWalletId: args.senderWalletId,
+      recipientWalletId: args.recipientWalletId,
+    },
+  }
+  if (result instanceof Error) {
+    notifyOpsEvent({
+      ...base,
+      phase: "failed",
+      status: "failed",
+      error: result.constructor.name,
+      meta: { ...base.meta, reason: "error-return" },
+    })
+  } else if (result === PaymentSendStatus.Failure) {
+    notifyOpsEvent({
+      ...base,
+      phase: "failed",
+      status: "failed",
+      meta: { ...base.meta, reason: "status-failure" },
+    })
+  } else if (result === PaymentSendStatus.Pending) {
+    notifyOpsEvent({ ...base, phase: "pending", status: "pending" })
+  } else {
+    notifyOpsEvent({ ...base, phase: "succeeded", status: "success" })
+  }
+}
 
 const intraledgerPaymentSendWalletId = async ({
   recipientWalletId: uncheckedRecipientWalletId,
@@ -90,14 +133,20 @@ export const intraledgerPaymentSendWalletIdForBtcWallet = async (
   args: IntraLedgerPaymentSendWalletIdArgs,
 ): Promise<PaymentSendStatus | ApplicationError> => {
   const validated = await validateIsBtcWallet(args.senderWalletId)
-  return validated instanceof Error ? validated : intraledgerPaymentSendWalletId(args)
+  const result =
+    validated instanceof Error ? validated : await intraledgerPaymentSendWalletId(args)
+  notifyIntraledgerSendResult(args, result)
+  return result
 }
 
 export const intraledgerPaymentSendWalletIdForUsdWallet = async (
   args: IntraLedgerPaymentSendWalletIdArgs,
 ): Promise<PaymentSendStatus | ApplicationError> => {
   const validated = await validateIsUsdWallet(args.senderWalletId, { includeUsdt: true })
-  return validated instanceof Error ? validated : intraledgerPaymentSendWalletId(args)
+  const result =
+    validated instanceof Error ? validated : await intraledgerPaymentSendWalletId(args)
+  notifyIntraledgerSendResult(args, result, usdCentsDisplay(args.amount))
+  return result
 }
 
 const validateIntraledgerPaymentInputs = async ({
