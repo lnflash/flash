@@ -1,5 +1,5 @@
 import { NETWORK, OPS_DISCORD_WEBHOOK_URL } from "@config"
-import { ErrorLevel } from "@domain/shared"
+import { ErrorLevel, JMDAmount, USDAmount, USDTAmount } from "@domain/shared"
 import { recordExceptionInCurrentSpan } from "@services/tracing"
 import axios, { isAxiosError } from "axios"
 
@@ -77,6 +77,15 @@ export const maskEmail = (email: string): string => {
 // channel can still correlate events without leaking full identifiers.
 export const truncateId = (id: string): string =>
   id.length > MAX_ID_LENGTH ? `${id.slice(0, ID_PREFIX_LENGTH)}…` : id
+
+// Money classes store minor units (cents / USDT micros); embeds should show
+// display units ($95.40, not 9540).
+export const toDisplayAmount = (
+  amount: USDAmount | USDTAmount | JMDAmount,
+): { value: string; currency: string } => ({
+  value: amount instanceof USDTAmount ? amount.asNumber(2) : amount.asDollars(),
+  currency: amount.currencyCode,
+})
 
 const envLabel = (): string => NETWORK ?? process.env.NODE_ENV ?? "unknown"
 

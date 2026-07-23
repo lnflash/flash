@@ -292,7 +292,7 @@ describe("intraledger send ops events", () => {
     memo: "ops event test",
   }
 
-  it("notifies a succeeded transfer event on success", async () => {
+  it("notifies a succeeded transfer event with display amount on success", async () => {
     const result = await intraledgerPaymentSendWalletIdForUsdWallet(sendArgs)
 
     expect(result).toEqual({ value: "success" })
@@ -302,6 +302,8 @@ describe("intraledger send ops events", () => {
         flow: "transfer",
         phase: "succeeded",
         status: "success",
+        // display units, not cents: 100 cents -> $1.00
+        amount: { value: "1.00", currency: "USD" },
         meta: {
           senderWalletId: senderUsdWalletId,
           recipientWalletId: recipientUsdWalletId,
@@ -331,18 +333,52 @@ describe("intraledger send ops events", () => {
         phase: "failed",
         status: "failed",
         error: "MismatchedCurrencyForWalletError",
+        meta: expect.objectContaining({ reason: "error-return" }),
       }),
     )
   })
 
-  it("notifies a failed transfer event when Ibex reports payment failure", async () => {
+  it("notifies a failed transfer event when the sender wallet fails wrapper validation", async () => {
+    mockFindWalletById.mockImplementation(async (walletId: WalletId) =>
+      wallet({
+        id: walletId,
+        accountId:
+          walletId === senderUsdWalletId ? "sender-account" : "recipient-account",
+        currency: WalletCurrency.Btc,
+      }),
+    )
+
+    const result = await intraledgerPaymentSendWalletIdForUsdWallet(sendArgs)
+
+    expect(result).toBeInstanceOf(MismatchedCurrencyForWalletError)
+    expect(mockAddInvoice).not.toHaveBeenCalled()
+    expect(notifyOpsEvent).toHaveBeenCalledTimes(1)
+    expect(notifyOpsEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        flow: "transfer",
+        phase: "failed",
+        status: "failed",
+        error: "MismatchedCurrencyForWalletError",
+        amount: { value: "1.00", currency: "USD" },
+        meta: expect.objectContaining({ reason: "error-return" }),
+      }),
+    )
+  })
+
+  it("distinguishes an Ibex status failure from an error return", async () => {
     mockPayInvoice.mockResolvedValue({ status: 3 })
 
     await intraledgerPaymentSendWalletIdForUsdWallet(sendArgs)
 
     expect(notifyOpsEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ flow: "transfer", phase: "failed", status: "failed" }),
+      expect.objectContaining({
+        flow: "transfer",
+        phase: "failed",
+        status: "failed",
+        meta: expect.objectContaining({ reason: "status-failure" }),
+      }),
     )
+    expect((notifyOpsEvent as jest.Mock).mock.calls[0][0].error).toBeUndefined()
   })
 
   it("notifies a pending transfer event when Ibex reports pending", async () => {

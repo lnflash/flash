@@ -19,12 +19,15 @@ jest.mock("axios", () => ({
 
 import axios from "axios"
 
+import { USDAmount, USDTAmount } from "@domain/shared"
+
 import {
   buildEmbed,
   maskEmail,
   maskPhone,
   notifyOpsEvent,
   opsEventsSettled,
+  toDisplayAmount,
   truncateId,
   OpsEvent,
 } from "@services/alerts/ops-events"
@@ -94,6 +97,20 @@ describe("truncateId", () => {
   it("keeps short ids as-is", () => {
     expect(truncateId("tr_12345")).toBe("tr_12345")
     expect(truncateId("123456789012")).toBe("123456789012")
+  })
+})
+
+describe("toDisplayAmount", () => {
+  it("renders USD cents as dollars", () => {
+    const amount = USDAmount.cents("9540")
+    if (amount instanceof Error) throw amount
+    expect(toDisplayAmount(amount)).toEqual({ value: "95.40", currency: "USD" })
+  })
+
+  it("renders USDT micros as major units", () => {
+    const amount = USDTAmount.usdCents("9540")
+    if (amount instanceof Error) throw amount
+    expect(toDisplayAmount(amount)).toEqual({ value: "95.40", currency: "USDT" })
   })
 })
 

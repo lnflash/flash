@@ -8,7 +8,7 @@ import { UnexpectedIbexResponse } from "@services/ibex/errors"
 import { getBankOwnerIbexAccount } from "@services/ledger/caching"
 
 import { RepositoryError } from "@domain/errors"
-import { notifyOpsEvent } from "@services/alerts/ops-events"
+import { notifyOpsEvent, toDisplayAmount } from "@services/alerts/ops-events"
 import { EmailService } from "@services/email"
 import ErpNext from "@services/frappe/ErpNext"
 import { BankAccountQueryError } from "@services/frappe/errors"
@@ -120,31 +120,48 @@ const CashoutManager = {
     if (providedWallet.accountId !== settlementWallet.accountId)
       return new ValidationError("Offer is not good for provided wallet.")
 
-    const paymentAmount = offer.details.payment.amount.asPaymentAmount()
+    const displayAmount = toDisplayAmount(offer.details.payment.amount)
     notifyOpsEvent({
       flow: "cashout",
       phase: "initiated",
       status: "pending",
       accountId: providedWallet.accountId,
-      amount: { value: paymentAmount.amount, currency: paymentAmount.currency },
+      amount: displayAmount,
       meta: { offerId: id },
     })
 
     const validOffer = await ValidOffer.from(offer.details)
-    if (validOffer instanceof Error) return validOffer
+    if (validOffer instanceof Error) {
+      notifyOpsEvent({
+        flow: "cashout",
+        phase: "failed",
+        status: "failed",
+        accountId: providedWallet.accountId,
+        amount: displayAmount,
+        step: "validation",
+        error: validOffer.constructor.name,
+        meta: { offerId: id },
+      })
+      return validOffer
+    }
 
     const executedOffer = await validOffer.execute()
     if (executedOffer instanceof Error) return executedOffer
     else {
       EmailService.sendCashoutInitiatedEmail(executedOffer)
-      notifyOpsEvent({
-        flow: "cashout",
-        phase: "succeeded",
-        status: "success",
-        accountId: providedWallet.accountId,
-        amount: { value: paymentAmount.amount, currency: paymentAmount.currency },
-        meta: { offerId: id, cashoutId: executedOffer.cashoutId },
-      })
+      // On a partial failure (payment made but ERPNext submit failed after
+      // retry) ValidOffer.execute already emitted the terminal failed event —
+      // exactly one truthful terminal event per cashout.
+      if (executedOffer.erpSubmitted) {
+        notifyOpsEvent({
+          flow: "cashout",
+          phase: "succeeded",
+          status: "success",
+          accountId: providedWallet.accountId,
+          amount: displayAmount,
+          meta: { offerId: id, cashoutId: executedOffer.cashoutId },
+        })
+      }
       return executedOffer
     }
   },

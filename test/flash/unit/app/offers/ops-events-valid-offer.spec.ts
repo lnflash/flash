@@ -92,6 +92,7 @@ describe("ops events — ValidOffer.execute step failures", () => {
     const result = await offer.execute()
 
     expect(result).toBeInstanceOf(InitiatedCashout)
+    expect((result as InitiatedCashout).erpSubmitted).toBe(true)
     expect(notifyOpsEvent).not.toHaveBeenCalled()
   })
 
@@ -141,8 +142,10 @@ describe("ops events — ValidOffer.execute step failures", () => {
 
     const result = await offer.execute()
 
-    // submit failure is not surfaced to the caller — manual intervention path
+    // submit failure is not surfaced as an error — manual intervention path —
+    // but the partial-failure fact is flagged for the caller
     expect(result).toBeInstanceOf(InitiatedCashout)
+    expect((result as InitiatedCashout).erpSubmitted).toBe(false)
     expect(mockSubmitCashout).toHaveBeenCalledTimes(2)
     expect(notifyOpsEvent).toHaveBeenCalledTimes(1)
     expect(notifyOpsEvent).toHaveBeenCalledWith(
@@ -163,6 +166,7 @@ describe("ops events — ValidOffer.execute step failures", () => {
     const result = await offer.execute()
 
     expect(result).toBeInstanceOf(InitiatedCashout)
+    expect((result as InitiatedCashout).erpSubmitted).toBe(true)
     expect(notifyOpsEvent).not.toHaveBeenCalled()
   })
 })

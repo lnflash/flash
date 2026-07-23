@@ -89,8 +89,9 @@ class ValidOffer extends Offer {
         this.notifyStepFailed("submitCashout", submitted)
       }
     }
+    const erpSubmitted = !(submitted instanceof CashoutSubmitError)
 
-    return new InitiatedCashout(this, cashoutId)
+    return new InitiatedCashout(this, cashoutId, erpSubmitted)
   }
 }
 
@@ -100,9 +101,14 @@ export class InitiatedCashout {
   readonly status = PaymentSendStatus.Pending
   readonly offer: ValidOffer
   readonly cashoutId: CashoutId
+  // False when the ERPNext submit failed after retry (payment made, manual
+  // intervention pending). Informational for callers/ops — GraphQL output is
+  // unchanged.
+  readonly erpSubmitted: boolean
 
-  constructor(offer: ValidOffer, cashoutId: CashoutId) {
+  constructor(offer: ValidOffer, cashoutId: CashoutId, erpSubmitted = true) {
     this.offer = offer
     this.cashoutId = cashoutId
+    this.erpSubmitted = erpSubmitted
   }
 }

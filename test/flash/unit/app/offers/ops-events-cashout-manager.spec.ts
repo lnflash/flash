@@ -3,7 +3,8 @@ const mockFindWalletById = jest.fn()
 const mockValidOfferFrom = jest.fn()
 
 jest.mock("@services/alerts/ops-events", () => ({
-  notifyOpsEvent: jest.fn().mockResolvedValue(undefined),
+  notifyOpsEvent: jest.fn(),
+  toDisplayAmount: jest.requireActual("@services/alerts/ops-events").toDisplayAmount,
 }))
 
 jest.mock("@config", () => ({
@@ -78,7 +79,10 @@ describe("ops events — CashoutManager.executeCashout", () => {
 
   it("notifies initiated then succeeded on a successful cashout", async () => {
     mockValidOfferFrom.mockResolvedValue({
-      execute: jest.fn(async () => ({ cashoutId: "ACC-CSH-2026-00001" })),
+      execute: jest.fn(async () => ({
+        cashoutId: "ACC-CSH-2026-00001",
+        erpSubmitted: true,
+      })),
     })
 
     const result = await CashoutManager.executeCashout(offerId, walletId)
@@ -93,7 +97,8 @@ describe("ops events — CashoutManager.executeCashout", () => {
         phase: "initiated",
         status: "pending",
         accountId,
-        amount: { value: 50000n, currency: "USD" },
+        // display units, not cents: 50000 cents -> $500.00
+        amount: { value: "500.00", currency: "USD" },
         meta: { offerId },
       }),
     )
@@ -104,8 +109,50 @@ describe("ops events — CashoutManager.executeCashout", () => {
         phase: "succeeded",
         status: "success",
         accountId,
-        amount: { value: 50000n, currency: "USD" },
+        amount: { value: "500.00", currency: "USD" },
         meta: { offerId, cashoutId: "ACC-CSH-2026-00001" },
+      }),
+    )
+  })
+
+  it("does not notify succeeded when the ERPNext submit partially failed", async () => {
+    mockValidOfferFrom.mockResolvedValue({
+      execute: jest.fn(async () => ({
+        cashoutId: "ACC-CSH-2026-00001",
+        erpSubmitted: false,
+      })),
+    })
+
+    const result = await CashoutManager.executeCashout(offerId, walletId)
+
+    // caller-visible result is unchanged; the terminal failed event was
+    // already emitted by ValidOffer.execute
+    expect(result).not.toBeInstanceOf(Error)
+    expect(EmailService.sendCashoutInitiatedEmail).toHaveBeenCalled()
+    expect(notifyOpsEvent).toHaveBeenCalledTimes(1)
+    expect(notifyOpsEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ flow: "cashout", phase: "initiated" }),
+    )
+  })
+
+  it("notifies a terminal failed event when offer validation fails", async () => {
+    mockValidOfferFrom.mockResolvedValue(new Error("offer no longer valid"))
+
+    const result = await CashoutManager.executeCashout(offerId, walletId)
+
+    expect(result).toBeInstanceOf(Error)
+    expect(notifyOpsEvent).toHaveBeenCalledTimes(2)
+    expect(notifyOpsEvent).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        flow: "cashout",
+        phase: "failed",
+        status: "failed",
+        accountId,
+        amount: { value: "500.00", currency: "USD" },
+        step: "validation",
+        error: "Error",
+        meta: { offerId },
       }),
     )
   })
