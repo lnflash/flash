@@ -99,6 +99,52 @@ describe("toWalletTransactions", () => {
     expect(transaction.settlementVia.type).toBe("onchain")
   })
 
+  it("maps IBEX crypto receive transaction type to incoming on-chain USDT", () => {
+    const [transaction] = toWalletTransactions([
+      {
+        id: "crypto-receive-trx-id",
+        accountId: "wallet-id",
+        amount: 2.5,
+        currencyId: 29,
+        transactionTypeId: 9,
+        createdAt: "2026-07-17T16:30:00.000Z",
+      },
+    ] as GResponse200)
+
+    expect(transaction.settlementCurrency).toBe(WalletCurrency.Usdt)
+    expect(transaction.settlementAmount).toBe(250)
+    expect(transaction.settlementDisplayAmount).toBe("2.5")
+    expect(transaction.initiationVia.type).toBe("onchain")
+    expect(transaction.settlementVia.type).toBe("onchain")
+  })
+
+  it("maps IBEX taproot types to on-chain with send rendered negative", () => {
+    const [received, sent] = toWalletTransactions([
+      {
+        id: "taproot-receive",
+        accountId: "wallet-id",
+        amount: 100,
+        currencyId: 3,
+        transactionTypeId: 11,
+        createdAt: "2026-07-17T16:30:00.000Z",
+      },
+      {
+        id: "taproot-send",
+        accountId: "wallet-id",
+        amount: 100,
+        currencyId: 3,
+        transactionTypeId: 12,
+        createdAt: "2026-07-17T16:30:00.000Z",
+      },
+    ] as GResponse200)
+
+    expect(received.settlementAmount).toBe(100)
+    expect(received.initiationVia.type).toBe("onchain")
+    expect(sent.settlementAmount).toBe(-100)
+    expect(sent.settlementDisplayAmount).toBe("-100")
+    expect(sent.initiationVia.type).toBe("onchain")
+  })
+
   it("defaults omitted IBEX USDT amount and network fee to zero cents", () => {
     const [transaction] = toWalletTransactions([
       {
@@ -156,8 +202,10 @@ describe("toWalletTransactions", () => {
     expect(transaction.settlementFee).toBe(12)
   })
 
-  it("does not silently classify unknown IBEX currency ids as BTC", () => {
-    const [transaction] = toWalletTransactions([
+  it("excludes transactions with unknown IBEX currency ids from the list", () => {
+    const errorSpy = jest.spyOn(baseLogger, "error").mockImplementation()
+
+    const transactions = toWalletTransactions([
       {
         id: "trx-id",
         accountId: "wallet-id",
@@ -168,9 +216,100 @@ describe("toWalletTransactions", () => {
       },
     ] as GResponse200)
 
-    expect(transaction.settlementCurrency).not.toBe(WalletCurrency.Btc)
-    expect(transaction.initiationVia.type).toBe("unknown")
-    expect(transaction.settlementVia.type).toBe("unknown")
+    expect(transactions).toHaveLength(0)
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Failed to parse Ibex transaction currency"),
+    )
+
+    errorSpy.mockRestore()
+  })
+
+  it("maps unknown IBEX transaction type ids to intraledger with valid amounts", () => {
+    const errorSpy = jest.spyOn(baseLogger, "error").mockImplementation()
+
+    const [transaction] = toWalletTransactions([
+      {
+        id: "trx-id",
+        accountId: "wallet-id",
+        amount: 250,
+        networkFee: 1,
+        currencyId: 3,
+        transactionTypeId: 99,
+        createdAt: "2026-05-13T00:00:00.000Z",
+      },
+    ] as GResponse200)
+
+    expect(transaction.settlementCurrency).toBe(WalletCurrency.Usd)
+    expect(transaction.settlementAmount).toBe(250)
+    expect(transaction.settlementFee).toBe(1)
+    expect(transaction.initiationVia.type).toBe("intraledger")
+    expect(transaction.settlementVia.type).toBe("intraledger")
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Failed to parse Ibex transaction type"),
+    )
+
+    errorSpy.mockRestore()
+  })
+
+  it("never emits via types outside the GraphQL union members", () => {
+    const resolvable = ["intraledger", "lightning", "onchain"]
+
+    const transactions = toWalletTransactions(
+      [3, 29].flatMap((currencyId) =>
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 99, undefined].map(
+          (transactionTypeId, i) => ({
+            id: `trx-${currencyId}-${i}`,
+            accountId: "wallet-id",
+            amount: 10,
+            currencyId,
+            transactionTypeId,
+            createdAt: "2026-05-13T00:00:00.000Z",
+          }),
+        ),
+      ) as GResponse200,
+    )
+
+    expect(transactions).toHaveLength(28)
+    for (const transaction of transactions) {
+      expect(resolvable).toContain(transaction.initiationVia.type)
+      expect(resolvable).toContain(transaction.settlementVia.type)
+    }
+  })
+
+  it("keeps IBEX bank/funding ops (5-8) on the logged intraledger fallback", () => {
+    const errorSpy = jest.spyOn(baseLogger, "error").mockImplementation()
+
+    const transactions = toWalletTransactions(
+      [5, 6, 7, 8].map((transactionTypeId) => ({
+        id: `trx-${transactionTypeId}`,
+        accountId: "wallet-id",
+        amount: 10,
+        currencyId: 3,
+        transactionTypeId,
+        createdAt: "2026-05-13T00:00:00.000Z",
+      })) as GResponse200,
+    )
+
+    expect(transactions).toHaveLength(4)
+    for (const transaction of transactions) {
+      expect(transaction.initiationVia.type).toBe("intraledger")
+      expect(transaction.settlementVia.type).toBe("intraledger")
+    }
+
+    const fallbackLogs = errorSpy.mock.calls.filter(
+      ([msg]) =>
+        typeof msg === "string" && msg.includes("Failed to parse Ibex transaction type"),
+    )
+    expect(fallbackLogs).toHaveLength(4)
+    for (const typeId of [5, 6, 7, 8]) {
+      expect(
+        fallbackLogs.some(([msg]) =>
+          (msg as string).includes(`transactionTypeId: ${typeId}`),
+        ),
+      ).toBe(true)
+    }
+
+    errorSpy.mockRestore()
   })
 })
 

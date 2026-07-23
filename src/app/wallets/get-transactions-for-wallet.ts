@@ -44,33 +44,18 @@ const currencyFromIbexCurrencyId = (
 }
 
 export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] => {
-  return ibexResp.map((trx) => {
+  return ibexResp.flatMap((trx) => {
     const currency = currencyFromIbexCurrencyId(trx.currencyId)
 
     if (!currency) {
       baseLogger.error(
-        `Failed to parse Ibex transaction currency. { WalletId: ${trx.accountId}, TransactionId: ${trx.id}, currencyId: ${trx.currencyId} }`,
+        `Failed to parse Ibex transaction currency. Excluding transaction from list. { WalletId: ${trx.accountId}, TransactionId: ${trx.id}, currencyId: ${trx.currencyId} }`,
       )
-      return {
-        walletId: (trx.accountId || "") as WalletId,
-        settlementAmount: 0 as Satoshis,
-        settlementFee: 0 as Satoshis,
-        settlementCurrency: WalletCurrency.Usd,
-        settlementDisplayAmount: `${trx.amount}`,
-        settlementDisplayFee: `${trx.networkFee}`,
-        settlementDisplayPrice: {
-          base: 0n,
-          offset: 0n,
-          displayCurrency: "USD" as DisplayCurrency,
-          walletCurrency: WalletCurrency.Usd,
-        },
-        createdAt: trx.createdAt ? new Date(trx.createdAt) : new Date(),
-        id: trx.id || "null",
-        status: "success" as TxStatus,
-        memo: null,
-        initiationVia: { type: "unknown" },
-        settlementVia: { type: "unknown" },
-      } as UnknownTypeTransaction
+      // A row with an unrecognized currency cannot be represented truthfully;
+      // excluding it beats fabricating a USD row or emitting a source the
+      // NonNull initiationVia/settlementVia unions cannot resolve (which fails
+      // the whole transaction list query for the account).
+      return []
     }
 
     const settlementDisplayPrice: WalletMinorUnitDisplayPrice<
@@ -112,9 +97,17 @@ export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] 
           initiationVia: { type: "lightning", paymentHash: "", pubkey: "" },
           settlementVia: { type: "lightning", revealedPreImage: undefined },
         } as WalletLnSettledTransaction
+      // IBEX type ids per GET /v2/transaction-types/all: 1/2 Lightning
+      // receive/send, 3/4 On-Chain receive/send, 5 Fund, 6 Defund, 7 Bank
+      // Deposit, 8 Bank Withdrawal, 9/10 Crypto receive/send (USDT), 11/12
+      // Taproot receive/send. Bank/funding ops (5-8) are org-level and
+      // intentionally left to the logged fallback below.
       case 3:
       case 4:
+      case 9:
       case 10:
+      case 11:
+      case 12:
         return {
           ...baseTrx,
           // Ibex does not provide paymentHash, pubkey and preimage in transactions endpoint. To get these fields,
@@ -124,13 +117,28 @@ export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] 
         } as WalletOnChainSettledTransaction // assuming Ibex only gives us settled
       default:
         baseLogger.error(
-          `Failed to parse Ibex transaction type. { WalletId: ${baseTrx.walletId}, TransactionId: ${trx.id}, transactionTypeId: ${trx.transactionTypeId}`,
+          `Failed to parse Ibex transaction type. Rendering as intraledger. { WalletId: ${baseTrx.walletId}, TransactionId: ${trx.id}, transactionTypeId: ${trx.transactionTypeId} }`,
         )
+        // Amounts and currency are valid even when the IBEX type id is not
+        // recognized; render as a generic intraledger transaction (all union
+        // fields nullable) rather than hiding money movement or emitting a
+        // source the unions cannot resolve. Accepted caveat: the sign
+        // convention (send = negative) is only known for recognized type ids,
+        // so an unrecognized send type renders positive until its id is
+        // added to the switch above.
         return {
           ...baseTrx,
-          initiationVia: { type: "unknown" },
-          settlementVia: { type: "unknown" },
-        } as UnknownTypeTransaction
+          initiationVia: {
+            type: "intraledger",
+            counterPartyWalletId: undefined,
+            counterPartyUsername: undefined,
+          },
+          settlementVia: {
+            type: "intraledger",
+            counterPartyWalletId: undefined,
+            counterPartyUsername: null,
+          },
+        } as IntraLedgerTransaction
     }
   })
 }
@@ -162,6 +170,13 @@ const toSettlementMinorUnit = (
   return amount as Satoshis
 }
 
+// Sends render negative: Lightning send (2), On-Chain send (4), Crypto send
+// (10), Taproot send (12).
+const IBEX_SEND_TYPE_IDS = [2, 4, 10, 12]
+
+const isIbexSendType = (transactionTypeId: number | undefined): boolean =>
+  transactionTypeId !== undefined && IBEX_SEND_TYPE_IDS.includes(transactionTypeId)
+
 const toSettlementAmount = (
   ibexAmount: number | undefined,
   transactionTypeId: number | undefined,
@@ -171,11 +186,7 @@ const toSettlementAmount = (
     baseLogger.warn("Ibex did not return transaction amount")
     return toSettlementMinorUnit(ibexAmount, currency)
   }
-  // When sending, make negative
-  const amt =
-    transactionTypeId === 2 || transactionTypeId === 4 || transactionTypeId === 10
-      ? -1 * ibexAmount
-      : ibexAmount
+  const amt = isIbexSendType(transactionTypeId) ? -1 * ibexAmount : ibexAmount
   return toSettlementMinorUnit(amt, currency)
 }
 
@@ -184,10 +195,7 @@ const toSettlementDisplayAmount = (
   transactionTypeId: number | undefined,
 ): string => {
   if (ibexAmount === undefined) return `${ibexAmount}`
-  const amount =
-    transactionTypeId === 2 || transactionTypeId === 4 || transactionTypeId === 10
-      ? -1 * ibexAmount
-      : ibexAmount
+  const amount = isIbexSendType(transactionTypeId) ? -1 * ibexAmount : ibexAmount
   return `${amount}`
 }
 

@@ -51,6 +51,29 @@ const upsert = async (
   return ErpNext.upsertBridgeTransferRequest(request)
 }
 
+// The IBEX crypto receive settle row (`ibex:<txHash>`), when it already
+// exists at Settled — i.e. the crypto side of this topup landed before this
+// deposit event. Carries the credited account/wallet so the deposit row gets
+// the same attribution the promotion path stamps. A lookup failure degrades
+// to undefined so the deposit audit write never fails on the enrichment; the
+// row just stays at Fiat Received until the crypto-receive handler (or a
+// Bridge retry) promotes it.
+const findSettledIbexReceive = async (
+  txHash: string,
+): Promise<{ accountId?: string; walletId?: string } | undefined> => {
+  if (!ErpNext?.findBridgeTransferRequest) return undefined
+  const doc = await ErpNext.findBridgeTransferRequest(`ibex:${txHash}`)
+  if (doc instanceof Error) {
+    baseLogger.warn(
+      { txHash, error: doc },
+      "Failed to check IBEX settle row for Bridge deposit; keeping Fiat Received",
+    )
+    return undefined
+  }
+  if (!doc || doc.status !== BridgeTransferRequestStatus.Settled) return undefined
+  return { accountId: doc.account_id, walletId: doc.wallet_id }
+}
+
 export const writeBridgeDepositRequest = async ({
   eventId,
   eventObject,
@@ -87,11 +110,20 @@ export const writeBridgeDepositRequest = async ({
     return true
   }
 
+  const destinationTxHash = receipt?.destination_tx_hash
+  const settledReceive = destinationTxHash
+    ? await findSettledIbexReceive(destinationTxHash)
+    : undefined
+
   return upsert(
     new BridgeTransferRequest({
       requestId: stableRequestId,
       transactionType: BridgeTransferRequestTransactionType.Topup,
-      status: BridgeTransferRequestStatus.FiatReceived,
+      status: settledReceive
+        ? BridgeTransferRequestStatus.Completed
+        : BridgeTransferRequestStatus.FiatReceived,
+      accountId: settledReceive?.accountId,
+      walletId: settledReceive?.walletId,
       amount: String(eventObject.amount),
       currency: String(currency),
       developerFee:
@@ -106,10 +138,32 @@ export const writeBridgeDepositRequest = async ({
       ibexTxHash: receipt?.destination_tx_hash,
       sourceEventId: eventId,
       sourceEventType: `deposit.${state}`,
-      sourceSystemsSeen: ["bridge_deposit"],
+      sourceSystemsSeen: settledReceive
+        ? ["bridge_deposit", "ibex_crypto_receive"]
+        : ["bridge_deposit"],
       rawPayload,
     }),
   )
+}
+
+// Called by the IBEX crypto-receive handler after it writes the settle row:
+// promotes the matching deposit-side Topup row (joined on ibex_tx_hash) to
+// Completed and stamps the credited account/wallet on it.
+export const promoteBridgeDepositForCryptoReceive = async ({
+  txHash,
+  accountId,
+  walletId,
+}: {
+  txHash: string
+  accountId: AccountId
+  walletId: WalletId
+}): Promise<
+  "completed" | "already_completed" | "not_found" | BridgeTransferRequestUpsertError
+> => {
+  if (!ErpNext?.completeBridgeTopupByTxHash) {
+    return new BridgeTransferRequestUpsertError("ERPNext client is not configured")
+  }
+  return ErpNext.completeBridgeTopupByTxHash({ txHash, accountId, walletId })
 }
 
 export const writeIbexCryptoReceiveRequest = async ({

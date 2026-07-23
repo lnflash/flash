@@ -1,6 +1,9 @@
 import { GT } from "@graphql/index"
 import { BankAccount } from "@services/frappe/models/BankAccount"
+import ErpNext from "@services/frappe/ErpNext"
 import { GraphQLObjectType } from "graphql"
+
+import GraphQLBankAccountUpdateRequest from "./bank-account-update-request"
 
 const GraphQLBankAccount: GraphQLObjectType<BankAccount> = GT.Object({
   name: "BankAccount",
@@ -38,6 +41,20 @@ const GraphQLBankAccount: GraphQLObjectType<BankAccount> = GT.Object({
     isDefault: {
       type: GT.NonNull(GT.Boolean),
       resolve: (o) => o.is_default === 1,
+    },
+    pendingUpdate: {
+      type: GraphQLBankAccountUpdateRequest,
+      description:
+        "The account's in-flight update request when it needs the user's attention — Pending (awaiting review) or Rejected (declined). Null once approved/closed, or when none exists.",
+      resolve: async (o) => {
+        if (!o.name) return null
+        const latest = await ErpNext.getLatestBankAccountUpdateRequestForAccount(o.name)
+        if (latest instanceof Error) return null
+        if (latest && (latest.status === "Pending" || latest.status === "Rejected")) {
+          return latest
+        }
+        return null
+      },
     },
   }),
 })

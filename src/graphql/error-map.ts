@@ -160,6 +160,32 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = "There is a pending payment for this invoice"
       return new ValidationInternalError({ message, logger: baseLogger })
 
+    case "InvalidApiKeyNameError":
+    case "InvalidApiKeyScopeError":
+    case "InvalidApiKeyIpConstraintError":
+    case "InvalidApiKeyRateLimitError":
+    case "InvalidApiKeyFormatError":
+    case "MaxApiKeysPerAccountError":
+    case "InsufficientApiKeyScopeError":
+      message = error.message
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "ApiKeyExpiredError":
+      message = "This API key has expired"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "ApiKeySecretMismatchError":
+      message = "Invalid API key"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "ApiKeyIpNotAllowedError":
+      message = "API key not allowed from this IP"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "ApiKeyCannotManageApiKeysError":
+      message = "API keys cannot be managed while authenticated with an API key"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
     case "SatoshiAmountRequiredError":
       message = "An amount is required to complete payment"
       return new ValidationInternalError({ message, logger: baseLogger })
@@ -636,6 +662,13 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         message,
       })
 
+    case "BridgeInvalidPlaidTokenError":
+      message = error.message || "linkToken and publicToken are required"
+      return bridgeGqlError({
+        code: "BRIDGE_INVALID_PLAID_TOKEN",
+        message,
+      })
+
     case "BridgeError":
       message = error.message || "Bridge API error"
       return bridgeGqlError({ code: "BRIDGE_ERROR", message })
@@ -894,6 +927,11 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "UpgradeRequestQueryError":
       message = "No upgrade request found for this account"
       return new NotFoundError({ message, logger: baseLogger })
+
+    case "ExchangeRateQueryError":
+      message =
+        "Cashout is temporarily unavailable while we refresh the exchange rate. Please try again shortly."
+      return new UnexpectedClientError({ message, logger: baseLogger })
 
     case "InvalidLnurlError":
       return new InvalidLnurlError({ message: error.message, logger: baseLogger })

@@ -3,6 +3,7 @@ import dedent from "dedent"
 import { GT } from "@graphql/index"
 
 import { SettlementMethod } from "@domain/wallets"
+import { baseLogger } from "@services/logger"
 
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 
@@ -15,7 +16,6 @@ import LnPaymentSecret from "../scalar/ln-payment-secret"
 
 const SettlementViaIntraLedger = GT.Object({
   name: "SettlementViaIntraLedger",
-  isTypeOf: (source) => source.type === SettlementMethod.IntraLedger,
   fields: () => ({
     counterPartyWalletId: {
       // type: GT.NonNull(WalletId),
@@ -30,7 +30,6 @@ const SettlementViaIntraLedger = GT.Object({
 
 const SettlementViaLn = GT.Object({
   name: "SettlementViaLn",
-  isTypeOf: (source: SettlementViaLn) => source.type === SettlementMethod.Lightning,
   fields: () => ({
     paymentSecret: {
       type: LnPaymentSecret,
@@ -47,7 +46,6 @@ const SettlementViaLn = GT.Object({
 
 const SettlementViaOnChain = GT.Object({
   name: "SettlementViaOnChain",
-  isTypeOf: (source) => source.type === SettlementMethod.OnChain,
   fields: () => ({
     transactionHash: { type: OnChainTxHash },
     vout: { type: GT.Int },
@@ -57,6 +55,25 @@ const SettlementViaOnChain = GT.Object({
 const SettlementVia = GT.Union({
   name: "SettlementVia",
   types: () => [SettlementViaIntraLedger, SettlementViaLn, SettlementViaOnChain],
+  // settlementVia is NonNull on Transaction: a source that fails to resolve
+  // fails the entire transaction list query for the account. Unrecognized
+  // sources degrade to the all-nullable IntraLedger member instead.
+  resolveType: (source) => {
+    switch (source.type) {
+      case SettlementMethod.IntraLedger:
+        return "SettlementViaIntraLedger"
+      case SettlementMethod.Lightning:
+        return "SettlementViaLn"
+      case SettlementMethod.OnChain:
+        return "SettlementViaOnChain"
+      default:
+        baseLogger.error(
+          { settlementViaType: source.type },
+          "Unrecognized settlementVia type; defaulting to SettlementViaIntraLedger",
+        )
+        return "SettlementViaIntraLedger"
+    }
+  },
 })
 
 export default SettlementVia

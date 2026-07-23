@@ -1,7 +1,7 @@
 import { UnknownLedgerError } from "@domain/ledger"
 import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
 import Ibex from "@services/ibex/client"
-import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
+import { IbexError } from "@services/ibex/errors"
 
 export const getBalanceForWallet = async ({
   walletId,
@@ -18,7 +18,15 @@ export const getBalanceForWallet = async ({
       }
       return resp
     }
-    if (resp.balance === undefined) return new UnexpectedIbexResponse("Balance not found")
+    if (resp.balance === undefined) {
+      // IBEX omits `balance` for drained / never-funded accounts (per-account and
+      // bulk endpoints alike: absent means zero — verified in prod during the USDT
+      // cutover). Post-cutover, every migrated account's legacy USD wallet reads
+      // this way; returning an error here broke the admin API's wallets[].balance
+      // for all migrated accounts (the cash-wallet compat redirect only runs when
+      // client capabilities are in ctx, i.e. for app users — never for admin).
+      return currency === WalletCurrency.Usdt ? USDTAmount.ZERO : USDAmount.ZERO
+    }
     return resp.balance
   } catch (err) {
     return new UnknownLedgerError(err)

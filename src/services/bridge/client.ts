@@ -201,8 +201,20 @@ export interface ExternalAccount {
 }
 
 export interface ExternalAccountLinkUrl {
+  /** @deprecated Prefer Plaid Link SDK flow via createPlaidLinkRequest. */
   link_url: string
+  /** @deprecated Prefer Plaid Link SDK flow via createPlaidLinkRequest. */
   expires_at: string
+}
+
+export interface PlaidLinkRequest {
+  link_token: string
+  link_token_expires_at: string
+  callback_url: string
+}
+
+export interface PlaidExchangePublicTokenResponse {
+  message: string
 }
 
 export interface ListResponse<T> {
@@ -357,7 +369,8 @@ export class BridgeClient {
     method: string,
     path: string,
     body?: unknown,
-    idempotencyKey?: string,
+    // undefined → auto-generate; null → endpoint does not accept the header
+    idempotencyKey?: string | null,
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`
     const headers: Record<string, string> = {
@@ -365,8 +378,10 @@ export class BridgeClient {
       "Content-Type": "application/json",
     }
 
-    // Bridge rejects Idempotency-Key on GET and DELETE endpoints.
-    if (!["GET", "DELETE"].includes(method.toUpperCase())) {
+    // Bridge rejects Idempotency-Key on GET and DELETE endpoints, and on a
+    // handful of POST resources that disable it explicitly (callers pass
+    // null for those — see exchangePlaidPublicToken).
+    if (!["GET", "DELETE"].includes(method.toUpperCase()) && idempotencyKey !== null) {
       if (idempotencyKey) {
         headers["Idempotency-Key"] = idempotencyKey
       } else {
@@ -515,12 +530,42 @@ export class BridgeClient {
     )
   }
 
+  /**
+   * @deprecated Use {@link createPlaidLinkRequest} + {@link exchangePlaidPublicToken}
+   * (Plaid Link SDK). Hosted `/external_accounts/link` is the legacy Bridge UI path.
+   */
   async getExternalAccountLinkUrl(
     customerId: BridgeCustomerId,
   ): Promise<ExternalAccountLinkUrl> {
     return this.request<ExternalAccountLinkUrl>(
       "POST",
       `/customers/${customerId}/external_accounts/link`,
+    )
+  }
+
+  // ============ Plaid Link ============
+
+  async createPlaidLinkRequest(customerId: BridgeCustomerId): Promise<PlaidLinkRequest> {
+    // request() generates a fresh Idempotency-Key per call, so consecutive
+    // calls mint distinct one-time link tokens.
+    return this.request<PlaidLinkRequest>(
+      "POST",
+      `/customers/${customerId}/plaid_link_requests`,
+    )
+  }
+
+  async exchangePlaidPublicToken(
+    linkToken: string,
+    publicToken: string,
+  ): Promise<PlaidExchangePublicTokenResponse> {
+    // Bridge explicitly disables Idempotency-Key on this resource (the
+    // exchange is already idempotent per link token) and 400s when the
+    // header is present: "Cannot set Idempotency-Key on this request".
+    return this.request<PlaidExchangePublicTokenResponse>(
+      "POST",
+      `/plaid_exchange_public_token/${encodeURIComponent(linkToken)}`,
+      { public_token: publicToken },
+      null,
     )
   }
 

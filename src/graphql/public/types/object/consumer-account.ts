@@ -28,6 +28,8 @@ import DisplayCurrency from "@graphql/shared/types/scalar/display-currency"
 import { listEndpoints } from "@app/callback"
 
 import AccountLevel from "../../../shared/types/scalar/account-level"
+import AccountCapabilities from "../../../shared/types/object/account-capabilities"
+import AccountStatusHeadline from "../../../shared/types/scalar/account-status-headline"
 
 import { TransactionConnection } from "../../../shared/types/object/transaction"
 
@@ -87,7 +89,25 @@ const ConsumerAccount = GT.Object<Account, GraphQLPublicContextAuth>({
 
     level: {
       type: GT.NonNull(AccountLevel),
+      description:
+        "Internal account level, derived from capabilities (ENG-516). Present capabilities and statusHeadline instead of this.",
       resolve: (source) => source.level,
+    },
+
+    capabilities: {
+      type: GT.NonNull(AccountCapabilities),
+      resolve: async (source) => {
+        const result = await Accounts.getAccountCapabilities(source)
+        return result.capabilities
+      },
+    },
+
+    statusHeadline: {
+      type: GT.NonNull(AccountStatusHeadline),
+      resolve: async (source) => {
+        const result = await Accounts.getAccountCapabilities(source)
+        return result.statusHeadline
+      },
     },
 
     realtimePrice: {

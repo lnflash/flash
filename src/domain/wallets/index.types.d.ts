@@ -9,8 +9,8 @@ type WalletType =
 
 type InitiationViaIntraledger = {
   readonly type: "intraledger"
-  readonly counterPartyWalletId: WalletId
-  readonly counterPartyUsername: Username
+  readonly counterPartyWalletId: WalletId | undefined
+  readonly counterPartyUsername: Username | undefined
 }
 
 type InitiationViaLn = {
@@ -32,7 +32,7 @@ type InitiationViaOnChainLegacy = {
 
 type SettlementViaIntraledger = {
   readonly type: "intraledger"
-  readonly counterPartyWalletId: WalletId
+  readonly counterPartyWalletId: WalletId | undefined
   readonly counterPartyUsername: Username | null
 }
 
@@ -130,15 +130,6 @@ type WalletLnSettledTransaction = BaseWalletTransaction & {
   readonly settlementVia: SettlementViaLn
 }
 
-type UnknownTypeTransaction = BaseWalletTransaction & {
-  readonly initiationVia: {
-    readonly type: "unknown"
-  }
-  readonly settlementVia: {
-    readonly type: "unknown"
-  }
-}
-
 type WalletOnChainTransaction =
   | WalletOnChainIntraledgerTransaction
   | WalletOnChainSettledTransaction
@@ -153,9 +144,9 @@ type WalletTransaction =
   | WalletLnTransaction
 
 type IbexTransaction =
+  | IntraLedgerTransaction
   | WalletOnChainTransaction
   | WalletLnTransaction
-  | UnknownTypeTransaction
 
 type MemoSharingConfig = {
   memoSharingCentsThreshold: UsdCents

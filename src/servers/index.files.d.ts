@@ -13,6 +13,7 @@ type GraphQLPublicContext = {
   domainAccount: Account | undefined
   ip: IpAddress | undefined
   sessionId: SessionId | undefined
+  scopes?: string[]
   cashWalletClientCapabilities: import("@app/cash-wallet-cutover/client-capability").CashWalletClientCapabilities
 }
 

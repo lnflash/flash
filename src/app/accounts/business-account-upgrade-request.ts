@@ -47,7 +47,9 @@ type MerchantUpgradeRequest = {
   fullName: string
   address: Address
   terminalsRequested: number
-  bankAccount: BankAccount
+  // Optional: a business (L3) upgrade may reuse a bank account already on file
+  // in ERPNext (ENG-516 capability flow), in which case none is re-submitted.
+  bankAccount?: BankAccount
   idDocument: string
 }
 

@@ -12,7 +12,10 @@ import {
   alertIbexCryptoReceiveFailure,
   alertIbexReconciliationFailed,
 } from "@services/alerts/ibex-bridge-movement"
-import { writeIbexCryptoReceiveRequest } from "@services/frappe/BridgeTransferRequestWriter"
+import {
+  promoteBridgeDepositForCryptoReceive,
+  writeIbexCryptoReceiveRequest,
+} from "@services/frappe/BridgeTransferRequestWriter"
 import { ibexWebhookPaths } from "@services/ibex/webhook-config"
 
 import { authenticate, logRequest, validateIbexIp } from "../middleware"
@@ -190,6 +193,34 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
             },
           })
           return { status: "error", code: "erpnext_audit_failed" } as CryptoReceiveResult
+        }
+
+        // Best-effort: the funds are already credited and the settle row is
+        // written, so a promotion failure must not fail the webhook. The
+        // deposit writer's reverse check (and Bridge webhook retries) will
+        // converge the row on a later event.
+        const promoteResult = await promoteBridgeDepositForCryptoReceive({
+          txHash: String(tx_hash),
+          accountId: account.id,
+          walletId: usdtWallet.id,
+        })
+        if (promoteResult instanceof Error) {
+          baseLogger.error(
+            { error: promoteResult, tx_hash, accountId: account.id },
+            "Failed to promote Bridge deposit audit row to Completed",
+          )
+          alertIbexCryptoReceiveFailure({
+            txHash: String(tx_hash),
+            code: "erpnext_promote_failed",
+            title: "Bridge deposit audit row promotion failed",
+            detail: promoteResult.message,
+            context: { accountId: account.id, walletId: usdtWallet.id, address },
+          })
+        } else {
+          baseLogger.info(
+            { tx_hash, promoteResult },
+            "Bridge deposit audit row promotion result",
+          )
         }
 
         await sendBridgeDepositNotificationBestEffort({

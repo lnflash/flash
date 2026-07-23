@@ -1,5 +1,5 @@
 import { resolveCashoutWalletSelection } from "@app/cash-wallet-cutover/cashout-routing"
-import { Cashout, ExchangeRates } from "@config"
+import { Cashout } from "@config"
 import { decodeInvoice } from "@domain/bitcoin/lightning"
 import { CacheServiceError } from "@domain/cache"
 import { USDAmount, USDTAmount, ValidationError } from "@domain/shared"
@@ -11,16 +11,16 @@ import { RepositoryError } from "@domain/errors"
 import { notifyOpsEvent, toDisplayAmount } from "@services/alerts/ops-events"
 import { EmailService } from "@services/email"
 import ErpNext from "@services/frappe/ErpNext"
-import { BankAccountQueryError } from "@services/frappe/errors"
+import { BankAccountQueryError, ExchangeRateQueryError } from "@services/frappe/errors"
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 
 import PersistedOffer from "./storage/PersistedOffer"
 import Storage from "./storage/Redis"
+import { CashoutDetails } from "./types"
 import ValidOffer, { InitiatedCashout } from "./ValidOffer"
 
 const config = {
   ...Cashout.OfferConfig,
-  ...ExchangeRates,
 }
 
 const CashoutManager = {
@@ -69,8 +69,6 @@ const CashoutManager = {
 
     const serviceFee = userPayment.multiplyBips(config.fee)
     const usdPayout = userPayment.subtract(serviceFee)
-    const exchangeRate = config.jmd.sell // todo: get from price server
-    const jmdPayout = usdPayout.convertAtRate(exchangeRate)
 
     const bankAccounts = await ErpNext.getBankAccountsByCustomer(account.erpParty!)
     if (bankAccounts instanceof BankAccountQueryError) return bankAccounts
@@ -79,9 +77,22 @@ const CashoutManager = {
       return new ValidationError(`Bank account not found: ${bankAccountId}`)
 
     const isJmdPayout = bankAccount.currency === "JMD"
-    const payout = isJmdPayout
-      ? { bankAccountId, amount: jmdPayout, serviceFee, exchangeRate }
-      : { bankAccountId, amount: usdPayout, serviceFee }
+
+    // JMD cashout settles at NCB's buy rate, scraped weekly into ERPNext. Fail
+    // closed: never build a JMD offer at a guessed rate if the live rate is missing.
+    let payout: CashoutDetails["payout"]
+    if (isJmdPayout) {
+      const exchangeRate = await ErpNext.getCashoutExchangeRate()
+      if (exchangeRate instanceof ExchangeRateQueryError) return exchangeRate
+      payout = {
+        bankAccountId,
+        amount: usdPayout.convertAtRate(exchangeRate),
+        serviceFee,
+        exchangeRate,
+      }
+    } else {
+      payout = { bankAccountId, amount: usdPayout, serviceFee }
+    }
 
     const validated = await ValidOffer.from({
       payment: {

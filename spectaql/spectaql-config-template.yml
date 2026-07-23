@@ -7,19 +7,22 @@ introspection:
   schemaFile: ./src/graphql/public/schema.graphql
 
 info:
-  title: GraphQL API Reference
-  description: Welcome to the Galoy API reference!
+  title: Flash GraphQL API Reference
+  description: Complete reference for the Flash GraphQL API — every query, mutation, and type, generated from the live schema. For guides and getting started, see https://docs.flashapp.me.
   contact:
-    name: Galoy developer community
-    url: https://chat.galoy.io/
+    name: Flash
+    url: https://getflash.io/
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
   x-introItems:
-    - title: Galoy API Tutorial
+    - title: Flash API Tutorial
       description: #@ data.read("TUTORIAL.md")
 
 servers:
-  - url: https://api.staging.galoy.io/graphql
-    description: Testnet
+  - url: https://api.flashapp.me/graphql
+    description: Production (mainnet)
+    production: true
+  - url: https://api.test.flashapp.me/graphql
+    description: Test environment
     production: false

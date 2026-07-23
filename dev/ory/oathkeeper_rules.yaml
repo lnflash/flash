@@ -69,10 +69,29 @@
         preserve_query: true
         subject_from: identity.id
         extra_from: "@this"
+    # FIP-07 API keys: fk_… in the X-API-KEY header, verified by the
+    # backend's cluster-internal check endpoint. Response mimics kratos
+    # whoami, so subject_from/extra_from stay identical. An invalid key
+    # gets an explicit 401 (like a bad kratos token); requests without
+    # X-API-KEY skip this authenticator entirely.
+    - handler: bearer_token
+      config:
+        check_session_url: http://bats-tests:4012/auth/api-key/check
+        token_from:
+          header: X-API-KEY
+        forward_http_headers:
+          - X-API-KEY
+          # X-Real-Ip is ingress-set in prod (trustworthy) but client-controlled in dev proxy mode
+          - X-Real-Ip
+        force_method: GET
+        preserve_path: true
+        preserve_query: true
+        subject_from: identity.id
+        extra_from: "@this"
     - handler: anonymous
   authorizer:
     handler: allow
   mutators:
     - handler: id_token
       config:
-        claims: '{"sub": "{{ print .Subject }}", "session_id": "{{ print .Extra.id }}", "expires_at": "{{ print .Extra.expires_at }}" }'
+        claims: '{"sub": "{{ print .Subject }}", "session_id": "{{ print .Extra.id }}", "expires_at": "{{ print .Extra.expires_at }}"{{ if .Extra.scope }}, "scope": "{{ print .Extra.scope }}"{{ end }}{{ if .Extra.rate_limit }}, "rate_limit": {{ print .Extra.rate_limit }}{{ end }} }'

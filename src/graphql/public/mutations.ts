@@ -27,6 +27,7 @@ import UserUpdateUsernameMutation from "@graphql/public/root/mutation/user-updat
 import AccountUpdateDefaultWalletIdMutation from "@graphql/public/root/mutation/account-update-default-wallet-id"
 import AccountUpdateDisplayCurrencyMutation from "@graphql/public/root/mutation/account-update-display-currency"
 import BusinessAccountUpgradeRequestMutation from "@graphql/public/root/mutation/business-account-upgrade-request"
+import AccountCapabilityUpgradeRequestMutation from "@graphql/public/root/mutation/account-capability-upgrade-request"
 import UserContactUpdateAliasMutation from "@graphql/public/root/mutation/user-contact-update-alias"
 import UserQuizQuestionUpdateCompletedMutation from "@graphql/public/root/mutation/user-quiz-question-update-completed"
 import OnChainPaymentSendMutation from "@graphql/public/root/mutation/onchain-payment-send"
@@ -65,12 +66,17 @@ import UpdateExternalWalletMutation from "./root/mutation/update-external-wallet
 import BridgeInitiateKycMutation from "./root/mutation/bridge-initiate-kyc"
 import BridgeCreateVirtualAccountMutation from "./root/mutation/bridge-create-virtual-account"
 import BridgeAddExternalAccountMutation from "./root/mutation/bridge-add-external-account"
+import BridgeExchangePlaidPublicTokenMutation from "./root/mutation/bridge-exchange-plaid-public-token"
 import BridgeCreateExternalAccountMutation from "./root/mutation/bridge-create-external-account"
 import BridgeSetDefaultExternalAccountMutation from "./root/mutation/bridge-set-default-external-account"
 import BridgeDeleteExternalAccountMutation from "./root/mutation/bridge-delete-external-account"
 import BridgeRequestWithdrawalMutation from "./root/mutation/bridge-request-withdrawal"
 import BridgeInitiateWithdrawalMutation from "./root/mutation/bridge-initiate-withdrawal"
 import BridgeCancelWithdrawalRequestMutation from "./root/mutation/bridge-cancel-withdrawal-request"
+import ApiKeyCreateMutation from "./root/mutation/api-key-create"
+import ApiKeyRevokeMutation from "./root/mutation/api-key-revoke"
+import ApiKeyRotateMutation from "./root/mutation/api-key-rotate"
+import BankAccountUpdateRequestMutation from "./root/mutation/bank-account-update-request"
 
 // TODO: // const fields: { [key: string]: GraphQLFieldConfig<any, GraphQLPublicContext> }
 export const mutationFields = {
@@ -112,6 +118,8 @@ export const mutationFields = {
       accountUpdateDefaultWalletId: AccountUpdateDefaultWalletIdMutation,
       accountUpdateDisplayCurrency: AccountUpdateDisplayCurrencyMutation,
       businessAccountUpgradeRequest: BusinessAccountUpgradeRequestMutation,
+      accountCapabilityUpgradeRequest: AccountCapabilityUpgradeRequestMutation,
+      bankAccountUpdateRequest: BankAccountUpdateRequestMutation,
       accountEnableNotificationCategory: AccountEnableNotificationCategoryMutation,
       accountDisableNotificationCategory: AccountDisableNotificationCategoryMutation,
       accountEnableNotificationChannel: AccountEnableNotificationChannelMutation,
@@ -128,12 +136,16 @@ export const mutationFields = {
       bridgeInitiateKyc: BridgeInitiateKycMutation,
       bridgeCreateVirtualAccount: BridgeCreateVirtualAccountMutation,
       bridgeAddExternalAccount: BridgeAddExternalAccountMutation,
+      bridgeExchangePlaidPublicToken: BridgeExchangePlaidPublicTokenMutation,
       bridgeCreateExternalAccount: BridgeCreateExternalAccountMutation,
       bridgeSetDefaultExternalAccount: BridgeSetDefaultExternalAccountMutation,
       bridgeDeleteExternalAccount: BridgeDeleteExternalAccountMutation,
       bridgeRequestWithdrawal: BridgeRequestWithdrawalMutation,
       bridgeInitiateWithdrawal: BridgeInitiateWithdrawalMutation,
       bridgeCancelWithdrawalRequest: BridgeCancelWithdrawalRequestMutation,
+      apiKeyCreate: ApiKeyCreateMutation,
+      apiKeyRevoke: ApiKeyRevokeMutation,
+      apiKeyRotate: ApiKeyRotateMutation,
     },
 
     atWalletLevel: {

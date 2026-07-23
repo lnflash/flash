@@ -14,6 +14,7 @@ import { BridgeVirtualAccount } from "@services/mongoose/schema"
 import { wrapAsyncFunctionsToRunInSpan } from "@services/tracing"
 import { baseLogger } from "@services/logger"
 
+import { CacheServiceError } from "@domain/cache"
 import { RepositoryError } from "@domain/errors"
 import {
   toBridgeCustomerId,
@@ -44,6 +45,7 @@ import {
   BridgeWithdrawalNotFoundError,
   BridgeWithdrawalAlreadyInitiatedError,
   BridgePlaidNotAvailableError,
+  BridgeInvalidPlaidTokenError,
   BridgeDepositInstructionsMissingError,
   BridgeWithdrawalNetAmountTooLowError,
 } from "./errors"
@@ -51,6 +53,7 @@ import BridgeApiClient, {
   type CreateExternalAccountRequest,
   type ExternalAccount,
 } from "./client"
+import { PlaidLinkTokenStore } from "./plaid-link-token-store"
 import {
   presentBridgeWithdrawal,
   receiptFeesFromTransfer,
@@ -89,8 +92,13 @@ type CreateVirtualAccountResult = {
 }
 
 type AddExternalAccountResult = {
-  linkUrl: string
+  linkToken: string
+  linkUrl: string | null
   expiresAt: string
+}
+
+type ExchangePlaidPublicTokenResult = {
+  message: string
 }
 
 type WithdrawalRequestResult = PresentedBridgeWithdrawal
@@ -595,7 +603,7 @@ const createVirtualAccount = async (
 }
 
 /**
- * Returns Bridge hosted bank linking URL for adding external accounts
+ * Requests a Plaid link_token from Bridge for adding external accounts.
  */
 const addExternalAccount = async (
   accountId: AccountId,
@@ -619,11 +627,39 @@ const addExternalAccount = async (
       )
     }
 
-    const linkUrl = await BridgeApiClient.getExternalAccountLinkUrl(customerId)
+    const plaid = await BridgeApiClient.createPlaidLinkRequest(customerId)
+
+    // Bind token → account before returning it so exchange can enforce ownership.
+    const saved = await PlaidLinkTokenStore.save(plaid.link_token, {
+      accountId,
+      bridgeCustomerId: customerId,
+      expiresAt: plaid.link_token_expires_at,
+    })
+    if (saved instanceof CacheServiceError) {
+      baseLogger.error(
+        { accountId, operation: "addExternalAccount", error: saved },
+        "Failed to bind Plaid link token",
+      )
+      return new BridgeError("Unable to start bank linking — please try again")
+    }
+
+    // Deployed clients still select the deprecated linkUrl field, so keep
+    // serving the hosted flow best-effort until the fleet is on linkToken.
+    let linkUrl: string | null = null
+    try {
+      const hosted = await BridgeApiClient.getExternalAccountLinkUrl(customerId)
+      linkUrl = hosted.link_url
+    } catch (hostedError) {
+      baseLogger.warn(
+        { accountId, operation: "addExternalAccount", error: hostedError },
+        "Hosted link URL unavailable; returning linkToken only",
+      )
+    }
 
     const result: AddExternalAccountResult = {
-      linkUrl: linkUrl.link_url,
-      expiresAt: linkUrl.expires_at,
+      linkToken: plaid.link_token,
+      linkUrl,
+      expiresAt: plaid.link_token_expires_at,
     }
 
     baseLogger.info(
@@ -643,6 +679,98 @@ const addExternalAccount = async (
       (error.statusCode === 401 || error.statusCode === 403)
     ) {
       return new BridgePlaidNotAvailableError()
+    }
+
+    return error instanceof Error ? error : new Error(String(error))
+  }
+}
+
+/**
+ * Exchanges a Plaid public_token with Bridge after the user completes Link.
+ * External accounts are created asynchronously and arrive via webhook.
+ */
+const exchangePlaidPublicToken = async (
+  accountId: AccountId,
+  linkToken: string,
+  publicToken: string,
+): Promise<ExchangePlaidPublicTokenResult | Error> => {
+  baseLogger.info(
+    { accountId, operation: "exchangePlaidPublicToken" },
+    "Bridge operation started",
+  )
+
+  const enabledCheck = checkBridgeEnabled()
+  if (enabledCheck instanceof Error) return enabledCheck
+
+  const account = await checkAccountLevel(accountId)
+  if (account instanceof Error) return account
+
+  const trimmedLinkToken = linkToken?.trim() ?? ""
+  const trimmedPublicToken = publicToken?.trim() ?? ""
+  if (!trimmedLinkToken || !trimmedPublicToken) {
+    return new BridgeInvalidPlaidTokenError()
+  }
+
+  try {
+    const customerId = account.bridgeCustomerId
+    if (!customerId) {
+      return new BridgeCustomerNotFoundError(
+        "Account has no Bridge customer ID. Complete KYC first.",
+      )
+    }
+
+    const binding = await PlaidLinkTokenStore.consumeForAccount(
+      trimmedLinkToken,
+      accountId,
+    )
+    if (binding instanceof BridgeInvalidPlaidTokenError) return binding
+    if (binding instanceof CacheServiceError) {
+      baseLogger.error(
+        { accountId, operation: "exchangePlaidPublicToken", error: binding },
+        "Failed to load Plaid link token binding",
+      )
+      return new BridgeInvalidPlaidTokenError(
+        "Unable to verify Plaid link token — restart bank linking",
+      )
+    }
+
+    const exchanged = await BridgeApiClient.exchangePlaidPublicToken(
+      trimmedLinkToken,
+      trimmedPublicToken,
+    )
+
+    const result: ExchangePlaidPublicTokenResult = {
+      message: exchanged.message,
+    }
+
+    baseLogger.info(
+      {
+        accountId,
+        operation: "exchangePlaidPublicToken",
+        bridgeCustomerId: binding.bridgeCustomerId,
+      },
+      "Bridge operation completed",
+    )
+
+    return result
+  } catch (error) {
+    baseLogger.error(
+      { accountId, operation: "exchangePlaidPublicToken", error },
+      "Bridge operation failed",
+    )
+
+    if (error instanceof BridgeApiError) {
+      if (error.statusCode === 401 || error.statusCode === 403) {
+        return new BridgePlaidNotAvailableError()
+      }
+      // These mean the token pair was rejected — expired link_token,
+      // already-exchanged public_token, or a mismatched pair.
+      if ([400, 404, 409, 422].includes(error.statusCode)) {
+        const detail = (error.response as { message?: string } | null)?.message
+        return new BridgeInvalidPlaidTokenError(
+          detail || "Invalid or expired Plaid token — restart bank linking",
+        )
+      }
     }
 
     return error instanceof Error ? error : new Error(String(error))
@@ -1678,6 +1806,7 @@ export default wrapAsyncFunctionsToRunInSpan({
     initiateKyc,
     createVirtualAccount,
     addExternalAccount,
+    exchangePlaidPublicToken,
     createExternalAccount,
     setDefaultExternalAccount,
     deleteExternalAccount,

@@ -6,17 +6,15 @@
  *
  * Verified shapes (from source audit):
  *   - bridgeAddExternalAccount returns
- *     { errors, externalAccount: { linkUrl: string!, expiresAt: string! } }
+ *     { errors, externalAccount: { linkToken: string!, expiresAt: string! } }
  *   - externalAccountHandler accepts
  *     { event_id, event_object: { id, customer_id, bank_name, last_4, active } }
  *     and returns { status: "success" } or { status: "already_processed" } on 200
  *
- * ⚠️ Plaid sandbox linking is a manual step — the test generates the link URL
+ * ⚠️ Plaid sandbox linking is a manual step — the test generates a link_token
  *    and verifies it's well-formed, then simulates the webhook that follows
- *    successful Plaid linking. The test does NOT automate the Plaid browser UI.
- *
- * ⚠️ Some sandboxes return "link_url" instead of "linkUrl" — check actual response
- *    against the configured return shape and update assertions if needed.
+ *    successful Plaid linking. The test does NOT automate the Plaid browser UI
+ *    or bridgeExchangePlaidPublicToken.
  */
 
 import {
@@ -65,18 +63,17 @@ describe("Bridge External Account", () => {
   ;(EXTERNAL_ACCOUNT_LINK_TESTS ? describe : describe.skip)(
     "Plaid Link URL Generation",
     () => {
-      it("generates a Plaid link URL when called", async () => {
+      it("generates a Plaid link token when called", async () => {
         const result = await addExternalAccount(user.accountId)
 
         expect(result.errors).toBeDefined()
         expect(result.errors).toHaveLength(0)
         expect(result.externalAccount).toBeDefined()
-        expect(result.externalAccount!.linkUrl).toBeTruthy()
-        expect(result.externalAccount!.linkUrl).toMatch(/^https:\/\//)
+        expect(result.externalAccount!.linkToken).toBeTruthy()
         expect(result.externalAccount!.expiresAt).toBeTruthy()
       })
 
-      it("link URL is different on each call (one-time use tokens)", async () => {
+      it("link token is different on each call (one-time use tokens)", async () => {
         const result1 = await addExternalAccount(user.accountId)
         const result2 = await addExternalAccount(user.accountId)
 
@@ -84,10 +81,10 @@ describe("Bridge External Account", () => {
         expect(result2.errors).toHaveLength(0)
 
         // Plaid link tokens are one-time use; consecutive calls should differ
-        expect(result1.externalAccount?.linkUrl).toBeTruthy()
-        expect(result2.externalAccount?.linkUrl).toBeTruthy()
-        expect(result1.externalAccount!.linkUrl).not.toBe(
-          result2.externalAccount!.linkUrl,
+        expect(result1.externalAccount?.linkToken).toBeTruthy()
+        expect(result2.externalAccount?.linkToken).toBeTruthy()
+        expect(result1.externalAccount!.linkToken).not.toBe(
+          result2.externalAccount!.linkToken,
         )
       })
     },

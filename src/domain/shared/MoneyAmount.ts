@@ -2,6 +2,18 @@ import { Money, Round, PRECISION_M } from "./bigint-money"
 import { BigIntConversionError, UnsupportedCurrencyError } from "./errors"
 import { WalletCurrency } from "./primitives"
 
+// A USDT-specific `MoneyAmount` base + `USDTAmount` — nothing else lives here.
+//
+// This is NOT the base the app sees as `MoneyAmount`. The `@domain/shared` barrel does
+// `export * from "./money"`, so ./money/MoneyAmount.ts is the canonical base the rest of
+// the codebase resolves; the barrel takes only `{ USDTAmount }` from this file. Because
+// `USDTAmount` extends THIS base and not ./money's, `x instanceof MoneyAmount` (the
+// barrel's) does NOT match a USDTAmount — call sites that need to catch it add an explicit
+// `|| x instanceof USDTAmount` (e.g. app/offers/storage/OffersSerde.ts). The two bases
+// should be consolidated onto ./money (follow-up: ENG-523); until then, do NOT re-add USD/JMD/BTC
+// classes here — those live in ./money, and duplicating them here is exactly what let a
+// cashout fix land on a dead copy (ENG-518; #449 → #450).
+
 export abstract class MoneyAmount {
   readonly money: Money
   readonly currencyCode: WalletCurrency
@@ -58,138 +70,11 @@ export abstract class MoneyAmount {
   }
 
   static from(amount: number | string, currency: WalletCurrency): MoneyAmount | Error {
-    if (currency === WalletCurrency.Usd) return USDAmount.cents(amount.toString())
-    else if (currency === WalletCurrency.Jmd) return JMDAmount.cents(amount.toString())
-    else if (currency === WalletCurrency.Usdt)
+    // Scoped to USDT — the only amount type this file owns. USD/JMD/BTC construction
+    // goes through the ./money classes (and ./money/toMoneyAmount).
+    if (currency === WalletCurrency.Usdt)
       return USDTAmount.smallestUnits(amount.toString())
-    else return new UnsupportedCurrencyError(`Could not read currency: ${currency}`)
-  }
-}
-
-export class USDAmount extends MoneyAmount {
-  static currencyId: IbexCurrencyId = 3 as IbexCurrencyId
-
-  private constructor(amount: Money | bigint | string | number) {
-    super(amount, WalletCurrency.Usd)
-  }
-
-  static cents(cents: string | bigint): USDAmount | BigIntConversionError {
-    try {
-      return new USDAmount(cents)
-    } catch (error) {
-      return new BigIntConversionError(
-        error instanceof Error ? error.message : String(error),
-      )
-    }
-  }
-
-  // convert dollars to cents
-  static dollars(d: number | string): USDAmount | BigIntConversionError {
-    try {
-      const dollarAmt = new Money(d.toString(), "USDollars", Round.HALF_TO_EVEN)
-      const cents = USDAmount.cents(100n)
-      if (cents instanceof BigIntConversionError) return cents // should never happen
-      return new USDAmount(cents.money.multiply(dollarAmt).toFixed(2))
-    } catch (error) {
-      return new BigIntConversionError(
-        error instanceof Error ? error.message : String(error),
-      )
-    }
-  }
-
-  static ZERO = new USDAmount(0)
-
-  asCents(precision: number = 0): string {
-    return this.money.toFixed(precision)
-  }
-
-  asDollars(precision: number = 2): string {
-    return this.money.divide(100).toFixed(precision)
-  }
-
-  // const jmdLiability = {
-  //   amount: BigInt(usdLiability.asCents()) * exchangeRate / 100n,
-  //   currency: "JMD",
-  // }
-  // Rate is the ratio at which one currency can be exchanged for another.
-  // T:USD
-  convertAtRate<T extends MoneyAmount>(rate: T): T {
-    const converted = rate.money.multiply(this.money).divide(100)
-    return rate.getInstance(converted)
-  }
-
-  toIbex(): number {
-    return Number(this.asDollars(8))
-  }
-
-  getInstance(amount: Money): this {
-    return new USDAmount(amount) as this
-  }
-}
-
-export class JMDAmount extends MoneyAmount {
-  currencyCode = WalletCurrency.Jmd as WalletCurrency
-
-  private constructor(amount: Money | bigint | string | number) {
-    super(amount, WalletCurrency.Jmd)
-  }
-
-  static cents(c: string): JMDAmount | BigIntConversionError {
-    try {
-      return new JMDAmount(c)
-    } catch (error) {
-      return new BigIntConversionError(
-        error instanceof Error ? error.message : String(error),
-      )
-    }
-  }
-
-  static dollars(d: number): JMDAmount | BigIntConversionError {
-    try {
-      return new JMDAmount(BigInt(d) * 100n)
-    } catch (error) {
-      return new BigIntConversionError(
-        error instanceof Error ? error.message : String(error),
-      )
-    }
-  }
-
-  asCents(precision: number = 0): string {
-    return this.money.toFixed(precision)
-  }
-
-  asDollars(precision: number = 2): string {
-    return this.money.divide(100).toFixed(precision)
-  }
-
-  getInstance(amount: Money): this {
-    return new JMDAmount(amount) as this
-  }
-}
-
-export class BtcAmount extends MoneyAmount {
-  currencyCode = WalletCurrency.Btc as WalletCurrency
-
-  private constructor(amount: Money | bigint | string | number) {
-    super(amount, WalletCurrency.Btc)
-  }
-
-  static sats(c: string): BtcAmount | BigIntConversionError {
-    try {
-      return new BtcAmount(c)
-    } catch (error) {
-      return new BigIntConversionError(
-        error instanceof Error ? error.message : String(error),
-      )
-    }
-  }
-
-  asSats(precision: number = 0): string {
-    return this.money.toFixed(precision)
-  }
-
-  getInstance(amount: Money): this {
-    return new BtcAmount(amount) as this
+    return new UnsupportedCurrencyError(`Could not read currency: ${currency}`)
   }
 }
 
