@@ -73,6 +73,12 @@ const getOnChainTxHashAndVoutLockResource = ({
 }) => `locks:onchaintxhash:${txHash}:${vout}`
 const getIdempotencyKeyLockResource = (path: IdempotencyKey) =>
   `locks:idempotencykey:${path}`
+// Distinct namespace from the header-middleware `lockIdempotencyKey` (which holds a
+// non-releasing timelock). This one is a `.using` lock that releases when the wrapped
+// send finishes, so a concurrent same-key request is held off only for the in-flight
+// window (ENG-530 payment-send idempotency).
+const getPaymentIdempotencyKeyLockResource = (path: IdempotencyKey) =>
+  `locks:payment-idempotency:${path}`
 
 // unlock after asyncFn is done
 export const redlock = async <Signal extends RedlockAbortSignal, Ret>({
@@ -163,6 +169,15 @@ export const LockService = (): ILockService => {
     }
   }
 
+  const lockPaymentIdempotencyKey = async <Res>(
+    idempotencyKey: IdempotencyKey,
+    asyncFn: (signal: IdempotencyKeyAbortSignal) => Promise<Res>,
+  ): Promise<Res | LockServiceError> => {
+    const path = getPaymentIdempotencyKeyLockResource(idempotencyKey)
+
+    return redlock({ path, asyncFn })
+  }
+
   return wrapAsyncFunctionsToRunInSpan({
     namespace: "services.lock",
     fns: {
@@ -171,6 +186,7 @@ export const LockService = (): ILockService => {
       lockOnChainTxHash,
       lockOnChainTxHashAndVout,
       lockIdempotencyKey,
+      lockPaymentIdempotencyKey,
     },
   })
 }

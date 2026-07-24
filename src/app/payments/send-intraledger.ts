@@ -13,6 +13,8 @@ import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
 import { UnexpectedIbexResponse } from "@services/ibex/errors"
 
+import { withPaymentIdempotency } from "./idempotency"
+
 // Wallet-id intraledger sends are USD/USDT denominated; the unchecked amount
 // is in cents (1 USDT = 1 USD).
 const usdCentsDisplay = (cents: number) => ({
@@ -131,23 +133,41 @@ const intraledgerPaymentSendWalletId = async ({
 
 export const intraledgerPaymentSendWalletIdForBtcWallet = async (
   args: IntraLedgerPaymentSendWalletIdArgs,
-): Promise<PaymentSendStatus | ApplicationError> => {
-  const validated = await validateIsBtcWallet(args.senderWalletId)
-  const result =
-    validated instanceof Error ? validated : await intraledgerPaymentSendWalletId(args)
-  notifyIntraledgerSendResult(args, result)
-  return result
-}
+): Promise<PaymentSendStatus | ApplicationError> =>
+  withPaymentIdempotency({
+    idempotencyKey: args.idempotencyKey,
+    senderWalletId: args.senderWalletId,
+    requestFingerprint: `intraledger|${args.recipientWalletId}|${args.amount}`,
+    execute: async () => {
+      const validated = await validateIsBtcWallet(args.senderWalletId)
+      const result =
+        validated instanceof Error
+          ? validated
+          : await intraledgerPaymentSendWalletId(args)
+      notifyIntraledgerSendResult(args, result)
+      return result
+    },
+  })
 
 export const intraledgerPaymentSendWalletIdForUsdWallet = async (
   args: IntraLedgerPaymentSendWalletIdArgs,
-): Promise<PaymentSendStatus | ApplicationError> => {
-  const validated = await validateIsUsdWallet(args.senderWalletId, { includeUsdt: true })
-  const result =
-    validated instanceof Error ? validated : await intraledgerPaymentSendWalletId(args)
-  notifyIntraledgerSendResult(args, result, usdCentsDisplay(args.amount))
-  return result
-}
+): Promise<PaymentSendStatus | ApplicationError> =>
+  withPaymentIdempotency({
+    idempotencyKey: args.idempotencyKey,
+    senderWalletId: args.senderWalletId,
+    requestFingerprint: `intraledger|${args.recipientWalletId}|${args.amount}`,
+    execute: async () => {
+      const validated = await validateIsUsdWallet(args.senderWalletId, {
+        includeUsdt: true,
+      })
+      const result =
+        validated instanceof Error
+          ? validated
+          : await intraledgerPaymentSendWalletId(args)
+      notifyIntraledgerSendResult(args, result, usdCentsDisplay(args.amount))
+      return result
+    },
+  })
 
 const validateIntraledgerPaymentInputs = async ({
   uncheckedSenderWalletId,

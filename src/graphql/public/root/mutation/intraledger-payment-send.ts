@@ -15,6 +15,11 @@ const IntraLedgerPaymentSendInput = GT.Input({
     recipientWalletId: { type: GT.NonNull(WalletId) },
     amount: { type: GT.NonNull(SatAmount), description: "Amount in satoshis." },
     memo: { type: Memo, description: "Optional memo to be attached to the payment." },
+    idempotencyKey: {
+      type: GT.String,
+      description:
+        "Optional client-supplied key; a repeated send with the same key returns the original result instead of paying again.",
+    },
   }),
 })
 
@@ -30,7 +35,7 @@ const IntraLedgerPaymentSendMutation = GT.Field<null, GraphQLPublicContextAuth>(
     input: { type: GT.NonNull(IntraLedgerPaymentSendInput) },
   },
   resolve: async (_, args, { domainAccount }) => {
-    const { walletId, recipientWalletId, amount, memo } = args.input
+    const { walletId, recipientWalletId, amount, memo, idempotencyKey } = args.input
     for (const input of [walletId, recipientWalletId, amount, memo]) {
       if (input instanceof Error) {
         return { errors: [{ message: input.message }] }
@@ -61,6 +66,7 @@ const IntraLedgerPaymentSendMutation = GT.Field<null, GraphQLPublicContextAuth>(
       amount,
       senderWalletId: walletId,
       senderAccount: domainAccount,
+      idempotencyKey,
     })
     if (status instanceof Error) {
       return { status: "failed", errors: [mapAndParseErrorForGqlResponse(status)] }

@@ -29,6 +29,11 @@ const LnNoAmountInvoicePaymentInput = GT.Input({
       type: Memo,
       description: "Optional memo to associate with the lightning invoice.",
     },
+    idempotencyKey: {
+      type: GT.String,
+      description:
+        "Optional client-supplied key; a repeated send with the same key returns the original result instead of paying again.",
+    },
   }),
 })
 
@@ -41,6 +46,7 @@ const LnNoAmountInvoicePaymentSendMutation = GT.Field<
       paymentRequest: string | InputValidationError
       amount: Satoshis | InputValidationError
       memo?: string | InputValidationError
+      idempotencyKey?: string | null
     }
   }
 >({
@@ -55,7 +61,7 @@ const LnNoAmountInvoicePaymentSendMutation = GT.Field<
     input: { type: GT.NonNull(LnNoAmountInvoicePaymentInput) },
   },
   resolve: async (_, args, { domainAccount }) => {
-    const { walletId, paymentRequest, amount, memo } = args.input
+    const { walletId, paymentRequest, amount, memo, idempotencyKey } = args.input
 
     if (walletId instanceof InputValidationError) {
       return { errors: [{ message: walletId.message }] }
@@ -76,6 +82,7 @@ const LnNoAmountInvoicePaymentSendMutation = GT.Field<
       memo: memo ?? null,
       amount,
       senderAccount: domainAccount,
+      idempotencyKey,
     })
 
     if (status instanceof Error) {

@@ -27,6 +27,10 @@ interface ILockService {
     f: (signal: OnChainTxAbortSignal) => Promise<Res>,
   ): Promise<Res | LockServiceError>
   lockIdempotencyKey(idempotencyKey: IdempotencyKey): Promise<void | ExecutionError>
+  lockPaymentIdempotencyKey<Res>(
+    idempotencyKey: IdempotencyKey,
+    f: (signal: IdempotencyKeyAbortSignal) => Promise<Res>,
+  ): Promise<Res | LockServiceError>
 }
 
 type RedlockArgs<Signal, Ret> = {
