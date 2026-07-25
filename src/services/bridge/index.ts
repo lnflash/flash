@@ -11,11 +11,17 @@ import { BridgeConfig } from "@config"
 import * as BridgeAccountsRepo from "@services/mongoose/bridge-accounts"
 import { AccountsRepository } from "@services/mongoose/accounts"
 import { BridgeVirtualAccount } from "@services/mongoose/schema"
-import { wrapAsyncFunctionsToRunInSpan } from "@services/tracing"
+import {
+  recordExceptionInCurrentSpan,
+  wrapAsyncFunctionsToRunInSpan,
+} from "@services/tracing"
 import { baseLogger } from "@services/logger"
+import { IpFetcher } from "@services/ipfetcher"
 
 import { CacheServiceError } from "@domain/cache"
 import { RepositoryError } from "@domain/errors"
+import { isPrivateIp } from "@domain/accounts-ips"
+import { IpFetcherServiceError } from "@domain/ipfetcher"
 import {
   toBridgeCustomerId,
   toBridgeExternalAccountId,
@@ -23,7 +29,7 @@ import {
 } from "@domain/primitives/bridge"
 import { getBalanceForWallet } from "@app/wallets/get-balance-for-wallet"
 import { sendBridgeWithdrawalNotificationBestEffort } from "@app/bridge/send-withdrawal-notification"
-import { USDTAmount, WalletCurrency } from "@domain/shared"
+import { ErrorLevel, USDTAmount, WalletCurrency } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
 import { WalletsRepository } from "@services/mongoose/wallets"
 
@@ -600,6 +606,38 @@ const createVirtualAccount = async (
     )
     return error instanceof Error ? error : new Error(String(error))
   }
+}
+
+/**
+ * Whether Plaid Link is usable from the caller's IP.
+ *
+ * Plaid onboarding is US-only: a non-US egress IP is rejected *inside* the
+ * Plaid webview (surfacing as "rate limit exceeded" on the phone step), which
+ * the backend never sees and which dead-ends the user. We gate it here so the
+ * caller can return BRIDGE_PLAID_NOT_AVAILABLE and the client routes straight
+ * to manual bank-details entry instead of opening a Plaid session that can't
+ * complete.
+ *
+ * Fail-open: only a CONFIRMED non-US IP returns false. No IP, a private/dev IP,
+ * a geo-lookup failure, or an unknown country all return true — so a lookup
+ * blip never locks a legitimate US user out of Plaid, and the client's on-exit
+ * fallback still catches any non-US user that slips through.
+ */
+const plaidAvailableForIp = async (ip: IpAddress | undefined): Promise<boolean> => {
+  if (!ip || isPrivateIp(ip)) return true
+
+  const ipInfo = await IpFetcher().fetchIPInfo(ip)
+  if (ipInfo instanceof IpFetcherServiceError) {
+    recordExceptionInCurrentSpan({
+      error: ipInfo,
+      level: ErrorLevel.Warn,
+      attributes: { ip },
+    })
+    return true
+  }
+
+  if (!ipInfo.isoCode) return true
+  return ipInfo.isoCode.toUpperCase() === "US"
 }
 
 /**
@@ -1805,6 +1843,7 @@ export default wrapAsyncFunctionsToRunInSpan({
   fns: {
     initiateKyc,
     createVirtualAccount,
+    plaidAvailableForIp,
     addExternalAccount,
     exchangePlaidPublicToken,
     createExternalAccount,
