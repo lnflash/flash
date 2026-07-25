@@ -11,11 +11,18 @@ import { BridgeConfig } from "@config"
 import * as BridgeAccountsRepo from "@services/mongoose/bridge-accounts"
 import { AccountsRepository } from "@services/mongoose/accounts"
 import { BridgeVirtualAccount } from "@services/mongoose/schema"
-import { wrapAsyncFunctionsToRunInSpan } from "@services/tracing"
+import {
+  addAttributesToCurrentSpan,
+  recordExceptionInCurrentSpan,
+  wrapAsyncFunctionsToRunInSpan,
+} from "@services/tracing"
 import { baseLogger } from "@services/logger"
+import { IpFetcher } from "@services/ipfetcher"
 
 import { CacheServiceError } from "@domain/cache"
 import { RepositoryError } from "@domain/errors"
+import { isPrivateIp } from "@domain/accounts-ips"
+import { IpFetcherServiceError } from "@domain/ipfetcher"
 import {
   toBridgeCustomerId,
   toBridgeExternalAccountId,
@@ -23,7 +30,7 @@ import {
 } from "@domain/primitives/bridge"
 import { getBalanceForWallet } from "@app/wallets/get-balance-for-wallet"
 import { sendBridgeWithdrawalNotificationBestEffort } from "@app/bridge/send-withdrawal-notification"
-import { USDTAmount, WalletCurrency } from "@domain/shared"
+import { ErrorLevel, USDTAmount, WalletCurrency } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
 import { WalletsRepository } from "@services/mongoose/wallets"
 
@@ -599,6 +606,90 @@ const createVirtualAccount = async (
       "Bridge operation failed",
     )
     return error instanceof Error ? error : new Error(String(error))
+  }
+}
+
+type PlaidGateResult = {
+  // false only when the IP is a CONFIRMED non-US country.
+  available: boolean
+  // ISO country code when known (uppercased), else null. For telemetry/ops.
+  country: string | null
+}
+
+/**
+ * Whether Plaid Link is usable from the caller's IP, plus the resolved country.
+ *
+ * Plaid onboarding is US-only: a non-US egress IP is rejected *inside* the
+ * Plaid webview (surfacing as "rate limit exceeded" on the phone step), which
+ * the backend never sees and which dead-ends the user. We gate it here so the
+ * caller can return BRIDGE_PLAID_NOT_AVAILABLE and the client routes straight
+ * to manual bank-details entry instead of opening a Plaid session that can't
+ * complete.
+ *
+ * Fail-open: only a CONFIRMED non-US IP is unavailable. No IP, a private/dev
+ * IP, a geo-lookup failure, or an unknown country all stay available — so a
+ * lookup blip never locks a legitimate US user out of Plaid, and the client's
+ * on-exit fallback still catches any non-US user that slips through.
+ *
+ * Every branch tags the current span with `plaid.gate.decision` (and country)
+ * so prod efficacy — and silent fail-open (e.g. missing proxycheck key) — is
+ * observable rather than invisible.
+ */
+const plaidGateForIp = async (ip: IpAddress | undefined): Promise<PlaidGateResult> => {
+  if (!ip) {
+    addAttributesToCurrentSpan({ "plaid.gate.decision": "allowed-no-ip" })
+    return { available: true, country: null }
+  }
+
+  try {
+    // isPrivateIp parses as IPv4 and THROWS on a real IPv6 address. Treat a
+    // throw as "not private" so IPv6 clients (common on mobile carriers) still
+    // get geo-checked rather than crashing the mutation — proxycheck resolves
+    // IPv6 fine, so the US gate keeps working for them.
+    let isPrivate = false
+    try {
+      isPrivate = isPrivateIp(ip)
+    } catch {
+      isPrivate = false
+    }
+    if (isPrivate) {
+      addAttributesToCurrentSpan({ "plaid.gate.decision": "allowed-private-ip" })
+      return { available: true, country: null }
+    }
+
+    const ipInfo = await IpFetcher().fetchIPInfo(ip)
+    if (ipInfo instanceof IpFetcherServiceError) {
+      recordExceptionInCurrentSpan({
+        error: ipInfo,
+        level: ErrorLevel.Warn,
+        attributes: { ip },
+      })
+      addAttributesToCurrentSpan({ "plaid.gate.decision": "allowed-lookup-failed" })
+      return { available: true, country: null }
+    }
+
+    const country = ipInfo.isoCode ? ipInfo.isoCode.toUpperCase() : null
+    if (!country) {
+      addAttributesToCurrentSpan({ "plaid.gate.decision": "allowed-unknown-country" })
+      return { available: true, country: null }
+    }
+
+    const available = country === "US"
+    addAttributesToCurrentSpan({
+      "plaid.gate.decision": available ? "allowed-us" : "blocked-non-us",
+      "plaid.gate.country": country,
+    })
+    return { available, country }
+  } catch (error) {
+    // Backstop: any unexpected failure fails open. Never block a legitimate US
+    // user from linking a bank because of a geo hiccup.
+    recordExceptionInCurrentSpan({
+      error: error instanceof Error ? error : new Error(String(error)),
+      level: ErrorLevel.Warn,
+      attributes: { ip },
+    })
+    addAttributesToCurrentSpan({ "plaid.gate.decision": "allowed-error" })
+    return { available: true, country: null }
   }
 }
 
@@ -1805,6 +1896,7 @@ export default wrapAsyncFunctionsToRunInSpan({
   fns: {
     initiateKyc,
     createVirtualAccount,
+    plaidGateForIp,
     addExternalAccount,
     exchangePlaidPublicToken,
     createExternalAccount,
