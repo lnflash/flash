@@ -624,20 +624,43 @@ const createVirtualAccount = async (
  * fallback still catches any non-US user that slips through.
  */
 const plaidAvailableForIp = async (ip: IpAddress | undefined): Promise<boolean> => {
-  if (!ip || isPrivateIp(ip)) return true
+  if (!ip) return true
 
-  const ipInfo = await IpFetcher().fetchIPInfo(ip)
-  if (ipInfo instanceof IpFetcherServiceError) {
+  try {
+    // isPrivateIp parses as IPv4 and THROWS on a real IPv6 address. Treat a
+    // throw as "not private" so IPv6 clients (common on mobile carriers) still
+    // get geo-checked rather than crashing the mutation — proxycheck resolves
+    // IPv6 fine, so the US gate keeps working for them.
+    let isPrivate = false
+    try {
+      isPrivate = isPrivateIp(ip)
+    } catch {
+      isPrivate = false
+    }
+    if (isPrivate) return true
+
+    const ipInfo = await IpFetcher().fetchIPInfo(ip)
+    if (ipInfo instanceof IpFetcherServiceError) {
+      recordExceptionInCurrentSpan({
+        error: ipInfo,
+        level: ErrorLevel.Warn,
+        attributes: { ip },
+      })
+      return true
+    }
+
+    if (!ipInfo.isoCode) return true
+    return ipInfo.isoCode.toUpperCase() === "US"
+  } catch (error) {
+    // Backstop: any unexpected failure fails open. Never block a legitimate US
+    // user from linking a bank because of a geo hiccup.
     recordExceptionInCurrentSpan({
-      error: ipInfo,
+      error: error instanceof Error ? error : new Error(String(error)),
       level: ErrorLevel.Warn,
       attributes: { ip },
     })
     return true
   }
-
-  if (!ipInfo.isoCode) return true
-  return ipInfo.isoCode.toUpperCase() === "US"
 }
 
 /**

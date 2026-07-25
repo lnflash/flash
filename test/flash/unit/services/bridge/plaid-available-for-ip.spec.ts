@@ -91,6 +91,22 @@ describe("BridgeService.plaidAvailableForIp", () => {
     expect(await BridgeService.plaidAvailableForIp(ip("69.160.103.177"))).toBe(false)
   })
 
+  it("geo-checks an IPv6 client instead of crashing (blocks non-US)", async () => {
+    // isPrivateIp throws on a real IPv6 address; the gate must swallow that and
+    // still geo-check, not throw out of the mutation.
+    mockFetchIPInfo.mockResolvedValue(ipInfo("JM"))
+    const ipv6 = ip("2607:fb90:abcd::1")
+    await expect(BridgeService.plaidAvailableForIp(ipv6)).resolves.toBe(false)
+    expect(mockFetchIPInfo).toHaveBeenCalledWith("2607:fb90:abcd::1")
+  })
+
+  it("allows a US IPv6 client", async () => {
+    mockFetchIPInfo.mockResolvedValue(ipInfo("US"))
+    await expect(
+      BridgeService.plaidAvailableForIp(ip("2607:fb90:abcd::1")),
+    ).resolves.toBe(true)
+  })
+
   it("fails open (allows) when no IP is available — no lookup", async () => {
     expect(await BridgeService.plaidAvailableForIp(undefined)).toBe(true)
     expect(mockFetchIPInfo).not.toHaveBeenCalled()
