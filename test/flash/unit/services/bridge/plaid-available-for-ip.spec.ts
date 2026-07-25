@@ -1,4 +1,4 @@
-// Unit tests for BridgeService.plaidAvailableForIp — the US-only Plaid gate.
+// Unit tests for BridgeService.plaidGateForIp — the US-only Plaid gate.
 // Plaid onboarding is US-only, so a non-US egress IP must be routed to manual
 // entry (BRIDGE_PLAID_NOT_AVAILABLE) rather than opening a Plaid session it
 // can't complete. The gate is fail-open: only a CONFIRMED non-US IP blocks.
@@ -15,6 +15,7 @@ jest.mock("@services/mongoose/wallets", () => ({ WalletsRepository: jest.fn() })
 jest.mock("@services/tracing", () => ({
   wrapAsyncFunctionsToRunInSpan: <F extends object>({ fns }: { fns: F }) => fns,
   recordExceptionInCurrentSpan: jest.fn(),
+  addAttributesToCurrentSpan: jest.fn(),
 }))
 
 jest.mock("@services/logger", () => ({
@@ -52,6 +53,9 @@ jest.mock("@services/ipfetcher", () => ({
 
 import BridgeService from "@services/bridge"
 import { UnknownIpFetcherServiceError } from "@domain/ipfetcher"
+import { addAttributesToCurrentSpan } from "@services/tracing"
+
+const mockAddAttributes = addAttributesToCurrentSpan as jest.Mock
 
 const ip = (value: string) => value as unknown as IpAddress
 
@@ -66,64 +70,84 @@ const ipInfo = (isoCode: string) => ({
   proxy: false,
 })
 
-describe("BridgeService.plaidAvailableForIp", () => {
+describe("BridgeService.plaidGateForIp", () => {
   beforeEach(() => {
     jest.clearAllMocks()
   })
 
-  it("blocks a confirmed non-US IP (Jamaica) without opening Plaid", async () => {
+  it("blocks a confirmed non-US IP (Jamaica) and tags the span", async () => {
     mockFetchIPInfo.mockResolvedValue(ipInfo("JM"))
     // 69.160.103.177 = Digicel Jamaica — the real reported case.
-    expect(await BridgeService.plaidAvailableForIp(ip("69.160.103.177"))).toBe(false)
+    const result = await BridgeService.plaidGateForIp(ip("69.160.103.177"))
+
+    expect(result).toEqual({ available: false, country: "JM" })
     expect(mockFetchIPInfo).toHaveBeenCalledWith("69.160.103.177")
+    // Observability: the block decision is visible on the span.
+    expect(mockAddAttributes).toHaveBeenCalledWith({
+      "plaid.gate.decision": "blocked-non-us",
+      "plaid.gate.country": "JM",
+    })
   })
 
   it("allows a US IP", async () => {
     mockFetchIPInfo.mockResolvedValue(ipInfo("US"))
-    expect(await BridgeService.plaidAvailableForIp(ip("8.8.8.8"))).toBe(true)
+    const result = await BridgeService.plaidGateForIp(ip("8.8.8.8"))
+
+    expect(result).toEqual({ available: true, country: "US" })
+    expect(mockAddAttributes).toHaveBeenCalledWith({
+      "plaid.gate.decision": "allowed-us",
+      "plaid.gate.country": "US",
+    })
   })
 
   it("treats isoCode case-insensitively", async () => {
     mockFetchIPInfo.mockResolvedValue(ipInfo("us"))
-    expect(await BridgeService.plaidAvailableForIp(ip("8.8.8.8"))).toBe(true)
+    expect((await BridgeService.plaidGateForIp(ip("8.8.8.8"))).available).toBe(true)
 
     mockFetchIPInfo.mockResolvedValue(ipInfo("jm"))
-    expect(await BridgeService.plaidAvailableForIp(ip("69.160.103.177"))).toBe(false)
+    const jm = await BridgeService.plaidGateForIp(ip("69.160.103.177"))
+    expect(jm.available).toBe(false)
+    expect(jm.country).toBe("JM")
   })
 
   it("geo-checks an IPv6 client instead of crashing (blocks non-US)", async () => {
     // isPrivateIp throws on a real IPv6 address; the gate must swallow that and
     // still geo-check, not throw out of the mutation.
     mockFetchIPInfo.mockResolvedValue(ipInfo("JM"))
-    const ipv6 = ip("2607:fb90:abcd::1")
-    await expect(BridgeService.plaidAvailableForIp(ipv6)).resolves.toBe(false)
+    const result = await BridgeService.plaidGateForIp(ip("2607:fb90:abcd::1"))
+
+    expect(result).toEqual({ available: false, country: "JM" })
     expect(mockFetchIPInfo).toHaveBeenCalledWith("2607:fb90:abcd::1")
   })
 
   it("allows a US IPv6 client", async () => {
     mockFetchIPInfo.mockResolvedValue(ipInfo("US"))
-    await expect(
-      BridgeService.plaidAvailableForIp(ip("2607:fb90:abcd::1")),
-    ).resolves.toBe(true)
+    expect((await BridgeService.plaidGateForIp(ip("2607:fb90:abcd::1"))).available).toBe(
+      true,
+    )
   })
 
   it("fails open (allows) when no IP is available — no lookup", async () => {
-    expect(await BridgeService.plaidAvailableForIp(undefined)).toBe(true)
+    const result = await BridgeService.plaidGateForIp(undefined)
+    expect(result).toEqual({ available: true, country: null })
     expect(mockFetchIPInfo).not.toHaveBeenCalled()
   })
 
   it("fails open (allows) for a private/dev IP — no lookup", async () => {
-    expect(await BridgeService.plaidAvailableForIp(ip("192.168.1.10"))).toBe(true)
+    const result = await BridgeService.plaidGateForIp(ip("192.168.1.10"))
+    expect(result).toEqual({ available: true, country: null })
     expect(mockFetchIPInfo).not.toHaveBeenCalled()
   })
 
   it("fails open (allows) when the geo lookup errors", async () => {
     mockFetchIPInfo.mockResolvedValue(new UnknownIpFetcherServiceError("boom"))
-    expect(await BridgeService.plaidAvailableForIp(ip("69.160.103.177"))).toBe(true)
+    const result = await BridgeService.plaidGateForIp(ip("69.160.103.177"))
+    expect(result).toEqual({ available: true, country: null })
   })
 
   it("fails open (allows) when the country is unknown (empty isoCode)", async () => {
     mockFetchIPInfo.mockResolvedValue(ipInfo(""))
-    expect(await BridgeService.plaidAvailableForIp(ip("69.160.103.177"))).toBe(true)
+    const result = await BridgeService.plaidGateForIp(ip("69.160.103.177"))
+    expect(result).toEqual({ available: true, country: null })
   })
 })

@@ -12,6 +12,7 @@ import * as BridgeAccountsRepo from "@services/mongoose/bridge-accounts"
 import { AccountsRepository } from "@services/mongoose/accounts"
 import { BridgeVirtualAccount } from "@services/mongoose/schema"
 import {
+  addAttributesToCurrentSpan,
   recordExceptionInCurrentSpan,
   wrapAsyncFunctionsToRunInSpan,
 } from "@services/tracing"
@@ -608,8 +609,15 @@ const createVirtualAccount = async (
   }
 }
 
+type PlaidGateResult = {
+  // false only when the IP is a CONFIRMED non-US country.
+  available: boolean
+  // ISO country code when known (uppercased), else null. For telemetry/ops.
+  country: string | null
+}
+
 /**
- * Whether Plaid Link is usable from the caller's IP.
+ * Whether Plaid Link is usable from the caller's IP, plus the resolved country.
  *
  * Plaid onboarding is US-only: a non-US egress IP is rejected *inside* the
  * Plaid webview (surfacing as "rate limit exceeded" on the phone step), which
@@ -618,13 +626,20 @@ const createVirtualAccount = async (
  * to manual bank-details entry instead of opening a Plaid session that can't
  * complete.
  *
- * Fail-open: only a CONFIRMED non-US IP returns false. No IP, a private/dev IP,
- * a geo-lookup failure, or an unknown country all return true — so a lookup
- * blip never locks a legitimate US user out of Plaid, and the client's on-exit
- * fallback still catches any non-US user that slips through.
+ * Fail-open: only a CONFIRMED non-US IP is unavailable. No IP, a private/dev
+ * IP, a geo-lookup failure, or an unknown country all stay available — so a
+ * lookup blip never locks a legitimate US user out of Plaid, and the client's
+ * on-exit fallback still catches any non-US user that slips through.
+ *
+ * Every branch tags the current span with `plaid.gate.decision` (and country)
+ * so prod efficacy — and silent fail-open (e.g. missing proxycheck key) — is
+ * observable rather than invisible.
  */
-const plaidAvailableForIp = async (ip: IpAddress | undefined): Promise<boolean> => {
-  if (!ip) return true
+const plaidGateForIp = async (ip: IpAddress | undefined): Promise<PlaidGateResult> => {
+  if (!ip) {
+    addAttributesToCurrentSpan({ "plaid.gate.decision": "allowed-no-ip" })
+    return { available: true, country: null }
+  }
 
   try {
     // isPrivateIp parses as IPv4 and THROWS on a real IPv6 address. Treat a
@@ -637,7 +652,10 @@ const plaidAvailableForIp = async (ip: IpAddress | undefined): Promise<boolean> 
     } catch {
       isPrivate = false
     }
-    if (isPrivate) return true
+    if (isPrivate) {
+      addAttributesToCurrentSpan({ "plaid.gate.decision": "allowed-private-ip" })
+      return { available: true, country: null }
+    }
 
     const ipInfo = await IpFetcher().fetchIPInfo(ip)
     if (ipInfo instanceof IpFetcherServiceError) {
@@ -646,11 +664,22 @@ const plaidAvailableForIp = async (ip: IpAddress | undefined): Promise<boolean> 
         level: ErrorLevel.Warn,
         attributes: { ip },
       })
-      return true
+      addAttributesToCurrentSpan({ "plaid.gate.decision": "allowed-lookup-failed" })
+      return { available: true, country: null }
     }
 
-    if (!ipInfo.isoCode) return true
-    return ipInfo.isoCode.toUpperCase() === "US"
+    const country = ipInfo.isoCode ? ipInfo.isoCode.toUpperCase() : null
+    if (!country) {
+      addAttributesToCurrentSpan({ "plaid.gate.decision": "allowed-unknown-country" })
+      return { available: true, country: null }
+    }
+
+    const available = country === "US"
+    addAttributesToCurrentSpan({
+      "plaid.gate.decision": available ? "allowed-us" : "blocked-non-us",
+      "plaid.gate.country": country,
+    })
+    return { available, country }
   } catch (error) {
     // Backstop: any unexpected failure fails open. Never block a legitimate US
     // user from linking a bank because of a geo hiccup.
@@ -659,7 +688,8 @@ const plaidAvailableForIp = async (ip: IpAddress | undefined): Promise<boolean> 
       level: ErrorLevel.Warn,
       attributes: { ip },
     })
-    return true
+    addAttributesToCurrentSpan({ "plaid.gate.decision": "allowed-error" })
+    return { available: true, country: null }
   }
 }
 
@@ -1866,7 +1896,7 @@ export default wrapAsyncFunctionsToRunInSpan({
   fns: {
     initiateKyc,
     createVirtualAccount,
-    plaidAvailableForIp,
+    plaidGateForIp,
     addExternalAccount,
     exchangePlaidPublicToken,
     createExternalAccount,

@@ -9,6 +9,7 @@ import {
   BridgeAccountLevelError,
   BridgePlaidNotAvailableError,
 } from "@services/bridge/errors"
+import { notifyOpsEvent } from "@services/alerts/ops-events"
 
 const BridgeAddExternalAccountPayload = GT.Object({
   name: "BridgeAddExternalAccountPayload",
@@ -32,8 +33,17 @@ const bridgeAddExternalAccount = GT.Field({
     // Plaid onboarding is US-only. Send a non-US IP straight to the client's
     // manual-entry fallback (BRIDGE_PLAID_NOT_AVAILABLE) rather than opening a
     // Plaid session that gets blocked inside the webview.
-    const plaidAvailable = await BridgeService.plaidAvailableForIp(ip)
+    const { available: plaidAvailable, country } = await BridgeService.plaidGateForIp(ip)
     if (!plaidAvailable) {
+      // Surface to the #flash-activity ops feed so we can see non-US demand and
+      // confirm the gate is actually firing in prod. Fire-and-forget.
+      notifyOpsEvent({
+        flow: "cashout",
+        phase: "plaid-blocked-non-us",
+        status: "failed",
+        accountId: domainAccount.id,
+        meta: { country: country ?? "unknown" },
+      })
       return {
         errors: [mapAndParseErrorForGqlResponse(new BridgePlaidNotAvailableError())],
       }
