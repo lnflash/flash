@@ -29,11 +29,10 @@ class NotificationServiceImpl implements NotificationService {
   private initializeTwilio() {
     try {
       if (env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN) {
+        // Never log credential material (not even a prefix/length).
         baseLogger.info(
           {
             accountSid: env.TWILIO_ACCOUNT_SID,
-            authTokenLength: env.TWILIO_AUTH_TOKEN.length,
-            authTokenPrefix: env.TWILIO_AUTH_TOKEN.substring(0, 5),
             verifyServiceId: env.TWILIO_VERIFY_SERVICE_ID,
             twilioFrom: env.TWILIO_FROM || "NOT SET",
             twilioWhatsAppFrom: env.TWILIO_WHATSAPP_FROM || "NOT SET",
@@ -203,7 +202,16 @@ class NotificationServiceImpl implements NotificationService {
         messageOptions.body = body
       }
 
-      baseLogger.info({ messageOptions }, "Sending WhatsApp message with options")
+      // Redacted: body/contentVariables can carry a raw invite token (tokens
+      // are stored only as sha256 hashes — they must never reach the logs).
+      baseLogger.info(
+        {
+          from: messageOptions.from,
+          to: messageOptions.to,
+          usesTemplate: Boolean(messageOptions.contentSid),
+        },
+        "Sending WhatsApp message with options",
+      )
 
       const message = await this.twilioClient.messages.create(messageOptions)
 

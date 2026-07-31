@@ -85,12 +85,20 @@ export const createInvite = async ({
 
     // Send notification with username
     const senderName = inviterAccount.username || "A friend"
-    await sendInviteNotification({
+    const sent = await sendInviteNotification({
       method,
       contact,
       token,
       senderName,
     })
+
+    // A failed send must not burn the invite: the PENDING/SENT duplicate check
+    // above would otherwise block re-inviting this contact for 24h with no
+    // retry path. Delete the doc so the user can simply try again.
+    if (!sent) {
+      await InviteRepository.deleteOne({ _id: invite._id })
+      return new ValidationError("Failed to send invitation — please try again")
+    }
 
     // Update status to SENT
     invite.status = InviteStatus.SENT

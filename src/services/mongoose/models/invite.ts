@@ -84,7 +84,6 @@ const InviteSchema = new Schema<InviteRecord>({
   redeemedById: {
     type: Schema.Types.ObjectId,
     ref: "Account",
-    index: true,
   },
   revokedAt: {
     type: Date,
@@ -122,5 +121,12 @@ const InviteSchema = new Schema<InviteRecord>({
 InviteSchema.index({ inviterId: 1, createdAt: -1 })
 InviteSchema.index({ contact: 1, createdAt: -1 })
 InviteSchema.index({ status: 1, expiresAt: 1 })
+// One redeemed invite per account, ever — enforced at the storage layer so a
+// concurrent double-redeem race can't slip past the application check. Partial:
+// un-redeemed invites (no redeemedById) are unconstrained.
+InviteSchema.index(
+  { redeemedById: 1 },
+  { unique: true, partialFilterExpression: { redeemedById: { $exists: true } } },
+)
 
 export const InviteRepository = mongoose.model<InviteRecord>("Invite", InviteSchema)

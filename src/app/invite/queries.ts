@@ -1,3 +1,5 @@
+import mongoose from "mongoose"
+
 import { InviteRepository } from "@services/mongoose/models/invite"
 import { AccountsRepository } from "@services/mongoose"
 import { InviteStatus, InviteId } from "@domain/invite"
@@ -55,12 +57,14 @@ export const getInviteById = async (id: InviteId) => {
 
 export const listInvites = async ({
   first = 20,
-  skip = 0,
+  afterId,
   status,
   inviterId,
 }: {
   first?: number
-  skip?: number
+  // _id cursor: return invites strictly older than this id (ObjectIds are
+  // time-ordered, matching the newest-first sort).
+  afterId?: string
   status?: InviteStatus
   inviterId?: AccountId
 }) => {
@@ -72,16 +76,24 @@ export const listInvites = async ({
     }
 
     if (inviterId) {
-      matchQuery.inviterId = inviterId
+      // mongoose does not cast inside aggregation pipelines — a raw string
+      // would silently match nothing against the ObjectId field.
+      matchQuery.inviterId = new mongoose.Types.ObjectId(inviterId)
     }
+
+    const cursorMatch = afterId
+      ? [{ $match: { _id: { $lt: new mongoose.Types.ObjectId(afterId) } } }]
+      : []
 
     const [result] = await InviteRepository.aggregate([
       { $match: matchQuery },
       {
         $facet: {
+          // count covers everything matching the filter; only the data page
+          // is cursor-restricted.
           data: [
-            { $sort: { createdAt: -1 } },
-            { $skip: skip },
+            ...cursorMatch,
+            { $sort: { _id: -1 } },
             { $limit: first },
             {
               $project: {

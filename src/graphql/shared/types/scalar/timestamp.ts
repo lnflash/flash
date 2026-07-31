@@ -4,6 +4,20 @@ import { GT } from "@graphql/index"
 type InternalDate = Date
 type ExternalDate = number | InputValidationError
 
+// A pure-digit string is Unix seconds; anything else must be a parseable date
+// string (e.g. ISO-8601). `parseInt("2026-07-30T…")` would silently yield 2026
+// (≈1970 as epoch seconds), which once corrupted an admin-supplied scheduledAt.
+const parseDateString = (value: string): Date | InputValidationError => {
+  if (/^\d+$/.test(value)) {
+    return new Date(parseInt(value, 10) * 1000) // Unix seconds -> ms
+  }
+  const date = new Date(value)
+  if (isNaN(date.getTime())) {
+    return new InputValidationError({ message: "Invalid timestamp value" })
+  }
+  return date
+}
+
 const Timestamp = GT.Scalar<InternalDate | InputValidationError, ExternalDate>({
   name: "Timestamp",
   description:
@@ -18,23 +32,20 @@ const Timestamp = GT.Scalar<InternalDate | InputValidationError, ExternalDate>({
     return new InputValidationError({ message: "Invalid value for Date" })
   },
   parseValue(value) {
-    if (typeof value === "string" || typeof value === "number") {
-      // Parse as Unix timestamp (seconds since epoch)
-      const timestamp = typeof value === "string" ? parseInt(value, 10) : value
-      if (isNaN(timestamp)) {
-        return new InputValidationError({ message: "Invalid timestamp value" })
-      }
-      return new Date(timestamp * 1000) // Convert seconds to milliseconds
+    if (typeof value === "number") {
+      return new Date(value * 1000) // Unix seconds -> ms
+    }
+    if (typeof value === "string") {
+      return parseDateString(value)
     }
     return new InputValidationError({ message: "Invalid type for Date" })
   },
   parseLiteral(ast) {
-    if (ast.kind === GT.Kind.STRING || ast.kind === GT.Kind.INT) {
-      const timestamp = parseInt(ast.value, 10)
-      if (isNaN(timestamp)) {
-        return new InputValidationError({ message: "Invalid timestamp value" })
-      }
-      return new Date(timestamp * 1000) // Convert seconds to milliseconds
+    if (ast.kind === GT.Kind.INT) {
+      return new Date(parseInt(ast.value, 10) * 1000) // Unix seconds -> ms
+    }
+    if (ast.kind === GT.Kind.STRING) {
+      return parseDateString(ast.value)
     }
     return new InputValidationError({ message: "Invalid type for Date" })
   },

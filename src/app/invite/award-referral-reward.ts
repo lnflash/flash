@@ -49,6 +49,16 @@ export const awardReferralRewardOnKycApproval = async ({
     const config = getReferralRewardConfig()
     if (!config.enabled) return
 
+    // One reward per invitee, ever. Bridge KYC can flap back to "approved"
+    // (approved -> under_review -> approved re-fires this hook), and redemption
+    // history may hold more than one accepted invite — if ANY invite for this
+    // account was already claimed for a reward, never pay a second one.
+    const alreadyProcessed = await InviteRepository.exists({
+      redeemedById: accountId,
+      rewardStatus: { $exists: true },
+    })
+    if (alreadyProcessed) return
+
     // Only accepted invites that have not yet been claimed for a reward.
     const pending = await InviteRepository.findOne({
       redeemedById: accountId,
@@ -67,8 +77,12 @@ export const awardReferralRewardOnKycApproval = async ({
 
     // The claim is ours from here: an unexpected throw must not strand an
     // invisible "processing" row, so the remainder runs under its own catch
-    // that downgrades the claim to "failed" for reconciliation.
+    // that downgrades the claim to "failed" for reconciliation. Party results
+    // are hoisted so the catch can preserve evidence of any payment that
+    // already went out before the throw (a re-pay must never look safe).
     let seq: number | undefined
+    let inviterResult: PartyPayResult = "failed"
+    let inviteeResult: PartyPayResult = "failed"
     try {
       // Reserve the global sequence number and resolve this referral's amount.
       seq = await nextReferralRewardSeq()
@@ -164,8 +178,8 @@ export const awardReferralRewardOnKycApproval = async ({
       }
 
       // Pay each party independently so a single failure can't undo the other.
-      const inviterResult = await payParty(inviterWalletId)
-      const inviteeResult = await payParty(inviteeWalletId)
+      inviterResult = await payParty(inviterWalletId)
+      inviteeResult = await payParty(inviteeWalletId)
 
       const now = new Date()
       const rewardStatus =
@@ -208,16 +222,24 @@ export const awardReferralRewardOnKycApproval = async ({
       }
     } catch (err) {
       // Downgrade the claim so the row is visible to reconciliation instead of
-      // stranded in "processing" forever.
+      // stranded in "processing" forever — preserving evidence of any party
+      // already paid before the throw so reconciliation can't double-pay them.
       baseLogger.error(
-        { err, accountId, seq },
+        { err, accountId, seq, inviterResult, inviteeResult },
         "referral reward: unexpected error after claim",
       )
-      await markReward(invite._id, {
-        rewardStatus: "failed",
-        rewardError: `unexpected: ${String(err)}`,
+      const anyPartyPaid = inviterResult !== "failed" || inviteeResult !== "failed"
+      const update: Record<string, unknown> = {
+        rewardStatus: anyPartyPaid ? "partial" : "failed",
+        rewardError:
+          `unexpected: ${String(err)} ` +
+          `(inviter=${inviterResult} invitee=${inviteeResult})`,
         ...(seq !== undefined ? { rewardSeq: seq } : {}),
-      })
+      }
+      const now = new Date()
+      if (inviterResult !== "failed") update.inviterRewardedAt = now
+      if (inviteeResult !== "failed") update.inviteeRewardedAt = now
+      await markReward(invite._id, update)
     }
   } catch (err) {
     // A reward failure must never break KYC approval.

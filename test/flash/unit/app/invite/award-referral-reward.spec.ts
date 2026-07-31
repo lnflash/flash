@@ -9,6 +9,7 @@ jest.mock("@config", () => ({
 const mockFindOne = jest.fn()
 const mockFindOneAndUpdate = jest.fn()
 const mockUpdateOne = jest.fn()
+const mockExists = jest.fn()
 jest.mock("@services/mongoose/models/invite", () => {
   const actual = jest.requireActual("@services/mongoose/models/invite")
   return {
@@ -18,6 +19,7 @@ jest.mock("@services/mongoose/models/invite", () => {
       findOne: (...a: unknown[]) => mockFindOne(...a),
       findOneAndUpdate: (...a: unknown[]) => mockFindOneAndUpdate(...a),
       updateOne: (...a: unknown[]) => mockUpdateOne(...a),
+      exists: (...a: unknown[]) => mockExists(...a),
     },
   }
 })
@@ -84,6 +86,7 @@ describe("awardReferralRewardOnKycApproval", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     mockGetConfig.mockReturnValue({ enabled: true, tiers: DEFAULT_TIERS })
+    mockExists.mockResolvedValue(null) // no prior processed invite for the account
     mockFindOne.mockResolvedValue(pendingInvite())
     mockFindOneAndUpdate.mockResolvedValue(pendingInvite())
     mockNextSeq.mockResolvedValue(50)
@@ -101,6 +104,19 @@ describe("awardReferralRewardOnKycApproval", () => {
     mockGetConfig.mockReturnValue({ enabled: false, tiers: DEFAULT_TIERS })
     await awardReferralRewardOnKycApproval({ accountId: INVITEE })
     expect(mockFindOne).not.toHaveBeenCalled()
+    expect(mockPay).not.toHaveBeenCalled()
+  })
+
+  it("never pays a second reward for the same account (KYC re-approval flap)", async () => {
+    // A prior invite for this account was already claimed/processed.
+    mockExists.mockResolvedValue({ _id: "earlier-invite" })
+    await awardReferralRewardOnKycApproval({ accountId: INVITEE })
+    expect(mockExists).toHaveBeenCalledWith({
+      redeemedById: INVITEE,
+      rewardStatus: { $exists: true },
+    })
+    expect(mockFindOne).not.toHaveBeenCalled()
+    expect(mockFindOneAndUpdate).not.toHaveBeenCalled()
     expect(mockPay).not.toHaveBeenCalled()
   })
 
@@ -292,6 +308,25 @@ describe("awardReferralRewardOnKycApproval", () => {
     expect(set.rewardError).toContain("unexpected")
     expect(set.rewardSeq).toBeUndefined() // seq was never assigned
     expect(baseLogger.error).toHaveBeenCalled()
+  })
+
+  it("preserves paid-party evidence when the second payout leg throws", async () => {
+    mockPay
+      .mockResolvedValueOnce(PaymentSendStatus.Success) // inviter paid
+      .mockRejectedValueOnce(new Error("ibex client exploded")) // invitee leg THROWS
+    await expect(
+      awardReferralRewardOnKycApproval({ accountId: INVITEE }),
+    ).resolves.toBeUndefined()
+    const set = lastSet()
+    // The inviter's payment already went out: reconciliation must see it so a
+    // manual re-run can't double-pay them.
+    expect(set.rewardStatus).toBe("partial")
+    expect(set.inviterRewardedAt).toBeInstanceOf(Date)
+    expect(set.inviteeRewardedAt).toBeUndefined()
+    expect(set.rewardError).toContain("unexpected")
+    expect(set.rewardError).toContain("inviter=paid")
+    expect(set.rewardError).toContain("invitee=failed")
+    expect(set.rewardSeq).toBe(50)
   })
 
   it("never throws into the KYC path on an unexpected error", async () => {

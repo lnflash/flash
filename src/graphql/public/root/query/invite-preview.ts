@@ -45,10 +45,12 @@ const InvitePreviewQuery = GT.Field<null, GraphQLPublicContext>({
         throw new Error("Invalid or expired invitation")
       }
 
-      // Check if invite is still valid
+      // Check if invite is still valid (revoked invites carry EXPIRED status
+      // and/or revokedAt regardless of their expiresAt date)
       const isExpired = new Date() > invite.expiresAt
       const isAlreadyUsed = invite.status === InviteStatus.ACCEPTED
-      const isValid = !isExpired && !isAlreadyUsed
+      const isRevoked = invite.status === InviteStatus.EXPIRED || !!invite.revokedAt
+      const isValid = !isExpired && !isAlreadyUsed && !isRevoked
 
       // Get inviter username
       let inviterUsername: string | undefined

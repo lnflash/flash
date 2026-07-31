@@ -94,7 +94,6 @@ export const mutationFields = {
       LnNoAmountInvoiceCreateOnBehalfOfRecipientMutation,
 
     merchantMapSuggest: MerchantMapSuggestMutation,
-    redeemInvite: RedeemInviteMutation,
   },
 
   authed: {
@@ -131,6 +130,9 @@ export const mutationFields = {
       feedbackSubmit: FeedbackSubmitMutation,
 
       createInvite: CreateInviteMutation,
+      // Requires an authenticated session (mobile redeems post-login); keeping
+      // it authed also puts it behind API-key scope enforcement (BLOCKED).
+      redeemInvite: RedeemInviteMutation,
 
       callbackEndpointAdd: CallbackEndpointAdd,
       callbackEndpointDelete: CallbackEndpointDelete,

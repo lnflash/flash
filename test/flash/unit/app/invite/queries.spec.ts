@@ -88,10 +88,26 @@ describe("listInvites", () => {
     const data = [{ id: "a" }, { id: "b" }]
     mockAggregate.mockResolvedValue([{ data, count: [{ total: 2 }] }])
 
-    const result = await listInvites({ first: 10, skip: 0 })
+    const result = await listInvites({ first: 10 })
 
     expect(result).toEqual({ data, count: [{ total: 2 }] })
     expect(mockAggregate).toHaveBeenCalledTimes(1)
+  })
+
+  it("pages by _id cursor without restricting the total count", async () => {
+    mockAggregate.mockResolvedValue([{ data: [], count: [{ total: 9 }] }])
+    const afterId = "507f1f77bcf86cd799439033"
+
+    await listInvites({ first: 5, afterId })
+
+    const pipeline = mockAggregate.mock.calls[0][0]
+    // The cursor restriction lives inside the data facet (older than afterId,
+    // newest first) — never in the shared $match, so count covers everything.
+    expect(pipeline[0]).toEqual({ $match: {} })
+    const dataPipeline = pipeline[1].$facet.data
+    expect(dataPipeline[0].$match._id.$lt.toString()).toBe(afterId)
+    expect(dataPipeline[1]).toEqual({ $sort: { _id: -1 } })
+    expect(dataPipeline[2]).toEqual({ $limit: 5 })
   })
 
   it("defaults data and count when the facet result omits them", async () => {
@@ -102,13 +118,16 @@ describe("listInvites", () => {
     expect(result).toEqual({ data: [], count: [{ total: 0 }] })
   })
 
-  it("filters by status and inviterId when provided", async () => {
+  it("filters by status and casts inviterId to an ObjectId for the pipeline", async () => {
     mockAggregate.mockResolvedValue([{ data: [], count: [] }])
     await listInvites({ status: InviteStatus.PENDING, inviterId: INVITER as AccountId })
 
     const pipeline = mockAggregate.mock.calls[0][0]
-    expect(pipeline[0]).toEqual({
-      $match: { status: InviteStatus.PENDING, inviterId: INVITER },
-    })
+    const match = pipeline[0].$match
+    expect(match.status).toBe(InviteStatus.PENDING)
+    // Aggregation pipelines bypass mongoose casting: a raw string would
+    // silently match nothing against the ObjectId inviterId field.
+    expect(typeof match.inviterId).toBe("object")
+    expect(match.inviterId.toString()).toBe(INVITER)
   })
 })

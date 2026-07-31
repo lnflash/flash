@@ -67,9 +67,29 @@ const RedeemInviteMutation = GT.Field<null, GraphQLPublicContextAuth>({
         return { success: false, errors: ["This invitation has already been used"] }
       }
 
+      // Revoked (admin-expired) invites must not be redeemable even when their
+      // expiresAt is still in the future.
+      if (invite.status === InviteStatus.EXPIRED || invite.revokedAt) {
+        return { success: false, errors: ["This invitation is no longer valid"] }
+      }
+
       // Prevent self-redemption
       if (invite.inviterId.toString() === domainAccount.id) {
         return { success: false, errors: ["You cannot redeem your own invitation"] }
+      }
+
+      // One redeemed invite per account, ever: the referral reward is paid per
+      // redeemed invite on KYC approval, so accumulating several accepted
+      // invites would multiply payouts (KYC status flaps re-fire the award).
+      const alreadyRedeemed = await InviteRepository.exists({
+        redeemedById: new mongoose.Types.ObjectId(domainAccount.id),
+        status: InviteStatus.ACCEPTED,
+      })
+      if (alreadyRedeemed) {
+        return {
+          success: false,
+          errors: ["You have already redeemed an invitation"],
+        }
       }
 
       // Check if user account is new (created within the invite window)
@@ -143,11 +163,24 @@ const RedeemInviteMutation = GT.Field<null, GraphQLPublicContextAuth>({
       //   }
       // }
 
-      // Mark invite as accepted and set redeemer information
+      // Mark invite as accepted and set redeemer information. The unique
+      // partial index on redeemedById backstops the check above: a concurrent
+      // double-redeem loses with a duplicate-key error, treated as already
+      // redeemed.
       invite.status = InviteStatus.ACCEPTED
       invite.redeemedAt = new Date()
       invite.redeemedById = new mongoose.Types.ObjectId(domainAccount.id)
-      await invite.save()
+      try {
+        await invite.save()
+      } catch (saveError) {
+        if ((saveError as { code?: number })?.code === 11000) {
+          return {
+            success: false,
+            errors: ["You have already redeemed an invitation"],
+          }
+        }
+        throw saveError
+      }
 
       // Log successful redemption
       baseLogger.info(
@@ -162,8 +195,9 @@ const RedeemInviteMutation = GT.Field<null, GraphQLPublicContextAuth>({
         "Invite successfully redeemed by new user",
       )
 
-      // TODO: Award rewards to both inviter and invitee
-      // This would involve crediting their accounts through the ledger
+      // The referral reward is NOT paid here: payout is deferred until the
+      // invitee's Bridge KYC is approved (awardReferralRewardOnKycApproval,
+      // fired from the Bridge KYC webhook).
 
       return {
         success: true,

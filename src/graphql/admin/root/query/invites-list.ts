@@ -1,6 +1,7 @@
 import { GT } from "@graphql/index"
 import { Admin } from "@app"
 import { mapError } from "@graphql/error-map"
+import { InputValidationError } from "@graphql/error"
 import InvitesConnection from "@graphql/admin/types/object/invites-connection"
 import InviteStatus from "@graphql/shared/types/scalar/invite-status"
 import { checkedToAccountId } from "@domain/accounts"
@@ -33,21 +34,19 @@ const InvitesListQuery = GT.Field({
       processedInviterId = checkedInviterId
     }
 
-    // Calculate skip from cursor
-    let skip = 0
+    // Cursors are invite ObjectId hex strings (connectionFromPaginatedArray
+    // uses item ids as cursors); page by _id, which is time-ordered.
+    let afterId: string | undefined
     if (args.after) {
-      // For cursor-based pagination, we could store the last seen ID
-      // For now, we'll use a simple numeric approach
-      try {
-        skip = parseInt(args.after, 16) || 0
-      } catch {
-        skip = 0
+      if (!/^[a-f0-9]{24}$/i.test(args.after)) {
+        throw mapError(new InputValidationError({ message: "Invalid cursor" }))
       }
+      afterId = args.after
     }
 
     const invites = await Admin.listInvites({
       first: args.first || 20,
-      skip,
+      afterId,
       status: args.status instanceof Error ? undefined : args.status,
       inviterId: processedInviterId,
     })
