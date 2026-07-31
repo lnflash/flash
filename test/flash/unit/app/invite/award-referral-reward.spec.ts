@@ -65,11 +65,17 @@ const pendingInvite = () => ({
 })
 
 const usd = (id: string) => ({ currency: "USD", id })
+const usdt = (id: string) => ({ currency: "USDT", id })
 const btc = (id: string) => ({ currency: "BTC", id })
 
 // Route listByAccountId(accountId) -> wallets, by account.
 const walletsBy = (map: Record<string, unknown[]>) => (accountId: string) =>
   map[accountId] ?? []
+
+const useWallets = (map: Record<string, unknown[]>) =>
+  mockListByAccountId.mockImplementation((accountId: string) =>
+    Promise.resolve(walletsBy(map)(accountId)),
+  )
 
 const lastSet = () =>
   mockUpdateOne.mock.calls[mockUpdateOne.mock.calls.length - 1][1].$set
@@ -82,15 +88,12 @@ describe("awardReferralRewardOnKycApproval", () => {
     mockFindOneAndUpdate.mockResolvedValue(pendingInvite())
     mockNextSeq.mockResolvedValue(50)
     mockFindByRole.mockResolvedValue({ id: REWARDS_ACCT })
-    mockListByAccountId.mockImplementation((accountId: string) =>
-      Promise.resolve(
-        walletsBy({
-          [REWARDS_ACCT]: [usd("rewards-usd")],
-          [INVITER]: [usd("inviter-usd")],
-          [INVITEE]: [usd("invitee-usd")],
-        })(accountId),
-      ),
-    )
+    // Every account holds both wallets; USDT is the active cash wallet.
+    useWallets({
+      [REWARDS_ACCT]: [usd("rewards-usd"), usdt("rewards-usdt")],
+      [INVITER]: [usd("inviter-usd"), usdt("inviter-usdt")],
+      [INVITEE]: [usd("invitee-usd"), usdt("invitee-usdt")],
+    })
     mockPay.mockResolvedValue(PaymentSendStatus.Success)
   })
 
@@ -115,28 +118,30 @@ describe("awardReferralRewardOnKycApproval", () => {
     expect(mockPay).not.toHaveBeenCalled()
   })
 
-  it("claims the invite atomically (guarding on absent rewardStatus -> processing)", async () => {
+  it("claims atomically, stamping processing + rewardClaimedAt", async () => {
     await awardReferralRewardOnKycApproval({ accountId: INVITEE })
     const [filter, update] = mockFindOneAndUpdate.mock.calls[0]
     expect(filter).toMatchObject({ rewardStatus: { $exists: false } })
-    expect(update).toEqual({ $set: { rewardStatus: "processing" } })
+    expect(update).toEqual({
+      $set: { rewardStatus: "processing", rewardClaimedAt: expect.any(Date) },
+    })
   })
 
-  it("pays both parties the tier amount and marks the invite paid", async () => {
+  it("pays both parties from the USDT wallet (active cash wallet) and marks paid", async () => {
     await awardReferralRewardOnKycApproval({ accountId: INVITEE })
 
     expect(mockPay).toHaveBeenCalledTimes(2)
     expect(mockPay).toHaveBeenCalledWith(
       expect.objectContaining({
-        senderWalletId: "rewards-usd",
-        recipientWalletId: "inviter-usd",
+        senderWalletId: "rewards-usdt",
+        recipientWalletId: "inviter-usdt",
         amount: 500,
       }),
     )
     expect(mockPay).toHaveBeenCalledWith(
       expect.objectContaining({
-        senderWalletId: "rewards-usd",
-        recipientWalletId: "invitee-usd",
+        senderWalletId: "rewards-usdt",
+        recipientWalletId: "invitee-usdt",
         amount: 500,
       }),
     )
@@ -148,6 +153,28 @@ describe("awardReferralRewardOnKycApproval", () => {
     expect(set.rewardedAt).toBeInstanceOf(Date)
     expect(set.inviterRewardedAt).toBeInstanceOf(Date)
     expect(set.inviteeRewardedAt).toBeInstanceOf(Date)
+  })
+
+  it("falls back to USD when the rewards account has no USDT wallet, matching recipients by USD", async () => {
+    useWallets({
+      [REWARDS_ACCT]: [usd("rewards-usd")],
+      [INVITER]: [usd("inviter-usd"), usdt("inviter-usdt")],
+      [INVITEE]: [usd("invitee-usd")],
+    })
+    await awardReferralRewardOnKycApproval({ accountId: INVITEE })
+    expect(mockPay).toHaveBeenCalledWith(
+      expect.objectContaining({
+        senderWalletId: "rewards-usd",
+        recipientWalletId: "inviter-usd", // matched by sender currency, not USDT
+      }),
+    )
+    expect(mockPay).toHaveBeenCalledWith(
+      expect.objectContaining({
+        senderWalletId: "rewards-usd",
+        recipientWalletId: "invitee-usd",
+      }),
+    )
+    expect(lastSet().rewardStatus).toBe("paid")
   })
 
   it("applies the tier for the assigned sequence (101 -> 250)", async () => {
@@ -174,34 +201,31 @@ describe("awardReferralRewardOnKycApproval", () => {
     expect(lastSet().rewardStatus).toBe("failed")
   })
 
-  it("fails (no payout) when the rewards account has no USD wallet", async () => {
-    mockListByAccountId.mockImplementation((accountId: string) =>
-      Promise.resolve(walletsBy({ [REWARDS_ACCT]: [btc("rewards-btc")] })(accountId)),
-    )
+  it("fails (no payout) when the rewards account has neither a USDT nor a USD wallet", async () => {
+    useWallets({ [REWARDS_ACCT]: [btc("rewards-btc")] })
     await awardReferralRewardOnKycApproval({ accountId: INVITEE })
     expect(mockPay).not.toHaveBeenCalled()
-    expect(lastSet().rewardStatus).toBe("failed")
+    const set = lastSet()
+    expect(set.rewardStatus).toBe("failed")
+    expect(set.rewardError).toContain("USDT or USD")
   })
 
-  it("records 'partial' when only one party has a USD wallet", async () => {
-    mockListByAccountId.mockImplementation((accountId: string) =>
-      Promise.resolve(
-        walletsBy({
-          [REWARDS_ACCT]: [usd("rewards-usd")],
-          [INVITER]: [btc("inviter-btc")], // no USD wallet
-          [INVITEE]: [usd("invitee-usd")],
-        })(accountId),
-      ),
-    )
+  it("records 'partial' when a recipient lacks a wallet in the payout currency", async () => {
+    useWallets({
+      [REWARDS_ACCT]: [usdt("rewards-usdt")],
+      [INVITER]: [usd("inviter-usd")], // no USDT wallet -> can't receive
+      [INVITEE]: [usdt("invitee-usdt")],
+    })
     await awardReferralRewardOnKycApproval({ accountId: INVITEE })
     expect(mockPay).toHaveBeenCalledTimes(1)
     expect(mockPay).toHaveBeenCalledWith(
-      expect.objectContaining({ recipientWalletId: "invitee-usd" }),
+      expect.objectContaining({ recipientWalletId: "invitee-usdt" }),
     )
     const set = lastSet()
     expect(set.rewardStatus).toBe("partial")
     expect(set.inviteeRewardedAt).toBeInstanceOf(Date)
     expect(set.inviterRewardedAt).toBeUndefined()
+    expect(set.rewardError).toContain("inviter=failed")
   })
 
   it("records 'partial' when one payout errors and the other succeeds", async () => {
@@ -223,10 +247,51 @@ describe("awardReferralRewardOnKycApproval", () => {
     expect(lastSet().rewardStatus).toBe("failed")
   })
 
-  it("treats a Pending payout as paid", async () => {
+  it("records 'pending' (non-terminal) when a payout is IBEX-pending, timestamps set", async () => {
     mockPay.mockResolvedValue(PaymentSendStatus.Pending)
     await awardReferralRewardOnKycApproval({ accountId: INVITEE })
-    expect(lastSet().rewardStatus).toBe("paid")
+    const set = lastSet()
+    expect(set.rewardStatus).toBe("pending")
+    // Fail-closed: pending parties are timestamped so a re-run can't double-pay.
+    expect(set.inviterRewardedAt).toBeInstanceOf(Date)
+    expect(set.inviteeRewardedAt).toBeInstanceOf(Date)
+    expect(set.rewardedAt).toBeUndefined()
+    expect(set.rewardError).toContain("inviter=pending")
+    expect(set.rewardError).toContain("invitee=pending")
+  })
+
+  it("records 'pending' when one party is paid and the other IBEX-pending", async () => {
+    mockPay
+      .mockResolvedValueOnce(PaymentSendStatus.Success) // inviter
+      .mockResolvedValueOnce(PaymentSendStatus.Pending) // invitee
+    await awardReferralRewardOnKycApproval({ accountId: INVITEE })
+    const set = lastSet()
+    expect(set.rewardStatus).toBe("pending")
+    expect(set.inviterRewardedAt).toBeInstanceOf(Date)
+    expect(set.inviteeRewardedAt).toBeInstanceOf(Date)
+  })
+
+  it("records 'partial' when one party is IBEX-pending and the other fails", async () => {
+    mockPay
+      .mockResolvedValueOnce(PaymentSendStatus.Pending) // inviter
+      .mockResolvedValueOnce(new Error("ibex down")) // invitee
+    await awardReferralRewardOnKycApproval({ accountId: INVITEE })
+    const set = lastSet()
+    expect(set.rewardStatus).toBe("partial")
+    expect(set.inviterRewardedAt).toBeInstanceOf(Date) // pending party stays timestamped
+    expect(set.inviteeRewardedAt).toBeUndefined()
+  })
+
+  it("downgrades a claimed invite to 'failed' when an unexpected error follows the claim", async () => {
+    mockNextSeq.mockRejectedValue(new Error("mongo hiccup"))
+    await expect(
+      awardReferralRewardOnKycApproval({ accountId: INVITEE }),
+    ).resolves.toBeUndefined()
+    const set = lastSet()
+    expect(set.rewardStatus).toBe("failed")
+    expect(set.rewardError).toContain("unexpected")
+    expect(set.rewardSeq).toBeUndefined() // seq was never assigned
+    expect(baseLogger.error).toHaveBeenCalled()
   })
 
   it("never throws into the KYC path on an unexpected error", async () => {

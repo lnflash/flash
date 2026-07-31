@@ -13,6 +13,11 @@ export interface ReferralRewardTier {
 //    { upToCount: 600, amountCents: 250 },
 //    { upToCount: 0,   amountCents: 100 }]
 // seq 1..100 -> 500, 101..600 -> 250, 601+ -> 100.
+//
+// Fail-safe: past every bounded tier, the final tier's amount applies only if
+// that tier is explicitly unbounded (upToCount <= 0). A schedule missing the
+// unbounded sentinel pays 0 past its last bound — a misconfiguration must
+// never silently over-pay forever.
 export const referralRewardAmountCents = (
   tiers: ReferralRewardTier[],
   seq: number,
@@ -21,5 +26,5 @@ export const referralRewardAmountCents = (
     if (tier.upToCount > 0 && seq <= tier.upToCount) return tier.amountCents
   }
   const last = tiers[tiers.length - 1]
-  return last ? last.amountCents : 0
+  return last && last.upToCount <= 0 ? last.amountCents : 0
 }

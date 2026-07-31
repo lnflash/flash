@@ -31,12 +31,14 @@ describe("referralRewardAmountCents", () => {
     expect(referralRewardAmountCents(tiers, 1_000_000)).toBe(100)
   })
 
-  it("falls back to the last tier's amount past the final bound", () => {
+  it("pays 0 past the final bound when the unbounded sentinel is missing (misconfig fail-safe)", () => {
+    // Operator forgot the { upToCount: 0 } sentinel: never over-pay forever.
+    expect(referralRewardAmountCents([{ upToCount: 100, amountCents: 500 }], 101)).toBe(0)
     const tiers = [
       { upToCount: 10, amountCents: 500 },
       { upToCount: 20, amountCents: 250 },
     ]
-    // 25 is past every positive bound; last tier amount is used.
-    expect(referralRewardAmountCents(tiers, 25)).toBe(250)
+    expect(referralRewardAmountCents(tiers, 20)).toBe(250) // still within bounds
+    expect(referralRewardAmountCents(tiers, 25)).toBe(0) // past all bounds
   })
 })

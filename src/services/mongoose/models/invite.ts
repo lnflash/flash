@@ -27,9 +27,13 @@ export interface InviteRecord {
   revokeReason?: string
   // Referral reward payout (deferred to the invitee's Bridge KYC approval).
   // rewardStatus is the once-only claim guard: absent => unclaimed.
-  rewardStatus?: "processing" | "paid" | "partial" | "failed"
+  // "pending" = an IBEX send returned Pending; non-terminal, ops re-checks it.
+  rewardStatus?: "processing" | "paid" | "partial" | "failed" | "pending"
   rewardSeq?: number // global sequence assigned at claim; determines the tier
   rewardAmountCents?: number // per-party amount for this referral's tier
+  // Stamped when the claim is taken, so a sweep can find rows stuck in
+  // "processing" (e.g. process killed mid-payout before a terminal mark).
+  rewardClaimedAt?: Date
   rewardedAt?: Date
   inviterRewardedAt?: Date
   inviteeRewardedAt?: Date
@@ -90,13 +94,16 @@ const InviteSchema = new Schema<InviteRecord>({
   },
   rewardStatus: {
     type: String,
-    enum: ["processing", "paid", "partial", "failed"],
+    enum: ["processing", "paid", "partial", "failed", "pending"],
   },
   rewardSeq: {
     type: Number,
   },
   rewardAmountCents: {
     type: Number,
+  },
+  rewardClaimedAt: {
+    type: Date,
   },
   rewardedAt: {
     type: Date,
