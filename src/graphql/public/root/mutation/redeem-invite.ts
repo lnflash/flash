@@ -55,16 +55,20 @@ const RedeemInviteMutation = GT.Field<null, GraphQLPublicContextAuth>({
         return { success: false, errors: ["Invalid or expired invitation"] }
       }
 
+      // Check if invite has already been accepted. This MUST precede the
+      // date-expiry flip: replaying a redeemed invite's token after expiresAt
+      // must not overwrite ACCEPTED with EXPIRED — that would strand the
+      // pending reward and (via the one-redemption-per-account invariant)
+      // permanently cost the account its referral.
+      if (invite.status === InviteStatus.ACCEPTED) {
+        return { success: false, errors: ["This invitation has already been used"] }
+      }
+
       // Check if invite has expired
       if (new Date() > invite.expiresAt) {
         invite.status = InviteStatus.EXPIRED
         await invite.save()
         return { success: false, errors: ["This invitation has expired"] }
-      }
-
-      // Check if invite has already been accepted
-      if (invite.status === InviteStatus.ACCEPTED) {
-        return { success: false, errors: ["This invitation has already been used"] }
       }
 
       // Revoked (admin-expired) invites must not be redeemable even when their

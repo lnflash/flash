@@ -115,6 +115,21 @@ describe("redeemInvite resolver", () => {
     expect(result.errors[0]).toBe("This invitation has already been used")
   })
 
+  it("does not flip an ACCEPTED invite to EXPIRED on a post-expiry replay", async () => {
+    // The ACCEPTED check must precede the date-expiry flip: overwriting
+    // ACCEPTED would strand the pending reward and, via the one-redemption-
+    // per-account invariant, permanently cost the account its referral.
+    const invite = baseInvite({
+      status: InviteStatus.ACCEPTED,
+      expiresAt: new Date(Date.now() - hourMs),
+    })
+    mockInviteFindOne.mockResolvedValue(invite)
+    const result = await resolveRedeem()
+    expect(result.errors[0]).toBe("This invitation has already been used")
+    expect(invite.status).toBe(InviteStatus.ACCEPTED)
+    expect(invite.save).not.toHaveBeenCalled()
+  })
+
   it("rejects a revoked invite even when its expiry date is in the future", async () => {
     mockInviteFindOne.mockResolvedValue(
       baseInvite({ status: InviteStatus.EXPIRED, revokedAt: new Date() }),
