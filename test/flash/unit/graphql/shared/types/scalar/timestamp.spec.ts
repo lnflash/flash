@@ -24,7 +24,7 @@ describe("Timestamp scalar", () => {
     )
   })
 
-  it("rejects an unparseable date string", () => {
+  it("rejects an unparsable date string", () => {
     expect(Timestamp.parseValue("not-a-date")).toBeInstanceOf(InputValidationError)
   })
 
