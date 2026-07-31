@@ -44,6 +44,9 @@ export const getInviteById = async (id: InviteId) => {
       createdAt: invite.createdAt,
       expiresAt: invite.expiresAt,
       redeemedAt: invite.redeemedAt,
+      rewardStatus: invite.rewardStatus,
+      rewardAmountCents: invite.rewardAmountCents,
+      rewardedAt: invite.rewardedAt,
     }
   } catch (error) {
     return new UnknownRepositoryError(error)
@@ -89,6 +92,10 @@ export const listInvites = async ({
                 inviterAccountId: { $toString: "$inviterId" },
                 createdAt: 1,
                 expiresAt: 1,
+                redeemedAt: 1,
+                rewardStatus: 1,
+                rewardAmountCents: 1,
+                rewardedAt: 1,
               },
             },
           ],

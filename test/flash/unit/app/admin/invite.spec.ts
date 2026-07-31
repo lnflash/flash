@@ -44,6 +44,8 @@ const baseInvite = (overrides: Record<string, unknown> = {}) => ({
   inviterId: { toString: () => INVITER },
   createdAt: new Date(),
   expiresAt: new Date(),
+  revokedAt: undefined as Date | undefined,
+  revokeReason: undefined as string | undefined,
   save: jest.fn(),
   ...overrides,
 })

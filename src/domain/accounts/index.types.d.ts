@@ -236,9 +236,11 @@ interface IAccountsRepository {
   findByBridgeEthereumAddress(address: string): Promise<Account | RepositoryError>
 
   findByBridgeCustomerId(customerId: BridgeCustomerId): Promise<Account | RepositoryError>
+
+  findByRole(role: string): Promise<Account | RepositoryError>
 }
 
-type AdminRole = "dealer" | "funder" | "bankowner" | "editor"
+type AdminRole = "dealer" | "funder" | "bankowner" | "editor" | "rewards"
 type AdminAccount = {
   role: AdminRole
   phone: PhoneNumber

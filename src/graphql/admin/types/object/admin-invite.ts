@@ -40,6 +40,15 @@ const AdminInvite = GT.Object({
     redeemedAt: {
       type: Timestamp,
     },
+    rewardStatus: {
+      type: GT.String,
+    },
+    rewardAmountCents: {
+      type: GT.Int,
+    },
+    rewardedAt: {
+      type: Timestamp,
+    },
   }),
 })
 

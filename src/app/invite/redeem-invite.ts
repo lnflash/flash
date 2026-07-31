@@ -51,8 +51,10 @@ export const redeemInvite = async ({
     invite.redeemedById = new mongoose.Types.ObjectId(accountId)
     await invite.save()
 
-    // TODO: Award rewards to both inviter and invitee
-    // This would involve crediting their accounts through the ledger
+    // Referral rewards are NOT paid here. Redemption only links the invitee to
+    // the invite; payout is deferred until the invitee's Bridge KYC is approved
+    // (they have a US account). See awardReferralRewardOnKycApproval, fired from
+    // the Bridge KYC webhook.
 
     return true
   } catch (error) {

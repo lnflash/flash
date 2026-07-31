@@ -15,6 +15,7 @@ import { generateInviteToken } from "@utils"
 import { checkInviteCreateRateLimit, checkInviteTargetRateLimit } from "./rate-limits"
 
 export { getInviteById, listInvites } from "./queries"
+export { awardReferralRewardOnKycApproval } from "./award-referral-reward"
 
 export const createInvite = async ({
   accountId,

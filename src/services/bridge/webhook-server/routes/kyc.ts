@@ -24,6 +24,7 @@ import {
   toBridgeKycNotificationOutcome,
 } from "@app/bridge/send-kyc-notification"
 import { AccountsRepository } from "@services/mongoose/accounts"
+import { awardReferralRewardOnKycApproval } from "@app/invite"
 import { LockService } from "@services/lock"
 import { baseLogger } from "@services/logger"
 import { toBridgeCustomerId } from "@domain/primitives/bridge"
@@ -169,6 +170,12 @@ export const kycHandler = async (req: Request, res: Response) => {
           "Virtual account auto-created after KYC approval",
         )
       }
+
+      // If this account was referred, pay the tiered referral reward to both
+      // the inviter and this invitee. Reaching "approved" is once-only (CAS
+      // guard above), and the payout is itself idempotent + fail-closed, so it
+      // never throws into or blocks the KYC flow.
+      await awardReferralRewardOnKycApproval({ accountId: account.id })
     } else if (nextStatus === "rejected") {
       baseLogger.warn(
         { accountId: account.id, customerId, rejectionReasons },

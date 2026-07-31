@@ -63,6 +63,9 @@ type AdminInvite {
   redeemedAt: Timestamp
   redeemerAccountId: ID
   redeemerUsername: Username
+  rewardAmountCents: Int
+  rewardStatus: String
+  rewardedAt: Timestamp
   status: InviteStatus!
 }
 

@@ -222,7 +222,7 @@ const AccountSchema = new Schema<AccountRecord>(
       // there can be many users and editors
       // there can be only one dealer, bankowner and funder
       // so we may want different property to differentiate those
-      enum: ["user", "editor", "dealer", "bankowner", "funder"],
+      enum: ["user", "editor", "dealer", "bankowner", "funder", "rewards"],
       required: true,
       default: "user",
       // TODO : enforce the fact there can be only one dealer/bankowner/funder

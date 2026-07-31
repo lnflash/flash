@@ -273,6 +273,18 @@ export const AccountsRepository = (): IAccountsRepository => {
     }
   }
 
+  // Resolve a singleton internal account by its role (e.g. "rewards", the
+  // funding account for referral reward payouts).
+  const findByRole = async (role: string): Promise<Account | RepositoryError> => {
+    try {
+      const result = await Account.findOne({ role: { $eq: role } })
+      if (!result) return new RepositoryError(`Account not found for role ${role}`)
+      return translateToAccount(result)
+    } catch (error) {
+      return parseRepositoryError(error)
+    }
+  }
+
   return {
     persistNew,
     findByUserId,
@@ -286,6 +298,7 @@ export const AccountsRepository = (): IAccountsRepository => {
     updateBridgeFields,
     findByBridgeEthereumAddress,
     findByBridgeCustomerId,
+    findByRole,
   }
 }
 

@@ -25,6 +25,15 @@ export interface InviteRecord {
   redeemedById?: mongoose.Types.ObjectId
   revokedAt?: Date
   revokeReason?: string
+  // Referral reward payout (deferred to the invitee's Bridge KYC approval).
+  // rewardStatus is the once-only claim guard: absent => unclaimed.
+  rewardStatus?: "processing" | "paid" | "partial" | "failed"
+  rewardSeq?: number // global sequence assigned at claim; determines the tier
+  rewardAmountCents?: number // per-party amount for this referral's tier
+  rewardedAt?: Date
+  inviterRewardedAt?: Date
+  inviteeRewardedAt?: Date
+  rewardError?: string
 }
 
 const InviteSchema = new Schema<InviteRecord>({
@@ -77,6 +86,28 @@ const InviteSchema = new Schema<InviteRecord>({
     type: Date,
   },
   revokeReason: {
+    type: String,
+  },
+  rewardStatus: {
+    type: String,
+    enum: ["processing", "paid", "partial", "failed"],
+  },
+  rewardSeq: {
+    type: Number,
+  },
+  rewardAmountCents: {
+    type: Number,
+  },
+  rewardedAt: {
+    type: Date,
+  },
+  inviterRewardedAt: {
+    type: Date,
+  },
+  inviteeRewardedAt: {
+    type: Date,
+  },
+  rewardError: {
     type: String,
   },
 })

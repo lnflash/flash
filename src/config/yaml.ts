@@ -288,6 +288,14 @@ export const getFCMTopics = (config = yamlConfig): string[] =>
 
 export const getCaptcha = (config = yamlConfig): CaptchaConfig => config.captcha
 
+export const getReferralRewardConfig = (): {
+  enabled: boolean
+  tiers: { upToCount: number; amountCents: number }[]
+} => ({
+  enabled: yamlConfig.referralReward?.enabled ?? false,
+  tiers: yamlConfig.referralReward?.tiers ?? [],
+})
+
 export const getRewardsConfig = (): RewardsConfig => {
   const denyPhoneCountries = yamlConfig.rewards.denyPhoneCountries || []
   const allowPhoneCountries = yamlConfig.rewards.allowPhoneCountries || []
