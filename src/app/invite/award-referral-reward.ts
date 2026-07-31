@@ -5,8 +5,6 @@ import { referralRewardAmountCents } from "@domain/invite/referral-reward"
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { WalletCurrency } from "@domain/shared"
 
-import { intraledgerPaymentSendWalletIdForUsdWallet } from "@app/payments/send-intraledger"
-
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import { InviteRepository } from "@services/mongoose/models/invite"
 import { nextReferralRewardSeq } from "@services/mongoose/models/referral-reward-counter"
@@ -14,9 +12,7 @@ import { baseLogger } from "@services/logger"
 
 const REWARDS_ROLE = "rewards"
 
-const findUsdWalletId = async (
-  accountId: AccountId,
-): Promise<WalletId | undefined> => {
+const findUsdWalletId = async (accountId: AccountId): Promise<WalletId | undefined> => {
   const wallets = await WalletsRepository().listByAccountId(accountId)
   if (wallets instanceof Error) return undefined
   return wallets.find((w) => w.currency === WalletCurrency.Usd)?.id
@@ -79,8 +75,7 @@ export const awardReferralRewardOnKycApproval = async ({
     }
 
     const inviterAccountId = invite.inviterId.toString() as AccountId
-    const inviteeAccountId = (invite.redeemedById?.toString() ??
-      accountId) as AccountId
+    const inviteeAccountId = (invite.redeemedById?.toString() ?? accountId) as AccountId
 
     // Resolve the funding wallet.
     const rewardsAccount = await AccountsRepository().findByRole(REWARDS_ROLE)
@@ -120,6 +115,11 @@ export const awardReferralRewardOnKycApproval = async ({
       recipientWalletId: WalletId | undefined,
     ): Promise<boolean> => {
       if (!recipientWalletId) return false
+      // Lazy-import so merely importing @app/invite doesn't pull the IBEX
+      // client (and its module-load side effects) into unrelated code paths.
+      const { intraledgerPaymentSendWalletIdForUsdWallet } = await import(
+        "@app/payments/send-intraledger"
+      )
       const result = await intraledgerPaymentSendWalletIdForUsdWallet({
         senderWalletId: rewardsWalletId,
         recipientWalletId,
@@ -133,9 +133,7 @@ export const awardReferralRewardOnKycApproval = async ({
         )
         return false
       }
-      return (
-        result === PaymentSendStatus.Success || result === PaymentSendStatus.Pending
-      )
+      return result === PaymentSendStatus.Success || result === PaymentSendStatus.Pending
     }
 
     // Pay each party independently so a single failure can't undo the other.

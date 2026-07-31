@@ -1,4 +1,5 @@
 import { connectionDefinitions } from "@graphql/connections"
+
 import AdminInvite from "./admin-invite"
 
 export const { connectionType: InvitesConnection } = connectionDefinitions({

@@ -24,23 +24,34 @@ describe("redeemInvite", () => {
   beforeEach(() => jest.clearAllMocks())
 
   it("rejects a malformed token without touching the repository", async () => {
-    const result = await redeemInvite({ accountId: REDEEMER as AccountId, token: "short" })
+    const result = await redeemInvite({
+      accountId: REDEEMER as AccountId,
+      token: "short",
+    })
     expect(result).toBeInstanceOf(ValidationError)
     expect(mockFindOne).not.toHaveBeenCalled()
   })
 
   it("rejects an unknown token", async () => {
     mockFindOne.mockResolvedValue(null)
-    const result = await redeemInvite({ accountId: REDEEMER as AccountId, token: VALID_TOKEN })
+    const result = await redeemInvite({
+      accountId: REDEEMER as AccountId,
+      token: VALID_TOKEN,
+    })
     expect(result).toBeInstanceOf(ValidationError)
     expect((result as ValidationError).message).toBe("Invalid invitation token")
   })
 
   it("rejects an already-accepted invite", async () => {
     mockFindOne.mockResolvedValue({ status: InviteStatus.ACCEPTED })
-    const result = await redeemInvite({ accountId: REDEEMER as AccountId, token: VALID_TOKEN })
+    const result = await redeemInvite({
+      accountId: REDEEMER as AccountId,
+      token: VALID_TOKEN,
+    })
     expect(result).toBeInstanceOf(ValidationError)
-    expect((result as ValidationError).message).toBe("This invitation has already been used")
+    expect((result as ValidationError).message).toBe(
+      "This invitation has already been used",
+    )
   })
 
   it("expires and rejects an expired invite (persisting the EXPIRED status)", async () => {
@@ -53,7 +64,10 @@ describe("redeemInvite", () => {
     }
     mockFindOne.mockResolvedValue(invite)
 
-    const result = await redeemInvite({ accountId: REDEEMER as AccountId, token: VALID_TOKEN })
+    const result = await redeemInvite({
+      accountId: REDEEMER as AccountId,
+      token: VALID_TOKEN,
+    })
 
     expect(result).toBeInstanceOf(ValidationError)
     expect((result as ValidationError).message).toBe("This invitation has expired")
@@ -70,10 +84,15 @@ describe("redeemInvite", () => {
     }
     mockFindOne.mockResolvedValue(invite)
 
-    const result = await redeemInvite({ accountId: REDEEMER as AccountId, token: VALID_TOKEN })
+    const result = await redeemInvite({
+      accountId: REDEEMER as AccountId,
+      token: VALID_TOKEN,
+    })
 
     expect(result).toBeInstanceOf(ValidationError)
-    expect((result as ValidationError).message).toBe("You cannot redeem your own invitation")
+    expect((result as ValidationError).message).toBe(
+      "You cannot redeem your own invitation",
+    )
     expect(invite.save).not.toHaveBeenCalled()
   })
 
@@ -87,7 +106,10 @@ describe("redeemInvite", () => {
     } as Record<string, unknown>
     mockFindOne.mockResolvedValue(invite)
 
-    const result = await redeemInvite({ accountId: REDEEMER as AccountId, token: VALID_TOKEN })
+    const result = await redeemInvite({
+      accountId: REDEEMER as AccountId,
+      token: VALID_TOKEN,
+    })
 
     expect(result).toBe(true)
     expect(invite.status).toBe(InviteStatus.ACCEPTED)

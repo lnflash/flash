@@ -176,9 +176,7 @@ describe("awardReferralRewardOnKycApproval", () => {
 
   it("fails (no payout) when the rewards account has no USD wallet", async () => {
     mockListByAccountId.mockImplementation((accountId: string) =>
-      Promise.resolve(
-        walletsBy({ [REWARDS_ACCT]: [btc("rewards-btc")] })(accountId),
-      ),
+      Promise.resolve(walletsBy({ [REWARDS_ACCT]: [btc("rewards-btc")] })(accountId)),
     )
     await awardReferralRewardOnKycApproval({ accountId: INVITEE })
     expect(mockPay).not.toHaveBeenCalled()

@@ -32,7 +32,9 @@ describe("invite rate-limits", () => {
       const err = new InviteCreateRateLimiterExceededError()
       mockConsumeLimiter.mockResolvedValue(err)
 
-      const result = await checkInviteCreateRateLimit("507f1f77bcf86cd799439011" as AccountId)
+      const result = await checkInviteCreateRateLimit(
+        "507f1f77bcf86cd799439011" as AccountId,
+      )
 
       expect(result).toBe(err)
     })

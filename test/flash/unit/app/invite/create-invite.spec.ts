@@ -42,7 +42,11 @@ jest.mock("@utils", () => ({
 }))
 
 import { createInvite } from "@app/invite"
-import { InviteMethod, InviteStatus, InviteRepository } from "@services/mongoose/models/invite"
+import {
+  InviteMethod,
+  InviteStatus,
+  InviteRepository,
+} from "@services/mongoose/models/invite"
 
 const inviteRepo = InviteRepository as unknown as jest.Mock & {
   findOne: jest.Mock
@@ -74,7 +78,11 @@ describe("createInvite", () => {
 
   it("rejects when the daily create limit is exceeded", async () => {
     mockCreateRateLimit.mockResolvedValue(new Error("limited"))
-    const result = await createInvite({ accountId: ACCOUNT_ID, contact: EMAIL, method: InviteMethod.EMAIL })
+    const result = await createInvite({
+      accountId: ACCOUNT_ID,
+      contact: EMAIL,
+      method: InviteMethod.EMAIL,
+    })
     expect(result).toBeInstanceOf(ValidationError)
     expect((result as ValidationError).message).toBe("Daily invite limit exceeded")
   })
@@ -82,7 +90,11 @@ describe("createInvite", () => {
   it("rejects when the per-contact target limit is exceeded", async () => {
     mockCreateRateLimit.mockResolvedValue(true)
     mockTargetRateLimit.mockResolvedValue(new Error("limited"))
-    const result = await createInvite({ accountId: ACCOUNT_ID, contact: EMAIL, method: InviteMethod.EMAIL })
+    const result = await createInvite({
+      accountId: ACCOUNT_ID,
+      contact: EMAIL,
+      method: InviteMethod.EMAIL,
+    })
     expect(result).toBeInstanceOf(ValidationError)
     expect((result as ValidationError).message).toBe(
       "This contact has already been invited by multiple users",
@@ -92,9 +104,15 @@ describe("createInvite", () => {
   it("rejects a duplicate pending/sent invite from the same inviter", async () => {
     okLimits()
     mockFindOne.mockResolvedValue({ _id: "existing" })
-    const result = await createInvite({ accountId: ACCOUNT_ID, contact: EMAIL, method: InviteMethod.EMAIL })
+    const result = await createInvite({
+      accountId: ACCOUNT_ID,
+      contact: EMAIL,
+      method: InviteMethod.EMAIL,
+    })
     expect(result).toBeInstanceOf(ValidationError)
-    expect((result as ValidationError).message).toBe("This contact has already been invited")
+    expect((result as ValidationError).message).toBe(
+      "This contact has already been invited",
+    )
     expect(mockSave).not.toHaveBeenCalled()
   })
 
@@ -103,7 +121,11 @@ describe("createInvite", () => {
     mockFindOne.mockResolvedValue(null)
     const notFound = new Error("account gone")
     mockAccountFindById.mockResolvedValue(notFound)
-    const result = await createInvite({ accountId: ACCOUNT_ID, contact: EMAIL, method: InviteMethod.EMAIL })
+    const result = await createInvite({
+      accountId: ACCOUNT_ID,
+      contact: EMAIL,
+      method: InviteMethod.EMAIL,
+    })
     expect(result).toBe(notFound)
   })
 
@@ -127,11 +149,19 @@ describe("createInvite", () => {
     })
     // constructed with the hashed token, PENDING first
     expect(inviteRepo).toHaveBeenCalledWith(
-      expect.objectContaining({ contact: EMAIL, tokenHash: "token-hash", status: InviteStatus.PENDING }),
+      expect.objectContaining({
+        contact: EMAIL,
+        tokenHash: "token-hash",
+        status: InviteStatus.PENDING,
+      }),
     )
     // notification carries the inviter's username and the raw token
     expect(mockSendInviteNotification).toHaveBeenCalledWith(
-      expect.objectContaining({ contact: EMAIL, senderName: "alice", token: "t".repeat(40) }),
+      expect.objectContaining({
+        contact: EMAIL,
+        senderName: "alice",
+        token: "t".repeat(40),
+      }),
     )
     // saved twice: once PENDING, once SENT
     expect(mockSave).toHaveBeenCalledTimes(2)
@@ -142,7 +172,11 @@ describe("createInvite", () => {
     mockFindOne.mockResolvedValue(null)
     mockAccountFindById.mockResolvedValue({ username: null })
 
-    await createInvite({ accountId: ACCOUNT_ID, contact: EMAIL, method: InviteMethod.EMAIL })
+    await createInvite({
+      accountId: ACCOUNT_ID,
+      contact: EMAIL,
+      method: InviteMethod.EMAIL,
+    })
 
     expect(mockSendInviteNotification).toHaveBeenCalledWith(
       expect.objectContaining({ senderName: "A friend" }),

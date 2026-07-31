@@ -83,13 +83,17 @@ describe("admin extendInvite", () => {
   it("rejects a non-future expiration", async () => {
     mockFindById.mockResolvedValue(baseInvite())
     const past = new Date(Date.now() - 1000)
-    expect(await extendInvite("id" as never, past)).toBeInstanceOf(InvalidExpirationDateError)
+    expect(await extendInvite("id" as never, past)).toBeInstanceOf(
+      InvalidExpirationDateError,
+    )
   })
 
   it("refuses to extend an accepted invite", async () => {
     mockFindById.mockResolvedValue(baseInvite({ status: InviteStatus.ACCEPTED }))
     const future = new Date(Date.now() + 86_400_000)
-    expect(await extendInvite("id" as never, future)).toBeInstanceOf(InviteAlreadyAcceptedError)
+    expect(await extendInvite("id" as never, future)).toBeInstanceOf(
+      InviteAlreadyAcceptedError,
+    )
   })
 
   it("extends and resets the invite to PENDING", async () => {

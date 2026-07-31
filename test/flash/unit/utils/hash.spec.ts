@@ -1,9 +1,4 @@
-import {
-  sha256,
-  generateSecureToken,
-  hashToken,
-  generateInviteToken,
-} from "@utils"
+import { sha256, generateSecureToken, hashToken, generateInviteToken } from "@utils"
 
 describe("sha256", () => {
   it("matches known vectors", () => {

@@ -10,7 +10,7 @@ const InviteByIdQuery = GT.Field({
   },
   resolve: async (_, { id }) => {
     const invite = await Admin.getInviteById(id)
-    
+
     if (invite instanceof Error) {
       throw mapError(invite)
     }

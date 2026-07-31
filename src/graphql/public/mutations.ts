@@ -129,7 +129,7 @@ export const mutationFields = {
       accountDisableNotificationChannel: AccountDisableNotificationChannelMutation,
       accountDelete: AccountDeleteMutation,
       feedbackSubmit: FeedbackSubmitMutation,
-      
+
       createInvite: CreateInviteMutation,
 
       callbackEndpointAdd: CallbackEndpointAdd,

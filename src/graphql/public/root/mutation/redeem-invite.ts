@@ -1,10 +1,8 @@
 import { GT } from "@graphql/index"
-import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { InviteRepository, InviteStatus } from "@services/mongoose/models/invite"
 import { NEW_USER_INVITE_WINDOW_HOURS, checkedToInviteToken } from "@domain/invite"
 import { hashToken } from "@utils"
 import { baseLogger } from "@services/logger"
-import SuccessPayload from "@graphql/shared/types/payload/success-payload"
 import mongoose from "mongoose"
 import { AccountsRepository, UsersRepository } from "@services/mongoose"
 

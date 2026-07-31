@@ -29,22 +29,28 @@ class NotificationServiceImpl implements NotificationService {
   private initializeTwilio() {
     try {
       if (env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN) {
-        baseLogger.info({
-          accountSid: env.TWILIO_ACCOUNT_SID,
-          authTokenLength: env.TWILIO_AUTH_TOKEN.length,
-          authTokenPrefix: env.TWILIO_AUTH_TOKEN.substring(0, 5),
-          verifyServiceId: env.TWILIO_VERIFY_SERVICE_ID,
-          twilioFrom: env.TWILIO_FROM || "NOT SET",
-          twilioWhatsAppFrom: env.TWILIO_WHATSAPP_FROM || "NOT SET",
-        }, "Initializing Twilio client with credentials")
-        
+        baseLogger.info(
+          {
+            accountSid: env.TWILIO_ACCOUNT_SID,
+            authTokenLength: env.TWILIO_AUTH_TOKEN.length,
+            authTokenPrefix: env.TWILIO_AUTH_TOKEN.substring(0, 5),
+            verifyServiceId: env.TWILIO_VERIFY_SERVICE_ID,
+            twilioFrom: env.TWILIO_FROM || "NOT SET",
+            twilioWhatsAppFrom: env.TWILIO_WHATSAPP_FROM || "NOT SET",
+          },
+          "Initializing Twilio client with credentials",
+        )
+
         this.twilioClient = twilio(env.TWILIO_ACCOUNT_SID, env.TWILIO_AUTH_TOKEN)
         baseLogger.info("Twilio client initialized successfully")
       } else {
-        baseLogger.warn({
-          hasAccountSid: !!env.TWILIO_ACCOUNT_SID,
-          hasAuthToken: !!env.TWILIO_AUTH_TOKEN,
-        }, "Twilio credentials not fully configured")
+        baseLogger.warn(
+          {
+            hasAccountSid: !!env.TWILIO_ACCOUNT_SID,
+            hasAuthToken: !!env.TWILIO_AUTH_TOKEN,
+          },
+          "Twilio credentials not fully configured",
+        )
       }
     } catch (error) {
       baseLogger.error({ error }, "Failed to initialize Twilio client")
@@ -158,17 +164,26 @@ class NotificationServiceImpl implements NotificationService {
       ? TWILIO_WHATSAPP_FROM
       : `whatsapp:${TWILIO_WHATSAPP_FROM}`
 
-    baseLogger.info({
-      to: whatsappTo,
-      from: whatsappFrom,
-      bodyLength: body.length,
-      accountSid: env.TWILIO_ACCOUNT_SID,
-      hasAuthToken: !!env.TWILIO_AUTH_TOKEN,
-    }, "Attempting to send WhatsApp message")
+    baseLogger.info(
+      {
+        to: whatsappTo,
+        from: whatsappFrom,
+        bodyLength: body.length,
+        accountSid: env.TWILIO_ACCOUNT_SID,
+        hasAuthToken: !!env.TWILIO_AUTH_TOKEN,
+      },
+      "Attempting to send WhatsApp message",
+    )
 
     try {
       // Check if body contains template information
-      const messageOptions: any = {
+      const messageOptions: {
+        from: string
+        to: string
+        body?: string
+        contentSid?: string
+        contentVariables?: string
+      } = {
         from: whatsappFrom,
         to: whatsappTo,
       }
@@ -189,28 +204,41 @@ class NotificationServiceImpl implements NotificationService {
       }
 
       baseLogger.info({ messageOptions }, "Sending WhatsApp message with options")
-      
+
       const message = await this.twilioClient.messages.create(messageOptions)
-      
-      baseLogger.info({ 
-        to: whatsappTo,
-        messageSid: message.sid,
-        status: message.status,
-      }, "WhatsApp message sent successfully via Twilio")
-      return true
-    } catch (error: any) {
-      baseLogger.error({ 
-        error: {
-          message: error.message,
-          code: error.code,
-          status: error.status,
-          moreInfo: error.moreInfo,
-          details: error.details,
+
+      baseLogger.info(
+        {
+          to: whatsappTo,
+          messageSid: message.sid,
+          status: message.status,
         },
-        to: whatsappTo,
-        from: whatsappFrom,
-        accountSid: env.TWILIO_ACCOUNT_SID,
-      }, "Failed to send WhatsApp message")
+        "WhatsApp message sent successfully via Twilio",
+      )
+      return true
+    } catch (error) {
+      const err = error as {
+        message?: string
+        code?: string
+        status?: number
+        moreInfo?: string
+        details?: string
+      }
+      baseLogger.error(
+        {
+          error: {
+            message: err.message,
+            code: err.code,
+            status: err.status,
+            moreInfo: err.moreInfo,
+            details: err.details,
+          },
+          to: whatsappTo,
+          from: whatsappFrom,
+          accountSid: env.TWILIO_ACCOUNT_SID,
+        },
+        "Failed to send WhatsApp message",
+      )
       return false
     }
   }

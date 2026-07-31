@@ -84,9 +84,9 @@ describe("invite validation", () => {
     })
 
     it("does not accept an email when the method is a phone method", () => {
-      expect(validateContactForMethod("test@example.com", InviteMethod.SMS)).toBeInstanceOf(
-        ValidationError,
-      )
+      expect(
+        validateContactForMethod("test@example.com", InviteMethod.SMS),
+      ).toBeInstanceOf(ValidationError)
     })
   })
 })

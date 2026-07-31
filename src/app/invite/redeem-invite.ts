@@ -2,7 +2,7 @@ import crypto from "crypto"
 
 import mongoose from "mongoose"
 import { InviteRepository } from "@services/mongoose/models/invite"
-import { InviteStatus, checkedToInviteToken, InviteToken } from "@domain/invite"
+import { InviteStatus, checkedToInviteToken } from "@domain/invite"
 import { UnknownRepositoryError } from "@domain/errors"
 import { ValidationError } from "@domain/shared"
 
