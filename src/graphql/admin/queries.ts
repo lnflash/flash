@@ -18,6 +18,8 @@ import IdDocumentReadUrlQuery from "./root/query/id-document-read-url"
 import NotificationTopicsQuery from "./root/query/notification-topics"
 import BridgeReconciliationOrphansQuery from "./root/query/bridge-reconciliation-orphans"
 import CashWalletMigrationsQuery from "./root/query/cash-wallet-migrations"
+import InvitesListQuery from "./root/query/invites-list"
+import InviteByIdQuery from "./root/query/invite-by-id"
 
 export const queryFields = {
   unauthed: {},
@@ -40,6 +42,8 @@ export const queryFields = {
     bridgeReconciliationOrphans: BridgeReconciliationOrphansQuery,
     cashWalletCutover: CashWalletCutoverQuery,
     cashWalletMigrations: CashWalletMigrationsQuery,
+    invitesList: InvitesListQuery,
+    inviteById: InviteByIdQuery,
   },
 }
 

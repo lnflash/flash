@@ -41,6 +41,8 @@ export const apiKeyScopeForField: Readonly<Record<string, ApiKeyFieldAccess>> =
     deviceNotificationTokenCreate: "BLOCKED",
     businessAccountUpgradeRequest: "BLOCKED",
     accountCapabilityUpgradeRequest: "BLOCKED",
+    createInvite: "BLOCKED",
+    redeemInvite: "BLOCKED",
     bankAccountUpdateRequest: "BLOCKED",
     accountDelete: "BLOCKED",
     feedbackSubmit: "BLOCKED",

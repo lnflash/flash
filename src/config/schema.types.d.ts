@@ -107,6 +107,10 @@ type YamlSchema = {
     denyASNs: string[]
     allowASNs: string[]
   }
+  referralReward: {
+    enabled: boolean
+    tiers: { upToCount: number; amountCents: number }[]
+  }
   coldStorage: {
     minOnChainHotWalletBalance: number
     minRebalanceSize: number

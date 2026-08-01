@@ -1,0 +1,132 @@
+import mongoose, { Schema } from "mongoose"
+
+export enum InviteMethod {
+  EMAIL = "EMAIL",
+  SMS = "SMS",
+  WHATSAPP = "WHATSAPP",
+}
+
+export enum InviteStatus {
+  PENDING = "PENDING",
+  SENT = "SENT",
+  ACCEPTED = "ACCEPTED",
+  EXPIRED = "EXPIRED",
+}
+
+export interface InviteRecord {
+  contact: string
+  method: InviteMethod
+  tokenHash: string
+  inviterId: mongoose.Types.ObjectId
+  status: InviteStatus
+  createdAt: Date
+  expiresAt: Date
+  redeemedAt?: Date
+  redeemedById?: mongoose.Types.ObjectId
+  revokedAt?: Date
+  revokeReason?: string
+  // Referral reward payout (deferred to the invitee's Bridge KYC approval).
+  // rewardStatus is the once-only claim guard: absent => unclaimed.
+  // "pending" = an IBEX send returned Pending; non-terminal, ops re-checks it.
+  rewardStatus?: "processing" | "paid" | "partial" | "failed" | "pending"
+  rewardSeq?: number // global sequence assigned at claim; determines the tier
+  rewardAmountCents?: number // per-party amount for this referral's tier
+  // Stamped when the claim is taken, so a sweep can find rows stuck in
+  // "processing" (e.g. process killed mid-payout before a terminal mark).
+  rewardClaimedAt?: Date
+  rewardedAt?: Date
+  inviterRewardedAt?: Date
+  inviteeRewardedAt?: Date
+  rewardError?: string
+}
+
+const InviteSchema = new Schema<InviteRecord>({
+  contact: {
+    type: String,
+    required: true,
+    index: true,
+  },
+  method: {
+    type: String,
+    enum: Object.values(InviteMethod),
+    required: true,
+  },
+  tokenHash: {
+    type: String,
+    required: true,
+    unique: true,
+    index: true,
+  },
+  inviterId: {
+    type: Schema.Types.ObjectId,
+    ref: "Account",
+    required: true,
+    index: true,
+  },
+  status: {
+    type: String,
+    enum: Object.values(InviteStatus),
+    default: InviteStatus.PENDING,
+    required: true,
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now,
+  },
+  expiresAt: {
+    type: Date,
+    required: true,
+    index: true,
+  },
+  redeemedAt: {
+    type: Date,
+  },
+  redeemedById: {
+    type: Schema.Types.ObjectId,
+    ref: "Account",
+  },
+  revokedAt: {
+    type: Date,
+  },
+  revokeReason: {
+    type: String,
+  },
+  rewardStatus: {
+    type: String,
+    enum: ["processing", "paid", "partial", "failed", "pending"],
+  },
+  rewardSeq: {
+    type: Number,
+  },
+  rewardAmountCents: {
+    type: Number,
+  },
+  rewardClaimedAt: {
+    type: Date,
+  },
+  rewardedAt: {
+    type: Date,
+  },
+  inviterRewardedAt: {
+    type: Date,
+  },
+  inviteeRewardedAt: {
+    type: Date,
+  },
+  rewardError: {
+    type: String,
+  },
+})
+
+InviteSchema.index({ inviterId: 1, createdAt: -1 })
+InviteSchema.index({ contact: 1, createdAt: -1 })
+InviteSchema.index({ status: 1, expiresAt: 1 })
+// One redeemed invite per account, ever — enforced at the storage layer so a
+// concurrent double-redeem race can't slip past the application check. Partial:
+// un-redeemed invites (no redeemedById) are unconstrained.
+InviteSchema.index(
+  { redeemedById: 1 },
+  { unique: true, partialFilterExpression: { redeemedById: { $exists: true } } },
+)
+
+export const InviteRepository = mongoose.model<InviteRecord>("Invite", InviteSchema)

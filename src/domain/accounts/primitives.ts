@@ -36,4 +36,5 @@ export const AccountRoles = {
   bankowner: "bankowner",
   user: "user",
   editor: "editor",
+  rewards: "rewards", // funding account for referral reward payouts
 }

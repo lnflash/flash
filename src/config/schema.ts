@@ -162,6 +162,43 @@ export const configSchema = {
         denyASNs: [],
       },
     },
+    referralReward: {
+      type: "object",
+      properties: {
+        // Off by default: no payouts happen until ops assigns a `rewards`
+        // wallet and flips this on.
+        enabled: { type: "boolean", default: false },
+        // Cumulative tiers: seq 1..100 -> $5, 101..600 -> $2.50, 601+ -> $1.
+        // upToCount <= 0 marks the final unbounded tier.
+        tiers: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              upToCount: { type: "integer" },
+              amountCents: { type: "integer" },
+            },
+            required: ["upToCount", "amountCents"],
+            additionalProperties: false,
+          },
+          default: [
+            { upToCount: 100, amountCents: 500 },
+            { upToCount: 600, amountCents: 250 },
+            { upToCount: 0, amountCents: 100 },
+          ],
+        },
+      },
+      required: ["enabled", "tiers"],
+      additionalProperties: false,
+      default: {
+        enabled: false,
+        tiers: [
+          { upToCount: 100, amountCents: 500 },
+          { upToCount: 600, amountCents: 250 },
+          { upToCount: 0, amountCents: 100 },
+        ],
+      },
+    },
     coldStorage: {
       type: "object",
       properties: {
