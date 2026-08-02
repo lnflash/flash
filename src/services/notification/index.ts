@@ -148,6 +148,19 @@ class NotificationServiceImpl implements NotificationService {
   }
 
   private async sendWhatsApp(to: string, body: string): Promise<boolean> {
+    // Baileys bridge delivery (TEST/dev): when WA_BRIDGE_URL + WA_BRIDGE_SECRET
+    // are configured, WhatsApp messages go out through the wa-bridge's authed
+    // POST /send instead of Twilio (no Twilio WhatsApp sender is provisioned
+    // in any env today). Unset both to use the Twilio template path.
+    if (process.env.WA_BRIDGE_URL && process.env.WA_BRIDGE_SECRET) {
+      return this.sendWhatsAppViaBridge(
+        process.env.WA_BRIDGE_URL,
+        process.env.WA_BRIDGE_SECRET,
+        to,
+        body,
+      )
+    }
+
     if (!this.twilioClient) {
       baseLogger.error("Twilio client not configured")
       return false
@@ -248,6 +261,43 @@ class NotificationServiceImpl implements NotificationService {
         "Failed to send WhatsApp message",
       )
       return false
+    }
+  }
+
+  // Deliver a plain-text WhatsApp message through the Baileys wa-bridge
+  // (flash-support-infra/services/wa-bridge, authed POST /send). Message
+  // content is never logged — invite links carry one-time tokens.
+  private async sendWhatsAppViaBridge(
+    url: string,
+    secret: string,
+    to: string,
+    body: string,
+  ): Promise<boolean> {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15_000)
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Send-Token": secret },
+        body: JSON.stringify({ to, text: body }),
+        signal: controller.signal,
+      })
+      const payload = (await resp.json().catch(() => ({}))) as { ok?: boolean }
+      const ok = resp.ok && payload.ok === true
+      if (ok) {
+        baseLogger.info(
+          { to, bodyLength: body.length },
+          "WhatsApp message sent via wa-bridge",
+        )
+      } else {
+        baseLogger.error({ to, status: resp.status }, "wa-bridge send failed")
+      }
+      return ok
+    } catch (error) {
+      baseLogger.error({ error: String(error), to }, "wa-bridge send error")
+      return false
+    } finally {
+      clearTimeout(timeout)
     }
   }
 }

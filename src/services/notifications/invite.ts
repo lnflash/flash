@@ -61,14 +61,19 @@ export const sendInviteNotification = async ({
         break
 
       case InviteMethod.WHATSAPP:
-        // For WhatsApp templates (if using approved templates)
-        messageBody = JSON.stringify({
-          templateName: "flash_invite",
-          templateVariables: {
-            "1": senderName,
-            "2": token,
-          },
-        })
+        if (process.env.WA_BRIDGE_URL && process.env.WA_BRIDGE_SECRET) {
+          // Baileys wa-bridge delivery: plain text, no Meta template needed.
+          messageBody = `${senderName} invited you to Flash! Join using this link: ${inviteLink}`
+        } else {
+          // Twilio path: approved WhatsApp template.
+          messageBody = JSON.stringify({
+            templateName: "flash_invite",
+            templateVariables: {
+              "1": senderName,
+              "2": token,
+            },
+          })
+        }
         break
 
       case InviteMethod.SMS:
