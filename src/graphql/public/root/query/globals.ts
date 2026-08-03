@@ -7,6 +7,7 @@ import {
   getGaloyBuildInformation,
   getLightningAddressDomain,
   getLightningAddressDomainAliases,
+  getReferralRewardConfig,
 } from "@config"
 
 import { getSupportedCountries } from "@app/authentication/get-supported-countries"
@@ -39,6 +40,7 @@ const GlobalsQuery = GT.Field({
       topupEnabled: Topup.Enabled,
       cashoutEnabled: Cashout.Enabled,
       bridgeEnabled: BridgeConfig.enabled,
+      referralRewardEnabled: getReferralRewardConfig().enabled,
     }
   },
 })

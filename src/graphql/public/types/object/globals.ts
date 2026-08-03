@@ -52,6 +52,13 @@ const Globals = GT.Object({
       description: dedent`Whether Bridge (international bank transfer) entry points
         should be shown to the user. Controlled by the instance-wide bridge feature flag.`,
     },
+    referralRewardEnabled: {
+      type: GT.NonNull(GT.Boolean),
+      description: dedent`Whether referral-reward entry points (e.g. the "invite a
+        friend" home-screen card) should be shown to the user. Controlled by the
+        instance-wide referralReward feature flag; when false the referral payout is
+        disabled, so reward-promising UI must stay hidden.`,
+    },
   }),
 })
 
