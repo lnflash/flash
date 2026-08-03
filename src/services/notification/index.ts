@@ -3,6 +3,24 @@ import sgMail from "@sendgrid/mail"
 import { baseLogger } from "@services/logger"
 import { env, SendGridConfig, TWILIO_FROM, TWILIO_WHATSAPP_FROM } from "@config"
 
+// Single source of truth for whether WhatsApp delivery routes through the
+// Baileys wa-bridge (authed POST /send) instead of Twilio. Both the transport
+// (sendWhatsApp) and the invite message-body selection (sendInviteNotification)
+// read this, so the two decisions can never disagree. Returns null when the
+// bridge is not configured; warns if exactly one of the two vars is set — a
+// misconfiguration that would otherwise silently fall back to the Twilio path.
+export const waBridgeConfig = (): { url: string; secret: string } | null => {
+  const url = process.env.WA_BRIDGE_URL
+  const secret = process.env.WA_BRIDGE_SECRET
+  if (url && secret) return { url, secret }
+  if (url || secret) {
+    baseLogger.warn(
+      "WA_BRIDGE_URL and WA_BRIDGE_SECRET must both be set to route WhatsApp via the wa-bridge; falling back to Twilio",
+    )
+  }
+  return null
+}
+
 export enum NotificationMethod {
   EMAIL = "EMAIL",
   SMS = "SMS",
@@ -148,6 +166,15 @@ class NotificationServiceImpl implements NotificationService {
   }
 
   private async sendWhatsApp(to: string, body: string): Promise<boolean> {
+    // When the wa-bridge is configured (see waBridgeConfig), WhatsApp messages
+    // go out through its authed POST /send instead of Twilio (no Twilio
+    // WhatsApp sender is provisioned in any env today). This gate is env-based,
+    // not environment-restricted — it fires wherever both vars are set.
+    const bridge = waBridgeConfig()
+    if (bridge) {
+      return this.sendWhatsAppViaBridge(bridge.url, bridge.secret, to, body)
+    }
+
     if (!this.twilioClient) {
       baseLogger.error("Twilio client not configured")
       return false
@@ -248,6 +275,43 @@ class NotificationServiceImpl implements NotificationService {
         "Failed to send WhatsApp message",
       )
       return false
+    }
+  }
+
+  // Deliver a plain-text WhatsApp message through the Baileys wa-bridge
+  // (flash-support-infra/services/wa-bridge, authed POST /send). Message
+  // content is never logged — invite links carry one-time tokens.
+  private async sendWhatsAppViaBridge(
+    url: string,
+    secret: string,
+    to: string,
+    body: string,
+  ): Promise<boolean> {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15_000)
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Send-Token": secret },
+        body: JSON.stringify({ to, text: body }),
+        signal: controller.signal,
+      })
+      const payload = (await resp.json().catch(() => ({}))) as { ok?: boolean }
+      const ok = resp.ok && payload.ok === true
+      if (ok) {
+        baseLogger.info(
+          { to, bodyLength: body.length },
+          "WhatsApp message sent via wa-bridge",
+        )
+      } else {
+        baseLogger.error({ to, status: resp.status }, "wa-bridge send failed")
+      }
+      return ok
+    } catch (error) {
+      baseLogger.error({ error: String(error), to }, "wa-bridge send error")
+      return false
+    } finally {
+      clearTimeout(timeout)
     }
   }
 }
