@@ -6,6 +6,13 @@ jest.mock("@services/notification", () => ({
   notificationService: {
     sendNotification: (...a: unknown[]) => mockSendNotification(...a),
   },
+  // Mirror the real gate (env-driven) so this suite drives the body selection
+  // via WA_BRIDGE_* exactly as the transport does — one gate, one behavior.
+  waBridgeConfig: () => {
+    const url = process.env.WA_BRIDGE_URL
+    const secret = process.env.WA_BRIDGE_SECRET
+    return url && secret ? { url, secret } : null
+  },
 }))
 
 import { sendInviteNotification } from "@services/notifications/invite"

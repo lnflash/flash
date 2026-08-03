@@ -3,6 +3,24 @@ import sgMail from "@sendgrid/mail"
 import { baseLogger } from "@services/logger"
 import { env, SendGridConfig, TWILIO_FROM, TWILIO_WHATSAPP_FROM } from "@config"
 
+// Single source of truth for whether WhatsApp delivery routes through the
+// Baileys wa-bridge (authed POST /send) instead of Twilio. Both the transport
+// (sendWhatsApp) and the invite message-body selection (sendInviteNotification)
+// read this, so the two decisions can never disagree. Returns null when the
+// bridge is not configured; warns if exactly one of the two vars is set — a
+// misconfiguration that would otherwise silently fall back to the Twilio path.
+export const waBridgeConfig = (): { url: string; secret: string } | null => {
+  const url = process.env.WA_BRIDGE_URL
+  const secret = process.env.WA_BRIDGE_SECRET
+  if (url && secret) return { url, secret }
+  if (url || secret) {
+    baseLogger.warn(
+      "WA_BRIDGE_URL and WA_BRIDGE_SECRET must both be set to route WhatsApp via the wa-bridge; falling back to Twilio",
+    )
+  }
+  return null
+}
+
 export enum NotificationMethod {
   EMAIL = "EMAIL",
   SMS = "SMS",
@@ -148,17 +166,13 @@ class NotificationServiceImpl implements NotificationService {
   }
 
   private async sendWhatsApp(to: string, body: string): Promise<boolean> {
-    // Baileys bridge delivery (TEST/dev): when WA_BRIDGE_URL + WA_BRIDGE_SECRET
-    // are configured, WhatsApp messages go out through the wa-bridge's authed
-    // POST /send instead of Twilio (no Twilio WhatsApp sender is provisioned
-    // in any env today). Unset both to use the Twilio template path.
-    if (process.env.WA_BRIDGE_URL && process.env.WA_BRIDGE_SECRET) {
-      return this.sendWhatsAppViaBridge(
-        process.env.WA_BRIDGE_URL,
-        process.env.WA_BRIDGE_SECRET,
-        to,
-        body,
-      )
+    // When the wa-bridge is configured (see waBridgeConfig), WhatsApp messages
+    // go out through its authed POST /send instead of Twilio (no Twilio
+    // WhatsApp sender is provisioned in any env today). This gate is env-based,
+    // not environment-restricted — it fires wherever both vars are set.
+    const bridge = waBridgeConfig()
+    if (bridge) {
+      return this.sendWhatsAppViaBridge(bridge.url, bridge.secret, to, body)
     }
 
     if (!this.twilioClient) {

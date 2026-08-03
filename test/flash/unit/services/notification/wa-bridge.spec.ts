@@ -1,4 +1,8 @@
-import { notificationService, NotificationMethod } from "@services/notification"
+import {
+  notificationService,
+  NotificationMethod,
+  waBridgeConfig,
+} from "@services/notification"
 
 // The Twilio client is intentionally unconfigured in this suite (no TWILIO_*
 // env), so the non-bridge path deterministically fails — which lets us assert
@@ -77,5 +81,36 @@ describe("wa-bridge WhatsApp delivery", () => {
     // bridge really is the only reason the configured case succeeds.
     expect(result).toBe(false)
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+// waBridgeConfig is the single gate both the transport and the invite body
+// selection read, so it can never let the two disagree.
+describe("waBridgeConfig", () => {
+  afterEach(() => {
+    delete process.env.WA_BRIDGE_URL
+    delete process.env.WA_BRIDGE_SECRET
+  })
+
+  it("returns url + secret when both are set", () => {
+    process.env.WA_BRIDGE_URL = "http://bridge.local:3850/send"
+    process.env.WA_BRIDGE_SECRET = "sekrit"
+    expect(waBridgeConfig()).toEqual({
+      url: "http://bridge.local:3850/send",
+      secret: "sekrit",
+    })
+  })
+
+  it("returns null when neither is set", () => {
+    expect(waBridgeConfig()).toBeNull()
+  })
+
+  it("returns null (never partially enables) when only one var is set", () => {
+    process.env.WA_BRIDGE_URL = "http://bridge.local:3850/send"
+    expect(waBridgeConfig()).toBeNull() // secret missing -> not enabled
+
+    delete process.env.WA_BRIDGE_URL
+    process.env.WA_BRIDGE_SECRET = "sekrit"
+    expect(waBridgeConfig()).toBeNull() // url missing -> not enabled
   })
 })

@@ -1,5 +1,9 @@
 import { InviteMethod } from "@domain/invite"
-import { notificationService, NotificationMethod } from "@services/notification"
+import {
+  notificationService,
+  NotificationMethod,
+  waBridgeConfig,
+} from "@services/notification"
 import { baseLogger } from "@services/logger"
 
 const buildInviteLink = (token: string): string => {
@@ -61,7 +65,7 @@ export const sendInviteNotification = async ({
         break
 
       case InviteMethod.WHATSAPP:
-        if (process.env.WA_BRIDGE_URL && process.env.WA_BRIDGE_SECRET) {
+        if (waBridgeConfig()) {
           // Baileys wa-bridge delivery: plain text, no Meta template needed.
           messageBody = `${senderName} invited you to Flash! Join using this link: ${inviteLink}`
         } else {
