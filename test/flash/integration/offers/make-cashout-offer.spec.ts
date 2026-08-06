@@ -85,7 +85,12 @@ afterEach(async () => {
 
 describe("Offers", () => {
   it("successfully makes and persists an offer using default config", async () => {
-    const offer = await CashoutManager.createOffer(alice.usdWalletD.id, send, "", alice.account.id)
+    const offer = await CashoutManager.createOffer(
+      alice.usdWalletD.id,
+      send,
+      "",
+      alice.account.id,
+    )
 
     if (offer instanceof Error) throw offer
     expect(offer.details.payment.amount.currencyCode).toMatch(/^USD/)
