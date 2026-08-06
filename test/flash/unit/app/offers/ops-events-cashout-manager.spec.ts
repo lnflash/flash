@@ -85,7 +85,7 @@ describe("ops events — CashoutManager.executeCashout", () => {
       })),
     })
 
-    const result = await CashoutManager.executeCashout(offerId, walletId)
+    const result = await CashoutManager.executeCashout(offerId, walletId, accountId)
 
     expect(result).not.toBeInstanceOf(Error)
     expect(EmailService.sendCashoutInitiatedEmail).toHaveBeenCalled()
@@ -123,7 +123,7 @@ describe("ops events — CashoutManager.executeCashout", () => {
       })),
     })
 
-    const result = await CashoutManager.executeCashout(offerId, walletId)
+    const result = await CashoutManager.executeCashout(offerId, walletId, accountId)
 
     // caller-visible result is unchanged; the terminal failed event was
     // already emitted by ValidOffer.execute
@@ -138,7 +138,7 @@ describe("ops events — CashoutManager.executeCashout", () => {
   it("notifies a terminal failed event when offer validation fails", async () => {
     mockValidOfferFrom.mockResolvedValue(new Error("offer no longer valid"))
 
-    const result = await CashoutManager.executeCashout(offerId, walletId)
+    const result = await CashoutManager.executeCashout(offerId, walletId, accountId)
 
     expect(result).toBeInstanceOf(Error)
     expect(notifyOpsEvent).toHaveBeenCalledTimes(2)
@@ -162,7 +162,7 @@ describe("ops events — CashoutManager.executeCashout", () => {
       execute: jest.fn(async () => new Error("erp down")),
     })
 
-    const result = await CashoutManager.executeCashout(offerId, walletId)
+    const result = await CashoutManager.executeCashout(offerId, walletId, accountId)
 
     expect(result).toBeInstanceOf(Error)
     expect(EmailService.sendCashoutInitiatedEmail).not.toHaveBeenCalled()
@@ -177,7 +177,7 @@ describe("ops events — CashoutManager.executeCashout", () => {
       .mockResolvedValueOnce({ id: walletId, accountId: "other-account" })
       .mockResolvedValueOnce({ id: walletId, accountId })
 
-    const result = await CashoutManager.executeCashout(offerId, walletId)
+    const result = await CashoutManager.executeCashout(offerId, walletId, accountId)
 
     expect(result).toBeInstanceOf(Error)
     expect(notifyOpsEvent).not.toHaveBeenCalled()

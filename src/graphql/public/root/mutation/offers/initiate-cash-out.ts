@@ -43,8 +43,9 @@ const InitiateCashoutMutation = GT.Field({
   extensions: {
     complexity: 60,
   },
-  resolve: async (_, args) => {
+  resolve: async (_, args, { domainAccount }: GraphQLPublicContextAuth) => {
     if (!Cashout.Enabled) return new NotImplementedError("Cashout feature is not enabled")
+    if (!domainAccount) throw new Error("Authentication required")
 
     const { offerId, walletId } = args.input
     // Parse for input errors
@@ -52,7 +53,7 @@ const InitiateCashoutMutation = GT.Field({
       if (f instanceof Error) return { errors: [{ message: f.message, success: false }] }
     }
 
-    const offer = await CashoutManager.executeCashout(offerId, walletId)
+    const offer = await CashoutManager.executeCashout(offerId, walletId, domainAccount.id)
     if (offer instanceof Error) {
       recordExceptionInCurrentSpan({
         error: offer,

@@ -28,11 +28,15 @@ const CashoutManager = {
     walletId: WalletId,
     userPayment: USDAmount,
     bankAccountId: string,
+    accountId: AccountId,
   ): Promise<PersistedOffer | Error> => {
     const bankOwnerUsdWalletId = await getBankOwnerIbexAccount()
 
     const wallet = await WalletsRepository().findById(walletId)
     if (wallet instanceof RepositoryError) return new ValidationError(wallet)
+    // Object-level authz: never trust a client-supplied walletId on its own.
+    if (wallet.accountId !== accountId)
+      return new ValidationError("Wallet does not belong to account")
     const account = await AccountsRepository().findById(wallet.accountId)
     if (account instanceof RepositoryError) return new ValidationError(account)
     if (!account.erpParty) return new Error("Could not find erpParty for account")
@@ -113,16 +117,20 @@ const CashoutManager = {
   executeCashout: async (
     id: OfferId,
     walletId: WalletId,
+    accountId: AccountId,
   ): Promise<InitiatedCashout | Error> => {
     const offer = await Storage.get(id)
     if (offer instanceof Error) return offer
 
-    // walletId authenticates the caller at the wallet level; the offer's settlement wallet
-    // may differ from it (e.g. a USDT cash wallet post-cutover while an older client still
-    // presents the legacy USD walletId). Authorize when both belong to the same account.
+    // Object-level authorization: the presented wallet must belong to the
+    // authenticated caller; the offer's settlement wallet may differ from it
+    // (e.g. a USDT cash wallet post-cutover while an older client still
+    // presents the legacy USD walletId). Both must sit on the caller's account.
     const providedWallet = await WalletsRepository().findById(walletId)
     if (providedWallet instanceof RepositoryError)
       return new ValidationError(providedWallet)
+    if (providedWallet.accountId !== accountId)
+      return new ValidationError("Wallet does not belong to account")
     const settlementWallet = await WalletsRepository().findById(
       offer.details.payment.userAcct,
     )
