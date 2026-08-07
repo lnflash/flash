@@ -91,11 +91,20 @@ afterEach(async () => {
 
 describe("Offers", () => {
   it("successfully makes and executes an offer", async () => {
-    const offer = await CashoutManager.createOffer(alice.usdWalletD.id, send, "")
+    const offer = await CashoutManager.createOffer(
+      alice.usdWalletD.id,
+      send,
+      "",
+      alice.account.id,
+    )
     if (offer instanceof Error) throw offer
 
     const { id } = offer
-    const status = await CashoutManager.executeCashout(id, alice.usdWalletD.id)
+    const status = await CashoutManager.executeCashout(
+      id,
+      alice.usdWalletD.id,
+      alice.account.id,
+    )
 
     // make assertions against ledger
     expect(status).toBeDefined()
