@@ -125,6 +125,32 @@ describe("myReferrals query", () => {
     expect(inv.rewardPending).toBe(true)
   })
 
+  it("zero-tier claim (paid, 0 cents, no inviter leg) is DONE — never pending", async () => {
+    // award-referral-reward's zero-tier branch terminates a claim as
+    // rewardStatus "paid" with rewardAmountCents 0 and NO inviterRewardedAt —
+    // the designed outcome for every referral past a capped promo schedule.
+    mockListInvites.mockResolvedValue({
+      data: [
+        {
+          id: "i-zero",
+          contact: "late@x.com",
+          method: "EMAIL",
+          status: InviteStatus.ACCEPTED,
+          createdAt: new Date("2026-08-01T00:00:00Z"),
+          redeemedAt: new Date("2026-08-02T00:00:00Z"),
+          rewardStatus: "paid",
+          rewardAmountCents: 0,
+          inviterRewardedAt: undefined,
+        },
+      ],
+      count: [{ total: 1 }],
+    })
+    const out = await resolveQuery()
+    const inv = out.invites[0]
+    expect(inv.rewardPending).toBe(false)
+    expect(inv.myRewardCents).toBeNull()
+  })
+
   it("maps a sent-not-redeemed invite: not pending, no amount, no redeemedAt", async () => {
     mockListInvites.mockResolvedValue({
       data: [
@@ -164,7 +190,9 @@ describe("myReferrals query", () => {
   it("throws a mapped error when the stats lookup fails", async () => {
     mockGetMyReferralStats.mockResolvedValue(new Error("boom"))
     await expect(resolveQuery()).rejects.toBeDefined()
-    expect(mockListInvites).not.toHaveBeenCalled()
+    // The two reads run in parallel (one screen-load latency), so the list
+    // read fires regardless of the stats outcome.
+    expect(mockListInvites).toHaveBeenCalled()
   })
 
   it("throws a mapped error when the list lookup fails", async () => {

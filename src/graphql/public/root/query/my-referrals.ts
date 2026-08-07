@@ -58,16 +58,18 @@ const MyReferralsQuery = GT.Field({
   ) => {
     const first = Math.min(Math.max(args.first ?? DEFAULT_PAGE, 1), MAX_PAGE)
 
-    const stats = await getMyReferralStats(domainAccount.id)
+    // Independent reads — run them together; a screen load pays one latency.
+    const [stats, page] = await Promise.all([
+      getMyReferralStats(domainAccount.id),
+      listInvites({
+        first,
+        afterId: args.afterId,
+        inviterId: domainAccount.id,
+      }),
+    ])
     if (stats instanceof Error) {
       throw mapAndParseErrorForGqlResponse(stats)
     }
-
-    const page = await listInvites({
-      first,
-      afterId: args.afterId,
-      inviterId: domainAccount.id,
-    })
     if (page instanceof Error) {
       throw mapAndParseErrorForGqlResponse(page)
     }
@@ -82,6 +84,7 @@ const MyReferralsQuery = GT.Field({
           status: string
           createdAt?: Date
           redeemedAt?: Date
+          rewardStatus?: string
           rewardAmountCents?: number
           inviterRewardedAt?: Date
         }) => ({
@@ -92,7 +95,14 @@ const MyReferralsQuery = GT.Field({
           createdAt: toIso(inv.createdAt),
           redeemedAt: toIso(inv.redeemedAt),
           myRewardCents: inv.inviterRewardedAt ? (inv.rewardAmountCents ?? null) : null,
-          rewardPending: inv.status === InviteStatus.ACCEPTED && !inv.inviterRewardedAt,
+          // A zero-tier claim terminates as rewardStatus "paid" with 0 cents
+          // and no inviterRewardedAt — done, never "pending" (a capped promo
+          // schedule produces exactly this state for every referral past its
+          // last tier).
+          rewardPending:
+            inv.status === InviteStatus.ACCEPTED &&
+            !inv.inviterRewardedAt &&
+            inv.rewardStatus !== "paid",
         }),
       ),
     }

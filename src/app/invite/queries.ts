@@ -1,9 +1,15 @@
 import mongoose from "mongoose"
 
+import { isValidObjectId } from "@services/mongoose/utils"
+
 import { InviteRepository } from "@services/mongoose/models/invite"
 import { AccountsRepository } from "@services/mongoose"
 import { InviteStatus, InviteId } from "@domain/invite"
-import { UnknownRepositoryError, CouldNotFindError } from "@domain/errors"
+import {
+  UnknownRepositoryError,
+  CouldNotFindError,
+  BadInputsForFindError,
+} from "@domain/errors"
 import { checkedToAccountId } from "@domain/accounts"
 
 export const getInviteById = async (id: InviteId) => {
@@ -68,6 +74,12 @@ export const listInvites = async ({
   status?: InviteStatus
   inviterId?: AccountId
 }) => {
+  if (afterId && !isValidObjectId(afterId)) {
+    // Bad client input, not a repository failure — never let a garbage cursor
+    // masquerade as an unknown 500.
+    return new BadInputsForFindError(`invalid afterId cursor: ${afterId}`)
+  }
+
   try {
     const matchQuery: Record<string, unknown> = {}
 
@@ -158,6 +170,9 @@ export const getMyReferralStats = async (inviterId: AccountId) => {
                   $and: [
                     { $eq: ["$status", InviteStatus.ACCEPTED] },
                     { $eq: [{ $ifNull: ["$inviterRewardedAt", null] }, null] },
+                    // The zero-tier path terminates a claim as "paid" with 0
+                    // cents and NO inviterRewardedAt — done, never pending.
+                    { $ne: ["$rewardStatus", "paid"] },
                   ],
                 },
                 1,

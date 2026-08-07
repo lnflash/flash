@@ -1,4 +1,4 @@
-import { CouldNotFindError } from "@domain/errors"
+import { CouldNotFindError, BadInputsForFindError } from "@domain/errors"
 
 const mockFindById = jest.fn()
 const mockAggregate = jest.fn()
@@ -172,5 +172,15 @@ describe("getMyReferralStats", () => {
     mockAggregate.mockRejectedValue(new Error("mongo down"))
     const out = await getMyReferralStats(INVITER as never)
     expect(out).toBeInstanceOf(Error)
+  })
+})
+
+describe("listInvites cursor validation", () => {
+  beforeEach(() => jest.clearAllMocks())
+
+  it("rejects a garbage afterId cursor as bad input, not an unknown error", async () => {
+    const out = await listInvites({ afterId: "not-an-objectid" })
+    expect(out).toBeInstanceOf(BadInputsForFindError)
+    expect(mockAggregate).not.toHaveBeenCalled()
   })
 })
