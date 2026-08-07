@@ -17,12 +17,9 @@ const LnInvoicePaymentStatusQuery = GT.Field({
     const paymentStatusChecker = await Lightning.PaymentStatusChecker(paymentRequest)
     if (paymentStatusChecker instanceof Error) throw mapError(paymentStatusChecker)
 
-    const paid = await paymentStatusChecker.invoiceIsPaid()
-    if (paid instanceof Error) throw mapError(paid)
+    const status = await paymentStatusChecker.status()
+    if (status instanceof Error) throw mapError(status)
 
-    if (paid) return { errors: [], status: "PAID" }
-
-    const status = paymentStatusChecker.isExpired ? "EXPIRED" : "PENDING"
     return { errors: [], status }
   },
 })
