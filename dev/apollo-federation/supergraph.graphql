@@ -1849,6 +1849,29 @@ type Mutation
   userUpdateUsername(input: UserUpdateUsernameInput!): UserUpdateUsernamePayload! @deprecated(reason: "Username will be moved to @Handle in Accounts. Also SetUsername naming should be used instead of UpdateUsername to reflect the idempotency of Handles")
 }
 
+type MyReferralInvite
+  @join__type(graph: PUBLIC)
+{
+  contact: String!
+  createdAt: String!
+  id: ID!
+  method: InviteMethod!
+  myRewardCents: Int
+  redeemedAt: String
+  rewardPending: Boolean!
+  status: InviteStatus!
+}
+
+type MyReferrals
+  @join__type(graph: PUBLIC)
+{
+  acceptedCount: Int!
+  invites: [MyReferralInvite!]!
+  pendingRewardCount: Int!
+  totalEarnedCents: Int!
+  totalInvites: Int!
+}
+
 type MyUpdatesPayload
   @join__type(graph: PUBLIC)
 {
@@ -2194,6 +2217,7 @@ type Query
   lnInvoicePaymentStatus(input: LnInvoicePaymentStatusInput!): LnInvoicePaymentStatusPayload!
   me: User
   mobileVersions: [MobileVersions]
+  myReferrals(afterId: ID, first: Int): MyReferrals!
   npubByUsername(username: Username!): npubByUsername
   onChainTxFee(address: OnChainAddress!, amount: SatAmount!, speed: PayoutSpeed = FAST, walletId: WalletId!): OnChainTxFee!
   onChainUsdTxFee(address: OnChainAddress!, amount: FractionalCentAmount!, speed: PayoutSpeed = FAST, walletId: WalletId!): OnChainUsdTxFee!

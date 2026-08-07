@@ -30,6 +30,7 @@ import BridgeWithdrawalRequestQuery from "./root/query/bridge-withdrawal-request
 import BridgeWithdrawalsQuery from "./root/query/bridge-withdrawals"
 import ApiKeysQuery from "./root/query/api-keys"
 import InvitePreviewQuery from "./root/query/invite-preview"
+import MyReferralsQuery from "./root/query/my-referrals"
 
 export const queryFields = {
   unauthed: {
@@ -62,6 +63,7 @@ export const queryFields = {
       bridgeWithdrawalRequest: BridgeWithdrawalRequestQuery,
       bridgeWithdrawals: BridgeWithdrawalsQuery,
       apiKeys: ApiKeysQuery,
+      myReferrals: MyReferralsQuery,
     },
     atWalletLevel: {
       onChainTxFee: OnChainTxFeeQuery,

@@ -1,9 +1,15 @@
 import mongoose from "mongoose"
 
+import { isValidObjectId } from "@services/mongoose/utils"
+
 import { InviteRepository } from "@services/mongoose/models/invite"
 import { AccountsRepository } from "@services/mongoose"
 import { InviteStatus, InviteId } from "@domain/invite"
-import { UnknownRepositoryError, CouldNotFindError } from "@domain/errors"
+import {
+  UnknownRepositoryError,
+  CouldNotFindError,
+  BadInputsForFindError,
+} from "@domain/errors"
 import { checkedToAccountId } from "@domain/accounts"
 
 export const getInviteById = async (id: InviteId) => {
@@ -68,6 +74,12 @@ export const listInvites = async ({
   status?: InviteStatus
   inviterId?: AccountId
 }) => {
+  if (afterId && !isValidObjectId(afterId)) {
+    // Bad client input, not a repository failure — never let a garbage cursor
+    // masquerade as an unknown 500.
+    return new BadInputsForFindError(`invalid afterId cursor: ${afterId}`)
+  }
+
   try {
     const matchQuery: Record<string, unknown> = {}
 
@@ -108,6 +120,7 @@ export const listInvites = async ({
                 rewardStatus: 1,
                 rewardAmountCents: 1,
                 rewardedAt: 1,
+                inviterRewardedAt: 1,
               },
             },
           ],
@@ -119,6 +132,62 @@ export const listInvites = async ({
     return {
       data: result.data || [],
       count: result.count || [{ total: 0 }],
+    }
+  } catch (error) {
+    return new UnknownRepositoryError(error)
+  }
+}
+
+// Aggregate the caller's referral picture in one pass. "Earned" is strictly
+// the inviter's own leg (inviterRewardedAt set); a reward is "pending" from
+// the inviter's point of view whenever the invite was redeemed but their leg
+// hasn't paid yet — internal failed/processing states are ops' problem, the
+// user just sees it as still pending.
+export const getMyReferralStats = async (inviterId: AccountId) => {
+  try {
+    const [result] = await InviteRepository.aggregate([
+      { $match: { inviterId: new mongoose.Types.ObjectId(inviterId) } },
+      {
+        $group: {
+          _id: null,
+          totalInvites: { $sum: 1 },
+          acceptedCount: {
+            $sum: { $cond: [{ $eq: ["$status", InviteStatus.ACCEPTED] }, 1, 0] },
+          },
+          totalEarnedCents: {
+            $sum: {
+              $cond: [
+                { $gt: [{ $ifNull: ["$inviterRewardedAt", null] }, null] },
+                { $ifNull: ["$rewardAmountCents", 0] },
+                0,
+              ],
+            },
+          },
+          pendingRewardCount: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $eq: ["$status", InviteStatus.ACCEPTED] },
+                    { $eq: [{ $ifNull: ["$inviterRewardedAt", null] }, null] },
+                    // The zero-tier path terminates a claim as "paid" with 0
+                    // cents and NO inviterRewardedAt — done, never pending.
+                    { $ne: ["$rewardStatus", "paid"] },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+        },
+      },
+    ])
+    return {
+      totalInvites: result?.totalInvites ?? 0,
+      acceptedCount: result?.acceptedCount ?? 0,
+      totalEarnedCents: result?.totalEarnedCents ?? 0,
+      pendingRewardCount: result?.pendingRewardCount ?? 0,
     }
   } catch (error) {
     return new UnknownRepositoryError(error)

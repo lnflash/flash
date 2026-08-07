@@ -1,4 +1,4 @@
-import { CouldNotFindError } from "@domain/errors"
+import { CouldNotFindError, BadInputsForFindError } from "@domain/errors"
 
 const mockFindById = jest.fn()
 const mockAggregate = jest.fn()
@@ -19,7 +19,7 @@ jest.mock("@services/mongoose", () => ({
   AccountsRepository: () => ({ findById: mockAccountFindById }),
 }))
 
-import { getInviteById, listInvites } from "@app/invite/queries"
+import { getInviteById, listInvites, getMyReferralStats } from "@app/invite/queries"
 import { InviteStatus, InviteMethod } from "@services/mongoose/models/invite"
 
 const INVITER = "507f1f77bcf86cd799439011"
@@ -129,5 +129,58 @@ describe("listInvites", () => {
     // silently match nothing against the ObjectId inviterId field.
     expect(typeof match.inviterId).toBe("object")
     expect(match.inviterId.toString()).toBe(INVITER)
+  })
+})
+
+describe("getMyReferralStats", () => {
+  beforeEach(() => jest.clearAllMocks())
+
+  it("returns zeros when the inviter has no invites", async () => {
+    mockAggregate.mockResolvedValue([])
+    const out = await getMyReferralStats(INVITER as never)
+    expect(out).toEqual({
+      totalInvites: 0,
+      acceptedCount: 0,
+      totalEarnedCents: 0,
+      pendingRewardCount: 0,
+    })
+  })
+
+  it("returns the aggregation result scoped to the inviter", async () => {
+    mockAggregate.mockResolvedValue([
+      {
+        totalInvites: 5,
+        acceptedCount: 3,
+        totalEarnedCents: 1250,
+        pendingRewardCount: 2,
+      },
+    ])
+    const out = await getMyReferralStats(INVITER as never)
+    expect(out).toEqual({
+      totalInvites: 5,
+      acceptedCount: 3,
+      totalEarnedCents: 1250,
+      pendingRewardCount: 2,
+    })
+    // The pipeline must filter on the caller's ObjectId — never unscoped.
+    const pipeline = mockAggregate.mock.calls[0][0] as Array<Record<string, unknown>>
+    const match = pipeline[0].$match as { inviterId: { toString(): string } }
+    expect(match.inviterId.toString()).toBe(INVITER)
+  })
+
+  it("wraps repository failures", async () => {
+    mockAggregate.mockRejectedValue(new Error("mongo down"))
+    const out = await getMyReferralStats(INVITER as never)
+    expect(out).toBeInstanceOf(Error)
+  })
+})
+
+describe("listInvites cursor validation", () => {
+  beforeEach(() => jest.clearAllMocks())
+
+  it("rejects a garbage afterId cursor as bad input, not an unknown error", async () => {
+    const out = await listInvites({ afterId: "not-an-objectid" })
+    expect(out).toBeInstanceOf(BadInputsForFindError)
+    expect(mockAggregate).not.toHaveBeenCalled()
   })
 })
