@@ -4,7 +4,7 @@ import { createInvite } from "@app/invite"
 import { baseLogger } from "@services/logger"
 import { checkedToAccountId } from "@domain/accounts"
 
-const InviteMethodEnum = GT.Enum({
+export const InviteMethodEnum = GT.Enum({
   name: "InviteMethod",
   values: {
     EMAIL: { value: InviteMethod.EMAIL },
@@ -13,7 +13,7 @@ const InviteMethodEnum = GT.Enum({
   },
 })
 
-const InviteStatusEnum = GT.Enum({
+export const InviteStatusEnum = GT.Enum({
   name: "InviteStatus",
   values: {
     PENDING: { value: InviteStatus.PENDING },

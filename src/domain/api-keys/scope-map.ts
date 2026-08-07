@@ -16,6 +16,7 @@ export const apiKeyScopeForField: Readonly<Record<string, ApiKeyFieldAccess>> =
     transactionDetails: "read:transactions",
     latestAccountUpgradeRequest: "BLOCKED",
     bridgeKycStatus: "BLOCKED",
+    myReferrals: "BLOCKED",
     bridgeVirtualAccount: "BLOCKED",
     bridgeExternalAccounts: "BLOCKED",
     bridgeWithdrawalRequest: "BLOCKED",
