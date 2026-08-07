@@ -31,7 +31,9 @@ const PAYMENT_HASH = "b568463e07106d12fe406b2a1069bdc67ee4a6e67b4227934e8a7bed4d
 const PAYMENT_REQUEST = "lnbc1fakerequest"
 
 const ibexErrorWithHttpCode = (httpCode: number): IbexError =>
-  new IbexError(new ApiError(Object.assign(new Error(`http ${httpCode}`), { status: httpCode })))
+  new IbexError(
+    new ApiError(Object.assign(new Error(`http ${httpCode}`), { status: httpCode })),
+  )
 
 const decodedInvoice = ({ isExpired }: { isExpired: boolean }) => ({
   paymentHash: PAYMENT_HASH,

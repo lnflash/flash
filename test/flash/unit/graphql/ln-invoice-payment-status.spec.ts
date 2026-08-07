@@ -30,7 +30,6 @@ const mockPaymentStatusChecker = jest.requireMock("@app").Lightning
 const pubsubService = jest.requireMock("@services/pubsub").__service
 const mockPublishDelayed = pubsubService.publishDelayed as jest.Mock
 const mockPublish = pubsubService.publish as jest.Mock
-const mockCreateAsyncIterator = pubsubService.createAsyncIterator as jest.Mock
 
 const PAYMENT_REQUEST = "lnbc1fakerequest"
 
@@ -61,7 +60,9 @@ describe("lnInvoicePaymentStatus query", () => {
 
   it("returns the checker status", async () => {
     mockPaymentStatusChecker.mockResolvedValue(checker({ status: "PAID" }))
-    const result = await resolve(undefined, { input: { paymentRequest: PAYMENT_REQUEST } })
+    const result = await resolve(undefined, {
+      input: { paymentRequest: PAYMENT_REQUEST },
+    })
     expect(result).toEqual({ errors: [], status: "PAID" })
   })
 
@@ -69,7 +70,9 @@ describe("lnInvoicePaymentStatus query", () => {
     mockPaymentStatusChecker.mockResolvedValue(
       checker({ status: "EXPIRED", isExpired: true }),
     )
-    const result = await resolve(undefined, { input: { paymentRequest: PAYMENT_REQUEST } })
+    const result = await resolve(undefined, {
+      input: { paymentRequest: PAYMENT_REQUEST },
+    })
     expect(result).toEqual({ errors: [], status: "EXPIRED" })
   })
 
