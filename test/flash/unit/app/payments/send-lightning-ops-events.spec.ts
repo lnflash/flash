@@ -43,6 +43,16 @@ jest.mock("@services/lock", () => ({
   LockService: jest.fn(() => ({})),
 }))
 
+// These tests never supply an idempotency key, so the send functions never touch
+// the cache. Mock it to avoid transitively opening a real Redis connection via the
+// ENG-530 idempotency helper imported by send-lightning.
+jest.mock("@services/cache", () => ({
+  RedisCacheService: jest.fn(() => ({
+    get: jest.fn(async () => new Error("cache miss")),
+    set: jest.fn(async () => undefined),
+  })),
+}))
+
 jest.mock("@services/notifications", () => ({
   NotificationsService: jest.fn(() => ({})),
 }))

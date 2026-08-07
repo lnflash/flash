@@ -1,4 +1,5 @@
 import { InputValidationError } from "@graphql/error"
+import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { GT } from "@graphql/index"
 import PaymentSendPayload from "@graphql/public/types/payload/payment-send"
 import LnPaymentRequest from "@graphql/shared/types/scalar/ln-payment-request"
@@ -10,6 +11,7 @@ import dedent from "dedent"
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import Ibex from "@services/ibex/client"
 import { IbexError } from "@services/ibex/errors"
+import { withPaymentIdempotency } from "@app/payments/idempotency"
 
 const LnInvoicePaymentInput = GT.Input({
   name: "LnInvoicePaymentInput",
@@ -27,6 +29,11 @@ const LnInvoicePaymentInput = GT.Input({
       type: Memo,
       description: "Optional memo to associate with the lightning invoice.",
     },
+    idempotencyKey: {
+      type: GT.String,
+      description:
+        "Optional client-supplied key; a repeated send with the same key returns the original result instead of paying again.",
+    },
   }),
 })
 
@@ -38,6 +45,7 @@ const LnInvoicePaymentSendMutation = GT.Field<
       walletId: WalletId | InputValidationError
       paymentRequest: string | InputValidationError
       memo?: string | InputValidationError
+      idempotencyKey?: string | null
     }
   }
 >({
@@ -52,7 +60,7 @@ const LnInvoicePaymentSendMutation = GT.Field<
     input: { type: GT.NonNull(LnInvoicePaymentInput) },
   },
   resolve: async (_, args, { domainAccount }) => {
-    const { walletId, paymentRequest, memo } = args.input
+    const { walletId, paymentRequest, memo, idempotencyKey } = args.input
     if (walletId instanceof InputValidationError) {
       return { errors: [{ message: walletId.message }] }
     }
@@ -73,13 +81,43 @@ const LnInvoicePaymentSendMutation = GT.Field<
      */
 
     if (!domainAccount) throw new Error("Authentication required")
-    const PayLightningInvoice = await Ibex.payInvoice({
-      invoice: paymentRequest as Bolt11,
-      accountId: walletId,
+
+    // ENG-530: dedupe on (senderWalletId, idempotencyKey) when a key is supplied.
+    // This resolver pays IBEX directly (the app-layer path is stubbed above), so the
+    // idempotency wrapper goes around the inline call here rather than in @app.
+    const status = await withPaymentIdempotency({
+      idempotencyKey,
+      senderWalletId: walletId,
+      requestFingerprint: `ln|${paymentRequest}`,
+      execute: async (): Promise<PaymentSendStatus | ApplicationError> => {
+        const PayLightningInvoice = await Ibex.payInvoice({
+          invoice: paymentRequest as Bolt11,
+          accountId: walletId,
+        })
+
+        if (PayLightningInvoice instanceof IbexError) {
+          return PayLightningInvoice
+        }
+
+        let ibexStatus: PaymentSendStatus = PaymentSendStatus.Pending
+        switch (PayLightningInvoice.transaction?.payment?.status?.id) {
+          case 1:
+            ibexStatus = PaymentSendStatus.Pending
+            break
+          case 2:
+            ibexStatus = PaymentSendStatus.Success
+            break
+          case 3:
+            ibexStatus = PaymentSendStatus.Failure
+            break
+        }
+
+        return ibexStatus
+      },
     })
 
     // TODO: Reintroduce following code by adding to mapAndParseErrorForGqlResponse
-    // if (PayLightningInvoice instanceof IbexRateLimitError) {
+    // if (status instanceof IbexRateLimitError) {
     //   return {
     //     status: "failed",
     //     errors: [
@@ -91,25 +129,18 @@ const LnInvoicePaymentSendMutation = GT.Field<
     //   }
     // }
 
-    if (PayLightningInvoice instanceof IbexError) {
+    // Preserve the existing generic IBEX-failure message.
+    if (status instanceof IbexError) {
       return {
         status: "failed",
         errors: [{ message: "An unexpected error occurred. Please try again later." }],
-        // errors: [mapAndParseErrorForGqlResponse(PayLightningInvoice)] }
+        // errors: [mapAndParseErrorForGqlResponse(status)] }
       }
     }
 
-    let status: PaymentSendStatus = PaymentSendStatus.Pending
-    switch (PayLightningInvoice.transaction?.payment?.status?.id) {
-      case 1:
-        status = PaymentSendStatus.Pending
-        break
-      case 2:
-        status = PaymentSendStatus.Success
-        break
-      case 3:
-        status = PaymentSendStatus.Failure
-        break
+    // Non-IBEX errors: a concurrent same-key request in flight, or an invalid key.
+    if (status instanceof Error) {
+      return { status: "failed", errors: [mapAndParseErrorForGqlResponse(status)] }
     }
 
     return {

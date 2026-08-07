@@ -157,5 +157,11 @@ export class MultipleCurrenciesForSingleCurrencyOperationError extends Validatio
 
 export class InvalidIdempotencyKeyError extends ValidationError {}
 
+// Raised when an idempotency key is reused for a request whose parameters differ
+// from the original (e.g. same key, different amount/recipient). Returning the
+// original result would silently drop the new payment while reporting success, so
+// we reject instead. (ENG-530)
+export class IdempotencyKeyReuseError extends ValidationError {}
+
 export class InvalidLnurlError extends ValidationError {}
 export class InvalidLnurlAmountError extends ValidationError {}

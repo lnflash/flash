@@ -84,6 +84,10 @@ type PaymentSendArgs = {
   senderWalletId: WalletId
   senderAccount?: Account
   memo: string | null
+  // Optional client-supplied idempotency key (ENG-530). When present, a repeated
+  // send with the same key returns the original result instead of executing again.
+  // Absent = unchanged behavior (existing/internal callers do not supply one).
+  idempotencyKey?: string | null
 }
 
 type PayInvoiceByWalletIdArgs = PaymentSendArgs & {

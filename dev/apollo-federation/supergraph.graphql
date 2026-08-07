@@ -1206,6 +1206,11 @@ input IntraLedgerPaymentSendInput
   """Amount in satoshis."""
   amount: SatAmount!
 
+  """
+  Optional client-supplied key; a repeated send with the same key returns the original result instead of paying again.
+  """
+  idempotencyKey: String
+
   """Optional memo to be attached to the payment."""
   memo: Memo
   recipientWalletId: WalletId!
@@ -1229,6 +1234,11 @@ input IntraLedgerUsdPaymentSendInput
 {
   """Amount in cents."""
   amount: FractionalCentAmount!
+
+  """
+  Optional client-supplied key; a repeated send with the same key returns the original result instead of paying again.
+  """
+  idempotencyKey: String
 
   """Optional memo to be attached to the payment."""
   memo: Memo
@@ -1383,6 +1393,11 @@ type LnInvoicePayload
 input LnInvoicePaymentInput
   @join__type(graph: PUBLIC)
 {
+  """
+  Optional client-supplied key; a repeated send with the same key returns the original result instead of paying again.
+  """
+  idempotencyKey: String
+
   """Optional memo to associate with the lightning invoice."""
   memo: Memo
 
@@ -1466,6 +1481,11 @@ input LnNoAmountInvoicePaymentInput
 {
   """Amount to pay in satoshis."""
   amount: SatAmount!
+
+  """
+  Optional client-supplied key; a repeated send with the same key returns the original result instead of paying again.
+  """
+  idempotencyKey: String
 
   """Optional memo to associate with the lightning invoice."""
   memo: Memo

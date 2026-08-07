@@ -472,6 +472,14 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         logger: baseLogger,
       })
 
+    case "IdempotencyKeyReuseError":
+      message =
+        "This idempotency key was already used for a different payment. Use a new key for a new payment."
+      return new ValidationInternalError({
+        message,
+        logger: baseLogger,
+      })
+
     case "EmailUnverifiedError":
       return new EmailUnverifiedError({ logger: baseLogger })
 

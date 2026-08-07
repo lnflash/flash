@@ -72,6 +72,7 @@ import {
 } from "./helpers"
 
 import { reimburseFee } from "./reimburse-fee"
+import { withPaymentIdempotency } from "./idempotency"
 
 const dealer = DealerPriceService()
 const paymentFlowRepo = PaymentFlowStateRepository(defaultTimeToExpiryInSeconds)
@@ -118,11 +119,17 @@ const notifyLightningSendResult = (
 
 export const payInvoiceByWalletId = async (
   args: PayInvoiceByWalletIdArgs,
-): Promise<PaymentSendStatus | ApplicationError> => {
-  const result = await executePayInvoiceByWalletId(args)
-  notifyLightningSendResult(args, result)
-  return result
-}
+): Promise<PaymentSendStatus | ApplicationError> =>
+  withPaymentIdempotency({
+    idempotencyKey: args.idempotencyKey,
+    senderWalletId: args.senderWalletId,
+    requestFingerprint: `ln|${args.uncheckedPaymentRequest}`,
+    execute: async () => {
+      const result = await executePayInvoiceByWalletId(args)
+      notifyLightningSendResult(args, result)
+      return result
+    },
+  })
 
 const executePayInvoiceByWalletId = async ({
   uncheckedPaymentRequest,
@@ -213,23 +220,37 @@ const payNoAmountInvoiceByWalletId = async ({
 
 export const payNoAmountInvoiceByWalletIdForBtcWallet = async (
   args: PayNoAmountInvoiceByWalletIdArgs,
-): Promise<PaymentSendStatus | ApplicationError> => {
-  const validated = await validateIsBtcWallet(args.senderWalletId)
-  const result =
-    validated instanceof Error ? validated : await payNoAmountInvoiceByWalletId(args)
-  notifyLightningSendResult(args, result, satsDisplay(args.amount))
-  return result
-}
+): Promise<PaymentSendStatus | ApplicationError> =>
+  withPaymentIdempotency({
+    idempotencyKey: args.idempotencyKey,
+    senderWalletId: args.senderWalletId,
+    requestFingerprint: `ln-noamount|${args.uncheckedPaymentRequest}|${args.amount}`,
+    execute: async () => {
+      const validated = await validateIsBtcWallet(args.senderWalletId)
+      const result =
+        validated instanceof Error ? validated : await payNoAmountInvoiceByWalletId(args)
+      notifyLightningSendResult(args, result, satsDisplay(args.amount))
+      return result
+    },
+  })
 
 export const payNoAmountInvoiceByWalletIdForUsdWallet = async (
   args: PayNoAmountInvoiceByWalletIdArgs,
-): Promise<PaymentSendStatus | ApplicationError> => {
-  const validated = await validateIsUsdWallet(args.senderWalletId, { includeUsdt: true })
-  const result =
-    validated instanceof Error ? validated : await payNoAmountInvoiceByWalletId(args)
-  notifyLightningSendResult(args, result, usdCentsDisplay(args.amount))
-  return result
-}
+): Promise<PaymentSendStatus | ApplicationError> =>
+  withPaymentIdempotency({
+    idempotencyKey: args.idempotencyKey,
+    senderWalletId: args.senderWalletId,
+    requestFingerprint: `ln-noamount|${args.uncheckedPaymentRequest}|${args.amount}`,
+    execute: async () => {
+      const validated = await validateIsUsdWallet(args.senderWalletId, {
+        includeUsdt: true,
+      })
+      const result =
+        validated instanceof Error ? validated : await payNoAmountInvoiceByWalletId(args)
+      notifyLightningSendResult(args, result, usdCentsDisplay(args.amount))
+      return result
+    },
+  })
 
 const validateInvoicePaymentInputs = async ({
   uncheckedPaymentRequest,
