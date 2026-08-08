@@ -1,4 +1,5 @@
 import { Accounts, Payments } from "@app"
+import { resolveCashWalletRecipientMutationWalletId } from "@app/cash-wallet-cutover"
 import { checkedToWalletId } from "@domain/wallets"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { GT } from "@graphql/index"
@@ -6,6 +7,7 @@ import PaymentSendPayload from "@graphql/public/types/payload/payment-send"
 import Memo from "@graphql/shared/types/scalar/memo"
 import SatAmount from "@graphql/shared/types/scalar/sat-amount"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
+import { notifyOpsEvent } from "@services/alerts/ops-events"
 import dedent from "dedent"
 
 const IntraLedgerPaymentSendInput = GT.Input({
@@ -34,7 +36,7 @@ const IntraLedgerPaymentSendMutation = GT.Field<null, GraphQLPublicContextAuth>(
   args: {
     input: { type: GT.NonNull(IntraLedgerPaymentSendInput) },
   },
-  resolve: async (_, args, { domainAccount }) => {
+  resolve: async (_, args, { domainAccount, cashWalletClientCapabilities }) => {
     const { walletId, recipientWalletId, amount, memo, idempotencyKey } = args.input
     for (const input of [walletId, recipientWalletId, amount, memo]) {
       if (input instanceof Error) {
@@ -60,11 +62,33 @@ const IntraLedgerPaymentSendMutation = GT.Field<null, GraphQLPublicContextAuth>(
       return { errors: [mapAndParseErrorForGqlResponse(recipientUsername)] }
     }
 
+    const routedRecipientWalletId = await resolveCashWalletRecipientMutationWalletId({
+      recipientWalletId: recipientWalletIdChecked,
+      client: cashWalletClientCapabilities,
+    })
+    if (routedRecipientWalletId instanceof Error) {
+      notifyOpsEvent({
+        flow: "transfer",
+        phase: "failed",
+        status: "failed",
+        error: routedRecipientWalletId.constructor.name,
+        meta: {
+          senderWalletId,
+          recipientWalletId: recipientWalletIdChecked,
+          reason: "recipient-routing",
+        },
+      })
+      return {
+        status: "failed",
+        errors: [mapAndParseErrorForGqlResponse(routedRecipientWalletId)],
+      }
+    }
+
     const status = await Payments.intraledgerPaymentSendWalletIdForBtcWallet({
-      recipientWalletId,
+      recipientWalletId: routedRecipientWalletId,
       memo,
       amount,
-      senderWalletId: walletId,
+      senderWalletId,
       senderAccount: domainAccount,
       idempotencyKey,
     })
