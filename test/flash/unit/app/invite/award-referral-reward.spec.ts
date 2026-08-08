@@ -289,6 +289,8 @@ describe("awardReferralRewardOnKycApproval", () => {
     expect(set.rewardedAt).toBeUndefined()
     expect(set.rewardError).toContain("inviter=pending")
     expect(set.rewardError).toContain("invitee=pending")
+    // The headline rule: pending (unconfirmed) legs never notify.
+    expect(mockRewardPush).not.toHaveBeenCalled()
   })
 
   it("records 'pending' when one party is paid and the other IBEX-pending", async () => {
@@ -300,6 +302,9 @@ describe("awardReferralRewardOnKycApproval", () => {
     expect(set.rewardStatus).toBe("pending")
     expect(set.inviterRewardedAt).toBeInstanceOf(Date)
     expect(set.inviteeRewardedAt).toBeInstanceOf(Date)
+    // Only the confirmed-paid leg notifies; the pending leg stays silent.
+    const pushedLegs = mockRewardPush.mock.calls.map((c) => c[0].leg)
+    expect(pushedLegs).toEqual(["inviter"])
   })
 
   it("records 'partial' when one party is IBEX-pending and the other fails", async () => {
