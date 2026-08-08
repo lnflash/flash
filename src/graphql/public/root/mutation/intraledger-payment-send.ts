@@ -1,4 +1,5 @@
 import { Accounts, Payments } from "@app"
+import { resolveCashWalletRecipientMutationWalletId } from "@app/cash-wallet-cutover"
 import { checkedToWalletId } from "@domain/wallets"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { GT } from "@graphql/index"
@@ -34,7 +35,7 @@ const IntraLedgerPaymentSendMutation = GT.Field<null, GraphQLPublicContextAuth>(
   args: {
     input: { type: GT.NonNull(IntraLedgerPaymentSendInput) },
   },
-  resolve: async (_, args, { domainAccount }) => {
+  resolve: async (_, args, { domainAccount, cashWalletClientCapabilities }) => {
     const { walletId, recipientWalletId, amount, memo, idempotencyKey } = args.input
     for (const input of [walletId, recipientWalletId, amount, memo]) {
       if (input instanceof Error) {
@@ -60,8 +61,19 @@ const IntraLedgerPaymentSendMutation = GT.Field<null, GraphQLPublicContextAuth>(
       return { errors: [mapAndParseErrorForGqlResponse(recipientUsername)] }
     }
 
+    const routedRecipientWalletId = await resolveCashWalletRecipientMutationWalletId({
+      recipientWalletId: recipientWalletIdChecked,
+      client: cashWalletClientCapabilities,
+    })
+    if (routedRecipientWalletId instanceof Error) {
+      return {
+        status: "failed",
+        errors: [mapAndParseErrorForGqlResponse(routedRecipientWalletId)],
+      }
+    }
+
     const status = await Payments.intraledgerPaymentSendWalletIdForBtcWallet({
-      recipientWalletId,
+      recipientWalletId: routedRecipientWalletId,
       memo,
       amount,
       senderWalletId: walletId,
