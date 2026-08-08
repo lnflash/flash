@@ -30,6 +30,7 @@ import BridgeWithdrawalRequestQuery from "./root/query/bridge-withdrawal-request
 import BridgeWithdrawalsQuery from "./root/query/bridge-withdrawals"
 import ApiKeysQuery from "./root/query/api-keys"
 import InvitePreviewQuery from "./root/query/invite-preview"
+import CashoutRateQuery from "./root/query/cashout-rate"
 import MyReferralsQuery from "./root/query/my-referrals"
 
 export const queryFields = {
@@ -63,6 +64,7 @@ export const queryFields = {
       bridgeWithdrawalRequest: BridgeWithdrawalRequestQuery,
       bridgeWithdrawals: BridgeWithdrawalsQuery,
       apiKeys: ApiKeysQuery,
+      cashoutRate: CashoutRateQuery,
       myReferrals: MyReferralsQuery,
     },
     atWalletLevel: {
