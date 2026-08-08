@@ -854,6 +854,20 @@ type CashoutOffer
   walletId: WalletId!
 }
 
+type CashoutRate
+  @join__type(graph: PUBLIC)
+{
+  """
+  JMD cents per 1 USD at which a JMD cashout would settle right now — the same rate a cashout offer locks in.
+  """
+  exchangeRate: JMDCents!
+
+  """
+  Flash cashout service fee in basis points, deducted from the USD amount before conversion.
+  """
+  feeBasisPoints: Int!
+}
+
 type CashWalletCutover
   @join__type(graph: PUBLIC)
 {
@@ -2209,6 +2223,7 @@ type Query
   btcPriceList(range: PriceGraphRange!): [PricePoint]
   businessMapMarkers: [MapMarker!]!
   cashWalletCutover: CashWalletCutover!
+  cashoutRate: CashoutRate!
   currencyList: [Currency!]!
   globals: Globals
   invitePreview(token: String!): InvitePreview
