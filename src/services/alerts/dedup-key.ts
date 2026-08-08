@@ -28,6 +28,11 @@ export const generateDedupKey = {
     `ibex:reconcile:ibex-without-bridge:${txHash.toLowerCase()}`,
   ibexReconcileFailed: (txHash: string) =>
     `ibex:reconcile:failed:${txHash.toLowerCase()}`,
+  erpnextFygaroAudit: (transactionId: string) => `erpnext-audit:fygaro:${transactionId}`,
+  fygaroWebhookPayment: (transactionId: string) =>
+    `fygaro-webhook:payment:${transactionId}`,
+  fygaroUnattributed: (transactionId: string) => `fygaro:unattributed:${transactionId}`,
+  fygaroCreditFailed: (transactionId: string) => `fygaro:credit-failed:${transactionId}`,
 }
 
 export const normalizeDedupKey = (key: string): string =>

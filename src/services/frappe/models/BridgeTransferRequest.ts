@@ -17,7 +17,7 @@ export type BridgeTransferRequestInput = {
   status: BridgeTransferRequestStatus
   amount: string
   currency: string
-  provider?: "Bridge"
+  provider?: "Bridge" | "Fygaro"
   asset?: string
   network?: string
   developerFee?: string

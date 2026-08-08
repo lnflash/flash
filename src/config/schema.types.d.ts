@@ -68,6 +68,20 @@ type BridgeConfig = {
   webhook: BridgeWebhook
 }
 
+type FygaroWebhookConfig = {
+  port: number
+  secrets: Record<string, string>
+  timestampSkewMs: number
+}
+
+type FygaroConfig = {
+  enabled: boolean
+  webhook: FygaroWebhookConfig
+  credit: {
+    enabled: boolean
+  }
+}
+
 type CashoutEmail = {
   to: string
   from: string
@@ -237,6 +251,7 @@ type YamlSchema = {
   topup: {
     enabled: boolean
   }
+  fygaro: FygaroConfig
   sendgrid: SendGridConfig
   frappe: FrappeConfig
   fcmTopics: {
