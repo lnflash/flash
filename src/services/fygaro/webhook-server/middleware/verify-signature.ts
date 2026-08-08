@@ -92,6 +92,10 @@ export const verifyFygaroSignature = (
       return res.status(400).json({ error: "Missing request body" })
     }
 
+    // ASSUMPTION (verify against a real signed payment before trusting in
+    // prod): Fygaro's docs and official helper libraries compare hex-encoded
+    // HMAC digests. If a correctly-configured secret still 401s here, check
+    // whether the digest encoding is base64 before suspecting the secret.
     const signedPayload = `${timestamp}.${rawBody}`
     const valid = candidateSecrets.some((secret) => {
       const expected = crypto

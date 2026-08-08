@@ -27,6 +27,7 @@ import { AccountsRepository } from "@services/mongoose"
 import {
   writeFygaroTopupRequest,
   completeFygaroTopup,
+  isFygaroTopupCompleted,
 } from "@services/frappe/BridgeTransferRequestWriter"
 import { alertBridge, generateDedupKey } from "@services/alerts"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
@@ -124,6 +125,17 @@ export const paymentHandler = async (req: Request, res: Response) => {
     }
 
     if (!accountId) {
+      // Dedupe re-deliveries before emitting: alertBridge is TTL-deduped but
+      // the ops feed is not, so a Fygaro retry of an unattributed payment
+      // would otherwise spam a feed line per delivery. Taken only after the
+      // audit write succeeds so retries can still repair transient failures.
+      const dedupe = await LockService().lockIdempotencyKey(
+        `fygaro-payment:${transactionId}` as IdempotencyKey,
+      )
+      if (dedupe instanceof Error) {
+        baseLogger.info({ transactionId }, "Duplicate Fygaro payment webhook")
+        return res.status(200).json({ status: "already_processed" })
+      }
       alertBridge({
         dedupKey: generateDedupKey.fygaroUnattributed(transactionId),
         source: "fygaro-webhook",
@@ -151,18 +163,18 @@ export const paymentHandler = async (req: Request, res: Response) => {
       return res.status(200).json({ status: "recorded", attributed: false })
     }
 
-    // Mark processed only after the audit write succeeds, so provider retries
-    // can recover audit gaps after transient persistence failures. Everything
-    // past this point runs at most once per transaction.
-    const lockResult = await LockService().lockIdempotencyKey(
-      `fygaro-payment:${transactionId}` as IdempotencyKey,
-    )
-    if (lockResult instanceof Error) {
-      baseLogger.info({ transactionId }, "Duplicate Fygaro payment webhook")
-      return res.status(200).json({ status: "already_processed" })
-    }
-
     if (!FygaroConfig.credit?.enabled || currency !== "USD") {
+      // Record-only path: nothing money-moving happens here, so a
+      // non-releasing timelock is the right dedupe. Taken only after the
+      // audit write succeeds so provider retries can recover audit gaps
+      // after transient persistence failures.
+      const lockResult = await LockService().lockIdempotencyKey(
+        `fygaro-payment:${transactionId}` as IdempotencyKey,
+      )
+      if (lockResult instanceof Error) {
+        baseLogger.info({ transactionId }, "Duplicate Fygaro payment webhook")
+        return res.status(200).json({ status: "already_processed" })
+      }
       if (currency !== "USD") {
         // The payment button is USD-only; a non-USD payment is unexpected
         // enough to demand human eyes before any crediting.
@@ -186,79 +198,108 @@ export const paymentHandler = async (req: Request, res: Response) => {
       return res.status(200).json({ status: "recorded", credited: false })
     }
 
+    // Credit path: serialize deliveries with a RELEASING lock and use the
+    // audit row's Completed status as the processed marker. A crash between
+    // here and the promotion releases the lock, so the next provider retry
+    // re-runs this block — withPaymentIdempotency (keyed fygaro:<txId>) makes
+    // the send itself exactly-once — instead of stranding a paid-but-
+    // uncredited payment behind a consumed timelock. Distinct resource from
+    // the lock withPaymentIdempotency takes internally (that one is scoped to
+    // the sender wallet), so there is no nested-acquire collision.
+    const creditAccountId = accountId
     const amountCents = Math.round(Number(payload.amount) * 100)
-    const creditResult = await creditFygaroTopup({
-      recipientAccountId: accountId,
-      amountCents,
-      transactionId,
-    })
-    if (creditResult instanceof FygaroCreditError) {
-      baseLogger.error(
-        { error: creditResult, transactionId, accountId },
-        "Fygaro payment recorded but auto-credit failed",
-      )
-      alertBridge({
-        dedupKey: generateDedupKey.fygaroCreditFailed(transactionId),
-        source: "fygaro-webhook",
-        severity: "critical",
-        title: "Fygaro auto-credit failed — manual credit needed",
-        detail: `${creditResult.step}: ${creditResult.message}`,
-        context: {
-          transaction_id: transactionId,
-          account_id: accountId,
+    const outcome = await LockService().lockPaymentIdempotencyKey(
+      `fygaro-payment:${transactionId}` as IdempotencyKey,
+      async () => {
+        if (await isFygaroTopupCompleted(transactionId)) {
+          baseLogger.info({ transactionId }, "Duplicate Fygaro payment webhook")
+          return { code: 200, body: { status: "already_processed" } }
+        }
+
+        const creditResult = await creditFygaroTopup({
+          recipientAccountId: creditAccountId,
+          amountCents,
+          transactionId,
+        })
+        if (creditResult instanceof FygaroCreditError) {
+          baseLogger.error(
+            { error: creditResult, transactionId, accountId: creditAccountId },
+            "Fygaro payment recorded but auto-credit failed",
+          )
+          alertBridge({
+            dedupKey: generateDedupKey.fygaroCreditFailed(transactionId),
+            source: "fygaro-webhook",
+            severity: "critical",
+            title: "Fygaro auto-credit failed — manual credit needed",
+            detail: `${creditResult.step}: ${creditResult.message}`,
+            context: {
+              transaction_id: transactionId,
+              account_id: creditAccountId,
+              amount: String(payload.amount),
+            },
+          })
+          notifyOpsEvent({
+            flow: "deposit",
+            phase: "failed",
+            status: "failed",
+            step: `credit:${creditResult.step}`,
+            error: creditResult.constructor.name,
+            accountId: creditAccountId,
+            amount: { value: String(payload.amount), currency },
+            meta: { provider: "Fygaro", transactionId, username: username ?? "" },
+          })
+          // The payment IS recorded and the row stays Fiat Received. A failed
+          // send is not cached, so a provider retry re-attempts the credit
+          // (self-healing for transient failures); ops has the critical alert
+          // for the deterministic ones.
+          return { code: 200, body: { status: "recorded", credited: false } }
+        }
+
+        const completeResult = await completeFygaroTopup({
+          transactionId,
+          accountId: creditAccountId,
+          walletId: creditResult.walletId,
           amount: String(payload.amount),
-        },
-      })
-      notifyOpsEvent({
-        flow: "deposit",
-        phase: "failed",
-        status: "failed",
-        step: `credit:${creditResult.step}`,
-        error: creditResult.constructor.name,
-        accountId,
-        amount: { value: String(payload.amount), currency },
-        meta: { provider: "Fygaro", transactionId, username: username ?? "" },
-      })
-      // The payment IS recorded; a 500 would only re-run the (now locked)
-      // handler. Ops resolves the credit manually from the alert.
-      return res.status(200).json({ status: "recorded", credited: false })
-    }
+          currency,
+          rawPayload: req.body,
+        })
+        if (completeResult instanceof Error) {
+          // The money moved; only the audit promotion failed. Alert, don't
+          // fail: the row stays Fiat Received, so a provider retry replays
+          // the cached send result and re-attempts this promotion.
+          alertBridge({
+            dedupKey: generateDedupKey.erpnextFygaroAudit(transactionId),
+            source: "erpnext-audit",
+            severity: "warning",
+            title: "Fygaro credit succeeded but ERPNext promotion failed",
+            detail: completeResult.message,
+            context: { transaction_id: transactionId },
+          })
+        }
 
-    const completeResult = await completeFygaroTopup({
-      transactionId,
-      accountId,
-      walletId: creditResult.walletId,
-      amount: String(payload.amount),
-      currency,
-      rawPayload: req.body,
-    })
-    if (completeResult instanceof Error) {
-      // The money moved; only the audit promotion failed. Alert, don't fail.
-      alertBridge({
-        dedupKey: generateDedupKey.erpnextFygaroAudit(transactionId),
-        source: "erpnext-audit",
-        severity: "warning",
-        title: "Fygaro credit succeeded but ERPNext promotion failed",
-        detail: completeResult.message,
-        context: { transaction_id: transactionId },
-      })
-    }
+        notifyOpsEvent({
+          flow: "deposit",
+          phase: "succeeded",
+          status: "success",
+          accountId: creditAccountId,
+          amount: { value: String(payload.amount), currency },
+          meta: {
+            provider: "Fygaro",
+            transactionId,
+            username: username ?? "",
+            creditStatus: creditResult.status,
+          },
+        })
 
-    notifyOpsEvent({
-      flow: "deposit",
-      phase: "succeeded",
-      status: "success",
-      accountId,
-      amount: { value: String(payload.amount), currency },
-      meta: {
-        provider: "Fygaro",
-        transactionId,
-        username: username ?? "",
-        creditStatus: creditResult.status,
+        return { code: 200, body: { status: "success", credited: true } }
       },
-    })
-
-    return res.status(200).json({ status: "success", credited: true })
+    )
+    if (outcome instanceof Error) {
+      // Another delivery of this payment holds the credit lock right now.
+      baseLogger.info({ transactionId }, "Fygaro payment already being processed")
+      return res.status(200).json({ status: "already_processing" })
+    }
+    return res.status(outcome.code).json(outcome.body)
   } catch (error) {
     baseLogger.error({ error, transactionId }, "Error processing Fygaro payment webhook")
     alertBridge({

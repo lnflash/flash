@@ -243,6 +243,24 @@ export const writeFygaroTopupRequest = async ({
   )
 }
 
+// Whether this Fygaro payment was already fully processed (its audit row
+// promoted to Completed by a prior delivery). Used as the processed-marker for
+// webhook re-deliveries. A lookup failure degrades to false — the credit
+// itself is exactly-once under withPaymentIdempotency, so a false negative
+// can never double-pay; it only costs a redundant cached-send replay.
+export const isFygaroTopupCompleted = async (transactionId: string): Promise<boolean> => {
+  if (!ErpNext?.findBridgeTransferRequest) return false
+  const doc = await ErpNext.findBridgeTransferRequest(`fygaro:${transactionId}`)
+  if (doc instanceof Error) {
+    baseLogger.warn(
+      { transactionId, error: doc },
+      "Failed to check Fygaro topup completion; treating as not completed",
+    )
+    return false
+  }
+  return doc?.status === BridgeTransferRequestStatus.Completed
+}
+
 // Called after the treasury -> user intraledger credit succeeds: promotes the
 // Fygaro topup row to Completed and stamps the credited wallet on it. The
 // upsert's monotonic status guard makes this safe to repeat.

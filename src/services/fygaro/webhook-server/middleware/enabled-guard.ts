@@ -16,7 +16,10 @@ export const fygaroEnabledGuard = (
   next: express.NextFunction,
 ) => {
   if (req.path === "/health") return next()
-  if (!FygaroConfig.enabled) {
+  // Optional-chained: if the fygaro config block is ever absent (schema
+  // default not applied on some load path), fail closed with the 503 rather
+  // than throwing a per-request 500.
+  if (!FygaroConfig?.enabled) {
     baseLogger.warn(
       { path: req.path },
       "Fygaro webhook received while fygaro is disabled — rejecting",

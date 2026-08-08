@@ -19,6 +19,8 @@ jest.mock("@services/logger", () => ({
 jest.mock("@services/lock", () => ({
   LockService: jest.fn(() => ({
     lockIdempotencyKey: (...args: unknown[]) => mockLockIdempotencyKey(...args),
+    lockPaymentIdempotencyKey: (key: unknown, fn: unknown) =>
+      mockLockPaymentIdempotencyKey(key, fn),
   })),
 }))
 
@@ -31,6 +33,7 @@ jest.mock("@services/mongoose", () => ({
 jest.mock("@services/frappe/BridgeTransferRequestWriter", () => ({
   writeFygaroTopupRequest: (...args: unknown[]) => mockWriteFygaroTopup(...args),
   completeFygaroTopup: (...args: unknown[]) => mockCompleteFygaroTopup(...args),
+  isFygaroTopupCompleted: (...args: unknown[]) => mockIsFygaroTopupCompleted(...args),
 }))
 
 jest.mock("@services/alerts", () => ({
@@ -58,9 +61,11 @@ jest.mock("@services/fygaro/webhook-server/credit-topup", () => {
 })
 
 const mockLockIdempotencyKey = jest.fn()
+const mockLockPaymentIdempotencyKey = jest.fn()
 const mockFindByUsername = jest.fn()
 const mockWriteFygaroTopup = jest.fn()
 const mockCompleteFygaroTopup = jest.fn()
+const mockIsFygaroTopupCompleted = jest.fn()
 const mockAlertBridge = jest.fn()
 const mockNotifyOpsEvent = jest.fn()
 const mockCreditFygaroTopup = jest.fn()
@@ -96,6 +101,11 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockFygaroConfig.credit = { enabled: false }
   mockLockIdempotencyKey.mockResolvedValue(true)
+  // Releasing lock: default to acquiring and running the wrapped callback.
+  mockLockPaymentIdempotencyKey.mockImplementation(
+    async (_key: unknown, fn: () => Promise<unknown>) => fn(),
+  )
+  mockIsFygaroTopupCompleted.mockResolvedValue(false)
   mockFindByUsername.mockResolvedValue({ id: ACCOUNT_ID })
   mockWriteFygaroTopup.mockResolvedValue(true)
   mockCompleteFygaroTopup.mockResolvedValue(true)
@@ -176,15 +186,25 @@ describe("fygaro paymentHandler", () => {
     expect(mockLockIdempotencyKey).not.toHaveBeenCalled()
   })
 
-  it("acknowledges a duplicate delivery without reprocessing", async () => {
+  it("acknowledges a duplicate record-only delivery without reprocessing", async () => {
     mockLockIdempotencyKey.mockResolvedValue(new Error("already locked"))
-    mockFygaroConfig.credit = { enabled: true }
     const res = makeRes()
 
     await paymentHandler(makeReq(VALID_BODY), res)
 
-    expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+    expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
     expect(res.status).toHaveBeenCalledWith(200)
+    expect(res.json).toHaveBeenCalledWith({ status: "already_processed" })
+  })
+
+  it("dedupes re-deliveries of an unattributed payment before emitting the ops event", async () => {
+    mockLockIdempotencyKey.mockResolvedValue(new Error("already locked"))
+    const res = makeRes()
+
+    await paymentHandler(makeReq({ ...VALID_BODY, customReference: "" }), res)
+
+    expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+    expect(mockAlertBridge).not.toHaveBeenCalled()
     expect(res.json).toHaveBeenCalledWith({ status: "already_processed" })
   })
 
@@ -233,6 +253,42 @@ describe("fygaro paymentHandler", () => {
       )
       expect(res.status).toHaveBeenCalledWith(200)
       expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
+    })
+
+    it("short-circuits when the audit row is already Completed (processed re-delivery)", async () => {
+      mockIsFygaroTopupCompleted.mockResolvedValue(true)
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+      expect(mockCompleteFygaroTopup).not.toHaveBeenCalled()
+      expect(res.json).toHaveBeenCalledWith({ status: "already_processed" })
+    })
+
+    it("re-runs the credit when a retry arrives after an incomplete first attempt", async () => {
+      // Row still Fiat Received (crash or promotion failure last time):
+      // the credit path must run again — withPaymentIdempotency makes the
+      // send replay-safe — so the retry self-heals instead of stranding.
+      mockIsFygaroTopupCompleted.mockResolvedValue(false)
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockCreditFygaroTopup).toHaveBeenCalledTimes(1)
+      expect(mockCompleteFygaroTopup).toHaveBeenCalledTimes(1)
+      expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
+    })
+
+    it("acknowledges without crediting when another delivery holds the credit lock", async () => {
+      mockLockPaymentIdempotencyKey.mockResolvedValue(new Error("lock contention"))
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+      expect(res.status).toHaveBeenCalledWith(200)
+      expect(res.json).toHaveBeenCalledWith({ status: "already_processing" })
     })
 
     it("never auto-credits a non-USD payment", async () => {
