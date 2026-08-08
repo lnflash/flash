@@ -10,6 +10,8 @@ import { InviteRepository } from "@services/mongoose/models/invite"
 import { nextReferralRewardSeq } from "@services/mongoose/models/referral-reward-counter"
 import { baseLogger } from "@services/logger"
 
+import { sendReferralRewardNotificationBestEffort } from "./send-referral-notifications"
+
 const REWARDS_ROLE = "rewards"
 
 type PartyPayResult = "paid" | "pending" | "failed"
@@ -208,6 +210,23 @@ export const awardReferralRewardOnKycApproval = async ({
           `inviteeWallet=${Boolean(inviteeWalletId)}`
       }
       await markReward(invite._id, update)
+
+      // Per-leg reward pushes, only for confirmed-paid legs (a "pending" IBEX
+      // leg would be premature; ops reconciles those first). Fire-and-forget.
+      if (inviterResult === "paid") {
+        sendReferralRewardNotificationBestEffort({
+          accountId: inviterAccountId,
+          leg: "inviter",
+          amountCents,
+        })
+      }
+      if (inviteeResult === "paid") {
+        sendReferralRewardNotificationBestEffort({
+          accountId,
+          leg: "invitee",
+          amountCents,
+        })
+      }
 
       if (rewardStatus === "paid") {
         baseLogger.info(

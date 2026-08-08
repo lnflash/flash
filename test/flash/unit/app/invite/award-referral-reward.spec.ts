@@ -43,6 +43,11 @@ jest.mock("@app/payments/send-intraledger", () => ({
   intraledgerPaymentSendWalletIdForUsdWallet: (...a: unknown[]) => mockPay(...a),
 }))
 
+const mockRewardPush = jest.fn()
+jest.mock("@app/invite/send-referral-notifications", () => ({
+  sendReferralRewardNotificationBestEffort: (...a: unknown[]) => mockRewardPush(...a),
+}))
+
 jest.mock("@services/logger", () => ({
   baseLogger: { info: jest.fn(), error: jest.fn(), warn: jest.fn() },
 }))
@@ -164,6 +169,13 @@ describe("awardReferralRewardOnKycApproval", () => {
 
     const set = lastSet()
     expect(set.rewardStatus).toBe("paid")
+    // Both legs paid -> both parties get a reward push.
+    expect(mockRewardPush).toHaveBeenCalledWith(
+      expect.objectContaining({ leg: "inviter", amountCents: 500 }),
+    )
+    expect(mockRewardPush).toHaveBeenCalledWith(
+      expect.objectContaining({ leg: "invitee", amountCents: 500 }),
+    )
     expect(set.rewardSeq).toBe(50)
     expect(set.rewardAmountCents).toBe(500)
     expect(set.rewardedAt).toBeInstanceOf(Date)
@@ -239,6 +251,9 @@ describe("awardReferralRewardOnKycApproval", () => {
     )
     const set = lastSet()
     expect(set.rewardStatus).toBe("partial")
+    // Only the successfully-paid leg gets a push; the failed leg gets none.
+    const pushedLegs = mockRewardPush.mock.calls.map((c) => c[0].leg)
+    expect(pushedLegs).not.toContain("inviter")
     expect(set.inviteeRewardedAt).toBeInstanceOf(Date)
     expect(set.inviterRewardedAt).toBeUndefined()
     expect(set.rewardError).toContain("inviter=failed")

@@ -105,6 +105,21 @@
         "bodyWithReason": "Your identity verification was not approved: {{reason}}.",
         "title": "Verification unsuccessful"
       }
+    },
+    "referral": {
+      "accepted": {
+        "title": "Your invite was accepted 🎉",
+        "body": "{{name}} just joined Flash from your invite.",
+        "bodyNoName": "Someone just joined Flash from your invite."
+      },
+      "inviterReward": {
+        "title": "Referral reward earned",
+        "body": "US${{amount}} was credited to your wallet for inviting a friend."
+      },
+      "inviteeReward": {
+        "title": "Welcome reward received",
+        "body": "US${{amount}} was credited to your wallet for joining through an invite."
+      }
     }
   }
 }

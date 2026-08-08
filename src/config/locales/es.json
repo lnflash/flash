@@ -101,6 +101,21 @@
         "bodyWithReason": "Su verificación de identidad no fue aprobada: {{reason}}.",
         "title": "Verificación no exitosa"
       }
+    },
+    "referral": {
+      "accepted": {
+        "title": "Tu invitación fue aceptada 🎉",
+        "body": "{{name}} acaba de unirse a Flash con tu invitación.",
+        "bodyNoName": "Alguien acaba de unirse a Flash con tu invitación."
+      },
+      "inviterReward": {
+        "title": "Recompensa por referido",
+        "body": "Se acreditaron US${{amount}} a tu billetera por invitar a un amigo."
+      },
+      "inviteeReward": {
+        "title": "Recompensa de bienvenida",
+        "body": "Se acreditaron US${{amount}} a tu billetera por unirte con una invitación."
+      }
     }
   }
 }
