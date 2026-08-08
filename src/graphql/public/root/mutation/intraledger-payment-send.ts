@@ -88,7 +88,7 @@ const IntraLedgerPaymentSendMutation = GT.Field<null, GraphQLPublicContextAuth>(
       recipientWalletId: routedRecipientWalletId,
       memo,
       amount,
-      senderWalletId: walletId,
+      senderWalletId,
       senderAccount: domainAccount,
       idempotencyKey,
     })
