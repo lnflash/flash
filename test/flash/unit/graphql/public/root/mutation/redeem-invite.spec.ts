@@ -25,6 +25,11 @@ jest.mock("@services/logger", () => ({
   baseLogger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }))
 
+const mockAcceptedPush = jest.fn()
+jest.mock("@app/invite/send-referral-notifications", () => ({
+  sendInviteAcceptedNotificationBestEffort: (...a: unknown[]) => mockAcceptedPush(...a),
+}))
+
 import RedeemInviteMutation from "@graphql/public/root/mutation/redeem-invite"
 import { InviteStatus } from "@services/mongoose/models/invite"
 
@@ -198,6 +203,10 @@ describe("redeemInvite resolver", () => {
     const result = await resolveRedeem()
 
     expect(result).toEqual({ success: true, errors: [] })
+    // The inviter gets an "invite accepted" push, fire-and-forget.
+    expect(mockAcceptedPush).toHaveBeenCalledWith(
+      expect.objectContaining({ inviterAccountId: INVITER_ACCOUNT }),
+    )
     expect(invite.status).toBe(InviteStatus.ACCEPTED)
     expect(invite.redeemedAt).toBeInstanceOf(Date)
     expect(

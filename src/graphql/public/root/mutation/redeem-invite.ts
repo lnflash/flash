@@ -5,6 +5,7 @@ import { hashToken } from "@utils"
 import { baseLogger } from "@services/logger"
 import mongoose from "mongoose"
 import { AccountsRepository, UsersRepository } from "@services/mongoose"
+import { sendInviteAcceptedNotificationBestEffort } from "@app/invite/send-referral-notifications"
 
 const RedeemInviteInput = GT.Input({
   name: "RedeemInviteInput",
@@ -198,6 +199,13 @@ const RedeemInviteMutation = GT.Field<null, GraphQLPublicContextAuth>({
         },
         "Invite successfully redeemed by new user",
       )
+
+      // Tell the inviter their invite landed. Fire-and-forget: a push failure
+      // must never affect the redemption result.
+      sendInviteAcceptedNotificationBestEffort({
+        inviterAccountId: invite.inviterId.toString(),
+        inviteeName: domainAccount.username || undefined,
+      })
 
       // The referral reward is NOT paid here: payout is deferred until the
       // invitee's Bridge KYC is approved (awardReferralRewardOnKycApproval,

@@ -6,9 +6,16 @@ jest.mock("@services/lock", () => ({
   LockService: jest.fn(),
 }))
 
-jest.mock("@services/logger", () => ({
-  baseLogger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
-}))
+jest.mock("@services/logger", () => {
+  const stub: Record<string, unknown> = {
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+  }
+  stub.child = () => stub
+  return { baseLogger: stub }
+})
 
 jest.mock("@services/bridge", () => ({
   __esModule: true,
