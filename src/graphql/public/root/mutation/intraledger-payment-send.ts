@@ -7,6 +7,7 @@ import PaymentSendPayload from "@graphql/public/types/payload/payment-send"
 import Memo from "@graphql/shared/types/scalar/memo"
 import SatAmount from "@graphql/shared/types/scalar/sat-amount"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
+import { notifyOpsEvent } from "@services/alerts/ops-events"
 import dedent from "dedent"
 
 const IntraLedgerPaymentSendInput = GT.Input({
@@ -66,6 +67,17 @@ const IntraLedgerPaymentSendMutation = GT.Field<null, GraphQLPublicContextAuth>(
       client: cashWalletClientCapabilities,
     })
     if (routedRecipientWalletId instanceof Error) {
+      notifyOpsEvent({
+        flow: "transfer",
+        phase: "failed",
+        status: "failed",
+        error: routedRecipientWalletId.constructor.name,
+        meta: {
+          senderWalletId,
+          recipientWalletId: recipientWalletIdChecked,
+          reason: "recipient-routing",
+        },
+      })
       return {
         status: "failed",
         errors: [mapAndParseErrorForGqlResponse(routedRecipientWalletId)],

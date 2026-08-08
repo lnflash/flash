@@ -1,6 +1,12 @@
 const mockIntraledgerPaymentSendWalletIdForBtcWallet = jest.fn()
 const mockGetUsernameFromWalletId = jest.fn()
 const mockResolveCashWalletRecipientMutationWalletId = jest.fn()
+const mockNotifyOpsEvent = jest.fn()
+
+jest.mock("@services/alerts/ops-events", () => ({
+  notifyOpsEvent: (...args: Parameters<typeof mockNotifyOpsEvent>) =>
+    mockNotifyOpsEvent(...args),
+}))
 
 jest.mock("@app", () => ({
   Accounts: {
@@ -77,6 +83,7 @@ describe("IntraLedgerPaymentSendMutation", () => {
       idempotencyKey: "idem-1",
     })
     expect(result).toEqual({ errors: [], status: "success" })
+    expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
   })
 
   it("returns failed without paying when recipient routing errors", async () => {
@@ -95,5 +102,13 @@ describe("IntraLedgerPaymentSendMutation", () => {
     expect(result.status).toBe("failed")
     expect(result.errors).toHaveLength(1)
     expect(mockIntraledgerPaymentSendWalletIdForBtcWallet).not.toHaveBeenCalled()
+    expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        flow: "transfer",
+        status: "failed",
+        error: "MismatchedCurrencyForWalletError",
+        meta: expect.objectContaining({ reason: "recipient-routing" }),
+      }),
+    )
   })
 })

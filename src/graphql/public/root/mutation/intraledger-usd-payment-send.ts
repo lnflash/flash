@@ -10,6 +10,7 @@ import PaymentSendPayload from "@graphql/public/types/payload/payment-send"
 // import CentAmount from "@graphql/public/types/scalar/cent-amount"
 import Memo from "@graphql/shared/types/scalar/memo"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
+import { notifyOpsEvent } from "@services/alerts/ops-events"
 import dedent from "dedent"
 import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 // import { RequestInit, Response } from 'node-fetch'
@@ -28,6 +29,28 @@ const IntraLedgerUsdPaymentSendInput = GT.Input({
     },
   }),
 })
+
+const notifyCashWalletRoutingFailure = ({
+  error,
+  senderWalletId,
+  recipientWalletId,
+  amount,
+  reason,
+}: {
+  error: ApplicationError
+  senderWalletId: string
+  recipientWalletId: string
+  amount: number
+  reason: "sender-routing" | "recipient-routing"
+}): void =>
+  notifyOpsEvent({
+    flow: "transfer",
+    phase: "failed",
+    status: "failed",
+    error: error.constructor.name,
+    amount: { value: (Number(amount) / 100).toFixed(2), currency: "USD" },
+    meta: { senderWalletId, recipientWalletId, reason },
+  })
 
 const IntraLedgerUsdPaymentSendMutation = GT.Field<null, GraphQLPublicContextAuth>({
   extensions: {
@@ -70,6 +93,13 @@ const IntraLedgerUsdPaymentSendMutation = GT.Field<null, GraphQLPublicContextAut
       client: cashWalletClientCapabilities,
     })
     if (routedSenderWalletId instanceof Error) {
+      notifyCashWalletRoutingFailure({
+        error: routedSenderWalletId,
+        senderWalletId,
+        recipientWalletId: recipientWalletIdChecked,
+        amount,
+        reason: "sender-routing",
+      })
       return {
         status: "failed",
         errors: [mapAndParseErrorForGqlResponse(routedSenderWalletId)],
@@ -81,6 +111,13 @@ const IntraLedgerUsdPaymentSendMutation = GT.Field<null, GraphQLPublicContextAut
       client: cashWalletClientCapabilities,
     })
     if (routedRecipientWalletId instanceof Error) {
+      notifyCashWalletRoutingFailure({
+        error: routedRecipientWalletId,
+        senderWalletId: routedSenderWalletId,
+        recipientWalletId: recipientWalletIdChecked,
+        amount,
+        reason: "recipient-routing",
+      })
       return {
         status: "failed",
         errors: [mapAndParseErrorForGqlResponse(routedRecipientWalletId)],

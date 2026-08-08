@@ -1,3 +1,14 @@
+const mockGetConfig = jest.fn()
+
+jest.mock("@services/mongoose", () => ({
+  AccountsRepository: () => ({ findById: jest.fn() }),
+  WalletsRepository: () => ({ findById: jest.fn(), listByAccountId: jest.fn() }),
+  CashWalletCutoverRepository: () => ({
+    getConfig: (...args: Parameters<typeof mockGetConfig>) => mockGetConfig(...args),
+    findMigrationByAccountId: jest.fn(),
+  }),
+}))
+
 import { resolveCashWalletRecipientMutationWalletId } from "@app/cash-wallet-cutover/recipient-routing"
 import { WalletCurrency } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
@@ -54,5 +65,72 @@ describe("resolveCashWalletRecipientMutationWalletId", () => {
       client,
       walletsRepo,
     })
+  })
+})
+
+// Composition test: the real recipient resolver through the real
+// presentation/routing logic, with only the repos stubbed. This is the
+// production incident scenario — a legacy-capability client submitting a
+// recipient's legacy USD wallet id after the cutover completed.
+describe("resolveCashWalletRecipientMutationWalletId (real routing)", () => {
+  const usdtWalletId = "55555555-5555-4555-8555-555555555555" as WalletId
+  const usdtWallet = {
+    id: usdtWalletId,
+    accountId: recipientAccountId,
+    currency: WalletCurrency.Usdt,
+    type: WalletType.Checking,
+    onChainAddressIdentifiers: [],
+    onChainAddresses: () => [],
+    lnurlp: "lnurlp-recipient-usdt" as Lnurl,
+  } as Wallet
+
+  const legacyClient = {
+    cashWalletPresentation: "legacy_compat",
+    hasUsdtCashWalletSupport: false,
+  } as const
+
+  const accountsRepo = {
+    findById: jest.fn(),
+  }
+  const walletsRepo = {
+    findById: jest.fn(),
+    listByAccountId: jest.fn(),
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockGetConfig.mockResolvedValue({
+      state: "complete",
+      cutoverVersion: 1,
+      updatedAt: new Date(),
+    })
+    accountsRepo.findById.mockResolvedValue(recipientAccount)
+    walletsRepo.listByAccountId.mockResolvedValue([recipientWallet, usdtWallet])
+  })
+
+  it("resolves a legacy USD recipient id to the USDT settlement wallet post-cutover", async () => {
+    walletsRepo.findById.mockResolvedValue(recipientWallet)
+
+    const result = await resolveCashWalletRecipientMutationWalletId({
+      recipientWalletId,
+      client: legacyClient,
+      walletsRepo,
+      accountsRepo,
+    })
+
+    expect(result).toBe(usdtWalletId)
+  })
+
+  it("passes a recipient id that is already the settlement wallet through unchanged", async () => {
+    walletsRepo.findById.mockResolvedValue(usdtWallet)
+
+    const result = await resolveCashWalletRecipientMutationWalletId({
+      recipientWalletId: usdtWalletId,
+      client: legacyClient,
+      walletsRepo,
+      accountsRepo,
+    })
+
+    expect(result).toBe(usdtWalletId)
   })
 })

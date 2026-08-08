@@ -1,6 +1,12 @@
 const mockIntraledgerPaymentSendWalletIdForUsdWallet = jest.fn()
 const mockResolveCashWalletMutationWalletIdForAccount = jest.fn()
 const mockResolveCashWalletRecipientMutationWalletId = jest.fn()
+const mockNotifyOpsEvent = jest.fn()
+
+jest.mock("@services/alerts/ops-events", () => ({
+  notifyOpsEvent: (...args: Parameters<typeof mockNotifyOpsEvent>) =>
+    mockNotifyOpsEvent(...args),
+}))
 
 jest.mock("@app", () => ({
   Payments: {
@@ -84,6 +90,7 @@ describe("IntraLedgerUsdPaymentSendMutation", () => {
       idempotencyKey: "idem-1",
     })
     expect(result).toEqual({ errors: [], status: "success" })
+    expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
   })
 
   it("returns failed without paying when recipient routing errors", async () => {
@@ -102,5 +109,37 @@ describe("IntraLedgerUsdPaymentSendMutation", () => {
     expect(result.status).toBe("failed")
     expect(result.errors).toHaveLength(1)
     expect(mockIntraledgerPaymentSendWalletIdForUsdWallet).not.toHaveBeenCalled()
+    expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        flow: "transfer",
+        status: "failed",
+        error: "MismatchedCurrencyForWalletError",
+        meta: expect.objectContaining({ reason: "recipient-routing" }),
+      }),
+    )
+  })
+
+  it("reports sender routing failures to the ops feed", async () => {
+    mockResolveCashWalletMutationWalletIdForAccount.mockResolvedValue(
+      new MismatchedCurrencyForWalletError(),
+    )
+
+    const result = (await resolve({
+      walletId: senderWalletId,
+      recipientWalletId,
+      amount,
+      memo: null,
+      idempotencyKey: undefined,
+    })) as { status?: string }
+
+    expect(result.status).toBe("failed")
+    expect(mockIntraledgerPaymentSendWalletIdForUsdWallet).not.toHaveBeenCalled()
+    expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        flow: "transfer",
+        status: "failed",
+        meta: expect.objectContaining({ reason: "sender-routing" }),
+      }),
+    )
   })
 })
