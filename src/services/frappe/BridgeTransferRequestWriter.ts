@@ -205,6 +205,82 @@ export const writeIbexCryptoReceiveRequest = async ({
   )
 }
 
+// Fygaro card top-up audit row: fiat captured on Fygaro's side, recorded the
+// moment the payment webhook lands. `fygaro:` prefixed request ids keep these
+// rows disjoint from Bridge deposit ids and IBEX settle rows.
+export const writeFygaroTopupRequest = async ({
+  transactionId,
+  amount,
+  currency,
+  accountId,
+  createdAt,
+  rawPayload,
+}: {
+  transactionId: string
+  amount: string
+  currency: string
+  accountId?: AccountId | string
+  createdAt?: string
+  rawPayload: unknown
+}): Promise<true | BridgeTransferRequestUpsertError> => {
+  return upsert(
+    new BridgeTransferRequest({
+      requestId: `fygaro:${transactionId}`,
+      transactionType: BridgeTransferRequestTransactionType.Topup,
+      status: BridgeTransferRequestStatus.FiatReceived,
+      provider: "Fygaro",
+      asset: "USD",
+      network: "Card",
+      amount: String(amount),
+      currency: String(currency),
+      accountId,
+      sourceEventId: transactionId,
+      sourceEventType: "fygaro.payment",
+      sourceSystemsSeen: ["fygaro_webhook"],
+      firstSeenAt: createdAt,
+      rawPayload,
+    }),
+  )
+}
+
+// Called after the treasury -> user intraledger credit succeeds: promotes the
+// Fygaro topup row to Completed and stamps the credited wallet on it. The
+// upsert's monotonic status guard makes this safe to repeat.
+export const completeFygaroTopup = async ({
+  transactionId,
+  accountId,
+  walletId,
+  amount,
+  currency,
+  rawPayload,
+}: {
+  transactionId: string
+  accountId: AccountId | string
+  walletId: WalletId | string
+  amount: string
+  currency: string
+  rawPayload: unknown
+}): Promise<true | BridgeTransferRequestUpsertError> => {
+  return upsert(
+    new BridgeTransferRequest({
+      requestId: `fygaro:${transactionId}`,
+      transactionType: BridgeTransferRequestTransactionType.Topup,
+      status: BridgeTransferRequestStatus.Completed,
+      provider: "Fygaro",
+      asset: "USD",
+      network: "Card",
+      amount: String(amount),
+      currency: String(currency),
+      accountId,
+      walletId,
+      sourceEventId: transactionId,
+      sourceEventType: "fygaro.payment",
+      sourceSystemsSeen: ["fygaro_webhook", "ibex_intraledger_credit"],
+      rawPayload,
+    }),
+  )
+}
+
 type BridgeCashoutWriteInput = {
   transferId: string
   amount: string

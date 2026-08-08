@@ -15,6 +15,19 @@ ibex:
     # production overrides to enforce the allowlist; empty disables it (ISL-112).
     allowedIps: []
 
+fygaro:
+  enabled: false # flags-off baseline; enable per environment via config overrides
+  webhook:
+    port: 4010
+    timestampSkewMs: 300000
+    # HMAC shared secrets keyed by the Fygaro-Key-ID header value.
+    # Real secrets injected via config overrides; never commit a real secret.
+    secrets: {}
+  credit:
+    # Phase gate: with credit OFF the webhook only records the payment and
+    # notifies ops; the treasury -> user transfer stays manual.
+    enabled: false
+
 bridge:
   enabled: false # flags-off baseline; enable per environment via config overrides
   apiKey: "" # real key injected via config overrides; never commit a real key

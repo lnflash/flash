@@ -772,6 +772,41 @@ export const configSchema = {
       // stay hidden unless explicitly enabled per the v0.6.0 flag ramp.
       default: { enabled: false },
     },
+    fygaro: {
+      type: "object",
+      properties: {
+        enabled: { type: "boolean" },
+        webhook: {
+          type: "object",
+          properties: {
+            port: { type: "integer", default: 4010 },
+            // HMAC shared secrets keyed by the Fygaro-Key-ID header value.
+            // Multiple entries support secret rotation.
+            secrets: {
+              type: "object",
+              additionalProperties: { type: "string" },
+              default: {},
+            },
+            timestampSkewMs: { type: "integer", default: 300000 },
+          },
+          additionalProperties: false,
+          default: {},
+        },
+        credit: {
+          type: "object",
+          properties: {
+            enabled: { type: "boolean", default: false },
+          },
+          additionalProperties: false,
+          // Phase gate: with credit OFF the webhook only records + notifies;
+          // the treasury -> user transfer stays manual.
+          default: { enabled: false },
+        },
+      },
+      additionalProperties: false,
+      // Default OFF baseline (mirrors topup); enable per environment via overrides.
+      default: { enabled: false },
+    },
     frappe: {
       type: "object",
       properties: {

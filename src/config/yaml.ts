@@ -419,4 +419,6 @@ export const IbexConfig = yamlConfig.ibex as IbexConfig
 
 export const BridgeConfig = yamlConfig.bridge as BridgeConfig
 
+export const FygaroConfig = yamlConfig.fygaro as FygaroConfig
+
 export const FrappeConfig = yamlConfig.frappe as FrappeConfig
