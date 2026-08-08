@@ -70,6 +70,8 @@ const mockAlertBridge = jest.fn()
 const mockNotifyOpsEvent = jest.fn()
 const mockCreditFygaroTopup = jest.fn()
 
+import { ResourceAttemptsLockServiceError } from "@domain/lock"
+
 import { paymentHandler } from "@services/fygaro/webhook-server/routes/payment"
 import { FygaroCreditError } from "@services/fygaro/webhook-server/credit-topup"
 
@@ -281,7 +283,9 @@ describe("fygaro paymentHandler", () => {
     })
 
     it("acknowledges without crediting when another delivery holds the credit lock", async () => {
-      mockLockPaymentIdempotencyKey.mockResolvedValue(new Error("lock contention"))
+      mockLockPaymentIdempotencyKey.mockResolvedValue(
+        new ResourceAttemptsLockServiceError(),
+      )
       const res = makeRes()
 
       await paymentHandler(makeReq(VALID_BODY), res)
@@ -289,6 +293,23 @@ describe("fygaro paymentHandler", () => {
       expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
       expect(res.status).toHaveBeenCalledWith(200)
       expect(res.json).toHaveBeenCalledWith({ status: "already_processing" })
+    })
+
+    it("returns 500 with a critical alert when the credit block threw (not contention)", async () => {
+      // redlock reports a swallowed callback throw as a generic lock error —
+      // that must NOT be acked as already_processing, or Fygaro stops
+      // retrying and the payment strands at Fiat Received silently.
+      mockLockPaymentIdempotencyKey.mockResolvedValue(
+        new Error("UnknownLockServiceError"),
+      )
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({ severity: "critical" }),
+      )
+      expect(res.status).toHaveBeenCalledWith(500)
     })
 
     it("never auto-credits a non-USD payment", async () => {

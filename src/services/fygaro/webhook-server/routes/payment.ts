@@ -21,6 +21,7 @@
 import { Request, Response } from "express"
 
 import { FygaroConfig } from "@config"
+import { ResourceAttemptsLockServiceError } from "@domain/lock"
 import { LockService } from "@services/lock"
 import { baseLogger } from "@services/logger"
 import { AccountsRepository } from "@services/mongoose"
@@ -294,10 +295,17 @@ export const paymentHandler = async (req: Request, res: Response) => {
         return { code: 200, body: { status: "success", credited: true } }
       },
     )
-    if (outcome instanceof Error) {
+    if (outcome instanceof ResourceAttemptsLockServiceError) {
       // Another delivery of this payment holds the credit lock right now.
       baseLogger.info({ transactionId }, "Fygaro payment already being processed")
       return res.status(200).json({ status: "already_processing" })
+    }
+    if (outcome instanceof Error) {
+      // Any other lock error means redlock swallowed a throw from inside the
+      // credit block (UnknownLockServiceError). Rethrow so the catch-all
+      // below returns 500 + critical alert and Fygaro retries, instead of
+      // acking a stranded payment as "already_processing".
+      throw outcome
     }
     return res.status(outcome.code).json(outcome.body)
   } catch (error) {
