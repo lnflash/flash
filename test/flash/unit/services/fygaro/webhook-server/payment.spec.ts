@@ -38,7 +38,11 @@ jest.mock("@services/frappe/BridgeTransferRequestWriter", () => ({
 
 jest.mock("@services/alerts", () => ({
   alertBridge: (...args: unknown[]) => mockAlertBridge(...args),
-  generateDedupKey: new Proxy({}, { get: () => jest.fn(() => "dedup") }),
+  // Use the REAL dedup-key generator (a pure, side-effect-free module) rather
+  // than a constant stub. The static-vs-per-transaction key selection in the
+  // credit-failure branch is exactly what the dedupKey assertions below pin, so
+  // stubbing every key to one value would let a regressed ternary pass silently.
+  generateDedupKey: jest.requireActual("@services/alerts/dedup-key").generateDedupKey,
 }))
 
 jest.mock("@services/alerts/ops-events", () => ({
@@ -292,6 +296,11 @@ describe("fygaro paymentHandler", () => {
       expect(mockCompleteFygaroTopup).not.toHaveBeenCalled()
       expect(mockAlertBridge).toHaveBeenCalledWith(
         expect.objectContaining({
+          // A generic credit failure MUST keep the per-transaction dedup key so
+          // each stranded payment pages ops individually — pinned here so a
+          // regression to the static float-exhausted key (which would collapse
+          // distinct manual-credit failures into one page) fails the test.
+          dedupKey: `fygaro:credit-failed:${VALID_BODY.transactionId}`,
           severity: "critical",
           title: "Fygaro auto-credit failed — manual credit needed",
         }),
@@ -314,6 +323,11 @@ describe("fygaro paymentHandler", () => {
       expect(mockCompleteFygaroTopup).not.toHaveBeenCalled()
       expect(mockAlertBridge).toHaveBeenCalledWith(
         expect.objectContaining({
+          // The exhausted branch MUST swap the per-transaction key for the
+          // STATIC float-exhausted key so a treasury-outage run of failing
+          // credits collapses to ONE PagerDuty page instead of one-per-tx.
+          // Pinned so a regression back to the per-transaction key fails here.
+          dedupKey: "fygaro:float-exhausted",
           severity: "critical",
           title: "Fygaro treasury float EXHAUSTED — top up bankowner immediately",
         }),
