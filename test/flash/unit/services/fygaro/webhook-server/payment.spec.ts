@@ -60,6 +60,12 @@ jest.mock("@services/fygaro/webhook-server/credit-topup", () => {
   }
 })
 
+// The fee math (fees.ts) runs for real; only the ERPNext-backed settings read
+// is mocked, so the gating matrix exercises the actual formula end to end.
+jest.mock("@services/fygaro/webhook-server/fygaro-settings", () => ({
+  getFygaroSettings: (...args: unknown[]) => mockGetFygaroSettings(...args),
+}))
+
 const mockLockIdempotencyKey = jest.fn()
 const mockLockPaymentIdempotencyKey = jest.fn()
 const mockFindByUsername = jest.fn()
@@ -69,6 +75,21 @@ const mockIsFygaroTopupCompleted = jest.fn()
 const mockAlertBridge = jest.fn()
 const mockNotifyOpsEvent = jest.fn()
 const mockCreditFygaroTopup = jest.fn()
+const mockGetFygaroSettings = jest.fn()
+
+// Canonical operator settings: 2.99% + $0.49 processor, 2.0% Flash margin,
+// $500 auto-credit limit, auto-credit on. For a $10.00 top-up this yields a
+// $0.79 processor fee, a $0.20 Flash fee, and $9.01 (901¢) net credited.
+const DEFAULT_SETTINGS = {
+  processor: "Fygaro",
+  processorFeePercent: 2.99,
+  processorFeeFixed: 0.49,
+  flashMarginPercent: 2.0,
+  flashMarginFixed: 0,
+  autoCreditLimit: 500,
+  minimumTopup: 10,
+  autoCreditEnabled: true,
+}
 
 import { ResourceAttemptsLockServiceError } from "@domain/lock"
 
@@ -112,6 +133,7 @@ beforeEach(() => {
   mockWriteFygaroTopup.mockResolvedValue(true)
   mockCompleteFygaroTopup.mockResolvedValue(true)
   mockCreditFygaroTopup.mockResolvedValue({ walletId: WALLET_ID, status: "success" })
+  mockGetFygaroSettings.mockResolvedValue({ ...DEFAULT_SETTINGS })
 })
 
 describe("fygaro paymentHandler", () => {
@@ -215,14 +237,15 @@ describe("fygaro paymentHandler", () => {
       mockFygaroConfig.credit = { enabled: true }
     })
 
-    it("credits the account in cents and promotes the audit row to Completed", async () => {
+    it("credits the NET (not gross) and promotes the audit row with the fee breakdown", async () => {
       const res = makeRes()
 
       await paymentHandler(makeReq(VALID_BODY), res)
 
+      // $10.00 gross -> $0.79 processor + $0.20 flash -> $9.01 (901¢) net
       expect(mockCreditFygaroTopup).toHaveBeenCalledWith({
         recipientAccountId: ACCOUNT_ID,
-        amountCents: 1000,
+        amountCents: 901,
         transactionId: VALID_BODY.transactionId,
       })
       expect(mockCompleteFygaroTopup).toHaveBeenCalledWith(
@@ -230,6 +253,10 @@ describe("fygaro paymentHandler", () => {
           transactionId: VALID_BODY.transactionId,
           accountId: ACCOUNT_ID,
           walletId: WALLET_ID,
+          initialAmount: "10.00",
+          processorFee: "0.79",
+          flashFee: "0.20",
+          finalAmount: "9.01",
         }),
       )
       expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
@@ -321,7 +348,94 @@ describe("fygaro paymentHandler", () => {
       expect(mockAlertBridge).toHaveBeenCalledWith(
         expect.objectContaining({ severity: "warning" }),
       )
+      expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: "fygaro-recorded",
+          meta: expect.objectContaining({ reason: "non-usd" }),
+        }),
+      )
       expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
+    })
+
+    // Gating matrix: each failing gate records-only and fires exactly one
+    // reason-named ops alert, never crediting.
+    it.each([
+      [
+        "settings-unavailable",
+        (body: Record<string, unknown>) => body,
+        () => mockGetFygaroSettings.mockResolvedValue(undefined),
+      ],
+      [
+        "auto-credit-disabled",
+        (body: Record<string, unknown>) => body,
+        () =>
+          mockGetFygaroSettings.mockResolvedValue({
+            ...DEFAULT_SETTINGS,
+            autoCreditEnabled: false,
+          }),
+      ],
+      [
+        "over-limit",
+        (body: Record<string, unknown>) => ({ ...body, amount: "500.01" }),
+        () => undefined,
+      ],
+      [
+        "non-positive-net",
+        (body: Record<string, unknown>) => ({ ...body, amount: "0.10" }),
+        () => undefined,
+      ],
+    ])(
+      "records-only and alerts %s without crediting",
+      async (reason, mutateBody, arrange) => {
+        arrange()
+        const res = makeRes()
+
+        await paymentHandler(makeReq(mutateBody(VALID_BODY)), res)
+
+        expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+        expect(mockCompleteFygaroTopup).not.toHaveBeenCalled()
+        expect(mockAlertBridge).toHaveBeenCalledTimes(1)
+        expect(mockAlertBridge).toHaveBeenCalledWith(
+          expect.objectContaining({
+            severity: "warning",
+            context: expect.objectContaining({ reason }),
+          }),
+        )
+        expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            phase: "fygaro-recorded",
+            status: "pending",
+            meta: expect.objectContaining({ reason }),
+          }),
+        )
+        expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
+      },
+    )
+
+    it("does not read Fygaro Settings when credit is disabled at deploy level", async () => {
+      mockFygaroConfig.credit = { enabled: false }
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockGetFygaroSettings).not.toHaveBeenCalled()
+      expect(mockAlertBridge).not.toHaveBeenCalled()
+      expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ phase: "fygaro-recorded" }),
+      )
+      expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
+    })
+
+    it("credits a payment sitting exactly at the auto-credit limit", async () => {
+      const res = makeRes()
+
+      await paymentHandler(makeReq({ ...VALID_BODY, amount: "500.00" }), res)
+
+      // $500 gross -> $15.44 processor + $10.00 flash -> $474.56 (47456¢) net
+      expect(mockCreditFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({ amountCents: 47456 }),
+      )
+      expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
     })
 
     it("still reports success when only the ERPNext promotion fails after a credit", async () => {

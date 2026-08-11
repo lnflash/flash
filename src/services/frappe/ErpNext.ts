@@ -14,6 +14,7 @@ import {
   CashoutDraftError,
   CashoutSubmitError,
   ExchangeRateQueryError,
+  FygaroSettingsQueryError,
   JournalEntryDeleteError,
   SetDocTypeValueError,
   UpgradeRequestCreateError,
@@ -85,6 +86,20 @@ export type BridgeTransferRequestDoc = {
   source_systems_seen?: string
   account_id?: string
   wallet_id?: string
+}
+
+// Raw "Fygaro Settings" Single doctype as ERPNext returns it. Numeric fields
+// may arrive as numbers or numeric strings depending on the Frappe field type;
+// the caller (fygaro-settings.ts) coerces and validates before use.
+export type FygaroSettingsDoc = {
+  processor?: string
+  processor_fee_percent?: number | string
+  processor_fee_fixed?: number | string
+  flash_margin_percent?: number | string
+  flash_margin_fixed?: number | string
+  auto_credit_limit?: number | string
+  minimum_topup?: number | string
+  auto_credit_enabled?: number | boolean | string
 }
 
 export class ErpNext {
@@ -362,6 +377,34 @@ export class ErpNext {
         attributes: { "erpnext.exception": responseData?.exception },
       })
       return new ExchangeRateQueryError(err)
+    }
+  }
+
+  // Reads the "Fygaro Settings" Single doctype (one global row) that carries
+  // the operator-tuned processor/margin fees, auto-credit threshold, minimum
+  // top-up, and the auto-credit master toggle. The webhook consults this per
+  // payment (through a 60s cache) to compute the NET amount to credit.
+  async getFygaroSettings(): Promise<FygaroSettingsDoc | FygaroSettingsQueryError> {
+    try {
+      const resp = await axios.get(
+        `${this.url}/api/resource/${encodeURIComponent("Fygaro Settings")}/${encodeURIComponent("Fygaro Settings")}`,
+        { headers: this.headers },
+      )
+      const data = resp.data?.data
+      if (!data)
+        return new FygaroSettingsQueryError("No data in Fygaro Settings response")
+      return data as FygaroSettingsDoc
+    } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error(
+        { err, responseData },
+        "Error querying Fygaro Settings from ERPNext",
+      )
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
+      return new FygaroSettingsQueryError(err)
     }
   }
 

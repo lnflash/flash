@@ -262,14 +262,21 @@ export const isFygaroTopupCompleted = async (transactionId: string): Promise<boo
 }
 
 // Called after the treasury -> user intraledger credit succeeds: promotes the
-// Fygaro topup row to Completed and stamps the credited wallet on it. The
-// upsert's monotonic status guard makes this safe to repeat.
+// Fygaro topup row to Completed and stamps the credited wallet plus the fee
+// breakdown on it. `initialAmount` is the gross face value, `processorFee` /
+// `flashFee` are the deducted fees, and `finalAmount` is the NET amount that
+// was actually credited (all in USD dollars). The upsert's monotonic status
+// guard makes this safe to repeat.
 export const completeFygaroTopup = async ({
   transactionId,
   accountId,
   walletId,
   amount,
   currency,
+  initialAmount,
+  processorFee,
+  flashFee,
+  finalAmount,
   rawPayload,
 }: {
   transactionId: string
@@ -277,6 +284,10 @@ export const completeFygaroTopup = async ({
   walletId: WalletId | string
   amount: string
   currency: string
+  initialAmount?: string
+  processorFee?: string
+  flashFee?: string
+  finalAmount?: string
   rawPayload: unknown
 }): Promise<true | BridgeTransferRequestUpsertError> => {
   return upsert(
@@ -291,6 +302,10 @@ export const completeFygaroTopup = async ({
       currency: String(currency),
       accountId,
       walletId,
+      initialAmount,
+      processorFee,
+      flashFee,
+      finalAmount,
       sourceEventId: transactionId,
       sourceEventType: "fygaro.payment",
       sourceSystemsSeen: ["fygaro_webhook", "ibex_intraledger_credit"],

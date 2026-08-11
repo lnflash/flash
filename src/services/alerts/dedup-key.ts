@@ -33,6 +33,10 @@ export const generateDedupKey = {
     `fygaro-webhook:payment:${transactionId}`,
   fygaroUnattributed: (transactionId: string) => `fygaro:unattributed:${transactionId}`,
   fygaroCreditFailed: (transactionId: string) => `fygaro:credit-failed:${transactionId}`,
+  // A gate blocked auto-credit (over-limit, settings unavailable, disabled,
+  // non-USD, non-positive net). Distinct from fygaroCreditFailed so a "skipped"
+  // warning never suppresses a later "credit attempt failed" critical.
+  fygaroNotCredited: (transactionId: string) => `fygaro:not-credited:${transactionId}`,
 }
 
 export const normalizeDedupKey = (key: string): string =>

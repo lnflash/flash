@@ -13,3 +13,4 @@ export class BankAccountUpdateRequestCreateError extends ErpNextError {}
 export class BankAccountUpdateRequestQueryError extends ErpNextError {}
 export class ExchangeRateQueryError extends ErpNextError {}
 export class BridgeTransferRequestUpsertError extends ErpNextError {}
+export class FygaroSettingsQueryError extends ErpNextError {}
