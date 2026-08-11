@@ -3,6 +3,7 @@ import { USDAmount, USDTAmount } from "@domain/shared"
 import Ibex from "@services/ibex/client"
 import { alertBridge, generateDedupKey } from "@services/alerts"
 import { baseLogger } from "@services/logger"
+import { redis } from "@services/redis"
 
 import {
   FygaroCreditError,
@@ -24,6 +25,36 @@ import {
  * up bankowner" would be premature noise that contradicts its own instruction.
  */
 const DEFAULT_FLOOR_USD = 2000
+
+// Cross-run rate limit for the float-low warning. alertBridge's own TTL dedup
+// is a process-local Map, but this monitor runs as a one-shot cron Job (a fresh
+// process every ~15-min run), so that dedup resets each run and cannot suppress
+// anything across runs. Without this a treasury sitting below the floor would
+// page every run (~4/hr) instead of the ~1/hr the alert layer implies. A Redis
+// NX marker with a 1h TTL gives real cross-run suppression that survives the
+// process restarts. A Redis error falls through to alerting: over-notifying is
+// the safe failure mode for a draining float, never staying silent.
+const FLOAT_LOW_ALERT_WINDOW_SECONDS = 3600
+const FLOAT_LOW_ALERT_MARKER = "fygaro:float-low:alerted"
+
+const claimFloatLowAlertSlot = async (): Promise<boolean> => {
+  try {
+    const set = await redis.set(
+      FLOAT_LOW_ALERT_MARKER,
+      "1",
+      "EX",
+      FLOAT_LOW_ALERT_WINDOW_SECONDS,
+      "NX",
+    )
+    return set === "OK"
+  } catch (err) {
+    baseLogger.warn(
+      { err },
+      "Fygaro float check: dedup marker unavailable, alerting anyway",
+    )
+    return true
+  }
+}
 
 export const checkFygaroTreasuryFloat = async (): Promise<void> => {
   // Gate on both the feature flag and the auto-credit master gate. With
@@ -84,14 +115,18 @@ export const checkFygaroTreasuryFloat = async (): Promise<void> => {
 
     if (balanceUsd < floorUsd) {
       baseLogger.warn({ balanceUsd, floorUsd }, "Fygaro treasury float below floor")
-      alertBridge({
-        dedupKey: generateDedupKey.fygaroFloatLow(),
-        source: "fygaro-webhook",
-        severity: "warning",
-        title: "Fygaro treasury float low — top up bankowner",
-        detail: `balance=$${balanceUsd.toFixed(2)} floor=$${floorUsd.toFixed(2)}`,
-        context: { balance_usd: balanceUsd, floor_usd: floorUsd },
-      })
+      // Rate-limit across cron runs via the Redis marker (see above); without
+      // it a persistent low float would page every ~15-min run.
+      if (await claimFloatLowAlertSlot()) {
+        alertBridge({
+          dedupKey: generateDedupKey.fygaroFloatLow(),
+          source: "fygaro-webhook",
+          severity: "warning",
+          title: "Fygaro treasury float low — top up bankowner",
+          detail: `balance=$${balanceUsd.toFixed(2)} floor=$${floorUsd.toFixed(2)}`,
+          context: { balance_usd: balanceUsd, floor_usd: floorUsd },
+        })
+      }
     }
   } catch (err) {
     // Belt-and-suspenders: a resolver throw or any unexpected error is

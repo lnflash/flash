@@ -43,6 +43,13 @@ jest.mock("@services/alerts", () => ({
   },
 }))
 
+// The cron is a one-shot Job, so cross-run rate limiting is a Redis NX marker,
+// not the in-memory alert dedup. Mock redis.set so tests drive the claim path.
+const mockRedisSet = jest.fn()
+jest.mock("@services/redis", () => ({
+  redis: { set: (...args: unknown[]) => mockRedisSet(...args) },
+}))
+
 import { checkFygaroTreasuryFloat } from "@services/fygaro/float-monitor"
 
 const TREASURY_ACCOUNT_ID = "bankowner-account" as AccountId
@@ -95,6 +102,8 @@ beforeEach(() => {
   // currency, not by list order.
   mockListByAccountId.mockResolvedValue([usdWallet, usdtWallet])
   mockGetAccountDetails.mockResolvedValue(detailsWithBalance(usdt("5000")))
+  // Default: the cross-run Redis marker is claimable (NX SET succeeds).
+  mockRedisSet.mockResolvedValue("OK")
 })
 
 describe("checkFygaroTreasuryFloat", () => {
@@ -134,6 +143,33 @@ describe("checkFygaroTreasuryFloat", () => {
       balance_usd: 1500,
       floor_usd: 2000,
     })
+  })
+
+  it("suppresses the float-low alert across runs when the Redis marker is already set", async () => {
+    mockGetAccountDetails.mockResolvedValue(detailsWithBalance(usdt("1500")))
+    // NX SET returns null when the key already exists (a prior run alerted
+    // within the window) — the one-shot cron must not re-page.
+    mockRedisSet.mockResolvedValue(null)
+
+    await checkFygaroTreasuryFloat()
+
+    expect(mockRedisSet).toHaveBeenCalledWith(
+      "fygaro:float-low:alerted",
+      "1",
+      "EX",
+      3600,
+      "NX",
+    )
+    expect(mockAlertBridge).not.toHaveBeenCalled()
+  })
+
+  it("alerts anyway when the Redis dedup marker is unavailable (fail-open, never silent)", async () => {
+    mockGetAccountDetails.mockResolvedValue(detailsWithBalance(usdt("1500")))
+    mockRedisSet.mockRejectedValue(new Error("redis down"))
+
+    await checkFygaroTreasuryFloat()
+
+    expect(mockAlertBridge).toHaveBeenCalledTimes(1)
   })
 
   it("alerts (warning) when the balance is below the floor", async () => {
