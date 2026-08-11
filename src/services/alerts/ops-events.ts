@@ -1,7 +1,13 @@
 import { NETWORK, OPS_DISCORD_WEBHOOK_URL } from "@config"
 import { ErrorLevel, JMDAmount, USDAmount, USDTAmount } from "@domain/shared"
 import { recordExceptionInCurrentSpan } from "@services/tracing"
-import axios, { isAxiosError } from "axios"
+
+import {
+  DiscordEmbed,
+  DiscordEmbedField,
+  makeFieldBuilder,
+  postEmbed,
+} from "./discord-embed"
 
 /**
  * Fire-and-forget ops event feed: posts color-coded Discord embeds to
@@ -95,20 +101,10 @@ const titleCase = (phrase: string): string =>
     .map((word) => (word === "otp" ? "OTP" : word))
     .join(" ")
 
-type DiscordEmbedField = { name: string; value: string; inline: boolean }
-type DiscordEmbed = {
-  title: string
-  color: number
-  fields: DiscordEmbedField[]
-  timestamp: string
-}
-
 export const buildEmbed = (event: OpsEvent): DiscordEmbed => {
   const flowTitle = event.flow[0].toUpperCase() + event.flow.slice(1)
   const fields: DiscordEmbedField[] = []
-  const field = (name: string, value: string | undefined, inline = true) => {
-    if (value) fields.push({ name, value, inline })
-  }
+  const field = makeFieldBuilder(fields)
 
   field("account", event.accountId && truncateId(event.accountId))
   field("user", event.userId && truncateId(event.userId))
@@ -146,53 +142,22 @@ const queue: OpsEvent[] = []
 let droppedCount = 0
 let draining: Promise<void> | undefined
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-
-// Discord rate limit responses carry retry_after in seconds (possibly float),
-// in the body and/or the Retry-After header.
-const retryAfterMs = (error: unknown): number | undefined => {
-  if (!isAxiosError(error) || error.response?.status !== 429) return undefined
-  const body = error.response.data as { retry_after?: number } | undefined
-  const retryAfter = body?.retry_after ?? Number(error.response.headers?.["retry-after"])
-  if (typeof retryAfter !== "number" || !Number.isFinite(retryAfter)) return 1_000
-  return Math.ceil(retryAfter * 1000)
-}
-
-const postEmbed = async (embed: DiscordEmbed): Promise<void> => {
-  const post = () =>
-    axios.post(
-      OPS_DISCORD_WEBHOOK_URL as string,
-      { embeds: [embed] },
-      { timeout: FETCH_TIMEOUT_MS, headers: { "Content-Type": "application/json" } },
-    )
-
-  try {
-    await post()
-  } catch (error) {
-    const waitMs = retryAfterMs(error)
-    if (waitMs === undefined) {
-      recordExceptionInCurrentSpan({ error, level: ErrorLevel.Warn })
-      return
-    }
-    await sleep(waitMs)
-    try {
-      await post()
-    } catch (retryError) {
-      recordExceptionInCurrentSpan({ error: retryError, level: ErrorLevel.Warn })
-    }
-  }
-}
+// Deliver via the shared, rate-limit-aware sender. It clamps to Discord's
+// aggregate limit and honors a 429's retry_after once; FETCH_TIMEOUT_MS keeps
+// the ops feed's tighter 3s timeout.
+const send = (embed: DiscordEmbed): Promise<void> =>
+  postEmbed(OPS_DISCORD_WEBHOOK_URL as string, embed, FETCH_TIMEOUT_MS)
 
 const drain = async (): Promise<void> => {
   try {
     while (queue.length > 0) {
       const event = queue.shift()
-      if (event) await postEmbed(buildEmbed(event))
+      if (event) await send(buildEmbed(event))
 
       if (queue.length === 0 && droppedCount > 0) {
         const dropped = droppedCount
         droppedCount = 0
-        await postEmbed(droppedSummaryEmbed(dropped))
+        await send(droppedSummaryEmbed(dropped))
       }
     }
   } catch (error) {

@@ -1,17 +1,16 @@
 import { ALERT_DISCORD_WEBHOOK_URL } from "@config"
-import { ErrorLevel } from "@domain/shared"
-import { recordExceptionInCurrentSpan } from "@services/tracing"
-import axios from "axios"
 
 import { BridgeAlert } from "./index.types"
-
-// Discord embed limits: 25 fields, each value <= 1024 chars, title <= 256,
-// description <= 4096. We stay well under these; the guards below keep a large
-// context object from tripping them.
-const MAX_FIELDS = 25
-const MAX_FIELD_VALUE = 1024
-const MAX_TITLE = 256
-const MAX_DESCRIPTION = 4096
+import {
+  DiscordEmbed,
+  DiscordEmbedField,
+  MAX_DESCRIPTION,
+  MAX_FIELDS,
+  MAX_TITLE,
+  makeFieldBuilder,
+  postEmbed,
+  truncate,
+} from "./discord-embed"
 
 // Warm red for a page, amber for a warning — the embed's left border colour.
 const COLOR_CRITICAL = 0xe01e5a
@@ -35,56 +34,41 @@ const prettyKey = (key: string): string =>
     .replace(/[_-]+/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase())
 
-const truncate = (value: string, max: number): string =>
-  value.length > max ? value.slice(0, max - 1) + "…" : value
-
 const contextFields = (
   context: Record<string, unknown> | undefined,
-): { name: string; value: string; inline: boolean }[] => {
-  if (!context) return []
-  const fields: { name: string; value: string; inline: boolean }[] = []
+): DiscordEmbedField[] => {
+  const fields: DiscordEmbedField[] = []
+  if (!context) return fields
+  const field = makeFieldBuilder(fields)
   for (const [key, raw] of Object.entries(context)) {
     if (raw === undefined || raw === null) continue
-    const value = String(raw)
-    // Discord rejects empty field values.
-    if (value.length === 0) continue
-    fields.push({
-      name: truncate(prettyKey(key), MAX_TITLE),
-      value: truncate(value, MAX_FIELD_VALUE),
-      inline: true,
-    })
+    field(prettyKey(key), String(raw))
   }
   return fields
 }
 
 // Discord incoming webhook — a single rich embed (colour by severity, title,
 // detail as the description, and each context entry as its own field) instead
-// of a raw JSON dump.
+// of a raw JSON dump. Delivery is best-effort via postEmbed: the embed is
+// clamped to Discord's aggregate limit, a 429 is retried once, and any other
+// failure is swallowed as a Warn.
 export const sendDiscord = async (alert: BridgeAlert): Promise<void> => {
   if (!ALERT_DISCORD_WEBHOOK_URL) return
 
-  const fields = [
-    { name: "Source", value: alert.source, inline: true },
-    { name: "Severity", value: alert.severity, inline: true },
-    ...contextFields(alert.context),
-  ].slice(0, MAX_FIELDS)
+  const fields: DiscordEmbedField[] = []
+  const field = makeFieldBuilder(fields)
+  field("Source", alert.source)
+  field("Severity", alert.severity)
+  fields.push(...contextFields(alert.context))
 
-  const embed = {
+  const embed: DiscordEmbed = {
     author: { name: SOURCE_LABEL[alert.source] ?? alert.source },
     title: truncate(alert.title, MAX_TITLE),
     description: alert.detail ? truncate(alert.detail, MAX_DESCRIPTION) : undefined,
     color: alert.severity === "critical" ? COLOR_CRITICAL : COLOR_WARNING,
-    fields,
+    fields: fields.slice(0, MAX_FIELDS),
     timestamp: new Date().toISOString(),
   }
 
-  try {
-    await axios.post(
-      ALERT_DISCORD_WEBHOOK_URL,
-      { embeds: [embed] },
-      { timeout: 5000, headers: { "Content-Type": "application/json" } },
-    )
-  } catch (error) {
-    recordExceptionInCurrentSpan({ error, level: ErrorLevel.Warn })
-  }
+  await postEmbed(ALERT_DISCORD_WEBHOOK_URL, embed)
 }
