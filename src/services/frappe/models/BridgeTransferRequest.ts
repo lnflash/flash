@@ -24,6 +24,8 @@ export type BridgeTransferRequestInput = {
   initialAmount?: string
   subtotalAmount?: string
   finalAmount?: string
+  processorFee?: string
+  flashFee?: string
   accountId?: AccountId | string
   walletId?: WalletId | string
   bridgeCustomerId?: string
@@ -77,6 +79,8 @@ export class BridgeTransferRequest {
       initial_amount: this.input.initialAmount,
       subtotal_amount: this.input.subtotalAmount,
       final_amount: this.input.finalAmount,
+      processor_fee: this.input.processorFee,
+      flash_fee: this.input.flashFee,
       account_id: this.input.accountId,
       wallet_id: this.input.walletId,
       bridge_customer_id: this.input.bridgeCustomerId,

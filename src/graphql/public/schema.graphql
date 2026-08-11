@@ -862,6 +862,28 @@ Cent amount (1/100 of a dollar) as a float, can be positive or negative
 scalar FractionalCentAmount
 
 """
+Fee parameters for Fygaro card top-ups, so the client can
+compute the net amount a user will receive. Null when the operator settings
+are unavailable — clients should degrade gracefully (hide the estimate).
+"""
+type FygaroTopupInfo {
+  """Flash margin fixed fee, in USD."""
+  flashFeeFixed: Float!
+
+  """Flash margin percentage fee (e.g. 2.0 = 2.0%)."""
+  flashFeePercent: Float!
+
+  """Minimum top-up amount, in USD."""
+  minimumAmount: Float!
+
+  """Payment-processor fixed fee, in USD."""
+  processorFeeFixed: Float!
+
+  """Payment-processor percentage fee (e.g. 2.99 = 2.99%)."""
+  processorFeePercent: Float!
+}
+
+"""
 Provides global settings for the application which might have an impact for the user.
 """
 type Globals {
@@ -878,6 +900,13 @@ type Globals {
   """
   cashoutEnabled: Boolean!
   feesInformation: FeesInformation!
+
+  """
+  Fee parameters for Fygaro card top-ups so the app can
+  preview the net amount a user will receive. Null when operator settings
+  are unavailable — the app should hide the estimate and fall back gracefully.
+  """
+  fygaroTopup: FygaroTopupInfo
 
   """
   The domain name for lightning addresses accepted by this Galoy instance

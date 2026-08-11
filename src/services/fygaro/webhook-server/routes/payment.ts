@@ -34,6 +34,8 @@ import { alertBridge, generateDedupKey } from "@services/alerts"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
 
 import { creditFygaroTopup, FygaroCreditError } from "../credit-topup"
+import { getFygaroSettings } from "../fygaro-settings"
+import { evaluateCreditGate, RecordOnlyReason } from "../fees"
 
 type FygaroPaymentPayload = {
   transactionId?: string
@@ -44,6 +46,25 @@ type FygaroPaymentPayload = {
   authCode?: string | null
   createdAt?: string
   client?: { name?: string; email?: string }
+}
+
+const centsToDollars = (cents: number): string => (cents / 100).toFixed(2)
+
+// Human-readable title for the single record-only ops alert. `credit-disabled`
+// is intentionally absent — that is the deploy-level master gate and records
+// silently (no anomaly worth paging on).
+const RECORD_ONLY_ALERT_TITLE: Record<
+  Exclude<RecordOnlyReason, "credit-disabled">,
+  string
+> = {
+  "settings-unavailable":
+    "Fygaro Settings unavailable — payment recorded, not auto-credited",
+  "auto-credit-disabled":
+    "Fygaro auto-credit disabled in settings — payment recorded, not auto-credited",
+  "non-usd": "Fygaro payment in unexpected currency — not auto-credited",
+  "over-limit": "Fygaro payment over the auto-credit limit — not auto-credited",
+  "under-minimum": "Fygaro payment below the minimum top-up — not auto-credited",
+  "non-positive-net": "Fygaro payment net after fees is not positive — not auto-credited",
 }
 
 export const paymentHandler = async (req: Request, res: Response) => {
@@ -60,6 +81,26 @@ export const paymentHandler = async (req: Request, res: Response) => {
     return res.status(400).json({
       error: "Invalid payload",
       detail: "Missing one or more required fields: transactionId, amount",
+    })
+  }
+
+  // A non-numeric amount (e.g. "abc") is a malformed payload, not a real
+  // payment — reject it with 400 up front so it never reaches the credit gate.
+  // Otherwise Math.round(Number("abc") * 100) is NaN, which slips past every
+  // numeric gate (all NaN comparisons are false) into the credit path, where
+  // creditFygaroTopup rejects it and fires the CRITICAL "auto-credit failed"
+  // alert — misclassifying garbage input as a credit failure and paging ops.
+  // Fygaro does not retry 4xx, which is correct here: a retry cannot make
+  // "abc" numeric.
+  const grossAmount = Number(payload.amount)
+  if (!Number.isFinite(grossAmount)) {
+    baseLogger.warn(
+      { transactionId, amount: payload.amount },
+      "Fygaro payment webhook rejected: non-numeric amount",
+    )
+    return res.status(400).json({
+      error: "Invalid payload",
+      detail: "amount is not a finite number",
     })
   }
 
@@ -164,11 +205,56 @@ export const paymentHandler = async (req: Request, res: Response) => {
       return res.status(200).json({ status: "recorded", attributed: false })
     }
 
-    if (!FygaroConfig.credit?.enabled || currency !== "USD") {
-      // Record-only path: nothing money-moving happens here, so a
-      // non-releasing timelock is the right dedupe. Taken only after the
-      // audit write succeeds so provider retries can recover audit gaps
-      // after transient persistence failures.
+    // Fee-aware gate: credit the NET (gross minus processor + Flash fees), and
+    // only when every gate holds. The fees/threshold/minimum/toggle live in the
+    // ERPNext "Fygaro Settings" doctype, read through a 60s cache; the yaml
+    // FygaroConfig.credit.enabled stays the deploy-level master gate. Settings
+    // are only read when credit is enabled — a disabled deploy never touches
+    // ERPNext for this.
+    const creditEnabled = Boolean(FygaroConfig.credit?.enabled)
+    const grossCents = Math.round(grossAmount * 100)
+    const settings = creditEnabled ? await getFygaroSettings() : undefined
+    const gate = evaluateCreditGate({ creditEnabled, currency, settings, grossCents })
+
+    if (!gate.credit) {
+      // `settings-unavailable` is TRANSIENT (an ERPNext blip, cached undefined
+      // for up to 60s) — unlike the deterministic reasons below, a retry
+      // seconds later would auto-credit cleanly. Acking 200 (record-only) would
+      // stop Fygaro retrying and permanently downgrade the payment to manual
+      // credit over a momentary outage. Return 500 so Fygaro retries and the
+      // read self-heals once ERPNext recovers; it still never credits off
+      // missing data — the retry simply re-reads settings. Deliberately do NOT
+      // take the non-releasing dedupe lock here (it would make the very next
+      // retry ack 200 "already_processed" and defeat the self-heal), and skip
+      // the ops-feed line (it can't be deduped without that lock, so per-retry
+      // emission would spam the feed during an outage). alertBridge is
+      // TTL-deduped, so a genuine sustained outage still pages without spamming.
+      if (gate.reason === "settings-unavailable") {
+        baseLogger.warn(
+          { transactionId },
+          "Fygaro Settings unavailable — returning 500 so Fygaro retries and the read self-heals",
+        )
+        alertBridge({
+          dedupKey: generateDedupKey.fygaroNotCredited(transactionId),
+          source: "fygaro-webhook",
+          severity: "warning",
+          title: RECORD_ONLY_ALERT_TITLE["settings-unavailable"],
+          detail: `reason=settings-unavailable currency=${currency} gross=${centsToDollars(grossCents)}`,
+          context: {
+            transaction_id: transactionId,
+            amount: String(payload.amount),
+            reason: gate.reason,
+          },
+        })
+        return res.status(500).json({ error: "Fygaro Settings unavailable; will retry" })
+      }
+
+      // Deterministic record-only path (non-usd, over-limit, under-minimum,
+      // non-positive-net, auto-credit-disabled, and the silent credit-disabled
+      // master gate): these will never change on retry, so ack 200 and dedupe
+      // with a non-releasing timelock. Nothing money-moving happens here. Taken
+      // only after the audit write succeeds so provider retries can recover
+      // audit gaps after transient persistence failures.
       const lockResult = await LockService().lockIdempotencyKey(
         `fygaro-payment:${transactionId}` as IdempotencyKey,
       )
@@ -176,16 +262,22 @@ export const paymentHandler = async (req: Request, res: Response) => {
         baseLogger.info({ transactionId }, "Duplicate Fygaro payment webhook")
         return res.status(200).json({ status: "already_processed" })
       }
-      if (currency !== "USD") {
-        // The payment button is USD-only; a non-USD payment is unexpected
-        // enough to demand human eyes before any crediting.
+      if (gate.reason !== "credit-disabled") {
+        // credit-disabled is the deploy-level master gate and records
+        // silently. Every other reason means credit IS supposed to be on but
+        // this specific payment was skipped — page a human, naming the gate,
+        // since it leaves fiat sitting uncredited.
         alertBridge({
-          dedupKey: generateDedupKey.fygaroCreditFailed(transactionId),
+          dedupKey: generateDedupKey.fygaroNotCredited(transactionId),
           source: "fygaro-webhook",
           severity: "warning",
-          title: "Fygaro payment in unexpected currency — not auto-credited",
-          detail: `currency=${currency}`,
-          context: { transaction_id: transactionId, amount: String(payload.amount) },
+          title: RECORD_ONLY_ALERT_TITLE[gate.reason],
+          detail: `reason=${gate.reason} currency=${currency} gross=${centsToDollars(grossCents)}`,
+          context: {
+            transaction_id: transactionId,
+            amount: String(payload.amount),
+            reason: gate.reason,
+          },
         })
       }
       notifyOpsEvent({
@@ -194,7 +286,12 @@ export const paymentHandler = async (req: Request, res: Response) => {
         status: "pending",
         accountId,
         amount: { value: String(payload.amount), currency },
-        meta: { provider: "Fygaro", transactionId, username: username ?? "" },
+        meta: {
+          provider: "Fygaro",
+          transactionId,
+          username: username ?? "",
+          reason: gate.reason,
+        },
       })
       return res.status(200).json({ status: "recorded", credited: false })
     }
@@ -208,7 +305,7 @@ export const paymentHandler = async (req: Request, res: Response) => {
     // the lock withPaymentIdempotency takes internally (that one is scoped to
     // the sender wallet), so there is no nested-acquire collision.
     const creditAccountId = accountId
-    const amountCents = Math.round(Number(payload.amount) * 100)
+    const { fees } = gate
     const outcome = await LockService().lockPaymentIdempotencyKey(
       `fygaro-payment:${transactionId}` as IdempotencyKey,
       async () => {
@@ -219,7 +316,7 @@ export const paymentHandler = async (req: Request, res: Response) => {
 
         const creditResult = await creditFygaroTopup({
           recipientAccountId: creditAccountId,
-          amountCents,
+          amountCents: fees.netCents,
           transactionId,
         })
         if (creditResult instanceof FygaroCreditError) {
@@ -256,12 +353,21 @@ export const paymentHandler = async (req: Request, res: Response) => {
           return { code: 200, body: { status: "recorded", credited: false } }
         }
 
+        // Contract with the admin fee-breakdown view: on a credited (Completed)
+        // row every fee MUST be an explicit string, including "0.00" for a
+        // zero-rate promo — `centsToDollars` never returns undefined. The admin
+        // renders a missing fee as "Pending", which is correct only for an
+        // uncredited (Fiat Received) row; never omit these here.
         const completeResult = await completeFygaroTopup({
           transactionId,
           accountId: creditAccountId,
           walletId: creditResult.walletId,
           amount: String(payload.amount),
           currency,
+          initialAmount: centsToDollars(fees.grossCents),
+          processorFee: centsToDollars(fees.processorFeeCents),
+          flashFee: centsToDollars(fees.flashFeeCents),
+          finalAmount: centsToDollars(fees.netCents),
           rawPayload: req.body,
         })
         if (completeResult instanceof Error) {
@@ -289,6 +395,7 @@ export const paymentHandler = async (req: Request, res: Response) => {
             transactionId,
             username: username ?? "",
             creditStatus: creditResult.status,
+            net: centsToDollars(fees.netCents),
           },
         })
 

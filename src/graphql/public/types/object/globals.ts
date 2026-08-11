@@ -6,6 +6,7 @@ import Network from "../scalar/network"
 import Country from "./country"
 import FeesInformation from "./fees-information"
 import BuildInformation from "./build-information"
+import FygaroTopupInfo from "./fygaro-topup-info"
 
 const Globals = GT.Object({
   name: "Globals",
@@ -58,6 +59,12 @@ const Globals = GT.Object({
         friend" home-screen card) should be shown to the user. Controlled by the
         instance-wide referralReward feature flag; when false the referral payout is
         disabled, so reward-promising UI must stay hidden.`,
+    },
+    fygaroTopup: {
+      type: FygaroTopupInfo,
+      description: dedent`Fee parameters for Fygaro card top-ups so the app can
+        preview the net amount a user will receive. Null when operator settings
+        are unavailable — the app should hide the estimate and fall back gracefully.`,
     },
   }),
 })
