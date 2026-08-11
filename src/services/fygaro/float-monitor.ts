@@ -71,7 +71,7 @@ export const checkFygaroTreasuryFloat = async (): Promise<void> => {
     // account is provably the funding source. In flash's IBEX-custodial model
     // each walletId is its own IBEX account, so reading the bankowner account's
     // default wallet would read a DIFFERENT account's balance (typically the USD
-    // wallet) and mis-parse it as the USDT float: a drained USDT float would
+    // wallet) and misread it as the USDT float: a drained USDT float would
     // hide behind a funded USD wallet (no page ever fires) and a low USD wallet
     // would false-alarm as "USDT float low".
     const funding = await resolveFygaroTreasuryFundingWallet()

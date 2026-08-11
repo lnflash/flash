@@ -123,7 +123,7 @@ describe("checkFygaroTreasuryFloat", () => {
   it("falls back to the legacy USD wallet when the treasury has no USDT wallet", async () => {
     mockListByAccountId.mockResolvedValue([usdWallet])
     // A funded USD wallet above the floor must NOT alert (and must be read in
-    // USD, not mis-parsed as a zero USDT balance).
+    // USD, not misread as a zero USDT balance).
     mockGetAccountDetails.mockResolvedValue(detailsWithBalance(usd("5000")))
 
     await checkFygaroTreasuryFloat()
