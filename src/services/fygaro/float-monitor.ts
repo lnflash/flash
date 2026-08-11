@@ -1,9 +1,13 @@
 import { FygaroConfig } from "@config"
-import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
-import { AccountsRepository, WalletsRepository } from "@services/mongoose"
+import { USDAmount, USDTAmount } from "@domain/shared"
 import Ibex from "@services/ibex/client"
 import { alertBridge, generateDedupKey } from "@services/alerts"
 import { baseLogger } from "@services/logger"
+
+import {
+  FygaroCreditError,
+  resolveFygaroTreasuryFundingWallet,
+} from "./webhook-server/credit-topup"
 
 /**
  * Proactive bankowner treasury float check (the main value of the float-
@@ -14,60 +18,45 @@ import { baseLogger } from "@services/logger"
  *
  * Contract: this is registered as a cron task and MUST NOT throw — a thrown
  * task fails the whole cron run (exit 99 -> CrashLoopBackOff). Every failure
- * path here logs and returns. Only runs when the fygaro feature is enabled so
- * an unconfigured instance never alerts.
+ * path here logs and returns. Only runs when the fygaro feature is enabled AND
+ * auto-credit is on: during the record-only phase (fygaro.enabled=true,
+ * credit.enabled=false) nothing ever spends from the treasury, so paging "top
+ * up bankowner" would be premature noise that contradicts its own instruction.
  */
 const DEFAULT_FLOOR_USD = 2000
 
-// The role whose account funds auto-credit sends (credit-topup.ts).
-const TREASURY_ROLE = "bankowner"
-
 export const checkFygaroTreasuryFloat = async (): Promise<void> => {
-  if (!FygaroConfig.enabled) return
+  // Gate on both the feature flag and the auto-credit master gate. With
+  // credit.enabled=false the webhook only records payments and the treasury ->
+  // user transfer stays manual, so there is nothing for this monitor to fund
+  // yet — running it would page every window over a float no credit touches.
+  if (!FygaroConfig.enabled || !FygaroConfig.credit?.enabled) return
 
   const floorUsd = FygaroConfig.float?.floorUsd ?? DEFAULT_FLOOR_USD
 
   try {
     // Read the balance of the SAME wallet auto-credit actually spends from —
-    // resolved exactly the way credit-topup.ts does — so the monitored account
-    // is provably the funding source. In flash's IBEX-custodial model each
-    // walletId is its own IBEX account, so reading the bankowner account's
+    // resolved through the shared resolver credit-topup uses — so the monitored
+    // account is provably the funding source. In flash's IBEX-custodial model
+    // each walletId is its own IBEX account, so reading the bankowner account's
     // default wallet would read a DIFFERENT account's balance (typically the USD
     // wallet) and mis-parse it as the USDT float: a drained USDT float would
     // hide behind a funded USD wallet (no page ever fires) and a low USD wallet
     // would false-alarm as "USDT float low".
-    const treasury = await AccountsRepository().findByRole(TREASURY_ROLE)
-    if (treasury instanceof Error) {
+    const funding = await resolveFygaroTreasuryFundingWallet()
+    if (funding instanceof FygaroCreditError) {
+      // Could not resolve the treasury or its funding wallet. Log and bail; the
+      // next run re-reads. Never alert here (a distinct alert would fight the
+      // float-low dedup) and never crash the cron.
       baseLogger.error(
-        { err: treasury, role: TREASURY_ROLE },
-        "Fygaro float check: could not resolve the bankowner treasury account",
+        { step: funding.step, detail: funding.message },
+        "Fygaro float check: could not resolve the bankowner treasury funding wallet",
       )
       return
     }
 
-    const wallets = await WalletsRepository().listByAccountId(treasury.id)
-    if (wallets instanceof Error) {
-      baseLogger.error(
-        { err: wallets },
-        "Fygaro float check: could not list bankowner treasury wallets",
-      )
-      return
-    }
-
-    // Prefer the USDT wallet (the active cash wallet), falling back to the
-    // legacy USD wallet — the exact selection credit-topup makes for the send.
-    const funding =
-      wallets.find((w) => w.currency === WalletCurrency.Usdt) ??
-      wallets.find((w) => w.currency === WalletCurrency.Usd)
-    if (!funding) {
-      baseLogger.error(
-        { role: TREASURY_ROLE },
-        "Fygaro float check: treasury account has no USDT or USD wallet",
-      )
-      return
-    }
-
-    const details = await Ibex.getAccountDetails(funding.id, funding.currency)
+    const fundingWallet = funding.fundingWallet
+    const details = await Ibex.getAccountDetails(fundingWallet.id, fundingWallet.currency)
 
     if (details instanceof Error) {
       // An IBEX read blip must never crash the cron, and must never be mistaken

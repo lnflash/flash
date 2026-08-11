@@ -2,6 +2,7 @@ import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
 
 const mockFygaroConfig = {
   enabled: true,
+  credit: { enabled: true } as { enabled: boolean } | undefined,
   float: { floorUsd: 2000 } as { floorUsd: number } | undefined,
 }
 
@@ -87,6 +88,7 @@ const detailsWithBalance = (balance: USDTAmount | USDAmount | undefined) => ({
 beforeEach(() => {
   jest.clearAllMocks()
   mockFygaroConfig.enabled = true
+  mockFygaroConfig.credit = { enabled: true }
   mockFygaroConfig.float = { floorUsd: 2000 }
   mockFindByRole.mockResolvedValue({ id: TREASURY_ACCOUNT_ID })
   // USD wallet listed first on purpose: selection must pick the USDT wallet by
@@ -219,6 +221,32 @@ describe("checkFygaroTreasuryFloat", () => {
 
   it("skips entirely when the fygaro feature is disabled", async () => {
     mockFygaroConfig.enabled = false
+
+    await checkFygaroTreasuryFloat()
+
+    expect(mockFindByRole).not.toHaveBeenCalled()
+    expect(mockListByAccountId).not.toHaveBeenCalled()
+    expect(mockGetAccountDetails).not.toHaveBeenCalled()
+    expect(mockAlertBridge).not.toHaveBeenCalled()
+  })
+
+  it("skips entirely during the record-only phase (auto-credit disabled)", async () => {
+    // fygaro.enabled=true but credit.enabled=false: the webhook only records
+    // payments, nothing spends from the treasury, so the monitor must do no
+    // repository/IBEX read and fire no page — paging "top up bankowner" here
+    // would be premature noise contradicting the alert's own instruction.
+    mockFygaroConfig.credit = { enabled: false }
+
+    await checkFygaroTreasuryFloat()
+
+    expect(mockFindByRole).not.toHaveBeenCalled()
+    expect(mockListByAccountId).not.toHaveBeenCalled()
+    expect(mockGetAccountDetails).not.toHaveBeenCalled()
+    expect(mockAlertBridge).not.toHaveBeenCalled()
+  })
+
+  it("skips entirely when the credit config block is absent", async () => {
+    mockFygaroConfig.credit = undefined
 
     await checkFygaroTreasuryFloat()
 
