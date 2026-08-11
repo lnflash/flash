@@ -33,7 +33,11 @@ import {
 import { alertBridge, generateDedupKey } from "@services/alerts"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
 
-import { creditFygaroTopup, FygaroCreditError } from "../credit-topup"
+import {
+  creditFygaroTopup,
+  FygaroCreditError,
+  INSUFFICIENT_TREASURY_FLOAT_STEP,
+} from "../credit-topup"
 import { getFygaroSettings } from "../fygaro-settings"
 import { evaluateCreditGate, RecordOnlyReason } from "../fees"
 
@@ -324,11 +328,21 @@ export const paymentHandler = async (req: Request, res: Response) => {
             { error: creditResult, transactionId, accountId: creditAccountId },
             "Fygaro payment recorded but auto-credit failed",
           )
+          // Treasury-float exhaustion is an ops top-up problem, not a bug to
+          // debug — raise a distinct critical (with its own static dedup key so
+          // a run of exhausted credits collapses to one page) that names the
+          // fix. Every other credit failure keeps the generic per-transaction
+          // "manual credit needed" alert.
+          const floatExhausted = creditResult.step === INSUFFICIENT_TREASURY_FLOAT_STEP
           alertBridge({
-            dedupKey: generateDedupKey.fygaroCreditFailed(transactionId),
+            dedupKey: floatExhausted
+              ? generateDedupKey.fygaroFloatExhausted()
+              : generateDedupKey.fygaroCreditFailed(transactionId),
             source: "fygaro-webhook",
             severity: "critical",
-            title: "Fygaro auto-credit failed — manual credit needed",
+            title: floatExhausted
+              ? "Fygaro treasury float EXHAUSTED — top up bankowner immediately"
+              : "Fygaro auto-credit failed — manual credit needed",
             detail: `${creditResult.step}: ${creditResult.message}`,
             context: {
               transaction_id: transactionId,

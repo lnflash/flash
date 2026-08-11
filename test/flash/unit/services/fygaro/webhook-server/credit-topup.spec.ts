@@ -29,6 +29,8 @@ import {
   creditFygaroTopup,
   FygaroCreditError,
 } from "@services/fygaro/webhook-server/credit-topup"
+import { InsufficientIbexBalance } from "@services/ibex/errors"
+import { InsufficientBalanceError } from "@domain/errors"
 
 const TREASURY_ACCOUNT_ID = "treasury-account" as AccountId
 const RECIPIENT_ACCOUNT_ID = "recipient-account" as AccountId
@@ -143,13 +145,35 @@ describe("creditFygaroTopup", () => {
     expect(mockIntraledgerSend).not.toHaveBeenCalled()
   })
 
-  it("surfaces a send error as an intraledger-send failure", async () => {
+  it("surfaces a generic send error as an intraledger-send failure", async () => {
+    // A plain Error whose message merely mentions balance must NOT be
+    // misclassified as float exhaustion — detection is by error class.
     mockIntraledgerSend.mockResolvedValue(new Error("InsufficientBalanceError"))
 
     const result = await credit()
 
     expect(result).toBeInstanceOf(FygaroCreditError)
     expect((result as FygaroCreditError).step).toBe("intraledger-send")
+  })
+
+  it("maps an IBEX insufficient-balance failure to the insufficient-treasury-float step", async () => {
+    mockIntraledgerSend.mockResolvedValue(
+      new InsufficientIbexBalance(new Error("insufficient balance")),
+    )
+
+    const result = await credit()
+
+    expect(result).toBeInstanceOf(FygaroCreditError)
+    expect((result as FygaroCreditError).step).toBe("insufficient-treasury-float")
+  })
+
+  it("maps a domain InsufficientBalanceError to the insufficient-treasury-float step", async () => {
+    mockIntraledgerSend.mockResolvedValue(new InsufficientBalanceError("balance too low"))
+
+    const result = await credit()
+
+    expect(result).toBeInstanceOf(FygaroCreditError)
+    expect((result as FygaroCreditError).step).toBe("insufficient-treasury-float")
   })
 
   it("fails on an unexpected payment status instead of assuming success", async () => {

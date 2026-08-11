@@ -27,6 +27,11 @@ fygaro:
     # Phase gate: with credit OFF the webhook only records the payment and
     # notifies ops; the treasury -> user transfer stays manual.
     enabled: false
+  float:
+    # Alert (cron) when the bankowner treasury USDT balance — the auto-credit
+    # funding source — drops below this floor, in USD. Default ~4x the $500
+    # auto-credit limit so ops has runway to top up before the well runs dry.
+    floorUsd: 2000
 
 bridge:
   enabled: false # flags-off baseline; enable per environment via config overrides

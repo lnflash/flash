@@ -1,7 +1,21 @@
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { WalletCurrency } from "@domain/shared"
+import { InsufficientBalanceError } from "@domain/errors"
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import { baseLogger } from "@services/logger"
+import { InsufficientIbexBalance } from "@services/ibex/errors"
+
+// The treasury can't cover the send. On the flash IBEX-custodial path an
+// under-funded bankowner surfaces as InsufficientIbexBalance (ibex/errors.ts
+// maps the IBEX "insufficient balance" ApiError); InsufficientBalanceError is
+// the domain-level equivalent kept for defence in depth. Matched by class, not
+// by message, so a generic send error with a coincidental wording is NOT
+// misread as float exhaustion.
+const isInsufficientTreasuryBalance = (err: Error): boolean =>
+  err instanceof InsufficientIbexBalance || err instanceof InsufficientBalanceError
+
+/** Distinct credit-failure step signalling the treasury float is exhausted. */
+export const INSUFFICIENT_TREASURY_FLOAT_STEP = "insufficient-treasury-float"
 
 /**
  * Credits a verified Fygaro card payment to the payer's Flash account:
@@ -98,6 +112,13 @@ export const creditFygaroTopup = async ({
       { err: result, transactionId, recipientAccountId },
       "fygaro credit: intraledger send returned an error",
     )
+    // Distinguish "the treasury is empty" (an ops top-up problem) from every
+    // other send failure (a bug to debug) so payment.ts can raise the right
+    // alert. The payment is still recorded and the row stays Fiat Received
+    // either way — no double-spend risk.
+    if (isInsufficientTreasuryBalance(result)) {
+      return new FygaroCreditError(INSUFFICIENT_TREASURY_FLOAT_STEP, result.message)
+    }
     return new FygaroCreditError("intraledger-send", result.message)
   }
   if (result === PaymentSendStatus.Success) {

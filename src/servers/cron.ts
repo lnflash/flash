@@ -24,6 +24,7 @@ import {
   reconcileBridgeAndIbexDeposits,
   reconcileBridgeAndIbexWithdrawals,
 } from "@services/bridge/reconciliation"
+import { checkFygaroTreasuryFloat } from "@services/fygaro/float-monitor"
 
 import { elapsedSinceTimestamp, sleep } from "@utils"
 import { rebalancingInternalChannels } from "@services/lnd/rebalancing"
@@ -88,6 +89,13 @@ const reconcileBridgeWithdrawalsJob = async () => {
   if (result instanceof Error) throw result
 }
 
+// Bankowner treasury float check for Fygaro auto-credit. Runs every cron
+// invocation (~15 min via the k8s CronJob schedule, matching the reconcile
+// cadence above); self-guards on FygaroConfig.enabled and never throws.
+const checkFygaroFloatJob = async () => {
+  await checkFygaroTreasuryFloat()
+}
+
 const main = async () => {
   console.log("cronjob started")
   const start = new Date()
@@ -125,6 +133,7 @@ const main = async () => {
     ...(cronConfig.swapEnabled ? [swapOutJob] : []),
     reconcileBridgeDepositsJob,
     reconcileBridgeWithdrawalsJob,
+    checkFygaroFloatJob,
     deleteExpiredPaymentFlows,
     deleteExpiredInvoices,
     ...(cronConfig.lndTasksEnabled

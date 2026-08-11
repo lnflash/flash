@@ -4,8 +4,32 @@ import express from "express"
 
 import { FygaroConfig } from "@config"
 import { baseLogger } from "@services/logger"
+import { alertBridge, generateDedupKey } from "@services/alerts"
 
 type RawBodyRequest = express.Request & { rawBody?: string }
+
+/**
+ * Page ops when signature verification is failing for a reason that means our
+ * side is misconfigured — a rotated/wrong shared secret ("we hold a secret but
+ * the HMAC didn't match") or no secrets configured at all. Left silent, either
+ * one 401s every real payment while looking healthy: this exact gap caused
+ * hours of silent card-top-up failures during setup. The static dedup key lets
+ * the built-in TTL suppression collapse the flood to one alert per window
+ * rather than one per rejected request. Deliberately NOT fired for a plain
+ * missing/malformed/expired signature (random internet noise) — those never
+ * indicate a secret problem and would be pure alert spam. Never carries the
+ * secret itself — only the (public) key id.
+ */
+const alertSignatureFailure = (reason: string, keyId?: string): void => {
+  alertBridge({
+    dedupKey: generateDedupKey.fygaroSignatureFailure(),
+    source: "fygaro-webhook",
+    severity: "warning",
+    title: "Fygaro webhook signature verification failing — check the webhook secret",
+    detail: reason,
+    context: { key_id: keyId },
+  })
+}
 
 /**
  * Fygaro webhook signature verification.
@@ -66,6 +90,10 @@ export const verifyFygaroSignature = (
         { keyId },
         "Fygaro webhook rejected: no webhook secrets configured",
       )
+      alertSignatureFailure(
+        "no webhook secrets configured",
+        typeof keyId === "string" ? keyId : undefined,
+      )
       return res.status(401).json({ error: "Webhook secret not configured" })
     }
 
@@ -106,6 +134,10 @@ export const verifyFygaroSignature = (
     })
     if (!valid) {
       baseLogger.warn({ keyId }, "Fygaro webhook rejected: signature mismatch")
+      alertSignatureFailure(
+        "HMAC signature mismatch — secret likely rotated or wrong",
+        typeof keyId === "string" ? keyId : undefined,
+      )
       return res.status(401).json({ error: "Invalid signature" })
     }
 
