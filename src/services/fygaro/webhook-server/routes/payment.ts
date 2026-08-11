@@ -353,6 +353,11 @@ export const paymentHandler = async (req: Request, res: Response) => {
           return { code: 200, body: { status: "recorded", credited: false } }
         }
 
+        // Contract with the admin fee-breakdown view: on a credited (Completed)
+        // row every fee MUST be an explicit string, including "0.00" for a
+        // zero-rate promo — `centsToDollars` never returns undefined. The admin
+        // renders a missing fee as "Pending", which is correct only for an
+        // uncredited (Fiat Received) row; never omit these here.
         const completeResult = await completeFygaroTopup({
           transactionId,
           accountId: creditAccountId,
