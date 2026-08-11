@@ -63,6 +63,7 @@ const RECORD_ONLY_ALERT_TITLE: Record<
     "Fygaro auto-credit disabled in settings — payment recorded, not auto-credited",
   "non-usd": "Fygaro payment in unexpected currency — not auto-credited",
   "over-limit": "Fygaro payment over the auto-credit limit — not auto-credited",
+  "under-minimum": "Fygaro payment below the minimum top-up — not auto-credited",
   "non-positive-net": "Fygaro payment net after fees is not positive — not auto-credited",
 }
 
@@ -80,6 +81,26 @@ export const paymentHandler = async (req: Request, res: Response) => {
     return res.status(400).json({
       error: "Invalid payload",
       detail: "Missing one or more required fields: transactionId, amount",
+    })
+  }
+
+  // A non-numeric amount (e.g. "abc") is a malformed payload, not a real
+  // payment — reject it with 400 up front so it never reaches the credit gate.
+  // Otherwise Math.round(Number("abc") * 100) is NaN, which slips past every
+  // numeric gate (all NaN comparisons are false) into the credit path, where
+  // creditFygaroTopup rejects it and fires the CRITICAL "auto-credit failed"
+  // alert — misclassifying garbage input as a credit failure and paging ops.
+  // Fygaro does not retry 4xx, which is correct here: a retry cannot make
+  // "abc" numeric.
+  const grossAmount = Number(payload.amount)
+  if (!Number.isFinite(grossAmount)) {
+    baseLogger.warn(
+      { transactionId, amount: payload.amount },
+      "Fygaro payment webhook rejected: non-numeric amount",
+    )
+    return res.status(400).json({
+      error: "Invalid payload",
+      detail: "amount is not a finite number",
     })
   }
 
@@ -191,15 +212,49 @@ export const paymentHandler = async (req: Request, res: Response) => {
     // are only read when credit is enabled — a disabled deploy never touches
     // ERPNext for this.
     const creditEnabled = Boolean(FygaroConfig.credit?.enabled)
-    const grossCents = Math.round(Number(payload.amount) * 100)
+    const grossCents = Math.round(grossAmount * 100)
     const settings = creditEnabled ? await getFygaroSettings() : undefined
     const gate = evaluateCreditGate({ creditEnabled, currency, settings, grossCents })
 
     if (!gate.credit) {
-      // Record-only path: nothing money-moving happens here, so a
-      // non-releasing timelock is the right dedupe. Taken only after the
-      // audit write succeeds so provider retries can recover audit gaps
-      // after transient persistence failures.
+      // `settings-unavailable` is TRANSIENT (an ERPNext blip, cached undefined
+      // for up to 60s) — unlike the deterministic reasons below, a retry
+      // seconds later would auto-credit cleanly. Acking 200 (record-only) would
+      // stop Fygaro retrying and permanently downgrade the payment to manual
+      // credit over a momentary outage. Return 500 so Fygaro retries and the
+      // read self-heals once ERPNext recovers; it still never credits off
+      // missing data — the retry simply re-reads settings. Deliberately do NOT
+      // take the non-releasing dedupe lock here (it would make the very next
+      // retry ack 200 "already_processed" and defeat the self-heal), and skip
+      // the ops-feed line (it can't be deduped without that lock, so per-retry
+      // emission would spam the feed during an outage). alertBridge is
+      // TTL-deduped, so a genuine sustained outage still pages without spamming.
+      if (gate.reason === "settings-unavailable") {
+        baseLogger.warn(
+          { transactionId },
+          "Fygaro Settings unavailable — returning 500 so Fygaro retries and the read self-heals",
+        )
+        alertBridge({
+          dedupKey: generateDedupKey.fygaroNotCredited(transactionId),
+          source: "fygaro-webhook",
+          severity: "warning",
+          title: RECORD_ONLY_ALERT_TITLE["settings-unavailable"],
+          detail: `reason=settings-unavailable currency=${currency} gross=${centsToDollars(grossCents)}`,
+          context: {
+            transaction_id: transactionId,
+            amount: String(payload.amount),
+            reason: gate.reason,
+          },
+        })
+        return res.status(500).json({ error: "Fygaro Settings unavailable; will retry" })
+      }
+
+      // Deterministic record-only path (non-usd, over-limit, under-minimum,
+      // non-positive-net, auto-credit-disabled, and the silent credit-disabled
+      // master gate): these will never change on retry, so ack 200 and dedupe
+      // with a non-releasing timelock. Nothing money-moving happens here. Taken
+      // only after the audit write succeeds so provider retries can recover
+      // audit gaps after transient persistence failures.
       const lockResult = await LockService().lockIdempotencyKey(
         `fygaro-payment:${transactionId}` as IdempotencyKey,
       )

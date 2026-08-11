@@ -57,6 +57,7 @@ export type RecordOnlyReason =
   | "auto-credit-disabled"
   | "non-usd"
   | "over-limit"
+  | "under-minimum"
   | "non-positive-net"
 
 export type CreditGate =
@@ -68,9 +69,18 @@ export type CreditGate =
  *   1. credit enabled at deploy level (FygaroConfig.credit.enabled)
  *   2. Fygaro Settings available AND auto_credit_enabled
  *   3. currency === "USD"
- *   4. gross <= auto_credit_limit (threshold on GROSS)
+ *   4. gross <= auto_credit_limit (inclusive upper bound on GROSS)
  *   5. net > 0 (after fees)
+ *   6. gross >= minimum_topup (inclusive lower bound on GROSS)
  * The first failing gate names the record-only reason.
+ *
+ * `under-minimum` is checked last (after the net gate) on purpose: a payment
+ * below the operator minimum is a valid, positive-net, in-limit USD top-up that
+ * is simply too small to auto-credit, so it records for manual handling. A
+ * payment whose fees already sink the net non-positive surfaces as
+ * `non-positive-net` (the more fundamental problem) rather than `under-minimum`.
+ * Both bounds on gross are inclusive: exactly at the limit or exactly at the
+ * minimum still auto-credits.
  */
 export const evaluateCreditGate = ({
   creditEnabled,
@@ -94,6 +104,9 @@ export const evaluateCreditGate = ({
 
   const fees = computeFygaroFees({ grossCents, settings })
   if (fees.netCents <= 0) return { credit: false, reason: "non-positive-net" }
+  if (grossCents < Math.round(settings.minimumTopup * 100)) {
+    return { credit: false, reason: "under-minimum" }
+  }
 
   return { credit: true, fees }
 }

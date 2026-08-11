@@ -121,8 +121,34 @@ describe("evaluateCreditGate", () => {
     expect(gate.credit).toBe(true)
   })
 
+  it("record-only: under-minimum when a positive-net payment is below the minimum", () => {
+    // $2.00 gross, $10 minimum: net is positive (~$1.41) but the gross is below
+    // the operator minimum, so it must NOT auto-credit.
+    const gate = evaluateCreditGate({ ...base, grossCents: 200, settings: settings() })
+    expect(gate).toEqual({ credit: false, reason: "under-minimum" })
+  })
+
+  it("record-only: under-minimum one cent below the minimum", () => {
+    // $9.99 gross vs $10 minimum: still under-minimum (inclusive lower bound).
+    const gate = evaluateCreditGate({ ...base, grossCents: 999, settings: settings() })
+    expect(gate).toEqual({ credit: false, reason: "under-minimum" })
+  })
+
+  it("credits exactly at the minimum top-up (inclusive lower bound)", () => {
+    // $10.00 gross == $10 minimum: credits.
+    const gate = evaluateCreditGate({ ...base, grossCents: 1000, settings: settings() })
+    expect(gate.credit).toBe(true)
+  })
+
   it("record-only: non-positive-net when fees meet or exceed gross", () => {
     // $0.10 gross, $0.49 fixed processor fee => net is negative
+    const gate = evaluateCreditGate({ ...base, grossCents: 10, settings: settings() })
+    expect(gate).toEqual({ credit: false, reason: "non-positive-net" })
+  })
+
+  it("evaluates gates in order: non-positive-net wins over under-minimum", () => {
+    // $0.10 gross is BOTH below the $10 minimum and non-positive-net. The net
+    // gate is checked first, so the more fundamental reason is reported.
     const gate = evaluateCreditGate({ ...base, grossCents: 10, settings: settings() })
     expect(gate).toEqual({ credit: false, reason: "non-positive-net" })
   })

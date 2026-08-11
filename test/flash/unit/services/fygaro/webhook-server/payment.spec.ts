@@ -146,6 +146,21 @@ describe("fygaro paymentHandler", () => {
     expect(mockWriteFygaroTopup).not.toHaveBeenCalled()
   })
 
+  it("rejects a non-numeric amount with 400 and never records, credits, or alerts", async () => {
+    const res = makeRes()
+
+    await paymentHandler(makeReq({ ...VALID_BODY, amount: "abc" }), res)
+
+    expect(res.status).toHaveBeenCalledWith(400)
+    // "abc" -> Math.round(Number("abc") * 100) is NaN. It must be rejected up
+    // front, never reaching the audit/credit path where a NaN gross slips past
+    // every numeric gate and gets misclassified as a CRITICAL auto-credit
+    // failure that pages ops.
+    expect(mockWriteFygaroTopup).not.toHaveBeenCalled()
+    expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+    expect(mockAlertBridge).not.toHaveBeenCalled()
+  })
+
   it("records an attributed payment and reports pending when credit is disabled", async () => {
     const res = makeRes()
 
@@ -357,14 +372,11 @@ describe("fygaro paymentHandler", () => {
       expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
     })
 
-    // Gating matrix: each failing gate records-only and fires exactly one
-    // reason-named ops alert, never crediting.
+    // Gating matrix: each DETERMINISTIC failing gate records-only (200), fires
+    // exactly one reason-named ops alert, and never credits. `settings-
+    // unavailable` is intentionally NOT here — it is transient and returns 500
+    // (see its dedicated test below) so Fygaro retries and the read self-heals.
     it.each([
-      [
-        "settings-unavailable",
-        (body: Record<string, unknown>) => body,
-        () => mockGetFygaroSettings.mockResolvedValue(undefined),
-      ],
       [
         "auto-credit-disabled",
         (body: Record<string, unknown>) => body,
@@ -377,6 +389,12 @@ describe("fygaro paymentHandler", () => {
       [
         "over-limit",
         (body: Record<string, unknown>) => ({ ...body, amount: "500.01" }),
+        () => undefined,
+      ],
+      [
+        "under-minimum",
+        // $2.00 vs the $10 default minimum: positive net, but below the minimum.
+        (body: Record<string, unknown>) => ({ ...body, amount: "2.00" }),
         () => undefined,
       ],
       [
@@ -411,6 +429,33 @@ describe("fygaro paymentHandler", () => {
         expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
       },
     )
+
+    it("returns 500 for settings-unavailable so Fygaro retries (transient), without acking or spamming the feed", async () => {
+      // A brief ERPNext blip caches settings as undefined for up to 60s. That
+      // must NOT permanently downgrade the payment to manual credit: return 500
+      // so Fygaro retries and a recovered read auto-credits cleanly.
+      mockGetFygaroSettings.mockResolvedValue(undefined)
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+      expect(mockCompleteFygaroTopup).not.toHaveBeenCalled()
+      // The non-releasing dedupe lock is deliberately NOT taken here — taking it
+      // would make the very next retry ack 200 "already_processed" and defeat
+      // the self-heal.
+      expect(mockLockIdempotencyKey).not.toHaveBeenCalled()
+      // Paged via alertBridge (TTL-deduped); no ops-feed line, which cannot be
+      // deduped without the lock and would otherwise spam per retry.
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({
+          severity: "warning",
+          context: expect.objectContaining({ reason: "settings-unavailable" }),
+        }),
+      )
+      expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+      expect(res.status).toHaveBeenCalledWith(500)
+    })
 
     it("does not read Fygaro Settings when credit is disabled at deploy level", async () => {
       mockFygaroConfig.credit = { enabled: false }
