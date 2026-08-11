@@ -1,6 +1,6 @@
 import { FygaroConfig } from "@config"
-import { USDTAmount, WalletCurrency } from "@domain/shared"
-import { getBankOwnerWalletId } from "@services/ledger/caching"
+import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
+import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
 import { alertBridge, generateDedupKey } from "@services/alerts"
 import { baseLogger } from "@services/logger"
@@ -19,16 +19,55 @@ import { baseLogger } from "@services/logger"
  */
 const DEFAULT_FLOOR_USD = 2000
 
+// The role whose account funds auto-credit sends (credit-topup.ts).
+const TREASURY_ROLE = "bankowner"
+
 export const checkFygaroTreasuryFloat = async (): Promise<void> => {
   if (!FygaroConfig.enabled) return
 
   const floorUsd = FygaroConfig.float?.floorUsd ?? DEFAULT_FLOOR_USD
 
   try {
-    // walletId IS the IBEX accountId (see docs/ledger caching). Read the
-    // treasury's USDT balance straight off the IBEX client.
-    const walletId = await getBankOwnerWalletId()
-    const details = await Ibex.getAccountDetails(walletId, WalletCurrency.Usdt)
+    // Read the balance of the SAME wallet auto-credit actually spends from —
+    // resolved exactly the way credit-topup.ts does — so the monitored account
+    // is provably the funding source. In flash's IBEX-custodial model each
+    // walletId is its own IBEX account, so reading the bankowner account's
+    // default wallet would read a DIFFERENT account's balance (typically the USD
+    // wallet) and mis-parse it as the USDT float: a drained USDT float would
+    // hide behind a funded USD wallet (no page ever fires) and a low USD wallet
+    // would false-alarm as "USDT float low".
+    const treasury = await AccountsRepository().findByRole(TREASURY_ROLE)
+    if (treasury instanceof Error) {
+      baseLogger.error(
+        { err: treasury, role: TREASURY_ROLE },
+        "Fygaro float check: could not resolve the bankowner treasury account",
+      )
+      return
+    }
+
+    const wallets = await WalletsRepository().listByAccountId(treasury.id)
+    if (wallets instanceof Error) {
+      baseLogger.error(
+        { err: wallets },
+        "Fygaro float check: could not list bankowner treasury wallets",
+      )
+      return
+    }
+
+    // Prefer the USDT wallet (the active cash wallet), falling back to the
+    // legacy USD wallet — the exact selection credit-topup makes for the send.
+    const funding =
+      wallets.find((w) => w.currency === WalletCurrency.Usdt) ??
+      wallets.find((w) => w.currency === WalletCurrency.Usd)
+    if (!funding) {
+      baseLogger.error(
+        { role: TREASURY_ROLE },
+        "Fygaro float check: treasury account has no USDT or USD wallet",
+      )
+      return
+    }
+
+    const details = await Ibex.getAccountDetails(funding.id, funding.currency)
 
     if (details instanceof Error) {
       // An IBEX read blip must never crash the cron, and must never be mistaken
@@ -43,9 +82,16 @@ export const checkFygaroTreasuryFloat = async (): Promise<void> => {
 
     // IBEX omits `balance` for a drained / never-funded account (absent means
     // zero — see get-balance-for-wallet.ts). A genuinely empty treasury reads
-    // as 0 here and correctly trips the floor.
+    // as 0 here and correctly trips the floor. Read the balance in the funding
+    // wallet's own currency so the USD fallback is not scored as an empty USDT
+    // float (or vice versa).
+    const balance = details.balance
     const balanceUsd =
-      details.balance instanceof USDTAmount ? Number(details.balance.asNumber()) : 0
+      balance instanceof USDTAmount
+        ? Number(balance.asNumber())
+        : balance instanceof USDAmount
+          ? Number(balance.asDollars())
+          : 0
 
     if (balanceUsd < floorUsd) {
       baseLogger.warn({ balanceUsd, floorUsd }, "Fygaro treasury float below floor")
