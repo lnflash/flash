@@ -5,7 +5,6 @@ import {
   DiscordEmbed,
   DiscordEmbedField,
   MAX_DESCRIPTION,
-  MAX_FIELDS,
   MAX_TITLE,
   makeFieldBuilder,
   postEmbed,
@@ -66,7 +65,9 @@ export const sendDiscord = async (alert: BridgeAlert): Promise<void> => {
     title: truncate(alert.title, MAX_TITLE),
     description: alert.detail ? truncate(alert.detail, MAX_DESCRIPTION) : undefined,
     color: alert.severity === "critical" ? COLOR_CRITICAL : COLOR_WARNING,
-    fields: fields.slice(0, MAX_FIELDS),
+    // Field count is capped centrally by clampEmbedToBudget (applied in
+    // postEmbed), so no per-caller slice is needed here.
+    fields,
     timestamp: new Date().toISOString(),
   }
 

@@ -15,6 +15,7 @@ import { recordExceptionInCurrentSpan } from "@services/tracing"
 import {
   DiscordEmbed,
   MAX_EMBED_TOTAL,
+  MAX_FIELDS,
   MAX_FIELD_VALUE,
   MAX_TITLE,
   clampEmbedToBudget,
@@ -102,6 +103,21 @@ describe("clampEmbedToBudget", () => {
     expect(embedSize(clamped)).toBeLessThanOrEqual(MAX_EMBED_TOTAL)
     expect(clamped.fields.length).toBeGreaterThan(0)
     expect(clamped.fields.length).toBeLessThan(10)
+  })
+
+  it("caps the field count at Discord's 25-field limit", () => {
+    // Many tiny fields: nowhere near the 6000-char aggregate, so only the
+    // field-count cap can bound them. An over-25-field embed would otherwise be
+    // rejected wholesale by Discord (400) and silently dropped by postEmbed.
+    const fields = Array.from({ length: MAX_FIELDS + 10 }, (_, i) => ({
+      name: `f${i}`,
+      value: "x",
+      inline: true,
+    }))
+    const clamped = clampEmbedToBudget(baseEmbed({ fields }))
+
+    expect(clamped.fields.length).toBe(MAX_FIELDS)
+    expect(embedSize(clamped)).toBeLessThanOrEqual(MAX_EMBED_TOTAL)
   })
 
   it("truncates the description when it alone would blow the budget", () => {

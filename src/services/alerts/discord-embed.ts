@@ -12,7 +12,8 @@ import axios, { isAxiosError } from "axios"
  * title <= 256, description <= 4096, and — the one the per-field caps do NOT
  * bound — an aggregate <= 6000 chars summed across title + description + every
  * field name + every field value (+ author/footer text). clampEmbedToBudget
- * enforces that aggregate; postEmbed applies it before every POST.
+ * enforces both the aggregate AND the 25-field cap; postEmbed applies it before
+ * every POST.
  */
 
 export const MAX_FIELDS = 25
@@ -60,12 +61,15 @@ export const makeFieldBuilder =
 const fieldCost = (field: DiscordEmbedField): number =>
   field.name.length + field.value.length
 
-// Keep an embed under Discord's aggregate character limit. The per-field caps
-// bound each part but not their sum, so a caller that stuffs a large value into
-// one field can still build a >6000-char embed that Discord 400s (which
-// postEmbed would then swallow as a Warn, silently dropping the alert). We trim
-// the description if it alone blows the budget, then drop trailing fields until
-// the running total fits.
+// Keep an embed under Discord's aggregate character limit AND its 25-field cap.
+// The per-field caps bound each part but not their sum, so a caller that stuffs
+// a large value into one field can still build a >6000-char embed; likewise a
+// caller that emits one field per item can exceed 25 fields. Either overflow
+// makes Discord 400 the whole embed (which postEmbed then swallows as a Warn,
+// silently dropping the alert). We trim the description if it alone blows the
+// budget, then drop trailing fields once the running total OR the field count
+// would exceed the limit. Centralizing the count cap here protects every caller
+// (both discord.ts and ops-events.ts) without each having to slice itself.
 export const clampEmbedToBudget = (embed: DiscordEmbed): DiscordEmbed => {
   const scaffold = (embed.author?.name.length ?? 0) + embed.title.length
   let remaining = AGGREGATE_BUDGET - scaffold
@@ -82,6 +86,7 @@ export const clampEmbedToBudget = (embed: DiscordEmbed): DiscordEmbed => {
 
   const fields: DiscordEmbedField[] = []
   for (const field of embed.fields) {
+    if (fields.length >= MAX_FIELDS) break
     const cost = fieldCost(field)
     if (cost > remaining) break
     remaining -= cost
