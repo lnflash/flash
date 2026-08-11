@@ -1,4 +1,7 @@
+import { ApiError } from "ibex-client"
+
 import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
+import { IbexError } from "@services/ibex/errors"
 
 const mockFygaroConfig = {
   enabled: true,
@@ -91,6 +94,22 @@ const detailsWithBalance = (balance: USDTAmount | USDAmount | undefined) => ({
   name: "bankowner",
   balance,
 })
+
+// A drained / never-funded IBEX account answers getAccountDetails with an HTTP
+// 404 IbexError — the codebase's documented empty-account drain signal
+// (get-balance-for-wallet.ts maps 404 -> ZERO). The float monitor reads through
+// that helper, so this MUST be scored as an empty float, not swallowed as a read
+// blip.
+const ibex404 = (): IbexError =>
+  new IbexError(
+    new ApiError(Object.assign(new Error("account not found"), { status: 404 })),
+  )
+
+// A genuine read blip: an IBEX error that is NOT a 404. getBalanceForWallet
+// surfaces this as an error (never ZERO), so the monitor must bail without
+// alerting. (Ibex.getAccountDetails returns IbexError on failure — never a bare
+// Error — so this is what a real read failure looks like.)
+const ibexReadBlip = (): IbexError => new IbexError(new Error("ibex unreachable"))
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -216,11 +235,31 @@ describe("checkFygaroTreasuryFloat", () => {
     expect(mockAlertBridge).not.toHaveBeenCalled()
   })
 
-  it("does not crash and does not alert when the IBEX read fails", async () => {
-    mockGetAccountDetails.mockResolvedValue(new Error("ibex unreachable"))
+  it("does not crash and does not alert when the IBEX read fails (non-404 blip)", async () => {
+    mockGetAccountDetails.mockResolvedValue(ibexReadBlip())
 
     await expect(checkFygaroTreasuryFloat()).resolves.toBeUndefined()
     expect(mockAlertBridge).not.toHaveBeenCalled()
+  })
+
+  it("alerts with balance_usd 0 when IBEX 404s the drained treasury account", async () => {
+    // Regression: reading Ibex.getAccountDetails directly surfaced a 404 as an
+    // IbexError, hit the `instanceof Error` bail, and returned WITHOUT alerting —
+    // silently missing the empty-float condition. Routed through
+    // getBalanceForWallet the 404 collapses to ZERO and MUST trip the low-float
+    // alert.
+    mockGetAccountDetails.mockResolvedValue(ibex404())
+
+    await checkFygaroTreasuryFloat()
+
+    expect(mockAlertBridge).toHaveBeenCalledTimes(1)
+    const alert = mockAlertBridge.mock.calls[0][0]
+    expect(alert).toMatchObject({
+      dedupKey: "fygaro:float-low",
+      source: "fygaro-webhook",
+      severity: "warning",
+    })
+    expect(alert.context).toEqual({ balance_usd: 0, floor_usd: 2000 })
   })
 
   it("does not read IBEX or alert when the treasury account cannot be resolved", async () => {

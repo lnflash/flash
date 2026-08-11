@@ -1,6 +1,6 @@
 import { FygaroConfig } from "@config"
 import { USDAmount, USDTAmount } from "@domain/shared"
-import Ibex from "@services/ibex/client"
+import { getBalanceForWallet } from "@app/wallets/get-balance-for-wallet"
 import { alertBridge, generateDedupKey } from "@services/alerts"
 import { baseLogger } from "@services/logger"
 import { redis } from "@services/redis"
@@ -87,25 +87,35 @@ export const checkFygaroTreasuryFloat = async (): Promise<void> => {
     }
 
     const fundingWallet = funding.fundingWallet
-    const details = await Ibex.getAccountDetails(fundingWallet.id, fundingWallet.currency)
+    // Read through the SAME helper the rest of the app uses so this monitor
+    // inherits IBEX's documented drain semantics instead of re-deriving them.
+    // Crucially, IBEX returns HTTP 404 for a drained / never-funded account and
+    // getBalanceForWallet maps that 404 -> ZERO (get-balance-for-wallet.ts). The
+    // old direct Ibex.getAccountDetails read surfaced that 404 as an IbexError,
+    // hit the `instanceof Error` bail, and returned WITHOUT alerting — silently
+    // missing the very empty-float condition this monitor exists to catch. Via
+    // the helper both drain signals (404 and an absent `balance` field) collapse
+    // to ZERO, so a dry treasury correctly trips the floor.
+    const balance = await getBalanceForWallet({
+      walletId: fundingWallet.id,
+      currency: fundingWallet.currency,
+    })
 
-    if (details instanceof Error) {
-      // An IBEX read blip must never crash the cron, and must never be mistaken
-      // for a low balance. Log and bail; the next run re-reads. (Per the "or
-      // logs" option — a distinct alert here would fight the float-low dedup.)
+    if (balance instanceof Error) {
+      // A genuine read blip (a non-404 IBEX error, or an unexpected throw the
+      // helper wraps) must never crash the cron and must never be mistaken for a
+      // low balance. Log and bail; the next run re-reads. (A distinct alert here
+      // would fight the float-low dedup.)
       baseLogger.error(
-        { err: details },
+        { err: balance },
         "Fygaro float check: could not read bankowner treasury balance",
       )
       return
     }
 
-    // IBEX omits `balance` for a drained / never-funded account (absent means
-    // zero — see get-balance-for-wallet.ts). A genuinely empty treasury reads
-    // as 0 here and correctly trips the floor. Read the balance in the funding
-    // wallet's own currency so the USD fallback is not scored as an empty USDT
-    // float (or vice versa).
-    const balance = details.balance
+    // Score in the funding wallet's own currency so the USD fallback is not
+    // read as an empty USDT float (or vice versa). A ZERO from either drain
+    // signal above lands here as 0 and correctly trips the floor.
     const balanceUsd =
       balance instanceof USDTAmount
         ? Number(balance.asNumber())
