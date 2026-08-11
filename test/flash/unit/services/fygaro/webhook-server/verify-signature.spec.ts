@@ -22,6 +22,15 @@ jest.mock("@services/logger", () => ({
   baseLogger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }))
 
+const mockAlertBridge = jest.fn()
+jest.mock("@services/alerts", () => ({
+  alertBridge: (...args: unknown[]) => mockAlertBridge(...args),
+  generateDedupKey: {
+    fygaroSignatureFailure: () => "fygaro:signature-failure",
+    fygaroClockSkew: () => "fygaro:clock-skew",
+  },
+}))
+
 import { verifyFygaroSignature } from "@services/fygaro/webhook-server/middleware/verify-signature"
 
 const RAW_BODY = JSON.stringify({ transactionId: "tx-1", amount: "10.00" })
@@ -211,5 +220,90 @@ describe("verifyFygaroSignature", () => {
 
     expect(next).not.toHaveBeenCalled()
     expect(res.status).toHaveBeenCalledWith(400)
+  })
+
+  describe("signature-failure alerting", () => {
+    it("alerts (warning, static dedup key) on a signature mismatch, without the secret", () => {
+      const t = nowSeconds()
+      const req = makeReq({
+        signature: `t=${t},v1=${sign(t, RAW_BODY, "wrong-secret")}`,
+        keyId: "key1",
+      })
+
+      verifyFygaroSignature(req, makeRes(), jest.fn())
+
+      expect(mockAlertBridge).toHaveBeenCalledTimes(1)
+      const alert = mockAlertBridge.mock.calls[0][0]
+      expect(alert).toMatchObject({
+        dedupKey: "fygaro:signature-failure",
+        source: "fygaro-webhook",
+        severity: "warning",
+      })
+      expect(alert.title).toMatch(/signature verification failing/i)
+      // The key id is safe to include; the secret never is.
+      expect(alert.context).toEqual({ key_id: "key1" })
+      expect(JSON.stringify(alert)).not.toContain("secret-one")
+      expect(JSON.stringify(alert)).not.toContain("wrong-secret")
+    })
+
+    it("alerts when no webhook secrets are configured", () => {
+      mockFygaroConfig.webhook.secrets = {}
+      const t = nowSeconds()
+      const req = makeReq({
+        signature: `t=${t},v1=${sign(t, RAW_BODY, "secret-one")}`,
+        keyId: "key1",
+      })
+
+      verifyFygaroSignature(req, makeRes(), jest.fn())
+
+      expect(mockAlertBridge).toHaveBeenCalledTimes(1)
+      expect(mockAlertBridge.mock.calls[0][0]).toMatchObject({
+        dedupKey: "fygaro:signature-failure",
+        severity: "warning",
+      })
+    })
+
+    it("does NOT alert on a missing signature header (random internet noise)", () => {
+      verifyFygaroSignature(makeReq({}), makeRes(), jest.fn())
+
+      expect(mockAlertBridge).not.toHaveBeenCalled()
+    })
+
+    it("does NOT alert on a malformed signature header", () => {
+      verifyFygaroSignature(
+        makeReq({ signature: "not-a-signature" }),
+        makeRes(),
+        jest.fn(),
+      )
+
+      expect(mockAlertBridge).not.toHaveBeenCalled()
+    })
+
+    it("alerts on a timestamp outside skew under its OWN dedup key (stuck clock / NTP)", () => {
+      // A systematic skew 401s every real webhook while the service looks
+      // healthy — the same silent-misconfig class the secret alerts guard
+      // against. It must page, but under a DISTINCT static dedup key so replayed
+      // old webhooks collapse to one warning per window and it never masks (or is
+      // masked by) a bad-secret alert.
+      const t = String(Math.floor(Date.now() / 1000) - 3600)
+      const req = makeReq({
+        signature: `t=${t},v1=${sign(t, RAW_BODY, "secret-one")}`,
+        keyId: "key1",
+      })
+
+      verifyFygaroSignature(req, makeRes(), jest.fn())
+
+      expect(mockAlertBridge).toHaveBeenCalledTimes(1)
+      const alert = mockAlertBridge.mock.calls[0][0]
+      expect(alert).toMatchObject({
+        dedupKey: "fygaro:clock-skew",
+        source: "fygaro-webhook",
+        severity: "warning",
+      })
+      // Distinct from the signature-failure alerts so the two never collapse.
+      expect(alert.dedupKey).not.toBe("fygaro:signature-failure")
+      expect(alert.title).toMatch(/skew|clock/i)
+      expect(alert.context).toEqual({ key_id: "key1" })
+    })
   })
 })

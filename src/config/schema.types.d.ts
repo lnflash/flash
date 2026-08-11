@@ -80,6 +80,9 @@ type FygaroConfig = {
   credit: {
     enabled: boolean
   }
+  float: {
+    floorUsd: number
+  }
 }
 
 type CashoutEmail = {

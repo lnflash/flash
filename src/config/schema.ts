@@ -802,6 +802,17 @@ export const configSchema = {
           // the treasury -> user transfer stays manual.
           default: { enabled: false },
         },
+        float: {
+          type: "object",
+          properties: {
+            // Alert when the bankowner treasury USDT balance (the auto-credit
+            // funding source) drops below this floor, in USD. Default ~4x the
+            // $500 auto-credit limit so ops has runway to top up.
+            floorUsd: { type: "number", default: 2000 },
+          },
+          additionalProperties: false,
+          default: { floorUsd: 2000 },
+        },
       },
       additionalProperties: false,
       // Default OFF baseline (mirrors topup); enable per environment via overrides.

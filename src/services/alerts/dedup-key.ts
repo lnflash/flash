@@ -37,6 +37,16 @@ export const generateDedupKey = {
   // non-USD, non-positive net). Distinct from fygaroCreditFailed so a "skipped"
   // warning never suppresses a later "credit attempt failed" critical.
   fygaroNotCredited: (transactionId: string) => `fygaro:not-credited:${transactionId}`,
+  // Static keys (no per-request suffix) so the built-in TTL dedup rate-limits
+  // these to one alert per window rather than one per failing request/poll.
+  fygaroSignatureFailure: () => "fygaro:signature-failure",
+  // Distinct from fygaroSignatureFailure so a stuck server clock (every real
+  // webhook 401ing on skew) surfaces as its own warning instead of being
+  // collapsed into — or masked by — the "wrong secret" alert. Still static so
+  // replayed old webhooks collapse to one warning per window.
+  fygaroClockSkew: () => "fygaro:clock-skew",
+  fygaroFloatLow: () => "fygaro:float-low",
+  fygaroFloatExhausted: () => "fygaro:float-exhausted",
 }
 
 export const normalizeDedupKey = (key: string): string =>

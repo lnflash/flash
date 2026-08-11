@@ -1,7 +1,21 @@
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { WalletCurrency } from "@domain/shared"
+import { InsufficientBalanceError } from "@domain/errors"
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import { baseLogger } from "@services/logger"
+import { InsufficientIbexBalance } from "@services/ibex/errors"
+
+// The treasury can't cover the send. On the flash IBEX-custodial path an
+// under-funded bankowner surfaces as InsufficientIbexBalance (ibex/errors.ts
+// maps the IBEX "insufficient balance" ApiError); InsufficientBalanceError is
+// the domain-level equivalent kept for defence in depth. Matched by class, not
+// by message, so a generic send error with a coincidental wording is NOT
+// misread as float exhaustion.
+const isInsufficientTreasuryBalance = (err: Error): boolean =>
+  err instanceof InsufficientIbexBalance || err instanceof InsufficientBalanceError
+
+/** Distinct credit-failure step signalling the treasury float is exhausted. */
+export const INSUFFICIENT_TREASURY_FLOAT_STEP = "insufficient-treasury-float"
 
 /**
  * Credits a verified Fygaro card payment to the payer's Flash account:
@@ -32,6 +46,56 @@ const walletsFor = async (accountId: AccountId): Promise<Wallet[]> => {
   return wallets instanceof Error ? [] : wallets
 }
 
+export type FygaroTreasuryFunding = {
+  account: Account
+  fundingWallet: Wallet
+}
+
+/**
+ * Resolves the bankowner treasury account and the exact wallet auto-credit
+ * spends from: the USDT cash wallet on every account (see
+ * accounts/create-account.ts), falling back to the legacy USD wallet.
+ *
+ * This is the SINGLE source of truth for treasury funding-wallet selection.
+ * Both the credit path (creditFygaroTopup, below) and the proactive float
+ * monitor (float-monitor.ts) resolve the funding wallet through here, so the
+ * monitor can never silently drift onto a different wallet than the one credits
+ * actually drain — the round-1 "monitor the exact wallet auto-credit spends
+ * from" invariant is now enforced by shared code, not by two copies staying
+ * byte-identical.
+ */
+export const resolveFygaroTreasuryFundingWallet = async (): Promise<
+  FygaroTreasuryFunding | FygaroCreditError
+> => {
+  const account = await AccountsRepository().findByRole(TREASURY_ROLE)
+  if (account instanceof Error) {
+    return new FygaroCreditError(
+      "resolve-treasury",
+      `no account holds the '${TREASURY_ROLE}' role`,
+    )
+  }
+
+  const wallets = await WalletsRepository().listByAccountId(account.id)
+  if (wallets instanceof Error) {
+    return new FygaroCreditError(
+      "list-treasury-wallets",
+      "could not list treasury wallets",
+    )
+  }
+
+  const fundingWallet =
+    wallets.find((w) => w.currency === WalletCurrency.Usdt) ??
+    wallets.find((w) => w.currency === WalletCurrency.Usd)
+  if (!fundingWallet) {
+    return new FygaroCreditError(
+      "resolve-treasury-wallet",
+      "treasury account has no USDT or USD wallet",
+    )
+  }
+
+  return { account, fundingWallet }
+}
+
 export const creditFygaroTopup = async ({
   recipientAccountId,
   amountCents,
@@ -47,26 +111,13 @@ export const creditFygaroTopup = async ({
     return new FygaroCreditError("validate-amount", `invalid amount: ${amountCents}`)
   }
 
-  const treasuryAccount = await AccountsRepository().findByRole(TREASURY_ROLE)
-  if (treasuryAccount instanceof Error) {
-    return new FygaroCreditError(
-      "resolve-treasury",
-      `no account holds the '${TREASURY_ROLE}' role`,
-    )
+  // Resolve the treasury funding wallet through the shared resolver so the
+  // wallet credits drain from is provably the same one float-monitor watches.
+  const funding = await resolveFygaroTreasuryFundingWallet()
+  if (funding instanceof FygaroCreditError) {
+    return funding
   }
-
-  // Prefer the USDT wallet (the active cash wallet on every account — see
-  // accounts/create-account.ts), falling back to the legacy USD wallet.
-  const treasuryWallets = await walletsFor(treasuryAccount.id)
-  const fundingWallet =
-    treasuryWallets.find((w) => w.currency === WalletCurrency.Usdt) ??
-    treasuryWallets.find((w) => w.currency === WalletCurrency.Usd)
-  if (!fundingWallet) {
-    return new FygaroCreditError(
-      "resolve-treasury-wallet",
-      "treasury account has no USDT or USD wallet",
-    )
-  }
+  const { fundingWallet } = funding
 
   // Recipients must hold a wallet in the funding wallet's currency —
   // send-intraledger rejects cross-currency sends.
@@ -98,6 +149,13 @@ export const creditFygaroTopup = async ({
       { err: result, transactionId, recipientAccountId },
       "fygaro credit: intraledger send returned an error",
     )
+    // Distinguish "the treasury is empty" (an ops top-up problem) from every
+    // other send failure (a bug to debug) so payment.ts can raise the right
+    // alert. The payment is still recorded and the row stays Fiat Received
+    // either way — no double-spend risk.
+    if (isInsufficientTreasuryBalance(result)) {
+      return new FygaroCreditError(INSUFFICIENT_TREASURY_FLOAT_STEP, result.message)
+    }
     return new FygaroCreditError("intraledger-send", result.message)
   }
   if (result === PaymentSendStatus.Success) {

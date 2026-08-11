@@ -38,7 +38,11 @@ jest.mock("@services/frappe/BridgeTransferRequestWriter", () => ({
 
 jest.mock("@services/alerts", () => ({
   alertBridge: (...args: unknown[]) => mockAlertBridge(...args),
-  generateDedupKey: new Proxy({}, { get: () => jest.fn(() => "dedup") }),
+  // Use the REAL dedup-key generator (a pure, side-effect-free module) rather
+  // than a constant stub. The static-vs-per-transaction key selection in the
+  // credit-failure branch is exactly what the dedupKey assertions below pin, so
+  // stubbing every key to one value would let a regressed ternary pass silently.
+  generateDedupKey: jest.requireActual("@services/alerts/dedup-key").generateDedupKey,
 }))
 
 jest.mock("@services/alerts/ops-events", () => ({
@@ -56,6 +60,7 @@ jest.mock("@services/fygaro/webhook-server/credit-topup", () => {
   }
   return {
     FygaroCreditError,
+    INSUFFICIENT_TREASURY_FLOAT_STEP: "insufficient-treasury-float",
     creditFygaroTopup: (...args: unknown[]) => mockCreditFygaroTopup(...args),
   }
 })
@@ -280,9 +285,9 @@ describe("fygaro paymentHandler", () => {
       expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
     })
 
-    it("records without crediting and alerts critical when the credit fails", async () => {
+    it("records without crediting and fires the generic critical when the credit fails", async () => {
       mockCreditFygaroTopup.mockResolvedValue(
-        new FygaroCreditError("intraledger-send", "insufficient balance"),
+        new FygaroCreditError("intraledger-send", "some send error"),
       )
       const res = makeRes()
 
@@ -290,11 +295,44 @@ describe("fygaro paymentHandler", () => {
 
       expect(mockCompleteFygaroTopup).not.toHaveBeenCalled()
       expect(mockAlertBridge).toHaveBeenCalledWith(
-        expect.objectContaining({ severity: "critical" }),
+        expect.objectContaining({
+          // A generic credit failure MUST keep the per-transaction dedup key so
+          // each stranded payment pages ops individually — pinned here so a
+          // regression to the static float-exhausted key (which would collapse
+          // distinct manual-credit failures into one page) fails the test.
+          dedupKey: `fygaro:credit-failed:${VALID_BODY.transactionId}`,
+          severity: "critical",
+          title: "Fygaro auto-credit failed — manual credit needed",
+        }),
       )
       expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
         expect.objectContaining({ status: "failed", step: "credit:intraledger-send" }),
       )
+      expect(res.status).toHaveBeenCalledWith(200)
+      expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
+    })
+
+    it("fires the distinct float-EXHAUSTED critical when the treasury can't cover the send", async () => {
+      mockCreditFygaroTopup.mockResolvedValue(
+        new FygaroCreditError("insufficient-treasury-float", "insufficient balance"),
+      )
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockCompleteFygaroTopup).not.toHaveBeenCalled()
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({
+          // The exhausted branch MUST swap the per-transaction key for the
+          // STATIC float-exhausted key so a treasury-outage run of failing
+          // credits collapses to ONE PagerDuty page instead of one-per-tx.
+          // Pinned so a regression back to the per-transaction key fails here.
+          dedupKey: "fygaro:float-exhausted",
+          severity: "critical",
+          title: "Fygaro treasury float EXHAUSTED — top up bankowner immediately",
+        }),
+      )
+      // The row still stays Fiat Received — the existing safety is unchanged.
       expect(res.status).toHaveBeenCalledWith(200)
       expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
     })
