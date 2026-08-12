@@ -59,25 +59,37 @@ export const ibexErrorDetail = (e: unknown): string | undefined => {
   return undefined
 }
 
-// Matches against the structured body detail when the error carries one, and
-// against `message` otherwise (flash's raw-fetch path embeds the body text in
-// the message; ibex-client@3.2.0's ApiError message is only the wrapped stack,
-// which is why body-carrying shapes are checked first).
-const matchesIbexError = (e: Error, needle: string): boolean => {
-  const detail = ibexErrorDetail(e)
-  return detail !== undefined ? detail.includes(needle) : e.message.includes(needle)
+// The single needle list mapping IBEX error prose to a typed error class.
+// Matching is case-insensitive (the haystack is lowercased once here) so a
+// vendor rewording like "Insufficient Balance" cannot silently revert
+// classification to the generic path. Both errorHandler and httpErrorHandler
+// classify through this helper — never add a needle anywhere else.
+const classifyIbexErrorText = (
+  text: string,
+): typeof InsufficientIbexBalance | typeof CompletedInvoice | undefined => {
+  const haystack = text.toLowerCase()
+  if (haystack.includes("insufficient balance")) return InsufficientIbexBalance
+  if (haystack.includes("payment already prepared")) return CompletedInvoice
+  return undefined
 }
 
 export const errorHandler = <T>(
   e: T | IbexClientError | AuthenticationError | ApiError,
 ): T | IbexError => {
   if (e instanceof AuthenticationError) return new IbexError(e, ErrorLevel.Critical)
-  else if (e instanceof ApiError && matchesIbexError(e, "insufficient balance"))
-    return new InsufficientIbexBalance(e, ErrorLevel.Info, ibexErrorDetail(e))
-  else if (e instanceof ApiError && matchesIbexError(e, "payment already prepared"))
-    return new CompletedInvoice(e, ErrorLevel.Info)
-  else if (e instanceof IbexClientError) return new IbexError(e, ErrorLevel.Warn)
-  else return e
+  if (e instanceof ApiError) {
+    // Classify against the structured body detail when the error carries one,
+    // and against `message` otherwise (flash's raw-fetch path embeds the body
+    // text in the message; ibex-client@3.2.0's ApiError message is only the
+    // wrapped stack, which is why body-carrying shapes are checked first).
+    const detail = ibexErrorDetail(e)
+    const classified = classifyIbexErrorText(detail ?? e.message)
+    if (classified === InsufficientIbexBalance)
+      return new InsufficientIbexBalance(e, ErrorLevel.Info, detail)
+    if (classified === CompletedInvoice) return new CompletedInvoice(e, ErrorLevel.Info)
+  }
+  if (e instanceof IbexClientError) return new IbexError(e, ErrorLevel.Warn)
+  return e
 }
 
 /**
@@ -93,12 +105,17 @@ export const httpErrorHandler = (e: unknown): IbexError => {
   const raw = e instanceof Error ? e : new Error(String(e))
   if (raw instanceof AuthenticationError) return new IbexError(raw, ErrorLevel.Critical)
   const detail = ibexErrorDetail(raw)
-  const text = detail ?? raw.message
   // ApiError's constructor keeps `.status` as httpCode, which IbexError reads.
   const wrapped = raw instanceof IbexClientError ? raw : new ApiError(raw)
-  if (text.includes("insufficient balance"))
+  const classified = classifyIbexErrorText(detail ?? raw.message)
+  if (classified === InsufficientIbexBalance)
     return new InsufficientIbexBalance(wrapped, ErrorLevel.Info, detail)
-  if (text.includes("payment already prepared"))
+  if (classified === CompletedInvoice)
     return new CompletedInvoice(wrapped, ErrorLevel.Info)
+  // Unclassified path: ApiError's message is only the wrapped stack, so carry
+  // the extracted body detail into it — an unrecognized IBEX 400 must still
+  // log what IBEX actually said, not just "FetchError: Bad Request" + stack.
+  if (detail !== undefined && !(raw instanceof IbexClientError))
+    wrapped.message = `${detail}\n${wrapped.message}`
   return new IbexError(wrapped, ErrorLevel.Warn)
 }

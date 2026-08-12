@@ -99,6 +99,15 @@ describe("errorHandler", () => {
     expect((result as CompletedInvoice).level).toBe(ErrorLevel.Info)
   })
 
+  it("classifies case-insensitively — a vendor rewording must not revert to the generic path", () => {
+    const insufficientErr = new ApiError(new Error("Bad Request"))
+    Object.assign(insufficientErr, { ibexMessage: "Insufficient Balance" })
+    expect(errorHandler(insufficientErr)).toBeInstanceOf(InsufficientIbexBalance)
+
+    const preparedErr = new ApiError(new Error("Payment Already Prepared"))
+    expect(errorHandler(preparedErr)).toBeInstanceOf(CompletedInvoice)
+  })
+
   it("maps AuthenticationError to a critical IbexError", () => {
     const result = errorHandler(new AuthenticationError("auth failed"))
 
@@ -147,6 +156,41 @@ describe("httpErrorHandler", () => {
     const err = result as IbexError
     expect(err.httpCode).toBe(400)
     expect(err.level).toBe(ErrorLevel.Warn)
+    // the extracted body detail must survive the generic path — an
+    // unrecognized IBEX 400 that logs only "FetchError: Bad Request" is the
+    // debugging blindness this module exists to fix
+    expect(err.message).toContain("invalid parameters")
+  })
+
+  it("keeps the generic path unchanged when the error carries no body detail", () => {
+    const raw = fetchErrorShaped(500, undefined)
+
+    const result = httpErrorHandler(raw)
+
+    expect(result).toBeInstanceOf(IbexError)
+    expect((result as IbexError).httpCode).toBe(500)
+  })
+
+  it("classifies insufficient-balance case-insensitively", () => {
+    const raw = fetchErrorShaped(400, {
+      error: "Insufficient Balance. Current Balance: 5.000000",
+    })
+
+    const result = httpErrorHandler(raw)
+
+    expect(result).toBeInstanceOf(InsufficientIbexBalance)
+    // the client-facing detail keeps IBEX's original casing
+    expect((result as InsufficientIbexBalance).message).toBe(
+      "Insufficient Balance. Current Balance: 5.000000",
+    )
+  })
+
+  it("classifies payment-already-prepared case-insensitively", () => {
+    const raw = fetchErrorShaped(400, { error: "Payment Already Prepared" })
+
+    const result = httpErrorHandler(raw)
+
+    expect(result).toBeInstanceOf(CompletedInvoice)
   })
 
   it("classifies payment-already-prepared as CompletedInvoice", () => {
