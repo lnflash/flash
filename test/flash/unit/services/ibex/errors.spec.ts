@@ -13,6 +13,10 @@ import {
 const insufficientDetail =
   "insufficient balance. Current Balance: 5.000000. Estimated Fee: 0.001109. invoice amount: 5.042164. account: 39c6e986-979b-40ab-9e7b-df18a9277a84"
 
+// The client-facing message must strip IBEX's trailing internal account UUID.
+const insufficientDetailStripped =
+  "insufficient balance. Current Balance: 5.000000. Estimated Fee: 0.001109. invoice amount: 5.042164"
+
 // The generated api SDK throws FetchError: message = statusText, `.status` =
 // HTTP status, `.data` = parsed response body. Reproduce that shape without
 // depending on the api package internals.
@@ -69,14 +73,38 @@ describe("errorHandler", () => {
     expect(err.message).not.toContain("  at ")
   })
 
-  it("classifies a structured ibexMessage (ibex-client > 3.2.0) with full detail", () => {
+  it("classifies a structured ibexMessage (ibex-client > 3.2.0), stripping the account id", () => {
     const apiErr = new ApiError(new Error("Bad Request"))
     Object.assign(apiErr, { ibexMessage: insufficientDetail })
 
     const result = errorHandler(apiErr)
 
     expect(result).toBeInstanceOf(InsufficientIbexBalance)
-    expect((result as InsufficientIbexBalance).message).toBe(insufficientDetail)
+    const err = result as InsufficientIbexBalance
+    // client-facing message never exposes IBEX's internal account UUID
+    expect(err.message).toBe(insufficientDetailStripped)
+    expect(err.message).not.toContain("account:")
+    expect(err.message).not.toContain("39c6e986-979b-40ab-9e7b-df18a9277a84")
+    // the unstripped vendor text is preserved for logs/spans
+    expect(err.detail).toBe(insufficientDetail)
+  })
+
+  it("carries the body detail on the unclassified ApiError fall-through", () => {
+    // future body-carrying ApiError shape (lnflash/ibex-client#12) whose text
+    // matches no needle — the detail must still reach the logged message
+    const apiErr = new ApiError(new Error("Bad Request"))
+    Object.assign(apiErr, { ibexMessage: "invalid parameters" })
+    const originalMessage = apiErr.message
+
+    const result = errorHandler(apiErr)
+
+    expect(result).toBeInstanceOf(IbexError)
+    expect(result).not.toBeInstanceOf(InsufficientIbexBalance)
+    const err = result as IbexError
+    expect(err.level).toBe(ErrorLevel.Warn)
+    expect(err.message).toContain("invalid parameters")
+    // the caller's error is not mutated — a fresh IbexError carries the detail
+    expect(apiErr.message).toBe(originalMessage)
   })
 
   it("maps a pinned-version SDK-path ApiError (stack-only message) to a generic IbexError", () => {
@@ -131,8 +159,11 @@ describe("httpErrorHandler", () => {
     const err = result as InsufficientIbexBalance
     expect(err.httpCode).toBe(400)
     expect(err.level).toBe(ErrorLevel.Info)
-    // full IBEX detail is preserved for the client-facing message
-    expect(err.message).toBe(insufficientDetail)
+    // client-facing message keeps the IBEX detail minus the internal account UUID
+    expect(err.message).toBe(insufficientDetailStripped)
+    expect(err.message).not.toContain("account:")
+    // the unstripped vendor text is preserved for logs/spans
+    expect(err.detail).toBe(insufficientDetail)
   })
 
   it("classifies a 400 with a non-JSON insufficient-balance body", () => {

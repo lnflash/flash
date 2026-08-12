@@ -28,12 +28,21 @@ export class UnexpectedIbexResponse extends IbexError {
 export class ParseError extends IbexError {}
 
 export class InsufficientIbexBalance extends IbexError {
+  // Full vendor detail, preserved verbatim for logs/spans (pino's error
+  // serializer picks up own enumerable properties).
+  readonly detail?: string
+
   constructor(err: Error, level: ErrorLevel = ErrorLevel.Info, detail?: string) {
     super(err, level)
+    this.detail = detail
     // error-map forwards `message` to the GraphQL client verbatim (the
     // INSUFFICIENT_BALANCE case sets message = error.message). Keep it the
-    // human-readable IBEX detail — never the wrapped error's stack trace.
-    this.message = detail ?? "insufficient balance"
+    // human-readable IBEX detail — never the wrapped error's stack trace —
+    // but strip the trailing internal IBEX account UUID ("... account: <id>"):
+    // end users must never see vendor-internal identifiers on the failure
+    // screen. The unstripped detail stays on `this.detail`.
+    this.message =
+      detail?.replace(/[.,]?\s*account:\s*\S+\s*$/i, "") ?? "insufficient balance"
   }
 }
 export class CompletedInvoice extends IbexError {}
@@ -87,6 +96,15 @@ export const errorHandler = <T>(
     if (classified === InsufficientIbexBalance)
       return new InsufficientIbexBalance(e, ErrorLevel.Info, detail)
     if (classified === CompletedInvoice) return new CompletedInvoice(e, ErrorLevel.Info)
+    // Unclassified path: mirror httpErrorHandler's carry — an unrecognized
+    // IBEX 400 whose ApiError has a stack-only message must still log what
+    // IBEX actually said. Build a new IbexError rather than mutating `e`,
+    // which the caller may still hold.
+    if (detail !== undefined) {
+      const generic = new IbexError(e, ErrorLevel.Warn)
+      generic.message = `${detail}\n${generic.message}`
+      return generic
+    }
   }
   if (e instanceof IbexClientError) return new IbexError(e, ErrorLevel.Warn)
   return e

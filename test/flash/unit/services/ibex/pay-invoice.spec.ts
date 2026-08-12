@@ -89,7 +89,13 @@ describe("Ibex.payInvoice error classification", () => {
     expect(result).toBeInstanceOf(InsufficientIbexBalance)
     const err = result as InsufficientIbexBalance
     expect(err.httpCode).toBe(400)
-    expect(err.message).toBe(insufficientDetail)
+    // client-facing message strips IBEX's trailing internal account UUID
+    expect(err.message).toBe(
+      "insufficient balance. Current Balance: 5.000000. Estimated Fee: 0.001109. invoice amount: 5.042164",
+    )
+    expect(err.message).not.toContain("account:")
+    // the unstripped vendor text is preserved for logs/spans
+    expect(err.detail).toBe(insufficientDetail)
   })
 
   it("returns a generic IbexError for other 400s", async () => {

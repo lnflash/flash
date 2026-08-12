@@ -42,6 +42,9 @@ describe("error-map", () => {
   describe("IBEX payment errors (issue #93)", () => {
     const insufficientDetail =
       "insufficient balance. Current Balance: 5.000000. Estimated Fee: 0.001109. invoice amount: 5.042164. account: 39c6e986-979b-40ab-9e7b-df18a9277a84"
+    // client-facing message strips IBEX's trailing internal account UUID
+    const insufficientDetailStripped =
+      "insufficient balance. Current Balance: 5.000000. Estimated Fee: 0.001109. invoice amount: 5.042164"
 
     it("maps InsufficientIbexBalance to INSUFFICIENT_BALANCE with the IBEX detail", () => {
       const input = new InsufficientIbexBalance(
@@ -52,7 +55,10 @@ describe("error-map", () => {
       const result = mapError(input)
 
       expect(result.extensions.code).toBe("INSUFFICIENT_BALANCE")
-      expect(result.message).toBe(insufficientDetail)
+      expect(result.message).toBe(insufficientDetailStripped)
+      // never the internal IBEX account UUID
+      expect(result.message).not.toContain("account:")
+      expect(result.message).not.toContain("39c6e986-979b-40ab-9e7b-df18a9277a84")
     })
 
     it("maps InsufficientIbexBalance without detail to a clean fallback message", () => {
@@ -75,7 +81,7 @@ describe("error-map", () => {
 
       expect(result).toMatchObject({
         code: "INSUFFICIENT_BALANCE",
-        message: insufficientDetail,
+        message: insufficientDetailStripped,
       })
     })
 
