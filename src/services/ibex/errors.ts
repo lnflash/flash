@@ -139,8 +139,10 @@ export const httpErrorHandler = (e: unknown): IbexError => {
   // the cap — exactly the Cloudflare-HTML-error-page outage the cap exists
   // for — and prepend the full multi-KB body onto every failing call's
   // message. When `raw` is already an IbexClientError, wrapped === raw and
-  // the extraction is unchanged. The uncapped body stays on
-  // `wrapped.ibexResponse` for anyone who needs it verbatim.
+  // the extraction is unchanged. The uncapped body exists only on the local
+  // ApiError's `ibexResponse` and does not survive onto the returned
+  // IbexError — by design: pino serializes own enumerable properties, and
+  // attaching a multi-KB body would recreate the log bloat the cap prevents.
   const detail = ibexErrorDetail(wrapped)
   const classified = classifyIbexErrorText(detail ?? raw.message)
   if (classified === InsufficientIbexBalance)
