@@ -1,5 +1,5 @@
 import { ErrorLevel } from "@domain/shared"
-import { ApiError, AuthenticationError } from "ibex-client"
+import { ApiError, AuthenticationError, MAX_IBEX_MESSAGE_LENGTH } from "ibex-client"
 
 import {
   CompletedInvoice,
@@ -235,6 +235,40 @@ describe("httpErrorHandler", () => {
     // ... and exactly once: 3.3.0's ApiError wrapper already embeds the
     // detail in its message, so the carry must not duplicate it
     expect(err.message.split("invalid parameters").length - 1).toBe(1)
+  })
+
+  it("keeps the message bounded when the body exceeds ibex-client's cap", () => {
+    // Cloudflare-style outage: IBEX's proxy returns a full HTML error page,
+    // which arrives as a plain-text body far over MAX_IBEX_MESSAGE_LENGTH.
+    // ApiError embeds only the capped copy in its message; if the dedupe
+    // guard compared against an uncapped extraction of the same body, it
+    // would always miss and prepend the full multi-KB blob — once per
+    // failing call — into logs and Discord alert embeds.
+    const hugeBody = `<html>cf-502 error page</html>${"x".repeat(
+      MAX_IBEX_MESSAGE_LENGTH * 4,
+    )}`
+    const raw = fetchErrorShaped(502, hugeBody)
+    const rawStackLength = (raw.stack as string).length
+
+    const result = httpErrorHandler(raw)
+
+    expect(result).toBeInstanceOf(IbexError)
+    expect(result).not.toBeInstanceOf(InsufficientIbexBalance)
+    const err = result as IbexError
+    expect(err.httpCode).toBe(502)
+    // the truncated detail appears exactly once...
+    const truncatedDetail = `${hugeBody.slice(0, MAX_IBEX_MESSAGE_LENGTH)}... [truncated]`
+    expect(err.message.split(truncatedDetail).length - 1).toBe(1)
+    // ... the capped prefix itself is not duplicated (truncated + full copy)...
+    expect(err.message.split(hugeBody.slice(0, MAX_IBEX_MESSAGE_LENGTH)).length - 1).toBe(
+      1,
+    )
+    // ... the full uncapped body never reaches the message...
+    expect(err.message).not.toContain(hugeBody)
+    // ... and the whole message stays bounded: stack + capped detail + framing
+    expect(err.message.length).toBeLessThan(
+      rawStackLength + MAX_IBEX_MESSAGE_LENGTH + 100,
+    )
   })
 
   it("keeps the generic path unchanged when the error carries no body detail", () => {

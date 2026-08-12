@@ -129,9 +129,19 @@ export const errorHandler = <T>(
 export const httpErrorHandler = (e: unknown): IbexError => {
   const raw = e instanceof Error ? e : new Error(String(e))
   if (raw instanceof AuthenticationError) return new IbexError(raw, ErrorLevel.Critical)
-  const detail = ibexErrorDetail(raw)
   // ApiError's constructor keeps `.status` as httpCode, which IbexError reads.
   const wrapped = raw instanceof IbexClientError ? raw : new ApiError(raw)
+  // Derive the detail from `wrapped`, never from `raw`. For a raw FetchError,
+  // ApiError's own extraction (`ibexMessage`) is capped at ibex-client's
+  // MAX_IBEX_MESSAGE_LENGTH, while reading straight off `raw.data` is not:
+  // comparing an uncapped detail against the capped copy embedded in
+  // `wrapped.message` would defeat the dedupe guard below for any body over
+  // the cap — exactly the Cloudflare-HTML-error-page outage the cap exists
+  // for — and prepend the full multi-KB body onto every failing call's
+  // message. When `raw` is already an IbexClientError, wrapped === raw and
+  // the extraction is unchanged. The uncapped body stays on
+  // `wrapped.ibexResponse` for anyone who needs it verbatim.
+  const detail = ibexErrorDetail(wrapped)
   const classified = classifyIbexErrorText(detail ?? raw.message)
   if (classified === InsufficientIbexBalance)
     return new InsufficientIbexBalance(wrapped, ErrorLevel.Info, detail)
