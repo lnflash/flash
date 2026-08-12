@@ -50,7 +50,13 @@ import {
   UsdWalletAmount,
 } from "./types"
 
-import { errorHandler, IbexError, ParseError, UnexpectedIbexResponse } from "./errors"
+import {
+  errorHandler,
+  httpErrorHandler,
+  IbexError,
+  ParseError,
+  UnexpectedIbexResponse,
+} from "./errors"
 import { ibexWebhookEndpoints, ibexWebhookSecret } from "./webhook-config"
 
 const Ibex = new IbexClient(
@@ -241,7 +247,15 @@ const payInvoice = async (
     webhookSecret: ibexWebhookSecret,
   } as PayInvoiceV2BodyParam
   addAttributesToCurrentSpan({ "request.params": JSON.stringify(bodyWithHooks) })
-  return Ibex.payInvoiceV2(bodyWithHooks).then(errorHandler)
+  // Call the generated SDK through withAuth directly (instead of
+  // Ibex.payInvoiceV2) so a failed payment's FetchError — which carries the
+  // parsed IBEX error body on `.data` — reaches httpErrorHandler intact.
+  // ibex-client@3.2.0's own ApiError wrapper discards that body, which is what
+  // made "insufficient balance" 400s unclassifiable (lnflash/ibex-client#6).
+  return Ibex.authentication
+    .withAuth(() => Ibex.ibex.payInvoiceV2(bodyWithHooks))
+    .then(errorHandler)
+    .catch(httpErrorHandler)
 }
 
 // onchain transactions are typically high-value

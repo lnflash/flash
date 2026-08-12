@@ -10,7 +10,7 @@ import dedent from "dedent"
 // FLASH FORK: import ibex dependencies
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import Ibex from "@services/ibex/client"
-import { IbexError } from "@services/ibex/errors"
+import { IbexError, InsufficientIbexBalance } from "@services/ibex/errors"
 import { withPaymentIdempotency } from "@app/payments/idempotency"
 
 const LnInvoicePaymentInput = GT.Input({
@@ -129,7 +129,14 @@ const LnInvoicePaymentSendMutation = GT.Field<
     //   }
     // }
 
-    // Preserve the existing generic IBEX-failure message.
+    // Insufficient balance is actionable for the caller — surface the typed
+    // INSUFFICIENT_BALANCE error via the error map instead of the generic
+    // catch-all below (issue #93).
+    if (status instanceof InsufficientIbexBalance) {
+      return { status: "failed", errors: [mapAndParseErrorForGqlResponse(status)] }
+    }
+
+    // Preserve the existing generic IBEX-failure message for other IBEX errors.
     if (status instanceof IbexError) {
       return {
         status: "failed",

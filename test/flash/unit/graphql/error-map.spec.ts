@@ -1,10 +1,12 @@
-import { mapError } from "@graphql/error-map"
+import { ErrorLevel } from "@domain/shared"
+import { mapAndParseErrorForGqlResponse, mapError } from "@graphql/error-map"
 import { PhoneAccountAlreadyExistsCannotUpgradeError } from "@services/kratos"
 import {
   BridgeWithdrawalNotFoundError,
   BridgeWithdrawalAlreadyInitiatedError,
   BridgeDepositInstructionsMissingError,
 } from "@services/bridge/errors"
+import { IbexError, InsufficientIbexBalance } from "@services/ibex/errors"
 
 describe("error-map", () => {
   it("maps BridgeWithdrawalNotFoundError to BRIDGE_WITHDRAWAL_NOT_FOUND", () => {
@@ -35,5 +37,53 @@ describe("error-map", () => {
     expect(result).toBeDefined()
     expect(result.message).toContain("already registered")
     expect(result.extensions.code).toBe("PHONE_ALREADY_REGISTERED_TO_ANOTHER_USER")
+  })
+
+  describe("IBEX payment errors (issue #93)", () => {
+    const insufficientDetail =
+      "insufficient balance. Current Balance: 5.000000. Estimated Fee: 0.001109. invoice amount: 5.042164. account: 39c6e986-979b-40ab-9e7b-df18a9277a84"
+
+    it("maps InsufficientIbexBalance to INSUFFICIENT_BALANCE with the IBEX detail", () => {
+      const input = new InsufficientIbexBalance(
+        new Error("Bad Request"),
+        ErrorLevel.Info,
+        insufficientDetail,
+      )
+      const result = mapError(input)
+
+      expect(result.extensions.code).toBe("INSUFFICIENT_BALANCE")
+      expect(result.message).toBe(insufficientDetail)
+    })
+
+    it("maps InsufficientIbexBalance without detail to a clean fallback message", () => {
+      const input = new InsufficientIbexBalance(new Error("Bad Request"))
+      const result = mapError(input)
+
+      expect(result.extensions.code).toBe("INSUFFICIENT_BALANCE")
+      expect(result.message).toBe("insufficient balance")
+      // never a stack trace
+      expect(result.message).not.toContain("  at ")
+    })
+
+    it("surfaces INSUFFICIENT_BALANCE through mapAndParseErrorForGqlResponse", () => {
+      const input = new InsufficientIbexBalance(
+        new Error("Bad Request"),
+        ErrorLevel.Info,
+        insufficientDetail,
+      )
+      const result = mapAndParseErrorForGqlResponse(input)
+
+      expect(result).toMatchObject({
+        code: "INSUFFICIENT_BALANCE",
+        message: insufficientDetail,
+      })
+    })
+
+    it("keeps other IBEX errors mapped to the generic IBEX_ERROR", () => {
+      const result = mapError(new IbexError(new Error("some other 400")))
+
+      expect(result.extensions.code).toBe("IBEX_ERROR")
+      expect(result.message).toContain("An error occurred")
+    })
   })
 })
