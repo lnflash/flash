@@ -56,6 +56,42 @@ describe("ibexErrorDetail", () => {
   })
 })
 
+// ibex-client >= 3.3.0 populates ibexMessage/ibexResponse/httpCode itself —
+// these construct the real ApiError with no simulated fields, pinning the
+// integration the ^3.3.0 bump claims to deliver.
+describe("ibex-client 3.3.0 integration", () => {
+  it("ApiError extracts the body detail on construction", () => {
+    const apiErr = new ApiError(fetchErrorShaped(400, { error: insufficientDetail }))
+
+    expect(apiErr.httpCode).toBe(400)
+    expect(apiErr.ibexMessage).toBe(insufficientDetail)
+    expect(apiErr.ibexResponse).toEqual({ error: insufficientDetail })
+    expect(ibexErrorDetail(apiErr)).toBe(insufficientDetail)
+  })
+
+  it("errorHandler classifies a real body-carrying ApiError, stripping the account id", () => {
+    const apiErr = new ApiError(fetchErrorShaped(400, { error: insufficientDetail }))
+
+    const result = errorHandler(apiErr)
+
+    expect(result).toBeInstanceOf(InsufficientIbexBalance)
+    const err = result as InsufficientIbexBalance
+    expect(err.message).toBe(insufficientDetailStripped)
+    expect(err.message).not.toContain("39c6e986-979b-40ab-9e7b-df18a9277a84")
+    expect(err.detail).toBe(insufficientDetail)
+  })
+
+  it("errorHandler carries a real unclassified detail onto the generic IbexError", () => {
+    const apiErr = new ApiError(fetchErrorShaped(400, { error: "invalid parameters" }))
+
+    const result = errorHandler(apiErr)
+
+    expect(result).toBeInstanceOf(IbexError)
+    expect(result).not.toBeInstanceOf(InsufficientIbexBalance)
+    expect((result as IbexError).message).toContain("invalid parameters")
+  })
+})
+
 describe("errorHandler", () => {
   it("classifies an ApiError whose message carries the insufficient-balance text", () => {
     // flash's raw-fetch path embeds the body text in the wrapped message
