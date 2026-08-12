@@ -87,22 +87,26 @@ export const errorHandler = <T>(
 ): T | IbexError => {
   if (e instanceof AuthenticationError) return new IbexError(e, ErrorLevel.Critical)
   if (e instanceof ApiError) {
-    // Classify against the structured body detail when the error carries one,
-    // and against `message` otherwise (flash's raw-fetch path embeds the body
-    // text in the message; ibex-client@3.2.0's ApiError message is only the
-    // wrapped stack, which is why body-carrying shapes are checked first).
+    // Classify against the structured body detail when the error carries one
+    // (ibex-client >= 3.3.0's ApiError extracts it onto `ibexMessage`), and
+    // against `message` otherwise — flash's raw-fetch path embeds the body
+    // text in the message. Body-carrying shapes are checked first so a stack
+    // that happens to contain a needle can't misclassify.
     const detail = ibexErrorDetail(e)
     const classified = classifyIbexErrorText(detail ?? e.message)
     if (classified === InsufficientIbexBalance)
       return new InsufficientIbexBalance(e, ErrorLevel.Info, detail)
     if (classified === CompletedInvoice) return new CompletedInvoice(e, ErrorLevel.Info)
-    // Unclassified path: mirror httpErrorHandler's carry — an unrecognized
-    // IBEX 400 whose ApiError has a stack-only message must still log what
-    // IBEX actually said. Build a new IbexError rather than mutating `e`,
-    // which the caller may still hold.
+    // Unclassified path: an unrecognized IBEX 400 must still log what IBEX
+    // actually said. ibex-client >= 3.3.0's ApiError already appends
+    // "IBEX response (<code>): <detail>" to its own message, so only carry
+    // the detail when the message doesn't already contain it (older or raw
+    // shapes with a stack-only message). Build a new IbexError rather than
+    // mutating `e`, which the caller may still hold.
     if (detail !== undefined) {
       const generic = new IbexError(e, ErrorLevel.Warn)
-      generic.message = `${detail}\n${generic.message}`
+      if (!generic.message.includes(detail))
+        generic.message = `${detail}\n${generic.message}`
       return generic
     }
   }
@@ -111,29 +115,50 @@ export const errorHandler = <T>(
 }
 
 /**
- * Classify a raw error thrown by the generated IBEX SDK (or fetch) before
- * ibex-client's ApiError wrapper can discard the response body. With the
- * pinned ibex-client@3.2.0, ApiError keeps only `httpCode` — the JSON error
- * body that distinguishes e.g. "insufficient balance" from any other 400 only
- * exists on the underlying FetchError's `.data` (lnflash/ibex-client#6).
- * Call sites that need body-level classification invoke the SDK through
- * `Ibex.authentication.withAuth` themselves and route the caught error here.
+ * Classify a raw error thrown by the generated IBEX SDK (or fetch) for call
+ * sites that invoke the SDK through `Ibex.authentication.withAuth` themselves
+ * and route the caught error here (the payInvoice raw-fetch seam). The seam
+ * predates ibex-client@3.3.0: 3.2.0's ApiError kept only `httpCode` and
+ * discarded the JSON error body that distinguishes e.g. "insufficient
+ * balance" from any other 400 (lnflash/ibex-client#6). As of 3.3.0, ApiError
+ * extracts the body itself (`ibexResponse` / `ibexMessage`) and errorHandler
+ * classifies it through the standard path — this handler remains as
+ * defense-in-depth for the raw-fetch seam until that seam is collapsed
+ * (lnflash/flash#478).
  */
 export const httpErrorHandler = (e: unknown): IbexError => {
   const raw = e instanceof Error ? e : new Error(String(e))
   if (raw instanceof AuthenticationError) return new IbexError(raw, ErrorLevel.Critical)
-  const detail = ibexErrorDetail(raw)
   // ApiError's constructor keeps `.status` as httpCode, which IbexError reads.
   const wrapped = raw instanceof IbexClientError ? raw : new ApiError(raw)
+  // Derive the detail from `wrapped`, never from `raw`. For a raw FetchError,
+  // ApiError's own extraction (`ibexMessage`) is capped at ibex-client's
+  // MAX_IBEX_MESSAGE_LENGTH, while reading straight off `raw.data` is not:
+  // comparing an uncapped detail against the capped copy embedded in
+  // `wrapped.message` would defeat the dedupe guard below for any body over
+  // the cap — exactly the Cloudflare-HTML-error-page outage the cap exists
+  // for — and prepend the full multi-KB body onto every failing call's
+  // message. When `raw` is already an IbexClientError, wrapped === raw and
+  // the extraction is unchanged. The uncapped body exists only on the local
+  // ApiError's `ibexResponse` and does not survive onto the returned
+  // IbexError — by design: pino serializes own enumerable properties, and
+  // attaching a multi-KB body would recreate the log bloat the cap prevents.
+  const detail = ibexErrorDetail(wrapped)
   const classified = classifyIbexErrorText(detail ?? raw.message)
   if (classified === InsufficientIbexBalance)
     return new InsufficientIbexBalance(wrapped, ErrorLevel.Info, detail)
   if (classified === CompletedInvoice)
     return new CompletedInvoice(wrapped, ErrorLevel.Info)
-  // Unclassified path: ApiError's message is only the wrapped stack, so carry
-  // the extracted body detail into it — an unrecognized IBEX 400 must still
-  // log what IBEX actually said, not just "FetchError: Bad Request" + stack.
-  if (detail !== undefined && !(raw instanceof IbexClientError))
+  // Unclassified path: an unrecognized IBEX 400 must still log what IBEX
+  // actually said, not just "FetchError: Bad Request" + stack. The ApiError
+  // constructed above already embeds the extracted detail in its message
+  // (ibex-client >= 3.3.0), so only carry the detail when the message doesn't
+  // already contain it — never append the same text twice.
+  if (
+    detail !== undefined &&
+    !(raw instanceof IbexClientError) &&
+    !wrapped.message.includes(detail)
+  )
     wrapped.message = `${detail}\n${wrapped.message}`
   return new IbexError(wrapped, ErrorLevel.Warn)
 }

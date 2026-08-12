@@ -1,5 +1,5 @@
 import { ErrorLevel } from "@domain/shared"
-import { ApiError, AuthenticationError } from "ibex-client"
+import { ApiError, AuthenticationError, MAX_IBEX_MESSAGE_LENGTH } from "ibex-client"
 
 import {
   CompletedInvoice,
@@ -56,6 +56,47 @@ describe("ibexErrorDetail", () => {
   })
 })
 
+// ibex-client >= 3.3.0 populates ibexMessage/ibexResponse/httpCode itself —
+// these construct the real ApiError with no simulated fields, pinning the
+// integration the ^3.3.0 bump claims to deliver.
+describe("ibex-client 3.3.0 integration", () => {
+  it("ApiError extracts the body detail on construction", () => {
+    const apiErr = new ApiError(fetchErrorShaped(400, { error: insufficientDetail }))
+
+    expect(apiErr.httpCode).toBe(400)
+    expect(apiErr.ibexMessage).toBe(insufficientDetail)
+    expect(apiErr.ibexResponse).toEqual({ error: insufficientDetail })
+    expect(ibexErrorDetail(apiErr)).toBe(insufficientDetail)
+  })
+
+  it("errorHandler classifies a real body-carrying ApiError, stripping the account id", () => {
+    const apiErr = new ApiError(fetchErrorShaped(400, { error: insufficientDetail }))
+
+    const result = errorHandler(apiErr)
+
+    expect(result).toBeInstanceOf(InsufficientIbexBalance)
+    const err = result as InsufficientIbexBalance
+    expect(err.message).toBe(insufficientDetailStripped)
+    expect(err.message).not.toContain("39c6e986-979b-40ab-9e7b-df18a9277a84")
+    expect(err.detail).toBe(insufficientDetail)
+  })
+
+  it("errorHandler carries a real unclassified detail onto the generic IbexError", () => {
+    const apiErr = new ApiError(fetchErrorShaped(400, { error: "invalid parameters" }))
+
+    const result = errorHandler(apiErr)
+
+    expect(result).toBeInstanceOf(IbexError)
+    expect(result).not.toBeInstanceOf(InsufficientIbexBalance)
+    const message = (result as IbexError).message
+    expect(message).toContain("invalid parameters")
+    // 3.3.0's ApiError already embeds the detail in its own message — the
+    // unclassified carry must not append the same text a second time (the
+    // duplicated detail would reach logs and Discord alert embeds)
+    expect(message.split("invalid parameters").length - 1).toBe(1)
+  })
+})
+
 describe("errorHandler", () => {
   it("classifies an ApiError whose message carries the insufficient-balance text", () => {
     // flash's raw-fetch path embeds the body text in the wrapped message
@@ -107,8 +148,8 @@ describe("errorHandler", () => {
     expect(apiErr.message).toBe(originalMessage)
   })
 
-  it("maps a pinned-version SDK-path ApiError (stack-only message) to a generic IbexError", () => {
-    // ibex-client@3.2.0 discards the response body: message is only the
+  it("maps an ApiError with no extractable body (stack-only message) to a generic IbexError", () => {
+    // when the response carries no body, 3.3.0's ApiError message is only the
     // wrapped FetchError stack ("FetchError: Bad Request\n    at ...")
     const apiErr = new ApiError(fetchErrorShaped(400, undefined))
 
@@ -191,6 +232,43 @@ describe("httpErrorHandler", () => {
     // unrecognized IBEX 400 that logs only "FetchError: Bad Request" is the
     // debugging blindness this module exists to fix
     expect(err.message).toContain("invalid parameters")
+    // ... and exactly once: 3.3.0's ApiError wrapper already embeds the
+    // detail in its message, so the carry must not duplicate it
+    expect(err.message.split("invalid parameters").length - 1).toBe(1)
+  })
+
+  it("keeps the message bounded when the body exceeds ibex-client's cap", () => {
+    // Cloudflare-style outage: IBEX's proxy returns a full HTML error page,
+    // which arrives as a plain-text body far over MAX_IBEX_MESSAGE_LENGTH.
+    // ApiError embeds only the capped copy in its message; if the dedupe
+    // guard compared against an uncapped extraction of the same body, it
+    // would always miss and prepend the full multi-KB blob — once per
+    // failing call — into logs and Discord alert embeds.
+    const hugeBody = `<html>cf-502 error page</html>${"x".repeat(
+      MAX_IBEX_MESSAGE_LENGTH * 4,
+    )}`
+    const raw = fetchErrorShaped(502, hugeBody)
+    const rawStackLength = (raw.stack as string).length
+
+    const result = httpErrorHandler(raw)
+
+    expect(result).toBeInstanceOf(IbexError)
+    expect(result).not.toBeInstanceOf(InsufficientIbexBalance)
+    const err = result as IbexError
+    expect(err.httpCode).toBe(502)
+    // the truncated detail appears exactly once...
+    const truncatedDetail = `${hugeBody.slice(0, MAX_IBEX_MESSAGE_LENGTH)}... [truncated]`
+    expect(err.message.split(truncatedDetail).length - 1).toBe(1)
+    // ... the capped prefix itself is not duplicated (truncated + full copy)...
+    expect(err.message.split(hugeBody.slice(0, MAX_IBEX_MESSAGE_LENGTH)).length - 1).toBe(
+      1,
+    )
+    // ... the full uncapped body never reaches the message...
+    expect(err.message).not.toContain(hugeBody)
+    // ... and the whole message stays bounded: stack + capped detail + framing
+    expect(err.message.length).toBeLessThan(
+      rawStackLength + MAX_IBEX_MESSAGE_LENGTH + 100,
+    )
   })
 
   it("keeps the generic path unchanged when the error carries no body detail", () => {
