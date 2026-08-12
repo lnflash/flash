@@ -250,8 +250,13 @@ const payInvoice = async (
   // Call the generated SDK through withAuth directly (instead of
   // Ibex.payInvoiceV2) so a failed payment's FetchError — which carries the
   // parsed IBEX error body on `.data` — reaches httpErrorHandler intact.
-  // ibex-client@3.2.0's own ApiError wrapper discards that body, which is what
-  // made "insufficient balance" 400s unclassifiable (lnflash/ibex-client#6).
+  // This seam predates ibex-client@3.3.0: 3.2.0's ApiError wrapper discarded
+  // that body (lnflash/ibex-client#6), which made "insufficient balance" 400s
+  // unclassifiable. As of 3.3.0, ApiError carries the body itself and
+  // errorHandler classifies it through the standard path, so the seam is
+  // redundant — retained only as belt-and-braces until it is collapsed back
+  // to `Ibex.payInvoiceV2(bodyWithHooks).then(errorHandler)` in its own PR
+  // (lnflash/flash#478; a payment-path change doesn't belong in a deps bump).
   return Ibex.authentication
     .withAuth(() => Ibex.ibex.payInvoiceV2(bodyWithHooks))
     .then(errorHandler)

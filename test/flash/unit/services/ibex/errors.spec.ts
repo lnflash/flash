@@ -88,7 +88,12 @@ describe("ibex-client 3.3.0 integration", () => {
 
     expect(result).toBeInstanceOf(IbexError)
     expect(result).not.toBeInstanceOf(InsufficientIbexBalance)
-    expect((result as IbexError).message).toContain("invalid parameters")
+    const message = (result as IbexError).message
+    expect(message).toContain("invalid parameters")
+    // 3.3.0's ApiError already embeds the detail in its own message — the
+    // unclassified carry must not append the same text a second time (the
+    // duplicated detail would reach logs and Discord alert embeds)
+    expect(message.split("invalid parameters").length - 1).toBe(1)
   })
 })
 
@@ -143,8 +148,8 @@ describe("errorHandler", () => {
     expect(apiErr.message).toBe(originalMessage)
   })
 
-  it("maps a pinned-version SDK-path ApiError (stack-only message) to a generic IbexError", () => {
-    // ibex-client@3.2.0 discards the response body: message is only the
+  it("maps an ApiError with no extractable body (stack-only message) to a generic IbexError", () => {
+    // when the response carries no body, 3.3.0's ApiError message is only the
     // wrapped FetchError stack ("FetchError: Bad Request\n    at ...")
     const apiErr = new ApiError(fetchErrorShaped(400, undefined))
 
@@ -227,6 +232,9 @@ describe("httpErrorHandler", () => {
     // unrecognized IBEX 400 that logs only "FetchError: Bad Request" is the
     // debugging blindness this module exists to fix
     expect(err.message).toContain("invalid parameters")
+    // ... and exactly once: 3.3.0's ApiError wrapper already embeds the
+    // detail in its message, so the carry must not duplicate it
+    expect(err.message.split("invalid parameters").length - 1).toBe(1)
   })
 
   it("keeps the generic path unchanged when the error carries no body detail", () => {
