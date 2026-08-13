@@ -1,5 +1,4 @@
 const mockPayInvoiceV2 = jest.fn()
-const mockWithAuth = jest.fn()
 const mockGetAccessToken = jest.fn()
 const mockSetAccessToken = jest.fn()
 
@@ -30,26 +29,41 @@ jest.mock("@services/ibex/webhook-server", () => ({
   },
 }))
 
-// Keep the REAL ibex-client error classes (errorHandler/httpErrorHandler rely
-// on instanceof against them); mock only the client instance so we can drive
-// the SDK call underneath payInvoice.
-jest.mock("ibex-client", () => ({
-  ...jest.requireActual("ibex-client"),
-  __esModule: true,
-  default: jest.fn().mockImplementation(() => ({
-    authentication: {
-      storage: {
-        getAccessToken: (...args: unknown[]) => mockGetAccessToken(...args),
-        setAccessToken: (...args: unknown[]) => mockSetAccessToken(...args),
-        setRefreshToken: jest.fn(),
+// Keep the REAL ibex-client error classes (errorHandler relies on instanceof
+// against them); mock only the client instance so we can drive the SDK call
+// underneath payInvoice. The mocked payInvoiceV2 mirrors ibex-client v3.3.0's
+// wrapper contract, which the collapsed payInvoice path
+// (`Ibex.payInvoiceV2(body).then(errorHandler)`, lnflash/flash#478) relies on:
+// `withAuth` unwraps `.data` on success or resolves with an
+// AuthenticationError, and anything thrown resolves as `new ApiError(thrown)`.
+jest.mock("ibex-client", () => {
+  const actual = jest.requireActual("ibex-client")
+  return {
+    ...actual,
+    __esModule: true,
+    default: jest.fn().mockImplementation(() => ({
+      authentication: {
+        storage: {
+          getAccessToken: (...args: unknown[]) => mockGetAccessToken(...args),
+          setAccessToken: (...args: unknown[]) => mockSetAccessToken(...args),
+          setRefreshToken: jest.fn(),
+        },
       },
-      withAuth: (...args: unknown[]) => mockWithAuth(...args),
-    },
-    ibex: {
-      payInvoiceV2: (...args: unknown[]) => mockPayInvoiceV2(...args),
-    },
-  })),
-}))
+      payInvoiceV2: async (body: unknown) => {
+        try {
+          const resp = await mockPayInvoiceV2(body)
+          if (resp instanceof actual.AuthenticationError) return resp
+          return (resp as { data: unknown }).data
+        } catch (err) {
+          return new actual.ApiError(err as Error)
+        }
+      },
+    })),
+  }
+})
+
+import { ErrorLevel } from "@domain/shared"
+import { AuthenticationError } from "ibex-client"
 
 import Ibex from "@services/ibex/client"
 import { IbexError, InsufficientIbexBalance } from "@services/ibex/errors"
@@ -68,10 +82,6 @@ const fetchErrorShaped = (status: number, data: unknown): Error => {
 describe("Ibex.payInvoice error classification", () => {
   beforeEach(() => {
     jest.clearAllMocks()
-    // mirror the real withAuth: run the SDK call, unwrap .data, rethrow errors
-    mockWithAuth.mockImplementation(
-      async (apiCall: () => Promise<{ data: unknown }>) => (await apiCall()).data,
-    )
   })
 
   const payArgs = {
@@ -118,6 +128,17 @@ describe("Ibex.payInvoice error classification", () => {
     expect(result).toBeInstanceOf(IbexError)
     expect(result).not.toBeInstanceOf(InsufficientIbexBalance)
     expect((result as IbexError).httpCode).toBeUndefined()
+  })
+
+  it("returns a critical IbexError when authentication fails", async () => {
+    // withAuth resolves with (never throws) an AuthenticationError
+    mockPayInvoiceV2.mockResolvedValue(new AuthenticationError("auth failed"))
+
+    const result = await Ibex.payInvoice(payArgs)
+
+    expect(result).toBeInstanceOf(IbexError)
+    expect(result).not.toBeInstanceOf(InsufficientIbexBalance)
+    expect((result as IbexError).level).toBe(ErrorLevel.Critical)
   })
 
   it("passes successful payments through with the webhook body", async () => {

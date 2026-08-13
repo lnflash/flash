@@ -50,13 +50,7 @@ import {
   UsdWalletAmount,
 } from "./types"
 
-import {
-  errorHandler,
-  httpErrorHandler,
-  IbexError,
-  ParseError,
-  UnexpectedIbexResponse,
-} from "./errors"
+import { errorHandler, IbexError, ParseError, UnexpectedIbexResponse } from "./errors"
 import { ibexWebhookEndpoints, ibexWebhookSecret } from "./webhook-config"
 
 const Ibex = new IbexClient(
@@ -247,20 +241,11 @@ const payInvoice = async (
     webhookSecret: ibexWebhookSecret,
   } as PayInvoiceV2BodyParam
   addAttributesToCurrentSpan({ "request.params": JSON.stringify(bodyWithHooks) })
-  // Call the generated SDK through withAuth directly (instead of
-  // Ibex.payInvoiceV2) so a failed payment's FetchError — which carries the
-  // parsed IBEX error body on `.data` — reaches httpErrorHandler intact.
-  // This seam predates ibex-client@3.3.0: 3.2.0's ApiError wrapper discarded
-  // that body (lnflash/ibex-client#6), which made "insufficient balance" 400s
-  // unclassifiable. As of 3.3.0, ApiError carries the body itself and
-  // errorHandler classifies it through the standard path, so the seam is
-  // redundant — retained only as belt-and-braces until it is collapsed back
-  // to `Ibex.payInvoiceV2(bodyWithHooks).then(errorHandler)` in its own PR
-  // (lnflash/flash#478; a payment-path change doesn't belong in a deps bump).
-  return Ibex.authentication
-    .withAuth(() => Ibex.ibex.payInvoiceV2(bodyWithHooks))
-    .then(errorHandler)
-    .catch(httpErrorHandler)
+  // Standard SDK path. A raw-fetch seam lived here while ibex-client 3.2.0's
+  // ApiError discarded the response body (lnflash/ibex-client#6); 3.3.0's
+  // ApiError carries the body itself (`ibexMessage`/`ibexResponse`/`httpCode`)
+  // and errorHandler classifies it, so the seam was collapsed (lnflash/flash#478).
+  return Ibex.payInvoiceV2(bodyWithHooks).then(errorHandler)
 }
 
 // onchain transactions are typically high-value
