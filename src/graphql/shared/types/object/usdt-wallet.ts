@@ -70,7 +70,11 @@ const UsdtWallet = GT.Object<Wallet>({
         if (balance instanceof USDTAmount) {
           // Fractional cents (≤4 dp) — whole-cent rounding overstated the
           // balance by up to half a cent; see usdtMicrosToUsdCents.
-          return usdtMicrosToUsdCents(balance.asSmallestUnits())
+          const cents = usdtMicrosToUsdCents(balance.asSmallestUnits())
+          if (cents instanceof Error) {
+            throw mapError(cents)
+          }
+          return cents
         }
         if (balance instanceof USDAmount) {
           return Number(balance.asCents(8))

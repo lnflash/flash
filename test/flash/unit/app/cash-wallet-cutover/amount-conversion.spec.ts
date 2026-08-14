@@ -2,6 +2,7 @@ import {
   usdCentsToUsdtMicros,
   usdtMicrosToUsdCents,
 } from "@app/cash-wallet-cutover/amount-conversion"
+import { InvalidCashWalletCutoverAmountError } from "@app/cash-wallet-cutover/errors"
 
 describe("cash wallet cutover amount conversion", () => {
   it("converts precise USD cents to USDT micros", () => {
@@ -46,14 +47,33 @@ describe("usdtMicrosToUsdCents", () => {
     expect(usdtMicrosToUsdCents("1099346.00")).toBe(109.9346)
   })
 
-  it("rejects fractional micros", () => {
-    expect(() => usdtMicrosToUsdCents("1099346.5")).toThrow(
-      /Cannot convert fractional USDT micros/,
-    )
+  it("preserves the sign of negative balances (FractionalCentAmount is signed)", () => {
+    // IBEX can report a small negative balance (fee reconciliation / ledger
+    // anomaly); erroring here would break the wallet's balance field on
+    // every query.
+    expect(usdtMicrosToUsdCents("-123")).toBe(-0.0123)
+    expect(usdtMicrosToUsdCents("-1099346")).toBe(-109.9346)
+    expect(usdtMicrosToUsdCents(-1099346n)).toBe(-109.9346)
+    expect(usdtMicrosToUsdCents(-1099346)).toBe(-109.9346)
   })
 
-  it("rejects negative and malformed input", () => {
-    expect(() => usdtMicrosToUsdCents("-5")).toThrow()
-    expect(() => usdtMicrosToUsdCents("abc")).toThrow()
+  it("normalizes negative zero to zero", () => {
+    expect(usdtMicrosToUsdCents("-0")).toBe(0)
+  })
+
+  it("returns the module error for fractional micros", () => {
+    const result = usdtMicrosToUsdCents("1099346.5")
+    expect(result).toBeInstanceOf(InvalidCashWalletCutoverAmountError)
+    expect((result as Error).message).toMatch(/Cannot convert fractional USDT micros/)
+  })
+
+  it("returns the module error for malformed input", () => {
+    expect(usdtMicrosToUsdCents("abc")).toBeInstanceOf(
+      InvalidCashWalletCutoverAmountError,
+    )
+    expect(usdtMicrosToUsdCents("-")).toBeInstanceOf(InvalidCashWalletCutoverAmountError)
+    expect(usdtMicrosToUsdCents("1-2")).toBeInstanceOf(
+      InvalidCashWalletCutoverAmountError,
+    )
   })
 })

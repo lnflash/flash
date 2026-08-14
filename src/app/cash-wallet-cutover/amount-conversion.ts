@@ -55,21 +55,38 @@ export const usdCentsToUsdtMicros = (
  * `balance` GraphQL field is FractionalCentAmount; clients floor for
  * spendable-amount decisions.
  *
- * Throws on malformed input — callers are GraphQL resolvers whose error path
- * is throw-and-map.
+ * The amount is SIGNED: FractionalCentAmount is documented "can be positive
+ * or negative", Money holds negatives, and IBEX can report a small negative
+ * balance (fee reconciliation / ledger anomaly). A leading "-" negates the
+ * result — it must not error, or the wallet's balance field breaks on every
+ * query.
+ *
+ * Returns InvalidCashWalletCutoverAmountError on malformed input (module
+ * convention) — callers are GraphQL resolvers that `throw mapError(err)`
+ * like their other error paths.
  */
-export const usdtMicrosToUsdCents = (usdtMicros: bigint | number | string): number => {
+export const usdtMicrosToUsdCents = (
+  usdtMicros: bigint | number | string,
+): number | InvalidCashWalletCutoverAmountError => {
   const [wholeMicros, fractionalMicros] = usdtMicros.toString().split(".")
   if (fractionalMicros && !/^0+$/.test(fractionalMicros)) {
-    throw new Error(`Cannot convert fractional USDT micros ${usdtMicros} to USD cents`)
+    return new InvalidCashWalletCutoverAmountError(
+      `Cannot convert fractional USDT micros ${usdtMicros} to USD cents`,
+    )
   }
 
-  const parsed = parseNonNegativeInteger(wholeMicros)
-  if (parsed instanceof Error) throw parsed
+  const negative = wholeMicros.startsWith("-")
+  const magnitude = parseNonNegativeInteger(negative ? wholeMicros.slice(1) : wholeMicros)
+  if (magnitude instanceof Error) {
+    return new InvalidCashWalletCutoverAmountError(
+      `Invalid USDT micros amount: ${usdtMicros}`,
+    )
+  }
 
-  const wholeCents = parsed / USDT_MICROS_PER_USD_CENT
-  const fracMicros = parsed % USDT_MICROS_PER_USD_CENT
-  return Number(`${wholeCents}.${fracMicros.toString().padStart(4, "0")}`)
+  const wholeCents = magnitude / USDT_MICROS_PER_USD_CENT
+  const fracMicros = magnitude % USDT_MICROS_PER_USD_CENT
+  const cents = Number(`${wholeCents}.${fracMicros.toString().padStart(4, "0")}`)
+  return negative && cents !== 0 ? -cents : cents
 }
 
 export const usdtMicrosToUsdCentsCeil = (

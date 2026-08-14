@@ -81,7 +81,11 @@ const UsdWallet = GT.Object<Wallet>({
           throw mapError(balance)
         }
         if (balance instanceof USDTAmount) {
-          return usdtMicrosToUsdCents(balance.asSmallestUnits())
+          const cents = usdtMicrosToUsdCents(balance.asSmallestUnits())
+          if (cents instanceof Error) {
+            throw mapError(cents)
+          }
+          return cents
         }
         return Number(balance.asCents(8))
       },
