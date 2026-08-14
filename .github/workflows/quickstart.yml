@@ -16,6 +16,10 @@ jobs:
       - uses: carvel-dev/setup-action@v1
         with:
           only: ytt, vendir
+          # ytt v0.55.2's release notes use a single space in checksum
+          # lines; setup-action needs the sha256sum two-space format and
+          # fails verification. Pin until a fixed release lands upstream.
+          ytt: v0.55.1
       - name: Test quickstart
         run: |
           cd quickstart

@@ -8,6 +8,7 @@ import { normalizePaymentAmount } from "@graphql/shared/root/mutation"
 import { mapError } from "@graphql/error-map"
 
 import { Wallets } from "@app"
+import { usdtMicrosToUsdCents } from "@app/cash-wallet-cutover"
 
 import {
   USDAmount,
@@ -67,7 +68,13 @@ const UsdtWallet = GT.Object<Wallet>({
           throw mapError(balance)
         }
         if (balance instanceof USDTAmount) {
-          return Number(balance.asUsdCents())
+          // Fractional cents (≤4 dp) — whole-cent rounding overstated the
+          // balance by up to half a cent; see usdtMicrosToUsdCents.
+          const cents = usdtMicrosToUsdCents(balance.asSmallestUnits())
+          if (cents instanceof Error) {
+            throw mapError(cents)
+          }
+          return cents
         }
         if (balance instanceof USDAmount) {
           return Number(balance.asCents(8))

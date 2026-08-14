@@ -44,6 +44,51 @@ export const usdCentsToUsdtMicros = (
   return decimalToScaledInteger({ value: usdCents, scale: 4 })
 }
 
+/**
+ * USDT micros → USD cents for BALANCE REPORTING, preserving the fraction
+ * (1 cent = 10,000 micros, so ≤4 decimal places).
+ *
+ * Rounding here — the old `asUsdCents()` toFixed(0), half-to-even — reported
+ * up to half a cent MORE than the wallet holds, so a client that sent the
+ * reported balance died at IBEX with "insufficient balance" (on-device repro:
+ * 1,099,346 micros reported as 110 cents; true balance 109.9346). The wallet
+ * `balance` GraphQL field is FractionalCentAmount; clients floor for
+ * spendable-amount decisions.
+ *
+ * The amount is SIGNED: FractionalCentAmount is documented "can be positive
+ * or negative", Money holds negatives, and IBEX can report a small negative
+ * balance (fee reconciliation / ledger anomaly). A leading "-" negates the
+ * result — it must not error, or the wallet's balance field breaks on every
+ * query.
+ *
+ * Returns InvalidCashWalletCutoverAmountError on malformed input (module
+ * convention) — callers are GraphQL resolvers that `throw mapError(err)`
+ * like their other error paths.
+ */
+export const usdtMicrosToUsdCents = (
+  usdtMicros: bigint | number | string,
+): number | InvalidCashWalletCutoverAmountError => {
+  const [wholeMicros, fractionalMicros] = usdtMicros.toString().split(".")
+  if (fractionalMicros && !/^0+$/.test(fractionalMicros)) {
+    return new InvalidCashWalletCutoverAmountError(
+      `Cannot convert fractional USDT micros ${usdtMicros} to USD cents`,
+    )
+  }
+
+  const negative = wholeMicros.startsWith("-")
+  const magnitude = parseNonNegativeInteger(negative ? wholeMicros.slice(1) : wholeMicros)
+  if (magnitude instanceof Error) {
+    return new InvalidCashWalletCutoverAmountError(
+      `Invalid USDT micros amount: ${usdtMicros}`,
+    )
+  }
+
+  const wholeCents = magnitude / USDT_MICROS_PER_USD_CENT
+  const fracMicros = magnitude % USDT_MICROS_PER_USD_CENT
+  const cents = Number(`${wholeCents}.${fracMicros.toString().padStart(4, "0")}`)
+  return negative && cents !== 0 ? -cents : cents
+}
+
 export const usdtMicrosToUsdCentsCeil = (
   usdtMicros: string,
 ): string | InvalidCashWalletCutoverAmountError => {

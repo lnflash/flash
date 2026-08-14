@@ -9,7 +9,10 @@ import { mapError } from "@graphql/error-map"
 import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 
 import { Wallets } from "@app"
-import { resolveCashWalletPresentationForAccount } from "@app/cash-wallet-cutover"
+import {
+  resolveCashWalletPresentationForAccount,
+  usdtMicrosToUsdCents,
+} from "@app/cash-wallet-cutover"
 
 import { WalletCurrency as WalletCurrencyDomain, USDTAmount } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
@@ -23,18 +26,6 @@ import Lnurl from "../scalar/lnurl"
 
 import { resolveCashWalletHistoryWalletsForWalletObject } from "./cash-wallet-history"
 import { TransactionConnection } from "./transaction"
-
-export const usdtMicrosToUsdCents = (usdtMicros: bigint | number | string): number => {
-  const [wholeMicros, fractionalMicros] = usdtMicros.toString().split(".")
-  if (fractionalMicros && !/^0+$/.test(fractionalMicros)) {
-    throw new Error(`Cannot convert fractional USDT micros ${usdtMicros} to USD cents`)
-  }
-
-  const amount = USDTAmount.smallestUnits(wholeMicros)
-  if (amount instanceof Error) throw amount
-
-  return Number(amount.asUsdCents())
-}
 
 const UsdWallet = GT.Object<Wallet>({
   name: "UsdWallet",
@@ -90,7 +81,11 @@ const UsdWallet = GT.Object<Wallet>({
           throw mapError(balance)
         }
         if (balance instanceof USDTAmount) {
-          return usdtMicrosToUsdCents(balance.asSmallestUnits())
+          const cents = usdtMicrosToUsdCents(balance.asSmallestUnits())
+          if (cents instanceof Error) {
+            throw mapError(cents)
+          }
+          return cents
         }
         return Number(balance.asCents(8))
       },
