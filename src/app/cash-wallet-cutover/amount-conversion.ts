@@ -44,6 +44,34 @@ export const usdCentsToUsdtMicros = (
   return decimalToScaledInteger({ value: usdCents, scale: 4 })
 }
 
+/**
+ * USDT micros → USD cents for BALANCE REPORTING, preserving the fraction
+ * (1 cent = 10,000 micros, so ≤4 decimal places).
+ *
+ * Rounding here — the old `asUsdCents()` toFixed(0), half-to-even — reported
+ * up to half a cent MORE than the wallet holds, so a client that sent the
+ * reported balance died at IBEX with "insufficient balance" (on-device repro:
+ * 1,099,346 micros reported as 110 cents; true balance 109.9346). The wallet
+ * `balance` GraphQL field is FractionalCentAmount; clients floor for
+ * spendable-amount decisions.
+ *
+ * Throws on malformed input — callers are GraphQL resolvers whose error path
+ * is throw-and-map.
+ */
+export const usdtMicrosToUsdCents = (usdtMicros: bigint | number | string): number => {
+  const [wholeMicros, fractionalMicros] = usdtMicros.toString().split(".")
+  if (fractionalMicros && !/^0+$/.test(fractionalMicros)) {
+    throw new Error(`Cannot convert fractional USDT micros ${usdtMicros} to USD cents`)
+  }
+
+  const parsed = parseNonNegativeInteger(wholeMicros)
+  if (parsed instanceof Error) throw parsed
+
+  const wholeCents = parsed / USDT_MICROS_PER_USD_CENT
+  const fracMicros = parsed % USDT_MICROS_PER_USD_CENT
+  return Number(`${wholeCents}.${fracMicros.toString().padStart(4, "0")}`)
+}
+
 export const usdtMicrosToUsdCentsCeil = (
   usdtMicros: string,
 ): string | InvalidCashWalletCutoverAmountError => {
