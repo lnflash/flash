@@ -482,7 +482,7 @@ export class ErpNext {
         amount?: number | string | null
       }[]) {
         // Frappe's list API returns null for unset fields, and Number(null)
-        // is 0 — a null amount must fail closed like any other unparseable
+        // is 0 — a null amount must fail closed like any other unparsable
         // row, not silently contribute nothing to the sum.
         if (row.amount == null) {
           return new FygaroTopupHistoryQueryError(
