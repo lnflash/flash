@@ -228,12 +228,17 @@ export const paymentHandler = async (req: Request, res: Response) => {
     const settings = creditEnabled ? await getFygaroSettings() : undefined
 
     // Trailing-24h charged gross for the per-level daily cap, read only when a
-    // credit could actually happen (deploy gate on, settings readable). A
-    // failed read stays `undefined` — never coerced to 0, which would treat a
-    // history outage as a clean slate — and the gate turns it into the
-    // retryable `history-unavailable` stop.
+    // credit could actually happen (deploy gate on, settings readable,
+    // auto-credit toggle on, USD). The cheaper deterministic gates come first:
+    // with the operator kill switch off or a non-USD payment, gate ordering
+    // guarantees an `auto-credit-disabled`/`non-usd` stop before the history
+    // gates are ever consulted, so skipping the ERPNext list query here can
+    // never surface a false `history-unavailable`. A failed read stays
+    // `undefined` — never coerced to 0, which would treat a history outage as
+    // a clean slate — and the gate turns it into the retryable
+    // `history-unavailable` stop.
     let priorDayGrossCents: number | undefined
-    if (creditEnabled && settings) {
+    if (creditEnabled && settings?.autoCreditEnabled && currency === "USD") {
       const priorSum = await sumFygaroTopupGrossCentsLast24h({
         accountId,
         excludeTransactionId: transactionId,

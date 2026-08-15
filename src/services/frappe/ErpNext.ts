@@ -414,11 +414,19 @@ export class ErpNext {
 
   // Sums the GROSS USD cents of one account's Fygaro card top-ups over a
   // trailing window, for the per-level daily top-up limit gate. Counts every
-  // captured payment (Fiat Received or Completed — i.e. the card was charged,
-  // whether or not it has been credited yet), excludes Cancelled rows, and
-  // excludes the current delivery's own audit row (written before the gate
-  // runs) via excludeRequestId. Any read/shape/parse problem is an error, not
-  // zero — under-counting the window would quietly defeat the cap.
+  // captured USD payment (Fiat Received or Completed — i.e. the card was
+  // charged, whether or not it has been credited yet), excludes Cancelled
+  // rows, and excludes the current delivery's own audit row (written before
+  // the gate runs) via excludeRequestId. Non-USD rows are excluded because
+  // their `amount` is the raw foreign-currency figure — a 5,000 JMD payment
+  // counted at face value would look like $5,000 of prior gross and lock the
+  // account out of auto-credit for a day. The window filters on
+  // `last_seen_at`, which this code writes in UTC on every upsert (a
+  // re-delivery bump only widens the window — fails closed), NOT Frappe's
+  // `creation`, which is stored naive in the ERP site's configured time zone:
+  // comparing that against a UTC-rendered cutoff would silently shrink the
+  // window by the site's UTC offset. Any read/shape/parse problem is an
+  // error, not zero — under-counting the window would quietly defeat the cap.
   async sumFygaroTopupGrossCentsSince({
     accountId,
     since,
@@ -438,6 +446,7 @@ export class ErpNext {
           BridgeTransferRequestTransactionType.Topup,
         ],
         [BridgeTransferRequest.doctype, "account_id", "=", accountId],
+        [BridgeTransferRequest.doctype, "currency", "=", "USD"],
         [
           BridgeTransferRequest.doctype,
           "status",
@@ -449,7 +458,7 @@ export class ErpNext {
         ],
         [
           BridgeTransferRequest.doctype,
-          "creation",
+          "last_seen_at",
           ">=",
           toFrappeDatetime(since.toISOString()),
         ],
@@ -468,7 +477,18 @@ export class ErpNext {
         return new FygaroTopupHistoryQueryError("No data in top-up history response")
       }
       let sumCents = 0
-      for (const row of rows as { request_id?: string; amount?: number | string }[]) {
+      for (const row of rows as {
+        request_id?: string
+        amount?: number | string | null
+      }[]) {
+        // Frappe's list API returns null for unset fields, and Number(null)
+        // is 0 — a null amount must fail closed like any other unparseable
+        // row, not silently contribute nothing to the sum.
+        if (row.amount == null) {
+          return new FygaroTopupHistoryQueryError(
+            `Missing amount on ${row.request_id ?? "<unknown row>"}`,
+          )
+        }
         const cents = Math.round(Number(row.amount) * 100)
         if (!Number.isFinite(cents)) {
           return new FygaroTopupHistoryQueryError(

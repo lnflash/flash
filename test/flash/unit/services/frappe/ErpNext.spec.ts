@@ -430,8 +430,16 @@ describe("ErpNext.sumFygaroTopupGrossCentsSince", () => {
       ["Bridge Transfer Request", "provider", "=", "Fygaro"],
       ["Bridge Transfer Request", "transaction_type", "=", "Topup"],
       ["Bridge Transfer Request", "account_id", "=", "account-1"],
+      // USD only: a non-USD row carries the raw foreign-currency amount, so a
+      // 5,000 JMD payment counted at face value would read as $5,000 of prior
+      // gross and wrongly lock the account out for a day.
+      ["Bridge Transfer Request", "currency", "=", "USD"],
       ["Bridge Transfer Request", "status", "in", ["Fiat Received", "Completed"]],
-      ["Bridge Transfer Request", "creation", ">=", "2026-08-13 07:00:00"],
+      // The window must filter on last_seen_at (written in UTC by this code),
+      // NOT Frappe's `creation`, which is stored naive in the ERP site's
+      // configured time zone — comparing that against a UTC cutoff would
+      // silently shrink the 24h window by the site's UTC offset.
+      ["Bridge Transfer Request", "last_seen_at", ">=", "2026-08-13 07:00:00"],
       ["Bridge Transfer Request", "request_id", "!=", "fygaro:tx-current"],
     ])
     // limit_page_length 0 = no pagination cap; a truncated window would
@@ -456,6 +464,23 @@ describe("ErpNext.sumFygaroTopupGrossCentsSince", () => {
   it("fails closed on a non-numeric row amount", async () => {
     mockedAxios.get.mockResolvedValue({
       data: { data: [{ request_id: "fygaro:tx-1", amount: "N/A" }] },
+    })
+
+    const result = await client.sumFygaroTopupGrossCentsSince(params)
+
+    expect(result).toBeInstanceOf(Error)
+  })
+
+  it("fails closed on a null row amount instead of counting it as zero", async () => {
+    // Frappe's list API returns null for unset fields and Number(null) is 0 —
+    // a null amount must be an error, not a silent zero contribution.
+    mockedAxios.get.mockResolvedValue({
+      data: {
+        data: [
+          { request_id: "fygaro:tx-1", amount: "25.00" },
+          { request_id: "fygaro:tx-2", amount: null },
+        ],
+      },
     })
 
     const result = await client.sumFygaroTopupGrossCentsSince(params)

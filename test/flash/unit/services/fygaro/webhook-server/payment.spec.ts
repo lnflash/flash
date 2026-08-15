@@ -578,6 +578,50 @@ describe("fygaro paymentHandler", () => {
       expect(res.status).toHaveBeenCalledWith(500)
     })
 
+    it("does not read top-up history when auto-credit is disabled in settings", async () => {
+      // The operator kill switch fails the gate deterministically before the
+      // history gates, so the ERPNext list query is a wasted read per webhook
+      // — it must be skipped, and skipping it must still record-only on
+      // `auto-credit-disabled`, never a false transient `history-unavailable`.
+      mockGetFygaroSettings.mockResolvedValue({
+        ...DEFAULT_SETTINGS,
+        autoCreditEnabled: false,
+      })
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockSumFygaroLast24h).not.toHaveBeenCalled()
+      expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+      expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: "fygaro-recorded",
+          meta: expect.objectContaining({ reason: "auto-credit-disabled" }),
+        }),
+      )
+      expect(res.status).toHaveBeenCalledWith(200)
+      expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
+    })
+
+    it("does not read top-up history for a non-USD payment", async () => {
+      // Same ordering argument as the kill switch: `non-usd` fails the gate
+      // before the history gates, so the read would never be consumed.
+      const res = makeRes()
+
+      await paymentHandler(makeReq({ ...VALID_BODY, currency: "JMD" }), res)
+
+      expect(mockSumFygaroLast24h).not.toHaveBeenCalled()
+      expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+      expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: "fygaro-recorded",
+          meta: expect.objectContaining({ reason: "non-usd" }),
+        }),
+      )
+      expect(res.status).toHaveBeenCalledWith(200)
+      expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
+    })
+
     it("credits a payment sitting exactly at the auto-credit limit", async () => {
       // Level 2 so the $1000 daily cap does not shadow the $500 auto-credit
       // limit this test is pinning.
