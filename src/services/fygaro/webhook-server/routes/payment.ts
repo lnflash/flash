@@ -29,6 +29,7 @@ import {
   writeFygaroTopupRequest,
   completeFygaroTopup,
   isFygaroTopupCompleted,
+  sumFygaroTopupGrossCentsLast24h,
 } from "@services/frappe/BridgeTransferRequestWriter"
 import { alertBridge, generateDedupKey } from "@services/alerts"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
@@ -67,6 +68,12 @@ const RECORD_ONLY_ALERT_TITLE: Record<
     "Fygaro auto-credit disabled in settings — payment recorded, not auto-credited",
   "non-usd": "Fygaro payment in unexpected currency — not auto-credited",
   "over-limit": "Fygaro payment over the auto-credit limit — not auto-credited",
+  "no-daily-limit-for-level":
+    "Fygaro payment from an account level with no daily top-up limit — not auto-credited",
+  "history-unavailable":
+    "Fygaro top-up history unavailable — payment recorded, not auto-credited",
+  "daily-limit-exceeded":
+    "Fygaro payment exceeds the account's daily top-up limit — not auto-credited",
   "under-minimum": "Fygaro payment below the minimum top-up — not auto-credited",
   "non-positive-net": "Fygaro payment net after fees is not positive — not auto-credited",
 }
@@ -123,16 +130,16 @@ export const paymentHandler = async (req: Request, res: Response) => {
     // Attribution: customReference carries the Flash username. A blank or
     // unknown reference still gets recorded — that IS the failure mode this
     // webhook exists to surface.
-    let accountId: AccountId | undefined
+    let account: Account | undefined
     if (username) {
-      const account = await AccountsRepository().findByUsername(username as Username)
-      if (account instanceof Error) {
+      const found = await AccountsRepository().findByUsername(username as Username)
+      if (found instanceof Error) {
         baseLogger.warn(
           { transactionId, username },
           "Fygaro payment: customReference does not match any account",
         )
       } else {
-        accountId = account.id
+        account = found
       }
     }
 
@@ -140,7 +147,7 @@ export const paymentHandler = async (req: Request, res: Response) => {
       transactionId,
       amount: String(payload.amount),
       currency,
-      accountId,
+      accountId: account?.id,
       createdAt,
       rawPayload: req.body,
     })
@@ -170,7 +177,7 @@ export const paymentHandler = async (req: Request, res: Response) => {
       return res.status(500).json({ error: "Failed to persist audit row" })
     }
 
-    if (!accountId) {
+    if (!account) {
       // Dedupe re-deliveries before emitting: alertBridge is TTL-deduped but
       // the ops feed is not, so a Fygaro retry of an unattributed payment
       // would otherwise spam a feed line per delivery. Taken only after the
@@ -208,6 +215,7 @@ export const paymentHandler = async (req: Request, res: Response) => {
       })
       return res.status(200).json({ status: "recorded", attributed: false })
     }
+    const accountId = account.id
 
     // Fee-aware gate: credit the NET (gross minus processor + Flash fees), and
     // only when every gate holds. The fees/threshold/minimum/toggle live in the
@@ -218,42 +226,76 @@ export const paymentHandler = async (req: Request, res: Response) => {
     const creditEnabled = Boolean(FygaroConfig.credit?.enabled)
     const grossCents = Math.round(grossAmount * 100)
     const settings = creditEnabled ? await getFygaroSettings() : undefined
-    const gate = evaluateCreditGate({ creditEnabled, currency, settings, grossCents })
+
+    // Trailing-24h charged gross for the per-level daily cap, read only when a
+    // credit could actually happen (deploy gate on, settings readable). A
+    // failed read stays `undefined` — never coerced to 0, which would treat a
+    // history outage as a clean slate — and the gate turns it into the
+    // retryable `history-unavailable` stop.
+    let priorDayGrossCents: number | undefined
+    if (creditEnabled && settings) {
+      const priorSum = await sumFygaroTopupGrossCentsLast24h({
+        accountId,
+        excludeTransactionId: transactionId,
+      })
+      if (priorSum instanceof Error) {
+        baseLogger.warn(
+          { error: priorSum, transactionId },
+          "Failed to read Fygaro top-up history; treating as unavailable",
+        )
+      } else {
+        priorDayGrossCents = priorSum
+      }
+    }
+
+    const gate = evaluateCreditGate({
+      creditEnabled,
+      currency,
+      settings,
+      grossCents,
+      level: account.level,
+      priorDayGrossCents,
+    })
 
     if (!gate.credit) {
-      // `settings-unavailable` is TRANSIENT (an ERPNext blip, cached undefined
-      // for up to 60s) — unlike the deterministic reasons below, a retry
-      // seconds later would auto-credit cleanly. Acking 200 (record-only) would
-      // stop Fygaro retrying and permanently downgrade the payment to manual
-      // credit over a momentary outage. Return 500 so Fygaro retries and the
-      // read self-heals once ERPNext recovers; it still never credits off
-      // missing data — the retry simply re-reads settings. Deliberately do NOT
-      // take the non-releasing dedupe lock here (it would make the very next
-      // retry ack 200 "already_processed" and defeat the self-heal), and skip
-      // the ops-feed line (it can't be deduped without that lock, so per-retry
+      // `settings-unavailable` and `history-unavailable` are TRANSIENT (an
+      // ERPNext blip; settings reads are additionally cached-undefined for up
+      // to 60s) — unlike the deterministic reasons below, a retry seconds
+      // later would auto-credit cleanly. Acking 200 (record-only) would stop
+      // Fygaro retrying and permanently downgrade the payment to manual credit
+      // over a momentary outage. Return 500 so Fygaro retries and the read
+      // self-heals once ERPNext recovers; it still never credits off missing
+      // data — the retry simply re-reads. Deliberately do NOT take the
+      // non-releasing dedupe lock here (it would make the very next retry ack
+      // 200 "already_processed" and defeat the self-heal), and skip the
+      // ops-feed line (it can't be deduped without that lock, so per-retry
       // emission would spam the feed during an outage). alertBridge is
       // TTL-deduped, so a genuine sustained outage still pages without spamming.
-      if (gate.reason === "settings-unavailable") {
+      if (
+        gate.reason === "settings-unavailable" ||
+        gate.reason === "history-unavailable"
+      ) {
         baseLogger.warn(
-          { transactionId },
-          "Fygaro Settings unavailable — returning 500 so Fygaro retries and the read self-heals",
+          { transactionId, reason: gate.reason },
+          "Fygaro ERPNext read unavailable — returning 500 so Fygaro retries and the read self-heals",
         )
         alertBridge({
           dedupKey: generateDedupKey.fygaroNotCredited(transactionId),
           source: "fygaro-webhook",
           severity: "warning",
-          title: RECORD_ONLY_ALERT_TITLE["settings-unavailable"],
-          detail: `reason=settings-unavailable currency=${currency} gross=${centsToDollars(grossCents)}`,
+          title: RECORD_ONLY_ALERT_TITLE[gate.reason],
+          detail: `reason=${gate.reason} currency=${currency} gross=${centsToDollars(grossCents)}`,
           context: {
             transaction_id: transactionId,
             amount: String(payload.amount),
             reason: gate.reason,
           },
         })
-        return res.status(500).json({ error: "Fygaro Settings unavailable; will retry" })
+        return res.status(500).json({ error: "ERPNext read unavailable; will retry" })
       }
 
-      // Deterministic record-only path (non-usd, over-limit, under-minimum,
+      // Deterministic record-only path (non-usd, over-limit,
+      // no-daily-limit-for-level, daily-limit-exceeded, under-minimum,
       // non-positive-net, auto-credit-disabled, and the silent credit-disabled
       // master gate): these will never change on retry, so ack 200 and dedupe
       // with a non-releasing timelock. Nothing money-moving happens here. Taken
@@ -276,11 +318,13 @@ export const paymentHandler = async (req: Request, res: Response) => {
           source: "fygaro-webhook",
           severity: "warning",
           title: RECORD_ONLY_ALERT_TITLE[gate.reason],
-          detail: `reason=${gate.reason} currency=${currency} gross=${centsToDollars(grossCents)}`,
+          detail: `reason=${gate.reason} currency=${currency} gross=${centsToDollars(grossCents)} level=${account.level}`,
           context: {
             transaction_id: transactionId,
             amount: String(payload.amount),
             reason: gate.reason,
+            username,
+            account_level: account.level,
           },
         })
       }

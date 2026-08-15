@@ -13,6 +13,7 @@ const settings = (overrides: Partial<FygaroSettings> = {}): FygaroSettings => ({
   autoCreditLimit: 500,
   minimumTopup: 10,
   autoCreditEnabled: true,
+  dailyTopupLimits: { 1: 125, 2: 1000, 3: 2500 },
   ...overrides,
 })
 
@@ -73,7 +74,13 @@ describe("computeFygaroFees", () => {
 })
 
 describe("evaluateCreditGate", () => {
-  const base = { creditEnabled: true, currency: "USD", grossCents: 1000 }
+  const base = {
+    creditEnabled: true,
+    currency: "USD",
+    grossCents: 1000,
+    level: 1,
+    priorDayGrossCents: 0,
+  }
 
   it("credits with computed fees when every gate holds", () => {
     const gate = evaluateCreditGate({ ...base, settings: settings() })
@@ -117,8 +124,96 @@ describe("evaluateCreditGate", () => {
   })
 
   it("credits exactly at the auto-credit limit (inclusive threshold)", () => {
-    const gate = evaluateCreditGate({ ...base, grossCents: 50000, settings: settings() })
+    // Level 2 so the $1000 daily cap does not shadow the $500 auto-credit limit
+    // this test is pinning.
+    const gate = evaluateCreditGate({
+      ...base,
+      grossCents: 50000,
+      level: 2,
+      settings: settings(),
+    })
     expect(gate.credit).toBe(true)
+  })
+
+  it("record-only: daily-limit-exceeded when gross plus prior 24h gross tops the level cap", () => {
+    // L1 cap $125: $100 charged earlier today + $30 now = $130 > $125.
+    const gate = evaluateCreditGate({
+      ...base,
+      grossCents: 3000,
+      priorDayGrossCents: 10000,
+      settings: settings(),
+    })
+    expect(gate).toEqual({ credit: false, reason: "daily-limit-exceeded" })
+  })
+
+  it("credits a payment landing exactly ON the daily cap (inclusive)", () => {
+    // L1 cap $125: $100 earlier + $25 now = $125 exactly.
+    const gate = evaluateCreditGate({
+      ...base,
+      grossCents: 2500,
+      priorDayGrossCents: 10000,
+      settings: settings(),
+    })
+    expect(gate.credit).toBe(true)
+  })
+
+  it("uses the cap for the account's own level", () => {
+    // $130 total is over the L1 cap but comfortably inside the L2 cap.
+    const l1 = evaluateCreditGate({
+      ...base,
+      grossCents: 3000,
+      priorDayGrossCents: 10000,
+      level: 1,
+      settings: settings(),
+    })
+    const l2 = evaluateCreditGate({
+      ...base,
+      grossCents: 3000,
+      priorDayGrossCents: 10000,
+      level: 2,
+      settings: settings(),
+    })
+    expect(l1).toEqual({ credit: false, reason: "daily-limit-exceeded" })
+    expect(l2.credit).toBe(true)
+  })
+
+  it("record-only: no-daily-limit-for-level for a level with no configured cap", () => {
+    const gate = evaluateCreditGate({ ...base, level: 0, settings: settings() })
+    expect(gate).toEqual({ credit: false, reason: "no-daily-limit-for-level" })
+  })
+
+  it("record-only: history-unavailable when the trailing-24h read failed", () => {
+    const gate = evaluateCreditGate({
+      ...base,
+      priorDayGrossCents: undefined,
+      settings: settings(),
+    })
+    expect(gate).toEqual({ credit: false, reason: "history-unavailable" })
+  })
+
+  it("evaluates gates in order: over-limit wins over the daily-limit gates", () => {
+    // $500.01 gross is over BOTH the auto-credit limit and the L1 daily cap;
+    // over-limit is checked first. Also proves an over-limit payment never
+    // needs the history read (priorDayGrossCents undefined here).
+    const gate = evaluateCreditGate({
+      ...base,
+      grossCents: 50001,
+      priorDayGrossCents: undefined,
+      settings: settings(),
+    })
+    expect(gate).toEqual({ credit: false, reason: "over-limit" })
+  })
+
+  it("evaluates gates in order: daily-limit-exceeded wins over under-minimum", () => {
+    // $5 now with $125 already charged today: below the $10 minimum AND over
+    // the L1 cap — the cap (checked first) names the reason.
+    const gate = evaluateCreditGate({
+      ...base,
+      grossCents: 500,
+      priorDayGrossCents: 12500,
+      settings: settings(),
+    })
+    expect(gate).toEqual({ credit: false, reason: "daily-limit-exceeded" })
   })
 
   it("record-only: under-minimum when a positive-net payment is below the minimum", () => {

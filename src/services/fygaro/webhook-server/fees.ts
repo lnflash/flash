@@ -51,12 +51,18 @@ export const computeFygaroFees = ({
 // Why a payment was NOT auto-credited. `credit-disabled` is the deploy-level
 // master gate (FygaroConfig.credit.enabled) and is handled silently; the rest
 // are runtime conditions worth an ops alert because credit IS supposed to be on.
+// `settings-unavailable` and `history-unavailable` are TRANSIENT (an ERPNext
+// blip) — the route answers 500 so the provider retries and the read
+// self-heals; every other reason is deterministic and acks 200.
 export type RecordOnlyReason =
   | "credit-disabled"
   | "settings-unavailable"
   | "auto-credit-disabled"
   | "non-usd"
   | "over-limit"
+  | "no-daily-limit-for-level"
+  | "history-unavailable"
+  | "daily-limit-exceeded"
   | "under-minimum"
   | "non-positive-net"
 
@@ -70,9 +76,17 @@ export type CreditGate =
  *   2. Fygaro Settings available AND auto_credit_enabled
  *   3. currency === "USD"
  *   4. gross <= auto_credit_limit (inclusive upper bound on GROSS)
- *   5. net > 0 (after fees)
- *   6. gross >= minimum_topup (inclusive lower bound on GROSS)
+ *   5. the account level has a configured daily limit, the trailing-24h
+ *      history read succeeded, and gross + prior-24h gross <= that limit
+ *      (inclusive: a payment landing exactly ON the cap still credits)
+ *   6. net > 0 (after fees)
+ *   7. gross >= minimum_topup (inclusive lower bound on GROSS)
  * The first failing gate names the record-only reason.
+ *
+ * The daily-limit gates count GROSS captured fiat (Fiat Received + Completed
+ * rows), not net credits: the cap answers "how much card volume may this user
+ * run per day", and gross is also the only number the client can reproduce
+ * locally to warn before charging the card.
  *
  * `under-minimum` is checked last (after the net gate) on purpose: a payment
  * below the operator minimum is a valid, positive-net, in-limit USD top-up that
@@ -87,11 +101,18 @@ export const evaluateCreditGate = ({
   currency,
   settings,
   grossCents,
+  level,
+  priorDayGrossCents,
 }: {
   creditEnabled: boolean
   currency: string
   settings: FygaroSettings | undefined
   grossCents: number
+  // The recipient account's AccountLevel (0-3).
+  level: number
+  // Gross cents this account was charged over the trailing 24h (excluding the
+  // current payment), or undefined when the history read failed.
+  priorDayGrossCents: number | undefined
 }): CreditGate => {
   if (!creditEnabled) return { credit: false, reason: "credit-disabled" }
   if (!settings) return { credit: false, reason: "settings-unavailable" }
@@ -100,6 +121,19 @@ export const evaluateCreditGate = ({
   if (currency !== "USD") return { credit: false, reason: "non-usd" }
   if (grossCents > Math.round(settings.autoCreditLimit * 100)) {
     return { credit: false, reason: "over-limit" }
+  }
+
+  const dailyLimitUsd = settings.dailyTopupLimits[level]
+  if (dailyLimitUsd === undefined) {
+    // No configured allowance for this level (level 0, or a future level the
+    // settings row does not know) — fail closed to manual review.
+    return { credit: false, reason: "no-daily-limit-for-level" }
+  }
+  if (priorDayGrossCents === undefined) {
+    return { credit: false, reason: "history-unavailable" }
+  }
+  if (grossCents + priorDayGrossCents > Math.round(dailyLimitUsd * 100)) {
+    return { credit: false, reason: "daily-limit-exceeded" }
   }
 
   const fees = computeFygaroFees({ grossCents, settings })

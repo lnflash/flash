@@ -31,6 +31,21 @@ const FygaroTopupInfo = GT.Object({
       type: GT.NonNull(GT.Float),
       description: "Flash margin fixed fee, in USD.",
     },
+    l1DailyLimit: {
+      type: GT.NonNull(GT.Float),
+      description:
+        "Maximum gross card top-up per rolling 24h for level-1 accounts, in USD.",
+    },
+    l2DailyLimit: {
+      type: GT.NonNull(GT.Float),
+      description:
+        "Maximum gross card top-up per rolling 24h for level-2 accounts, in USD.",
+    },
+    l3DailyLimit: {
+      type: GT.NonNull(GT.Float),
+      description:
+        "Maximum gross card top-up per rolling 24h for level-3 (Business) accounts, in USD.",
+    },
   }),
 })
 

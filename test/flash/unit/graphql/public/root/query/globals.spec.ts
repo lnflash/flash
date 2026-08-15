@@ -18,6 +18,9 @@ type FygaroTopupField = {
   processorFeeFixed: number
   flashFeePercent: number
   flashFeeFixed: number
+  l1DailyLimit: number
+  l2DailyLimit: number
+  l3DailyLimit: number
 } | null
 
 type GlobalsResult = { fygaroTopup: FygaroTopupField }
@@ -44,6 +47,7 @@ const SETTINGS: FygaroSettings = {
   autoCreditLimit: 500,
   minimumTopup: 10,
   autoCreditEnabled: true,
+  dailyTopupLimits: { 1: 125, 2: 1000, 3: 2500 },
 }
 
 beforeEach(() => {
@@ -70,7 +74,20 @@ describe("globals query — fygaroTopup", () => {
       processorFeeFixed: SETTINGS.processorFeeFixed,
       flashFeePercent: SETTINGS.flashMarginPercent,
       flashFeeFixed: SETTINGS.flashMarginFixed,
+      l1DailyLimit: SETTINGS.dailyTopupLimits[1],
+      l2DailyLimit: SETTINGS.dailyTopupLimits[2],
+      l3DailyLimit: SETTINGS.dailyTopupLimits[3],
     })
+  })
+
+  it("maps each per-level daily limit to its own level (no swaps)", async () => {
+    mockGetFygaroSettings.mockResolvedValue({ ...SETTINGS })
+
+    const fygaroTopup = (await resolveGlobals()).fygaroTopup
+
+    expect(fygaroTopup?.l1DailyLimit).toBe(125)
+    expect(fygaroTopup?.l2DailyLimit).toBe(1000)
+    expect(fygaroTopup?.l3DailyLimit).toBe(2500)
   })
 
   it("does not transpose the processor and flash fixed/percent fees", async () => {

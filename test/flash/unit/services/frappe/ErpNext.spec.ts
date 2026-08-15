@@ -389,3 +389,85 @@ describe("ErpNext.completeBridgeTopupByTxHash", () => {
     expect(result).toBeInstanceOf(Error)
   })
 })
+
+describe("ErpNext.sumFygaroTopupGrossCentsSince", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+  })
+
+  const params = {
+    accountId: "account-1",
+    since: new Date("2026-08-13T07:00:00Z"),
+    excludeRequestId: "fygaro:tx-current",
+  }
+
+  it("sums row amounts in integer cents", async () => {
+    mockedAxios.get.mockResolvedValue({
+      data: {
+        data: [
+          { request_id: "fygaro:tx-1", amount: "25.00" },
+          { request_id: "fygaro:tx-2", amount: "10.50" },
+          // ERPNext may return numerics for Currency fields
+          { request_id: "fygaro:tx-3", amount: 0.1 },
+        ],
+      },
+    })
+
+    const result = await client.sumFygaroTopupGrossCentsSince(params)
+
+    expect(result).toBe(3560)
+  })
+
+  it("scopes the query to this account's captured Fygaro top-ups in the window, excluding the current delivery", async () => {
+    mockedAxios.get.mockResolvedValue({ data: { data: [] } })
+
+    await client.sumFygaroTopupGrossCentsSince(params)
+
+    const [url, config] = mockedAxios.get.mock.calls[0]
+    expect(url).toBe("https://erp.example/api/resource/Bridge%20Transfer%20Request")
+    const filters = JSON.parse(config.params.filters)
+    expect(filters).toEqual([
+      ["Bridge Transfer Request", "provider", "=", "Fygaro"],
+      ["Bridge Transfer Request", "transaction_type", "=", "Topup"],
+      ["Bridge Transfer Request", "account_id", "=", "account-1"],
+      ["Bridge Transfer Request", "status", "in", ["Fiat Received", "Completed"]],
+      ["Bridge Transfer Request", "creation", ">=", "2026-08-13 07:00:00"],
+      ["Bridge Transfer Request", "request_id", "!=", "fygaro:tx-current"],
+    ])
+    // limit_page_length 0 = no pagination cap; a truncated window would
+    // under-count and quietly defeat the daily cap.
+    expect(config.params.limit_page_length).toBe(0)
+  })
+
+  it("returns 0 for an empty window", async () => {
+    mockedAxios.get.mockResolvedValue({ data: { data: [] } })
+
+    expect(await client.sumFygaroTopupGrossCentsSince(params)).toBe(0)
+  })
+
+  it("fails closed (error, not zero) when the response has no data array", async () => {
+    mockedAxios.get.mockResolvedValue({ data: {} })
+
+    const result = await client.sumFygaroTopupGrossCentsSince(params)
+
+    expect(result).toBeInstanceOf(Error)
+  })
+
+  it("fails closed on a non-numeric row amount", async () => {
+    mockedAxios.get.mockResolvedValue({
+      data: { data: [{ request_id: "fygaro:tx-1", amount: "N/A" }] },
+    })
+
+    const result = await client.sumFygaroTopupGrossCentsSince(params)
+
+    expect(result).toBeInstanceOf(Error)
+  })
+
+  it("returns an error when the read fails", async () => {
+    mockedAxios.get.mockRejectedValue(new Error("erpnext down"))
+
+    const result = await client.sumFygaroTopupGrossCentsSince(params)
+
+    expect(result).toBeInstanceOf(Error)
+  })
+})
