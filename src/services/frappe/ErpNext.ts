@@ -15,6 +15,7 @@ import {
   CashoutSubmitError,
   ExchangeRateQueryError,
   FygaroSettingsQueryError,
+  FygaroTopupHistoryQueryError,
   JournalEntryDeleteError,
   SetDocTypeValueError,
   UpgradeRequestCreateError,
@@ -100,6 +101,9 @@ export type FygaroSettingsDoc = {
   auto_credit_limit?: number | string
   minimum_topup?: number | string
   auto_credit_enabled?: number | boolean | string
+  l1_daily_limit?: number | string
+  l2_daily_limit?: number | string
+  l3_daily_limit?: number | string
 }
 
 export class ErpNext {
@@ -405,6 +409,106 @@ export class ErpNext {
         attributes: { "erpnext.exception": responseData?.exception },
       })
       return new FygaroSettingsQueryError(err)
+    }
+  }
+
+  // Sums the GROSS USD cents of one account's Fygaro card top-ups over a
+  // trailing window, for the per-level daily top-up limit gate. Counts every
+  // captured USD payment (Fiat Received or Completed — i.e. the card was
+  // charged, whether or not it has been credited yet), excludes Cancelled
+  // rows, and excludes the current delivery's own audit row (written before
+  // the gate runs) via excludeRequestId. Non-USD rows are excluded because
+  // their `amount` is the raw foreign-currency figure — a 5,000 JMD payment
+  // counted at face value would look like $5,000 of prior gross and lock the
+  // account out of auto-credit for a day. The window filters on
+  // `last_seen_at`, which this code writes in UTC on every upsert (a
+  // re-delivery bump only widens the window — fails closed), NOT Frappe's
+  // `creation`, which is stored naive in the ERP site's configured time zone:
+  // comparing that against a UTC-rendered cutoff would silently shrink the
+  // window by the site's UTC offset. Any read/shape/parse problem is an
+  // error, not zero — under-counting the window would quietly defeat the cap.
+  async sumFygaroTopupGrossCentsSince({
+    accountId,
+    since,
+    excludeRequestId,
+  }: {
+    accountId: string
+    since: Date
+    excludeRequestId: string
+  }): Promise<number | FygaroTopupHistoryQueryError> {
+    try {
+      const filters = JSON.stringify([
+        [BridgeTransferRequest.doctype, "provider", "=", "Fygaro"],
+        [
+          BridgeTransferRequest.doctype,
+          "transaction_type",
+          "=",
+          BridgeTransferRequestTransactionType.Topup,
+        ],
+        [BridgeTransferRequest.doctype, "account_id", "=", accountId],
+        [BridgeTransferRequest.doctype, "currency", "=", "USD"],
+        [
+          BridgeTransferRequest.doctype,
+          "status",
+          "in",
+          [
+            BridgeTransferRequestStatus.FiatReceived,
+            BridgeTransferRequestStatus.Completed,
+          ],
+        ],
+        [
+          BridgeTransferRequest.doctype,
+          "last_seen_at",
+          ">=",
+          toFrappeDatetime(since.toISOString()),
+        ],
+        [BridgeTransferRequest.doctype, "request_id", "!=", excludeRequestId],
+      ])
+      const fields = JSON.stringify(["request_id", "amount"])
+      const resp = await axios.get(
+        `${this.url}/api/resource/${encodeURIComponent(BridgeTransferRequest.doctype)}`,
+        {
+          params: { filters, fields, limit_page_length: 0 },
+          headers: this.headers,
+        },
+      )
+      const rows = resp.data?.data
+      if (!Array.isArray(rows)) {
+        return new FygaroTopupHistoryQueryError("No data in top-up history response")
+      }
+      let sumCents = 0
+      for (const row of rows as {
+        request_id?: string
+        amount?: number | string | null
+      }[]) {
+        // Frappe's list API returns null for unset fields, and Number(null)
+        // is 0 — a null amount must fail closed like any other unparsable
+        // row, not silently contribute nothing to the sum.
+        if (row.amount == null) {
+          return new FygaroTopupHistoryQueryError(
+            `Missing amount on ${row.request_id ?? "<unknown row>"}`,
+          )
+        }
+        const cents = Math.round(Number(row.amount) * 100)
+        if (!Number.isFinite(cents)) {
+          return new FygaroTopupHistoryQueryError(
+            `Non-numeric amount on ${row.request_id ?? "<unknown row>"}`,
+          )
+        }
+        sumCents += cents
+      }
+      return sumCents
+    } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error(
+        { err, responseData, accountId },
+        "Error summing Fygaro top-up history from ERPNext",
+      )
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
+      return new FygaroTopupHistoryQueryError(err)
     }
   }
 

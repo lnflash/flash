@@ -24,6 +24,9 @@ const GOOD_DOC = {
   auto_credit_limit: 500,
   minimum_topup: 10,
   auto_credit_enabled: 1,
+  l1_daily_limit: 125,
+  l2_daily_limit: 1000,
+  l3_daily_limit: 2500,
 }
 
 let now = 1_000_000
@@ -51,6 +54,7 @@ describe("validateFygaroSettings", () => {
       autoCreditLimit: 500,
       minimumTopup: 10,
       autoCreditEnabled: true,
+      dailyTopupLimits: { 1: 125, 2: 1000, 3: 2500 },
     })
   })
 
@@ -59,9 +63,11 @@ describe("validateFygaroSettings", () => {
       ...GOOD_DOC,
       processor_fee_percent: "2.99",
       auto_credit_limit: "500",
+      l2_daily_limit: "1000",
     })
     expect(result?.processorFeePercent).toBe(2.99)
     expect(result?.autoCreditLimit).toBe(500)
+    expect(result?.dailyTopupLimits[2]).toBe(1000)
   })
 
   it.each([
@@ -81,6 +87,10 @@ describe("validateFygaroSettings", () => {
     ["a non-numeric string", { ...GOOD_DOC, processor_fee_fixed: "abc" }],
     ["a negative fee", { ...GOOD_DOC, flash_margin_percent: -1 }],
     ["a negative limit", { ...GOOD_DOC, auto_credit_limit: -5 }],
+    // A pre-migration doctype row without the daily-limit fields must
+    // hard-stop auto-credit, not credit uncapped.
+    ["a missing daily limit", { ...GOOD_DOC, l1_daily_limit: undefined }],
+    ["a negative daily limit", { ...GOOD_DOC, l3_daily_limit: -100 }],
   ])("returns undefined for %s (garbage)", (_label, doc) => {
     expect(validateFygaroSettings(doc as never)).toBeUndefined()
   })

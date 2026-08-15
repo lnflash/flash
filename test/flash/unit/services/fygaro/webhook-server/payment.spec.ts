@@ -34,6 +34,7 @@ jest.mock("@services/frappe/BridgeTransferRequestWriter", () => ({
   writeFygaroTopupRequest: (...args: unknown[]) => mockWriteFygaroTopup(...args),
   completeFygaroTopup: (...args: unknown[]) => mockCompleteFygaroTopup(...args),
   isFygaroTopupCompleted: (...args: unknown[]) => mockIsFygaroTopupCompleted(...args),
+  sumFygaroTopupGrossCentsLast24h: (...args: unknown[]) => mockSumFygaroLast24h(...args),
 }))
 
 jest.mock("@services/alerts", () => ({
@@ -81,6 +82,7 @@ const mockAlertBridge = jest.fn()
 const mockNotifyOpsEvent = jest.fn()
 const mockCreditFygaroTopup = jest.fn()
 const mockGetFygaroSettings = jest.fn()
+const mockSumFygaroLast24h = jest.fn()
 
 // Canonical operator settings: 2.99% + $0.49 processor, 2.0% Flash margin,
 // $500 auto-credit limit, auto-credit on. For a $10.00 top-up this yields a
@@ -94,6 +96,7 @@ const DEFAULT_SETTINGS = {
   autoCreditLimit: 500,
   minimumTopup: 10,
   autoCreditEnabled: true,
+  dailyTopupLimits: { 1: 125, 2: 1000, 3: 2500 },
 }
 
 import { ResourceAttemptsLockServiceError } from "@domain/lock"
@@ -134,8 +137,9 @@ beforeEach(() => {
     async (_key: unknown, fn: () => Promise<unknown>) => fn(),
   )
   mockIsFygaroTopupCompleted.mockResolvedValue(false)
-  mockFindByUsername.mockResolvedValue({ id: ACCOUNT_ID })
+  mockFindByUsername.mockResolvedValue({ id: ACCOUNT_ID, level: 1 })
   mockWriteFygaroTopup.mockResolvedValue(true)
+  mockSumFygaroLast24h.mockResolvedValue(0)
   mockCompleteFygaroTopup.mockResolvedValue(true)
   mockCreditFygaroTopup.mockResolvedValue({ walletId: WALLET_ID, status: "success" })
   mockGetFygaroSettings.mockResolvedValue({ ...DEFAULT_SETTINGS })
@@ -440,6 +444,18 @@ describe("fygaro paymentHandler", () => {
         (body: Record<string, unknown>) => ({ ...body, amount: "0.10" }),
         () => undefined,
       ],
+      [
+        "daily-limit-exceeded",
+        // $30 now on top of $100 already charged today busts the L1 $125 cap.
+        (body: Record<string, unknown>) => ({ ...body, amount: "30.00" }),
+        () => mockSumFygaroLast24h.mockResolvedValue(10000),
+      ],
+      [
+        "no-daily-limit-for-level",
+        // A level-0 account has no configured daily allowance — fail closed.
+        (body: Record<string, unknown>) => body,
+        () => mockFindByUsername.mockResolvedValue({ id: ACCOUNT_ID, level: 0 }),
+      ],
     ])(
       "records-only and alerts %s without crediting",
       async (reason, mutateBody, arrange) => {
@@ -495,13 +511,56 @@ describe("fygaro paymentHandler", () => {
       expect(res.status).toHaveBeenCalledWith(500)
     })
 
-    it("does not read Fygaro Settings when credit is disabled at deploy level", async () => {
+    it("returns 500 for history-unavailable so Fygaro retries (transient), without acking or spamming the feed", async () => {
+      // Same transient contract as settings-unavailable: a failed trailing-24h
+      // read must never be treated as a clean slate NOR permanently downgrade
+      // the payment to manual credit — 500 lets the provider retry re-read it.
+      mockSumFygaroLast24h.mockResolvedValue(new Error("erpnext down"))
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+      expect(mockCompleteFygaroTopup).not.toHaveBeenCalled()
+      expect(mockLockIdempotencyKey).not.toHaveBeenCalled()
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({
+          severity: "warning",
+          context: expect.objectContaining({ reason: "history-unavailable" }),
+        }),
+      )
+      expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+      expect(res.status).toHaveBeenCalledWith(500)
+    })
+
+    it("credits a payment landing exactly ON the daily cap and excludes its own audit row from the sum", async () => {
+      // $100 earlier + $25 now = exactly the L1 $125 cap (inclusive).
+      mockSumFygaroLast24h.mockResolvedValue(10000)
+      const res = makeRes()
+
+      await paymentHandler(makeReq({ ...VALID_BODY, amount: "25.00" }), res)
+
+      // The trailing-24h sum must exclude THIS delivery's audit row (written
+      // before the gate) or every payment would double-count itself.
+      expect(mockSumFygaroLast24h).toHaveBeenCalledWith({
+        accountId: ACCOUNT_ID,
+        excludeTransactionId: VALID_BODY.transactionId,
+      })
+      // $25.00 gross -> $1.24 processor + $0.50 flash -> $23.26 (2326¢) net
+      expect(mockCreditFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({ amountCents: 2326 }),
+      )
+      expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
+    })
+
+    it("does not read Fygaro Settings or top-up history when credit is disabled at deploy level", async () => {
       mockFygaroConfig.credit = { enabled: false }
       const res = makeRes()
 
       await paymentHandler(makeReq(VALID_BODY), res)
 
       expect(mockGetFygaroSettings).not.toHaveBeenCalled()
+      expect(mockSumFygaroLast24h).not.toHaveBeenCalled()
       expect(mockAlertBridge).not.toHaveBeenCalled()
       expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
         expect.objectContaining({ phase: "fygaro-recorded" }),
@@ -509,7 +568,64 @@ describe("fygaro paymentHandler", () => {
       expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
     })
 
+    it("does not read top-up history when settings are unavailable", async () => {
+      mockGetFygaroSettings.mockResolvedValue(undefined)
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockSumFygaroLast24h).not.toHaveBeenCalled()
+      expect(res.status).toHaveBeenCalledWith(500)
+    })
+
+    it("does not read top-up history when auto-credit is disabled in settings", async () => {
+      // The operator kill switch fails the gate deterministically before the
+      // history gates, so the ERPNext list query is a wasted read per webhook
+      // — it must be skipped, and skipping it must still record-only on
+      // `auto-credit-disabled`, never a false transient `history-unavailable`.
+      mockGetFygaroSettings.mockResolvedValue({
+        ...DEFAULT_SETTINGS,
+        autoCreditEnabled: false,
+      })
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockSumFygaroLast24h).not.toHaveBeenCalled()
+      expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+      expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: "fygaro-recorded",
+          meta: expect.objectContaining({ reason: "auto-credit-disabled" }),
+        }),
+      )
+      expect(res.status).toHaveBeenCalledWith(200)
+      expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
+    })
+
+    it("does not read top-up history for a non-USD payment", async () => {
+      // Same ordering argument as the kill switch: `non-usd` fails the gate
+      // before the history gates, so the read would never be consumed.
+      const res = makeRes()
+
+      await paymentHandler(makeReq({ ...VALID_BODY, currency: "JMD" }), res)
+
+      expect(mockSumFygaroLast24h).not.toHaveBeenCalled()
+      expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+      expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: "fygaro-recorded",
+          meta: expect.objectContaining({ reason: "non-usd" }),
+        }),
+      )
+      expect(res.status).toHaveBeenCalledWith(200)
+      expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
+    })
+
     it("credits a payment sitting exactly at the auto-credit limit", async () => {
+      // Level 2 so the $1000 daily cap does not shadow the $500 auto-credit
+      // limit this test is pinning.
+      mockFindByUsername.mockResolvedValue({ id: ACCOUNT_ID, level: 2 })
       const res = makeRes()
 
       await paymentHandler(makeReq({ ...VALID_BODY, amount: "500.00" }), res)

@@ -1,6 +1,9 @@
 import ErpNext from "@services/frappe/ErpNext"
 import { baseLogger } from "@services/logger"
-import { BridgeTransferRequestUpsertError } from "@services/frappe/errors"
+import {
+  BridgeTransferRequestUpsertError,
+  FygaroTopupHistoryQueryError,
+} from "@services/frappe/errors"
 
 import {
   BridgeTransferRequest,
@@ -241,6 +244,28 @@ export const writeFygaroTopupRequest = async ({
       rawPayload,
     }),
   )
+}
+
+// Gross cents this account was charged via Fygaro over the trailing 24h,
+// excluding the given transaction's own audit row (which is written before the
+// credit gate runs). Feeds the per-level daily top-up cap. An unconfigured
+// ERPNext client is an error, not zero — the gate must fail closed rather
+// than treat a missing history as a clean slate.
+export const sumFygaroTopupGrossCentsLast24h = async ({
+  accountId,
+  excludeTransactionId,
+}: {
+  accountId: AccountId | string
+  excludeTransactionId: string
+}): Promise<number | FygaroTopupHistoryQueryError> => {
+  if (!ErpNext?.sumFygaroTopupGrossCentsSince) {
+    return new FygaroTopupHistoryQueryError("ERPNext client is not configured")
+  }
+  return ErpNext.sumFygaroTopupGrossCentsSince({
+    accountId: String(accountId),
+    since: new Date(Date.now() - 24 * 60 * 60 * 1000),
+    excludeRequestId: `fygaro:${excludeTransactionId}`,
+  })
 }
 
 // Whether this Fygaro payment was already fully processed (its audit row

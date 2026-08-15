@@ -2,6 +2,7 @@ jest.mock("@services/frappe/ErpNext", () => ({
   upsertBridgeTransferRequest: jest.fn(),
   findBridgeTransferRequest: jest.fn(),
   completeBridgeTopupByTxHash: jest.fn(),
+  sumFygaroTopupGrossCentsSince: jest.fn(),
 }))
 
 jest.mock("@services/logger", () => ({
@@ -12,17 +13,20 @@ import ErpNext from "@services/frappe/ErpNext"
 import { baseLogger } from "@services/logger"
 import {
   promoteBridgeDepositForCryptoReceive,
+  sumFygaroTopupGrossCentsLast24h,
   writeBridgeCashoutCompleted,
   writeBridgeCashoutFailed,
   writeBridgeCashoutPending,
   writeBridgeDepositRequest,
   writeIbexCryptoReceiveRequest,
 } from "@services/frappe/BridgeTransferRequestWriter"
+import { FygaroTopupHistoryQueryError } from "@services/frappe/errors"
 import { BridgeTransferRequestStatus } from "@services/frappe/models/BridgeTransferRequest"
 
 const upsert = ErpNext.upsertBridgeTransferRequest as jest.Mock
 const findRow = ErpNext.findBridgeTransferRequest as jest.Mock
 const completeByTxHash = ErpNext.completeBridgeTopupByTxHash as jest.Mock
+const sumSince = ErpNext.sumFygaroTopupGrossCentsSince as jest.Mock
 const lastRequestInput = () => upsert.mock.calls[0][0].input
 
 describe("BridgeTransferRequestWriter", () => {
@@ -348,6 +352,46 @@ describe("BridgeTransferRequestWriter", () => {
         sourceEventType: "bridge.withdrawal.usdt_sent",
       }),
     )
+  })
+
+  describe("sumFygaroTopupGrossCentsLast24h", () => {
+    it("queries the trailing 24h excluding the payment's own fygaro-prefixed audit row", async () => {
+      sumSince.mockResolvedValue(10_000)
+
+      const before = Date.now()
+      const result = await sumFygaroTopupGrossCentsLast24h({
+        accountId: "acct_123" as AccountId,
+        excludeTransactionId: "tx-1",
+      })
+      const after = Date.now()
+
+      expect(result).toBe(10_000)
+      expect(sumSince).toHaveBeenCalledTimes(1)
+      const { accountId, since, excludeRequestId } = sumSince.mock.calls[0][0]
+      expect(accountId).toBe("acct_123")
+      expect(excludeRequestId).toBe("fygaro:tx-1")
+      const dayMs = 24 * 60 * 60 * 1000
+      expect(since).toBeInstanceOf(Date)
+      expect(since.getTime()).toBeGreaterThanOrEqual(before - dayMs)
+      expect(since.getTime()).toBeLessThanOrEqual(after - dayMs)
+    })
+
+    it("fails closed with FygaroTopupHistoryQueryError when the ERPNext client is not configured", async () => {
+      const erpnext = ErpNext as unknown as {
+        sumFygaroTopupGrossCentsSince?: jest.Mock
+      }
+      const original = erpnext.sumFygaroTopupGrossCentsSince
+      delete erpnext.sumFygaroTopupGrossCentsSince
+      try {
+        const result = await sumFygaroTopupGrossCentsLast24h({
+          accountId: "acct_123" as AccountId,
+          excludeTransactionId: "tx-1",
+        })
+        expect(result).toBeInstanceOf(FygaroTopupHistoryQueryError)
+      } finally {
+        erpnext.sumFygaroTopupGrossCentsSince = original
+      }
+    })
   })
 
   it("writes failed Bridge transfers as failed cashout audit requests", async () => {

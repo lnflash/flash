@@ -54,6 +54,9 @@ const GlobalsQuery = GT.Field({
             processorFeeFixed: fygaroSettings.processorFeeFixed,
             flashFeePercent: fygaroSettings.flashMarginPercent,
             flashFeeFixed: fygaroSettings.flashMarginFixed,
+            l1DailyLimit: fygaroSettings.dailyTopupLimits[1],
+            l2DailyLimit: fygaroSettings.dailyTopupLimits[2],
+            l3DailyLimit: fygaroSettings.dailyTopupLimits[3],
           }
         : null,
     }

@@ -24,6 +24,16 @@ export type FygaroSettings = {
   autoCreditLimit: number // USD
   minimumTopup: number // USD
   autoCreditEnabled: boolean
+  // Per-account-level daily top-up caps in GROSS USD, keyed by AccountLevel.
+  // Levels 1-3 are always present (validation rejects the row otherwise);
+  // indexing by an arbitrary level yields `number | undefined`, and levels
+  // absent here (e.g. level 0) have no top-up allowance so they fail the
+  // credit gate.
+  dailyTopupLimits: { [level: number]: number | undefined } & {
+    1: number
+    2: number
+    3: number
+  }
 }
 
 const CACHE_TTL_MS = 60_000
@@ -58,6 +68,9 @@ export const validateFygaroSettings = (
   const flashMarginFixed = toFiniteNumber(doc.flash_margin_fixed)
   const autoCreditLimit = toFiniteNumber(doc.auto_credit_limit)
   const minimumTopup = toFiniteNumber(doc.minimum_topup)
+  const l1DailyLimit = toFiniteNumber(doc.l1_daily_limit)
+  const l2DailyLimit = toFiniteNumber(doc.l2_daily_limit)
+  const l3DailyLimit = toFiniteNumber(doc.l3_daily_limit)
 
   const numbers = [
     processorFeePercent,
@@ -66,8 +79,14 @@ export const validateFygaroSettings = (
     flashMarginFixed,
     autoCreditLimit,
     minimumTopup,
+    l1DailyLimit,
+    l2DailyLimit,
+    l3DailyLimit,
   ]
   // A missing or negative fee/limit is not something we can safely credit off.
+  // The daily limits are equally load-bearing: a doctype row from before the
+  // limit fields existed (ERP not yet migrated/saved) hard-stops auto-credit
+  // rather than crediting uncapped — deploy the ERP fields first.
   if (numbers.some((n) => n === undefined || n < 0)) return undefined
 
   return {
@@ -79,6 +98,11 @@ export const validateFygaroSettings = (
     autoCreditLimit: autoCreditLimit as number,
     minimumTopup: minimumTopup as number,
     autoCreditEnabled: toBoolean(doc.auto_credit_enabled),
+    dailyTopupLimits: {
+      1: l1DailyLimit as number,
+      2: l2DailyLimit as number,
+      3: l3DailyLimit as number,
+    },
   }
 }
 
