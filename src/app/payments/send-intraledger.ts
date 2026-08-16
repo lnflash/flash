@@ -12,6 +12,7 @@ import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 
 import Ibex from "@services/ibex/client"
 import { UnexpectedIbexResponse } from "@services/ibex/errors"
+import { paymentSendStatusOrPending } from "@services/ibex/payment-status"
 
 import { withPaymentIdempotency } from "./idempotency"
 
@@ -97,25 +98,21 @@ const intraledgerPaymentSendWalletId = async ({
   })
   if (payResp instanceof Error) return payResp
 
-  // https://docs.ibexmercado.com/reference/flow-1#payment-status
-  let paymentSendStatus: PaymentSendStatus
-  switch (payResp.status) {
-    case 1:
-      paymentSendStatus = PaymentSendStatus.Pending
-      break
-    case 2:
-      paymentSendStatus = PaymentSendStatus.Success
-      break
-    case 3:
-      paymentSendStatus = PaymentSendStatus.Failure
-      break
-    case 0:
-      return new UnexpectedIbexResponse("Invoice already paid")
-    default:
-      return new UnexpectedIbexResponse(
-        `StatusId (${payResp.status}) not in documentation`,
-      )
-  }
+  // Same payInvoiceV2 response, same reader as every other IBEX send path —
+  // this used to be a fourth private dialect of the status switch, and the only
+  // one reading the top-level `status` alone. See @services/ibex/payment-status
+  // for the field precedence and for why 0 is not "invoice already paid".
+  //
+  // CONTRACT CHANGE (deliberate, not incidental): an unreadable payInvoiceV2
+  // response used to return `UnexpectedIbexResponse` here, which
+  // intraledger-usd-payment-send maps to `{ status: "failed" }`. It now reports
+  // `pending`, for the double-pay reason documented on
+  // paymentSendStatusOrPending — an error return is left uncached by
+  // withPaymentIdempotency, so a same-key retry could re-execute the one send
+  // whose outcome we do not know. Until flash-mobile#699 lands, the shipped
+  // client renders PENDING as a completed conversion, so this rail is
+  // fail-open on that one case; the PR body states this and sequences the two.
+  const paymentSendStatus = paymentSendStatusOrPending(payResp)
 
   // flash fork: no longer adding contact on payments
   // if (senderAccount.id !== recipientAccount.id) {

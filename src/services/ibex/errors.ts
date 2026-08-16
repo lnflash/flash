@@ -48,6 +48,60 @@ export class InsufficientIbexBalance extends IbexError {
 export class CompletedInvoice extends IbexError {}
 
 /**
+ * IBEX accepted the request but the response carries no recognisable payment
+ * status, so we cannot say whether funds moved. Distinct from the generic
+ * UnexpectedIbexResponse so this condition — money may or may not have left a
+ * user's wallet — is greppable and alertable on its own. Never returned to
+ * clients: the send resolvers record it and report the payment as still in
+ * flight, the only honest reading of "we don't know yet".
+ *
+ * SEVERITY: the default is **Warn**, and Warn is the honest level until a real
+ * response from either send endpoint has been captured. Neither `payInvoiceV2`
+ * nor `payToLnurl` has an observed 200/201 in this repo — the committed
+ * fixtures under test/flash/mocks/ibex/ are the vendor's openapi examples — so
+ * an unreadable response may well be a rail's ordinary shape rather than an
+ * incident, and paging on every send of that rail would be an outage, not a
+ * severity. Raise the default (or pass Critical at a specific call site) once a
+ * capture proves the payment-level fields are populated. The level is honoured
+ * by the recorder in ./payment-status, which passes `level: error.level`
+ * straight through to the span.
+ *
+ * `uncorroboratedOutcome` names a terminal outcome IBEX *claimed* in the
+ * top-level `status` field and this codebase refused to honour uncorroborated.
+ * It is what tells that same recorder how loud to be: a response that reported
+ * nothing at all is an ordinary in-flight payment and gets a span event, while
+ * one carrying an unhonoured SUCCEEDED/FAILED is a genuine field-level
+ * disagreement and gets a recorded exception (which sets the span status to
+ * ERROR). See the doc block on `recordUnconfirmed` in ./payment-status.
+ */
+export class UnconfirmedIbexPayment extends IbexError {
+  readonly uncorroboratedOutcome?: "SUCCEEDED" | "FAILED"
+
+  constructor(
+    message: string,
+    level: ErrorLevel = ErrorLevel.Warn,
+    uncorroboratedOutcome?: "SUCCEEDED" | "FAILED",
+  ) {
+    super(new UnexpectedResponseError(message), level)
+    this.uncorroboratedOutcome = uncorroboratedOutcome
+  }
+}
+
+/**
+ * IBEX answered 200/201 and the response says the payment FAILED — a definite,
+ * corroborated negative, not an unreadable one. Distinct from
+ * `UnconfirmedIbexPayment` ("we cannot tell") and from the generic `IbexError`
+ * ("the call itself errored"): this is the shape that sails through any caller
+ * which only checks `resp instanceof IbexError`, letting downstream side
+ * effects fire behind a lightning payment that never settled.
+ */
+export class FailedIbexPayment extends IbexError {
+  constructor(message: string, level: ErrorLevel = ErrorLevel.Warn) {
+    super(new IbexClientError(message), level)
+  }
+}
+
+/**
  * Best-effort extraction of the IBEX error text from a failed call.
  * Shapes handled:
  *  - ibex-client > 3.2.0 (lnflash/ibex-client#6): ApiError carries the parsed

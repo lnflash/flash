@@ -16,6 +16,7 @@ jest.mock("@config", () => ({
 
 jest.mock("@services/tracing", () => ({
   addAttributesToCurrentSpan: jest.fn(),
+  addEventToCurrentSpan: jest.fn(),
   recordExceptionInCurrentSpan: jest.fn(),
 }))
 
@@ -135,6 +136,7 @@ import {
 } from "@domain/errors"
 import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
+import { addEventToCurrentSpan, recordExceptionInCurrentSpan } from "@services/tracing"
 
 const senderUsdWalletId = "11111111-1111-4111-8111-111111111111" as WalletId
 const senderUsdtWalletId = "22222222-2222-4222-8222-222222222222" as WalletId
@@ -163,6 +165,23 @@ const wallet = ({
     currency,
   }) as unknown as Wallet
 
+// A payInvoiceV2 response shaped the way IBEX actually returns one: the status
+// is reported at the payment level as well as at the top level (see
+// test/flash/mocks/ibex/pay-invoice.ts). Intraledger used to read the top-level
+// field alone, which is why a payment-level-only status went unseen.
+const ibexPayResponse = (statusId: number) => ({
+  status: statusId,
+  transaction: {
+    id: "dfeec8bd-b4e7-46f1-aa4a-cf4e4569df02",
+    accountId: "37fe77d13",
+    payment: {
+      hash: "19b7ff42e048d147",
+      statusId,
+      status: { id: statusId },
+    },
+  },
+})
+
 describe("intraledgerPaymentSendWalletIdForUsdWallet", () => {
   beforeEach(() => {
     jest.clearAllMocks()
@@ -171,7 +190,7 @@ describe("intraledgerPaymentSendWalletIdForUsdWallet", () => {
       activeAccount(accountId as string),
     )
     mockAddInvoice.mockResolvedValue({ invoice: { bolt11: "lnbc1recipient" } })
-    mockPayInvoice.mockResolvedValue({ status: 2 })
+    mockPayInvoice.mockResolvedValue(ibexPayResponse(2))
   })
 
   it("keeps USD to USD using cent amount semantics", async () => {
@@ -305,6 +324,143 @@ describe("intraledgerPaymentSendWalletIdForUsdWallet", () => {
   })
 })
 
+describe("intraledger IBEX status reading", () => {
+  // Intraledger consumes the same payInvoiceV2 response as the LN send
+  // resolvers, and used to read the top-level `status` alone — a fourth private
+  // dialect of the switch this module now shares.
+  beforeEach(() => {
+    jest.clearAllMocks()
+
+    mockFindAccountById.mockImplementation(async (accountId: AccountId) =>
+      activeAccount(accountId as string),
+    )
+    mockAddInvoice.mockResolvedValue({ invoice: { bolt11: "lnbc1recipient" } })
+    mockFindWalletById.mockImplementation(async (walletId: WalletId) =>
+      wallet({
+        id: walletId,
+        accountId:
+          walletId === senderUsdWalletId ? "sender-account" : "recipient-account",
+        currency: WalletCurrency.Usd,
+      }),
+    )
+  })
+
+  const sendArgs = {
+    senderWalletId: senderUsdWalletId,
+    recipientWalletId: recipientUsdWalletId,
+    amount: 100,
+    memo: "status reading",
+  }
+
+  it("settles on a payment-level SUCCEEDED even when the top-level status is 0", async () => {
+    // The exact shape that used to return UnexpectedIbexResponse("Invoice
+    // already paid") for a payment that settled: IBEX populated
+    // transaction.payment.status.id = 2 and left the top-level status at 0
+    // (0 is UNKNOWN in IBEX's table, never "already paid").
+    mockPayInvoice.mockResolvedValue({
+      status: 0,
+      transaction: { payment: { statusId: 0, status: { id: 2 } } },
+    })
+
+    const result = await intraledgerPaymentSendWalletIdForUsdWallet(sendArgs)
+
+    expect(result).toEqual({ value: "success" })
+  })
+
+  it("reports a payment-level FAILED even when the top-level status is 0", async () => {
+    mockPayInvoice.mockResolvedValue({
+      status: 0,
+      transaction: { payment: { statusId: 3 } },
+    })
+
+    const result = await intraledgerPaymentSendWalletIdForUsdWallet(sendArgs)
+
+    expect(result).toEqual({ value: "failed" })
+  })
+
+  it("reports an unreadable response as pending instead of erroring or inventing a settlement", async () => {
+    // CONTRACT CHANGE, pinned here deliberately: this case previously returned
+    // an UnexpectedIbexResponse, which intraledger-usd-payment-send maps to
+    // `{ status: "failed" }`. It now reports pending — an error return is left
+    // uncached by withPaymentIdempotency, so a same-key retry could re-execute
+    // the one send whose outcome we do not know. Until flash-mobile#699 lands,
+    // the shipped client renders PENDING as a completed conversion, so this
+    // rail is fail-open on this one case; see the PR body and the doc block on
+    // paymentSendStatusOrPending.
+    mockPayInvoice.mockResolvedValue({ status: 0, transaction: { payment: {} } })
+
+    const result = await intraledgerPaymentSendWalletIdForUsdWallet(sendArgs)
+
+    expect(result).toEqual({ value: "pending" })
+    expect(result).not.toBeInstanceOf(Error)
+  })
+
+  it("does not report a bare top-level FAILED as a failed send", async () => {
+    // The mirror of "never invent a settled send": a fabricated "failed" sends
+    // the user back to retry with a fresh idempotency key against a send IBEX
+    // may in fact have made. A top-level 3 counts only when IBEX also names a
+    // failure code.
+    mockPayInvoice.mockResolvedValue({ status: 3, transaction: { payment: {} } })
+
+    expect(await intraledgerPaymentSendWalletIdForUsdWallet(sendArgs)).toEqual({
+      value: "pending",
+    })
+
+    mockPayInvoice.mockResolvedValue({
+      status: 3,
+      failureReason: 2,
+      transaction: { payment: {} },
+    })
+
+    expect(await intraledgerPaymentSendWalletIdForUsdWallet(sendArgs)).toEqual({
+      value: "failed",
+    })
+  })
+
+  it("does not settle on a top-level SUCCEEDED with no payment-level corroboration", async () => {
+    mockPayInvoice.mockResolvedValue({ status: 2, transaction: { payment: {} } })
+
+    const result = await intraledgerPaymentSendWalletIdForUsdWallet(sendArgs)
+
+    expect(result).toEqual({ value: "pending" })
+  })
+
+  describe("span volume on the flash-to-flash rail", () => {
+    // recordExceptionInCurrentSpan sets the span status to ERROR
+    // unconditionally (services/tracing.ts) — ErrorLevel only picks which
+    // `error.*` attributes win. So if this rail's ordinary response shape were
+    // routed through it, every intraledger send would emit a red span and any
+    // trigger keyed on span status rather than the error.level attribute would
+    // fire on 100% of the rail. Only a response that CLAIMS a terminal outcome
+    // we refuse to honour earns that.
+    it("stays green when IBEX reported nothing at all", async () => {
+      mockPayInvoice.mockResolvedValue({ status: 0, transaction: { payment: {} } })
+
+      await intraledgerPaymentSendWalletIdForUsdWallet(sendArgs)
+
+      expect(recordExceptionInCurrentSpan).not.toHaveBeenCalled()
+      expect(addEventToCurrentSpan).toHaveBeenCalledTimes(1)
+      expect((addEventToCurrentSpan as jest.Mock).mock.calls[0][0]).toBe(
+        "ibex.payment.unconfirmed",
+      )
+    })
+
+    it("goes red when IBEX claimed a terminal outcome we refused to honour", async () => {
+      mockPayInvoice.mockResolvedValue({ status: 2, transaction: { payment: {} } })
+
+      await intraledgerPaymentSendWalletIdForUsdWallet(sendArgs)
+
+      expect(addEventToCurrentSpan).not.toHaveBeenCalled()
+      expect(recordExceptionInCurrentSpan).toHaveBeenCalledTimes(1)
+      expect(
+        (recordExceptionInCurrentSpan as jest.Mock).mock.calls[0][0].attributes[
+          "ibex.payment.uncorroborated_outcome"
+        ],
+      ).toBe("SUCCEEDED")
+    })
+  })
+})
+
 describe("intraledger send ops events", () => {
   beforeEach(() => {
     jest.clearAllMocks()
@@ -313,7 +469,7 @@ describe("intraledger send ops events", () => {
       activeAccount(accountId as string),
     )
     mockAddInvoice.mockResolvedValue({ invoice: { bolt11: "lnbc1recipient" } })
-    mockPayInvoice.mockResolvedValue({ status: 2 })
+    mockPayInvoice.mockResolvedValue(ibexPayResponse(2))
     mockFindWalletById.mockImplementation(async (walletId: WalletId) =>
       wallet({
         id: walletId,
@@ -405,7 +561,7 @@ describe("intraledger send ops events", () => {
   })
 
   it("distinguishes an Ibex status failure from an error return", async () => {
-    mockPayInvoice.mockResolvedValue({ status: 3 })
+    mockPayInvoice.mockResolvedValue(ibexPayResponse(3))
 
     await intraledgerPaymentSendWalletIdForUsdWallet(sendArgs)
 
@@ -421,7 +577,7 @@ describe("intraledger send ops events", () => {
   })
 
   it("notifies a pending transfer event when Ibex reports pending", async () => {
-    mockPayInvoice.mockResolvedValue({ status: 1 })
+    mockPayInvoice.mockResolvedValue(ibexPayResponse(1))
 
     await intraledgerPaymentSendWalletIdForUsdWallet(sendArgs)
 
@@ -451,7 +607,7 @@ describe("intraledger idempotency (ENG-530)", () => {
       activeAccount(accountId as string),
     )
     mockAddInvoice.mockResolvedValue({ invoice: { bolt11: "lnbc1recipient" } })
-    mockPayInvoice.mockResolvedValue({ status: 2 })
+    mockPayInvoice.mockResolvedValue(ibexPayResponse(2))
     mockFindWalletById.mockImplementation(async (walletId: WalletId) => {
       const isUsdt = walletId === senderUsdtWalletId || walletId === recipientUsdtWalletId
       const isSender = walletId === senderUsdWalletId || walletId === senderUsdtWalletId
@@ -510,7 +666,7 @@ describe("intraledger idempotency (ENG-530)", () => {
     expect(second).toBeInstanceOf(Error)
     expect(mockAddInvoice).toHaveBeenCalledTimes(1)
 
-    releasePay({ status: 2 })
+    releasePay(ibexPayResponse(2))
     const first = await firstPromise
 
     expect(first).toEqual({ value: "success" })

@@ -7,7 +7,6 @@ import {
   validateLnurlPayAmountMsat,
 } from "@app/payments/lnurl-pay"
 import { usdWalletAmountFromWalletId } from "@app/wallets"
-import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { InvalidLnurlError } from "@domain/errors"
 import { GT } from "@graphql/index"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
@@ -20,6 +19,7 @@ import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import { DealerPriceService } from "@services/dealer-price"
 import Ibex from "@services/ibex/client"
 import { IbexError } from "@services/ibex/errors"
+import { lnurlPaymentSendStatusOrPending } from "@services/ibex/payment-status"
 
 type LnurlPayMetadata = {
   callback: string
@@ -76,32 +76,10 @@ const paramsFromMetadata = ({
     tag: "payRequest",
   })
 
-type IbexPaymentStatus = {
-  transaction?: {
-    payment?: {
-      status?: {
-        id?: number
-      }
-      statusId?: number
-    }
-  }
-}
-
-const paymentStatusFromIbex = (payment: IbexPaymentStatus): PaymentSendStatus => {
-  switch (
-    payment.transaction?.payment?.status?.id ??
-    payment.transaction?.payment?.statusId
-  ) {
-    case 1:
-      return PaymentSendStatus.Pending
-    case 2:
-      return PaymentSendStatus.Success
-    case 3:
-      return PaymentSendStatus.Failure
-    default:
-      return PaymentSendStatus.Pending
-  }
-}
+// Status reading (including the "no recognised status" case) lives in
+// @services/ibex/payment-status. payToLnurl gets its own reader there: its 201
+// response carries no top-level `status` and no `transaction.payment.status`
+// object, and reports settlement via `settleDateUtc` instead.
 
 const LnurlPaymentSendMutation = GT.Field<
   null,
@@ -226,7 +204,7 @@ const LnurlPaymentSendMutation = GT.Field<
 
     return {
       errors: [],
-      status: paymentStatusFromIbex(payment).value,
+      status: lnurlPaymentSendStatusOrPending(payment).value,
     }
   },
 })

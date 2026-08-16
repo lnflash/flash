@@ -11,13 +11,12 @@ import dedent from "dedent"
 import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 
 // FLASH FORK: import ibex dependencies
-import { PaymentSendStatus } from "@domain/bitcoin/lightning"
-
 import { usdWalletAmountFromWalletId } from "@app/wallets"
 import { resolveCashWalletMutationWalletIdForAccount } from "@app/cash-wallet-cutover"
 import Ibex from "@services/ibex/client"
 
 import { IbexError } from "@services/ibex/errors"
+import { paymentSendStatusOrPending } from "@services/ibex/payment-status"
 
 const LnNoAmountUsdInvoicePaymentInput = GT.Input({
   name: "LnNoAmountUsdInvoicePaymentInput",
@@ -126,18 +125,7 @@ const LnNoAmountUsdInvoicePaymentSendMutation = GT.Field<
       }
     }
 
-    let status: PaymentSendStatus = PaymentSendStatus.Pending
-    switch (PayLightningInvoice.transaction?.payment?.status?.id) {
-      case 1:
-        status = PaymentSendStatus.Pending
-        break
-      case 2:
-        status = PaymentSendStatus.Success
-        break
-      case 3:
-        status = PaymentSendStatus.Failure
-        break
-    }
+    const status = paymentSendStatusOrPending(PayLightningInvoice)
 
     return {
       errors: [],

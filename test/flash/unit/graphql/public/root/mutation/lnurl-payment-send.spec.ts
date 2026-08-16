@@ -42,6 +42,10 @@ import LnurlPaymentSendMutation from "@graphql/public/root/mutation/lnurl-paymen
 import { paymentAmountFromNumber, USDTAmount, WalletCurrency } from "@domain/shared"
 import { IbexError } from "@services/ibex/errors"
 
+// The vendor's documented 201 body, committed verbatim — the only evidence
+// this endpoint's shape has. See test/flash/mocks/ibex/pay-to-lnurl.ts.
+import * as payToLnurlMock from "test/flash/mocks/ibex/pay-to-lnurl"
+
 const walletId = "11111111-1111-4111-8111-111111111111" as WalletId
 const routedWalletId = "22222222-2222-4222-8222-222222222222" as WalletId
 const domainAccount = { id: "account-id" } as Account
@@ -158,6 +162,47 @@ describe("LnurlPaymentSendMutation", () => {
     expect(mockPayToLnurl).not.toHaveBeenCalled()
     expect(result?.status).toBe("failed")
     expect(result?.errors[0].message).toMatch(/minSendable|maxSendable/i)
+  })
+
+  it("reports pending — never success — on the vendor's documented payToLnurl 201 example", async () => {
+    // The committed fixture is the vendor's own example: a top-level
+    // settleDateUtc of 1668544241 that is `transaction.createdAt` floored to
+    // the second, next to `statusId: 0`, `payment.settleDateUtc: null`,
+    // `paidMsat: 0` and `payment.hash: null`. payToLnurl also registers an
+    // async settlement webhook, so the 201 is an acceptance. Reading that
+    // top-level echo reported every LNURL send as a completed conversion —
+    // the exact bug this PR opens by condemning.
+    mockPayToLnurl.mockResolvedValueOnce(payToLnurlMock.response)
+
+    const result = await resolveMutation()
+
+    expect(result).toEqual({ errors: [], status: "pending" })
+  })
+
+  it("reports success on a payment-level settle date — a reading only the LNURL reader makes", async () => {
+    // The payInvoiceV2 reader has no settle-date rule at all and would report
+    // this as pending, so this is the assertion that catches the two readers
+    // being swapped on this rail.
+    mockPayToLnurl.mockResolvedValueOnce({
+      hash: "19b7ff42e048d14791180d63592099b3394fc9ea7e3243906e810362124c29fd",
+      transaction: {
+        id: "dfeec8bd-b4e7-46f1-aa4a-cf4e4569df02",
+        accountId: "eeba6152-9432-448e-b7d2-4205e5099924",
+        payment: { statusId: 0, settleDateUtc: "2022-11-15T20:30:41.960887Z" },
+      },
+    })
+
+    const result = await resolveMutation()
+
+    expect(result).toEqual({ errors: [], status: "success" })
+  })
+
+  it("reports pending — never success — when the payToLnurl response carries neither status nor settle date", async () => {
+    mockPayToLnurl.mockResolvedValueOnce({ transaction: { payment: { statusId: 0 } } })
+
+    const result = await resolveMutation()
+
+    expect(result).toEqual({ errors: [], status: "pending" })
   })
 
   it("maps IBEX pay failures into payload errors", async () => {
