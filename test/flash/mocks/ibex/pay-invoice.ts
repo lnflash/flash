@@ -1,3 +1,15 @@
+/**
+ * IBEX `payInvoiceV2` — the 200 body.
+ *
+ * PROVENANCE: the vendor's documented example, copied verbatim from the
+ * generated client's openapi document. NOT a live capture. It happens to
+ * populate all three status fields (`status: 1`, `payment.statusId: 1`,
+ * `payment.status.id: 1` — IN_FLIGHT), but nothing has confirmed that a real
+ * 200 does the same: the pre-#483 intraledger code read the TOP-LEVEL `status`
+ * alone and its fixture modelled exactly that. That is why the unreadable case
+ * in src/services/ibex/payment-status.ts records at Warn rather than paging.
+ * Capture a real 200 on TEST, commit it beside this file, then raise it.
+ */
 const response = {
   settleAtUtc: 0,
   hash: "",

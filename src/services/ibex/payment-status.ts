@@ -70,11 +70,18 @@ export type IbexPaymentStatusResponse = {
  * The `payToLnurl` (201) shape is NOT the same dialect: per the generated
  * schema it carries no top-level `status` and no `transaction.payment.status`
  * object — only `transaction.payment.statusId`, whose documented example is 0,
- * alongside a top-level `settleDateUtc` (example 1668544241) and `hash`. Two of
- * the three fields the payInvoiceV2 reader looks at are structurally absent
- * here, so this endpoint gets its own reader below.
+ * alongside a top-level `settleDateUtc` (example 1668544241, a creation-time
+ * echo — see the reader) and `hash`. Two of the three fields the payInvoiceV2
+ * reader looks at are structurally absent here, so this endpoint gets its own
+ * reader below.
  */
 export type IbexLnurlPayStatusResponse = {
+  /**
+   * Declared because it is on the wire, NOT because it is read: the vendor's
+   * documented example populates it with the transaction's creation time on a
+   * payment that has not settled. See the reader below — it is settlement
+   * evidence for nothing.
+   */
   settleDateUtc?: unknown
   hash?: unknown
   transaction?: {
@@ -107,40 +114,43 @@ const statusFromField = (value: unknown): PaymentSendStatus | undefined => {
 }
 
 /**
- * Populated only when IBEX has actually settled the payment.
+ * Whether IBEX stamped a real settlement date on the payment.
+ *
+ * Presence is the entire question — no caller needs the instant — so this
+ * returns a boolean rather than a timestamp. The two accepted serialisations
+ * normalise to different UNITS (the integer form is epoch seconds, the ISO
+ * string parses to milliseconds), and handing that back from a helper whose
+ * name promises a timestamp is a trap for the next caller who actually uses
+ * the number.
  *
  * Two serialisations have to be accepted. The payToLnurl 201 declares the
  * top-level `settleDateUtc` as an integer epoch (example 1668544241) whose
- * `default: 0` means "not settled"; the payment-level `settleDateUtc` has no
- * declared type at all, and every payment-level date field this vendor DOES
- * declare is an ISO string (`creationDateUtc`:
- * "2023-07-06T14:51:59.389565Z"). Accepting numbers only would leave the
- * payment-level fallback dead for the string form — and, if the top-level
- * field also arrives as a string, would report every LNURL send as pending
- * forever with a Warn span per send.
+ * `default: 0` means "not settled"; the payment-level `settleDateUtc` — the
+ * only one this module reads, see the reader below — has no declared type at
+ * all, and every payment-level date field this vendor DOES declare is an ISO
+ * string (`creationDateUtc`: "2023-07-06T14:51:59.389565Z"). Accepting numbers
+ * only would leave the payment-level read dead for the string form.
  *
- * Both forms are normalised to an epoch and required to be > 0, which also
- * rejects this vendor's zero-date sentinel "0001-01-01T00:00:00Z" (it parses
- * to a large NEGATIVE epoch) the same way the integer 0 is rejected.
+ * Both forms are required to resolve to an epoch > 0, which also rejects this
+ * vendor's zero-date sentinel "0001-01-01T00:00:00Z" (it parses to a large
+ * NEGATIVE epoch) the same way the integer 0 is rejected.
  */
-const settledAt = (value: unknown): number | undefined => {
-  if (typeof value === "number")
-    return Number.isFinite(value) && value > 0 ? value : undefined
-  if (typeof value === "string" && value.trim() !== "") {
-    const trimmed = value.trim()
-    // An all-digit string is a stringified epoch, NOT a date to parse. Handing
-    // one to Date.parse inverts the check in both directions: Date.parse("0")
-    // is 946713600000 (V8 reads a bare "0" as the year 2000), so the unset
-    // sentinel would read as settled, while a real epoch like "1668544241"
-    // parses as a year and is rejected. Coerce numerically first.
-    if (/^[+-]?\d+$/.test(trimmed)) {
-      const epoch = Number(trimmed)
-      return Number.isFinite(epoch) && epoch > 0 ? epoch : undefined
-    }
-    const parsed = Date.parse(trimmed)
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
+const hasSettleDate = (value: unknown): boolean => {
+  if (typeof value === "number") return Number.isFinite(value) && value > 0
+  if (typeof value !== "string") return false
+  const trimmed = value.trim()
+  if (trimmed === "") return false
+  // An all-digit string is a stringified epoch, NOT a date to parse. Handing
+  // one to Date.parse inverts the check in both directions: Date.parse("0")
+  // is 946713600000 (V8 reads a bare "0" as the year 2000), so the unset
+  // sentinel would read as settled, while a real epoch like "1668544241"
+  // parses as a year and is rejected. Coerce numerically first.
+  if (/^[+-]?\d+$/.test(trimmed)) {
+    const epoch = Number(trimmed)
+    return Number.isFinite(epoch) && epoch > 0
   }
-  return undefined
+  const parsed = Date.parse(trimmed)
+  return Number.isFinite(parsed) && parsed > 0
 }
 
 /**
@@ -148,10 +158,27 @@ const settledAt = (value: unknown): number | undefined => {
  * payment) default to 0 — "no failure". A code above 0 is IBEX naming a reason
  * the payment failed, and is the only corroboration available for a top-level
  * `status: 3`.
+ *
+ * The declared type admits strings as well as numbers, and a string reason can
+ * be NAMED rather than numeric ("NO_ROUTE"). A named reason is IBEX naming a
+ * failure exactly as much as an integer code is, so it must not be coerced
+ * through `Number()` into a NaN that reads as "no corroboration" — that would
+ * report a definitively failed send as `pending`, which `withPaymentIdempotency`
+ * then caches for 24h under the same key.
+ *
+ * Only an explicit zero says "no failure": "", "0", "0.0", "-0". A string that
+ * parses as a number is held to the same finite-and-`> 0` rule as the number
+ * branch — a negative or infinite code is malformed, not a named reason, and
+ * malformed input must never corroborate a top-level FAILED.
  */
 const reportsFailureCode = (value: unknown): boolean => {
-  const code = typeof value === "string" ? Number(value) : value
-  return typeof code === "number" && Number.isFinite(code) && code > 0
+  if (typeof value === "string") {
+    const trimmed = value.trim()
+    if (trimmed === "") return false
+    const numeric = Number(trimmed)
+    return Number.isNaN(numeric) ? true : Number.isFinite(numeric) && numeric > 0
+  }
+  return typeof value === "number" && Number.isFinite(value) && value > 0
 }
 
 const identityAttributes = (
@@ -197,6 +224,18 @@ const identityAttributes = (
  *
  * Returns `UnconfirmedIbexPayment` when no field can settle the question, so
  * callers can record the anomaly instead of silently inventing an outcome.
+ *
+ * SEVERITY: Warn, not Critical — and deliberately the same level the LNURL
+ * reader uses, because the evidence behind both is the same: no real
+ * payInvoiceV2 200 has been captured on TEST either. The committed fixture
+ * (test/flash/mocks/ibex/pay-invoice.ts) is the vendor's openapi example copied
+ * verbatim, not an observation, and the pre-PR intraledger code read the
+ * TOP-LEVEL `status` field alone — with a `{ status: 2 }` test fixture modelling
+ * exactly that — which is direct evidence that at least one rail may populate
+ * only the field this reader treats as uncorroborated. Paging on every
+ * flash-to-flash send until a capture proves otherwise is not a severity, it is
+ * an outage. Capture one 200 on TEST, commit it as a fixture, confirm the
+ * payment-level fields are populated, then raise this to Critical.
  */
 export const paymentSendStatusFromIbex = (
   response: IbexPaymentStatusResponse | null | undefined,
@@ -225,30 +264,44 @@ export const paymentSendStatusFromIbex = (
         : `No recognised payment status in IBEX response (candidates: ${JSON.stringify(
             candidates,
           )})`,
+    ErrorLevel.Warn,
   )
 }
 
 /**
  * Map an IBEX `payToLnurl` (201) response to a payment status.
  *
- * Same payment-level precedence, but this endpoint reports settlement with a
- * `settleDateUtc` timestamp rather than a status enum — its documented
- * `statusId` example is 0 — so a populated settle date is read as settlement
- * once the status fields have come up empty. That is an explicit signal from
- * IBEX, not an inference from silence.
+ * Same payment-level precedence, and settlement is read ONLY from
+ * payment-level evidence: a recognised `transaction.payment.status.id` /
+ * `statusId`, or failing those a populated `transaction.payment.settleDateUtc`.
  *
- * `settledAt` accepts both the integer epoch the top-level field declares and
- * the ISO string every payment-level date field on this vendor is serialised
- * as, because settlement-on-settle-date is now the ONLY route by which an LNURL
- * send can report success and a type mismatch here would silently return the
- * pre-fix always-pending behaviour with a Warn span attached to every send.
+ * The TOP-LEVEL `settleDateUtc` is deliberately not read. The vendor's own
+ * documented 201 example — the only evidence anyone has for this endpoint —
+ * sets it to 1668544241, which is `transaction.createdAt`
+ * ("2022-11-15T20:30:41.960887Z") floored to the second, while every
+ * payment-level field in the SAME example says the payment has not settled:
+ * `statusId: 0`, `payment.settleDateUtc: null`, `paidMsat: 0`,
+ * `payment.hash: null`. `Ibex.payToLnurl` also registers an async settlement
+ * webhook (see client.ts), so a 201 is an acceptance, not a settlement.
+ * Reading that field would report EVERY LNURL send as `success` regardless of
+ * outcome — the "conversion successful while no funds moved" bug this module
+ * exists to close, reintroduced on the one rail whose real response has never
+ * been observed, and with the Warn-level record suppressed on that path by
+ * design. The example is committed at test/flash/mocks/ibex/pay-to-lnurl.ts
+ * and pinned by a test.
+ *
+ * The payment-level date survives because the same example corroborates it in
+ * the other direction: it is `null` on a payment that has not settled, which is
+ * what a settlement marker looks like. `hasSettleDate` accepts both the integer
+ * epoch and the ISO string every payment-level date on this vendor is
+ * serialised as, since that field has no declared type at all.
  *
  * OPEN: no real payToLnurl response has been captured on TEST yet, so the
- * field's actual runtime type is still schema-derived rather than observed.
- * Until one is captured the residual "no status, no settle date" case is raised
- * at Warn rather than Critical — we do not page on what may well be this
- * endpoint's happy path. Capture a response, confirm the type, then raise this
- * to Critical.
+ * settle-date rule is still schema-derived rather than observed and the
+ * residual "no status, no settle date" case — the documented example's own
+ * shape — is raised at Warn rather than Critical: we do not page on what may
+ * well be this endpoint's happy path. Capture a response, commit it beside the
+ * example fixture, then confirm both the rule and the severity.
  */
 export const paymentSendStatusFromIbexLnurlPay = (
   response: IbexLnurlPayStatusResponse | null | undefined,
@@ -258,13 +311,11 @@ export const paymentSendStatusFromIbexLnurlPay = (
     statusFromField(payment?.status?.id) ?? statusFromField(payment?.statusId)
   if (paymentLevel !== undefined) return paymentLevel
 
-  const settleDateUtc =
-    settledAt(response?.settleDateUtc) ?? settledAt(payment?.settleDateUtc)
-  if (settleDateUtc !== undefined) return PaymentSendStatus.Success
+  if (hasSettleDate(payment?.settleDateUtc)) return PaymentSendStatus.Success
 
   return new UnconfirmedIbexPayment(
-    `No recognised payment status and no settle date in IBEX payToLnurl response (candidates: ${JSON.stringify(
-      [payment?.status?.id, payment?.statusId, response?.settleDateUtc],
+    `No recognised payment status and no payment-level settle date in IBEX payToLnurl response (candidates: ${JSON.stringify(
+      [payment?.status?.id, payment?.statusId, payment?.settleDateUtc],
     )})`,
     ErrorLevel.Warn,
   )
@@ -276,9 +327,11 @@ const recordUnconfirmed = (
 ): void => {
   recordExceptionInCurrentSpan({
     error,
-    // The error carries its own severity — the payInvoiceV2 reader raises
-    // Critical, the LNURL one Warn. Hardcoding a level here would make that
-    // constructor argument silently dead.
+    // The error carries its own severity. Both readers currently raise Warn —
+    // neither endpoint has a captured response to justify paging on an
+    // unreadable one — but the level travels on the error so raising either
+    // reader (once a capture lands) needs no change here. Hardcoding a level
+    // would make that constructor argument silently dead.
     level: error.level,
     fallbackMsg: "IBEX payment response carried no recognised status",
     // Without these an operator woken by "money may or may not have moved" has

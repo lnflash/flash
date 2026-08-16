@@ -136,10 +136,12 @@ describe("lnInvoicePaymentSend IBEX status reader wiring", () => {
     expect(result).toEqual({ errors: [], status: "failed" })
   })
 
-  it("reports an unreadable response as pending and records it at Critical", async () => {
-    // Critical is the payInvoiceV2 reader's severity for this condition; the
-    // LNURL reader raises the same one at Warn. This is the assertion that
-    // catches the two readers being swapped.
+  it("reports an unreadable response as pending and records it in the payInvoiceV2 reader's own words", async () => {
+    // Both readers record at Warn (neither endpoint has a captured response to
+    // justify paging), so severity alone no longer tells them apart — the
+    // message does: the LNURL reader names payToLnurl and its payment-level
+    // settle date. This is the assertion that catches the two readers being
+    // swapped.
     mockPayInvoice.mockResolvedValue({ status: 0, transaction: { payment: {} } })
 
     const result = await resolvePayment()
@@ -148,7 +150,11 @@ describe("lnInvoicePaymentSend IBEX status reader wiring", () => {
     expect(mockRecordExceptionInCurrentSpan).toHaveBeenCalledTimes(1)
     const [{ error, level }] = mockRecordExceptionInCurrentSpan.mock.calls[0]
     expect(error).toBeInstanceOf(UnconfirmedIbexPayment)
-    expect(level).toBe(ErrorLevel.Critical)
+    expect(level).toBe(ErrorLevel.Warn)
+    expect((error as UnconfirmedIbexPayment).message).toMatch(
+      /No recognised payment status in IBEX response/,
+    )
+    expect((error as UnconfirmedIbexPayment).message).not.toMatch(/payToLnurl/)
   })
 
   it("never reports success from a top-level status alone", async () => {
