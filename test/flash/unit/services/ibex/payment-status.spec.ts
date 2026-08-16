@@ -19,12 +19,15 @@ const withNestedStatus = (id: number) => ({
   transaction: { payment: { status: { id } } },
 })
 
-// Responses payInvoiceV2 callers cannot read an outcome from. Note `{ status: 2 }`:
-// a lone top-level SUCCEEDED is NOT settlement — see the precedence tests below.
+// Responses payInvoiceV2 callers cannot read an outcome from. Note `{ status: 2 }`
+// and `{ status: 3 }`: a lone top-level SUCCEEDED is not settlement and a lone
+// top-level FAILED is not failure — see the precedence tests below.
 const unreadableResponses = [
   {},
   { status: 0 },
   { status: 2 },
+  { status: 3 },
+  { status: 3, failureReason: 0, transaction: { payment: { failureId: 0 } } },
   { status: 7 },
   { transaction: {} },
   { transaction: { payment: {} } },
@@ -51,9 +54,50 @@ describe("paymentSendStatusFromIbex", () => {
     )
   })
 
-  it("falls back to the top-level status field for pending and failure", () => {
+  it("falls back to the top-level status field for pending unconditionally", () => {
+    // Pending needs no corroboration: it is the same outcome the unconfirmed
+    // path reports anyway, so reading it commits to nothing.
     expect(paymentSendStatusFromIbex({ status: 1 })).toBe(PaymentSendStatus.Pending)
-    expect(paymentSendStatusFromIbex({ status: 3 })).toBe(PaymentSendStatus.Failure)
+  })
+
+  it("falls back to the top-level status field for failure only when IBEX names a failure code", () => {
+    expect(paymentSendStatusFromIbex({ status: 3, failureReason: 2 })).toBe(
+      PaymentSendStatus.Failure,
+    )
+    expect(
+      paymentSendStatusFromIbex({
+        status: 3,
+        transaction: { payment: { failureId: 4 } },
+      }),
+    ).toBe(PaymentSendStatus.Failure)
+  })
+
+  it("never fails a payment on the top-level status field alone", () => {
+    // The mirror of "never invent a settled send". Telling a user "failed" for
+    // a send IBEX may in fact have made sends them back to retry with a fresh
+    // idempotency key — the double-pay hole withPaymentIdempotency (#478)
+    // exists to close. The top-level field is the least corroborated of the
+    // three and is only ever read when both payment-level fields said nothing;
+    // that argument does not stop applying when the digit is 3.
+    const unconfirmed = paymentSendStatusFromIbex({ status: 3 })
+
+    expect(unconfirmed).toBeInstanceOf(UnconfirmedIbexPayment)
+    expect((unconfirmed as UnconfirmedIbexPayment).message).toMatch(
+      /FAILED only in the top-level status field/i,
+    )
+  })
+
+  it("treats a zeroed failure code as no corroboration", () => {
+    // Every integer in the generated schema declares `default: 0`, so an unset
+    // failureReason/failureId arrives as 0 — that is IBEX saying "no failure",
+    // never "failed for reason zero".
+    expect(
+      paymentSendStatusFromIbex({
+        status: 3,
+        failureReason: 0,
+        transaction: { payment: { failureId: 0 } },
+      }),
+    ).toBeInstanceOf(UnconfirmedIbexPayment)
   })
 
   it("skips unset (0) fields rather than reading them as unknown", () => {
@@ -126,6 +170,26 @@ describe("paymentSendStatusFromIbex", () => {
         }),
       ).toBe(PaymentSendStatus.Failure)
     })
+
+    it("does not read a top-level FAILED past an unset payment-level statusId without a failure code", () => {
+      // The shape that made this a finding: payment-level unreadable (0 is
+      // unset/UNKNOWN, never an outcome) with a bare top-level 3. Uncorroborated
+      // it is unconfirmed; the moment IBEX also names a failure code it is a
+      // genuine failure.
+      expect(
+        paymentSendStatusFromIbex({
+          status: 3,
+          transaction: { payment: { statusId: 0 } },
+        }),
+      ).toBeInstanceOf(UnconfirmedIbexPayment)
+      expect(
+        paymentSendStatusFromIbex({
+          status: 3,
+          failureReason: 12,
+          transaction: { payment: { statusId: 0 } },
+        }),
+      ).toBe(PaymentSendStatus.Failure)
+    })
   })
 
   it("returns UnconfirmedIbexPayment when no recognised status is present", () => {
@@ -143,6 +207,15 @@ describe("paymentSendStatusFromIbex", () => {
   it("never reports success without an explicit success id", () => {
     for (const response of unreadableResponses) {
       expect(paymentSendStatusFromIbex(response)).not.toBe(PaymentSendStatus.Success)
+    }
+  })
+
+  it("never reports failure without an explicit, corroborated failure", () => {
+    // The mirror invariant. A fabricated "failed" is not a safe default: it
+    // sends the user back to retry with a new idempotency key against a send
+    // that may already have paid.
+    for (const response of unreadableResponses) {
+      expect(paymentSendStatusFromIbex(response)).not.toBe(PaymentSendStatus.Failure)
     }
   })
 })
@@ -205,9 +278,20 @@ describe("paymentSendStatusOrPending", () => {
     paymentSendStatusOrPending(withNestedStatus(1))
     paymentSendStatusOrPending(withNestedStatus(2))
     paymentSendStatusOrPending(withNestedStatus(3))
-    paymentSendStatusOrPending({ status: 3 })
+    paymentSendStatusOrPending({ status: 1 })
+    paymentSendStatusOrPending({ status: 3, failureReason: 2 })
 
     expect(recordMock).not.toHaveBeenCalled()
+  })
+
+  it("reports an uncorroborated top-level FAILED as pending, not as failed", () => {
+    const status = paymentSendStatusOrPending({
+      status: 3,
+      transaction: { payment: { statusId: 0, status: { id: 0 } } },
+    })
+
+    expect(status).toBe(PaymentSendStatus.Pending)
+    expect(recordMock).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -264,6 +348,54 @@ describe("paymentSendStatusFromIbexLnurlPay", () => {
     ).toBeInstanceOf(UnconfirmedIbexPayment)
   })
 
+  describe("settleDateUtc serialisation", () => {
+    // The top-level field declares an integer epoch, but the payment-level one
+    // has no declared type at all and every payment-level date this vendor DOES
+    // declare is an ISO string ("2023-07-06T14:51:59.389565Z" — see
+    // test/flash/mocks/ibex/pay-invoice.ts). Settlement-on-settle-date is the
+    // only route by which an LNURL send can report success, so a number-only
+    // reader would return the pre-fix always-pending behaviour plus a Warn span
+    // on every send.
+    it("accepts an ISO string settle date at the top level", () => {
+      expect(
+        paymentSendStatusFromIbexLnurlPay({
+          settleDateUtc: "2022-11-15T20:30:41.960887Z",
+          transaction: { payment: { statusId: 0 } },
+        }),
+      ).toBe(PaymentSendStatus.Success)
+    })
+
+    it("accepts an ISO string settle date at the payment level", () => {
+      expect(
+        paymentSendStatusFromIbexLnurlPay({
+          transaction: {
+            payment: { statusId: 0, settleDateUtc: "2023-07-06T14:51:59.389565Z" },
+          },
+        }),
+      ).toBe(PaymentSendStatus.Success)
+    })
+
+    it("rejects the vendor's zero-date sentinel and unparseable strings", () => {
+      // "0001-01-01T00:00:00Z" is this vendor's zero value (it is the
+      // creationDateUtc example on the payToLnurl 201 itself) and parses to a
+      // large NEGATIVE epoch — it must be rejected exactly like the integer 0.
+      for (const settleDateUtc of [
+        "0001-01-01T00:00:00Z",
+        "",
+        "   ",
+        "not-a-date",
+        null,
+      ]) {
+        expect(
+          paymentSendStatusFromIbexLnurlPay({
+            settleDateUtc,
+            transaction: { payment: { statusId: 0 } },
+          }),
+        ).toBeInstanceOf(UnconfirmedIbexPayment)
+      }
+    })
+  })
+
   it("raises the unreadable LNURL case at Warn, not Critical", () => {
     // No real payToLnurl response has been captured on TEST yet, so an
     // unreadable one must not page — it may be this endpoint's happy path.
@@ -283,5 +415,40 @@ describe("lnurlPaymentSendStatusOrPending", () => {
     const [{ error, level }] = recordMock.mock.calls[0]
     expect(error).toBeInstanceOf(UnconfirmedIbexPayment)
     expect(level).toBe(ErrorLevel.Warn)
+  })
+
+  it("records the payment hash from the top level, where payToLnurl puts it", () => {
+    // payToLnurl's 201 declares `transaction.payment.hash` with an EMPTY schema
+    // and carries the 64-char hash at the top level instead. Reading only the
+    // payInvoiceV2 position hands an operator transaction id and account id but
+    // not the one field that names the payment — with the hash sitting right
+    // there in the response.
+    lnurlPaymentSendStatusOrPending({
+      hash: "19b7ff42e048d14791180d63592099b3394fc9ea7e3243906e810362124c29fd",
+      transaction: {
+        id: "dfeec8bd-b4e7-46f1-aa4a-cf4e4569df02",
+        accountId: "eeba6152-9432-448e-b7d2-4205e5099924",
+        payment: { statusId: 0 },
+      },
+    })
+
+    expect(recordMock).toHaveBeenCalledTimes(1)
+    expect(recordMock.mock.calls[0][0].attributes).toEqual({
+      "ibex.transaction.id": "dfeec8bd-b4e7-46f1-aa4a-cf4e4569df02",
+      "ibex.payment.hash":
+        "19b7ff42e048d14791180d63592099b3394fc9ea7e3243906e810362124c29fd",
+      "ibex.account.id": "eeba6152-9432-448e-b7d2-4205e5099924",
+    })
+  })
+
+  it("prefers the payment-level hash when the endpoint populates it", () => {
+    lnurlPaymentSendStatusOrPending({
+      hash: "top-level-hash",
+      transaction: { payment: { hash: "payment-level-hash", statusId: 0 } },
+    })
+
+    expect(recordMock.mock.calls[0][0].attributes["ibex.payment.hash"]).toBe(
+      "payment-level-hash",
+    )
   })
 })

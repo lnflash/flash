@@ -377,12 +377,42 @@ describe("intraledger IBEX status reading", () => {
   })
 
   it("reports an unreadable response as pending instead of erroring or inventing a settlement", async () => {
+    // CONTRACT CHANGE, pinned here deliberately: this case previously returned
+    // an UnexpectedIbexResponse, which intraledger-usd-payment-send maps to
+    // `{ status: "failed" }`. It now reports pending — an error return is left
+    // uncached by withPaymentIdempotency, so a same-key retry could re-execute
+    // the one send whose outcome we do not know. Until flash-mobile#699 lands,
+    // the shipped client renders PENDING as a completed conversion, so this
+    // rail is fail-open on this one case; see the PR body and the doc block on
+    // paymentSendStatusOrPending.
     mockPayInvoice.mockResolvedValue({ status: 0, transaction: { payment: {} } })
 
     const result = await intraledgerPaymentSendWalletIdForUsdWallet(sendArgs)
 
     expect(result).toEqual({ value: "pending" })
     expect(result).not.toBeInstanceOf(Error)
+  })
+
+  it("does not report a bare top-level FAILED as a failed send", async () => {
+    // The mirror of "never invent a settled send": a fabricated "failed" sends
+    // the user back to retry with a fresh idempotency key against a send IBEX
+    // may in fact have made. A top-level 3 counts only when IBEX also names a
+    // failure code.
+    mockPayInvoice.mockResolvedValue({ status: 3, transaction: { payment: {} } })
+
+    expect(await intraledgerPaymentSendWalletIdForUsdWallet(sendArgs)).toEqual({
+      value: "pending",
+    })
+
+    mockPayInvoice.mockResolvedValue({
+      status: 3,
+      failureReason: 2,
+      transaction: { payment: {} },
+    })
+
+    expect(await intraledgerPaymentSendWalletIdForUsdWallet(sendArgs)).toEqual({
+      value: "failed",
+    })
   })
 
   it("does not settle on a top-level SUCCEEDED with no payment-level corroboration", async () => {

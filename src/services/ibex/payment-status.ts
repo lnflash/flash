@@ -44,15 +44,23 @@ const RECOGNISED_IDS: number[] = [
  * `statusId` and a nested `status.id`. Which ones are populated varies by
  * response, so we read them in precedence order rather than `??`-chaining
  * fields that can legitimately be 0.
+ *
+ * The 200 also carries two failure codes — a top-level `failureReason` and
+ * `transaction.payment.failureId`, both integers defaulting to 0. They are the
+ * only corroboration available for a top-level `status: 3`, and that is exactly
+ * what they are used for below.
  */
 export type IbexPaymentStatusResponse = {
   status?: number | null
+  failureReason?: number | string | null
+  hash?: unknown
   transaction?: {
     id?: unknown
     accountId?: unknown
     payment?: {
       hash?: unknown
       statusId?: number | null
+      failureId?: number | string | null
       status?: { id?: number | null } | null
     } | null
   } | null
@@ -76,6 +84,9 @@ export type IbexLnurlPayStatusResponse = {
       hash?: unknown
       settleDateUtc?: unknown
       statusId?: number | null
+      // No `failureId` here on purpose: the payToLnurl 201 declares it with an
+      // EMPTY schema (it deserialises as `unknown`), so it can corroborate
+      // nothing. This reader has no top-level `status` to corroborate anyway.
       status?: { id?: number | null } | null
     } | null
   } | null
@@ -95,11 +106,43 @@ const statusFromField = (value: unknown): PaymentSendStatus | undefined => {
   }
 }
 
-// Populated only when IBEX has actually settled the payment (the schema's
-// `default: 0` means "not settled" arrives as 0, and the field is null on an
-// in-flight payInvoiceV2 response).
-const settledAt = (value: unknown): number | undefined =>
-  typeof value === "number" && value > 0 ? value : undefined
+/**
+ * Populated only when IBEX has actually settled the payment.
+ *
+ * Two serialisations have to be accepted. The payToLnurl 201 declares the
+ * top-level `settleDateUtc` as an integer epoch (example 1668544241) whose
+ * `default: 0` means "not settled"; the payment-level `settleDateUtc` has no
+ * declared type at all, and every payment-level date field this vendor DOES
+ * declare is an ISO string (`creationDateUtc`:
+ * "2023-07-06T14:51:59.389565Z"). Accepting numbers only would leave the
+ * payment-level fallback dead for the string form — and, if the top-level
+ * field also arrives as a string, would report every LNURL send as pending
+ * forever with a Warn span per send.
+ *
+ * Both forms are normalised to an epoch and required to be > 0, which also
+ * rejects this vendor's zero-date sentinel "0001-01-01T00:00:00Z" (it parses
+ * to a large NEGATIVE epoch) the same way the integer 0 is rejected.
+ */
+const settledAt = (value: unknown): number | undefined => {
+  if (typeof value === "number")
+    return Number.isFinite(value) && value > 0 ? value : undefined
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Date.parse(value)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
+  }
+  return undefined
+}
+
+/**
+ * IBEX's failure codes (`failureReason` at the top level, `failureId` on the
+ * payment) default to 0 — "no failure". A code above 0 is IBEX naming a reason
+ * the payment failed, and is the only corroboration available for a top-level
+ * `status: 3`.
+ */
+const reportsFailureCode = (value: unknown): boolean => {
+  const code = typeof value === "string" ? Number(value) : value
+  return typeof code === "number" && Number.isFinite(code) && code > 0
+}
 
 const identityAttributes = (
   response: IbexPaymentStatusResponse | IbexLnurlPayStatusResponse | null | undefined,
@@ -108,7 +151,13 @@ const identityAttributes = (
     typeof value === "string" && value ? value : undefined
   return {
     "ibex.transaction.id": asString(response?.transaction?.id),
-    "ibex.payment.hash": asString(response?.transaction?.payment?.hash),
+    // payInvoiceV2 puts the payment hash on `transaction.payment.hash`;
+    // payToLnurl leaves that field's schema empty and carries the hash at the
+    // TOP level instead. Reading only the first shape hands an operator paged
+    // on an unreadable LNURL response every identifier EXCEPT the one that
+    // names the payment.
+    "ibex.payment.hash":
+      asString(response?.transaction?.payment?.hash) ?? asString(response?.hash),
     "ibex.account.id": asString(response?.transaction?.accountId),
   }
 }
@@ -119,15 +168,25 @@ const identityAttributes = (
  * Precedence: the payment-level fields (`transaction.payment.status.id`, then
  * `transaction.payment.statusId`) decide the outcome whenever either reports a
  * recognised id. Only if BOTH are unreadable do we fall back to the top-level
- * `status` — and then for Pending/Failure only. Settlement is never taken from
- * the top-level field: it is the least corroborated of the three (the only one
- * with no sibling `name` in the schema to confirm its enum), and the context it
- * would fire in — both payment-level fields unreadable — is the worst possible
- * one in which to upgrade a payment to "settled".
+ * `status`, which is the least corroborated of the three (the only one with no
+ * sibling `name` in the schema to confirm its enum) and is only ever read in
+ * the anomalous context where the payment-level fields said nothing. That is
+ * the worst possible place to invent a terminal outcome, in EITHER direction:
+ *
+ *  - Never `Success` from a lone top-level 2. Inventing a settled send is the
+ *    headline bug this module exists to close.
+ *  - Never `Failure` from a lone top-level 3 either. Telling a user "failed"
+ *    for a payment IBEX may in fact have made sends them back to retry with a
+ *    fresh idempotency key — the double-pay hole `withPaymentIdempotency`
+ *    (#478) exists to close, and the same hazard the Pending choice in
+ *    `paymentSendStatusOrPending` is argued from. A top-level 3 is therefore
+ *    accepted only when IBEX also names a failure code (`failureReason` or
+ *    `transaction.payment.failureId` > 0); uncorroborated, it is unconfirmed.
+ *  - Pending needs no gate: it is the same outcome the unconfirmed path
+ *    reports anyway, so reading it commits to nothing.
  *
  * Returns `UnconfirmedIbexPayment` when no field can settle the question, so
  * callers can record the anomaly instead of silently inventing an outcome.
- * Note what this deliberately never returns from a lone top-level 2: `Success`.
  */
 export const paymentSendStatusFromIbex = (
   response: IbexPaymentStatusResponse | null | undefined,
@@ -138,19 +197,24 @@ export const paymentSendStatusFromIbex = (
   if (paymentLevel !== undefined) return paymentLevel
 
   const topLevel = statusFromField(response?.status)
-  if (topLevel === PaymentSendStatus.Pending || topLevel === PaymentSendStatus.Failure) {
-    return topLevel
-  }
+  if (topLevel === PaymentSendStatus.Pending) return topLevel
+  const corroboratedFailure =
+    reportsFailureCode(response?.failureReason) || reportsFailureCode(payment?.failureId)
+  if (topLevel === PaymentSendStatus.Failure && corroboratedFailure) return topLevel
 
   const candidates = [payment?.status?.id, payment?.statusId, response?.status]
+  const uncorroborated = (outcome: string) =>
+    `IBEX reported ${outcome} only in the top-level status field, with no payment-level corroboration (candidates: ${JSON.stringify(
+      candidates,
+    )})`
   return new UnconfirmedIbexPayment(
     topLevel === PaymentSendStatus.Success
-      ? `IBEX reported SUCCEEDED only in the top-level status field, with no payment-level corroboration (candidates: ${JSON.stringify(
-          candidates,
-        )})`
-      : `No recognised payment status in IBEX response (candidates: ${JSON.stringify(
-          candidates,
-        )})`,
+      ? uncorroborated("SUCCEEDED")
+      : topLevel === PaymentSendStatus.Failure
+        ? uncorroborated("FAILED")
+        : `No recognised payment status in IBEX response (candidates: ${JSON.stringify(
+            candidates,
+          )})`,
   )
 }
 
@@ -163,10 +227,18 @@ export const paymentSendStatusFromIbex = (
  * once the status fields have come up empty. That is an explicit signal from
  * IBEX, not an inference from silence.
  *
- * The residual "no status, no settle date" case is raised at Warn rather than
- * Critical: no real payToLnurl response has been captured on TEST yet, so we do
- * not page on what may well be this endpoint's happy path. Raise it to Critical
- * once a captured response proves the field is populated in normal operation.
+ * `settledAt` accepts both the integer epoch the top-level field declares and
+ * the ISO string every payment-level date field on this vendor is serialised
+ * as, because settlement-on-settle-date is now the ONLY route by which an LNURL
+ * send can report success and a type mismatch here would silently return the
+ * pre-fix always-pending behaviour with a Warn span attached to every send.
+ *
+ * OPEN: no real payToLnurl response has been captured on TEST yet, so the
+ * field's actual runtime type is still schema-derived rather than observed.
+ * Until one is captured the residual "no status, no settle date" case is raised
+ * at Warn rather than Critical — we do not page on what may well be this
+ * endpoint's happy path. Capture a response, confirm the type, then raise this
+ * to Critical.
  */
 export const paymentSendStatusFromIbexLnurlPay = (
   response: IbexLnurlPayStatusResponse | null | undefined,
@@ -210,13 +282,21 @@ const recordUnconfirmed = (
  * What the `payInvoiceV2` send resolvers call: the mapping above, with an
  * unreadable response recorded and reported as still in flight.
  *
- * "Pending" is what the previous inline switches produced for these responses
- * too, and it is kept deliberately: `withPaymentIdempotency` caches only a
- * definitive PaymentSendStatus, so returning an error here would leave the one
- * case where we do not know whether funds moved as the one case a same-key
- * retry could pay twice. What changes is that the anomaly is no longer
- * invisible, and that a status IBEX *did* report can no longer be missed —
- * see paymentSendStatusFromIbex.
+ * Pending is what the LN resolvers' inline switches produced for these
+ * responses; intraledger previously returned an `UnexpectedIbexResponse` here
+ * — a GraphQL error, rendered as "failed" — and now reports Pending. That is a
+ * deliberate, user-visible contract change on the flash-to-flash rail, called
+ * out in the PR body and sequenced behind the client fix (flash-mobile#699)
+ * that makes the app render `pending` honestly instead of as a completed
+ * conversion. Do not treat it as an incidental side effect of the refactor.
+ *
+ * Pending is the choice for all four call sites because
+ * `withPaymentIdempotency` caches only a definitive PaymentSendStatus:
+ * returning an error here would leave the one case where we do not know
+ * whether funds moved as the one case a same-key retry could pay twice. What
+ * changes for the LN rails is that the anomaly is no longer invisible, and
+ * that a status IBEX *did* report can no longer be missed — see
+ * paymentSendStatusFromIbex.
  */
 export const paymentSendStatusOrPending = (
   response: IbexPaymentStatusResponse | null | undefined,

@@ -102,6 +102,16 @@ const intraledgerPaymentSendWalletId = async ({
   // this used to be a fourth private dialect of the status switch, and the only
   // one reading the top-level `status` alone. See @services/ibex/payment-status
   // for the field precedence and for why 0 is not "invoice already paid".
+  //
+  // CONTRACT CHANGE (deliberate, not incidental): an unreadable payInvoiceV2
+  // response used to return `UnexpectedIbexResponse` here, which
+  // intraledger-usd-payment-send maps to `{ status: "failed" }`. It now reports
+  // `pending`, for the double-pay reason documented on
+  // paymentSendStatusOrPending — an error return is left uncached by
+  // withPaymentIdempotency, so a same-key retry could re-execute the one send
+  // whose outcome we do not know. Until flash-mobile#699 lands, the shipped
+  // client renders PENDING as a completed conversion, so this rail is
+  // fail-open on that one case; the PR body states this and sequences the two.
   const paymentSendStatus = paymentSendStatusOrPending(payResp)
 
   // flash fork: no longer adding contact on payments
