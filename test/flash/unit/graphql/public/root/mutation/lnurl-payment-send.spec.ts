@@ -160,6 +160,34 @@ describe("LnurlPaymentSendMutation", () => {
     expect(result?.errors[0].message).toMatch(/minSendable|maxSendable/i)
   })
 
+  it("reports success on the documented payToLnurl 201 shape (statusId 0 + settleDateUtc)", async () => {
+    // Per the generated schema this endpoint has no top-level `status` and no
+    // `transaction.payment.status` object — its documented statusId example is
+    // 0 next to a populated settleDateUtc. Reading it with the payInvoiceV2
+    // reader would have reported every LNURL send as pending and paged on it.
+    mockPayToLnurl.mockResolvedValueOnce({
+      settleDateUtc: 1668544241,
+      hash: "19b7ff42e048d14791180d63592099b3394fc9ea7e3243906e810362124c29fd",
+      transaction: {
+        id: "dfeec8bd-b4e7-46f1-aa4a-cf4e4569df02",
+        accountId: "eeba6152-9432-448e-b7d2-4205e5099924",
+        payment: { statusId: 0 },
+      },
+    })
+
+    const result = await resolveMutation()
+
+    expect(result).toEqual({ errors: [], status: "success" })
+  })
+
+  it("reports pending — never success — when the payToLnurl response carries neither status nor settle date", async () => {
+    mockPayToLnurl.mockResolvedValueOnce({ transaction: { payment: { statusId: 0 } } })
+
+    const result = await resolveMutation()
+
+    expect(result).toEqual({ errors: [], status: "pending" })
+  })
+
   it("maps IBEX pay failures into payload errors", async () => {
     mockPayToLnurl.mockResolvedValueOnce(new IbexError(new Error("ibex failed")))
 

@@ -54,6 +54,11 @@ export class CompletedInvoice extends IbexError {}
  * user's wallet — is greppable and alertable on its own. Never returned to
  * clients: the send resolvers record it and report the payment as still in
  * flight, the only honest reading of "we don't know yet".
+ *
+ * `level` is honoured by the recorder in ./payment-status (it passes
+ * `level: error.level` through to the span), so a Warn-level instance records
+ * at Warn. Keep it that way — a severity argument that the only caller
+ * overrides is worse than no argument at all.
  */
 export class UnconfirmedIbexPayment extends IbexError {
   constructor(message: string, level: ErrorLevel = ErrorLevel.Critical) {

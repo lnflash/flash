@@ -19,7 +19,7 @@ import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import { DealerPriceService } from "@services/dealer-price"
 import Ibex from "@services/ibex/client"
 import { IbexError } from "@services/ibex/errors"
-import { paymentSendStatusOrPending } from "@services/ibex/payment-status"
+import { lnurlPaymentSendStatusOrPending } from "@services/ibex/payment-status"
 
 type LnurlPayMetadata = {
   callback: string
@@ -76,8 +76,10 @@ const paramsFromMetadata = ({
     tag: "payRequest",
   })
 
-// Status reading (including the "no recognised status" case) is shared with
-// the other IBEX send mutations: @services/ibex/payment-status.
+// Status reading (including the "no recognised status" case) lives in
+// @services/ibex/payment-status. payToLnurl gets its own reader there: its 201
+// response carries no top-level `status` and no `transaction.payment.status`
+// object, and reports settlement via `settleDateUtc` instead.
 
 const LnurlPaymentSendMutation = GT.Field<
   null,
@@ -202,7 +204,7 @@ const LnurlPaymentSendMutation = GT.Field<
 
     return {
       errors: [],
-      status: paymentSendStatusOrPending(payment).value,
+      status: lnurlPaymentSendStatusOrPending(payment).value,
     }
   },
 })
