@@ -11,6 +11,7 @@ import dedent from "dedent"
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import Ibex from "@services/ibex/client"
 import { IbexError, InsufficientIbexBalance } from "@services/ibex/errors"
+import { paymentSendStatusOrPending } from "@services/ibex/payment-status"
 import { withPaymentIdempotency } from "@app/payments/idempotency"
 
 const LnInvoicePaymentInput = GT.Input({
@@ -99,20 +100,7 @@ const LnInvoicePaymentSendMutation = GT.Field<
           return PayLightningInvoice
         }
 
-        let ibexStatus: PaymentSendStatus = PaymentSendStatus.Pending
-        switch (PayLightningInvoice.transaction?.payment?.status?.id) {
-          case 1:
-            ibexStatus = PaymentSendStatus.Pending
-            break
-          case 2:
-            ibexStatus = PaymentSendStatus.Success
-            break
-          case 3:
-            ibexStatus = PaymentSendStatus.Failure
-            break
-        }
-
-        return ibexStatus
+        return paymentSendStatusOrPending(PayLightningInvoice)
       },
     })
 

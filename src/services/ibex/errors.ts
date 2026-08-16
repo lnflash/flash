@@ -48,6 +48,20 @@ export class InsufficientIbexBalance extends IbexError {
 export class CompletedInvoice extends IbexError {}
 
 /**
+ * IBEX accepted the request but the response carries no recognisable payment
+ * status, so we cannot say whether funds moved. Distinct from the generic
+ * UnexpectedIbexResponse so this condition — money may or may not have left a
+ * user's wallet — is greppable and alertable on its own. Never returned to
+ * clients: the send resolvers record it and report the payment as still in
+ * flight, the only honest reading of "we don't know yet".
+ */
+export class UnconfirmedIbexPayment extends IbexError {
+  constructor(message: string, level: ErrorLevel = ErrorLevel.Critical) {
+    super(new UnexpectedResponseError(message), level)
+  }
+}
+
+/**
  * Best-effort extraction of the IBEX error text from a failed call.
  * Shapes handled:
  *  - ibex-client > 3.2.0 (lnflash/ibex-client#6): ApiError carries the parsed
