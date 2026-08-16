@@ -61,6 +61,13 @@ describe("validateFeeDiscountDoc", () => {
     })
   })
 
+  it("lowercases the username key (platform usernames are case-insensitive)", () => {
+    expect(validateFeeDiscountDoc({ ...ROW, username: "RegginaB" })).toEqual({
+      username: "regginab",
+      discount: { discountPercent: 50, appliesToTopup: true, appliesToCashout: true },
+    })
+  })
+
   it.each([
     ["blank username", { ...ROW, username: "  " }],
     ["missing username", { ...ROW, username: undefined }],
@@ -79,6 +86,24 @@ describe("getFlashFeeDiscountPercent", () => {
     ).resolves.toBe(50)
     await expect(
       getFlashFeeDiscountPercent({ username: "civilizedbarbarian", flow: "cashout" }),
+    ).resolves.toBe(50)
+  })
+
+  it("matches case-insensitively between the whitelisted and registered casing", async () => {
+    // Usernames are case-insensitive platform-wide (findByUsername uses
+    // collation strength 2), so account.username carries registration case
+    // while the operator types an arbitrary casing into ERPNext. A user
+    // registered "RegginaB" whitelisted as "regginab" must still match —
+    // and vice versa.
+    mockGetFeeDiscounts.mockResolvedValue([{ ...ROW, username: "regginab" }])
+    await expect(
+      getFlashFeeDiscountPercent({ username: "RegginaB", flow: "topup" }),
+    ).resolves.toBe(50)
+
+    _resetFeeDiscountsCache()
+    mockGetFeeDiscounts.mockResolvedValue([{ ...ROW, username: "RegginaB" }])
+    await expect(
+      getFlashFeeDiscountPercent({ username: "regginab", flow: "topup" }),
     ).resolves.toBe(50)
   })
 

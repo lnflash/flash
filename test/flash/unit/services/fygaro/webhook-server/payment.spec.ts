@@ -292,6 +292,30 @@ describe("fygaro paymentHandler", () => {
       expect(res.json).toHaveBeenCalledWith({ status: "recorded", attributed: false })
     })
 
+    it("lowercases the payer email before the kratos lookup (checkout keyboards auto-capitalize)", async () => {
+      // Mobile checkout keyboards auto-capitalize ("Regina@Example.com") while
+      // the stored Kratos identifier is lowercase; the lookup must normalize or
+      // attribution silently never fires for those payments.
+      const res = makeRes()
+
+      await paymentHandler(
+        makeReq({
+          ...VALID_BODY,
+          customReference: "",
+          client: { name: "Regina Bailey", email: " Regina@Example.COM " },
+        }),
+        res,
+      )
+
+      expect(mockGetUserIdFromIdentifier).toHaveBeenCalledWith("regina@example.com")
+      expect(mockWriteFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({
+          accountId: EMAIL_ACCOUNT_ID,
+          emailAttributed: true,
+        }),
+      )
+    })
+
     it("never attempts email attribution when customReference resolved an account", async () => {
       const res = makeRes()
 

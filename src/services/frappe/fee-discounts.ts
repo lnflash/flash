@@ -48,11 +48,16 @@ const toBoolean = (value: unknown): boolean =>
 // Validates one raw row into a keyed entry, or undefined for garbage (blank
 // username, non-numeric or out-of-range percent). Malformed rows are dropped
 // individually — one bad row must not take out the rest of the whitelist.
+// The username key is lowercased: platform usernames are case-insensitive
+// (AccountsRepository.findByUsername matches with collation strength 2), so
+// account.username carries registration case and the operator may type any
+// casing into ERPNext — both sides normalize to lowercase to match.
 export const validateFeeDiscountDoc = (
   doc: FeeDiscountDoc,
 ): { username: string; discount: FeeDiscount } | undefined => {
   if (!doc || typeof doc !== "object") return undefined
-  const username = typeof doc.username === "string" ? doc.username.trim() : ""
+  const username =
+    typeof doc.username === "string" ? doc.username.trim().toLowerCase() : ""
   if (!username) return undefined
 
   const discountPercent = toFiniteNumber(doc.discount_percent)
@@ -112,7 +117,8 @@ export const getFlashFeeDiscountPercent = async ({
   if (!username) return 0
   try {
     const discounts = await loadDiscounts()
-    const discount = discounts.get(username.trim())
+    // Lowercased to match the map keys — usernames are case-insensitive.
+    const discount = discounts.get(username.trim().toLowerCase())
     if (!discount) return 0
     const applies = flow === "topup" ? discount.appliesToTopup : discount.appliesToCashout
     return applies ? discount.discountPercent : 0

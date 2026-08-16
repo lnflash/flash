@@ -69,7 +69,11 @@ const centsToDollars = (cents: number): string => (cents / 100).toFixed(2)
 const resolveAccountByPayerEmail = async (
   email: string | undefined,
 ): Promise<Account | undefined> => {
-  const trimmed = email?.trim()
+  // Lowercased before the Kratos lookup: checkout keyboards auto-capitalize
+  // ("Jabari@gmail.com") while the stored login identifier is lowercase, and
+  // listIdentities matches the identifier verbatim — without normalizing here
+  // the attribution silently never fires for those payments.
+  const trimmed = email?.trim().toLowerCase()
   if (!trimmed) return undefined
   try {
     const userId = await IdentityRepository().getUserIdFromIdentifier(
@@ -285,6 +289,7 @@ export const paymentHandler = async (req: Request, res: Response) => {
     // a clean slate — and the gate turns it into the retryable
     // `history-unavailable` stop.
     let priorDayGrossCents: number | undefined
+    let flashFeeDiscountPercent = 0
     if (creditEnabled && settings?.autoCreditEnabled && currency === "USD") {
       const priorSum = await sumFygaroTopupGrossCentsLast24h({
         accountId,
@@ -298,15 +303,11 @@ export const paymentHandler = async (req: Request, res: Response) => {
       } else {
         priorDayGrossCents = priorSum
       }
-    }
 
-    // Flash-fee discount from the operator's Fee Discount whitelist, read
-    // under the same guard as the history read (only when a credit could
-    // actually happen). Fail-open: the reader resolves to 0 on any failure,
-    // so an unreadable whitelist charges the standard fee instead of blocking
-    // the credit.
-    let flashFeeDiscountPercent = 0
-    if (creditEnabled && settings?.autoCreditEnabled && currency === "USD") {
+      // Flash-fee discount from the operator's Fee Discount whitelist, read
+      // under the same could-actually-credit guard as the history read.
+      // Fail-open: the reader resolves to 0 on any failure, so an unreadable
+      // whitelist charges the standard fee instead of blocking the credit.
       flashFeeDiscountPercent = await getFlashFeeDiscountPercent({
         username: account.username,
         flow: "topup",
