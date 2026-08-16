@@ -629,7 +629,7 @@ describe("paymentSendStatusFromIbexLnurlPay", () => {
       )
     })
 
-    it("rejects the vendor's zero-date sentinel and unparseable strings", () => {
+    it("rejects the vendor's zero-date sentinel and unparsable strings", () => {
       // "0001-01-01T00:00:00Z" is this vendor's zero value (it is the
       // creationDateUtc example on the payToLnurl 201 itself) and parses to a
       // large NEGATIVE epoch — it must be rejected exactly like the integer 0.
