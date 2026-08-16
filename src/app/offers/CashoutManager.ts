@@ -11,6 +11,7 @@ import { RepositoryError } from "@domain/errors"
 import { notifyOpsEvent, toDisplayAmount } from "@services/alerts/ops-events"
 import { EmailService } from "@services/email"
 import ErpNext from "@services/frappe/ErpNext"
+import { getFlashFeeDiscountPercent } from "@services/frappe/fee-discounts"
 import { BankAccountQueryError, ExchangeRateQueryError } from "@services/frappe/errors"
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 
@@ -71,7 +72,21 @@ const CashoutManager = {
     const invoice = decodeInvoice(invoiceResp.invoice.bolt11)
     if (invoice instanceof Error) return invoice
 
-    const serviceFee = userPayment.multiplyBips(config.fee)
+    // Flash-fee discount from the operator's Fee Discount whitelist (ERPNext,
+    // cached 60s, fail-open to 0 — an unreadable whitelist charges the
+    // standard fee, never blocks the offer). Expressed to 0.01% precision as
+    // "kept" basis points so the Money math stays in one multiplyBips step.
+    const feeDiscountPercent = await getFlashFeeDiscountPercent({
+      username: account.username,
+      flow: "cashout",
+    })
+    const fullServiceFee = userPayment.multiplyBips(config.fee)
+    const serviceFee =
+      feeDiscountPercent > 0
+        ? fullServiceFee.multiplyBips(
+            BigInt(10000 - Math.round(feeDiscountPercent * 100)) as BasisPoints,
+          )
+        : fullServiceFee
     const usdPayout = userPayment.subtract(serviceFee)
 
     const bankAccounts = await ErpNext.getBankAccountsByCustomer(account.erpParty!)

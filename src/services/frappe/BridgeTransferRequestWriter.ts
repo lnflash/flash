@@ -216,6 +216,7 @@ export const writeFygaroTopupRequest = async ({
   amount,
   currency,
   accountId,
+  emailAttributed,
   createdAt,
   rawPayload,
 }: {
@@ -223,6 +224,11 @@ export const writeFygaroTopupRequest = async ({
   amount: string
   currency: string
   accountId?: AccountId | string
+  // True when accountId was resolved from the checkout payer email rather
+  // than customReference — display-grade attribution the webhook never
+  // credits from. Marked in source_systems_seen so the admin detail view
+  // shows how the row got its account.
+  emailAttributed?: boolean
   createdAt?: string
   rawPayload: unknown
 }): Promise<true | BridgeTransferRequestUpsertError> => {
@@ -239,7 +245,9 @@ export const writeFygaroTopupRequest = async ({
       accountId,
       sourceEventId: transactionId,
       sourceEventType: "fygaro.payment",
-      sourceSystemsSeen: ["fygaro_webhook"],
+      sourceSystemsSeen: emailAttributed
+        ? ["fygaro_webhook", "email_attribution"]
+        : ["fygaro_webhook"],
       firstSeenAt: createdAt,
       rawPayload,
     }),

@@ -14,6 +14,7 @@ import {
   CashoutDraftError,
   CashoutSubmitError,
   ExchangeRateQueryError,
+  FeeDiscountQueryError,
   FygaroSettingsQueryError,
   FygaroTopupHistoryQueryError,
   JournalEntryDeleteError,
@@ -104,6 +105,18 @@ export type FygaroSettingsDoc = {
   l1_daily_limit?: number | string
   l2_daily_limit?: number | string
   l3_daily_limit?: number | string
+}
+
+// Raw "Fee Discount" doctype row as ERPNext returns it (one row per username,
+// operator-managed at /app/fee-discount). Numeric/check fields may arrive as
+// numbers or strings; the caller (fee-discounts.ts) coerces and validates
+// before use.
+export type FeeDiscountDoc = {
+  username?: string
+  discount_percent?: number | string
+  applies_to_topup?: number | boolean | string
+  applies_to_cashout?: number | boolean | string
+  active?: number | boolean | string
 }
 
 export class ErpNext {
@@ -409,6 +422,34 @@ export class ErpNext {
         attributes: { "erpnext.exception": responseData?.exception },
       })
       return new FygaroSettingsQueryError(err)
+    }
+  }
+
+  // Reads every ACTIVE "Fee Discount" row (operator-managed whitelist of
+  // usernames whose Flash fee is discounted on Fygaro top-ups and/or bank
+  // cashouts). The consumers read this through a 60s cache and fail open to a
+  // 0% discount, so an ERPNext blip can never block a credit or an offer —
+  // it just charges the standard fee.
+  async getFeeDiscounts(): Promise<FeeDiscountDoc[] | FeeDiscountQueryError> {
+    try {
+      const fields = `["username","discount_percent","applies_to_topup","applies_to_cashout","active"]`
+      const filters = `[["active","=",1]]`
+      const resp = await axios.get(
+        `${this.url}/api/resource/${encodeURIComponent("Fee Discount")}?filters=${filters}&fields=${fields}&limit_page_length=0`,
+        { headers: this.headers },
+      )
+      const data = resp.data?.data
+      if (!Array.isArray(data))
+        return new FeeDiscountQueryError("No data in Fee Discount response")
+      return data as FeeDiscountDoc[]
+    } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error({ err, responseData }, "Error querying Fee Discount from ERPNext")
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
+      return new FeeDiscountQueryError(err)
     }
   }
 

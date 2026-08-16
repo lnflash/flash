@@ -27,7 +27,19 @@ jest.mock("@services/lock", () => ({
 jest.mock("@services/mongoose", () => ({
   AccountsRepository: () => ({
     findByUsername: (...args: unknown[]) => mockFindByUsername(...args),
+    findByUserId: (...args: unknown[]) => mockFindByUserId(...args),
   }),
+}))
+
+jest.mock("@services/kratos", () => ({
+  IdentityRepository: () => ({
+    getUserIdFromIdentifier: (...args: unknown[]) => mockGetUserIdFromIdentifier(...args),
+  }),
+}))
+
+jest.mock("@services/frappe/fee-discounts", () => ({
+  getFlashFeeDiscountPercent: (...args: unknown[]) =>
+    mockGetFlashFeeDiscountPercent(...args),
 }))
 
 jest.mock("@services/frappe/BridgeTransferRequestWriter", () => ({
@@ -75,6 +87,9 @@ jest.mock("@services/fygaro/webhook-server/fygaro-settings", () => ({
 const mockLockIdempotencyKey = jest.fn()
 const mockLockPaymentIdempotencyKey = jest.fn()
 const mockFindByUsername = jest.fn()
+const mockFindByUserId = jest.fn()
+const mockGetUserIdFromIdentifier = jest.fn()
+const mockGetFlashFeeDiscountPercent = jest.fn()
 const mockWriteFygaroTopup = jest.fn()
 const mockCompleteFygaroTopup = jest.fn()
 const mockIsFygaroTopupCompleted = jest.fn()
@@ -137,7 +152,16 @@ beforeEach(() => {
     async (_key: unknown, fn: () => Promise<unknown>) => fn(),
   )
   mockIsFygaroTopupCompleted.mockResolvedValue(false)
-  mockFindByUsername.mockResolvedValue({ id: ACCOUNT_ID, level: 1 })
+  mockFindByUsername.mockResolvedValue({
+    id: ACCOUNT_ID,
+    level: 1,
+    username: VALID_BODY.customReference,
+  })
+  // Email fallback attribution: default to "no identity for this email".
+  mockGetUserIdFromIdentifier.mockResolvedValue(new Error("IdentifierNotFoundError"))
+  mockFindByUserId.mockResolvedValue(new Error("CouldNotFindError"))
+  // Fee Discount whitelist: default to nobody discounted.
+  mockGetFlashFeeDiscountPercent.mockResolvedValue(0)
   mockWriteFygaroTopup.mockResolvedValue(true)
   mockSumFygaroLast24h.mockResolvedValue(0)
   mockCompleteFygaroTopup.mockResolvedValue(true)
@@ -221,6 +245,103 @@ describe("fygaro paymentHandler", () => {
     expect(res.json).toHaveBeenCalledWith({ status: "recorded", attributed: false })
   })
 
+  describe("payer-email fallback attribution (display-only)", () => {
+    const EMAIL_ACCOUNT_ID = "account-email-match" as AccountId
+    const KRATOS_USER_ID = "kratos-user-1"
+
+    beforeEach(() => {
+      mockGetUserIdFromIdentifier.mockResolvedValue(KRATOS_USER_ID)
+      mockFindByUserId.mockResolvedValue({
+        id: EMAIL_ACCOUNT_ID,
+        level: 1,
+        username: "reginab",
+      })
+    })
+
+    it("stamps the email-matched account on the audit row and names it in the alert, without crediting", async () => {
+      mockFygaroConfig.credit = { enabled: true }
+      const res = makeRes()
+
+      await paymentHandler(makeReq({ ...VALID_BODY, customReference: "" }), res)
+
+      expect(mockGetUserIdFromIdentifier).toHaveBeenCalledWith(VALID_BODY.client.email)
+      expect(mockFindByUserId).toHaveBeenCalledWith(KRATOS_USER_ID)
+      expect(mockWriteFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({
+          accountId: EMAIL_ACCOUNT_ID,
+          emailAttributed: true,
+        }),
+      )
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({
+          detail: expect.stringContaining("@reginab"),
+          context: expect.objectContaining({ email_matched_username: "reginab" }),
+        }),
+      )
+      expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: "fygaro-unattributed",
+          accountId: EMAIL_ACCOUNT_ID,
+          meta: expect.objectContaining({ emailMatchedUsername: "reginab" }),
+        }),
+      )
+      // Email attribution is display-grade: the credit path must stay cold
+      // even with the deploy gate on.
+      expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+      expect(mockGetFygaroSettings).not.toHaveBeenCalled()
+      expect(res.json).toHaveBeenCalledWith({ status: "recorded", attributed: false })
+    })
+
+    it("never attempts email attribution when customReference resolved an account", async () => {
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockGetUserIdFromIdentifier).not.toHaveBeenCalled()
+      expect(mockWriteFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({ accountId: ACCOUNT_ID, emailAttributed: false }),
+      )
+    })
+
+    it("leaves the row unattributed when the email matches no identity", async () => {
+      mockGetUserIdFromIdentifier.mockResolvedValue(new Error("IdentifierNotFoundError"))
+      const res = makeRes()
+
+      await paymentHandler(makeReq({ ...VALID_BODY, customReference: "" }), res)
+
+      expect(mockWriteFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({ accountId: undefined, emailAttributed: false }),
+      )
+      expect(res.json).toHaveBeenCalledWith({ status: "recorded", attributed: false })
+    })
+
+    it("records unattributed when the kratos lookup throws (best-effort, never breaks the webhook)", async () => {
+      mockGetUserIdFromIdentifier.mockRejectedValue(new Error("kratos down"))
+      const res = makeRes()
+
+      await paymentHandler(makeReq({ ...VALID_BODY, customReference: "" }), res)
+
+      expect(mockWriteFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({ accountId: undefined }),
+      )
+      expect(res.json).toHaveBeenCalledWith({ status: "recorded", attributed: false })
+    })
+
+    it("skips the lookup entirely for a payload without a client email", async () => {
+      const res = makeRes()
+
+      await paymentHandler(
+        makeReq({ ...VALID_BODY, customReference: "", client: { name: "X" } }),
+        res,
+      )
+
+      expect(mockGetUserIdFromIdentifier).not.toHaveBeenCalled()
+      expect(mockWriteFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({ accountId: undefined }),
+      )
+    })
+  })
+
   it("returns 500 when the ERPNext audit write fails so Fygaro retries", async () => {
     mockWriteFygaroTopup.mockResolvedValue(new Error("erpnext down"))
     const res = makeRes()
@@ -287,6 +408,68 @@ describe("fygaro paymentHandler", () => {
         expect.objectContaining({ phase: "succeeded", status: "success" }),
       )
       expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
+    })
+
+    it("consults the Fee Discount whitelist for the account's username in the topup flow", async () => {
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockGetFlashFeeDiscountPercent).toHaveBeenCalledWith({
+        username: VALID_BODY.customReference,
+        flow: "topup",
+      })
+    })
+
+    it("credits with a discounted flash fee and promotes the discounted breakdown", async () => {
+      mockGetFlashFeeDiscountPercent.mockResolvedValue(50)
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      // $10.00 gross -> $0.79 processor + $0.10 flash (50% off $0.20) -> $9.11 net
+      expect(mockCreditFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({ amountCents: 911 }),
+      )
+      expect(mockCompleteFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({
+          processorFee: "0.79",
+          flashFee: "0.10",
+          finalAmount: "9.11",
+        }),
+      )
+      expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
+    })
+
+    it("waives the flash fee entirely at a 100% discount (processor fee still applies)", async () => {
+      mockGetFlashFeeDiscountPercent.mockResolvedValue(100)
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockCreditFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({ amountCents: 921 }),
+      )
+      expect(mockCompleteFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({
+          processorFee: "0.79",
+          flashFee: "0.00",
+          finalAmount: "9.21",
+        }),
+      )
+    })
+
+    it("does not consult the whitelist when auto-credit is disabled in settings", async () => {
+      mockGetFygaroSettings.mockResolvedValue({
+        ...DEFAULT_SETTINGS,
+        autoCreditEnabled: false,
+      })
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockGetFlashFeeDiscountPercent).not.toHaveBeenCalled()
+      expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
     })
 
     it("records without crediting and fires the generic critical when the credit fails", async () => {

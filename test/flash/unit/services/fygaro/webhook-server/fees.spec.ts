@@ -263,3 +263,102 @@ describe("evaluateCreditGate", () => {
     expect(gate).toEqual({ credit: false, reason: "settings-unavailable" })
   })
 })
+
+describe("flash-fee discount", () => {
+  // $10.00 gross with the canonical schedule: processor 79¢, full flash 20¢.
+  it.each([
+    // discount% -> expected flash¢, net¢
+    [0, 20, 901],
+    [25, 15, 906], // round(20 * 0.75) = 15
+    [50, 10, 911],
+    [100, 0, 921], // full waiver: net = gross - processor only
+  ])("discounts the flash fee by %i%%", (discount, flash, net) => {
+    const fees = computeFygaroFees({
+      grossCents: 1000,
+      settings: settings(),
+      flashFeeDiscountPercent: discount,
+    })
+    expect(fees.processorFeeCents).toBe(79) // never discounted
+    expect(fees.flashFeeCents).toBe(flash)
+    expect(fees.netCents).toBe(net)
+  })
+
+  it("discounts the fixed flash margin component too", () => {
+    // 2% + $0.50 fixed on $10.00 = 20¢ + 50¢ = 70¢ full flash fee; 50% -> 35¢.
+    const fees = computeFygaroFees({
+      grossCents: 1000,
+      settings: settings({ flashMarginFixed: 0.5 }),
+      flashFeeDiscountPercent: 50,
+    })
+    expect(fees.flashFeeCents).toBe(35)
+  })
+
+  it("supports fractional discount percentages", () => {
+    // $500.00 gross -> full flash fee 1000¢; 12.5% off -> round(875) = 875¢.
+    const fees = computeFygaroFees({
+      grossCents: 50000,
+      settings: settings(),
+      flashFeeDiscountPercent: 12.5,
+    })
+    expect(fees.flashFeeCents).toBe(875)
+  })
+
+  it("clamps out-of-range discounts so garbage can never inflate the fee", () => {
+    const negative = computeFygaroFees({
+      grossCents: 1000,
+      settings: settings(),
+      flashFeeDiscountPercent: -50,
+    })
+    expect(negative.flashFeeCents).toBe(20) // treated as 0%
+    const over = computeFygaroFees({
+      grossCents: 1000,
+      settings: settings(),
+      flashFeeDiscountPercent: 250,
+    })
+    expect(over.flashFeeCents).toBe(0) // treated as 100%
+  })
+
+  it("flows through evaluateCreditGate into the credited fees", () => {
+    const base = {
+      creditEnabled: true,
+      currency: "USD",
+      grossCents: 1000,
+      level: 1,
+      priorDayGrossCents: 0,
+    }
+    const gate = evaluateCreditGate({
+      ...base,
+      settings: settings(),
+      flashFeeDiscountPercent: 100,
+    })
+    expect(gate).toMatchObject({
+      credit: true,
+      fees: { netCents: 921, processorFeeCents: 79, flashFeeCents: 0 },
+    })
+  })
+
+  it("can rescue a non-positive-net payment (fee waiver makes the net positive)", () => {
+    // $0.60 gross: processor round(60*2.99/100)+49 = 51¢, full flash 1¢ ->
+    // net 8¢ ... still positive; use flashMarginFixed to force it negative.
+    // 2% + $0.10 fixed on $0.60 = 1¢ + 10¢ = 11¢ flash; net 60-51-11 = -2¢.
+    const base = {
+      creditEnabled: true,
+      currency: "USD",
+      grossCents: 60,
+      level: 1,
+      priorDayGrossCents: 0,
+    }
+    const withFee = evaluateCreditGate({
+      ...base,
+      settings: settings({ flashMarginFixed: 0.1, minimumTopup: 0.1 }),
+    })
+    expect(withFee).toEqual({ credit: false, reason: "non-positive-net" })
+
+    const waived = evaluateCreditGate({
+      ...base,
+      settings: settings({ flashMarginFixed: 0.1, minimumTopup: 0.1 }),
+      flashFeeDiscountPercent: 100,
+    })
+    expect(waived).toMatchObject({ credit: true, fees: { netCents: 9 } })
+  })
+})
