@@ -1,6 +1,10 @@
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { ErrorLevel } from "@domain/shared"
-import { recordExceptionInCurrentSpan } from "@services/tracing"
+import {
+  addAttributesToCurrentSpan,
+  addEventToCurrentSpan,
+  recordExceptionInCurrentSpan,
+} from "@services/tracing"
 
 import { UnconfirmedIbexPayment } from "./errors"
 
@@ -225,17 +229,23 @@ const identityAttributes = (
  * Returns `UnconfirmedIbexPayment` when no field can settle the question, so
  * callers can record the anomaly instead of silently inventing an outcome.
  *
- * SEVERITY: Warn, not Critical — and deliberately the same level the LNURL
- * reader uses, because the evidence behind both is the same: no real
- * payInvoiceV2 200 has been captured on TEST either. The committed fixture
- * (test/flash/mocks/ibex/pay-invoice.ts) is the vendor's openapi example copied
- * verbatim, not an observation, and the pre-PR intraledger code read the
- * TOP-LEVEL `status` field alone — with a `{ status: 2 }` test fixture modelling
- * exactly that — which is direct evidence that at least one rail may populate
- * only the field this reader treats as uncorroborated. Paging on every
- * flash-to-flash send until a capture proves otherwise is not a severity, it is
- * an outage. Capture one 200 on TEST, commit it as a fixture, confirm the
- * payment-level fields are populated, then raise this to Critical.
+ * SEVERITY: Warn — the class default (see UnconfirmedIbexPayment), passed
+ * explicitly here only so the argument sits next to the reasoning, and
+ * deliberately the same level the LNURL reader uses, because the evidence
+ * behind both is the same: no real payInvoiceV2 200 has been captured on TEST
+ * either. The committed fixture (test/flash/mocks/ibex/pay-invoice.ts) is the
+ * vendor's openapi example copied verbatim, not an observation, and the pre-PR
+ * intraledger code read the TOP-LEVEL `status` field alone — with a
+ * `{ status: 2 }` test fixture modelling exactly that — which is direct
+ * evidence that at least one rail may populate only the field this reader
+ * treats as uncorroborated. Paging on every flash-to-flash send until a capture
+ * proves otherwise is not a severity, it is an outage. Capture one 200 on TEST,
+ * commit it as a fixture, confirm the payment-level fields are populated, then
+ * raise this to Critical.
+ *
+ * VOLUME is a separate axis from severity and is decided by the third
+ * constructor argument, not by the level — see `recordUnconfirmed` below for
+ * why `level` alone cannot keep a span green.
  */
 export const paymentSendStatusFromIbex = (
   response: IbexPaymentStatusResponse | null | undefined,
@@ -256,14 +266,23 @@ export const paymentSendStatusFromIbex = (
     `IBEX reported ${outcome} only in the top-level status field, with no payment-level corroboration (candidates: ${JSON.stringify(
       candidates,
     )})`
+  // The third argument is the volume dial, not a severity: it says IBEX made a
+  // terminal claim this reader refused to honour, which is a genuine field-level
+  // disagreement and worth a red span. A response that claimed nothing at all is
+  // an ordinary in-flight payment and must not be. See `recordUnconfirmed`.
+  if (topLevel === PaymentSendStatus.Success)
+    return new UnconfirmedIbexPayment(
+      uncorroborated("SUCCEEDED"),
+      ErrorLevel.Warn,
+      "SUCCEEDED",
+    )
+  if (topLevel === PaymentSendStatus.Failure)
+    return new UnconfirmedIbexPayment(uncorroborated("FAILED"), ErrorLevel.Warn, "FAILED")
+
   return new UnconfirmedIbexPayment(
-    topLevel === PaymentSendStatus.Success
-      ? uncorroborated("SUCCEEDED")
-      : topLevel === PaymentSendStatus.Failure
-        ? uncorroborated("FAILED")
-        : `No recognised payment status in IBEX response (candidates: ${JSON.stringify(
-            candidates,
-          )})`,
+    `No recognised payment status in IBEX response (candidates: ${JSON.stringify(
+      candidates,
+    )})`,
     ErrorLevel.Warn,
   )
 }
@@ -281,20 +300,37 @@ export const paymentSendStatusFromIbex = (
  * ("2022-11-15T20:30:41.960887Z") floored to the second, while every
  * payment-level field in the SAME example says the payment has not settled:
  * `statusId: 0`, `payment.settleDateUtc: null`, `paidMsat: 0`,
- * `payment.hash: null`. `Ibex.payToLnurl` also registers an async settlement
- * webhook (see client.ts), so a 201 is an acceptance, not a settlement.
- * Reading that field would report EVERY LNURL send as `success` regardless of
- * outcome — the "conversion successful while no funds moved" bug this module
- * exists to close, reintroduced on the one rail whose real response has never
- * been observed, and with the Warn-level record suppressed on that path by
- * design. The example is committed at test/flash/mocks/ibex/pay-to-lnurl.ts
- * and pinned by a test.
+ * `payment.hash: null`. On the example's own evidence, then, a 201 is an
+ * acceptance rather than a settlement. Reading that field would report EVERY
+ * LNURL send as `success` regardless of outcome — the "conversion successful
+ * while no funds moved" bug this module exists to close, reintroduced on the
+ * one rail whose real response has never been observed, and with the Warn-level
+ * record suppressed on that path by design. The example is committed at
+ * test/flash/mocks/ibex/pay-to-lnurl.ts and pinned by a test.
  *
  * The payment-level date survives because the same example corroborates it in
  * the other direction: it is `null` on a payment that has not settled, which is
  * what a settlement marker looks like. `hasSettleDate` accepts both the integer
  * epoch and the ISO string every payment-level date on this vendor is
  * serialised as, since that field has no declared type at all.
+ *
+ * GAP — NOTHING RESOLVES A PENDING LNURL SEND SERVER-SIDE. An earlier revision
+ * of this block justified the acceptance reading with "payToLnurl also
+ * registers an async settlement webhook". That was wrong and is corrected here:
+ * `Ibex.payToLnurl` does pass a `webhookUrl` (client.ts), but the value it
+ * passes is `ibexWebhookEndpoints.onPay.lnurl`, which resolves to
+ * `<uri>/pay/lnurl/:username` — the express ROUTE TEMPLATE from
+ * webhook-config.ts, `:username` never substituted. The only route this repo
+ * mounts at that path is the public **GET** LNURL-pay callback for INBOUND
+ * payments (webhook-server/routes/on-pay.ts); there is no POST handler for it,
+ * and the two POST webhook routes that do exist (`/pay/invoice`, `/pay/onchain`)
+ * are `resp.status(200).end()` stubs. So an LNURL send this reader reports as
+ * `pending` stays pending: no webhook, no poller, no reconciliation job moves
+ * it, and `withPaymentIdempotency` replays that same `pending` for 24h under
+ * the same key. Whoever wires a real POST handler (at a substituted path) or a
+ * reconciler must update this block and
+ * test/flash/unit/services/ibex/webhook-server/on-pay-lnurl-gap.spec.ts, which
+ * pins the absence.
  *
  * OPEN: no real payToLnurl response has been captured on TEST yet, so the
  * settle-date rule is still schema-derived rather than observed and the
@@ -321,10 +357,68 @@ export const paymentSendStatusFromIbexLnurlPay = (
   )
 }
 
+/** Span attribute + event name for the quiet path. Exported for the tests. */
+export const UNCONFIRMED_SPAN_EVENT = "ibex.payment.unconfirmed"
+
+/**
+ * Record an unreadable response on the current span — at one of two volumes.
+ *
+ * `ErrorLevel` does NOT control volume. `recordExceptionInCurrentSpan` ends in
+ * `span.setStatus({ code: SpanStatusCode.ERROR })` UNCONDITIONALLY
+ * (services/tracing.ts `recordException`); the level only decides which
+ * `error.*` attributes win the ranking in `updateErrorForSpan`. So a Warn-level
+ * `recordException` still paints the span red, and any dashboard or trigger
+ * keyed on span status rather than on the `error.level` attribute fires on it.
+ *
+ * That matters because one of the two unreadable cases is expected to be a
+ * rail's ORDINARY shape, not an incident:
+ *
+ *  - **Quiet** — the response reported no outcome anywhere (`uncorroboratedOutcome`
+ *    unset). This is exactly the vendor's documented payToLnurl 201: an
+ *    acceptance with `statusId: 0` and a null payment-level settle date, on a
+ *    payment that is genuinely still in flight. `pending` is the correct,
+ *    unremarkable answer, and marking 100% of that rail's spans ERROR would
+ *    bury the real ones. Recorded as span attributes plus a span event, which
+ *    stay fully queryable (`name = ibex.payment.unconfirmed`) without touching
+ *    span status.
+ *  - **Loud** — IBEX claimed SUCCEEDED or FAILED in the top-level `status` and
+ *    the corroboration rules refused it (`uncorroboratedOutcome` set). Here the
+ *    payload disagrees with itself and the `pending` we report may well be
+ *    wrong in a direction that moved money, so the exception — and the ERROR
+ *    span status that comes with it — is earned. Only the payInvoiceV2 reader
+ *    can produce this; the payToLnurl dialect has no top-level `status` field.
+ *
+ * If alerting is later confirmed to key on the `error.level` attribute rather
+ * than span status, collapsing this back to a single `recordException` call is
+ * a safe simplification. Until then this split is what keeps the LN/LNURL rails
+ * from going permanently red on their happy path.
+ */
 const recordUnconfirmed = (
   error: UnconfirmedIbexPayment,
   response: IbexPaymentStatusResponse | IbexLnurlPayStatusResponse | null | undefined,
 ): void => {
+  // Without these an operator looking at "money may or may not have moved" has
+  // to trace-hop to the child ibex-client span before they can even name the
+  // payment. They go on the span on BOTH paths.
+  const attributes = identityAttributes(response)
+
+  if (error.uncorroboratedOutcome === undefined) {
+    addAttributesToCurrentSpan({
+      ...attributes,
+      "ibex.payment.unconfirmed": true,
+      // Namespaced deliberately: writing the bare `error.level` attribute here
+      // would bypass updateErrorForSpan's ranking and could DOWNGRADE a real
+      // error already recorded on the same span.
+      "ibex.payment.unconfirmed.level": error.level,
+      "ibex.payment.unconfirmed.reason": error.message,
+    })
+    addEventToCurrentSpan(UNCONFIRMED_SPAN_EVENT, {
+      "ibex.payment.unconfirmed.level": error.level,
+      "ibex.payment.unconfirmed.reason": error.message,
+    })
+    return
+  }
+
   recordExceptionInCurrentSpan({
     error,
     // The error carries its own severity. Both readers currently raise Warn —
@@ -334,10 +428,10 @@ const recordUnconfirmed = (
     // would make that constructor argument silently dead.
     level: error.level,
     fallbackMsg: "IBEX payment response carried no recognised status",
-    // Without these an operator woken by "money may or may not have moved" has
-    // to trace-hop to the child ibex-client span before they can even name the
-    // payment.
-    attributes: identityAttributes(response),
+    attributes: {
+      ...attributes,
+      "ibex.payment.uncorroborated_outcome": error.uncorroboratedOutcome,
+    },
   })
 }
 
@@ -372,7 +466,15 @@ export const paymentSendStatusOrPending = (
   return status
 }
 
-/** The `payToLnurl` counterpart of `paymentSendStatusOrPending`. */
+/**
+ * The `payToLnurl` counterpart of `paymentSendStatusOrPending`.
+ *
+ * NOTE the asymmetry: a `pending` from this reader is terminal in practice.
+ * Nothing in this repo resolves it — payToLnurl is handed a webhook URL that
+ * has no POST handler mounted behind it — so the value here is replayed by
+ * `withPaymentIdempotency` for 24h and never transitions. See the GAP paragraph
+ * on `paymentSendStatusFromIbexLnurlPay`.
+ */
 export const lnurlPaymentSendStatusOrPending = (
   response: IbexLnurlPayStatusResponse | null | undefined,
 ): PaymentSendStatus => {

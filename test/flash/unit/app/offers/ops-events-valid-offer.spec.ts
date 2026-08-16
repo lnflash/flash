@@ -16,6 +16,12 @@ jest.mock("@services/logger", () => ({
   baseLogger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }))
 
+jest.mock("@services/tracing", () => ({
+  addAttributesToCurrentSpan: jest.fn(),
+  addEventToCurrentSpan: jest.fn(),
+  recordExceptionInCurrentSpan: jest.fn(),
+}))
+
 jest.mock("@services/mongoose", () => ({
   AccountsRepository: jest.fn(() => ({
     findById: (...args: unknown[]) => mockFindAccountById(...args),
@@ -44,7 +50,7 @@ jest.mock("@app/offers/Validator", () => ({
 
 import ValidOffer, { InitiatedCashout } from "@app/offers/ValidOffer"
 import { CashoutDraftError, CashoutSubmitError } from "@services/frappe/errors"
-import { IbexError } from "@services/ibex/errors"
+import { FailedIbexPayment, IbexError } from "@services/ibex/errors"
 import { USDAmount } from "@domain/shared"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
 
@@ -82,7 +88,12 @@ describe("ops events — ValidOffer.execute step failures", () => {
     mockFindWalletById.mockResolvedValue({ id: walletId, accountId })
     mockFindAccountById.mockResolvedValue({ id: accountId })
     mockDraftCashout.mockResolvedValue(cashoutId)
-    mockPayInvoice.mockResolvedValue({ status: 2 })
+    // A payment-level SUCCEEDED — what a settled payInvoiceV2 200 looks like.
+    // (A lone top-level `{ status: 2 }` is deliberately NOT settlement; see
+    // @services/ibex/payment-status.)
+    mockPayInvoice.mockResolvedValue({
+      transaction: { payment: { status: { id: 2 } } },
+    })
     mockSubmitCashout.mockResolvedValue(true)
   })
 
@@ -133,6 +144,79 @@ describe("ops events — ValidOffer.execute step failures", () => {
         status: "failed",
       }),
     )
+  })
+
+  // The headline defect of lnflash/flash#483, on the one rail it had not
+  // reached: this path only ever checked `resp instanceof IbexError`, so a 200
+  // carrying a FAILED payment read as paid and Flash submitted a cashout in
+  // ERPNext — on the fiat-payout rail — with no lightning payment behind it.
+  // Unlike cash-wallet-cutover's send path there is no
+  // balanceVerifier.verifyBalanceMove backstop here, so the status field is the
+  // only check there is.
+  describe("IBEX reports the payment as FAILED in a 200 body", () => {
+    const failedResponses = [
+      { transaction: { payment: { status: { id: 3 } } } },
+      { transaction: { payment: { statusId: 3 } } },
+      { status: 3, failureReason: "NO_ROUTE", transaction: { payment: { statusId: 0 } } },
+    ]
+
+    it("never submits the cashout", async () => {
+      for (const resp of failedResponses) {
+        jest.clearAllMocks()
+        mockPayInvoice.mockResolvedValue(resp)
+        const offer = await makeOffer()
+
+        const result = await offer.execute()
+
+        expect(result).toBeInstanceOf(FailedIbexPayment)
+        expect(mockSubmitCashout).not.toHaveBeenCalled()
+      }
+    })
+
+    it("reports the payInvoice step to ops", async () => {
+      mockPayInvoice.mockResolvedValue(failedResponses[0])
+      const offer = await makeOffer()
+
+      await offer.execute()
+
+      expect(notifyOpsEvent).toHaveBeenCalledTimes(1)
+      expect(notifyOpsEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          step: "payInvoice",
+          error: "FailedIbexPayment",
+          status: "failed",
+        }),
+      )
+    })
+  })
+
+  describe("IBEX has not reported an outcome yet", () => {
+    // Pending — including the unreadable-response case, which
+    // paymentSendStatusOrPending reports as pending so a same-key retry cannot
+    // pay twice — is submitted deliberately. The cashout is an async, reconciled
+    // flow (InitiatedCashout.status is Pending by construction); holding the
+    // ERPNext submit on a payment that probably did settle would strand the
+    // user's funds in a draft nobody is watching. Only a definitive FAILED
+    // stops the submit.
+    it("still submits the cashout on an in-flight payment", async () => {
+      mockPayInvoice.mockResolvedValue({ transaction: { payment: { statusId: 1 } } })
+      const offer = await makeOffer()
+
+      const result = await offer.execute()
+
+      expect(result).toBeInstanceOf(InitiatedCashout)
+      expect(mockSubmitCashout).toHaveBeenCalledTimes(1)
+    })
+
+    it("still submits the cashout on an unreadable response", async () => {
+      mockPayInvoice.mockResolvedValue({ transaction: { payment: {} } })
+      const offer = await makeOffer()
+
+      const result = await offer.execute()
+
+      expect(result).toBeInstanceOf(InitiatedCashout)
+      expect(mockSubmitCashout).toHaveBeenCalledTimes(1)
+    })
   })
 
   it("reports the submitCashout step when submit fails after the retry", async () => {

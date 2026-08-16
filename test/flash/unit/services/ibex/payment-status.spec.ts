@@ -1,4 +1,6 @@
 jest.mock("@services/tracing", () => ({
+  addAttributesToCurrentSpan: jest.fn(),
+  addEventToCurrentSpan: jest.fn(),
   recordExceptionInCurrentSpan: jest.fn(),
 }))
 
@@ -6,12 +8,17 @@ import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { ErrorLevel } from "@domain/shared"
 import { UnconfirmedIbexPayment } from "@services/ibex/errors"
 import {
+  UNCONFIRMED_SPAN_EVENT,
   lnurlPaymentSendStatusOrPending,
   paymentSendStatusFromIbex,
   paymentSendStatusFromIbexLnurlPay,
   paymentSendStatusOrPending,
 } from "@services/ibex/payment-status"
-import { recordExceptionInCurrentSpan } from "@services/tracing"
+import {
+  addAttributesToCurrentSpan,
+  addEventToCurrentSpan,
+  recordExceptionInCurrentSpan,
+} from "@services/tracing"
 
 // The vendor's own documented response bodies, committed verbatim. Neither is a
 // live capture — that is the point: these are the only evidence either reader
@@ -21,10 +28,46 @@ import * as payInvoiceMock from "test/flash/mocks/ibex/pay-invoice"
 import * as payToLnurlMock from "test/flash/mocks/ibex/pay-to-lnurl"
 
 const recordMock = recordExceptionInCurrentSpan as jest.Mock
+const attrMock = addAttributesToCurrentSpan as jest.Mock
+const eventMock = addEventToCurrentSpan as jest.Mock
 
 const withNestedStatus = (id: number) => ({
   transaction: { payment: { status: { id } } },
 })
+
+/**
+ * An unreadable response is recorded on exactly one of two channels, never
+ * both and never neither — see recordUnconfirmed. `recordExceptionInCurrentSpan`
+ * ends in an unconditional `span.setStatus({ code: ERROR })`, so the channel,
+ * not the ErrorLevel, is what decides whether the span goes red. This helper
+ * asserts the "exactly one" invariant and hands back which channel fired so the
+ * tests below can pin the choice per response shape.
+ */
+const soleRecord = () => {
+  expect(recordMock.mock.calls.length + eventMock.mock.calls.length).toBe(1)
+
+  if (recordMock.mock.calls.length === 1) {
+    const [payload] = recordMock.mock.calls[0]
+    return {
+      loud: true as const,
+      level: payload.level as ErrorLevel,
+      error: payload.error as UnconfirmedIbexPayment,
+      reason: (payload.error as UnconfirmedIbexPayment).message,
+      attributes: payload.attributes as Record<string, unknown>,
+    }
+  }
+
+  const [name, eventAttributes] = eventMock.mock.calls[0]
+  expect(name).toBe(UNCONFIRMED_SPAN_EVENT)
+  const spanAttributes = Object.assign({}, ...attrMock.mock.calls.map(([a]) => a))
+  return {
+    loud: false as const,
+    level: eventAttributes["ibex.payment.unconfirmed.level"] as ErrorLevel,
+    error: undefined,
+    reason: eventAttributes["ibex.payment.unconfirmed.reason"] as string,
+    attributes: spanAttributes as Record<string, unknown>,
+  }
+}
 
 // Responses payInvoiceV2 callers cannot read an outcome from. Note `{ status: 2 }`
 // and `{ status: 3 }`: a lone top-level SUCCEEDED is not settlement and a lone
@@ -300,36 +343,113 @@ describe("paymentSendStatusOrPending", () => {
   })
 
   it("records the anomaly exactly once, at the error's own level", () => {
+    // soleRecord() asserts the "exactly once, on exactly one channel" half.
+    // Collect the levels and check them after the loop so every assertion is
+    // unconditional.
+    const recordedLevels: ErrorLevel[] = []
+    const errorOwnLevels: ErrorLevel[] = []
+
     for (const response of unreadableResponses) {
-      recordMock.mockClear()
+      jest.clearAllMocks()
 
       paymentSendStatusOrPending(response)
 
-      expect(recordMock).toHaveBeenCalledTimes(1)
-      const [{ error, level }] = recordMock.mock.calls[0]
-      expect(error).toBeInstanceOf(UnconfirmedIbexPayment)
-      expect(level).toBe(ErrorLevel.Warn)
-      expect(level).toBe((error as UnconfirmedIbexPayment).level)
+      const recorded = soleRecord()
+      recordedLevels.push(recorded.level)
+      // Present only on the loud channel; the level must be the error's own
+      // rather than a hardcoded one, so that raising a reader's severity needs
+      // no change in recordUnconfirmed.
+      if (recorded.error) errorOwnLevels.push(recorded.error.level)
     }
+
+    expect(recordedLevels).toEqual(unreadableResponses.map(() => ErrorLevel.Warn))
+    expect(errorOwnLevels.length).toBeGreaterThan(0)
+    expect(errorOwnLevels).toEqual(errorOwnLevels.map(() => ErrorLevel.Warn))
+  })
+
+  describe("span volume — which channel each unreadable shape earns", () => {
+    // ErrorLevel does NOT decide this: recordExceptionInCurrentSpan ends in an
+    // unconditional span.setStatus({ code: ERROR }) (services/tracing.ts), so a
+    // Warn-level recordException still paints the span red and any trigger keyed
+    // on span status rather than the error.level attribute fires on it. Marking
+    // 100% of a rail's spans ERROR because its ordinary acceptance shape is
+    // unreadable would bury the anomalies that matter.
+    it("stays quiet — attributes + span event, no exception — when IBEX claimed nothing", () => {
+      for (const response of [
+        {},
+        { status: 0 },
+        { status: 7 },
+        { transaction: { payment: {} } },
+        { transaction: { payment: { statusId: 0, status: { id: 0 } } } },
+        null,
+        undefined,
+      ]) {
+        jest.clearAllMocks()
+
+        expect(paymentSendStatusOrPending(response)).toBe(PaymentSendStatus.Pending)
+
+        const recorded = soleRecord()
+        expect(recorded.loud).toBe(false)
+        expect(recorded.attributes["ibex.payment.unconfirmed"]).toBe(true)
+        expect(recordMock).not.toHaveBeenCalled()
+      }
+    })
+
+    it("goes loud — a recorded exception — when IBEX claimed a terminal outcome we refused", () => {
+      // Here the payload disagrees with itself: a top-level SUCCEEDED/FAILED
+      // that the corroboration rules would not honour. The `pending` we report
+      // may be wrong in a direction that moved money, so the ERROR span status
+      // that comes with recordException is earned.
+      for (const [response, outcome] of [
+        [{ status: 2 }, "SUCCEEDED"],
+        [{ status: 3 }, "FAILED"],
+        [
+          { status: 3, failureReason: 0, transaction: { payment: { failureId: 0 } } },
+          "FAILED",
+        ],
+        [{ status: 2, transaction: { payment: { statusId: 0 } } }, "SUCCEEDED"],
+      ] as const) {
+        jest.clearAllMocks()
+
+        expect(paymentSendStatusOrPending(response)).toBe(PaymentSendStatus.Pending)
+
+        const recorded = soleRecord()
+        if (!recorded.loud) throw new Error("expected a recorded exception, got an event")
+        expect(recorded.attributes["ibex.payment.uncorroborated_outcome"]).toBe(outcome)
+        expect(recorded.error.uncorroboratedOutcome).toBe(outcome)
+        expect(eventMock).not.toHaveBeenCalled()
+      }
+    })
   })
 
   it("records the identifying fields so the payment is nameable from the alert", () => {
-    // Without these an operator woken by "money may or may not have moved" has
-    // to trace-hop to the child ibex-client span before they can name it.
-    paymentSendStatusOrPending({
-      status: 0,
-      transaction: {
-        id: "dfeec8bd-b4e7-46f1-aa4a-cf4e4569df02",
-        accountId: "eeba6152-9432-448e-b7d2-4205e5099924",
-        payment: { hash: "19b7ff42e048d147", statusId: 0 },
-      },
-    })
-
-    expect(recordMock).toHaveBeenCalledTimes(1)
-    expect(recordMock.mock.calls[0][0].attributes).toEqual({
+    // Without these an operator looking at "money may or may not have moved"
+    // has to trace-hop to the child ibex-client span before they can name it.
+    // They must land on BOTH channels — a quiet record that cannot name the
+    // payment is not a record.
+    const identity = {
       "ibex.transaction.id": "dfeec8bd-b4e7-46f1-aa4a-cf4e4569df02",
       "ibex.payment.hash": "19b7ff42e048d147",
       "ibex.account.id": "eeba6152-9432-448e-b7d2-4205e5099924",
+    }
+    const transaction = {
+      id: identity["ibex.transaction.id"],
+      accountId: identity["ibex.account.id"],
+      payment: { hash: identity["ibex.payment.hash"], statusId: 0 },
+    }
+
+    paymentSendStatusOrPending({ status: 0, transaction })
+    expect(soleRecord()).toMatchObject({
+      loud: false,
+      attributes: expect.objectContaining(identity),
+    })
+
+    jest.clearAllMocks()
+
+    paymentSendStatusOrPending({ status: 2, transaction })
+    expect(soleRecord()).toMatchObject({
+      loud: true,
+      attributes: expect.objectContaining(identity),
     })
   })
 
@@ -341,6 +461,8 @@ describe("paymentSendStatusOrPending", () => {
     paymentSendStatusOrPending({ status: 3, failureReason: 2 })
 
     expect(recordMock).not.toHaveBeenCalled()
+    expect(eventMock).not.toHaveBeenCalled()
+    expect(attrMock).not.toHaveBeenCalled()
   })
 
   it("reports an uncorroborated top-level FAILED as pending, not as failed", () => {
@@ -387,6 +509,7 @@ describe("paymentSendStatusFromIbexLnurlPay", () => {
     lnurlPaymentSendStatusOrPending(settledLnurlResponse)
 
     expect(recordMock).not.toHaveBeenCalled()
+    expect(eventMock).not.toHaveBeenCalled()
   })
 
   it("lets a recognised status override the settle date", () => {
@@ -419,7 +542,16 @@ describe("paymentSendStatusFromIbexLnurlPay", () => {
       expect(lnurlPaymentSendStatusOrPending(payToLnurlMock.response)).toBe(
         PaymentSendStatus.Pending,
       )
-      expect(recordMock).toHaveBeenCalledTimes(1)
+
+      // Recorded, but QUIETLY: this shape is the vendor's own documented
+      // acceptance, i.e. plausibly this rail's every-send happy path. A
+      // recorded exception would set the span status to ERROR (tracing.ts
+      // does it unconditionally, regardless of ErrorLevel) and turn 100% of
+      // the LNURL rail red.
+      const recorded = soleRecord()
+      expect(recorded.loud).toBe(false)
+      expect(recorded.level).toBe(ErrorLevel.Warn)
+      expect(recordMock).not.toHaveBeenCalled()
     })
 
     it("ignores a top-level settle date in every serialisation", () => {
@@ -530,10 +662,33 @@ describe("lnurlPaymentSendStatusOrPending", () => {
     const status = lnurlPaymentSendStatusOrPending({ transaction: { payment: {} } })
 
     expect(status).toBe(PaymentSendStatus.Pending)
-    expect(recordMock).toHaveBeenCalledTimes(1)
-    const [{ error, level }] = recordMock.mock.calls[0]
-    expect(error).toBeInstanceOf(UnconfirmedIbexPayment)
-    expect(level).toBe(ErrorLevel.Warn)
+    const recorded = soleRecord()
+    expect(recorded.level).toBe(ErrorLevel.Warn)
+  })
+
+  it("never records an exception on this rail — the dialect cannot produce one", () => {
+    // The payToLnurl 201 has no top-level `status` field at all, so this reader
+    // can never be in the "IBEX claimed a terminal outcome we refused" case
+    // that earns a red span. Every unreadable payToLnurl response is therefore
+    // quiet, which is the whole point: this rail's documented acceptance shape
+    // IS unreadable, and it must not paint every send ERROR.
+    for (const response of [
+      {},
+      null,
+      undefined,
+      { transaction: {} },
+      { transaction: { payment: {} } },
+      { transaction: { payment: { statusId: 0 } } },
+      { transaction: { payment: { statusId: 0, settleDateUtc: 0 } } },
+      payToLnurlMock.response,
+    ]) {
+      jest.clearAllMocks()
+
+      expect(lnurlPaymentSendStatusOrPending(response)).toBe(PaymentSendStatus.Pending)
+
+      expect(recordMock).not.toHaveBeenCalled()
+      expect(soleRecord().loud).toBe(false)
+    }
   })
 
   it("records the payment hash from the top level, where payToLnurl puts it", () => {
@@ -551,8 +706,7 @@ describe("lnurlPaymentSendStatusOrPending", () => {
       },
     })
 
-    expect(recordMock).toHaveBeenCalledTimes(1)
-    expect(recordMock.mock.calls[0][0].attributes).toEqual({
+    expect(soleRecord().attributes).toMatchObject({
       "ibex.transaction.id": "dfeec8bd-b4e7-46f1-aa4a-cf4e4569df02",
       "ibex.payment.hash":
         "19b7ff42e048d14791180d63592099b3394fc9ea7e3243906e810362124c29fd",
@@ -566,8 +720,6 @@ describe("lnurlPaymentSendStatusOrPending", () => {
       transaction: { payment: { hash: "payment-level-hash", statusId: 0 } },
     })
 
-    expect(recordMock.mock.calls[0][0].attributes["ibex.payment.hash"]).toBe(
-      "payment-level-hash",
-    )
+    expect(soleRecord().attributes["ibex.payment.hash"]).toBe("payment-level-hash")
   })
 })

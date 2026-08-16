@@ -1,8 +1,10 @@
 const mockPayInvoice = jest.fn()
 const mockRecordExceptionInCurrentSpan = jest.fn()
+const mockAddEventToCurrentSpan = jest.fn()
 
 jest.mock("@services/tracing", () => ({
   addAttributesToCurrentSpan: jest.fn(),
+  addEventToCurrentSpan: (...args: unknown[]) => mockAddEventToCurrentSpan(...args),
   recordExceptionInCurrentSpan: (...args: unknown[]) =>
     mockRecordExceptionInCurrentSpan(...args),
 }))
@@ -142,19 +144,25 @@ describe("lnInvoicePaymentSend IBEX status reader wiring", () => {
     // message does: the LNURL reader names payToLnurl and its payment-level
     // settle date. This is the assertion that catches the two readers being
     // swapped.
+    //
+    // The channel matters as much as the message: a response that claimed
+    // NOTHING is recorded as a span event, not a recorded exception, because
+    // recordExceptionInCurrentSpan sets the span status to ERROR
+    // unconditionally and this shape may be a rail's ordinary answer.
     mockPayInvoice.mockResolvedValue({ status: 0, transaction: { payment: {} } })
 
     const result = await resolvePayment()
 
     expect(result).toEqual({ errors: [], status: "pending" })
-    expect(mockRecordExceptionInCurrentSpan).toHaveBeenCalledTimes(1)
-    const [{ error, level }] = mockRecordExceptionInCurrentSpan.mock.calls[0]
-    expect(error).toBeInstanceOf(UnconfirmedIbexPayment)
-    expect(level).toBe(ErrorLevel.Warn)
-    expect((error as UnconfirmedIbexPayment).message).toMatch(
+    expect(mockRecordExceptionInCurrentSpan).not.toHaveBeenCalled()
+    expect(mockAddEventToCurrentSpan).toHaveBeenCalledTimes(1)
+    const [eventName, eventAttributes] = mockAddEventToCurrentSpan.mock.calls[0]
+    expect(eventName).toBe("ibex.payment.unconfirmed")
+    expect(eventAttributes["ibex.payment.unconfirmed.level"]).toBe(ErrorLevel.Warn)
+    expect(eventAttributes["ibex.payment.unconfirmed.reason"]).toMatch(
       /No recognised payment status in IBEX response/,
     )
-    expect((error as UnconfirmedIbexPayment).message).not.toMatch(/payToLnurl/)
+    expect(eventAttributes["ibex.payment.unconfirmed.reason"]).not.toMatch(/payToLnurl/)
   })
 
   it("never reports success from a top-level status alone", async () => {
@@ -163,6 +171,15 @@ describe("lnInvoicePaymentSend IBEX status reader wiring", () => {
     const result = await resolvePayment()
 
     expect(result).toEqual({ errors: [], status: "pending" })
+    // An unhonoured terminal claim IS worth a red span — the payload disagrees
+    // with itself and our `pending` may be wrong in a direction that moved
+    // money.
+    expect(mockAddEventToCurrentSpan).not.toHaveBeenCalled()
+    expect(mockRecordExceptionInCurrentSpan).toHaveBeenCalledTimes(1)
+    const [{ error, level }] = mockRecordExceptionInCurrentSpan.mock.calls[0]
+    expect(error).toBeInstanceOf(UnconfirmedIbexPayment)
+    expect(level).toBe(ErrorLevel.Warn)
+    expect((error as UnconfirmedIbexPayment).uncorroboratedOutcome).toBe("SUCCEEDED")
   })
 
   it("never reports failure from a top-level status alone", async () => {

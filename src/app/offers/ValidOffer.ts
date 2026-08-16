@@ -9,7 +9,8 @@ import { notifyOpsEvent } from "@services/alerts/ops-events"
 import ErpNext, { CashoutId } from "@services/frappe/ErpNext"
 import { CashoutDraftError, CashoutSubmitError } from "@services/frappe/errors"
 import { baseLogger } from "@services/logger"
-import { IbexError } from "@services/ibex/errors"
+import { FailedIbexPayment, IbexError } from "@services/ibex/errors"
+import { paymentSendStatusOrPending } from "@services/ibex/payment-status"
 import { Cashout } from "@config"
 
 import { CashoutDetails, ValidationInputs } from "./types"
@@ -73,6 +74,35 @@ class ValidOffer extends Offer {
         this.notifyStepFailed("payInvoice", resp)
         return resp
       }
+
+      // A 200 from IBEX is not a settlement. The same payInvoiceV2 body that
+      // carries a successful send also carries a FAILED one, and reading only
+      // `resp instanceof IbexError` here treated both as paid — submitting a
+      // cashout in ERPNext, on the fiat-payout rail, with no lightning payment
+      // behind it. Unlike cash-wallet-cutover, this path has no
+      // balanceVerifier.verifyBalanceMove backstop, so the status field is the
+      // only check there is. See @services/ibex/payment-status.
+      const paymentStatus = paymentSendStatusOrPending(resp)
+      if (paymentStatus === PaymentSendStatus.Failure) {
+        const failure = new FailedIbexPayment(
+          `IBEX reported the cashout payment as FAILED for cashout ${cashoutId}`,
+        )
+        baseLogger.error(
+          { cashoutId, resp },
+          "IBEX reported the cashout payment as failed — not submitting the cashout",
+        )
+        this.notifyStepFailed("payInvoice", failure)
+        return failure
+      }
+      // Pending is submitted deliberately, not by omission. `pending` here means
+      // "IBEX accepted it and has not told us the outcome" — including the
+      // unreadable-response case, which paymentSendStatusOrPending reports as
+      // pending precisely so a same-key retry cannot pay twice. The cashout is
+      // an async, reconciled flow (InitiatedCashout.status is Pending by
+      // construction and ops settle the fiat leg against the draft), so holding
+      // the ERPNext submit on a payment that probably did settle would strand
+      // the user's funds in a draft nobody is watching. Refusing to submit is
+      // reserved for the one answer that is definitively negative, above.
     } else {
       baseLogger.warn({ cashoutId }, "Skipping Ibex payment (skipPayment=true)")
     }

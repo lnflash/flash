@@ -16,6 +16,7 @@ jest.mock("@config", () => ({
 
 jest.mock("@services/tracing", () => ({
   addAttributesToCurrentSpan: jest.fn(),
+  addEventToCurrentSpan: jest.fn(),
   recordExceptionInCurrentSpan: jest.fn(),
 }))
 
@@ -135,6 +136,7 @@ import {
 } from "@domain/errors"
 import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
+import { addEventToCurrentSpan, recordExceptionInCurrentSpan } from "@services/tracing"
 
 const senderUsdWalletId = "11111111-1111-4111-8111-111111111111" as WalletId
 const senderUsdtWalletId = "22222222-2222-4222-8222-222222222222" as WalletId
@@ -421,6 +423,41 @@ describe("intraledger IBEX status reading", () => {
     const result = await intraledgerPaymentSendWalletIdForUsdWallet(sendArgs)
 
     expect(result).toEqual({ value: "pending" })
+  })
+
+  describe("span volume on the flash-to-flash rail", () => {
+    // recordExceptionInCurrentSpan sets the span status to ERROR
+    // unconditionally (services/tracing.ts) — ErrorLevel only picks which
+    // `error.*` attributes win. So if this rail's ordinary response shape were
+    // routed through it, every intraledger send would emit a red span and any
+    // trigger keyed on span status rather than the error.level attribute would
+    // fire on 100% of the rail. Only a response that CLAIMS a terminal outcome
+    // we refuse to honour earns that.
+    it("stays green when IBEX reported nothing at all", async () => {
+      mockPayInvoice.mockResolvedValue({ status: 0, transaction: { payment: {} } })
+
+      await intraledgerPaymentSendWalletIdForUsdWallet(sendArgs)
+
+      expect(recordExceptionInCurrentSpan).not.toHaveBeenCalled()
+      expect(addEventToCurrentSpan).toHaveBeenCalledTimes(1)
+      expect((addEventToCurrentSpan as jest.Mock).mock.calls[0][0]).toBe(
+        "ibex.payment.unconfirmed",
+      )
+    })
+
+    it("goes red when IBEX claimed a terminal outcome we refused to honour", async () => {
+      mockPayInvoice.mockResolvedValue({ status: 2, transaction: { payment: {} } })
+
+      await intraledgerPaymentSendWalletIdForUsdWallet(sendArgs)
+
+      expect(addEventToCurrentSpan).not.toHaveBeenCalled()
+      expect(recordExceptionInCurrentSpan).toHaveBeenCalledTimes(1)
+      expect(
+        (recordExceptionInCurrentSpan as jest.Mock).mock.calls[0][0].attributes[
+          "ibex.payment.uncorroborated_outcome"
+        ],
+      ).toBe("SUCCEEDED")
+    })
   })
 })
 

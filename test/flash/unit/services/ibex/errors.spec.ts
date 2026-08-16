@@ -4,9 +4,11 @@ import { ApiError, AuthenticationError, MAX_IBEX_MESSAGE_LENGTH } from "ibex-cli
 import {
   CompletedInvoice,
   errorHandler,
+  FailedIbexPayment,
   IbexError,
   ibexErrorDetail,
   InsufficientIbexBalance,
+  UnconfirmedIbexPayment,
 } from "@services/ibex/errors"
 
 const insufficientDetail =
@@ -286,5 +288,47 @@ describe("errorHandler", () => {
   it("passes successful responses through untouched", () => {
     const response = { transaction: { id: "t-1" } }
     expect(errorHandler(response)).toBe(response)
+  })
+})
+
+describe("UnconfirmedIbexPayment", () => {
+  it("defaults to Warn, the level every construction site actually wants", () => {
+    // The default used to be Critical while both readers in
+    // @services/ibex/payment-status passed Warn explicitly — an unreachable
+    // default that would silently page the next caller who omitted the
+    // argument, on rails whose responses have never been captured. Warn is the
+    // documented, evidence-backed level until a capture justifies raising it.
+    expect(new UnconfirmedIbexPayment("nothing readable").level).toBe(ErrorLevel.Warn)
+  })
+
+  it("still honours an explicit level", () => {
+    expect(
+      new UnconfirmedIbexPayment("nothing readable", ErrorLevel.Critical).level,
+    ).toBe(ErrorLevel.Critical)
+  })
+
+  it("carries no uncorroborated outcome unless one is named", () => {
+    // The flag drives span VOLUME in payment-status.recordUnconfirmed (event vs
+    // recorded exception), so an accidental default of "set" would put every
+    // unreadable response back on the red-span path.
+    expect(new UnconfirmedIbexPayment("nothing readable").uncorroboratedOutcome).toBe(
+      undefined,
+    )
+    expect(
+      new UnconfirmedIbexPayment("top-level only", ErrorLevel.Warn, "SUCCEEDED")
+        .uncorroboratedOutcome,
+    ).toBe("SUCCEEDED")
+  })
+})
+
+describe("FailedIbexPayment", () => {
+  it("is an IbexError so existing `instanceof IbexError` guards still catch it", () => {
+    const failure = new FailedIbexPayment("IBEX reported the payment as FAILED")
+
+    expect(failure).toBeInstanceOf(IbexError)
+    expect(failure.level).toBe(ErrorLevel.Warn)
+    // error-map keys on `name`; a class whose name is not in the switch falls
+    // through to the unknown-error path.
+    expect(failure.name).toBe("FailedIbexPayment")
   })
 })
