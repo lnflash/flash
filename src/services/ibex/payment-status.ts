@@ -127,7 +127,17 @@ const settledAt = (value: unknown): number | undefined => {
   if (typeof value === "number")
     return Number.isFinite(value) && value > 0 ? value : undefined
   if (typeof value === "string" && value.trim() !== "") {
-    const parsed = Date.parse(value)
+    const trimmed = value.trim()
+    // An all-digit string is a stringified epoch, NOT a date to parse. Handing
+    // one to Date.parse inverts the check in both directions: Date.parse("0")
+    // is 946713600000 (V8 reads a bare "0" as the year 2000), so the unset
+    // sentinel would read as settled, while a real epoch like "1668544241"
+    // parses as a year and is rejected. Coerce numerically first.
+    if (/^[+-]?\d+$/.test(trimmed)) {
+      const epoch = Number(trimmed)
+      return Number.isFinite(epoch) && epoch > 0 ? epoch : undefined
+    }
+    const parsed = Date.parse(trimmed)
     return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
   }
   return undefined

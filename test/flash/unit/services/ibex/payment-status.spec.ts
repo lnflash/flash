@@ -375,6 +375,29 @@ describe("paymentSendStatusFromIbexLnurlPay", () => {
       ).toBe(PaymentSendStatus.Success)
     })
 
+    it("reads an all-digit string as an epoch, not as a date", () => {
+      // Date.parse("0") is 946713600000 (V8 reads a bare "0" as the year 2000),
+      // so routing a stringified epoch through Date.parse inverts the check in
+      // BOTH directions: the unset sentinel would read as settled, and a real
+      // epoch would be rejected as an out-of-range year.
+      for (const settleDateUtc of ["0", "00", "-1", "+0"]) {
+        expect(
+          paymentSendStatusFromIbexLnurlPay({
+            settleDateUtc,
+            transaction: { payment: { statusId: 0 } },
+          }),
+        ).toBeInstanceOf(UnconfirmedIbexPayment)
+      }
+
+      expect(
+        paymentSendStatusFromIbexLnurlPay({
+          // the schema's own example, stringified
+          settleDateUtc: "1668544241",
+          transaction: { payment: { statusId: 0 } },
+        }),
+      ).toBe(PaymentSendStatus.Success)
+    })
+
     it("rejects the vendor's zero-date sentinel and unparseable strings", () => {
       // "0001-01-01T00:00:00Z" is this vendor's zero value (it is the
       // creationDateUtc example on the payToLnurl 201 itself) and parses to a
