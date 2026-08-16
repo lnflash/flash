@@ -26,6 +26,7 @@ import {
 // imagined.
 import * as payInvoiceMock from "test/flash/mocks/ibex/pay-invoice"
 import * as payToLnurlMock from "test/flash/mocks/ibex/pay-to-lnurl"
+import { capturedSettledLightningSend } from "test/flash/mocks/ibex/transaction-details-captured"
 
 const recordMock = recordExceptionInCurrentSpan as jest.Mock
 const attrMock = addAttributesToCurrentSpan as jest.Mock
@@ -721,5 +722,40 @@ describe("lnurlPaymentSendStatusOrPending", () => {
     })
 
     expect(soleRecord().attributes["ibex.payment.hash"]).toBe("payment-level-hash")
+  })
+})
+
+describe("against a REAL captured IBEX response", () => {
+  // test/flash/mocks/ibex/transaction-details-captured.ts — a settled Lightning
+  // send pulled from the sandbox hub on 2026-08-16, not an openapi example.
+  // Everything else in this suite is derived from the generated examples; this
+  // is the one place the readers are held against a shape IBEX actually sent.
+  const { payment } = capturedSettledLightningSend
+
+  it("populates BOTH payment-level status fields on a settled send", () => {
+    // The precedence rule reads payment-level fields first and only falls back
+    // to the top-level status. If IBEX left these empty in practice, that
+    // fallback — and the Critical severity on the unreadable case — would be
+    // firing on the happy path instead of on a genuine anomaly.
+    expect(payment.statusId).toBe(2)
+    expect(payment.status.id).toBe(2)
+    expect(payment.status.name).toBe("SUCCEEDED")
+  })
+
+  it("reads the captured payment as a settled send", () => {
+    expect(paymentSendStatusFromIbex({ transaction: { payment } })).toBe(
+      PaymentSendStatus.Success,
+    )
+  })
+
+  it("reports no failure code on a successful payment", () => {
+    expect(payment.failureId).toBe(0)
+  })
+
+  it("returns an ISO-string settleDateUtc, not the integer epoch of the example", () => {
+    // hasSettleDate must accept both serialisations: the payToLnurl example
+    // declares an integer epoch, but a real payment-level settle date is ISO.
+    expect(typeof payment.settleDateUtc).toBe("string")
+    expect(Number.isNaN(Date.parse(payment.settleDateUtc))).toBe(false)
   })
 })

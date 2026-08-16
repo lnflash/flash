@@ -8,3 +8,4 @@ export * as signIn from "./sign-in"
 // export const getAccountDetails = () => {
 //   return account
 // }
+export * from "./transaction-details-captured"
