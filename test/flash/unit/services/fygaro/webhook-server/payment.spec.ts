@@ -27,7 +27,19 @@ jest.mock("@services/lock", () => ({
 jest.mock("@services/mongoose", () => ({
   AccountsRepository: () => ({
     findByUsername: (...args: unknown[]) => mockFindByUsername(...args),
+    findByUserId: (...args: unknown[]) => mockFindByUserId(...args),
   }),
+}))
+
+jest.mock("@services/kratos", () => ({
+  IdentityRepository: () => ({
+    getUserIdFromIdentifier: (...args: unknown[]) => mockGetUserIdFromIdentifier(...args),
+  }),
+}))
+
+jest.mock("@services/frappe/fee-discounts", () => ({
+  getFlashFeeDiscountPercent: (...args: unknown[]) =>
+    mockGetFlashFeeDiscountPercent(...args),
 }))
 
 jest.mock("@services/frappe/BridgeTransferRequestWriter", () => ({
@@ -75,6 +87,9 @@ jest.mock("@services/fygaro/webhook-server/fygaro-settings", () => ({
 const mockLockIdempotencyKey = jest.fn()
 const mockLockPaymentIdempotencyKey = jest.fn()
 const mockFindByUsername = jest.fn()
+const mockFindByUserId = jest.fn()
+const mockGetUserIdFromIdentifier = jest.fn()
+const mockGetFlashFeeDiscountPercent = jest.fn()
 const mockWriteFygaroTopup = jest.fn()
 const mockCompleteFygaroTopup = jest.fn()
 const mockIsFygaroTopupCompleted = jest.fn()
@@ -99,6 +114,10 @@ const DEFAULT_SETTINGS = {
   dailyTopupLimits: { 1: 125, 2: 1000, 3: 2500 },
 }
 
+import {
+  CouldNotFindAccountFromUsernameError,
+  UnknownRepositoryError,
+} from "@domain/errors"
 import { ResourceAttemptsLockServiceError } from "@domain/lock"
 
 import { paymentHandler } from "@services/fygaro/webhook-server/routes/payment"
@@ -137,7 +156,16 @@ beforeEach(() => {
     async (_key: unknown, fn: () => Promise<unknown>) => fn(),
   )
   mockIsFygaroTopupCompleted.mockResolvedValue(false)
-  mockFindByUsername.mockResolvedValue({ id: ACCOUNT_ID, level: 1 })
+  mockFindByUsername.mockResolvedValue({
+    id: ACCOUNT_ID,
+    level: 1,
+    username: VALID_BODY.customReference,
+  })
+  // Email fallback attribution: default to "no identity for this email".
+  mockGetUserIdFromIdentifier.mockResolvedValue(new Error("IdentifierNotFoundError"))
+  mockFindByUserId.mockResolvedValue(new Error("CouldNotFindError"))
+  // Fee Discount whitelist: default to nobody discounted.
+  mockGetFlashFeeDiscountPercent.mockResolvedValue(0)
   mockWriteFygaroTopup.mockResolvedValue(true)
   mockSumFygaroLast24h.mockResolvedValue(0)
   mockCompleteFygaroTopup.mockResolvedValue(true)
@@ -210,7 +238,12 @@ describe("fygaro paymentHandler", () => {
   })
 
   it("treats an unknown username as unattributed", async () => {
-    mockFindByUsername.mockResolvedValue(new Error("CouldNotFindError"))
+    // The real repository signals "no account owns this username" with this
+    // exact class (AccountsRepository.findByUsername) — a bare Error would not
+    // distinguish a miss from a Mongo fault, which the next test pins apart.
+    mockFindByUsername.mockResolvedValue(
+      new CouldNotFindAccountFromUsernameError(VALID_BODY.customReference),
+    )
     const res = makeRes()
 
     await paymentHandler(makeReq(VALID_BODY), res)
@@ -219,6 +252,232 @@ describe("fygaro paymentHandler", () => {
       expect.objectContaining({ accountId: undefined }),
     )
     expect(res.json).toHaveBeenCalledWith({ status: "recorded", attributed: false })
+  })
+
+  it("returns 500 on an account-lookup FAULT instead of falling back to the payer email", async () => {
+    // findByUsername returns CouldNotFindAccountFromUsernameError for a genuine
+    // miss and parseRepositoryError(err) — e.g. UnknownRepositoryError — for a
+    // Mongo timeout. Collapsing the two is a money bug on RE-DELIVERY: a
+    // perfectly-referenced payment that was already credited would be rewritten
+    // with the sticky `email_attribution` marker, which permanently exempts the
+    // row from sumFygaroTopupGrossCentsSince. The account's spent daily
+    // allowance would then read $0 and it could auto-credit its full cap a
+    // second time inside 24h — and the 200 ack would stop Fygaro retrying, so
+    // the payment strands for manual credit too. Fail transient: 500, retry.
+    mockFindByUsername.mockResolvedValue(
+      new UnknownRepositoryError("connection timed out"),
+    )
+    // Her own checkout email DOES resolve to her account — exactly the state
+    // that made the collapsed branch look harmless.
+    mockGetUserIdFromIdentifier.mockResolvedValue("kratos-user-1")
+    mockFindByUserId.mockResolvedValue({
+      id: ACCOUNT_ID,
+      level: 1,
+      username: VALID_BODY.customReference,
+    })
+    const res = makeRes()
+
+    await paymentHandler(makeReq(VALID_BODY), res)
+
+    expect(res.status).toHaveBeenCalledWith(500)
+    expect(res.json).toHaveBeenCalledWith({
+      error: "account lookup unavailable; will retry",
+    })
+    // The payment IS recorded — unattributed. Bailing without a write would
+    // leave captured fiat with no server-side record if Fygaro's retry budget
+    // expires before Mongo recovers, which is the failure class this webhook
+    // exists to end. No account_id, and in particular never the sticky
+    // email-attribution marker over a row whose account_id is verifiable.
+    expect(mockWriteFygaroTopup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transactionId: VALID_BODY.transactionId,
+        amount: "10.00",
+        accountId: undefined,
+        emailAttributed: false,
+      }),
+    )
+    expect(mockWriteFygaroTopup).not.toHaveBeenCalledWith(
+      expect.objectContaining({ emailAttributed: true }),
+    )
+    // The email fallback must not even be consulted.
+    expect(mockGetUserIdFromIdentifier).not.toHaveBeenCalled()
+    // No dedupe lock: taking the non-releasing timelock here would make the
+    // very next retry ack 200 "already_processed" and defeat the self-heal.
+    expect(mockLockIdempotencyKey).not.toHaveBeenCalled()
+    expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+    // Ops gets PAGED — payments are landing unattributed and uncredited, the
+    // same severity as the audit-write failure below. Static dedup key so one
+    // outage is one incident, not one page per in-flight payment.
+    expect(mockAlertBridge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dedupKey: "fygaro:account-lookup-failed",
+        severity: "critical",
+      }),
+    )
+  })
+
+  it("still answers 500 when the unattributed audit write also fails during a lookup fault", async () => {
+    // Both Mongo and ERPNext are down. The response must stay 500 so Fygaro
+    // retries; the failed write needs no extra handling beyond a log.
+    mockFindByUsername.mockResolvedValue(
+      new UnknownRepositoryError("connection timed out"),
+    )
+    mockWriteFygaroTopup.mockResolvedValue(new Error("erpnext down"))
+    const res = makeRes()
+
+    await paymentHandler(makeReq(VALID_BODY), res)
+
+    expect(res.status).toHaveBeenCalledWith(500)
+    expect(res.json).toHaveBeenCalledWith({
+      error: "account lookup unavailable; will retry",
+    })
+    expect(mockLockIdempotencyKey).not.toHaveBeenCalled()
+    expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+  })
+
+  describe("payer-email fallback attribution (display-only)", () => {
+    const EMAIL_ACCOUNT_ID = "account-email-match" as AccountId
+    const KRATOS_USER_ID = "kratos-user-1"
+
+    beforeEach(() => {
+      mockGetUserIdFromIdentifier.mockResolvedValue(KRATOS_USER_ID)
+      mockFindByUserId.mockResolvedValue({
+        id: EMAIL_ACCOUNT_ID,
+        level: 1,
+        username: "reginab",
+      })
+    })
+
+    it("stamps the email-matched account on the audit row and names it in the alert, without crediting", async () => {
+      mockFygaroConfig.credit = { enabled: true }
+      const res = makeRes()
+
+      await paymentHandler(makeReq({ ...VALID_BODY, customReference: "" }), res)
+
+      expect(mockGetUserIdFromIdentifier).toHaveBeenCalledWith(VALID_BODY.client.email)
+      expect(mockFindByUserId).toHaveBeenCalledWith(KRATOS_USER_ID)
+      expect(mockWriteFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({
+          accountId: EMAIL_ACCOUNT_ID,
+          emailAttributed: true,
+        }),
+      )
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({
+          detail: expect.stringContaining("@reginab"),
+          context: expect.objectContaining({ email_matched_username: "reginab" }),
+        }),
+      )
+      expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: "fygaro-unattributed",
+          accountId: EMAIL_ACCOUNT_ID,
+          meta: expect.objectContaining({ emailMatchedUsername: "reginab" }),
+        }),
+      )
+      // Email attribution is display-grade: the credit path must stay cold
+      // even with the deploy gate on.
+      expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+      expect(mockGetFygaroSettings).not.toHaveBeenCalled()
+      expect(res.json).toHaveBeenCalledWith({ status: "recorded", attributed: false })
+    })
+
+    it("keeps the email match out of every gate — no daily-cap read, no credit", async () => {
+      // The checkout email is payer-typed and identity-unverified. A relative
+      // (or anyone who knows a victim's email) paying with a blank
+      // customReference must not touch the named account's daily allowance or
+      // its balance: the row is an audit/display artifact and nothing more.
+      // The read side is enforced in ErpNext.sumFygaroTopupGrossCentsSince,
+      // which skips rows marked email_attribution; here the webhook must not
+      // even consult the gate.
+      mockFygaroConfig.credit = { enabled: true }
+      const res = makeRes()
+
+      await paymentHandler(makeReq({ ...VALID_BODY, customReference: "" }), res)
+
+      expect(mockSumFygaroLast24h).not.toHaveBeenCalled()
+      expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+      expect(mockCompleteFygaroTopup).not.toHaveBeenCalled()
+      // The alert must read as a lead to confirm, not an instruction to credit.
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({
+          detail: expect.stringContaining("UNVERIFIED"),
+        }),
+      )
+    })
+
+    it("lowercases the payer email before the kratos lookup (checkout keyboards auto-capitalize)", async () => {
+      // Mobile checkout keyboards auto-capitalize ("Regina@Example.com") while
+      // the stored Kratos identifier is lowercase; the lookup must normalize or
+      // attribution silently never fires for those payments.
+      const res = makeRes()
+
+      await paymentHandler(
+        makeReq({
+          ...VALID_BODY,
+          customReference: "",
+          client: { name: "Regina Bailey", email: " Regina@Example.COM " },
+        }),
+        res,
+      )
+
+      expect(mockGetUserIdFromIdentifier).toHaveBeenCalledWith("regina@example.com")
+      expect(mockWriteFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({
+          accountId: EMAIL_ACCOUNT_ID,
+          emailAttributed: true,
+        }),
+      )
+    })
+
+    it("never attempts email attribution when customReference resolved an account", async () => {
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockGetUserIdFromIdentifier).not.toHaveBeenCalled()
+      expect(mockWriteFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({ accountId: ACCOUNT_ID, emailAttributed: false }),
+      )
+    })
+
+    it("leaves the row unattributed when the email matches no identity", async () => {
+      mockGetUserIdFromIdentifier.mockResolvedValue(new Error("IdentifierNotFoundError"))
+      const res = makeRes()
+
+      await paymentHandler(makeReq({ ...VALID_BODY, customReference: "" }), res)
+
+      expect(mockWriteFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({ accountId: undefined, emailAttributed: false }),
+      )
+      expect(res.json).toHaveBeenCalledWith({ status: "recorded", attributed: false })
+    })
+
+    it("records unattributed when the kratos lookup throws (best-effort, never breaks the webhook)", async () => {
+      mockGetUserIdFromIdentifier.mockRejectedValue(new Error("kratos down"))
+      const res = makeRes()
+
+      await paymentHandler(makeReq({ ...VALID_BODY, customReference: "" }), res)
+
+      expect(mockWriteFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({ accountId: undefined }),
+      )
+      expect(res.json).toHaveBeenCalledWith({ status: "recorded", attributed: false })
+    })
+
+    it("skips the lookup entirely for a payload without a client email", async () => {
+      const res = makeRes()
+
+      await paymentHandler(
+        makeReq({ ...VALID_BODY, customReference: "", client: { name: "X" } }),
+        res,
+      )
+
+      expect(mockGetUserIdFromIdentifier).not.toHaveBeenCalled()
+      expect(mockWriteFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({ accountId: undefined }),
+      )
+    })
   })
 
   it("returns 500 when the ERPNext audit write fails so Fygaro retries", async () => {
@@ -287,6 +546,68 @@ describe("fygaro paymentHandler", () => {
         expect.objectContaining({ phase: "succeeded", status: "success" }),
       )
       expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
+    })
+
+    it("consults the Fee Discount whitelist for the account's username in the topup flow", async () => {
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockGetFlashFeeDiscountPercent).toHaveBeenCalledWith({
+        username: VALID_BODY.customReference,
+        flow: "topup",
+      })
+    })
+
+    it("credits with a discounted flash fee and promotes the discounted breakdown", async () => {
+      mockGetFlashFeeDiscountPercent.mockResolvedValue(50)
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      // $10.00 gross -> $0.79 processor + $0.10 flash (50% off $0.20) -> $9.11 net
+      expect(mockCreditFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({ amountCents: 911 }),
+      )
+      expect(mockCompleteFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({
+          processorFee: "0.79",
+          flashFee: "0.10",
+          finalAmount: "9.11",
+        }),
+      )
+      expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
+    })
+
+    it("waives the flash fee entirely at a 100% discount (processor fee still applies)", async () => {
+      mockGetFlashFeeDiscountPercent.mockResolvedValue(100)
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockCreditFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({ amountCents: 921 }),
+      )
+      expect(mockCompleteFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({
+          processorFee: "0.79",
+          flashFee: "0.00",
+          finalAmount: "9.21",
+        }),
+      )
+    })
+
+    it("does not consult the whitelist when auto-credit is disabled in settings", async () => {
+      mockGetFygaroSettings.mockResolvedValue({
+        ...DEFAULT_SETTINGS,
+        autoCreditEnabled: false,
+      })
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockGetFlashFeeDiscountPercent).not.toHaveBeenCalled()
+      expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
     })
 
     it("records without crediting and fires the generic critical when the credit fails", async () => {

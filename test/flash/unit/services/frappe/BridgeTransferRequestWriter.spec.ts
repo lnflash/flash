@@ -18,6 +18,7 @@ import {
   writeBridgeCashoutFailed,
   writeBridgeCashoutPending,
   writeBridgeDepositRequest,
+  writeFygaroTopupRequest,
   writeIbexCryptoReceiveRequest,
 } from "@services/frappe/BridgeTransferRequestWriter"
 import { FygaroTopupHistoryQueryError } from "@services/frappe/errors"
@@ -352,6 +353,46 @@ describe("BridgeTransferRequestWriter", () => {
         sourceEventType: "bridge.withdrawal.usdt_sent",
       }),
     )
+  })
+
+  describe("writeFygaroTopupRequest", () => {
+    it("writes a Fygaro payment as a Fiat Received topup audit row", async () => {
+      await writeFygaroTopupRequest({
+        transactionId: "ftx-1",
+        amount: "20.00",
+        currency: "USD",
+        accountId: "acct-1",
+        rawPayload: { transactionId: "ftx-1" },
+      })
+
+      expect(lastRequestInput()).toEqual(
+        expect.objectContaining({
+          requestId: "fygaro:ftx-1",
+          provider: "Fygaro",
+          status: BridgeTransferRequestStatus.FiatReceived,
+          accountId: "acct-1",
+          sourceSystemsSeen: ["fygaro_webhook"],
+        }),
+      )
+    })
+
+    it("marks email-derived attribution in source systems so the admin view shows how the row got its account", async () => {
+      await writeFygaroTopupRequest({
+        transactionId: "ftx-2",
+        amount: "20.00",
+        currency: "USD",
+        accountId: "acct-email-match",
+        emailAttributed: true,
+        rawPayload: { transactionId: "ftx-2" },
+      })
+
+      expect(lastRequestInput()).toEqual(
+        expect.objectContaining({
+          accountId: "acct-email-match",
+          sourceSystemsSeen: ["fygaro_webhook", "email_attribution"],
+        }),
+      )
+    })
   })
 
   describe("sumFygaroTopupGrossCentsLast24h", () => {

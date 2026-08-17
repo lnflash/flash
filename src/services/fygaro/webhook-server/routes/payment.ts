@@ -21,7 +21,10 @@
 import { Request, Response } from "express"
 
 import { FygaroConfig } from "@config"
+import { CouldNotFindAccountFromUsernameError } from "@domain/errors"
 import { ResourceAttemptsLockServiceError } from "@domain/lock"
+import { getFlashFeeDiscountPercent } from "@services/frappe/fee-discounts"
+import { IdentityRepository } from "@services/kratos"
 import { LockService } from "@services/lock"
 import { baseLogger } from "@services/logger"
 import { AccountsRepository } from "@services/mongoose"
@@ -54,6 +57,38 @@ type FygaroPaymentPayload = {
 }
 
 const centsToDollars = (cents: number): string => (cents / 100).toFixed(2)
+
+// DISPLAY-ONLY fallback attribution for payments whose customReference missed:
+// the payer email Fygaro captured at checkout -> Kratos identity (email is a
+// login identifier) -> Flash account. Stamping the account on the audit row
+// lets the admin Transfer Requests page show the username on every top-up and
+// saves ops the manual email->kratos->mongo chase. It must NEVER feed the
+// credit path — the checkout email is whatever the payer typed, not verified
+// app identity like customReference — so the caller keeps `account`
+// (credit-eligible) and this result strictly separate. Best-effort: any
+// failure resolves to undefined and the row simply stays unattributed.
+const resolveAccountByPayerEmail = async (
+  email: string | undefined,
+): Promise<Account | undefined> => {
+  // Lowercased before the Kratos lookup: checkout keyboards auto-capitalize
+  // ("Jabari@gmail.com") while the stored login identifier is lowercase, and
+  // listIdentities matches the identifier verbatim — without normalizing here
+  // the attribution silently never fires for those payments.
+  const trimmed = email?.trim().toLowerCase()
+  if (!trimmed) return undefined
+  try {
+    const userId = await IdentityRepository().getUserIdFromIdentifier(
+      trimmed as EmailAddress,
+    )
+    if (userId instanceof Error) return undefined
+    const account = await AccountsRepository().findByUserId(userId)
+    if (account instanceof Error) return undefined
+    return account
+  } catch (error) {
+    baseLogger.warn({ error, email: trimmed }, "Fygaro payer-email attribution failed")
+    return undefined
+  }
+}
 
 // Human-readable title for the single record-only ops alert. `credit-disabled`
 // is intentionally absent — that is the deploy-level master gate and records
@@ -133,21 +168,86 @@ export const paymentHandler = async (req: Request, res: Response) => {
     let account: Account | undefined
     if (username) {
       const found = await AccountsRepository().findByUsername(username as Username)
-      if (found instanceof Error) {
+      if (found instanceof CouldNotFindAccountFromUsernameError) {
+        // A genuine miss: no account owns this username. Fall through to the
+        // display-only payer-email fallback below.
         baseLogger.warn(
           { transactionId, username },
           "Fygaro payment: customReference does not match any account",
         )
+      } else if (found instanceof Error) {
+        // A repository FAULT (Mongo timeout, connection blip) is NOT "no such
+        // username": findByUsername returns CouldNotFindAccountFromUsernameError
+        // for a real miss and parseRepositoryError(err) for everything else.
+        // Collapsing the two would let a momentary outage on a RE-DELIVERY drop
+        // a perfectly-referenced payment into the payer-email fallback and stamp
+        // the sticky `email_attribution` marker onto a row whose account_id was
+        // already verified via customReference — permanently exempting an
+        // already-credited top-up from the daily-cap sum
+        // (ErpNext.sumFygaroTopupGrossCentsSince), so the account's spent
+        // allowance reads $0 and it can auto-credit its full cap again. It would
+        // also ack 200 and strand the payment for manual credit. Same self-heal
+        // policy this handler applies to transient ERPNext reads below: 500 and
+        // no dedupe lock — let Fygaro retry once Mongo is back.
+        baseLogger.error(
+          { error: found, transactionId, username },
+          "Fygaro payment: account lookup failed — returning 500 so Fygaro retries",
+        )
+        // Record the payment UNATTRIBUTED first. The retry above is a policy,
+        // not a guarantee — if Fygaro's retry budget expires before Mongo
+        // recovers, bailing without a write would leave captured fiat with no
+        // server-side record at all, which is the exact failure class this
+        // webhook was built to end. Deliberately no account_id and no
+        // `email_attribution` marker: a later retry upserts the verified
+        // account_id onto this same row and the daily-cap sum still counts it
+        // once attributed. A failure here needs no extra handling — the
+        // response is already 500, so Fygaro retries either way.
+        const faultAudit = await writeFygaroTopupRequest({
+          transactionId,
+          amount: String(payload.amount),
+          currency,
+          accountId: undefined,
+          emailAttributed: false,
+          createdAt,
+          rawPayload: req.body,
+        })
+        if (faultAudit instanceof Error) {
+          baseLogger.error(
+            { error: faultAudit, transactionId },
+            "Failed to persist unattributed Fygaro audit row during an account-lookup fault",
+          )
+        }
+        // Critical, not warning: this means captured payments are not being
+        // attributed or credited at all. The dedup key is static, so PagerDuty
+        // groups a whole outage into ONE incident rather than paging per
+        // payment — the same reason the audit-write failure below pages.
+        alertBridge({
+          dedupKey: generateDedupKey.fygaroAccountLookupFailed(),
+          source: "fygaro-webhook",
+          severity: "critical",
+          title:
+            "Fygaro account lookup unavailable — payments recorded unattributed, will retry",
+          detail: found.message,
+          context: { transaction_id: transactionId, username },
+        })
+        return res.status(500).json({ error: "account lookup unavailable; will retry" })
       } else {
         account = found
       }
     }
 
+    // Fallback attribution for the audit row only (never for crediting):
+    // resolved from the checkout payer email when customReference missed.
+    const emailAttributedAccount = account
+      ? undefined
+      : await resolveAccountByPayerEmail(payload.client?.email)
+
     const auditResult = await writeFygaroTopupRequest({
       transactionId,
       amount: String(payload.amount),
       currency,
-      accountId: account?.id,
+      accountId: account?.id ?? emailAttributedAccount?.id,
+      emailAttributed: Boolean(emailAttributedAccount),
       createdAt,
       rawPayload: req.body,
     })
@@ -189,28 +289,40 @@ export const paymentHandler = async (req: Request, res: Response) => {
         baseLogger.info({ transactionId }, "Duplicate Fygaro payment webhook")
         return res.status(200).json({ status: "already_processed" })
       }
+      // When the payer email resolved to an account, name the username in the
+      // alert so ops can start from a candidate instead of re-running the
+      // email->kratos->mongo chase by hand. It is a LEAD, not an instruction:
+      // the checkout email is payer-typed and identity-unverified (a relative
+      // or an attacker can type anyone's address), so the alert says confirm
+      // before crediting rather than "credit this account".
+      const resolvedUsername = emailAttributedAccount?.username
       alertBridge({
         dedupKey: generateDedupKey.fygaroUnattributed(transactionId),
         source: "fygaro-webhook",
         severity: "warning",
         title: "Fygaro payment could not be attributed to an account",
-        detail: `customReference=${username ?? "<blank>"} — manual attribution needed`,
+        detail: resolvedUsername
+          ? `customReference=${username ?? "<blank>"} — UNVERIFIED payer-email match on @${resolvedUsername}; confirm the payer owns this account before crediting`
+          : `customReference=${username ?? "<blank>"} — manual attribution needed`,
         context: {
           transaction_id: transactionId,
           amount: String(payload.amount),
           client_email: payload.client?.email,
+          ...(resolvedUsername ? { email_matched_username: resolvedUsername } : {}),
         },
       })
       notifyOpsEvent({
         flow: "deposit",
         phase: "fygaro-unattributed",
         status: "pending",
+        accountId: emailAttributedAccount?.id,
         amount: { value: String(payload.amount), currency },
         meta: {
           provider: "Fygaro",
           transactionId,
           reference: username ?? "blank",
           email: payload.client?.email ?? "unknown",
+          ...(resolvedUsername ? { emailMatchedUsername: resolvedUsername } : {}),
         },
       })
       return res.status(200).json({ status: "recorded", attributed: false })
@@ -238,6 +350,7 @@ export const paymentHandler = async (req: Request, res: Response) => {
     // a clean slate — and the gate turns it into the retryable
     // `history-unavailable` stop.
     let priorDayGrossCents: number | undefined
+    let flashFeeDiscountPercent = 0
     if (creditEnabled && settings?.autoCreditEnabled && currency === "USD") {
       const priorSum = await sumFygaroTopupGrossCentsLast24h({
         accountId,
@@ -251,6 +364,15 @@ export const paymentHandler = async (req: Request, res: Response) => {
       } else {
         priorDayGrossCents = priorSum
       }
+
+      // Flash-fee discount from the operator's Fee Discount whitelist, read
+      // under the same could-actually-credit guard as the history read.
+      // Fail-open: the reader resolves to 0 on any failure, so an unreadable
+      // whitelist charges the standard fee instead of blocking the credit.
+      flashFeeDiscountPercent = await getFlashFeeDiscountPercent({
+        username: account.username,
+        flow: "topup",
+      })
     }
 
     const gate = evaluateCreditGate({
@@ -260,6 +382,7 @@ export const paymentHandler = async (req: Request, res: Response) => {
       grossCents,
       level: account.level,
       priorDayGrossCents,
+      flashFeeDiscountPercent,
     })
 
     if (!gate.credit) {

@@ -4,6 +4,7 @@ import { GT } from "@graphql/index"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import JMDCentsScalar from "@graphql/shared/types/scalar/jmd-cent-amount"
 import ErpNext from "@services/frappe/ErpNext"
+import { getFlashFeeDiscountPercent } from "@services/frappe/fee-discounts"
 
 // The settlement rate the app shows BEFORE a cashout offer exists. This is the
 // same source `CashoutManager.createOffer` locks into a JMD offer (ERPNext
@@ -27,7 +28,7 @@ const CashoutRateType = GT.Object({
     feeBasisPoints: {
       type: GT.NonNull(GT.Int),
       description:
-        "Flash cashout service fee in basis points, deducted from the USD amount before conversion.",
+        "Flash cashout service fee in basis points for the calling account, deducted from the USD amount before conversion. Already net of any Fee Discount the account is whitelisted for. The offer may still charge more than quoted: up to 1 bip from rounding when the discount is a fraction of a percent, or the full standard fee if the Fee Discount list is unreadable at the moment the offer is built.",
       resolve: (source: CashoutRateSource) => source.feeBasisPoints,
     },
   }),
@@ -35,14 +36,54 @@ const CashoutRateType = GT.Object({
 
 const CashoutRateQuery = GT.Field({
   type: GT.NonNull(CashoutRateType),
-  resolve: async () => {
+  resolve: async (
+    _: unknown,
+    __: Record<string, never>,
+    { domainAccount }: GraphQLPublicContextAuth,
+  ) => {
     const exchangeRate = await ErpNext.getCashoutExchangeRate()
     if (exchangeRate instanceof Error) {
       throw mapAndParseErrorForGqlResponse(exchangeRate)
     }
+
+    // Quote the fee this caller will actually be charged. CashoutManager
+    // applies the same Fee Discount when it builds the offer, so a whitelisted
+    // user seeing the undiscounted config fee here would watch the preview
+    // disagree with the offer — the exact mismatch this query exists to
+    // prevent. Fail-open (0 on any read problem) is inherited from
+    // getFlashFeeDiscountPercent: the preview degrades to the standard fee, it
+    // never breaks.
+    //
+    // Exactness caveat, deliberately documented rather than hidden: this is the
+    // same "kept basis points" arithmetic CashoutManager uses, but the field is
+    // an Int, so the discounted rate is rounded to a whole basis point HERE
+    // while the offer keeps full precision and rounds once at the end, on money
+    // (userPayment.multiplyBips(fee).multiplyBips(keptBips)). Whenever
+    // `fee * keptBips / 10000` is not an integer the two differ by up to 1 bip.
+    // With the configured 200-bip fee that is any discount_percent that is not a
+    // multiple of 0.5: e.g. 33.4% -> keptBips 6660 -> this quotes
+    // round(133.2) = 133 bips, while a $500 cashout is charged 1000¢ * 6660/10000
+    // = 666¢, i.e. $6.66 against a $6.65 preview. Whole/half-percent discounts —
+    // every discount ops has actually configured — are exact.
+    //
+    // Rounding is not the only way the offer can exceed this quote:
+    // getFlashFeeDiscountPercent fails open to 0 and caches for 60s, so a
+    // whitelist read that succeeds here and fails when createOffer runs a
+    // minute later charges the full fee against a discounted quote — 50 bips
+    // on a 25%-off account, not 1. Both divergences are stated in the SDL
+    // description rather than hidden; cashout-rate.spec.ts pins them.
+    const discountPercent = await getFlashFeeDiscountPercent({
+      username: domainAccount?.username,
+      flow: "cashout",
+    })
+    const keptBips = 10000 - Math.round(discountPercent * 100)
+    const feeBasisPoints = Math.round(
+      (Number(Cashout.OfferConfig.fee) * keptBips) / 10000,
+    )
+
     return {
       exchangeRate,
-      feeBasisPoints: Number(Cashout.OfferConfig.fee),
+      feeBasisPoints,
     }
   },
 })
