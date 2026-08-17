@@ -8,9 +8,16 @@ jest.mock("@services/logger", () => ({
   baseLogger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }))
 
+jest.mock("@services/rate-limit", () => ({
+  consumeLimiter: (...args: unknown[]) => mockConsumeLimiter(...args),
+}))
+
 const mockAuthorizeFygaroTopup = jest.fn()
+const mockConsumeLimiter = jest.fn()
 
 import { AccountLevel } from "@domain/accounts"
+import { RateLimitConfig } from "@domain/rate-limit"
+import { FygaroCheckoutCreateRateLimiterExceededError } from "@domain/rate-limit/errors"
 import { InputValidationError } from "@graphql/error"
 import FygaroCheckoutCreateMutation from "@graphql/public/root/mutation/fygaro-checkout-create"
 
@@ -55,6 +62,7 @@ const resolve = async (
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockConsumeLimiter.mockResolvedValue(true)
   mockAuthorizeFygaroTopup.mockResolvedValue({
     authorized: true,
     checkout: CHECKOUT,
@@ -212,5 +220,85 @@ describe("fygaroCheckoutCreate resolver", () => {
     const result = await resolve(8000)
 
     expect(result.errors[0].code).toBe("FYGARO_CHECKOUT_DISABLED")
+  })
+
+  describe("an abandoned link is not a spent allowance", () => {
+    it("says the link is open — never that the allowance is gone", async () => {
+      // The refusal every abandoned checkout produces. Saying "you have $0.00
+      // left of today's top-up limit" to an account that has spent $0.00 today
+      // is a false statement, and it points the customer (and support) at the
+      // wrong thing entirely.
+      mockAuthorizeFygaroTopup.mockResolvedValue({
+        authorized: false,
+        reason: "checkout-already-open",
+        remainingAllowanceCents: 0,
+        limitCents: 12500,
+        holdExpiresAt: new Date(Date.now() + 12 * 60_000),
+        holdAmountCents: 12500,
+      })
+
+      const result = await resolve(12500)
+
+      expect(result.errors[0].code).toBe("FYGARO_CHECKOUT_ALREADY_OPEN")
+      expect(result.errors[0].code).not.toBe("FYGARO_DAILY_ALLOWANCE_EXCEEDED")
+      expect(result.errors[0].message).toContain("$125.00 card top-up link open")
+      // Relative, not a wall-clock time: the server is in UTC and the customer
+      // is not, so "HH:MM" here is a time they cannot act on.
+      expect(result.errors[0].message).toContain("expires in 12 minute(s)")
+      expect(result.errors[0].message).not.toContain("left of today")
+    })
+
+    it("still refuses usefully when the hold's expiry is unknown", async () => {
+      mockAuthorizeFygaroTopup.mockResolvedValue({
+        authorized: false,
+        reason: "checkout-already-open",
+      })
+
+      const result = await resolve(12500)
+
+      expect(result.errors[0].code).toBe("FYGARO_CHECKOUT_ALREADY_OPEN")
+      expect(result.errors[0].message).toContain("already have a card top-up link open")
+    })
+
+    it("maps an unreadable reservation index to the same client-facing outage", async () => {
+      // The Redis-vs-ERPNext distinction exists for the ALERT, not the client.
+      mockAuthorizeFygaroTopup.mockResolvedValue({
+        authorized: false,
+        reason: "reservations-unavailable",
+      })
+
+      const result = await resolve(8000)
+
+      expect(result.errors[0].code).toBe("FYGARO_ALLOWANCE_UNAVAILABLE")
+    })
+  })
+
+  describe("rate limiting", () => {
+    it("consumes the per-account limiter BEFORE authorising", async () => {
+      // Every call that gets past the cheap gates runs an ERPNext list query,
+      // and the two gates a spam client would trip (`under-minimum`,
+      // `non-positive-net`) sit AFTER the history gate — so an unbounded
+      // mutation is unbounded ERPNext load pointed at the exact read whose
+      // failure refuses card top-ups for every user.
+      await resolve(8000)
+
+      expect(mockConsumeLimiter).toHaveBeenCalledWith({
+        rateLimitConfig: RateLimitConfig.fygaroCheckoutCreate,
+        keyToConsume: ACCOUNT_ID,
+      })
+    })
+
+    it("refuses without touching ERPNext once the limiter is spent", async () => {
+      mockConsumeLimiter.mockResolvedValue(
+        new FygaroCheckoutCreateRateLimiterExceededError(),
+      )
+
+      const result = await resolve(1)
+
+      expect(mockAuthorizeFygaroTopup).not.toHaveBeenCalled()
+      expect(result.checkout).toBeUndefined()
+      expect(result.errors).toHaveLength(1)
+      expect(result.errors[0].code).toBe("TOO_MANY_REQUEST")
+    })
   })
 })

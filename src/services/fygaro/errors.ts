@@ -17,6 +17,18 @@ export class FygaroAboveSinglePaymentLimitError extends FygaroError {}
 export class FygaroDailyAllowanceExceededError extends FygaroError {}
 
 /**
+ * The account is HOLDING its allowance in an unpaid checkout link, not spending
+ * it.
+ *
+ * Deliberately NOT `FygaroDailyAllowanceExceededError`: an account that has
+ * spent $0 today and abandoned one payment page has not exceeded anything, and
+ * telling it "you have $0.00 left of today's top-up limit" is a false statement
+ * that also invites the one action — retry now — that keeps hitting it. This
+ * says what is true and, in the message, when the hold lifts.
+ */
+export class FygaroCheckoutAlreadyOpenError extends FygaroError {}
+
+/**
  * We could not establish what the customer is allowed to spend — the settings
  * row or the 24h history was unreadable.
  *

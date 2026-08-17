@@ -2,15 +2,18 @@ import {
   authorizeFygaroTopup,
   type AuthorizeTopupResult,
 } from "@app/fygaro/authorize-topup"
+import { RateLimitConfig } from "@domain/rate-limit"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { GT } from "@graphql/index"
 import FygaroCheckout from "@graphql/public/types/object/fygaro-checkout"
 import CentAmount from "@graphql/public/types/scalar/cent-amount"
 import IError from "@graphql/shared/types/abstract/error"
+import { consumeLimiter } from "@services/rate-limit"
 import {
   FygaroAboveSinglePaymentLimitError,
   FygaroAllowanceUnavailableError,
   FygaroBelowMinimumError,
+  FygaroCheckoutAlreadyOpenError,
   FygaroCheckoutDisabledError,
   FygaroDailyAllowanceExceededError,
   FygaroLevelNotEligibleError,
@@ -41,6 +44,16 @@ const FygaroCheckoutCreateInput = GT.Input({
 const centsToDollars = (cents: number) => (cents / 100).toFixed(2)
 
 /**
+ * Whole minutes until `at`, floor 1.
+ *
+ * Deliberately relative rather than a wall-clock "HH:MM": the server renders in
+ * UTC and the customer is not in it, so a clock time here is a time they cannot
+ * act on. "in 12 minutes" is correct in every timezone.
+ */
+const minutesUntil = (at: Date, nowMs: number = Date.now()): number =>
+  Math.max(1, Math.ceil((at.getTime() - nowMs) / 60_000))
+
+/**
  * Turn a refusal into the error the client shows the customer.
  *
  * Where we know the actual number, it goes in the message: "you have $45 left
@@ -48,7 +61,14 @@ const centsToDollars = (cents: number) => (cents / 100).toFixed(2)
  * charged at this point, so they can still act on it.
  */
 const failureError = (result: AuthorizeTopupResult & { authorized: false }): Error => {
-  const { reason, limitCents, minimumCents, remainingAllowanceCents } = result
+  const {
+    reason,
+    limitCents,
+    minimumCents,
+    remainingAllowanceCents,
+    holdExpiresAt,
+    holdAmountCents,
+  } = result
   switch (reason) {
     case "below-minimum":
       return new FygaroBelowMinimumError(
@@ -68,6 +88,18 @@ const failureError = (result: AuthorizeTopupResult & { authorized: false }): Err
           ? "Amount is above your remaining daily top-up allowance"
           : `You have $${centsToDollars(remainingAllowanceCents)} left of today's top-up limit`,
       )
+    case "checkout-already-open":
+      // The account has NOT spent this money — it is holding it in a link it
+      // opened and did not pay. Saying "you have $0.00 left of today's limit"
+      // to an account that has spent $0.00 today is simply false, and it points
+      // the customer (and support) at the wrong thing entirely.
+      return new FygaroCheckoutAlreadyOpenError(
+        holdExpiresAt === undefined
+          ? "You already have a card top-up link open. Finish that payment, or wait for it to expire, before starting another."
+          : `You already have a${
+              holdAmountCents === undefined ? "" : ` $${centsToDollars(holdAmountCents)}`
+            } card top-up link open — it expires in ${minutesUntil(holdExpiresAt)} minute(s). Finish that payment, or wait for it to expire, before starting another.`,
+      )
     case "non-positive-net":
       // Above the operator minimum, but the fixed processor + Flash fees eat
       // the whole thing. "Too small" is the honest thing to tell the customer;
@@ -77,11 +109,16 @@ const failureError = (result: AuthorizeTopupResult & { authorized: false }): Err
       )
     case "no-daily-limit-for-level":
       // Deterministic and permanent until the account upgrades — NOT one of the
-      // two transient ERPNext failures below. Telling a level-0 account to try
-      // again later would loop forever and send support after a phantom outage.
+      // three transient failures below. Telling a level-0 account to try again
+      // later would loop forever and send support after a phantom outage.
       return new FygaroLevelNotEligibleError()
+    // The three transient stops. ERPNext settings, ERPNext history and the
+    // Redis reservation index fail differently and alert differently, but the
+    // customer-facing answer is identical: we could not measure your allowance,
+    // try again. The distinction exists for the ALERT and the log, not here.
     case "settings-unavailable":
     case "history-unavailable":
+    case "reservations-unavailable":
       return new FygaroAllowanceUnavailableError()
     case "checkout-disabled":
       return new FygaroCheckoutDisabledError()
@@ -121,6 +158,21 @@ const fygaroCheckoutCreate = GT.Field<
           ),
         ],
       }
+    }
+
+    // Per-account, BEFORE the authorisation runs. Every call that gets past the
+    // cheap deterministic gates runs an ERPNext list query, and the two gates a
+    // spam client would trip (`under-minimum`, `non-positive-net`) sit AFTER
+    // the history gate — so `fygaroCheckoutCreate(amount: 1)` in a loop is
+    // unbounded ERPNext load pointed at the exact read whose failure refuses
+    // card top-ups for every user. Same treatment as invoiceCreate /
+    // onChainAddressCreate / inviteCreate.
+    const limitOk = await consumeLimiter({
+      rateLimitConfig: RateLimitConfig.fygaroCheckoutCreate,
+      keyToConsume: domainAccount.id,
+    })
+    if (limitOk instanceof Error) {
+      return { errors: [mapAndParseErrorForGqlResponse(limitOk)] }
     }
 
     const result = await authorizeFygaroTopup({

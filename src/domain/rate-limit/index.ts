@@ -1,6 +1,7 @@
 import {
   getFailedLoginAttemptPerIpLimits,
   getFailedLoginAttemptPerLoginIdentifierLimits,
+  getFygaroCheckoutCreateAttemptLimits,
   getInviteCreateAttemptLimits,
   getInviteTargetAttemptLimits,
   getInvoiceCreateAttemptLimits,
@@ -11,6 +12,7 @@ import {
 } from "@config"
 
 import {
+  FygaroCheckoutCreateRateLimiterExceededError,
   InviteCreateRateLimiterExceededError,
   InviteTargetRateLimiterExceededError,
   InvoiceCreateForRecipientRateLimiterExceededError,
@@ -32,6 +34,7 @@ export const RateLimitPrefix = {
   onChainAddressCreate: "onchain_address_create",
   inviteCreate: "invite_daily",
   inviteTarget: "invite_target",
+  fygaroCheckoutCreate: "fygaro_checkout_create",
 } as const
 
 export const RateLimitConfig: { [key: string]: RateLimitConfig } = {
@@ -79,5 +82,13 @@ export const RateLimitConfig: { [key: string]: RateLimitConfig } = {
     key: RateLimitPrefix.inviteTarget,
     limits: getInviteTargetAttemptLimits(),
     error: InviteTargetRateLimiterExceededError,
+  },
+  // Same class of per-account resource-minting call as invoiceCreate and
+  // onChainAddressCreate — except this one also runs an ERPNext list query per
+  // call, against the exact read every other card top-up depends on.
+  fygaroCheckoutCreate: {
+    key: RateLimitPrefix.fygaroCheckoutCreate,
+    limits: getFygaroCheckoutCreateAttemptLimits(),
+    error: FygaroCheckoutCreateRateLimiterExceededError,
   },
 }

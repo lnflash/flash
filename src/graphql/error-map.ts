@@ -263,6 +263,10 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         "Too many onchain addresses creation, please wait for a while and try again."
       return new TooManyRequestError({ message, logger: baseLogger })
 
+    case "FygaroCheckoutCreateRateLimiterExceededError":
+      message = "Too many card top-up attempts, please wait for a while and try again."
+      return new TooManyRequestError({ message, logger: baseLogger })
+
     case "UserCodeAttemptIdentifierRateLimiterExceededError":
       message = "Too many request code attempts, please wait for a while and try again."
       return new TooManyRequestError({ message, logger: baseLogger })
@@ -696,6 +700,13 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = error.message || "Amount is above your remaining daily top-up allowance"
       return bridgeGqlError({
         code: "FYGARO_DAILY_ALLOWANCE_EXCEEDED",
+        message,
+      })
+
+    case "FygaroCheckoutAlreadyOpenError":
+      message = error.message || "You already have a card top-up link open"
+      return bridgeGqlError({
+        code: "FYGARO_CHECKOUT_ALREADY_OPEN",
         message,
       })
 

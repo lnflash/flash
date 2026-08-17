@@ -90,6 +90,7 @@ jest.mock("@services/fygaro/webhook-server/fygaro-settings", () => ({
 jest.mock("@services/fygaro/checkout-intent-store", () => ({
   readIntent: (...args: unknown[]) => mockReadIntent(...args),
   consumeIntent: (...args: unknown[]) => mockConsumeIntent(...args),
+  releaseIntentReservation: (...args: unknown[]) => mockReleaseIntentReservation(...args),
 }))
 
 const mockLockIdempotencyKey = jest.fn()
@@ -108,6 +109,7 @@ const mockGetFygaroSettings = jest.fn()
 const mockSumFygaroLast24h = jest.fn()
 const mockReadIntent = jest.fn()
 const mockConsumeIntent = jest.fn()
+const mockReleaseIntentReservation = jest.fn()
 
 // Canonical operator settings: 2.99% + $0.49 processor, 2.0% Flash margin,
 // $500 auto-credit limit, auto-credit on. For a $10.00 top-up this yields a
@@ -184,6 +186,7 @@ beforeEach(() => {
   // Legacy default: the reference carries no intent, so nothing is looked up.
   mockReadIntent.mockResolvedValue({ found: false })
   mockConsumeIntent.mockResolvedValue({ consumed: true })
+  mockReleaseIntentReservation.mockResolvedValue(undefined)
 })
 
 describe("fygaro paymentHandler", () => {
@@ -1188,6 +1191,84 @@ describe("fygaro paymentHandler", () => {
 
         expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
         expect(mockConsumeIntent).not.toHaveBeenCalled()
+      })
+    })
+
+    // A hold left behind after the payment is already counted in ERPNext is a
+    // DOUBLE count: `sumFygaroTopupGrossCentsSince` includes the Fiat Received
+    // row the handler just wrote, so the same $50 is subtracted from the daily
+    // allowance twice for the rest of the JWT window — refusing the customer's
+    // next legitimate top-up on top of an already-bad event.
+    describe("the hold is released on terminal answers that did not credit", () => {
+      it("releases the reservation — but NOT the record — when the credit failed", async () => {
+        mockReadIntent.mockResolvedValue(intent())
+        mockCreditFygaroTopup.mockResolvedValue(
+          new FygaroCreditError("insufficient-treasury-float", "insufficient balance"),
+        )
+        const res = makeRes()
+
+        await paymentHandler(makeReq(SIGNED_BODY), res)
+
+        expect(mockReleaseIntentReservation).toHaveBeenCalledWith(
+          expect.objectContaining({
+            intentId: INTENT_ID,
+            accountId: ACCOUNT_ID,
+            amountCents: 1000,
+          }),
+        )
+        // The record survives: the manual credit this alert asks for still
+        // needs the cross-check of what was originally authorised, and the
+        // provider retry this branch invites still needs something to verify
+        // against.
+        expect(mockConsumeIntent).not.toHaveBeenCalled()
+        expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
+      })
+
+      it("releases the reservation when a signed reference no longer resolves to an account", async () => {
+        // Terminal: the dedupe lock is non-releasing, so Fygaro's retries ack
+        // "already_processed" and this delivery is the only one that can let go
+        // of the hold.
+        mockFindByUsername.mockResolvedValue(
+          new CouldNotFindAccountFromUsernameError(VALID_BODY.customReference),
+        )
+        mockReadIntent.mockResolvedValue(intent())
+        const res = makeRes()
+
+        await paymentHandler(makeReq(SIGNED_BODY), res)
+
+        expect(res.json).toHaveBeenCalledWith({ status: "recorded", attributed: false })
+        expect(mockReleaseIntentReservation).toHaveBeenCalledWith(
+          expect.objectContaining({ intentId: INTENT_ID, amountCents: 1000 }),
+        )
+        expect(mockConsumeIntent).not.toHaveBeenCalled()
+      })
+
+      it("does NOT release the hold on a transient 500 that asks for a retry", async () => {
+        // The retry will re-run this handler and reach a terminal answer that
+        // releases it. Letting go early would let a second link be minted
+        // against an allowance this payment has already consumed.
+        mockSumFygaroLast24h.mockResolvedValue(new Error("erpnext down"))
+        mockReadIntent.mockResolvedValue(intent())
+        const res = makeRes()
+
+        await paymentHandler(makeReq(SIGNED_BODY), res)
+
+        expect(res.status).toHaveBeenCalledWith(500)
+        expect(mockReleaseIntentReservation).not.toHaveBeenCalled()
+        expect(mockConsumeIntent).not.toHaveBeenCalled()
+      })
+
+      it("leaves the release to consumeIntent on a successful credit", async () => {
+        // consumeIntent releases the hold itself once it wins the claim, so
+        // releasing here as well would be a second, redundant zrem.
+        mockReadIntent.mockResolvedValue(intent())
+        const res = makeRes()
+
+        await paymentHandler(makeReq(SIGNED_BODY), res)
+
+        expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
+        expect(mockConsumeIntent).toHaveBeenCalledWith(INTENT_ID)
+        expect(mockReleaseIntentReservation).not.toHaveBeenCalled()
       })
     })
   })

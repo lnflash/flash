@@ -4,9 +4,11 @@ import { parseCustomReference } from "@services/fygaro/checkout"
 const mockGetFygaroSettings = jest.fn()
 const mockSumPrior = jest.fn()
 const mockSaveIntent = jest.fn()
-const mockSumOutstanding = jest.fn()
+const mockReadReservations = jest.fn()
+const mockReadIntent = jest.fn()
 const mockReleaseReservation = jest.fn()
 const mockGetFlashFeeDiscountPercent = jest.fn()
+const mockAlertBridge = jest.fn()
 
 jest.mock("@services/fygaro/webhook-server/fygaro-settings", () => ({
   getFygaroSettings: (...args: unknown[]) => mockGetFygaroSettings(...args),
@@ -18,10 +20,19 @@ jest.mock("@services/frappe/fee-discounts", () => ({
   getFlashFeeDiscountPercent: (...args: unknown[]) =>
     mockGetFlashFeeDiscountPercent(...args),
 }))
+jest.mock("@services/alerts", () => ({
+  alertBridge: (...args: unknown[]) => mockAlertBridge(...args),
+  // The REAL key generator: the static-per-reason key selection is exactly what
+  // makes an outage one incident per failing dependency instead of one page per
+  // refused customer (or, before this, zero), so stubbing it would let a
+  // regression pass.
+  generateDedupKey: jest.requireActual("@services/alerts/dedup-key").generateDedupKey,
+}))
 jest.mock("@services/fygaro/checkout-intent-store", () => ({
   newIntentId: () => "intent-fixed",
   saveIntent: (...args: unknown[]) => mockSaveIntent(...args),
-  sumOutstandingAuthorizedCents: (...args: unknown[]) => mockSumOutstanding(...args),
+  readOutstandingReservations: (...args: unknown[]) => mockReadReservations(...args),
+  readIntent: (...args: unknown[]) => mockReadIntent(...args),
   releaseIntentReservation: (...args: unknown[]) => mockReleaseReservation(...args),
 }))
 
@@ -65,15 +76,25 @@ const SETTINGS = {
   dailyTopupLimits: { 1: 100, 2: 500 },
 }
 
+const NOW_MS = 1_700_000_000_000
+
 const authorize = (overrides: Record<string, unknown> = {}) =>
   authorizeFygaroTopup({
     accountId: "acct-1",
     username: "jaceth2009",
     level: AccountLevel.One,
     amountCents: 8000,
-    nowMs: 1_700_000_000_000,
+    nowMs: NOW_MS,
     ...overrides,
   })
+
+// One live, unpaid link the account is holding. `expiresAtMs` is the zset score
+// — the moment the JWT stops being payable and the hold stops counting.
+const hold = (amountCents: number, intentId = "intent-open", expiresInMs = 900_000) => ({
+  intentId,
+  amountCents,
+  expiresAtMs: NOW_MS + expiresInMs,
+})
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -82,7 +103,8 @@ beforeEach(() => {
   mockCreditEnabled = true
   mockGetFygaroSettings.mockResolvedValue({ ...SETTINGS })
   mockSumPrior.mockResolvedValue(0)
-  mockSumOutstanding.mockResolvedValue(0)
+  mockReadReservations.mockResolvedValue([])
+  mockReadIntent.mockResolvedValue({ found: false })
   mockSaveIntent.mockResolvedValue(true)
   mockGetFlashFeeDiscountPercent.mockResolvedValue(0)
 })
@@ -116,6 +138,16 @@ describe("authorizeFygaroTopup", () => {
       username: intent.username,
       intentId: intent.intentId,
     })
+  })
+
+  it("stores the signed link itself, so an abandoned checkout can be re-offered", async () => {
+    // Without the URL on the record there is no way out of a self-inflicted
+    // hold: the client cannot cancel it and cannot be given it back.
+    const res = await authorize()
+
+    const [{ intent }] = mockSaveIntent.mock.calls[0]
+    expect(intent.checkoutUrl).toBe(res.checkout.url)
+    expect(intent.expiresAtMs).toBe(res.checkout.expiresAt.getTime())
   })
 
   it("reports what is left after the authorised amount, not before it", async () => {
@@ -277,15 +309,14 @@ describe("authorizeFygaroTopup", () => {
   })
 
   describe("outstanding authorisations count against the allowance", () => {
-    it("refuses a second full-allowance link while the first is still live", async () => {
+    it("refuses a second link for a DIFFERENT amount while the first is still live", async () => {
       // Authorisation is not reservation unless live links are subtracted:
       // otherwise N calls against a $100 allowance each mint a $100 link, and
       // paying two of them captures $200 while the webhook credits one.
-      mockSumOutstanding.mockResolvedValue(8000)
-      const res = await authorize({ amountCents: 8000 })
+      mockReadReservations.mockResolvedValue([hold(8000)])
+      const res = await authorize({ amountCents: 5000 })
 
       expect(res.authorized).toBe(false)
-      expect(res.reason).toBe("exceeds-daily-allowance")
       expect(res.remainingAllowanceCents).toBe(2000)
       expect(mockSaveIntent).not.toHaveBeenCalled()
     })
@@ -293,7 +324,7 @@ describe("authorizeFygaroTopup", () => {
     it("counts outstanding links alongside settled charges", async () => {
       // $30 settled + $30 authorised-but-unpaid = $60 of a $100 allowance.
       mockSumPrior.mockResolvedValue(3000)
-      mockSumOutstanding.mockResolvedValue(3000)
+      mockReadReservations.mockResolvedValue([hold(3000)])
       const res = await authorize({ amountCents: 3000 })
 
       expect(res.authorized).toBe(true)
@@ -303,18 +334,22 @@ describe("authorizeFygaroTopup", () => {
     it("never treats an unreadable reservation index as nothing outstanding", async () => {
       // Failing open here is exactly the hole: "no live links" is what lets a
       // second full-allowance link be minted.
-      mockSumOutstanding.mockResolvedValue(new Error("redis down"))
+      mockReadReservations.mockResolvedValue(new Error("redis down"))
       const res = await authorize()
 
       expect(res.authorized).toBe(false)
-      expect(res.reason).toBe("history-unavailable")
+      // NOT `history-unavailable`: that name sends whoever reads the alert to
+      // ERPNext for a fault that is in Redis.
+      expect(res.reason).toBe("reservations-unavailable")
       expect(mockSaveIntent).not.toHaveBeenCalled()
     })
 
     it("rolls the reservation back when a racing request got in between", async () => {
       // Both requests passed the check, both reserved; the re-read now shows the
       // combined total, so this one backs out rather than over-issuing.
-      mockSumOutstanding.mockResolvedValueOnce(0).mockResolvedValueOnce(16000)
+      mockReadReservations
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([hold(8000, "intent-racer"), hold(8000, "intent-fixed")])
       const res = await authorize({ amountCents: 8000 })
 
       expect(res.authorized).toBe(false)
@@ -322,14 +357,161 @@ describe("authorizeFygaroTopup", () => {
       expect(mockReleaseReservation).toHaveBeenCalledWith(
         expect.objectContaining({ intentId: "intent-fixed", accountId: "acct-1" }),
       )
+      // The number reported must come from the RE-READ, minus this request's own
+      // reservation (just released). Reporting the pre-race $100 would hand the
+      // client a bigger number than reality in exactly the case where it is
+      // wrong — it retries the same amount and fails again.
+      expect(res.remainingAllowanceCents).toBe(2000)
     })
 
     it("keeps the reservation when the re-read still fits", async () => {
-      mockSumOutstanding.mockResolvedValueOnce(0).mockResolvedValueOnce(8000)
+      mockReadReservations
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([hold(8000, "intent-fixed")])
       const res = await authorize({ amountCents: 8000 })
 
       expect(res.authorized).toBe(true)
       expect(mockReleaseReservation).not.toHaveBeenCalled()
+    })
+  })
+
+  // The single most common thing a payer does is open a payment page and walk
+  // away from it. Before this, that self-inflicted hold was reported as
+  // "exceeds-daily-allowance" with "$0.00 left" — to an account that had spent
+  // nothing — and there was no way for the client to clear its own hold.
+  describe("an abandoned checkout is not a spent allowance", () => {
+    const OPEN_URL = "https://fygaro.com/en/pb/ABC123?jwt=open.link.signature"
+    const openIntent = (overrides: Record<string, unknown> = {}) => ({
+      found: true,
+      intent: {
+        intentId: "intent-open",
+        accountId: "acct-1",
+        username: "jaceth2009",
+        amountCents: 10000,
+        currency: "USD",
+        createdAtMs: NOW_MS - 60_000,
+        checkoutUrl: OPEN_URL,
+        expiresAtMs: NOW_MS + 840_000,
+        ...overrides,
+      },
+    })
+
+    it("hands the SAME live link back when the customer retries the same amount", async () => {
+      // $100 cap, $0 settled, one live $100 link: the customer is asking for the
+      // link they already have. Refusing them for their own reservation with
+      // "you have $0.00 left" is both false and a dead end.
+      mockReadReservations.mockResolvedValue([hold(10000)])
+      mockReadIntent.mockResolvedValue(openIntent())
+      const res = await authorize({ amountCents: 10000 })
+
+      expect(res.authorized).toBe(true)
+      expect(res.reused).toBe(true)
+      expect(res.checkout.url).toBe(OPEN_URL)
+      // Nothing new is minted or reserved — the outstanding total must not move.
+      expect(mockSaveIntent).not.toHaveBeenCalled()
+      expect(res.remainingAllowanceCents).toBe(0)
+    })
+
+    it("refuses with checkout-already-open, not exceeds-daily-allowance, when it cannot re-offer", async () => {
+      // A different amount: the hold still blocks it, but the account has spent
+      // $0.00 today, so "you have $0.00 left of today's top-up limit" would be a
+      // false statement about a limit it never reached.
+      mockReadReservations.mockResolvedValue([hold(10000)])
+      const res = await authorize({ amountCents: 5000 })
+
+      expect(res.authorized).toBe(false)
+      expect(res.reason).toBe("checkout-already-open")
+      expect(res.holdExpiresAt).toEqual(new Date(NOW_MS + 900_000))
+      expect(res.holdAmountCents).toBe(10000)
+    })
+
+    it("never hands back a link whose record names a different account", async () => {
+      // The id came out of THIS account's reservation index, so a record naming
+      // someone else means the two disagree — and the link is not ours to give.
+      mockReadReservations.mockResolvedValue([hold(10000)])
+      mockReadIntent.mockResolvedValue(openIntent({ accountId: "acct-someone-else" }))
+      const res = await authorize({ amountCents: 10000 })
+
+      expect(res.authorized).toBe(false)
+      expect(res.reason).toBe("checkout-already-open")
+    })
+
+    it("refuses an intent record written before the URL was stored", async () => {
+      // Records already in Redis when this shipped have no checkoutUrl, so they
+      // cannot be re-offered — but the refusal must still be the honest one.
+      mockReadReservations.mockResolvedValue([hold(10000)])
+      mockReadIntent.mockResolvedValue(
+        openIntent({ checkoutUrl: undefined, expiresAtMs: undefined }),
+      )
+      const res = await authorize({ amountCents: 10000 })
+
+      expect(res.authorized).toBe(false)
+      expect(res.reason).toBe("checkout-already-open")
+    })
+
+    it("names the SOONEST hold to lift, since that is when allowance reappears", async () => {
+      mockReadReservations.mockResolvedValue([
+        hold(6000, "intent-late", 800_000),
+        hold(4000, "intent-soon", 120_000),
+      ])
+      const res = await authorize({ amountCents: 5000 })
+
+      expect(res.reason).toBe("checkout-already-open")
+      expect(res.holdExpiresAt).toEqual(new Date(NOW_MS + 120_000))
+      expect(res.holdAmountCents).toBe(4000)
+    })
+
+    it("still says exceeds-daily-allowance when the SETTLED spend is what blocks it", async () => {
+      // $95 already charged today against a $100 cap. The holds are irrelevant:
+      // this account really has spent its allowance, and saying so is correct.
+      mockSumPrior.mockResolvedValue(9500)
+      mockReadReservations.mockResolvedValue([hold(1000)])
+      const res = await authorize({ amountCents: 8000 })
+
+      expect(res.authorized).toBe(false)
+      expect(res.reason).toBe("exceeds-daily-allowance")
+    })
+  })
+
+  // The webhook side pages on both of its transient stops. This side had no
+  // signal at all, so card top-ups could be 100% unavailable for every user
+  // while nothing fired.
+  describe("a broken pre-charge check is an incident, not a silence", () => {
+    it.each([
+      ["settings-unavailable", () => mockGetFygaroSettings.mockResolvedValue(undefined)],
+      [
+        "history-unavailable",
+        () => mockSumPrior.mockResolvedValue(new Error("erpnext down")),
+      ],
+      [
+        "reservations-unavailable",
+        () => mockReadReservations.mockResolvedValue(new Error("redis down")),
+      ],
+    ])("pages once, naming %s, when the check cannot run", async (reason, arrange) => {
+      arrange()
+      const res = await authorize()
+
+      expect(res.authorized).toBe(false)
+      expect(res.reason).toBe(reason)
+      expect(mockAlertBridge).toHaveBeenCalledTimes(1)
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({
+          severity: "warning",
+          // Static per reason: an outage collapses to ONE incident per failing
+          // dependency rather than one page per refused customer, and Redis
+          // never lands in the same incident as ERPNext.
+          dedupKey: `fygaro:authorize-unavailable:${reason}`,
+          context: expect.objectContaining({ reason }),
+        }),
+      )
+    })
+
+    it("never pages for a refusal the customer caused", async () => {
+      mockSumPrior.mockResolvedValue(9500)
+      const res = await authorize({ amountCents: 8000 })
+
+      expect(res.reason).toBe("exceeds-daily-allowance")
+      expect(mockAlertBridge).not.toHaveBeenCalled()
     })
   })
 
@@ -367,7 +549,7 @@ describe("authorizeFygaroTopup", () => {
       expect(res.authorized).toBe(false)
       expect(res.reason).toBe("above-single-payment-limit")
       expect(mockSumPrior).not.toHaveBeenCalled()
-      expect(mockSumOutstanding).not.toHaveBeenCalled()
+      expect(mockReadReservations).not.toHaveBeenCalled()
     })
   })
 })

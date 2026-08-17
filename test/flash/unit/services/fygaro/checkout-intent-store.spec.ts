@@ -29,12 +29,14 @@ jest.mock("@services/logger", () => ({
   baseLogger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }))
 
+import { CacheUndefinedError, UnknownCacheServiceError } from "@domain/cache"
+import { baseLogger } from "@services/logger"
 import {
   consumeIntent,
   readIntent,
+  readOutstandingReservations,
   releaseIntentReservation,
   saveIntent,
-  sumOutstandingAuthorizedCents,
 } from "@services/fygaro/checkout-intent-store"
 
 const NOW_MS = 1_700_000_000_000
@@ -47,6 +49,15 @@ const INTENT = {
   amountCents: 8000,
   currency: "USD",
   createdAtMs: NOW_MS,
+}
+
+const sumOutstanding = async () => {
+  const reservations = await readOutstandingReservations({
+    accountId: "acct-1",
+    nowMs: NOW_MS,
+  })
+  if (reservations instanceof Error) return reservations
+  return reservations.reduce((sum, r) => sum + r.amountCents, 0)
 }
 
 beforeEach(() => {
@@ -91,19 +102,45 @@ describe("saveIntent", () => {
   })
 })
 
-describe("sumOutstandingAuthorizedCents", () => {
+describe("readOutstandingReservations", () => {
   it("sums the live authorisations for the account", async () => {
-    mockZrange.mockResolvedValue(["8000:intent-1", "2500:intent-2"])
+    mockZrange.mockResolvedValue([
+      "8000:intent-1",
+      String(NOW_MS + 1000),
+      "2500:intent-2",
+      String(NOW_MS + 2000),
+    ])
+
+    expect(await sumOutstanding()).toBe(10500)
+  })
+
+  it("reports each hold's id and expiry, not just a total", async () => {
+    // A refusal that cannot say WHEN the hold lifts is a dead end, and handing
+    // an abandoned link back needs the intent id it is stored under.
+    mockZrange.mockResolvedValue(["8000:intent-1", String(NOW_MS + 900_000)])
 
     expect(
-      await sumOutstandingAuthorizedCents({ accountId: "acct-1", nowMs: NOW_MS }),
-    ).toBe(10500)
+      await readOutstandingReservations({ accountId: "acct-1", nowMs: NOW_MS }),
+    ).toEqual([
+      { intentId: "intent-1", amountCents: 8000, expiresAtMs: NOW_MS + 900_000 },
+    ])
+  })
+
+  it("reads the scores, or the expiry would be unknowable", async () => {
+    await readOutstandingReservations({ accountId: "acct-1", nowMs: NOW_MS })
+
+    expect(mockZrange).toHaveBeenCalledWith(
+      "fygaro-checkout-intents:acct-1",
+      0,
+      -1,
+      "WITHSCORES",
+    )
   })
 
   it("drops authorisations whose JWT has already expired before summing", async () => {
     // Holding an abandoned, no-longer-payable link against the allowance would
     // lock the customer out for the rest of the window for nothing.
-    await sumOutstandingAuthorizedCents({ accountId: "acct-1", nowMs: NOW_MS })
+    await readOutstandingReservations({ accountId: "acct-1", nowMs: NOW_MS })
 
     expect(mockZremrangebyscore).toHaveBeenCalledWith(
       "fygaro-checkout-intents:acct-1",
@@ -117,7 +154,7 @@ describe("sumOutstandingAuthorizedCents", () => {
     // full-allowance link be minted while the first is still payable.
     mockZrange.mockRejectedValue(new Error("redis down"))
 
-    const result = await sumOutstandingAuthorizedCents({
+    const result = await readOutstandingReservations({
       accountId: "acct-1",
       nowMs: NOW_MS,
     })
@@ -126,11 +163,14 @@ describe("sumOutstandingAuthorizedCents", () => {
   })
 
   it("ignores a member it cannot parse instead of summing NaN", async () => {
-    mockZrange.mockResolvedValue(["garbage", "2500:intent-2"])
+    mockZrange.mockResolvedValue([
+      "garbage",
+      String(NOW_MS + 1000),
+      "2500:intent-2",
+      String(NOW_MS + 2000),
+    ])
 
-    expect(
-      await sumOutstandingAuthorizedCents({ accountId: "acct-1", nowMs: NOW_MS }),
-    ).toBe(2500)
+    expect(await sumOutstanding()).toBe(2500)
   })
 })
 
@@ -151,6 +191,25 @@ describe("readIntent", () => {
     mockCacheGet.mockResolvedValue(new Error("redis down"))
 
     expect(await readIntent("intent-1")).toEqual({ found: false })
+  })
+
+  it("does NOT warn on an ordinary cache miss", async () => {
+    // RedisCacheService.get returns CacheUndefinedError for a plain miss, which
+    // is what EVERY expired, evicted or already-redeemed intent looks like —
+    // including every provider re-delivery after a successful redemption.
+    // Warning on those turns the one line that should mean "Redis is broken"
+    // into routine noise, and an unactionable line stops being read at all.
+    mockCacheGet.mockResolvedValue(new CacheUndefinedError())
+
+    expect(await readIntent("intent-1")).toEqual({ found: false })
+    expect(baseLogger.warn).not.toHaveBeenCalled()
+  })
+
+  it("still warns on a real cache fault", async () => {
+    mockCacheGet.mockResolvedValue(new UnknownCacheServiceError("redis down"))
+
+    expect(await readIntent("intent-1")).toEqual({ found: false })
+    expect(baseLogger.warn).toHaveBeenCalledTimes(1)
   })
 })
 

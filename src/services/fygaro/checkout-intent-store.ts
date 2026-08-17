@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto"
 
+import { CacheUndefinedError } from "@domain/cache"
 import { baseLogger } from "@services/logger"
 
 // Loaded on first use rather than at import time. `@services/cache` and
@@ -13,14 +14,29 @@ const redisClient = async () => (await import("@services/redis")).redis
 
 /**
  * What the server authorised, so the webhook can check what actually got paid
- * against it.
+ * against it — and so the pre-charge allowance check can subtract links this
+ * account is still holding.
  *
- * The signed JWT already prevents the customer editing the amount, so this is
- * not the primary defence — it is the record that lets us verify the two
- * independently, catch a signing/config mistake on our side, and make each
- * authorisation redeemable at most once. Losing this store degrades a payment
- * to the legacy unverified path; it never blocks a credit on its own (see
- * readIntent).
+ * This store has TWO halves with OPPOSITE failure postures. Read both before
+ * ruling Redis in or out of an incident:
+ *
+ *   - The RESERVATION INDEX (`readOutstandingReservations`) is FAIL-CLOSED, and
+ *     `authorizeFygaroTopup` refuses when it cannot be read. Redis is therefore
+ *     ON THE CRITICAL PATH for authorising a card top-up: if Redis is down,
+ *     `fygaroCheckoutCreate` refuses every request with
+ *     FYGARO_ALLOWANCE_UNAVAILABLE. Failing open here is what would let a second
+ *     full-allowance link be minted against an allowance the first already
+ *     spent, so this is deliberate — but it means "card top-ups are refusing"
+ *     has Redis as a first-class suspect alongside ERPNext.
+ *   - The CROSS-CHECK record (`readIntent`) is FAIL-OPEN: an unreadable intent
+ *     is treated as "no authorisation on file", the same position every legacy
+ *     payment is in, and the webhook's own credit gate still applies in full.
+ *     Losing it never blocks a credit for a payment already captured.
+ *
+ * The signed JWT already prevents the customer editing the amount, so the
+ * cross-check is not the primary defence — it is the record that lets us verify
+ * the two independently, catch a signing/config mistake on our side, and make
+ * each authorisation redeemable at most once.
  */
 export type FygaroCheckoutIntent = {
   intentId: string
@@ -29,6 +45,13 @@ export type FygaroCheckoutIntent = {
   amountCents: number
   currency: string
   createdAtMs: number
+  // The signed link itself, so a customer who abandoned the payment page can be
+  // handed their OWN live link back instead of being refused by the hold it
+  // still has on their allowance. Optional because records written before this
+  // field existed are still in Redis (and still verifiable); a record without
+  // them simply cannot be re-offered.
+  checkoutUrl?: string
+  expiresAtMs?: number
 }
 
 const cacheKey = (intentId: string) => `fygaro-checkout-intent:${intentId}`
@@ -102,28 +125,60 @@ export const saveIntent = async ({
 }
 
 /**
- * Gross cents this account has live, unredeemed authorisations for.
+ * One live, unredeemed authorisation this account is still holding.
  *
- * Fails closed (returns the error) rather than resolving to 0: treating an
- * unreadable index as "nothing outstanding" is precisely the state that lets a
- * second link be minted against an allowance the first one already spent.
+ * `expiresAtMs` is the zset score — the moment the JWT stops being payable and
+ * the hold therefore stops counting against the allowance. The caller needs it
+ * to tell a refused customer WHEN their allowance frees up, which is the
+ * difference between an actionable refusal and a dead end.
  */
-export const sumOutstandingAuthorizedCents = async ({
+export type FygaroReservation = {
+  intentId: string
+  amountCents: number
+  expiresAtMs: number
+}
+
+/**
+ * The live, unredeemed authorisations this account is still holding.
+ *
+ * FAIL-CLOSED (returns the error) rather than resolving to an empty list:
+ * treating an unreadable index as "nothing outstanding" is precisely the state
+ * that lets a second link be minted against an allowance the first one already
+ * spent. See the type docstring above — this is the half that puts Redis on the
+ * critical path for authorising a top-up.
+ */
+export const readOutstandingReservations = async ({
   accountId,
   nowMs,
 }: {
   accountId: string
   nowMs: number
-}): Promise<number | Error> => {
+}): Promise<FygaroReservation[] | Error> => {
   try {
     const redis = await redisClient()
     const key = accountIntentsKey(accountId)
-    // Drop everything whose JWT has expired before summing: those URLs cannot
+    // Drop everything whose JWT has expired before reading: those URLs cannot
     // be paid any more, so holding their amount against the allowance would
     // lock a customer out for the rest of the window for links they abandoned.
     await redis.zremrangebyscore(key, "-inf", nowMs)
-    const members = await redis.zrange(key, 0, -1)
-    return members.reduce((sum, member) => sum + reservationAmountCents(member), 0)
+    // WITHSCORES: the score IS the expiry, and a refusal that cannot say when
+    // the hold lifts is the same dead end as no refusal reason at all.
+    const flat = await redis.zrange(key, 0, -1, "WITHSCORES")
+
+    const reservations: FygaroReservation[] = []
+    for (let i = 0; i < flat.length; i += 2) {
+      const member = flat[i]
+      const amountCents = reservationAmountCents(member)
+      // A member we cannot parse is dropped rather than summed as NaN.
+      if (amountCents <= 0) continue
+      const expiresAtMs = Number(flat[i + 1])
+      reservations.push({
+        intentId: member.slice(member.indexOf(":") + 1),
+        amountCents,
+        expiresAtMs: Number.isFinite(expiresAtMs) ? expiresAtMs : nowMs,
+      })
+    }
+    return reservations
   } catch (err) {
     baseLogger.warn(
       { accountId, error: err instanceof Error ? err.constructor.name : String(err) },
@@ -188,10 +243,18 @@ export const readIntent = async (intentId: string): Promise<IntentLookup> => {
   const cache = await cacheService()
   const found = await cache.get<FygaroCheckoutIntent>({ key: cacheKey(intentId) })
   if (found instanceof Error) {
-    baseLogger.warn(
-      { intentId, error: found.constructor.name },
-      "Fygaro checkout intent lookup failed; treating payment as unauthorised-legacy",
-    )
+    // A plain cache MISS is the ordinary case, not a fault: every expired,
+    // evicted or already-redeemed intent lands here, including every provider
+    // re-delivery of a payment whose intent the first delivery redeemed.
+    // Warning on all of those turns the one line that should mean "Redis is
+    // broken" into routine noise. The caller already logs the miss with the
+    // transaction id, so this side stays silent for it.
+    if (!(found instanceof CacheUndefinedError)) {
+      baseLogger.warn(
+        { intentId, error: found.constructor.name },
+        "Fygaro checkout intent lookup failed; treating payment as unauthorised-legacy",
+      )
+    }
     return { found: false }
   }
   return { found: true, intent: found }

@@ -1,12 +1,19 @@
 import { FygaroConfig } from "@config"
 import { AccountLevel } from "@domain/accounts"
+import { alertBridge, generateDedupKey } from "@services/alerts"
 import { baseLogger } from "@services/logger"
-import { buildFygaroCheckout, type FygaroCheckout } from "@services/fygaro/checkout"
+import {
+  buildCustomReference,
+  buildFygaroCheckout,
+  type FygaroCheckout,
+} from "@services/fygaro/checkout"
 import {
   newIntentId,
+  readIntent,
+  readOutstandingReservations,
   releaseIntentReservation,
   saveIntent,
-  sumOutstandingAuthorizedCents,
+  type FygaroReservation,
 } from "@services/fygaro/checkout-intent-store"
 import { getFygaroSettings } from "@services/fygaro/webhook-server/fygaro-settings"
 import {
@@ -42,13 +49,26 @@ export type AuthorizeTopupFailure =
   | "above-single-payment-limit"
   | "no-daily-limit-for-level"
   | "history-unavailable"
+  // The reservation index (Redis) was unreadable. Deliberately NOT folded into
+  // `history-unavailable`: that name sends the operator reading the alert to
+  // ERPNext for a fault that is in Redis.
+  | "reservations-unavailable"
   | "exceeds-daily-allowance"
+  // The account has NOT spent its allowance — it is holding it, in links it
+  // authorised and has not paid. Distinct from `exceeds-daily-allowance`
+  // because telling someone who has spent $0 today that they have $0 left is
+  // simply false, and the honest answer ("finish or wait for the link you
+  // already have") is the one they can act on.
+  | "checkout-already-open"
 
 export type AuthorizeTopupResult =
   | {
       authorized: true
       checkout: FygaroCheckout
       remainingAllowanceCents: number
+      // True when this is a link the account already held, handed back rather
+      // than minted. Nothing new was reserved.
+      reused?: boolean
     }
   | {
       authorized: false
@@ -59,7 +79,13 @@ export type AuthorizeTopupResult =
       remainingAllowanceCents?: number
       limitCents?: number
       minimumCents?: number
+      // When (and for how much) the open link that is holding the allowance
+      // stops being payable. Only set for `checkout-already-open`.
+      holdExpiresAt?: Date
+      holdAmountCents?: number
     }
+
+export type AuthorizeTopupRefusal = Extract<AuthorizeTopupResult, { authorized: false }>
 
 /**
  * Every stop `evaluateCreditGate` can return, in the vocabulary this call site
@@ -138,16 +164,122 @@ export const authorizeFygaroTopup = async ({
   const dailyLimitCents =
     dailyLimitUsd === undefined ? undefined : Math.round(dailyLimitUsd * 100)
 
+  const refuseWith = (
+    reason: AuthorizeTopupFailure,
+    remainingAllowanceCents?: number,
+    limitCents?: number,
+  ): AuthorizeTopupRefusal => ({
+    authorized: false,
+    reason,
+    remainingAllowanceCents,
+    limitCents: limitCents ?? dailyLimitCents,
+    minimumCents,
+  })
+
   const refuse = (
     reason: RecordOnlyReason,
     remainingAllowanceCents?: number,
-  ): AuthorizeTopupResult => ({
-    authorized: false,
-    reason: FAILURE_BY_GATE_REASON[reason],
+  ): AuthorizeTopupRefusal =>
+    refuseWith(
+      FAILURE_BY_GATE_REASON[reason],
+      remainingAllowanceCents,
+      reason === "over-limit" ? singleLimitCents : dailyLimitCents,
+    )
+
+  /**
+   * Refuse a request because a dependency of the CHECK is down, and page for it.
+   *
+   * The webhook side pages on both of its transient stops (payment.ts). This
+   * side had no signal at all, so card top-ups could be 100% unavailable for
+   * every user while nothing fired. The dedup key is static per reason: an
+   * outage is one incident, not one per refused customer, and naming the reason
+   * in the key keeps "ERPNext is down" from masquerading as "Redis is down".
+   */
+  const refuseTransient = (
+    reason: "settings-unavailable" | "history-unavailable" | "reservations-unavailable",
+  ): AuthorizeTopupRefusal => {
+    alertBridge({
+      dedupKey: generateDedupKey.fygaroAuthorizeUnavailable(reason),
+      source: "fygaro-checkout",
+      severity: "warning",
+      title: "Fygaro pre-charge allowance check unavailable — card top-ups refusing",
+      detail: `reason=${reason}`,
+      context: { reason, account_id: accountId },
+    })
+    return refuseWith(reason)
+  }
+
+  /**
+   * The account is HOLDING its allowance, not spending it.
+   *
+   * First choice is to give it back: if one of the live holds is for exactly
+   * this amount, the customer is asking for the link they already have, so hand
+   * that link back rather than refusing them for their own reservation. Nothing
+   * new is reserved and the outstanding total does not move.
+   *
+   * Failing that (a different amount, or a record from before the URL was
+   * stored), refuse with a reason that says what is actually true and when the
+   * hold lifts.
+   */
+  const refuseOpenCheckout = async ({
+    reservations,
+    amountCents,
+    dailyLimitCents,
     remainingAllowanceCents,
-    limitCents: reason === "over-limit" ? singleLimitCents : dailyLimitCents,
-    minimumCents,
-  })
+  }: {
+    reservations: FygaroReservation[]
+    amountCents: number
+    dailyLimitCents: number
+    remainingAllowanceCents: number
+  }): Promise<AuthorizeTopupResult> => {
+    const sameAmount = reservations.find((r) => r.amountCents === amountCents)
+    if (sameAmount) {
+      const open = await readIntent(sameAmount.intentId)
+      if (
+        open.found &&
+        // Belt and braces: the id came out of THIS account's reservation index,
+        // so a record naming another account means the two disagree and the
+        // link is not ours to hand out.
+        open.intent.accountId === accountId &&
+        open.intent.checkoutUrl !== undefined &&
+        open.intent.expiresAtMs !== undefined &&
+        open.intent.expiresAtMs > nowMs
+      ) {
+        baseLogger.info(
+          { accountId, intentId: sameAmount.intentId },
+          "Re-offering the Fygaro checkout link this account already holds",
+        )
+        return {
+          authorized: true,
+          reused: true,
+          checkout: {
+            url: open.intent.checkoutUrl,
+            expiresAt: new Date(open.intent.expiresAtMs),
+            customReference: buildCustomReference({
+              username: open.intent.username,
+              intentId: open.intent.intentId,
+            }),
+          },
+          // The hold is already inside `remainingAllowanceCents`, so nothing is
+          // subtracted a second time for handing the same link back.
+          remainingAllowanceCents,
+        }
+      }
+    }
+
+    // The soonest hold to lift is the soonest moment more allowance exists, so
+    // that — not the latest — is the time worth telling the customer.
+    const soonest = reservations.reduce(
+      (earliest: FygaroReservation | undefined, r) =>
+        earliest === undefined || r.expiresAtMs < earliest.expiresAtMs ? r : earliest,
+      undefined,
+    )
+    return {
+      ...refuseWith("checkout-already-open", remainingAllowanceCents, dailyLimitCents),
+      holdExpiresAt: soonest ? new Date(soonest.expiresAtMs) : undefined,
+      holdAmountCents: soonest?.amountCents,
+    }
+  }
 
   const gateArgs = {
     creditEnabled,
@@ -163,6 +295,9 @@ export const authorizeFygaroTopup = async ({
   // ordering lives in evaluateCreditGate; this reads it rather than restating it.
   const probe = evaluateCreditGate({ ...gateArgs, priorDayGrossCents: undefined })
   if (!probe.credit && probe.reason !== "history-unavailable") {
+    if (probe.reason === "settings-unavailable") {
+      return refuseTransient("settings-unavailable")
+    }
     return refuse(probe.reason)
   }
 
@@ -170,20 +305,22 @@ export const authorizeFygaroTopup = async ({
   if (priorCents instanceof Error) {
     // Never coerce an unreadable history to zero: that would treat an ERPNext
     // outage as a clean slate and authorise the full allowance to everyone.
-    return refuse("history-unavailable")
+    return refuseTransient("history-unavailable")
   }
 
   // Authorisation is only a promise until it is also a reservation. Links this
   // account already holds are money it can still spend, so they count against
   // the allowance exactly like settled charges do — otherwise N calls each mint
   // a full-allowance link and paying two of them strands the second.
-  const outstandingCents = await sumOutstandingAuthorizedCents({ accountId, nowMs })
-  if (outstandingCents instanceof Error) {
+  const reservations = await readOutstandingReservations({ accountId, nowMs })
+  if (reservations instanceof Error) {
     // Same posture as the history read: unknown outstanding is not zero
     // outstanding. The customer is told we could not check, not that they are
-    // over a limit we never measured.
-    return refuse("history-unavailable")
+    // over a limit we never measured — and the reason names REDIS, so nobody
+    // goes hunting through ERPNext for it.
+    return refuseTransient("reservations-unavailable")
   }
+  const outstandingCents = reservations.reduce((sum, r) => sum + r.amountCents, 0)
 
   // Fail-open (0 on any failure), and gross-denominated gates are discount-blind
   // anyway — it only moves the fee math, which is what `non-positive-net` turns
@@ -202,7 +339,29 @@ export const authorizeFygaroTopup = async ({
     priorDayGrossCents: spentCents,
     flashFeeDiscountPercent,
   })
-  if (!gate.credit) return refuse(gate.reason, remainingAllowanceCents)
+  if (!gate.credit) {
+    // Settled spend and live holds are both "gone" as far as the cap is
+    // concerned, but they are NOT the same thing to the customer. When the
+    // shortfall is entirely this account's own unpaid links — the single most
+    // common thing a payer does is open a payment page and abandon it — the
+    // honest answers are, in order: hand them the link they already have, or
+    // tell them when it expires. Telling someone who has spent nothing today
+    // that they have $0.00 left is false, and their natural response (retry
+    // immediately) is exactly what keeps hitting it.
+    if (
+      gate.reason === "daily-limit-exceeded" &&
+      dailyLimitCents !== undefined &&
+      priorCents + amountCents <= dailyLimitCents
+    ) {
+      return refuseOpenCheckout({
+        reservations,
+        amountCents,
+        dailyLimitCents,
+        remainingAllowanceCents: remainingAllowanceCents ?? 0,
+      })
+    }
+    return refuse(gate.reason, remainingAllowanceCents)
+  }
 
   // Past this point the gate said yes, so the daily limit exists by construction
   // (`no-daily-limit-for-level` precedes it) — narrowed for the type checker.
@@ -228,6 +387,11 @@ export const authorizeFygaroTopup = async ({
     amountCents,
     currency: "USD",
     createdAtMs: nowMs,
+    // Stored so an abandoned checkout can be re-offered instead of refused by
+    // its own hold. The URL is already in the customer's hands at this point,
+    // so keeping a copy adds no exposure the payment page does not already have.
+    checkoutUrl: checkout.url,
+    expiresAtMs: checkout.expiresAt.getTime(),
   }
   const saved = await saveIntent({ intent, ttlSeconds: checkoutConfig.ttlSeconds })
   if (saved instanceof Error) {
@@ -245,7 +409,9 @@ export const authorizeFygaroTopup = async ({
   // Reserve, then re-read. Two requests that raced past the check above have
   // both reserved by now, so both see the combined total here and both back
   // out: the allowance can be under-used for one round trip, never over-issued.
-  const outstandingAfter = await sumOutstandingAuthorizedCents({ accountId, nowMs })
+  const after = await readOutstandingReservations({ accountId, nowMs })
+  const outstandingAfter =
+    after instanceof Error ? after : after.reduce((sum, r) => sum + r.amountCents, 0)
   if (
     dailyLimitCents !== undefined &&
     !(outstandingAfter instanceof Error) &&
@@ -256,10 +422,20 @@ export const authorizeFygaroTopup = async ({
       { accountId, intentId },
       "Concurrent Fygaro checkout authorisation would exceed the daily allowance; rolled back",
     )
+    // `remainingAllowanceCents` was computed from the FIRST read — the read
+    // this branch has just been told was stale. Reporting it here hands the
+    // client a bigger number than reality in exactly the case where it is
+    // wrong, so it retries the same amount and fails again. `outstandingAfter`
+    // includes this request's own reservation, which the line above just
+    // released, so it comes back out.
+    const remainingAfterRollback = Math.max(
+      0,
+      dailyLimitCents - priorCents - (outstandingAfter - amountCents),
+    )
     return {
       authorized: false,
       reason: "exceeds-daily-allowance",
-      remainingAllowanceCents,
+      remainingAllowanceCents: remainingAfterRollback,
       limitCents: dailyLimitCents,
     }
   }
