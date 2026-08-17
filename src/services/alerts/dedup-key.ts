@@ -47,6 +47,12 @@ export const generateDedupKey = {
   fygaroClockSkew: () => "fygaro:clock-skew",
   fygaroFloatLow: () => "fygaro:float-low",
   fygaroFloatExhausted: () => "fygaro:float-exhausted",
+  // The account repository faulted while resolving a customReference. Static
+  // (no transaction suffix) because this is an infrastructure outage, not a
+  // per-payment anomaly: every in-flight delivery hits it at once and should
+  // collapse into one alert per window. Distinct from fygaroUnattributed so an
+  // outage never masquerades as "this payer typed a bad username".
+  fygaroAccountLookupFailed: () => "fygaro:account-lookup-failed",
 }
 
 export const normalizeDedupKey = (key: string): string =>

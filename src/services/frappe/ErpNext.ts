@@ -92,6 +92,19 @@ const isEmailAttributedRow = (sourceSystemsSeen?: string | null): boolean =>
     .split(",")
     .some((system) => system.trim() === EMAIL_ATTRIBUTION_SOURCE_SYSTEM)
 
+// Remove one member from a comma-joined source_systems_seen list, normalizing
+// like mergeSourceSystemsSeen so the two round-trip identically.
+const dropSourceSystem = (
+  sourceSystemsSeen: string | undefined,
+  system: string,
+): string | undefined => {
+  const kept = (sourceSystemsSeen ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s && s !== system)
+  return kept.length ? kept.join(",") : undefined
+}
+
 export type BridgeTransferRequestDoc = {
   name: string
   status?: string
@@ -857,12 +870,28 @@ export class ErpNext {
     payload: ReturnType<BridgeTransferRequest["toErpnext"]>,
     existing: BridgeTransferRequestDoc,
   ): ReturnType<BridgeTransferRequest["toErpnext"]> {
+    const merged = mergeSourceSystemsSeen(
+      existing.source_systems_seen,
+      payload.source_systems_seen,
+    )
+
+    // `source_systems_seen` accumulates as a union so no writer erases another
+    // writer's provenance — with one exception. `email_attribution` is not
+    // provenance; it is a live claim about how THIS row's account_id was
+    // resolved, and the daily-cap sum reads it to decide whether the row counts
+    // (sumFygaroTopupGrossCentsSince). A later delivery that attributes the same
+    // transaction from customReference (verified) must therefore CLEAR it: a
+    // sticky marker would keep a verified, already-credited top-up out of the
+    // account's trailing-24h gross forever, handing it a second full daily
+    // allowance. Only an incoming payload that both names an account and does
+    // not claim email attribution can clear it — an unattributed re-delivery
+    // (no account_id) leaves the existing marker alone.
     const guarded = {
       ...payload,
-      source_systems_seen: mergeSourceSystemsSeen(
-        existing.source_systems_seen,
-        payload.source_systems_seen,
-      ),
+      source_systems_seen:
+        payload.account_id && !isEmailAttributedRow(payload.source_systems_seen)
+          ? dropSourceSystem(merged, EMAIL_ATTRIBUTION_SOURCE_SYSTEM)
+          : merged,
     }
 
     if (

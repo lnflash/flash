@@ -24,6 +24,7 @@ import {
   BridgeTransferRequest,
   BridgeTransferRequestStatus,
   BridgeTransferRequestTransactionType,
+  EMAIL_ATTRIBUTION_SOURCE_SYSTEM,
 } from "@services/frappe/models/BridgeTransferRequest"
 
 const mockedAxios = axios as unknown as {
@@ -234,6 +235,107 @@ describe("ErpNext.upsertBridgeTransferRequest", () => {
       }),
       expect.any(Object),
     )
+  })
+
+  describe("email_attribution marker", () => {
+    // `fygaro:<tx>` rows carry the marker only while their account_id came from
+    // the unverified payer email. It gates the daily-cap sum
+    // (sumFygaroTopupGrossCentsSince skips marked rows), so unlike every other
+    // member of source_systems_seen it must describe the CURRENT attribution
+    // rather than accumulate forever.
+    const emailAttributedExisting = {
+      name: "BTR-FYG-1",
+      status: BridgeTransferRequestStatus.Completed,
+      source_systems_seen: `fygaro_webhook,${EMAIL_ATTRIBUTION_SOURCE_SYSTEM}`,
+      account_id: "account-1",
+    }
+
+    const fygaroTopup = (sourceSystemsSeen: string[], accountId?: string) =>
+      new BridgeTransferRequest({
+        requestId: "fygaro:tx-1",
+        transactionType: BridgeTransferRequestTransactionType.Topup,
+        status: BridgeTransferRequestStatus.FiatReceived,
+        provider: "Fygaro",
+        amount: "100.00",
+        currency: "USD",
+        accountId,
+        sourceSystemsSeen,
+      })
+
+    it("clears the marker when a customReference-attributed write lands on an email-attributed row", async () => {
+      // Without this, a re-delivery that verified the account via
+      // customReference would leave the sticky marker in place and the
+      // already-credited $100 would stay invisible to the daily cap — the
+      // account would read $0 spent and could auto-credit its full cap again.
+      mockedAxios.get.mockResolvedValue({ data: { data: [emailAttributedExisting] } })
+      mockedAxios.put.mockResolvedValue({ data: { data: { name: "BTR-FYG-1" } } })
+
+      await client.upsertBridgeTransferRequest(
+        fygaroTopup(["fygaro_webhook"], "account-1"),
+      )
+
+      expect(mockedAxios.put).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ source_systems_seen: "fygaro_webhook" }),
+        expect.any(Object),
+      )
+    })
+
+    it("keeps the marker when the incoming write is itself email-attributed", async () => {
+      mockedAxios.get.mockResolvedValue({ data: { data: [emailAttributedExisting] } })
+      mockedAxios.put.mockResolvedValue({ data: { data: { name: "BTR-FYG-1" } } })
+
+      await client.upsertBridgeTransferRequest(
+        fygaroTopup(["fygaro_webhook", EMAIL_ATTRIBUTION_SOURCE_SYSTEM], "account-1"),
+      )
+
+      expect(mockedAxios.put).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          source_systems_seen: `fygaro_webhook,${EMAIL_ATTRIBUTION_SOURCE_SYSTEM}`,
+        }),
+        expect.any(Object),
+      )
+    })
+
+    it("keeps the marker when the incoming write names no account", async () => {
+      // An unattributed re-delivery says nothing about how the row got its
+      // account_id, so it must not clear another writer's claim.
+      mockedAxios.get.mockResolvedValue({ data: { data: [emailAttributedExisting] } })
+      mockedAxios.put.mockResolvedValue({ data: { data: { name: "BTR-FYG-1" } } })
+
+      await client.upsertBridgeTransferRequest(fygaroTopup(["fygaro_webhook"]))
+
+      expect(mockedAxios.put).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          source_systems_seen: `fygaro_webhook,${EMAIL_ATTRIBUTION_SOURCE_SYSTEM}`,
+        }),
+        expect.any(Object),
+      )
+    })
+
+    it("clears the marker on the create-race path too", async () => {
+      mockedAxios.get
+        .mockResolvedValueOnce({ data: { data: [] } })
+        .mockResolvedValueOnce({ data: { data: [emailAttributedExisting] } })
+      mockedAxios.post.mockRejectedValue({
+        isAxiosError: true,
+        response: { status: 409, data: { exception: "DuplicateEntryError" } },
+      })
+      mockedAxios.put.mockResolvedValue({ data: { data: { name: "BTR-FYG-1" } } })
+
+      const result = await client.upsertBridgeTransferRequest(
+        fygaroTopup(["fygaro_webhook"], "account-1"),
+      )
+
+      expect(result).toBe(true)
+      expect(mockedAxios.put).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ source_systems_seen: "fygaro_webhook" }),
+        expect.any(Object),
+      )
+    })
   })
 
   it("keeps last-write-wins semantics for Cashout rows", async () => {

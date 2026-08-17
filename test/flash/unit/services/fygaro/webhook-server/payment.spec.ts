@@ -114,6 +114,10 @@ const DEFAULT_SETTINGS = {
   dailyTopupLimits: { 1: 125, 2: 1000, 3: 2500 },
 }
 
+import {
+  CouldNotFindAccountFromUsernameError,
+  UnknownRepositoryError,
+} from "@domain/errors"
 import { ResourceAttemptsLockServiceError } from "@domain/lock"
 
 import { paymentHandler } from "@services/fygaro/webhook-server/routes/payment"
@@ -234,7 +238,12 @@ describe("fygaro paymentHandler", () => {
   })
 
   it("treats an unknown username as unattributed", async () => {
-    mockFindByUsername.mockResolvedValue(new Error("CouldNotFindError"))
+    // The real repository signals "no account owns this username" with this
+    // exact class (AccountsRepository.findByUsername) — a bare Error would not
+    // distinguish a miss from a Mongo fault, which the next test pins apart.
+    mockFindByUsername.mockResolvedValue(
+      new CouldNotFindAccountFromUsernameError(VALID_BODY.customReference),
+    )
     const res = makeRes()
 
     await paymentHandler(makeReq(VALID_BODY), res)
@@ -243,6 +252,58 @@ describe("fygaro paymentHandler", () => {
       expect.objectContaining({ accountId: undefined }),
     )
     expect(res.json).toHaveBeenCalledWith({ status: "recorded", attributed: false })
+  })
+
+  it("returns 500 on an account-lookup FAULT instead of falling back to the payer email", async () => {
+    // findByUsername returns CouldNotFindAccountFromUsernameError for a genuine
+    // miss and parseRepositoryError(err) — e.g. UnknownRepositoryError — for a
+    // Mongo timeout. Collapsing the two is a money bug on RE-DELIVERY: a
+    // perfectly-referenced payment that was already credited would be rewritten
+    // with the sticky `email_attribution` marker, which permanently exempts the
+    // row from sumFygaroTopupGrossCentsSince. The account's spent daily
+    // allowance would then read $0 and it could auto-credit its full cap a
+    // second time inside 24h — and the 200 ack would stop Fygaro retrying, so
+    // the payment strands for manual credit too. Fail transient: 500, retry.
+    mockFindByUsername.mockResolvedValue(
+      new UnknownRepositoryError("connection timed out"),
+    )
+    // Her own checkout email DOES resolve to her account — exactly the state
+    // that made the collapsed branch look harmless.
+    mockGetUserIdFromIdentifier.mockResolvedValue("kratos-user-1")
+    mockFindByUserId.mockResolvedValue({
+      id: ACCOUNT_ID,
+      level: 1,
+      username: VALID_BODY.customReference,
+    })
+    const res = makeRes()
+
+    await paymentHandler(makeReq(VALID_BODY), res)
+
+    expect(res.status).toHaveBeenCalledWith(500)
+    expect(res.json).toHaveBeenCalledWith({
+      error: "account lookup unavailable; will retry",
+    })
+    // No audit write at all — and in particular never one carrying the sticky
+    // email-attribution marker over a verified row.
+    expect(mockWriteFygaroTopup).not.toHaveBeenCalled()
+    expect(mockWriteFygaroTopup).not.toHaveBeenCalledWith(
+      expect.objectContaining({ emailAttributed: true }),
+    )
+    // The email fallback must not even be consulted.
+    expect(mockGetUserIdFromIdentifier).not.toHaveBeenCalled()
+    // No dedupe lock: taking the non-releasing timelock here would make the
+    // very next retry ack 200 "already_processed" and defeat the self-heal.
+    expect(mockLockIdempotencyKey).not.toHaveBeenCalled()
+    expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+    // Ops still hears about it — a sustained outage would otherwise be a silent
+    // 500 loop. Static dedup key so one outage is one alert, not one per
+    // in-flight payment.
+    expect(mockAlertBridge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dedupKey: "fygaro:account-lookup-failed",
+        severity: "warning",
+      }),
+    )
   })
 
   describe("payer-email fallback attribution (display-only)", () => {

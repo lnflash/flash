@@ -28,7 +28,7 @@ const CashoutRateType = GT.Object({
     feeBasisPoints: {
       type: GT.NonNull(GT.Int),
       description:
-        "Flash cashout service fee in basis points for the calling account, deducted from the USD amount before conversion. Already net of any Fee Discount the account is whitelisted for, so it matches the fee the offer will charge.",
+        "Flash cashout service fee in basis points for the calling account, deducted from the USD amount before conversion. Already net of any Fee Discount the account is whitelisted for, and rounded to the nearest whole basis point — the offer may charge up to 1 bip more or less when the discount is a fraction of a percent.",
       resolve: (source: CashoutRateSource) => source.feeBasisPoints,
     },
   }),
@@ -50,10 +50,22 @@ const CashoutRateQuery = GT.Field({
     // applies the same Fee Discount when it builds the offer, so a whitelisted
     // user seeing the undiscounted config fee here would watch the preview
     // disagree with the offer — the exact mismatch this query exists to
-    // prevent. Same "kept basis points" arithmetic as CashoutManager so the
-    // two agree to 0.01% of discount precision. Fail-open (0 on any read
-    // problem) is inherited from getFlashFeeDiscountPercent: the preview
-    // degrades to the standard fee, it never breaks.
+    // prevent. Fail-open (0 on any read problem) is inherited from
+    // getFlashFeeDiscountPercent: the preview degrades to the standard fee, it
+    // never breaks.
+    //
+    // Exactness caveat, deliberately documented rather than hidden: this is the
+    // same "kept basis points" arithmetic CashoutManager uses, but the field is
+    // an Int, so the discounted rate is rounded to a whole basis point HERE
+    // while the offer keeps full precision and rounds once at the end, on money
+    // (userPayment.multiplyBips(fee).multiplyBips(keptBips)). Whenever
+    // `fee * keptBips / 10000` is not an integer the two differ by up to 1 bip.
+    // With the configured 200-bip fee that is any discount_percent that is not a
+    // multiple of 0.5: e.g. 33.4% -> keptBips 6660 -> this quotes
+    // round(133.2) = 133 bips, while a $500 cashout is charged 1000¢ * 6660/10000
+    // = 666¢, i.e. $6.66 against a $6.65 preview. Whole/half-percent discounts —
+    // every discount ops has actually configured — are exact. The SDL
+    // description states the tolerance; cashout-rate.spec.ts pins it.
     const discountPercent = await getFlashFeeDiscountPercent({
       username: domainAccount?.username,
       flow: "cashout",

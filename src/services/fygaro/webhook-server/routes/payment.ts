@@ -21,6 +21,7 @@
 import { Request, Response } from "express"
 
 import { FygaroConfig } from "@config"
+import { CouldNotFindAccountFromUsernameError } from "@domain/errors"
 import { ResourceAttemptsLockServiceError } from "@domain/lock"
 import { getFlashFeeDiscountPercent } from "@services/frappe/fee-discounts"
 import { IdentityRepository } from "@services/kratos"
@@ -167,11 +168,40 @@ export const paymentHandler = async (req: Request, res: Response) => {
     let account: Account | undefined
     if (username) {
       const found = await AccountsRepository().findByUsername(username as Username)
-      if (found instanceof Error) {
+      if (found instanceof CouldNotFindAccountFromUsernameError) {
+        // A genuine miss: no account owns this username. Fall through to the
+        // display-only payer-email fallback below.
         baseLogger.warn(
           { transactionId, username },
           "Fygaro payment: customReference does not match any account",
         )
+      } else if (found instanceof Error) {
+        // A repository FAULT (Mongo timeout, connection blip) is NOT "no such
+        // username": findByUsername returns CouldNotFindAccountFromUsernameError
+        // for a real miss and parseRepositoryError(err) for everything else.
+        // Collapsing the two would let a momentary outage on a RE-DELIVERY drop
+        // a perfectly-referenced payment into the payer-email fallback and stamp
+        // the sticky `email_attribution` marker onto a row whose account_id was
+        // already verified via customReference — permanently exempting an
+        // already-credited top-up from the daily-cap sum
+        // (ErpNext.sumFygaroTopupGrossCentsSince), so the account's spent
+        // allowance reads $0 and it can auto-credit its full cap again. It would
+        // also ack 200 and strand the payment for manual credit. Same self-heal
+        // policy this handler applies to transient ERPNext reads below: 500,
+        // no audit write, no dedupe lock — let Fygaro retry once Mongo is back.
+        baseLogger.error(
+          { error: found, transactionId, username },
+          "Fygaro payment: account lookup failed — returning 500 so Fygaro retries",
+        )
+        alertBridge({
+          dedupKey: generateDedupKey.fygaroAccountLookupFailed(),
+          source: "fygaro-webhook",
+          severity: "warning",
+          title: "Fygaro account lookup unavailable — payment not recorded, will retry",
+          detail: found.message,
+          context: { transaction_id: transactionId, username },
+        })
+        return res.status(500).json({ error: "account lookup unavailable; will retry" })
       } else {
         account = found
       }

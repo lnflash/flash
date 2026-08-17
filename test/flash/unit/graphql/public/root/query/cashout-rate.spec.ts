@@ -82,11 +82,49 @@ describe("cashoutRate query", () => {
       username: USERNAME,
       flow: "cashout",
     })
-    // 25% off the Flash fee — a 100-bip config quotes 75 bips.
+    // 25% off the Flash fee — a 200-bip config quotes 150 bips.
     const fullFee = Number(Cashout.OfferConfig.fee)
     expect(result.feeBasisPoints).toBe(fullFee * 0.75)
     expect(result.feeBasisPoints).toBeLessThan(fullFee)
     expect(Number.isInteger(result.feeBasisPoints)).toBe(true)
+  })
+
+  it("rounds a fractional discount to a whole bip, within the ±1 bip the SDL documents", async () => {
+    // feeBasisPoints is an Int, so a discount whose kept-bips product is not an
+    // integer CANNOT match the offer exactly: this rounds to a whole bip here,
+    // while CashoutManager keeps full precision and rounds once at the end, on
+    // money. The SDL description promises "up to 1 bip more or less" rather
+    // than an exact match; this pins that contract so the next reader does not
+    // re-tighten the wording. 33.4% off a 200-bip fee -> keptBips 6660 ->
+    // round(133.2) = 133 bips quoted, while a $500 cashout is charged
+    // 1000¢ * 6660/10000 = 666¢ ($6.66) against a $6.65 preview.
+    okRate()
+    mockGetFlashFeeDiscountPercent.mockResolvedValue(33.4)
+
+    const result = await resolveQuery()
+
+    const fullFee = Number(Cashout.OfferConfig.fee)
+    const exact = (fullFee * (10000 - 3340)) / 10000
+    expect(Number.isInteger(exact)).toBe(false)
+    expect(result.feeBasisPoints).toBe(Math.round(exact))
+    expect(Number.isInteger(result.feeBasisPoints)).toBe(true)
+    expect(Math.abs(result.feeBasisPoints - exact)).toBeLessThanOrEqual(1)
+  })
+
+  it("is exact for a half-percent-multiple discount at the configured fee", async () => {
+    // The other half of the same contract: every discount ops has actually
+    // configured (whole and half percents) lands on an integer bip, so preview
+    // and offer agree bit-for-bit. If the configured fee ever changes such that
+    // this stops holding, this test says so.
+    okRate()
+    mockGetFlashFeeDiscountPercent.mockResolvedValue(33.5)
+
+    const result = await resolveQuery()
+
+    const fullFee = Number(Cashout.OfferConfig.fee)
+    const exact = (fullFee * (10000 - 3350)) / 10000
+    expect(Number.isInteger(exact)).toBe(true)
+    expect(result.feeBasisPoints).toBe(exact)
   })
 
   it("quotes a zero fee at a 100% waiver", async () => {
