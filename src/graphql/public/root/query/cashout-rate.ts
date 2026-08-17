@@ -4,6 +4,7 @@ import { GT } from "@graphql/index"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import JMDCentsScalar from "@graphql/shared/types/scalar/jmd-cent-amount"
 import ErpNext from "@services/frappe/ErpNext"
+import { getFlashFeeDiscountPercent } from "@services/frappe/fee-discounts"
 
 // The settlement rate the app shows BEFORE a cashout offer exists. This is the
 // same source `CashoutManager.createOffer` locks into a JMD offer (ERPNext
@@ -27,7 +28,7 @@ const CashoutRateType = GT.Object({
     feeBasisPoints: {
       type: GT.NonNull(GT.Int),
       description:
-        "Flash cashout service fee in basis points, deducted from the USD amount before conversion.",
+        "Flash cashout service fee in basis points for the calling account, deducted from the USD amount before conversion. Already net of any Fee Discount the account is whitelisted for, so it matches the fee the offer will charge.",
       resolve: (source: CashoutRateSource) => source.feeBasisPoints,
     },
   }),
@@ -35,14 +36,36 @@ const CashoutRateType = GT.Object({
 
 const CashoutRateQuery = GT.Field({
   type: GT.NonNull(CashoutRateType),
-  resolve: async () => {
+  resolve: async (
+    _: unknown,
+    __: Record<string, never>,
+    { domainAccount }: GraphQLPublicContextAuth,
+  ) => {
     const exchangeRate = await ErpNext.getCashoutExchangeRate()
     if (exchangeRate instanceof Error) {
       throw mapAndParseErrorForGqlResponse(exchangeRate)
     }
+
+    // Quote the fee this caller will actually be charged. CashoutManager
+    // applies the same Fee Discount when it builds the offer, so a whitelisted
+    // user seeing the undiscounted config fee here would watch the preview
+    // disagree with the offer — the exact mismatch this query exists to
+    // prevent. Same "kept basis points" arithmetic as CashoutManager so the
+    // two agree to 0.01% of discount precision. Fail-open (0 on any read
+    // problem) is inherited from getFlashFeeDiscountPercent: the preview
+    // degrades to the standard fee, it never breaks.
+    const discountPercent = await getFlashFeeDiscountPercent({
+      username: domainAccount?.username,
+      flow: "cashout",
+    })
+    const keptBips = 10000 - Math.round(discountPercent * 100)
+    const feeBasisPoints = Math.round(
+      (Number(Cashout.OfferConfig.fee) * keptBips) / 10000,
+    )
+
     return {
       exchangeRate,
-      feeBasisPoints: Number(Cashout.OfferConfig.fee),
+      feeBasisPoints,
     }
   },
 })

@@ -9,6 +9,7 @@ import {
   BridgeTransferRequest,
   BridgeTransferRequestStatus,
   BridgeTransferRequestTransactionType,
+  EMAIL_ATTRIBUTION_SOURCE_SYSTEM,
 } from "./models/BridgeTransferRequest"
 
 type BridgeDepositEventObject = {
@@ -227,7 +228,8 @@ export const writeFygaroTopupRequest = async ({
   // True when accountId was resolved from the checkout payer email rather
   // than customReference — display-grade attribution the webhook never
   // credits from. Marked in source_systems_seen so the admin detail view
-  // shows how the row got its account.
+  // shows how the row got its account, and so the daily-cap sum can skip it:
+  // an unverified email must never consume the named account's allowance.
   emailAttributed?: boolean
   createdAt?: string
   rawPayload: unknown
@@ -246,7 +248,7 @@ export const writeFygaroTopupRequest = async ({
       sourceEventId: transactionId,
       sourceEventType: "fygaro.payment",
       sourceSystemsSeen: emailAttributed
-        ? ["fygaro_webhook", "email_attribution"]
+        ? ["fygaro_webhook", EMAIL_ATTRIBUTION_SOURCE_SYSTEM]
         : ["fygaro_webhook"],
       firstSeenAt: createdAt,
       rawPayload,

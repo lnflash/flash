@@ -231,9 +231,11 @@ export const paymentHandler = async (req: Request, res: Response) => {
         return res.status(200).json({ status: "already_processed" })
       }
       // When the payer email resolved to an account, name the username in the
-      // alert so ops can credit without re-running the email->kratos->mongo
-      // chase by hand. It still needs a human: email attribution is
-      // display-grade, not credit-grade.
+      // alert so ops can start from a candidate instead of re-running the
+      // email->kratos->mongo chase by hand. It is a LEAD, not an instruction:
+      // the checkout email is payer-typed and identity-unverified (a relative
+      // or an attacker can type anyone's address), so the alert says confirm
+      // before crediting rather than "credit this account".
       const resolvedUsername = emailAttributedAccount?.username
       alertBridge({
         dedupKey: generateDedupKey.fygaroUnattributed(transactionId),
@@ -241,7 +243,7 @@ export const paymentHandler = async (req: Request, res: Response) => {
         severity: "warning",
         title: "Fygaro payment could not be attributed to an account",
         detail: resolvedUsername
-          ? `customReference=${username ?? "<blank>"} — payer email matches @${resolvedUsername}; manual credit needed`
+          ? `customReference=${username ?? "<blank>"} — UNVERIFIED payer-email match on @${resolvedUsername}; confirm the payer owns this account before crediting`
           : `customReference=${username ?? "<blank>"} — manual attribution needed`,
         context: {
           transaction_id: transactionId,

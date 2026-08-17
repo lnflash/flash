@@ -292,6 +292,30 @@ describe("fygaro paymentHandler", () => {
       expect(res.json).toHaveBeenCalledWith({ status: "recorded", attributed: false })
     })
 
+    it("keeps the email match out of every gate — no daily-cap read, no credit", async () => {
+      // The checkout email is payer-typed and identity-unverified. A relative
+      // (or anyone who knows a victim's email) paying with a blank
+      // customReference must not touch the named account's daily allowance or
+      // its balance: the row is an audit/display artifact and nothing more.
+      // The read side is enforced in ErpNext.sumFygaroTopupGrossCentsSince,
+      // which skips rows marked email_attribution; here the webhook must not
+      // even consult the gate.
+      mockFygaroConfig.credit = { enabled: true }
+      const res = makeRes()
+
+      await paymentHandler(makeReq({ ...VALID_BODY, customReference: "" }), res)
+
+      expect(mockSumFygaroLast24h).not.toHaveBeenCalled()
+      expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+      expect(mockCompleteFygaroTopup).not.toHaveBeenCalled()
+      // The alert must read as a lead to confirm, not an instruction to credit.
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({
+          detail: expect.stringContaining("UNVERIFIED"),
+        }),
+      )
+    })
+
     it("lowercases the payer email before the kratos lookup (checkout keyboards auto-capitalize)", async () => {
       // Mobile checkout keyboards auto-capitalize ("Regina@Example.com") while
       // the stored Kratos identifier is lowercase; the lookup must normalize or

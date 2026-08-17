@@ -12,6 +12,7 @@
  * auto-credit — never as "assume zero fees" — so a broken settings row can
  * never make Flash credit the gross face value again.
  */
+import { toBoolean, toFiniteNumber } from "@services/frappe/coerce"
 import ErpNext, { type FygaroSettingsDoc } from "@services/frappe/ErpNext"
 import { baseLogger } from "@services/logger"
 
@@ -39,21 +40,6 @@ export type FygaroSettings = {
 const CACHE_TTL_MS = 60_000
 
 let cache: { value: FygaroSettings | undefined; at: number } | undefined
-
-// Coerce a value that ERPNext may send as a number or a numeric string. Returns
-// undefined for anything that is not a finite number.
-const toFiniteNumber = (value: unknown): number | undefined => {
-  if (typeof value === "number") return Number.isFinite(value) ? value : undefined
-  if (typeof value === "string" && value.trim() !== "") {
-    const parsed = Number(value)
-    return Number.isFinite(parsed) ? parsed : undefined
-  }
-  return undefined
-}
-
-// ERPNext Check fields come back as 1/0; be liberal about truthy encodings.
-const toBoolean = (value: unknown): boolean =>
-  value === 1 || value === true || value === "1"
 
 // Validates the raw doctype into a typed FygaroSettings, or undefined when any
 // fee-relevant field is missing / non-numeric / negative (i.e. "garbage").

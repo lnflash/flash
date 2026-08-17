@@ -74,8 +74,21 @@ describe("validateFeeDiscountDoc", () => {
     ["non-numeric percent", { ...ROW, discount_percent: "abc" }],
     ["negative percent", { ...ROW, discount_percent: -1 }],
     ["percent over 100", { ...ROW, discount_percent: 101 }],
+    // Unticking Active is how an operator ends a promo. The ERPNext query
+    // filters on active=1, but that filter must not be the ONLY thing
+    // enforcing it: this reader fails OPEN, so a dropped or mis-encoded
+    // filter would keep every deactivated row discounting Flash's fee
+    // indefinitely with nothing to alarm on.
+    ["active unticked", { ...ROW, active: 0 }],
+    ["active missing", { ...ROW, active: undefined }],
+    ["active as an unrecognized string", { ...ROW, active: "no" }],
   ])("rejects a row with %s", (_label, doc) => {
     expect(validateFeeDiscountDoc(doc)).toBeUndefined()
+  })
+
+  it("accepts the check-field encodings ERPNext uses for Active", () => {
+    expect(validateFeeDiscountDoc({ ...ROW, active: "1" })).toBeDefined()
+    expect(validateFeeDiscountDoc({ ...ROW, active: true })).toBeDefined()
   })
 })
 
@@ -146,6 +159,20 @@ describe("getFlashFeeDiscountPercent", () => {
     mockGetFeeDiscounts.mockRejectedValue(new Error("network down"))
     await expect(
       getFlashFeeDiscountPercent({ username: "civilizedbarbarian", flow: "topup" }),
+    ).resolves.toBe(0)
+  })
+
+  it("returns 0 for a deactivated row even if ERPNext hands one back", async () => {
+    // Defence in depth against the active=1 query filter being lost: the row
+    // is on the whitelist but the operator ended the promo, so the user pays
+    // the standard fee.
+    mockGetFeeDiscounts.mockResolvedValue([{ ...ROW, active: 0 }])
+
+    await expect(
+      getFlashFeeDiscountPercent({ username: "civilizedbarbarian", flow: "topup" }),
+    ).resolves.toBe(0)
+    await expect(
+      getFlashFeeDiscountPercent({ username: "civilizedbarbarian", flow: "cashout" }),
     ).resolves.toBe(0)
   })
 

@@ -19,6 +19,7 @@ jest.mock("@config", () => ({
 
 import axios from "axios"
 import { ErpNext } from "@services/frappe/ErpNext"
+import { FeeDiscountQueryError } from "@services/frappe/errors"
 import {
   BridgeTransferRequest,
   BridgeTransferRequestStatus,
@@ -435,6 +436,9 @@ describe("ErpNext.sumFygaroTopupGrossCentsSince", () => {
       // gross and wrongly lock the account out for a day.
       ["Bridge Transfer Request", "currency", "=", "USD"],
       ["Bridge Transfer Request", "status", "in", ["Fiat Received", "Completed"]],
+      // NOTE: email-attributed rows are excluded in code, not here — a Frappe
+      // `not like` filter would evaluate NULL for rows with an empty
+      // source_systems_seen and silently drop them from the window.
       // The window must filter on last_seen_at (written in UTC by this code),
       // NOT Frappe's `creation`, which is stored naive in the ERP site's
       // configured time zone — comparing that against a UTC cutoff would
@@ -445,6 +449,13 @@ describe("ErpNext.sumFygaroTopupGrossCentsSince", () => {
     // limit_page_length 0 = no pagination cap; a truncated window would
     // under-count and quietly defeat the daily cap.
     expect(config.params.limit_page_length).toBe(0)
+    // source_systems_seen must be fetched — it is what marks a row as
+    // email-attributed, and the exclusion below cannot work without it.
+    expect(JSON.parse(config.params.fields)).toEqual([
+      "request_id",
+      "amount",
+      "source_systems_seen",
+    ])
   })
 
   it("returns 0 for an empty window", async () => {
@@ -494,5 +505,159 @@ describe("ErpNext.sumFygaroTopupGrossCentsSince", () => {
     const result = await client.sumFygaroTopupGrossCentsSince(params)
 
     expect(result).toBeInstanceOf(Error)
+  })
+
+  it("excludes email-attributed rows — an unverified payer email must not burn the account's cap", async () => {
+    // A relative pays $125 for someone else's top-up with a blank
+    // customReference and their own email at checkout. The row is stamped onto
+    // the matched account for DISPLAY only; counting it here would consume the
+    // whole level-1 $125 daily allowance and bounce that account's own top-up
+    // hours later. Adversarially, anyone who knows a victim's email could lock
+    // them out of auto-credit for 24h with a single card payment.
+    mockedAxios.get.mockResolvedValue({
+      data: {
+        data: [
+          {
+            request_id: "fygaro:tx-stranger",
+            amount: "125.00",
+            source_systems_seen: "fygaro_webhook,email_attribution",
+          },
+          {
+            request_id: "fygaro:tx-mine",
+            amount: "10.00",
+            source_systems_seen: "fygaro_webhook",
+          },
+        ],
+      },
+    })
+
+    expect(await client.sumFygaroTopupGrossCentsSince(params)).toBe(1000)
+  })
+
+  it("still counts rows with no source_systems_seen (absent marker is not an exemption)", async () => {
+    // Fails CLOSED: an unset/legacy source_systems_seen means "not
+    // email-attributed", so the row counts. The SQL-side alternative
+    // (`not like`) would have dropped exactly these rows and under-counted.
+    mockedAxios.get.mockResolvedValue({
+      data: {
+        data: [
+          { request_id: "fygaro:tx-1", amount: "25.00", source_systems_seen: null },
+          { request_id: "fygaro:tx-2", amount: "10.00" },
+        ],
+      },
+    })
+
+    expect(await client.sumFygaroTopupGrossCentsSince(params)).toBe(3500)
+  })
+
+  it("does not treat a lookalike source system as email attribution", async () => {
+    // Matched on comma-separated members, not substrings, so a future
+    // "email_attribution_reviewed" marker cannot silently exempt a row.
+    mockedAxios.get.mockResolvedValue({
+      data: {
+        data: [
+          {
+            request_id: "fygaro:tx-1",
+            amount: "25.00",
+            source_systems_seen: "fygaro_webhook,email_attribution_reviewed",
+          },
+        ],
+      },
+    })
+
+    expect(await client.sumFygaroTopupGrossCentsSince(params)).toBe(2500)
+  })
+
+  it("skips an email-attributed row without failing on its amount", async () => {
+    // The exclusion runs before the fail-closed amount checks: an excluded row
+    // contributes nothing by design, so its amount is irrelevant and must not
+    // error the whole window.
+    mockedAxios.get.mockResolvedValue({
+      data: {
+        data: [
+          {
+            request_id: "fygaro:tx-stranger",
+            amount: null,
+            source_systems_seen: "fygaro_webhook,email_attribution",
+          },
+          {
+            request_id: "fygaro:tx-mine",
+            amount: "10.00",
+            source_systems_seen: "fygaro_webhook",
+          },
+        ],
+      },
+    })
+
+    expect(await client.sumFygaroTopupGrossCentsSince(params)).toBe(1000)
+  })
+})
+
+describe("ErpNext.getFeeDiscounts", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+  })
+
+  it("requests only ACTIVE rows, with every field the validator reads", async () => {
+    mockedAxios.get.mockResolvedValue({ data: { data: [] } })
+
+    await client.getFeeDiscounts()
+
+    const [url, config] = mockedAxios.get.mock.calls[0]
+    expect(url).toBe("https://erp.example/api/resource/Fee%20Discount")
+    // The active=1 filter is what stops a promo the operator ended from
+    // continuing to discount Flash's fee. (validateFeeDiscountDoc re-checks
+    // `active` too — belt and braces, since this reader fails OPEN and a lost
+    // filter would never alarm.)
+    expect(JSON.parse(config.params.filters)).toEqual([["active", "=", 1]])
+    expect(JSON.parse(config.params.fields)).toEqual([
+      "username",
+      "discount_percent",
+      "applies_to_topup",
+      "applies_to_cashout",
+      "active",
+    ])
+    // No pagination cap: a truncated page would silently drop whitelisted
+    // users off the discount.
+    expect(config.params.limit_page_length).toBe(0)
+  })
+
+  it("returns the rows as-is for the validator to coerce", async () => {
+    const rows = [
+      {
+        username: "civilizedbarbarian",
+        discount_percent: "25",
+        applies_to_topup: 1,
+        applies_to_cashout: 0,
+        active: 1,
+      },
+    ]
+    mockedAxios.get.mockResolvedValue({ data: { data: rows } })
+
+    expect(await client.getFeeDiscounts()).toEqual(rows)
+  })
+
+  it("returns an empty list when no rows are active", async () => {
+    mockedAxios.get.mockResolvedValue({ data: { data: [] } })
+
+    expect(await client.getFeeDiscounts()).toEqual([])
+  })
+
+  it("returns an error (not a silent empty list) when the response is not an array", async () => {
+    mockedAxios.get.mockResolvedValue({ data: { data: { username: "x" } } })
+
+    expect(await client.getFeeDiscounts()).toBeInstanceOf(FeeDiscountQueryError)
+  })
+
+  it("returns an error when the response has no data", async () => {
+    mockedAxios.get.mockResolvedValue({ data: {} })
+
+    expect(await client.getFeeDiscounts()).toBeInstanceOf(FeeDiscountQueryError)
+  })
+
+  it("returns the error rather than throwing when the request rejects", async () => {
+    mockedAxios.get.mockRejectedValue(new Error("erpnext down"))
+
+    expect(await client.getFeeDiscounts()).toBeInstanceOf(FeeDiscountQueryError)
   })
 })

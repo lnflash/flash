@@ -11,6 +11,14 @@ export enum BridgeTransferRequestStatus {
   Failed = "Failed",
 }
 
+// Marker written into `source_systems_seen` when a row's account_id was
+// resolved from the checkout payer email rather than from customReference.
+// That input is payer-typed and identity-unverified, so rows carrying this
+// marker are DISPLAY-ONLY: no gate may read their account_id (see
+// ErpNext.sumFygaroTopupGrossCentsSince). Writer and reader share the
+// constant so the two can never drift on the spelling.
+export const EMAIL_ATTRIBUTION_SOURCE_SYSTEM = "email_attribution"
+
 export type BridgeTransferRequestInput = {
   requestId: string
   transactionType: BridgeTransferRequestTransactionType

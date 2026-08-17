@@ -15,6 +15,7 @@
  * turn a courtesy into an outage. Worst case a whitelisted user pays the
  * standard fee for a minute and ops adjusts manually.
  */
+import { toBoolean, toFiniteNumber } from "@services/frappe/coerce"
 import ErpNext, { type FeeDiscountDoc } from "@services/frappe/ErpNext"
 import { baseLogger } from "@services/logger"
 
@@ -31,23 +32,10 @@ const CACHE_TTL_MS = 60_000
 
 let cache: { value: Map<string, FeeDiscount>; at: number } | undefined
 
-// Coerce a value that ERPNext may send as a number or a numeric string.
-const toFiniteNumber = (value: unknown): number | undefined => {
-  if (typeof value === "number") return Number.isFinite(value) ? value : undefined
-  if (typeof value === "string" && value.trim() !== "") {
-    const parsed = Number(value)
-    return Number.isFinite(parsed) ? parsed : undefined
-  }
-  return undefined
-}
-
-// ERPNext Check fields come back as 1/0; be liberal about truthy encodings.
-const toBoolean = (value: unknown): boolean =>
-  value === 1 || value === true || value === "1"
-
 // Validates one raw row into a keyed entry, or undefined for garbage (blank
-// username, non-numeric or out-of-range percent). Malformed rows are dropped
-// individually — one bad row must not take out the rest of the whitelist.
+// username, non-numeric or out-of-range percent, or a row the operator has
+// deactivated). Malformed rows are dropped individually — one bad row must
+// not take out the rest of the whitelist.
 // The username key is lowercased: platform usernames are case-insensitive
 // (AccountsRepository.findByUsername matches with collation strength 2), so
 // account.username carries registration case and the operator may type any
@@ -56,6 +44,12 @@ export const validateFeeDiscountDoc = (
   doc: FeeDiscountDoc,
 ): { username: string; discount: FeeDiscount } | undefined => {
   if (!doc || typeof doc !== "object") return undefined
+  // Honour the operator's Active tick here, not only in the ERPNext query
+  // filter. Unticking Active is how a promo ends; if this were enforced by
+  // the query string alone, a dropped or mis-encoded filter would silently
+  // keep every deactivated row discounting Flash's fee forever — and because
+  // the reader deliberately fails open, nothing would alarm.
+  if (!toBoolean(doc.active)) return undefined
   const username =
     typeof doc.username === "string" ? doc.username.trim().toLowerCase() : ""
   if (!username) return undefined

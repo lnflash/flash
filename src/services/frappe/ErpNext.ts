@@ -33,6 +33,7 @@ import {
   BridgeTransferRequest,
   BridgeTransferRequestStatus,
   BridgeTransferRequestTransactionType,
+  EMAIL_ATTRIBUTION_SOURCE_SYSTEM,
   toFrappeDatetime,
 } from "./models/BridgeTransferRequest"
 import { Filter } from "./SearchFilters"
@@ -81,6 +82,15 @@ const mergeSourceSystemsSeen = (
   ]
   return merged.length ? merged.join(",") : undefined
 }
+
+// Whether a Bridge Transfer Request row's account_id came from the unverified
+// payer-email fallback. `source_systems_seen` is a comma-joined list, so match
+// on exact members rather than a substring. A null/absent value means "not
+// email-attributed" — which counts the row, i.e. fails CLOSED for the daily cap.
+const isEmailAttributedRow = (sourceSystemsSeen?: string | null): boolean =>
+  (sourceSystemsSeen ?? "")
+    .split(",")
+    .some((system) => system.trim() === EMAIL_ATTRIBUTION_SOURCE_SYSTEM)
 
 export type BridgeTransferRequestDoc = {
   name: string
@@ -432,11 +442,24 @@ export class ErpNext {
   // it just charges the standard fee.
   async getFeeDiscounts(): Promise<FeeDiscountDoc[] | FeeDiscountQueryError> {
     try {
-      const fields = `["username","discount_percent","applies_to_topup","applies_to_cashout","active"]`
-      const filters = `[["active","=",1]]`
+      // Serialized through axios `params` (not hand-interpolated into the URL)
+      // so encoding is the HTTP client's job. `active` is fetched as well as
+      // filtered on: validateFeeDiscountDoc re-checks it, so a deactivated row
+      // is dropped even if this filter is ever lost or mis-encoded.
+      const fields = JSON.stringify([
+        "username",
+        "discount_percent",
+        "applies_to_topup",
+        "applies_to_cashout",
+        "active",
+      ])
+      const filters = JSON.stringify([["active", "=", 1]])
       const resp = await axios.get(
-        `${this.url}/api/resource/${encodeURIComponent("Fee Discount")}?filters=${filters}&fields=${fields}&limit_page_length=0`,
-        { headers: this.headers },
+        `${this.url}/api/resource/${encodeURIComponent("Fee Discount")}`,
+        {
+          params: { filters, fields, limit_page_length: 0 },
+          headers: this.headers,
+        },
       )
       const data = resp.data?.data
       if (!Array.isArray(data))
@@ -457,8 +480,9 @@ export class ErpNext {
   // trailing window, for the per-level daily top-up limit gate. Counts every
   // captured USD payment (Fiat Received or Completed — i.e. the card was
   // charged, whether or not it has been credited yet), excludes Cancelled
-  // rows, and excludes the current delivery's own audit row (written before
-  // the gate runs) via excludeRequestId. Non-USD rows are excluded because
+  // rows, excludes email-attributed rows (see below), and excludes the
+  // current delivery's own audit row (written before the gate runs) via
+  // excludeRequestId. Non-USD rows are excluded because
   // their `amount` is the raw foreign-currency figure — a 5,000 JMD payment
   // counted at face value would look like $5,000 of prior gross and lock the
   // account out of auto-credit for a day. The window filters on
@@ -505,7 +529,7 @@ export class ErpNext {
         ],
         [BridgeTransferRequest.doctype, "request_id", "!=", excludeRequestId],
       ])
-      const fields = JSON.stringify(["request_id", "amount"])
+      const fields = JSON.stringify(["request_id", "amount", "source_systems_seen"])
       const resp = await axios.get(
         `${this.url}/api/resource/${encodeURIComponent(BridgeTransferRequest.doctype)}`,
         {
@@ -521,7 +545,26 @@ export class ErpNext {
       for (const row of rows as {
         request_id?: string
         amount?: number | string | null
+        source_systems_seen?: string | null
       }[]) {
+        // An email-attributed row got its account_id from the payer-typed
+        // checkout email — input nobody verified against an identity. Letting
+        // it into this sum would let ANY card payment burn the named account's
+        // daily allowance: a relative paying for someone else, or an attacker
+        // who merely knows a victim's email, could lock them out of
+        // auto-credit for 24h. Those rows stay display-only — including after
+        // an ops hand-credit, since source_systems_seen merges as a union and
+        // keeps the marker. A hand-credit is a human decision outside this
+        // auto-credit gate, so leaving it out of the cap is the safe side.
+        //
+        // Filtered here in JS rather than with a Frappe
+        // `["source_systems_seen","not like","%email_attribution%"]` filter on
+        // purpose: SQL evaluates `NULL NOT LIKE '%x%'` to NULL (falsy), so
+        // that filter would silently drop every row with an empty
+        // source_systems_seen from the window — under-counting the gross and
+        // quietly defeating the cap, the exact failure this method's other
+        // guards refuse to accept.
+        if (isEmailAttributedRow(row.source_systems_seen)) continue
         // Frappe's list API returns null for unset fields, and Number(null)
         // is 0 — a null amount must fail closed like any other unparsable
         // row, not silently contribute nothing to the sum.

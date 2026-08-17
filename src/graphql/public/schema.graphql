@@ -705,7 +705,7 @@ type CashoutRate {
   exchangeRate: JMDCents!
 
   """
-  Flash cashout service fee in basis points, deducted from the USD amount before conversion.
+  Flash cashout service fee in basis points for the calling account, deducted from the USD amount before conversion. Already net of any Fee Discount the account is whitelisted for, so it matches the fee the offer will charge.
   """
   feeBasisPoints: Int!
 }
