@@ -79,13 +79,20 @@ describe("parseApiKey", () => {
 
   it("rejects malformed keys", () => {
     const { keyId, secret } = generateApiKey()
+    // The uppercase case needs a keyId that actually CONTAINS a hex letter.
+    // keyId is only 4 random bytes (8 hex chars), so ~2.3% of runs — 1 in 43 —
+    // generate an all-digit id, where `.toUpperCase()` is a no-op and the
+    // "malformed" string is a perfectly valid key. That made this spec fail
+    // randomly in CI on unrelated PRs. Substitute a known letter rather than
+    // regenerating in a loop, so the case is deterministic.
+    const keyIdWithLetter = ("a" + keyId.slice(1)) as typeof keyId
     const malformed = [
       "",
       "not-a-key",
       `flash_${keyId}_${secret}`, // wrong prefix
       `fk_${keyId}`, // missing secret
       `fk_${keyId.slice(0, 6)}_${secret}`, // short keyId
-      `fk_${keyId.toUpperCase()}_${secret}`, // keyId must be lowercase hex
+      `fk_${keyIdWithLetter.toUpperCase()}_${secret}`, // keyId must be lowercase hex
       `fk_${keyId}_${secret.slice(0, 63)}`, // short secret
       `fk_${keyId}_${secret}x`, // long secret
     ]
