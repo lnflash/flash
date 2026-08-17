@@ -187,17 +187,46 @@ export const paymentHandler = async (req: Request, res: Response) => {
         // (ErpNext.sumFygaroTopupGrossCentsSince), so the account's spent
         // allowance reads $0 and it can auto-credit its full cap again. It would
         // also ack 200 and strand the payment for manual credit. Same self-heal
-        // policy this handler applies to transient ERPNext reads below: 500,
-        // no audit write, no dedupe lock — let Fygaro retry once Mongo is back.
+        // policy this handler applies to transient ERPNext reads below: 500 and
+        // no dedupe lock — let Fygaro retry once Mongo is back.
         baseLogger.error(
           { error: found, transactionId, username },
           "Fygaro payment: account lookup failed — returning 500 so Fygaro retries",
         )
+        // Record the payment UNATTRIBUTED first. The retry above is a policy,
+        // not a guarantee — if Fygaro's retry budget expires before Mongo
+        // recovers, bailing without a write would leave captured fiat with no
+        // server-side record at all, which is the exact failure class this
+        // webhook was built to end. Deliberately no account_id and no
+        // `email_attribution` marker: a later retry upserts the verified
+        // account_id onto this same row and the daily-cap sum still counts it
+        // once attributed. A failure here needs no extra handling — the
+        // response is already 500, so Fygaro retries either way.
+        const faultAudit = await writeFygaroTopupRequest({
+          transactionId,
+          amount: String(payload.amount),
+          currency,
+          accountId: undefined,
+          emailAttributed: false,
+          createdAt,
+          rawPayload: req.body,
+        })
+        if (faultAudit instanceof Error) {
+          baseLogger.error(
+            { error: faultAudit, transactionId },
+            "Failed to persist unattributed Fygaro audit row during an account-lookup fault",
+          )
+        }
+        // Critical, not warning: this means captured payments are not being
+        // attributed or credited at all. The dedup key is static, so PagerDuty
+        // groups a whole outage into ONE incident rather than paging per
+        // payment — the same reason the audit-write failure below pages.
         alertBridge({
           dedupKey: generateDedupKey.fygaroAccountLookupFailed(),
           source: "fygaro-webhook",
-          severity: "warning",
-          title: "Fygaro account lookup unavailable — payment not recorded, will retry",
+          severity: "critical",
+          title:
+            "Fygaro account lookup unavailable — payments recorded unattributed, will retry",
           detail: found.message,
           context: { transaction_id: transactionId, username },
         })

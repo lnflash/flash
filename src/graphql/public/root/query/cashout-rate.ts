@@ -28,7 +28,7 @@ const CashoutRateType = GT.Object({
     feeBasisPoints: {
       type: GT.NonNull(GT.Int),
       description:
-        "Flash cashout service fee in basis points for the calling account, deducted from the USD amount before conversion. Already net of any Fee Discount the account is whitelisted for, and rounded to the nearest whole basis point — the offer may charge up to 1 bip more or less when the discount is a fraction of a percent.",
+        "Flash cashout service fee in basis points for the calling account, deducted from the USD amount before conversion. Already net of any Fee Discount the account is whitelisted for. The offer may still charge more than quoted: up to 1 bip from rounding when the discount is a fraction of a percent, or the full standard fee if the Fee Discount list is unreadable at the moment the offer is built.",
       resolve: (source: CashoutRateSource) => source.feeBasisPoints,
     },
   }),
@@ -64,8 +64,14 @@ const CashoutRateQuery = GT.Field({
     // multiple of 0.5: e.g. 33.4% -> keptBips 6660 -> this quotes
     // round(133.2) = 133 bips, while a $500 cashout is charged 1000¢ * 6660/10000
     // = 666¢, i.e. $6.66 against a $6.65 preview. Whole/half-percent discounts —
-    // every discount ops has actually configured — are exact. The SDL
-    // description states the tolerance; cashout-rate.spec.ts pins it.
+    // every discount ops has actually configured — are exact.
+    //
+    // Rounding is not the only way the offer can exceed this quote:
+    // getFlashFeeDiscountPercent fails open to 0 and caches for 60s, so a
+    // whitelist read that succeeds here and fails when createOffer runs a
+    // minute later charges the full fee against a discounted quote — 50 bips
+    // on a 25%-off account, not 1. Both divergences are stated in the SDL
+    // description rather than hidden; cashout-rate.spec.ts pins them.
     const discountPercent = await getFlashFeeDiscountPercent({
       username: domainAccount?.username,
       flow: "cashout",

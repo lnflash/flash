@@ -93,7 +93,7 @@ describe("cashoutRate query", () => {
     // feeBasisPoints is an Int, so a discount whose kept-bips product is not an
     // integer CANNOT match the offer exactly: this rounds to a whole bip here,
     // while CashoutManager keeps full precision and rounds once at the end, on
-    // money. The SDL description promises "up to 1 bip more or less" rather
+    // money. The SDL description promises "up to 1 bip from rounding" rather
     // than an exact match; this pins that contract so the next reader does not
     // re-tighten the wording. 33.4% off a 200-bip fee -> keptBips 6660 ->
     // round(133.2) = 133 bips quoted, while a $500 cashout is charged
@@ -132,6 +132,19 @@ describe("cashoutRate query", () => {
     mockGetFlashFeeDiscountPercent.mockResolvedValue(100)
 
     expect((await resolveQuery()).feeBasisPoints).toBe(0)
+  })
+
+  it("quotes the standard fee when the whitelist is unreadable (fail-open, the other divergence the SDL names)", async () => {
+    // getFlashFeeDiscountPercent fails open to 0, so an ERPNext blip degrades
+    // the preview to the standard fee instead of breaking the screen. The
+    // reverse ordering is the one that generates tickets — a read that works
+    // here and fails 60s later when createOffer runs charges the FULL fee
+    // against a discounted quote (50 bips on a 25%-off account, not 1), which
+    // is why the SDL description names this alongside the rounding tolerance.
+    okRate()
+    mockGetFlashFeeDiscountPercent.mockResolvedValue(0)
+
+    expect((await resolveQuery()).feeBasisPoints).toBe(Number(Cashout.OfferConfig.fee))
   })
 
   it("quotes the standard fee for an account with no username", async () => {

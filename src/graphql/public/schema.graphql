@@ -705,7 +705,7 @@ type CashoutRate {
   exchangeRate: JMDCents!
 
   """
-  Flash cashout service fee in basis points for the calling account, deducted from the USD amount before conversion. Already net of any Fee Discount the account is whitelisted for, and rounded to the nearest whole basis point — the offer may charge up to 1 bip more or less when the discount is a fraction of a percent.
+  Flash cashout service fee in basis points for the calling account, deducted from the USD amount before conversion. Already net of any Fee Discount the account is whitelisted for. The offer may still charge more than quoted: up to 1 bip from rounding when the discount is a fraction of a percent, or the full standard fee if the Fee Discount list is unreadable at the moment the offer is built.
   """
   feeBasisPoints: Int!
 }

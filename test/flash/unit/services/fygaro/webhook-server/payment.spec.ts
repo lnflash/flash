@@ -283,9 +283,19 @@ describe("fygaro paymentHandler", () => {
     expect(res.json).toHaveBeenCalledWith({
       error: "account lookup unavailable; will retry",
     })
-    // No audit write at all — and in particular never one carrying the sticky
-    // email-attribution marker over a verified row.
-    expect(mockWriteFygaroTopup).not.toHaveBeenCalled()
+    // The payment IS recorded — unattributed. Bailing without a write would
+    // leave captured fiat with no server-side record if Fygaro's retry budget
+    // expires before Mongo recovers, which is the failure class this webhook
+    // exists to end. No account_id, and in particular never the sticky
+    // email-attribution marker over a row whose account_id is verifiable.
+    expect(mockWriteFygaroTopup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transactionId: VALID_BODY.transactionId,
+        amount: "10.00",
+        accountId: undefined,
+        emailAttributed: false,
+      }),
+    )
     expect(mockWriteFygaroTopup).not.toHaveBeenCalledWith(
       expect.objectContaining({ emailAttributed: true }),
     )
@@ -295,15 +305,34 @@ describe("fygaro paymentHandler", () => {
     // very next retry ack 200 "already_processed" and defeat the self-heal.
     expect(mockLockIdempotencyKey).not.toHaveBeenCalled()
     expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
-    // Ops still hears about it — a sustained outage would otherwise be a silent
-    // 500 loop. Static dedup key so one outage is one alert, not one per
-    // in-flight payment.
+    // Ops gets PAGED — payments are landing unattributed and uncredited, the
+    // same severity as the audit-write failure below. Static dedup key so one
+    // outage is one incident, not one page per in-flight payment.
     expect(mockAlertBridge).toHaveBeenCalledWith(
       expect.objectContaining({
         dedupKey: "fygaro:account-lookup-failed",
-        severity: "warning",
+        severity: "critical",
       }),
     )
+  })
+
+  it("still answers 500 when the unattributed audit write also fails during a lookup fault", async () => {
+    // Both Mongo and ERPNext are down. The response must stay 500 so Fygaro
+    // retries; the failed write needs no extra handling beyond a log.
+    mockFindByUsername.mockResolvedValue(
+      new UnknownRepositoryError("connection timed out"),
+    )
+    mockWriteFygaroTopup.mockResolvedValue(new Error("erpnext down"))
+    const res = makeRes()
+
+    await paymentHandler(makeReq(VALID_BODY), res)
+
+    expect(res.status).toHaveBeenCalledWith(500)
+    expect(res.json).toHaveBeenCalledWith({
+      error: "account lookup unavailable; will retry",
+    })
+    expect(mockLockIdempotencyKey).not.toHaveBeenCalled()
+    expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
   })
 
   describe("payer-email fallback attribution (display-only)", () => {
