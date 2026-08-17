@@ -802,6 +802,30 @@ export const configSchema = {
           // the treasury -> user transfer stays manual.
           default: { enabled: false },
         },
+        // Server-signed checkout. With this OFF the app keeps building the
+        // pre-fill URL on the device, where the customer can edit both the
+        // amount and custom_reference; the webhook credit gate is the only
+        // protection. Turning it ON requires a Fygaro plan that supports JWT
+        // links (Pro or above) — the token is rejected by Fygaro otherwise, so
+        // enabling it without the plan breaks checkout rather than degrading.
+        checkout: {
+          type: "object",
+          properties: {
+            enabled: { type: "boolean", default: false },
+            // Full payment-button URL to append `?jwt=` to.
+            buttonUrl: { type: "string", default: "" },
+            // Which entry of `webhook.secrets` signs the token. The value lands
+            // in the JWT header `kid` so Fygaro picks the matching secret,
+            // which is what makes rotation a config change and nothing else.
+            keyId: { type: "string", default: "" },
+            // How long an authorised checkout stays payable. Long enough to
+            // enter card details, short enough that a URL captured from the
+            // WebView cannot be paid after the daily allowance has moved on.
+            ttlSeconds: { type: "integer", default: 900 },
+          },
+          additionalProperties: false,
+          default: { enabled: false, buttonUrl: "", keyId: "", ttlSeconds: 900 },
+        },
         float: {
           type: "object",
           properties: {

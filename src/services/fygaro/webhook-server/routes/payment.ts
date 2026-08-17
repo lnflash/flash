@@ -43,6 +43,8 @@ import {
   INSUFFICIENT_TREASURY_FLOAT_STEP,
 } from "../credit-topup"
 import { getFygaroSettings } from "../fygaro-settings"
+import { parseCustomReference } from "../../checkout"
+import { consumeIntent } from "../../checkout-intent-store"
 import { evaluateCreditGate, RecordOnlyReason } from "../fees"
 
 type FygaroPaymentPayload = {
@@ -110,6 +112,8 @@ const RECORD_ONLY_ALERT_TITLE: Record<
   "daily-limit-exceeded":
     "Fygaro payment exceeds the account's daily top-up limit — not auto-credited",
   "under-minimum": "Fygaro payment below the minimum top-up — not auto-credited",
+  "intent-mismatch":
+    "Fygaro payment does not match the checkout Flash signed for it — not auto-credited",
   "non-positive-net": "Fygaro payment net after fees is not positive — not auto-credited",
 }
 
@@ -117,7 +121,13 @@ export const paymentHandler = async (req: Request, res: Response) => {
   const payload = (req.body ?? {}) as FygaroPaymentPayload
   const { transactionId, createdAt } = payload
   const currency = (payload.currency ?? "USD").toUpperCase()
-  const username = payload.customReference?.trim() || undefined
+  // `custom_reference` is either a bare username (built on-device by app
+  // versions predating signed checkout, and editable by the payer) or
+  // `username|intentId` minted by authorizeFygaroTopup. Both are accepted for
+  // as long as older clients are in the wild; only the second can be verified.
+  const reference = parseCustomReference(payload.customReference)
+  const username = reference?.username
+  const intentId = reference?.intentId
 
   if (!transactionId || !payload.amount) {
     baseLogger.warn(
@@ -337,6 +347,31 @@ export const paymentHandler = async (req: Request, res: Response) => {
     // ERPNext for this.
     const creditEnabled = Boolean(FygaroConfig.credit?.enabled)
     const grossCents = Math.round(grossAmount * 100)
+    // Cross-check the payment against what the server authorised, when the
+    // reference carries an intent. The signed JWT already prevents the customer
+    // altering the amount, so a mismatch here means something on OUR side is
+    // wrong — a signing bug, a stale intent, a replay — and quietly crediting a
+    // payment we cannot account for is the failure this whole workstream is
+    // about. A missing intent is NOT treated as a mismatch: it is the legacy
+    // position (unverified), and the credit gate below still applies in full.
+    let intentMismatch: string | undefined
+    if (intentId) {
+      const lookup = await consumeIntent(intentId)
+      if (lookup.found) {
+        const authorized = lookup.intent
+        if (authorized.amountCents !== grossCents) {
+          intentMismatch = `authorised ${authorized.amountCents}c, paid ${grossCents}c`
+        } else if (accountId && authorized.accountId !== accountId) {
+          intentMismatch = `authorised for account ${authorized.accountId}, paid as ${accountId}`
+        }
+      } else {
+        baseLogger.info(
+          { transactionId, intentId },
+          "Fygaro payment references an intent that is expired, consumed or unknown",
+        )
+      }
+    }
+
     const settings = creditEnabled ? await getFygaroSettings() : undefined
 
     // Trailing-24h charged gross for the per-level daily cap, read only when a
@@ -375,15 +410,19 @@ export const paymentHandler = async (req: Request, res: Response) => {
       })
     }
 
-    const gate = evaluateCreditGate({
-      creditEnabled,
-      currency,
-      settings,
-      grossCents,
-      level: account.level,
-      priorDayGrossCents,
-      flashFeeDiscountPercent,
-    })
+    // A mismatch overrides every other outcome: the gate can only reason about
+    // the payment in front of it, not about whether we ever authorised it.
+    const gate = intentMismatch
+      ? ({ credit: false, reason: "intent-mismatch" } as const)
+      : evaluateCreditGate({
+          creditEnabled,
+          currency,
+          settings,
+          grossCents,
+          level: account.level,
+          priorDayGrossCents,
+          flashFeeDiscountPercent,
+        })
 
     if (!gate.credit) {
       // `settings-unavailable` and `history-unavailable` are TRANSIENT (an
@@ -446,13 +485,19 @@ export const paymentHandler = async (req: Request, res: Response) => {
           source: "fygaro-webhook",
           severity: "warning",
           title: RECORD_ONLY_ALERT_TITLE[gate.reason],
-          detail: `reason=${gate.reason} currency=${currency} gross=${centsToDollars(grossCents)} level=${account.level}`,
+          detail: `reason=${gate.reason} currency=${currency} gross=${centsToDollars(grossCents)} level=${account.level}${
+            intentMismatch ? ` mismatch=${intentMismatch}` : ""
+          }`,
           context: {
             transaction_id: transactionId,
             amount: String(payload.amount),
             reason: gate.reason,
             username,
             account_level: account.level,
+            // Without these numbers the alert says a payment was refused but
+            // not what it was refused against, which is the only thing that
+            // tells an operator whether to credit it by hand.
+            ...(intentMismatch ? { intent_mismatch: intentMismatch } : {}),
           },
         })
       }

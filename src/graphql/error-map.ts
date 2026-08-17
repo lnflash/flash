@@ -671,6 +671,41 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         message,
       })
 
+    case "FygaroCheckoutDisabledError":
+      message = error.message || "Card top-up is currently unavailable"
+      return bridgeGqlError({
+        code: "FYGARO_CHECKOUT_DISABLED",
+        message,
+      })
+
+    case "FygaroBelowMinimumError":
+      message = error.message || "Amount is below the minimum top-up"
+      return bridgeGqlError({
+        code: "FYGARO_BELOW_MINIMUM",
+        message,
+      })
+
+    case "FygaroAboveSinglePaymentLimitError":
+      message = error.message || "Amount is above the single top-up limit"
+      return bridgeGqlError({
+        code: "FYGARO_ABOVE_SINGLE_PAYMENT_LIMIT",
+        message,
+      })
+
+    case "FygaroDailyAllowanceExceededError":
+      message = error.message || "Amount is above your remaining daily top-up allowance"
+      return bridgeGqlError({
+        code: "FYGARO_DAILY_ALLOWANCE_EXCEEDED",
+        message,
+      })
+
+    case "FygaroAllowanceUnavailableError":
+      message = error.message || "Could not check your top-up allowance right now"
+      return bridgeGqlError({
+        code: "FYGARO_ALLOWANCE_UNAVAILABLE",
+        message,
+      })
+
     case "BridgeInvalidPlaidTokenError":
       message = error.message || "linkToken and publicToken are required"
       return bridgeGqlError({
