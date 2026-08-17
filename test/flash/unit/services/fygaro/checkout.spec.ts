@@ -4,6 +4,7 @@ import {
   buildCustomReference,
   buildFygaroCheckout,
   formatFygaroAmount,
+  NBF_SKEW_SECONDS,
   parseCustomReference,
   signFygaroCheckoutJwt,
 } from "@services/fygaro/checkout"
@@ -164,9 +165,23 @@ describe("buildFygaroCheckout", () => {
       amount: "80.00",
       currency: "USD",
       custom_reference: "jaceth2009|abc-123",
-      nbf: 1_700_000_000,
+      nbf: 1_700_000_000 - NBF_SKEW_SECONDS,
       exp: 1_700_000_900,
     })
+  })
+
+  it("backdates nbf so a clock a few seconds ahead does not dead-end the payer", () => {
+    // Fygaro validates the token against THEIR clock. `nbf: now` with zero
+    // leeway means a server running slightly fast mints a link Fygaro rejects
+    // as "not yet valid" — the customer hits a dead end at the payment page.
+    // Flash already tolerates 5 minutes of skew inbound; outbound must not be
+    // stricter. `exp` is what bounds replay, not `nbf`.
+    const payload = decodeSegment(
+      buildFygaroCheckout(args).url.split("?jwt=")[1].split(".")[1],
+    )
+    expect(NBF_SKEW_SECONDS).toBeGreaterThan(0)
+    expect(payload.nbf).toBeLessThan(Math.floor(args.nowMs / 1000))
+    expect(payload.nbf).toBe(Math.floor(args.nowMs / 1000) - NBF_SKEW_SECONDS)
   })
 
   it("bounds the validity window so a captured URL cannot be paid later", () => {

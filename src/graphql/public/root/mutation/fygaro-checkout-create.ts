@@ -13,6 +13,7 @@ import {
   FygaroBelowMinimumError,
   FygaroCheckoutDisabledError,
   FygaroDailyAllowanceExceededError,
+  FygaroLevelNotEligibleError,
 } from "@services/fygaro/errors"
 
 const FygaroCheckoutCreatePayload = GT.Object({
@@ -67,9 +68,20 @@ const failureError = (result: AuthorizeTopupResult & { authorized: false }): Err
           ? "Amount is above your remaining daily top-up allowance"
           : `You have $${centsToDollars(remainingAllowanceCents)} left of today's top-up limit`,
       )
+    case "non-positive-net":
+      // Above the operator minimum, but the fixed processor + Flash fees eat
+      // the whole thing. "Too small" is the honest thing to tell the customer;
+      // it is not a limit and not an outage.
+      return new FygaroBelowMinimumError(
+        "That amount is too small to cover the payment fees",
+      )
+    case "no-daily-limit-for-level":
+      // Deterministic and permanent until the account upgrades — NOT one of the
+      // two transient ERPNext failures below. Telling a level-0 account to try
+      // again later would loop forever and send support after a phantom outage.
+      return new FygaroLevelNotEligibleError()
     case "settings-unavailable":
     case "history-unavailable":
-    case "no-daily-limit-for-level":
       return new FygaroAllowanceUnavailableError()
     case "checkout-disabled":
       return new FygaroCheckoutDisabledError()
@@ -88,8 +100,14 @@ const fygaroCheckoutCreate = GT.Field<
   },
   resolve: async (_, args, { domainAccount }) => {
     const { amount } = args.input
+    // What CentAmount hands back for a negative/oversized/non-integer value is
+    // an InputValidationError — an Apollo error, NOT an ApplicationError. Run
+    // through mapAndParseErrorForGqlResponse it falls off the end of the switch
+    // and throws `assertUnreachable`, turning a bad client amount into an
+    // internal error. Same handling as every other scalar-validated mutation
+    // (see ln-noamount-usd-invoice-payment-send).
     if (amount instanceof Error) {
-      return { errors: [mapAndParseErrorForGqlResponse(amount)] }
+      return { errors: [{ message: amount.message }] }
     }
 
     // custom_reference is how the webhook attributes the payment to an account.

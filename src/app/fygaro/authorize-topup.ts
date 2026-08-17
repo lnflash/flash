@@ -2,8 +2,18 @@ import { FygaroConfig } from "@config"
 import { AccountLevel } from "@domain/accounts"
 import { baseLogger } from "@services/logger"
 import { buildFygaroCheckout, type FygaroCheckout } from "@services/fygaro/checkout"
-import { newIntentId, saveIntent } from "@services/fygaro/checkout-intent-store"
+import {
+  newIntentId,
+  releaseIntentReservation,
+  saveIntent,
+  sumOutstandingAuthorizedCents,
+} from "@services/fygaro/checkout-intent-store"
 import { getFygaroSettings } from "@services/fygaro/webhook-server/fygaro-settings"
+import {
+  evaluateCreditGate,
+  type RecordOnlyReason,
+} from "@services/fygaro/webhook-server/fees"
+import { getFlashFeeDiscountPercent } from "@services/frappe/fee-discounts"
 import { sumFygaroTopupGrossCentsLast24h } from "@services/frappe/BridgeTransferRequestWriter"
 
 /**
@@ -17,12 +27,18 @@ import { sumFygaroTopupGrossCentsLast24h } from "@services/frappe/BridgeTransfer
  *
  * The returned checkout URL carries a signed amount, so the answer given here
  * is the amount that can actually be paid.
+ *
+ * The decision itself is NOT reimplemented here: it is `evaluateCreditGate`,
+ * the same function the webhook runs after the charge. Any ladder written twice
+ * drifts, and every drifted gate is a customer charged for a credit that will
+ * be refused.
  */
 
 export type AuthorizeTopupFailure =
   | "checkout-disabled"
   | "settings-unavailable"
   | "below-minimum"
+  | "non-positive-net"
   | "above-single-payment-limit"
   | "no-daily-limit-for-level"
   | "history-unavailable"
@@ -45,6 +61,29 @@ export type AuthorizeTopupResult =
       minimumCents?: number
     }
 
+/**
+ * Every stop `evaluateCreditGate` can return, in the vocabulary this call site
+ * answers in. Exhaustive by type, so a new gate reason cannot be added to the
+ * webhook without a decision being made here too.
+ *
+ * `non-usd` and `intent-mismatch` are unreachable from this path — the currency
+ * is fixed to USD and no payment exists yet — but map to the same "we cannot
+ * offer you a checkout" answer rather than being asserted away.
+ */
+const FAILURE_BY_GATE_REASON: Record<RecordOnlyReason, AuthorizeTopupFailure> = {
+  "credit-disabled": "checkout-disabled",
+  "auto-credit-disabled": "checkout-disabled",
+  "non-usd": "checkout-disabled",
+  "intent-mismatch": "checkout-disabled",
+  "settings-unavailable": "settings-unavailable",
+  "history-unavailable": "history-unavailable",
+  "over-limit": "above-single-payment-limit",
+  "no-daily-limit-for-level": "no-daily-limit-for-level",
+  "daily-limit-exceeded": "exceeds-daily-allowance",
+  "non-positive-net": "non-positive-net",
+  "under-minimum": "below-minimum",
+}
+
 export const authorizeFygaroTopup = async ({
   accountId,
   username,
@@ -58,6 +97,18 @@ export const authorizeFygaroTopup = async ({
   amountCents: number
   nowMs?: number
 }): Promise<AuthorizeTopupResult> => {
+  // The yaml master gates come first, before any ERPNext read. `fygaro.enabled`
+  // off means the webhook server 503s every delivery (fygaroEnabledGuard), so a
+  // payment made against a link minted here would not even be RECORDED; and
+  // `credit.enabled` off — the default, and the very first rollout state —
+  // means the webhook records the payment with reason `credit-disabled` and
+  // credits nothing. Either way the customer is charged and uncredited, which
+  // is the failure this whole path exists to prevent.
+  const creditEnabled = Boolean(FygaroConfig?.credit?.enabled)
+  if (!FygaroConfig?.enabled || !creditEnabled) {
+    return { authorized: false, reason: "checkout-disabled" }
+  }
+
   const checkoutConfig = FygaroConfig.checkout
   if (!checkoutConfig?.enabled || !checkoutConfig.buttonUrl || !checkoutConfig.keyId) {
     return { authorized: false, reason: "checkout-disabled" }
@@ -78,60 +129,84 @@ export const authorizeFygaroTopup = async ({
   // Returns undefined (never throws) when the ERPNext row is unreadable or
   // malformed — same "record-only" posture the webhook takes.
   const settings = await getFygaroSettings()
-  if (!settings) {
-    return { authorized: false, reason: "settings-unavailable" }
-  }
-  if (!settings.autoCreditEnabled) {
-    // Nothing would be credited even on a clean payment, so authorising a
-    // charge here would knowingly create another stuck top-up.
-    return { authorized: false, reason: "checkout-disabled" }
-  }
 
-  const minimumCents = Math.round(settings.minimumTopup * 100)
-  if (amountCents < minimumCents) {
-    return { authorized: false, reason: "below-minimum", minimumCents }
-  }
+  const minimumCents =
+    settings === undefined ? undefined : Math.round(settings.minimumTopup * 100)
+  const singleLimitCents =
+    settings === undefined ? undefined : Math.round(settings.autoCreditLimit * 100)
+  const dailyLimitUsd = settings?.dailyTopupLimits[level]
+  const dailyLimitCents =
+    dailyLimitUsd === undefined ? undefined : Math.round(dailyLimitUsd * 100)
 
-  // The single-payment auto-credit ceiling. Anything above it would be recorded
-  // and held for manual review even if the daily allowance were untouched, so
-  // there is no honest way to authorise it here.
-  const singleLimitCents = Math.round(settings.autoCreditLimit * 100)
-  if (amountCents > singleLimitCents) {
-    return {
-      authorized: false,
-      reason: "above-single-payment-limit",
-      limitCents: singleLimitCents,
-    }
-  }
-
-  const dailyLimitUsd = settings.dailyTopupLimits[level]
-  if (dailyLimitUsd === undefined) {
-    return { authorized: false, reason: "no-daily-limit-for-level" }
-  }
-  const dailyLimitCents = Math.round(dailyLimitUsd * 100)
-
-  // Same read the webhook gate uses, so the answer here and the decision there
-  // cannot drift. `excludeTransactionId` has no counterpart yet — nothing has
-  // been paid — so pass a value that matches no row.
-  const priorCents = await sumFygaroTopupGrossCentsLast24h({
-    accountId,
-    excludeTransactionId: `intent-preauth-${accountId}`,
+  const refuse = (
+    reason: RecordOnlyReason,
+    remainingAllowanceCents?: number,
+  ): AuthorizeTopupResult => ({
+    authorized: false,
+    reason: FAILURE_BY_GATE_REASON[reason],
+    remainingAllowanceCents,
+    limitCents: reason === "over-limit" ? singleLimitCents : dailyLimitCents,
+    minimumCents,
   })
+
+  const gateArgs = {
+    creditEnabled,
+    currency: "USD",
+    settings,
+    grossCents: amountCents,
+    level,
+  }
+
+  // Probe with an unknown history: `history-unavailable` is the FIRST gate that
+  // needs one, so any other stop is decided without reading ERPNext at all — a
+  // client can no longer make us run a list query per rejected amount. The
+  // ordering lives in evaluateCreditGate; this reads it rather than restating it.
+  const probe = evaluateCreditGate({ ...gateArgs, priorDayGrossCents: undefined })
+  if (!probe.credit && probe.reason !== "history-unavailable") {
+    return refuse(probe.reason)
+  }
+
+  const priorCents = await sumFygaroTopupGrossCentsLast24h({ accountId })
   if (priorCents instanceof Error) {
     // Never coerce an unreadable history to zero: that would treat an ERPNext
     // outage as a clean slate and authorise the full allowance to everyone.
-    return { authorized: false, reason: "history-unavailable" }
+    return refuse("history-unavailable")
   }
 
-  const remainingAllowanceCents = Math.max(0, dailyLimitCents - priorCents)
-  if (amountCents > remainingAllowanceCents) {
-    return {
-      authorized: false,
-      reason: "exceeds-daily-allowance",
-      remainingAllowanceCents,
-      limitCents: dailyLimitCents,
-    }
+  // Authorisation is only a promise until it is also a reservation. Links this
+  // account already holds are money it can still spend, so they count against
+  // the allowance exactly like settled charges do — otherwise N calls each mint
+  // a full-allowance link and paying two of them strands the second.
+  const outstandingCents = await sumOutstandingAuthorizedCents({ accountId, nowMs })
+  if (outstandingCents instanceof Error) {
+    // Same posture as the history read: unknown outstanding is not zero
+    // outstanding. The customer is told we could not check, not that they are
+    // over a limit we never measured.
+    return refuse("history-unavailable")
   }
+
+  // Fail-open (0 on any failure), and gross-denominated gates are discount-blind
+  // anyway — it only moves the fee math, which is what `non-positive-net` turns
+  // on. Read here so this side and the webhook side compute the same net.
+  const flashFeeDiscountPercent = await getFlashFeeDiscountPercent({
+    username,
+    flow: "topup",
+  })
+
+  const spentCents = priorCents + outstandingCents
+  const remainingAllowanceCents =
+    dailyLimitCents === undefined ? undefined : Math.max(0, dailyLimitCents - spentCents)
+
+  const gate = evaluateCreditGate({
+    ...gateArgs,
+    priorDayGrossCents: spentCents,
+    flashFeeDiscountPercent,
+  })
+  if (!gate.credit) return refuse(gate.reason, remainingAllowanceCents)
+
+  // Past this point the gate said yes, so the daily limit exists by construction
+  // (`no-daily-limit-for-level` precedes it) — narrowed for the type checker.
+  const allowanceCents = remainingAllowanceCents ?? 0
 
   const intentId = newIntentId()
   const checkout = buildFygaroCheckout({
@@ -146,30 +221,52 @@ export const authorizeFygaroTopup = async ({
     nowMs,
   })
 
-  const saved = await saveIntent({
-    intent: {
-      intentId,
-      accountId,
-      username,
-      amountCents,
-      currency: "USD",
-      createdAtMs: nowMs,
-    },
-    ttlSeconds: checkoutConfig.ttlSeconds,
-  })
+  const intent = {
+    intentId,
+    accountId,
+    username,
+    amountCents,
+    currency: "USD",
+    createdAtMs: nowMs,
+  }
+  const saved = await saveIntent({ intent, ttlSeconds: checkoutConfig.ttlSeconds })
   if (saved instanceof Error) {
     // The signed URL is still perfectly payable and the webhook gate still
-    // applies; only our own after-the-fact cross-check is missing. Log it and
-    // proceed rather than blocking a legitimate top-up on a cache write.
+    // applies; only our own after-the-fact cross-check and reservation are
+    // missing. Log it and proceed rather than blocking a legitimate top-up on a
+    // cache write.
     baseLogger.warn(
       { intentId, error: saved.constructor.name },
-      "Failed to persist Fygaro checkout intent; proceeding without cross-check",
+      "Failed to persist Fygaro checkout authorisation; proceeding without cross-check",
     )
+    return { authorized: true, checkout, remainingAllowanceCents: allowanceCents }
+  }
+
+  // Reserve, then re-read. Two requests that raced past the check above have
+  // both reserved by now, so both see the combined total here and both back
+  // out: the allowance can be under-used for one round trip, never over-issued.
+  const outstandingAfter = await sumOutstandingAuthorizedCents({ accountId, nowMs })
+  if (
+    dailyLimitCents !== undefined &&
+    !(outstandingAfter instanceof Error) &&
+    priorCents + outstandingAfter > dailyLimitCents
+  ) {
+    await releaseIntentReservation(intent)
+    baseLogger.info(
+      { accountId, intentId },
+      "Concurrent Fygaro checkout authorisation would exceed the daily allowance; rolled back",
+    )
+    return {
+      authorized: false,
+      reason: "exceeds-daily-allowance",
+      remainingAllowanceCents,
+      limitCents: dailyLimitCents,
+    }
   }
 
   return {
     authorized: true,
     checkout,
-    remainingAllowanceCents: remainingAllowanceCents - amountCents,
+    remainingAllowanceCents: allowanceCents - amountCents,
   }
 }

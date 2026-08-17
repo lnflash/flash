@@ -1098,7 +1098,9 @@ type FygaroCheckout
   """
   expiresAt: Timestamp!
 
-  """Open this in the payment webview. Single use."""
+  """
+  Open this in the payment webview. The amount and the destination account are signed into it and cannot be edited; it stops working at expiresAt.
+  """
   url: String!
 }
 

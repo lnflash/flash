@@ -560,6 +560,23 @@ describe("ErpNext.sumFygaroTopupGrossCentsSince", () => {
     ])
   })
 
+  it("drops the request_id filter entirely when no exclusion is given", async () => {
+    // The pre-charge allowance check has no row of its own yet. Sending a
+    // sentinel request_id instead would make the query's correctness depend on
+    // that string never colliding with a real one.
+    mockedAxios.get.mockResolvedValue({ data: { data: [] } })
+
+    await client.sumFygaroTopupGrossCentsSince({
+      accountId: params.accountId,
+      since: params.since,
+    })
+
+    const filters = JSON.parse(mockedAxios.get.mock.calls[0][1].params.filters)
+    expect(filters.some((f: unknown[]) => f[1] === "request_id")).toBe(false)
+    // Every other filter is untouched — the window must not widen.
+    expect(filters).toHaveLength(6)
+  })
+
   it("returns 0 for an empty window", async () => {
     mockedAxios.get.mockResolvedValue({ data: { data: [] } })
 

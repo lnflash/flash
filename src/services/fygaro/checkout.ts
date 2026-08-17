@@ -99,6 +99,18 @@ export type FygaroCheckoutJwtPayload = {
 }
 
 /**
+ * How far `nbf` is backdated.
+ *
+ * Fygaro validates the token against THEIR clock. `nbf: now` with zero leeway
+ * means a server running even a second fast mints a link that is "not yet
+ * valid" — a dead end at the payment page, which is a payer-facing hard failure
+ * rather than a degraded credit. Flash already tolerates 5 minutes of skew on
+ * the inbound webhook (`webhook.timestampSkewMs`); the outbound side has no
+ * business being stricter. `exp` is what actually bounds replay.
+ */
+export const NBF_SKEW_SECONDS = 60
+
+/**
  * Sign a Fygaro checkout payload. HS256 over the shared secret, with the key id
  * in the header so Fygaro knows which secret to verify against — the same
  * key-id/secret pairing the inbound webhook already uses, which is why secret
@@ -160,7 +172,7 @@ export const buildFygaroCheckout = ({
     amount: formatFygaroAmount(amountCents),
     currency,
     custom_reference: customReference,
-    nbf: nowSecs,
+    nbf: nowSecs - NBF_SKEW_SECONDS,
     exp: nowSecs + ttlSeconds,
   }
 

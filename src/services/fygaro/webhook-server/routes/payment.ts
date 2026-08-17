@@ -44,7 +44,7 @@ import {
 } from "../credit-topup"
 import { getFygaroSettings } from "../fygaro-settings"
 import { parseCustomReference } from "../../checkout"
-import { consumeIntent } from "../../checkout-intent-store"
+import { consumeIntent, readIntent } from "../../checkout-intent-store"
 import { evaluateCreditGate, RecordOnlyReason } from "../fees"
 
 type FygaroPaymentPayload = {
@@ -354,9 +354,17 @@ export const paymentHandler = async (req: Request, res: Response) => {
     // payment we cannot account for is the failure this whole workstream is
     // about. A missing intent is NOT treated as a mismatch: it is the legacy
     // position (unverified), and the credit gate below still applies in full.
+    //
+    // The read is NON-DESTRUCTIVE. This handler answers 500 on the transient
+    // stops below so the provider retries; consuming here would burn the
+    // authorisation on a delivery that credited nothing, leaving the retry that
+    // actually moves money — the one most worth verifying — with nothing to
+    // check against. The intent is redeemed instead on the terminal paths
+    // (`redeemIntent` below), which is also where its hold on the account's
+    // daily allowance is released.
     let intentMismatch: string | undefined
     if (intentId) {
-      const lookup = await consumeIntent(intentId)
+      const lookup = await readIntent(intentId)
       if (lookup.found) {
         const authorized = lookup.intent
         if (authorized.amountCents !== grossCents) {
@@ -370,6 +378,14 @@ export const paymentHandler = async (req: Request, res: Response) => {
           "Fygaro payment references an intent that is expired, consumed or unknown",
         )
       }
+    }
+
+    // Terminal-path redemption: atomic, so a replayed authorisation is claimed
+    // exactly once. Deliberately not awaited for its answer — losing the claim
+    // means another delivery already redeemed it, which changes nothing about
+    // this payment's outcome.
+    const redeemIntent = async () => {
+      if (intentId) await consumeIntent(intentId)
     }
 
     const settings = creditEnabled ? await getFygaroSettings() : undefined
@@ -514,6 +530,9 @@ export const paymentHandler = async (req: Request, res: Response) => {
           reason: gate.reason,
         },
       })
+      // Terminal: this reason will not change on retry, so the authorisation is
+      // spent and its hold on the daily allowance must be released.
+      await redeemIntent()
       return res.status(200).json({ status: "recorded", credited: false })
     }
 
@@ -629,6 +648,10 @@ export const paymentHandler = async (req: Request, res: Response) => {
             net: centsToDollars(fees.netCents),
           },
         })
+
+        // The money moved: the authorisation is spent. Not done on the credit-
+        // FAILURE branch above, which is deliberately retryable.
+        await redeemIntent()
 
         return { code: 200, body: { status: "success", credited: true } }
       },

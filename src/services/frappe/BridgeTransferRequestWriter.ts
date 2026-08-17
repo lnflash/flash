@@ -256,17 +256,21 @@ export const writeFygaroTopupRequest = async ({
   )
 }
 
-// Gross cents this account was charged via Fygaro over the trailing 24h,
-// excluding the given transaction's own audit row (which is written before the
-// credit gate runs). Feeds the per-level daily top-up cap. An unconfigured
-// ERPNext client is an error, not zero — the gate must fail closed rather
-// than treat a missing history as a clean slate.
+// Gross cents this account was charged via Fygaro over the trailing 24h. Feeds
+// the per-level daily top-up cap. An unconfigured ERPNext client is an error,
+// not zero — the gate must fail closed rather than treat a missing history as a
+// clean slate.
+//
+// `excludeTransactionId` drops the caller's OWN audit row, which the webhook
+// writes before the credit gate runs; without it every payment double-counts
+// itself. It is optional because the pre-charge check has no such row — nothing
+// has been paid yet — and omitting the filter is the honest way to say so.
 export const sumFygaroTopupGrossCentsLast24h = async ({
   accountId,
   excludeTransactionId,
 }: {
   accountId: AccountId | string
-  excludeTransactionId: string
+  excludeTransactionId?: string
 }): Promise<number | FygaroTopupHistoryQueryError> => {
   if (!ErpNext?.sumFygaroTopupGrossCentsSince) {
     return new FygaroTopupHistoryQueryError("ERPNext client is not configured")
@@ -274,7 +278,9 @@ export const sumFygaroTopupGrossCentsLast24h = async ({
   return ErpNext.sumFygaroTopupGrossCentsSince({
     accountId: String(accountId),
     since: new Date(Date.now() - 24 * 60 * 60 * 1000),
-    excludeRequestId: `fygaro:${excludeTransactionId}`,
+    ...(excludeTransactionId === undefined
+      ? {}
+      : { excludeRequestId: `fygaro:${excludeTransactionId}` }),
   })
 }
 

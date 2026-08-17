@@ -10,7 +10,9 @@ const FygaroCheckout = GT.Object({
   fields: () => ({
     url: {
       type: GT.NonNull(GT.String),
-      description: "Open this in the payment webview. Single use.",
+      description:
+        "Open this in the payment webview. The amount and the destination account are " +
+        "signed into it and cannot be edited; it stops working at expiresAt.",
     },
     expiresAt: {
       type: GT.NonNull(Timestamp),

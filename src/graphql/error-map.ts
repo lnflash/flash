@@ -706,6 +706,13 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         message,
       })
 
+    case "FygaroLevelNotEligibleError":
+      message = error.message || "Card top-up isn't available on your account level yet"
+      return bridgeGqlError({
+        code: "FYGARO_LEVEL_NOT_ELIGIBLE",
+        message,
+      })
+
     case "BridgeInvalidPlaidTokenError":
       message = error.message || "linkToken and publicToken are required"
       return bridgeGqlError({

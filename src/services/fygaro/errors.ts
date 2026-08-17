@@ -29,3 +29,17 @@ export class FygaroAllowanceUnavailableError extends FygaroError {
     super(message)
   }
 }
+
+/**
+ * The account's level has no configured top-up allowance (level 0 today).
+ *
+ * Deliberately NOT an "unavailable" error: that reason is deterministic and
+ * permanent until the account upgrades, so telling the customer to try again
+ * later sends them into a loop and sends support chasing a phantom outage. Its
+ * own code exists so the client can route them to the upgrade flow instead.
+ */
+export class FygaroLevelNotEligibleError extends FygaroError {
+  constructor(message: string = "Card top-up isn't available on your account level yet") {
+    super(message)
+  }
+}
