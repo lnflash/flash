@@ -3,11 +3,13 @@ import {
   type AuthorizeTopupResult,
 } from "@app/fygaro/authorize-topup"
 import { RateLimitConfig } from "@domain/rate-limit"
+import { FygaroCheckoutCreateRateLimiterExceededError } from "@domain/rate-limit/errors"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { GT } from "@graphql/index"
 import FygaroCheckout from "@graphql/public/types/object/fygaro-checkout"
 import CentAmount from "@graphql/public/types/scalar/cent-amount"
 import IError from "@graphql/shared/types/abstract/error"
+import { baseLogger } from "@services/logger"
 import { consumeLimiter } from "@services/rate-limit"
 import {
   FygaroAboveSinglePaymentLimitError,
@@ -27,9 +29,11 @@ const FygaroCheckoutCreatePayload = GT.Object({
     remainingAllowance: {
       type: CentAmount,
       description:
-        "What is left of today's top-up allowance after this request. Present on refusal " +
-        "too, so the client can say how much would be accepted instead of only saying no. " +
-        "Null when the allowance itself could not be established.",
+        "How much more could be authorised right now, after this request. Card top-up " +
+        "links you have open but have not paid are ALREADY SUBTRACTED, so this is what " +
+        "would be accepted this second — not a statement of what the account has spent " +
+        "today. Present on refusal too, so the client can say how much would go through " +
+        "instead of only saying no. Null when the allowance could not be established.",
     },
   }),
 })
@@ -171,8 +175,22 @@ const fygaroCheckoutCreate = GT.Field<
       rateLimitConfig: RateLimitConfig.fygaroCheckoutCreate,
       keyToConsume: domainAccount.id,
     })
-    if (limitOk instanceof Error) {
+    if (limitOk instanceof FygaroCheckoutCreateRateLimiterExceededError) {
       return { errors: [mapAndParseErrorForGqlResponse(limitOk)] }
+    }
+    if (limitOk instanceof Error) {
+      // The limiter STORE is down, not the caller misbehaving. Refusing here
+      // would tell every customer they are rate limited on their first attempt
+      // and would page nobody, because authorizeFygaroTopup — which fails
+      // closed on its own Redis read and alerts as `reservations-unavailable`
+      // — would never be entered. Fall through instead: the same outage stops
+      // the authorisation one step later, with the honest message and the
+      // page. This cannot open an abuse window, because no link can be minted
+      // while the store the reservation index lives in is unreachable.
+      baseLogger.warn(
+        { accountId: domainAccount.id, error: limitOk.name },
+        "Fygaro checkout rate limiter unavailable; deferring to the authorisation gate",
+      )
     }
 
     const result = await authorizeFygaroTopup({

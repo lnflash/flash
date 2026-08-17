@@ -3,7 +3,7 @@ import {
   UnknownRateLimitServiceError,
 } from "@domain/rate-limit/errors"
 import { redis } from "@services/redis"
-import { RateLimiterRedis } from "rate-limiter-flexible"
+import { RateLimiterRedis, RateLimiterRes } from "rate-limiter-flexible"
 
 export const RedisRateLimitService = ({
   keyPrefix,
@@ -19,7 +19,15 @@ export const RedisRateLimitService = ({
       await limiter.consume(key)
       return true
     } catch (err) {
-      return new RateLimiterExceededError()
+      // `limiter.consume` rejects for two unrelated reasons, and they must not
+      // be conflated. A RateLimiterRes rejection means the caller really is
+      // over the limit. Anything else is the STORE failing — with no
+      // insuranceLimiter configured, a Redis outage rejects with the raw store
+      // error — and reporting that as "too many attempts" tells every user
+      // they are rate limited on their first request of the day, while hiding
+      // the outage from whoever is on call.
+      if (err instanceof RateLimiterRes) return new RateLimiterExceededError()
+      return new UnknownRateLimitServiceError(err)
     }
   }
 
@@ -56,7 +64,10 @@ export const consumeLimiter = async ({
     limitOptions: rateLimitConfig.limits,
   })
   const consume = await limiter.consume(keyToConsume)
-  return consume instanceof Error ? new rateLimitConfig.error() : consume
+  // Only a genuine limit breach becomes the caller's "too many attempts"
+  // error; a store fault propagates as itself so it can be told apart.
+  if (consume instanceof RateLimiterExceededError) return new rateLimitConfig.error()
+  return consume
 }
 
 export const resetLimiter = async ({

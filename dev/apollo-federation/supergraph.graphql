@@ -1117,7 +1117,7 @@ type FygaroCheckoutCreatePayload
   errors: [Error!]!
 
   """
-  What is left of today's top-up allowance after this request. Present on refusal too, so the client can say how much would be accepted instead of only saying no. Null when the allowance itself could not be established.
+  How much more could be authorised right now, after this request. Card top-up links you have open but have not paid are ALREADY SUBTRACTED, so this is what would be accepted this second — not a statement of what the account has spent today. Present on refusal too, so the client can say how much would go through instead of only saying no. Null when the allowance could not be established.
   """
   remainingAllowance: CentAmount
 }

@@ -7,6 +7,7 @@ import {
   buildFygaroCheckout,
   type FygaroCheckout,
 } from "@services/fygaro/checkout"
+import { FygaroReservationWriteError } from "@services/fygaro/errors"
 import {
   newIntentId,
   readIntent,
@@ -230,6 +231,12 @@ export const authorizeFygaroTopup = async ({
     reservations: FygaroReservation[]
     amountCents: number
     dailyLimitCents: number
+    // How much MORE could be authorised right now — live holds already
+    // subtracted. In the canonical abandoned-link case this is 0, and that is
+    // the true answer to "what else can I do this second": nothing, until the
+    // hold lifts. It is not a claim about what the account has spent, which is
+    // why `holdAmountCents`/`holdExpiresAt` travel with it and why the field's
+    // schema description says outright that holds count against it.
     remainingAllowanceCents: number
   }): Promise<AuthorizeTopupResult> => {
     const sameAmount = reservations.find((r) => r.amountCents === amountCents)
@@ -260,8 +267,8 @@ export const authorizeFygaroTopup = async ({
               intentId: open.intent.intentId,
             }),
           },
-          // The hold is already inside `remainingAllowanceCents`, so nothing is
-          // subtracted a second time for handing the same link back.
+          // The hold is already counted, so nothing is subtracted a second
+          // time for handing the same link back.
           remainingAllowanceCents,
         }
       }
@@ -394,6 +401,14 @@ export const authorizeFygaroTopup = async ({
     expiresAtMs: checkout.expiresAt.getTime(),
   }
   const saved = await saveIntent({ intent, ttlSeconds: checkoutConfig.ttlSeconds })
+  if (saved instanceof FygaroReservationWriteError) {
+    // The hold could not be recorded, so the next request would see this
+    // allowance as still free and hand it out again — the over-issue the
+    // reservation exists to stop. The read side of the same index already
+    // refuses when it is unreachable; the write side has to match, or the
+    // guarantee only holds while Redis is healthy.
+    return refuseTransient("reservations-unavailable")
+  }
   if (saved instanceof Error) {
     // The signed URL is still perfectly payable and the webhook gate still
     // applies; only our own after-the-fact cross-check and reservation are
@@ -401,7 +416,7 @@ export const authorizeFygaroTopup = async ({
     // cache write.
     baseLogger.warn(
       { intentId, error: saved.constructor.name },
-      "Failed to persist Fygaro checkout authorisation; proceeding without cross-check",
+      "Failed to persist the Fygaro cross-check record; the hold is in place, so proceeding",
     )
     return { authorized: true, checkout, remainingAllowanceCents: allowanceCents }
   }

@@ -55,3 +55,13 @@ export class FygaroLevelNotEligibleError extends FygaroError {
     super(message)
   }
 }
+
+/**
+ * The reservation index could not be written.
+ *
+ * Distinct from a failed cross-check record: without the reservation the
+ * authorisation is invisible to the next request, so the same allowance can be
+ * handed out again. The read side already fails closed, and the write side has
+ * to match — a link minted with no hold is exactly the over-issue this guards.
+ */
+export class FygaroReservationWriteError extends FygaroError {}

@@ -1,5 +1,6 @@
 import { AccountLevel } from "@domain/accounts"
 import { parseCustomReference } from "@services/fygaro/checkout"
+import { FygaroReservationWriteError } from "@services/fygaro/errors"
 
 const mockGetFygaroSettings = jest.fn()
 const mockSumPrior = jest.fn()
@@ -257,15 +258,29 @@ describe("authorizeFygaroTopup", () => {
     expect(res.reason).toBe("checkout-disabled")
   })
 
-  it("still authorises when the intent could not be stored", async () => {
-    // The signed amount and the webhook gate both still apply; only our own
-    // after-the-fact cross-check is missing. A Redis blip must not block a
-    // legitimate top-up.
+  it("still authorises when only the cross-check record could not be stored", async () => {
+    // The hold IS in place and the webhook gate still applies; only our own
+    // after-the-fact verification is missing. That must not block a legitimate
+    // top-up.
     mockSaveIntent.mockResolvedValue(new Error("redis down"))
     const res = await authorize()
 
     expect(res.authorized).toBe(true)
     expect(res.checkout.url).toContain("?jwt=")
+  })
+
+  it("refuses — and pages — when the RESERVATION could not be written", async () => {
+    // The read side of the reservation index fails closed. If the write side
+    // failed open, the hold would be invisible to the next request and the same
+    // allowance would be handed out twice: exactly the over-issue the
+    // reservation exists to stop.
+    mockSaveIntent.mockResolvedValue(new FygaroReservationWriteError("READONLY"))
+    const res = await authorize()
+
+    expect(res.authorized).toBe(false)
+    expect(res.reason).toBe("reservations-unavailable")
+    // Card top-ups being 100% unavailable must never be silent.
+    expect(mockAlertBridge).toHaveBeenCalledTimes(1)
   })
 
   it("asks the trailing-24h sum for the whole window, with nothing excluded", async () => {

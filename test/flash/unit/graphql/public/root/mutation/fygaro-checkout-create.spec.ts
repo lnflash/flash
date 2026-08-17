@@ -17,7 +17,10 @@ const mockConsumeLimiter = jest.fn()
 
 import { AccountLevel } from "@domain/accounts"
 import { RateLimitConfig } from "@domain/rate-limit"
-import { FygaroCheckoutCreateRateLimiterExceededError } from "@domain/rate-limit/errors"
+import {
+  FygaroCheckoutCreateRateLimiterExceededError,
+  UnknownRateLimitServiceError,
+} from "@domain/rate-limit/errors"
 import { InputValidationError } from "@graphql/error"
 import FygaroCheckoutCreateMutation from "@graphql/public/root/mutation/fygaro-checkout-create"
 
@@ -299,6 +302,27 @@ describe("fygaroCheckoutCreate resolver", () => {
       expect(result.checkout).toBeUndefined()
       expect(result.errors).toHaveLength(1)
       expect(result.errors[0].code).toBe("TOO_MANY_REQUEST")
+    })
+
+    it("defers to the authorisation gate when the limiter STORE is down", async () => {
+      // A Redis outage rejects `limiter.consume` with a store error, not a
+      // RateLimiterRes. Reporting that as "too many attempts" would tell every
+      // customer they are rate limited on their first attempt of the day, and
+      // would page nobody — authorizeFygaroTopup, which fails closed on its own
+      // Redis read and alerts, would never be entered. No abuse window opens:
+      // no link can be minted while that same store is unreachable.
+      mockConsumeLimiter.mockResolvedValue(
+        new UnknownRateLimitServiceError("ECONNREFUSED"),
+      )
+      mockAuthorizeFygaroTopup.mockResolvedValue({
+        authorized: false,
+        reason: "reservations-unavailable",
+      })
+
+      const result = await resolve(8000)
+
+      expect(mockAuthorizeFygaroTopup).toHaveBeenCalled()
+      expect(result.errors[0].code).toBe("FYGARO_ALLOWANCE_UNAVAILABLE")
     })
   })
 })

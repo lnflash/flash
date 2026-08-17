@@ -3,6 +3,8 @@ import { randomUUID } from "crypto"
 import { CacheUndefinedError } from "@domain/cache"
 import { baseLogger } from "@services/logger"
 
+import { FygaroReservationWriteError } from "./errors"
+
 // Loaded on first use rather than at import time. `@services/cache` and
 // `@services/redis` construct a Redis client as a module side effect, and this
 // module is imported by the Fygaro webhook route — eagerly importing them would
@@ -118,7 +120,9 @@ export const saveIntent = async ({
     // up does not leave a key behind forever.
     await redis.expire(key, ttlSeconds + 3600)
   } catch (err) {
-    return err instanceof Error ? err : new Error(String(err))
+    return new FygaroReservationWriteError(
+      err instanceof Error ? err.message : String(err),
+    )
   }
 
   return true
