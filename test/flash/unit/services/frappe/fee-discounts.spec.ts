@@ -76,7 +76,7 @@ describe("validateFeeDiscountDoc", () => {
     ["percent over 100", { ...ROW, discount_percent: 101 }],
     // Unticking Active is how an operator ends a promo. The ERPNext query
     // filters on active=1, but that filter must not be the ONLY thing
-    // enforcing it: this reader fails OPEN, so a dropped or mis-encoded
+    // enforcing it: this reader fails OPEN, so a dropped or malformed
     // filter would keep every deactivated row discounting Flash's fee
     // indefinitely with nothing to alarm on.
     ["active unticked", { ...ROW, active: 0 }],

@@ -458,7 +458,7 @@ export class ErpNext {
       // Serialized through axios `params` (not hand-interpolated into the URL)
       // so encoding is the HTTP client's job. `active` is fetched as well as
       // filtered on: validateFeeDiscountDoc re-checks it, so a deactivated row
-      // is dropped even if this filter is ever lost or mis-encoded.
+      // is dropped even if this filter is ever lost or malformed.
       const fields = JSON.stringify([
         "username",
         "discount_percent",

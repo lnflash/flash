@@ -46,7 +46,7 @@ export const validateFeeDiscountDoc = (
   if (!doc || typeof doc !== "object") return undefined
   // Honour the operator's Active tick here, not only in the ERPNext query
   // filter. Unticking Active is how a promo ends; if this were enforced by
-  // the query string alone, a dropped or mis-encoded filter would silently
+  // the query string alone, a dropped or malformed filter would silently
   // keep every deactivated row discounting Flash's fee forever — and because
   // the reader deliberately fails open, nothing would alarm.
   if (!toBoolean(doc.active)) return undefined
