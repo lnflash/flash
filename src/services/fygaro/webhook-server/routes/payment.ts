@@ -43,6 +43,13 @@ import {
   INSUFFICIENT_TREASURY_FLOAT_STEP,
 } from "../credit-topup"
 import { getFygaroSettings } from "../fygaro-settings"
+import { parseCustomReference } from "../../checkout"
+import {
+  consumeIntent,
+  readIntent,
+  releaseIntentReservation,
+  type FygaroCheckoutIntent,
+} from "../../checkout-intent-store"
 import { evaluateCreditGate, RecordOnlyReason } from "../fees"
 
 type FygaroPaymentPayload = {
@@ -110,6 +117,8 @@ const RECORD_ONLY_ALERT_TITLE: Record<
   "daily-limit-exceeded":
     "Fygaro payment exceeds the account's daily top-up limit — not auto-credited",
   "under-minimum": "Fygaro payment below the minimum top-up — not auto-credited",
+  "intent-mismatch":
+    "Fygaro payment does not match the checkout Flash signed for it — not auto-credited",
   "non-positive-net": "Fygaro payment net after fees is not positive — not auto-credited",
 }
 
@@ -117,7 +126,13 @@ export const paymentHandler = async (req: Request, res: Response) => {
   const payload = (req.body ?? {}) as FygaroPaymentPayload
   const { transactionId, createdAt } = payload
   const currency = (payload.currency ?? "USD").toUpperCase()
-  const username = payload.customReference?.trim() || undefined
+  // `custom_reference` is either a bare username (built on-device by app
+  // versions predating signed checkout, and editable by the payer) or
+  // `username|intentId` minted by authorizeFygaroTopup. Both are accepted for
+  // as long as older clients are in the wild; only the second can be verified.
+  const reference = parseCustomReference(payload.customReference)
+  const username = reference?.username
+  const intentId = reference?.intentId
 
   if (!transactionId || !payload.amount) {
     baseLogger.warn(
@@ -277,6 +292,45 @@ export const paymentHandler = async (req: Request, res: Response) => {
       return res.status(500).json({ error: "Failed to persist audit row" })
     }
 
+    // Look the authorisation up ONCE, and do it BEFORE the unattributed branch
+    // below, so every terminal answer in this handler can let go of the hold
+    // the authorisation still has on the account's daily allowance. A leaked
+    // hold is not cosmetic: the audit row already counts the payment towards
+    // the cap, so a hold left behind on top of it double-counts one payment for
+    // the rest of the JWT's window and refuses the account's next legitimate
+    // top-up — piling a second failure onto an already-bad event.
+    //
+    // The read is NON-DESTRUCTIVE. This handler answers 500 on the transient
+    // stops below so the provider retries; consuming here would burn the
+    // authorisation on a delivery that credited nothing, leaving the retry that
+    // actually moves money — the one most worth verifying — with nothing to
+    // check against.
+    let authorizedIntent: FygaroCheckoutIntent | undefined
+    if (intentId) {
+      const lookup = await readIntent(intentId)
+      if (lookup.found) {
+        authorizedIntent = lookup.intent
+      } else {
+        baseLogger.info(
+          { transactionId, intentId },
+          "Fygaro payment references an intent that is expired, consumed or unknown",
+        )
+      }
+    }
+
+    /**
+     * Drop the authorisation's hold on the daily allowance WITHOUT consuming the
+     * record.
+     *
+     * For terminal answers that did not move money: the hold must go (it is
+     * holding allowance against a payment that is already counted in ERPNext),
+     * but the record must stay, so a later manual credit still has the
+     * cross-check of what we originally authorised.
+     */
+    const releaseAuthorizedHold = async () => {
+      if (authorizedIntent) await releaseIntentReservation(authorizedIntent)
+    }
+
     if (!account) {
       // Dedupe re-deliveries before emitting: alertBridge is TTL-deduped but
       // the ops feed is not, so a Fygaro retry of an unattributed payment
@@ -325,6 +379,11 @@ export const paymentHandler = async (req: Request, res: Response) => {
           ...(resolvedUsername ? { emailMatchedUsername: resolvedUsername } : {}),
         },
       })
+      // Terminal (the dedupe lock above is non-releasing, so retries ack
+      // "already_processed"): a signed reference whose username no longer
+      // resolves never reaches the redemption paths below, so release its hold
+      // here or it sits on the allowance until the JWT expires.
+      await releaseAuthorizedHold()
       return res.status(200).json({ status: "recorded", attributed: false })
     }
     const accountId = account.id
@@ -337,6 +396,36 @@ export const paymentHandler = async (req: Request, res: Response) => {
     // ERPNext for this.
     const creditEnabled = Boolean(FygaroConfig.credit?.enabled)
     const grossCents = Math.round(grossAmount * 100)
+    // Cross-check the payment against what the server authorised (read above),
+    // when the reference carries an intent. The signed JWT already prevents the
+    // customer altering the amount, so a mismatch here means something on OUR
+    // side is wrong — a signing bug, a stale intent, a replay — and quietly
+    // crediting a payment we cannot account for is the failure this whole
+    // workstream is about. A missing intent is NOT treated as a mismatch: it is
+    // the legacy position (unverified), and the credit gate below still applies
+    // in full.
+    //
+    // The intent is redeemed on the terminal paths (`redeemIntent` below), which
+    // is also where its hold on the account's daily allowance is released; the
+    // terminal paths that did NOT move money release the hold alone
+    // (`releaseAuthorizedHold`), keeping the record for a manual credit.
+    let intentMismatch: string | undefined
+    if (authorizedIntent) {
+      if (authorizedIntent.amountCents !== grossCents) {
+        intentMismatch = `authorised ${authorizedIntent.amountCents}c, paid ${grossCents}c`
+      } else if (accountId && authorizedIntent.accountId !== accountId) {
+        intentMismatch = `authorised for account ${authorizedIntent.accountId}, paid as ${accountId}`
+      }
+    }
+
+    // Terminal-path redemption: atomic, so a replayed authorisation is claimed
+    // exactly once. Deliberately not awaited for its answer — losing the claim
+    // means another delivery already redeemed it, which changes nothing about
+    // this payment's outcome.
+    const redeemIntent = async () => {
+      if (intentId) await consumeIntent(intentId)
+    }
+
     const settings = creditEnabled ? await getFygaroSettings() : undefined
 
     // Trailing-24h charged gross for the per-level daily cap, read only when a
@@ -375,15 +464,19 @@ export const paymentHandler = async (req: Request, res: Response) => {
       })
     }
 
-    const gate = evaluateCreditGate({
-      creditEnabled,
-      currency,
-      settings,
-      grossCents,
-      level: account.level,
-      priorDayGrossCents,
-      flashFeeDiscountPercent,
-    })
+    // A mismatch overrides every other outcome: the gate can only reason about
+    // the payment in front of it, not about whether we ever authorised it.
+    const gate = intentMismatch
+      ? ({ credit: false, reason: "intent-mismatch" } as const)
+      : evaluateCreditGate({
+          creditEnabled,
+          currency,
+          settings,
+          grossCents,
+          level: account.level,
+          priorDayGrossCents,
+          flashFeeDiscountPercent,
+        })
 
     if (!gate.credit) {
       // `settings-unavailable` and `history-unavailable` are TRANSIENT (an
@@ -446,13 +539,19 @@ export const paymentHandler = async (req: Request, res: Response) => {
           source: "fygaro-webhook",
           severity: "warning",
           title: RECORD_ONLY_ALERT_TITLE[gate.reason],
-          detail: `reason=${gate.reason} currency=${currency} gross=${centsToDollars(grossCents)} level=${account.level}`,
+          detail: `reason=${gate.reason} currency=${currency} gross=${centsToDollars(grossCents)} level=${account.level}${
+            intentMismatch ? ` mismatch=${intentMismatch}` : ""
+          }`,
           context: {
             transaction_id: transactionId,
             amount: String(payload.amount),
             reason: gate.reason,
             username,
             account_level: account.level,
+            // Without these numbers the alert says a payment was refused but
+            // not what it was refused against, which is the only thing that
+            // tells an operator whether to credit it by hand.
+            ...(intentMismatch ? { intent_mismatch: intentMismatch } : {}),
           },
         })
       }
@@ -469,6 +568,9 @@ export const paymentHandler = async (req: Request, res: Response) => {
           reason: gate.reason,
         },
       })
+      // Terminal: this reason will not change on retry, so the authorisation is
+      // spent and its hold on the daily allowance must be released.
+      await redeemIntent()
       return res.status(200).json({ status: "recorded", credited: false })
     }
 
@@ -536,6 +638,17 @@ export const paymentHandler = async (req: Request, res: Response) => {
           // send is not cached, so a provider retry re-attempts the credit
           // (self-healing for transient failures); ops has the critical alert
           // for the deterministic ones.
+          //
+          // Release the HOLD but not the record. The ERPNext row already counts
+          // this payment towards the daily cap (Fiat Received rows are summed),
+          // so leaving the reservation up as well double-counts one payment:
+          // $50 paid on a $125 cap would read as $100 spent and refuse the
+          // customer's next $50 for the rest of the JWT window — a second
+          // failure stacked on an already-failed credit. The record survives so
+          // the manual credit this alert asks for still has its cross-check,
+          // and so a provider retry (which this branch invites) can still
+          // verify the payment.
+          await releaseAuthorizedHold()
           return { code: 200, body: { status: "recorded", credited: false } }
         }
 
@@ -584,6 +697,10 @@ export const paymentHandler = async (req: Request, res: Response) => {
             net: centsToDollars(fees.netCents),
           },
         })
+
+        // The money moved: the authorisation is spent. Not done on the credit-
+        // FAILURE branch above, which is deliberately retryable.
+        await redeemIntent()
 
         return { code: 200, body: { status: "success", credited: true } }
       },

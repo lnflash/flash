@@ -60,6 +60,9 @@ export const apiKeyScopeForField: Readonly<Record<string, ApiKeyFieldAccess>> =
     bridgeRequestWithdrawal: "BLOCKED",
     bridgeInitiateWithdrawal: "BLOCKED",
     bridgeCancelWithdrawalRequest: "BLOCKED",
+    // Mints a payment link that charges a card. Interactive-session only, in
+    // the same family as the cashout and Bridge money-movement mutations.
+    fygaroCheckoutCreate: "BLOCKED",
     requestCashout: "BLOCKED",
     initiateCashout: "BLOCKED",
     apiKeyCreate: "BLOCKED",

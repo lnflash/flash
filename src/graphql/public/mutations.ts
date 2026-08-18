@@ -66,6 +66,7 @@ import InitiateCashoutMutation from "./root/mutation/offers/initiate-cash-out"
 import IdDocumentUploadUrlGenerateMutation from "./root/mutation/id-document-upload-url-generate"
 import UpdateExternalWalletMutation from "./root/mutation/update-external-wallet"
 import BridgeInitiateKycMutation from "./root/mutation/bridge-initiate-kyc"
+import FygaroCheckoutCreateMutation from "./root/mutation/fygaro-checkout-create"
 import BridgeCreateVirtualAccountMutation from "./root/mutation/bridge-create-virtual-account"
 import BridgeAddExternalAccountMutation from "./root/mutation/bridge-add-external-account"
 import BridgeExchangePlaidPublicTokenMutation from "./root/mutation/bridge-exchange-plaid-public-token"
@@ -141,6 +142,7 @@ export const mutationFields = {
 
       updateExternalWallet: UpdateExternalWalletMutation,
       bridgeInitiateKyc: BridgeInitiateKycMutation,
+      fygaroCheckoutCreate: FygaroCheckoutCreateMutation,
       bridgeCreateVirtualAccount: BridgeCreateVirtualAccountMutation,
       bridgeAddExternalAccount: BridgeAddExternalAccountMutation,
       bridgeExchangePlaidPublicToken: BridgeExchangePlaidPublicTokenMutation,

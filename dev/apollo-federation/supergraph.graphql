@@ -1083,6 +1083,46 @@ scalar FractionalCentAmount
   @join__type(graph: PUBLIC)
 
 """
+A server-authorised card top-up. The amount is signed into the URL, so it is the only amount that can be paid through it.
+"""
+type FygaroCheckout
+  @join__type(graph: PUBLIC)
+{
+  """
+  The authorised amount, echoed back so the client can display what was signed.
+  """
+  amount: CentAmount!
+
+  """
+  After this, the URL is rejected by the payment provider and a new one must be requested.
+  """
+  expiresAt: Timestamp!
+
+  """
+  Open this in the payment webview. The amount and the destination account are signed into it and cannot be edited; it stops working at expiresAt.
+  """
+  url: String!
+}
+
+input FygaroCheckoutCreateInput
+  @join__type(graph: PUBLIC)
+{
+  amount: CentAmount!
+}
+
+type FygaroCheckoutCreatePayload
+  @join__type(graph: PUBLIC)
+{
+  checkout: FygaroCheckout
+  errors: [Error!]!
+
+  """
+  How much more could be authorised right now, after this request. Card top-up links you have open but have not paid are ALREADY SUBTRACTED, so this is what would be accepted this second — not a statement of what the account has spent today. Present on refusal too, so the client can say how much would go through instead of only saying no. Null when the allowance could not be established.
+  """
+  remainingAllowance: CentAmount
+}
+
+"""
 Fee parameters for Fygaro card top-ups, so the client can
 compute the net amount a user will receive. Null when the operator settings
 are unavailable — clients should degrade gracefully (hide the estimate).
@@ -1776,6 +1816,7 @@ type Mutation
   createInvite(input: CreateInviteInput!): CreateInvitePayload!
   deviceNotificationTokenCreate(input: DeviceNotificationTokenCreateInput!): SuccessPayload!
   feedbackSubmit(input: FeedbackSubmitInput!): SuccessPayload!
+  fygaroCheckoutCreate(input: FygaroCheckoutCreateInput!): FygaroCheckoutCreatePayload!
   idDocumentUploadUrlGenerate(input: IdDocumentUploadUrlGenerateInput!): IdDocumentUploadUrlPayload!
 
   """

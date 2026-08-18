@@ -29,6 +29,7 @@ import * as SvixErrors from "@services/svix/errors"
 import * as IbexErrors from "@services/ibex/errors"
 import * as ErpNextErrors from "@services/frappe/errors"
 import * as BridgeErrors from "@services/bridge/errors"
+import * as FygaroErrors from "@services/fygaro/errors"
 import * as ApiKeyErrors from "@domain/api-keys/errors"
 
 export const ApplicationErrors = {
@@ -64,5 +65,6 @@ export const ApplicationErrors = {
   ...IbexErrors,
   ...ErpNextErrors,
   ...BridgeErrors,
+  ...FygaroErrors,
   ...ApiKeyErrors,
 } as const

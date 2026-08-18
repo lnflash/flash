@@ -80,6 +80,12 @@ type FygaroConfig = {
   credit: {
     enabled: boolean
   }
+  checkout: {
+    enabled: boolean
+    buttonUrl: string
+    keyId: string
+    ttlSeconds: number
+  }
   float: {
     floorUsd: number
   }

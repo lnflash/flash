@@ -417,6 +417,22 @@ describe("BridgeTransferRequestWriter", () => {
       expect(since.getTime()).toBeLessThanOrEqual(after - dayMs)
     })
 
+    it("omits the exclusion filter entirely when there is no row of its own to skip", async () => {
+      // The pre-charge allowance check runs before any payment exists. Omitting
+      // the parameter is how it says so; a sentinel would make correctness rest
+      // on "this string can never collide with a real request_id".
+      sumSince.mockResolvedValue(2_500)
+
+      const result = await sumFygaroTopupGrossCentsLast24h({
+        accountId: "acct_123" as AccountId,
+      })
+
+      expect(result).toBe(2_500)
+      const args = sumSince.mock.calls[0][0]
+      expect(args.accountId).toBe("acct_123")
+      expect("excludeRequestId" in args).toBe(false)
+    })
+
     it("fails closed with FygaroTopupHistoryQueryError when the ERPNext client is not configured", async () => {
       const erpnext = ErpNext as unknown as {
         sumFygaroTopupGrossCentsSince?: jest.Mock

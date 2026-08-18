@@ -84,6 +84,15 @@ jest.mock("@services/fygaro/webhook-server/fygaro-settings", () => ({
   getFygaroSettings: (...args: unknown[]) => mockGetFygaroSettings(...args),
 }))
 
+// Redis-backed store for the pre-charge authorisation. Read and redemption are
+// separate calls on purpose (a delivery that will be retried must not burn the
+// intent), so both are mocked and both are asserted on below.
+jest.mock("@services/fygaro/checkout-intent-store", () => ({
+  readIntent: (...args: unknown[]) => mockReadIntent(...args),
+  consumeIntent: (...args: unknown[]) => mockConsumeIntent(...args),
+  releaseIntentReservation: (...args: unknown[]) => mockReleaseIntentReservation(...args),
+}))
+
 const mockLockIdempotencyKey = jest.fn()
 const mockLockPaymentIdempotencyKey = jest.fn()
 const mockFindByUsername = jest.fn()
@@ -98,6 +107,9 @@ const mockNotifyOpsEvent = jest.fn()
 const mockCreditFygaroTopup = jest.fn()
 const mockGetFygaroSettings = jest.fn()
 const mockSumFygaroLast24h = jest.fn()
+const mockReadIntent = jest.fn()
+const mockConsumeIntent = jest.fn()
+const mockReleaseIntentReservation = jest.fn()
 
 // Canonical operator settings: 2.99% + $0.49 processor, 2.0% Flash margin,
 // $500 auto-credit limit, auto-credit on. For a $10.00 top-up this yields a
@@ -171,6 +183,10 @@ beforeEach(() => {
   mockCompleteFygaroTopup.mockResolvedValue(true)
   mockCreditFygaroTopup.mockResolvedValue({ walletId: WALLET_ID, status: "success" })
   mockGetFygaroSettings.mockResolvedValue({ ...DEFAULT_SETTINGS })
+  // Legacy default: the reference carries no intent, so nothing is looked up.
+  mockReadIntent.mockResolvedValue({ found: false })
+  mockConsumeIntent.mockResolvedValue({ consumed: true })
+  mockReleaseIntentReservation.mockResolvedValue(undefined)
 })
 
 describe("fygaro paymentHandler", () => {
@@ -968,6 +984,292 @@ describe("fygaro paymentHandler", () => {
         expect.objectContaining({ severity: "warning" }),
       )
       expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
+    })
+  })
+
+  // The pre-charge authorisation cross-check. This is the branch that decides
+  // whether a payment we cannot account for gets credited anyway, so every arm
+  // of it is pinned: match, both mismatch shapes, and the legacy fall-through.
+  describe("checkout intent cross-check", () => {
+    const INTENT_ID = "3f5a1c9e-2b7d-4a10-9f33-6c8e2d4b7a51"
+    const SIGNED_BODY = {
+      ...VALID_BODY,
+      customReference: `${VALID_BODY.customReference}|${INTENT_ID}`,
+    }
+    const intent = (overrides: Record<string, unknown> = {}) => ({
+      found: true,
+      intent: {
+        intentId: INTENT_ID,
+        accountId: ACCOUNT_ID as string,
+        username: VALID_BODY.customReference,
+        // $10.00, matching VALID_BODY.amount
+        amountCents: 1000,
+        currency: "USD",
+        createdAtMs: 1_700_000_000_000,
+        ...overrides,
+      },
+    })
+
+    beforeEach(() => {
+      mockFygaroConfig.credit = { enabled: true }
+    })
+
+    it("credits normally when the payment matches what was authorised", async () => {
+      mockReadIntent.mockResolvedValue(intent())
+      const res = makeRes()
+
+      await paymentHandler(makeReq(SIGNED_BODY), res)
+
+      expect(mockReadIntent).toHaveBeenCalledWith(INTENT_ID)
+      // $10.00 gross -> $0.79 processor + $0.20 flash -> $9.01 (901¢) net
+      expect(mockCreditFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({ recipientAccountId: ACCOUNT_ID, amountCents: 901 }),
+      )
+      expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
+    })
+
+    it("resolves the account from the username half of a username|intentId reference", async () => {
+      mockReadIntent.mockResolvedValue(intent())
+      const res = makeRes()
+
+      await paymentHandler(makeReq(SIGNED_BODY), res)
+
+      // The whole reference must never reach findByUsername, or a signed
+      // checkout would be unattributable and land in the unattributed alert.
+      expect(mockFindByUsername).toHaveBeenCalledWith(VALID_BODY.customReference)
+      expect(mockWriteFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({ accountId: ACCOUNT_ID }),
+      )
+    })
+
+    it("records-only on an amount mismatch and names both numbers in the alert", async () => {
+      // The amount lives inside the signed JWT, so a mismatch cannot come from
+      // the customer — it means a bug or a replay on our side, and crediting a
+      // payment we cannot account for is the failure this whole change is about.
+      mockReadIntent.mockResolvedValue(intent({ amountCents: 2000 }))
+      const res = makeRes()
+
+      await paymentHandler(makeReq(SIGNED_BODY), res)
+
+      expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+      expect(mockCompleteFygaroTopup).not.toHaveBeenCalled()
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({
+          severity: "warning",
+          title:
+            "Fygaro payment does not match the checkout Flash signed for it — not auto-credited",
+          // Without both numbers the alert says a payment was refused but not
+          // what it was refused against — the only thing that tells an operator
+          // whether to credit it by hand.
+          detail: expect.stringContaining("mismatch=authorised 2000c, paid 1000c"),
+          context: expect.objectContaining({
+            reason: "intent-mismatch",
+            intent_mismatch: "authorised 2000c, paid 1000c",
+          }),
+        }),
+      )
+      expect(res.status).toHaveBeenCalledWith(200)
+      expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
+    })
+
+    it("records-only on an account mismatch and names both accounts in the alert", async () => {
+      mockReadIntent.mockResolvedValue(intent({ accountId: "account-someone-else" }))
+      const res = makeRes()
+
+      await paymentHandler(makeReq(SIGNED_BODY), res)
+
+      expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({
+          context: expect.objectContaining({
+            reason: "intent-mismatch",
+            intent_mismatch: `authorised for account account-someone-else, paid as ${ACCOUNT_ID}`,
+          }),
+        }),
+      )
+      expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
+    })
+
+    it("overrides an otherwise-clean gate: a mismatch is never credited", async () => {
+      // The gate can only reason about the payment in front of it, not about
+      // whether we ever authorised it, so the mismatch must win outright.
+      mockReadIntent.mockResolvedValue(intent({ amountCents: 999 }))
+      const res = makeRes()
+
+      await paymentHandler(makeReq(SIGNED_BODY), res)
+
+      expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+      expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: "fygaro-recorded",
+          meta: expect.objectContaining({ reason: "intent-mismatch" }),
+        }),
+      )
+    })
+
+    it("still credits through the legacy path when the intent is missing or expired", async () => {
+      // An intent that expired, was evicted, or was minted by another
+      // deployment is NOT a mismatch: it is the position every pre-signed-
+      // checkout payment is in, and the credit gate still applies in full.
+      // Failing it here would turn a Redis blip into stuck customer funds.
+      mockReadIntent.mockResolvedValue({ found: false })
+      const res = makeRes()
+
+      await paymentHandler(makeReq(SIGNED_BODY), res)
+
+      expect(mockCreditFygaroTopup).toHaveBeenCalledWith(
+        expect.objectContaining({ amountCents: 901 }),
+      )
+      expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
+    })
+
+    it("never looks up an intent for a bare legacy reference", async () => {
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockReadIntent).not.toHaveBeenCalled()
+      expect(mockConsumeIntent).not.toHaveBeenCalled()
+    })
+
+    describe("redemption is terminal-only", () => {
+      it("redeems the authorisation once the credit has actually gone through", async () => {
+        mockReadIntent.mockResolvedValue(intent())
+        const res = makeRes()
+
+        await paymentHandler(makeReq(SIGNED_BODY), res)
+
+        expect(mockConsumeIntent).toHaveBeenCalledWith(INTENT_ID)
+      })
+
+      it("redeems the authorisation on a deterministic record-only ack", async () => {
+        // Nothing will change on retry, so the authorisation is spent and its
+        // hold on the account's daily allowance must be released.
+        mockReadIntent.mockResolvedValue(intent({ amountCents: 2000 }))
+        const res = makeRes()
+
+        await paymentHandler(makeReq(SIGNED_BODY), res)
+
+        expect(mockConsumeIntent).toHaveBeenCalledWith(INTENT_ID)
+      })
+
+      it("does NOT burn the authorisation on a transient 500 that asks for a retry", async () => {
+        // This is the whole reason read and redeem are separate calls. The
+        // retry that eventually credits the payment is the delivery most worth
+        // verifying; consuming here would leave it with nothing to check.
+        mockSumFygaroLast24h.mockResolvedValue(new Error("erpnext down"))
+        mockReadIntent.mockResolvedValue(intent())
+        const res = makeRes()
+
+        await paymentHandler(makeReq(SIGNED_BODY), res)
+
+        expect(res.status).toHaveBeenCalledWith(500)
+        expect(mockConsumeIntent).not.toHaveBeenCalled()
+      })
+
+      it("does NOT burn the authorisation when settings are unavailable", async () => {
+        mockGetFygaroSettings.mockResolvedValue(undefined)
+        mockReadIntent.mockResolvedValue(intent())
+        const res = makeRes()
+
+        await paymentHandler(makeReq(SIGNED_BODY), res)
+
+        expect(res.status).toHaveBeenCalledWith(500)
+        expect(mockConsumeIntent).not.toHaveBeenCalled()
+      })
+
+      it("does NOT burn the authorisation when the credit itself failed", async () => {
+        // That branch acks 200 but is deliberately retryable — a failed send is
+        // not cached, so the next delivery re-attempts the credit.
+        mockReadIntent.mockResolvedValue(intent())
+        mockCreditFygaroTopup.mockResolvedValue(
+          new FygaroCreditError("intraledger-send", "some send error"),
+        )
+        const res = makeRes()
+
+        await paymentHandler(makeReq(SIGNED_BODY), res)
+
+        expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
+        expect(mockConsumeIntent).not.toHaveBeenCalled()
+      })
+    })
+
+    // A hold left behind after the payment is already counted in ERPNext is a
+    // DOUBLE count: `sumFygaroTopupGrossCentsSince` includes the Fiat Received
+    // row the handler just wrote, so the same $50 is subtracted from the daily
+    // allowance twice for the rest of the JWT window — refusing the customer's
+    // next legitimate top-up on top of an already-bad event.
+    describe("the hold is released on terminal answers that did not credit", () => {
+      it("releases the reservation — but NOT the record — when the credit failed", async () => {
+        mockReadIntent.mockResolvedValue(intent())
+        mockCreditFygaroTopup.mockResolvedValue(
+          new FygaroCreditError("insufficient-treasury-float", "insufficient balance"),
+        )
+        const res = makeRes()
+
+        await paymentHandler(makeReq(SIGNED_BODY), res)
+
+        expect(mockReleaseIntentReservation).toHaveBeenCalledWith(
+          expect.objectContaining({
+            intentId: INTENT_ID,
+            accountId: ACCOUNT_ID,
+            amountCents: 1000,
+          }),
+        )
+        // The record survives: the manual credit this alert asks for still
+        // needs the cross-check of what was originally authorised, and the
+        // provider retry this branch invites still needs something to verify
+        // against.
+        expect(mockConsumeIntent).not.toHaveBeenCalled()
+        expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
+      })
+
+      it("releases the reservation when a signed reference no longer resolves to an account", async () => {
+        // Terminal: the dedupe lock is non-releasing, so Fygaro's retries ack
+        // "already_processed" and this delivery is the only one that can let go
+        // of the hold.
+        mockFindByUsername.mockResolvedValue(
+          new CouldNotFindAccountFromUsernameError(VALID_BODY.customReference),
+        )
+        mockReadIntent.mockResolvedValue(intent())
+        const res = makeRes()
+
+        await paymentHandler(makeReq(SIGNED_BODY), res)
+
+        expect(res.json).toHaveBeenCalledWith({ status: "recorded", attributed: false })
+        expect(mockReleaseIntentReservation).toHaveBeenCalledWith(
+          expect.objectContaining({ intentId: INTENT_ID, amountCents: 1000 }),
+        )
+        expect(mockConsumeIntent).not.toHaveBeenCalled()
+      })
+
+      it("does NOT release the hold on a transient 500 that asks for a retry", async () => {
+        // The retry will re-run this handler and reach a terminal answer that
+        // releases it. Letting go early would let a second link be minted
+        // against an allowance this payment has already consumed.
+        mockSumFygaroLast24h.mockResolvedValue(new Error("erpnext down"))
+        mockReadIntent.mockResolvedValue(intent())
+        const res = makeRes()
+
+        await paymentHandler(makeReq(SIGNED_BODY), res)
+
+        expect(res.status).toHaveBeenCalledWith(500)
+        expect(mockReleaseIntentReservation).not.toHaveBeenCalled()
+        expect(mockConsumeIntent).not.toHaveBeenCalled()
+      })
+
+      it("leaves the release to consumeIntent on a successful credit", async () => {
+        // consumeIntent releases the hold itself once it wins the claim, so
+        // releasing here as well would be a second, redundant zrem.
+        mockReadIntent.mockResolvedValue(intent())
+        const res = makeRes()
+
+        await paymentHandler(makeReq(SIGNED_BODY), res)
+
+        expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
+        expect(mockConsumeIntent).toHaveBeenCalledWith(INTENT_ID)
+        expect(mockReleaseIntentReservation).not.toHaveBeenCalled()
+      })
     })
   })
 })

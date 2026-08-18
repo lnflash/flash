@@ -76,6 +76,11 @@ export type RecordOnlyReason =
   | "daily-limit-exceeded"
   | "under-minimum"
   | "non-positive-net"
+  // The payment did not match the checkout we signed for it. Not reachable
+  // from user input — the amount is inside the JWT — so it means a bug or a
+  // replay on our side, and crediting anyway would be crediting something we
+  // cannot account for.
+  | "intent-mismatch"
 
 export type CreditGate =
   | { credit: true; fees: FygaroFees }

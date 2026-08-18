@@ -27,6 +27,7 @@ jest.mock("@config", () => {
     getTestAccounts: jest.fn(() => []),
     getFailedLoginAttemptPerIpLimits: jest.fn(() => limits),
     getFailedLoginAttemptPerLoginIdentifierLimits: jest.fn(() => limits),
+    getFygaroCheckoutCreateAttemptLimits: jest.fn(() => limits),
     getInvoiceCreateAttemptLimits: jest.fn(() => limits),
     getInvoiceCreateForRecipientAttemptLimits: jest.fn(() => limits),
     getInviteCreateAttemptLimits: jest.fn(() => limits),

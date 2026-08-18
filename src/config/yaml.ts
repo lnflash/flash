@@ -230,6 +230,23 @@ export const getInviteTargetAttemptLimits = () => ({
   blockDuration: toSeconds(86400), // 24 hours
 })
 
+/**
+ * Card top-up checkout links, per account.
+ *
+ * Every call runs an ERPNext list query for the trailing-24h history — the same
+ * read every other top-up depends on, and one whose failure mode refuses card
+ * top-ups for EVERY user. Amounts below the minimum do not short-circuit before
+ * it (that gate sits after the history gate), so an unbounded mutation is an
+ * unbounded ERPNext load an authenticated client can point at a shared
+ * dependency. Generous against real use: minting more than a few links a minute
+ * is not a customer topping up.
+ */
+export const getFygaroCheckoutCreateAttemptLimits = () => ({
+  points: 10,
+  duration: toSeconds(60), // 1 minute
+  blockDuration: toSeconds(300), // 5 minutes
+})
+
 export const getOnChainWalletConfig = () => ({
   dustThreshold: yamlConfig.onChainWallet.dustThreshold,
 })

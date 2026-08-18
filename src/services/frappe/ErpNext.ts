@@ -512,7 +512,11 @@ export class ErpNext {
   }: {
     accountId: string
     since: Date
-    excludeRequestId: string
+    // Omitted by callers with no row of their own to exclude (the pre-charge
+    // allowance check runs before any payment exists). Omitting it drops the
+    // filter entirely rather than sending a sentinel that must be guaranteed
+    // never to collide with a real request_id.
+    excludeRequestId?: string
   }): Promise<number | FygaroTopupHistoryQueryError> {
     try {
       const filters = JSON.stringify([
@@ -540,7 +544,9 @@ export class ErpNext {
           ">=",
           toFrappeDatetime(since.toISOString()),
         ],
-        [BridgeTransferRequest.doctype, "request_id", "!=", excludeRequestId],
+        ...(excludeRequestId === undefined
+          ? []
+          : [[BridgeTransferRequest.doctype, "request_id", "!=", excludeRequestId]]),
       ])
       const fields = JSON.stringify(["request_id", "amount", "source_systems_seen"])
       const resp = await axios.get(

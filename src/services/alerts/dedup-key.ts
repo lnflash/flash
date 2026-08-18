@@ -53,6 +53,14 @@ export const generateDedupKey = {
   // collapse into one alert per window. Distinct from fygaroUnattributed so an
   // outage never masquerades as "this payer typed a bad username".
   fygaroAccountLookupFailed: () => "fygaro:account-lookup-failed",
+  // The PRE-charge allowance check could not run: ERPNext settings, ERPNext
+  // 24h history, or the Redis reservation index. Static per reason — an outage
+  // refuses every card top-up at once, so it must collapse into ONE incident
+  // per failing dependency rather than one per refused customer. The reason is
+  // in the key (not just the body) so a Redis outage never lands in the same
+  // incident as an ERPNext one and get triaged as the wrong system.
+  fygaroAuthorizeUnavailable: (reason: string) =>
+    `fygaro:authorize-unavailable:${reason}`,
 }
 
 export const normalizeDedupKey = (key: string): string =>
