@@ -1,4 +1,3 @@
-import type { FygaroTopupWindow } from "@services/frappe/models/BridgeTransferRequest"
 jest.mock("axios", () => ({
   get: jest.fn(),
   post: jest.fn(),
@@ -26,6 +25,7 @@ import {
   BridgeTransferRequestStatus,
   BridgeTransferRequestTransactionType,
   EMAIL_ATTRIBUTION_SOURCE_SYSTEM,
+  type FygaroTopupWindow,
 } from "@services/frappe/models/BridgeTransferRequest"
 
 const mockedAxios = axios as unknown as {
