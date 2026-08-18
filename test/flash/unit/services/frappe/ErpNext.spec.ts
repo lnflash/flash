@@ -1,3 +1,4 @@
+import type { FygaroTopupWindow } from "@services/frappe/models/BridgeTransferRequest"
 jest.mock("axios", () => ({
   get: jest.fn(),
   post: jest.fn(),
@@ -518,7 +519,7 @@ describe("ErpNext.sumFygaroTopupGrossCentsSince", () => {
 
     const result = await client.sumFygaroTopupGrossCentsSince(params)
 
-    expect(result).toBe(3560)
+    expect((result as FygaroTopupWindow).grossCents).toBe(3560)
   })
 
   it("scopes the query to this account's captured Fygaro top-ups in the window, excluding the current delivery", async () => {
@@ -557,6 +558,11 @@ describe("ErpNext.sumFygaroTopupGrossCentsSince", () => {
       "request_id",
       "amount",
       "source_systems_seen",
+      // A row that carries a failure reason was captured and NOT credited, so
+      // it delivered no value and must not spend the allowance.
+      "failure_reason",
+      // Stored UTC — the oldest counted row is when allowance frees up.
+      "last_seen_at",
     ])
   })
 
@@ -580,7 +586,10 @@ describe("ErpNext.sumFygaroTopupGrossCentsSince", () => {
   it("returns 0 for an empty window", async () => {
     mockedAxios.get.mockResolvedValue({ data: { data: [] } })
 
-    expect(await client.sumFygaroTopupGrossCentsSince(params)).toBe(0)
+    expect(
+      ((await client.sumFygaroTopupGrossCentsSince(params)) as FygaroTopupWindow)
+        .grossCents,
+    ).toBe(0)
   })
 
   it("fails closed (error, not zero) when the response has no data array", async () => {
@@ -650,7 +659,10 @@ describe("ErpNext.sumFygaroTopupGrossCentsSince", () => {
       },
     })
 
-    expect(await client.sumFygaroTopupGrossCentsSince(params)).toBe(1000)
+    expect(
+      ((await client.sumFygaroTopupGrossCentsSince(params)) as FygaroTopupWindow)
+        .grossCents,
+    ).toBe(1000)
   })
 
   it("still counts rows with no source_systems_seen (absent marker is not an exemption)", async () => {
@@ -666,7 +678,10 @@ describe("ErpNext.sumFygaroTopupGrossCentsSince", () => {
       },
     })
 
-    expect(await client.sumFygaroTopupGrossCentsSince(params)).toBe(3500)
+    expect(
+      ((await client.sumFygaroTopupGrossCentsSince(params)) as FygaroTopupWindow)
+        .grossCents,
+    ).toBe(3500)
   })
 
   it("does not treat a lookalike source system as email attribution", async () => {
@@ -684,7 +699,10 @@ describe("ErpNext.sumFygaroTopupGrossCentsSince", () => {
       },
     })
 
-    expect(await client.sumFygaroTopupGrossCentsSince(params)).toBe(2500)
+    expect(
+      ((await client.sumFygaroTopupGrossCentsSince(params)) as FygaroTopupWindow)
+        .grossCents,
+    ).toBe(2500)
   })
 
   it("skips an email-attributed row without failing on its amount", async () => {
@@ -708,7 +726,10 @@ describe("ErpNext.sumFygaroTopupGrossCentsSince", () => {
       },
     })
 
-    expect(await client.sumFygaroTopupGrossCentsSince(params)).toBe(1000)
+    expect(
+      ((await client.sumFygaroTopupGrossCentsSince(params)) as FygaroTopupWindow)
+        .grossCents,
+    ).toBe(1000)
   })
 })
 

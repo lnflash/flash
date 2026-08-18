@@ -129,3 +129,17 @@ export class BridgeTransferRequest {
     }
   }
 }
+
+/**
+ * What the trailing 24h window holds for one account: the gross that counts
+ * against the daily top-up cap, and when the oldest counted payment ages out.
+ *
+ * Lives on the model rather than beside either reader so the query (ErpNext)
+ * and its wrapper (BridgeTransferRequestWriter) can share it without importing
+ * each other.
+ */
+export type FygaroTopupWindow = {
+  grossCents: number
+  // Undefined when nothing is counted, i.e. the full allowance is available.
+  oldestCountedMs?: number
+}

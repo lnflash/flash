@@ -35,6 +35,7 @@ import {
   BridgeTransferRequestTransactionType,
   EMAIL_ATTRIBUTION_SOURCE_SYSTEM,
   toFrappeDatetime,
+  type FygaroTopupWindow,
 } from "./models/BridgeTransferRequest"
 import { Filter } from "./SearchFilters"
 
@@ -517,7 +518,7 @@ export class ErpNext {
     // filter entirely rather than sending a sentinel that must be guaranteed
     // never to collide with a real request_id.
     excludeRequestId?: string
-  }): Promise<number | FygaroTopupHistoryQueryError> {
+  }): Promise<FygaroTopupWindow | FygaroTopupHistoryQueryError> {
     try {
       const filters = JSON.stringify([
         [BridgeTransferRequest.doctype, "provider", "=", "Fygaro"],
@@ -548,7 +549,13 @@ export class ErpNext {
           ? []
           : [[BridgeTransferRequest.doctype, "request_id", "!=", excludeRequestId]]),
       ])
-      const fields = JSON.stringify(["request_id", "amount", "source_systems_seen"])
+      const fields = JSON.stringify([
+        "request_id",
+        "amount",
+        "source_systems_seen",
+        "failure_reason",
+        "last_seen_at",
+      ])
       const resp = await axios.get(
         `${this.url}/api/resource/${encodeURIComponent(BridgeTransferRequest.doctype)}`,
         {
@@ -561,11 +568,34 @@ export class ErpNext {
         return new FygaroTopupHistoryQueryError("No data in top-up history response")
       }
       let sumCents = 0
+      // Oldest row still counted. Its 24h anniversary is the moment the
+      // customer's allowance actually frees up, which is the only useful thing
+      // to tell someone who has just been refused.
+      let oldestCountedMs: number | undefined
       for (const row of rows as {
         request_id?: string
         amount?: number | string | null
         source_systems_seen?: string | null
+        failure_reason?: string | null
+        last_seen_at?: string | null
       }[]) {
+        // A row that carries a failure reason was captured by Fygaro and
+        // deliberately NOT credited — the customer received no value from it,
+        // so it must not consume the allowance that governs value received.
+        // Refunds are not an option operationally, so the only way an
+        // uncredited payment leaves the window is by ageing out; counting it
+        // meanwhile would refuse the customer's NEXT legitimate top-up on the
+        // strength of one we already refused.
+        //
+        // A row still in flight has no reason yet and DOES count, which is what
+        // stops two rapid payments both passing the gate.
+        //
+        // Filtered in JS for the same reason as the marker below: a Frappe
+        // `["failure_reason","is","not set"]` filter inverts awkwardly around
+        // NULL, and getting it wrong under-counts the window.
+        if (row.failure_reason != null && String(row.failure_reason).trim() !== "") {
+          continue
+        }
         // An email-attributed row got its account_id from the payer-typed
         // checkout email — input nobody verified against an identity. Letting
         // it into this sum would let ANY card payment burn the named account's
@@ -599,8 +629,20 @@ export class ErpNext {
           )
         }
         sumCents += cents
+        // Stored UTC (written by us via toFrappeDatetime), unlike `creation`
+        // which Frappe renders in the site timezone. Appending Z keeps the
+        // parse explicit rather than leaning on the runtime's local guess.
+        const seenMs = row.last_seen_at
+          ? Date.parse(`${String(row.last_seen_at).replace(" ", "T")}Z`)
+          : NaN
+        if (
+          Number.isFinite(seenMs) &&
+          (oldestCountedMs === undefined || seenMs < oldestCountedMs)
+        ) {
+          oldestCountedMs = seenMs
+        }
       }
-      return sumCents
+      return { grossCents: sumCents, oldestCountedMs }
     } catch (err) {
       const responseData = isAxiosError(err) ? err.response?.data : undefined
       baseLogger.error(

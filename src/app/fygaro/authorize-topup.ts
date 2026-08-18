@@ -266,6 +266,10 @@ export const authorizeFygaroTopup = async ({
               username: open.intent.username,
               intentId: open.intent.intentId,
             }),
+            // The re-offered link is the SAME authorisation, so it must poll
+            // under the same id — a fresh one would report "processing"
+            // forever against an intent no payment will ever reference.
+            intentId: open.intent.intentId,
           },
           // The hold is already counted, so nothing is subtracted a second
           // time for handing the same link back.

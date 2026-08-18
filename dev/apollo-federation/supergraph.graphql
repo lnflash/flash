@@ -1094,6 +1094,11 @@ type FygaroCheckout
   amount: CentAmount!
 
   """
+  Poll fygaroTopupStatus with this after the payment page closes. Do NOT report success from the payment page alone — the card charge succeeding and Flash crediting the wallet are different events.
+  """
+  checkoutId: String!
+
+  """
   After this, the URL is rejected by the payment provider and a new one must be requested.
   """
   expiresAt: Timestamp!
@@ -1120,6 +1125,29 @@ type FygaroCheckoutCreatePayload
   How much more could be authorised right now, after this request. Card top-up links you have open but have not paid are ALREADY SUBTRACTED, so this is what would be accepted this second — not a statement of what the account has spent today. Present on refusal too, so the client can say how much would go through instead of only saying no. Null when the allowance could not be established.
   """
   remainingAllowance: CentAmount
+}
+
+"""
+How much of today's card top-up allowance this account has left. Read-only — safe to call while the customer is still choosing an amount.
+"""
+type FygaroTopupAllowance
+  @join__type(graph: PUBLIC)
+{
+  """The account level's rolling 24-hour cap."""
+  limit: CentAmount!
+
+  """What would still be accepted right now. Never negative."""
+  remaining: CentAmount!
+
+  """
+  When the oldest counted payment ages out and allowance returns. Null when nothing is counted, i.e. the full limit is already available.
+  """
+  resetsAt: Timestamp
+
+  """
+  Gross charged in the trailing 24 hours. Payments we captured but did not credit are excluded — they delivered nothing, so they do not spend the allowance.
+  """
+  spent: CentAmount!
 }
 
 """
@@ -1159,6 +1187,47 @@ type FygaroTopupInfo
 
   """Payment-processor percentage fee (e.g. 2.99 = 2.99%)."""
   processorFeePercent: Float!
+}
+
+enum FygaroTopupState
+  @join__type(graph: PUBLIC)
+{
+  """Money is in the wallet."""
+  CREDITED @join__enumValue(graph: PUBLIC)
+
+  """
+  We tried to credit and it failed. A provider retry may still resolve it, so this is 'we are on it', not 'contact support'.
+  """
+  FAILED @join__enumValue(graph: PUBLIC)
+
+  """
+  Captured and deliberately not credited. Terminal until a human acts, so retrying achieves nothing — show the reason.
+  """
+  HELD_FOR_REVIEW @join__enumValue(graph: PUBLIC)
+
+  """
+  We have the payment and are crediting it. Not yet terminal — keep polling, then fall back to telling the customer they will be notified.
+  """
+  PROCESSING @join__enumValue(graph: PUBLIC)
+}
+
+"""
+What actually happened to a card top-up. The card charge succeeding and Flash crediting the wallet are different events; only this reports the second.
+"""
+type FygaroTopupStatus
+  @join__type(graph: PUBLIC)
+{
+  """The amount this checkout was authorised for."""
+  authorizedAmount: CentAmount!
+
+  """What reached the wallet, after fees. Present once credited."""
+  netAmount: CentAmount
+
+  """
+  Customer-facing explanation, present when the state needs one. Reasons the customer can act on are named plainly; our own faults are not blamed on them.
+  """
+  reason: String
+  state: FygaroTopupState!
 }
 
 """
@@ -2312,6 +2381,16 @@ type Query
   cashWalletCutover: CashWalletCutover!
   cashoutRate: CashoutRate!
   currencyList: [Currency!]!
+
+  """
+  How much card top-up allowance this account has left today. Null when the allowance cannot currently be established — show the flat limit and let the pre-charge check decide, rather than inventing a number.
+  """
+  fygaroTopupAllowance: FygaroTopupAllowance
+
+  """
+  The outcome of a card top-up, by the checkout id returned from fygaroCheckoutCreate. Null when the checkout is unknown, expired, or not this account's.
+  """
+  fygaroTopupStatus(checkoutId: String!): FygaroTopupStatus
   globals: Globals
   invitePreview(token: String!): InvitePreview
   isFlashNpub(input: IsFlashNpubInput!): IsFlashNpubPayload

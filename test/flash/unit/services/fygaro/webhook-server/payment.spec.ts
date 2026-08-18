@@ -47,6 +47,7 @@ jest.mock("@services/frappe/BridgeTransferRequestWriter", () => ({
   completeFygaroTopup: (...args: unknown[]) => mockCompleteFygaroTopup(...args),
   isFygaroTopupCompleted: (...args: unknown[]) => mockIsFygaroTopupCompleted(...args),
   sumFygaroTopupGrossCentsLast24h: (...args: unknown[]) => mockSumFygaroLast24h(...args),
+  markFygaroTopupNotCredited: (...args: unknown[]) => mockMarkNotCredited(...args),
 }))
 
 jest.mock("@services/alerts", () => ({
@@ -91,8 +92,10 @@ jest.mock("@services/fygaro/checkout-intent-store", () => ({
   readIntent: (...args: unknown[]) => mockReadIntent(...args),
   consumeIntent: (...args: unknown[]) => mockConsumeIntent(...args),
   releaseIntentReservation: (...args: unknown[]) => mockReleaseIntentReservation(...args),
+  recordIntentOutcome: (...args: unknown[]) => mockRecordIntentOutcome(...args),
 }))
 
+const mockRecordIntentOutcome = jest.fn()
 const mockLockIdempotencyKey = jest.fn()
 const mockLockPaymentIdempotencyKey = jest.fn()
 const mockFindByUsername = jest.fn()
@@ -107,6 +110,7 @@ const mockNotifyOpsEvent = jest.fn()
 const mockCreditFygaroTopup = jest.fn()
 const mockGetFygaroSettings = jest.fn()
 const mockSumFygaroLast24h = jest.fn()
+const mockMarkNotCredited = jest.fn()
 const mockReadIntent = jest.fn()
 const mockConsumeIntent = jest.fn()
 const mockReleaseIntentReservation = jest.fn()
@@ -180,6 +184,8 @@ beforeEach(() => {
   mockGetFlashFeeDiscountPercent.mockResolvedValue(0)
   mockWriteFygaroTopup.mockResolvedValue(true)
   mockSumFygaroLast24h.mockResolvedValue(0)
+  mockMarkNotCredited.mockResolvedValue(true)
+  mockRecordIntentOutcome.mockResolvedValue(undefined)
   mockCompleteFygaroTopup.mockResolvedValue(true)
   mockCreditFygaroTopup.mockResolvedValue({ walletId: WALLET_ID, status: "success" })
   mockGetFygaroSettings.mockResolvedValue({ ...DEFAULT_SETTINGS })

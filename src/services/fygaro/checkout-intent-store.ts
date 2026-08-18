@@ -54,6 +54,42 @@ export type FygaroCheckoutIntent = {
   // them simply cannot be re-offered.
   checkoutUrl?: string
   expiresAtMs?: number
+  // What the webhook decided about the payment made against this
+  // authorisation. Written once the outcome is terminal, so the app can stop
+  // guessing: today it navigates to "Payment Successful — Deposited to <wallet>"
+  // off nothing but a Fygaro redirect URL, which is a claim we cannot back.
+  //
+  // Deliberately held HERE rather than read back from ERPNext. ERPNext is
+  // already a hard dependency of authorising (its outage refuses top-ups);
+  // putting it on the status path too would mean a customer who has just been
+  // charged cannot even be told what happened. Redis outlives the poll window
+  // by an hour, and the audit row remains the durable record.
+  outcome?: FygaroTopupOutcome
+}
+
+export type FygaroTopupOutcomeState =
+  // Credited. `netAmountCents` is what actually reached the wallet.
+  | "credited"
+  // Captured by Fygaro, deliberately not credited. Terminal until a human acts
+  // — retrying changes nothing, so the customer must be told why.
+  | "held-for-review"
+  // Captured, we tried to credit, and the attempt failed (e.g. treasury float).
+  // A provider retry may still resolve it, so this is "we are on it", not "go
+  // to support".
+  | "failed"
+
+export type FygaroTopupOutcome = {
+  state: FygaroTopupOutcomeState
+  // The gate reason (`daily-limit-exceeded`, `over-limit`, …) or `credit-failed`.
+  // Mapped to customer-facing wording at the GraphQL edge, never rendered raw.
+  reason?: string
+  netAmountCents?: number
+  // The threshold the payment fell foul of, when there is one — the daily
+  // limit, the single-payment ceiling, the minimum. Captured at decision time
+  // so the customer-facing message can name the actual number without the
+  // status query making a second ERPNext read on every poll.
+  detailCents?: number
+  atMs: number
 }
 
 const cacheKey = (intentId: string) => `fygaro-checkout-intent:${intentId}`
@@ -290,4 +326,53 @@ export const consumeIntent = async (intentId: string): Promise<{ consumed: boole
 
   if (lookup.found) await releaseIntentReservation(lookup.intent)
   return { consumed: true }
+}
+
+/**
+ * Stamp the terminal outcome onto an authorisation, preserving everything else
+ * about it.
+ *
+ * Read-modify-write rather than a blind overwrite: the record still carries the
+ * amount and account the cross-check verifies against, and losing those to a
+ * status update would silently disarm it.
+ *
+ * Never throws and never blocks the caller — this runs on the webhook's
+ * money-moving path, and a status write failing is not a reason to fail a
+ * credit that already succeeded. A missing outcome degrades the app to
+ * "we'll notify you", which is exactly what it shows while waiting anyway.
+ */
+export const recordIntentOutcome = async ({
+  intentId,
+  outcome,
+  ttlSeconds,
+}: {
+  intentId: string
+  outcome: FygaroTopupOutcome
+  ttlSeconds: number
+}): Promise<void> => {
+  try {
+    const cache = await cacheService()
+    const found = await cache.get<FygaroCheckoutIntent>({ key: cacheKey(intentId) })
+    if (found instanceof Error) {
+      // Expired, evicted, or a legacy payment with no intent at all. Nothing to
+      // stamp; the app falls back to its unresolved state.
+      return
+    }
+    const res = await cache.set<FygaroCheckoutIntent>({
+      key: cacheKey(intentId),
+      value: { ...found, outcome },
+      ttlSecs: (ttlSeconds + 3600) as Seconds,
+    })
+    if (res instanceof Error) {
+      baseLogger.warn(
+        { intentId, state: outcome.state },
+        "Failed to record Fygaro top-up outcome; app will fall back to pending",
+      )
+    }
+  } catch (err) {
+    baseLogger.warn(
+      { intentId, error: err instanceof Error ? err.name : String(err) },
+      "Failed to record Fygaro top-up outcome; app will fall back to pending",
+    )
+  }
 }

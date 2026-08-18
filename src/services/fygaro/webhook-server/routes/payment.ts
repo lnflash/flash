@@ -21,6 +21,7 @@
 import { Request, Response } from "express"
 
 import { FygaroConfig } from "@config"
+import { AccountLevel } from "@domain/accounts"
 import { CouldNotFindAccountFromUsernameError } from "@domain/errors"
 import { ResourceAttemptsLockServiceError } from "@domain/lock"
 import { getFlashFeeDiscountPercent } from "@services/frappe/fee-discounts"
@@ -32,6 +33,7 @@ import {
   writeFygaroTopupRequest,
   completeFygaroTopup,
   isFygaroTopupCompleted,
+  markFygaroTopupNotCredited,
   sumFygaroTopupGrossCentsLast24h,
 } from "@services/frappe/BridgeTransferRequestWriter"
 import { alertBridge, generateDedupKey } from "@services/alerts"
@@ -42,13 +44,15 @@ import {
   FygaroCreditError,
   INSUFFICIENT_TREASURY_FLOAT_STEP,
 } from "../credit-topup"
-import { getFygaroSettings } from "../fygaro-settings"
+import { getFygaroSettings, type FygaroSettings } from "../fygaro-settings"
 import { parseCustomReference } from "../../checkout"
 import {
   consumeIntent,
   readIntent,
+  recordIntentOutcome,
   releaseIntentReservation,
   type FygaroCheckoutIntent,
+  type FygaroTopupOutcomeState,
 } from "../../checkout-intent-store"
 import { evaluateCreditGate, RecordOnlyReason } from "../fees"
 
@@ -120,6 +124,27 @@ const RECORD_ONLY_ALERT_TITLE: Record<
   "intent-mismatch":
     "Fygaro payment does not match the checkout Flash signed for it — not auto-credited",
   "non-positive-net": "Fygaro payment net after fees is not positive — not auto-credited",
+}
+
+// The number behind a threshold refusal, so the customer can be told "above
+// your $125 daily limit" rather than "declined". Only the gates that turn on a
+// threshold have one; everything else is our fault, not theirs, and gets no
+// number because there is none to give.
+const thresholdCentsFor = (
+  reason: RecordOnlyReason,
+  settings: FygaroSettings | undefined,
+  level: AccountLevel,
+): number | undefined => {
+  if (!settings) return undefined
+  const usd =
+    reason === "daily-limit-exceeded"
+      ? settings.dailyTopupLimits[level]
+      : reason === "over-limit"
+        ? settings.autoCreditLimit
+        : reason === "under-minimum"
+          ? settings.minimumTopup
+          : undefined
+  return usd === undefined ? undefined : Math.round(usd * 100)
 }
 
 export const paymentHandler = async (req: Request, res: Response) => {
@@ -426,6 +451,24 @@ export const paymentHandler = async (req: Request, res: Response) => {
       if (intentId) await consumeIntent(intentId)
     }
 
+    // Stamp the terminal outcome so the app can stop guessing. Never throws and
+    // never blocks: this rides the money-moving path, and a status write is not
+    // worth failing a credit over. A missing outcome leaves the app on its
+    // "received, crediting" state, which is honest either way.
+    const recordOutcome = async (outcome: {
+      state: FygaroTopupOutcomeState
+      reason?: string
+      netAmountCents?: number
+      detailCents?: number
+    }) => {
+      if (!intentId) return
+      await recordIntentOutcome({
+        intentId,
+        outcome: { ...outcome, atMs: Date.now() },
+        ttlSeconds: FygaroConfig.checkout?.ttlSeconds ?? 900,
+      })
+    }
+
     const settings = creditEnabled ? await getFygaroSettings() : undefined
 
     // Trailing-24h charged gross for the per-level daily cap, read only when a
@@ -571,6 +614,25 @@ export const paymentHandler = async (req: Request, res: Response) => {
       // Terminal: this reason will not change on retry, so the authorisation is
       // spent and its hold on the daily allowance must be released.
       await redeemIntent()
+      // Take the row OUT of the allowance sum and give ops the reason. An
+      // uncredited payment delivered no value, so it must not spend the
+      // allowance that governs value delivered — otherwise this refusal
+      // refuses the customer's next legitimate top-up too.
+      await markFygaroTopupNotCredited({
+        transactionId,
+        accountId,
+        amount: String(payload.amount),
+        currency,
+        reason: gate.reason,
+        rawPayload: payload,
+      })
+      await recordOutcome({
+        state: "held-for-review",
+        reason: gate.reason,
+        // The number the customer needs to hear back. Only the gates that turn
+        // on a threshold have one; the rest are our problems, not theirs.
+        detailCents: thresholdCentsFor(gate.reason, settings, account.level),
+      })
       return res.status(200).json({ status: "recorded", credited: false })
     }
 
@@ -649,6 +711,14 @@ export const paymentHandler = async (req: Request, res: Response) => {
           // and so a provider retry (which this branch invites) can still
           // verify the payment.
           await releaseAuthorizedHold()
+          // Deliberately NOT stamped with a failure_reason, unlike the
+          // record-only path above. A failed credit is not terminal — this
+          // branch exists to invite a provider retry — so the payment is still
+          // in flight and must keep counting against the allowance. Marking it
+          // uncredited would drop it out of the sum while a retry is pending
+          // and let the customer authorise against allowance that is about to
+          // be spent.
+          await recordOutcome({ state: "failed", reason: "credit-failed" })
           return { code: 200, body: { status: "recorded", credited: false } }
         }
 
@@ -682,6 +752,8 @@ export const paymentHandler = async (req: Request, res: Response) => {
             context: { transaction_id: transactionId },
           })
         }
+
+        await recordOutcome({ state: "credited", netAmountCents: fees.netCents })
 
         notifyOpsEvent({
           flow: "deposit",

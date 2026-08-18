@@ -10,6 +10,7 @@ import {
   BridgeTransferRequestStatus,
   BridgeTransferRequestTransactionType,
   EMAIL_ATTRIBUTION_SOURCE_SYSTEM,
+  type FygaroTopupWindow,
 } from "./models/BridgeTransferRequest"
 
 type BridgeDepositEventObject = {
@@ -265,13 +266,13 @@ export const writeFygaroTopupRequest = async ({
 // writes before the credit gate runs; without it every payment double-counts
 // itself. It is optional because the pre-charge check has no such row — nothing
 // has been paid yet — and omitting the filter is the honest way to say so.
-export const sumFygaroTopupGrossCentsLast24h = async ({
+export const readFygaroTopupWindowLast24h = async ({
   accountId,
   excludeTransactionId,
 }: {
   accountId: AccountId | string
   excludeTransactionId?: string
-}): Promise<number | FygaroTopupHistoryQueryError> => {
+}): Promise<FygaroTopupWindow | FygaroTopupHistoryQueryError> => {
   if (!ErpNext?.sumFygaroTopupGrossCentsSince) {
     return new FygaroTopupHistoryQueryError("ERPNext client is not configured")
   }
@@ -282,6 +283,17 @@ export const sumFygaroTopupGrossCentsLast24h = async ({
       ? {}
       : { excludeRequestId: `fygaro:${excludeTransactionId}` }),
   })
+}
+
+// Gross-only view, for the gates that decide yes/no and have no use for when
+// the window rolls. Kept as its own export so those call sites cannot start
+// depending on a shape they do not need.
+export const sumFygaroTopupGrossCentsLast24h = async (args: {
+  accountId: AccountId | string
+  excludeTransactionId?: string
+}): Promise<number | FygaroTopupHistoryQueryError> => {
+  const window = await readFygaroTopupWindowLast24h(args)
+  return window instanceof Error ? window : window.grossCents
 }
 
 // Whether this Fygaro payment was already fully processed (its audit row
@@ -350,6 +362,55 @@ export const completeFygaroTopup = async ({
       sourceEventId: transactionId,
       sourceEventType: "fygaro.payment",
       sourceSystemsSeen: ["fygaro_webhook", "ibex_intraledger_credit"],
+      rawPayload,
+    }),
+  )
+}
+
+/**
+ * Record WHY a captured payment was not credited, on the row that was already
+ * written when it arrived.
+ *
+ * Two jobs, and both matter. It is the ops-visible answer to "this customer was
+ * charged, what happened" — previously reconstructable only from a Discord
+ * alert. And it is what takes the row OUT of the daily-allowance sum: an
+ * uncredited payment delivered no value, so it must not spend the allowance
+ * that governs value delivered (see sumFygaroTopupGrossCentsSince).
+ *
+ * Status deliberately stays `Fiat Received`. The money really was received;
+ * inventing a new status would break every existing reader, including the
+ * allowance sum's own status filter.
+ */
+export const markFygaroTopupNotCredited = async ({
+  transactionId,
+  accountId,
+  amount,
+  currency,
+  reason,
+  rawPayload,
+}: {
+  transactionId: string
+  accountId?: AccountId | string
+  amount: string
+  currency: string
+  reason: string
+  rawPayload: unknown
+}): Promise<true | BridgeTransferRequestUpsertError> => {
+  return upsert(
+    new BridgeTransferRequest({
+      requestId: `fygaro:${transactionId}`,
+      transactionType: BridgeTransferRequestTransactionType.Topup,
+      status: BridgeTransferRequestStatus.FiatReceived,
+      provider: "Fygaro",
+      asset: "USD",
+      network: "Card",
+      amount: String(amount),
+      currency: String(currency),
+      accountId,
+      failureReason: reason,
+      sourceEventId: transactionId,
+      sourceEventType: "fygaro.payment",
+      sourceSystemsSeen: ["fygaro_webhook"],
       rawPayload,
     }),
   )

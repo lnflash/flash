@@ -397,7 +397,7 @@ describe("BridgeTransferRequestWriter", () => {
 
   describe("sumFygaroTopupGrossCentsLast24h", () => {
     it("queries the trailing 24h excluding the payment's own fygaro-prefixed audit row", async () => {
-      sumSince.mockResolvedValue(10_000)
+      sumSince.mockResolvedValue({ grossCents: 10_000 })
 
       const before = Date.now()
       const result = await sumFygaroTopupGrossCentsLast24h({
@@ -421,7 +421,7 @@ describe("BridgeTransferRequestWriter", () => {
       // The pre-charge allowance check runs before any payment exists. Omitting
       // the parameter is how it says so; a sentinel would make correctness rest
       // on "this string can never collide with a real request_id".
-      sumSince.mockResolvedValue(2_500)
+      sumSince.mockResolvedValue({ grossCents: 2_500 })
 
       const result = await sumFygaroTopupGrossCentsLast24h({
         accountId: "acct_123" as AccountId,
