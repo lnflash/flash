@@ -912,6 +912,50 @@ describe("fygaro paymentHandler", () => {
       )
     })
 
+    it("still refuses nothing when the credit landed but ERPNext never promoted it", async () => {
+      // The ERPNext row is the marker the guard used to trust ALONE, and it is
+      // the very write this handler alerts on when it fails ("credit succeeded
+      // but ERPNext promotion failed"). After that the money IS in the wallet
+      // and the row still reads Fiat Received. The reasons that reach here are
+      // ordinary — auto-credit-disabled is exactly what ops flip while cleaning
+      // up the same ERPNext incident that broke the promotion.
+      const intentId = "b41f7c02-9e35-4d6a-8f11-3a7c5d29e604"
+      mockReadCompletion.mockResolvedValue({ completed: false })
+      mockReadIntent.mockResolvedValue({
+        found: true,
+        intent: {
+          intentId,
+          accountId: ACCOUNT_ID,
+          username: "alice",
+          amountCents: 3000,
+          currency: "USD",
+          createdAtMs: 1,
+          outcome: { state: "credited", netAmountCents: 2852, atMs: 1 },
+        },
+      })
+      mockSumFygaroLast24h.mockResolvedValue(10000)
+      const res = makeRes()
+
+      await paymentHandler(
+        makeReq({
+          ...VALID_BODY,
+          amount: "30.00",
+          customReference: `alice|${intentId}`,
+        }),
+        res,
+      )
+
+      expect(res.json).toHaveBeenCalledWith({ status: "already_processed" })
+      expect(mockMarkNotCredited).not.toHaveBeenCalled()
+      // And the net already recorded survives, rather than being replaced by a
+      // credited stamp with no figure.
+      expect(mockRecordIntentOutcome).toHaveBeenCalledWith(
+        expect.objectContaining({
+          outcome: expect.objectContaining({ state: "credited", netAmountCents: 2852 }),
+        }),
+      )
+    })
+
     it("never refuses a payment that has ALREADY been credited", async () => {
       // Reachable, and it costs real money: tx1 ($60) credits; tx2 ($100) is
       // refused daily-limit-exceeded and hand-credited by ops, which correctly

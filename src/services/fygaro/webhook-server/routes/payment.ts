@@ -624,7 +624,23 @@ export const paymentHandler = async (req: Request, res: Response) => {
       // row, and overwrites the customer's CREDITED status with "held for
       // review — more than your remaining daily limit" for $60 they already have.
       const priorCompletion = await readFygaroTopupCompletion(transactionId)
-      if (priorCompletion.completed) {
+      // TWO markers, because the first one can lag the money. Promoting the
+      // ERPNext row is itself a write this handler alerts on when it fails
+      // ("Fygaro credit succeeded but ERPNext promotion failed", below): after
+      // that the money IS in the wallet and the row still reads Fiat Received.
+      // A guard that asks only ERPNext walks straight past it, and the refusal
+      // reasons that reach here are ordinary — `auto-credit-disabled` is
+      // exactly what ops flip while cleaning up the very ERPNext incident that
+      // broke the promotion.
+      //
+      // The recorded outcome is the second marker: it is stamped from the
+      // credit path independently of whether the promotion succeeded, so
+      // between them they cover each other's gap.
+      const creditedOutcome =
+        authorizedIntent?.outcome?.state === "credited"
+          ? authorizedIntent.outcome
+          : undefined
+      if (priorCompletion.completed || creditedOutcome) {
         baseLogger.info(
           { transactionId, reason: gate.reason },
           "Fygaro payment already credited — ignoring a late record-only refusal",
@@ -637,7 +653,8 @@ export const paymentHandler = async (req: Request, res: Response) => {
         // present once credited.
         await recordOutcome({
           state: "credited",
-          netAmountCents: priorCompletion.netAmountCents,
+          netAmountCents:
+            priorCompletion.netAmountCents ?? creditedOutcome?.netAmountCents,
         })
         return res.status(200).json({ status: "already_processed" })
       }
