@@ -1508,6 +1508,41 @@ describe("fygaro paymentHandler", () => {
         // short-circuiting on the Completed row. Without a stamp here the
         // customer polls "processing" until the record expires — for money that
         // is already in their wallet.
+        //
+        // ...and the figure comes off the COMPLETED ROW, not from this
+        // delivery's recomputed fees. Here the first delivery credited a
+        // fee-discount-whitelisted customer $9.21; this retry's whitelist read
+        // fails open to 0% and would recompute $9.01. The store's merge prefers
+        // the incoming value, so a recomputed net does not merely fail to
+        // improve the record — it OVERWRITES the true one, showing CREDITED
+        // $9.01 for $9.21 that is in the wallet.
+        mockReadCompletion.mockResolvedValue({ completed: true, netAmountCents: 921 })
+        mockGetFlashFeeDiscountPercent.mockResolvedValue(0)
+        mockReadIntent.mockResolvedValue(intent())
+        const res = makeRes()
+
+        await paymentHandler(makeReq(SIGNED_BODY), res)
+
+        expect(res.json).toHaveBeenCalledWith({ status: "already_processed" })
+        expect(mockRecordIntentOutcome).toHaveBeenCalledWith(
+          expect.objectContaining({
+            outcome: expect.objectContaining({ state: "credited", netAmountCents: 921 }),
+          }),
+        )
+        const credited = mockRecordIntentOutcome.mock.calls
+          .map(
+            ([args]: [{ outcome: { state: string; netAmountCents?: number } }]) => args,
+          )
+          .filter(({ outcome }) => outcome.state === "credited")
+        expect(credited).toHaveLength(1)
+        expect(credited[0].outcome.netAmountCents).not.toBe(901)
+      })
+
+      it("falls back to this delivery's net when the completed row carries none", async () => {
+        // An older row, or one promoted by a path that wrote no fee breakdown.
+        // The row is the preferred source, not the only one: with nothing to
+        // read back, the recomputed net is better than stamping a credited
+        // top-up with no figure at all.
         mockReadCompletion.mockResolvedValue({ completed: true })
         mockReadIntent.mockResolvedValue(intent())
         const res = makeRes()

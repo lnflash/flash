@@ -792,7 +792,8 @@ export const paymentHandler = async (req: Request, res: Response) => {
     const outcome = await LockService().lockPaymentIdempotencyKey(
       `fygaro-payment:${transactionId}` as IdempotencyKey,
       async () => {
-        if ((await readFygaroTopupCompletion(transactionId)).completed) {
+        const priorCompletion = await readFygaroTopupCompletion(transactionId)
+        if (priorCompletion.completed) {
           baseLogger.info({ transactionId }, "Duplicate Fygaro payment webhook")
           // Stamp before returning. `recordIntentOutcome` swallows its write
           // failures by design, so a first delivery that credited but failed to
@@ -800,7 +801,21 @@ export const paymentHandler = async (req: Request, res: Response) => {
           // customer polling "processing" until the record expires, for money
           // that is already in their wallet. Re-stamping an outcome that is
           // already there is a no-op write of the same value.
-          await recordOutcome({ state: "credited", netAmountCents: fees.netCents })
+          //
+          // The net comes off the COMPLETED ROW first, and only falls back to
+          // this delivery's recomputed `fees.netCents` when the row carries no
+          // figure. `fees` is derived from inputs that can legitimately differ
+          // between deliveries — `getFlashFeeDiscountPercent` is fail-open to 0
+          // and `getFygaroSettings` is a 60s cache over an operator-editable
+          // doctype — so a whitelist read that fails on the retry would
+          // recompute a SMALLER net than the one actually credited. The store's
+          // merge prefers the incoming value, so that wrong number would
+          // overwrite the right one and show the customer $96.50 CREDITED for
+          // $99.00 that is in their wallet.
+          await recordOutcome({
+            state: "credited",
+            netAmountCents: priorCompletion.netAmountCents ?? fees.netCents,
+          })
           return { code: 200, body: { status: "already_processed" } }
         }
 
