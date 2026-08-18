@@ -248,6 +248,13 @@ export const authorizeFygaroTopup = async ({
         // so a record naming another account means the two disagree and the
         // link is not ours to hand out.
         open.intent.accountId === accountId &&
+        // A record carrying a terminal outcome has already been paid against.
+        // The record deliberately outlives redemption now (the status poll
+        // reads it), so "the record still exists" no longer implies "nobody has
+        // used this link" — that inference has to be made explicitly, or a
+        // redemption whose zrem failed would see the link handed back to a
+        // customer who has already been charged for it.
+        open.intent.outcome === undefined &&
         open.intent.checkoutUrl !== undefined &&
         open.intent.expiresAtMs !== undefined &&
         open.intent.expiresAtMs > nowMs

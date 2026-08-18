@@ -1,5 +1,7 @@
+import { FygaroConfig } from "@config"
 import { AccountLevel } from "@domain/accounts"
 import { readFygaroTopupWindowLast24h } from "@services/frappe/BridgeTransferRequestWriter"
+import { readOutstandingReservations } from "@services/fygaro/checkout-intent-store"
 import { getFygaroSettings } from "@services/fygaro/webhook-server/fygaro-settings"
 
 /**
@@ -13,6 +15,12 @@ import { getFygaroSettings } from "@services/fygaro/webhook-server/fygaro-settin
  * Read-only and side-effect free, unlike `authorizeFygaroTopup` — it can be
  * called while the customer is still typing an amount, where minting a
  * reservation would burn their allowance on a number they never committed to.
+ *
+ * It must nonetheless answer with the SAME arithmetic and the SAME gates as
+ * `authorizeFygaroTopup`, or it invites a top-up the pre-charge check then
+ * refuses — the invite-then-refuse failure this workstream exists to end, moved
+ * onto a new surface. Two things follow from that and neither is optional: the
+ * master switches are checked here too, and live holds are subtracted here too.
  */
 
 export type FygaroTopupAllowance = {
@@ -21,6 +29,15 @@ export type FygaroTopupAllowance = {
   // refused are excluded: they delivered no value, so they must not consume the
   // allowance that governs value delivered.
   spentCents: number
+  // Unpaid checkout links this account is still holding. NOT spent — nothing
+  // has been charged — but not available either, because paying one of them
+  // would charge it. Kept separate from `spentCents` precisely because "you
+  // have spent $0 and have $65 left of $125" is the true sentence, and folding
+  // holds into spend would make it a false one.
+  heldCents: number
+  // What would still be accepted right now: the cap less BOTH the settled gross
+  // and the live holds — the same quantity `authorizeFygaroTopup` computes, so
+  // the two surfaces cannot disagree about the same account at the same moment.
   remainingCents: number
   // When the oldest counted payment ages out of the window and some allowance
   // comes back. Undefined when nothing is counted (the full cap is available).
@@ -29,8 +46,16 @@ export type FygaroTopupAllowance = {
 }
 
 export type FygaroTopupAllowanceFailure =
+  // Card top-ups are off at the deploy level, or auto-credit is off in the
+  // operator settings. There is no allowance to report because there is nothing
+  // it could be spent on — `authorizeFygaroTopup` refuses every request with
+  // `checkout-disabled` in this state.
+  | "checkout-disabled"
   | "settings-unavailable"
   | "history-unavailable"
+  // The reservation index (Redis) was unreadable. Named separately from
+  // `history-unavailable` so an operator reading it goes to Redis, not ERPNext.
+  | "reservations-unavailable"
   | "no-daily-limit-for-level"
 
 export type FygaroTopupAllowanceResult =
@@ -42,13 +67,31 @@ const DAY_MS = 24 * 60 * 60 * 1000
 export const getFygaroTopupAllowance = async ({
   accountId,
   level,
+  nowMs = Date.now(),
 }: {
   accountId: string
   level: AccountLevel
+  nowMs?: number
 }): Promise<FygaroTopupAllowanceResult> => {
+  // The yaml master gates, first and before any read — the same order
+  // `authorizeFygaroTopup` applies them in. With `fygaro.enabled` off the
+  // webhook 503s every delivery (a payment would not even be RECORDED), and
+  // with `credit.enabled` off it records without crediting. Reporting a healthy
+  // allowance in either state invites a charge that cannot be credited.
+  if (!FygaroConfig?.enabled || !FygaroConfig?.credit?.enabled) {
+    return { available: false, reason: "checkout-disabled" }
+  }
+
   // Returns undefined (never throws) when the ERPNext row is unreadable.
   const settings = await getFygaroSettings()
   if (!settings) return { available: false, reason: "settings-unavailable" }
+
+  // The operator kill switch. Same argument as the deploy gate above: with it
+  // off, every checkout request is refused `checkout-disabled`, so a number
+  // here would be a number that cannot be spent.
+  if (!settings.autoCreditEnabled) {
+    return { available: false, reason: "checkout-disabled" }
+  }
 
   const dailyLimitUsd = settings.dailyTopupLimits[level]
   if (dailyLimitUsd === undefined) {
@@ -66,12 +109,26 @@ export const getFygaroTopupAllowance = async ({
     return { available: false, reason: "history-unavailable" }
   }
 
+  // Links this account authorised and has not paid are still payable, so they
+  // are subtracted here exactly as `authorizeFygaroTopup` subtracts them. The
+  // canonical case is the customer who minted a $60 link and closed the page:
+  // without this, they are shown the full $125, enter $125, and are refused —
+  // the invite-then-refuse loop, rebuilt on the query the PR added to end it.
+  const reservations = await readOutstandingReservations({ accountId, nowMs })
+  if (reservations instanceof Error) {
+    // Fail closed, matching the gate (authorize-topup refuses
+    // `reservations-unavailable` rather than treating unknown holds as none).
+    return { available: false, reason: "reservations-unavailable" }
+  }
+  const heldCents = reservations.reduce((sum, r) => sum + r.amountCents, 0)
+
   return {
     available: true,
     allowance: {
       limitCents,
       spentCents: window.grossCents,
-      remainingCents: Math.max(0, limitCents - window.grossCents),
+      heldCents,
+      remainingCents: Math.max(0, limitCents - window.grossCents - heldCents),
       resetsAt:
         window.oldestCountedMs === undefined
           ? undefined

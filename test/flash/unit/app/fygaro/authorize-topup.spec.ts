@@ -451,6 +451,24 @@ describe("authorizeFygaroTopup", () => {
       expect(res.reason).toBe("checkout-already-open")
     })
 
+    it("never hands back a link that has already been paid against", async () => {
+      // The record deliberately OUTLIVES redemption now — the status poll reads
+      // the terminal outcome off it — so "the record still exists" no longer
+      // means "nobody has used this link". If a redemption's zrem failed, the
+      // stale hold plus a live record would otherwise re-offer a checkout to a
+      // customer who has already been charged for it.
+      mockReadReservations.mockResolvedValue([hold(10000)])
+      mockReadIntent.mockResolvedValue(
+        openIntent({
+          outcome: { state: "credited", netAmountCents: 9421, atMs: NOW_MS - 30_000 },
+        }),
+      )
+      const res = await authorize({ amountCents: 10000 })
+
+      expect(res.authorized).toBe(false)
+      expect(res.reason).toBe("checkout-already-open")
+    })
+
     it("refuses an intent record written before the URL was stored", async () => {
       // Records already in Redis when this shipped have no checkoutUrl, so they
       // cannot be re-offered — but the refusal must still be the honest one.

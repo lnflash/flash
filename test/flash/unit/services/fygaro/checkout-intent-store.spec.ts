@@ -35,6 +35,7 @@ import {
   consumeIntent,
   readIntent,
   readOutstandingReservations,
+  recordIntentOutcome,
   releaseIntentReservation,
   saveIntent,
 } from "@services/fygaro/checkout-intent-store"
@@ -93,6 +94,33 @@ describe("saveIntent", () => {
       NOW_MS + TTL * 1000,
       "8000:intent-1",
     )
+  })
+
+  it("writes the redemption claim under its OWN key, not the record's", async () => {
+    // Redemption DELs this key. If it DELed the record instead, redeeming an
+    // authorisation would destroy the thing the status poll reads and the
+    // terminal outcome is stamped onto.
+    await saveIntent({ intent: INTENT, ttlSeconds: TTL })
+
+    expect(mockCacheSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: "fygaro-checkout-claim:intent-1",
+        ttlSecs: TTL + 3600,
+      }),
+    )
+  })
+
+  it("still authorises when only the claim write fails", async () => {
+    // The record and the hold are both in place; the worst case is that no
+    // delivery can win the claim, so the hold lifts at expiry instead of on
+    // redemption. Refusing the customer a checkout over that is the wrong trade.
+    mockCacheSet.mockImplementation(async ({ key }: { key: string }) =>
+      key.startsWith("fygaro-checkout-claim:")
+        ? new UnknownCacheServiceError("redis down")
+        : INTENT,
+    )
+
+    expect(await saveIntent({ intent: INTENT, ttlSeconds: TTL })).toBe(true)
   })
 
   it("reports a failed reservation write so the caller knows there is no hold", async () => {
@@ -214,13 +242,19 @@ describe("readIntent", () => {
 })
 
 describe("consumeIntent", () => {
-  it("gates redemption on the atomic DEL, not on a get-then-clear", async () => {
+  it("gates redemption on the atomic DEL of the CLAIM key, not on a get-then-clear", async () => {
     // `clear` discards the removed-count and always resolves true, so
     // get-then-clear is a TOCTOU race in which every concurrent consumer
     // "succeeds". Only the DEL removed-count picks a single winner.
+    //
+    // And it must land on the claim key: DELing the record instead destroys
+    // what `recordIntentOutcome` writes to and the status poll reads.
     const result = await consumeIntent("intent-1")
 
     expect(mockConsumeCacheKey).toHaveBeenCalledWith({
+      key: "fygaro-checkout-claim:intent-1",
+    })
+    expect(mockConsumeCacheKey).not.toHaveBeenCalledWith({
       key: "fygaro-checkout-intent:intent-1",
     })
     expect(result).toEqual({ consumed: true })
@@ -247,6 +281,87 @@ describe("consumeIntent", () => {
     mockConsumeCacheKey.mockResolvedValue(new Error("redis down"))
 
     expect(await consumeIntent("intent-1")).toEqual({ consumed: false })
+  })
+})
+
+// The whole point of the record/claim split. These run against a keyed
+// in-memory Redis rather than blanket mock returns, because the bug they pin
+// was invisible to blanket mocks: `mockCacheGet` answering with the intent for
+// EVERY key cannot tell a live record from a deleted one, which is exactly the
+// distinction that broke.
+describe("redemption leaves the record the status poll reads", () => {
+  const store = new Map<string, unknown>()
+
+  beforeEach(() => {
+    store.clear()
+    mockCacheSet.mockImplementation(async ({ key, value }: Record<string, unknown>) => {
+      store.set(key as string, value)
+      return value
+    })
+    mockCacheGet.mockImplementation(async ({ key }: { key: string }) =>
+      store.has(key) ? store.get(key) : new CacheUndefinedError(),
+    )
+    mockConsumeCacheKey.mockImplementation(async ({ key }: { key: string }) =>
+      store.delete(key),
+    )
+  })
+
+  const OUTCOME = {
+    state: "held-for-review" as const,
+    reason: "daily-limit-exceeded",
+    detailCents: 2500,
+    atMs: NOW_MS,
+  }
+
+  it("records a terminal outcome AFTER the authorisation was redeemed", async () => {
+    // The webhook's record-only path redeems, then marks the ERPNext row, then
+    // stamps the outcome. When redemption DELed the record, that stamp hit a
+    // deleted key and returned early — so HELD_FOR_REVIEW, the state this whole
+    // feature exists to deliver, was never observable and the customer polled
+    // "processing" forever.
+    await saveIntent({ intent: INTENT, ttlSeconds: TTL })
+    await consumeIntent(INTENT.intentId)
+
+    await recordIntentOutcome({
+      intentId: INTENT.intentId,
+      outcome: OUTCOME,
+      ttlSeconds: TTL,
+    })
+
+    expect(await readIntent(INTENT.intentId)).toEqual({
+      found: true,
+      intent: { ...INTENT, outcome: OUTCOME },
+    })
+  })
+
+  it("keeps an outcome written BEFORE redemption (the credit path's order)", async () => {
+    // The credit path stamps `credited` and only then redeems. Redeeming must
+    // not take the freshly-written outcome with it.
+    await saveIntent({ intent: INTENT, ttlSeconds: TTL })
+    await recordIntentOutcome({
+      intentId: INTENT.intentId,
+      outcome: { state: "credited", netAmountCents: 7551, atMs: NOW_MS },
+      ttlSeconds: TTL,
+    })
+
+    await consumeIntent(INTENT.intentId)
+
+    const lookup = await readIntent(INTENT.intentId)
+    expect(lookup).toMatchObject({
+      found: true,
+      intent: { outcome: { state: "credited", netAmountCents: 7551 } },
+    })
+  })
+
+  it("still redeems exactly once", async () => {
+    // Splitting record from claim must not cost the exactly-once guarantee:
+    // the DEL removed-count on the claim key is still what picks the winner.
+    await saveIntent({ intent: INTENT, ttlSeconds: TTL })
+
+    expect(await consumeIntent(INTENT.intentId)).toEqual({ consumed: true })
+    expect(await consumeIntent(INTENT.intentId)).toEqual({ consumed: false })
+    // Exactly one release, from the one winner.
+    expect(mockZrem).toHaveBeenCalledTimes(1)
   })
 })
 

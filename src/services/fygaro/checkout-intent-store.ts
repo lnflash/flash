@@ -94,6 +94,24 @@ export type FygaroTopupOutcome = {
 
 const cacheKey = (intentId: string) => `fygaro-checkout-intent:${intentId}`
 
+/**
+ * The single-use REDEMPTION claim, held in a key of its own.
+ *
+ * Redemption used to be the DEL of the record itself, which meant redeeming an
+ * authorisation destroyed the very thing `recordIntentOutcome` writes to and
+ * `readIntent` serves the status poll from — so `credited` and
+ * `held-for-review` were never observable: on the record-only path the outcome
+ * write found a deleted key and returned early, and on the credit path the
+ * outcome was written and then deleted microseconds later. Every poll answered
+ * "processing" for a payment that had already reached a terminal answer.
+ *
+ * Splitting the two keeps the exactly-once guarantee exactly where it was — the
+ * DEL removed-count on THIS key still picks a single winner among concurrent
+ * consumers — while the record lives out its full TTL so the customer can be
+ * told what happened.
+ */
+const claimKey = (intentId: string) => `fygaro-checkout-claim:${intentId}`
+
 // Per-account index of authorisations that are still payable, so the pre-charge
 // allowance check can subtract what it has already handed out. Without it,
 // authorisation is not reservation: N calls against a $100 allowance each mint a
@@ -132,14 +150,33 @@ export const saveIntent = async ({
   // Outlive the JWT by a margin: a payment authorised at the very end of the
   // token's window still arrives (and must still be verifiable) minutes later,
   // once the customer has finished typing their card details.
-  const res = await (
-    await cacheService()
-  ).set<FygaroCheckoutIntent>({
+  const cache = await cacheService()
+  const res = await cache.set<FygaroCheckoutIntent>({
     key: cacheKey(intent.intentId),
     value: intent,
     ttlSecs: (ttlSeconds + 3600) as Seconds,
   })
   if (res instanceof Error) return res
+
+  // The redemption claim, written alongside the record and living exactly as
+  // long, so `consumeIntent` has something to DEL that is not the record the
+  // status poll reads. Best-effort on purpose: the record and the reservation
+  // are both in place by now, and failing the whole authorisation over the
+  // claim would refuse a customer a checkout we can otherwise honour. Without
+  // it no delivery can ever win the claim, so nothing is redeemed twice — the
+  // hold simply waits for the JWT to expire instead of being released early,
+  // the same bounded degradation `releaseIntentReservation` already accepts.
+  const claim = await cache.set<string>({
+    key: claimKey(intent.intentId),
+    value: intent.intentId,
+    ttlSecs: (ttlSeconds + 3600) as Seconds,
+  })
+  if (claim instanceof Error) {
+    baseLogger.warn(
+      { intentId: intent.intentId, error: claim.constructor.name },
+      "Failed to write the Fygaro redemption claim; the hold will lift at expiry instead",
+    )
+  }
 
   // The RESERVATION expires with the JWT, not with the record: once the token is
   // no longer payable the amount is no longer outstanding, even though the
@@ -309,6 +346,10 @@ export const readIntent = async (intentId: string): Promise<IntentLookup> => {
  * resolves `true`, which makes get-then-`clear` a TOCTOU race in which every
  * concurrent consumer "succeeds" (see the docstring on `consumeCacheKey`).
  *
+ * The DEL lands on the CLAIM key, never on the record — see `claimKey`. Deleting
+ * the record here is what made every terminal outcome unobservable, because the
+ * outcome is stamped onto (and polled from) that record.
+ *
  * Call this only on terminal outcomes — a delivery that will be retried must
  * leave the authorisation in place.
  */
@@ -317,7 +358,7 @@ export const consumeIntent = async (intentId: string): Promise<{ consumed: boole
   // release. The read is not the gate; the DEL below is.
   const lookup = await readIntent(intentId)
 
-  const claimed = await (await cacheModule()).consumeCacheKey({ key: cacheKey(intentId) })
+  const claimed = await (await cacheModule()).consumeCacheKey({ key: claimKey(intentId) })
   if (claimed instanceof Error) {
     baseLogger.warn({ intentId }, "Failed to consume Fygaro checkout intent")
     return { consumed: false }

@@ -554,6 +554,10 @@ export class ErpNext {
         "amount",
         "source_systems_seen",
         "failure_reason",
+        // Read alongside the reason because the reason ALONE cannot decide the
+        // exclusion: a Completed row delivered value whatever reason it once
+        // carried. See the guard below.
+        "status",
         "last_seen_at",
       ])
       const resp = await axios.get(
@@ -577,6 +581,7 @@ export class ErpNext {
         amount?: number | string | null
         source_systems_seen?: string | null
         failure_reason?: string | null
+        status?: string | null
         last_seen_at?: string | null
       }[]) {
         // A row that carries a failure reason was captured by Fygaro and
@@ -590,10 +595,21 @@ export class ErpNext {
         // A row still in flight has no reason yet and DOES count, which is what
         // stops two rapid payments both passing the gate.
         //
+        // STATUS OVERRIDES THE REASON. `failure_reason` is never cleared —
+        // `completeFygaroTopup` omits the field entirely, so `applyUpdateGuards`
+        // leaves whatever is stored intact — which means a payment refused for
+        // `daily-limit-exceeded` and then hand-credited by ops (the exact action
+        // the "manual credit needed" alert asks for) would be exempt from this
+        // sum forever. That account would receive $160 of value against a $125
+        // cap while the gate still read $100 spent, and could auto-credit the
+        // rest of the cap on top. A Completed row delivered value; it counts.
+        //
         // Filtered in JS for the same reason as the marker below: a Frappe
         // `["failure_reason","is","not set"]` filter inverts awkwardly around
         // NULL, and getting it wrong under-counts the window.
-        if (row.failure_reason != null && String(row.failure_reason).trim() !== "") {
+        const failureReasonSet =
+          row.failure_reason != null && String(row.failure_reason).trim() !== ""
+        if (failureReasonSet && row.status !== BridgeTransferRequestStatus.Completed) {
           continue
         }
         // An email-attributed row got its account_id from the payer-typed

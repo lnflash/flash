@@ -130,20 +130,35 @@ const RECORD_ONLY_ALERT_TITLE: Record<
 // your $125 daily limit" rather than "declined". Only the gates that turn on a
 // threshold have one; everything else is our fault, not theirs, and gets no
 // number because there is none to give.
+//
+// `daily-limit-exceeded` sends what is LEFT, not the cap. The customer-facing
+// sentence built from this number says "more than your REMAINING daily top-up
+// limit of $X", and the cap is not that: a level-1 account that has spent $100
+// of $125 and pays $60 would be told "$60 is more than your remaining limit of
+// $125.00" — arithmetically false, and it withholds the only actionable figure,
+// the $25 actually left.
 const thresholdCentsFor = (
   reason: RecordOnlyReason,
   settings: FygaroSettings | undefined,
   level: AccountLevel,
+  priorDayGrossCents: number | undefined,
 ): number | undefined => {
   if (!settings) return undefined
+  if (reason === "daily-limit-exceeded") {
+    const capUsd = settings.dailyTopupLimits[level]
+    // `history-unavailable` precedes this gate, so the prior sum is defined
+    // whenever the reason is `daily-limit-exceeded`. If it somehow is not, send
+    // no number at all rather than the cap — the generic wording is honest, a
+    // wrong number is not.
+    if (capUsd === undefined || priorDayGrossCents === undefined) return undefined
+    return Math.max(0, Math.round(capUsd * 100) - priorDayGrossCents)
+  }
   const usd =
-    reason === "daily-limit-exceeded"
-      ? settings.dailyTopupLimits[level]
-      : reason === "over-limit"
-        ? settings.autoCreditLimit
-        : reason === "under-minimum"
-          ? settings.minimumTopup
-          : undefined
+    reason === "over-limit"
+      ? settings.autoCreditLimit
+      : reason === "under-minimum"
+        ? settings.minimumTopup
+        : undefined
   return usd === undefined ? undefined : Math.round(usd * 100)
 }
 
@@ -631,7 +646,12 @@ export const paymentHandler = async (req: Request, res: Response) => {
         reason: gate.reason,
         // The number the customer needs to hear back. Only the gates that turn
         // on a threshold have one; the rest are our problems, not theirs.
-        detailCents: thresholdCentsFor(gate.reason, settings, account.level),
+        detailCents: thresholdCentsFor(
+          gate.reason,
+          settings,
+          account.level,
+          priorDayGrossCents,
+        ),
       })
       return res.status(200).json({ status: "recorded", credited: false })
     }
@@ -651,6 +671,13 @@ export const paymentHandler = async (req: Request, res: Response) => {
       async () => {
         if (await isFygaroTopupCompleted(transactionId)) {
           baseLogger.info({ transactionId }, "Duplicate Fygaro payment webhook")
+          // Stamp before returning. `recordIntentOutcome` swallows its write
+          // failures by design, so a first delivery that credited but failed to
+          // stamp would leave every retry short-circuiting here — and the
+          // customer polling "processing" until the record expires, for money
+          // that is already in their wallet. Re-stamping an outcome that is
+          // already there is a no-op write of the same value.
+          await recordOutcome({ state: "credited", netAmountCents: fees.netCents })
           return { code: 200, body: { status: "already_processed" } }
         }
 

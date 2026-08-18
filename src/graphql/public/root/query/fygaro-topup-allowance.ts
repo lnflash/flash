@@ -19,6 +19,11 @@ const FygaroTopupAllowanceQuery = GT.Field({
     // real gate still runs before any charge.
     if (!result.available) return null
 
+    // `remaining` is deliberately NOT `limit - spent`: it also has this
+    // account's unpaid checkout links subtracted, exactly as the pre-charge gate
+    // subtracts them, so the two surfaces answer the same question with the same
+    // number. `spent` keeps its own meaning — gross actually charged — because a
+    // hold is not a charge and calling it one would be its own false claim.
     const { limitCents, spentCents, remainingCents, resetsAt } = result.allowance
     return { limit: limitCents, spent: spentCents, remaining: remainingCents, resetsAt }
   },

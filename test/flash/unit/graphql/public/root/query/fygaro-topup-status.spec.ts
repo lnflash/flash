@@ -1,0 +1,259 @@
+// jest.mock calls are hoisted before imports
+
+const mockGetFygaroTopupStatus = jest.fn()
+const mockGetFygaroTopupAllowance = jest.fn()
+
+jest.mock("@app/fygaro/topup-status", () => ({
+  getFygaroTopupStatus: (...args: unknown[]) => mockGetFygaroTopupStatus(...args),
+}))
+
+jest.mock("@app/fygaro/topup-allowance", () => ({
+  getFygaroTopupAllowance: (...args: unknown[]) => mockGetFygaroTopupAllowance(...args),
+}))
+
+import FygaroTopupStatusQuery from "@graphql/public/root/query/fygaro-topup-status"
+import FygaroTopupAllowanceQuery from "@graphql/public/root/query/fygaro-topup-allowance"
+
+const ACCOUNT_ID = "account-001" as AccountId
+const CHECKOUT_ID = "3f5a1c9e-2b7d-4a10-9f33-6c8e2d4b7a51"
+
+const ctx = {
+  domainAccount: { id: ACCOUNT_ID, level: 1 },
+} as unknown as GraphQLPublicContextAuth
+
+type Query = {
+  resolve?: (
+    source: null,
+    args: Record<string, unknown>,
+    context: GraphQLPublicContextAuth,
+    info: never,
+  ) => Promise<unknown> | unknown
+}
+
+const resolve = async (query: Query, args: Record<string, unknown> = {}) => {
+  if (!query.resolve) throw new Error("Missing resolver")
+  return query.resolve(null, args, ctx, {} as never)
+}
+
+type StatusPayload = {
+  state: string
+  authorizedAmount: number
+  netAmount?: number
+  reason?: string
+} | null
+
+const askStatus = async (
+  status: Record<string, unknown> | undefined,
+): Promise<StatusPayload> => {
+  mockGetFygaroTopupStatus.mockResolvedValue(
+    status === undefined ? { found: false } : { found: true, status },
+  )
+  return (await resolve(FygaroTopupStatusQuery as Query, {
+    checkoutId: CHECKOUT_ID,
+  })) as StatusPayload
+}
+
+const held = (reason: string, detailCents?: number) => ({
+  state: "held-for-review",
+  authorizedAmountCents: 6000,
+  reason,
+  detailCents,
+})
+
+beforeEach(() => {
+  jest.clearAllMocks()
+})
+
+describe("fygaroTopupStatus resolver", () => {
+  it("asks only about THIS account's checkout", async () => {
+    await askStatus({ state: "processing", authorizedAmountCents: 6000 })
+
+    // The account id comes from the session, never from the argument — the
+    // checkout id alone must not be able to name whose payment is being read.
+    expect(mockGetFygaroTopupStatus).toHaveBeenCalledWith({
+      intentId: CHECKOUT_ID,
+      accountId: ACCOUNT_ID,
+    })
+  })
+
+  it("returns null for an unknown, expired or foreign checkout", async () => {
+    expect(await askStatus(undefined)).toBeNull()
+  })
+
+  it("says nothing about a payment still being processed", async () => {
+    // No terminal answer yet, so there is nothing honest to explain. The app
+    // shows its "we have your payment" state off the enum alone.
+    const result = await askStatus({ state: "processing", authorizedAmountCents: 6000 })
+
+    expect(result).toEqual({
+      state: "processing",
+      authorizedAmount: 6000,
+      netAmount: undefined,
+      reason: undefined,
+    })
+  })
+
+  it("reports the credited NET, which is not what the customer paid", async () => {
+    const result = await askStatus({
+      state: "credited",
+      authorizedAmountCents: 6000,
+      netAmountCents: 5652,
+    })
+
+    expect(result).toMatchObject({
+      state: "credited",
+      authorizedAmount: 6000,
+      netAmount: 5652,
+      reason: undefined,
+    })
+  })
+
+  // The threshold class: the customer tripped a rule, the rule is named, and
+  // the number that makes it actionable travels with it.
+  describe("reasons the customer can act on name their number", () => {
+    it("names the REMAINING daily limit", async () => {
+      const result = await askStatus(held("daily-limit-exceeded", 2500))
+
+      expect(result?.reason).toBe(
+        "This is more than your remaining daily top-up limit of $25.00.",
+      )
+    })
+
+    it("falls back to the limit without a figure when none was recorded", async () => {
+      // An older record, or a stamp written before the threshold was captured.
+      // Still true, just less useful — never a fabricated number.
+      const result = await askStatus(held("daily-limit-exceeded"))
+
+      expect(result?.reason).toBe("This is more than your remaining daily top-up limit.")
+    })
+
+    it("names the single-payment ceiling", async () => {
+      expect((await askStatus(held("over-limit", 50000)))?.reason).toBe(
+        "Top-ups over $500.00 need a quick manual review.",
+      )
+    })
+
+    it("names the ceiling generically when none was recorded", async () => {
+      expect((await askStatus(held("over-limit")))?.reason).toBe(
+        "Top-ups above our automatic limit need a quick manual review.",
+      )
+    })
+
+    it("names the minimum", async () => {
+      expect((await askStatus(held("under-minimum", 1000)))?.reason).toBe(
+        "The minimum top-up is $10.00.",
+      )
+    })
+
+    it("names the minimum generically when none was recorded", async () => {
+      expect((await askStatus(held("under-minimum")))?.reason).toBe(
+        "This is below the minimum top-up.",
+      )
+    })
+
+    it("explains an account level that cannot take card top-ups at all", async () => {
+      expect((await askStatus(held("no-daily-limit-for-level")))?.reason).toBe(
+        "Card top-ups aren't available on your account level yet.",
+      )
+    })
+  })
+
+  // The ours class. A customer who has already been charged must never be told
+  // that OUR disabled toggle, unreadable settings row or failed send was
+  // something they did — an operator is already being paged for it.
+  describe("our own faults are never dressed up as the customer's", () => {
+    const OURS = "We've received your payment and are completing it manually."
+
+    it.each([
+      "credit-disabled",
+      "auto-credit-disabled",
+      "settings-unavailable",
+      "history-unavailable",
+      "non-positive-net",
+      "non-usd",
+    ])("%s reads as a manual completion, with no number", async (reason) => {
+      const result = await askStatus(held(reason, 12500))
+
+      expect(result?.reason).toBe(OURS)
+    })
+
+    it("credit-failed reads as a manual completion too", async () => {
+      // Stamped by the credit path, not the gate — and retryable, so the state
+      // is `failed` while the wording still says we are on it.
+      const result = await askStatus({
+        state: "failed",
+        authorizedAmountCents: 6000,
+        reason: "credit-failed",
+      })
+
+      expect(result).toMatchObject({ state: "failed", reason: OURS })
+    })
+
+    it("intent-mismatch says we could not match it, not that they did wrong", async () => {
+      expect((await askStatus(held("intent-mismatch")))?.reason).toBe(
+        "We couldn't match this payment to your checkout, so we're completing it by hand.",
+      )
+    })
+
+    it("an unrecognised reason from an older deployment is ours by default", async () => {
+      // The map is exhaustive at compile time, but the string comes off a Redis
+      // record a previous deploy may have written. We cannot explain a rule we
+      // no longer have, so we must not try to blame the customer for it.
+      expect((await askStatus(held("some-reason-we-no-longer-have", 999)))?.reason).toBe(
+        OURS,
+      )
+    })
+  })
+})
+
+describe("fygaroTopupAllowance resolver", () => {
+  it("asks for the caller's own account and level", async () => {
+    mockGetFygaroTopupAllowance.mockResolvedValue({ available: false, reason: "x" })
+
+    await resolve(FygaroTopupAllowanceQuery as Query)
+
+    expect(mockGetFygaroTopupAllowance).toHaveBeenCalledWith({
+      accountId: ACCOUNT_ID,
+      level: 1,
+    })
+  })
+
+  it("maps the allowance onto the schema's cent fields", async () => {
+    const resetsAt = new Date("2026-08-18T02:33:31Z")
+    mockGetFygaroTopupAllowance.mockResolvedValue({
+      available: true,
+      allowance: {
+        limitCents: 12500,
+        spentCents: 5000,
+        heldCents: 4000,
+        remainingCents: 3500,
+        resetsAt,
+      },
+    })
+
+    // `remaining` is deliberately NOT `limit - spent`: the account's unpaid
+    // checkout links are subtracted from it too, so it answers the same
+    // question, with the same number, as the pre-charge gate.
+    expect(await resolve(FygaroTopupAllowanceQuery as Query)).toEqual({
+      limit: 12500,
+      spent: 5000,
+      remaining: 3500,
+      resetsAt,
+    })
+  })
+
+  it.each([
+    "checkout-disabled",
+    "settings-unavailable",
+    "history-unavailable",
+    "reservations-unavailable",
+    "no-daily-limit-for-level",
+  ])("returns null rather than inventing a number when %s", async (reason) => {
+    // Decoration on a screen the customer is still filling in. A red banner
+    // over a Redis blip — or worse, a full allowance that the charge path will
+    // refuse — is worse than simply not showing the number.
+    mockGetFygaroTopupAllowance.mockResolvedValue({ available: false, reason })
+
+    expect(await resolve(FygaroTopupAllowanceQuery as Query)).toBeNull()
+  })
+})
