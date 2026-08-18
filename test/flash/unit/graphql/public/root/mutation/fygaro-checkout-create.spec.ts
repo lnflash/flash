@@ -26,15 +26,21 @@ import FygaroCheckoutCreateMutation from "@graphql/public/root/mutation/fygaro-c
 
 const ACCOUNT_ID = "account-001" as AccountId
 const EXPIRES_AT = new Date("2026-08-16T12:15:00Z")
+const INTENT_ID = "intent-1"
 const CHECKOUT = {
   url: "https://fygaro.com/en/pb/ABC123?jwt=header.payload.signature",
   expiresAt: EXPIRES_AT,
-  customReference: "jaceth2009|intent-1",
+  customReference: `jaceth2009|${INTENT_ID}`,
+  // The id the WHOLE feature hangs on: it is what the client polls
+  // fygaroTopupStatus with, and FygaroCheckout.checkoutId is NonNull, so a
+  // construction site that omits it makes GraphQL null the entire `checkout`
+  // field — a top-up that produces no link and no error.
+  intentId: INTENT_ID,
 }
 
 type CheckoutCreateResult = {
   errors: Array<{ code?: string; message?: string }>
-  checkout?: { url?: string; expiresAt?: Date; amount?: number }
+  checkout?: { url?: string; expiresAt?: Date; checkoutId?: string; amount?: number }
   remainingAllowance?: number
 }
 
@@ -87,9 +93,45 @@ describe("fygaroCheckoutCreate resolver", () => {
     expect(result.checkout).toEqual({
       url: CHECKOUT.url,
       expiresAt: EXPIRES_AT,
+      checkoutId: INTENT_ID,
       amount: 8000,
     })
     expect(result.remainingAllowance).toBe(2000)
+  })
+
+  describe("the id the client polls with", () => {
+    it("returns the authorisation's intent id as checkoutId", async () => {
+      // FygaroCheckout.checkoutId is NonNull(String). If any construction site
+      // stops passing `intentId`, GraphQL nulls the WHOLE checkout field and
+      // the mutation answers `{errors: [], checkout: null}` — a top-up with no
+      // link and no error, and the client polls nothing.
+      const result = await resolve(8000)
+
+      expect(result.checkout?.checkoutId).toBe(INTENT_ID)
+    })
+
+    it("re-offers an abandoned link under the SAME id, not a fresh one", async () => {
+      // The reuse path (authorize-topup: refuseOpenCheckout hands back the link
+      // the account already holds). A new id here would poll an intent no
+      // payment will ever reference, so the customer's own completed top-up
+      // would report "processing" forever.
+      mockAuthorizeFygaroTopup.mockResolvedValue({
+        authorized: true,
+        reused: true,
+        checkout: { ...CHECKOUT, intentId: "intent-already-held" },
+        remainingAllowanceCents: 0,
+      })
+
+      const result = await resolve(12500)
+
+      expect(result.checkout).toEqual({
+        url: CHECKOUT.url,
+        expiresAt: EXPIRES_AT,
+        checkoutId: "intent-already-held",
+        amount: 12500,
+      })
+      expect(result.errors).toEqual([])
+    })
   })
 
   it("hands expiresAt to the Timestamp scalar as a Date, not a pre-serialised value", async () => {

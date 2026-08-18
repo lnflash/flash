@@ -218,6 +218,24 @@ describe("readIntent", () => {
     // customer funds — the outcome this whole workstream exists to avoid.
     mockCacheGet.mockResolvedValue(new Error("redis down"))
 
+    expect(await readIntent("intent-1")).toMatchObject({ found: false })
+  })
+
+  it("marks a FAULT as unavailable, so a blip is not reported as 'never existed'", async () => {
+    // The money paths keep treating it as a miss (fail-open). The status query
+    // needs the distinction: without it, a customer who has just been charged
+    // is told their checkout does not exist for as long as Redis is unwell.
+    mockCacheGet.mockResolvedValue(new UnknownCacheServiceError("redis down"))
+
+    expect(await readIntent("intent-1")).toEqual({ found: false, unavailable: true })
+  })
+
+  it("does NOT mark an ordinary miss as unavailable", async () => {
+    // Every expired, evicted or already-redeemed intent is a plain miss. Marking
+    // those unavailable would leave the app polling "we cannot confirm yet"
+    // forever on a checkout id that is simply gone.
+    mockCacheGet.mockResolvedValue(new CacheUndefinedError())
+
     expect(await readIntent("intent-1")).toEqual({ found: false })
   })
 
@@ -236,7 +254,7 @@ describe("readIntent", () => {
   it("still warns on a real cache fault", async () => {
     mockCacheGet.mockResolvedValue(new UnknownCacheServiceError("redis down"))
 
-    expect(await readIntent("intent-1")).toEqual({ found: false })
+    expect(await readIntent("intent-1")).toMatchObject({ found: false })
     expect(baseLogger.warn).toHaveBeenCalledTimes(1)
   })
 })
@@ -264,8 +282,24 @@ describe("consumeIntent", () => {
     mockConsumeCacheKey.mockResolvedValue(false)
 
     expect(await consumeIntent("intent-1")).toEqual({ consumed: false })
-    // The winner releases the reservation; the loser must not touch it.
-    expect(mockZrem).not.toHaveBeenCalled()
+  })
+
+  it("releases the hold even when it LOSES the claim", async () => {
+    // Gating the release on the claim leaks holds for a whole class of intents
+    // that cannot win one: every record minted before the claim key existed,
+    // and every record whose best-effort claim write failed at saveIntent.
+    // Those accounts would hold allowance they have already spent until the JWT
+    // expired, and their next top-up would be refused `checkout-already-open`.
+    // `zrem` is idempotent, so releasing on a lost claim costs nothing; the
+    // exactly-once guarantee lives in the DEL removed-count, not here.
+    mockConsumeCacheKey.mockResolvedValue(false)
+
+    await consumeIntent("intent-1")
+
+    expect(mockZrem).toHaveBeenCalledWith(
+      "fygaro-checkout-intents:acct-1",
+      "8000:intent-1",
+    )
   })
 
   it("releases the account's reservation when it wins the claim", async () => {
@@ -427,12 +461,70 @@ describe("redemption leaves the record the status poll reads", () => {
   it("still redeems exactly once", async () => {
     // Splitting record from claim must not cost the exactly-once guarantee:
     // the DEL removed-count on the claim key is still what picks the winner.
+    // The guarantee is `consumed`, NOT how many times the idempotent release
+    // ran — pinning the zrem count pinned an implementation detail, and it was
+    // that detail (release gated on the claim) that leaked holds for every
+    // intent minted before the claim key existed.
     await saveIntent({ intent: INTENT, ttlSeconds: TTL })
 
     expect(await consumeIntent(INTENT.intentId)).toEqual({ consumed: true })
     expect(await consumeIntent(INTENT.intentId)).toEqual({ consumed: false })
-    // Exactly one release, from the one winner.
-    expect(mockZrem).toHaveBeenCalledTimes(1)
+  })
+
+  it("releases the hold on a record minted before the claim key existed", async () => {
+    // The rollout window this change is really about: an intent written by the
+    // previous deploy has a record and NO claim, so it can never win — and
+    // under a claim-gated release its hold sat on the account's allowance for
+    // ttlSeconds+3600, refusing its next top-up with `checkout-already-open`
+    // for money it had already spent.
+    store.set(`fygaro-checkout-intent:${INTENT.intentId}`, INTENT)
+
+    expect(await consumeIntent(INTENT.intentId)).toEqual({ consumed: false })
+    expect(mockZrem).toHaveBeenCalledWith(
+      "fygaro-checkout-intents:acct-1",
+      "8000:intent-1",
+    )
+  })
+
+  it("keeps a `received` stamp from walking a terminal answer backwards", async () => {
+    // The webhook stamps `received` on EVERY delivery, including the
+    // re-delivery of a payment an earlier delivery already credited or held.
+    // Letting that write would downgrade a terminal answer to "we're crediting
+    // it" and leave the customer polling that forever, for a payment that has
+    // already been decided.
+    await saveIntent({ intent: INTENT, ttlSeconds: TTL })
+    await recordIntentOutcome({
+      intentId: INTENT.intentId,
+      outcome: { state: "credited", netAmountCents: 5652, atMs: NOW_MS },
+      ttlSeconds: TTL,
+    })
+
+    await recordIntentOutcome({
+      intentId: INTENT.intentId,
+      outcome: { state: "received", atMs: NOW_MS + 1000 },
+      ttlSeconds: TTL,
+    })
+
+    expect(await readIntent(INTENT.intentId)).toMatchObject({
+      intent: { outcome: { state: "credited", netAmountCents: 5652 } },
+    })
+  })
+
+  it("records `received` when nothing is known about the payment yet", async () => {
+    // The other half: the stamp has to LAND on a fresh intent, or the status
+    // query has nothing to distinguish "we have your payment" from "you may
+    // never have paid".
+    await saveIntent({ intent: INTENT, ttlSeconds: TTL })
+
+    await recordIntentOutcome({
+      intentId: INTENT.intentId,
+      outcome: { state: "received", atMs: NOW_MS },
+      ttlSeconds: TTL,
+    })
+
+    expect(await readIntent(INTENT.intentId)).toMatchObject({
+      intent: { outcome: { state: "received" } },
+    })
   })
 })
 

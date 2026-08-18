@@ -399,6 +399,30 @@ describe("ErpNext.findBridgeTransferRequest", () => {
     )
   })
 
+  it("asks for final_amount, so a completed row can say what was credited", async () => {
+    // Frappe returns ONLY the fields named in the request, so dropping this one
+    // is a silent `undefined` at the call site rather than a type error — and
+    // the webhook path that merely CONFIRMS an earlier credit would go back to
+    // stamping the customer's status with no amount.
+    mockedAxios.get.mockResolvedValue({
+      data: {
+        data: [
+          {
+            name: "BTR-1",
+            status: BridgeTransferRequestStatus.Completed,
+            final_amount: "56.52",
+          },
+        ],
+      },
+    })
+
+    const result = await client.findBridgeTransferRequest("fygaro:tx_123")
+
+    expect(result).toEqual(expect.objectContaining({ final_amount: "56.52" }))
+    const getParams = mockedAxios.get.mock.calls[0][1].params
+    expect(JSON.parse(getParams.fields)).toContain("final_amount")
+  })
+
   it("returns undefined when no row exists", async () => {
     mockedAxios.get.mockResolvedValue({ data: { data: [] } })
 

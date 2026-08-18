@@ -45,7 +45,7 @@ jest.mock("@services/frappe/fee-discounts", () => ({
 jest.mock("@services/frappe/BridgeTransferRequestWriter", () => ({
   writeFygaroTopupRequest: (...args: unknown[]) => mockWriteFygaroTopup(...args),
   completeFygaroTopup: (...args: unknown[]) => mockCompleteFygaroTopup(...args),
-  isFygaroTopupCompleted: (...args: unknown[]) => mockIsFygaroTopupCompleted(...args),
+  readFygaroTopupCompletion: (...args: unknown[]) => mockReadCompletion(...args),
   sumFygaroTopupGrossCentsLast24h: (...args: unknown[]) => mockSumFygaroLast24h(...args),
   markFygaroTopupNotCredited: (...args: unknown[]) => mockMarkNotCredited(...args),
 }))
@@ -104,7 +104,7 @@ const mockGetUserIdFromIdentifier = jest.fn()
 const mockGetFlashFeeDiscountPercent = jest.fn()
 const mockWriteFygaroTopup = jest.fn()
 const mockCompleteFygaroTopup = jest.fn()
-const mockIsFygaroTopupCompleted = jest.fn()
+const mockReadCompletion = jest.fn()
 const mockAlertBridge = jest.fn()
 const mockNotifyOpsEvent = jest.fn()
 const mockCreditFygaroTopup = jest.fn()
@@ -171,7 +171,7 @@ beforeEach(() => {
   mockLockPaymentIdempotencyKey.mockImplementation(
     async (_key: unknown, fn: () => Promise<unknown>) => fn(),
   )
-  mockIsFygaroTopupCompleted.mockResolvedValue(false)
+  mockReadCompletion.mockResolvedValue({ completed: false })
   mockFindByUsername.mockResolvedValue({
     id: ACCOUNT_ID,
     level: 1,
@@ -716,7 +716,7 @@ describe("fygaro paymentHandler", () => {
     })
 
     it("short-circuits when the audit row is already Completed (processed re-delivery)", async () => {
-      mockIsFygaroTopupCompleted.mockResolvedValue(true)
+      mockReadCompletion.mockResolvedValue({ completed: true })
       const res = makeRes()
 
       await paymentHandler(makeReq(VALID_BODY), res)
@@ -730,7 +730,7 @@ describe("fygaro paymentHandler", () => {
       // Row still Fiat Received (crash or promotion failure last time):
       // the credit path must run again — withPaymentIdempotency makes the
       // send replay-safe — so the retry self-heals instead of stranding.
-      mockIsFygaroTopupCompleted.mockResolvedValue(false)
+      mockReadCompletion.mockResolvedValue({ completed: false })
       const res = makeRes()
 
       await paymentHandler(makeReq(VALID_BODY), res)
@@ -883,6 +883,35 @@ describe("fygaro paymentHandler", () => {
       )
     })
 
+    it("raises the not-stamped CRITICAL under its OWN dedup key", async () => {
+      // It used to share `erpnext-audit:fygaro:<tx>` with the audit-WRITE
+      // failure — and the delivery order that produces THIS failure is exactly
+      // the one that produces that one first: write fails, critical fires, 500,
+      // Fygaro retries minutes later, the write succeeds, the gate refuses, and
+      // the stamp fails. Inside informDedupTtlMs (60 minutes) Slack/Discord
+      // suppress the second alert and PagerDuty folds it into the open
+      // incident, so the page that says a customer's cap is being eaten by a
+      // payment they got nothing for is silently swallowed.
+      mockSumFygaroLast24h.mockResolvedValue(10000)
+      mockMarkNotCredited.mockResolvedValue(new Error("erpnext PUT timed out"))
+      const res = makeRes()
+
+      await paymentHandler(makeReq({ ...VALID_BODY, amount: "30.00" }), res)
+
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dedupKey: `fygaro:refusal-not-stamped:${VALID_BODY.transactionId}`,
+          severity: "critical",
+        }),
+      )
+      const notStamped = mockAlertBridge.mock.calls
+        .map(([alert]: [{ dedupKey: string; title: string }]) => alert)
+        .find(({ title }) => title.startsWith("Fygaro refusal not stamped"))
+      expect(notStamped?.dedupKey).not.toBe(
+        `erpnext-audit:fygaro:${VALID_BODY.transactionId}`,
+      )
+    })
+
     it("never refuses a payment that has ALREADY been credited", async () => {
       // Reachable, and it costs real money: tx1 ($60) credits; tx2 ($100) is
       // refused daily-limit-exceeded and hand-credited by ops, which correctly
@@ -892,7 +921,7 @@ describe("fygaro paymentHandler", () => {
       // the gate refuses money already in the wallet: a false "manual credit
       // needed" page, a failure_reason stamped onto a Completed row, and the
       // customer's CREDITED status overwritten with "held for review".
-      mockIsFygaroTopupCompleted.mockResolvedValue(true)
+      mockReadCompletion.mockResolvedValue({ completed: true })
       mockSumFygaroLast24h.mockResolvedValue(10000)
       const res = makeRes()
 
@@ -909,7 +938,13 @@ describe("fygaro paymentHandler", () => {
     })
 
     it("re-stamps CREDITED, not held-for-review, on a refused re-delivery of a credited payment", async () => {
-      mockIsFygaroTopupCompleted.mockResolvedValue(true)
+      // ...and with the NET read back off the completed ERPNext row. This
+      // branch exists precisely for the case where the FIRST delivery's stamp
+      // never landed, so there is usually no recorded outcome for the store's
+      // merge to preserve: stamping `credited` with no amount would show the
+      // customer a credited top-up and no figure, against a schema that
+      // promises `netAmount` is present once credited.
+      mockReadCompletion.mockResolvedValue({ completed: true, netAmountCents: 2851 })
       mockSumFygaroLast24h.mockResolvedValue(10000)
       const res = makeRes()
 
@@ -924,9 +959,32 @@ describe("fygaro paymentHandler", () => {
 
       expect(mockRecordIntentOutcome).toHaveBeenCalledWith(
         expect.objectContaining({
-          outcome: expect.objectContaining({ state: "credited" }),
+          outcome: expect.objectContaining({ state: "credited", netAmountCents: 2851 }),
         }),
       )
+    })
+
+    it("stamps credited with no figure rather than a wrong one when the row has no net", async () => {
+      // An older row, or one promoted by a path that wrote no fee breakdown.
+      // The state is still the truth; a fabricated amount would not be.
+      mockReadCompletion.mockResolvedValue({ completed: true })
+      mockSumFygaroLast24h.mockResolvedValue(10000)
+      const res = makeRes()
+
+      await paymentHandler(
+        makeReq({
+          ...VALID_BODY,
+          customReference: `${VALID_BODY.customReference}|3f5a1c9e-2b7d-4a10-9f33-6c8e2d4b7a51`,
+          amount: "30.00",
+        }),
+        res,
+      )
+
+      const stamped = mockRecordIntentOutcome.mock.calls
+        .map(([args]: [{ outcome: { state: string; netAmountCents?: number } }]) => args)
+        .filter(({ outcome }) => outcome.state === "credited")
+      expect(stamped).toHaveLength(1)
+      expect(stamped[0].outcome.netAmountCents).toBeUndefined()
     })
 
     it("returns 500 for settings-unavailable so Fygaro retries (transient), without acking or spamming the feed", async () => {
@@ -1122,6 +1180,16 @@ describe("fygaro paymentHandler", () => {
       mockFygaroConfig.credit = { enabled: true }
     })
 
+    // Every state stamped on this delivery, in order. `received` is stamped on
+    // every delivery that persists the audit row, so assertions about the
+    // TERMINAL answer have to name it rather than counting calls.
+    const stampedStates = (): string[] =>
+      mockRecordIntentOutcome.mock.calls.map(
+        ([args]: [{ outcome: { state: string } }]) => args.outcome.state,
+      )
+    const terminalStamps = (): string[] =>
+      stampedStates().filter((state) => state !== "received")
+
     it("credits normally when the payment matches what was authorised", async () => {
       mockReadIntent.mockResolvedValue(intent())
       const res = makeRes()
@@ -1245,6 +1313,61 @@ describe("fygaro paymentHandler", () => {
     // would still pass — which is how a redemption that destroyed the record it
     // stamps shipped: PROCESSING and FAILED were reachable, CREDITED and
     // HELD_FOR_REVIEW were not, and nothing noticed.
+    describe("the payment itself is stamped, before any decision about it", () => {
+      it("stamps `received` as soon as the audit row is written", async () => {
+        // Until this existed the status query could not tell "we have your
+        // payment" from "you may never have paid": the intent record is written
+        // when the LINK is minted, so a customer whose card was DECLINED polled
+        // after the payment page closed and was told their payment had been
+        // received and was being credited. This stamp is the server actually
+        // knowing.
+        mockReadIntent.mockResolvedValue(intent())
+        const res = makeRes()
+
+        await paymentHandler(makeReq(SIGNED_BODY), res)
+
+        expect(mockRecordIntentOutcome).toHaveBeenCalledWith(
+          expect.objectContaining({
+            intentId: INTENT_ID,
+            outcome: expect.objectContaining({ state: "received" }),
+          }),
+        )
+      })
+
+      it("stamps `received` BEFORE the credit is attempted, not after", async () => {
+        // Order is the whole value: stamped after the decision it would tell
+        // the customer nothing during the window they are actually staring at
+        // the screen.
+        mockReadIntent.mockResolvedValue(intent())
+        mockCreditFygaroTopup.mockImplementation(async () => {
+          expect(mockRecordIntentOutcome).toHaveBeenCalledWith(
+            expect.objectContaining({
+              outcome: expect.objectContaining({ state: "received" }),
+            }),
+          )
+          return { walletId: WALLET_ID, status: "success" }
+        })
+
+        await paymentHandler(makeReq(SIGNED_BODY), makeRes())
+
+        expect(mockCreditFygaroTopup).toHaveBeenCalledTimes(1)
+      })
+
+      it("does not stamp `received` when the audit write failed", async () => {
+        // Nothing has been recorded on our side, and the handler answers 500 so
+        // Fygaro retries. Claiming receipt off a delivery we could not persist
+        // would be the same unbacked claim in a new place.
+        mockWriteFygaroTopup.mockResolvedValue(new Error("erpnext down"))
+        mockReadIntent.mockResolvedValue(intent())
+        const res = makeRes()
+
+        await paymentHandler(makeReq(SIGNED_BODY), res)
+
+        expect(res.status).toHaveBeenCalledWith(500)
+        expect(mockRecordIntentOutcome).not.toHaveBeenCalled()
+      })
+    })
+
     describe("the terminal outcome is stamped for the app to read", () => {
       it("stamps credited with the NET that actually reached the wallet", async () => {
         // The gross is what the customer paid; the net is what they got. The
@@ -1385,7 +1508,7 @@ describe("fygaro paymentHandler", () => {
         // short-circuiting on the Completed row. Without a stamp here the
         // customer polls "processing" until the record expires — for money that
         // is already in their wallet.
-        mockIsFygaroTopupCompleted.mockResolvedValue(true)
+        mockReadCompletion.mockResolvedValue({ completed: true })
         mockReadIntent.mockResolvedValue(intent())
         const res = makeRes()
 
@@ -1399,7 +1522,12 @@ describe("fygaro paymentHandler", () => {
         )
       })
 
-      it("stamps NOTHING on a transient 500 — the payment is not terminal yet", async () => {
+      it("stamps NO TERMINAL ANSWER on a transient 500 — the payment is not decided yet", async () => {
+        // The payment itself IS recorded on this delivery, so `received` is
+        // honest and stays. What must never appear is a terminal state: this
+        // delivery reached no answer, the provider will retry, and a stamped
+        // `held-for-review` would tell the customer a decision was made that
+        // the next delivery may well contradict.
         mockSumFygaroLast24h.mockResolvedValue(new Error("erpnext down"))
         mockReadIntent.mockResolvedValue(intent())
         const res = makeRes()
@@ -1407,7 +1535,8 @@ describe("fygaro paymentHandler", () => {
         await paymentHandler(makeReq(SIGNED_BODY), res)
 
         expect(res.status).toHaveBeenCalledWith(500)
-        expect(mockRecordIntentOutcome).not.toHaveBeenCalled()
+        expect(stampedStates()).toEqual(["received"])
+        expect(terminalStamps()).toEqual([])
       })
 
       it("stamps nothing for a bare legacy reference — there is no record to stamp", async () => {
@@ -1434,7 +1563,9 @@ describe("fygaro paymentHandler", () => {
             reason: "intent-mismatch",
           }),
         )
-        expect(mockRecordIntentOutcome).toHaveBeenCalledTimes(1)
+        // Exactly one TERMINAL stamp — the `received` observation that precedes
+        // it is not an answer about the payment and does not count.
+        expect(terminalStamps()).toEqual(["held-for-review"])
       })
 
       it("stamps held-for-review when the record-only dedupe short-circuits", async () => {

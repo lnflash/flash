@@ -2,6 +2,7 @@
 
 const mockGetFygaroTopupStatus = jest.fn()
 const mockGetFygaroTopupAllowance = jest.fn()
+const mockConsumeLimiter = jest.fn()
 
 jest.mock("@app/fygaro/topup-status", () => ({
   getFygaroTopupStatus: (...args: unknown[]) => mockGetFygaroTopupStatus(...args),
@@ -11,6 +12,16 @@ jest.mock("@app/fygaro/topup-allowance", () => ({
   getFygaroTopupAllowance: (...args: unknown[]) => mockGetFygaroTopupAllowance(...args),
 }))
 
+jest.mock("@services/rate-limit", () => ({
+  consumeLimiter: (...args: unknown[]) => mockConsumeLimiter(...args),
+}))
+
+jest.mock("@services/logger", () => ({
+  baseLogger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+}))
+
+import { RateLimitConfig } from "@domain/rate-limit"
+import { FygaroTopupAllowanceRateLimiterExceededError } from "@domain/rate-limit/errors"
 import FygaroTopupStatusQuery from "@graphql/public/root/query/fygaro-topup-status"
 import FygaroTopupAllowanceQuery from "@graphql/public/root/query/fygaro-topup-allowance"
 
@@ -37,7 +48,7 @@ const resolve = async (query: Query, args: Record<string, unknown> = {}) => {
 
 type StatusPayload = {
   state: string
-  authorizedAmount: number
+  authorizedAmount?: number
   netAmount?: number
   reason?: string
 } | null
@@ -62,6 +73,7 @@ const held = (reason: string, detailCents?: number) => ({
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockConsumeLimiter.mockResolvedValue(true)
 })
 
 describe("fygaroTopupStatus resolver", () => {
@@ -80,6 +92,24 @@ describe("fygaroTopupStatus resolver", () => {
     expect(await askStatus(undefined)).toBeNull()
   })
 
+  it("answers UNCONFIRMED — not null — when the record could not be READ", async () => {
+    // A Redis fault is not an answer about the checkout. Null means "unknown,
+    // expired, or not yours", so returning it here tells a customer who may
+    // have just been charged that their checkout never existed. UNCONFIRMED is
+    // the true sentence: nothing about this payment is confirmed yet.
+    mockGetFygaroTopupStatus.mockResolvedValue({ found: false, unavailable: true })
+
+    const result = (await resolve(FygaroTopupStatusQuery as Query, {
+      checkoutId: CHECKOUT_ID,
+    })) as StatusPayload
+
+    expect(result).toEqual({ state: "unconfirmed" })
+    // ...and it must not claim receipt either: PROCESSING says "we have the
+    // payment and are crediting it", which we cannot know while the read is
+    // failing.
+    expect(result?.state).not.toBe("processing")
+  })
+
   it("says nothing about a payment still being processed", async () => {
     // No terminal answer yet, so there is nothing honest to explain. The app
     // shows its "we have your payment" state off the enum alone.
@@ -87,6 +117,20 @@ describe("fygaroTopupStatus resolver", () => {
 
     expect(result).toEqual({
       state: "processing",
+      authorizedAmount: 6000,
+      netAmount: undefined,
+      reason: undefined,
+    })
+  })
+
+  it("passes UNCONFIRMED through for a checkout with no payment observed", async () => {
+    // The state the app must never render as "payment received": the record is
+    // written when the LINK is minted, so this is also what a declined card and
+    // a cancelled page look like.
+    const result = await askStatus({ state: "unconfirmed", authorizedAmountCents: 6000 })
+
+    expect(result).toEqual({
+      state: "unconfirmed",
       authorizedAmount: 6000,
       netAmount: undefined,
       reason: undefined,
@@ -313,5 +357,46 @@ describe("fygaroTopupAllowance resolver", () => {
     mockGetFygaroTopupAllowance.mockResolvedValue({ available: false, reason })
 
     expect(await resolve(FygaroTopupAllowanceQuery as Query)).toBeNull()
+  })
+
+  describe("rate limiting", () => {
+    it("consumes the per-account limiter BEFORE reading ERPNext", async () => {
+      // Cheaper to abuse than fygaroCheckoutCreate next door: no amount
+      // argument, so nothing can short-circuit before the trailing-24h ERPNext
+      // list query — the read whose failure refuses card top-ups for EVERY
+      // user. The field is blocked for API keys, so every caller is a Kratos
+      // session and the API-key limiter passes those through untouched.
+      mockGetFygaroTopupAllowance.mockResolvedValue({
+        available: false,
+        reason: "history-unavailable",
+      })
+
+      await resolve(FygaroTopupAllowanceQuery as Query)
+
+      expect(mockConsumeLimiter).toHaveBeenCalledWith({
+        rateLimitConfig: RateLimitConfig.fygaroTopupAllowance,
+        keyToConsume: ACCOUNT_ID,
+      })
+    })
+
+    it("answers null without touching ERPNext once the limiter is spent", async () => {
+      mockConsumeLimiter.mockResolvedValue(
+        new FygaroTopupAllowanceRateLimiterExceededError(),
+      )
+
+      expect(await resolve(FygaroTopupAllowanceQuery as Query)).toBeNull()
+      expect(mockGetFygaroTopupAllowance).not.toHaveBeenCalled()
+    })
+
+    it("answers null without touching ERPNext when the limiter STORE is down", async () => {
+      // The allowance read fails closed on that same Redis anyway, so refusing
+      // here costs a null the client already handles — and it keeps an outage
+      // from becoming unbounded load on the ERPNext read every other card
+      // top-up depends on.
+      mockConsumeLimiter.mockResolvedValue(new Error("ECONNREFUSED"))
+
+      expect(await resolve(FygaroTopupAllowanceQuery as Query)).toBeNull()
+      expect(mockGetFygaroTopupAllowance).not.toHaveBeenCalled()
+    })
   })
 })

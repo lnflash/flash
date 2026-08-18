@@ -12,7 +12,9 @@ jest.mock("@services/logger", () => ({
 import ErpNext from "@services/frappe/ErpNext"
 import { baseLogger } from "@services/logger"
 import {
+  markFygaroTopupNotCredited,
   promoteBridgeDepositForCryptoReceive,
+  readFygaroTopupCompletion,
   sumFygaroTopupGrossCentsLast24h,
   writeBridgeCashoutCompleted,
   writeBridgeCashoutFailed,
@@ -392,6 +394,130 @@ describe("BridgeTransferRequestWriter", () => {
           sourceSystemsSeen: ["fygaro_webhook", "email_attribution"],
         }),
       )
+    })
+  })
+
+  // The payload IS the behaviour change. Get any of it wrong and the feature
+  // silently does nothing while every other test in the tree still passes: the
+  // webhook spec mocks this writer wholesale, so only an exact-wire assertion
+  // here can catch it.
+  describe("markFygaroTopupNotCredited", () => {
+    it("upserts the row the payment already wrote, with the reason it was refused", async () => {
+      await markFygaroTopupNotCredited({
+        transactionId: "ftx-9",
+        accountId: "acct-1",
+        amount: "80.00",
+        currency: "USD",
+        reason: "daily-limit-exceeded",
+        rawPayload: { transactionId: "ftx-9" },
+      })
+
+      expect(lastRequestInput()).toEqual(
+        expect.objectContaining({
+          // The SAME request_id writeFygaroTopupRequest used. A different
+          // prefix creates a SECOND row, leaves the original counting against
+          // the customer's cap, and the refusal never leaves the window.
+          requestId: "fygaro:ftx-9",
+          // Deliberately NOT a new status: the money really was received, and
+          // the trailing-24h sum filters on `Fiat Received`, so anything else
+          // would take the row out of the window by accident rather than by
+          // the failure_reason exclusion below.
+          status: BridgeTransferRequestStatus.FiatReceived,
+          provider: "Fygaro",
+          // What actually removes the row from the allowance sum
+          // (ErpNext.sumFygaroTopupGrossCentsSince skips a row with a reason
+          // unless it is Completed). Without it, a refused payment goes on
+          // consuming the cap for 24h and refuses the customer's NEXT
+          // legitimate top-up.
+          failureReason: "daily-limit-exceeded",
+          accountId: "acct-1",
+          sourceSystemsSeen: ["fygaro_webhook"],
+        }),
+      )
+    })
+
+    it("does not stamp the email-attribution marker onto a refusal", async () => {
+      // `email_attribution` permanently exempts a row from the daily-cap sum.
+      // A refusal must be excluded by its REASON, which an ops hand-credit can
+      // override by promoting the row to Completed — not by a sticky marker
+      // that would survive the hand-credit and leave the cap under-counted.
+      await markFygaroTopupNotCredited({
+        transactionId: "ftx-10",
+        amount: "80.00",
+        currency: "USD",
+        reason: "over-limit",
+        rawPayload: {},
+      })
+
+      expect(lastRequestInput().sourceSystemsSeen).toEqual(["fygaro_webhook"])
+    })
+  })
+
+  describe("readFygaroTopupCompletion", () => {
+    it("reports the credited net off the completed row", async () => {
+      // The already-credited guard in the webhook re-stamps the customer's
+      // status from a path with no fee breakdown of its own. Without the net
+      // read back here it stamps `credited` with no amount — against a schema
+      // that promises `netAmount` is present once credited.
+      findRow.mockResolvedValue({
+        name: "BTR-1",
+        status: BridgeTransferRequestStatus.Completed,
+        final_amount: "56.52",
+      })
+
+      expect(await readFygaroTopupCompletion("ftx-1")).toEqual({
+        completed: true,
+        netAmountCents: 5652,
+      })
+      expect(findRow).toHaveBeenCalledWith("fygaro:ftx-1")
+    })
+
+    it("reports completion without a net when the row carries no final amount", async () => {
+      // An older row, or one promoted by a path that wrote no breakdown. The
+      // completion is still true; inventing a figure would be worse than none.
+      findRow.mockResolvedValue({
+        name: "BTR-1",
+        status: BridgeTransferRequestStatus.Completed,
+      })
+
+      expect(await readFygaroTopupCompletion("ftx-1")).toEqual({
+        completed: true,
+        netAmountCents: undefined,
+      })
+    })
+
+    it("never reports a zero net for an unset final amount", async () => {
+      // Frappe returns null for an unset field and Number(null) is 0, which
+      // would tell a credited customer that nothing reached their wallet.
+      findRow.mockResolvedValue({
+        name: "BTR-1",
+        status: BridgeTransferRequestStatus.Completed,
+        final_amount: null,
+      })
+
+      expect(await readFygaroTopupCompletion("ftx-1")).toEqual({
+        completed: true,
+        netAmountCents: undefined,
+      })
+    })
+
+    it("is not completed while the row is still Fiat Received", async () => {
+      findRow.mockResolvedValue({
+        name: "BTR-1",
+        status: BridgeTransferRequestStatus.FiatReceived,
+        final_amount: "56.52",
+      })
+
+      expect(await readFygaroTopupCompletion("ftx-1")).toEqual({ completed: false })
+    })
+
+    it("degrades to not-completed on a lookup failure", async () => {
+      // The credit itself is exactly-once under withPaymentIdempotency, so a
+      // false negative costs a cached-send replay and never a double-pay.
+      findRow.mockResolvedValue(new Error("erpnext down"))
+
+      expect(await readFygaroTopupCompletion("ftx-1")).toEqual({ completed: false })
+      expect(baseLogger.warn).toHaveBeenCalled()
     })
   })
 

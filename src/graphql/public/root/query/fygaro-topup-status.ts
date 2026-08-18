@@ -77,7 +77,10 @@ const FygaroTopupStatusQuery = GT.Field({
   type: FygaroTopupStatus,
   description:
     "The outcome of a card top-up, by the checkout id returned from fygaroCheckoutCreate. " +
-    "Null when the checkout is unknown, expired, or not this account's.",
+    "Null when the checkout is unknown, expired, or not this account's — never as a way " +
+    "of saying 'not yet': a checkout we simply cannot read right now comes back as " +
+    "UNCONFIRMED so a transient fault is not reported to the customer as a payment that " +
+    "never existed.",
   args: {
     checkoutId: { type: GT.NonNull(GT.String) },
   },
@@ -86,7 +89,16 @@ const FygaroTopupStatusQuery = GT.Field({
       intentId: args.checkoutId,
       accountId: domainAccount.id,
     })
-    if (!result.found) return null
+    if (!result.found) {
+      // A store FAULT is not an answer about the checkout. Returning null would
+      // tell a customer who may have just been charged that their checkout does
+      // not exist — the worst possible moment for that sentence. UNCONFIRMED
+      // says the true thing instead ("nothing confirmed yet, keep polling") and
+      // does not assert receipt, which is exactly why the no-outcome case uses
+      // it too.
+      if (result.unavailable) return { state: "unconfirmed" }
+      return null
+    }
 
     const { state, authorizedAmountCents, netAmountCents, reason } = result.status
     return {

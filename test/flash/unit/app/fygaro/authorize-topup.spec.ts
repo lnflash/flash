@@ -469,6 +469,21 @@ describe("authorizeFygaroTopup", () => {
       expect(res.reason).toBe("checkout-already-open")
     })
 
+    it("never hands back a link a payment has already ARRIVED against", async () => {
+      // `received` is stamped by the webhook the moment it records the payment,
+      // before any credit decision. Re-offering the link in that window would
+      // invite the customer to pay the same authorisation a second time while
+      // the first payment is still being credited.
+      mockReadReservations.mockResolvedValue([hold(10000)])
+      mockReadIntent.mockResolvedValue(
+        openIntent({ outcome: { state: "received", atMs: NOW_MS - 5_000 } }),
+      )
+      const res = await authorize({ amountCents: 10000 })
+
+      expect(res.authorized).toBe(false)
+      expect(res.reason).toBe("checkout-already-open")
+    })
+
     it("refuses an intent record written before the URL was stored", async () => {
       // Records already in Redis when this shipped have no checkoutUrl, so they
       // cannot be re-offered — but the refusal must still be the honest one.

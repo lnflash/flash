@@ -4,9 +4,25 @@ const mockGetFygaroSettings = jest.fn()
 const mockReadWindow = jest.fn()
 const mockReadOutstandingReservations = jest.fn()
 
-const mockFygaroConfig = {
+// A fully-wired deploy: every switch the shared master gate checks, not just
+// the two this query used to check for itself.
+const CHECKOUT = {
+  enabled: true,
+  buttonUrl: "https://fygaro.com/en/pb/ABC123",
+  keyId: "key-1",
+  ttlSeconds: 900,
+}
+
+const mockFygaroConfig: {
+  enabled: boolean
+  credit: { enabled: boolean }
+  checkout: typeof CHECKOUT
+  webhook: { secrets: Record<string, string> }
+} = {
   enabled: true,
   credit: { enabled: true },
+  checkout: { ...CHECKOUT },
+  webhook: { secrets: { "key-1": "shared-secret" } },
 }
 
 jest.mock("@config", () => ({
@@ -47,6 +63,8 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockFygaroConfig.enabled = true
   mockFygaroConfig.credit = { enabled: true }
+  mockFygaroConfig.checkout = { ...CHECKOUT }
+  mockFygaroConfig.webhook = { secrets: { "key-1": "shared-secret" } }
   mockGetFygaroSettings.mockResolvedValue({ ...SETTINGS })
   mockReadWindow.mockResolvedValue({ grossCents: 0 })
   mockReadOutstandingReservations.mockResolvedValue([])
@@ -247,6 +265,50 @@ describe("getFygaroTopupAllowance", () => {
 
     it("reports nothing when the operator kill switch is off", async () => {
       mockGetFygaroSettings.mockResolvedValue({ ...SETTINGS, autoCreditEnabled: false })
+      const res = await ask()
+
+      expect(res.available).toBe(false)
+      expect(res.reason).toBe("checkout-disabled")
+      expect(mockReadWindow).not.toHaveBeenCalled()
+    })
+
+    // The half this query used to skip. `fygaro.checkout.enabled` DEFAULTS TO
+    // FALSE and is independent of the two switches above, so in the default
+    // rollout state this query reported a healthy allowance while
+    // fygaroCheckoutCreate refused every single request with
+    // `checkout-disabled` — invite-then-refuse, rebuilt on the surface added to
+    // end it. Both sides now run one shared predicate, so a gate cannot be
+    // added to one and forgotten on the other.
+    it("reports nothing when server-signed checkout itself is off", async () => {
+      mockFygaroConfig.checkout = { ...CHECKOUT, enabled: false }
+      const res = await ask()
+
+      expect(res.available).toBe(false)
+      expect(res.reason).toBe("checkout-disabled")
+      expect(mockGetFygaroSettings).not.toHaveBeenCalled()
+      expect(mockReadWindow).not.toHaveBeenCalled()
+    })
+
+    it("reports nothing when no payment-button URL is configured", async () => {
+      mockFygaroConfig.checkout = { ...CHECKOUT, buttonUrl: "" }
+      const res = await ask()
+
+      expect(res.available).toBe(false)
+      expect(res.reason).toBe("checkout-disabled")
+    })
+
+    it("reports nothing when no signing key id is configured", async () => {
+      mockFygaroConfig.checkout = { ...CHECKOUT, keyId: "" }
+      const res = await ask()
+
+      expect(res.available).toBe(false)
+      expect(res.reason).toBe("checkout-disabled")
+    })
+
+    it("reports nothing when the key id names a secret we do not have", async () => {
+      // Misconfiguration on our side: no link can be SIGNED, so no amount can
+      // be spent, so there is no allowance worth reporting.
+      mockFygaroConfig.webhook = { secrets: {} }
       const res = await ask()
 
       expect(res.available).toBe(false)

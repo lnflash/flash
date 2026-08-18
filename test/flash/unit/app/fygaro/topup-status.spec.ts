@@ -25,15 +25,35 @@ beforeEach(() => {
 })
 
 describe("getFygaroTopupStatus", () => {
-  it("reports processing while no outcome has been recorded", async () => {
-    // The webhook may not have been delivered yet. "Processing" is the honest
-    // answer; the app's current behaviour — asserting a completed deposit off a
-    // Fygaro redirect — is not.
+  it("does NOT claim a payment for a record that only proves a link was minted", async () => {
+    // The record is written by saveIntent at CHECKOUT-CREATE time — before the
+    // customer has seen the payment page. Reading "no outcome" as "processing"
+    // therefore told a customer whose card was DECLINED that we had their
+    // payment and were crediting it, since the payment page closes on a decline
+    // exactly as it does on a success. Money that was never taken, asserted by
+    // the server: the same unbacked claim this feature exists to delete.
     const res = await ask()
 
     expect(res.found).toBe(true)
-    expect(res.status).toMatchObject({ state: "processing", authorizedAmountCents: 6000 })
+    expect(res.status).toMatchObject({
+      state: "unconfirmed",
+      authorizedAmountCents: 6000,
+    })
+    expect(res.status.state).not.toBe("processing")
     expect(res.status.netAmountCents).toBeUndefined()
+  })
+
+  it("reports processing only once the webhook has actually seen the payment", async () => {
+    // `received` is the webhook stamping "this payment exists" the moment it
+    // records it. THAT is what makes "we have your payment, we're crediting it"
+    // a claim the server can back.
+    mockReadIntent.mockResolvedValue({
+      found: true,
+      intent: { ...INTENT, outcome: { state: "received", atMs: 1 } },
+    })
+    const res = await ask()
+
+    expect(res.status).toMatchObject({ state: "processing", authorizedAmountCents: 6000 })
   })
 
   it("reports the credited net, which is not what the customer paid", async () => {
@@ -97,5 +117,32 @@ describe("getFygaroTopupStatus", () => {
     mockReadIntent.mockResolvedValue({ found: false })
 
     expect((await ask()).found).toBe(false)
+  })
+
+  it("distinguishes 'we could not read it' from 'it does not exist'", async () => {
+    // readIntent is fail-open by design: EVERY cache error, not just a miss,
+    // comes back as found:false. Collapsing that into the ordinary miss makes
+    // the resolver tell a customer who has just been charged that their
+    // checkout never existed — at the worst possible moment to say it.
+    mockReadIntent.mockResolvedValue({ found: false, unavailable: true })
+
+    expect(await ask()).toEqual({ found: false, unavailable: true })
+  })
+
+  it("does not mark an ordinary miss as unavailable", async () => {
+    // Or the resolver would answer UNCONFIRMED — "keep polling" — for a
+    // checkout id that will never resolve, forever.
+    mockReadIntent.mockResolvedValue({ found: false })
+
+    expect(await ask()).toEqual({ found: false })
+  })
+
+  it("never reports another account's checkout as merely unavailable", async () => {
+    // The cross-account guard must stay a flat "no". Leaking "this id exists
+    // but we cannot read it right now" would turn the query into the existence
+    // oracle the guard exists to prevent.
+    mockReadIntent.mockResolvedValue({ found: true, intent: { ...INTENT } })
+
+    expect(await ask("someone-else")).toEqual({ found: false })
   })
 })

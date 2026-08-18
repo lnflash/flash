@@ -296,22 +296,50 @@ export const sumFygaroTopupGrossCentsLast24h = async (args: {
   return window instanceof Error ? window : window.grossCents
 }
 
-// Whether this Fygaro payment was already fully processed (its audit row
-// promoted to Completed by a prior delivery). Used as the processed-marker for
-// webhook re-deliveries. A lookup failure degrades to false — the credit
-// itself is exactly-once under withPaymentIdempotency, so a false negative
-// can never double-pay; it only costs a redundant cached-send replay.
-export const isFygaroTopupCompleted = async (transactionId: string): Promise<boolean> => {
-  if (!ErpNext?.findBridgeTransferRequest) return false
+export type FygaroTopupCompletion = {
+  // Whether the audit row was already promoted to Completed by a prior delivery.
+  completed: boolean
+  // The NET credited, in cents, when the row records one. Carried alongside the
+  // boolean because the paths that ask this question are exactly the paths with
+  // no fee breakdown of their own: a delivery that merely CONFIRMS an earlier
+  // credit re-stamps the customer's status, and without this it would stamp
+  // `credited` with no amount — against a schema that promises `netAmount` is
+  // "present once credited". Undefined when the row has no final_amount (an
+  // older row, or one promoted by a path that did not write the breakdown).
+  netAmountCents?: number
+}
+
+// Whether this Fygaro payment was already fully processed, and for how much.
+// Used as the processed-marker for webhook re-deliveries. A lookup failure
+// degrades to not-completed — the credit itself is exactly-once under
+// withPaymentIdempotency, so a false negative can never double-pay; it only
+// costs a redundant cached-send replay.
+export const readFygaroTopupCompletion = async (
+  transactionId: string,
+): Promise<FygaroTopupCompletion> => {
+  if (!ErpNext?.findBridgeTransferRequest) return { completed: false }
   const doc = await ErpNext.findBridgeTransferRequest(`fygaro:${transactionId}`)
   if (doc instanceof Error) {
     baseLogger.warn(
       { transactionId, error: doc },
       "Failed to check Fygaro topup completion; treating as not completed",
     )
-    return false
+    return { completed: false }
   }
-  return doc?.status === BridgeTransferRequestStatus.Completed
+  if (doc?.status !== BridgeTransferRequestStatus.Completed) return { completed: false }
+
+  // Frappe hands back numbers or numeric strings depending on the field type,
+  // and null for an unset field — `Number(null)` is 0, which would report a
+  // credited top-up as having delivered nothing. Anything unparsable or
+  // non-positive is simply not reported.
+  const netDollars = doc.final_amount == null ? NaN : Number(doc.final_amount)
+  return {
+    completed: true,
+    netAmountCents:
+      Number.isFinite(netDollars) && netDollars > 0
+        ? Math.round(netDollars * 100)
+        : undefined,
+  }
 }
 
 // Called after the treasury -> user intraledger credit succeeds: promotes the

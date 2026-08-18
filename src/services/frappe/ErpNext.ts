@@ -112,6 +112,12 @@ export type BridgeTransferRequestDoc = {
   source_systems_seen?: string
   account_id?: string
   wallet_id?: string
+  // The NET that was actually credited, in dollars, as Frappe returns it
+  // (number or numeric string). Read back so a delivery that only CONFIRMS an
+  // earlier credit can still say how much reached the wallet — the confirming
+  // path has no fee breakdown of its own, and a confirmation that knows less
+  // than the original leaves the app showing a credited top-up with no amount.
+  final_amount?: number | string
 }
 
 // Raw "Fygaro Settings" Single doctype as ERPNext returns it. Numeric fields
@@ -983,6 +989,11 @@ export class ErpNext {
         "source_systems_seen",
         "account_id",
         "wallet_id",
+        // Frappe returns ONLY the fields named here, so an omission is a silent
+        // undefined at the call site, not a type error. `final_amount` is what
+        // lets the already-credited guard re-stamp the customer's status with
+        // the net that actually reached the wallet.
+        "final_amount",
       ])
       const resp = await axios.get(
         `${this.url}/api/resource/${encodeURIComponent(BridgeTransferRequest.doctype)}`,

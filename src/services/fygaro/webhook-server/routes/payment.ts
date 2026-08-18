@@ -32,7 +32,7 @@ import { AccountsRepository } from "@services/mongoose"
 import {
   writeFygaroTopupRequest,
   completeFygaroTopup,
-  isFygaroTopupCompleted,
+  readFygaroTopupCompletion,
   markFygaroTopupNotCredited,
   sumFygaroTopupGrossCentsLast24h,
 } from "@services/frappe/BridgeTransferRequestWriter"
@@ -297,6 +297,29 @@ export const paymentHandler = async (req: Request, res: Response) => {
       ? undefined
       : await resolveAccountByPayerEmail(payload.client?.email)
 
+    // Stamp what we know about this payment so the app can stop guessing. Never
+    // throws and never blocks: this rides the money-moving path, and a status
+    // write is not worth failing a credit over.
+    //
+    // Declared HERE, above the audit write, because the very first thing worth
+    // stamping happens the moment that write succeeds — and because the
+    // unattributed branch below is terminal too: it needs nothing but
+    // `intentId`, and leaving it out of reach is what left a customer polling
+    // PROCESSING forever on a payment ops was crediting by hand.
+    const recordOutcome = async (outcome: {
+      state: FygaroTopupOutcomeState
+      reason?: string
+      netAmountCents?: number
+      detailCents?: number
+    }) => {
+      if (!intentId) return
+      await recordIntentOutcome({
+        intentId,
+        outcome: { ...outcome, atMs: Date.now() },
+        ttlSeconds: FygaroConfig.checkout?.ttlSeconds ?? 900,
+      })
+    }
+
     const auditResult = await writeFygaroTopupRequest({
       transactionId,
       amount: String(payload.amount),
@@ -331,6 +354,19 @@ export const paymentHandler = async (req: Request, res: Response) => {
       // 500 so Fygaro retries and the audit gap can self-heal.
       return res.status(500).json({ error: "Failed to persist audit row" })
     }
+
+    // The payment is now an OBSERVED fact, recorded on our side — which is the
+    // first moment "we have your payment" is a claim the server can back.
+    //
+    // Without this stamp the status query has only the intent record, and that
+    // is written when the checkout link is MINTED, not when it is paid. Reading
+    // "no outcome" as PROCESSING therefore told a customer whose card was
+    // DECLINED that their payment had been received and was being credited —
+    // the same unbacked claim this workstream exists to delete, moved one
+    // screen later and given a server response to stand on. `recordIntentOutcome`
+    // refuses to let this overwrite a terminal outcome, so a re-delivery of an
+    // already-credited payment cannot walk the answer backwards.
+    await recordOutcome({ state: "received" })
 
     // Look the authorisation up ONCE, and do it BEFORE the unattributed branch
     // below, so every terminal answer in this handler can let go of the hold
@@ -369,29 +405,6 @@ export const paymentHandler = async (req: Request, res: Response) => {
      */
     const releaseAuthorizedHold = async () => {
       if (authorizedIntent) await releaseIntentReservation(authorizedIntent)
-    }
-
-    // Stamp the terminal outcome so the app can stop guessing. Never throws and
-    // never blocks: this rides the money-moving path, and a status write is not
-    // worth failing a credit over. A missing outcome leaves the app on its
-    // "received, crediting" state, which is honest either way.
-    //
-    // Declared HERE, above the unattributed branch, because that branch is
-    // terminal too: it needs nothing but `intentId`, and leaving it out of reach
-    // is what left a customer polling PROCESSING forever on a payment ops was
-    // crediting by hand.
-    const recordOutcome = async (outcome: {
-      state: FygaroTopupOutcomeState
-      reason?: string
-      netAmountCents?: number
-      detailCents?: number
-    }) => {
-      if (!intentId) return
-      await recordIntentOutcome({
-        intentId,
-        outcome: { ...outcome, atMs: Date.now() },
-        ttlSeconds: FygaroConfig.checkout?.ttlSeconds ?? 900,
-      })
     }
 
     if (!account) {
@@ -610,12 +623,22 @@ export const paymentHandler = async (req: Request, res: Response) => {
       // "manual credit needed", stamps a `failure_reason` onto tx1's Completed
       // row, and overwrites the customer's CREDITED status with "held for
       // review — more than your remaining daily limit" for $60 they already have.
-      if (await isFygaroTopupCompleted(transactionId)) {
+      const priorCompletion = await readFygaroTopupCompletion(transactionId)
+      if (priorCompletion.completed) {
         baseLogger.info(
           { transactionId, reason: gate.reason },
           "Fygaro payment already credited — ignoring a late record-only refusal",
         )
-        await recordOutcome({ state: "credited" })
+        // With the net read back off the completed row. This branch exists for
+        // the case where the FIRST delivery's stamp never landed, so there is
+        // usually no recorded outcome for the store-side merge to preserve —
+        // stamping `credited` with no amount would show the customer a credited
+        // top-up and no figure, against a schema that promises `netAmount` is
+        // present once credited.
+        await recordOutcome({
+          state: "credited",
+          netAmountCents: priorCompletion.netAmountCents,
+        })
         return res.status(200).json({ status: "already_processed" })
       }
 
@@ -719,7 +742,16 @@ export const paymentHandler = async (req: Request, res: Response) => {
           "Failed to stamp a Fygaro refusal as not-credited",
         )
         alertBridge({
-          dedupKey: generateDedupKey.erpnextFygaroAudit(transactionId),
+          // Its OWN key, not `erpnextFygaroAudit`. That key is claimed by the
+          // audit-WRITE failure above, and the delivery order that produces
+          // THIS failure is exactly the one that produces that one first:
+          // write fails -> critical fires -> 500 -> Fygaro retries minutes
+          // later -> write succeeds, the gate refuses, and the stamp fails.
+          // Within informDedupTtlMs (60 minutes) Slack/Discord would suppress
+          // this alert and PagerDuty would fold it into the open incident —
+          // silently swallowing the one that says a customer's cap is being
+          // consumed by a payment they never received value for.
+          dedupKey: generateDedupKey.fygaroRefusalNotStamped(transactionId),
           source: "erpnext-audit",
           severity: "critical",
           title:
@@ -760,7 +792,7 @@ export const paymentHandler = async (req: Request, res: Response) => {
     const outcome = await LockService().lockPaymentIdempotencyKey(
       `fygaro-payment:${transactionId}` as IdempotencyKey,
       async () => {
-        if (await isFygaroTopupCompleted(transactionId)) {
+        if ((await readFygaroTopupCompletion(transactionId)).completed) {
           baseLogger.info({ transactionId }, "Duplicate Fygaro payment webhook")
           // Stamp before returning. `recordIntentOutcome` swallows its write
           // failures by design, so a first delivery that credited but failed to

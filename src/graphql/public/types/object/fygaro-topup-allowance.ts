@@ -7,10 +7,10 @@ const FygaroTopupAllowance = GT.Object({
   description:
     "How much of today's card top-up allowance this account has left. Does not " +
     "authorise anything, so it is safe to call while the customer is still choosing " +
-    "an amount. Render all four: `remaining` is the cap less BOTH `spent` and `held`, " +
-    "so without those two the gap cannot be explained. It is floored at zero and can " +
-    "therefore be smaller than `limit - spent - held` — an account can exceed its cap " +
-    "via a hand-credit, or via spend recorded before a limit change.",
+    "an amount. Render all of them: `remaining` is the cap less BOTH `spent` and " +
+    "`held`, so without those two the gap cannot be explained. Floored at zero, so it " +
+    "can be LARGER than `limit - spent - held` when the cap has been exceeded — via a " +
+    "hand-credit, or via spend recorded before a limit change.",
   fields: () => ({
     limit: {
       type: GT.NonNull(CentAmount),

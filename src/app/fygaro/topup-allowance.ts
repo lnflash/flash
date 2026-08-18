@@ -1,8 +1,9 @@
-import { FygaroConfig } from "@config"
 import { AccountLevel } from "@domain/accounts"
 import { readFygaroTopupWindowLast24h } from "@services/frappe/BridgeTransferRequestWriter"
 import { readOutstandingReservations } from "@services/fygaro/checkout-intent-store"
 import { getFygaroSettings } from "@services/fygaro/webhook-server/fygaro-settings"
+
+import { fygaroCheckoutMasterGate } from "./checkout-master-gate"
 
 /**
  * How much of today's card top-up allowance is left for one account.
@@ -23,6 +24,11 @@ import { getFygaroSettings } from "@services/fygaro/webhook-server/fygaro-settin
  * refuses — the invite-then-refuse failure this workstream exists to end, moved
  * onto a new surface. Two things follow from that and neither is optional: the
  * master switches are checked here too, and live holds are subtracted here too.
+ *
+ * "Checked here too" is now enforced by construction, not by this comment: the
+ * deploy-level switches live in `fygaroCheckoutMasterGate` and BOTH surfaces
+ * call it. The previous arrangement — a hand-copied subset — checked two of the
+ * four and reported an allowance in the state where checkout is off.
  */
 
 export type FygaroTopupAllowance = {
@@ -84,13 +90,15 @@ export const getFygaroTopupAllowance = async ({
   level: AccountLevel
   nowMs?: number
 }): Promise<FygaroTopupAllowanceResult> => {
-  // The yaml master gates, first and before any read — the same order
-  // `authorizeFygaroTopup` applies them in. With `fygaro.enabled` off the
-  // webhook 503s every delivery (a payment would not even be RECORDED), and
-  // with `credit.enabled` off it records without crediting. Reporting a healthy
-  // allowance in either state invites a charge that cannot be credited.
-  if (!FygaroConfig?.enabled || !FygaroConfig?.credit?.enabled) {
-    return { available: false, reason: "checkout-disabled" }
+  // The yaml master gates, first and before any read — literally the same
+  // predicate `authorizeFygaroTopup` runs, not a second copy of it. Checking a
+  // subset is how this query came to report a healthy allowance in the default
+  // rollout state (`fygaro.checkout.enabled` defaults to FALSE and is
+  // independent of the other switches), while `fygaroCheckoutCreate` refused
+  // every single request with `checkout-disabled`.
+  const master = fygaroCheckoutMasterGate()
+  if (!master.ok) {
+    return { available: false, reason: master.reason }
   }
 
   // Returns undefined (never throws) when the ERPNext row is unreadable.

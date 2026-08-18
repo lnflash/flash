@@ -1128,7 +1128,7 @@ type FygaroCheckoutCreatePayload
 }
 
 """
-How much of today's card top-up allowance this account has left. Does not authorise anything, so it is safe to call while the customer is still choosing an amount. Render all four: `remaining` is the cap less BOTH `spent` and `held`, so without those two the gap cannot be explained. It is floored at zero and can therefore be smaller than `limit - spent - held` — an account can exceed its cap via a hand-credit, or via spend recorded before a limit change.
+How much of today's card top-up allowance this account has left. Does not authorise anything, so it is safe to call while the customer is still choosing an amount. Render all of them: `remaining` is the cap less BOTH `spent` and `held`, so without those two the gap cannot be explained. Floored at zero, so it can be LARGER than `limit - spent - held` when the cap has been exceeded — via a hand-credit, or via spend recorded before a limit change.
 """
 type FygaroTopupAllowance
   @join__type(graph: PUBLIC)
@@ -1218,9 +1218,14 @@ enum FygaroTopupState
   HELD_FOR_REVIEW @join__enumValue(graph: PUBLIC)
 
   """
-  We have the payment and are crediting it. Not yet terminal — keep polling, then fall back to telling the customer they will be notified.
+  We have the payment — the provider told us so — and are crediting it. Not yet terminal, so keep polling, then fall back to telling the customer they will be notified.
   """
   PROCESSING @join__enumValue(graph: PUBLIC)
+
+  """
+  No payment has been observed for this checkout. The customer may still be on the payment page, the card may have been declined, the page may have been cancelled — or we may be momentarily unable to check. NEVER render this as 'payment received': the payment page closes on a decline exactly as it does on a success. Keep polling, then fall back to 'we'll let you know'.
+  """
+  UNCONFIRMED @join__enumValue(graph: PUBLIC)
 }
 
 """
@@ -1229,8 +1234,10 @@ What actually happened to a card top-up. The card charge succeeding and Flash cr
 type FygaroTopupStatus
   @join__type(graph: PUBLIC)
 {
-  """The amount this checkout was authorised for."""
-  authorizedAmount: CentAmount!
+  """
+  The amount this checkout was authorised for. Null ONLY when the checkout record could not be read (state UNCONFIRMED, transient): the amount lives on that record. The client already knows what it asked for, so this is an echo, never the source of truth for what was charged.
+  """
+  authorizedAmount: CentAmount
 
   """What reached the wallet, after fees. Present once credited."""
   netAmount: CentAmount
@@ -2400,7 +2407,7 @@ type Query
   fygaroTopupAllowance: FygaroTopupAllowance
 
   """
-  The outcome of a card top-up, by the checkout id returned from fygaroCheckoutCreate. Null when the checkout is unknown, expired, or not this account's.
+  The outcome of a card top-up, by the checkout id returned from fygaroCheckoutCreate. Null when the checkout is unknown, expired, or not this account's — never as a way of saying 'not yet': a checkout we simply cannot read right now comes back as UNCONFIRMED so a transient fault is not reported to the customer as a payment that never existed.
   """
   fygaroTopupStatus(checkoutId: String!): FygaroTopupStatus
   globals: Globals

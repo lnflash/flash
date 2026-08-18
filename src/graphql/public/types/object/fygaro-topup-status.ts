@@ -4,11 +4,21 @@ import CentAmount from "@graphql/public/types/scalar/cent-amount"
 export const FygaroTopupStateEnum = GT.Enum({
   name: "FygaroTopupState",
   values: {
+    UNCONFIRMED: {
+      value: "unconfirmed",
+      description:
+        "No payment has been observed for this checkout. The customer may still be on " +
+        "the payment page, the card may have been declined, the page may have been " +
+        "cancelled — or we may be momentarily unable to check. NEVER render this as " +
+        "'payment received': the payment page closes on a decline exactly as it does " +
+        "on a success. Keep polling, then fall back to 'we'll let you know'.",
+    },
     PROCESSING: {
       value: "processing",
       description:
-        "We have the payment and are crediting it. Not yet terminal — keep polling, " +
-        "then fall back to telling the customer they will be notified.",
+        "We have the payment — the provider told us so — and are crediting it. Not " +
+        "yet terminal, so keep polling, then fall back to telling the customer they " +
+        "will be notified.",
     },
     CREDITED: { value: "credited", description: "Money is in the wallet." },
     HELD_FOR_REVIEW: {
@@ -34,8 +44,12 @@ const FygaroTopupStatus = GT.Object({
   fields: () => ({
     state: { type: GT.NonNull(FygaroTopupStateEnum) },
     authorizedAmount: {
-      type: GT.NonNull(CentAmount),
-      description: "The amount this checkout was authorised for.",
+      type: CentAmount,
+      description:
+        "The amount this checkout was authorised for. Null ONLY when the checkout " +
+        "record could not be read (state UNCONFIRMED, transient): the amount lives on " +
+        "that record. The client already knows what it asked for, so this is an echo, " +
+        "never the source of truth for what was charged.",
     },
     netAmount: {
       type: CentAmount,

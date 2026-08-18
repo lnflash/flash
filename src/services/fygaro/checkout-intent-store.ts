@@ -68,6 +68,15 @@ export type FygaroCheckoutIntent = {
 }
 
 export type FygaroTopupOutcomeState =
+  // NON-TERMINAL, and the only state that means "a payment exists". Stamped by
+  // the webhook the moment the payment is recorded, before any credit decision.
+  //
+  // Its absence is what makes "we have your payment" sayable at all: an intent
+  // is written when the checkout link is MINTED, so a record with no outcome is
+  // a customer who may never have paid — a declined card, a closed page — and
+  // reading that as "processing" told them money had been received that never
+  // left their account. `received` is the server actually knowing.
+  | "received"
   // Credited. `netAmountCents` is what actually reached the wallet.
   | "credited"
   // Captured by Fygaro, deliberately not credited. Terminal until a human acts
@@ -81,6 +90,7 @@ export type FygaroTopupOutcomeState =
 export type FygaroTopupOutcome = {
   state: FygaroTopupOutcomeState
   // The gate reason (`daily-limit-exceeded`, `over-limit`, …) or `credit-failed`.
+  // Never set for `received`, which is an observation and not a decision.
   // Mapped to customer-facing wording at the GraphQL edge, never rendered raw.
   reason?: string
   netAmountCents?: number
@@ -299,7 +309,15 @@ export const releaseIntentReservation = async ({
 export type IntentLookup =
   | { found: true; intent: FygaroCheckoutIntent }
   // Expired, evicted, already consumed, or minted by a different deployment.
-  | { found: false }
+  //
+  // `unavailable` marks the one sub-case that is NOT an answer about the
+  // intent: the cache itself faulted, so "no record" is our ignorance rather
+  // than a fact. Every caller on the money path still treats it as a miss —
+  // that fail-open posture is what keeps a Redis blip from stranding captured
+  // funds — but the status query needs the distinction, because telling a
+  // customer who has just been charged that their checkout does not exist is
+  // its own false claim.
+  | { found: false; unavailable?: boolean }
 
 /**
  * Read an intent WITHOUT invalidating it.
@@ -331,6 +349,10 @@ export const readIntent = async (intentId: string): Promise<IntentLookup> => {
         { intentId, error: found.constructor.name },
         "Fygaro checkout intent lookup failed; treating payment as unauthorised-legacy",
       )
+      // A FAULT, not a miss. Every caller on the money path still treats it as
+      // a miss; only the status query cares, and only so it can say "we cannot
+      // confirm this yet" instead of "this checkout does not exist".
+      return { found: false, unavailable: true }
     }
     return { found: false }
   }
@@ -354,9 +376,28 @@ export const readIntent = async (intentId: string): Promise<IntentLookup> => {
  * leave the authorisation in place.
  */
 export const consumeIntent = async (intentId: string): Promise<{ consumed: boolean }> => {
-  // Read first, purely so a winning claim knows which account reservation to
-  // release. The read is not the gate; the DEL below is.
+  // Read first, so this call knows which account reservation to release. The
+  // read is not the gate; the DEL below is.
   const lookup = await readIntent(intentId)
+
+  // Release BEFORE the claim gate, and regardless of who wins it. `zrem` is
+  // idempotent — removing a member that is already gone is a no-op — so a
+  // losing caller releasing costs nothing, while gating on the claim costs a
+  // whole class of leaked holds:
+  //
+  //   - Every intent minted BEFORE the claim key existed has a record and no
+  //     claim, so it can never win, and under a claim-gated release its hold
+  //     would sit on the allowance until the JWT expired. For ttlSeconds+3600
+  //     after any deploy that introduces the claim, those accounts hold
+  //     allowance they have already spent and their next top-up is refused
+  //     `checkout-already-open`.
+  //   - A claim write that failed at saveIntent (best-effort, by design) puts a
+  //     live intent in exactly the same position.
+  //
+  // The exactly-once guarantee is untouched: it lives in the DEL removed-count
+  // below, which is what decides `consumed`, and releasing a hold is not a
+  // redemption.
+  if (lookup.found) await releaseIntentReservation(lookup.intent)
 
   const claimed = await (await cacheModule()).consumeCacheKey({ key: claimKey(intentId) })
   if (claimed instanceof Error) {
@@ -365,7 +406,6 @@ export const consumeIntent = async (intentId: string): Promise<{ consumed: boole
   }
   if (!claimed) return { consumed: false }
 
-  if (lookup.found) await releaseIntentReservation(lookup.intent)
   return { consumed: true }
 }
 
@@ -399,6 +439,14 @@ export const recordIntentOutcome = async ({
       // stamp; the app falls back to its unresolved state.
       return
     }
+    // `received` is an OBSERVATION, and only ever the first thing known about a
+    // payment. Every webhook delivery stamps it — including the re-delivery of
+    // a payment an earlier delivery already credited or held — so letting it
+    // write would walk a terminal answer backwards to "we're crediting it" and
+    // leave the customer polling that forever. Terminal states are stamped by a
+    // delivery that decided something; this one only saw a payment arrive.
+    if (outcome.state === "received" && found.outcome !== undefined) return
+
     // A later stamp must not DESTROY what an earlier one knew. The
     // already-credited guard in the webhook re-stamps `credited` from a path
     // that has no fee breakdown to hand, and a blind overwrite would drop the
