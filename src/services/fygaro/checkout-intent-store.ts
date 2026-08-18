@@ -399,9 +399,24 @@ export const recordIntentOutcome = async ({
       // stamp; the app falls back to its unresolved state.
       return
     }
+    // A later stamp must not DESTROY what an earlier one knew. The
+    // already-credited guard in the webhook re-stamps `credited` from a path
+    // that has no fee breakdown to hand, and a blind overwrite would drop the
+    // net that a real credit recorded — leaving the app showing a credited
+    // top-up with no amount, against a schema that promises `netAmount` is
+    // "present once credited". Confirming an outcome should never know less
+    // than recording it did.
+    const merged: FygaroTopupOutcome =
+      found.outcome?.state === "credited" && outcome.state === "credited"
+        ? {
+            ...outcome,
+            netAmountCents: outcome.netAmountCents ?? found.outcome.netAmountCents,
+          }
+        : outcome
+
     const res = await cache.set<FygaroCheckoutIntent>({
       key: cacheKey(intentId),
-      value: { ...found, outcome },
+      value: { ...found, outcome: merged },
       ttlSecs: (ttlSeconds + 3600) as Seconds,
     })
     if (res instanceof Error) {

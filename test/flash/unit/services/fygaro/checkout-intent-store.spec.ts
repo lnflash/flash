@@ -334,6 +334,77 @@ describe("redemption leaves the record the status poll reads", () => {
     })
   })
 
+  it("re-stamping credited without a net KEEPS the net already recorded", async () => {
+    // The webhook's already-credited guard re-stamps `credited` from a path
+    // with no fee breakdown in hand. A blind overwrite would drop the net a
+    // real credit recorded, leaving the app showing a credited top-up with no
+    // amount — against a schema that promises netAmount is present once
+    // credited. Confirming an outcome must never know less than recording it.
+    await saveIntent({ intent: INTENT, ttlSeconds: TTL })
+    await recordIntentOutcome({
+      intentId: INTENT.intentId,
+      outcome: { state: "credited", netAmountCents: 5652, atMs: NOW_MS },
+      ttlSeconds: TTL,
+    })
+
+    await recordIntentOutcome({
+      intentId: INTENT.intentId,
+      outcome: { state: "credited", atMs: NOW_MS + 1000 },
+      ttlSeconds: TTL,
+    })
+
+    const lookup = await readIntent(INTENT.intentId)
+    expect(lookup).toMatchObject({
+      found: true,
+      intent: { outcome: { state: "credited", netAmountCents: 5652 } },
+    })
+  })
+
+  it("lets a later credited stamp carry a net when the first had none", async () => {
+    // The merge preserves, it does not freeze: new information still lands.
+    await saveIntent({ intent: INTENT, ttlSeconds: TTL })
+    await recordIntentOutcome({
+      intentId: INTENT.intentId,
+      outcome: { state: "credited", atMs: NOW_MS },
+      ttlSeconds: TTL,
+    })
+
+    await recordIntentOutcome({
+      intentId: INTENT.intentId,
+      outcome: { state: "credited", netAmountCents: 5652, atMs: NOW_MS + 1000 },
+      ttlSeconds: TTL,
+    })
+
+    expect(await readIntent(INTENT.intentId)).toMatchObject({
+      intent: { outcome: { netAmountCents: 5652 } },
+    })
+  })
+
+  it("does not carry a net across a state change", async () => {
+    // Only credited->credited merges. A different state is a different answer
+    // about the payment, and inheriting an amount from the previous one would
+    // attach a credited figure to something that was not credited.
+    await saveIntent({ intent: INTENT, ttlSeconds: TTL })
+    await recordIntentOutcome({
+      intentId: INTENT.intentId,
+      outcome: { state: "credited", netAmountCents: 5652, atMs: NOW_MS },
+      ttlSeconds: TTL,
+    })
+
+    await recordIntentOutcome({
+      intentId: INTENT.intentId,
+      outcome: { state: "failed", reason: "credit-failed", atMs: NOW_MS + 1000 },
+      ttlSeconds: TTL,
+    })
+
+    const lookup = await readIntent(INTENT.intentId)
+    expect(lookup).toMatchObject({ intent: { outcome: { state: "failed" } } })
+    expect(
+      (lookup as { intent: { outcome: { netAmountCents?: number } } }).intent.outcome
+        .netAmountCents,
+    ).toBeUndefined()
+  })
+
   it("keeps an outcome written BEFORE redemption (the credit path's order)", async () => {
     // The credit path stamps `credited` and only then redeems. Redeeming must
     // not take the freshly-written outcome with it.

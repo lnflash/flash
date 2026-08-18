@@ -404,6 +404,11 @@ export const paymentHandler = async (req: Request, res: Response) => {
       )
       if (dedupe instanceof Error) {
         baseLogger.info({ transactionId }, "Duplicate Fygaro payment webhook")
+        // Terminal for this payment too, so stamp it for the same reason the
+        // non-deduped return below does. A re-delivery arriving after a first
+        // delivery whose Redis stamp failed would otherwise leave the app
+        // polling PROCESSING forever on a payment ops is crediting by hand.
+        await recordOutcome({ state: "held-for-review", reason: "unattributed" })
         return res.status(200).json({ status: "already_processed" })
       }
       // When the payer email resolved to an account, name the username in the

@@ -259,6 +259,37 @@ describe("fygaro paymentHandler", () => {
     expect(res.json).toHaveBeenCalledWith({ status: "recorded", attributed: false })
   })
 
+  it("stamps an outcome on a DEDUPED unattributed re-delivery", async () => {
+    // The third terminal return, and the one the first two fixes missed. If the
+    // first delivery's Redis stamp failed (swallowed by design), every retry
+    // short-circuits on the dedupe lock — so without a stamp here the app polls
+    // PROCESSING until the record expires, on a payment ops is crediting by hand.
+    const intentId = "9c1f7e42-5a3b-4d18-8e07-2b6a9f1c4d33"
+    // No account owns this username, so the handler takes the unattributed
+    // branch — where the dedupe short-circuit lives.
+    mockFindByUsername.mockResolvedValue(
+      new CouldNotFindAccountFromUsernameError("unknown-user"),
+    )
+    mockLockIdempotencyKey.mockResolvedValue(new Error("already locked"))
+    const res = makeRes()
+
+    await paymentHandler(
+      makeReq({ ...VALID_BODY, customReference: `unknown-user|${intentId}` }),
+      res,
+    )
+
+    expect(mockRecordIntentOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        intentId,
+        outcome: expect.objectContaining({
+          state: "held-for-review",
+          reason: "unattributed",
+        }),
+      }),
+    )
+    expect(res.json).toHaveBeenCalledWith({ status: "already_processed" })
+  })
+
   it("treats an unknown username as unattributed", async () => {
     // The real repository signals "no account owns this username" with this
     // exact class (AccountsRepository.findByUsername) — a bare Error would not
