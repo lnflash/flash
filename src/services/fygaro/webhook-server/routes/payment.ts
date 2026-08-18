@@ -36,6 +36,7 @@ import {
 } from "@services/frappe/BridgeTransferRequestWriter"
 import { alertBridge, generateDedupKey } from "@services/alerts"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
+import { sendFygaroTopupNotificationBestEffort } from "@app/fygaro/send-topup-notification"
 
 import {
   creditFygaroTopup,
@@ -571,6 +572,20 @@ export const paymentHandler = async (req: Request, res: Response) => {
       // Terminal: this reason will not change on retry, so the authorisation is
       // spent and its hold on the daily allowance must be released.
       await redeemIntent()
+      // Notify on the REFUSAL too. Telling the customer only when the money
+      // arrives keeps the promise exactly when it costs nothing and breaks it
+      // for the person whose payment was captured and not credited — who is
+      // otherwise left on a screen that said we would be in touch.
+      // `credit-disabled` is the silent deploy-level master gate: it records
+      // without crediting by design, and pushing for it would notify every
+      // customer during a rollout.
+      if (accountId && gate.reason !== "credit-disabled") {
+        await sendFygaroTopupNotificationBestEffort({
+          accountId,
+          outcome: "heldForReview",
+          amountCents: grossCents,
+        })
+      }
       return res.status(200).json({ status: "recorded", credited: false })
     }
 
@@ -682,6 +697,22 @@ export const paymentHandler = async (req: Request, res: Response) => {
             context: { transaction_id: transactionId },
           })
         }
+
+        // The app told this customer "we'll let you know as soon as it lands".
+        // A credit can outlive the screen — the transient paths deliberately
+        // 500 so Fygaro retries — so this is what makes that sentence true.
+        // Best-effort by construction: the money has already moved, and a
+        // failed push must never put a delivered credit back into the retry
+        // loop.
+        // Awaited, matching the Bridge deposit path: the helper swallows every
+        // failure internally, so awaiting cannot fail the credit, and NOT
+        // awaiting would leave a dangling promise that a recycled pod can drop
+        // — losing exactly the notification the app told the customer to expect.
+        await sendFygaroTopupNotificationBestEffort({
+          accountId: creditAccountId,
+          outcome: "credited",
+          amountCents: fees.netCents,
+        })
 
         notifyOpsEvent({
           flow: "deposit",

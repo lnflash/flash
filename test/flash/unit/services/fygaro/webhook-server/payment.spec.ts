@@ -58,6 +58,12 @@ jest.mock("@services/alerts", () => ({
   generateDedupKey: jest.requireActual("@services/alerts/dedup-key").generateDedupKey,
 }))
 
+jest.mock("@app/fygaro/send-topup-notification", () => ({
+  sendFygaroTopupNotificationBestEffort: (...args: unknown[]) =>
+    mockSendTopupNotification(...args),
+}))
+const mockSendTopupNotification = jest.fn()
+
 jest.mock("@services/alerts/ops-events", () => ({
   notifyOpsEvent: (...args: unknown[]) => mockNotifyOpsEvent(...args),
 }))
@@ -573,6 +579,23 @@ describe("fygaro paymentHandler", () => {
         username: VALID_BODY.customReference,
         flow: "topup",
       })
+    })
+
+    it("notifies the customer with the NET once the credit lands", async () => {
+      // The app promises "we'll let you know as soon as it lands" and then
+      // stops polling after a minute. Without this the promise is kept by
+      // nothing, and a credit that arrives on a Fygaro retry is never announced.
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockSendTopupNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: "credited" }),
+      )
+      const [args] = mockSendTopupNotification.mock.calls[0]
+      // The NET, not the gross: naming what they paid overstates the balance
+      // change by the fees.
+      expect(args.amountCents).toBeLessThan(Math.round(Number(VALID_BODY.amount) * 100))
     })
 
     it("credits with a discounted flash fee and promotes the discounted breakdown", async () => {
