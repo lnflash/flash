@@ -153,7 +153,28 @@ describe("getFygaroTopupAllowance", () => {
         spentCents: 0,
         heldCents: 6000,
         remainingCents: 6500,
+        // ...and the hold lifts on its own when the JWT expires, which is the
+        // only actionable thing to say about it. `resetsAt` cannot carry this:
+        // it is derived from the ERPNext window and there is no row here at all.
+        holdsExpireAt: new Date(NOW_MS + 900_000),
       })
+      expect((await ask()).allowance.resetsAt).toBeUndefined()
+    })
+
+    it("reports the SOONEST hold expiry, not the latest", async () => {
+      // The first moment any of this allowance comes back on its own. Reporting
+      // the latest would tell a customer to wait longer than they have to.
+      mockReadOutstandingReservations.mockResolvedValue([
+        { intentId: "intent-1", amountCents: 2000, expiresAtMs: NOW_MS + 900_000 },
+        { intentId: "intent-2", amountCents: 1000, expiresAtMs: NOW_MS + 120_000 },
+        { intentId: "intent-3", amountCents: 1000, expiresAtMs: NOW_MS + 600_000 },
+      ])
+
+      expect((await ask()).allowance.holdsExpireAt).toEqual(new Date(NOW_MS + 120_000))
+    })
+
+    it("reports no hold expiry when nothing is held", async () => {
+      expect((await ask()).allowance.holdsExpireAt).toBeUndefined()
     })
 
     it("subtracts holds and settled spend together, exactly as the gate does", async () => {

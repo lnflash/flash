@@ -24,8 +24,22 @@ const FygaroTopupAllowanceQuery = GT.Field({
     // subtracts them, so the two surfaces answer the same question with the same
     // number. `spent` keeps its own meaning — gross actually charged — because a
     // hold is not a charge and calling it one would be its own false claim.
-    const { limitCents, spentCents, remainingCents, resetsAt } = result.allowance
-    return { limit: limitCents, spent: spentCents, remaining: remainingCents, resetsAt }
+    //
+    // Which is precisely why `held` and `holdsExpireAt` are reported too. The
+    // canonical case is a customer who minted a $60 link and closed the page:
+    // nothing is charged, so `spent` is 0 and `resetsAt` (settled spend only) is
+    // null, yet $60 of a $125 cap is gone. Without these two fields the client
+    // can neither name the missing money nor say when it comes back.
+    const { limitCents, spentCents, heldCents, remainingCents, resetsAt, holdsExpireAt } =
+      result.allowance
+    return {
+      limit: limitCents,
+      spent: spentCents,
+      held: heldCents,
+      remaining: remainingCents,
+      resetsAt,
+      holdsExpireAt,
+    }
   },
 })
 

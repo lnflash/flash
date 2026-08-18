@@ -12,9 +12,11 @@ import { getFygaroSettings } from "@services/fygaro/webhook-server/fygaro-settin
  * objecting once: each amount is individually under the cap, and nothing on the
  * device knew what had already been spent. This is the missing half.
  *
- * Read-only and side-effect free, unlike `authorizeFygaroTopup` — it can be
- * called while the customer is still typing an amount, where minting a
- * reservation would burn their allowance on a number they never committed to.
+ * Does not mint a reservation, unlike `authorizeFygaroTopup`, so it is safe to
+ * call while the customer is still typing an amount — where minting one would
+ * burn their allowance on a number they never committed to. It is NOT literally
+ * side-effect free: reading the hold index prunes the entries that have expired
+ * (`readOutstandingReservations` issues a ZREMRANGEBYSCORE before it reads).
  *
  * It must nonetheless answer with the SAME arithmetic and the SAME gates as
  * `authorizeFygaroTopup`, or it invites a top-up the pre-charge check then
@@ -41,8 +43,17 @@ export type FygaroTopupAllowance = {
   remainingCents: number
   // When the oldest counted payment ages out of the window and some allowance
   // comes back. Undefined when nothing is counted (the full cap is available).
-  // This is the only actionable thing to tell someone who has been refused.
+  // SETTLED SPEND ONLY: it is derived from the ERPNext window, and holds live in
+  // Redis, so it says nothing at all about when a hold lifts. That is what
+  // `holdsExpireAt` is for, and the two are reported separately because they
+  // come back at different times for different reasons.
   resetsAt?: Date
+  // When the SOONEST of this account's unpaid checkout links expires and its
+  // hold on the allowance lifts by itself. Undefined when nothing is held.
+  // Without it, an account whose whole gap is holds is told "$0 spent, $65 of
+  // $125 available" with no way to explain the missing $60 or say when it
+  // returns — the exact dead end a refusal with no reset time is.
+  holdsExpireAt?: Date
 }
 
 export type FygaroTopupAllowanceFailure =
@@ -121,6 +132,14 @@ export const getFygaroTopupAllowance = async ({
     return { available: false, reason: "reservations-unavailable" }
   }
   const heldCents = reservations.reduce((sum, r) => sum + r.amountCents, 0)
+  // The SOONEST expiry, not the latest: it is the first moment any of this
+  // allowance comes back on its own, which is the only thing worth telling
+  // someone who is looking at a number smaller than they expected.
+  const soonestHoldExpiryMs = reservations.reduce<number | undefined>(
+    (soonest, r) =>
+      soonest === undefined ? r.expiresAtMs : Math.min(soonest, r.expiresAtMs),
+    undefined,
+  )
 
   return {
     available: true,
@@ -133,6 +152,8 @@ export const getFygaroTopupAllowance = async ({
         window.oldestCountedMs === undefined
           ? undefined
           : new Date(window.oldestCountedMs + DAY_MS),
+      holdsExpireAt:
+        soonestHoldExpiryMs === undefined ? undefined : new Date(soonestHoldExpiryMs),
     },
   }
 }

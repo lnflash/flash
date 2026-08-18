@@ -827,6 +827,77 @@ describe("fygaro paymentHandler", () => {
       },
     )
 
+    it("pages CRITICAL when the not-credited stamp fails, instead of failing silently", async () => {
+      // The write that carries the whole point of the record-only path. The
+      // dedupe timelock above it is non-releasing and already taken, so Fygaro
+      // never retries and nothing self-heals: the row keeps no failure_reason,
+      // stays inside the trailing-24h sum, and this refused $30 goes on eating
+      // the customer's $125 cap for 24h — refusing their next LEGITIMATE
+      // top-up, which is the exact failure this stamp exists to end.
+      mockSumFygaroLast24h.mockResolvedValue(10000)
+      mockMarkNotCredited.mockResolvedValue(new Error("erpnext PUT timed out"))
+      const res = makeRes()
+
+      await paymentHandler(makeReq({ ...VALID_BODY, amount: "30.00" }), res)
+
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: "erpnext-audit",
+          severity: "critical",
+          context: expect.objectContaining({
+            transaction_id: VALID_BODY.transactionId,
+            reason: "daily-limit-exceeded",
+          }),
+        }),
+      )
+    })
+
+    it("never refuses a payment that has ALREADY been credited", async () => {
+      // Reachable, and it costs real money: tx1 ($60) credits; tx2 ($100) is
+      // refused daily-limit-exceeded and hand-credited by ops, which correctly
+      // puts it back into the trailing-24h sum; Fygaro then re-delivers tx1.
+      // The record-only timelock lives in a different redis namespace from the
+      // credit path's lock, so it is still free and cannot stop this. Unguarded,
+      // the gate refuses money already in the wallet: a false "manual credit
+      // needed" page, a failure_reason stamped onto a Completed row, and the
+      // customer's CREDITED status overwritten with "held for review".
+      mockIsFygaroTopupCompleted.mockResolvedValue(true)
+      mockSumFygaroLast24h.mockResolvedValue(10000)
+      const res = makeRes()
+
+      await paymentHandler(makeReq({ ...VALID_BODY, amount: "30.00" }), res)
+
+      expect(res.status).toHaveBeenCalledWith(200)
+      expect(res.json).toHaveBeenCalledWith({ status: "already_processed" })
+      expect(mockMarkNotCredited).not.toHaveBeenCalled()
+      expect(mockAlertBridge).not.toHaveBeenCalled()
+      expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+      // Checked BEFORE the non-releasing record-only timelock, so a re-delivery
+      // is not silently converted into a consumed lock either.
+      expect(mockLockIdempotencyKey).not.toHaveBeenCalled()
+    })
+
+    it("re-stamps CREDITED, not held-for-review, on a refused re-delivery of a credited payment", async () => {
+      mockIsFygaroTopupCompleted.mockResolvedValue(true)
+      mockSumFygaroLast24h.mockResolvedValue(10000)
+      const res = makeRes()
+
+      await paymentHandler(
+        makeReq({
+          ...VALID_BODY,
+          customReference: `${VALID_BODY.customReference}|3f5a1c9e-2b7d-4a10-9f33-6c8e2d4b7a51`,
+          amount: "30.00",
+        }),
+        res,
+      )
+
+      expect(mockRecordIntentOutcome).toHaveBeenCalledWith(
+        expect.objectContaining({
+          outcome: expect.objectContaining({ state: "credited" }),
+        }),
+      )
+    })
+
     it("returns 500 for settings-unavailable so Fygaro retries (transient), without acking or spamming the feed", async () => {
       // A brief ERPNext blip caches settings as undefined for up to 60s. That
       // must NOT permanently downgrade the payment to manual credit: return 500
@@ -1333,6 +1404,60 @@ describe("fygaro paymentHandler", () => {
           }),
         )
         expect(mockRecordIntentOutcome).toHaveBeenCalledTimes(1)
+      })
+
+      it("stamps held-for-review when the record-only dedupe short-circuits", async () => {
+        // `recordIntentOutcome` swallows its write failures by design, so a
+        // first delivery that took the (non-releasing) record-only timelock and
+        // then failed its Redis stamp leaves every retry short-circuiting here.
+        // Without a stamp on this return the customer polls PROCESSING until
+        // the record expires — for a payment that is permanently held for
+        // review. The gate ran on this delivery too, so the same reason and the
+        // same number are already in hand.
+        mockSumFygaroLast24h.mockResolvedValue(10000)
+        mockLockIdempotencyKey.mockResolvedValue(new Error("already locked"))
+        mockReadIntent.mockResolvedValue(intent({ amountCents: 3000 }))
+        const res = makeRes()
+
+        await paymentHandler(makeReq({ ...SIGNED_BODY, amount: "30.00" }), res)
+
+        expect(res.json).toHaveBeenCalledWith({ status: "already_processed" })
+        expect(mockRecordIntentOutcome).toHaveBeenCalledWith(
+          expect.objectContaining({
+            intentId: INTENT_ID,
+            outcome: expect.objectContaining({
+              state: "held-for-review",
+              reason: "daily-limit-exceeded",
+              detailCents: 2500,
+            }),
+          }),
+        )
+      })
+
+      it("stamps held-for-review when a signed reference no longer resolves to an account", async () => {
+        // The unattributed terminal is terminal: the dedupe lock it takes is
+        // non-releasing, so every retry acks already_processed and this is the
+        // final answer. Ops credits it by hand; without a stamp the app polls
+        // PROCESSING forever while that happens.
+        mockFindByUsername.mockResolvedValue(
+          new CouldNotFindAccountFromUsernameError(VALID_BODY.customReference),
+        )
+        mockReadIntent.mockResolvedValue(intent())
+        const res = makeRes()
+
+        await paymentHandler(makeReq(SIGNED_BODY), res)
+
+        expect(res.json).toHaveBeenCalledWith({ status: "recorded", attributed: false })
+        expect(mockRecordIntentOutcome).toHaveBeenCalledWith(
+          expect.objectContaining({
+            intentId: INTENT_ID,
+            outcome: expect.objectContaining({
+              state: "held-for-review",
+              // Ours, not theirs — the status resolver words it that way.
+              reason: "unattributed",
+            }),
+          }),
+        )
       })
     })
 

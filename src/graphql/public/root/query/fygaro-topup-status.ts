@@ -26,9 +26,10 @@ const OURS = "We've received your payment and are completing it manually."
  * completing it, and an operator gets paged (already handled at the webhook).
  */
 const CUSTOMER_REASON: Record<
-  // `credit-failed` is not a gate reason — the credit path stamps it directly
-  // — so it is added to the union rather than being caught by a fallthrough.
-  RecordOnlyReason | "credit-failed",
+  // `credit-failed` and `unattributed` are not gate reasons — the credit path
+  // and the unattributed terminal stamp them directly — so they are added to
+  // the union rather than being caught by a fallthrough.
+  RecordOnlyReason | "credit-failed" | "unattributed",
   (detailCents?: number) => string
 > = {
   "daily-limit-exceeded": (cents) =>
@@ -54,6 +55,10 @@ const CUSTOMER_REASON: Record<
   "non-positive-net": () => OURS,
   "non-usd": () => OURS,
   "credit-failed": () => OURS,
+  // The signed reference named a username that no longer resolves to an
+  // account. That is a mismatch on our side of the checkout, not a rule the
+  // customer broke, so it gets the same wording as any other fault of ours.
+  "unattributed": () => OURS,
 }
 
 const customerReason = (

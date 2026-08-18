@@ -220,6 +220,7 @@ describe("fygaroTopupAllowance resolver", () => {
 
   it("maps the allowance onto the schema's cent fields", async () => {
     const resetsAt = new Date("2026-08-18T02:33:31Z")
+    const holdsExpireAt = new Date("2026-08-17T03:00:00Z")
     mockGetFygaroTopupAllowance.mockResolvedValue({
       available: true,
       allowance: {
@@ -228,18 +229,75 @@ describe("fygaroTopupAllowance resolver", () => {
         heldCents: 4000,
         remainingCents: 3500,
         resetsAt,
+        holdsExpireAt,
       },
     })
 
     // `remaining` is deliberately NOT `limit - spent`: the account's unpaid
     // checkout links are subtracted from it too, so it answers the same
-    // question, with the same number, as the pre-charge gate.
+    // question, with the same number, as the pre-charge gate. Which is why
+    // `held` has to ship alongside it — it is the only thing that accounts for
+    // the difference.
     expect(await resolve(FygaroTopupAllowanceQuery as Query)).toEqual({
       limit: 12500,
       spent: 5000,
+      held: 4000,
       remaining: 3500,
       resetsAt,
+      holdsExpireAt,
     })
+  })
+
+  it("explains the abandoned-link case: $0 spent, $60 held, and when it comes back", async () => {
+    // THE canonical case, and the one that broke the type's contract: a
+    // customer mints a $60 link against a $125 cap and closes the page. No
+    // payment exists, so `spent` is 0 and `resetsAt` — settled spend only — is
+    // null. Reporting only "limit 12500, spent 0, remaining 6500" says the full
+    // limit is available while showing $65, and gives the client nothing to
+    // render the missing $60 with. `held` names it and `holdsExpireAt` says
+    // when it lifts.
+    const holdsExpireAt = new Date("2026-08-17T03:15:00Z")
+    mockGetFygaroTopupAllowance.mockResolvedValue({
+      available: true,
+      allowance: {
+        limitCents: 12500,
+        spentCents: 0,
+        heldCents: 6000,
+        remainingCents: 6500,
+        resetsAt: undefined,
+        holdsExpireAt,
+      },
+    })
+
+    expect(await resolve(FygaroTopupAllowanceQuery as Query)).toEqual({
+      limit: 12500,
+      spent: 0,
+      held: 6000,
+      remaining: 6500,
+      resetsAt: undefined,
+      holdsExpireAt,
+    })
+  })
+
+  it("reports no hold expiry when nothing is held", async () => {
+    mockGetFygaroTopupAllowance.mockResolvedValue({
+      available: true,
+      allowance: {
+        limitCents: 12500,
+        spentCents: 5000,
+        heldCents: 0,
+        remainingCents: 7500,
+        resetsAt: new Date("2026-08-18T02:33:31Z"),
+        holdsExpireAt: undefined,
+      },
+    })
+
+    const payload = (await resolve(FygaroTopupAllowanceQuery as Query)) as Record<
+      string,
+      unknown
+    >
+    expect(payload.held).toBe(0)
+    expect(payload.holdsExpireAt).toBeUndefined()
   })
 
   it.each([
