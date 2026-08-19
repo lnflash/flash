@@ -871,6 +871,11 @@ type FygaroCheckout {
   amount: CentAmount!
 
   """
+  Poll fygaroTopupStatus with this after the payment page closes. Do NOT report success from the payment page alone — the card charge succeeding and Flash crediting the wallet are different events.
+  """
+  checkoutId: String!
+
+  """
   After this, the URL is rejected by the payment provider and a new one must be requested.
   """
   expiresAt: Timestamp!
@@ -893,6 +898,97 @@ type FygaroCheckoutCreatePayload {
   How much more could be authorised right now, after this request. Card top-up links you have open but have not paid are ALREADY SUBTRACTED, so this is what would be accepted this second — not a statement of what the account has spent today. Present on refusal too, so the client can say how much would go through instead of only saying no. Null when the allowance could not be established.
   """
   remainingAllowance: CentAmount
+}
+
+"""
+How much of today's card top-up allowance this account has left. Does not authorise anything, so it is safe to call while the customer is still choosing an amount. Render all of them: `remaining` is the cap less BOTH `spent` and `held`, so without those two the gap cannot be explained. Floored at zero, so it can be LARGER than `limit - spent - held` when the cap has been exceeded — via a hand-credit, or via spend recorded before a limit change. The largest amount that would actually go through is `min(remaining, singlePaymentLimit)`, and anything below `minimum` is refused.
+"""
+type FygaroTopupAllowance {
+  """
+  Card top-up links this account has open but has not paid. NOT spent — nothing has been charged — but not available either, because paying one would charge it. The common case is a customer who minted a link and closed the page, so this is usually the whole difference between `limit - spent` and `remaining`.
+  """
+  held: CentAmount!
+
+  """
+  When the SOONEST unpaid checkout link expires and its hold on the allowance lifts by itself. Null when `held` is zero. This is the answer to 'why is $65 left when I have spent nothing, and when do I get the rest back?'.
+  """
+  holdsExpireAt: Timestamp
+
+  """The account level's rolling 24-hour cap."""
+  limit: CentAmount!
+
+  """
+  The smallest top-up that will be accepted. Enforced before the charge, so a client that does not render it can only discover it by being refused.
+  """
+  minimum: CentAmount!
+
+  """
+  What would still be accepted right now AGAINST THE DAILY CAP: the cap less BOTH `spent` and `held`. Unpaid checkout links are already subtracted, exactly as the pre-charge check subtracts them, so this is what a new top-up is measured against — not `limit - spent`. Never negative. NOT the largest payable amount on its own: `singlePaymentLimit` is a separate ceiling and is deliberately not folded in here, or this number would stop meaning 'daily headroom' and `resetsAt` would stop describing it.
+  """
+  remaining: CentAmount!
+
+  """
+  When the oldest counted PAYMENT ages out and the allowance it spent returns. Covers settled spend only — a hold is not a payment and never moves this. Null when no payment is counted, even if `held` is non-zero; see `holdsExpireAt`.
+  """
+  resetsAt: Timestamp
+
+  """
+  The most that can be charged in ONE top-up, whatever the daily headroom. A separate gate from the cap, so an account with $500 remaining and a $200 single-payment limit can only pay $200 at a time — offering the $500 gets the charge refused. Take `min(remaining, singlePaymentLimit)` as the maximum.
+  """
+  singlePaymentLimit: CentAmount!
+
+  """
+  Gross charged in the trailing 24 hours. Payments we captured but did not credit are excluded — they delivered nothing, so they do not spend the allowance.
+  """
+  spent: CentAmount!
+}
+
+"""
+The allowance, or why there isn't one. Exactly one of the two fields is ever set. `unavailableReason` exists so the client can tell a state that will never resolve on its own (hide the card top-up option) from a momentary read failure (show the flat limit, retry) — collapsing both into a missing allowance is what invites a top-up the pre-charge check then refuses.
+"""
+type FygaroTopupAllowancePayload {
+  """Null whenever `unavailableReason` is set, and only then."""
+  allowance: FygaroTopupAllowance
+
+  """
+  Always empty. Refusals are reported as `unavailableReason`, not as errors — the field is decoration on a screen the customer is still filling in, so a read failure must not surface as one. Present for consistency with every other payload type.
+  """
+  errors: [Error!]!
+
+  """Null whenever `allowance` is present, and only then."""
+  unavailableReason: FygaroTopupAllowanceUnavailableReason
+}
+
+enum FygaroTopupAllowanceUnavailableReason {
+  """
+  PERMANENT until an operator acts: card top-ups are switched off. Every fygaroCheckoutCreate is refused in this state, so hide the card top-up option rather than polling.
+  """
+  CHECKOUT_DISABLED
+
+  """
+  TRANSIENT: the trailing-24h top-up history could not be read. We refuse to guess rather than show a full allowance we would then refuse to honour.
+  """
+  HISTORY_UNAVAILABLE
+
+  """
+  PERMANENT until the account is upgraded: this account level has no card top-up allowance at all. Hide the option and point at verification; retrying changes nothing.
+  """
+  LEVEL_NOT_ELIGIBLE
+
+  """
+  TRANSIENT: too many allowance checks from this account too quickly. Back off and reuse the last answer; nothing here is authorised, so no charge was lost.
+  """
+  RATE_LIMITED
+
+  """
+  TRANSIENT: this account's open checkout links could not be read, so the allowance cannot be known. Unknown holds are not zero holds.
+  """
+  RESERVATIONS_UNAVAILABLE
+
+  """
+  TRANSIENT: the operator settings could not be read. Retry — nothing about the account has changed.
+  """
+  SETTINGS_UNAVAILABLE
 }
 
 """
@@ -930,6 +1026,50 @@ type FygaroTopupInfo {
 
   """Payment-processor percentage fee (e.g. 2.99 = 2.99%)."""
   processorFeePercent: Float!
+}
+
+enum FygaroTopupState {
+  """Money is in the wallet."""
+  CREDITED
+
+  """
+  We tried to credit and it failed. A provider retry may still resolve it, so this is 'we are on it', not 'contact support'.
+  """
+  FAILED
+
+  """
+  Captured and deliberately not credited. Terminal until a human acts, so retrying achieves nothing — show the reason.
+  """
+  HELD_FOR_REVIEW
+
+  """
+  We have the payment — the provider told us so — and are crediting it. Not yet terminal, so keep polling, then fall back to telling the customer they will be notified.
+  """
+  PROCESSING
+
+  """
+  No payment has been observed for this checkout. The customer may still be on the payment page, the card may have been declined, the page may have been cancelled — or we may be momentarily unable to check. NEVER render this as 'payment received': the payment page closes on a decline exactly as it does on a success. Keep polling, then fall back to 'we'll let you know'.
+  """
+  UNCONFIRMED
+}
+
+"""
+What actually happened to a card top-up. The card charge succeeding and Flash crediting the wallet are different events; only this reports the second.
+"""
+type FygaroTopupStatus {
+  """
+  The amount this checkout was authorised for. Null ONLY when the checkout record could not be read (state UNCONFIRMED, transient): the amount lives on that record. The client already knows what it asked for, so this is an echo, never the source of truth for what was charged.
+  """
+  authorizedAmount: CentAmount
+
+  """What reached the wallet, after fees. Present once credited."""
+  netAmount: CentAmount
+
+  """
+  Customer-facing explanation, present when the state needs one. Reasons the customer can act on are named plainly; our own faults are not blamed on them.
+  """
+  reason: String
+  state: FygaroTopupState!
 }
 
 """
@@ -1862,6 +2002,16 @@ type Query {
   cashWalletCutover: CashWalletCutover!
   cashoutRate: CashoutRate!
   currencyList: [Currency!]!
+
+  """
+  How much card top-up allowance this account has left today. When the allowance cannot be established, `unavailableReason` says why: hide the card top-up option for the reasons that will not resolve on their own (CHECKOUT_DISABLED, LEVEL_NOT_ELIGIBLE), and for the transient ones show the flat limit and let the pre-charge check decide, rather than inventing a number.
+  """
+  fygaroTopupAllowance: FygaroTopupAllowancePayload!
+
+  """
+  The outcome of a card top-up, by the checkout id returned from fygaroCheckoutCreate. Null when the checkout is unknown, expired, or not this account's — never as a way of saying 'not yet': a checkout we simply cannot read right now comes back as UNCONFIRMED so a transient fault is not reported to the customer as a payment that never existed.
+  """
+  fygaroTopupStatus(checkoutId: String!): FygaroTopupStatus
   globals: Globals
   invitePreview(token: String!): InvitePreview
   isFlashNpub(input: IsFlashNpubInput!): IsFlashNpubPayload

@@ -247,6 +247,28 @@ export const getFygaroCheckoutCreateAttemptLimits = () => ({
   blockDuration: toSeconds(300), // 5 minutes
 })
 
+/**
+ * The card top-up allowance READ, per account.
+ *
+ * Cheaper to abuse than the mutation it sits next to, not dearer: it takes no
+ * amount, so none of the deterministic gates can short-circuit it, and every
+ * single call reaches the trailing-24h ERPNext list query — the read whose
+ * failure refuses card top-ups for EVERY user. Both fields are blocked for API
+ * keys, so every caller is a Kratos session, and the API-key limiter waves
+ * those straight through; without this there is no request-rate limit on the
+ * path at all.
+ *
+ * Looser than the mutation because the honest client behaviour is different: a
+ * screen renders this, and a customer editing an amount or backgrounding and
+ * reopening the app can legitimately ask several times a minute. Minting links
+ * that often is not.
+ */
+export const getFygaroTopupAllowanceAttemptLimits = () => ({
+  points: 30,
+  duration: toSeconds(60), // 1 minute
+  blockDuration: toSeconds(60), // 1 minute
+})
+
 export const getOnChainWalletConfig = () => ({
   dustThreshold: yamlConfig.onChainWallet.dustThreshold,
 })

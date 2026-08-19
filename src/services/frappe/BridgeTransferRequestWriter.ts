@@ -10,6 +10,7 @@ import {
   BridgeTransferRequestStatus,
   BridgeTransferRequestTransactionType,
   EMAIL_ATTRIBUTION_SOURCE_SYSTEM,
+  type FygaroTopupWindow,
 } from "./models/BridgeTransferRequest"
 
 type BridgeDepositEventObject = {
@@ -265,13 +266,13 @@ export const writeFygaroTopupRequest = async ({
 // writes before the credit gate runs; without it every payment double-counts
 // itself. It is optional because the pre-charge check has no such row — nothing
 // has been paid yet — and omitting the filter is the honest way to say so.
-export const sumFygaroTopupGrossCentsLast24h = async ({
+export const readFygaroTopupWindowLast24h = async ({
   accountId,
   excludeTransactionId,
 }: {
   accountId: AccountId | string
   excludeTransactionId?: string
-}): Promise<number | FygaroTopupHistoryQueryError> => {
+}): Promise<FygaroTopupWindow | FygaroTopupHistoryQueryError> => {
   if (!ErpNext?.sumFygaroTopupGrossCentsSince) {
     return new FygaroTopupHistoryQueryError("ERPNext client is not configured")
   }
@@ -284,22 +285,61 @@ export const sumFygaroTopupGrossCentsLast24h = async ({
   })
 }
 
-// Whether this Fygaro payment was already fully processed (its audit row
-// promoted to Completed by a prior delivery). Used as the processed-marker for
-// webhook re-deliveries. A lookup failure degrades to false — the credit
-// itself is exactly-once under withPaymentIdempotency, so a false negative
-// can never double-pay; it only costs a redundant cached-send replay.
-export const isFygaroTopupCompleted = async (transactionId: string): Promise<boolean> => {
-  if (!ErpNext?.findBridgeTransferRequest) return false
+// Gross-only view, for the gates that decide yes/no and have no use for when
+// the window rolls. Kept as its own export so those call sites cannot start
+// depending on a shape they do not need.
+export const sumFygaroTopupGrossCentsLast24h = async (args: {
+  accountId: AccountId | string
+  excludeTransactionId?: string
+}): Promise<number | FygaroTopupHistoryQueryError> => {
+  const window = await readFygaroTopupWindowLast24h(args)
+  return window instanceof Error ? window : window.grossCents
+}
+
+export type FygaroTopupCompletion = {
+  // Whether the audit row was already promoted to Completed by a prior delivery.
+  completed: boolean
+  // The NET credited, in cents, when the row records one. Carried alongside the
+  // boolean because the paths that ask this question are exactly the paths with
+  // no fee breakdown of their own: a delivery that merely CONFIRMS an earlier
+  // credit re-stamps the customer's status, and without this it would stamp
+  // `credited` with no amount — against a schema that promises `netAmount` is
+  // "present once credited". Undefined when the row has no final_amount (an
+  // older row, or one promoted by a path that did not write the breakdown).
+  netAmountCents?: number
+}
+
+// Whether this Fygaro payment was already fully processed, and for how much.
+// Used as the processed-marker for webhook re-deliveries. A lookup failure
+// degrades to not-completed — the credit itself is exactly-once under
+// withPaymentIdempotency, so a false negative can never double-pay; it only
+// costs a redundant cached-send replay.
+export const readFygaroTopupCompletion = async (
+  transactionId: string,
+): Promise<FygaroTopupCompletion> => {
+  if (!ErpNext?.findBridgeTransferRequest) return { completed: false }
   const doc = await ErpNext.findBridgeTransferRequest(`fygaro:${transactionId}`)
   if (doc instanceof Error) {
     baseLogger.warn(
       { transactionId, error: doc },
       "Failed to check Fygaro topup completion; treating as not completed",
     )
-    return false
+    return { completed: false }
   }
-  return doc?.status === BridgeTransferRequestStatus.Completed
+  if (doc?.status !== BridgeTransferRequestStatus.Completed) return { completed: false }
+
+  // Frappe hands back numbers or numeric strings depending on the field type,
+  // and null for an unset field — `Number(null)` is 0, which would report a
+  // credited top-up as having delivered nothing. Anything unparsable or
+  // non-positive is simply not reported.
+  const netDollars = doc.final_amount == null ? NaN : Number(doc.final_amount)
+  return {
+    completed: true,
+    netAmountCents:
+      Number.isFinite(netDollars) && netDollars > 0
+        ? Math.round(netDollars * 100)
+        : undefined,
+  }
 }
 
 // Called after the treasury -> user intraledger credit succeeds: promotes the
@@ -350,6 +390,55 @@ export const completeFygaroTopup = async ({
       sourceEventId: transactionId,
       sourceEventType: "fygaro.payment",
       sourceSystemsSeen: ["fygaro_webhook", "ibex_intraledger_credit"],
+      rawPayload,
+    }),
+  )
+}
+
+/**
+ * Record WHY a captured payment was not credited, on the row that was already
+ * written when it arrived.
+ *
+ * Two jobs, and both matter. It is the ops-visible answer to "this customer was
+ * charged, what happened" — previously reconstructable only from a Discord
+ * alert. And it is what takes the row OUT of the daily-allowance sum: an
+ * uncredited payment delivered no value, so it must not spend the allowance
+ * that governs value delivered (see sumFygaroTopupGrossCentsSince).
+ *
+ * Status deliberately stays `Fiat Received`. The money really was received;
+ * inventing a new status would break every existing reader, including the
+ * allowance sum's own status filter.
+ */
+export const markFygaroTopupNotCredited = async ({
+  transactionId,
+  accountId,
+  amount,
+  currency,
+  reason,
+  rawPayload,
+}: {
+  transactionId: string
+  accountId?: AccountId | string
+  amount: string
+  currency: string
+  reason: string
+  rawPayload: unknown
+}): Promise<true | BridgeTransferRequestUpsertError> => {
+  return upsert(
+    new BridgeTransferRequest({
+      requestId: `fygaro:${transactionId}`,
+      transactionType: BridgeTransferRequestTransactionType.Topup,
+      status: BridgeTransferRequestStatus.FiatReceived,
+      provider: "Fygaro",
+      asset: "USD",
+      network: "Card",
+      amount: String(amount),
+      currency: String(currency),
+      accountId,
+      failureReason: reason,
+      sourceEventId: transactionId,
+      sourceEventType: "fygaro.payment",
+      sourceSystemsSeen: ["fygaro_webhook"],
       rawPayload,
     }),
   )

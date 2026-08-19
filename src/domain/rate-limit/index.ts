@@ -2,6 +2,7 @@ import {
   getFailedLoginAttemptPerIpLimits,
   getFailedLoginAttemptPerLoginIdentifierLimits,
   getFygaroCheckoutCreateAttemptLimits,
+  getFygaroTopupAllowanceAttemptLimits,
   getInviteCreateAttemptLimits,
   getInviteTargetAttemptLimits,
   getInvoiceCreateAttemptLimits,
@@ -13,6 +14,7 @@ import {
 
 import {
   FygaroCheckoutCreateRateLimiterExceededError,
+  FygaroTopupAllowanceRateLimiterExceededError,
   InviteCreateRateLimiterExceededError,
   InviteTargetRateLimiterExceededError,
   InvoiceCreateForRecipientRateLimiterExceededError,
@@ -35,6 +37,7 @@ export const RateLimitPrefix = {
   inviteCreate: "invite_daily",
   inviteTarget: "invite_target",
   fygaroCheckoutCreate: "fygaro_checkout_create",
+  fygaroTopupAllowance: "fygaro_topup_allowance",
 } as const
 
 export const RateLimitConfig: { [key: string]: RateLimitConfig } = {
@@ -90,5 +93,14 @@ export const RateLimitConfig: { [key: string]: RateLimitConfig } = {
     key: RateLimitPrefix.fygaroCheckoutCreate,
     limits: getFygaroCheckoutCreateAttemptLimits(),
     error: FygaroCheckoutCreateRateLimiterExceededError,
+  },
+  // The read side of the same ERPNext dependency, and the CHEAPER one to abuse:
+  // no amount argument, so nothing can short-circuit before the trailing-24h
+  // list query runs. Its own key so a customer who has spent the mutation's
+  // budget can still be told what is left of their allowance.
+  fygaroTopupAllowance: {
+    key: RateLimitPrefix.fygaroTopupAllowance,
+    limits: getFygaroTopupAllowanceAttemptLimits(),
+    error: FygaroTopupAllowanceRateLimiterExceededError,
   },
 }

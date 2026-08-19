@@ -21,6 +21,7 @@
 import { Request, Response } from "express"
 
 import { FygaroConfig } from "@config"
+import { AccountLevel } from "@domain/accounts"
 import { CouldNotFindAccountFromUsernameError } from "@domain/errors"
 import { ResourceAttemptsLockServiceError } from "@domain/lock"
 import { getFlashFeeDiscountPercent } from "@services/frappe/fee-discounts"
@@ -31,7 +32,8 @@ import { AccountsRepository } from "@services/mongoose"
 import {
   writeFygaroTopupRequest,
   completeFygaroTopup,
-  isFygaroTopupCompleted,
+  readFygaroTopupCompletion,
+  markFygaroTopupNotCredited,
   sumFygaroTopupGrossCentsLast24h,
 } from "@services/frappe/BridgeTransferRequestWriter"
 import { alertBridge, generateDedupKey } from "@services/alerts"
@@ -42,13 +44,15 @@ import {
   FygaroCreditError,
   INSUFFICIENT_TREASURY_FLOAT_STEP,
 } from "../credit-topup"
-import { getFygaroSettings } from "../fygaro-settings"
+import { getFygaroSettings, type FygaroSettings } from "../fygaro-settings"
 import { parseCustomReference } from "../../checkout"
 import {
   consumeIntent,
   readIntent,
+  recordIntentOutcome,
   releaseIntentReservation,
   type FygaroCheckoutIntent,
+  type FygaroTopupOutcomeState,
 } from "../../checkout-intent-store"
 import { evaluateCreditGate, RecordOnlyReason } from "../fees"
 
@@ -120,6 +124,42 @@ const RECORD_ONLY_ALERT_TITLE: Record<
   "intent-mismatch":
     "Fygaro payment does not match the checkout Flash signed for it — not auto-credited",
   "non-positive-net": "Fygaro payment net after fees is not positive — not auto-credited",
+}
+
+// The number behind a threshold refusal, so the customer can be told "above
+// your $125 daily limit" rather than "declined". Only the gates that turn on a
+// threshold have one; everything else is our fault, not theirs, and gets no
+// number because there is none to give.
+//
+// `daily-limit-exceeded` sends what is LEFT, not the cap. The customer-facing
+// sentence built from this number says "more than your REMAINING daily top-up
+// limit of $X", and the cap is not that: a level-1 account that has spent $100
+// of $125 and pays $60 would be told "$60 is more than your remaining limit of
+// $125.00" — arithmetically false, and it withholds the only actionable figure,
+// the $25 actually left.
+const thresholdCentsFor = (
+  reason: RecordOnlyReason,
+  settings: FygaroSettings | undefined,
+  level: AccountLevel,
+  priorDayGrossCents: number | undefined,
+): number | undefined => {
+  if (!settings) return undefined
+  if (reason === "daily-limit-exceeded") {
+    const capUsd = settings.dailyTopupLimits[level]
+    // `history-unavailable` precedes this gate, so the prior sum is defined
+    // whenever the reason is `daily-limit-exceeded`. If it somehow is not, send
+    // no number at all rather than the cap — the generic wording is honest, a
+    // wrong number is not.
+    if (capUsd === undefined || priorDayGrossCents === undefined) return undefined
+    return Math.max(0, Math.round(capUsd * 100) - priorDayGrossCents)
+  }
+  const usd =
+    reason === "over-limit"
+      ? settings.autoCreditLimit
+      : reason === "under-minimum"
+        ? settings.minimumTopup
+        : undefined
+  return usd === undefined ? undefined : Math.round(usd * 100)
 }
 
 export const paymentHandler = async (req: Request, res: Response) => {
@@ -257,6 +297,34 @@ export const paymentHandler = async (req: Request, res: Response) => {
       ? undefined
       : await resolveAccountByPayerEmail(payload.client?.email)
 
+    // Stamp what we know about this payment so the app can stop guessing. Never
+    // throws and never blocks: this rides the money-moving path, and a status
+    // write is not worth failing a credit over.
+    //
+    // Declared HERE, above the audit write, because the very first thing worth
+    // stamping happens the moment that write succeeds — and because the
+    // unattributed branch below is terminal too: it needs nothing but
+    // `intentId`, and leaving it out of reach is what left a customer polling
+    // PROCESSING forever on a payment ops was crediting by hand.
+    const recordOutcome = async (outcome: {
+      state: FygaroTopupOutcomeState
+      reason?: string
+      netAmountCents?: number
+      detailCents?: number
+    }) => {
+      if (!intentId) return
+      await recordIntentOutcome({
+        intentId,
+        // Stamped with the TRANSACTION, not just the intent. The record is
+        // keyed on the intent, but one signed link can be paid twice inside its
+        // window, so an outcome that does not name the payment it is about
+        // cannot be used to decide anything about a different payment — see the
+        // already-credited guard below.
+        outcome: { ...outcome, transactionId, atMs: Date.now() },
+        ttlSeconds: FygaroConfig.checkout?.ttlSeconds ?? 900,
+      })
+    }
+
     const auditResult = await writeFygaroTopupRequest({
       transactionId,
       amount: String(payload.amount),
@@ -291,6 +359,19 @@ export const paymentHandler = async (req: Request, res: Response) => {
       // 500 so Fygaro retries and the audit gap can self-heal.
       return res.status(500).json({ error: "Failed to persist audit row" })
     }
+
+    // The payment is now an OBSERVED fact, recorded on our side — which is the
+    // first moment "we have your payment" is a claim the server can back.
+    //
+    // Without this stamp the status query has only the intent record, and that
+    // is written when the checkout link is MINTED, not when it is paid. Reading
+    // "no outcome" as PROCESSING therefore told a customer whose card was
+    // DECLINED that their payment had been received and was being credited —
+    // the same unbacked claim this workstream exists to delete, moved one
+    // screen later and given a server response to stand on. `recordIntentOutcome`
+    // refuses to let this overwrite a terminal outcome, so a re-delivery of an
+    // already-credited payment cannot walk the answer backwards.
+    await recordOutcome({ state: "received" })
 
     // Look the authorisation up ONCE, and do it BEFORE the unattributed branch
     // below, so every terminal answer in this handler can let go of the hold
@@ -341,6 +422,11 @@ export const paymentHandler = async (req: Request, res: Response) => {
       )
       if (dedupe instanceof Error) {
         baseLogger.info({ transactionId }, "Duplicate Fygaro payment webhook")
+        // Terminal for this payment too, so stamp it for the same reason the
+        // non-deduped return below does. A re-delivery arriving after a first
+        // delivery whose Redis stamp failed would otherwise leave the app
+        // polling PROCESSING forever on a payment ops is crediting by hand.
+        await recordOutcome({ state: "held-for-review", reason: "unattributed" })
         return res.status(200).json({ status: "already_processed" })
       }
       // When the payer email resolved to an account, name the username in the
@@ -384,6 +470,13 @@ export const paymentHandler = async (req: Request, res: Response) => {
       // resolves never reaches the redemption paths below, so release its hold
       // here or it sits on the allowance until the JWT expires.
       await releaseAuthorizedHold()
+      // ...and stamp, for the same reason the hold is released: this IS the
+      // final answer for this payment. A signed checkout whose username stopped
+      // resolving between minting and paying leaves an app polling the status
+      // query; without a stamp it polls PROCESSING until the record expires
+      // while ops credits the payment by hand. `unattributed` is one of ours,
+      // not the customer's, and the status resolver words it that way.
+      await recordOutcome({ state: "held-for-review", reason: "unattributed" })
       return res.status(200).json({ status: "recorded", attributed: false })
     }
     const accountId = account.id
@@ -515,6 +608,80 @@ export const paymentHandler = async (req: Request, res: Response) => {
         return res.status(500).json({ error: "ERPNext read unavailable; will retry" })
       }
 
+      // Already credited? Then this refusal is about a payment that has ALREADY
+      // been delivered, and every line below it would write a falsehood over
+      // the truth. The credit path guards on this marker; the record-only path
+      // must guard on it too, because a payment that credited on an earlier
+      // delivery CAN come back through the gate and be refused:
+      //
+      //   tx1 ($60) credits — Completed, no failure_reason, counts in the sum.
+      //   tx2 ($100) is refused `daily-limit-exceeded` and stamped uncredited.
+      //   Ops hand-credits tx2, and `sumFygaroTopupGrossCentsSince` correctly
+      //   counts a Completed row again whatever reason it once carried.
+      //   Fygaro re-delivers tx1 hours later: prior is now $100, $100+$60 is
+      //   over the $125 cap, and the gate refuses money already in the wallet.
+      //
+      // Nothing below stops that on its own. The record-only timelock lives in
+      // a DIFFERENT redis namespace (`locks:idempotencykey:`) from the credit
+      // path's releasing lock (`locks:payment-idempotency:`), so it is still
+      // free on such a re-delivery. Unguarded, this pages ops with a false
+      // "manual credit needed", stamps a `failure_reason` onto tx1's Completed
+      // row, and overwrites the customer's CREDITED status with "held for
+      // review — more than your remaining daily limit" for $60 they already have.
+      const priorCompletion = await readFygaroTopupCompletion(transactionId)
+      // TWO markers, because the first one can lag the money. Promoting the
+      // ERPNext row is itself a write this handler alerts on when it fails
+      // ("Fygaro credit succeeded but ERPNext promotion failed", below): after
+      // that the money IS in the wallet and the row still reads Fiat Received.
+      // A guard that asks only ERPNext walks straight past it, and the refusal
+      // reasons that reach here are ordinary — `auto-credit-disabled` is
+      // exactly what ops flip while cleaning up the very ERPNext incident that
+      // broke the promotion.
+      //
+      // The recorded outcome is the second marker: it is stamped from the
+      // credit path independently of whether the promotion succeeded, so
+      // between them they cover each other's gap.
+      //
+      // It must name THIS transaction. `priorCompletion` is keyed on the
+      // transaction; the intent record is keyed on the intent, and one signed
+      // link can be paid more than once inside its 900s window — the replay
+      // `authorizeFygaroTopup` already guards against. Accepting any `credited`
+      // stamp on the intent turns tx1's credit into an answer about tx2:
+      // customer pays a $100 link twice, tx1 credits and stamps the intent, tx2
+      // arrives, the gate correctly refuses `daily-limit-exceeded`, and this
+      // branch acks 200 `already_processed` for it — no
+      // `markFygaroTopupNotCredited` (so it eats the cap for 24h), no alert, no
+      // ops-feed line, and `fygaroTopupStatus` reports CREDITED with tx1's net
+      // for a second real capture that never reached the wallet. It would also
+      // swallow `intent-mismatch`, the one reason that exists to catch a replay.
+      //
+      // A record with no `transactionId` (written before that field existed)
+      // does not match either, so it falls through to the record-only path —
+      // an extra ops alert, never a silently-swallowed capture.
+      const creditedOutcome =
+        authorizedIntent?.outcome?.state === "credited" &&
+        authorizedIntent.outcome.transactionId === transactionId
+          ? authorizedIntent.outcome
+          : undefined
+      if (priorCompletion.completed || creditedOutcome) {
+        baseLogger.info(
+          { transactionId, reason: gate.reason },
+          "Fygaro payment already credited — ignoring a late record-only refusal",
+        )
+        // With the net read back off the completed row. This branch exists for
+        // the case where the FIRST delivery's stamp never landed, so there is
+        // usually no recorded outcome for the store-side merge to preserve —
+        // stamping `credited` with no amount would show the customer a credited
+        // top-up and no figure, against a schema that promises `netAmount` is
+        // present once credited.
+        await recordOutcome({
+          state: "credited",
+          netAmountCents:
+            priorCompletion.netAmountCents ?? creditedOutcome?.netAmountCents,
+        })
+        return res.status(200).json({ status: "already_processed" })
+      }
+
       // Deterministic record-only path (non-usd, over-limit,
       // no-daily-limit-for-level, daily-limit-exceeded, under-minimum,
       // non-positive-net, auto-credit-disabled, and the silent credit-disabled
@@ -527,6 +694,23 @@ export const paymentHandler = async (req: Request, res: Response) => {
       )
       if (lockResult instanceof Error) {
         baseLogger.info({ transactionId }, "Duplicate Fygaro payment webhook")
+        // Stamp before returning, the same argument as the credit path's
+        // already-processed short-circuit. `recordIntentOutcome` swallows its
+        // write failures by design, so a first delivery that took this lock and
+        // then failed its Redis stamp leaves EVERY retry short-circuiting here
+        // — and the customer polling "processing" until the record expires, for
+        // a payment that is permanently held for review. The gate ran on this
+        // delivery too, so the reason and number are in hand and identical.
+        await recordOutcome({
+          state: "held-for-review",
+          reason: gate.reason,
+          detailCents: thresholdCentsFor(
+            gate.reason,
+            settings,
+            account.level,
+            priorDayGrossCents,
+          ),
+        })
         return res.status(200).json({ status: "already_processed" })
       }
       if (gate.reason !== "credit-disabled") {
@@ -571,6 +755,67 @@ export const paymentHandler = async (req: Request, res: Response) => {
       // Terminal: this reason will not change on retry, so the authorisation is
       // spent and its hold on the daily allowance must be released.
       await redeemIntent()
+      // Take the row OUT of the allowance sum and give ops the reason. An
+      // uncredited payment delivered no value, so it must not spend the
+      // allowance that governs value delivered — otherwise this refusal
+      // refuses the customer's next legitimate top-up too.
+      const marked = await markFygaroTopupNotCredited({
+        transactionId,
+        accountId,
+        amount: String(payload.amount),
+        currency,
+        reason: gate.reason,
+        rawPayload: payload,
+      })
+      if (marked instanceof Error) {
+        // The one write on this path that carries the behaviour change, so it
+        // is the last one that can be allowed to fail silently. The dedupe
+        // timelock above is non-releasing and already taken, so Fygaro's next
+        // retry acks "already_processed" and nothing self-heals: the row keeps
+        // no `failure_reason`, stays inside the trailing-24h sum, and this
+        // refused payment goes on consuming the customer's cap for 24h —
+        // refusing their next LEGITIMATE top-up, which is precisely the failure
+        // this stamp exists to end. Critical and paged, matching the audit
+        // write above, because only a human can repair it now.
+        baseLogger.error(
+          { error: marked, transactionId, reason: gate.reason },
+          "Failed to stamp a Fygaro refusal as not-credited",
+        )
+        alertBridge({
+          // Its OWN key, not `erpnextFygaroAudit`. That key is claimed by the
+          // audit-WRITE failure above, and the delivery order that produces
+          // THIS failure is exactly the one that produces that one first:
+          // write fails -> critical fires -> 500 -> Fygaro retries minutes
+          // later -> write succeeds, the gate refuses, and the stamp fails.
+          // Within informDedupTtlMs (60 minutes) Slack/Discord would suppress
+          // this alert and PagerDuty would fold it into the open incident —
+          // silently swallowing the one that says a customer's cap is being
+          // consumed by a payment they never received value for.
+          dedupKey: generateDedupKey.fygaroRefusalNotStamped(transactionId),
+          source: "erpnext-audit",
+          severity: "critical",
+          title:
+            "Fygaro refusal not stamped — payment still counts against the customer's daily allowance",
+          detail: marked.message,
+          context: {
+            transaction_id: transactionId,
+            reason: gate.reason,
+            account_id: accountId,
+          },
+        })
+      }
+      await recordOutcome({
+        state: "held-for-review",
+        reason: gate.reason,
+        // The number the customer needs to hear back. Only the gates that turn
+        // on a threshold have one; the rest are our problems, not theirs.
+        detailCents: thresholdCentsFor(
+          gate.reason,
+          settings,
+          account.level,
+          priorDayGrossCents,
+        ),
+      })
       return res.status(200).json({ status: "recorded", credited: false })
     }
 
@@ -587,8 +832,30 @@ export const paymentHandler = async (req: Request, res: Response) => {
     const outcome = await LockService().lockPaymentIdempotencyKey(
       `fygaro-payment:${transactionId}` as IdempotencyKey,
       async () => {
-        if (await isFygaroTopupCompleted(transactionId)) {
+        const priorCompletion = await readFygaroTopupCompletion(transactionId)
+        if (priorCompletion.completed) {
           baseLogger.info({ transactionId }, "Duplicate Fygaro payment webhook")
+          // Stamp before returning. `recordIntentOutcome` swallows its write
+          // failures by design, so a first delivery that credited but failed to
+          // stamp would leave every retry short-circuiting here — and the
+          // customer polling "processing" until the record expires, for money
+          // that is already in their wallet. Re-stamping an outcome that is
+          // already there is a no-op write of the same value.
+          //
+          // The net comes off the COMPLETED ROW first, and only falls back to
+          // this delivery's recomputed `fees.netCents` when the row carries no
+          // figure. `fees` is derived from inputs that can legitimately differ
+          // between deliveries — `getFlashFeeDiscountPercent` is fail-open to 0
+          // and `getFygaroSettings` is a 60s cache over an operator-editable
+          // doctype — so a whitelist read that fails on the retry would
+          // recompute a SMALLER net than the one actually credited. The store's
+          // merge prefers the incoming value, so that wrong number would
+          // overwrite the right one and show the customer $96.50 CREDITED for
+          // $99.00 that is in their wallet.
+          await recordOutcome({
+            state: "credited",
+            netAmountCents: priorCompletion.netAmountCents ?? fees.netCents,
+          })
           return { code: 200, body: { status: "already_processed" } }
         }
 
@@ -649,6 +916,14 @@ export const paymentHandler = async (req: Request, res: Response) => {
           // and so a provider retry (which this branch invites) can still
           // verify the payment.
           await releaseAuthorizedHold()
+          // Deliberately NOT stamped with a failure_reason, unlike the
+          // record-only path above. A failed credit is not terminal — this
+          // branch exists to invite a provider retry — so the payment is still
+          // in flight and must keep counting against the allowance. Marking it
+          // uncredited would drop it out of the sum while a retry is pending
+          // and let the customer authorise against allowance that is about to
+          // be spent.
+          await recordOutcome({ state: "failed", reason: "credit-failed" })
           return { code: 200, body: { status: "recorded", credited: false } }
         }
 
@@ -682,6 +957,8 @@ export const paymentHandler = async (req: Request, res: Response) => {
             context: { transaction_id: transactionId },
           })
         }
+
+        await recordOutcome({ state: "credited", netAmountCents: fees.netCents })
 
         notifyOpsEvent({
           flow: "deposit",

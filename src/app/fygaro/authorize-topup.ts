@@ -1,4 +1,3 @@
-import { FygaroConfig } from "@config"
 import { AccountLevel } from "@domain/accounts"
 import { alertBridge, generateDedupKey } from "@services/alerts"
 import { baseLogger } from "@services/logger"
@@ -23,6 +22,8 @@ import {
 } from "@services/fygaro/webhook-server/fees"
 import { getFlashFeeDiscountPercent } from "@services/frappe/fee-discounts"
 import { sumFygaroTopupGrossCentsLast24h } from "@services/frappe/BridgeTransferRequestWriter"
+
+import { fygaroCheckoutMasterGate } from "./checkout-master-gate"
 
 /**
  * Authorise a card top-up BEFORE the customer is sent to Fygaro.
@@ -124,34 +125,25 @@ export const authorizeFygaroTopup = async ({
   amountCents: number
   nowMs?: number
 }): Promise<AuthorizeTopupResult> => {
-  // The yaml master gates come first, before any ERPNext read. `fygaro.enabled`
-  // off means the webhook server 503s every delivery (fygaroEnabledGuard), so a
-  // payment made against a link minted here would not even be RECORDED; and
-  // `credit.enabled` off — the default, and the very first rollout state —
-  // means the webhook records the payment with reason `credit-disabled` and
-  // credits nothing. Either way the customer is charged and uncredited, which
-  // is the failure this whole path exists to prevent.
-  const creditEnabled = Boolean(FygaroConfig?.credit?.enabled)
-  if (!FygaroConfig?.enabled || !creditEnabled) {
-    return { authorized: false, reason: "checkout-disabled" }
+  // The yaml master gates come first, before any ERPNext read: with any of them
+  // off, a payment made against a link minted here is either never RECORDED
+  // (`fygaro.enabled`), recorded and never credited (`credit.enabled`), or
+  // impossible to sign at all (`checkout.*`) — the customer charged and
+  // uncredited, which is the failure this whole path exists to prevent.
+  //
+  // Shared with `getFygaroTopupAllowance` rather than restated, so the surface
+  // that REPORTS an allowance and the surface that GRANTS one cannot disagree
+  // about whether checkout is on. The gate hands back the config it checked,
+  // so the link below is signed with exactly the values that passed it.
+  const master = fygaroCheckoutMasterGate()
+  if (!master.ok) {
+    return { authorized: false, reason: master.reason }
   }
-
-  const checkoutConfig = FygaroConfig.checkout
-  if (!checkoutConfig?.enabled || !checkoutConfig.buttonUrl || !checkoutConfig.keyId) {
-    return { authorized: false, reason: "checkout-disabled" }
-  }
-
-  const secret = FygaroConfig.webhook?.secrets?.[checkoutConfig.keyId]
-  if (!secret) {
-    // Misconfiguration, not a user error: the key id names a secret that is not
-    // present. Fail as "disabled" so the caller degrades to the legacy flow
-    // rather than showing the customer an error we caused.
-    baseLogger.error(
-      { keyId: checkoutConfig.keyId },
-      "Fygaro checkout enabled but no signing secret for keyId",
-    )
-    return { authorized: false, reason: "checkout-disabled" }
-  }
+  // True by construction past the gate above — `credit.enabled` is one of the
+  // four switches it refuses on. Named rather than inlined because
+  // `evaluateCreditGate` takes it as a parameter and reading `true` at the call
+  // site says nothing about why.
+  const creditEnabled = true
 
   // Returns undefined (never throws) when the ERPNext row is unreadable or
   // malformed — same "record-only" posture the webhook takes.
@@ -248,6 +240,16 @@ export const authorizeFygaroTopup = async ({
         // so a record naming another account means the two disagree and the
         // link is not ours to hand out.
         open.intent.accountId === accountId &&
+        // A record carrying ANY outcome has been paid against. The record
+        // deliberately outlives redemption now (the status poll reads it), so
+        // "the record still exists" no longer implies "nobody has used this
+        // link" — that inference has to be made explicitly, or a redemption
+        // whose zrem failed would see the link handed back to a customer who
+        // has already been charged for it. `received` counts as much as the
+        // terminal states do: it means the webhook has SEEN a payment against
+        // this authorisation, which is precisely when re-offering the link
+        // would invite the customer to pay it a second time.
+        open.intent.outcome === undefined &&
         open.intent.checkoutUrl !== undefined &&
         open.intent.expiresAtMs !== undefined &&
         open.intent.expiresAtMs > nowMs
@@ -266,6 +268,10 @@ export const authorizeFygaroTopup = async ({
               username: open.intent.username,
               intentId: open.intent.intentId,
             }),
+            // The re-offered link is the SAME authorisation, so it must poll
+            // under the same id — a fresh one would report "processing"
+            // forever against an intent no payment will ever reference.
+            intentId: open.intent.intentId,
           },
           // The hold is already counted, so nothing is subtracted a second
           // time for handing the same link back.
@@ -376,14 +382,14 @@ export const authorizeFygaroTopup = async ({
 
   const intentId = newIntentId()
   const checkout = buildFygaroCheckout({
-    buttonUrl: checkoutConfig.buttonUrl,
+    buttonUrl: master.buttonUrl,
     username,
     intentId,
     amountCents,
     currency: "USD",
-    keyId: checkoutConfig.keyId,
-    secret,
-    ttlSeconds: checkoutConfig.ttlSeconds,
+    keyId: master.keyId,
+    secret: master.secret,
+    ttlSeconds: master.ttlSeconds,
     nowMs,
   })
 
@@ -400,7 +406,7 @@ export const authorizeFygaroTopup = async ({
     checkoutUrl: checkout.url,
     expiresAtMs: checkout.expiresAt.getTime(),
   }
-  const saved = await saveIntent({ intent, ttlSeconds: checkoutConfig.ttlSeconds })
+  const saved = await saveIntent({ intent, ttlSeconds: master.ttlSeconds })
   if (saved instanceof FygaroReservationWriteError) {
     // The hold could not be recorded, so the next request would see this
     // allowance as still free and hand it out again — the over-issue the
@@ -410,15 +416,28 @@ export const authorizeFygaroTopup = async ({
     return refuseTransient("reservations-unavailable")
   }
   if (saved instanceof Error) {
-    // The signed URL is still perfectly payable and the webhook gate still
-    // applies; only our own after-the-fact cross-check and reservation are
-    // missing. Log it and proceed rather than blocking a legitimate top-up on a
-    // cache write.
+    // Only the after-the-fact CROSS-CHECK RECORD is missing. The signed URL is
+    // still perfectly payable and the webhook's own credit gate still applies
+    // in full, so proceeding here is the same unverified-legacy position every
+    // pre-intent payment is in — not a reason to refuse a legitimate top-up.
+    //
+    // This branch is safe ONLY because `saveIntent` writes the reservation
+    // before the record (see the ordering note there). Any error that reaches
+    // here is therefore a record/claim failure with the hold already in Redis;
+    // a reservation that could not be written cannot reach this line at all —
+    // it returns FygaroReservationWriteError and is refused above. If that
+    // ordering is ever reversed, this branch starts authorising links against
+    // an allowance nothing is holding, and must become a refusal instead.
     baseLogger.warn(
       { intentId, error: saved.constructor.name },
-      "Failed to persist the Fygaro cross-check record; the hold is in place, so proceeding",
+      "Failed to persist the Fygaro cross-check record; proceeding on the credit gate alone",
     )
-    return { authorized: true, checkout, remainingAllowanceCents: allowanceCents }
+    // Deliberately NOT an early return. The hold is real, so this request has
+    // to be treated like every other authorised one from here down: it must go
+    // through the post-reserve concurrency re-read (a racing request holds
+    // allowance this one has not seen), and it must report the allowance NET of
+    // its own reservation. Returning here reported the pre-reservation figure,
+    // which now overstates the headroom by exactly this request's amount.
   }
 
   // Reserve, then re-read. Two requests that raced past the check above have
