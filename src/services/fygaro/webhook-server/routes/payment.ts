@@ -828,12 +828,6 @@ export const paymentHandler = async (req: Request, res: Response) => {
     // the lock withPaymentIdempotency takes internally (that one is scoped to
     // the sender wallet), so there is no nested-acquire collision.
     const creditAccountId = accountId
-    // Captured out here, where the `account !== undefined` guard above still
-    // narrows it — inside the closure below TypeScript re-widens a `let`. The
-    // credit notification needs the whole account (kratosUserId to find the
-    // device tokens, notificationSettings to respect the user's preferences),
-    // not just its id.
-    const creditAccount = account
     const { fees } = gate
     const outcome = await LockService().lockPaymentIdempotencyKey(
       `fygaro-payment:${transactionId}` as IdempotencyKey,

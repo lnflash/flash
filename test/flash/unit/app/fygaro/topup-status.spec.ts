@@ -95,6 +95,41 @@ describe("getFygaroTopupStatus", () => {
     })
   })
 
+  it("reports a failed credit as failed, not as anything terminal-sounding", async () => {
+    mockReadIntent.mockResolvedValue({
+      found: true,
+      intent: {
+        ...INTENT,
+        outcome: { state: "failed", reason: "credit-failed", atMs: 1 },
+      },
+    })
+    const res = await ask()
+
+    expect(res.status).toMatchObject({ state: "failed", reason: "credit-failed" })
+  })
+
+  it("degrades an outcome state this build has no member for to unconfirmed", async () => {
+    // `outcome.state` is a string off a Redis record ANOTHER deployment wrote,
+    // and it is handed straight to a GraphQL enum. Passing an unrecognised one
+    // through threw `Enum "FygaroTopupState" cannot represent value: ...` on
+    // the status screen of a customer who has just been charged — a hard error
+    // over a record we can read perfectly well. `unconfirmed` asserts nothing.
+    mockReadIntent.mockResolvedValue({
+      found: true,
+      intent: {
+        ...INTENT,
+        outcome: { state: "refunded", netAmountCents: 5652, atMs: 1 },
+      },
+    })
+    const res = await ask()
+
+    expect(res.found).toBe(true)
+    expect(res.status.state).toBe("unconfirmed")
+    // ...and specifically not dressed up as receipt, which is the one thing an
+    // unknown state can never be assumed to mean.
+    expect(res.status.state).not.toBe("processing")
+  })
+
   it("never reveals another account's payment", async () => {
     // The id is a uuid, so guessing is impractical — but payment state is
     // exactly the thing that must not leak on a bare id match.

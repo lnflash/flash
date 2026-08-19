@@ -14,7 +14,9 @@ jest.mock("@services/logger", () => ({
   baseLogger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }))
 
+import type { FygaroTopupState } from "@app/fygaro/topup-status"
 import FygaroTopupStatusQuery from "@graphql/public/root/query/fygaro-topup-status"
+import { FygaroTopupStateEnum } from "@graphql/public/types/object/fygaro-topup-status"
 
 const ACCOUNT_ID = "account-001" as AccountId
 const CHECKOUT_ID = "3f5a1c9e-2b7d-4a10-9f33-6c8e2d4b7a51"
@@ -237,5 +239,58 @@ describe("fygaroTopupStatus resolver", () => {
         OURS,
       )
     })
+  })
+})
+
+// Every case above calls `resolve()` directly, so `GraphQLEnumType.serialize` —
+// the step that turns the resolver's internal string into the wire member —
+// never runs, and a value no member carries looks exactly like a value every
+// member carries. The five wire strings live in two places: the enum's `value:`
+// entries and the `FygaroTopupState` union the app layer returns. Typing the
+// `value:` side against that union makes a rename a compile error; this makes
+// it a test failure as well, on the enum every polling client hits.
+describe("fygaroTopupStatus state survives GraphQL serialization", () => {
+  const serialize = (value: unknown) => FygaroTopupStateEnum.serialize(value)
+
+  // A `Record` over the union, so the OTHER half of the drift — adding a state
+  // to `FygaroTopupOutcomeState`/`FygaroTopupState` and forgetting the enum
+  // member — cannot pass either: a new member of the union fails to compile
+  // here until it is listed, and listing it fails at runtime until the enum
+  // carries it.
+  const WIRE_MEMBER: Record<FygaroTopupState, string> = {
+    "unconfirmed": "UNCONFIRMED",
+    "processing": "PROCESSING",
+    "credited": "CREDITED",
+    "held-for-review": "HELD_FOR_REVIEW",
+    "failed": "FAILED",
+  }
+
+  it.each(Object.entries(WIRE_MEMBER))(
+    "serializes the %s the resolver returns as %s",
+    async (state, member) => {
+      const result = await askStatus({ state, authorizedAmountCents: 6000 })
+
+      // Would throw `Enum "FygaroTopupState" cannot represent value: ...` if
+      // the two sides had drifted — which is precisely what the customer would
+      // get, on the status screen for the payment this query exists to explain.
+      expect(serialize(result?.state)).toBe(member)
+    },
+  )
+
+  it("serializes the UNCONFIRMED substituted for an unreadable record", async () => {
+    // This one is a bare literal in the resolver rather than a value relayed
+    // from the app layer, so it is the member most able to drift on its own.
+    mockGetFygaroTopupStatus.mockResolvedValue({ found: false, unavailable: true })
+
+    const result = (await resolve(FygaroTopupStatusQuery as Query, {
+      checkoutId: CHECKOUT_ID,
+    })) as StatusPayload
+
+    expect(serialize(result?.state)).toBe("UNCONFIRMED")
+  })
+
+  it("still refuses a value no member carries", () => {
+    // The assertions above are only worth something if serialize can say no.
+    expect(() => serialize("held_for_review")).toThrow()
   })
 })

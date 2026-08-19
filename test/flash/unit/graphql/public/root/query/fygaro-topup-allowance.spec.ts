@@ -416,3 +416,34 @@ describe("fygaroTopupAllowance payload keeps the payload contract", () => {
     expect(storeDown.errors).toEqual([])
   })
 })
+
+// Every resolve of this field runs the trailing-24h ERPNext list query — the
+// same read whose failure refuses card top-ups for every user — and ROOT QUERY
+// FIELDS RESOLVE IN PARALLEL. Undeclared, `simpleEstimator({ defaultComplexity:
+// 1 })` scores it at 1 against the server's 200 ceiling, so one authenticated
+// document aliasing it 25 times fires 25 concurrent
+// `sumFygaroTopupGrossCentsSince` reads. The 30/min per-account limiter is not
+// an answer to that: it consumes once per RESOLVE, so it refuses the NEXT
+// request, after the burst has already landed.
+describe("fygaroTopupAllowance is budgeted for the read it performs", () => {
+  // src/servers/graphql-server.ts — createComplexityPlugin
+  const MAXIMUM_COMPLEXITY = 200
+
+  const declared = () => {
+    const complexity = FygaroTopupAllowanceQuery.extensions?.complexity
+    expect(typeof complexity).toBe("number")
+    return complexity as number
+  }
+
+  it("declares a complexity rather than taking the default of 1", () => {
+    expect(declared()).toBeGreaterThan(1)
+  })
+
+  it("costs enough that a second copy cannot fit in the same document", () => {
+    // The property that matters, expressed against the real ceiling rather than
+    // the literal: whatever the number, aliasing the field twice must be
+    // refused, and once must still be allowed.
+    expect(declared()).toBeLessThanOrEqual(MAXIMUM_COMPLEXITY)
+    expect(declared() * 2).toBeGreaterThan(MAXIMUM_COMPLEXITY)
+  })
+})

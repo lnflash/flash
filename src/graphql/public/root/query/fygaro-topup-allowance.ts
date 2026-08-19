@@ -47,6 +47,17 @@ const UNAVAILABLE_REASON: Record<
 const RATE_LIMITED: FygaroTopupAllowanceUnavailableReasonValue = "rate-limited"
 
 const FygaroTopupAllowanceQuery = GT.Field({
+  // Same budget as `fygaroCheckoutCreate`, and for the same reason: both run
+  // the trailing-24h ERPNext list query, and root fields resolve in PARALLEL.
+  // Unscored, `simpleEstimator({ defaultComplexity: 1 })` lets one document
+  // alias this field 25 times under the 200 ceiling and fire 25 concurrent
+  // `sumFygaroTopupGrossCentsSince` reads — the exact read whose failure
+  // refuses card top-ups for every user. The 30/min per-account limiter is no
+  // answer to that: it consumes once per RESOLVE, so it only refuses the NEXT
+  // request, after the burst has already landed. At 120 against a 200 ceiling
+  // only one allowance read fits in a document, which is all a client that is
+  // rendering one number ever needs.
+  extensions: { complexity: 120 },
   type: GT.NonNull(FygaroTopupAllowancePayload),
   description:
     "How much card top-up allowance this account has left today. When the allowance " +

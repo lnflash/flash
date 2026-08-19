@@ -90,8 +90,10 @@ const FygaroTopupAllowance = GT.Object({
  * for every customer on the top-up screen, with a fully green build.
  *
  * As the declared type of both sides, a rename on either is now a compile
- * error. (`fygaro-topup-status.spec.ts` also serializes every member through
- * the real enum, so a value that no member carries fails at runtime too.)
+ * error. (`fygaro-topup-allowance.spec.ts` — the suite for THIS field, next to
+ * the resolver's — also serializes every member through the real enum, so a
+ * value that no member carries fails at runtime too. `fygaro-topup-status.spec.ts`
+ * does the same for `FygaroTopupState`; neither covers the other's enum.)
  *
  * `rate-limited` is the one member with no `FygaroTopupAllowanceFailure` behind
  * it: the query refuses at the limiter, before the app layer is ever called, so

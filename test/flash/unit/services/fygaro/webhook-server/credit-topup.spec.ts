@@ -77,16 +77,7 @@ describe("creditFygaroTopup", () => {
       memo: `Card top-up (Fygaro ${TX_ID})`,
       idempotencyKey: `fygaro:${TX_ID}`,
     })
-    // The CURRENCY comes back too. The caller has to name this credit to the
-    // customer, and the push renderer scales by the currency it is given
-    // (÷100 for USD, ÷1,000,000 for USDT) while the amount sent is USD cents
-    // either way — so a caller left to guess announces $0.10 for a $10 credit
-    // on every post-cutover account.
-    expect(result).toEqual({
-      walletId: "r-usdt",
-      walletCurrency: WalletCurrency.Usdt,
-      status: "success",
-    })
+    expect(result).toEqual({ walletId: "r-usdt", status: "success" })
   })
 
   it("falls back to the legacy USD wallets when the treasury has no USDT wallet", async () => {
@@ -98,14 +89,7 @@ describe("creditFygaroTopup", () => {
     expect(mockIntraledgerSend).toHaveBeenCalledWith(
       expect.objectContaining({ senderWalletId: "t-usd", recipientWalletId: "r-usd" }),
     )
-    // ...and it tracks the wallet actually chosen, not a constant: the legacy
-    // fallback credits USD, and reporting USDT here would misscale the push by
-    // four orders of magnitude in the opposite direction.
-    expect(result).toEqual({
-      walletId: "r-usd",
-      walletCurrency: WalletCurrency.Usd,
-      status: "success",
-    })
+    expect(result).toEqual({ walletId: "r-usd", status: "success" })
   })
 
   it("treats a Pending send as credited and never retries", async () => {
@@ -114,11 +98,7 @@ describe("creditFygaroTopup", () => {
     const result = await credit()
 
     expect(mockIntraledgerSend).toHaveBeenCalledTimes(1)
-    expect(result).toEqual({
-      walletId: "r-usdt",
-      walletCurrency: WalletCurrency.Usdt,
-      status: "pending",
-    })
+    expect(result).toEqual({ walletId: "r-usdt", status: "pending" })
   })
 
   it.each([

@@ -1,4 +1,8 @@
-import { readIntent } from "@services/fygaro/checkout-intent-store"
+import {
+  readIntent,
+  type FygaroTopupOutcome,
+  type FygaroTopupOutcomeState,
+} from "@services/fygaro/checkout-intent-store"
 
 /**
  * What happened to the payment made against one checkout authorisation.
@@ -67,6 +71,33 @@ export type FygaroTopupStatusResult =
 // way: nothing about this payment is confirmed. Neither says "received".
 const UNCONFIRMED: FygaroTopupState = "unconfirmed"
 
+/**
+ * Stored outcome state -> the state the client is told.
+ *
+ * `received` is the webhook saying a payment arrived; that — and only that — is
+ * what becomes "processing". The rest carry through unchanged, but they carry
+ * through a MAP rather than a passthrough on purpose: `outcome.state` is a
+ * string off a Redis record that another deployment wrote, and the value goes
+ * straight to a GraphQL enum. A state a newer build stamps and this one has no
+ * member for would be handed to the serializer and throw
+ * `Enum "FygaroTopupState" cannot represent value: ...` — a hard error on the
+ * status screen of a customer who has just been charged, for a record we can
+ * read perfectly well.
+ */
+const STATE_BY_OUTCOME: Record<FygaroTopupOutcomeState, FygaroTopupState> = {
+  "received": "processing",
+  "credited": "credited",
+  "held-for-review": "held-for-review",
+  "failed": "failed",
+}
+
+// Same posture the reason mapping takes at the GraphQL edge: a value we do not
+// recognise is not a value we may assert anything about. `unconfirmed` is the
+// one answer that claims nothing — "we cannot confirm this yet, keep polling" —
+// so an unknown state degrades to it rather than to a wrong claim or a throw.
+const stateFor = (outcome: FygaroTopupOutcome | undefined): FygaroTopupState =>
+  outcome === undefined ? UNCONFIRMED : (STATE_BY_OUTCOME[outcome.state] ?? UNCONFIRMED)
+
 export const getFygaroTopupStatus = async ({
   intentId,
   accountId,
@@ -89,15 +120,10 @@ export const getFygaroTopupStatus = async ({
   return {
     found: true,
     status: {
-      // `received` is the webhook saying a payment arrived; that — and only
-      // that — is what the client renders as "processing". No outcome at all
-      // means no payment has been observed.
-      state:
-        outcome === undefined
-          ? UNCONFIRMED
-          : outcome.state === "received"
-            ? "processing"
-            : outcome.state,
+      // No outcome at all means no payment has been observed; everything else
+      // goes through the map above, which is also the guard against a state
+      // this build has no enum member for.
+      state: stateFor(outcome),
       authorizedAmountCents: lookup.intent.amountCents,
       netAmountCents: outcome?.netAmountCents,
       reason: outcome?.reason,
