@@ -616,6 +616,62 @@ describe("redemption leaves the record the status poll reads", () => {
       intent: { outcome: { state: "credited", netAmountCents: 9421 } },
     })
   })
+
+  it("lets a held-for-review stamp about ANOTHER payment land over a credited one", async () => {
+    // The two tests above make `credited` absorbing. It has to be absorbing per
+    // PAYMENT, not per intent, or it swallows the very stamp the webhook's
+    // transaction-scoped already-credited guard exists to produce:
+    //
+    //   Customer pays one $100 link twice inside its 900s window. tx1 credits
+    //   and stamps {credited, tx1, net 9421}. tx2 arrives, readFygaroTopup-
+    //   Completion(tx2) says not completed, the intent's credited marker names
+    //   tx1 so it is correctly not trusted, the gate refuses
+    //   `daily-limit-exceeded` and the handler stamps {held-for-review, tx2}.
+    //
+    // Dropped here, the record stays `credited` with tx1's net and
+    // getFygaroTopupStatus answers CREDITED — for a second real $100 capture
+    // sitting in manual review with nothing in the wallet.
+    await saveIntent({ intent: INTENT, ttlSeconds: TTL })
+    await recordIntentOutcome({
+      intentId: INTENT.intentId,
+      outcome: {
+        state: "credited",
+        netAmountCents: 9421,
+        transactionId: "tx-1",
+        atMs: NOW_MS,
+      },
+      ttlSeconds: TTL,
+    })
+
+    await recordIntentOutcome({
+      intentId: INTENT.intentId,
+      outcome: {
+        state: "held-for-review",
+        reason: "daily-limit-exceeded",
+        detailCents: 12500,
+        transactionId: "tx-2",
+        atMs: NOW_MS + 1000,
+      },
+      ttlSeconds: TTL,
+    })
+
+    const lookup = await readIntent(INTENT.intentId)
+    expect(lookup).toMatchObject({
+      intent: {
+        outcome: {
+          state: "held-for-review",
+          reason: "daily-limit-exceeded",
+          transactionId: "tx-2",
+        },
+      },
+    })
+    // And tx1's net does NOT ride along: it is what reached the wallet for a
+    // DIFFERENT capture, so showing it against tx2 puts a figure on the screen
+    // that nobody credited for this payment.
+    expect(
+      lookup.found ? lookup.intent.outcome?.netAmountCents : "record missing",
+    ).toBeUndefined()
+  })
 })
 
 // The guards above are only worth anything if they are evaluated against the
@@ -773,6 +829,58 @@ describe("mergeIntentOutcome", () => {
         reason: "credit-failed",
         atMs: NOW_MS + 2,
       }),
+    ).toBeUndefined()
+  })
+
+  it("lets a non-credited stamp about a DIFFERENT payment land", () => {
+    // `credited` is absorbing per PAYMENT, not per intent. One signed link can
+    // be paid twice inside its window, and the webhook's already-credited guard
+    // is transaction-scoped precisely so tx2 is refused on its own merits and
+    // stamped `held-for-review`. Dropping that here would leave the record
+    // saying CREDITED, with tx1's net, about a capture nobody credited.
+    expect(
+      mergeIntentOutcome(
+        { ...CREDITED, transactionId: "tx-1" },
+        { ...HELD, transactionId: "tx-2" },
+      ),
+    ).toMatchObject({ state: "held-for-review", transactionId: "tx-2" })
+  })
+
+  it("does not lend one payment's net to a stamp about another", () => {
+    expect(
+      mergeIntentOutcome(
+        { ...CREDITED, transactionId: "tx-1" },
+        { ...HELD, transactionId: "tx-2" },
+      )?.netAmountCents,
+    ).toBeUndefined()
+    // Not even to a later credit: a net is what reached the wallet for ONE
+    // capture, and tx2's credit path always has its own figure to hand.
+    expect(
+      mergeIntentOutcome(
+        { ...CREDITED, transactionId: "tx-1" },
+        { state: "credited", transactionId: "tx-2", atMs: NOW_MS + 2 },
+      )?.netAmountCents,
+    ).toBeUndefined()
+  })
+
+  it("keeps `credited` absorbing when either side cannot name its payment", () => {
+    // Records written before `transactionId` existed are still in Redis, and a
+    // stamp that cannot name its payment says nothing about whether it is a
+    // different one. Treating unknown as "different" would re-open the exact
+    // regression the absorbing rule exists to stop — delivery 2 of the SAME
+    // payment walking `credited` back to `held-for-review`/`unattributed`. So
+    // unknown stays absorbing; only a proven mismatch opens the door.
+    expect(
+      mergeIntentOutcome(CREDITED, { ...HELD, transactionId: "tx-2" }),
+    ).toBeUndefined()
+    expect(
+      mergeIntentOutcome({ ...CREDITED, transactionId: "tx-1" }, HELD),
+    ).toBeUndefined()
+    expect(
+      mergeIntentOutcome(
+        { ...CREDITED, transactionId: "tx-1" },
+        { ...HELD, transactionId: "tx-1" },
+      ),
     ).toBeUndefined()
   })
 

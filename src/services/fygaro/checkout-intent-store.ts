@@ -447,16 +447,45 @@ export const mergeIntentOutcome = (
   // delivery that decided something; this one only saw a payment arrive.
   if (incoming.state === "received") return undefined
 
-  // `credited` is ABSORBING. The guard above stops `received` walking a
-  // terminal answer backwards, but a LATER terminal answer walks it backwards
-  // just as effectively, and that is reachable without any race: delivery 2 of
-  // the same payment takes the webhook's unattributed branch because the
-  // username no longer resolves, and stamps `held-for-review`/`unattributed`
-  // over `credited`. The customer's screen flips from "Money is in your wallet,
-  // $94.21" to "We've received your payment and are completing it manually",
-  // and ops is paged for an unattributed payment that is already in the wallet.
-  // There is no refund path here, so credited is genuinely terminal.
-  if (existing.state === "credited" && incoming.state !== "credited") return undefined
+  // Is this stamp about a DIFFERENT payment from the one the record already
+  // describes? Both ids must be present AND differ: an absent id is a record
+  // written before `transactionId` existed (or a stamp that could not name its
+  // payment), and treating "unknown" as "different" would let a legacy
+  // `credited` be walked backwards by the very re-delivery the rules below
+  // exist to stop. Unknown therefore stays absorbing; only a proven mismatch
+  // opens the door.
+  const differentPayment =
+    existing.transactionId !== undefined &&
+    incoming.transactionId !== undefined &&
+    existing.transactionId !== incoming.transactionId
+
+  // `credited` is ABSORBING — for THE SAME PAYMENT. The guard above stops
+  // `received` walking a terminal answer backwards, but a LATER terminal answer
+  // walks it backwards just as effectively, and that is reachable without any
+  // race: delivery 2 of the same payment takes the webhook's unattributed
+  // branch because the username no longer resolves, and stamps
+  // `held-for-review`/`unattributed` over `credited`. The customer's screen
+  // flips from "Money is in your wallet, $94.21" to "We've received your
+  // payment and are completing it manually", and ops is paged for an
+  // unattributed payment that is already in the wallet. There is no refund path
+  // here, so credited is genuinely terminal.
+  //
+  // Terminal for that payment, though — not for the INTENT the record is keyed
+  // on. One signed link can be paid more than once inside its 900s window (the
+  // replay `authorizeFygaroTopup` guards against), and the webhook's
+  // already-credited short-circuit is transaction-scoped for exactly that
+  // reason: tx2 against a link tx1 already credited is refused on its own
+  // merits and stamped `held-for-review`. Swallowing that stamp here would undo
+  // the whole guard — the record would stay `credited` with tx1's net, and
+  // `getFygaroTopupStatus` would answer CREDITED for a second real capture
+  // sitting in manual review.
+  if (
+    existing.state === "credited" &&
+    incoming.state !== "credited" &&
+    !differentPayment
+  ) {
+    return undefined
+  }
 
   // A later stamp must not DESTROY what an earlier one knew. The
   // already-credited guard in the webhook re-stamps `credited` from a path that
@@ -464,7 +493,12 @@ export const mergeIntentOutcome = (
   // a real credit recorded — leaving the app showing a credited top-up with no
   // amount, against a schema that promises `netAmount` is "present once
   // credited". Confirming an outcome should never know less than recording it.
-  if (existing.state === "credited") {
+  //
+  // Scoped to the same payment for the same reason as the guard above: a net is
+  // an amount that reached the wallet for ONE capture, so lending tx1's $94.21
+  // to a stamp about tx2 would put a figure on the screen that no one credited
+  // for that payment.
+  if (existing.state === "credited" && !differentPayment) {
     return {
       ...incoming,
       netAmountCents: incoming.netAmountCents ?? existing.netAmountCents,

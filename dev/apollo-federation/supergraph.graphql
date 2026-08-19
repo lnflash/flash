@@ -1181,6 +1181,11 @@ type FygaroTopupAllowancePayload
   """Null whenever `unavailableReason` is set, and only then."""
   allowance: FygaroTopupAllowance
 
+  """
+  Always empty. Refusals are reported as `unavailableReason`, not as errors — the field is decoration on a screen the customer is still filling in, so a read failure must not surface as one. Present for consistency with every other payload type.
+  """
+  errors: [Error!]!
+
   """Null whenever `allowance` is present, and only then."""
   unavailableReason: FygaroTopupAllowanceUnavailableReason
 }

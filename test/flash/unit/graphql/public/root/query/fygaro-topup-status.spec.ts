@@ -24,6 +24,10 @@ import { RateLimitConfig } from "@domain/rate-limit"
 import { FygaroTopupAllowanceRateLimiterExceededError } from "@domain/rate-limit/errors"
 import FygaroTopupStatusQuery from "@graphql/public/root/query/fygaro-topup-status"
 import FygaroTopupAllowanceQuery from "@graphql/public/root/query/fygaro-topup-allowance"
+import {
+  FygaroTopupAllowancePayload,
+  FygaroTopupAllowanceUnavailableReasonEnum,
+} from "@graphql/public/types/object/fygaro-topup-allowance"
 
 const ACCOUNT_ID = "account-001" as AccountId
 const CHECKOUT_ID = "3f5a1c9e-2b7d-4a10-9f33-6c8e2d4b7a51"
@@ -285,6 +289,7 @@ describe("fygaroTopupAllowance resolver", () => {
     // `held` has to ship alongside it — it is the only thing that accounts for
     // the difference.
     expect(await resolve(FygaroTopupAllowanceQuery as Query)).toEqual({
+      errors: [],
       allowance: {
         limit: 12500,
         spent: 5000,
@@ -351,6 +356,7 @@ describe("fygaroTopupAllowance resolver", () => {
     })
 
     expect(await resolve(FygaroTopupAllowanceQuery as Query)).toEqual({
+      errors: [],
       allowance: {
         limit: 12500,
         spent: 0,
@@ -404,6 +410,7 @@ describe("fygaroTopupAllowance resolver", () => {
     mockGetFygaroTopupAllowance.mockResolvedValue({ available: false, reason })
 
     expect(await resolve(FygaroTopupAllowanceQuery as Query)).toEqual({
+      errors: [],
       allowance: null,
       unavailableReason: wire,
     })
@@ -453,6 +460,7 @@ describe("fygaroTopupAllowance resolver", () => {
       // opposite instructions, and the client cannot act on either if both
       // arrive as an absent allowance.
       expect(await resolve(FygaroTopupAllowanceQuery as Query)).toEqual({
+        errors: [],
         allowance: null,
         unavailableReason: "rate-limited",
       })
@@ -467,10 +475,112 @@ describe("fygaroTopupAllowance resolver", () => {
       mockConsumeLimiter.mockResolvedValue(new Error("ECONNREFUSED"))
 
       expect(await resolve(FygaroTopupAllowanceQuery as Query)).toEqual({
+        errors: [],
         allowance: null,
         unavailableReason: "rate-limited",
       })
       expect(mockGetFygaroTopupAllowance).not.toHaveBeenCalled()
     })
+  })
+})
+
+// The resolver returns the enum's INTERNAL value; GraphQL turns that into the
+// member name on the wire. Every test above stops one step short of that —
+// `resolve()` is called directly, so `GraphQLEnumType.serialize` never runs and
+// a value no member carries looks exactly like a value every member carries.
+// The six wire strings live in two files (the enum's `value:` entries and the
+// resolver's UNAVAILABLE_REASON map); typing both against
+// `FygaroTopupAllowanceUnavailableReasonValue` makes a rename a compile error,
+// and this makes it a test failure as well.
+describe("fygaroTopupAllowance unavailableReason survives GraphQL serialization", () => {
+  const serialize = (value: unknown) =>
+    FygaroTopupAllowanceUnavailableReasonEnum.serialize(value)
+
+  it.each([
+    ["checkout-disabled", "CHECKOUT_DISABLED"],
+    ["no-daily-limit-for-level", "LEVEL_NOT_ELIGIBLE"],
+    ["settings-unavailable", "SETTINGS_UNAVAILABLE"],
+    ["history-unavailable", "HISTORY_UNAVAILABLE"],
+    ["reservations-unavailable", "RESERVATIONS_UNAVAILABLE"],
+  ])("serializes the %s the resolver returns as %s", async (reason, member) => {
+    mockGetFygaroTopupAllowance.mockResolvedValue({ available: false, reason })
+
+    const { unavailableReason } = (await resolve(FygaroTopupAllowanceQuery as Query)) as {
+      unavailableReason: string
+    }
+
+    // Would throw `Enum "FygaroTopupAllowanceUnavailableReason" cannot
+    // represent value: ...` if the two sides had drifted.
+    expect(serialize(unavailableReason)).toBe(member)
+  })
+
+  it("serializes the rate-limited refusal the resolver owns itself", async () => {
+    // The one reason with no app-layer failure behind it: the limiter refuses
+    // before `getFygaroTopupAllowance` is ever called, so it is written as a
+    // bare literal in the resolver and had nothing at all tying it to the enum.
+    mockConsumeLimiter.mockResolvedValue(
+      new FygaroTopupAllowanceRateLimiterExceededError(),
+    )
+
+    const { unavailableReason } = (await resolve(FygaroTopupAllowanceQuery as Query)) as {
+      unavailableReason: string
+    }
+
+    expect(serialize(unavailableReason)).toBe("RATE_LIMITED")
+  })
+
+  it("still refuses a value no member carries", () => {
+    // The assertions above are only worth something if serialize can say no.
+    expect(() => serialize("rate_limited")).toThrow()
+  })
+})
+
+// `FygaroTopupAllowancePayload` was the only `*Payload` in the public schema
+// without `errors` — including the four that queries, not mutations, already
+// return. Mobile codegen and the shared "did this payload error" helpers key
+// off that field, so a payload without it opts out of the one convention the
+// suffix promises.
+describe("fygaroTopupAllowance payload keeps the payload contract", () => {
+  it("declares errors as a non-null list of IError", () => {
+    const errors = FygaroTopupAllowancePayload.getFields().errors
+    expect(errors).toBeDefined()
+    expect(String(errors.type)).toBe("[Error!]!")
+  })
+
+  it("returns an empty errors list on every path, refusals included", async () => {
+    mockGetFygaroTopupAllowance.mockResolvedValue({
+      available: false,
+      reason: "history-unavailable",
+    })
+    const refused = (await resolve(FygaroTopupAllowanceQuery as Query)) as {
+      errors: unknown[]
+    }
+    expect(refused.errors).toEqual([])
+
+    mockGetFygaroTopupAllowance.mockResolvedValue({
+      available: true,
+      allowance: {
+        limitCents: 12500,
+        spentCents: 0,
+        heldCents: 0,
+        remainingCents: 12500,
+        singlePaymentLimitCents: 20000,
+        minimumCents: 1000,
+        resetsAt: undefined,
+        holdsExpireAt: undefined,
+      },
+    })
+    const answered = (await resolve(FygaroTopupAllowanceQuery as Query)) as {
+      errors: unknown[]
+    }
+    expect(answered.errors).toEqual([])
+
+    mockConsumeLimiter.mockResolvedValue(
+      new FygaroTopupAllowanceRateLimiterExceededError(),
+    )
+    const limited = (await resolve(FygaroTopupAllowanceQuery as Query)) as {
+      errors: unknown[]
+    }
+    expect(limited.errors).toEqual([])
   })
 })

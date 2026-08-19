@@ -4,7 +4,10 @@ import {
 } from "@app/fygaro/topup-allowance"
 import { RateLimitConfig } from "@domain/rate-limit"
 import { GT } from "@graphql/index"
-import { FygaroTopupAllowancePayload } from "@graphql/public/types/object/fygaro-topup-allowance"
+import {
+  FygaroTopupAllowancePayload,
+  type FygaroTopupAllowanceUnavailableReasonValue,
+} from "@graphql/public/types/object/fygaro-topup-allowance"
 import { baseLogger } from "@services/logger"
 import { consumeLimiter } from "@services/rate-limit"
 
@@ -17,14 +20,30 @@ import { consumeLimiter } from "@services/rate-limit"
  * client to retry forever. As a Record over `FygaroTopupAllowanceFailure`, a
  * new member of that union is a compile error here until someone decides what
  * the client should be told.
+ *
+ * The VALUES are typed too — `FygaroTopupAllowanceUnavailableReasonValue`, the
+ * union declared beside the enum itself. As plain `string` these six literals
+ * were duplicated across two files with nothing linking them and no test that
+ * could catch a divergence (every test drives `resolve()` directly, so the
+ * enum's own serialization never ran). Renaming one `value:` over there would
+ * ship a field that throws `Enum "FygaroTopupAllowanceUnavailableReason" cannot
+ * represent value: ...` for every customer on the top-up screen, green build
+ * and all. Now a rename on either side fails to compile.
  */
-const UNAVAILABLE_REASON: Record<FygaroTopupAllowanceFailure, string> = {
+const UNAVAILABLE_REASON: Record<
+  FygaroTopupAllowanceFailure,
+  FygaroTopupAllowanceUnavailableReasonValue
+> = {
   "checkout-disabled": "checkout-disabled",
   "no-daily-limit-for-level": "no-daily-limit-for-level",
   "settings-unavailable": "settings-unavailable",
   "history-unavailable": "history-unavailable",
   "reservations-unavailable": "reservations-unavailable",
 }
+
+// Same union, so the one reason with no app-layer failure behind it — the
+// limiter refusing before the app layer is called — cannot drift either.
+const RATE_LIMITED: FygaroTopupAllowanceUnavailableReasonValue = "rate-limited"
 
 const FygaroTopupAllowanceQuery = GT.Field({
   type: GT.NonNull(FygaroTopupAllowancePayload),
@@ -58,7 +77,7 @@ const FygaroTopupAllowanceQuery = GT.Field({
         { accountId: domainAccount.id, error: limitOk.name },
         "Fygaro allowance query not answered: rate limiter refused or unavailable",
       )
-      return { allowance: null, unavailableReason: "rate-limited" }
+      return { errors: [], allowance: null, unavailableReason: RATE_LIMITED }
     }
 
     const result = await getFygaroTopupAllowance({
@@ -72,7 +91,11 @@ const FygaroTopupAllowanceQuery = GT.Field({
     // whether a top-up is impossible right now (hide the option) or the number
     // is merely unknown (show the flat limit and let the charge path decide).
     if (!result.available) {
-      return { allowance: null, unavailableReason: UNAVAILABLE_REASON[result.reason] }
+      return {
+        errors: [],
+        allowance: null,
+        unavailableReason: UNAVAILABLE_REASON[result.reason],
+      }
     }
 
     // `remaining` is deliberately NOT `limit - spent`: it also has this
@@ -102,6 +125,7 @@ const FygaroTopupAllowanceQuery = GT.Field({
       holdsExpireAt,
     } = result.allowance
     return {
+      errors: [],
       allowance: {
         limit: limitCents,
         spent: spentCents,

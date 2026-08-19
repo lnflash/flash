@@ -93,6 +93,16 @@ jest.mock("@services/fygaro/checkout-intent-store", () => ({
   consumeIntent: (...args: unknown[]) => mockConsumeIntent(...args),
   releaseIntentReservation: (...args: unknown[]) => mockReleaseIntentReservation(...args),
   recordIntentOutcome: (...args: unknown[]) => mockRecordIntentOutcome(...args),
+  // NOT mocked. Mocking `recordIntentOutcome` means this suite asserts the CALL
+  // and never the RECORD, and the two are not the same thing: the store's merge
+  // rules can drop a stamp the handler was right to make. That is exactly how a
+  // handler test and a store test came to be green while claiming opposite
+  // things about a link paid twice. The real merge is pure and drags in no
+  // Redis (the store defers `@services/cache`/`@services/redis` to first use),
+  // so the already-credited test below replays its stamps through it and
+  // asserts what the customer would actually be shown.
+  mergeIntentOutcome: jest.requireActual("@services/fygaro/checkout-intent-store")
+    .mergeIntentOutcome,
 }))
 
 const mockRecordIntentOutcome = jest.fn()
@@ -138,6 +148,12 @@ import { ResourceAttemptsLockServiceError } from "@domain/lock"
 
 import { paymentHandler } from "@services/fygaro/webhook-server/routes/payment"
 import { FygaroCreditError } from "@services/fygaro/webhook-server/credit-topup"
+// The REAL merge (see the mock factory above): a stamp the handler makes is only
+// worth what the store keeps of it.
+import {
+  mergeIntentOutcome,
+  type FygaroTopupOutcome,
+} from "@services/fygaro/checkout-intent-store"
 
 const ACCOUNT_ID = "account-1" as AccountId
 const WALLET_ID = "wallet-1" as WalletId
@@ -996,6 +1012,12 @@ describe("fygaro paymentHandler", () => {
       // reporting CREDITED with tx1's net for a second real $100 capture that
       // never reached the wallet.
       const intentId = "b41f7c02-9e35-4d6a-8f11-3a7c5d29e604"
+      const CREDITED_BY_ANOTHER_TX: FygaroTopupOutcome = {
+        state: "credited",
+        netAmountCents: 9421,
+        transactionId: "a1111111-2222-3333-4444-555555555555",
+        atMs: 1,
+      }
       mockReadCompletion.mockResolvedValue({ completed: false })
       mockReadIntent.mockResolvedValue({
         found: true,
@@ -1006,12 +1028,7 @@ describe("fygaro paymentHandler", () => {
           amountCents: 10000,
           currency: "USD",
           createdAtMs: 1,
-          outcome: {
-            state: "credited",
-            netAmountCents: 9421,
-            transactionId: "a1111111-2222-3333-4444-555555555555",
-            atMs: 1,
-          },
+          outcome: CREDITED_BY_ANOTHER_TX,
         },
       })
       // $100 already charged against the $125 L1 cap, so this second $100 is
@@ -1049,7 +1066,7 @@ describe("fygaro paymentHandler", () => {
       )
       // ...and the stamp is the truth about THIS payment.
       const stamped = mockRecordIntentOutcome.mock.calls
-        .map(([args]: [{ outcome: { state: string } }]) => args.outcome)
+        .map(([args]: [{ outcome: FygaroTopupOutcome }]) => args.outcome)
         .filter(({ state }) => state !== "received")
       expect(stamped).toEqual([
         expect.objectContaining({
@@ -1058,6 +1075,29 @@ describe("fygaro paymentHandler", () => {
           transactionId: VALID_BODY.transactionId,
         }),
       ])
+
+      // And the RECORD ends up saying so. Asserting the call alone is what let
+      // this test pass while the store quietly dropped the stamp — `credited`
+      // was absorbing per INTENT, so tx2's held-for-review was discarded and
+      // fygaroTopupStatus went on answering CREDITED, with tx1's $94.21, for a
+      // second real $100 capture sitting in manual review. Replaying every
+      // stamp this delivery made through the REAL merge, over the record that
+      // was already there, is the only version of this assertion that can fail
+      // when that regression comes back.
+      const recorded = mockRecordIntentOutcome.mock.calls.reduce(
+        (
+          record: FygaroTopupOutcome | undefined,
+          [args]: [{ outcome: FygaroTopupOutcome }],
+        ) => mergeIntentOutcome(record, args.outcome) ?? record,
+        CREDITED_BY_ANOTHER_TX,
+      )
+      expect(recorded).toMatchObject({
+        state: "held-for-review",
+        reason: "daily-limit-exceeded",
+        transactionId: VALID_BODY.transactionId,
+      })
+      // tx1's net must not ride along onto a payment nobody credited.
+      expect(recorded?.netAmountCents).toBeUndefined()
     })
 
     it("does NOT let another transaction's credit swallow an intent-mismatch", async () => {
