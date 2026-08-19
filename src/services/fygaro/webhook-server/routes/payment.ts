@@ -38,6 +38,23 @@ import {
 } from "@services/frappe/BridgeTransferRequestWriter"
 import { alertBridge, generateDedupKey } from "@services/alerts"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
+// FCM from the fygaro-webhook workload. Nothing reachable from this server
+// pushed before, and a missing GOOGLE_APPLICATION_CREDENTIALS fails SILENTLY —
+// firebase.ts leaves `messaging` null and push-notifications.ts returns `true`
+// anyway, so nothing here can tell a delivered push from a discarded one. The
+// server's boot path now pages a critical on that (see `if (!messaging)` in
+// ../index.ts), which is the only place it CAN be detected. Verified wired for
+// this workload, not inherited from the api pod: lnflash/charts
+// `charts/flash/templates/fygaro-webhook-deployment.yaml` sets
+// GOOGLE_APPLICATION_CREDENTIALS and mounts the galoyapp-firebase-serviceaccount
+// secret under `.Values.galoy.api.firebaseNotifications.enabled` (chart >= 3.2.54;
+// deployments pins 3.2.63), and lnflash/deployments
+// `tf-modules/flash/flash-values.tmpl.yaml` sets that flag true for test + prod.
+// Any new workload that imports this must be checked the same way.
+import {
+  sendFygaroTopupNotificationBestEffort,
+  type FygaroTopupNotificationOutcome,
+} from "@app/fygaro/send-topup-notification"
 
 import {
   creditFygaroTopup,
@@ -160,6 +177,130 @@ const thresholdCentsFor = (
         ? settings.minimumTopup
         : undefined
   return usd === undefined ? undefined : Math.round(usd * 100)
+}
+
+/**
+ * Which refusals earn the customer the "we have your payment and are completing
+ * it manually — we'll let you know when it lands" push.
+ *
+ * Exhaustive by TYPE, not by omission: adding a `RecordOnlyReason` without a
+ * value here is a compile error, so a new gate can never silently inherit a
+ * promise about what happens next. The copy is a commitment that a human will
+ * hand-credit this payment, so a reason only belongs here when that is the real
+ * outcome.
+ *
+ * DEPENDS ON `fygaro.checkout.enabled`. This table says which reasons MAY push;
+ * REFUSAL_NEEDS_VERIFIED_REFERENCE below says which ones additionally need a
+ * server-signed reference, and a signed reference only exists when server-side
+ * checkout is on — the flag defaults to `false` (config/schema.ts) and turning
+ * it on needs a Fygaro Pro-or-above plan. So with checkout OFF, or for any
+ * legacy app build still in the wild, the only refusal that actually reaches a
+ * customer is the one marked `false` in that second table. Read the two
+ * together; neither is the whole answer on its own.
+ */
+const REFUSAL_NOTIFIES_CUSTOMER: Record<RecordOnlyReason, boolean> = {
+  // The deploy-level master gate. Records without crediting BY DESIGN, so
+  // pushing here would notify every paying customer during a rollout.
+  "credit-disabled": false,
+  // The operator's ERPNext runtime kill switch — the one ops actually flips
+  // during an incident. Same mass-push problem as the master gate.
+  "auto-credit-disabled": false,
+  // Transient: the route answers 500 and never reaches this branch. Listed so
+  // the record stays exhaustive.
+  "settings-unavailable": false,
+  "history-unavailable": false,
+  // Fees already meet or exceed the gross — nothing will ever land, so
+  // promising that it will is a lie.
+  "non-positive-net": false,
+  // The payment does not match the checkout we signed. That is a refund or an
+  // escalation, not a hand-credit, and we should not commit to crediting a
+  // payment we cannot account for.
+  "intent-mismatch": false,
+  // Captured fiat that a human has to finish by hand — exactly what the copy
+  // says. `non-usd` included: the push now names the payment's real currency
+  // (see FygaroTopupNotificationArgs), so it reads truthfully off USD.
+  "non-usd": true,
+  "over-limit": true,
+  "no-daily-limit-for-level": true,
+  "daily-limit-exceeded": true,
+  "under-minimum": true,
+}
+
+/**
+ * Which of those refusals ALSO require a server-verified reference before the
+ * push goes out.
+ *
+ * On legacy unsigned clients `customReference` is free text the PAYER types, so
+ * anyone can pay with a stranger's username on it and have the bank's own app
+ * tell that stranger we are holding a payment of theirs — a ready-made pretext
+ * for a follow-up scam call. What makes that worth blocking is the PRICE: the
+ * gates below all trip on amounts an attacker is happy to spend.
+ *
+ * `over-limit` is the exception, and the reason this is a per-reason table
+ * rather than one blanket `authorizedIntent &&`. It trips only when the gross
+ * EXCEEDS the operator's single-payment auto-credit limit (fees.ts), so buying
+ * that push costs the attacker more than the limit — real money that ops then
+ * hand-credits to the VICTIM. That is the same self-defeating economics that
+ * leaves the `credited` push ungated, and gating it bought nothing while
+ * silencing the reason most likely to be the one a real customer hits.
+ *
+ * The rest stay gated because they are cheap: `under-minimum` costs whatever is
+ * below the operator minimum, `non-usd` costs a single Jamaican dollar, and
+ * `daily-limit-exceeded` / `no-daily-limit-for-level` cost nothing at all when
+ * the victim already sits at their cap (both are checked before the minimum
+ * gate). Legacy clients keep the pre-PR behaviour for those — ops alert only,
+ * no push — until they are out of the wild.
+ *
+ * Exhaustive by TYPE for the same reason as the table above: a new gate must
+ * make this call explicitly rather than inherit either answer.
+ */
+const REFUSAL_NEEDS_VERIFIED_REFERENCE: Record<RecordOnlyReason, boolean> = {
+  // Costs the attacker more than the auto-credit limit, paid to the victim.
+  "over-limit": false,
+  // Cheap enough to be a scam pretext — a signed reference is required.
+  "non-usd": true,
+  "under-minimum": true,
+  "daily-limit-exceeded": true,
+  "no-daily-limit-for-level": true,
+  // Never push at all (REFUSAL_NOTIFIES_CUSTOMER above), so this value is
+  // unreachable. Listed so the record stays exhaustive and a reason promoted to
+  // notifying cannot arrive here without an answer.
+  "credit-disabled": true,
+  "auto-credit-disabled": true,
+  "settings-unavailable": true,
+  "history-unavailable": true,
+  "non-positive-net": true,
+  "intent-mismatch": true,
+}
+
+// Read off `creditFygaroTopup` itself rather than restated as a literal union:
+// a restated one stays "complete" when the source grows a status, and the only
+// thing left to catch it would be an out-of-range index — which this repo
+// compiles with `noImplicitAny: false` and therefore does not report.
+type FygaroCreditStatus = Exclude<
+  Awaited<ReturnType<typeof creditFygaroTopup>>,
+  FygaroCreditError
+>["status"]
+
+/**
+ * Which push a successful credit path earns, keyed by what the send actually
+ * reported.
+ *
+ * A Record rather than a ternary, for the same reason REFUSAL_NOTIFIES_CUSTOMER
+ * above is one: the difference between "N USD has been added to your wallet"
+ * and "we're crediting it now" is a claim about the customer's balance, and a
+ * ternary hands every future status the fallback arm silently. Add a status to
+ * `creditFygaroTopup` and this object is missing a key — a compile error, not a
+ * customer told their money landed when it did not.
+ */
+const OUTCOME_BY_CREDIT_STATUS: Record<
+  FygaroCreditStatus,
+  FygaroTopupNotificationOutcome
+> = {
+  success: "credited",
+  // IBEX reporting IN_FLIGHT is the vendor's documented 200, so this is a
+  // routine outcome — too weak for the credited copy, too real for silence.
+  pending: "crediting",
 }
 
 export const paymentHandler = async (req: Request, res: Response) => {
@@ -816,6 +957,45 @@ export const paymentHandler = async (req: Request, res: Response) => {
           priorDayGrossCents,
         ),
       })
+
+      // Notify on the REFUSAL too. Telling the customer only when the money
+      // arrives keeps the promise exactly when it costs nothing and breaks it
+      // for the person whose payment was captured and not credited — who is
+      // otherwise left on a screen that said we would be in touch. Only for the
+      // reasons where a human really does finish the payment by hand
+      // (REFUSAL_NOTIFIES_CUSTOMER above); the rest would be promising something
+      // that is not going to happen.
+      //
+      // ...and, for the CHEAP reasons, only against a SERVER-VERIFIED
+      // reference. `authorizedIntent` is set only when the reference carries an
+      // intentId that Flash itself minted and signed for this account and this
+      // amount (see readIntent above; a mismatch on either lands as
+      // `intent-mismatch`, which the allowlist refuses anyway). On the legacy
+      // unsigned clients still in the wild — and on EVERY client while
+      // `fygaro.checkout.enabled` is false, which is its default — the
+      // reference is free text the PAYER types, so anyone could pay J$1, or $2
+      // against the $10 minimum, with a stranger's username on it and have the
+      // bank's own app tell that stranger we are holding a payment of theirs.
+      //
+      // Which is a price argument, not a blanket one, so the price decides:
+      // REFUSAL_NEEDS_VERIFIED_REFERENCE exempts `over-limit`, whose trigger
+      // costs the attacker MORE than the auto-credit limit and hands it to the
+      // victim — the same self-defeating economics that leaves the `credited`
+      // push ungated. Gating that one bought nothing and, with signed checkout
+      // off, silenced the whole refusal half of this feature.
+      if (
+        REFUSAL_NOTIFIES_CUSTOMER[gate.reason] &&
+        (authorizedIntent || !REFUSAL_NEEDS_VERIFIED_REFERENCE[gate.reason])
+      ) {
+        await sendFygaroTopupNotificationBestEffort({
+          accountId,
+          outcome: "heldForReview",
+          // GROSS: what the card was actually charged, which is the number the
+          // customer is looking at on their statement.
+          amountCents: grossCents,
+          currency,
+        })
+      }
       return res.status(200).json({ status: "recorded", credited: false })
     }
 
@@ -924,6 +1104,23 @@ export const paymentHandler = async (req: Request, res: Response) => {
           // and let the customer authorise against allowance that is about to
           // be spent.
           await recordOutcome({ state: "failed", reason: "credit-failed" })
+
+          // The one terminal outcome this notification exists for: money
+          // captured, credit FAILED. Ops has a CRITICAL asking them to credit
+          // it by hand and this response is a 200, so Fygaro stops retrying —
+          // without this push the customer is silent forever, while someone
+          // refused by the far more benign `under-minimum` gets told. The copy
+          // ("completing it manually") is literally what the alert asks ops to
+          // do. Currency is USD by construction here: the gate refuses non-USD
+          // long before the credit path. Repeats on any provider retry that
+          // re-attempts and re-fails the credit — same cadence as the ops-feed
+          // line above, and each one is a fresh true statement.
+          await sendFygaroTopupNotificationBestEffort({
+            accountId: creditAccountId,
+            outcome: "heldForReview",
+            amountCents: fees.grossCents,
+            currency,
+          })
           return { code: 200, body: { status: "recorded", credited: false } }
         }
 
@@ -978,6 +1175,66 @@ export const paymentHandler = async (req: Request, res: Response) => {
         // The money moved: the authorisation is spent. Not done on the credit-
         // FAILURE branch above, which is deliberately retryable.
         await redeemIntent()
+
+        // The app told this customer "we'll let you know as soon as it lands".
+        // A credit can outlive the screen — the transient paths deliberately
+        // 500 so Fygaro retries — so this is what makes that sentence true.
+        // Best-effort by construction: the money has already moved, and a
+        // failed push must never put a delivered credit back into the retry
+        // loop.
+        // Awaited, matching the Bridge deposit path: the helper swallows every
+        // failure internally, so awaiting cannot fail the credit, and NOT
+        // awaiting would leave a dangling promise that a recycled pod can drop
+        // — losing exactly the notification the app told the customer to expect.
+        // Sequenced AFTER redeemIntent deliberately: a pod recycle during the
+        // FCM round trip would otherwise leave the authorisation unconsumed, so
+        // its hold keeps sitting on the daily allowance that the (already
+        // promoted) ERPNext row counts too — double-counting one payment and
+        // refusing the customer's next top-up with `daily-limit-exceeded`.
+        // Costs the push nothing: `consumeIntent` reports failure by return
+        // value, never a throw, so it cannot skip what follows it.
+        // ONCE PER PAYMENT, and keyed on the TRANSACTION.
+        //
+        // This block is deliberately re-enterable: the Completed row is the
+        // processed marker, and it is exactly what is missing after the
+        // promotion failure alerted on above (money in the wallet, row still
+        // Fiat Received), as it also is whenever `readFygaroTopupCompletion`
+        // degrades to "not completed" on a transient lookup. Delivery 2 then
+        // replays the cached send and arrives here for a top-up already paid.
+        // A second "+$9.01 added" on a payments app's lock screen reads as a
+        // second charge, and unlike a stale status screen it cannot be walked
+        // back.
+        //
+        // The non-releasing timelock under its own key is the marker that
+        // survives all of it. NOT the intent: `authorizedIntent` is undefined
+        // for every payment whose custom_reference is a bare username — the
+        // legacy shape, and the only shape in production while signed checkout
+        // is off — so an intent-keyed guard protects nobody on the traffic that
+        // actually exists. Its own key, because the record-only path's
+        // `fygaro-payment:` lock is never taken on the credit path.
+        const pushClaim = await LockService().lockIdempotencyKey(
+          `fygaro-credit-push:${transactionId}` as IdempotencyKey,
+        )
+        if (pushClaim instanceof Error) {
+          baseLogger.info(
+            { transactionId },
+            "Fygaro credit already announced to the customer — not re-announcing",
+          )
+        } else {
+          await sendFygaroTopupNotificationBestEffort({
+            accountId: creditAccountId,
+            // `pending` gets its OWN phrase rather than the credited one or
+            // nothing at all. Looked up in OUTCOME_BY_CREDIT_STATUS (above)
+            // rather than branched on inline, so a third send status cannot
+            // silently inherit either claim.
+            outcome: OUTCOME_BY_CREDIT_STATUS[creditResult.status],
+            // NET: what actually landed in the wallet (or is on its way to
+            // it). Naming the gross would overstate the balance change by the
+            // fees.
+            amountCents: fees.netCents,
+            currency,
+          })
+        }
 
         return { code: 200, body: { status: "success", credited: true } }
       },

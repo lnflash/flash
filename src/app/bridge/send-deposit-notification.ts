@@ -1,104 +1,57 @@
-import { BridgeConfig, getI18nInstance } from "@config"
-import { checkedToAccountId } from "@domain/accounts"
-import { getLanguageOrDefault } from "@domain/locale"
-import {
-  DeviceTokensNotRegisteredNotificationsServiceError,
-  FlashNotificationCategories,
-  NotificationsServiceError,
-} from "@domain/notifications"
-import { removeDeviceTokens } from "@app/users/remove-device-tokens"
-import { baseLogger } from "@services/logger"
-import { AccountsRepository } from "@services/mongoose/accounts"
-import { UsersRepository } from "@services/mongoose/users"
-import {
-  PushNotificationsService,
-  SendFilteredPushNotificationStatus,
-} from "@services/notifications/push-notifications"
+import { BridgeConfig } from "@config"
 
-const i18n = getI18nInstance()
+import {
+  sendOutcomeNotificationBestEffort,
+  type OutcomeNotificationArgs,
+} from "@app/notifications/send-outcome-notification"
 
 const formatDepositAmount = (amount: string, currency: string): string =>
   `${amount} ${currency.toUpperCase()}`
 
 export type BridgeDepositNotificationOutcome = "received" | "processing" | "completed"
 
-export const sendBridgeDepositNotification = async ({
-  accountId: accountIdRaw,
-  amount,
-  currency,
-  outcome = "completed",
-}: {
+export type BridgeDepositNotificationArgs = {
   accountId: string
   amount: string
   currency: string
   outcome?: BridgeDepositNotificationOutcome
-}): Promise<true | ApplicationError> => {
-  const accountId = checkedToAccountId(accountIdRaw)
-  if (accountId instanceof Error) return accountId
-
-  const account = await AccountsRepository().findById(accountId)
-  if (account instanceof Error) return account
-
-  const user = await UsersRepository().findById(account.kratosUserId)
-  if (user instanceof Error) return user
-
-  const locale = getLanguageOrDefault(user.language)
-  const formattedAmount = formatDepositAmount(amount, currency)
-  const phraseBase = `notification.bridgeDeposit.${outcome}`
-
-  const title = i18n.__({ phrase: `${phraseBase}.title`, locale })
-  const body = i18n.__(
-    { phrase: `${phraseBase}.body`, locale },
-    { amount: formattedAmount },
-  )
-
-  const result = await PushNotificationsService().sendFilteredNotification({
-    deviceTokens: user.deviceTokens,
-    title,
-    body,
-    notificationCategory: FlashNotificationCategories.Payments,
-    notificationSettings: account.notificationSettings,
-    data: {
-      type: `bridge_deposit_${outcome}`,
-      amount,
-      currency: currency == "usdt" ? "USD" : currency.toUpperCase(),
-    },
-  })
-
-  if (result instanceof NotificationsServiceError) return result
-
-  if (result.status === SendFilteredPushNotificationStatus.Filtered) {
-    return true
-  }
-
-  return true
 }
 
+const toOutcomeArgs = ({
+  accountId,
+  amount,
+  currency,
+  outcome = "completed",
+}: BridgeDepositNotificationArgs): OutcomeNotificationArgs => ({
+  accountId,
+  phraseBase: `notification.bridgeDeposit.${outcome}`,
+  dataType: `bridge_deposit_${outcome}`,
+  amountArg: formatDepositAmount(amount, currency),
+  extraData: {
+    amount,
+    currency: currency == "usdt" ? "USD" : currency.toUpperCase(),
+  },
+})
+
+/**
+ * The ONLY entry point, and best-effort by construction — same shape as the
+ * Fygaro top-up module.
+ *
+ * There is deliberately no throwing/error-returning variant: the caller is on a
+ * money path where the deposit has already landed, so a notification failure
+ * must never become the deposit's failure. An exported variant returning
+ * `true | ApplicationError` would be dead code inviting exactly the caller this
+ * must not have.
+ */
 export const sendBridgeDepositNotificationBestEffort = async (
-  args: Parameters<typeof sendBridgeDepositNotification>[0],
+  args: BridgeDepositNotificationArgs,
 ): Promise<void> => {
   // ENG-466: never push a Bridge deposit notification when the feature is off.
   if (!BridgeConfig.enabled) return
-  const result = await sendBridgeDepositNotification(args)
 
-  if (result instanceof DeviceTokensNotRegisteredNotificationsServiceError) {
-    const accountId = checkedToAccountId(args.accountId)
-    if (accountId instanceof Error) return
-
-    const account = await AccountsRepository().findById(accountId)
-    if (account instanceof Error) return
-
-    await removeDeviceTokens({
-      userId: account.kratosUserId,
-      deviceTokens: result.tokens,
-    })
-    return
-  }
-
-  if (result instanceof Error) {
-    baseLogger.warn(
-      { accountId: args.accountId, outcome: args.outcome ?? "completed", error: result },
-      "Failed to send Bridge deposit push notification",
-    )
-  }
+  return sendOutcomeNotificationBestEffort({
+    ...toOutcomeArgs(args),
+    logMessage: "Failed to send Bridge deposit push notification",
+    logContext: { accountId: args.accountId, outcome: args.outcome ?? "completed" },
+  })
 }

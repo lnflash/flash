@@ -116,6 +116,20 @@
         "title": "Recompensa de bienvenida",
         "body": "Se acreditaron US${{amount}} a tu billetera por unirte con una invitación."
       }
+    },
+    "fygaroTopup": {
+      "credited": {
+        "title": "Recarga completada",
+        "body": "{{amount}} se ha añadido a tu billetera."
+      },
+      "heldForReview": {
+        "title": "Tu recarga necesita un momento",
+        "body": "Tenemos tu pago de {{amount}} y lo estamos completando manualmente."
+      },
+      "crediting": {
+        "title": "Tu recarga está en camino",
+        "body": "Estamos acreditando {{amount}} a tu billetera. Debería aparecer en breve."
+      }
     }
   }
 }

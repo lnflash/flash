@@ -120,6 +120,20 @@
         "title": "Welcome reward received",
         "body": "US${{amount}} was credited to your wallet for joining through an invite."
       }
+    },
+    "fygaroTopup": {
+      "credited": {
+        "title": "Top-up complete",
+        "body": "{{amount}} has been added to your wallet."
+      },
+      "heldForReview": {
+        "title": "Top-up needs a moment",
+        "body": "We have your {{amount}} payment and are completing it manually."
+      },
+      "crediting": {
+        "title": "Top-up on its way",
+        "body": "We're crediting {{amount}} to your wallet now. It should appear shortly."
+      }
     }
   }
 }

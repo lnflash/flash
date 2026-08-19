@@ -11,7 +11,9 @@ import express from "express"
 import rateLimitMiddleware from "express-rate-limit"
 
 import { FygaroConfig } from "@config"
+import { alertBridge, generateDedupKey } from "@services/alerts"
 import { baseLogger } from "@services/logger"
+import { messaging } from "@services/notifications/firebase"
 
 import { verifyFygaroSignature } from "./middleware/verify-signature"
 import { fygaroEnabledGuard } from "./middleware/enabled-guard"
@@ -66,6 +68,35 @@ export const startFygaroWebhookServer = () => {
     baseLogger.warn(
       "No Fygaro webhook secrets configured (fygaro.webhook.secrets) — /payment will reject all requests with 401",
     )
+  }
+
+  // Top-up pushes fail SILENTLY without Firebase: firebase.ts leaves `messaging`
+  // null when GOOGLE_APPLICATION_CREDENTIALS is unset or the credential fails to
+  // load, and push-notifications.ts then returns `true` anyway (its own
+  // "FIXME: should return an error?"). Every layer above — including the
+  // best-effort wrapper on the money path — reads that as a delivered push, so
+  // a regressed secret mount in a chart bump would leave this whole feature dead
+  // in prod with no signal but one boot-time warn nobody watches. Page instead.
+  // Static dedup key: one broken deployment, one incident.
+  //
+  // Gated on `credit.enabled` because that flag decides whether ANY push is
+  // reachable from this server. It defaults to false and is the very first
+  // rollout state; with credit off the gate answers `credit-disabled`, which
+  // REFUSAL_NOTIFIES_CUSTOMER deliberately keeps silent, and the credit path is
+  // never entered — so there is nothing for a missing credential to break.
+  // Paging anyway would fire a CRITICAL, on every pod restart and rolling
+  // deploy, with no auto-resolve, about a feature that is switched off by
+  // design.
+  if (FygaroConfig.credit?.enabled && !messaging) {
+    alertBridge({
+      dedupKey: generateDedupKey.fygaroPushUnavailable(),
+      source: "fygaro-webhook",
+      severity: "critical",
+      title:
+        "Fygaro webhook: Firebase messaging unavailable — top-up notifications will silently no-op",
+      detail:
+        "GOOGLE_APPLICATION_CREDENTIALS is unset or the credential failed to load in this workload; every customer top-up push is a no-op that reports success.",
+    })
   }
 
   // Start server

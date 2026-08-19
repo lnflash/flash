@@ -59,6 +59,12 @@ jest.mock("@services/alerts", () => ({
   generateDedupKey: jest.requireActual("@services/alerts/dedup-key").generateDedupKey,
 }))
 
+jest.mock("@app/fygaro/send-topup-notification", () => ({
+  sendFygaroTopupNotificationBestEffort: (...args: unknown[]) =>
+    mockSendTopupNotification(...args),
+}))
+const mockSendTopupNotification = jest.fn()
+
 jest.mock("@services/alerts/ops-events", () => ({
   notifyOpsEvent: (...args: unknown[]) => mockNotifyOpsEvent(...args),
 }))
@@ -179,6 +185,36 @@ const makeRes = (): Response => {
 const makeReq = (body: Record<string, unknown>): Request =>
   ({ body }) as unknown as Request
 
+const SIGNED_INTENT_ID = "8c1d2e3f-4a5b-6c7d-8e9f-0a1b2c3d4e5f"
+
+/**
+ * Turn a payload into one carrying a SERVER-SIGNED reference, and stand up the
+ * authorisation it points at.
+ *
+ * The distinction matters wherever the handler acts on the identity in
+ * `customReference` rather than just recording it: on legacy unsigned clients
+ * that field is free text the PAYER types, while `username|intentId` can only
+ * come from an authorizeFygaroTopup call Flash made for that account. Pass an
+ * `authorizedCents` that differs from what is paid to produce a mismatch.
+ */
+const signedBody = (
+  body: Record<string, unknown>,
+  authorizedCents: number,
+): Record<string, unknown> => {
+  mockReadIntent.mockResolvedValue({
+    found: true,
+    intent: {
+      intentId: SIGNED_INTENT_ID,
+      accountId: ACCOUNT_ID as string,
+      username: VALID_BODY.customReference,
+      amountCents: authorizedCents,
+      currency: String(body.currency ?? "USD"),
+      createdAtMs: 1_700_000_000_000,
+    },
+  })
+  return { ...body, customReference: `${body.customReference}|${SIGNED_INTENT_ID}` }
+}
+
 beforeEach(() => {
   jest.clearAllMocks()
   mockFygaroConfig.credit = { enabled: false }
@@ -256,6 +292,10 @@ describe("fygaro paymentHandler", () => {
     expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
       expect.objectContaining({ phase: "fygaro-recorded", status: "pending" }),
     )
+    // `credit-disabled` is the deploy-level master gate: it records without
+    // crediting BY DESIGN. Pushing "we're completing it manually" here would
+    // notify every paying customer for the whole of a rollout.
+    expect(mockSendTopupNotification).not.toHaveBeenCalled()
     expect(res.status).toHaveBeenCalledWith(200)
     expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
   })
@@ -628,6 +668,155 @@ describe("fygaro paymentHandler", () => {
       expect(mockGetFlashFeeDiscountPercent).toHaveBeenCalledWith({
         username: VALID_BODY.customReference,
         flow: "topup",
+      })
+    })
+
+    it("notifies the customer with the NET once the credit lands", async () => {
+      // The app promises "we'll let you know as soon as it lands" and then
+      // stops polling after a minute. Without this the promise is kept by
+      // nothing, and a credit that arrives on a Fygaro retry is never announced.
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      // The NET, not the gross: naming what they paid overstates the balance
+      // change by the fees. $10.00 gross -> $0.79 processor + $0.20 flash ->
+      // 901¢ — the exact number the credit itself is asserted against above, so
+      // "some number smaller than gross" would not pin it.
+      expect(mockSendTopupNotification).toHaveBeenCalledWith({
+        accountId: ACCOUNT_ID,
+        outcome: "credited",
+        amountCents: 901,
+        currency: "USD",
+      })
+    })
+    it("announces a landed credit ONCE, however many times Fygaro re-delivers", async () => {
+      // This block is deliberately re-enterable — the Completed row is the
+      // processed marker, and it is exactly what is missing after a promotion
+      // failure (money in the wallet, row still Fiat Received). Delivery 2
+      // replays the cached send and arrives here for a top-up already paid. A
+      // second "+$9.01 added" on a lock screen reads as a second charge, and
+      // unlike a stale status screen it cannot be walked back.
+      //
+      // Keyed on the TRANSACTION: an intent-keyed guard is undefined for every
+      // payment whose custom_reference is a bare username, which is the only
+      // shape in production while signed checkout is off.
+      mockLockIdempotencyKey.mockResolvedValue(new Error("already claimed"))
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockSendTopupNotification).not.toHaveBeenCalled()
+      // The credit itself is still replayed and the row still re-promoted —
+      // only the announcement is suppressed.
+      expect(mockCompleteFygaroTopup).toHaveBeenCalled()
+      expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
+    })
+
+    it("tells the customer an in-flight credit is on its way, not that it landed", async () => {
+      // IBEX reporting IN_FLIGHT is the vendor's own documented 200, so this is
+      // routine. `credited` ("has been added to your wallet") would send them to
+      // a balance that has not moved; silence — which is what this branch did —
+      // leaves the customer this whole feature exists for with nothing.
+      mockCreditFygaroTopup.mockResolvedValue({
+        status: "pending",
+        walletId: "wallet-1",
+      })
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockSendTopupNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: "crediting" }),
+      )
+    })
+
+    it("does not claim a LANDED credit on a PENDING send", async () => {
+      // `creditFygaroTopup` returns `pending` when the intraledger send came
+      // back Pending: "money has PROBABLY left the treasury: report credited,
+      // never re-pay". That is a deliberately weaker claim than the credited
+      // push's "X has been added to your wallet", which would walk the customer
+      // to an unchanged balance. But silence is not the answer either — IBEX
+      // reporting IN_FLIGHT is the vendor's documented 200, so this is routine,
+      // and saying nothing strands the customer this feature exists for. It
+      // gets its own phrase instead.
+      mockCreditFygaroTopup.mockResolvedValue({ walletId: WALLET_ID, status: "pending" })
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      // Still credited-and-done as far as idempotency goes: the row is promoted
+      // and the response acks, so Fygaro must not retry and re-pay.
+      expect(mockCompleteFygaroTopup).toHaveBeenCalledTimes(1)
+      expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
+      // ...and ops can still see it, so it is not lost — just not asserted to
+      // the customer as a completed credit.
+      expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: "succeeded",
+          meta: expect.objectContaining({ creditStatus: "pending" }),
+        }),
+      )
+      expect(mockSendTopupNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: "crediting" }),
+      )
+      expect(mockSendTopupNotification).not.toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: "credited" }),
+      )
+    })
+
+    it("sends the credited push only AFTER the authorisation is redeemed", async () => {
+      // A pod recycle during the FCM round trip must not leave the intent
+      // unconsumed: the ERPNext row already counts this payment towards the
+      // daily cap, so a surviving hold double-counts it and refuses the
+      // customer's next top-up with `daily-limit-exceeded`.
+      const SIGNED = {
+        ...VALID_BODY,
+        customReference: `${VALID_BODY.customReference}|8c1d2e3f-4a5b-6c7d-8e9f-0a1b2c3d4e5f`,
+      }
+      mockReadIntent.mockResolvedValue({
+        found: true,
+        intent: {
+          intentId: "8c1d2e3f-4a5b-6c7d-8e9f-0a1b2c3d4e5f",
+          accountId: ACCOUNT_ID as string,
+          username: VALID_BODY.customReference,
+          amountCents: 1000,
+          currency: "USD",
+          createdAtMs: 1_700_000_000_000,
+        },
+      })
+      const res = makeRes()
+
+      await paymentHandler(makeReq(SIGNED), res)
+
+      expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
+      expect(mockConsumeIntent).toHaveBeenCalledTimes(1)
+      expect(mockSendTopupNotification).toHaveBeenCalledTimes(1)
+      expect(mockSendTopupNotification.mock.invocationCallOrder[0]).toBeGreaterThan(
+        mockConsumeIntent.mock.invocationCallOrder[0],
+      )
+    })
+
+    it("tells the customer when the money was captured and the credit FAILED", async () => {
+      // The outcome this notification exists for. Ops gets a CRITICAL asking
+      // them to credit it by hand and the response is a 200, so Fygaro stops
+      // retrying — without a push the customer is silent forever, while someone
+      // refused by the far more benign `under-minimum` does get told.
+      mockCreditFygaroTopup.mockResolvedValue(
+        new FygaroCreditError("insufficient-treasury-float", "insufficient balance"),
+      )
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
+      // GROSS ($10.00), not the net that never landed: the customer is looking
+      // at what their card was charged.
+      expect(mockSendTopupNotification).toHaveBeenCalledWith({
+        accountId: ACCOUNT_ID,
+        outcome: "heldForReview",
+        amountCents: 1000,
+        currency: "USD",
       })
     })
 
@@ -1226,6 +1415,234 @@ describe("fygaro paymentHandler", () => {
       expect(stamped[0].outcome.netAmountCents).toBeUndefined()
     })
 
+    // "We have your $X payment and are completing it manually" is a COMMITMENT
+    // that a human finishes this payment. It must go out only for the reasons
+    // where that is the real outcome — an exclusion list of one silently hands
+    // the same promise to every gate added later, including ones where nothing
+    // is ever going to land — and only to an account we can PROVE asked for the
+    // checkout.
+    describe("the held-for-review push is an allowlist, not a denylist", () => {
+      it.each([
+        [
+          "over-limit",
+          (body: Record<string, unknown>) => ({ ...body, amount: "500.01" }),
+          () => undefined,
+          { amountCents: 50001, currency: "USD" },
+        ],
+        [
+          "under-minimum",
+          (body: Record<string, unknown>) => ({ ...body, amount: "2.00" }),
+          () => undefined,
+          { amountCents: 200, currency: "USD" },
+        ],
+        [
+          "daily-limit-exceeded",
+          (body: Record<string, unknown>) => ({ ...body, amount: "30.00" }),
+          () => mockSumFygaroLast24h.mockResolvedValue(10000),
+          { amountCents: 3000, currency: "USD" },
+        ],
+        [
+          "no-daily-limit-for-level",
+          (body: Record<string, unknown>) => body,
+          () =>
+            mockFindByUsername.mockResolvedValue({
+              id: ACCOUNT_ID,
+              level: 0,
+              username: VALID_BODY.customReference,
+            }),
+          { amountCents: 1000, currency: "USD" },
+        ],
+        [
+          // The push names the payment's REAL currency. Assuming USD rendered a
+          // J$6,000 payment as "$6000.00" — a ~150x overstatement in the one
+          // message whose job is telling the customer what we are holding.
+          "non-usd",
+          (body: Record<string, unknown>) => ({
+            ...body,
+            amount: "6000.00",
+            currency: "JMD",
+          }),
+          () => undefined,
+          { amountCents: 600000, currency: "JMD" },
+        ],
+      ])(
+        "tells the customer their captured payment is being finished by hand (%s)",
+        async (reason, mutateBody, arrange, expected) => {
+          arrange()
+          const res = makeRes()
+
+          // Signed: the refusal push only goes to a reference Flash itself
+          // minted (see the unverified-reference case below).
+          await paymentHandler(
+            makeReq(signedBody(mutateBody(VALID_BODY), expected.amountCents)),
+            res,
+          )
+
+          // Pin the gate this case actually tripped, the way the silent block
+          // below does. Without it the case name is decoration: nudge
+          // DEFAULT_SETTINGS.minimumTopup past autoCreditLimit and the
+          // "under-minimum" row starts refusing on `over-limit` instead, with
+          // byte-identical push args — the test stays green under a name that
+          // has become a lie, and the allowlist it is guarding is no longer
+          // covered where it claims to be.
+          expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+            expect.objectContaining({
+              meta: expect.objectContaining({ reason }),
+            }),
+          )
+          // The GROSS captured, which is what their card statement shows.
+          expect(mockSendTopupNotification).toHaveBeenCalledWith({
+            accountId: ACCOUNT_ID,
+            outcome: "heldForReview",
+            ...expected,
+          })
+        },
+      )
+
+      it.each([
+        [
+          // The operator's ERPNext runtime kill switch — the one ops flips
+          // during an incident. Pushing here mass-notifies every paying
+          // customer exactly when nobody wants more traffic.
+          "auto-credit-disabled",
+          (body: Record<string, unknown>) => body,
+          1000,
+          () =>
+            mockGetFygaroSettings.mockResolvedValue({
+              ...DEFAULT_SETTINGS,
+              autoCreditEnabled: false,
+            }),
+        ],
+        [
+          // Fees already meet or exceed the gross: nothing will ever land, so
+          // promising that it will is simply untrue.
+          "non-positive-net",
+          (body: Record<string, unknown>) => ({ ...body, amount: "0.10" }),
+          10,
+          () => undefined,
+        ],
+        [
+          // The payment does not match the checkout we signed. That is a refund
+          // or an escalation, not a hand-credit. Signed for $20, paid $10.
+          "intent-mismatch",
+          (body: Record<string, unknown>) => body,
+          2000,
+          () => undefined,
+        ],
+      ])(
+        "stays silent on %s — no hand-credit is coming",
+        async (reason, mutateBody, authorizedCents, arrange) => {
+          arrange()
+          const res = makeRes()
+
+          // Signed too, so these cases keep testing the ALLOWLIST rather than
+          // passing for free on the unverified-reference gate. Flip any of
+          // these three to `true` in REFUSAL_NOTIFIES_CUSTOMER and this fails.
+          await paymentHandler(
+            makeReq(signedBody(mutateBody(VALID_BODY), authorizedCents)),
+            res,
+          )
+
+          // The refusal still happened and ops was still paged...
+          expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+            expect.objectContaining({ meta: expect.objectContaining({ reason }) }),
+          )
+          // ...the customer just is not promised something that will not happen.
+          expect(mockSendTopupNotification).not.toHaveBeenCalled()
+        },
+      )
+
+      it.each([
+        ["under-minimum", "2.00", "USD", () => undefined],
+        // A single Jamaican dollar: the cheapest possible way to put a message
+        // on someone else's lock screen.
+        ["non-usd", "1.00", "JMD", () => undefined],
+        // Free once the victim already sits at their cap: ANY amount trips it,
+        // so the attacker pays the smallest top-up the operator allows.
+        [
+          "daily-limit-exceeded",
+          "30.00",
+          "USD",
+          () => mockSumFygaroLast24h.mockResolvedValue(10000),
+        ],
+        // Likewise free — a level-0 account refuses every amount.
+        [
+          "no-daily-limit-for-level",
+          "10.00",
+          "USD",
+          () =>
+            mockFindByUsername.mockResolvedValue({
+              id: ACCOUNT_ID,
+              level: 0,
+              username: VALID_BODY.customReference,
+            }),
+        ],
+      ])(
+        "refuses to push at a PAYER-TYPED reference (%s) — that is a scam pretext, not a notification",
+        async (reason, amount, currency, arrange) => {
+          // On unsigned clients `customReference` is free text the payer types
+          // (there is no intentId to verify it against), so an attacker can pay
+          // a trivial amount — or nothing above the victim's spent cap — with a
+          // STRANGER's username on it. Without this gate the bank's own app
+          // then tells that stranger we are holding a payment of theirs: a
+          // ready-made pretext for a follow-up scam call, bought for a dollar.
+          // Unlike the `credited` push, whose abuse means paying the victim
+          // real money, nothing about THESE reasons makes it self-defeating —
+          // which is exactly what separates them from `over-limit` below.
+          arrange()
+          const res = makeRes()
+
+          // No `|intentId`: what a pre-signed-checkout build sends, and what
+          // EVERY build sends while `fygaro.checkout.enabled` is false.
+          await paymentHandler(makeReq({ ...VALID_BODY, amount, currency }), res)
+
+          // The payment is still recorded and ops is still paged — the money is
+          // real, it is only the identity claim that is not.
+          expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+            expect.objectContaining({ meta: expect.objectContaining({ reason }) }),
+          )
+          expect(mockAlertBridge).toHaveBeenCalledWith(
+            expect.objectContaining({
+              context: expect.objectContaining({ reason }),
+            }),
+          )
+          expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
+          expect(mockSendTopupNotification).not.toHaveBeenCalled()
+        },
+      )
+
+      it("still pushes an UNSIGNED over-limit refusal — forging that one costs the attacker more than the limit", async () => {
+        // The verified-reference gate is a PRICE argument, so it must not
+        // extend to the expensive reason. `over-limit` trips only ABOVE the
+        // operator's $500 single-payment limit, so forging it means paying
+        // >$500 that ops then hand-credits TO THE VICTIM — the same
+        // self-defeating economics that leaves the `credited` push ungated.
+        //
+        // And it is the reason a real customer is most likely to hit while
+        // `fygaro.checkout.enabled` is false — its default, and a Fygaro
+        // Pro-plan dependency — when no client can produce a signed reference
+        // at all. Gate this one too and the entire refusal half of this feature
+        // is dead in the default configuration.
+        const res = makeRes()
+
+        // No `|intentId`, exactly as above.
+        await paymentHandler(makeReq({ ...VALID_BODY, amount: "500.01" }), res)
+
+        expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            meta: expect.objectContaining({ reason: "over-limit" }),
+          }),
+        )
+        expect(mockSendTopupNotification).toHaveBeenCalledWith({
+          accountId: ACCOUNT_ID,
+          outcome: "heldForReview",
+          // The GROSS captured, which is what their card statement shows.
+          amountCents: 50001,
+          currency: "USD",
+        })
+      })
+    })
+
     it("returns 500 for settings-unavailable so Fygaro retries (transient), without acking or spamming the feed", async () => {
       // A brief ERPNext blip caches settings as undefined for up to 60s. That
       // must NOT permanently downgrade the payment to manual credit: return 500
@@ -1250,6 +1667,9 @@ describe("fygaro paymentHandler", () => {
         }),
       )
       expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+      // Nothing is terminal yet — a retry seconds later credits cleanly, so
+      // telling the customer it needs manual work would be wrong and unretractable.
+      expect(mockSendTopupNotification).not.toHaveBeenCalled()
       expect(res.status).toHaveBeenCalledWith(500)
     })
 
@@ -1272,6 +1692,7 @@ describe("fygaro paymentHandler", () => {
         }),
       )
       expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+      expect(mockSendTopupNotification).not.toHaveBeenCalled()
       expect(res.status).toHaveBeenCalledWith(500)
     })
 
