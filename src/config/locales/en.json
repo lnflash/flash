@@ -128,7 +128,7 @@
       },
       "heldForReview": {
         "title": "Top-up needs a moment",
-        "body": "We have your {{amount}} payment and are completing it manually. We'll let you know when it lands."
+        "body": "We have your {{amount}} payment and are completing it manually."
       },
       "crediting": {
         "title": "Top-up on its way",

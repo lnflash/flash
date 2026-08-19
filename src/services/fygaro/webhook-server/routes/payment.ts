@@ -38,16 +38,21 @@ import { alertBridge, generateDedupKey } from "@services/alerts"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
 // FCM from the fygaro-webhook workload. Nothing reachable from this server
 // pushed before, and a missing GOOGLE_APPLICATION_CREDENTIALS fails SILENTLY —
-// firebase.ts leaves `messaging` null, push-notifications.ts returns `true`
-// anyway, and the only signal is one boot-time warn nobody watches. Verified
-// wired for this workload, not inherited from the api pod: lnflash/charts
+// firebase.ts leaves `messaging` null and push-notifications.ts returns `true`
+// anyway, so nothing here can tell a delivered push from a discarded one. The
+// server's boot path now pages a critical on that (see `if (!messaging)` in
+// ../index.ts), which is the only place it CAN be detected. Verified wired for
+// this workload, not inherited from the api pod: lnflash/charts
 // `charts/flash/templates/fygaro-webhook-deployment.yaml` sets
 // GOOGLE_APPLICATION_CREDENTIALS and mounts the galoyapp-firebase-serviceaccount
 // secret under `.Values.galoy.api.firebaseNotifications.enabled` (chart >= 3.2.54;
 // deployments pins 3.2.63), and lnflash/deployments
 // `tf-modules/flash/flash-values.tmpl.yaml` sets that flag true for test + prod.
 // Any new workload that imports this must be checked the same way.
-import { sendFygaroTopupNotificationBestEffort } from "@app/fygaro/send-topup-notification"
+import {
+  sendFygaroTopupNotificationBestEffort,
+  type FygaroTopupNotificationOutcome,
+} from "@app/fygaro/send-topup-notification"
 
 import {
   creditFygaroTopup,
@@ -170,6 +175,36 @@ const REFUSAL_NOTIFIES_CUSTOMER: Record<RecordOnlyReason, boolean> = {
   "no-daily-limit-for-level": true,
   "daily-limit-exceeded": true,
   "under-minimum": true,
+}
+
+// Read off `creditFygaroTopup` itself rather than restated as a literal union:
+// a restated one stays "complete" when the source grows a status, and the only
+// thing left to catch it would be an out-of-range index — which this repo
+// compiles with `noImplicitAny: false` and therefore does not report.
+type FygaroCreditStatus = Exclude<
+  Awaited<ReturnType<typeof creditFygaroTopup>>,
+  FygaroCreditError
+>["status"]
+
+/**
+ * Which push a successful credit path earns, keyed by what the send actually
+ * reported.
+ *
+ * A Record rather than a ternary, for the same reason REFUSAL_NOTIFIES_CUSTOMER
+ * above is one: the difference between "N USD has been added to your wallet"
+ * and "we're crediting it now" is a claim about the customer's balance, and a
+ * ternary hands every future status the fallback arm silently. Add a status to
+ * `creditFygaroTopup` and this object is missing a key — a compile error, not a
+ * customer told their money landed when it did not.
+ */
+const OUTCOME_BY_CREDIT_STATUS: Record<
+  FygaroCreditStatus,
+  FygaroTopupNotificationOutcome
+> = {
+  success: "credited",
+  // IBEX reporting IN_FLIGHT is the vendor's documented 200, so this is a
+  // routine outcome — too weak for the credited copy, too real for silence.
+  pending: "crediting",
 }
 
 export const paymentHandler = async (req: Request, res: Response) => {
@@ -628,7 +663,22 @@ export const paymentHandler = async (req: Request, res: Response) => {
       // reasons where a human really does finish the payment by hand
       // (REFUSAL_NOTIFIES_CUSTOMER above); the rest would be promising something
       // that is not going to happen.
-      if (REFUSAL_NOTIFIES_CUSTOMER[gate.reason]) {
+      //
+      // ...and only for a SERVER-VERIFIED reference. `authorizedIntent` is set
+      // only when the reference carries an intentId that Flash itself minted
+      // and signed for this account and this amount (see readIntent above; a
+      // mismatch on either lands as `intent-mismatch`, which this allowlist
+      // refuses anyway). On the legacy unsigned clients still in the wild,
+      // `customReference` is free text the PAYER types — so without this gate
+      // anyone could pay J$1, or $2 against the $10 minimum, with a stranger's
+      // username on it and have the bank's own app tell that stranger we are
+      // holding a payment of theirs. That is a ready-made pretext for a
+      // follow-up scam call, and it costs the attacker a dollar. The `credited`
+      // push is not gated the same way because abusing it means paying the
+      // victim real money, which makes it self-defeating; a refusal push has no
+      // such offsetting cost. Legacy clients simply keep the pre-PR behaviour
+      // (ops alert only, no push) until they are out of the wild.
+      if (authorizedIntent && REFUSAL_NOTIFIES_CUSTOMER[gate.reason]) {
         await sendFygaroTopupNotificationBestEffort({
           accountId,
           outcome: "heldForReview",
@@ -815,10 +865,10 @@ export const paymentHandler = async (req: Request, res: Response) => {
         await sendFygaroTopupNotificationBestEffort({
           accountId: creditAccountId,
           // `pending` gets its OWN phrase rather than the credited one or
-          // nothing at all. IBEX reporting IN_FLIGHT is the vendor's documented
-          // 200, so this is a routine outcome — and leaving it silent stranded
-          // exactly the customer this notification exists for.
-          outcome: creditResult.status === "success" ? "credited" : "crediting",
+          // nothing at all. Looked up in OUTCOME_BY_CREDIT_STATUS (above)
+          // rather than branched on inline, so a third send status cannot
+          // silently inherit either claim.
+          outcome: OUTCOME_BY_CREDIT_STATUS[creditResult.status],
           // NET: what actually landed in the wallet (or is on its way to it).
           // Naming the gross would overstate the balance change by the fees.
           amountCents: fees.netCents,

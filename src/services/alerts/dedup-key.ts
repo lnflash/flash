@@ -61,6 +61,13 @@ export const generateDedupKey = {
   // incident as an ERPNext one and get triaged as the wrong system.
   fygaroAuthorizeUnavailable: (reason: string) =>
     `fygaro:authorize-unavailable:${reason}`,
+  // The fygaro-webhook workload booted without a usable Firebase messaging
+  // client, so every top-up push is a SILENT no-op (push-notifications.ts
+  // returns `true` when `messaging` is null). Static: this is one broken
+  // deployment, not a per-payment anomaly, and it must page once rather than
+  // per webhook. Fires at boot, so the feature is never quietly dead for a
+  // whole release because a secret mount regressed in a chart bump.
+  fygaroPushUnavailable: () => "fygaro:push-unavailable",
 }
 
 export const normalizeDedupKey = (key: string): string =>

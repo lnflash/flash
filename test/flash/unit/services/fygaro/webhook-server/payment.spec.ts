@@ -165,6 +165,36 @@ const makeRes = (): Response => {
 const makeReq = (body: Record<string, unknown>): Request =>
   ({ body }) as unknown as Request
 
+const SIGNED_INTENT_ID = "8c1d2e3f-4a5b-6c7d-8e9f-0a1b2c3d4e5f"
+
+/**
+ * Turn a payload into one carrying a SERVER-SIGNED reference, and stand up the
+ * authorisation it points at.
+ *
+ * The distinction matters wherever the handler acts on the identity in
+ * `customReference` rather than just recording it: on legacy unsigned clients
+ * that field is free text the PAYER types, while `username|intentId` can only
+ * come from an authorizeFygaroTopup call Flash made for that account. Pass an
+ * `authorizedCents` that differs from what is paid to produce a mismatch.
+ */
+const signedBody = (
+  body: Record<string, unknown>,
+  authorizedCents: number,
+): Record<string, unknown> => {
+  mockReadIntent.mockResolvedValue({
+    found: true,
+    intent: {
+      intentId: SIGNED_INTENT_ID,
+      accountId: ACCOUNT_ID as string,
+      username: VALID_BODY.customReference,
+      amountCents: authorizedCents,
+      currency: String(body.currency ?? "USD"),
+      createdAtMs: 1_700_000_000_000,
+    },
+  })
+  return { ...body, customReference: `${body.customReference}|${SIGNED_INTENT_ID}` }
+}
+
 beforeEach(() => {
   jest.clearAllMocks()
   mockFygaroConfig.credit = { enabled: false }
@@ -958,11 +988,12 @@ describe("fygaro paymentHandler", () => {
       },
     )
 
-    // "We have your $X payment and are completing it manually. We'll let you
-    // know when it lands" is a COMMITMENT that a human finishes this payment.
-    // It must go out only for the reasons where that is the real outcome — an
-    // exclusion list of one silently hands the same promise to every gate added
-    // later, including ones where nothing is ever going to land.
+    // "We have your $X payment and are completing it manually" is a COMMITMENT
+    // that a human finishes this payment. It must go out only for the reasons
+    // where that is the real outcome — an exclusion list of one silently hands
+    // the same promise to every gate added later, including ones where nothing
+    // is ever going to land — and only to an account we can PROVE asked for the
+    // checkout.
     describe("the held-for-review push is an allowlist, not a denylist", () => {
       it.each([
         [
@@ -986,7 +1017,12 @@ describe("fygaro paymentHandler", () => {
         [
           "no-daily-limit-for-level",
           (body: Record<string, unknown>) => body,
-          () => mockFindByUsername.mockResolvedValue({ id: ACCOUNT_ID, level: 0 }),
+          () =>
+            mockFindByUsername.mockResolvedValue({
+              id: ACCOUNT_ID,
+              level: 0,
+              username: VALID_BODY.customReference,
+            }),
           { amountCents: 1000, currency: "USD" },
         ],
         [
@@ -1008,7 +1044,12 @@ describe("fygaro paymentHandler", () => {
           arrange()
           const res = makeRes()
 
-          await paymentHandler(makeReq(mutateBody(VALID_BODY)), res)
+          // Signed: the refusal push only goes to a reference Flash itself
+          // minted (see the unverified-reference case below).
+          await paymentHandler(
+            makeReq(signedBody(mutateBody(VALID_BODY), expected.amountCents)),
+            res,
+          )
 
           // Pin the gate this case actually tripped, the way the silent block
           // below does. Without it the case name is decoration: nudge
@@ -1038,6 +1079,7 @@ describe("fygaro paymentHandler", () => {
           // customer exactly when nobody wants more traffic.
           "auto-credit-disabled",
           (body: Record<string, unknown>) => body,
+          1000,
           () =>
             mockGetFygaroSettings.mockResolvedValue({
               ...DEFAULT_SETTINGS,
@@ -1049,42 +1091,73 @@ describe("fygaro paymentHandler", () => {
           // promising that it will is simply untrue.
           "non-positive-net",
           (body: Record<string, unknown>) => ({ ...body, amount: "0.10" }),
+          10,
           () => undefined,
         ],
         [
           // The payment does not match the checkout we signed. That is a refund
-          // or an escalation, not a hand-credit.
+          // or an escalation, not a hand-credit. Signed for $20, paid $10.
           "intent-mismatch",
-          (body: Record<string, unknown>) => ({
-            ...body,
-            customReference: `${VALID_BODY.customReference}|1a2b3c4d-5e6f-4a1b-8c2d-3e4f5a6b7c8d`,
-          }),
-          () =>
-            mockReadIntent.mockResolvedValue({
-              found: true,
-              intent: {
-                intentId: "1a2b3c4d-5e6f-4a1b-8c2d-3e4f5a6b7c8d",
-                accountId: ACCOUNT_ID as string,
-                username: VALID_BODY.customReference,
-                amountCents: 2000,
-                currency: "USD",
-                createdAtMs: 1_700_000_000_000,
-              },
-            }),
+          (body: Record<string, unknown>) => body,
+          2000,
+          () => undefined,
         ],
       ])(
         "stays silent on %s — no hand-credit is coming",
-        async (reason, mutateBody, arrange) => {
+        async (reason, mutateBody, authorizedCents, arrange) => {
           arrange()
           const res = makeRes()
 
-          await paymentHandler(makeReq(mutateBody(VALID_BODY)), res)
+          // Signed too, so these cases keep testing the ALLOWLIST rather than
+          // passing for free on the unverified-reference gate. Flip any of
+          // these three to `true` in REFUSAL_NOTIFIES_CUSTOMER and this fails.
+          await paymentHandler(
+            makeReq(signedBody(mutateBody(VALID_BODY), authorizedCents)),
+            res,
+          )
 
           // The refusal still happened and ops was still paged...
           expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
             expect.objectContaining({ meta: expect.objectContaining({ reason }) }),
           )
           // ...the customer just is not promised something that will not happen.
+          expect(mockSendTopupNotification).not.toHaveBeenCalled()
+        },
+      )
+
+      it.each([
+        ["under-minimum", "2.00", "USD"],
+        // A single Jamaican dollar: the cheapest possible way to put a message
+        // on someone else's lock screen.
+        ["non-usd", "1.00", "JMD"],
+        ["over-limit", "500.01", "USD"],
+      ])(
+        "refuses to push at a PAYER-TYPED reference (%s) — that is a scam pretext, not a notification",
+        async (reason, amount, currency) => {
+          // On legacy unsigned clients `customReference` is free text the payer
+          // types (there is no intentId to verify it against), so an attacker
+          // can pay a trivial amount with a STRANGER's username on it. Without
+          // this gate the bank's own app then tells that stranger we are holding
+          // a payment of theirs — a ready-made pretext for a follow-up scam
+          // call, bought for a dollar. Unlike the `credited` push, whose abuse
+          // means paying the victim real money, nothing here makes it
+          // self-defeating.
+          const res = makeRes()
+
+          // No `|intentId`: exactly what a pre-signed-checkout build sends.
+          await paymentHandler(makeReq({ ...VALID_BODY, amount, currency }), res)
+
+          // The payment is still recorded and ops is still paged — the money is
+          // real, it is only the identity claim that is not.
+          expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+            expect.objectContaining({ meta: expect.objectContaining({ reason }) }),
+          )
+          expect(mockAlertBridge).toHaveBeenCalledWith(
+            expect.objectContaining({
+              context: expect.objectContaining({ reason }),
+            }),
+          )
+          expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
           expect(mockSendTopupNotification).not.toHaveBeenCalled()
         },
       )

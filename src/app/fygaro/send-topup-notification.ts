@@ -1,5 +1,4 @@
 import {
-  sendOutcomeNotification,
   sendOutcomeNotificationBestEffort,
   type OutcomeNotificationArgs,
 } from "@app/notifications/send-outcome-notification"
@@ -52,6 +51,24 @@ export type FygaroTopupNotificationArgs = {
 // ISO code, so one convention covers every currency without a per-symbol table.
 const formatMajorUnits = (amountCents: number): string => (amountCents / 100).toFixed(2)
 
+/**
+ * The `data.type` the mobile app switches on. Spelled out per outcome rather
+ * than interpolated from it, because the two vocabularies differ: outcomes are
+ * camelCase TypeScript identifiers, wire types are snake_case
+ * (`bridge_deposit_completed`, `bridge_deposit_processing`). Deriving one from
+ * the other shipped `fygaro_topup_heldForReview` — a snake prefix welded to a
+ * camel suffix — into a cross-repo contract where correcting it later costs a
+ * coordinated release with flash-mobile.
+ *
+ * Exhaustive by TYPE: a new outcome without an entry here is a compile error,
+ * not a push whose casing is silently wrong.
+ */
+const DATA_TYPE_BY_OUTCOME: Record<FygaroTopupNotificationOutcome, string> = {
+  credited: "fygaro_topup_credited",
+  crediting: "fygaro_topup_crediting",
+  heldForReview: "fygaro_topup_held_for_review",
+}
+
 const toOutcomeArgs = ({
   accountId,
   outcome,
@@ -60,7 +77,7 @@ const toOutcomeArgs = ({
 }: FygaroTopupNotificationArgs): OutcomeNotificationArgs => ({
   accountId,
   phraseBase: `notification.fygaroTopup.${outcome}`,
-  dataType: `fygaro_topup_${outcome}`,
+  dataType: DATA_TYPE_BY_OUTCOME[outcome],
   amountArg: `${formatMajorUnits(amountCents)} ${currency}`,
   extraData: {
     // MAJOR units, matching `data.amount` on the Bridge deposit push. Sending
@@ -71,10 +88,15 @@ const toOutcomeArgs = ({
   },
 })
 
-export const sendFygaroTopupNotification = async (
-  args: FygaroTopupNotificationArgs,
-): Promise<true | ApplicationError> => sendOutcomeNotification(toOutcomeArgs(args))
-
+/**
+ * The ONLY entry point, and best-effort by construction.
+ *
+ * There is deliberately no throwing/error-returning variant: every caller is on
+ * a money path where the payment has already been captured, so a notification
+ * failure must never become the payment's failure. An exported variant that
+ * returns `true | ApplicationError` would be dead code inviting exactly the
+ * caller this must not have.
+ */
 export const sendFygaroTopupNotificationBestEffort = async (
   args: FygaroTopupNotificationArgs,
 ): Promise<void> =>
