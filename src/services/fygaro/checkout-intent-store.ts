@@ -479,11 +479,28 @@ export const mergeIntentOutcome = (
   // the whole guard — the record would stay `credited` with tx1's net, and
   // `getFygaroTopupStatus` would answer CREDITED for a second real capture
   // sitting in manual review.
-  if (
-    existing.state === "credited" &&
-    incoming.state !== "credited" &&
-    !differentPayment
-  ) {
+  // CREDITED IS ABSORBING, for the intent and not merely for the payment.
+  //
+  // The scoped version of this rule was still a "last stamp wins" fall-through
+  // for any other transaction, and webhook deliveries are not a timeline: a
+  // routine re-delivery of tx1 arriving after tx2 was refused walked the record
+  // back and forth between "money is in your wallet" and "we're completing it
+  // manually". Both stamps are true about their own payment; the record has one
+  // slot, so the only rule that cannot produce a falsehood in SOME ordering is
+  // to keep the claim that is irreversibly true. Money reaching the wallet is
+  // that claim. A refusal is not — it is a payment ops may still hand-credit.
+  //
+  // The second, uncredited capture is not lost by this: it is transaction-
+  // scoped everywhere it matters. `markFygaroTopupNotCredited` stamps its
+  // ERPNext row, that row drops out of the 24h allowance sum, and alertBridge
+  // pages a human. What it does not do is flip the customer's screen away from
+  // a credit that genuinely landed.
+  //
+  // KNOWN GAP, deliberately left: a customer who pays the SAME link twice is
+  // told about the credited one and not about the one in manual review. A
+  // per-intent record cannot represent two payments; per-transaction status is
+  // the real fix and is out of scope here.
+  if (existing.state === "credited" && incoming.state !== "credited") {
     return undefined
   }
 

@@ -1003,6 +1003,9 @@ describe("fygaro paymentHandler", () => {
     })
 
     it("does NOT treat another transaction's credit as this one being already credited", async () => {
+      // The webhook decision is TRANSACTION-scoped: tx2 must be refused on its
+      // own merits, stamped uncredited in ERPNext and alerted. What the shared
+      // per-intent record ends up saying is a separate question, settled below.
       // The marker is INTENT-scoped; the decision is TRANSACTION-scoped. One
       // signed link can be paid twice inside its 900s window — the replay
       // authorize-topup guards against — so tx1's credit says nothing about
@@ -1076,14 +1079,19 @@ describe("fygaro paymentHandler", () => {
         }),
       ])
 
-      // And the RECORD ends up saying so. Asserting the call alone is what let
-      // this test pass while the store quietly dropped the stamp — `credited`
-      // was absorbing per INTENT, so tx2's held-for-review was discarded and
-      // fygaroTopupStatus went on answering CREDITED, with tx1's $94.21, for a
-      // second real $100 capture sitting in manual review. Replaying every
-      // stamp this delivery made through the REAL merge, over the record that
-      // was already there, is the only version of this assertion that can fail
-      // when that regression comes back.
+      // The RECORD, by contrast, deliberately keeps `credited`. It has ONE
+      // outcome slot and this link has two payments, so some ordering of
+      // deliveries contradicts some stamp whatever rule is chosen — and the
+      // only claim that is irreversibly true is that money reached the wallet.
+      // Scoping absorbency to the payment instead left a "last stamp wins"
+      // fall-through, and a routine re-delivery of tx1 then walked the record
+      // back and forth between "money is in your wallet" and "we're completing
+      // it manually".
+      //
+      // tx2 is not lost by that, which is the point of the assertions ABOVE:
+      // its ERPNext row is stamped uncredited (so it leaves the 24h allowance
+      // sum) and a human is paged. Only the customer-facing record stays on the
+      // credit that genuinely landed.
       const recorded = mockRecordIntentOutcome.mock.calls.reduce(
         (
           record: FygaroTopupOutcome | undefined,
@@ -1091,13 +1099,7 @@ describe("fygaro paymentHandler", () => {
         ) => mergeIntentOutcome(record, args.outcome) ?? record,
         CREDITED_BY_ANOTHER_TX,
       )
-      expect(recorded).toMatchObject({
-        state: "held-for-review",
-        reason: "daily-limit-exceeded",
-        transactionId: VALID_BODY.transactionId,
-      })
-      // tx1's net must not ride along onto a payment nobody credited.
-      expect(recorded?.netAmountCents).toBeUndefined()
+      expect(recorded).toMatchObject({ state: "credited" })
     })
 
     it("does NOT let another transaction's credit swallow an intent-mismatch", async () => {

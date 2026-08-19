@@ -616,21 +616,22 @@ describe("redemption leaves the record the status poll reads", () => {
       intent: { outcome: { state: "credited", netAmountCents: 9421 } },
     })
   })
-
-  it("lets a held-for-review stamp about ANOTHER payment land over a credited one", async () => {
-    // The two tests above make `credited` absorbing. It has to be absorbing per
-    // PAYMENT, not per intent, or it swallows the very stamp the webhook's
-    // transaction-scoped already-credited guard exists to produce:
+  it("keeps CREDITED even when another payment on the same link is refused", async () => {
+    // The record has one outcome slot and a link can be paid twice, so some
+    // ordering of deliveries will always contradict some stamp. The only rule
+    // that cannot produce a falsehood is to keep the claim that is
+    // irreversibly true: money reached the wallet. A refusal is not that — it
+    // is a capture ops may still hand-credit.
     //
-    //   Customer pays one $100 link twice inside its 900s window. tx1 credits
-    //   and stamps {credited, tx1, net 9421}. tx2 arrives, readFygaroTopup-
-    //   Completion(tx2) says not completed, the intent's credited marker names
-    //   tx1 so it is correctly not trusted, the gate refuses
-    //   `daily-limit-exceeded` and the handler stamps {held-for-review, tx2}.
+    // The scoped version of this rule was still "last stamp wins" for any other
+    // transaction, and webhook deliveries are not a timeline: a routine
+    // RE-delivery of tx-1 after tx-2 was refused walked the record back and
+    // forth between "money is in your wallet" and "we're completing it
+    // manually".
     //
-    // Dropped here, the record stays `credited` with tx1's net and
-    // getFygaroTopupStatus answers CREDITED — for a second real $100 capture
-    // sitting in manual review with nothing in the wallet.
+    // tx-2 is not lost by this — it is transaction-scoped everywhere it
+    // matters: its ERPNext row is stamped uncredited, drops out of the 24h
+    // allowance sum, and pages a human.
     await saveIntent({ intent: INTENT, ttlSeconds: TTL })
     await recordIntentOutcome({
       intentId: INTENT.intentId,
@@ -658,19 +659,32 @@ describe("redemption leaves the record the status poll reads", () => {
     const lookup = await readIntent(INTENT.intentId)
     expect(lookup).toMatchObject({
       intent: {
-        outcome: {
-          state: "held-for-review",
-          reason: "daily-limit-exceeded",
-          transactionId: "tx-2",
-        },
+        outcome: { state: "credited", netAmountCents: 9421, transactionId: "tx-1" },
       },
     })
-    // And tx1's net does NOT ride along: it is what reached the wallet for a
-    // DIFFERENT capture, so showing it against tx2 puts a figure on the screen
-    // that nobody credited for this payment.
-    expect(
-      lookup.found ? lookup.intent.outcome?.netAmountCents : "record missing",
-    ).toBeUndefined()
+  })
+
+  it("cannot be walked back by a re-delivery of an earlier payment", async () => {
+    // The failure the rule above exists to kill: once any payment credited,
+    // no later stamp in any order flips the screen off it.
+    await saveIntent({ intent: INTENT, ttlSeconds: TTL })
+    for (const outcome of [
+      { state: "held-for-review" as const, transactionId: "tx-2", atMs: NOW_MS },
+      {
+        state: "credited" as const,
+        netAmountCents: 9421,
+        transactionId: "tx-1",
+        atMs: NOW_MS + 1,
+      },
+      { state: "held-for-review" as const, transactionId: "tx-2", atMs: NOW_MS + 2 },
+      { state: "failed" as const, transactionId: "tx-3", atMs: NOW_MS + 3 },
+    ]) {
+      await recordIntentOutcome({ intentId: INTENT.intentId, outcome, ttlSeconds: TTL })
+    }
+
+    expect(await readIntent(INTENT.intentId)).toMatchObject({
+      intent: { outcome: { state: "credited", netAmountCents: 9421 } },
+    })
   })
 })
 
@@ -832,27 +846,21 @@ describe("mergeIntentOutcome", () => {
     ).toBeUndefined()
   })
 
-  it("lets a non-credited stamp about a DIFFERENT payment land", () => {
-    // `credited` is absorbing per PAYMENT, not per intent. One signed link can
-    // be paid twice inside its window, and the webhook's already-credited guard
-    // is transaction-scoped precisely so tx2 is refused on its own merits and
-    // stamped `held-for-review`. Dropping that here would leave the record
-    // saying CREDITED, with tx1's net, about a capture nobody credited.
+  it("drops a non-credited stamp even when it is about a DIFFERENT payment", () => {
+    // Absorbing for the INTENT, not merely for the payment. Scoping it to the
+    // payment left a "last stamp wins" fall-through for every other
+    // transaction, and deliveries are not a timeline — a re-delivery of tx-1
+    // after tx-2 was refused walked the record back and forth. One slot, two
+    // payments: keep the claim that is irreversibly true.
     expect(
       mergeIntentOutcome(
         { ...CREDITED, transactionId: "tx-1" },
         { ...HELD, transactionId: "tx-2" },
       ),
-    ).toMatchObject({ state: "held-for-review", transactionId: "tx-2" })
+    ).toBeUndefined()
   })
 
   it("does not lend one payment's net to a stamp about another", () => {
-    expect(
-      mergeIntentOutcome(
-        { ...CREDITED, transactionId: "tx-1" },
-        { ...HELD, transactionId: "tx-2" },
-      )?.netAmountCents,
-    ).toBeUndefined()
     // Not even to a later credit: a net is what reached the wallet for ONE
     // capture, and tx2's credit path always has its own figure to hand.
     expect(
