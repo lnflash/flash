@@ -25,6 +25,7 @@ import {
   BridgeTransferRequestStatus,
   BridgeTransferRequestTransactionType,
   EMAIL_ATTRIBUTION_SOURCE_SYSTEM,
+  type FygaroTopupWindow,
 } from "@services/frappe/models/BridgeTransferRequest"
 
 const mockedAxios = axios as unknown as {
@@ -398,6 +399,30 @@ describe("ErpNext.findBridgeTransferRequest", () => {
     )
   })
 
+  it("asks for final_amount, so a completed row can say what was credited", async () => {
+    // Frappe returns ONLY the fields named in the request, so dropping this one
+    // is a silent `undefined` at the call site rather than a type error — and
+    // the webhook path that merely CONFIRMS an earlier credit would go back to
+    // stamping the customer's status with no amount.
+    mockedAxios.get.mockResolvedValue({
+      data: {
+        data: [
+          {
+            name: "BTR-1",
+            status: BridgeTransferRequestStatus.Completed,
+            final_amount: "56.52",
+          },
+        ],
+      },
+    })
+
+    const result = await client.findBridgeTransferRequest("fygaro:tx_123")
+
+    expect(result).toEqual(expect.objectContaining({ final_amount: "56.52" }))
+    const getParams = mockedAxios.get.mock.calls[0][1].params
+    expect(JSON.parse(getParams.fields)).toContain("final_amount")
+  })
+
   it("returns undefined when no row exists", async () => {
     mockedAxios.get.mockResolvedValue({ data: { data: [] } })
 
@@ -518,7 +543,7 @@ describe("ErpNext.sumFygaroTopupGrossCentsSince", () => {
 
     const result = await client.sumFygaroTopupGrossCentsSince(params)
 
-    expect(result).toBe(3560)
+    expect((result as FygaroTopupWindow).grossCents).toBe(3560)
   })
 
   it("scopes the query to this account's captured Fygaro top-ups in the window, excluding the current delivery", async () => {
@@ -557,6 +582,14 @@ describe("ErpNext.sumFygaroTopupGrossCentsSince", () => {
       "request_id",
       "amount",
       "source_systems_seen",
+      // A row that carries a failure reason was captured and NOT credited, so
+      // it delivered no value and must not spend the allowance.
+      "failure_reason",
+      // ...unless it was later credited by hand. `failure_reason` is never
+      // cleared, so the status is the only thing that can distinguish the two.
+      "status",
+      // Stored UTC — the oldest counted row is when allowance frees up.
+      "last_seen_at",
     ])
   })
 
@@ -580,7 +613,10 @@ describe("ErpNext.sumFygaroTopupGrossCentsSince", () => {
   it("returns 0 for an empty window", async () => {
     mockedAxios.get.mockResolvedValue({ data: { data: [] } })
 
-    expect(await client.sumFygaroTopupGrossCentsSince(params)).toBe(0)
+    expect(
+      ((await client.sumFygaroTopupGrossCentsSince(params)) as FygaroTopupWindow)
+        .grossCents,
+    ).toBe(0)
   })
 
   it("fails closed (error, not zero) when the response has no data array", async () => {
@@ -650,7 +686,10 @@ describe("ErpNext.sumFygaroTopupGrossCentsSince", () => {
       },
     })
 
-    expect(await client.sumFygaroTopupGrossCentsSince(params)).toBe(1000)
+    expect(
+      ((await client.sumFygaroTopupGrossCentsSince(params)) as FygaroTopupWindow)
+        .grossCents,
+    ).toBe(1000)
   })
 
   it("still counts rows with no source_systems_seen (absent marker is not an exemption)", async () => {
@@ -666,7 +705,10 @@ describe("ErpNext.sumFygaroTopupGrossCentsSince", () => {
       },
     })
 
-    expect(await client.sumFygaroTopupGrossCentsSince(params)).toBe(3500)
+    expect(
+      ((await client.sumFygaroTopupGrossCentsSince(params)) as FygaroTopupWindow)
+        .grossCents,
+    ).toBe(3500)
   })
 
   it("does not treat a lookalike source system as email attribution", async () => {
@@ -684,7 +726,136 @@ describe("ErpNext.sumFygaroTopupGrossCentsSince", () => {
       },
     })
 
-    expect(await client.sumFygaroTopupGrossCentsSince(params)).toBe(2500)
+    expect(
+      ((await client.sumFygaroTopupGrossCentsSince(params)) as FygaroTopupWindow)
+        .grossCents,
+    ).toBe(2500)
+  })
+
+  describe("refused payments and when the window rolls", () => {
+    // The allowance maths this whole feature turns on. A mixed set, read once:
+    // one credited row, one refused row, one row whose `failure_reason` is
+    // present but empty, each with its own `last_seen_at`.
+    const MIXED = [
+      {
+        request_id: "fygaro:tx-credited",
+        amount: "25.00",
+        status: "Completed",
+        last_seen_at: "2026-08-13 09:00:00",
+      },
+      {
+        // Captured, deliberately not credited: the customer got nothing from
+        // it, so it must not spend the allowance that governs value delivered.
+        request_id: "fygaro:tx-refused",
+        amount: "60.00",
+        status: "Fiat Received",
+        failure_reason: "daily-limit-exceeded",
+        // OLDER than every counted row: if the exclusion did not also apply to
+        // the oldest-row derivation, this timestamp would leak into
+        // `oldestCountedMs` and promise the allowance back too early.
+        last_seen_at: "2026-08-13 07:30:00",
+      },
+      {
+        // An empty reason is not a reason. Trimming matters: "" and "   " are
+        // both "no reason recorded", and treating them as one would drop a
+        // perfectly ordinary in-flight payment out of the cap.
+        request_id: "fygaro:tx-blank-reason",
+        amount: "10.00",
+        status: "Fiat Received",
+        failure_reason: "   ",
+        last_seen_at: "2026-08-13 08:00:00",
+      },
+    ]
+
+    it("excludes a refused row from the gross and counts the rest", async () => {
+      mockedAxios.get.mockResolvedValue({ data: { data: MIXED } })
+
+      expect(
+        ((await client.sumFygaroTopupGrossCentsSince(params)) as FygaroTopupWindow)
+          .grossCents,
+      ).toBe(3500)
+    })
+
+    it("takes oldestCountedMs from the oldest COUNTED row, not the oldest row", async () => {
+      // The refused row is the oldest of the three. Reporting its timestamp
+      // would tell a refused customer their allowance frees up half an hour
+      // before it actually does — and they would come back and be refused again.
+      mockedAxios.get.mockResolvedValue({ data: { data: MIXED } })
+
+      expect(
+        ((await client.sumFygaroTopupGrossCentsSince(params)) as FygaroTopupWindow)
+          .oldestCountedMs,
+        // Frappe stores this naive; we write it in UTC, so it parses as UTC.
+      ).toBe(Date.parse("2026-08-13T08:00:00Z"))
+    })
+
+    it("counts a refused row again once ops credits it by hand", async () => {
+      // `completeFygaroTopup` omits `failureReason`, so `applyUpdateGuards`
+      // leaves the old reason on the row forever. Keying the exclusion on the
+      // reason ALONE would make a hand-credited payment — the exact action the
+      // "manual credit needed" alert asks for — permanently exempt: $160 of
+      // value delivered against a $125 cap while the gate still reads $100
+      // spent, with the rest of the cap free to auto-credit on top.
+      mockedAxios.get.mockResolvedValue({
+        data: {
+          data: [
+            {
+              request_id: "fygaro:tx-hand-credited",
+              amount: "60.00",
+              status: "Completed",
+              failure_reason: "daily-limit-exceeded",
+              last_seen_at: "2026-08-13 09:00:00",
+            },
+          ],
+        },
+      })
+
+      expect(
+        ((await client.sumFygaroTopupGrossCentsSince(params)) as FygaroTopupWindow)
+          .grossCents,
+      ).toBe(6000)
+    })
+
+    it("leaves oldestCountedMs undefined when nothing counts", async () => {
+      mockedAxios.get.mockResolvedValue({
+        data: {
+          data: [
+            {
+              request_id: "fygaro:tx-refused",
+              amount: "60.00",
+              status: "Fiat Received",
+              failure_reason: "under-minimum",
+              last_seen_at: "2026-08-13 07:30:00",
+            },
+          ],
+        },
+      })
+
+      const result = (await client.sumFygaroTopupGrossCentsSince(
+        params,
+      )) as FygaroTopupWindow
+      expect(result.grossCents).toBe(0)
+      expect(result.oldestCountedMs).toBeUndefined()
+    })
+
+    it("leaves oldestCountedMs undefined when the timestamp cannot be parsed", async () => {
+      // The row still counts towards the gross — the cap must never under-count
+      // over a malformed timestamp — but "when does this free up" has no answer,
+      // and inventing one (NaN, or now) would be worse than saying nothing.
+      mockedAxios.get.mockResolvedValue({
+        data: {
+          data: [
+            { request_id: "fygaro:tx-1", amount: "25.00", last_seen_at: "not-a-date" },
+          ],
+        },
+      })
+
+      const result = (await client.sumFygaroTopupGrossCentsSince(
+        params,
+      )) as FygaroTopupWindow
+      expect(result.grossCents).toBe(2500)
+      expect(result.oldestCountedMs).toBeUndefined()
+    })
   })
 
   it("skips an email-attributed row without failing on its amount", async () => {
@@ -708,7 +879,10 @@ describe("ErpNext.sumFygaroTopupGrossCentsSince", () => {
       },
     })
 
-    expect(await client.sumFygaroTopupGrossCentsSince(params)).toBe(1000)
+    expect(
+      ((await client.sumFygaroTopupGrossCentsSince(params)) as FygaroTopupWindow)
+        .grossCents,
+    ).toBe(1000)
   })
 })
 

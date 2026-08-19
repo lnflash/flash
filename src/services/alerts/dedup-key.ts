@@ -37,6 +37,17 @@ export const generateDedupKey = {
   // non-USD, non-positive net). Distinct from fygaroCreditFailed so a "skipped"
   // warning never suppresses a later "credit attempt failed" critical.
   fygaroNotCredited: (transactionId: string) => `fygaro:not-credited:${transactionId}`,
+  // The refusal was decided but could NOT be stamped onto the ERPNext row, so
+  // the payment keeps counting against the customer's daily allowance. Its own
+  // key, never `erpnextFygaroAudit`: that one is already claimed by the
+  // audit-WRITE failure on the very delivery that most often precedes this one
+  // (write fails -> critical -> 500 -> Fygaro retries -> write succeeds, gate
+  // refuses, stamp fails). Sharing a key means Slack/Discord suppress the
+  // second alert for the whole informDedupTtlMs window and PagerDuty folds it
+  // into the open incident — the same anti-pattern fygaroNotCredited vs
+  // fygaroCreditFailed exists to avoid.
+  fygaroRefusalNotStamped: (transactionId: string) =>
+    `fygaro:refusal-not-stamped:${transactionId}`,
   // Static keys (no per-request suffix) so the built-in TTL dedup rate-limits
   // these to one alert per window rather than one per failing request/poll.
   fygaroSignatureFailure: () => "fygaro:signature-failure",

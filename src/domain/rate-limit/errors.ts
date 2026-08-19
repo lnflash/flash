@@ -19,3 +19,4 @@ export class OnChainAddressCreateRateLimiterExceededError extends RateLimiterExc
 export class InviteCreateRateLimiterExceededError extends RateLimiterExceededError {}
 export class InviteTargetRateLimiterExceededError extends RateLimiterExceededError {}
 export class FygaroCheckoutCreateRateLimiterExceededError extends RateLimiterExceededError {}
+export class FygaroTopupAllowanceRateLimiterExceededError extends RateLimiterExceededError {}

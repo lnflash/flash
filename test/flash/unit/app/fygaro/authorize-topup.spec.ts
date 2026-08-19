@@ -259,14 +259,52 @@ describe("authorizeFygaroTopup", () => {
   })
 
   it("still authorises when only the cross-check record could not be stored", async () => {
-    // The hold IS in place and the webhook gate still applies; only our own
-    // after-the-fact verification is missing. That must not block a legitimate
-    // top-up.
+    // The hold IS in place — `saveIntent` writes the reservation before the
+    // record precisely so this branch can say that — and the webhook gate still
+    // applies; only our own after-the-fact verification is missing. That must
+    // not block a legitimate top-up.
     mockSaveIntent.mockResolvedValue(new Error("redis down"))
     const res = await authorize()
 
     expect(res.authorized).toBe(true)
     expect(res.checkout.url).toContain("?jwt=")
+  })
+
+  it("treats a record-write failure as a fully reserved request, not an unreserved one", async () => {
+    // The branch used to return early, which skipped BOTH of the things that
+    // only make sense once a hold exists — and a hold now always does by the
+    // time this error is returned.
+    mockSaveIntent.mockResolvedValue(new Error("redis down"))
+    // A racing request reserved $30 after this one's first read. The
+    // post-reserve re-read is the only thing that sees it: this request's own
+    // $80 hold plus the racer's $30 against the $100 level cap.
+    mockReadReservations
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([hold(8000, "intent-fixed"), hold(3000, "intent-racer")])
+
+    const res = await authorize()
+
+    // The concurrency re-read still runs and still rolls this one back — it was
+    // skipped entirely by the early return, so a record-write blip during a
+    // race re-opened the over-issue the re-read exists to close.
+    expect(res.authorized).toBe(false)
+    expect(res.reason).toBe("exceeds-daily-allowance")
+    expect(mockReleaseReservation).toHaveBeenCalledWith(
+      expect.objectContaining({ intentId: "intent-fixed", accountId: "acct-1" }),
+    )
+  })
+
+  it("reports the allowance NET of its own hold when the record write failed", async () => {
+    // The early return reported the PRE-reservation figure. With the hold
+    // genuinely taken, that overstated the headroom by exactly this request's
+    // own amount — so a client that trusted it would immediately mint a second
+    // link the cap cannot cover. $100 cap - $80 authorised = $20.
+    mockSaveIntent.mockResolvedValue(new Error("redis down"))
+
+    const res = await authorize()
+
+    expect(res.authorized).toBe(true)
+    expect(res.remainingAllowanceCents).toBe(2000)
   })
 
   it("refuses — and pages — when the RESERVATION could not be written", async () => {
@@ -445,6 +483,39 @@ describe("authorizeFygaroTopup", () => {
       // someone else means the two disagree — and the link is not ours to give.
       mockReadReservations.mockResolvedValue([hold(10000)])
       mockReadIntent.mockResolvedValue(openIntent({ accountId: "acct-someone-else" }))
+      const res = await authorize({ amountCents: 10000 })
+
+      expect(res.authorized).toBe(false)
+      expect(res.reason).toBe("checkout-already-open")
+    })
+
+    it("never hands back a link that has already been paid against", async () => {
+      // The record deliberately OUTLIVES redemption now — the status poll reads
+      // the terminal outcome off it — so "the record still exists" no longer
+      // means "nobody has used this link". If a redemption's zrem failed, the
+      // stale hold plus a live record would otherwise re-offer a checkout to a
+      // customer who has already been charged for it.
+      mockReadReservations.mockResolvedValue([hold(10000)])
+      mockReadIntent.mockResolvedValue(
+        openIntent({
+          outcome: { state: "credited", netAmountCents: 9421, atMs: NOW_MS - 30_000 },
+        }),
+      )
+      const res = await authorize({ amountCents: 10000 })
+
+      expect(res.authorized).toBe(false)
+      expect(res.reason).toBe("checkout-already-open")
+    })
+
+    it("never hands back a link a payment has already ARRIVED against", async () => {
+      // `received` is stamped by the webhook the moment it records the payment,
+      // before any credit decision. Re-offering the link in that window would
+      // invite the customer to pay the same authorisation a second time while
+      // the first payment is still being credited.
+      mockReadReservations.mockResolvedValue([hold(10000)])
+      mockReadIntent.mockResolvedValue(
+        openIntent({ outcome: { state: "received", atMs: NOW_MS - 5_000 } }),
+      )
       const res = await authorize({ amountCents: 10000 })
 
       expect(res.authorized).toBe(false)

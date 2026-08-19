@@ -24,6 +24,8 @@ import TransactionDetailsQuery from "./root/query/transaction-details"
 import LatestAccountUpgradeRequestQuery from "./root/query/account-upgrade-request"
 import SupportedBanksQuery from "./root/query/supported-banks"
 import BridgeKycStatusQuery from "./root/query/bridge-kyc-status"
+import FygaroTopupAllowanceQuery from "./root/query/fygaro-topup-allowance"
+import FygaroTopupStatusQuery from "./root/query/fygaro-topup-status"
 import BridgeVirtualAccountQuery from "./root/query/bridge-virtual-account"
 import BridgeExternalAccountsQuery from "./root/query/bridge-external-accounts"
 import BridgeWithdrawalRequestQuery from "./root/query/bridge-withdrawal-request"
@@ -59,6 +61,8 @@ export const queryFields = {
       transactionDetails: TransactionDetailsQuery,
       latestAccountUpgradeRequest: LatestAccountUpgradeRequestQuery,
       bridgeKycStatus: BridgeKycStatusQuery,
+      fygaroTopupAllowance: FygaroTopupAllowanceQuery,
+      fygaroTopupStatus: FygaroTopupStatusQuery,
       bridgeVirtualAccount: BridgeVirtualAccountQuery,
       bridgeExternalAccounts: BridgeExternalAccountsQuery,
       bridgeWithdrawalRequest: BridgeWithdrawalRequestQuery,

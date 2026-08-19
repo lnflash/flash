@@ -19,6 +19,13 @@ const FygaroCheckout = GT.Object({
       description:
         "After this, the URL is rejected by the payment provider and a new one must be requested.",
     },
+    checkoutId: {
+      type: GT.NonNull(GT.String),
+      description:
+        "Poll fygaroTopupStatus with this after the payment page closes. Do NOT " +
+        "report success from the payment page alone — the card charge succeeding " +
+        "and Flash crediting the wallet are different events.",
+    },
     amount: {
       type: GT.NonNull(CentAmount),
       description:

@@ -212,6 +212,7 @@ const fygaroCheckoutCreate = GT.Field<
       checkout: {
         url: result.checkout.url,
         expiresAt: result.checkout.expiresAt,
+        checkoutId: result.checkout.intentId,
         amount: amount,
       },
       remainingAllowance: result.remainingAllowanceCents,

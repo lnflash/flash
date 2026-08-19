@@ -137,6 +137,10 @@ export type FygaroCheckout = {
   url: string
   expiresAt: Date
   customReference: string
+  // Handed to the client so it can ask what became of the payment instead of
+  // assuming. It is already inside the token in the URL, so returning it
+  // exposes nothing new — it just stops the app having to parse its own link.
+  intentId: string
 }
 
 /**
@@ -186,5 +190,6 @@ export const buildFygaroCheckout = ({
     url: `${buttonUrl}${separator}jwt=${token}`,
     expiresAt: new Date((nowSecs + ttlSeconds) * 1000),
     customReference,
+    intentId,
   }
 }

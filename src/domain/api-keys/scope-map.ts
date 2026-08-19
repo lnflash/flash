@@ -16,6 +16,11 @@ export const apiKeyScopeForField: Readonly<Record<string, ApiKeyFieldAccess>> =
     transactionDetails: "read:transactions",
     latestAccountUpgradeRequest: "BLOCKED",
     bridgeKycStatus: "BLOCKED",
+    // Both read card-top-up state for the calling account. BLOCKED alongside
+    // the other fiat-rail reads (cashout, Bridge): an API key has no business
+    // seeing, or polling, a customer's payment outcomes.
+    fygaroTopupAllowance: "BLOCKED",
+    fygaroTopupStatus: "BLOCKED",
     cashoutRate: "BLOCKED",
     myReferrals: "BLOCKED",
     bridgeVirtualAccount: "BLOCKED",
