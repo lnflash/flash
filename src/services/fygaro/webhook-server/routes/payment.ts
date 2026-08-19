@@ -44,7 +44,6 @@ import {
   FygaroCreditError,
   INSUFFICIENT_TREASURY_FLOAT_STEP,
 } from "../credit-topup"
-import { notifyFygaroTopupCredited } from "../notify-credited"
 import { getFygaroSettings, type FygaroSettings } from "../fygaro-settings"
 import { parseCustomReference } from "../../checkout"
 import {
@@ -966,55 +965,6 @@ export const paymentHandler = async (req: Request, res: Response) => {
         }
 
         await recordOutcome({ state: "credited", netAmountCents: fees.netCents })
-
-        // TELL THE CUSTOMER. The status query only answers a client that is
-        // open and polling, and its record expires an hour after the JWT — so a
-        // top-up that resolves after the customer closed the app was never
-        // reported to them at all, while the client contract this workstream
-        // documents promises "we'll let you know" for every non-terminal state.
-        // Best-effort and non-throwing by construction (see the module
-        // docstring): the money has already moved and the audit row is already
-        // promoted, so a failed push must not turn into a 500 that asks Fygaro
-        // to retry a payment sitting in the customer's wallet.
-        //
-        // ONCE, though. This whole block is deliberately re-enterable: the
-        // Completed row is the processed marker, and it is exactly what is
-        // missing after the promotion failure alerted on immediately above
-        // (money in the wallet, row still Fiat Received) — as it also is
-        // whenever `readFygaroTopupCompletion` degrades to "not completed" on a
-        // transient lookup failure. Delivery 2 then replays the cached send,
-        // re-promotes, and arrives here for a top-up already paid. A second
-        // "+$9.01 added" on a payments app's lock screen reads as a second
-        // charge, and unlike a stale status screen it cannot be walked back.
-        //
-        // The intent's own stamp is the marker that survives all of that — it
-        // is written from this path independently of ERPNext, one line above.
-        // It must name THIS transaction for the same reason the record-only
-        // guard above does: one signed link can be paid twice inside its
-        // window, and tx1's stamp is not an answer about tx2's genuine credit.
-        // `authorizedIntent` was read before any of this delivery's writes, so
-        // it carries the EARLIER delivery's stamp, never this one's.
-        const alreadyAnnounced =
-          authorizedIntent?.outcome?.state === "credited" &&
-          authorizedIntent.outcome.transactionId === transactionId
-        if (!alreadyAnnounced) {
-          await notifyFygaroTopupCredited({
-            recipientAccount: creditAccount,
-            recipientWalletId: creditResult.walletId,
-            recipientWalletCurrency: creditResult.walletCurrency,
-            netAmountCents: fees.netCents,
-            transactionId,
-          }).catch((err) => {
-            // The module swallows its own failures; this is the call site
-            // refusing to DEPEND on that. Everything below — the ops event, the
-            // redemption, the 200 — must happen for a credit that has already
-            // moved money, and none of it may hinge on a push.
-            baseLogger.warn(
-              { transactionId, error: err instanceof Error ? err.name : String(err) },
-              "Fygaro credit notification threw; credit and audit are unaffected",
-            )
-          })
-        }
 
         notifyOpsEvent({
           flow: "deposit",
