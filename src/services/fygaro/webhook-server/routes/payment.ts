@@ -914,18 +914,48 @@ export const paymentHandler = async (req: Request, res: Response) => {
         // refusing the customer's next top-up with `daily-limit-exceeded`.
         // Costs the push nothing: `consumeIntent` reports failure by return
         // value, never a throw, so it cannot skip what follows it.
-        await sendFygaroTopupNotificationBestEffort({
-          accountId: creditAccountId,
-          // `pending` gets its OWN phrase rather than the credited one or
-          // nothing at all. Looked up in OUTCOME_BY_CREDIT_STATUS (above)
-          // rather than branched on inline, so a third send status cannot
-          // silently inherit either claim.
-          outcome: OUTCOME_BY_CREDIT_STATUS[creditResult.status],
-          // NET: what actually landed in the wallet (or is on its way to it).
-          // Naming the gross would overstate the balance change by the fees.
-          amountCents: fees.netCents,
-          currency,
-        })
+        // ONCE PER PAYMENT, and keyed on the TRANSACTION.
+        //
+        // This block is deliberately re-enterable: the Completed row is the
+        // processed marker, and it is exactly what is missing after the
+        // promotion failure alerted on above (money in the wallet, row still
+        // Fiat Received), as it also is whenever `readFygaroTopupCompletion`
+        // degrades to "not completed" on a transient lookup. Delivery 2 then
+        // replays the cached send and arrives here for a top-up already paid.
+        // A second "+$9.01 added" on a payments app's lock screen reads as a
+        // second charge, and unlike a stale status screen it cannot be walked
+        // back.
+        //
+        // The non-releasing timelock under its own key is the marker that
+        // survives all of it. NOT the intent: `authorizedIntent` is undefined
+        // for every payment whose custom_reference is a bare username — the
+        // legacy shape, and the only shape in production while signed checkout
+        // is off — so an intent-keyed guard protects nobody on the traffic that
+        // actually exists. Its own key, because the record-only path's
+        // `fygaro-payment:` lock is never taken on the credit path.
+        const pushClaim = await LockService().lockIdempotencyKey(
+          `fygaro-credit-push:${transactionId}` as IdempotencyKey,
+        )
+        if (pushClaim instanceof Error) {
+          baseLogger.info(
+            { transactionId },
+            "Fygaro credit already announced to the customer — not re-announcing",
+          )
+        } else {
+          await sendFygaroTopupNotificationBestEffort({
+            accountId: creditAccountId,
+            // `pending` gets its OWN phrase rather than the credited one or
+            // nothing at all. Looked up in OUTCOME_BY_CREDIT_STATUS (above)
+            // rather than branched on inline, so a third send status cannot
+            // silently inherit either claim.
+            outcome: OUTCOME_BY_CREDIT_STATUS[creditResult.status],
+            // NET: what actually landed in the wallet (or is on its way to
+            // it). Naming the gross would overstate the balance change by the
+            // fees.
+            amountCents: fees.netCents,
+            currency,
+          })
+        }
 
         return { code: 200, body: { status: "success", credited: true } }
       },

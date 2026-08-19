@@ -634,6 +634,28 @@ describe("fygaro paymentHandler", () => {
         currency: "USD",
       })
     })
+    it("announces a landed credit ONCE, however many times Fygaro re-delivers", async () => {
+      // This block is deliberately re-enterable — the Completed row is the
+      // processed marker, and it is exactly what is missing after a promotion
+      // failure (money in the wallet, row still Fiat Received). Delivery 2
+      // replays the cached send and arrives here for a top-up already paid. A
+      // second "+$9.01 added" on a lock screen reads as a second charge, and
+      // unlike a stale status screen it cannot be walked back.
+      //
+      // Keyed on the TRANSACTION: an intent-keyed guard is undefined for every
+      // payment whose custom_reference is a bare username, which is the only
+      // shape in production while signed checkout is off.
+      mockLockIdempotencyKey.mockResolvedValue(new Error("already claimed"))
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockSendTopupNotification).not.toHaveBeenCalled()
+      // The credit itself is still replayed and the row still re-promoted —
+      // only the announcement is suppressed.
+      expect(mockCompleteFygaroTopup).toHaveBeenCalled()
+      expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
+    })
 
     it("tells the customer an in-flight credit is on its way, not that it landed", async () => {
       // IBEX reporting IN_FLIGHT is the vendor's own documented 200, so this is
