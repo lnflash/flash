@@ -6,6 +6,8 @@ const mockZrem = jest.fn()
 const mockZrange = jest.fn()
 const mockZremrangebyscore = jest.fn()
 const mockExpire = jest.fn()
+const mockRedisGet = jest.fn()
+const mockEval = jest.fn()
 
 jest.mock("@services/cache", () => ({
   RedisCacheService: () => ({
@@ -22,6 +24,8 @@ jest.mock("@services/redis", () => ({
     zrange: (...args: unknown[]) => mockZrange(...args),
     zremrangebyscore: (...args: unknown[]) => mockZremrangebyscore(...args),
     expire: (...args: unknown[]) => mockExpire(...args),
+    get: (...args: unknown[]) => mockRedisGet(...args),
+    eval: (...args: unknown[]) => mockEval(...args),
   },
 }))
 
@@ -33,6 +37,7 @@ import { CacheUndefinedError, UnknownCacheServiceError } from "@domain/cache"
 import { baseLogger } from "@services/logger"
 import {
   consumeIntent,
+  mergeIntentOutcome,
   readIntent,
   readOutstandingReservations,
   recordIntentOutcome,
@@ -71,6 +76,8 @@ beforeEach(() => {
   mockZrange.mockResolvedValue([])
   mockZremrangebyscore.mockResolvedValue(0)
   mockExpire.mockResolvedValue(1)
+  mockRedisGet.mockResolvedValue(JSON.stringify(INTENT))
+  mockEval.mockResolvedValue(1)
 })
 
 describe("saveIntent", () => {
@@ -324,21 +331,45 @@ describe("consumeIntent", () => {
 // EVERY key cannot tell a live record from a deleted one, which is exactly the
 // distinction that broke.
 describe("redemption leaves the record the status poll reads", () => {
-  const store = new Map<string, unknown>()
+  // Values are held as the RAW JSON strings redis actually stores, because
+  // `recordIntentOutcome` now swaps the record with a compare-and-set on those
+  // exact bytes. Holding parsed objects would make every CAS compare identity
+  // instead of content and silently "succeed".
+  const store = new Map<string, string>()
 
   beforeEach(() => {
     store.clear()
     mockCacheSet.mockImplementation(async ({ key, value }: Record<string, unknown>) => {
-      store.set(key as string, value)
+      store.set(key as string, JSON.stringify(value))
       return value
     })
-    mockCacheGet.mockImplementation(async ({ key }: { key: string }) =>
-      store.has(key) ? store.get(key) : new CacheUndefinedError(),
-    )
+    mockCacheGet.mockImplementation(async ({ key }: { key: string }) => {
+      const raw = store.get(key)
+      return raw === undefined ? new CacheUndefinedError() : JSON.parse(raw)
+    })
     mockConsumeCacheKey.mockImplementation(async ({ key }: { key: string }) =>
       store.delete(key),
     )
+    mockRedisGet.mockImplementation(async (key: string) => store.get(key) ?? null)
+    mockEval.mockImplementation(
+      async (
+        _script: string,
+        _numKeys: number,
+        key: string,
+        expected: string,
+        next: string,
+      ) => cas(key, expected, next),
+    )
   })
+
+  // The Lua compare-and-set, in JS: replace ONLY if the key still holds the
+  // exact bytes the caller decided against. No domain logic lives here — the
+  // ordering rules are `mergeIntentOutcome`'s, and they run on the TS side.
+  const cas = (key: string, expected: string, next: string) => {
+    if ((store.get(key) ?? null) !== expected) return 0
+    store.set(key, next)
+    return 1
+  }
 
   const OUTCOME = {
     state: "held-for-review" as const,
@@ -418,21 +449,35 @@ describe("redemption leaves the record the status poll reads", () => {
     // Only credited->credited merges. A different state is a different answer
     // about the payment, and inheriting an amount from the previous one would
     // attach a credited figure to something that was not credited.
+    //
+    // Demonstrated failed->held-for-review rather than credited->failed: the
+    // credited case is no longer a state CHANGE at all, because credited is
+    // absorbing (see "refuses to overwrite `credited` with a later failed"
+    // below). The property being pinned here is unchanged.
     await saveIntent({ intent: INTENT, ttlSeconds: TTL })
     await recordIntentOutcome({
       intentId: INTENT.intentId,
-      outcome: { state: "credited", netAmountCents: 5652, atMs: NOW_MS },
+      outcome: {
+        state: "failed",
+        reason: "credit-failed",
+        netAmountCents: 5652,
+        atMs: NOW_MS,
+      },
       ttlSeconds: TTL,
     })
 
     await recordIntentOutcome({
       intentId: INTENT.intentId,
-      outcome: { state: "failed", reason: "credit-failed", atMs: NOW_MS + 1000 },
+      outcome: {
+        state: "held-for-review",
+        reason: "daily-limit-exceeded",
+        atMs: NOW_MS + 1000,
+      },
       ttlSeconds: TTL,
     })
 
     const lookup = await readIntent(INTENT.intentId)
-    expect(lookup).toMatchObject({ intent: { outcome: { state: "failed" } } })
+    expect(lookup).toMatchObject({ intent: { outcome: { state: "held-for-review" } } })
     expect(
       (lookup as { intent: { outcome: { netAmountCents?: number } } }).intent.outcome
         .netAmountCents,
@@ -477,7 +522,7 @@ describe("redemption leaves the record the status poll reads", () => {
     // under a claim-gated release its hold sat on the account's allowance for
     // ttlSeconds+3600, refusing its next top-up with `checkout-already-open`
     // for money it had already spent.
-    store.set(`fygaro-checkout-intent:${INTENT.intentId}`, INTENT)
+    store.set(`fygaro-checkout-intent:${INTENT.intentId}`, JSON.stringify(INTENT))
 
     expect(await consumeIntent(INTENT.intentId)).toEqual({ consumed: false })
     expect(mockZrem).toHaveBeenCalledWith(
@@ -525,6 +570,247 @@ describe("redemption leaves the record the status poll reads", () => {
     expect(await readIntent(INTENT.intentId)).toMatchObject({
       intent: { outcome: { state: "received" } },
     })
+  })
+
+  it("refuses to overwrite `credited` with a later held-for-review", async () => {
+    // No race needed to reach this: delivery 2 of the same payment takes the
+    // webhook's unattributed branch because the username no longer resolves,
+    // and stamps held-for-review/unattributed over credited. The customer's
+    // screen flips from "Money is in your wallet, $94.21" to "We've received
+    // your payment and are completing it manually", and ops gets paged for an
+    // unattributed payment that is already in the wallet. There is no refund
+    // path, so credited is terminal.
+    await saveIntent({ intent: INTENT, ttlSeconds: TTL })
+    await recordIntentOutcome({
+      intentId: INTENT.intentId,
+      outcome: { state: "credited", netAmountCents: 9421, atMs: NOW_MS },
+      ttlSeconds: TTL,
+    })
+
+    await recordIntentOutcome({
+      intentId: INTENT.intentId,
+      outcome: { state: "held-for-review", reason: "unattributed", atMs: NOW_MS + 1000 },
+      ttlSeconds: TTL,
+    })
+
+    expect(await readIntent(INTENT.intentId)).toMatchObject({
+      intent: { outcome: { state: "credited", netAmountCents: 9421 } },
+    })
+  })
+
+  it("refuses to overwrite `credited` with a later failed", async () => {
+    await saveIntent({ intent: INTENT, ttlSeconds: TTL })
+    await recordIntentOutcome({
+      intentId: INTENT.intentId,
+      outcome: { state: "credited", netAmountCents: 9421, atMs: NOW_MS },
+      ttlSeconds: TTL,
+    })
+
+    await recordIntentOutcome({
+      intentId: INTENT.intentId,
+      outcome: { state: "failed", reason: "credit-failed", atMs: NOW_MS + 1000 },
+      ttlSeconds: TTL,
+    })
+
+    expect(await readIntent(INTENT.intentId)).toMatchObject({
+      intent: { outcome: { state: "credited", netAmountCents: 9421 } },
+    })
+  })
+})
+
+// The guards above are only worth anything if they are evaluated against the
+// value being REPLACED. This key is written by several concurrent deliveries of
+// the same payment, and neither of the webhook's locks serialises the call —
+// the `received` stamp runs before either is taken.
+describe("recordIntentOutcome is a compare-and-set, not a read-then-blind-write", () => {
+  const KEY = `fygaro-checkout-intent:${INTENT.intentId}`
+  const CREDITED = { state: "credited" as const, netAmountCents: 5652, atMs: NOW_MS }
+
+  it("swaps only against the exact bytes it decided on, keeping the record's TTL", async () => {
+    const raw = JSON.stringify(INTENT)
+    mockRedisGet.mockResolvedValue(raw)
+
+    await recordIntentOutcome({
+      intentId: INTENT.intentId,
+      outcome: { state: "received", atMs: NOW_MS },
+      ttlSeconds: TTL,
+    })
+
+    expect(mockEval).toHaveBeenCalledTimes(1)
+    const [script, numKeys, key, expected, next, ttl] = mockEval.mock.calls[0]
+    expect(script).toContain("GET")
+    expect(numKeys).toBe(1)
+    expect(key).toBe(KEY)
+    // The value read, verbatim — not a re-serialisation of it, which would let
+    // a concurrent writer's bytes compare equal to ours.
+    expect(expected).toBe(raw)
+    expect(JSON.parse(next).outcome).toMatchObject({ state: "received" })
+    expect(ttl).toBe(String(TTL + 3600))
+    // ...and never through the cache service's plain SET, which is what made
+    // the guard a TOCTOU in the first place.
+    expect(mockCacheSet).not.toHaveBeenCalled()
+  })
+
+  it("re-decides against the value that actually won when it loses the swap", async () => {
+    // Delivery A reads a record with no outcome and decides to stamp
+    // `received`; delivery B credits in between. A blind SET would erase the
+    // terminal answer, leaving the customer polling PROCESSING for money
+    // already in their wallet — and the webhook's already-credited marker,
+    // which reads this same field, silently stops working.
+    const stale = JSON.stringify(INTENT)
+    const credited = JSON.stringify({ ...INTENT, outcome: CREDITED })
+    mockRedisGet.mockResolvedValueOnce(stale).mockResolvedValue(credited)
+    mockEval.mockResolvedValueOnce(0)
+
+    await recordIntentOutcome({
+      intentId: INTENT.intentId,
+      outcome: { state: "received", atMs: NOW_MS + 1 },
+      ttlSeconds: TTL,
+    })
+
+    // The retry re-read the winner and the `received` guard dropped the stamp,
+    // so there is no second swap at all.
+    expect(mockEval).toHaveBeenCalledTimes(1)
+    expect(mockRedisGet).toHaveBeenCalledTimes(2)
+  })
+
+  it("re-runs the merge, not just the write, after losing the swap", async () => {
+    // The retry must re-evaluate: a terminal stamp that is still valid against
+    // the winner has to land, or a lost race would silently drop it.
+    const stale = JSON.stringify(INTENT)
+    const received = JSON.stringify({
+      ...INTENT,
+      outcome: { state: "received", atMs: NOW_MS },
+    })
+    mockRedisGet.mockResolvedValueOnce(stale).mockResolvedValue(received)
+    mockEval.mockResolvedValueOnce(0)
+
+    await recordIntentOutcome({
+      intentId: INTENT.intentId,
+      outcome: { state: "credited", netAmountCents: 5652, atMs: NOW_MS + 1 },
+      ttlSeconds: TTL,
+    })
+
+    expect(mockEval).toHaveBeenCalledTimes(2)
+    expect(mockEval.mock.calls[1][3]).toBe(received)
+    expect(JSON.parse(mockEval.mock.calls[1][4]).outcome).toMatchObject({
+      state: "credited",
+      netAmountCents: 5652,
+    })
+  })
+
+  it("gives up quietly rather than looping on sustained contention", async () => {
+    mockEval.mockResolvedValue(0)
+
+    await expect(
+      recordIntentOutcome({
+        intentId: INTENT.intentId,
+        outcome: { state: "credited", netAmountCents: 5652, atMs: NOW_MS },
+        ttlSeconds: TTL,
+      }),
+    ).resolves.toBeUndefined()
+
+    expect(mockEval).toHaveBeenCalledTimes(3)
+    expect(baseLogger.warn).toHaveBeenCalledTimes(1)
+  })
+
+  it("writes nothing when the record is gone", async () => {
+    // Expired, evicted, or a legacy payment with no intent at all — never
+    // resurrect it, or a redeemed authorisation comes back to life.
+    mockRedisGet.mockResolvedValue(null)
+
+    await recordIntentOutcome({
+      intentId: INTENT.intentId,
+      outcome: { state: "credited", netAmountCents: 5652, atMs: NOW_MS },
+      ttlSeconds: TTL,
+    })
+
+    expect(mockEval).not.toHaveBeenCalled()
+  })
+
+  it("never throws on a redis fault — a status write must not fail a credit", async () => {
+    mockRedisGet.mockRejectedValue(new Error("redis down"))
+
+    await expect(
+      recordIntentOutcome({
+        intentId: INTENT.intentId,
+        outcome: { state: "credited", netAmountCents: 5652, atMs: NOW_MS },
+        ttlSeconds: TTL,
+      }),
+    ).resolves.toBeUndefined()
+  })
+})
+
+// The ordering rules themselves, pinned directly rather than only through the
+// store, because they are what stands between a customer and a status screen
+// that walks backwards.
+describe("mergeIntentOutcome", () => {
+  const CREDITED = { state: "credited" as const, netAmountCents: 9421, atMs: NOW_MS }
+  const HELD = {
+    state: "held-for-review" as const,
+    reason: "daily-limit-exceeded",
+    atMs: NOW_MS + 1,
+  }
+
+  it("takes the first thing known about a payment", () => {
+    expect(mergeIntentOutcome(undefined, { state: "received", atMs: NOW_MS })).toEqual({
+      state: "received",
+      atMs: NOW_MS,
+    })
+  })
+
+  it("drops `received` once anything at all has been decided", () => {
+    expect(
+      mergeIntentOutcome(HELD, { state: "received", atMs: NOW_MS + 2 }),
+    ).toBeUndefined()
+  })
+
+  it("drops every non-credited state against a credited record", () => {
+    expect(mergeIntentOutcome(CREDITED, HELD)).toBeUndefined()
+    expect(
+      mergeIntentOutcome(CREDITED, {
+        state: "failed",
+        reason: "credit-failed",
+        atMs: NOW_MS + 2,
+      }),
+    ).toBeUndefined()
+  })
+
+  it("keeps the net a real credit recorded when a confirmation carries none", () => {
+    expect(
+      mergeIntentOutcome(CREDITED, { state: "credited", atMs: NOW_MS + 2 }),
+    ).toMatchObject({ state: "credited", netAmountCents: 9421 })
+  })
+
+  it("lets a later credited stamp carry its own net", () => {
+    expect(
+      mergeIntentOutcome(CREDITED, {
+        state: "credited",
+        netAmountCents: 8000,
+        atMs: NOW_MS + 2,
+      }),
+    ).toMatchObject({ netAmountCents: 8000 })
+  })
+
+  it("does not carry a net across a state change", () => {
+    const merged = mergeIntentOutcome(
+      { state: "received", atMs: NOW_MS },
+      { state: "held-for-review", reason: "under-minimum", atMs: NOW_MS + 1 },
+    )
+
+    expect(merged).toMatchObject({ state: "held-for-review" })
+    expect(merged?.netAmountCents).toBeUndefined()
+  })
+
+  it("lets one terminal answer replace another that is not credited", () => {
+    // `failed` is explicitly retryable, so a later decision about the same
+    // payment is newer information and must land.
+    expect(
+      mergeIntentOutcome(
+        { state: "failed", reason: "credit-failed", atMs: NOW_MS },
+        HELD,
+      ),
+    ).toMatchObject({ state: "held-for-review" })
   })
 })
 

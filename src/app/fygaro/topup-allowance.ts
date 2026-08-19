@@ -43,10 +43,27 @@ export type FygaroTopupAllowance = {
   // have spent $0 and have $65 left of $125" is the true sentence, and folding
   // holds into spend would make it a false one.
   heldCents: number
-  // What would still be accepted right now: the cap less BOTH the settled gross
-  // and the live holds — the same quantity `authorizeFygaroTopup` computes, so
-  // the two surfaces cannot disagree about the same account at the same moment.
+  // What would still be accepted right now AGAINST THE DAILY CAP: the cap less
+  // BOTH the settled gross and the live holds — the same quantity
+  // `authorizeFygaroTopup` computes, so the two surfaces cannot disagree about
+  // the same account at the same moment. It is NOT the largest payable amount
+  // on its own; see `singlePaymentLimitCents`.
   remainingCents: number
+  // The per-payment ceiling (`auto_credit_limit`), which is a SEPARATE gate
+  // from the daily cap and is not folded into `remainingCents` — folding it in
+  // would misreport the daily headroom, which is what `resetsAt` is about.
+  //
+  // Reported because the gate enforces it (fees.ts `over-limit`) and nothing
+  // else in the schema carries it: an account with $500 of daily headroom
+  // against a $200 single-payment limit was being told it could top up $500,
+  // and `fygaroCheckoutCreate` then refused `above-single-payment-limit`. The
+  // largest amount that would actually go through is
+  // `min(remainingCents, singlePaymentLimitCents)`.
+  singlePaymentLimitCents: number
+  // The operator minimum (`minimum_topup`), the gate's lower bound. Reported
+  // for the same reason as the ceiling: it is enforced before the charge, so a
+  // client that cannot see it can only discover it by being refused.
+  minimumCents: number
   // When the oldest counted payment ages out of the window and some allowance
   // comes back. Undefined when nothing is counted (the full cap is available).
   // SETTLED SPEND ONLY: it is derived from the ERPNext window, and holds live in
@@ -156,6 +173,10 @@ export const getFygaroTopupAllowance = async ({
       spentCents: window.grossCents,
       heldCents,
       remainingCents: Math.max(0, limitCents - window.grossCents - heldCents),
+      // Off the SAME settings read the gate uses, so the two surfaces cannot
+      // name different ceilings for the same account at the same moment.
+      singlePaymentLimitCents: Math.round(settings.autoCreditLimit * 100),
+      minimumCents: Math.round(settings.minimumTopup * 100),
       resetsAt:
         window.oldestCountedMs === undefined
           ? undefined

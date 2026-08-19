@@ -315,7 +315,12 @@ export const paymentHandler = async (req: Request, res: Response) => {
       if (!intentId) return
       await recordIntentOutcome({
         intentId,
-        outcome: { ...outcome, atMs: Date.now() },
+        // Stamped with the TRANSACTION, not just the intent. The record is
+        // keyed on the intent, but one signed link can be paid twice inside its
+        // window, so an outcome that does not name the payment it is about
+        // cannot be used to decide anything about a different payment — see the
+        // already-credited guard below.
+        outcome: { ...outcome, transactionId, atMs: Date.now() },
         ttlSeconds: FygaroConfig.checkout?.ttlSeconds ?? 900,
       })
     }
@@ -636,8 +641,26 @@ export const paymentHandler = async (req: Request, res: Response) => {
       // The recorded outcome is the second marker: it is stamped from the
       // credit path independently of whether the promotion succeeded, so
       // between them they cover each other's gap.
+      //
+      // It must name THIS transaction. `priorCompletion` is keyed on the
+      // transaction; the intent record is keyed on the intent, and one signed
+      // link can be paid more than once inside its 900s window — the replay
+      // `authorizeFygaroTopup` already guards against. Accepting any `credited`
+      // stamp on the intent turns tx1's credit into an answer about tx2:
+      // customer pays a $100 link twice, tx1 credits and stamps the intent, tx2
+      // arrives, the gate correctly refuses `daily-limit-exceeded`, and this
+      // branch acks 200 `already_processed` for it — no
+      // `markFygaroTopupNotCredited` (so it eats the cap for 24h), no alert, no
+      // ops-feed line, and `fygaroTopupStatus` reports CREDITED with tx1's net
+      // for a second real capture that never reached the wallet. It would also
+      // swallow `intent-mismatch`, the one reason that exists to catch a replay.
+      //
+      // A record with no `transactionId` (written before that field existed)
+      // does not match either, so it falls through to the record-only path —
+      // an extra ops alert, never a silently-swallowed capture.
       const creditedOutcome =
-        authorizedIntent?.outcome?.state === "credited"
+        authorizedIntent?.outcome?.state === "credited" &&
+        authorizedIntent.outcome.transactionId === transactionId
           ? authorizedIntent.outcome
           : undefined
       if (priorCompletion.completed || creditedOutcome) {

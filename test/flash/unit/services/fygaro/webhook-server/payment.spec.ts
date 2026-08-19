@@ -930,7 +930,15 @@ describe("fygaro paymentHandler", () => {
           amountCents: 3000,
           currency: "USD",
           createdAtMs: 1,
-          outcome: { state: "credited", netAmountCents: 2852, atMs: 1 },
+          // Stamped by THIS transaction's own credit. The marker is only an
+          // answer about the payment it names — see the sibling test below,
+          // where the same intent carries a different transaction's credit.
+          outcome: {
+            state: "credited",
+            netAmountCents: 2852,
+            transactionId: VALID_BODY.transactionId,
+            atMs: 1,
+          },
         },
       })
       mockSumFygaroLast24h.mockResolvedValue(10000)
@@ -952,6 +960,148 @@ describe("fygaro paymentHandler", () => {
       expect(mockRecordIntentOutcome).toHaveBeenCalledWith(
         expect.objectContaining({
           outcome: expect.objectContaining({ state: "credited", netAmountCents: 2852 }),
+        }),
+      )
+    })
+
+    it("stamps every outcome with the transaction it is about", async () => {
+      // The record is keyed on the INTENT and a link can be paid twice, so an
+      // outcome that does not name its payment cannot be used to decide
+      // anything about a different one — which is exactly what the
+      // already-credited guard below does with it.
+      mockSumFygaroLast24h.mockResolvedValue(10000)
+
+      await paymentHandler(
+        makeReq({
+          ...VALID_BODY,
+          amount: "30.00",
+          customReference: `${VALID_BODY.customReference}|3f5a1c9e-2b7d-4a10-9f33-6c8e2d4b7a51`,
+        }),
+        makeRes(),
+      )
+
+      expect(mockRecordIntentOutcome).toHaveBeenCalled()
+      for (const [{ outcome }] of mockRecordIntentOutcome.mock.calls) {
+        expect(outcome.transactionId).toBe(VALID_BODY.transactionId)
+      }
+    })
+
+    it("does NOT treat another transaction's credit as this one being already credited", async () => {
+      // The marker is INTENT-scoped; the decision is TRANSACTION-scoped. One
+      // signed link can be paid twice inside its 900s window — the replay
+      // authorize-topup guards against — so tx1's credit says nothing about
+      // tx2. Trusting it acks tx2 200 "already_processed": no
+      // markFygaroTopupNotCredited (so a payment that delivered NOTHING eats
+      // the customer's cap for 24h), no ops alert, and fygaroTopupStatus
+      // reporting CREDITED with tx1's net for a second real $100 capture that
+      // never reached the wallet.
+      const intentId = "b41f7c02-9e35-4d6a-8f11-3a7c5d29e604"
+      mockReadCompletion.mockResolvedValue({ completed: false })
+      mockReadIntent.mockResolvedValue({
+        found: true,
+        intent: {
+          intentId,
+          accountId: ACCOUNT_ID,
+          username: VALID_BODY.customReference,
+          amountCents: 10000,
+          currency: "USD",
+          createdAtMs: 1,
+          outcome: {
+            state: "credited",
+            netAmountCents: 9421,
+            transactionId: "a1111111-2222-3333-4444-555555555555",
+            atMs: 1,
+          },
+        },
+      })
+      // $100 already charged against the $125 L1 cap, so this second $100 is
+      // genuinely over it.
+      mockSumFygaroLast24h.mockResolvedValue(10000)
+      const res = makeRes()
+
+      await paymentHandler(
+        makeReq({
+          ...VALID_BODY,
+          amount: "100.00",
+          customReference: `${VALID_BODY.customReference}|${intentId}`,
+        }),
+        res,
+      )
+
+      // Recorded and refused on its own merits, not swallowed.
+      expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
+      // Out of the allowance sum: an uncredited payment must not go on
+      // consuming the cap that governs value delivered.
+      expect(mockMarkNotCredited).toHaveBeenCalledWith(
+        expect.objectContaining({
+          transactionId: VALID_BODY.transactionId,
+          reason: "daily-limit-exceeded",
+        }),
+      )
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({
+          severity: "warning",
+          context: expect.objectContaining({ reason: "daily-limit-exceeded" }),
+        }),
+      )
+      expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ phase: "fygaro-recorded" }),
+      )
+      // ...and the stamp is the truth about THIS payment.
+      const stamped = mockRecordIntentOutcome.mock.calls
+        .map(([args]: [{ outcome: { state: string } }]) => args.outcome)
+        .filter(({ state }) => state !== "received")
+      expect(stamped).toEqual([
+        expect.objectContaining({
+          state: "held-for-review",
+          reason: "daily-limit-exceeded",
+          transactionId: VALID_BODY.transactionId,
+        }),
+      ])
+    })
+
+    it("does NOT let another transaction's credit swallow an intent-mismatch", async () => {
+      // `intent-mismatch` is the one gate reason that exists to catch a replay,
+      // so an intent-scoped credited marker swallowing it disarms the very
+      // check that would have caught the replay stamping the marker.
+      const intentId = "c5271f80-1a44-4c8e-9d02-77b3e6a1f409"
+      mockReadCompletion.mockResolvedValue({ completed: false })
+      mockReadIntent.mockResolvedValue({
+        found: true,
+        intent: {
+          intentId,
+          accountId: ACCOUNT_ID,
+          username: VALID_BODY.customReference,
+          amountCents: 10000,
+          currency: "USD",
+          createdAtMs: 1,
+          outcome: {
+            state: "credited",
+            netAmountCents: 9421,
+            transactionId: "a1111111-2222-3333-4444-555555555555",
+            atMs: 1,
+          },
+        },
+      })
+      const res = makeRes()
+
+      // Authorised $100, paid $30 — a mismatch on OUR side.
+      await paymentHandler(
+        makeReq({
+          ...VALID_BODY,
+          amount: "30.00",
+          customReference: `${VALID_BODY.customReference}|${intentId}`,
+        }),
+        res,
+      )
+
+      expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
+      expect(mockMarkNotCredited).toHaveBeenCalledWith(
+        expect.objectContaining({ reason: "intent-mismatch" }),
+      )
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({
+          context: expect.objectContaining({ reason: "intent-mismatch" }),
         }),
       )
     })

@@ -901,7 +901,7 @@ type FygaroCheckoutCreatePayload {
 }
 
 """
-How much of today's card top-up allowance this account has left. Does not authorise anything, so it is safe to call while the customer is still choosing an amount. Render all of them: `remaining` is the cap less BOTH `spent` and `held`, so without those two the gap cannot be explained. Floored at zero, so it can be LARGER than `limit - spent - held` when the cap has been exceeded — via a hand-credit, or via spend recorded before a limit change.
+How much of today's card top-up allowance this account has left. Does not authorise anything, so it is safe to call while the customer is still choosing an amount. Render all of them: `remaining` is the cap less BOTH `spent` and `held`, so without those two the gap cannot be explained. Floored at zero, so it can be LARGER than `limit - spent - held` when the cap has been exceeded — via a hand-credit, or via spend recorded before a limit change. The largest amount that would actually go through is `min(remaining, singlePaymentLimit)`, and anything below `minimum` is refused.
 """
 type FygaroTopupAllowance {
   """
@@ -918,7 +918,12 @@ type FygaroTopupAllowance {
   limit: CentAmount!
 
   """
-  What would still be accepted right now: the cap less BOTH `spent` and `held`. Unpaid checkout links are already subtracted, exactly as the pre-charge check subtracts them, so this is what a new top-up would be measured against — not `limit - spent`. Never negative.
+  The smallest top-up that will be accepted. Enforced before the charge, so a client that does not render it can only discover it by being refused.
+  """
+  minimum: CentAmount!
+
+  """
+  What would still be accepted right now AGAINST THE DAILY CAP: the cap less BOTH `spent` and `held`. Unpaid checkout links are already subtracted, exactly as the pre-charge check subtracts them, so this is what a new top-up is measured against — not `limit - spent`. Never negative. NOT the largest payable amount on its own: `singlePaymentLimit` is a separate ceiling and is deliberately not folded in here, or this number would stop meaning 'daily headroom' and `resetsAt` would stop describing it.
   """
   remaining: CentAmount!
 
@@ -928,9 +933,57 @@ type FygaroTopupAllowance {
   resetsAt: Timestamp
 
   """
+  The most that can be charged in ONE top-up, whatever the daily headroom. A separate gate from the cap, so an account with $500 remaining and a $200 single-payment limit can only pay $200 at a time — offering the $500 gets the charge refused. Take `min(remaining, singlePaymentLimit)` as the maximum.
+  """
+  singlePaymentLimit: CentAmount!
+
+  """
   Gross charged in the trailing 24 hours. Payments we captured but did not credit are excluded — they delivered nothing, so they do not spend the allowance.
   """
   spent: CentAmount!
+}
+
+"""
+The allowance, or why there isn't one. Exactly one of the two fields is ever set. `unavailableReason` exists so the client can tell a state that will never resolve on its own (hide the card top-up option) from a momentary read failure (show the flat limit, retry) — collapsing both into a missing allowance is what invites a top-up the pre-charge check then refuses.
+"""
+type FygaroTopupAllowancePayload {
+  """Null whenever `unavailableReason` is set, and only then."""
+  allowance: FygaroTopupAllowance
+
+  """Null whenever `allowance` is present, and only then."""
+  unavailableReason: FygaroTopupAllowanceUnavailableReason
+}
+
+enum FygaroTopupAllowanceUnavailableReason {
+  """
+  PERMANENT until an operator acts: card top-ups are switched off. Every fygaroCheckoutCreate is refused in this state, so hide the card top-up option rather than polling.
+  """
+  CHECKOUT_DISABLED
+
+  """
+  TRANSIENT: the trailing-24h top-up history could not be read. We refuse to guess rather than show a full allowance we would then refuse to honour.
+  """
+  HISTORY_UNAVAILABLE
+
+  """
+  PERMANENT until the account is upgraded: this account level has no card top-up allowance at all. Hide the option and point at verification; retrying changes nothing.
+  """
+  LEVEL_NOT_ELIGIBLE
+
+  """
+  TRANSIENT: too many allowance checks from this account too quickly. Back off and reuse the last answer; nothing here is authorised, so no charge was lost.
+  """
+  RATE_LIMITED
+
+  """
+  TRANSIENT: this account's open checkout links could not be read, so the allowance cannot be known. Unknown holds are not zero holds.
+  """
+  RESERVATIONS_UNAVAILABLE
+
+  """
+  TRANSIENT: the operator settings could not be read. Retry — nothing about the account has changed.
+  """
+  SETTINGS_UNAVAILABLE
 }
 
 """
@@ -1946,9 +1999,9 @@ type Query {
   currencyList: [Currency!]!
 
   """
-  How much card top-up allowance this account has left today. Null when the allowance cannot currently be established — show the flat limit and let the pre-charge check decide, rather than inventing a number.
+  How much card top-up allowance this account has left today. When the allowance cannot be established, `unavailableReason` says why: hide the card top-up option for the reasons that will not resolve on their own (CHECKOUT_DISABLED, LEVEL_NOT_ELIGIBLE), and for the transient ones show the flat limit and let the pre-charge check decide, rather than inventing a number.
   """
-  fygaroTopupAllowance: FygaroTopupAllowance
+  fygaroTopupAllowance: FygaroTopupAllowancePayload!
 
   """
   The outcome of a card top-up, by the checkout id returned from fygaroCheckoutCreate. Null when the checkout is unknown, expired, or not this account's — never as a way of saying 'not yet': a checkout we simply cannot read right now comes back as UNCONFIRMED so a transient fault is not reported to the customer as a payment that never existed.

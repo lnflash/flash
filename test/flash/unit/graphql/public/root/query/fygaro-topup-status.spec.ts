@@ -272,6 +272,8 @@ describe("fygaroTopupAllowance resolver", () => {
         spentCents: 5000,
         heldCents: 4000,
         remainingCents: 3500,
+        singlePaymentLimitCents: 20000,
+        minimumCents: 1000,
         resetsAt,
         holdsExpireAt,
       },
@@ -283,13 +285,46 @@ describe("fygaroTopupAllowance resolver", () => {
     // `held` has to ship alongside it — it is the only thing that accounts for
     // the difference.
     expect(await resolve(FygaroTopupAllowanceQuery as Query)).toEqual({
-      limit: 12500,
-      spent: 5000,
-      held: 4000,
-      remaining: 3500,
-      resetsAt,
-      holdsExpireAt,
+      allowance: {
+        limit: 12500,
+        spent: 5000,
+        held: 4000,
+        remaining: 3500,
+        singlePaymentLimit: 20000,
+        minimum: 1000,
+        resetsAt,
+        holdsExpireAt,
+      },
+      unavailableReason: null,
     })
+  })
+
+  it("carries the gate's per-payment bounds, not only the daily headroom", async () => {
+    // `remaining` is daily headroom; `singlePaymentLimit` is a SEPARATE gate
+    // (fees.ts `over-limit`). An account with $500 of daily room against a $200
+    // ceiling that is offered $500 has its charge refused
+    // `above-single-payment-limit` — the invite-then-refuse loop, on the query
+    // added to end it. Neither bound is exposed anywhere else in the schema.
+    mockGetFygaroTopupAllowance.mockResolvedValue({
+      available: true,
+      allowance: {
+        limitCents: 100000,
+        spentCents: 0,
+        heldCents: 0,
+        remainingCents: 50000,
+        singlePaymentLimitCents: 20000,
+        minimumCents: 1000,
+        resetsAt: undefined,
+        holdsExpireAt: undefined,
+      },
+    })
+
+    const { allowance } = (await resolve(FygaroTopupAllowanceQuery as Query)) as {
+      allowance: Record<string, unknown>
+    }
+    expect(allowance.remaining).toBe(50000)
+    expect(allowance.singlePaymentLimit).toBe(20000)
+    expect(allowance.minimum).toBe(1000)
   })
 
   it("explains the abandoned-link case: $0 spent, $60 held, and when it comes back", async () => {
@@ -308,18 +343,25 @@ describe("fygaroTopupAllowance resolver", () => {
         spentCents: 0,
         heldCents: 6000,
         remainingCents: 6500,
+        singlePaymentLimitCents: 20000,
+        minimumCents: 1000,
         resetsAt: undefined,
         holdsExpireAt,
       },
     })
 
     expect(await resolve(FygaroTopupAllowanceQuery as Query)).toEqual({
-      limit: 12500,
-      spent: 0,
-      held: 6000,
-      remaining: 6500,
-      resetsAt: undefined,
-      holdsExpireAt,
+      allowance: {
+        limit: 12500,
+        spent: 0,
+        held: 6000,
+        remaining: 6500,
+        singlePaymentLimit: 20000,
+        minimum: 1000,
+        resetsAt: undefined,
+        holdsExpireAt,
+      },
+      unavailableReason: null,
     })
   })
 
@@ -331,32 +373,55 @@ describe("fygaroTopupAllowance resolver", () => {
         spentCents: 5000,
         heldCents: 0,
         remainingCents: 7500,
+        singlePaymentLimitCents: 20000,
+        minimumCents: 1000,
         resetsAt: new Date("2026-08-18T02:33:31Z"),
         holdsExpireAt: undefined,
       },
     })
 
-    const payload = (await resolve(FygaroTopupAllowanceQuery as Query)) as Record<
-      string,
-      unknown
-    >
-    expect(payload.held).toBe(0)
-    expect(payload.holdsExpireAt).toBeUndefined()
+    const { allowance } = (await resolve(FygaroTopupAllowanceQuery as Query)) as {
+      allowance: Record<string, unknown>
+    }
+    expect(allowance.held).toBe(0)
+    expect(allowance.holdsExpireAt).toBeUndefined()
   })
 
+  // Collapsing all five into one bare null was itself the invite-then-refuse
+  // bug: two of them never resolve on their own, so a client that cannot tell
+  // them from an ERPNext blip renders the card top-up option and has
+  // fygaroCheckoutCreate refuse every attempt, forever.
   it.each([
-    "checkout-disabled",
-    "settings-unavailable",
-    "history-unavailable",
-    "reservations-unavailable",
-    "no-daily-limit-for-level",
-  ])("returns null rather than inventing a number when %s", async (reason) => {
-    // Decoration on a screen the customer is still filling in. A red banner
-    // over a Redis blip — or worse, a full allowance that the charge path will
-    // refuse — is worse than simply not showing the number.
+    ["checkout-disabled", "checkout-disabled"],
+    ["settings-unavailable", "settings-unavailable"],
+    ["history-unavailable", "history-unavailable"],
+    ["reservations-unavailable", "reservations-unavailable"],
+    ["no-daily-limit-for-level", "no-daily-limit-for-level"],
+  ])("names %s instead of inventing a number", async (reason, wire) => {
+    // Still no number — decoration on a screen the customer is still filling
+    // in, and a full allowance the charge path will refuse is worse than none.
+    // But the client is told WHICH kind of nothing it got.
     mockGetFygaroTopupAllowance.mockResolvedValue({ available: false, reason })
 
-    expect(await resolve(FygaroTopupAllowanceQuery as Query)).toBeNull()
+    expect(await resolve(FygaroTopupAllowanceQuery as Query)).toEqual({
+      allowance: null,
+      unavailableReason: wire,
+    })
+  })
+
+  it("distinguishes the PERMANENT refusals from the transient ones", async () => {
+    // The whole point of reporting the reason. These two are the states in
+    // which fygaroCheckoutCreate refuses every single request — the default
+    // rollout state (`fygaro.checkout.enabled` is false) and a level-0 account
+    // — so the client must hide the option rather than retry.
+    for (const reason of ["checkout-disabled", "no-daily-limit-for-level"]) {
+      mockGetFygaroTopupAllowance.mockResolvedValue({ available: false, reason })
+
+      const payload = (await resolve(FygaroTopupAllowanceQuery as Query)) as {
+        unavailableReason: string
+      }
+      expect(payload.unavailableReason).toBe(reason)
+    }
   })
 
   describe("rate limiting", () => {
@@ -379,23 +444,32 @@ describe("fygaroTopupAllowance resolver", () => {
       })
     })
 
-    it("answers null without touching ERPNext once the limiter is spent", async () => {
+    it("answers RATE_LIMITED without touching ERPNext once the limiter is spent", async () => {
       mockConsumeLimiter.mockResolvedValue(
         new FygaroTopupAllowanceRateLimiterExceededError(),
       )
 
-      expect(await resolve(FygaroTopupAllowanceQuery as Query)).toBeNull()
+      // Named, not bare: "back off" and "card top-ups are switched off" are
+      // opposite instructions, and the client cannot act on either if both
+      // arrive as an absent allowance.
+      expect(await resolve(FygaroTopupAllowanceQuery as Query)).toEqual({
+        allowance: null,
+        unavailableReason: "rate-limited",
+      })
       expect(mockGetFygaroTopupAllowance).not.toHaveBeenCalled()
     })
 
-    it("answers null without touching ERPNext when the limiter STORE is down", async () => {
+    it("answers RATE_LIMITED without touching ERPNext when the limiter STORE is down", async () => {
       // The allowance read fails closed on that same Redis anyway, so refusing
-      // here costs a null the client already handles — and it keeps an outage
-      // from becoming unbounded load on the ERPNext read every other card
-      // top-up depends on.
+      // here costs an answer the client already handles — and it keeps an
+      // outage from becoming unbounded load on the ERPNext read every other
+      // card top-up depends on.
       mockConsumeLimiter.mockResolvedValue(new Error("ECONNREFUSED"))
 
-      expect(await resolve(FygaroTopupAllowanceQuery as Query)).toBeNull()
+      expect(await resolve(FygaroTopupAllowanceQuery as Query)).toEqual({
+        allowance: null,
+        unavailableReason: "rate-limited",
+      })
       expect(mockGetFygaroTopupAllowance).not.toHaveBeenCalled()
     })
   })

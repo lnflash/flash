@@ -99,6 +99,20 @@ export type FygaroTopupOutcome = {
   // so the customer-facing message can name the actual number without the
   // status query making a second ERPNext read on every poll.
   detailCents?: number
+  // WHICH PAYMENT this outcome is about. The record is keyed on the intent, but
+  // one signed link can be paid more than once inside its window — the very
+  // replay `authorizeFygaroTopup` guards against — so an outcome without this
+  // is an intent-scoped fact being read as a transaction-scoped one. The
+  // webhook's already-credited short-circuit turns on exactly that distinction:
+  // without it, tx2 against a link tx1 already credited is acked
+  // `already_processed`, never stamped uncredited, never alerted, and reported
+  // to the customer as CREDITED for money that never reached their wallet.
+  //
+  // Optional because records written before this field existed are still in
+  // Redis. A guard comparing it must therefore require a MATCH rather than
+  // accept an absent value, so a legacy record falls through to the ordinary
+  // record-only path (alert + stamp) instead of being silently swallowed.
+  transactionId?: string
   atMs: number
 }
 
@@ -410,12 +424,99 @@ export const consumeIntent = async (intentId: string): Promise<{ consumed: boole
 }
 
 /**
+ * What the record should carry once `incoming` is applied to `existing`, or
+ * `undefined` when the stamp must be DROPPED because the record already says
+ * more than it does.
+ *
+ * Exported and pure so the ordering rules can be pinned directly. They are the
+ * only thing standing between a customer and a status screen that walks
+ * backwards, and every one of them is reachable from an ordinary provider
+ * re-delivery.
+ */
+export const mergeIntentOutcome = (
+  existing: FygaroTopupOutcome | undefined,
+  incoming: FygaroTopupOutcome,
+): FygaroTopupOutcome | undefined => {
+  if (existing === undefined) return incoming
+
+  // `received` is an OBSERVATION, and only ever the first thing known about a
+  // payment. Every webhook delivery stamps it — including the re-delivery of a
+  // payment an earlier delivery already credited or held — so letting it write
+  // would walk a terminal answer backwards to "we're crediting it" and leave
+  // the customer polling that forever. Terminal states are stamped by a
+  // delivery that decided something; this one only saw a payment arrive.
+  if (incoming.state === "received") return undefined
+
+  // `credited` is ABSORBING. The guard above stops `received` walking a
+  // terminal answer backwards, but a LATER terminal answer walks it backwards
+  // just as effectively, and that is reachable without any race: delivery 2 of
+  // the same payment takes the webhook's unattributed branch because the
+  // username no longer resolves, and stamps `held-for-review`/`unattributed`
+  // over `credited`. The customer's screen flips from "Money is in your wallet,
+  // $94.21" to "We've received your payment and are completing it manually",
+  // and ops is paged for an unattributed payment that is already in the wallet.
+  // There is no refund path here, so credited is genuinely terminal.
+  if (existing.state === "credited" && incoming.state !== "credited") return undefined
+
+  // A later stamp must not DESTROY what an earlier one knew. The
+  // already-credited guard in the webhook re-stamps `credited` from a path that
+  // has no fee breakdown to hand, and a blind overwrite would drop the net that
+  // a real credit recorded — leaving the app showing a credited top-up with no
+  // amount, against a schema that promises `netAmount` is "present once
+  // credited". Confirming an outcome should never know less than recording it.
+  if (existing.state === "credited") {
+    return {
+      ...incoming,
+      netAmountCents: incoming.netAmountCents ?? existing.netAmountCents,
+    }
+  }
+
+  return incoming
+}
+
+/**
+ * Compare-and-set on the intent record: replace it ONLY if it still holds the
+ * exact bytes the caller decided against, and keep its bounded lifetime.
+ *
+ * This is what makes the ordering rules above real. `recordIntentOutcome` was a
+ * plain GET→SET on a key several concurrent deliveries write, so every
+ * guarantee it leaned on held only while no write landed in between: delivery A
+ * reads a record with no outcome, delivery B credits and writes `credited`, A
+ * then writes its `received` over the top and the terminal answer is gone —
+ * the customer polls PROCESSING for money already in their wallet, and the
+ * webhook's already-credited marker, which reads this same field, silently
+ * stops working. Neither of the webhook's locks serialises this call, and the
+ * `received` stamp runs before either is taken.
+ *
+ * Deliberately GENERIC — no state names, no merge — so the decision has exactly
+ * one implementation (`mergeIntentOutcome`, in TypeScript, unit-tested) and
+ * this script cannot drift from it.
+ *
+ * A missing key returns `false` from GET, never equal to a string ARGV, so a
+ * record that expired between the read and the swap is not resurrected.
+ */
+const CAS_INTENT_RECORD = `
+local current = redis.call('GET', KEYS[1])
+if current ~= ARGV[1] then return 0 end
+redis.call('SETEX', KEYS[1], tonumber(ARGV[3]), ARGV[2])
+return 1
+`
+
+// Contention here is a re-delivery storm on ONE payment, not sustained load, so
+// a couple of retries covers it. Giving up is safe by construction: losing the
+// swap means another delivery's answer is on the record, and the guard would
+// have been re-evaluated against it.
+const RECORD_OUTCOME_ATTEMPTS = 3
+
+/**
  * Stamp the terminal outcome onto an authorisation, preserving everything else
  * about it.
  *
  * Read-modify-write rather than a blind overwrite: the record still carries the
  * amount and account the cross-check verifies against, and losing those to a
- * status update would silently disarm it.
+ * status update would silently disarm it. The write is a compare-and-set, so
+ * the guard is evaluated against the value actually being replaced; a lost race
+ * re-reads and decides again rather than clobbering the winner.
  *
  * Never throws and never blocks the caller — this runs on the webhook's
  * money-moving path, and a status write failing is not a reason to fail a
@@ -432,47 +533,37 @@ export const recordIntentOutcome = async ({
   ttlSeconds: number
 }): Promise<void> => {
   try {
-    const cache = await cacheService()
-    const found = await cache.get<FygaroCheckoutIntent>({ key: cacheKey(intentId) })
-    if (found instanceof Error) {
-      // Expired, evicted, or a legacy payment with no intent at all. Nothing to
-      // stamp; the app falls back to its unresolved state.
-      return
-    }
-    // `received` is an OBSERVATION, and only ever the first thing known about a
-    // payment. Every webhook delivery stamps it — including the re-delivery of
-    // a payment an earlier delivery already credited or held — so letting it
-    // write would walk a terminal answer backwards to "we're crediting it" and
-    // leave the customer polling that forever. Terminal states are stamped by a
-    // delivery that decided something; this one only saw a payment arrive.
-    if (outcome.state === "received" && found.outcome !== undefined) return
+    const redis = await redisClient()
+    const key = cacheKey(intentId)
+    // Written raw rather than through the cache service so the CAS has the
+    // exact bytes to compare against. Same key, same JSON, same SETEX the cache
+    // service issues, so `readIntent` reads it back unchanged.
+    const ttl = String(ttlSeconds + 3600)
 
-    // A later stamp must not DESTROY what an earlier one knew. The
-    // already-credited guard in the webhook re-stamps `credited` from a path
-    // that has no fee breakdown to hand, and a blind overwrite would drop the
-    // net that a real credit recorded — leaving the app showing a credited
-    // top-up with no amount, against a schema that promises `netAmount` is
-    // "present once credited". Confirming an outcome should never know less
-    // than recording it did.
-    const merged: FygaroTopupOutcome =
-      found.outcome?.state === "credited" && outcome.state === "credited"
-        ? {
-            ...outcome,
-            netAmountCents: outcome.netAmountCents ?? found.outcome.netAmountCents,
-          }
-        : outcome
+    for (let attempt = 0; attempt < RECORD_OUTCOME_ATTEMPTS; attempt++) {
+      const raw = await redis.get(key)
+      if (raw === null || raw === undefined) {
+        // Expired, evicted, or a legacy payment with no intent at all. Nothing
+        // to stamp; the app falls back to its unresolved state.
+        return
+      }
 
-    const res = await cache.set<FygaroCheckoutIntent>({
-      key: cacheKey(intentId),
-      value: { ...found, outcome: merged },
-      ttlSecs: (ttlSeconds + 3600) as Seconds,
-    })
-    if (res instanceof Error) {
-      baseLogger.warn(
-        { intentId, state: outcome.state },
-        "Failed to record Fygaro top-up outcome; app will fall back to pending",
-      )
+      const found = JSON.parse(raw) as FygaroCheckoutIntent
+      const merged = mergeIntentOutcome(found.outcome, outcome)
+      if (merged === undefined) return
+
+      const next = JSON.stringify({ ...found, outcome: merged })
+      const swapped = await redis.eval(CAS_INTENT_RECORD, 1, key, raw, next, ttl)
+      if (Number(swapped) === 1) return
+      // Another delivery replaced the record between the read and the swap, so
+      // the decision above was made against a value that no longer exists. Read
+      // the value that actually won and decide again against THAT.
     }
+
+    baseLogger.warn(
+      { intentId, state: outcome.state },
+      "Gave up recording a Fygaro top-up outcome after repeated concurrent writes",
+    )
   } catch (err) {
     baseLogger.warn(
       { intentId, error: err instanceof Error ? err.name : String(err) },

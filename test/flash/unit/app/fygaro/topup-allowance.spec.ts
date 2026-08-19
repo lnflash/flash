@@ -47,6 +47,11 @@ const { getFygaroTopupAllowance } = require("@app/fygaro/topup-allowance")
 const SETTINGS = {
   dailyTopupLimits: { 1: 125, 2: 1000, 3: 2500 },
   autoCreditEnabled: true,
+  // The gate's OTHER two bounds (fees.ts `over-limit` / `under-minimum`).
+  // Deliberately set BELOW the L1 daily cap, so a test that reported the daily
+  // headroom as the maximum payable would be visibly wrong.
+  autoCreditLimit: 100,
+  minimumTopup: 10,
 }
 const DAY_MS = 24 * 60 * 60 * 1000
 const NOW_MS = 1_787_000_000_000
@@ -149,6 +154,51 @@ describe("getFygaroTopupAllowance", () => {
 
   it("uses the limit for the caller's own level", async () => {
     expect((await ask({ level: AccountLevel.Two })).allowance.limitCents).toBe(100000)
+  })
+
+  // The gate applies THREE bounds, not one. `remaining` is only the daily cap's
+  // headroom; a client offered that as the maximum invites a charge the
+  // single-payment ceiling then refuses with `above-single-payment-limit` —
+  // the invite-then-refuse loop, on the surface added to end it.
+  describe("the per-payment bounds the gate also applies", () => {
+    it("reports the single-payment ceiling and the minimum off the same settings read", async () => {
+      expect((await ask()).allowance).toMatchObject({
+        singlePaymentLimitCents: 10000,
+        minimumCents: 1000,
+      })
+    })
+
+    it("does NOT fold the single-payment ceiling into the daily remainder", async () => {
+      // `remaining` means daily headroom — `resetsAt` is the answer to when it
+      // comes back — so folding a per-payment bound into it would make both
+      // numbers describe something neither of them is. The largest payable
+      // amount is min(remaining, singlePaymentLimit), computed by the client.
+      const { remainingCents, singlePaymentLimitCents } = (await ask()).allowance
+
+      expect(remainingCents).toBe(12500)
+      expect(singlePaymentLimitCents).toBe(10000)
+    })
+
+    it("reports them for a level whose daily cap is far above them", async () => {
+      expect((await ask({ level: AccountLevel.Three })).allowance).toMatchObject({
+        limitCents: 250000,
+        singlePaymentLimitCents: 10000,
+        minimumCents: 1000,
+      })
+    })
+
+    it("rounds fractional operator settings to whole cents", async () => {
+      mockGetFygaroSettings.mockResolvedValue({
+        ...SETTINGS,
+        autoCreditLimit: 200.005,
+        minimumTopup: 9.99,
+      })
+
+      expect((await ask()).allowance).toMatchObject({
+        singlePaymentLimitCents: 20001,
+        minimumCents: 999,
+      })
+    })
   })
 
   // The gate that actually decides subtracts open checkout links
