@@ -812,16 +812,18 @@ export const paymentHandler = async (req: Request, res: Response) => {
         // prevent. The pending case stays visible to ops through `creditStatus`
         // on the feed line above; telling the customer about it needs its own
         // phrase, not this one overloaded.
-        if (creditResult.status === "success") {
-          await sendFygaroTopupNotificationBestEffort({
-            accountId: creditAccountId,
-            outcome: "credited",
-            // NET: what actually landed in the wallet. Naming the gross would
-            // overstate the balance change by the fees.
-            amountCents: fees.netCents,
-            currency,
-          })
-        }
+        await sendFygaroTopupNotificationBestEffort({
+          accountId: creditAccountId,
+          // `pending` gets its OWN phrase rather than the credited one or
+          // nothing at all. IBEX reporting IN_FLIGHT is the vendor's documented
+          // 200, so this is a routine outcome — and leaving it silent stranded
+          // exactly the customer this notification exists for.
+          outcome: creditResult.status === "success" ? "credited" : "crediting",
+          // NET: what actually landed in the wallet (or is on its way to it).
+          // Naming the gross would overstate the balance change by the fees.
+          amountCents: fees.netCents,
+          currency,
+        })
 
         return { code: 200, body: { status: "success", credited: true } }
       },

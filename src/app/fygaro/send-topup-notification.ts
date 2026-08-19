@@ -19,7 +19,20 @@ import {
  * not credited, who is otherwise left watching a screen that said we would be
  * in touch.
  */
-export type FygaroTopupNotificationOutcome = "credited" | "heldForReview"
+export type FygaroTopupNotificationOutcome =
+  | "credited"
+  // The send is in flight — IBEX reporting IN_FLIGHT is the vendor's own
+  // documented 200, so this is an ordinary outcome, not an edge case. Too weak
+  // for the `credited` copy ("has been added to your wallet"), which would send
+  // the customer to a balance that has not moved; but silence here leaves the
+  // very customer this feature exists for with nothing at all.
+  //
+  // Its copy deliberately promises NO follow-up message. Nothing re-notifies
+  // when an in-flight send settles asynchronously, so "we'll let you know when
+  // it lands" would be exactly the unkeepable promise this PR was written to
+  // retire.
+  | "crediting"
+  | "heldForReview"
 
 export type FygaroTopupNotificationArgs = {
   accountId: string

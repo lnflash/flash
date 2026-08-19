@@ -125,6 +125,10 @@
       "heldForReview": {
         "title": "Tu recarga necesita un momento",
         "body": "Tenemos tu pago de {{amount}} y lo estamos completando manualmente. Te avisaremos cuando se acredite."
+      },
+      "crediting": {
+        "title": "Tu recarga está en camino",
+        "body": "Estamos acreditando {{amount}} a tu billetera. Debería aparecer en breve."
       }
     }
   }

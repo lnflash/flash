@@ -605,13 +605,33 @@ describe("fygaro paymentHandler", () => {
       })
     })
 
-    it("stays silent on a PENDING credit — the money has not provably landed", async () => {
+    it("tells the customer an in-flight credit is on its way, not that it landed", async () => {
+      // IBEX reporting IN_FLIGHT is the vendor's own documented 200, so this is
+      // routine. `credited` ("has been added to your wallet") would send them to
+      // a balance that has not moved; silence — which is what this branch did —
+      // leaves the customer this whole feature exists for with nothing.
+      mockCreditFygaroTopup.mockResolvedValue({
+        status: "pending",
+        walletId: "wallet-1",
+      })
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockSendTopupNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: "crediting" }),
+      )
+    })
+
+    it("does not claim a LANDED credit on a PENDING send", async () => {
       // `creditFygaroTopup` returns `pending` when the intraledger send came
       // back Pending: "money has PROBABLY left the treasury: report credited,
-      // never re-pay". That is a deliberately weaker claim than the push's
-      // "X USD has been added to your wallet". Sending it here walks the
-      // customer to an unchanged balance and files the support ticket this
-      // notification exists to prevent.
+      // never re-pay". That is a deliberately weaker claim than the credited
+      // push's "X has been added to your wallet", which would walk the customer
+      // to an unchanged balance. But silence is not the answer either — IBEX
+      // reporting IN_FLIGHT is the vendor's documented 200, so this is routine,
+      // and saying nothing strands the customer this feature exists for. It
+      // gets its own phrase instead.
       mockCreditFygaroTopup.mockResolvedValue({ walletId: WALLET_ID, status: "pending" })
       const res = makeRes()
 
@@ -629,7 +649,12 @@ describe("fygaro paymentHandler", () => {
           meta: expect.objectContaining({ creditStatus: "pending" }),
         }),
       )
-      expect(mockSendTopupNotification).not.toHaveBeenCalled()
+      expect(mockSendTopupNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: "crediting" }),
+      )
+      expect(mockSendTopupNotification).not.toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: "credited" }),
+      )
     })
 
     it("sends the credited push only AFTER the authorisation is redeemed", async () => {
