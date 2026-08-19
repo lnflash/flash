@@ -128,6 +128,40 @@ describe("getFygaroTopupStatus", () => {
     // ...and specifically not dressed up as receipt, which is the one thing an
     // unknown state can never be assumed to mean.
     expect(res.status.state).not.toBe("processing")
+    // The net is stamped alongside the state we just refused to believe, so it
+    // does not survive the degrade either (see the test below).
+    expect(res.status.netAmountCents).toBeUndefined()
+  })
+
+  it("drops the net, reason and threshold that hang off an unrecognised state", async () => {
+    // Degrading only `state` fixed the field that THROWS and left the two that
+    // carry the same claim in words: a newer deployment's `refunded` record
+    // came back as UNCONFIRMED — "NEVER render this as 'payment received'" —
+    // with a $56.52 net and, since `customerReason` maps every unknown reason
+    // to ours, the sentence "We've received your payment and are completing it
+    // manually". A vocabulary we do not have is not partially trustworthy.
+    mockReadIntent.mockResolvedValue({
+      found: true,
+      intent: {
+        ...INTENT,
+        outcome: {
+          state: "refunded",
+          reason: "refunded-by-provider",
+          netAmountCents: 5652,
+          detailCents: 12500,
+          atMs: 1,
+        },
+      },
+    })
+    const res = await ask()
+
+    expect(res.status.state).toBe("unconfirmed")
+    expect(res.status.netAmountCents).toBeUndefined()
+    expect(res.status.reason).toBeUndefined()
+    expect(res.status.detailCents).toBeUndefined()
+    // The authorised amount is not the outcome's to invalidate — it comes off
+    // the intent WE minted, and the client is owed the echo either way.
+    expect(res.status.authorizedAmountCents).toBe(6000)
   })
 
   it("never reveals another account's payment", async () => {

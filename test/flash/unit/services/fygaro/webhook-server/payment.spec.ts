@@ -145,7 +145,6 @@ import {
   UnknownRepositoryError,
 } from "@domain/errors"
 import { ResourceAttemptsLockServiceError } from "@domain/lock"
-import { WalletCurrency } from "@domain/shared"
 
 import { paymentHandler } from "@services/fygaro/webhook-server/routes/payment"
 import { FygaroCreditError } from "@services/fygaro/webhook-server/credit-topup"
@@ -206,7 +205,6 @@ beforeEach(() => {
   mockCompleteFygaroTopup.mockResolvedValue(true)
   mockCreditFygaroTopup.mockResolvedValue({
     walletId: WALLET_ID,
-    walletCurrency: WalletCurrency.Usdt,
     status: "success",
   })
   mockGetFygaroSettings.mockResolvedValue({ ...DEFAULT_SETTINGS })
@@ -1588,7 +1586,6 @@ describe("fygaro paymentHandler", () => {
           )
           return {
             walletId: WALLET_ID,
-            walletCurrency: WalletCurrency.Usdt,
             status: "success",
           }
         })

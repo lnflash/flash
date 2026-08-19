@@ -98,6 +98,30 @@ const STATE_BY_OUTCOME: Record<FygaroTopupOutcomeState, FygaroTopupState> = {
 const stateFor = (outcome: FygaroTopupOutcome | undefined): FygaroTopupState =>
   outcome === undefined ? UNCONFIRMED : (STATE_BY_OUTCOME[outcome.state] ?? UNCONFIRMED)
 
+/**
+ * The outcome, but ONLY when its state is one this build understands.
+ *
+ * Everything else on the record — `netAmountCents`, `reason`, `detailCents` —
+ * describes the state it was written alongside, so relaying it while degrading
+ * the state ships exactly the claim the degrade exists to withhold. A newer
+ * deployment writing `{ state: "refunded", reason: "refunded-by-provider",
+ * netAmountCents: 5652 }` would have this build answer UNCONFIRMED — whose enum
+ * description reads "NEVER render this as 'payment received'" — carrying a net
+ * amount and, because `customerReason` maps every unrecognised reason to ours,
+ * the sentence "We've received your payment and are completing it manually".
+ *
+ * An unrecognised state is not a partially trustworthy record; it is a record
+ * written in a vocabulary we do not have. The state degrades and everything
+ * hanging off it drops with it. `authorizedAmountCents` is unaffected: that
+ * comes off the intent WE minted, not off the outcome someone else stamped.
+ */
+const recognisedOutcome = (
+  outcome: FygaroTopupOutcome | undefined,
+): FygaroTopupOutcome | undefined =>
+  outcome !== undefined && STATE_BY_OUTCOME[outcome.state] !== undefined
+    ? outcome
+    : undefined
+
 export const getFygaroTopupStatus = async ({
   intentId,
   accountId,
@@ -117,6 +141,10 @@ export const getFygaroTopupStatus = async ({
   if (lookup.intent.accountId !== accountId) return { found: false }
 
   const outcome = lookup.intent.outcome
+  // Read the state and the fields that hang off it through the SAME
+  // recognition test, or the degrade only covers the field that would have
+  // thrown and lets the rest carry the claim through untouched.
+  const known = recognisedOutcome(outcome)
   return {
     found: true,
     status: {
@@ -125,9 +153,9 @@ export const getFygaroTopupStatus = async ({
       // this build has no enum member for.
       state: stateFor(outcome),
       authorizedAmountCents: lookup.intent.amountCents,
-      netAmountCents: outcome?.netAmountCents,
-      reason: outcome?.reason,
-      detailCents: outcome?.detailCents,
+      netAmountCents: known?.netAmountCents,
+      reason: known?.reason,
+      detailCents: known?.detailCents,
     },
   }
 }

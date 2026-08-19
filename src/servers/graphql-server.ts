@@ -26,7 +26,7 @@ import {
 } from "@domain/api-keys"
 import { parseUnknownDomainErrorFromUnknown } from "@domain/shared"
 
-import { createComplexityPlugin } from "./plugins/complexity"
+import { MAXIMUM_QUERY_COMPLEXITY, createComplexityPlugin } from "./plugins/complexity"
 
 import authRouter from "./authorization"
 import kratosCallback from "./event-handlers/kratos"
@@ -101,7 +101,7 @@ export const startApolloServer = async ({
     createComplexityPlugin({
       schema,
       estimators: [fieldExtensionsEstimator(), simpleEstimator({ defaultComplexity: 1 })],
-      maximumComplexity: 200,
+      maximumComplexity: MAXIMUM_QUERY_COMPLEXITY,
       onComplete: (complexity) => {
         // TODO(telemetry): add complexity value to span
         baseLogger.debug({ complexity }, "queryComplexity")

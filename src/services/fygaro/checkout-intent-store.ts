@@ -516,36 +516,29 @@ export const mergeIntentOutcome = (
     incoming.transactionId !== undefined &&
     existing.transactionId !== incoming.transactionId
 
-  // `credited` is ABSORBING — for THE SAME PAYMENT. The guard above stops
-  // `received` walking a terminal answer backwards, but a LATER terminal answer
-  // walks it backwards just as effectively, and that is reachable without any
-  // race: delivery 2 of the same payment takes the webhook's unattributed
-  // branch because the username no longer resolves, and stamps
-  // `held-for-review`/`unattributed` over `credited`. The customer's screen
-  // flips from "Money is in your wallet, $94.21" to "We've received your
-  // payment and are completing it manually", and ops is paged for an
-  // unattributed payment that is already in the wallet. There is no refund path
-  // here, so credited is genuinely terminal.
-  //
-  // Terminal for that payment, though — not for the INTENT the record is keyed
-  // on. One signed link can be paid more than once inside its 900s window (the
-  // replay `authorizeFygaroTopup` guards against), and the webhook's
-  // already-credited short-circuit is transaction-scoped for exactly that
-  // reason: tx2 against a link tx1 already credited is refused on its own
-  // merits and stamped `held-for-review`. Swallowing that stamp here would undo
-  // the whole guard — the record would stay `credited` with tx1's net, and
-  // `getFygaroTopupStatus` would answer CREDITED for a second real capture
-  // sitting in manual review.
   // CREDITED IS ABSORBING, for the intent and not merely for the payment.
   //
-  // The scoped version of this rule was still a "last stamp wins" fall-through
-  // for any other transaction, and webhook deliveries are not a timeline: a
-  // routine re-delivery of tx1 arriving after tx2 was refused walked the record
-  // back and forth between "money is in your wallet" and "we're completing it
-  // manually". Both stamps are true about their own payment; the record has one
-  // slot, so the only rule that cannot produce a falsehood in SOME ordering is
-  // to keep the claim that is irreversibly true. Money reaching the wallet is
-  // that claim. A refusal is not — it is a payment ops may still hand-credit.
+  // The guard above stops an OBSERVATION walking a terminal answer backwards; a
+  // later TERMINAL answer walks it backwards just as effectively, and that needs
+  // no race at all. Delivery 2 of the same payment takes the webhook's
+  // unattributed branch because the username no longer resolves, and stamps
+  // `held-for-review`/`unattributed` over `credited`: the customer's screen
+  // flips from "Money is in your wallet, $94.21" to "We've received your
+  // payment and are completing it manually", and ops is paged for a payment
+  // that is already in the wallet. There is no refund path here, so a credit is
+  // irreversible and genuinely terminal.
+  //
+  // Scoping that terminality to the PAYMENT was not enough. One signed link can
+  // be paid more than once inside its 900s window (the replay
+  // `authorizeFygaroTopup` guards against), and the payment-scoped version of
+  // this rule was still a "last stamp wins" fall-through for any other
+  // transaction. Webhook deliveries are not a timeline: a routine re-delivery of
+  // tx1 arriving after tx2 was refused walked the record back and forth between
+  // "money is in your wallet" and "we're completing it manually". Both stamps
+  // are true about their own payment; the record has one slot, so the only rule
+  // that cannot produce a falsehood in SOME ordering is to keep the claim that
+  // is irreversibly true. Money reaching the wallet is that claim. A refusal is
+  // not — it is a payment ops may still hand-credit.
   //
   // The second, uncredited capture is not lost by this: it is transaction-
   // scoped everywhere it matters. `markFygaroTopupNotCredited` stamps its
@@ -553,10 +546,12 @@ export const mergeIntentOutcome = (
   // pages a human. What it does not do is flip the customer's screen away from
   // a credit that genuinely landed.
   //
-  // KNOWN GAP, deliberately left: a customer who pays the SAME link twice is
-  // told about the credited one and not about the one in manual review. A
-  // per-intent record cannot represent two payments; per-transaction status is
-  // the real fix and is out of scope here.
+  // KNOWN GAP, deliberately left: this swallows tx2's `held-for-review` stamp,
+  // so a customer who pays the SAME link twice is told about the credited
+  // payment and not about the one sitting in manual review. That is the
+  // deliberate price of the rule above — a per-intent record cannot represent
+  // two payments; per-transaction status is the real fix and is out of scope
+  // here.
   if (existing.state === "credited" && incoming.state !== "credited") {
     return undefined
   }

@@ -25,6 +25,12 @@ import {
   FygaroTopupAllowancePayload,
   FygaroTopupAllowanceUnavailableReasonEnum,
 } from "@graphql/public/types/object/fygaro-topup-allowance"
+// The ceiling the running server enforces, not a copy of it — see the
+// complexity describe block at the bottom of this file. Imported from the
+// plugin rather than from `graphql-server.ts` only because importing that
+// module pulls the entire app graph (and its firebase/logger side effects)
+// into a unit test; the constant it hands the plugin is this one.
+import { MAXIMUM_QUERY_COMPLEXITY } from "@servers/plugins/complexity"
 
 const ACCOUNT_ID = "account-001" as AccountId
 
@@ -426,9 +432,6 @@ describe("fygaroTopupAllowance payload keeps the payload contract", () => {
 // an answer to that: it consumes once per RESOLVE, so it refuses the NEXT
 // request, after the burst has already landed.
 describe("fygaroTopupAllowance is budgeted for the read it performs", () => {
-  // src/servers/graphql-server.ts — createComplexityPlugin
-  const MAXIMUM_COMPLEXITY = 200
-
   const declared = () => {
     const complexity = FygaroTopupAllowanceQuery.extensions?.complexity
     expect(typeof complexity).toBe("number")
@@ -440,10 +443,14 @@ describe("fygaroTopupAllowance is budgeted for the read it performs", () => {
   })
 
   it("costs enough that a second copy cannot fit in the same document", () => {
-    // The property that matters, expressed against the real ceiling rather than
-    // the literal: whatever the number, aliasing the field twice must be
-    // refused, and once must still be allowed.
-    expect(declared()).toBeLessThanOrEqual(MAXIMUM_COMPLEXITY)
-    expect(declared() * 2).toBeGreaterThan(MAXIMUM_COMPLEXITY)
+    // The property that matters, expressed against the ceiling the server
+    // actually enforces — IMPORTED, not hand-copied. As a local literal this
+    // read `200` on both sides of a coincidence: raising the server's budget to
+    // 400 left the suite green while the property it exists to protect, that
+    // only one allowance read fits in a document, was gone. Whatever the
+    // number, aliasing the field twice must be refused and once must still be
+    // allowed.
+    expect(declared()).toBeLessThanOrEqual(MAXIMUM_QUERY_COMPLEXITY)
+    expect(declared() * 2).toBeGreaterThan(MAXIMUM_QUERY_COMPLEXITY)
   })
 })
