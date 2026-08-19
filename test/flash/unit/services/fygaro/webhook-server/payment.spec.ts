@@ -1976,6 +1976,59 @@ describe("fygaro paymentHandler", () => {
       })
     })
 
+    describe("the customer's phone buzzes exactly once", () => {
+      const creditedBy = (transactionId: string) => ({
+        state: "credited",
+        netAmountCents: 901,
+        transactionId,
+        atMs: 1,
+      })
+
+      it("does not re-announce a credit whose ERPNext promotion failed on the first delivery", async () => {
+        // The retry path the credit block deliberately invites, and the one the
+        // Completed-row guard cannot see. `completeFygaroTopup` failing leaves
+        // the money in the wallet and the row at Fiat Received (the handler
+        // alerts and continues), so `readFygaroTopupCompletion` answers
+        // `completed:false` on delivery 2 — as it also does whenever that
+        // lookup merely degrades. Delivery 2 replays the cached send,
+        // re-promotes, re-stamps, and would push "+$9.01" to the lock screen a
+        // second time for one $9.01 top-up. On a payments app a repeated credit
+        // alert reads as a repeated charge.
+        mockReadCompletion.mockResolvedValue({ completed: false })
+        mockReadIntent.mockResolvedValue(
+          intent({ outcome: creditedBy(SIGNED_BODY.transactionId) }),
+        )
+
+        await paymentHandler(makeReq(SIGNED_BODY), makeRes())
+
+        expect(mockNotifyCredited).not.toHaveBeenCalled()
+        // The credit itself is still idempotent-by-replay and the row is still
+        // re-promoted — only the push is suppressed.
+        expect(mockCompleteFygaroTopup).toHaveBeenCalled()
+      })
+
+      it("still announces when the stamp names a DIFFERENT payment", async () => {
+        // One signed link can be paid twice inside its 900s window, and the
+        // record is keyed on the intent, not the transaction. A guard that
+        // accepted any `credited` stamp would let tx1's push silence tx2's —
+        // a second real capture, credited, that the customer is never told
+        // about. The stamp must name this transaction to suppress anything.
+        mockReadCompletion.mockResolvedValue({ completed: false })
+        mockReadIntent.mockResolvedValue(
+          intent({ outcome: creditedBy("some-other-transaction") }),
+        )
+
+        await paymentHandler(makeReq(SIGNED_BODY), makeRes())
+
+        expect(mockNotifyCredited).toHaveBeenCalledWith(
+          expect.objectContaining({
+            netAmountCents: 901,
+            transactionId: SIGNED_BODY.transactionId,
+          }),
+        )
+      })
+    })
+
     describe("redemption is terminal-only", () => {
       it("redeems the authorisation once the credit has actually gone through", async () => {
         mockReadIntent.mockResolvedValue(intent())

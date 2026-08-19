@@ -175,6 +175,46 @@ describe("saveIntent", () => {
       "8000:intent-1",
     )
   })
+
+  it("bounds the index key's own lifetime so an idle account leaves nothing behind", async () => {
+    await saveIntent({ intent: INTENT, ttlSeconds: TTL })
+
+    expect(mockExpire).toHaveBeenCalledWith("fygaro-checkout-intents:acct-1", TTL + 3600)
+  })
+
+  it("still authorises when only that TTL write fails — the hold is already in Redis", async () => {
+    // The `expire` used to share the `zadd`'s try block, so a blip on it
+    // returned FygaroReservationWriteError with the hold ALREADY written. The
+    // caller REFUSES on that class, so no record was written either — and that
+    // combination is worse than the outage it reports. The customer retries,
+    // `readIntent` finds nothing, so `refuseOpenCheckout` cannot hand back the
+    // live link; meanwhile the orphaned hold still covers their cap, so they
+    // get `checkout-already-open` with a `holdExpiresAt` up to a full JWT
+    // window out — locked out of card top-ups over a link they never received.
+    // ioredis burning `maxRetriesPerRequest` after the `zadd` has landed
+    // server-side is exactly that shape.
+    //
+    // The TTL is hygiene: `readOutstandingReservations` ZREMRANGEBYSCOREs the
+    // expired members on every read and Redis drops the set with its last
+    // member, so losing it never costs correctness. Turning a written hold into
+    // a refusal does.
+    mockExpire.mockRejectedValue(new Error("redis down"))
+
+    const res = await saveIntent({ intent: INTENT, ttlSeconds: TTL })
+
+    expect(res).toBe(true)
+    expect(mockZadd).toHaveBeenCalledWith(
+      "fygaro-checkout-intents:acct-1",
+      NOW_MS + TTL * 1000,
+      "8000:intent-1",
+    )
+    // And the record is written, so a retry can still re-offer the live link
+    // instead of being refused by the hold this authorisation holds.
+    expect(mockCacheSet).toHaveBeenCalledWith(
+      expect.objectContaining({ key: "fygaro-checkout-intent:intent-1" }),
+    )
+    expect(baseLogger.warn).toHaveBeenCalled()
+  })
 })
 
 describe("readOutstandingReservations", () => {

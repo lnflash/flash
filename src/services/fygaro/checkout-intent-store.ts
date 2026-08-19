@@ -195,20 +195,50 @@ export const saveIntent = async ({
   // The RESERVATION expires with the JWT, not with the record: once the token is
   // no longer payable the amount is no longer outstanding, even though the
   // record must stick around to verify a payment already in flight.
+  const reservationKey = accountIntentsKey(intent.accountId)
   try {
     const redis = await redisClient()
-    const key = accountIntentsKey(intent.accountId)
     await redis.zadd(
-      key,
+      reservationKey,
       intent.createdAtMs + ttlSeconds * 1000,
       reservationMember(intent),
     )
-    // Bounded lifetime for the index itself, so an account that stops topping
-    // up does not leave a key behind forever.
-    await redis.expire(key, ttlSeconds + 3600)
   } catch (err) {
     return new FygaroReservationWriteError(
       err instanceof Error ? err.message : String(err),
+    )
+  }
+
+  // Bounded lifetime for the index itself, so an account that stops topping up
+  // does not leave a key behind forever — and in its OWN try, because this is
+  // HYGIENE, never correctness.
+  //
+  // Sharing the `zadd`'s try turned an `expire` blip into a refusal with the
+  // hold ALREADY in Redis: FygaroReservationWriteError is fail-closed at the
+  // caller, so the record never got written either. What the customer then
+  // hits is worse than the outage — `readIntent` finds nothing, so the retry's
+  // `refuseOpenCheckout` cannot hand back the live link, while the orphaned
+  // hold still covers their cap. They get `checkout-already-open` with a
+  // `holdExpiresAt` up to a full JWT window out, locked out of card top-ups
+  // over a link they were never given. ioredis burning `maxRetriesPerRequest`
+  // after the `zadd` has landed server-side is exactly that shape, and it is
+  // the failure mode the comment above cites as reachable.
+  //
+  // A missing TTL costs nothing beside that: `readOutstandingReservations`
+  // ZREMRANGEBYSCOREs the expired members on every read and Redis drops a
+  // sorted set once its last member goes, so the key cannot outlive its
+  // contents by more than the idle window this TTL exists to bound.
+  try {
+    const redis = await redisClient()
+    await redis.expire(reservationKey, ttlSeconds + 3600)
+  } catch (err) {
+    baseLogger.warn(
+      {
+        accountId: intent.accountId,
+        intentId: intent.intentId,
+        error: err instanceof Error ? err.constructor.name : String(err),
+      },
+      "Failed to bound the Fygaro reservation index's lifetime; the hold itself is in place",
     )
   }
 
