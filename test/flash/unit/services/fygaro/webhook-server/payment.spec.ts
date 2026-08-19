@@ -605,6 +605,33 @@ describe("fygaro paymentHandler", () => {
       })
     })
 
+    it("stays silent on a PENDING credit — the money has not provably landed", async () => {
+      // `creditFygaroTopup` returns `pending` when the intraledger send came
+      // back Pending: "money has PROBABLY left the treasury: report credited,
+      // never re-pay". That is a deliberately weaker claim than the push's
+      // "X USD has been added to your wallet". Sending it here walks the
+      // customer to an unchanged balance and files the support ticket this
+      // notification exists to prevent.
+      mockCreditFygaroTopup.mockResolvedValue({ walletId: WALLET_ID, status: "pending" })
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      // Still credited-and-done as far as idempotency goes: the row is promoted
+      // and the response acks, so Fygaro must not retry and re-pay.
+      expect(mockCompleteFygaroTopup).toHaveBeenCalledTimes(1)
+      expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
+      // ...and ops can still see it, so it is not lost — just not asserted to
+      // the customer as a completed credit.
+      expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: "succeeded",
+          meta: expect.objectContaining({ creditStatus: "pending" }),
+        }),
+      )
+      expect(mockSendTopupNotification).not.toHaveBeenCalled()
+    })
+
     it("sends the credited push only AFTER the authorisation is redeemed", async () => {
       // A pod recycle during the FCM round trip must not leave the intent
       // unconsumed: the ERPNext row already counts this payment towards the
@@ -952,12 +979,24 @@ describe("fygaro paymentHandler", () => {
         ],
       ])(
         "tells the customer their captured payment is being finished by hand (%s)",
-        async (_reason, mutateBody, arrange, expected) => {
+        async (reason, mutateBody, arrange, expected) => {
           arrange()
           const res = makeRes()
 
           await paymentHandler(makeReq(mutateBody(VALID_BODY)), res)
 
+          // Pin the gate this case actually tripped, the way the silent block
+          // below does. Without it the case name is decoration: nudge
+          // DEFAULT_SETTINGS.minimumTopup past autoCreditLimit and the
+          // "under-minimum" row starts refusing on `over-limit` instead, with
+          // byte-identical push args — the test stays green under a name that
+          // has become a lie, and the allowlist it is guarding is no longer
+          // covered where it claims to be.
+          expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+            expect.objectContaining({
+              meta: expect.objectContaining({ reason }),
+            }),
+          )
           // The GROSS captured, which is what their card statement shows.
           expect(mockSendTopupNotification).toHaveBeenCalledWith({
             accountId: ACCOUNT_ID,

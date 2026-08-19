@@ -36,6 +36,17 @@ import {
 } from "@services/frappe/BridgeTransferRequestWriter"
 import { alertBridge, generateDedupKey } from "@services/alerts"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
+// FCM from the fygaro-webhook workload. Nothing reachable from this server
+// pushed before, and a missing GOOGLE_APPLICATION_CREDENTIALS fails SILENTLY —
+// firebase.ts leaves `messaging` null, push-notifications.ts returns `true`
+// anyway, and the only signal is one boot-time warn nobody watches. Verified
+// wired for this workload, not inherited from the api pod: lnflash/charts
+// `charts/flash/templates/fygaro-webhook-deployment.yaml` sets
+// GOOGLE_APPLICATION_CREDENTIALS and mounts the galoyapp-firebase-serviceaccount
+// secret under `.Values.galoy.api.firebaseNotifications.enabled` (chart >= 3.2.54;
+// deployments pins 3.2.63), and lnflash/deployments
+// `tf-modules/flash/flash-values.tmpl.yaml` sets that flag true for test + prod.
+// Any new workload that imports this must be checked the same way.
 import { sendFygaroTopupNotificationBestEffort } from "@app/fygaro/send-topup-notification"
 
 import {
@@ -160,12 +171,6 @@ const REFUSAL_NOTIFIES_CUSTOMER: Record<RecordOnlyReason, boolean> = {
   "daily-limit-exceeded": true,
   "under-minimum": true,
 }
-
-const NOTIFIABLE_REFUSALS: ReadonlySet<RecordOnlyReason> = new Set(
-  (Object.keys(REFUSAL_NOTIFIES_CUSTOMER) as RecordOnlyReason[]).filter(
-    (reason) => REFUSAL_NOTIFIES_CUSTOMER[reason],
-  ),
-)
 
 export const paymentHandler = async (req: Request, res: Response) => {
   const payload = (req.body ?? {}) as FygaroPaymentPayload
@@ -621,9 +626,9 @@ export const paymentHandler = async (req: Request, res: Response) => {
       // for the person whose payment was captured and not credited — who is
       // otherwise left on a screen that said we would be in touch. Only for the
       // reasons where a human really does finish the payment by hand
-      // (NOTIFIABLE_REFUSALS above); the rest would be promising something that
-      // is not going to happen.
-      if (NOTIFIABLE_REFUSALS.has(gate.reason)) {
+      // (REFUSAL_NOTIFIES_CUSTOMER above); the rest would be promising something
+      // that is not going to happen.
+      if (REFUSAL_NOTIFIES_CUSTOMER[gate.reason]) {
         await sendFygaroTopupNotificationBestEffort({
           accountId,
           outcome: "heldForReview",
@@ -797,14 +802,26 @@ export const paymentHandler = async (req: Request, res: Response) => {
         // refusing the customer's next top-up with `daily-limit-exceeded`.
         // Costs the push nothing: `consumeIntent` reports failure by return
         // value, never a throw, so it cannot skip what follows it.
-        await sendFygaroTopupNotificationBestEffort({
-          accountId: creditAccountId,
-          outcome: "credited",
-          // NET: what actually landed in the wallet. Naming the gross would
-          // overstate the balance change by the fees.
-          amountCents: fees.netCents,
-          currency,
-        })
+        //
+        // ONLY on `success`. `creditFygaroTopup` also returns `pending`, whose
+        // own comment reads "money has PROBABLY left the treasury: report
+        // credited, never re-pay" — a deliberately weaker claim than "N USD has
+        // been added to your wallet", which is what this copy asserts. Pushing
+        // it on `pending` sends the customer to a balance that has not moved
+        // yet, i.e. manufactures the support ticket this notification exists to
+        // prevent. The pending case stays visible to ops through `creditStatus`
+        // on the feed line above; telling the customer about it needs its own
+        // phrase, not this one overloaded.
+        if (creditResult.status === "success") {
+          await sendFygaroTopupNotificationBestEffort({
+            accountId: creditAccountId,
+            outcome: "credited",
+            // NET: what actually landed in the wallet. Naming the gross would
+            // overstate the balance change by the fees.
+            amountCents: fees.netCents,
+            currency,
+          })
+        }
 
         return { code: 200, body: { status: "success", credited: true } }
       },
