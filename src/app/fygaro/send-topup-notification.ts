@@ -12,11 +12,11 @@ import {
  * transient webhook paths deliberately 500 so Fygaro retries, which can take
  * minutes. Without this, that sentence is a promise nothing keeps.
  *
- * BOTH terminal outcomes notify, and that is deliberate. Sending only on
- * success would keep the promise exactly when it costs nothing and break it in
- * the case that actually matters — the customer whose money was captured and
- * not credited, who is otherwise left watching a screen that said we would be
- * in touch.
+ * EVERY outcome notifies — the two terminal ones and the in-flight one — and
+ * that is deliberate. Sending only on success would keep the promise exactly
+ * when it costs nothing and break it in the case that actually matters — the
+ * customer whose money was captured and not credited, who is otherwise left
+ * watching a screen that said we would be in touch.
  */
 export type FygaroTopupNotificationOutcome =
   | "credited"
@@ -36,9 +36,11 @@ export type FygaroTopupNotificationOutcome =
 export type FygaroTopupNotificationArgs = {
   accountId: string
   outcome: FygaroTopupNotificationOutcome
-  // The NET credited for `credited`, the gross captured for `heldForReview` —
-  // in both cases the number the customer would recognise as "the amount this
-  // is about".
+  // The NET for `credited` and `crediting` (what landed, or is on its way to
+  // landing, in the wallet); the GROSS captured for `heldForReview` (what their
+  // card statement shows, since nothing has been credited to net against). In
+  // every case the number the customer would recognise as "the amount this is
+  // about".
   amountCents: number
   // The currency the payment was actually captured in, NOT an assumption. The
   // `heldForReview` push fires on refusals that include `non-usd`, so hardcoding

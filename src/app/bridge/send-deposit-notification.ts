@@ -1,7 +1,6 @@
 import { BridgeConfig } from "@config"
 
 import {
-  sendOutcomeNotification,
   sendOutcomeNotificationBestEffort,
   type OutcomeNotificationArgs,
 } from "@app/notifications/send-outcome-notification"
@@ -34,10 +33,16 @@ const toOutcomeArgs = ({
   },
 })
 
-export const sendBridgeDepositNotification = async (
-  args: BridgeDepositNotificationArgs,
-): Promise<true | ApplicationError> => sendOutcomeNotification(toOutcomeArgs(args))
-
+/**
+ * The ONLY entry point, and best-effort by construction — same shape as the
+ * Fygaro top-up module.
+ *
+ * There is deliberately no throwing/error-returning variant: the caller is on a
+ * money path where the deposit has already landed, so a notification failure
+ * must never become the deposit's failure. An exported variant returning
+ * `true | ApplicationError` would be dead code inviting exactly the caller this
+ * must not have.
+ */
 export const sendBridgeDepositNotificationBestEffort = async (
   args: BridgeDepositNotificationArgs,
 ): Promise<void> => {

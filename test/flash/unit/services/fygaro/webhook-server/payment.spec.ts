@@ -1126,25 +1126,47 @@ describe("fygaro paymentHandler", () => {
       )
 
       it.each([
-        ["under-minimum", "2.00", "USD"],
+        ["under-minimum", "2.00", "USD", () => undefined],
         // A single Jamaican dollar: the cheapest possible way to put a message
         // on someone else's lock screen.
-        ["non-usd", "1.00", "JMD"],
-        ["over-limit", "500.01", "USD"],
+        ["non-usd", "1.00", "JMD", () => undefined],
+        // Free once the victim already sits at their cap: ANY amount trips it,
+        // so the attacker pays the smallest top-up the operator allows.
+        [
+          "daily-limit-exceeded",
+          "30.00",
+          "USD",
+          () => mockSumFygaroLast24h.mockResolvedValue(10000),
+        ],
+        // Likewise free — a level-0 account refuses every amount.
+        [
+          "no-daily-limit-for-level",
+          "10.00",
+          "USD",
+          () =>
+            mockFindByUsername.mockResolvedValue({
+              id: ACCOUNT_ID,
+              level: 0,
+              username: VALID_BODY.customReference,
+            }),
+        ],
       ])(
         "refuses to push at a PAYER-TYPED reference (%s) — that is a scam pretext, not a notification",
-        async (reason, amount, currency) => {
-          // On legacy unsigned clients `customReference` is free text the payer
-          // types (there is no intentId to verify it against), so an attacker
-          // can pay a trivial amount with a STRANGER's username on it. Without
-          // this gate the bank's own app then tells that stranger we are holding
-          // a payment of theirs — a ready-made pretext for a follow-up scam
-          // call, bought for a dollar. Unlike the `credited` push, whose abuse
-          // means paying the victim real money, nothing here makes it
-          // self-defeating.
+        async (reason, amount, currency, arrange) => {
+          // On unsigned clients `customReference` is free text the payer types
+          // (there is no intentId to verify it against), so an attacker can pay
+          // a trivial amount — or nothing above the victim's spent cap — with a
+          // STRANGER's username on it. Without this gate the bank's own app
+          // then tells that stranger we are holding a payment of theirs: a
+          // ready-made pretext for a follow-up scam call, bought for a dollar.
+          // Unlike the `credited` push, whose abuse means paying the victim
+          // real money, nothing about THESE reasons makes it self-defeating —
+          // which is exactly what separates them from `over-limit` below.
+          arrange()
           const res = makeRes()
 
-          // No `|intentId`: exactly what a pre-signed-checkout build sends.
+          // No `|intentId`: what a pre-signed-checkout build sends, and what
+          // EVERY build sends while `fygaro.checkout.enabled` is false.
           await paymentHandler(makeReq({ ...VALID_BODY, amount, currency }), res)
 
           // The payment is still recorded and ops is still paged — the money is
@@ -1161,6 +1183,37 @@ describe("fygaro paymentHandler", () => {
           expect(mockSendTopupNotification).not.toHaveBeenCalled()
         },
       )
+
+      it("still pushes an UNSIGNED over-limit refusal — forging that one costs the attacker more than the limit", async () => {
+        // The verified-reference gate is a PRICE argument, so it must not
+        // extend to the expensive reason. `over-limit` trips only ABOVE the
+        // operator's $500 single-payment limit, so forging it means paying
+        // >$500 that ops then hand-credits TO THE VICTIM — the same
+        // self-defeating economics that leaves the `credited` push ungated.
+        //
+        // And it is the reason a real customer is most likely to hit while
+        // `fygaro.checkout.enabled` is false — its default, and a Fygaro
+        // Pro-plan dependency — when no client can produce a signed reference
+        // at all. Gate this one too and the entire refusal half of this feature
+        // is dead in the default configuration.
+        const res = makeRes()
+
+        // No `|intentId`, exactly as above.
+        await paymentHandler(makeReq({ ...VALID_BODY, amount: "500.01" }), res)
+
+        expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            meta: expect.objectContaining({ reason: "over-limit" }),
+          }),
+        )
+        expect(mockSendTopupNotification).toHaveBeenCalledWith({
+          accountId: ACCOUNT_ID,
+          outcome: "heldForReview",
+          // The GROSS captured, which is what their card statement shows.
+          amountCents: 50001,
+          currency: "USD",
+        })
+      })
     })
 
     it("returns 500 for settings-unavailable so Fygaro retries (transient), without acking or spamming the feed", async () => {

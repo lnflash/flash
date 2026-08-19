@@ -148,6 +148,15 @@ const RECORD_ONLY_ALERT_TITLE: Record<
  * promise about what happens next. The copy is a commitment that a human will
  * hand-credit this payment, so a reason only belongs here when that is the real
  * outcome.
+ *
+ * DEPENDS ON `fygaro.checkout.enabled`. This table says which reasons MAY push;
+ * REFUSAL_NEEDS_VERIFIED_REFERENCE below says which ones additionally need a
+ * server-signed reference, and a signed reference only exists when server-side
+ * checkout is on — the flag defaults to `false` (config/schema.ts) and turning
+ * it on needs a Fygaro Pro-or-above plan. So with checkout OFF, or for any
+ * legacy app build still in the wild, the only refusal that actually reaches a
+ * customer is the one marked `false` in that second table. Read the two
+ * together; neither is the whole answer on its own.
  */
 const REFUSAL_NOTIFIES_CUSTOMER: Record<RecordOnlyReason, boolean> = {
   // The deploy-level master gate. Records without crediting BY DESIGN, so
@@ -175,6 +184,53 @@ const REFUSAL_NOTIFIES_CUSTOMER: Record<RecordOnlyReason, boolean> = {
   "no-daily-limit-for-level": true,
   "daily-limit-exceeded": true,
   "under-minimum": true,
+}
+
+/**
+ * Which of those refusals ALSO require a server-verified reference before the
+ * push goes out.
+ *
+ * On legacy unsigned clients `customReference` is free text the PAYER types, so
+ * anyone can pay with a stranger's username on it and have the bank's own app
+ * tell that stranger we are holding a payment of theirs — a ready-made pretext
+ * for a follow-up scam call. What makes that worth blocking is the PRICE: the
+ * gates below all trip on amounts an attacker is happy to spend.
+ *
+ * `over-limit` is the exception, and the reason this is a per-reason table
+ * rather than one blanket `authorizedIntent &&`. It trips only when the gross
+ * EXCEEDS the operator's single-payment auto-credit limit (fees.ts), so buying
+ * that push costs the attacker more than the limit — real money that ops then
+ * hand-credits to the VICTIM. That is the same self-defeating economics that
+ * leaves the `credited` push ungated, and gating it bought nothing while
+ * silencing the reason most likely to be the one a real customer hits.
+ *
+ * The rest stay gated because they are cheap: `under-minimum` costs whatever is
+ * below the operator minimum, `non-usd` costs a single Jamaican dollar, and
+ * `daily-limit-exceeded` / `no-daily-limit-for-level` cost nothing at all when
+ * the victim already sits at their cap (both are checked before the minimum
+ * gate). Legacy clients keep the pre-PR behaviour for those — ops alert only,
+ * no push — until they are out of the wild.
+ *
+ * Exhaustive by TYPE for the same reason as the table above: a new gate must
+ * make this call explicitly rather than inherit either answer.
+ */
+const REFUSAL_NEEDS_VERIFIED_REFERENCE: Record<RecordOnlyReason, boolean> = {
+  // Costs the attacker more than the auto-credit limit, paid to the victim.
+  "over-limit": false,
+  // Cheap enough to be a scam pretext — a signed reference is required.
+  "non-usd": true,
+  "under-minimum": true,
+  "daily-limit-exceeded": true,
+  "no-daily-limit-for-level": true,
+  // Never push at all (REFUSAL_NOTIFIES_CUSTOMER above), so this value is
+  // unreachable. Listed so the record stays exhaustive and a reason promoted to
+  // notifying cannot arrive here without an answer.
+  "credit-disabled": true,
+  "auto-credit-disabled": true,
+  "settings-unavailable": true,
+  "history-unavailable": true,
+  "non-positive-net": true,
+  "intent-mismatch": true,
 }
 
 // Read off `creditFygaroTopup` itself rather than restated as a literal union:
@@ -664,21 +720,27 @@ export const paymentHandler = async (req: Request, res: Response) => {
       // (REFUSAL_NOTIFIES_CUSTOMER above); the rest would be promising something
       // that is not going to happen.
       //
-      // ...and only for a SERVER-VERIFIED reference. `authorizedIntent` is set
-      // only when the reference carries an intentId that Flash itself minted
-      // and signed for this account and this amount (see readIntent above; a
-      // mismatch on either lands as `intent-mismatch`, which this allowlist
-      // refuses anyway). On the legacy unsigned clients still in the wild,
-      // `customReference` is free text the PAYER types — so without this gate
-      // anyone could pay J$1, or $2 against the $10 minimum, with a stranger's
-      // username on it and have the bank's own app tell that stranger we are
-      // holding a payment of theirs. That is a ready-made pretext for a
-      // follow-up scam call, and it costs the attacker a dollar. The `credited`
-      // push is not gated the same way because abusing it means paying the
-      // victim real money, which makes it self-defeating; a refusal push has no
-      // such offsetting cost. Legacy clients simply keep the pre-PR behaviour
-      // (ops alert only, no push) until they are out of the wild.
-      if (authorizedIntent && REFUSAL_NOTIFIES_CUSTOMER[gate.reason]) {
+      // ...and, for the CHEAP reasons, only against a SERVER-VERIFIED
+      // reference. `authorizedIntent` is set only when the reference carries an
+      // intentId that Flash itself minted and signed for this account and this
+      // amount (see readIntent above; a mismatch on either lands as
+      // `intent-mismatch`, which the allowlist refuses anyway). On the legacy
+      // unsigned clients still in the wild — and on EVERY client while
+      // `fygaro.checkout.enabled` is false, which is its default — the
+      // reference is free text the PAYER types, so anyone could pay J$1, or $2
+      // against the $10 minimum, with a stranger's username on it and have the
+      // bank's own app tell that stranger we are holding a payment of theirs.
+      //
+      // Which is a price argument, not a blanket one, so the price decides:
+      // REFUSAL_NEEDS_VERIFIED_REFERENCE exempts `over-limit`, whose trigger
+      // costs the attacker MORE than the auto-credit limit and hands it to the
+      // victim — the same self-defeating economics that leaves the `credited`
+      // push ungated. Gating that one bought nothing and, with signed checkout
+      // off, silenced the whole refusal half of this feature.
+      if (
+        REFUSAL_NOTIFIES_CUSTOMER[gate.reason] &&
+        (authorizedIntent || !REFUSAL_NEEDS_VERIFIED_REFERENCE[gate.reason])
+      ) {
         await sendFygaroTopupNotificationBestEffort({
           accountId,
           outcome: "heldForReview",
@@ -852,16 +914,6 @@ export const paymentHandler = async (req: Request, res: Response) => {
         // refusing the customer's next top-up with `daily-limit-exceeded`.
         // Costs the push nothing: `consumeIntent` reports failure by return
         // value, never a throw, so it cannot skip what follows it.
-        //
-        // ONLY on `success`. `creditFygaroTopup` also returns `pending`, whose
-        // own comment reads "money has PROBABLY left the treasury: report
-        // credited, never re-pay" — a deliberately weaker claim than "N USD has
-        // been added to your wallet", which is what this copy asserts. Pushing
-        // it on `pending` sends the customer to a balance that has not moved
-        // yet, i.e. manufactures the support ticket this notification exists to
-        // prevent. The pending case stays visible to ops through `creditStatus`
-        // on the feed line above; telling the customer about it needs its own
-        // phrase, not this one overloaded.
         await sendFygaroTopupNotificationBestEffort({
           accountId: creditAccountId,
           // `pending` gets its OWN phrase rather than the credited one or

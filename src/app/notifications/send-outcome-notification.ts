@@ -40,7 +40,14 @@ export type OutcomeNotificationArgs = {
   extraData?: Record<string, string>
 }
 
-export const sendOutcomeNotification = async ({
+/**
+ * Deliberately NOT exported. Every caller of this module is on a money path
+ * where the payment has already been captured, so a notification failure must
+ * never become the payment's failure — which is what an error-returning variant
+ * in reach of a caller eventually becomes. `sendOutcomeNotificationBestEffort`
+ * is the module's only entry point; this stays private to it.
+ */
+const sendOutcomeNotification = async ({
   accountId: accountIdRaw,
   phraseBase,
   dataType,

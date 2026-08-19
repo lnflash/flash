@@ -78,7 +78,16 @@ export const startFygaroWebhookServer = () => {
   // a regressed secret mount in a chart bump would leave this whole feature dead
   // in prod with no signal but one boot-time warn nobody watches. Page instead.
   // Static dedup key: one broken deployment, one incident.
-  if (!messaging) {
+  //
+  // Gated on `credit.enabled` because that flag decides whether ANY push is
+  // reachable from this server. It defaults to false and is the very first
+  // rollout state; with credit off the gate answers `credit-disabled`, which
+  // REFUSAL_NOTIFIES_CUSTOMER deliberately keeps silent, and the credit path is
+  // never entered — so there is nothing for a missing credential to break.
+  // Paging anyway would fire a CRITICAL, on every pod restart and rolling
+  // deploy, with no auto-resolve, about a feature that is switched off by
+  // design.
+  if (FygaroConfig.credit?.enabled && !messaging) {
     alertBridge({
       dedupKey: generateDedupKey.fygaroPushUnavailable(),
       source: "fygaro-webhook",

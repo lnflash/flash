@@ -1,7 +1,10 @@
 const mockFygaroConfig = {
   enabled: true,
   webhook: { port: 4010, secrets: { default: "s3cret" }, timestampSkewMs: 300000 },
-  credit: { enabled: false },
+  // Mutated per test: `credit.enabled` is what decides whether any push is
+  // reachable from this server at all, so it decides whether a missing Firebase
+  // credential is an incident or a non-event.
+  credit: { enabled: true },
 }
 
 // `messaging` is a module-level binding in firebase.ts — null when
@@ -71,10 +74,11 @@ import { startFygaroWebhookServer } from "@services/fygaro/webhook-server"
 beforeEach(() => {
   jest.clearAllMocks()
   mockMessaging = {}
+  mockFygaroConfig.credit.enabled = true
 })
 
 describe("startFygaroWebhookServer", () => {
-  it("pages when Firebase messaging is unavailable — otherwise every push is a silent no-op", () => {
+  it("pages when credit is ON and Firebase messaging is unavailable — otherwise every push is a silent no-op", () => {
     // firebase.ts leaves `messaging` null when the credential is missing, and
     // push-notifications.ts then returns `true` anyway (its own "FIXME: should
     // return an error?"). Every layer above — including the best-effort wrapper
@@ -96,6 +100,22 @@ describe("startFygaroWebhookServer", () => {
   })
 
   it("stays quiet when Firebase messaging loaded", () => {
+    startFygaroWebhookServer()
+
+    expect(mockAlertBridge).not.toHaveBeenCalled()
+  })
+
+  it("stays quiet with no messaging when credit is disabled — nothing could push anyway", () => {
+    // `fygaro.credit.enabled` defaults to false and is the first rollout state.
+    // With it off the gate answers `credit-disabled`, which
+    // REFUSAL_NOTIFIES_CUSTOMER keeps deliberately silent, and the credit path
+    // is never entered — so no push is reachable and a missing credential
+    // breaks nothing. Paging here would mean a CRITICAL on every pod restart
+    // and rolling deploy, with no auto-resolve, about a feature switched off by
+    // design.
+    mockFygaroConfig.credit.enabled = false
+    mockMessaging = null
+
     startFygaroWebhookServer()
 
     expect(mockAlertBridge).not.toHaveBeenCalled()
