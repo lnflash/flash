@@ -1,5 +1,11 @@
 files.extend-exclude = [
   "dev",
+  # Spanish copy, checked against an English dictionary. "momento" (a moment)
+  # is read as a misspelling of "memento", and every Spanish word added later
+  # is the same coin flip. A per-word allowlist would be worse than this: it is
+  # global, so it would also stop flagging those words where they ARE typos, in
+  # the English files. en.json stays checked.
+  "src/config/locales/es.json",
   "src/domain/users/languages.ts",
   "src/services/loopd/protos",
   "docs/postman-collection/galoy_graphql_main_api.postman_collection.json",
