@@ -130,7 +130,10 @@ describe("referral push notifications", () => {
 
   it("prunes dead device tokens", async () => {
     mockSendFiltered.mockResolvedValue(
-      new DeviceTokensNotRegisteredNotificationsServiceError(["dead-1" as DeviceToken]),
+      new DeviceTokensNotRegisteredNotificationsServiceError(
+        ["dead-1" as DeviceToken],
+        1,
+      ),
     )
     await sendInviteAcceptedNotificationBestEffort({ inviterAccountId: ACCOUNT })
     expect(mockRemoveTokens).toHaveBeenCalledWith(

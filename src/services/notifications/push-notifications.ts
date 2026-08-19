@@ -4,6 +4,7 @@ import {
   DeviceTokensNotRegisteredNotificationsServiceError,
   FirebaseMessageError,
   InvalidDeviceNotificationsServiceError,
+  NoDeviceAcceptedPushNotificationsServiceError,
   NotificationChannel,
   NotificationsServiceError,
   NotificationsServiceUnreachableServerError,
@@ -34,15 +35,19 @@ const sendToDevice = async (
   try {
     if (!messaging) {
       baseLogger.error("Firebase messaging module not loaded")
-      // FIXME: should return an error?
-      return true
+      return new NotificationsServiceError("Firebase messaging module not loaded")
     }
 
     const batchResp = await messaging.sendEachForMulticast({ tokens, ...message }, false)
 
     const invalidTokens: DeviceToken[] = []
+    // Deduped so a 200-device fleet failing on one bad APNs key reports one
+    // code, not two hundred. Carried on the returned error: the per-token warn
+    // lines below are keyed by token only, with no account or operator on them.
+    const failureCodes = new Set<string>()
     batchResp.responses.forEach((r, idx) => {
       if (!r.success) {
+        failureCodes.add(r.error?.code ?? "unknown")
         logger.warn(
           { error: r.error, token: tokens[idx] },
           "Error sending notification to device",
@@ -61,7 +66,11 @@ const sendToDevice = async (
     })
 
     logger.info(
-      { successCount: batchResp.successCount, failureCount: batchResp.failureCount },
+      {
+        successCount: batchResp.successCount,
+        failureCount: batchResp.failureCount,
+        failureCodes: [...failureCodes],
+      },
       "Notification batch response",
     )
 
@@ -71,7 +80,28 @@ const sendToDevice = async (
     // })
 
     if (invalidTokens.length > 0) {
-      return new DeviceTokensNotRegisteredNotificationsServiceError(invalidTokens)
+      return new DeviceTokensNotRegisteredNotificationsServiceError(
+        invalidTokens,
+        batchResp.successCount,
+        [...failureCodes],
+      )
+    }
+
+    // Tokens can fail for reasons other than being unregistered (expired APNs
+    // auth key, sender-id mismatch, quota). Those leave `invalidTokens` empty,
+    // so without this check a send where every device failed would report
+    // success and nothing would have been delivered.
+    if (batchResp.successCount === 0) {
+      // Typed, not a bare NotificationsServiceError: it subclasses one, so every
+      // existing caller (log-and-continue, bestEffort wrappers) behaves
+      // identically, while the admin resolver can tell the operator that the
+      // push infrastructure is broken instead of "Unexpected error occurred".
+      // This is the expired-APNs-auth-key case: no token is unregistered, so
+      // invalidTokens is empty and nothing above catches it.
+      return new NoDeviceAcceptedPushNotificationsServiceError(
+        "no device accepted the push",
+        [...failureCodes],
+      )
     }
 
     return true

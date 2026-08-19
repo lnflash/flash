@@ -811,6 +811,9 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "NotificationsServiceError":
     case "InvalidDeviceNotificationsServiceError":
     case "DeviceTokensNotRegisteredNotificationsServiceError":
+    case "AllDeviceTokensStaleNotificationsServiceError":
+    case "NoDeviceAcceptedPushNotificationsServiceError":
+    case "RecipientDisabledNotificationsServiceError":
     case "AccountError":
     case "IpFetcherError":
     case "IpFetcherServiceError":
