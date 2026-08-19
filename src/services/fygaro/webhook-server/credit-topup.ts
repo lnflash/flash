@@ -96,6 +96,22 @@ export const resolveFygaroTreasuryFundingWallet = async (): Promise<
   return { account, fundingWallet }
 }
 
+export type FygaroCreditSuccess = {
+  walletId: WalletId
+  // The currency of the wallet that was actually credited — USDT on every
+  // account created since the cash-wallet cutover, USD on the legacy ones.
+  //
+  // Reported because the caller has to NAME this credit to the customer, and
+  // the two currencies scale differently: the amount handed to the send is USD
+  // cents either way (`intraledgerPaymentSendWalletIdForUsdWallet` formats it
+  // with `usdCentsDisplay`), while the push renderer divides by 100 for USD and
+  // by 1,000,000 for USDT. A caller that had to guess would announce "$0.0094"
+  // for a $9.42 credit on every post-cutover account. Resolved here rather than
+  // re-read downstream because this function has already picked the wallet.
+  walletCurrency: WalletCurrency
+  status: "success" | "pending"
+}
+
 export const creditFygaroTopup = async ({
   recipientAccountId,
   amountCents,
@@ -104,9 +120,7 @@ export const creditFygaroTopup = async ({
   recipientAccountId: AccountId
   amountCents: number
   transactionId: string
-}): Promise<
-  { walletId: WalletId; status: "success" | "pending" } | FygaroCreditError
-> => {
+}): Promise<FygaroCreditSuccess | FygaroCreditError> => {
   if (!Number.isInteger(amountCents) || amountCents <= 0) {
     return new FygaroCreditError("validate-amount", `invalid amount: ${amountCents}`)
   }
@@ -159,7 +173,11 @@ export const creditFygaroTopup = async ({
     return new FygaroCreditError("intraledger-send", result.message)
   }
   if (result === PaymentSendStatus.Success) {
-    return { walletId: recipientWallet.id, status: "success" }
+    return {
+      walletId: recipientWallet.id,
+      walletCurrency: recipientWallet.currency,
+      status: "success",
+    }
   }
   if (result === PaymentSendStatus.Pending) {
     // Money has probably left the treasury: report credited, never re-pay.
@@ -167,7 +185,11 @@ export const creditFygaroTopup = async ({
       { transactionId, recipientAccountId },
       "fygaro credit: send pending — treating as credited for idempotency",
     )
-    return { walletId: recipientWallet.id, status: "pending" }
+    return {
+      walletId: recipientWallet.id,
+      walletCurrency: recipientWallet.currency,
+      status: "pending",
+    }
   }
   return new FygaroCreditError(
     "intraledger-send",

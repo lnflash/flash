@@ -34,6 +34,7 @@ jest.mock("@services/logger", () => ({
 }))
 
 import { CacheUndefinedError, UnknownCacheServiceError } from "@domain/cache"
+import { FygaroReservationWriteError } from "@services/fygaro/errors"
 import { baseLogger } from "@services/logger"
 import {
   consumeIntent,
@@ -133,7 +134,46 @@ describe("saveIntent", () => {
   it("reports a failed reservation write so the caller knows there is no hold", async () => {
     mockZadd.mockRejectedValue(new Error("redis down"))
 
-    expect(await saveIntent({ intent: INTENT, ttlSeconds: TTL })).toBeInstanceOf(Error)
+    const res = await saveIntent({ intent: INTENT, ttlSeconds: TTL })
+
+    expect(res).toBeInstanceOf(FygaroReservationWriteError)
+    // A distinct class, because the caller's two branches are opposites:
+    // this one REFUSES the checkout, and a plain Error falls open. A reservation
+    // failure reported as a plain Error would be authorised with no hold.
+    // ...and nothing is written for a checkout that is about to be refused.
+    expect(mockCacheSet).not.toHaveBeenCalled()
+  })
+
+  it("writes the hold BEFORE the record, so a record-write failure still leaves the allowance held", async () => {
+    // THE ordering regression. The record and the reservation live on two
+    // different ioredis clients (`@services/cache` vs `@services/redis`) and can
+    // be in different health states — one mid-reconnect after a sentinel
+    // failover, or one having burned `maxRetriesPerRequest`. Written
+    // record-first, this failure returned before the `zadd` ever ran, and
+    // `authorizeFygaroTopup` — which fails OPEN on any non-reservation error —
+    // handed out a signed, payable link with NOTHING holding the allowance.
+    // `readOutstandingReservations` then kept answering "0 outstanding", so
+    // every subsequent call minted another full-allowance link: N payable $125
+    // links against a $125 cap, two of them paid, one credited, one charged and
+    // refused. That is the incident this index exists to end.
+    mockCacheSet.mockImplementation(async ({ key }: { key: string }) =>
+      key.startsWith("fygaro-checkout-intent:")
+        ? new UnknownCacheServiceError("cache client down")
+        : INTENT,
+    )
+
+    const res = await saveIntent({ intent: INTENT, ttlSeconds: TTL })
+
+    // Fails OPEN at the caller — the signed URL is still payable and the
+    // webhook's credit gate still applies — which is only defensible because...
+    expect(res).toBeInstanceOf(Error)
+    expect(res).not.toBeInstanceOf(FygaroReservationWriteError)
+    // ...the hold is already in Redis by the time that error is returned.
+    expect(mockZadd).toHaveBeenCalledWith(
+      "fygaro-checkout-intents:acct-1",
+      NOW_MS + TTL * 1000,
+      "8000:intent-1",
+    )
   })
 })
 

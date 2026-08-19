@@ -3,6 +3,7 @@ import {
   type FygaroTopupAllowanceFailure,
 } from "@app/fygaro/topup-allowance"
 import { RateLimitConfig } from "@domain/rate-limit"
+import { FygaroTopupAllowanceRateLimiterExceededError } from "@domain/rate-limit/errors"
 import { GT } from "@graphql/index"
 import {
   FygaroTopupAllowancePayload,
@@ -65,19 +66,47 @@ const FygaroTopupAllowanceQuery = GT.Field({
       rateLimitConfig: RateLimitConfig.fygaroTopupAllowance,
       keyToConsume: domainAccount.id,
     })
-    if (limitOk instanceof Error) {
-      // No allowance, but a NAMED one — a caller spending its budget on a
-      // decorative number gets no number, and gets told to back off rather than
-      // being left to guess whether card top-ups are off entirely. And when the
-      // limiter STORE itself is down, refusing is still right: the allowance
-      // read below fails closed on that same Redis anyway
-      // (`reservations-unavailable`), so refusing here costs nothing and keeps
-      // an outage from turning into unbounded ERPNext load.
+    if (limitOk instanceof FygaroTopupAllowanceRateLimiterExceededError) {
+      // The caller really is over the limit. A NAMED refusal — a client
+      // spending its budget on a decorative number gets no number, and gets
+      // told to back off rather than being left to guess whether card top-ups
+      // are off entirely.
       baseLogger.info(
-        { accountId: domainAccount.id, error: limitOk.name },
-        "Fygaro allowance query not answered: rate limiter refused or unavailable",
+        { accountId: domainAccount.id },
+        "Fygaro allowance query not answered: rate limit exceeded",
       )
       return { errors: [], allowance: null, unavailableReason: RATE_LIMITED }
+    }
+    if (limitOk instanceof Error) {
+      // The limiter STORE is down, not the caller misbehaving — `consume`
+      // returns UnknownRateLimitServiceError for a store fault and
+      // RateLimiterExceededError only for a real refusal, precisely so the two
+      // are not conflated. Reporting a store fault as RATE_LIMITED told every
+      // customer on the top-up screen "too many allowance checks from this
+      // account too quickly. Back off and reuse the last answer" during a Redis
+      // outage, which is a claim about their behaviour that is simply false.
+      //
+      // RESERVATIONS_UNAVAILABLE is what the app layer would have said, and it
+      // is the honest answer: the limiter and the reservation index are the
+      // SAME ioredis client (`@services/rate-limit` and
+      // `readOutstandingReservations` both take `redis` from
+      // `@services/redis`), so a store fault here means the hold read below
+      // fails closed too. Answering it directly rather than falling through
+      // like `fygaroCheckoutCreate` does keeps a Redis outage from turning into
+      // unbounded ERPNext load on the very read whose failure refuses card
+      // top-ups for everyone — this query authorises nothing, so there is no
+      // gate one step later that needs entering to produce the right message.
+      // Same reason, same wording as the sibling mutation ends up with; only
+      // the mechanism differs.
+      baseLogger.warn(
+        { accountId: domainAccount.id, error: limitOk.name },
+        "Fygaro allowance rate limiter unavailable; reporting the underlying store outage",
+      )
+      return {
+        errors: [],
+        allowance: null,
+        unavailableReason: UNAVAILABLE_REASON["reservations-unavailable"],
+      }
     }
 
     const result = await getFygaroTopupAllowance({

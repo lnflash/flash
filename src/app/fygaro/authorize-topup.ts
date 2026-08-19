@@ -416,15 +416,28 @@ export const authorizeFygaroTopup = async ({
     return refuseTransient("reservations-unavailable")
   }
   if (saved instanceof Error) {
-    // The signed URL is still perfectly payable and the webhook gate still
-    // applies; only our own after-the-fact cross-check and reservation are
-    // missing. Log it and proceed rather than blocking a legitimate top-up on a
-    // cache write.
+    // Only the after-the-fact CROSS-CHECK RECORD is missing. The signed URL is
+    // still perfectly payable and the webhook's own credit gate still applies
+    // in full, so proceeding here is the same unverified-legacy position every
+    // pre-intent payment is in — not a reason to refuse a legitimate top-up.
+    //
+    // This branch is safe ONLY because `saveIntent` writes the reservation
+    // before the record (see the ordering note there). Any error that reaches
+    // here is therefore a record/claim failure with the hold already in Redis;
+    // a reservation that could not be written cannot reach this line at all —
+    // it returns FygaroReservationWriteError and is refused above. If that
+    // ordering is ever reversed, this branch starts authorising links against
+    // an allowance nothing is holding, and must become a refusal instead.
     baseLogger.warn(
       { intentId, error: saved.constructor.name },
-      "Failed to persist the Fygaro cross-check record; the hold is in place, so proceeding",
+      "Failed to persist the Fygaro cross-check record; proceeding on the credit gate alone",
     )
-    return { authorized: true, checkout, remainingAllowanceCents: allowanceCents }
+    // Deliberately NOT an early return. The hold is real, so this request has
+    // to be treated like every other authorised one from here down: it must go
+    // through the post-reserve concurrency re-read (a racing request holds
+    // allowance this one has not seen), and it must report the allowance NET of
+    // its own reservation. Returning here reported the pre-reservation figure,
+    // which now overstates the headroom by exactly this request's amount.
   }
 
   // Reserve, then re-read. Two requests that raced past the check above have

@@ -79,6 +79,13 @@ jest.mock("@services/fygaro/webhook-server/credit-topup", () => {
   }
 })
 
+// The customer-facing push for a landed credit. Mocked so the suite can assert
+// WHETHER and WITH WHAT it fires without dragging Firebase and the redis pubsub
+// client into a route test; the module's own failure posture is its business.
+jest.mock("@services/fygaro/webhook-server/notify-credited", () => ({
+  notifyFygaroTopupCredited: (...args: unknown[]) => mockNotifyCredited(...args),
+}))
+
 // The fee math (fees.ts) runs for real; only the ERPNext-backed settings read
 // is mocked, so the gating matrix exercises the actual formula end to end.
 jest.mock("@services/fygaro/webhook-server/fygaro-settings", () => ({
@@ -118,6 +125,7 @@ const mockReadCompletion = jest.fn()
 const mockAlertBridge = jest.fn()
 const mockNotifyOpsEvent = jest.fn()
 const mockCreditFygaroTopup = jest.fn()
+const mockNotifyCredited = jest.fn()
 const mockGetFygaroSettings = jest.fn()
 const mockSumFygaroLast24h = jest.fn()
 const mockMarkNotCredited = jest.fn()
@@ -145,6 +153,7 @@ import {
   UnknownRepositoryError,
 } from "@domain/errors"
 import { ResourceAttemptsLockServiceError } from "@domain/lock"
+import { WalletCurrency } from "@domain/shared"
 
 import { paymentHandler } from "@services/fygaro/webhook-server/routes/payment"
 import { FygaroCreditError } from "@services/fygaro/webhook-server/credit-topup"
@@ -203,7 +212,12 @@ beforeEach(() => {
   mockMarkNotCredited.mockResolvedValue(true)
   mockRecordIntentOutcome.mockResolvedValue(undefined)
   mockCompleteFygaroTopup.mockResolvedValue(true)
-  mockCreditFygaroTopup.mockResolvedValue({ walletId: WALLET_ID, status: "success" })
+  mockCreditFygaroTopup.mockResolvedValue({
+    walletId: WALLET_ID,
+    walletCurrency: WalletCurrency.Usdt,
+    status: "success",
+  })
+  mockNotifyCredited.mockResolvedValue(undefined)
   mockGetFygaroSettings.mockResolvedValue({ ...DEFAULT_SETTINGS })
   // Legacy default: the reference carries no intent, so nothing is looked up.
   mockReadIntent.mockResolvedValue({ found: false })
@@ -614,6 +628,70 @@ describe("fygaro paymentHandler", () => {
       expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
         expect.objectContaining({ phase: "succeeded", status: "success" }),
       )
+      expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
+    })
+
+    it("TELLS THE CUSTOMER the credit landed, with the net that reached the wallet", async () => {
+      // Nothing else does. `creditFygaroTopup` sends intraledger and emits no
+      // push, and `NotificationsService().intraLedgerTxReceived` had zero
+      // callers in the whole of src/ — so the only way to learn the outcome was
+      // to have the app open and polling `fygaroTopupStatus`, whose record
+      // expires an hour after the JWT. A top-up that resolved after the
+      // customer closed the app was never reported to them at all, while the
+      // documented client contract promises "we'll let you know".
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockNotifyCredited).toHaveBeenCalledWith({
+        recipientAccount: expect.objectContaining({ id: ACCOUNT_ID }),
+        recipientWalletId: WALLET_ID,
+        // Carried through from the credit result rather than assumed: the push
+        // renderer scales by the currency it is given, so guessing USD for a
+        // post-cutover USDT wallet would announce $0.0901 for a $9.01 credit.
+        recipientWalletCurrency: WalletCurrency.Usdt,
+        // The NET credited (901¢), not the $10.00 gross — the same number
+        // `fygaroTopupStatus` reports as `netAmount` for this payment.
+        netAmountCents: 901,
+        transactionId: VALID_BODY.transactionId,
+      })
+    })
+
+    it("does not announce a credit that did not happen", async () => {
+      // The credit-failure branch is deliberately retryable and the money has
+      // NOT reached the wallet. A push here would be the same unbacked claim
+      // the status record's ordering rules exist to prevent, delivered to the
+      // lock screen where it cannot be walked back.
+      mockCreditFygaroTopup.mockResolvedValue(
+        new FygaroCreditError("intraledger-send", "some send error"),
+      )
+
+      await paymentHandler(makeReq(VALID_BODY), makeRes())
+
+      expect(mockNotifyCredited).not.toHaveBeenCalled()
+    })
+
+    it("does not re-announce a payment an earlier delivery already credited", async () => {
+      // Provider re-deliveries are routine. The first delivery already told the
+      // customer; repeating it on every retry would page their phone for money
+      // that arrived once.
+      mockReadCompletion.mockResolvedValue({ completed: true, netAmountCents: 901 })
+
+      await paymentHandler(makeReq(VALID_BODY), makeRes())
+
+      expect(mockNotifyCredited).not.toHaveBeenCalled()
+    })
+
+    it("still answers success when the push cannot be sent", async () => {
+      // The money has moved and the audit row is promoted by this point. A 500
+      // here would ask Fygaro to retry a payment already in the customer's
+      // wallet, so a failed notification must never reach the response.
+      mockNotifyCredited.mockRejectedValue(new Error("firebase down"))
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(res.status).toHaveBeenCalledWith(200)
       expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
     })
 
@@ -1581,7 +1659,11 @@ describe("fygaro paymentHandler", () => {
               outcome: expect.objectContaining({ state: "received" }),
             }),
           )
-          return { walletId: WALLET_ID, status: "success" }
+          return {
+            walletId: WALLET_ID,
+            walletCurrency: WalletCurrency.Usdt,
+            status: "success",
+          }
         })
 
         await paymentHandler(makeReq(SIGNED_BODY), makeRes())

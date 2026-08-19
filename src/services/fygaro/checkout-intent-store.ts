@@ -171,6 +171,47 @@ export const saveIntent = async ({
   intent: FygaroCheckoutIntent
   ttlSeconds: number
 }): Promise<true | Error> => {
+  // THE HOLD IS WRITTEN FIRST, and the ordering is load-bearing.
+  //
+  // The two halves of this store fail in opposite directions — the reservation
+  // is fail-CLOSED and the record is fail-OPEN — so whichever is written first
+  // decides what an early return can leave behind. Written record-first, a
+  // record-write failure returned before the `zadd` ever ran, and the caller's
+  // fail-open branch then authorised a checkout with NO hold on the allowance
+  // while its log line claimed "the hold is in place". They are two separate
+  // ioredis clients (`@services/cache` and `@services/redis`) and can be in
+  // different health states — one mid-reconnect after a sentinel failover, or
+  // one having burned `maxRetriesPerRequest` — so that is a reachable window,
+  // not a theoretical one. In it, `readOutstandingReservations` keeps answering
+  // "0 outstanding" and every call mints another full-allowance signed link:
+  // N payable $125 links against a $125 cap, exactly the over-issue the
+  // reservation index exists to stop.
+  //
+  // Hold first inverts that. Any early return from here on has the reservation
+  // already in Redis, so the fail-open branch is telling the truth, and a
+  // reservation that cannot be written still refuses the whole authorisation
+  // via FygaroReservationWriteError below.
+  //
+  // The RESERVATION expires with the JWT, not with the record: once the token is
+  // no longer payable the amount is no longer outstanding, even though the
+  // record must stick around to verify a payment already in flight.
+  try {
+    const redis = await redisClient()
+    const key = accountIntentsKey(intent.accountId)
+    await redis.zadd(
+      key,
+      intent.createdAtMs + ttlSeconds * 1000,
+      reservationMember(intent),
+    )
+    // Bounded lifetime for the index itself, so an account that stops topping
+    // up does not leave a key behind forever.
+    await redis.expire(key, ttlSeconds + 3600)
+  } catch (err) {
+    return new FygaroReservationWriteError(
+      err instanceof Error ? err.message : String(err),
+    )
+  }
+
   // Outlive the JWT by a margin: a payment authorised at the very end of the
   // token's window still arrives (and must still be verifiable) minutes later,
   // once the customer has finished typing their card details.
@@ -180,6 +221,12 @@ export const saveIntent = async ({
     value: intent,
     ttlSecs: (ttlSeconds + 3600) as Seconds,
   })
+  // Fail-open at the caller, and safe to be: the hold above is already in
+  // place, so the allowance this link would spend is genuinely reserved. What
+  // is missing is only the after-the-fact cross-check. The hold is not leaked
+  // either — `consumeIntent` reads the record to know what to release, so
+  // without one it lifts at the JWT's expiry instead of at redemption, the same
+  // bounded degradation `releaseIntentReservation` already accepts.
   if (res instanceof Error) return res
 
   // The redemption claim, written alongside the record and living exactly as
@@ -199,26 +246,6 @@ export const saveIntent = async ({
     baseLogger.warn(
       { intentId: intent.intentId, error: claim.constructor.name },
       "Failed to write the Fygaro redemption claim; the hold will lift at expiry instead",
-    )
-  }
-
-  // The RESERVATION expires with the JWT, not with the record: once the token is
-  // no longer payable the amount is no longer outstanding, even though the
-  // record must stick around to verify a payment already in flight.
-  try {
-    const redis = await redisClient()
-    const key = accountIntentsKey(intent.accountId)
-    await redis.zadd(
-      key,
-      intent.createdAtMs + ttlSeconds * 1000,
-      reservationMember(intent),
-    )
-    // Bounded lifetime for the index itself, so an account that stops topping
-    // up does not leave a key behind forever.
-    await redis.expire(key, ttlSeconds + 3600)
-  } catch (err) {
-    return new FygaroReservationWriteError(
-      err instanceof Error ? err.message : String(err),
     )
   }
 

@@ -44,6 +44,7 @@ import {
   FygaroCreditError,
   INSUFFICIENT_TREASURY_FLOAT_STEP,
 } from "../credit-topup"
+import { notifyFygaroTopupCredited } from "../notify-credited"
 import { getFygaroSettings, type FygaroSettings } from "../fygaro-settings"
 import { parseCustomReference } from "../../checkout"
 import {
@@ -828,6 +829,12 @@ export const paymentHandler = async (req: Request, res: Response) => {
     // the lock withPaymentIdempotency takes internally (that one is scoped to
     // the sender wallet), so there is no nested-acquire collision.
     const creditAccountId = accountId
+    // Captured out here, where the `account !== undefined` guard above still
+    // narrows it — inside the closure below TypeScript re-widens a `let`. The
+    // credit notification needs the whole account (kratosUserId to find the
+    // device tokens, notificationSettings to respect the user's preferences),
+    // not just its id.
+    const creditAccount = account
     const { fees } = gate
     const outcome = await LockService().lockPaymentIdempotencyKey(
       `fygaro-payment:${transactionId}` as IdempotencyKey,
@@ -959,6 +966,32 @@ export const paymentHandler = async (req: Request, res: Response) => {
         }
 
         await recordOutcome({ state: "credited", netAmountCents: fees.netCents })
+
+        // TELL THE CUSTOMER. The status query only answers a client that is
+        // open and polling, and its record expires an hour after the JWT — so a
+        // top-up that resolves after the customer closed the app was never
+        // reported to them at all, while the client contract this workstream
+        // documents promises "we'll let you know" for every non-terminal state.
+        // Best-effort and non-throwing by construction (see the module
+        // docstring): the money has already moved and the audit row is already
+        // promoted, so a failed push must not turn into a 500 that asks Fygaro
+        // to retry a payment sitting in the customer's wallet.
+        await notifyFygaroTopupCredited({
+          recipientAccount: creditAccount,
+          recipientWalletId: creditResult.walletId,
+          recipientWalletCurrency: creditResult.walletCurrency,
+          netAmountCents: fees.netCents,
+          transactionId,
+        }).catch((err) => {
+          // The module swallows its own failures; this is the call site
+          // refusing to DEPEND on that. Everything below — the ops event, the
+          // redemption, the 200 — must happen for a credit that has already
+          // moved money, and none of it may hinge on a push.
+          baseLogger.warn(
+            { transactionId, error: err instanceof Error ? err.name : String(err) },
+            "Fygaro credit notification threw; credit and audit are unaffected",
+          )
+        })
 
         notifyOpsEvent({
           flow: "deposit",
