@@ -237,6 +237,10 @@ describe("fygaro paymentHandler", () => {
     expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
       expect.objectContaining({ phase: "fygaro-recorded", status: "pending" }),
     )
+    // `credit-disabled` is the deploy-level master gate: it records without
+    // crediting BY DESIGN. Pushing "we're completing it manually" here would
+    // notify every paying customer for the whole of a rollout.
+    expect(mockSendTopupNotification).not.toHaveBeenCalled()
     expect(res.status).toHaveBeenCalledWith(200)
     expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
   })
@@ -589,13 +593,71 @@ describe("fygaro paymentHandler", () => {
 
       await paymentHandler(makeReq(VALID_BODY), res)
 
-      expect(mockSendTopupNotification).toHaveBeenCalledWith(
-        expect.objectContaining({ outcome: "credited" }),
-      )
-      const [args] = mockSendTopupNotification.mock.calls[0]
       // The NET, not the gross: naming what they paid overstates the balance
-      // change by the fees.
-      expect(args.amountCents).toBeLessThan(Math.round(Number(VALID_BODY.amount) * 100))
+      // change by the fees. $10.00 gross -> $0.79 processor + $0.20 flash ->
+      // 901¢ — the exact number the credit itself is asserted against above, so
+      // "some number smaller than gross" would not pin it.
+      expect(mockSendTopupNotification).toHaveBeenCalledWith({
+        accountId: ACCOUNT_ID,
+        outcome: "credited",
+        amountCents: 901,
+        currency: "USD",
+      })
+    })
+
+    it("sends the credited push only AFTER the authorisation is redeemed", async () => {
+      // A pod recycle during the FCM round trip must not leave the intent
+      // unconsumed: the ERPNext row already counts this payment towards the
+      // daily cap, so a surviving hold double-counts it and refuses the
+      // customer's next top-up with `daily-limit-exceeded`.
+      const SIGNED = {
+        ...VALID_BODY,
+        customReference: `${VALID_BODY.customReference}|8c1d2e3f-4a5b-6c7d-8e9f-0a1b2c3d4e5f`,
+      }
+      mockReadIntent.mockResolvedValue({
+        found: true,
+        intent: {
+          intentId: "8c1d2e3f-4a5b-6c7d-8e9f-0a1b2c3d4e5f",
+          accountId: ACCOUNT_ID as string,
+          username: VALID_BODY.customReference,
+          amountCents: 1000,
+          currency: "USD",
+          createdAtMs: 1_700_000_000_000,
+        },
+      })
+      const res = makeRes()
+
+      await paymentHandler(makeReq(SIGNED), res)
+
+      expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
+      expect(mockConsumeIntent).toHaveBeenCalledTimes(1)
+      expect(mockSendTopupNotification).toHaveBeenCalledTimes(1)
+      expect(mockSendTopupNotification.mock.invocationCallOrder[0]).toBeGreaterThan(
+        mockConsumeIntent.mock.invocationCallOrder[0],
+      )
+    })
+
+    it("tells the customer when the money was captured and the credit FAILED", async () => {
+      // The outcome this notification exists for. Ops gets a CRITICAL asking
+      // them to credit it by hand and the response is a 200, so Fygaro stops
+      // retrying — without a push the customer is silent forever, while someone
+      // refused by the far more benign `under-minimum` does get told.
+      mockCreditFygaroTopup.mockResolvedValue(
+        new FygaroCreditError("insufficient-treasury-float", "insufficient balance"),
+      )
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
+      // GROSS ($10.00), not the net that never landed: the customer is looking
+      // at what their card was charged.
+      expect(mockSendTopupNotification).toHaveBeenCalledWith({
+        accountId: ACCOUNT_ID,
+        outcome: "heldForReview",
+        amountCents: 1000,
+        currency: "USD",
+      })
     })
 
     it("credits with a discounted flash fee and promotes the discounted breakdown", async () => {
@@ -844,6 +906,126 @@ describe("fygaro paymentHandler", () => {
       },
     )
 
+    // "We have your $X payment and are completing it manually. We'll let you
+    // know when it lands" is a COMMITMENT that a human finishes this payment.
+    // It must go out only for the reasons where that is the real outcome — an
+    // exclusion list of one silently hands the same promise to every gate added
+    // later, including ones where nothing is ever going to land.
+    describe("the held-for-review push is an allowlist, not a denylist", () => {
+      it.each([
+        [
+          "over-limit",
+          (body: Record<string, unknown>) => ({ ...body, amount: "500.01" }),
+          () => undefined,
+          { amountCents: 50001, currency: "USD" },
+        ],
+        [
+          "under-minimum",
+          (body: Record<string, unknown>) => ({ ...body, amount: "2.00" }),
+          () => undefined,
+          { amountCents: 200, currency: "USD" },
+        ],
+        [
+          "daily-limit-exceeded",
+          (body: Record<string, unknown>) => ({ ...body, amount: "30.00" }),
+          () => mockSumFygaroLast24h.mockResolvedValue(10000),
+          { amountCents: 3000, currency: "USD" },
+        ],
+        [
+          "no-daily-limit-for-level",
+          (body: Record<string, unknown>) => body,
+          () => mockFindByUsername.mockResolvedValue({ id: ACCOUNT_ID, level: 0 }),
+          { amountCents: 1000, currency: "USD" },
+        ],
+        [
+          // The push names the payment's REAL currency. Assuming USD rendered a
+          // J$6,000 payment as "$6000.00" — a ~150x overstatement in the one
+          // message whose job is telling the customer what we are holding.
+          "non-usd",
+          (body: Record<string, unknown>) => ({
+            ...body,
+            amount: "6000.00",
+            currency: "JMD",
+          }),
+          () => undefined,
+          { amountCents: 600000, currency: "JMD" },
+        ],
+      ])(
+        "tells the customer their captured payment is being finished by hand (%s)",
+        async (_reason, mutateBody, arrange, expected) => {
+          arrange()
+          const res = makeRes()
+
+          await paymentHandler(makeReq(mutateBody(VALID_BODY)), res)
+
+          // The GROSS captured, which is what their card statement shows.
+          expect(mockSendTopupNotification).toHaveBeenCalledWith({
+            accountId: ACCOUNT_ID,
+            outcome: "heldForReview",
+            ...expected,
+          })
+        },
+      )
+
+      it.each([
+        [
+          // The operator's ERPNext runtime kill switch — the one ops flips
+          // during an incident. Pushing here mass-notifies every paying
+          // customer exactly when nobody wants more traffic.
+          "auto-credit-disabled",
+          (body: Record<string, unknown>) => body,
+          () =>
+            mockGetFygaroSettings.mockResolvedValue({
+              ...DEFAULT_SETTINGS,
+              autoCreditEnabled: false,
+            }),
+        ],
+        [
+          // Fees already meet or exceed the gross: nothing will ever land, so
+          // promising that it will is simply untrue.
+          "non-positive-net",
+          (body: Record<string, unknown>) => ({ ...body, amount: "0.10" }),
+          () => undefined,
+        ],
+        [
+          // The payment does not match the checkout we signed. That is a refund
+          // or an escalation, not a hand-credit.
+          "intent-mismatch",
+          (body: Record<string, unknown>) => ({
+            ...body,
+            customReference: `${VALID_BODY.customReference}|1a2b3c4d-5e6f-4a1b-8c2d-3e4f5a6b7c8d`,
+          }),
+          () =>
+            mockReadIntent.mockResolvedValue({
+              found: true,
+              intent: {
+                intentId: "1a2b3c4d-5e6f-4a1b-8c2d-3e4f5a6b7c8d",
+                accountId: ACCOUNT_ID as string,
+                username: VALID_BODY.customReference,
+                amountCents: 2000,
+                currency: "USD",
+                createdAtMs: 1_700_000_000_000,
+              },
+            }),
+        ],
+      ])(
+        "stays silent on %s — no hand-credit is coming",
+        async (reason, mutateBody, arrange) => {
+          arrange()
+          const res = makeRes()
+
+          await paymentHandler(makeReq(mutateBody(VALID_BODY)), res)
+
+          // The refusal still happened and ops was still paged...
+          expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+            expect.objectContaining({ meta: expect.objectContaining({ reason }) }),
+          )
+          // ...the customer just is not promised something that will not happen.
+          expect(mockSendTopupNotification).not.toHaveBeenCalled()
+        },
+      )
+    })
+
     it("returns 500 for settings-unavailable so Fygaro retries (transient), without acking or spamming the feed", async () => {
       // A brief ERPNext blip caches settings as undefined for up to 60s. That
       // must NOT permanently downgrade the payment to manual credit: return 500
@@ -868,6 +1050,9 @@ describe("fygaro paymentHandler", () => {
         }),
       )
       expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+      // Nothing is terminal yet — a retry seconds later credits cleanly, so
+      // telling the customer it needs manual work would be wrong and unretractable.
+      expect(mockSendTopupNotification).not.toHaveBeenCalled()
       expect(res.status).toHaveBeenCalledWith(500)
     })
 
@@ -890,6 +1075,7 @@ describe("fygaro paymentHandler", () => {
         }),
       )
       expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+      expect(mockSendTopupNotification).not.toHaveBeenCalled()
       expect(res.status).toHaveBeenCalledWith(500)
     })
 

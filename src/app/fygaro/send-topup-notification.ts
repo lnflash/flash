@@ -1,21 +1,8 @@
-import { getI18nInstance } from "@config"
-import { checkedToAccountId } from "@domain/accounts"
-import { getLanguageOrDefault } from "@domain/locale"
 import {
-  DeviceTokensNotRegisteredNotificationsServiceError,
-  FlashNotificationCategories,
-  NotificationsServiceError,
-} from "@domain/notifications"
-import { removeDeviceTokens } from "@app/users/remove-device-tokens"
-import { baseLogger } from "@services/logger"
-import { AccountsRepository } from "@services/mongoose/accounts"
-import { UsersRepository } from "@services/mongoose/users"
-import {
-  PushNotificationsService,
-  SendFilteredPushNotificationStatus,
-} from "@services/notifications/push-notifications"
-
-const i18n = getI18nInstance()
+  sendOutcomeNotification,
+  sendOutcomeNotificationBestEffort,
+  type OutcomeNotificationArgs,
+} from "@app/notifications/send-outcome-notification"
 
 /**
  * Tell the customer how their card top-up ended.
@@ -34,94 +21,52 @@ const i18n = getI18nInstance()
  */
 export type FygaroTopupNotificationOutcome = "credited" | "heldForReview"
 
-const formatUsd = (cents: number): string => `$${(cents / 100).toFixed(2)}`
-
-export const sendFygaroTopupNotification = async ({
-  accountId: accountIdRaw,
-  outcome,
-  amountCents,
-}: {
+export type FygaroTopupNotificationArgs = {
   accountId: string
   outcome: FygaroTopupNotificationOutcome
   // The NET credited for `credited`, the gross captured for `heldForReview` —
   // in both cases the number the customer would recognise as "the amount this
   // is about".
   amountCents: number
-}): Promise<true | ApplicationError> => {
-  const accountId = checkedToAccountId(accountIdRaw)
-  if (accountId instanceof Error) return accountId
-
-  const account = await AccountsRepository().findById(accountId)
-  if (account instanceof Error) return account
-
-  const user = await UsersRepository().findById(account.kratosUserId)
-  if (user instanceof Error) return user
-
-  const locale = getLanguageOrDefault(user.language)
-  const phraseBase = `notification.fygaroTopup.${outcome}`
-
-  const title = i18n.__({ phrase: `${phraseBase}.title`, locale })
-  const body = i18n.__(
-    { phrase: `${phraseBase}.body`, locale },
-    { amount: formatUsd(amountCents) },
-  )
-
-  const result = await PushNotificationsService().sendFilteredNotification({
-    deviceTokens: user.deviceTokens,
-    title,
-    body,
-    notificationCategory: FlashNotificationCategories.Payments,
-    notificationSettings: account.notificationSettings,
-    data: {
-      type: `fygaro_topup_${outcome}`,
-      amount: String(amountCents),
-      currency: "USD",
-    },
-  })
-
-  if (result instanceof NotificationsServiceError) return result
-
-  if (result.status === SendFilteredPushNotificationStatus.Filtered) {
-    return true
-  }
-
-  return true
+  // The currency the payment was actually captured in, NOT an assumption. The
+  // `heldForReview` push fires on refusals that include `non-usd`, so hardcoding
+  // USD here rendered a J$6,000 payment as "$6000.00" — a ~150x overstatement in
+  // the one message whose whole point is telling the customer what we hold.
+  currency: string
 }
 
-/**
- * Fire-and-forget wrapper for the webhook, which must never fail a credit over
- * a notification.
- *
- * The money has already moved by the time this runs. A push that cannot be
- * delivered is a worse experience, not a worse outcome, and turning it into an
- * error would put a delivered credit back into Fygaro's retry loop.
- */
+// Matches the Bridge deposit push (`formatDepositAmount`): major units plus the
+// ISO code, so one convention covers every currency without a per-symbol table.
+const formatMajorUnits = (amountCents: number): string => (amountCents / 100).toFixed(2)
+
+const toOutcomeArgs = ({
+  accountId,
+  outcome,
+  amountCents,
+  currency,
+}: FygaroTopupNotificationArgs): OutcomeNotificationArgs => ({
+  accountId,
+  phraseBase: `notification.fygaroTopup.${outcome}`,
+  dataType: `fygaro_topup_${outcome}`,
+  amountArg: `${formatMajorUnits(amountCents)} ${currency}`,
+  extraData: {
+    // MAJOR units, matching `data.amount` on the Bridge deposit push. Sending
+    // cents under this key would render a $56.52 credit as $5,652 in any mobile
+    // handler that treats `amount` the way every other Payments push does.
+    amount: formatMajorUnits(amountCents),
+    currency,
+  },
+})
+
+export const sendFygaroTopupNotification = async (
+  args: FygaroTopupNotificationArgs,
+): Promise<true | ApplicationError> => sendOutcomeNotification(toOutcomeArgs(args))
+
 export const sendFygaroTopupNotificationBestEffort = async (
-  args: Parameters<typeof sendFygaroTopupNotification>[0],
-): Promise<void> => {
-  const result = await sendFygaroTopupNotification(args)
-
-  if (result instanceof DeviceTokensNotRegisteredNotificationsServiceError) {
-    // Stale tokens from a reinstalled or handed-on device. Prune them, exactly
-    // as the Bridge deposit path does, so the next notification is not sent
-    // into the same void.
-    const accountId = checkedToAccountId(args.accountId)
-    if (accountId instanceof Error) return
-
-    const account = await AccountsRepository().findById(accountId)
-    if (account instanceof Error) return
-
-    await removeDeviceTokens({
-      userId: account.kratosUserId,
-      deviceTokens: result.tokens,
-    })
-    return
-  }
-
-  if (result instanceof Error) {
-    baseLogger.warn(
-      { accountId: args.accountId, outcome: args.outcome, error: result },
-      "Failed to send Fygaro top-up push notification",
-    )
-  }
-}
+  args: FygaroTopupNotificationArgs,
+): Promise<void> =>
+  sendOutcomeNotificationBestEffort({
+    ...toOutcomeArgs(args),
+    logMessage: "Failed to send Fygaro top-up push notification",
+    logContext: { accountId: args.accountId, outcome: args.outcome },
+  })

@@ -123,6 +123,50 @@ const RECORD_ONLY_ALERT_TITLE: Record<
   "non-positive-net": "Fygaro payment net after fees is not positive — not auto-credited",
 }
 
+/**
+ * Which refusals earn the customer the "we have your payment and are completing
+ * it manually — we'll let you know when it lands" push.
+ *
+ * Exhaustive by TYPE, not by omission: adding a `RecordOnlyReason` without a
+ * value here is a compile error, so a new gate can never silently inherit a
+ * promise about what happens next. The copy is a commitment that a human will
+ * hand-credit this payment, so a reason only belongs here when that is the real
+ * outcome.
+ */
+const REFUSAL_NOTIFIES_CUSTOMER: Record<RecordOnlyReason, boolean> = {
+  // The deploy-level master gate. Records without crediting BY DESIGN, so
+  // pushing here would notify every paying customer during a rollout.
+  "credit-disabled": false,
+  // The operator's ERPNext runtime kill switch — the one ops actually flips
+  // during an incident. Same mass-push problem as the master gate.
+  "auto-credit-disabled": false,
+  // Transient: the route answers 500 and never reaches this branch. Listed so
+  // the record stays exhaustive.
+  "settings-unavailable": false,
+  "history-unavailable": false,
+  // Fees already meet or exceed the gross — nothing will ever land, so
+  // promising that it will is a lie.
+  "non-positive-net": false,
+  // The payment does not match the checkout we signed. That is a refund or an
+  // escalation, not a hand-credit, and we should not commit to crediting a
+  // payment we cannot account for.
+  "intent-mismatch": false,
+  // Captured fiat that a human has to finish by hand — exactly what the copy
+  // says. `non-usd` included: the push now names the payment's real currency
+  // (see FygaroTopupNotificationArgs), so it reads truthfully off USD.
+  "non-usd": true,
+  "over-limit": true,
+  "no-daily-limit-for-level": true,
+  "daily-limit-exceeded": true,
+  "under-minimum": true,
+}
+
+const NOTIFIABLE_REFUSALS: ReadonlySet<RecordOnlyReason> = new Set(
+  (Object.keys(REFUSAL_NOTIFIES_CUSTOMER) as RecordOnlyReason[]).filter(
+    (reason) => REFUSAL_NOTIFIES_CUSTOMER[reason],
+  ),
+)
+
 export const paymentHandler = async (req: Request, res: Response) => {
   const payload = (req.body ?? {}) as FygaroPaymentPayload
   const { transactionId, createdAt } = payload
@@ -575,15 +619,18 @@ export const paymentHandler = async (req: Request, res: Response) => {
       // Notify on the REFUSAL too. Telling the customer only when the money
       // arrives keeps the promise exactly when it costs nothing and breaks it
       // for the person whose payment was captured and not credited — who is
-      // otherwise left on a screen that said we would be in touch.
-      // `credit-disabled` is the silent deploy-level master gate: it records
-      // without crediting by design, and pushing for it would notify every
-      // customer during a rollout.
-      if (accountId && gate.reason !== "credit-disabled") {
+      // otherwise left on a screen that said we would be in touch. Only for the
+      // reasons where a human really does finish the payment by hand
+      // (NOTIFIABLE_REFUSALS above); the rest would be promising something that
+      // is not going to happen.
+      if (NOTIFIABLE_REFUSALS.has(gate.reason)) {
         await sendFygaroTopupNotificationBestEffort({
           accountId,
           outcome: "heldForReview",
+          // GROSS: what the card was actually charged, which is the number the
+          // customer is looking at on their statement.
           amountCents: grossCents,
+          currency,
         })
       }
       return res.status(200).json({ status: "recorded", credited: false })
@@ -664,6 +711,22 @@ export const paymentHandler = async (req: Request, res: Response) => {
           // and so a provider retry (which this branch invites) can still
           // verify the payment.
           await releaseAuthorizedHold()
+          // The one terminal outcome this notification exists for: money
+          // captured, credit FAILED. Ops has a CRITICAL asking them to credit
+          // it by hand and this response is a 200, so Fygaro stops retrying —
+          // without this push the customer is silent forever, while someone
+          // refused by the far more benign `under-minimum` gets told. The copy
+          // ("completing it manually") is literally what the alert asks ops to
+          // do. Currency is USD by construction here: the gate refuses non-USD
+          // long before the credit path. Repeats on any provider retry that
+          // re-attempts and re-fails the credit — same cadence as the ops-feed
+          // line above, and each one is a fresh true statement.
+          await sendFygaroTopupNotificationBestEffort({
+            accountId: creditAccountId,
+            outcome: "heldForReview",
+            amountCents: fees.grossCents,
+            currency,
+          })
           return { code: 200, body: { status: "recorded", credited: false } }
         }
 
@@ -698,22 +761,6 @@ export const paymentHandler = async (req: Request, res: Response) => {
           })
         }
 
-        // The app told this customer "we'll let you know as soon as it lands".
-        // A credit can outlive the screen — the transient paths deliberately
-        // 500 so Fygaro retries — so this is what makes that sentence true.
-        // Best-effort by construction: the money has already moved, and a
-        // failed push must never put a delivered credit back into the retry
-        // loop.
-        // Awaited, matching the Bridge deposit path: the helper swallows every
-        // failure internally, so awaiting cannot fail the credit, and NOT
-        // awaiting would leave a dangling promise that a recycled pod can drop
-        // — losing exactly the notification the app told the customer to expect.
-        await sendFygaroTopupNotificationBestEffort({
-          accountId: creditAccountId,
-          outcome: "credited",
-          amountCents: fees.netCents,
-        })
-
         notifyOpsEvent({
           flow: "deposit",
           phase: "succeeded",
@@ -732,6 +779,32 @@ export const paymentHandler = async (req: Request, res: Response) => {
         // The money moved: the authorisation is spent. Not done on the credit-
         // FAILURE branch above, which is deliberately retryable.
         await redeemIntent()
+
+        // The app told this customer "we'll let you know as soon as it lands".
+        // A credit can outlive the screen — the transient paths deliberately
+        // 500 so Fygaro retries — so this is what makes that sentence true.
+        // Best-effort by construction: the money has already moved, and a
+        // failed push must never put a delivered credit back into the retry
+        // loop.
+        // Awaited, matching the Bridge deposit path: the helper swallows every
+        // failure internally, so awaiting cannot fail the credit, and NOT
+        // awaiting would leave a dangling promise that a recycled pod can drop
+        // — losing exactly the notification the app told the customer to expect.
+        // Sequenced AFTER redeemIntent deliberately: a pod recycle during the
+        // FCM round trip would otherwise leave the authorisation unconsumed, so
+        // its hold keeps sitting on the daily allowance that the (already
+        // promoted) ERPNext row counts too — double-counting one payment and
+        // refusing the customer's next top-up with `daily-limit-exceeded`.
+        // Costs the push nothing: `consumeIntent` reports failure by return
+        // value, never a throw, so it cannot skip what follows it.
+        await sendFygaroTopupNotificationBestEffort({
+          accountId: creditAccountId,
+          outcome: "credited",
+          // NET: what actually landed in the wallet. Naming the gross would
+          // overstate the balance change by the fees.
+          amountCents: fees.netCents,
+          currency,
+        })
 
         return { code: 200, body: { status: "success", credited: true } }
       },

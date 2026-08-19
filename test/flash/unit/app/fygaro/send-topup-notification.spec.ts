@@ -23,12 +23,10 @@ jest.mock("@app/users/remove-device-tokens", () => ({
   removeDeviceTokens: (...a: unknown[]) => mockRemoveDeviceTokens(...a),
 }))
 
-/* eslint-disable @typescript-eslint/no-var-requires */
-const {
+import {
   sendFygaroTopupNotification,
   sendFygaroTopupNotificationBestEffort,
-} = require("@app/fygaro/send-topup-notification")
-/* eslint-enable @typescript-eslint/no-var-requires */
+} from "@app/fygaro/send-topup-notification"
 
 const ACCOUNT_ID = "6a8203ce490716aa69381454"
 
@@ -51,11 +49,26 @@ describe("sendFygaroTopupNotification", () => {
       accountId: ACCOUNT_ID,
       outcome: "credited",
       amountCents: 5652,
+      currency: "USD",
     })
 
     const [args] = mockSendFiltered.mock.calls[0]
-    expect(args.body).toContain("$56.52")
+    expect(args.body).toContain("56.52 USD")
     expect(args.data).toMatchObject({ type: "fygaro_topup_credited", currency: "USD" })
+  })
+
+  it("sends data.amount in MAJOR units, the way every other Payments push does", async () => {
+    // `amount` is the Bridge-deposit convention (major units); the referral
+    // sender uses a different key, `amountCents`, precisely because it is cents.
+    // Cents under this key renders a $56.52 credit as $5,652 in the app.
+    await sendFygaroTopupNotification({
+      accountId: ACCOUNT_ID,
+      outcome: "credited",
+      amountCents: 5652,
+      currency: "USD",
+    })
+
+    expect(mockSendFiltered.mock.calls[0][0].data.amount).toBe("56.52")
   })
 
   it("also notifies when the payment was captured and NOT credited", async () => {
@@ -65,13 +78,31 @@ describe("sendFygaroTopupNotification", () => {
       accountId: ACCOUNT_ID,
       outcome: "heldForReview",
       amountCents: 6000,
+      currency: "USD",
     })
 
     const [args] = mockSendFiltered.mock.calls[0]
-    expect(args.body).toContain("$60.00")
+    expect(args.body).toContain("60.00 USD")
     expect(args.data).toMatchObject({ type: "fygaro_topup_heldForReview" })
     // Not a dead end: ops is already paged by the gate that produced this.
     expect(args.body.toLowerCase()).toContain("completing it manually")
+  })
+
+  it("names the currency the payment was actually captured in", async () => {
+    // The heldForReview push fires on refusals that include `non-usd`. Assuming
+    // USD rendered a J$6,000 payment as "$6000.00" — a ~150x overstatement in
+    // the one message whose entire job is telling the customer what we hold.
+    await sendFygaroTopupNotification({
+      accountId: ACCOUNT_ID,
+      outcome: "heldForReview",
+      amountCents: 600000,
+      currency: "JMD",
+    })
+
+    const [args] = mockSendFiltered.mock.calls[0]
+    expect(args.body).toContain("6000.00 JMD")
+    expect(args.body).not.toContain("USD")
+    expect(args.data).toMatchObject({ amount: "6000.00", currency: "JMD" })
   })
 
   it("sends in the user's language", async () => {
@@ -81,6 +112,7 @@ describe("sendFygaroTopupNotification", () => {
       accountId: ACCOUNT_ID,
       outcome: "credited",
       amountCents: 5652,
+      currency: "USD",
     })
 
     expect(mockSendFiltered.mock.calls[0][0].title).toBe("Recarga completada")
@@ -93,6 +125,7 @@ describe("sendFygaroTopupNotification", () => {
       accountId: ACCOUNT_ID,
       outcome: "credited",
       amountCents: 5652,
+      currency: "USD",
     })
 
     expect(res).toBeInstanceOf(Error)
@@ -111,6 +144,7 @@ describe("sendFygaroTopupNotificationBestEffort", () => {
         accountId: ACCOUNT_ID,
         outcome: "credited",
         amountCents: 5652,
+        currency: "USD",
       }),
     ).resolves.toBeUndefined()
   })
@@ -126,6 +160,7 @@ describe("sendFygaroTopupNotificationBestEffort", () => {
       accountId: ACCOUNT_ID,
       outcome: "credited",
       amountCents: 5652,
+      currency: "USD",
     })
 
     expect(mockRemoveDeviceTokens).toHaveBeenCalledWith({
@@ -142,6 +177,7 @@ describe("sendFygaroTopupNotificationBestEffort", () => {
         accountId: ACCOUNT_ID,
         outcome: "heldForReview",
         amountCents: 6000,
+        currency: "USD",
       }),
     ).resolves.toBeUndefined()
   })
