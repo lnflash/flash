@@ -171,9 +171,15 @@ const VALID_BODY = {
   amount: "10.00",
   currency: "USD",
   authCode: null,
-  createdAt: "2026-08-07T15:00:00Z",
+  // The real production shape: epoch SECONDS, not an ISO string. The fixture
+  // used to carry an ISO string, which is the one shape Fygaro never sends —
+  // and that lie is what let first_seen_at sit at 1970-01-21 on every row while
+  // this suite stayed green.
+  createdAt: 1786940395,
   client: { name: "Regina Bailey", email: "regina@example.com" },
 }
+
+const VALID_BODY_CREATED_AT_ISO = "2026-08-17T04:19:55.000Z"
 
 const makeRes = (): Response => {
   const res = { status: jest.fn(), json: jest.fn() } as unknown as Response
@@ -286,6 +292,11 @@ describe("fygaro paymentHandler", () => {
         amount: "10.00",
         currency: "USD",
         accountId: ACCOUNT_ID,
+        // The whole point of the fix: the epoch SECONDS Fygaro sends reach the
+        // writer as the instant they name. Handing payload.createdAt through
+        // untouched writes 1970-01-21 into first_seen_at, which is what every
+        // row carried.
+        createdAt: VALID_BODY_CREATED_AT_ISO,
       }),
     )
     expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
@@ -298,6 +309,25 @@ describe("fygaro paymentHandler", () => {
     expect(mockSendTopupNotification).not.toHaveBeenCalled()
     expect(res.status).toHaveBeenCalledWith(200)
     expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
+  })
+
+  it("records with an empty createdAt rather than inventing one when the payload omits it", async () => {
+    const withoutCreatedAt: Record<string, unknown> = { ...VALID_BODY }
+    delete withoutCreatedAt.createdAt
+    const res = makeRes()
+
+    await paymentHandler(makeReq(withoutCreatedAt), res)
+
+    // An absent arrival time must leave the column empty. A missing field that
+    // coerces to 1970 is worse than a blank one: it reads as a real answer to
+    // "when did this payment arrive" and there is no way to tell it apart.
+    expect(mockWriteFygaroTopup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transactionId: VALID_BODY.transactionId,
+        createdAt: undefined,
+      }),
+    )
+    expect(res.status).toHaveBeenCalledWith(200)
   })
 
   it("still records a payment with a blank customReference and alerts as unattributed", async () => {
@@ -406,6 +436,10 @@ describe("fygaro paymentHandler", () => {
         amount: "10.00",
         accountId: undefined,
         emailAttributed: false,
+        // Pinned on the unattributed path too: this is the row an operator has
+        // to reconcile by hand, so its arrival time is the one field they lean
+        // on hardest.
+        createdAt: VALID_BODY_CREATED_AT_ISO,
       }),
     )
     expect(mockWriteFygaroTopup).not.toHaveBeenCalledWith(

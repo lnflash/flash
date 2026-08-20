@@ -3,10 +3,9 @@ import { fygaroCreatedAtToIso } from "@services/fygaro/webhook-server/created-at
 describe("fygaroCreatedAtToIso", () => {
   it("reads Fygaro's epoch SECONDS as seconds, not milliseconds", () => {
     // The bug, exactly. 1786940395 is what Fygaro sends; handing it straight to
-    // `new Date` reads it as milliseconds and lands on 1970-01-21, which is what
-    // every Fygaro audit row has carried in first_seen_at.
+    // `new Date` reads it as milliseconds and lands on 1970-01-21 — which is
+    // what every Fygaro audit row has carried in first_seen_at.
     expect(fygaroCreatedAtToIso(1786940395)).toBe("2026-08-17T04:19:55.000Z")
-    expect(new Date(1786940395).getUTCFullYear()).toBe(1970)
   })
 
   it("accepts the same value as a numeric string", () => {
@@ -35,12 +34,26 @@ describe("fygaroCreatedAtToIso", () => {
     }
   })
 
-  it("never returns a date in the 1970s for a present-day payment", () => {
-    // The regression net: whatever shape a real captured payload carries, the
-    // answer must land in this century.
-    for (const value of [1786940395, "1786940395", 1786940395000]) {
-      const iso = fygaroCreatedAtToIso(value)
-      expect(new Date(iso as string).getUTCFullYear()).toBeGreaterThan(2000)
+  it("treats an unset timestamp as absent rather than as the epoch instant", () => {
+    // These are the values that make 1970 come BACK. Each one coerces to 0, and
+    // a 0 read as epoch seconds is 1970-01-01 — indistinguishable, to the
+    // operator reading first_seen_at, from a real timestamp. Empty is honest.
+    for (const value of [0, "0", " ", "  \t "]) {
+      expect(fygaroCreatedAtToIso(value)).toBeUndefined()
     }
+  })
+
+  it("does not read a bare-numeric date string as epoch seconds", () => {
+    // A provider switching to date strings is the likeliest future change, and
+    // "2026" coerces to the number 2026. Read as epoch seconds that is
+    // 1970-01-01T00:33:46Z — this same bug in a different payload. It must be
+    // parsed as a date.
+    expect(fygaroCreatedAtToIso("2026")).toBe("2026-01-01T00:00:00.000Z")
+    expect(fygaroCreatedAtToIso("2026-08-17")).toBe("2026-08-17T00:00:00.000Z")
+  })
+
+  it("still reads a quoted epoch timestamp as epoch, not as a date string", () => {
+    // The other side of the gate above: 9+ digits is a timestamp, not a year.
+    expect(fygaroCreatedAtToIso(" 1786940395 ")).toBe("2026-08-17T04:19:55.000Z")
   })
 })
