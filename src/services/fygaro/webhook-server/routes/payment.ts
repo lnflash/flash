@@ -62,6 +62,7 @@ import {
   INSUFFICIENT_TREASURY_FLOAT_STEP,
 } from "../credit-topup"
 import { getFygaroSettings, type FygaroSettings } from "../fygaro-settings"
+import { fygaroCreatedAtToIso } from "../created-at"
 import { parseCustomReference } from "../../checkout"
 import {
   consumeIntent,
@@ -80,7 +81,11 @@ type FygaroPaymentPayload = {
   amount?: string
   currency?: string
   authCode?: string | null
-  createdAt?: string
+  // Epoch SECONDS, as a JSON number — not the ISO string this was typed as.
+  // The lie was the bug: `new Date(1786940395)` reads a bare number as
+  // MILLISECONDS, so every Fygaro row landed with first_seen_at at
+  // 1970-01-21. Typed honestly so nobody hands it straight to `new Date`.
+  createdAt?: string | number
   client?: { name?: string; email?: string }
 }
 
@@ -305,7 +310,8 @@ const OUTCOME_BY_CREDIT_STATUS: Record<
 
 export const paymentHandler = async (req: Request, res: Response) => {
   const payload = (req.body ?? {}) as FygaroPaymentPayload
-  const { transactionId, createdAt } = payload
+  const { transactionId } = payload
+  const createdAt = fygaroCreatedAtToIso(payload.createdAt)
   const currency = (payload.currency ?? "USD").toUpperCase()
   // `custom_reference` is either a bare username (built on-device by app
   // versions predating signed checkout, and editable by the payer) or
