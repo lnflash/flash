@@ -22,23 +22,39 @@
  *   switches to date strings — would coerce to 2026 and be read as epoch
  *   seconds, landing on 1970-01-01T00:33:46Z: this same bug, wearing a
  *   different payload.
- * - Zero in any shape (`0`, `"0"`) is treated as ABSENT, not as the epoch
- *   instant. A provider sending 0 for an unset timestamp means "no value", and
- *   honouring it literally would put 1970 back in the column this function
- *   exists to keep out of it.
+ * - Anything that coerces to a non-positive number (`0`, `"0"`, `-1`, `"-1"`)
+ *   is treated as ABSENT. Both are common "unset timestamp" sentinels, and
+ *   Fygaro is a card processor that did not exist before 1970, so a negative
+ *   value here is garbage by construction. Honouring either literally would put
+ *   a 1969/1970 date back in the column this function exists to keep it out of.
  *
- * Anything else non-numeric is treated as a date string, and anything
- * unparseable returns undefined so the column stays empty rather than holding a
- * fiction.
+ * Anything else non-numeric is treated as a date string. A naive datetime with
+ * no zone (`"2026-08-17 15:00:00"`, the shape Frappe itself emits) is pinned to
+ * UTC before parsing — `new Date` reads that form as HOST-LOCAL time, which
+ * would shift the answer by the container's UTC offset and, in the site's
+ * configured `America/Adak`, onto the wrong calendar day. Anything unparseable
+ * returns undefined so the column stays empty rather than holding a fiction.
  */
 const EPOCH_SECONDS_CEILING = 1e11
 
 /**
- * What a quoted epoch timestamp looks like: all digits, and enough of them that
- * it cannot be confused with a year or a compact date. 9 digits is 1973 in
- * seconds; every real timestamp from here on is longer.
+ * What a quoted epoch timestamp looks like: digits, and enough of them that it
+ * cannot be confused with a year or a compact date. 9 digits is 1973 in
+ * seconds; every real timestamp from here on is longer. A fractional part is
+ * allowed because that is what a provider emits when it stringifies a float
+ * clock (`"1786940395.75"`) — the number form of that value is already read
+ * correctly, and the string form must not silently blank the column. No sign is
+ * allowed: `-` is handled as "unset" below, and a leading `+` is accepted only
+ * because `Number` accepts it.
  */
-const QUOTED_EPOCH = /^-?\d{9,}$/
+const QUOTED_EPOCH = /^\+?\d{9,}(\.\d+)?$/
+
+/**
+ * A datetime with no zone designator — `"2026-08-17 15:00:00"` or the `T`
+ * form. `new Date` reads these as host-local time, so they are pinned to UTC
+ * explicitly rather than picking up the container's offset.
+ */
+const NAIVE_DATETIME = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/
 
 export const fygaroCreatedAtToIso = (
   createdAt: string | number | undefined | null,
@@ -52,17 +68,23 @@ export const fygaroCreatedAtToIso = (
   if (typeof createdAt === "string" && trimmed === "") return undefined
 
   const numeric = typeof createdAt === "number" ? createdAt : Number(trimmed)
-  // Zero means "unset" from any provider that sends it; an operator reading
-  // 1970-01-01 in first_seen_at cannot tell that from a real timestamp.
-  if (numeric === 0) return undefined
+  // A timestamp is a POSITIVE number. Zero and negatives are both stock "unset"
+  // sentinels, and an operator reading 1970-01-01 (or 1969-12-31) in
+  // first_seen_at cannot tell either from a real timestamp. NaN deliberately
+  // falls through this comparison — that is a date string like "2026-08-17",
+  // which the date branch below handles.
+  if (numeric <= 0) return undefined
 
   const looksLikeEpoch = typeof createdAt === "number" || QUOTED_EPOCH.test(trimmed)
   if (looksLikeEpoch && Number.isFinite(numeric)) {
-    const ms = Math.abs(numeric) < EPOCH_SECONDS_CEILING ? numeric * 1000 : numeric
+    const ms = numeric < EPOCH_SECONDS_CEILING ? numeric * 1000 : numeric
     const fromEpoch = new Date(ms)
     return Number.isNaN(fromEpoch.getTime()) ? undefined : fromEpoch.toISOString()
   }
 
-  const parsed = new Date(trimmed || String(createdAt))
+  const source = trimmed || String(createdAt)
+  const parsed = new Date(
+    NAIVE_DATETIME.test(source) ? `${source.replace(" ", "T")}Z` : source,
+  )
   return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString()
 }

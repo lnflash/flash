@@ -35,10 +35,14 @@ describe("fygaroCreatedAtToIso", () => {
   })
 
   it("treats an unset timestamp as absent rather than as the epoch instant", () => {
-    // These are the values that make 1970 come BACK. Each one coerces to 0, and
-    // a 0 read as epoch seconds is 1970-01-01 — indistinguishable, to the
-    // operator reading first_seen_at, from a real timestamp. Empty is honest.
-    for (const value of [0, "0", " ", "  \t "]) {
+    // These are the values that make 1970 come BACK. Each one coerces to a
+    // non-positive number, and a 0 read as epoch seconds is 1970-01-01 —
+    // indistinguishable, to the operator reading first_seen_at, from a real
+    // timestamp. -1 is just as common a sentinel, and it used to produce two
+    // DIFFERENT fictions depending on JSON type: the number gave
+    // 1969-12-31T23:59:59Z, the string fell through to the date branch and gave
+    // 2001-01-01. Fygaro is a card processor that did not exist before 1970.
+    for (const value of [0, "0", -1, "-1", " ", "  \t "]) {
       expect(fygaroCreatedAtToIso(value)).toBeUndefined()
     }
   })
@@ -55,5 +59,29 @@ describe("fygaroCreatedAtToIso", () => {
   it("still reads a quoted epoch timestamp as epoch, not as a date string", () => {
     // The other side of the gate above: 9+ digits is a timestamp, not a year.
     expect(fygaroCreatedAtToIso(" 1786940395 ")).toBe("2026-08-17T04:19:55.000Z")
+  })
+
+  it("reads a fractional epoch the same whether it arrives quoted or bare", () => {
+    // A provider that stringifies a float clock sends "1786940395.75". The bare
+    // number was always read correctly; the quoted form used to fail the
+    // digits-only gate and blank the column — the same value producing two
+    // different answers depending on how the JSON happened to be serialised.
+    expect(fygaroCreatedAtToIso(1786940395.75)).toBe("2026-08-17T04:19:55.750Z")
+    expect(fygaroCreatedAtToIso("1786940395.75")).toBe("2026-08-17T04:19:55.750Z")
+    expect(fygaroCreatedAtToIso("1786940395.5")).toBe("2026-08-17T04:19:55.500Z")
+    expect(fygaroCreatedAtToIso("1786940395.000")).toBe("2026-08-17T04:19:55.000Z")
+    expect(fygaroCreatedAtToIso("+1786940395")).toBe("2026-08-17T04:19:55.000Z")
+  })
+
+  it("reads a zoneless datetime as UTC, not as whatever the host clock is set to", () => {
+    // "2026-08-17 15:00:00" is the shape Frappe emits and the likeliest form if
+    // Fygaro ever moves off epoch. `new Date` reads it as HOST-LOCAL, so the
+    // answer used to slide with the container's offset: 20:00Z under
+    // America/Jamaica, and under the site's configured America/Adak it landed
+    // on 2026-08-18 — the wrong calendar day. This assertion holds under every
+    // TZ; run the suite with TZ=America/Adak to see it bite.
+    expect(fygaroCreatedAtToIso("2026-08-17 15:00:00")).toBe("2026-08-17T15:00:00.000Z")
+    expect(fygaroCreatedAtToIso("2026-08-17T15:00:00")).toBe("2026-08-17T15:00:00.000Z")
+    expect(fygaroCreatedAtToIso("2026-08-17 15:00")).toBe("2026-08-17T15:00:00.000Z")
   })
 })
