@@ -32,7 +32,7 @@
  * no zone (`"2026-08-17 15:00:00"`, the shape Frappe itself emits) is pinned to
  * UTC before parsing — `new Date` reads that form as HOST-LOCAL time, which
  * would shift the answer by the container's UTC offset and, in the site's
- * configured `America/Adak`, onto the wrong calendar day. Anything unparseable
+ * configured `America/Adak`, onto the wrong calendar day. Anything unparsable
  * returns undefined so the column stays empty rather than holding a fiction.
  */
 const EPOCH_SECONDS_CEILING = 1e11
