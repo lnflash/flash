@@ -2,6 +2,7 @@ export * from "./update-user-phone"
 // export * from "./send-admin-push-notification"
 // export * from "./send-broadcast-notification"
 export * from "./send-cashout-notification"
+export * from "./send-user-notification"
 export * from "./invite"
 
 // Re-export query functions from invite module for admin GraphQL compatibility

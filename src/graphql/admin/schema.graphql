@@ -439,6 +439,7 @@ type Mutation {
   merchantMapDelete(input: MerchantMapDeleteInput!): MerchantPayload!
   merchantMapValidate(input: MerchantMapValidateInput!): MerchantPayload!
   sendNotification(input: SendNotificationInput!): SendNotificationPayload!
+  userNotificationSend(input: UserNotificationSendInput!): SuccessPayload!
   userUpdatePhone(input: UserUpdatePhoneInput!): AccountDetailPayload!
 }
 
@@ -784,6 +785,23 @@ type UsdtWallet implements Wallet {
     last: Int
   ): TransactionConnection
   walletCurrency: WalletCurrency!
+}
+
+"""
+Sends a push notification to one user's registered devices. Honors the recipient's notification settings: a user who has disabled push, or the AdminPushNotification category, is not sent to and the mutation returns success: false with 'User has disabled admin notifications' — a normal terminal state, not a system failure. Other reachable terminal states: the user has no registered devices, every registered device token is stale (app uninstalled/reinstalled), and no device accepted the push (push infrastructure problem — escalate to engineering rather than to the user).
+"""
+input UserNotificationSendInput {
+  """Account uuid of the recipient. Provide this or username."""
+  accountId: String
+
+  """Notification body. Trimmed; 1 to 1024 characters."""
+  body: String!
+
+  """Notification title. Trimmed; 1 to 256 characters."""
+  title: String!
+
+  """Username of the recipient. Provide this or accountId."""
+  username: String
 }
 
 input UserUpdatePhoneInput {
