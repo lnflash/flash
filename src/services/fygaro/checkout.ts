@@ -75,7 +75,20 @@ export const buildCustomReference = ({
 }): string => {
   if (!intentId) return username
   const withUsername = `${username}${FYGARO_REFERENCE_SEPARATOR}${intentId}`
-  if (withUsername.length <= FYGARO_CUSTOM_REFERENCE_MAX_LENGTH) return withUsername
+  // Measured in UTF-8 BYTES, not `String.length`. Fygaro documents the cap as
+  // "40 characters" but does not say what it counts, and UsernameRegex is
+  // `[\p{L}0-9_]{3,50}` — ANY Unicode letter — so a 13-character Cyrillic
+  // username is 26 UTF-16 code units and 39 UTF-8 bytes. If their validator
+  // counts bytes, `.length` would hand that account a reference Fygaro
+  // refuses: an error page where the payment form should be, then a silent
+  // fall back to the editable legacy URL. That is precisely the bug this
+  // module exists to fix, and assuming the unit of the limit is the same
+  // mistake one level down. Bytes is the conservative reading — the only cost
+  // of being wrong this way is that a few more accounts take the `|<intentId>`
+  // form, which is handled end to end.
+  if (Buffer.byteLength(withUsername, "utf8") <= FYGARO_CUSTOM_REFERENCE_MAX_LENGTH) {
+    return withUsername
+  }
   return `${FYGARO_REFERENCE_SEPARATOR}${intentId}`
 }
 

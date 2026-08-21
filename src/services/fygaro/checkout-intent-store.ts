@@ -146,9 +146,10 @@ const claimKey = (intentId: string) => `fygaro-checkout-claim:${intentId}`
 // longer payable (Fygaro rejects an expired token) and are pruned on read.
 const accountIntentsKey = (accountId: string) => `fygaro-checkout-intents:${accountId}`
 
-// `<amountCents>:<intentId>`. Amount first because an intentId is a uuid and
-// carries no colon, so the split point is unambiguous either way, and a
-// malformed member yields NaN which is dropped rather than summed.
+// `<amountCents>:<intentId>`. Amount first because an intentId is base64url
+// (`[A-Za-z0-9_-]`) and carries no colon, so the split point is unambiguous
+// either way, and a malformed member yields NaN which is dropped rather than
+// summed.
 const reservationMember = ({
   intentId,
   amountCents,

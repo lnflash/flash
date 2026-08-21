@@ -49,9 +49,27 @@ describe("custom_reference round-trip", () => {
     // for every longer one. Signed checkout could never have worked for a real
     // account, which is why the amount stayed editable for everyone — the app
     // was falling back to the legacy URL every time.
-    for (const username of ["abc", "jaceth2009", "a".repeat(23), "a".repeat(50)]) {
+    //
+    // The non-ASCII entries are not decoration. UsernameRegex is
+    // `[\p{L}0-9_]{3,50}` — any Unicode letter — so a username of ordinary
+    // LENGTH can be well past 40 BYTES, and Fygaro documents the cap as
+    // "characters" without saying what it counts. The ceiling is therefore
+    // measured in UTF-8 bytes, and these pin that: 13 Cyrillic characters is
+    // 26 UTF-8 bytes, so `<username>|<16-char id>` is 43 bytes — over the cap
+    // on a reference that is only 30 characters long.
+    for (const username of [
+      "abc",
+      "jaceth2009",
+      "a".repeat(23),
+      "a".repeat(50),
+      "марианна",
+      "з".repeat(13),
+      "日本語のなまえ",
+    ]) {
       const reference = buildCustomReference({ username, intentId: newIntentId() })
-      expect(reference.length).toBeLessThanOrEqual(FYGARO_CUSTOM_REFERENCE_MAX_LENGTH)
+      expect(Buffer.byteLength(reference, "utf8")).toBeLessThanOrEqual(
+        FYGARO_CUSTOM_REFERENCE_MAX_LENGTH,
+      )
     }
   })
 
@@ -83,8 +101,16 @@ describe("custom_reference round-trip", () => {
     const id = newIntentId()
     expect(id).toHaveLength(16)
     expect(id).toMatch(/^[A-Za-z0-9_-]{16}$/)
-    // Distinct ids, so the reference identifies one authorisation.
-    expect(new Set(Array.from({ length: 200 }, newIntentId)).size).toBe(200)
+  })
+
+  it("draws the id from 12 random bytes — 96 bits, not a shorter draw", () => {
+    // Assert on the WIDTH OF THE DRAW, not on a sample of outputs. The
+    // previous assertion here was `new Set(200 draws).size === 200`, which
+    // cannot tell 96 bits from 32: narrowing randomBytes(12) to randomBytes(4)
+    // collides with probability ~2e-5 over 200 draws, so that test passes
+    // essentially always on the one regression it exists to catch. Decoding
+    // the id back to bytes catches it on the first draw.
+    expect(Buffer.from(newIntentId(), "base64url")).toHaveLength(12)
   })
 
   it("reads a bare username as legacy, with no intent", () => {
