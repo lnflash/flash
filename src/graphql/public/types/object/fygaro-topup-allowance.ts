@@ -163,6 +163,83 @@ export const FygaroTopupAllowanceUnavailableReasonEnum = GT.Enum({
   values: UNAVAILABLE_REASON_ENUM_VALUES,
 })
 
+/**
+ * COMPATIBILITY SHIM for flash-mobile v0.6.7. Delete once that build has aged
+ * out of the stores.
+ *
+ * v0.6.7 queries the payload as if it WERE the allowance:
+ *
+ *     fygaroTopupAllowance { limit held remaining holdsExpireAt }
+ *
+ * Those are fields of `FygaroTopupAllowance`, not of this payload, so the
+ * server answers 400 GRAPHQL_VALIDATION_FAILED — and the app's global Apollo
+ * handler turns any 4xx into a toast reading "StatusCode: 400 / Error code:
+ * undefined" on the card top-up amount screen, every time it is opened. The
+ * app shipped that way because codegen ran against a checked-in
+ * `public-schema.graphql` that still described the pre-payload shape: the
+ * generator validated happily against a schema the server had already moved
+ * past.
+ *
+ * Aliasing the four fields here fixes every INSTALLED v0.6.7 without a store
+ * release, which is the whole point — those users cannot be reached any other
+ * way.
+ *
+ * `limit`/`held`/`remaining` are NON-NULL on purpose, and that is the subtle
+ * part. When the allowance is unavailable (ERPNext unreadable, rate limited,
+ * checkout disabled) `allowance` is null and these resolve to null, which is a
+ * non-null violation. GraphQL propagates that up and nulls `data`, so the app
+ * sees no allowance and falls back to rendering the flat per-level cap — which
+ * is EXACTLY what it does today when the whole query 400s, and exactly what
+ * the pre-payload schema did by returning a null allowance.
+ *
+ * Making them nullable instead would be worse, not safer: the app builds its
+ * allowance object from any truthy payload (`use-card-topup-allowance.ts`), so
+ * nulls would render as a zeroed allowance and tell the customer they have
+ * nothing left to spend — a false refusal in place of a graceful fallback.
+ *
+ * The error that propagation produces is a GRAPHQL error on a 200, not a
+ * network error. The app logs those and never toasts them (`client.tsx`:
+ * "only network error are managed globally"), so the shim is silent in exactly
+ * the case it needs to be.
+ */
+type AllowancePayloadSource = {
+  allowance?: {
+    limit?: number
+    held?: number
+    remaining?: number
+    holdsExpireAt?: number | null
+  } | null
+}
+
+const LEGACY_UNWRAPPED_FIELDS = {
+  limit: {
+    type: GT.NonNull(CentAmount),
+    deprecationReason: "Use `allowance.limit`. Present only for flash-mobile v0.6.7.",
+    resolve: (source: AllowancePayloadSource) => source.allowance?.limit,
+  },
+  held: {
+    type: GT.NonNull(CentAmount),
+    deprecationReason: "Use `allowance.held`. Present only for flash-mobile v0.6.7.",
+    resolve: (source: AllowancePayloadSource) => source.allowance?.held,
+  },
+  remaining: {
+    type: GT.NonNull(CentAmount),
+    deprecationReason: "Use `allowance.remaining`. Present only for flash-mobile v0.6.7.",
+    resolve: (source: AllowancePayloadSource) => source.allowance?.remaining,
+  },
+  // Nullable in the inner type and nullable here: it is legitimately absent
+  // when nothing is held, and v0.6.7 already guards it
+  // (`raw.holdsExpireAt ? new Date(...) : undefined`). Making it non-null would
+  // null the whole payload for every account with no open checkout — the
+  // common case — and hide a perfectly good allowance behind the flat cap.
+  holdsExpireAt: {
+    type: Timestamp,
+    deprecationReason:
+      "Use `allowance.holdsExpireAt`. Present only for flash-mobile v0.6.7.",
+    resolve: (source: AllowancePayloadSource) => source.allowance?.holdsExpireAt ?? null,
+  },
+}
+
 export const FygaroTopupAllowancePayload = GT.Object({
   name: "FygaroTopupAllowancePayload",
   description:
@@ -196,6 +273,7 @@ export const FygaroTopupAllowancePayload = GT.Object({
       type: FygaroTopupAllowanceUnavailableReasonEnum,
       description: "Null whenever `allowance` is present, and only then.",
     },
+    ...LEGACY_UNWRAPPED_FIELDS,
   }),
 })
 
