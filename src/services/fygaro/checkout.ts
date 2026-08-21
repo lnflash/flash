@@ -95,12 +95,22 @@ export const buildCustomReference = ({
 /**
  * Read a `custom_reference` coming back from Fygaro.
  *
- * Deliberately lenient about shape and strict about meaning: anything that is
- * not exactly `username|intentId` yields no intentId, so the caller falls back
- * to the unverified legacy path rather than treating a malformed reference as
- * an authorisation. Returns undefined only when there is no usable username at
- * all — that is the "payment we cannot attribute" case the webhook already
- * records and alerts on.
+ * Three shapes are meaningful, and they are the three buildCustomReference can
+ * mint:
+ *
+ *   `username`             legacy — every client predating signed checkout
+ *   `username|intentId`    signed, with the account named inline
+ *   `|intentId`            signed, username dropped to fit the 40-byte ceiling
+ *
+ * Deliberately lenient about shape and strict about meaning: anything else
+ * yields no intentId, so the caller falls back to the unverified legacy path
+ * rather than treating a reference it does not understand as an authorisation.
+ *
+ * Returns undefined only when there is nothing usable at ALL — neither a
+ * username nor an intent id. That is the "payment we cannot attribute" case the
+ * webhook already records and alerts on. Note the asymmetry it creates: a
+ * `|intentId` result carries no username, so every caller must treat
+ * `username` as optional and resolve the account from the intent record.
  */
 export const parseCustomReference = (
   raw: string | undefined | null,

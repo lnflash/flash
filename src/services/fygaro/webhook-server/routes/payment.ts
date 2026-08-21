@@ -344,17 +344,23 @@ export const paymentHandler = async (req: Request, res: Response) => {
   // then ignored it after the first call would hand a later caller a record
   // naming an account and an amount it never asked for — on the one path where
   // that record is what the credit is cross-checked against. It is bound to
-  // THIS delivery's `intentId` instead; every call site is already inside an
-  // `if (intentId)` guard.
+  // THIS delivery's `intentId` instead.
+  //
+  // It returns `IntentLookup | undefined` rather than asserting the id is
+  // present, so "there is no intent to look up" is a value the caller has to
+  // handle rather than a claim the compiler was told to stop checking. With a
+  // non-null assertion, a future call site outside an `if (intentId)` guard
+  // reads the key `fygaro-checkout-intent:undefined` and gets a miss that is
+  // indistinguishable from an expired authorisation.
   let intentLookup: IntentLookup | undefined
-  const lookupIntent = async (): Promise<IntentLookup> =>
-    (intentLookup ??= await readIntent(intentId as string))
-  const usernameFromIntent = async (): Promise<string | undefined> => {
+  const lookupIntent = async (): Promise<IntentLookup | undefined> => {
     if (!intentId) return undefined
-    const lookup = await lookupIntent()
-    return lookup.found ? lookup.intent.username : undefined
+    return (intentLookup ??= await readIntent(intentId))
   }
-  const username = reference?.username ?? (await usernameFromIntent())
+  const usernameFromIntent = async (): Promise<string | undefined> => {
+    const lookup = await lookupIntent()
+    return lookup?.found ? lookup.intent.username : undefined
+  }
 
   if (!transactionId || !payload.amount) {
     baseLogger.warn(
@@ -388,6 +394,16 @@ export const paymentHandler = async (req: Request, res: Response) => {
   }
 
   try {
+    // Resolved HERE, inside the try and after the payload validation above,
+    // not at parse time. It is the handler's first Redis touch, and its first
+    // call awaits a dynamic `import()` of the cache module — a rejection there
+    // (or any throw the module raises on load) outside this try would escape
+    // paymentHandler as an unhandled rejection, answering the provider with a
+    // bare 500 and none of the record-first handling below. Reading it after
+    // validation also means a payload that was never going to be processed
+    // does not cost a lookup.
+    const username = reference?.username ?? (await usernameFromIntent())
+
     baseLogger.info(
       {
         transactionId,
@@ -576,7 +592,7 @@ export const paymentHandler = async (req: Request, res: Response) => {
     let authorizedIntent: FygaroCheckoutIntent | undefined
     if (intentId) {
       const lookup = await lookupIntent()
-      if (lookup.found) {
+      if (lookup?.found) {
         authorizedIntent = lookup.intent
       } else {
         baseLogger.info(
