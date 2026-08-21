@@ -1185,6 +1185,10 @@ type FygaroTopupAllowancePayload
   Always empty. Refusals are reported as `unavailableReason`, not as errors — the field is decoration on a screen the customer is still filling in, so a read failure must not surface as one. Present for consistency with every other payload type.
   """
   errors: [Error!]!
+  held: CentAmount! @deprecated(reason: "Use `allowance.held`. Present only for flash-mobile v0.6.7.")
+  holdsExpireAt: Timestamp @deprecated(reason: "Use `allowance.holdsExpireAt`. Present only for flash-mobile v0.6.7.")
+  limit: CentAmount! @deprecated(reason: "Use `allowance.limit`. Present only for flash-mobile v0.6.7.")
+  remaining: CentAmount! @deprecated(reason: "Use `allowance.remaining`. Present only for flash-mobile v0.6.7.")
 
   """Null whenever `allowance` is present, and only then."""
   unavailableReason: FygaroTopupAllowanceUnavailableReason
