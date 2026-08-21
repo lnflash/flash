@@ -201,6 +201,17 @@ export const FygaroTopupAllowanceUnavailableReasonEnum = GT.Enum({
  * network error. The app logs those and never toasts them (`client.tsx`:
  * "only network error are managed globally"), so the shim is silent in exactly
  * the case it needs to be.
+ *
+ * NEVER select these fields alongside `allowance`/`unavailableReason` in the
+ * same document. When the allowance is unavailable, the non-null violation on
+ * a flat field nulls the ENTIRE payload — `unavailableReason` included — and
+ * that field's whole purpose is separating "hide the option" from "retry".
+ * A transitional query that selects both shapes is precisely the likeliest
+ * next query someone writes while migrating off these, and it silently
+ * reinstates the invite-then-refuse loop the payload type exists to end.
+ * v0.6.8+ must query ONLY the payload shape; these four are for the frozen
+ * v0.6.7 document and nothing else. Pinned by the mixed-selection test in
+ * fygaro-allowance-legacy-fields.spec.ts.
  */
 type AllowancePayloadSource = {
   allowance?: {

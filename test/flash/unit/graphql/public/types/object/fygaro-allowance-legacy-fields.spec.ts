@@ -208,6 +208,41 @@ describe("v0.6.7 allowance compatibility", () => {
     expect(result.errors?.length).toBeGreaterThan(0)
   })
 
+  it("nulls the WHOLE payload — unavailableReason included — on a mixed selection", async () => {
+    // THE TRAP the shim docblock warns about, pinned so it is a documented
+    // property rather than a discovery. A transitional client that selects a
+    // deprecated flat field ALONGSIDE the modern shape loses everything when
+    // the allowance is unavailable: the non-null violation on `limit` nulls
+    // the entire payload, `unavailableReason` with it. The client cannot tell
+    // "checkout is disabled, hide the option" from an ERPNext blip — the
+    // invite-then-refuse loop the payload type exists to end. This is why
+    // v0.6.8+ must query ONLY the payload shape and never mix the two.
+    const result = await graphql({
+      schema: publicSchema(),
+      source: `
+        query {
+          fygaroTopupAllowance {
+            limit
+            allowance { limit }
+            unavailableReason
+          }
+        }
+      `,
+      rootValue: {
+        fygaroTopupAllowance: {
+          errors: [],
+          allowance: null,
+          unavailableReason: "CHECKOUT_DISABLED",
+        },
+      },
+    })
+
+    // Root field is NonNull, so propagation reaches the top: data is null and
+    // the reason a pure-modern query would have received is gone.
+    expect(result.data).toBeNull()
+    expect(result.errors?.length).toBeGreaterThan(0)
+  })
+
   it("still serves the modern payload shape unchanged", async () => {
     // The shim must not disturb the query v0.6.8 will send.
     const result = await graphql({
