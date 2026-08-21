@@ -207,7 +207,13 @@ type AllowancePayloadSource = {
     limit?: number
     held?: number
     remaining?: number
-    holdsExpireAt?: number | null
+    // At runtime this is what the root resolver passes through from the app
+    // layer: a `Date` when something is held, `undefined` when nothing is
+    // (src/app/fygaro/topup-allowance.ts `holdsExpireAt?: Date`). `number` is
+    // kept in the union because `Timestamp.serialize` accepts already-Unix
+    // values too — but do NOT compare this field numerically: a Date coerces
+    // via `valueOf` to MILLISECONDS, off by 1000x from Unix seconds.
+    holdsExpireAt?: Date | number | null
   } | null
 }
 

@@ -103,6 +103,79 @@ describe("v0.6.7 allowance compatibility", () => {
     })
   })
 
+  it("serves the common case — allowance present, nothing held, holdsExpireAt absent — with a null holdsExpireAt", async () => {
+    // The most common production shape: the app layer's `holdsExpireAt?: Date`
+    // is simply absent when nothing is held, and the root resolver passes that
+    // `undefined` straight through. The shim's `?? null` must absorb it so the
+    // nullable Timestamp serves an explicit null — never a propagated error,
+    // which would null the whole payload and hide a perfectly good allowance
+    // behind the flat cap.
+    const result = await graphql({
+      schema: publicSchema(),
+      source: V067_ALLOWANCE_QUERY,
+      rootValue: {
+        fygaroTopupAllowance: {
+          errors: [],
+          unavailableReason: null,
+          allowance: {
+            limit: 12500,
+            spent: 0,
+            held: 0,
+            remaining: 12500,
+            singlePaymentLimit: 49900,
+            minimum: 1000,
+            // resetsAt and holdsExpireAt intentionally omitted (undefined), as
+            // the app layer returns them when nothing is counted or held.
+          },
+        },
+      },
+    })
+
+    expect(result.errors).toBeUndefined()
+    expect(result.data?.fygaroTopupAllowance).toEqual({
+      limit: 12500,
+      held: 0,
+      remaining: 12500,
+      holdsExpireAt: null,
+    })
+  })
+
+  it("serializes a Date holdsExpireAt — the actual runtime type — as Unix seconds", async () => {
+    // The root resolver passes the app layer's `holdsExpireAt?: Date` through
+    // untouched, so a Date (not a number) is what reaches the shim at runtime.
+    // Timestamp.serialize must turn it into Unix SECONDS — a numeric coercion
+    // via valueOf would be milliseconds, silently off by 1000x.
+    const holdsExpireAt = new Date(1787340000 * 1000)
+    const result = await graphql({
+      schema: publicSchema(),
+      source: V067_ALLOWANCE_QUERY,
+      rootValue: {
+        fygaroTopupAllowance: {
+          errors: [],
+          unavailableReason: null,
+          allowance: {
+            limit: 12500,
+            spent: 0,
+            held: 6000,
+            remaining: 6500,
+            singlePaymentLimit: 49900,
+            minimum: 1000,
+            resetsAt: null,
+            holdsExpireAt,
+          },
+        },
+      },
+    })
+
+    expect(result.errors).toBeUndefined()
+    expect(result.data?.fygaroTopupAllowance).toEqual({
+      limit: 12500,
+      held: 6000,
+      remaining: 6500,
+      holdsExpireAt: 1787340000,
+    })
+  })
+
   it("nulls the payload when the allowance is unavailable, rather than zeroing it", async () => {
     // THE REASON limit/held/remaining ARE NON-NULL.
     //
