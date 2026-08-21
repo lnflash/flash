@@ -24,8 +24,25 @@ import { createHmac } from "crypto"
 // checkedToUsername) and it survives URL/JSON encoding unescaped.
 export const FYGARO_REFERENCE_SEPARATOR = "|"
 
+/**
+ * Fygaro's hard limit on `custom_reference`. Exceeding it is not a soft
+ * truncation — Fygaro refuses the whole checkout with "Custom reference cannot
+ * exceed 40 characters in length", which the customer meets as an error page
+ * where the payment form should be.
+ *
+ * This is why signed checkout never worked for a single real account. The
+ * original format was `<username>|<uuid>`: a v4 UUID is 36 characters and the
+ * separator is 1, so the reference was 37 + the username, and usernames are at
+ * least 3 characters (UsernameRegex). Exactly 40 for a 3-character username and
+ * over the limit for every longer one — which is to say, everyone.
+ */
+export const FYGARO_CUSTOM_REFERENCE_MAX_LENGTH = 40
+
 export type FygaroCustomReference = {
-  username: string
+  // Absent when the reference carries ONLY an intent id — see
+  // buildCustomReference for when that happens. The caller resolves the account
+  // from the intent record in that case.
+  username?: string
   // Absent for references built by app versions that predate signed checkout.
   // Those payments are still recorded and still pass through the credit gate —
   // they simply carry no proof of what was authorised.
@@ -34,6 +51,20 @@ export type FygaroCustomReference = {
 
 /**
  * `<username>|<intentId>`, or bare `<username>` when no intent is bound.
+ *
+ * When the username is long enough that `<username>|<intentId>` would breach
+ * Fygaro's 40-character ceiling, the username is dropped and the reference
+ * becomes `|<intentId>` — a leading separator, which is unambiguous because a
+ * username can never be empty and can never contain the separator.
+ *
+ * Keeping the username whenever it FITS is deliberate, and it is the reason
+ * this is a conditional rather than always minting the short form. The username
+ * is what the webhook attributes a payment by; the intent record is a 75-minute
+ * Redis entry. If Redis is lost mid-window, `<username>|<intentId>` still names
+ * an account and the payment credits, where `|<intentId>` alone would fall
+ * through to payer-email attribution. That fallback exists and is handled, but
+ * it is strictly worse than not needing it, so it is reserved for the case that
+ * has no alternative.
  */
 export const buildCustomReference = ({
   username,
@@ -41,18 +72,45 @@ export const buildCustomReference = ({
 }: {
   username: string
   intentId?: string
-}): string =>
-  intentId ? `${username}${FYGARO_REFERENCE_SEPARATOR}${intentId}` : username
+}): string => {
+  if (!intentId) return username
+  const withUsername = `${username}${FYGARO_REFERENCE_SEPARATOR}${intentId}`
+  // Measured in UTF-8 BYTES, not `String.length`. Fygaro documents the cap as
+  // "40 characters" but does not say what it counts, and UsernameRegex is
+  // `[\p{L}0-9_]{3,50}` — ANY Unicode letter — so a 13-character Cyrillic
+  // username is 26 UTF-16 code units and 39 UTF-8 bytes. If their validator
+  // counts bytes, `.length` would hand that account a reference Fygaro
+  // refuses: an error page where the payment form should be, then a silent
+  // fall back to the editable legacy URL. That is precisely the bug this
+  // module exists to fix, and assuming the unit of the limit is the same
+  // mistake one level down. Bytes is the conservative reading — the only cost
+  // of being wrong this way is that a few more accounts take the `|<intentId>`
+  // form, which is handled end to end.
+  if (Buffer.byteLength(withUsername, "utf8") <= FYGARO_CUSTOM_REFERENCE_MAX_LENGTH) {
+    return withUsername
+  }
+  return `${FYGARO_REFERENCE_SEPARATOR}${intentId}`
+}
 
 /**
  * Read a `custom_reference` coming back from Fygaro.
  *
- * Deliberately lenient about shape and strict about meaning: anything that is
- * not exactly `username|intentId` yields no intentId, so the caller falls back
- * to the unverified legacy path rather than treating a malformed reference as
- * an authorisation. Returns undefined only when there is no usable username at
- * all — that is the "payment we cannot attribute" case the webhook already
- * records and alerts on.
+ * Three shapes are meaningful, and they are the three buildCustomReference can
+ * mint:
+ *
+ *   `username`             legacy — every client predating signed checkout
+ *   `username|intentId`    signed, with the account named inline
+ *   `|intentId`            signed, username dropped to fit the 40-byte ceiling
+ *
+ * Deliberately lenient about shape and strict about meaning: anything else
+ * yields no intentId, so the caller falls back to the unverified legacy path
+ * rather than treating a reference it does not understand as an authorisation.
+ *
+ * Returns undefined only when there is nothing usable at ALL — neither a
+ * username nor an intent id. That is the "payment we cannot attribute" case the
+ * webhook already records and alerts on. Note the asymmetry it creates: a
+ * `|intentId` result carries no username, so every caller must treat
+ * `username` as optional and resolve the account from the intent record.
  */
 export const parseCustomReference = (
   raw: string | undefined | null,
@@ -62,15 +120,19 @@ export const parseCustomReference = (
 
   const parts = trimmed.split(FYGARO_REFERENCE_SEPARATOR)
   const username = parts[0].trim()
-  if (username === "") return undefined
 
-  // Exactly two segments, both non-empty, is the only shape that carries an
-  // intent. A third segment means something built a reference we do not
-  // understand; treating that as legacy is the safe reading.
-  if (parts.length !== 2) return { username }
+  // Exactly two segments is the only shape that carries an intent. A third
+  // means something built a reference we do not understand; treating that as
+  // legacy is the safe reading.
+  if (parts.length !== 2) return username === "" ? undefined : { username }
   const intentId = parts[1].trim()
-  if (intentId === "") return { username }
 
+  // `|<intentId>` — the long-username form. An empty first segment cannot be a
+  // username (they are 3+ characters), so this shape is unambiguous. The caller
+  // resolves the account from the intent record.
+  if (username === "") return intentId === "" ? undefined : { intentId }
+
+  if (intentId === "") return { username }
   return { username, intentId }
 }
 

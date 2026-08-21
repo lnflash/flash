@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto"
+import { randomBytes } from "crypto"
 
 import { CacheUndefinedError } from "@domain/cache"
 import { baseLogger } from "@services/logger"
@@ -146,9 +146,10 @@ const claimKey = (intentId: string) => `fygaro-checkout-claim:${intentId}`
 // longer payable (Fygaro rejects an expired token) and are pruned on read.
 const accountIntentsKey = (accountId: string) => `fygaro-checkout-intents:${accountId}`
 
-// `<amountCents>:<intentId>`. Amount first because an intentId is a uuid and
-// carries no colon, so the split point is unambiguous either way, and a
-// malformed member yields NaN which is dropped rather than summed.
+// `<amountCents>:<intentId>`. Amount first because an intentId is base64url
+// (`[A-Za-z0-9_-]`) and carries no colon, so the split point is unambiguous
+// either way, and a malformed member yields NaN which is dropped rather than
+// summed.
 const reservationMember = ({
   intentId,
   amountCents,
@@ -162,7 +163,29 @@ const reservationAmountCents = (member: string): number => {
   return Number.isFinite(amount) && amount > 0 ? amount : 0
 }
 
-export const newIntentId = (): string => randomUUID()
+/**
+ * 12 random bytes as base64url — 16 characters, 96 bits.
+ *
+ * Deliberately NOT a UUID. The id is carried inside Fygaro's
+ * `custom_reference`, which is capped at 40 characters
+ * (FYGARO_CUSTOM_REFERENCE_MAX_LENGTH), and a 36-character UUID left room for a
+ * 3-character username and nothing longer — so `<username>|<uuid>` breached the
+ * cap for every real account and Fygaro answered the customer with an error
+ * page instead of a payment form.
+ *
+ * 16 characters leaves 23 BYTES for the username — 23 ASCII characters, fewer
+ * for the multi-byte usernames UsernameRegex allows (roughly 11 Cyrillic, 7
+ * CJK); see buildCustomReference, which measures the ceiling in UTF-8 bytes.
+ * That covers the ordinary case without the short `|<intentId>` form;
+ * buildCustomReference handles the rest.
+ * 96 bits is far beyond what guessing resistance needs here — an id is only
+ * useful inside its 15-minute window, and an intent is bound to one account and
+ * one amount, so a guessed id buys an attacker a mismatch, not a credit.
+ *
+ * 12 bytes rather than a length-sliced UUID because base64url of 12 bytes is
+ * exactly 16 characters with no padding to strip.
+ */
+export const newIntentId = (): string => randomBytes(12).toString("base64url")
 
 export const saveIntent = async ({
   intent,

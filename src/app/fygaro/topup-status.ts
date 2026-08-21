@@ -134,7 +134,7 @@ export const getFygaroTopupStatus = async ({
     return lookup.unavailable ? { found: false, unavailable: true } : { found: false }
   }
 
-  // The intent id is a random uuid, so guessing one is impractical — but the
+  // The intent id is 96 random bits, so guessing one is impractical — but the
   // record names the account it was minted for, and checking costs nothing.
   // Payment state is exactly the kind of thing that must not leak across
   // accounts on a mere id match.

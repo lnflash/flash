@@ -160,6 +160,9 @@ import {
   mergeIntentOutcome,
   type FygaroTopupOutcome,
 } from "@services/fygaro/checkout-intent-store"
+// Not mocked: reference parsing is pure, and the shapes it accepts are the
+// whole contract between the app's checkout and this handler.
+import { FYGARO_REFERENCE_SEPARATOR } from "@services/fygaro/checkout"
 
 const ACCOUNT_ID = "account-1" as AccountId
 const WALLET_ID = "wallet-1" as WalletId
@@ -344,6 +347,32 @@ describe("fygaro paymentHandler", () => {
     )
     expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
       expect.objectContaining({ phase: "fygaro-unattributed", status: "pending" }),
+    )
+    expect(res.json).toHaveBeenCalledWith({ status: "recorded", attributed: false })
+  })
+
+  it("reports a WHITESPACE-ONLY customReference to ops as <blank>", async () => {
+    // The parser trims before deciding, so `" "` is blank to the handler and
+    // takes the unattributed branch. The alert has to agree: untrimmed, `" "`
+    // is truthy and ops read `customReference= — manual attribution needed`,
+    // which renders as nothing at all — the alert and the parser disagreeing
+    // about what counts as blank, on the one line whose job is to tell ops
+    // exactly what the payer sent.
+    const res = makeRes()
+
+    await paymentHandler(makeReq({ ...VALID_BODY, customReference: "   " }), res)
+
+    expect(mockFindByUsername).not.toHaveBeenCalled()
+    expect(mockAlertBridge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        detail: "customReference=<blank> — manual attribution needed",
+      }),
+    )
+    expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: "fygaro-unattributed",
+        meta: expect.objectContaining({ reference: "<blank>" }),
+      }),
     )
     expect(res.json).toHaveBeenCalledWith({ status: "recorded", attributed: false })
   })
@@ -1910,6 +1939,115 @@ describe("fygaro paymentHandler", () => {
       expect(mockWriteFygaroTopup).toHaveBeenCalledWith(
         expect.objectContaining({ accountId: ACCOUNT_ID }),
       )
+    })
+
+    // The `|<intentId>` form — the half of this change that makes long-username
+    // checkouts credit at all. Every account whose username does not fit
+    // alongside the id pays through this branch, so it gets the same treatment
+    // as the `username|intentId` case above: the match, the miss, and the
+    // mismatch.
+    describe("the |intentId form, minted when the username will not fit", () => {
+      const SHORT_BODY = {
+        ...VALID_BODY,
+        customReference: `${FYGARO_REFERENCE_SEPARATOR}${INTENT_ID}`,
+      }
+
+      it("recovers the username from the intent record and credits normally", async () => {
+        mockReadIntent.mockResolvedValue(intent())
+        const res = makeRes()
+
+        await paymentHandler(makeReq(SHORT_BODY), res)
+
+        // The reference names no account, so the intent record is the ONLY
+        // thing standing between this payment and the unattributed alert.
+        expect(mockFindByUsername).toHaveBeenCalledWith(VALID_BODY.customReference)
+        expect(mockCreditFygaroTopup).toHaveBeenCalledWith(
+          expect.objectContaining({ recipientAccountId: ACCOUNT_ID, amountCents: 901 }),
+        )
+        expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
+      })
+
+      it("reads the intent exactly once across username recovery and the cross-check", async () => {
+        // Two independent reads of one Redis key can DISAGREE: a blip on the
+        // first leaves the username undefined and sends the payment to the
+        // unattributed branch, while the second succeeds and hands the
+        // cross-check the very record naming the account we just failed to
+        // attribute to. Memoizing the lookup is what makes that state
+        // unreachable, and only a call count can hold it there.
+        mockReadIntent.mockResolvedValue(intent())
+        const res = makeRes()
+
+        await paymentHandler(makeReq(SHORT_BODY), res)
+
+        expect(mockReadIntent).toHaveBeenCalledTimes(1)
+        expect(mockReadIntent).toHaveBeenCalledWith(INTENT_ID)
+      })
+
+      it("falls through to the unattributed branch when the intent cannot be read", async () => {
+        // FAIL-OPEN, matching readIntent everywhere else: an unreadable intent
+        // is not an accusation, it is an unattributable payment — the same
+        // position a payer-typed reference we do not recognise is in.
+        mockReadIntent.mockResolvedValue({ found: false })
+        const res = makeRes()
+
+        await paymentHandler(makeReq(SHORT_BODY), res)
+
+        // Nothing to look up: the reference carries no username, and the whole
+        // raw reference must never be handed to findByUsername as if it were.
+        expect(mockFindByUsername).not.toHaveBeenCalled()
+        expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+        expect(res.json).toHaveBeenCalledWith({ status: "recorded", attributed: false })
+      })
+
+      it("shows ops the reference the payer actually sent, and the intent id", async () => {
+        // The alert used to render the (undefined) username, so this case
+        // reached ops as `customReference=<blank>` — which reads at 3am as
+        // "the payer sent us nothing" when in fact we minted the reference and
+        // then could not read our own record. The intent id is the only handle
+        // a human has for tracing the payment back to the checkout.
+        mockReadIntent.mockResolvedValue({ found: false })
+        const res = makeRes()
+
+        await paymentHandler(makeReq(SHORT_BODY), res)
+
+        expect(mockAlertBridge).toHaveBeenCalledWith(
+          expect.objectContaining({
+            title: "Fygaro payment could not be attributed to an account",
+            detail: `customReference=${SHORT_BODY.customReference} — manual attribution needed`,
+            context: expect.objectContaining({ intent_id: INTENT_ID }),
+          }),
+        )
+        expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            phase: "fygaro-unattributed",
+            meta: expect.objectContaining({
+              reference: SHORT_BODY.customReference,
+              intentId: INTENT_ID,
+            }),
+          }),
+        )
+      })
+
+      it("still refuses a payment that does not match what was authorised", async () => {
+        // The short form must not be a way around the cross-check: the
+        // username arrives from the intent record itself, but the amount and
+        // account it names are still checked against what was paid.
+        mockReadIntent.mockResolvedValue(intent({ amountCents: 2000 }))
+        const res = makeRes()
+
+        await paymentHandler(makeReq(SHORT_BODY), res)
+
+        expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+        expect(mockAlertBridge).toHaveBeenCalledWith(
+          expect.objectContaining({
+            context: expect.objectContaining({
+              reason: "intent-mismatch",
+              intent_mismatch: "authorised 2000c, paid 1000c",
+            }),
+          }),
+        )
+        expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
+      })
     })
 
     it("records-only on an amount mismatch and names both numbers in the alert", async () => {

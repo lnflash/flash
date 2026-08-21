@@ -71,6 +71,7 @@ import {
   releaseIntentReservation,
   type FygaroCheckoutIntent,
   type FygaroTopupOutcomeState,
+  type IntentLookup,
 } from "../../checkout-intent-store"
 import { evaluateCreditGate, RecordOnlyReason } from "../fees"
 
@@ -313,13 +314,53 @@ export const paymentHandler = async (req: Request, res: Response) => {
   const { transactionId } = payload
   const createdAt = fygaroCreatedAtToIso(payload.createdAt)
   const currency = (payload.currency ?? "USD").toUpperCase()
-  // `custom_reference` is either a bare username (built on-device by app
-  // versions predating signed checkout, and editable by the payer) or
-  // `username|intentId` minted by authorizeFygaroTopup. Both are accepted for
-  // as long as older clients are in the wild; only the second can be verified.
+  // `custom_reference` is one of three shapes: a bare username (built on-device
+  // by app versions predating signed checkout, and editable by the payer),
+  // `username|intentId`, or `|intentId` when the username was too long to fit
+  // Fygaro's 40-character ceiling alongside it. All three are accepted for as
+  // long as older clients are in the wild; only the latter two can be verified.
   const reference = parseCustomReference(payload.customReference)
-  const username = reference?.username
   const intentId = reference?.intentId
+  // Absent when the reference is the `|<intentId>` form, which is minted when a
+  // username is long enough that `<username>|<intentId>` would breach Fygaro's
+  // 40-character ceiling. The intent record names the account, so the username
+  // is recovered from it and everything downstream is unchanged.
+  //
+  // FAIL-OPEN, matching readIntent's posture everywhere else in this handler: an
+  // unreadable intent leaves the username undefined and the payment falls
+  // through to payer-email attribution, exactly where an unrecognised reference
+  // already lands. That is the whole reason buildCustomReference keeps the
+  // username inline whenever it fits.
+  //
+  // MEMOIZED, and that is not a micro-optimisation. The authorisation
+  // cross-check below reads the same intent, and two independent reads of one
+  // Redis key can DISAGREE: a blip on the first (fail-open, so `username`
+  // stays undefined) followed by a success on the second produced a delivery
+  // that stamped `held-for-review`/`unattributed`, paged ops, and told the
+  // customer we were completing it by hand — while holding, two lines later,
+  // the very record naming the account it had just failed to attribute to. One
+  // read cannot produce that state.
+  // It takes NO key, and that is deliberate. A memo that accepted an id and
+  // then ignored it after the first call would hand a later caller a record
+  // naming an account and an amount it never asked for — on the one path where
+  // that record is what the credit is cross-checked against. It is bound to
+  // THIS delivery's `intentId` instead.
+  //
+  // It returns `IntentLookup | undefined` rather than asserting the id is
+  // present, so "there is no intent to look up" is a value the caller has to
+  // handle rather than a claim the compiler was told to stop checking. With a
+  // non-null assertion, a future call site outside an `if (intentId)` guard
+  // reads the key `fygaro-checkout-intent:undefined` and gets a miss that is
+  // indistinguishable from an expired authorisation.
+  let intentLookup: IntentLookup | undefined
+  const lookupIntent = async (): Promise<IntentLookup | undefined> => {
+    if (!intentId) return undefined
+    return (intentLookup ??= await readIntent(intentId))
+  }
+  const usernameFromIntent = async (): Promise<string | undefined> => {
+    const lookup = await lookupIntent()
+    return lookup?.found ? lookup.intent.username : undefined
+  }
 
   if (!transactionId || !payload.amount) {
     baseLogger.warn(
@@ -353,6 +394,16 @@ export const paymentHandler = async (req: Request, res: Response) => {
   }
 
   try {
+    // Resolved HERE, inside the try and after the payload validation above,
+    // not at parse time. It is the handler's first Redis touch, and its first
+    // call awaits a dynamic `import()` of the cache module — a rejection there
+    // (or any throw the module raises on load) outside this try would escape
+    // paymentHandler as an unhandled rejection, answering the provider with a
+    // bare 500 and none of the record-first handling below. Reading it after
+    // validation also means a payload that was never going to be processed
+    // does not cost a lookup.
+    const username = reference?.username ?? (await usernameFromIntent())
+
     baseLogger.info(
       {
         transactionId,
@@ -520,9 +571,14 @@ export const paymentHandler = async (req: Request, res: Response) => {
     // already-credited payment cannot walk the answer backwards.
     await recordOutcome({ state: "received" })
 
-    // Look the authorisation up ONCE, and do it BEFORE the unattributed branch
-    // below, so every terminal answer in this handler can let go of the hold
-    // the authorisation still has on the account's daily allowance. A leaked
+    // Look the authorisation up ONCE — `lookupIntent` memoizes, so this shares
+    // the single read the username recovery at the top of the handler may
+    // already have taken, and the two can never disagree about whether the
+    // record exists.
+    //
+    // Do it BEFORE the unattributed branch below, so every terminal answer in
+    // this handler can let go of the hold the authorisation still has on the
+    // account's daily allowance. A leaked
     // hold is not cosmetic: the audit row already counts the payment towards
     // the cap, so a hold left behind on top of it double-counts one payment for
     // the rest of the JWT's window and refuses the account's next legitimate
@@ -535,8 +591,8 @@ export const paymentHandler = async (req: Request, res: Response) => {
     // check against.
     let authorizedIntent: FygaroCheckoutIntent | undefined
     if (intentId) {
-      const lookup = await readIntent(intentId)
-      if (lookup.found) {
+      const lookup = await lookupIntent()
+      if (lookup?.found) {
         authorizedIntent = lookup.intent
       } else {
         baseLogger.info(
@@ -583,18 +639,34 @@ export const paymentHandler = async (req: Request, res: Response) => {
       // or an attacker can type anyone's address), so the alert says confirm
       // before crediting rather than "credit this account".
       const resolvedUsername = emailAttributedAccount?.username
+      // Show ops the reference the PAYER actually sent, not the username we
+      // failed to derive from it. Those are different things in the
+      // `|<intentId>` form: there the raw reference carries an intent id and
+      // no username, so reporting the (undefined) username as "<blank>" reads
+      // at 3am as "the payer sent us nothing" when in fact we minted a
+      // reference and then could not read our own record. The intent id is
+      // also the only handle a human has for tracing the payment back to the
+      // checkout, so it is carried alongside.
+      // TRIMMED before the blank test, so this line and `parseCustomReference`
+      // agree on what counts as blank. A payer who typed only spaces into the
+      // legacy editable reference is blank to the parser (checkout.ts trims
+      // first) and must read as blank here too — untrimmed, `" "` is truthy and
+      // ops get `customReference= — manual attribution needed`, which renders
+      // as nothing at all.
+      const rawReference = payload.customReference?.trim() || "<blank>"
       alertBridge({
         dedupKey: generateDedupKey.fygaroUnattributed(transactionId),
         source: "fygaro-webhook",
         severity: "warning",
         title: "Fygaro payment could not be attributed to an account",
         detail: resolvedUsername
-          ? `customReference=${username ?? "<blank>"} — UNVERIFIED payer-email match on @${resolvedUsername}; confirm the payer owns this account before crediting`
-          : `customReference=${username ?? "<blank>"} — manual attribution needed`,
+          ? `customReference=${rawReference} — UNVERIFIED payer-email match on @${resolvedUsername}; confirm the payer owns this account before crediting`
+          : `customReference=${rawReference} — manual attribution needed`,
         context: {
           transaction_id: transactionId,
           amount: String(payload.amount),
           client_email: payload.client?.email,
+          ...(intentId ? { intent_id: intentId } : {}),
           ...(resolvedUsername ? { email_matched_username: resolvedUsername } : {}),
         },
       })
@@ -607,8 +679,9 @@ export const paymentHandler = async (req: Request, res: Response) => {
         meta: {
           provider: "Fygaro",
           transactionId,
-          reference: username ?? "blank",
+          reference: rawReference,
           email: payload.client?.email ?? "unknown",
+          ...(intentId ? { intentId } : {}),
           ...(resolvedUsername ? { emailMatchedUsername: resolvedUsername } : {}),
         },
       })
