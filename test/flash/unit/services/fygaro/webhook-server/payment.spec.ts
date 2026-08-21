@@ -351,6 +351,32 @@ describe("fygaro paymentHandler", () => {
     expect(res.json).toHaveBeenCalledWith({ status: "recorded", attributed: false })
   })
 
+  it("reports a WHITESPACE-ONLY customReference to ops as <blank>", async () => {
+    // The parser trims before deciding, so `" "` is blank to the handler and
+    // takes the unattributed branch. The alert has to agree: untrimmed, `" "`
+    // is truthy and ops read `customReference= — manual attribution needed`,
+    // which renders as nothing at all — the alert and the parser disagreeing
+    // about what counts as blank, on the one line whose job is to tell ops
+    // exactly what the payer sent.
+    const res = makeRes()
+
+    await paymentHandler(makeReq({ ...VALID_BODY, customReference: "   " }), res)
+
+    expect(mockFindByUsername).not.toHaveBeenCalled()
+    expect(mockAlertBridge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        detail: "customReference=<blank> — manual attribution needed",
+      }),
+    )
+    expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: "fygaro-unattributed",
+        meta: expect.objectContaining({ reference: "<blank>" }),
+      }),
+    )
+    expect(res.json).toHaveBeenCalledWith({ status: "recorded", attributed: false })
+  })
+
   it("stamps an outcome on a DEDUPED unattributed re-delivery", async () => {
     // The third terminal return, and the one the first two fixes missed. If the
     // first delivery's Redis stamp failed (swallowed by design), every retry

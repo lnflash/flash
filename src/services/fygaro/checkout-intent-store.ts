@@ -173,8 +173,11 @@ const reservationAmountCents = (member: string): number => {
  * cap for every real account and Fygaro answered the customer with an error
  * page instead of a payment form.
  *
- * 16 characters leaves 23 for the username, which covers the ordinary case
- * without the short `|<intentId>` form; buildCustomReference handles the rest.
+ * 16 characters leaves 23 BYTES for the username — 23 ASCII characters, fewer
+ * for the multi-byte usernames UsernameRegex allows (roughly 11 Cyrillic, 7
+ * CJK); see buildCustomReference, which measures the ceiling in UTF-8 bytes.
+ * That covers the ordinary case without the short `|<intentId>` form;
+ * buildCustomReference handles the rest.
  * 96 bits is far beyond what guessing resistance needs here — an id is only
  * useful inside its 15-minute window, and an intent is bound to one account and
  * one amount, so a guessed id buys an attacker a mismatch, not a credit.

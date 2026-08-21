@@ -340,12 +340,18 @@ export const paymentHandler = async (req: Request, res: Response) => {
   // customer we were completing it by hand — while holding, two lines later,
   // the very record naming the account it had just failed to attribute to. One
   // read cannot produce that state.
+  // It takes NO key, and that is deliberate. A memo that accepted an id and
+  // then ignored it after the first call would hand a later caller a record
+  // naming an account and an amount it never asked for — on the one path where
+  // that record is what the credit is cross-checked against. It is bound to
+  // THIS delivery's `intentId` instead; every call site is already inside an
+  // `if (intentId)` guard.
   let intentLookup: IntentLookup | undefined
-  const lookupIntent = async (id: string): Promise<IntentLookup> =>
-    (intentLookup ??= await readIntent(id))
+  const lookupIntent = async (): Promise<IntentLookup> =>
+    (intentLookup ??= await readIntent(intentId as string))
   const usernameFromIntent = async (): Promise<string | undefined> => {
     if (!intentId) return undefined
-    const lookup = await lookupIntent(intentId)
+    const lookup = await lookupIntent()
     return lookup.found ? lookup.intent.username : undefined
   }
   const username = reference?.username ?? (await usernameFromIntent())
@@ -569,7 +575,7 @@ export const paymentHandler = async (req: Request, res: Response) => {
     // check against.
     let authorizedIntent: FygaroCheckoutIntent | undefined
     if (intentId) {
-      const lookup = await lookupIntent(intentId)
+      const lookup = await lookupIntent()
       if (lookup.found) {
         authorizedIntent = lookup.intent
       } else {
@@ -625,7 +631,13 @@ export const paymentHandler = async (req: Request, res: Response) => {
       // reference and then could not read our own record. The intent id is
       // also the only handle a human has for tracing the payment back to the
       // checkout, so it is carried alongside.
-      const rawReference = payload.customReference || "<blank>"
+      // TRIMMED before the blank test, so this line and `parseCustomReference`
+      // agree on what counts as blank. A payer who typed only spaces into the
+      // legacy editable reference is blank to the parser (checkout.ts trims
+      // first) and must read as blank here too — untrimmed, `" "` is truthy and
+      // ops get `customReference= — manual attribution needed`, which renders
+      // as nothing at all.
+      const rawReference = payload.customReference?.trim() || "<blank>"
       alertBridge({
         dedupKey: generateDedupKey.fygaroUnattributed(transactionId),
         source: "fygaro-webhook",
