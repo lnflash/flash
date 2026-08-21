@@ -313,13 +313,29 @@ export const paymentHandler = async (req: Request, res: Response) => {
   const { transactionId } = payload
   const createdAt = fygaroCreatedAtToIso(payload.createdAt)
   const currency = (payload.currency ?? "USD").toUpperCase()
-  // `custom_reference` is either a bare username (built on-device by app
-  // versions predating signed checkout, and editable by the payer) or
-  // `username|intentId` minted by authorizeFygaroTopup. Both are accepted for
-  // as long as older clients are in the wild; only the second can be verified.
+  // `custom_reference` is one of three shapes: a bare username (built on-device
+  // by app versions predating signed checkout, and editable by the payer),
+  // `username|intentId`, or `|intentId` when the username was too long to fit
+  // Fygaro's 40-character ceiling alongside it. All three are accepted for as
+  // long as older clients are in the wild; only the latter two can be verified.
   const reference = parseCustomReference(payload.customReference)
-  const username = reference?.username
   const intentId = reference?.intentId
+  // Absent when the reference is the `|<intentId>` form, which is minted when a
+  // username is long enough that `<username>|<intentId>` would breach Fygaro's
+  // 40-character ceiling. The intent record names the account, so the username
+  // is recovered from it and everything downstream is unchanged.
+  //
+  // FAIL-OPEN, matching readIntent's posture everywhere else in this handler: an
+  // unreadable intent leaves the username undefined and the payment falls
+  // through to payer-email attribution, exactly where an unrecognised reference
+  // already lands. That is the whole reason buildCustomReference keeps the
+  // username inline whenever it fits.
+  const usernameFromIntent = async (): Promise<string | undefined> => {
+    if (!intentId) return undefined
+    const lookup = await readIntent(intentId)
+    return lookup.found ? lookup.intent.username : undefined
+  }
+  const username = reference?.username ?? (await usernameFromIntent())
 
   if (!transactionId || !payload.amount) {
     baseLogger.warn(

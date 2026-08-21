@@ -2,12 +2,14 @@ import { createHmac } from "crypto"
 
 import {
   buildCustomReference,
+  FYGARO_CUSTOM_REFERENCE_MAX_LENGTH,
   buildFygaroCheckout,
   formatFygaroAmount,
   NBF_SKEW_SECONDS,
   parseCustomReference,
   signFygaroCheckoutJwt,
 } from "@services/fygaro/checkout"
+import { newIntentId } from "@services/fygaro/checkout-intent-store"
 
 const SECRET = "fygaro-shared-secret"
 const KEY_ID = "key-1"
@@ -37,6 +39,54 @@ describe("custom_reference round-trip", () => {
     })
   })
 
+  it("never mints a reference Fygaro will refuse", () => {
+    // THE BUG. Fygaro caps custom_reference at 40 characters and refuses the
+    // whole checkout past it — the customer gets "Custom reference cannot
+    // exceed 40 characters in length" where the payment form should be.
+    //
+    // The original format was `<username>|<uuid>`: 36 + 1 + username, so it was
+    // exactly 40 for a 3-character username (the shortest one allowed) and over
+    // for every longer one. Signed checkout could never have worked for a real
+    // account, which is why the amount stayed editable for everyone — the app
+    // was falling back to the legacy URL every time.
+    for (const username of ["abc", "jaceth2009", "a".repeat(23), "a".repeat(50)]) {
+      const reference = buildCustomReference({ username, intentId: newIntentId() })
+      expect(reference.length).toBeLessThanOrEqual(FYGARO_CUSTOM_REFERENCE_MAX_LENGTH)
+    }
+  })
+
+  it("keeps the username inline whenever it fits, and drops it only when it cannot", () => {
+    // Keeping the username is what lets the webhook attribute a payment without
+    // Redis. The intent record is a 75-minute entry; if it is lost mid-window,
+    // an inline username still credits the right account, where `|<intentId>`
+    // alone falls through to payer-email attribution. So the short form is a
+    // last resort, not the default.
+    const id = newIntentId()
+    expect(buildCustomReference({ username: "jaceth2009", intentId: id })).toBe(
+      `jaceth2009|${id}`,
+    )
+
+    // 23 characters is the longest username that still fits alongside a
+    // 16-character id and the separator.
+    const longest = "a".repeat(23)
+    expect(buildCustomReference({ username: longest, intentId: id })).toBe(
+      `${longest}|${id}`,
+    )
+
+    const tooLong = "a".repeat(24)
+    expect(buildCustomReference({ username: tooLong, intentId: id })).toBe(`|${id}`)
+    expect(parseCustomReference(`|${id}`)).toEqual({ intentId: id })
+  })
+
+  it("mints an intent id short enough to leave room for a username", () => {
+    // 12 random bytes as base64url: 16 characters, no padding to strip.
+    const id = newIntentId()
+    expect(id).toHaveLength(16)
+    expect(id).toMatch(/^[A-Za-z0-9_-]{16}$/)
+    // Distinct ids, so the reference identifies one authorisation.
+    expect(new Set(Array.from({ length: 200 }, newIntentId)).size).toBe(200)
+  })
+
   it("reads a bare username as legacy, with no intent", () => {
     // Every app version before signed checkout sends this shape, and will keep
     // sending it for months. It must stay attributable.
@@ -58,10 +108,21 @@ describe("custom_reference round-trip", () => {
     }
   })
 
-  it("returns undefined when there is no usable username", () => {
-    for (const raw of ["", "   ", "|abc-123", undefined, null]) {
+  it("returns undefined when there is nothing usable at all", () => {
+    for (const raw of ["", "   ", "|", " | ", undefined, null]) {
       expect(parseCustomReference(raw)).toBeUndefined()
     }
+  })
+
+  it("reads a leading separator as an intent with no username", () => {
+    // The long-username form. `<username>|<intentId>` breaches Fygaro's
+    // 40-character ceiling once the username is more than 23 characters, so
+    // buildCustomReference drops the username and mints `|<intentId>`. An empty
+    // first segment cannot be a username — they are 3+ characters — so this
+    // shape is unambiguous, and the webhook recovers the account from the
+    // intent record.
+    expect(parseCustomReference("|abc-123")).toEqual({ intentId: "abc-123" })
+    expect(parseCustomReference("  |  abc-123 ")).toEqual({ intentId: "abc-123" })
   })
 
   it("trims surrounding whitespace on both halves", () => {
