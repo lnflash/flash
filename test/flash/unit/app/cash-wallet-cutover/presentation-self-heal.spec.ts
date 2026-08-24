@@ -35,7 +35,7 @@ const walletsRepoWith = (wallets: Wallet[]) => ({
 })
 
 // A modern client (v0.6.x sends the usdt capability header). With the field
-// mis-shaped this silently decides "legacy_usd_compat" instead of "usdt" —
+// wrongly shaped this silently decides "legacy_usd_compat" instead of "usdt" —
 // which ALSO errors on a missing USDT wallet, so the self-heal covers both;
 // the fixtures pin the real shape so the assertions name the right wallet.
 const client: CashWalletClientCapabilities = {
