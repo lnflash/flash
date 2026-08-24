@@ -489,6 +489,7 @@ type PriceOfOneSettlementMinorUnitInDisplayMinorUnit implements PriceInterface {
 type Query {
   accountDetailsByAccountId(accountId: ID!): AuditedAccount!
   accountDetailsByEmail(email: EmailAddress!): AuditedAccount!
+  accountDetailsByNpub(npub: npub!): AuditedAccount!
   accountDetailsByUserPhone(phone: Phone!): AuditedAccount!
   accountDetailsByUsername(username: Username!): AuditedAccount!
   allLevels: [AccountLevel!]!
@@ -872,3 +873,6 @@ enum WalletCurrency {
 
 """Unique identifier of a wallet"""
 scalar WalletId
+
+"""Nostr Identity public key"""
+scalar npub

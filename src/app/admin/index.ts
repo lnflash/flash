@@ -20,6 +20,13 @@ export const getAccountByUsername = async (username: string) => {
   return accounts.findByUsername(usernameValid)
 }
 
+export const getAccountByNpub = async (npub: string) => {
+  // Format validation happens at the GraphQL boundary (Npub scalar);
+  // the repository query is an exact $eq match so a raw string is safe.
+  const accounts = AccountsRepository()
+  return accounts.findByNpub(npub as Npub)
+}
+
 export const getAccountByUserPhone = async (phone: PhoneNumber) => {
   // TODO: replace by getAccountByUserPhone
   // but need to change the integration admin query test first
