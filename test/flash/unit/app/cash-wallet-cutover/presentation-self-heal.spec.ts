@@ -6,12 +6,21 @@ jest.mock("@app/cash-wallet-cutover/ensure-usdt-wallet", () => ({
   ensureUsdtWalletForAccount: (...args: unknown[]) => mockEnsureUsdtWallet(...args),
 }))
 // The resolver imports the real repos as defaults; both are injected per test.
+// The resolver's DEFAULT balance reader lazy-imports the real IBEX-backed
+// module at call time; unmocked, any test that exercises the gate without
+// injecting a reader opens a live Redis/IBEX connection and hangs the runner.
+jest.mock("@app/wallets/get-balance-for-wallet", () => ({
+  getBalanceForWallet: async () => ({ isZero: () => true }),
+}))
+jest.mock("@services/tracing", () => ({
+  recordExceptionInCurrentSpan: jest.fn(),
+}))
 jest.mock("@services/mongoose", () => ({
   WalletsRepository: () => ({}),
   CashWalletCutoverRepository: () => ({}),
 }))
 
-import { WalletCurrency } from "@domain/shared"
+import { USDAmount, WalletCurrency } from "@domain/shared"
 import { resolveCashWalletPresentationForAccount } from "@app/cash-wallet-cutover/presentation-for-account"
 import { CashWalletMissingUsdtWalletError } from "@app/cash-wallet-cutover/errors"
 import type { CashWalletClientCapabilities } from "@app/cash-wallet-cutover/client-capability"
@@ -38,6 +47,11 @@ const walletsRepoWith = (wallets: Wallet[]) => ({
 // wrongly shaped this silently decides "legacy_usd_compat" instead of "usdt" —
 // which ALSO errors on a missing USDT wallet, so the self-heal covers both;
 // the fixtures pin the real shape so the assertions name the right wallet.
+// The gate consults the legacy balance before healing under "usdt". Default
+// fixture: a drained legacy wallet (the fleet this heal exists for).
+const zeroBalance = async () => ({ isZero: () => true }) as unknown as USDAmount
+const nonzeroBalance = async () => ({ isZero: () => false }) as unknown as USDAmount
+
 const client: CashWalletClientCapabilities = {
   cashWalletPresentation: "usdt",
   hasUsdtCashWalletSupport: true,
@@ -103,6 +117,7 @@ describe("presentation self-heal (ENG-544)", () => {
       client,
       migrationsRepo,
       walletsRepo: walletsRepoWith([btcWallet, usdWallet]),
+      legacyUsdBalance: zeroBalance,
     })
 
     expect(result).toBeInstanceOf(CashWalletMissingUsdtWalletError)
@@ -120,5 +135,59 @@ describe("presentation self-heal (ENG-544)", () => {
 
     expect(result).not.toBeInstanceOf(Error)
     expect(mockEnsureUsdtWallet).not.toHaveBeenCalled()
+  })
+
+  it("refuses to heal a nonzero legacy balance under the usdt presentation", async () => {
+    // THE MONEY CASE. The usdt presentation hides the legacy wallet — its
+    // balance resolver redirects to the settlement wallet — so healing an
+    // account that still holds legacy funds would show the customer an empty
+    // cash wallet with their money out of sight. Those accounts keep the
+    // original error and stay on the operator queue: moving their money is a
+    // migration run, not a lazy write on the resolution path.
+    mockEnsureUsdtWallet.mockResolvedValue(usdtWallet)
+
+    const result = await resolveCashWalletPresentationForAccount({
+      account: ACCOUNT,
+      client,
+      migrationsRepo,
+      walletsRepo: walletsRepoWith([btcWallet, usdWallet]),
+      legacyUsdBalance: nonzeroBalance,
+    })
+
+    expect(result).toBeInstanceOf(CashWalletMissingUsdtWalletError)
+    expect(mockEnsureUsdtWallet).not.toHaveBeenCalled()
+  })
+
+  it("refuses to heal when the legacy balance cannot be read — creating blind is the flip the gate prevents", async () => {
+    mockEnsureUsdtWallet.mockResolvedValue(usdtWallet)
+
+    const result = await resolveCashWalletPresentationForAccount({
+      account: ACCOUNT,
+      client,
+      migrationsRepo,
+      walletsRepo: walletsRepoWith([btcWallet, usdWallet]),
+      legacyUsdBalance: async () => new Error("ibex unreachable") as unknown as USDAmount,
+    })
+
+    expect(result).toBeInstanceOf(CashWalletMissingUsdtWalletError)
+    expect(mockEnsureUsdtWallet).not.toHaveBeenCalled()
+  })
+
+  it("heals without a balance read when the account has no legacy wallet at all", async () => {
+    // Nothing to hide, nothing to consult.
+    mockEnsureUsdtWallet.mockResolvedValue(usdtWallet)
+    const balanceReader = jest.fn(nonzeroBalance)
+
+    const result = await resolveCashWalletPresentationForAccount({
+      account: ACCOUNT,
+      client,
+      migrationsRepo,
+      walletsRepo: walletsRepoWith([btcWallet]),
+      legacyUsdBalance: balanceReader,
+    })
+
+    expect(result).not.toBeInstanceOf(Error)
+    expect(balanceReader).not.toHaveBeenCalled()
+    expect(mockEnsureUsdtWallet).toHaveBeenCalled()
   })
 })
