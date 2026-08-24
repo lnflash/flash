@@ -139,21 +139,11 @@ const LnurlPaymentSendMutation = GT.Field<
       }
     }
 
-    const walletAmount = await usdWalletAmountFromWalletId({
-      walletId: routedWalletId,
-      amount: amount.toString(),
-    })
-    if (walletAmount instanceof Error) {
-      return {
-        status: "failed",
-        errors: [mapAndParseErrorForGqlResponse(walletAmount)],
-      }
-    }
-
     // ENG-533: direct-IBEX execution, so the exactly-once wrapper never ran on
     // this path. Scoped to the ROUTED wallet. EVERYTHING after routing —
-    // decode, metadata fetch, msat conversion, amount validation and the
-    // money-moving call — sits inside execute(), so a cached replay
+    // decode, metadata fetch, wallet-amount conversion, msat conversion,
+    // amount validation and the money-moving call — sits inside execute(), so
+    // a cached replay
     // short-circuits before touching IBEX or the lnurl server. That matters
     // precisely on the retry path this wrapper exists for: the flaky lnurl
     // server (or a moved dealer rate) must not be able to mask a cached
@@ -184,6 +174,12 @@ const LnurlPaymentSendMutation = GT.Field<
           return new InvalidLnurlError()
         }
         if (!isLnurlPayMetadata(metadata)) return new InvalidLnurlError()
+
+        const walletAmount = await usdWalletAmountFromWalletId({
+          walletId: routedWalletId,
+          amount: amount.toString(),
+        })
+        if (walletAmount instanceof Error) return walletAmount
 
         const dealer = DealerPriceService()
         const amountMsat = await amountMsatFromUsdWalletAmount({

@@ -256,8 +256,7 @@ describe("LnurlPaymentSendMutation", () => {
       // The fingerprint uses the client's lnurl + input amount — NOT amountMsat,
       // which moves with the dealer rate. A legitimate same-key retry must not
       // be rejected as a different payment because the price ticked.
-      expect(call.requestFingerprint).toMatch(/^lnurl\|/)
-      expect(call.requestFingerprint).not.toContain("Msat")
+      expect(call.requestFingerprint).toBe("lnurl|LNURL1DP68GURN8GHJ7MRWW4EXCTN|19446")
     })
 
     it("serves the wrapper's cached outcome without touching IBEX or the lnurl server", async () => {
@@ -276,6 +275,7 @@ describe("LnurlPaymentSendMutation", () => {
       // re-sends with a new key: the double-pay class this PR closes.
       expect(mockDecodeLnurl).not.toHaveBeenCalled()
       expect(mockAxiosGet).not.toHaveBeenCalled()
+      expect(mockUsdWalletAmountFromWalletId).not.toHaveBeenCalled()
       expect(mockPayToLnurl).not.toHaveBeenCalled()
     })
 
