@@ -50,6 +50,7 @@ jest.mock("axios", () => ({
 }))
 
 import LnurlPaymentSendMutation from "@graphql/public/root/mutation/lnurl-payment-send"
+import { IdempotencyKeyReuseError } from "@domain/errors"
 import { paymentAmountFromNumber, USDTAmount, WalletCurrency } from "@domain/shared"
 import { IbexError } from "@services/ibex/errors"
 
@@ -228,6 +229,20 @@ describe("LnurlPaymentSendMutation", () => {
     expect(result?.errors[0].message).toBeTruthy()
   })
 
+  it("returns a failed payload — not a bare GraphQL error — when the lnurl metadata fetch rejects", async () => {
+    // axios.get rejects on non-2xx and on network errors. Inside execute() a
+    // bare throw would propagate through the redlock callback as an unhandled
+    // GraphQL error, so the rejection must be caught and mapped like every
+    // sibling branch.
+    mockAxiosGet.mockRejectedValueOnce(new Error("connect ECONNREFUSED"))
+
+    const result = await resolveMutation()
+
+    expect(result?.status).toBe("failed")
+    expect(result?.errors[0].message).toBeTruthy()
+    expect(mockPayToLnurl).not.toHaveBeenCalled()
+  })
+
   describe("idempotency wiring (ENG-533)", () => {
     it("routes payToLnurl through withPaymentIdempotency, fingerprinting the request as sent", async () => {
       const result = (await resolveMutation({
@@ -253,7 +268,37 @@ describe("LnurlPaymentSendMutation", () => {
       })) as { status?: string }
 
       expect(result.status).toBe("success")
+      // The replay path the wrapper exists for is exactly the one where the
+      // lnurl server (the flaky dependency) may be down or the dealer rate may
+      // have moved — so a cache hit must short-circuit EVERY external call,
+      // not just the money-moving one. If decode or the metadata fetch runs
+      // here, a cached success can be masked as a fresh failure and the user
+      // re-sends with a new key: the double-pay class this PR closes.
+      expect(mockDecodeLnurl).not.toHaveBeenCalled()
+      expect(mockAxiosGet).not.toHaveBeenCalled()
       expect(mockPayToLnurl).not.toHaveBeenCalled()
+    })
+
+    it("maps a wrapper error (key reuse / lock busy) to a failed payload", async () => {
+      mockWithPaymentIdempotency.mockResolvedValue(
+        new IdempotencyKeyReuseError("same key, different payment"),
+      )
+
+      const result = (await resolveMutation({
+        idempotencyKey: "11111111-2222-4333-8444-555555555555",
+      })) as MutationResult
+
+      expect(result.status).toBe("failed")
+      expect(result.errors.length).toBeGreaterThan(0)
+      expect(mockPayToLnurl).not.toHaveBeenCalled()
+    })
+
+    it("still executes without a key — absent key means passthrough, not rejection", async () => {
+      const result = (await resolveMutation()) as MutationResult
+
+      expect(result.errors).toEqual([])
+      expect(mockWithPaymentIdempotency.mock.calls[0][0].idempotencyKey).toBeUndefined()
+      expect(mockPayToLnurl).toHaveBeenCalledTimes(1)
     })
   })
 })

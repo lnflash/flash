@@ -150,66 +150,55 @@ const LnurlPaymentSendMutation = GT.Field<
       }
     }
 
-    const decoded = await Ibex.decodeLnurl({ lnurl })
-    if (decoded instanceof IbexError) {
-      return {
-        status: "failed",
-        errors: [mapAndParseErrorForGqlResponse(decoded)],
-      }
-    }
-    if (!decoded.decodedLnurl) {
-      return {
-        status: "failed",
-        errors: [mapAndParseErrorForGqlResponse(new InvalidLnurlError())],
-      }
-    }
-
-    const metadataResponse = await axios.get(decoded.decodedLnurl)
-    const metadata = metadataResponse.data
-    if (!isLnurlPayMetadata(metadata)) {
-      return {
-        status: "failed",
-        errors: [mapAndParseErrorForGqlResponse(new InvalidLnurlError())],
-      }
-    }
-
-    const dealer = DealerPriceService()
-    const amountMsat = await amountMsatFromUsdWalletAmount({
-      amount: walletAmount,
-      btcFromUsd: dealer.getSatsFromCentsForImmediateSell,
-    })
-    if (amountMsat instanceof Error) {
-      return {
-        status: "failed",
-        errors: [mapAndParseErrorForGqlResponse(amountMsat)],
-      }
-    }
-
-    const validAmount = validateLnurlPayAmountMsat({
-      amountMsat,
-      minSendable: metadata.minSendable,
-      maxSendable: metadata.maxSendable,
-    })
-    if (validAmount instanceof Error) {
-      return {
-        status: "failed",
-        errors: [mapAndParseErrorForGqlResponse(validAmount)],
-      }
-    }
-
     // ENG-533: direct-IBEX execution, so the exactly-once wrapper never ran on
-    // this path. Scoped to the ROUTED wallet; only the money-moving call sits
-    // inside execute() — decode, metadata fetch and amount validation stay
-    // outside, so a cached replay touches neither IBEX nor the lnurl server.
-    // The fingerprint uses the client's lnurl + amount (the request as sent),
-    // not amountMsat: the msat figure moves with the dealer rate, and a
-    // legitimate same-key retry must not be rejected as a different payment
-    // because the price ticked.
+    // this path. Scoped to the ROUTED wallet. EVERYTHING after routing —
+    // decode, metadata fetch, msat conversion, amount validation and the
+    // money-moving call — sits inside execute(), so a cached replay
+    // short-circuits before touching IBEX or the lnurl server. That matters
+    // precisely on the retry path this wrapper exists for: the flaky lnurl
+    // server (or a moved dealer rate) must not be able to mask a cached
+    // success as a failure. The fingerprint needs only the client's
+    // lnurl + amount (the request as sent) — not amountMsat, which moves with
+    // the dealer rate; a legitimate same-key retry must not be rejected as a
+    // different payment because the price ticked. Failure branches return
+    // ApplicationErrors, which the wrapper never caches, so first-attempt
+    // failures stay retryable.
     const outcome = await withPaymentIdempotency({
       idempotencyKey,
       senderWalletId: routedWalletId,
       requestFingerprint: `lnurl|${lnurl}|${amount}`,
       execute: async () => {
+        const decoded = await Ibex.decodeLnurl({ lnurl })
+        if (decoded instanceof IbexError) return decoded
+        if (!decoded.decodedLnurl) return new InvalidLnurlError()
+
+        // A metadata-fetch rejection (non-2xx or network error) must become a
+        // typed error like every sibling branch — a bare throw here would
+        // propagate through the redlock callback as an unhandled GraphQL error
+        // instead of the failed payload.
+        let metadata: unknown
+        try {
+          const metadataResponse = await axios.get(decoded.decodedLnurl)
+          metadata = metadataResponse.data
+        } catch {
+          return new InvalidLnurlError()
+        }
+        if (!isLnurlPayMetadata(metadata)) return new InvalidLnurlError()
+
+        const dealer = DealerPriceService()
+        const amountMsat = await amountMsatFromUsdWalletAmount({
+          amount: walletAmount,
+          btcFromUsd: dealer.getSatsFromCentsForImmediateSell,
+        })
+        if (amountMsat instanceof Error) return amountMsat
+
+        const validAmount = validateLnurlPayAmountMsat({
+          amountMsat,
+          minSendable: metadata.minSendable,
+          maxSendable: metadata.maxSendable,
+        })
+        if (validAmount instanceof Error) return validAmount
+
         const payment = await Ibex.payToLnurl({
           accountId: routedWalletId,
           amountMsat,
