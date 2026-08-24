@@ -1767,6 +1767,11 @@ input LnNoAmountUsdInvoicePaymentInput
   """Amount to pay in USD cents."""
   amount: FractionalCentAmount!
 
+  """
+  Optional client-supplied key; a repeated send with the same key returns the original result instead of paying again.
+  """
+  idempotencyKey: String
+
   """Optional memo to associate with the lightning invoice."""
   memo: Memo
 
@@ -1808,6 +1813,11 @@ input LnurlPaymentSendInput
 {
   """Amount to spend from the USD/USDT wallet, in USD cents."""
   amount: FractionalCentAmount!
+
+  """
+  Optional client-supplied key; a repeated send with the same key returns the original result instead of paying again.
+  """
+  idempotencyKey: String
 
   """LNURL-pay value to decode and pay."""
   lnurl: Lnurl!

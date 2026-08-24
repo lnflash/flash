@@ -22,12 +22,26 @@ jest.mock("@app/cash-wallet-cutover", () => ({
   ) => mockResolveCashWalletMutationWalletIdForAccount(...args),
 }))
 
+const mockWithPaymentIdempotency = jest.fn()
+
+// Passthrough by default: the wrapper's own dedupe/lock/fingerprint behavior is
+// covered exhaustively by app/payments/idempotency.spec.ts. THIS spec pins the
+// WIRING — that the resolver routes its IBEX execution through the wrapper with
+// the right key, wallet scope and fingerprint — which is the half a resolver
+// can get wrong (and did: this path bypassed the wrapper entirely until
+// ENG-533).
+jest.mock("@app/payments/idempotency", () => ({
+  withPaymentIdempotency: (...args: Parameters<typeof mockWithPaymentIdempotency>) =>
+    mockWithPaymentIdempotency(...args),
+}))
+
 jest.mock("@app/wallets", () => ({
   usdWalletAmountFromWalletId: (
     ...args: Parameters<typeof mockUsdWalletAmountFromWalletId>
   ) => mockUsdWalletAmountFromWalletId(...args),
 }))
 
+import { IdempotencyKeyReuseError } from "@domain/errors"
 import { ErrorLevel, USDTAmount } from "@domain/shared"
 import LnNoAmountUsdInvoicePaymentSendMutation from "@graphql/public/root/mutation/ln-noamount-usd-invoice-payment-send"
 import { IbexError, UnconfirmedIbexPayment } from "@services/ibex/errors"
@@ -75,6 +89,9 @@ describe("LnNoAmountUsdInvoicePaymentSendMutation", () => {
       status: 0,
       transaction: { payment: { status: { id: 2 } } },
     })
+    mockWithPaymentIdempotency.mockImplementation(
+      async ({ execute }: { execute: () => Promise<unknown> }) => execute(),
+    )
   })
 
   it("pays the routed wallet with the resolved cent amount", async () => {
@@ -181,5 +198,61 @@ describe("LnNoAmountUsdInvoicePaymentSendMutation", () => {
     expect(result.status).toBe("failed")
     expect(result.errors[0].message).toBeTruthy()
     expect(mockRecordExceptionInCurrentSpan).not.toHaveBeenCalled()
+  })
+
+  describe("idempotency wiring (ENG-533)", () => {
+    it("routes the IBEX execution through withPaymentIdempotency with key, routed wallet and fingerprint", async () => {
+      const result = (await resolveMutation({
+        idempotencyKey: "11111111-2222-4333-8444-555555555555",
+      })) as MutationResult
+
+      expect(result.errors).toEqual([])
+      expect(mockWithPaymentIdempotency).toHaveBeenCalledTimes(1)
+      const call = mockWithPaymentIdempotency.mock.calls[0][0]
+      expect(call.idempotencyKey).toBe("11111111-2222-4333-8444-555555555555")
+      // Scoped to the ROUTED wallet — the one actually debited — so the same
+      // key behaves identically across the cash-wallet compat redirect.
+      expect(call.senderWalletId).toBe(routedWalletId)
+      // Fingerprints the REQUEST as the client sent it (invoice + input
+      // amount), so a legitimate same-key retry is recognized as the same
+      // payment.
+      expect(call.requestFingerprint).toBe("ln-noamount-usd|lnbc1noamount|1234")
+    })
+
+    it("serves the wrapper's cached outcome without touching IBEX", async () => {
+      // The replay case the wrapper exists for: a double-fire's second request
+      // must produce the first result and no second payment. If this fails,
+      // the 2026-07-23 double-pay class is back on this path.
+      mockWithPaymentIdempotency.mockResolvedValue({ value: "success" })
+
+      const result = (await resolveMutation({
+        idempotencyKey: "11111111-2222-4333-8444-555555555555",
+      })) as MutationResult
+
+      expect(result.status).toBe("success")
+      expect(mockPayInvoice).not.toHaveBeenCalled()
+    })
+
+    it("maps a wrapper error (key reuse / lock busy) to a failed payload", async () => {
+      mockWithPaymentIdempotency.mockResolvedValue(
+        new IdempotencyKeyReuseError("same key, different payment"),
+      )
+
+      const result = (await resolveMutation({
+        idempotencyKey: "11111111-2222-4333-8444-555555555555",
+      })) as MutationResult
+
+      expect(result.status).toBe("failed")
+      expect(result.errors.length).toBeGreaterThan(0)
+      expect(mockPayInvoice).not.toHaveBeenCalled()
+    })
+
+    it("still executes without a key — absent key means passthrough, not rejection", async () => {
+      const result = (await resolveMutation()) as MutationResult
+
+      expect(result.errors).toEqual([])
+      expect(mockWithPaymentIdempotency.mock.calls[0][0].idempotencyKey).toBeUndefined()
+      expect(mockPayInvoice).toHaveBeenCalledTimes(1)
+    })
   })
 })

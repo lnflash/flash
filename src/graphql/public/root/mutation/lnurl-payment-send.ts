@@ -1,3 +1,4 @@
+import { withPaymentIdempotency } from "@app/payments/idempotency"
 import axios from "axios"
 import dedent from "dedent"
 
@@ -48,6 +49,11 @@ const LnurlPaymentSendInput = GT.Input({
       type: Memo,
       description: "Optional memo for the Lightning payment.",
     },
+    idempotencyKey: {
+      type: GT.String,
+      description:
+        "Optional client-supplied key; a repeated send with the same key returns the original result instead of paying again.",
+    },
   }),
 })
 
@@ -90,6 +96,7 @@ const LnurlPaymentSendMutation = GT.Field<
       lnurl: Lnurl | InputValidationError
       amount: FractionalCentAmount | InputValidationError
       memo?: Memo | InputValidationError
+      idempotencyKey?: string | null
     }
   }
 >({
@@ -103,7 +110,7 @@ const LnurlPaymentSendMutation = GT.Field<
     input: { type: GT.NonNull(LnurlPaymentSendInput) },
   },
   resolve: async (_, args, { domainAccount, cashWalletClientCapabilities }) => {
-    const { walletId, lnurl, amount, memo } = args.input
+    const { walletId, lnurl, amount, memo, idempotencyKey } = args.input
 
     if (walletId instanceof InputValidationError) {
       return { status: "failed", errors: [{ message: walletId.message }] }
@@ -190,21 +197,39 @@ const LnurlPaymentSendMutation = GT.Field<
       }
     }
 
-    const payment = await Ibex.payToLnurl({
-      accountId: routedWalletId,
-      amountMsat,
-      params: paramsFromMetadata(metadata),
+    // ENG-533: direct-IBEX execution, so the exactly-once wrapper never ran on
+    // this path. Scoped to the ROUTED wallet; only the money-moving call sits
+    // inside execute() — decode, metadata fetch and amount validation stay
+    // outside, so a cached replay touches neither IBEX nor the lnurl server.
+    // The fingerprint uses the client's lnurl + amount (the request as sent),
+    // not amountMsat: the msat figure moves with the dealer rate, and a
+    // legitimate same-key retry must not be rejected as a different payment
+    // because the price ticked.
+    const outcome = await withPaymentIdempotency({
+      idempotencyKey,
+      senderWalletId: routedWalletId,
+      requestFingerprint: `lnurl|${lnurl}|${amount}`,
+      execute: async () => {
+        const payment = await Ibex.payToLnurl({
+          accountId: routedWalletId,
+          amountMsat,
+          params: paramsFromMetadata(metadata),
+        })
+        if (payment instanceof IbexError) return payment
+        return lnurlPaymentSendStatusOrPending(payment)
+      },
     })
-    if (payment instanceof IbexError) {
+
+    if (outcome instanceof Error) {
       return {
         status: "failed",
-        errors: [mapAndParseErrorForGqlResponse(payment)],
+        errors: [mapAndParseErrorForGqlResponse(outcome)],
       }
     }
 
     return {
       errors: [],
-      status: lnurlPaymentSendStatusOrPending(payment).value,
+      status: outcome.value,
     }
   },
 })

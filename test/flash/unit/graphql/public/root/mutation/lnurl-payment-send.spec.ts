@@ -5,6 +5,17 @@ const mockPayToLnurl = jest.fn()
 const mockGetSatsFromCentsForImmediateSell = jest.fn()
 const mockAxiosGet = jest.fn()
 
+const mockWithPaymentIdempotency = jest.fn()
+
+// Passthrough by default — the wrapper's behavior is covered by
+// app/payments/idempotency.spec.ts; this spec pins the resolver WIRING
+// (key, wallet scope, fingerprint), the half this path got wrong by
+// bypassing the wrapper entirely until ENG-533.
+jest.mock("@app/payments/idempotency", () => ({
+  withPaymentIdempotency: (...args: Parameters<typeof mockWithPaymentIdempotency>) =>
+    mockWithPaymentIdempotency(...args),
+}))
+
 jest.mock("@app/cash-wallet-cutover", () => ({
   resolveCashWalletMutationWalletIdForAccount: (
     ...args: Parameters<typeof mockResolveCashWalletMutationWalletIdForAccount>
@@ -106,6 +117,9 @@ describe("LnurlPaymentSendMutation", () => {
     mockPayToLnurl.mockResolvedValue({
       transaction: { payment: { status: { id: 2 } } },
     })
+    mockWithPaymentIdempotency.mockImplementation(
+      async ({ execute }: { execute: () => Promise<unknown> }) => execute(),
+    )
   })
 
   it("decodes LNURL metadata, converts USDT wallet amount to msats, and pays IBEX", async () => {
@@ -212,5 +226,34 @@ describe("LnurlPaymentSendMutation", () => {
 
     expect(result?.status).toBe("failed")
     expect(result?.errors[0].message).toBeTruthy()
+  })
+
+  describe("idempotency wiring (ENG-533)", () => {
+    it("routes payToLnurl through withPaymentIdempotency, fingerprinting the request as sent", async () => {
+      const result = (await resolveMutation({
+        idempotencyKey: "11111111-2222-4333-8444-555555555555",
+      })) as { errors: unknown[] }
+
+      expect(result.errors).toEqual([])
+      const call = mockWithPaymentIdempotency.mock.calls[0][0]
+      expect(call.idempotencyKey).toBe("11111111-2222-4333-8444-555555555555")
+      expect(call.senderWalletId).toBe(routedWalletId)
+      // The fingerprint uses the client's lnurl + input amount — NOT amountMsat,
+      // which moves with the dealer rate. A legitimate same-key retry must not
+      // be rejected as a different payment because the price ticked.
+      expect(call.requestFingerprint).toMatch(/^lnurl\|/)
+      expect(call.requestFingerprint).not.toContain("Msat")
+    })
+
+    it("serves the wrapper's cached outcome without touching IBEX or the lnurl server", async () => {
+      mockWithPaymentIdempotency.mockResolvedValue({ value: "success" })
+
+      const result = (await resolveMutation({
+        idempotencyKey: "11111111-2222-4333-8444-555555555555",
+      })) as { status?: string }
+
+      expect(result.status).toBe("success")
+      expect(mockPayToLnurl).not.toHaveBeenCalled()
+    })
   })
 })
