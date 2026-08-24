@@ -49,19 +49,50 @@ describe("presentation self-heal (ENG-544)", () => {
   it("creates the missing USDT wallet and resolves against it", async () => {
     // The account that could not be paid: usdt presentation, no usdt wallet.
     mockEnsureUsdtWallet.mockResolvedValue(usdtWallet)
+    const walletsRepo = walletsRepoWith([btcWallet, usdWallet])
 
     const result = await resolveCashWalletPresentationForAccount({
       account: ACCOUNT,
       client,
       migrationsRepo,
-      walletsRepo: walletsRepoWith([btcWallet, usdWallet]),
+      walletsRepo,
     })
 
     expect(result).not.toBeInstanceOf(Error)
     if (result instanceof Error) throw result
     expect(result.defaultWalletId).toBe("usdt-1")
     expect(result.activeSettlementWallet.id).toBe("usdt-1")
-    expect(mockEnsureUsdtWallet).toHaveBeenCalledWith({ account: ACCOUNT })
+    // The heal's reads must go through the SAME repo the resolver reads from
+    // — a caller injecting a scoped/instrumented repo must not get heal
+    // traffic through a different one.
+    expect(mockEnsureUsdtWallet).toHaveBeenCalledWith({ account: ACCOUNT, walletsRepo })
+  })
+
+  it("heals the legacy_usd_compat presentation too — old client, cutover complete", async () => {
+    // guard.ts: a client WITHOUT usdt support after cutover completion gets
+    // "legacy_usd_compat", and presentation.ts errors on a missing USDT
+    // wallet there as well (it is the active settlement wallet). If the heal
+    // trigger is ever narrowed to the "usdt" presentation, this fails.
+    mockEnsureUsdtWallet.mockResolvedValue(usdtWallet)
+    const walletsRepo = walletsRepoWith([btcWallet, usdWallet])
+
+    const result = await resolveCashWalletPresentationForAccount({
+      account: ACCOUNT,
+      client: {
+        cashWalletPresentation: "legacy_compat",
+        hasUsdtCashWalletSupport: false,
+      },
+      migrationsRepo,
+      walletsRepo,
+    })
+
+    expect(result).not.toBeInstanceOf(Error)
+    if (result instanceof Error) throw result
+    expect(mockEnsureUsdtWallet).toHaveBeenCalledWith({ account: ACCOUNT, walletsRepo })
+    // Compat keeps presenting the legacy USD wallet to the old client…
+    expect(result.defaultWalletId).toBe("usd-1")
+    // …but settles on the healed USDT wallet.
+    expect(result.activeSettlementWallet.id).toBe("usdt-1")
   })
 
   it("preserves the original error when creation fails — degraded, never worse", async () => {

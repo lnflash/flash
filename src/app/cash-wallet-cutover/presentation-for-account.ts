@@ -27,6 +27,10 @@ type CashWalletPresentationMigrationsRepository = {
 
 type CashWalletPresentationWalletsRepository = {
   listByAccountId: (accountId: AccountId) => Promise<Wallet[] | RepositoryError>
+  // Optional: injected repos that also carry persistNew (e.g. the real
+  // WalletsRepository) get the self-heal's create routed through them too;
+  // list-only repos fall back to the real repo for the create.
+  persistNew?: (args: NewWalletInfo) => Promise<Wallet | ApplicationError>
 }
 
 export const resolveCashWalletPresentationForAccount = async ({
@@ -78,7 +82,7 @@ export const resolveCashWalletPresentationForAccount = async ({
   // the original error: the account is no better off, but never worse, and the
   // next resolution retries.
   if (presentation instanceof CashWalletMissingUsdtWalletError) {
-    const created = await ensureUsdtWallet({ account })
+    const created = await ensureUsdtWallet({ account, walletsRepo })
     if (created) {
       return resolveCashWalletPresentation({ decision, wallets: [...wallets, created] })
     }

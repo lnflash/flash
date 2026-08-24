@@ -1,3 +1,7 @@
+// Deliberately NOT the @app/accounts barrel: the barrel constructs
+// repositories at module load, which drags the entire accounts module (and
+// its side effects) into every consumer of the presentation path.
+import { updateDefaultWalletId } from "@app/accounts/update-default-walletid"
 import { WalletType } from "@domain/wallets"
 import { ErrorLevel, WalletCurrency } from "@domain/shared"
 import { LockService } from "@services/lock"
@@ -6,7 +10,10 @@ import { recordExceptionInCurrentSpan } from "@services/tracing"
 
 type EnsureWalletsRepository = {
   listByAccountId: (accountId: AccountId) => Promise<Wallet[] | RepositoryError>
-  persistNew: (args: NewWalletInfo) => Promise<Wallet | RepositoryError>
+  // Optional so list-only callers (e.g. the presentation resolver's injected
+  // repo) can still route reads through their repo; creation falls back to
+  // the real repo when absent.
+  persistNew?: (args: NewWalletInfo) => Promise<Wallet | ApplicationError>
 }
 
 /**
@@ -35,13 +42,24 @@ type EnsureWalletsRepository = {
  *   permission to create without it. Unlocked creation is exactly the
  *   double-mint this function exists to prevent, and the next resolution will
  *   simply try again.
+ * - Convergence includes the stored default pointer, mirroring the real
+ *   migration path (runtime-services pairs addWalletIfNonexistent with
+ *   updateDefaultWalletId). A healed account that keeps the RETIRED legacy
+ *   USD wallet as its persisted default keeps getting balance notifications
+ *   on it (send-default-wallet-balance-to-users), shows the wrong default on
+ *   the operator dashboard, and gets re-flagged by discovery as still needing
+ *   a pointer flip. The flip only happens when the stored default IS the
+ *   legacy USD wallet — a deliberate non-cash default (e.g. BTC) is the
+ *   user's choice and stays put.
  */
 export const ensureUsdtWalletForAccount = async ({
   account,
   walletsRepo = WalletsRepository(),
+  updateDefaultWallet = updateDefaultWalletId,
 }: {
   account: Account
   walletsRepo?: EnsureWalletsRepository
+  updateDefaultWallet?: typeof updateDefaultWalletId
 }): Promise<Wallet | null> => {
   const created = await LockService().lockAccountId(account.id, async () => {
     // Re-check INSIDE the lock: the concurrent resolution that beat us to the
@@ -50,14 +68,43 @@ export const ensureUsdtWalletForAccount = async ({
     const wallets = await walletsRepo.listByAccountId(account.id)
     if (wallets instanceof Error) return wallets
 
-    const existing = wallets.find((wallet) => wallet.currency === WalletCurrency.Usdt)
-    if (existing) return existing
+    const persistNew = walletsRepo.persistNew ?? WalletsRepository().persistNew
 
-    return walletsRepo.persistNew({
-      accountId: account.id,
-      type: WalletType.Checking,
-      currency: WalletCurrency.Usdt,
-    })
+    const existing = wallets.find((wallet) => wallet.currency === WalletCurrency.Usdt)
+    const usdtWallet =
+      existing ??
+      (await persistNew({
+        accountId: account.id,
+        type: WalletType.Checking,
+        currency: WalletCurrency.Usdt,
+      }))
+    if (usdtWallet instanceof Error) return usdtWallet
+
+    const legacyUsdWallet = wallets.find(
+      (wallet) => wallet.currency === WalletCurrency.Usd,
+    )
+    if (legacyUsdWallet && account.defaultWalletId === legacyUsdWallet.id) {
+      const updated = await updateDefaultWallet({
+        accountId: account.id,
+        walletId: usdtWallet.id,
+      })
+      if (updated instanceof Error) {
+        // The wallet exists and the caller can resolve against it — a failed
+        // pointer flip must not undo the heal. The residual pointer is
+        // exactly what discovery flags (status "legacy_default"), so the
+        // operator flow picks it up.
+        recordExceptionInCurrentSpan({
+          error: updated,
+          level: ErrorLevel.Warn,
+          attributes: {
+            accountId: account.id,
+            ensureUsdtWallet: "default_wallet_flip_failed",
+          },
+        })
+      }
+    }
+
+    return usdtWallet
   })
 
   if (created instanceof Error) {
