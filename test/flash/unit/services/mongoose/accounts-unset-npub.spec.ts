@@ -1,4 +1,4 @@
-import { CouldNotFindAccountError } from "@domain/errors"
+import { CouldNotFindAccountFromIdError, NoNpubToReleaseError } from "@domain/errors"
 import { AccountsRepository } from "@services/mongoose/accounts"
 
 const findOneAndUpdate = jest.fn()
@@ -14,6 +14,7 @@ jest.mock("@services/mongoose/utils", () => ({
 }))
 
 const ACCOUNT_ID = "5f4c9a2b1e7d3f8a6b0c4d2e" as AccountId
+const NPUB = `npub1${"q".repeat(58)}` as Npub
 
 const accountRecord = {
   _id: ACCOUNT_ID,
@@ -36,16 +37,18 @@ describe("AccountsRepository.unsetNpub", () => {
     // update doc, so that is a silent no-op) and not `npub: null` (the partial
     // index excludes non-strings, so a null would sit there unindexed and keep
     // failing lookups). Removed means the key is genuinely unclaimed again.
-    findOneAndUpdate.mockResolvedValue(accountRecord)
+    findOneAndUpdate.mockResolvedValue({ ...accountRecord, npub: NPUB })
 
     const result = await AccountsRepository().unsetNpub(ACCOUNT_ID)
 
     expect(findOneAndUpdate).toHaveBeenCalledWith(
       { _id: ACCOUNT_ID },
       { $unset: { npub: "" } },
-      { new: true },
+      { new: false },
     )
     expect(result).not.toBeInstanceOf(Error)
+    // The document read back is the pre-update one, which still carries the
+    // npub; the account handed to the caller must not.
     expect((result as Account).npub).toBeUndefined()
   })
 
@@ -53,7 +56,46 @@ describe("AccountsRepository.unsetNpub", () => {
     findOneAndUpdate.mockResolvedValue(null)
 
     expect(await AccountsRepository().unsetNpub(ACCOUNT_ID)).toBeInstanceOf(
-      CouldNotFindAccountError,
+      CouldNotFindAccountFromIdError,
+    )
+  })
+
+  it("refuses an account that held no npub", async () => {
+    // `$unset` on a document without the field is a no-op that still matches on
+    // `_id`, so the write itself reports success. Support pastes the wrong
+    // account id, is told the key is free, and sends the customer off to
+    // re-link — where `setNpub` refuses them because the squatter still has it.
+    findOneAndUpdate.mockResolvedValue(accountRecord)
+
+    expect(await AccountsRepository().unsetNpub(ACCOUNT_ID)).toBeInstanceOf(
+      NoNpubToReleaseError,
+    )
+  })
+})
+
+describe("AccountsRepository.claimNpub", () => {
+  beforeEach(() => {
+    findOneAndUpdate.mockReset()
+  })
+
+  it("sets the key on the receiving account", async () => {
+    findOneAndUpdate.mockResolvedValue({ ...accountRecord, npub: NPUB })
+
+    const result = await AccountsRepository().claimNpub(ACCOUNT_ID, NPUB)
+
+    expect(findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: ACCOUNT_ID },
+      { $set: { npub: NPUB } },
+      { new: true },
+    )
+    expect((result as Account).npub).toBe(NPUB)
+  })
+
+  it("reports an unknown account", async () => {
+    findOneAndUpdate.mockResolvedValue(null)
+
+    expect(await AccountsRepository().claimNpub(ACCOUNT_ID, NPUB)).toBeInstanceOf(
+      CouldNotFindAccountFromIdError,
     )
   })
 })

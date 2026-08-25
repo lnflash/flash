@@ -3,10 +3,12 @@ import { OnboardingEarn } from "@config"
 import { AccountStatus } from "@domain/accounts"
 import {
   CouldNotFindAccountError,
+  CouldNotFindAccountFromIdError,
   CouldNotFindAccountFromKratosIdError,
   CouldNotFindAccountFromNpubError,
   CouldNotFindAccountFromUsernameError,
   CouldNotFindAccountFromUuidError,
+  NoNpubToReleaseError,
   RepositoryError,
 } from "@domain/errors"
 import { UsdDisplayCurrency } from "@domain/fiat"
@@ -100,14 +102,43 @@ export const AccountsRepository = (): IAccountsRepository => {
   // undefined keys from an update doc, so clearing the field takes an explicit
   // $unset — and the partial index only covers string npubs, so the released key
   // is immediately re-claimable by whoever actually holds the secret key.
+  //
+  // `new: false` is load-bearing. `$unset` against a document that never held an
+  // npub is a no-op that still matches on `_id`, so the post-update document is
+  // identical in both cases and the operator would be told a release happened
+  // when nothing was freed — then send the rightful owner off to re-link, where
+  // `setNpub` refuses them because the squatter still holds the key. The
+  // pre-update document is the only thing that can tell the two apart.
   const unsetNpub = async (accountId: AccountId): Promise<Account | RepositoryError> => {
+    try {
+      const before = await Account.findOneAndUpdate(
+        { _id: toObjectId<AccountId>(accountId) },
+        { $unset: { npub: "" } },
+        { new: false },
+      )
+      if (!before) return new CouldNotFindAccountFromIdError(accountId)
+      if (typeof before.npub !== "string") return new NoNpubToReleaseError(accountId)
+      return { ...translateToAccount(before), npub: undefined }
+    } catch (err) {
+      return parseRepositoryError(err)
+    }
+  }
+
+  // The reassignment half of a release. A targeted `$set` rather than a
+  // read-modify-write through `update`, so the unique partial index is the only
+  // thing that decides whether the claim lands: a concurrent claimant trips it
+  // and `parseRepositoryError` surfaces `DuplicateKeyForPersistError`.
+  const claimNpub = async (
+    accountId: AccountId,
+    npub: Npub,
+  ): Promise<Account | RepositoryError> => {
     try {
       const result = await Account.findOneAndUpdate(
         { _id: toObjectId<AccountId>(accountId) },
-        { $unset: { npub: "" } },
+        { $set: { npub } },
         { new: true },
       )
-      if (!result) return new CouldNotFindAccountError()
+      if (!result) return new CouldNotFindAccountFromIdError(accountId)
       return translateToAccount(result)
     } catch (err) {
       return parseRepositoryError(err)
@@ -316,6 +347,7 @@ export const AccountsRepository = (): IAccountsRepository => {
     findByUsername,
     findByNpub,
     unsetNpub,
+    claimNpub,
     update,
     transitionBridgeKycStatus,
     updateBridgeFields,

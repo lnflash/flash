@@ -28,6 +28,14 @@ enum AccountLevel {
 
 input AccountReleaseNpubInput {
   accountId: ID!
+  reassignToAccountId: ID
+}
+
+type AccountReleaseNpubPayload {
+  accountDetails: AuditedAccount
+  errors: [Error]
+  previousNpub: String
+  reassignedTo: AuditedAccount
 }
 
 enum AccountStatus {
@@ -433,7 +441,7 @@ type MerchantPayload {
 }
 
 type Mutation {
-  accountReleaseNpub(input: AccountReleaseNpubInput!): AccountDetailPayload!
+  accountReleaseNpub(input: AccountReleaseNpubInput!): AccountReleaseNpubPayload!
   accountUpdateLevel(input: AccountUpdateLevelInput!): AccountDetailPayload!
   accountUpdateStatus(input: AccountUpdateStatusInput!): AccountDetailPayload!
   businessDeleteMapInfo(input: BusinessDeleteMapInfoInput!): AccountDetailPayload!

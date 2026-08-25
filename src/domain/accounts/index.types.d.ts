@@ -80,7 +80,9 @@ type Account = {
   readonly uuid: AccountUuid
   readonly createdAt: Date
   username: Username
-  npub: Npub
+  // Optional: an account holds an npub only once it links one, and `releaseNpub`
+  // takes it back off.
+  npub?: Npub
   defaultWalletId: WalletId
   withdrawFee: Satoshis // TODO: make it optional. only save when not default value from yaml
   level: AccountLevel
@@ -197,6 +199,7 @@ interface IAccountsRepository {
   // listBusinessesForMap(): Promise<BusinessMapMarker[] | RepositoryError>
   findByNpub(npub: Npub): Promise<Account | RepositoryError>
   unsetNpub(accountId: AccountId): Promise<Account | RepositoryError>
+  claimNpub(accountId: AccountId, npub: Npub): Promise<Account | RepositoryError>
   update(account: Account): Promise<Account | RepositoryError>
 
   transitionBridgeKycStatus(
