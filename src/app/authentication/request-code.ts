@@ -2,10 +2,14 @@ import {
   TWILIO_ACCOUNT_SID,
   UNSECURE_DEFAULT_LOGIN_CODE,
   getGeetestConfig,
+  getSmsAuthUnsupportedCountries,
   getTestAccounts,
+  getWhatsAppAuthUnsupportedCountries,
 } from "@config"
 import { TestAccountsChecker } from "@domain/accounts/test-accounts-checker"
+import { isAuthChannelSupportedForCountry } from "@domain/authentication"
 import { PhoneAlreadyExistsError } from "@domain/authentication/errors"
+import { PhoneCountryNotAllowedError } from "@domain/users/errors"
 import { NotImplementedError } from "@domain/errors"
 import { RateLimitConfig } from "@domain/rate-limit"
 import { RateLimiterExceededError } from "@domain/rate-limit/errors"
@@ -15,6 +19,7 @@ import { AuthWithEmailPasswordlessService } from "@services/kratos"
 import { baseLogger } from "@services/logger"
 import { consumeLimiter } from "@services/rate-limit"
 import { TWILIO_ACCOUNT_TEST, TwilioClient } from "@services/twilio"
+import { parsePhoneNumberFromString } from "libphonenumber-js"
 
 export const requestPhoneCodeWithCaptcha = async ({
   phone,
@@ -64,6 +69,9 @@ export const requestPhoneCodeWithCaptcha = async ({
     return true
   }
 
+  const destinationOk = checkAuthCodeDestination({ phone, channel })
+  if (destinationOk instanceof Error) return destinationOk
+
   return TwilioClient().initiateVerify({ to: phone, channel })
 }
 
@@ -77,7 +85,7 @@ export const requestPhoneCodeForAuthedUser = async ({
   ip: IpAddress
   channel: ChannelType
   user: User
-}): Promise<true | PhoneProviderServiceError> => {
+}): Promise<true | PhoneProviderServiceError | PhoneCountryNotAllowedError> => {
   {
     const limitOk = await checkRequestCodeAttemptPerIpLimits(ip)
     if (limitOk instanceof Error) return limitOk
@@ -104,6 +112,9 @@ export const requestPhoneCodeForAuthedUser = async ({
   if (TestAccountsChecker(testAccounts).isPhoneValid(phone)) {
     return true
   }
+
+  const destinationOk = checkAuthCodeDestination({ phone, channel })
+  if (destinationOk instanceof Error) return destinationOk
 
   const verifyResp = await TwilioClient().initiateVerify({ to: phone, channel })
   if (!(verifyResp instanceof Error)) {
@@ -142,6 +153,30 @@ export const requestEmailCode = async ({
   if (flow instanceof Error) return flow
 
   return flow
+}
+
+// Rejects auth-code destinations before any Twilio spend. Countries are billed
+// per message whether or not a human is behind the request, so an unsupported
+// destination must never reach the provider.
+const checkAuthCodeDestination = ({
+  phone,
+  channel,
+}: {
+  phone: PhoneNumber
+  channel: ChannelType
+}): true | PhoneCountryNotAllowedError => {
+  const countryCode = parsePhoneNumberFromString(phone)?.country
+  if (countryCode === undefined) return new PhoneCountryNotAllowedError()
+
+  const supported = isAuthChannelSupportedForCountry({
+    countryCode: countryCode as CountryCode,
+    channel,
+    unsupportedSmsCountries: getSmsAuthUnsupportedCountries(),
+    unsupportedWhatsAppCountries: getWhatsAppAuthUnsupportedCountries(),
+  })
+  if (!supported) return new PhoneCountryNotAllowedError()
+
+  return true
 }
 
 const checkRequestCodeAttemptPerIpLimits = async (

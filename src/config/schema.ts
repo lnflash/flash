@@ -1,6 +1,39 @@
 import { AccountRoles, AccountStatus } from "@domain/accounts/primitives"
 import { WalletCurrency } from "@domain/shared"
 
+// Every country here sent us auth-code traffic with zero conversions over the
+// full Twilio retention window, and each was a source of the 2026-08-25
+// SMS-pumping attack. Countries with even one real signup (JM, US, NG, IN, GB,
+// CA, DE, GH, KY, BJ, RW, SD, CD, MV, BD, BE, UG, TT, ML, CO, SK) are absent by
+// design: this is a fraud control, not a market policy.
+const SMS_PUMPING_HIGH_RISK_COUNTRIES = [
+  "TR",
+  "UZ",
+  "RU",
+  "IL",
+  "AM",
+  "UA",
+  "TZ",
+  "EC",
+  "BY",
+  "ZM",
+  "MR",
+  "BA",
+  "TN",
+  "CI",
+  "BI",
+  "TG",
+  "VE",
+  "XK",
+  "GN",
+  "SL",
+  "SN",
+  "CM",
+  "MZ",
+  "CF",
+  "LB",
+]
+
 const displayCurrencyConfigSchema = {
   type: "object",
   properties: {
@@ -330,7 +363,7 @@ export const configSchema = {
           blockDuration: 10800,
         },
         requestCodePerIp: {
-          points: 16,
+          points: 8,
           duration: 3600,
           blockDuration: 86400,
         },
@@ -658,15 +691,20 @@ export const configSchema = {
         chanId: [],
       },
     },
+    // Destinations that produced auth-code traffic but never a single
+    // conversion, and are the origin of the 2026-08-25 SMS-pumping attack.
+    // Enforced server-side in requestPhoneCode*, not just hidden in the
+    // client's country picker. Drop a country from this list when Flash
+    // opens that market.
     smsAuthUnsupportedCountries: {
       type: "array",
       items: { type: "string" },
-      default: [],
+      default: SMS_PUMPING_HIGH_RISK_COUNTRIES,
     },
     whatsAppAuthUnsupportedCountries: {
       type: "array",
       items: { type: "string" },
-      default: [],
+      default: SMS_PUMPING_HIGH_RISK_COUNTRIES,
     },
     ibex: {
       type: "object",

@@ -35,6 +35,25 @@ export const getSupportedCountries = ({
   return countries
 }
 
+export const isAuthChannelSupportedForCountry = ({
+  countryCode,
+  channel,
+  unsupportedSmsCountries,
+  unsupportedWhatsAppCountries,
+}: {
+  countryCode: CountryCode
+  channel: ChannelType
+  unsupportedSmsCountries: CountryCode[]
+  unsupportedWhatsAppCountries: CountryCode[]
+}): boolean => {
+  const unsupportedCountries =
+    channel === ChannelType.Whatsapp
+      ? unsupportedWhatsAppCountries
+      : unsupportedSmsCountries
+
+  return !unsupportedCountries.includes(countryCode)
+}
+
 export const checkedToEmailCode = (code: string): EmailCode | ApplicationError => {
   if (!/^[0-9]{6}$/.test(code)) return new EmailCodeInvalidError()
   return code as EmailCode
