@@ -278,6 +278,7 @@ export const resetBlockedDestinationReporting = (): void => {
     blockedReportTimer = undefined
   }
   unhookShutdownFlush()
+  shuttingDown = false
 }
 
 // Counts that only exist in this map are lost on every rolling deploy, pod
@@ -290,10 +291,23 @@ export const resetBlockedDestinationReporting = (): void => {
 // fire-and-forget ops queue a bounded moment to land the summaries, and
 // re-raises. A telemetry flush is never allowed to be the reason a pod misses
 // its termination grace period.
+//
+// `shuttingDown` makes the hook a one-way latch, and that is load-bearing rather
+// than tidiness. Apollo's drain keeps existing keep-alive connections served
+// while it stops, so blocked requests keep arriving after SIGTERM — exactly the
+// flood the flush exists for. Without the latch, any coalesce landing in the
+// re-raise window calls scheduleBlockedReportFlush() → hookShutdownFlush() and
+// reinstalls the listener; the re-raised signal is then caught again, waits
+// another SHUTDOWN_FLUSH_TIMEOUT_MS, and re-raises again. Under a k8s 30s grace
+// period that is ~15 loops and then SIGKILL: in-flight requests dropped and the
+// counts lost anyway.
 const SHUTDOWN_SIGNALS: NodeJS.Signals[] = ["SIGTERM", "SIGINT"]
 const SHUTDOWN_FLUSH_TIMEOUT_MS = 2_000
 
+let shuttingDown = false
+
 const onShutdownSignal = (signal: NodeJS.Signals): void => {
+  shuttingDown = true
   unhookShutdownFlush()
   flushBlockedDestinationReports()
 
@@ -310,7 +324,7 @@ const onShutdownSignal = (signal: NodeJS.Signals): void => {
 let shutdownFlushHooked = false
 
 const hookShutdownFlush = (): void => {
-  if (shutdownFlushHooked) return
+  if (shuttingDown || shutdownFlushHooked) return
   shutdownFlushHooked = true
   for (const signal of SHUTDOWN_SIGNALS) process.on(signal, onShutdownSignal)
 }

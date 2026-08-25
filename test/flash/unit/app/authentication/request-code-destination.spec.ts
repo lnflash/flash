@@ -622,6 +622,38 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
 
           expect(process.listenerCount("SIGTERM")).toBe(before)
         })
+
+        // Apollo's drain keeps existing keep-alive connections served while it
+        // stops, so blocked requests keep arriving after SIGTERM — a flood is
+        // the only time this flush is worth having. Re-arming the hook there
+        // would make the re-raised signal be caught again, wait the flush
+        // timeout again and re-raise again: ~15 loops inside a 30s k8s grace
+        // period, then SIGKILL with in-flight requests dropped and the counts
+        // lost anyway. The hook is a one-way latch.
+        it("does not re-arm when a block lands after the signal", async () => {
+          mockSmsBlocked.mockReturnValue(["UZ"])
+          const killSpy = jest.spyOn(process, "kill").mockImplementation(() => true)
+
+          try {
+            for (let i = 0; i < 3; i++) await requestCode(UZBEKISTAN, "sms")
+
+            process.emit("SIGTERM", "SIGTERM")
+            await new Promise((resolve) => setImmediate(resolve))
+            expect(process.listenerCount("SIGTERM")).toBe(0)
+
+            // The drain window: more blocked traffic, still coalescing.
+            for (let i = 0; i < 5; i++) await requestCode(UZBEKISTAN, "sms")
+
+            expect(process.listenerCount("SIGTERM")).toBe(0)
+
+            // And so the signal is handed back exactly once.
+            process.emit("SIGTERM", "SIGTERM")
+            await new Promise((resolve) => setImmediate(resolve))
+            expect(killSpy).toHaveBeenCalledTimes(1)
+          } finally {
+            killSpy.mockRestore()
+          }
+        })
       })
 
       it("pages a new attack origin immediately even mid-flood", async () => {

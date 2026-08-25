@@ -504,8 +504,11 @@ export const reportAmbiguousBlockedCountries = (
     try {
       callingCode = getCountryCallingCode(code as Region)
     } catch {
-      // Not a region libphonenumber knows (XK, say). It can never be a parsed
-      // number's region, so it cannot widen a candidate set either.
+      // Not a region libphonenumber knows. The list is operator-editable via
+      // the configmap, so a typo or a non-region code (ZZ, say) must be skipped
+      // rather than thrown: such a code can never be a parsed number's region,
+      // so it cannot widen a candidate set either. Note XK does NOT land here —
+      // libphonenumber resolves it to +383.
       continue
     }
 

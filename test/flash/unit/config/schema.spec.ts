@@ -68,8 +68,10 @@ describe("config schema", () => {
         try {
           return getCountryCallingCode(code as Region)
         } catch {
-          // Not a region libphonenumber knows (XK). It can never be a parsed
-          // number's region, so it cannot widen a candidate set either.
+          // Not a region libphonenumber knows. It can never be a parsed
+          // number's region, so it cannot widen a candidate set either. (XK is
+          // not such a code — it resolves to +383 — but a future list entry
+          // could be, and this assertion must not turn into a throw.)
           return undefined
         }
       }

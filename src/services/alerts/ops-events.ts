@@ -185,5 +185,13 @@ export const notifyOpsEvent = (event: OpsEvent): void => {
   }
 }
 
-/** Resolves once the delivery queue is idle. Intended for tests. */
+/**
+ * Resolves once the delivery queue is idle.
+ *
+ * This is the drain barrier for graceful shutdown as well as for tests: the
+ * SIGTERM handler in src/app/authentication/request-code.ts races it against a
+ * bounded timeout so the coalesced blocked-destination summaries actually reach
+ * Discord before the pod exits. It must keep returning the in-flight `draining`
+ * promise — resolving eagerly would silently turn that flush into a no-op.
+ */
 export const opsEventsSettled = (): Promise<void> => draining ?? Promise.resolve()

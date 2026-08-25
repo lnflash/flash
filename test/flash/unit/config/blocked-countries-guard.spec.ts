@@ -79,11 +79,26 @@ describe("reportAmbiguousBlockedCountries", () => {
     )
   })
 
-  // XK (Kosovo) is on the seeded list and is not a region libphonenumber knows.
+  // The seeded list is operator-editable via the configmap, so an entry that is
+  // not a region at all has to be survivable: getCountryCallingCode throws on
+  // it, and an unhandled throw here would wedge every pod in a crash loop.
+  // ZZ is the CLDR "unknown region" code and libphonenumber has no metadata for
+  // it, so it is what actually reaches the catch.
   it("skips a code libphonenumber cannot resolve instead of throwing", () => {
     expect(() =>
-      reportAmbiguousBlockedCountries("smsAuthBlockedCountries", ["XK"]),
+      reportAmbiguousBlockedCountries("smsAuthBlockedCountries", ["ZZ"]),
     ).not.toThrow()
+    expect(baseLogger.error).not.toHaveBeenCalled()
+    expect(baseLogger.warn).not.toHaveBeenCalled()
+  })
+
+  // XK (Kosovo) is on the seeded list and, contrary to what one might assume, is
+  // a region libphonenumber knows: it resolves to +383 and is the sole region on
+  // that calling code. It is therefore silent by the no-unblocked-sibling check,
+  // not by the catch above — blocking it costs no collateral.
+  it("says nothing for XK, the sole region on +383", () => {
+    reportAmbiguousBlockedCountries("smsAuthBlockedCountries", ["XK"])
+
     expect(baseLogger.error).not.toHaveBeenCalled()
     expect(baseLogger.warn).not.toHaveBeenCalled()
   })
