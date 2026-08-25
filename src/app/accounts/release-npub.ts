@@ -40,8 +40,11 @@ export type NpubRelease = {
  * that recovering it means finding its current holder with
  * `accountDetailsByNpub` and releasing it from there. The target is read and
  * checked before the release so that everything knowable up front fails before
- * the key is freed; the unique partial index is what guarantees the
- * reassignment cannot collide.
+ * the key is freed; the unique partial index guarantees the reassignment
+ * cannot collide with a concurrent claim of the same key, and `claimNpub`'s
+ * own write-time filter refuses a target that linked a different key after the
+ * pre-release check — surfaced as `AccountAlreadyHasNpubError` in
+ * `reassignmentError`, never a silent overwrite of the target's key.
  *
  * `releasedByUserId` is the whole attribution trail. Neither the account
  * document nor the payload retains the npub that was removed, and the admin

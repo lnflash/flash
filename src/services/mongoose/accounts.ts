@@ -12,6 +12,7 @@ import {
   RepositoryError,
 } from "@domain/errors"
 import { UsdDisplayCurrency } from "@domain/fiat"
+import { AccountAlreadyHasNpubError } from "@domain/nostr"
 
 import { Account } from "@services/mongoose/schema"
 
@@ -138,19 +139,39 @@ export const AccountsRepository = (): IAccountsRepository => {
 
   // The reassignment half of a release. A targeted `$set` rather than a
   // read-modify-write through `update`, so the unique partial index is the only
-  // thing that decides whether the claim lands: a concurrent claimant trips it
-  // and `parseRepositoryError` surfaces `DuplicateKeyForPersistError`.
+  // thing that decides whether the claim lands on the key side: a concurrent
+  // claimant of the same npub trips it and `parseRepositoryError` surfaces
+  // `DuplicateKeyForPersistError`.
+  //
+  // The filter guards the target side. The caller checks the target holds no
+  // npub before releasing, but that check is a read from before the release
+  // round-trip: if the target links a different key via `userUpdateNpub` in
+  // that window, an unguarded `$set` would silently overwrite the just-claimed
+  // key — which becomes unclaimed with no log line saying so. The unique index
+  // cannot catch this: it prevents duplicates, not overwrites. `$not:
+  // { $type: "string" }` rather than `$exists: false` because legacy documents
+  // predating the partial index hold an explicit `npub: null`, which is not a
+  // claim and must not block a reassignment.
+  //
+  // A no-match is ambiguous between "no such account" and "account claimed a
+  // key since the caller checked", so one follow-up read disambiguates. The
+  // claim did not land in either case, so a stale answer from that read still
+  // reports a refusal — the conservative outcome.
   const claimNpub = async (
     accountId: AccountId,
     npub: Npub,
-  ): Promise<Account | RepositoryError> => {
+  ): Promise<Account | RepositoryError | AccountAlreadyHasNpubError> => {
     try {
       const result = await Account.findOneAndUpdate(
-        { _id: toObjectId<AccountId>(accountId) },
+        { _id: toObjectId<AccountId>(accountId), npub: { $not: { $type: "string" } } },
         { $set: { npub } },
         { new: true },
       )
-      if (!result) return new CouldNotFindAccountFromIdError(accountId)
+      if (!result) {
+        const existing = await Account.findOne({ _id: toObjectId<AccountId>(accountId) })
+        if (!existing) return new CouldNotFindAccountFromIdError(accountId)
+        return new AccountAlreadyHasNpubError(accountId)
+      }
       return translateToAccount(result)
     } catch (err) {
       return parseRepositoryError(err)

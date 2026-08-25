@@ -1,6 +1,7 @@
 /**
- * `Accounts.findByNpub` is the twin of `Admin.getAccountByNpub` but never got
- * the same normalisation. Once the case-insensitive collation came off the
+ * `Accounts.findByNpub` is the one implementation behind both this name and
+ * `Admin.getAccountByNpub`, which re-exports it. It never had the normalisation
+ * the admin path did; once the case-insensitive collation came off the
  * repository query, normalising here stopped being optional.
  */
 const findByNpub = jest.fn()

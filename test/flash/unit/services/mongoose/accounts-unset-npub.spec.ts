@@ -1,10 +1,15 @@
 import { CouldNotFindAccountFromIdError, NoNpubToReleaseError } from "@domain/errors"
+import { AccountAlreadyHasNpubError } from "@domain/nostr"
 import { AccountsRepository } from "@services/mongoose/accounts"
 
 const findOneAndUpdate = jest.fn()
+const findOne = jest.fn()
 
 jest.mock("@services/mongoose/schema", () => ({
-  Account: { findOneAndUpdate: (...args: unknown[]) => findOneAndUpdate(...args) },
+  Account: {
+    findOneAndUpdate: (...args: unknown[]) => findOneAndUpdate(...args),
+    findOne: (...args: unknown[]) => findOne(...args),
+  },
 }))
 
 jest.mock("@services/mongoose/utils", () => ({
@@ -89,15 +94,22 @@ describe("AccountsRepository.unsetNpub", () => {
 describe("AccountsRepository.claimNpub", () => {
   beforeEach(() => {
     findOneAndUpdate.mockReset()
+    findOne.mockReset()
   })
 
-  it("sets the key on the receiving account", async () => {
+  it("sets the key only on an account that holds none", async () => {
     findOneAndUpdate.mockResolvedValue({ ...accountRecord, npub: NPUB })
 
     const result = await AccountsRepository().claimNpub(ACCOUNT_ID, NPUB)
 
+    // The npub guard in the filter is the write-time re-check: the caller's
+    // "target holds no npub" read happens before the release round-trip, so a
+    // key the target claims in that window must fail the match rather than be
+    // silently overwritten. `$not: { $type: "string" }` and not
+    // `$exists: false`, because legacy documents hold `npub: null`, which is
+    // not a claim.
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: ACCOUNT_ID },
+      { _id: ACCOUNT_ID, npub: { $not: { $type: "string" } } },
       { $set: { npub: NPUB } },
       { new: true },
     )
@@ -106,9 +118,22 @@ describe("AccountsRepository.claimNpub", () => {
 
   it("reports an unknown account", async () => {
     findOneAndUpdate.mockResolvedValue(null)
+    findOne.mockResolvedValue(null)
 
     expect(await AccountsRepository().claimNpub(ACCOUNT_ID, NPUB)).toBeInstanceOf(
       CouldNotFindAccountFromIdError,
+    )
+  })
+
+  it("refuses to overwrite a key the account claimed concurrently", async () => {
+    // The unique index cannot catch this case — it prevents duplicates, not
+    // overwrites. Without the filter guard, the $set would land, the target's
+    // just-claimed key would become unclaimed, and nothing would log it.
+    findOneAndUpdate.mockResolvedValue(null)
+    findOne.mockResolvedValue({ ...accountRecord, npub: `npub1${"z".repeat(58)}` })
+
+    expect(await AccountsRepository().claimNpub(ACCOUNT_ID, NPUB)).toBeInstanceOf(
+      AccountAlreadyHasNpubError,
     )
   })
 })

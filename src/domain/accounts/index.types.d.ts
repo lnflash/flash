@@ -208,7 +208,14 @@ interface IAccountsRepository {
   // listBusinessesForMap(): Promise<BusinessMapMarker[] | RepositoryError>
   findByNpub(npub: Npub): Promise<Account | RepositoryError>
   unsetNpub(accountId: AccountId): Promise<NpubUnset | RepositoryError>
-  claimNpub(accountId: AccountId, npub: Npub): Promise<Account | RepositoryError>
+  // `AccountAlreadyHasNpubError` in the union is the write-time guard: the
+  // caller's "target holds no npub" check is a read from before the release,
+  // and a key the target claims in that window must refuse the reassignment
+  // rather than be silently overwritten.
+  claimNpub(
+    accountId: AccountId,
+    npub: Npub,
+  ): Promise<Account | RepositoryError | AccountAlreadyHasNpubError>
   update(account: Account): Promise<Account | RepositoryError>
 
   transitionBridgeKycStatus(

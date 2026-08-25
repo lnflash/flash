@@ -1,8 +1,11 @@
 /**
- * `Admin.getAccountByNpub` is the only genuinely new app-layer code behind the
- * admin npub lookup, and it was previously reachable only through a mocked
- * `@app` barrel — i.e. not covered at all. Here the repository is the mock and
- * the app function is real.
+ * `Admin.getAccountByNpub` is the admin barrel's name for `Accounts.findByNpub`
+ * — a re-export, not a second implementation, so a fix cannot land in one and
+ * not the other. The import path here is deliberately the admin module rather
+ * than the accounts one: it is what proves the re-export is actually wired, so
+ * the behaviour the admin GraphQL resolver depends on stays covered even though
+ * the code lives elsewhere. The repository is the mock and the app function is
+ * real.
  */
 const findByNpub = jest.fn()
 

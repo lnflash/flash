@@ -1,19 +1,8 @@
-import { checkedToNpub } from "@domain/nostr"
-import { AccountsRepository } from "@services/mongoose"
-
 /**
- * Lives in its own module rather than inline in `index.ts` so it can be unit
- * tested against a mocked repository — importing the admin barrel drags in the
- * notification and invite stacks, which open connections at import time.
+ * `Admin.getAccountByNpub` is `Accounts.findByNpub` under the admin barrel's
+ * name — same validation, same normalisation rationale, same repository call.
+ * A re-export rather than a copy so a fix (e.g. a bech32 validation upgrade)
+ * cannot land in one and not the other. The admin unit spec stays pointed at
+ * this module so registration coverage of the re-export survives.
  */
-export const getAccountByNpub = async (npub: Npub) => {
-  // Mirrors getAccountByUsername: the branded type is the contract, and
-  // checkedToNpub is defence in depth for callers that are not the GraphQL
-  // boundary (scripts, backfills, a future REST shim) — they get a validation
-  // error rather than a silent not-found on a malformed value.
-  const npubValid = checkedToNpub(npub)
-  if (npubValid instanceof Error) return npubValid
-
-  const accounts = AccountsRepository()
-  return accounts.findByNpub(npubValid)
-}
+export { findByNpub as getAccountByNpub } from "@app/accounts/find-by-npub"

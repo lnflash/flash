@@ -352,6 +352,25 @@ describe("Accounts.releaseNpub", () => {
           reassignmentError: expect.any(UnknownRepositoryError),
         })
       })
+
+      it("reports a target that claimed a different key after the pre-release check", async () => {
+        // The "target holds no npub" check above is a read from before the
+        // release round-trip. If the target links a different key via
+        // `userUpdateNpub` in that window, `claimNpub`'s write-time filter
+        // refuses rather than silently overwriting the just-claimed key — and
+        // the refusal must reach the operator as a reassignment failure on an
+        // otherwise-landed release, not vanish.
+        claimNpub.mockResolvedValue(new AccountAlreadyHasNpubError(TARGET_ACCOUNT_ID))
+
+        const result = await release({ reassignToAccountId: TARGET_ACCOUNT_ID })
+
+        expect(result).not.toBeInstanceOf(Error)
+        expect(result).toMatchObject({
+          previousNpub: NPUB,
+          reassignmentError: expect.any(AccountAlreadyHasNpubError),
+        })
+        expect(result).not.toMatchObject({ reassignedTo: expect.anything() })
+      })
     })
   })
 })
