@@ -36,6 +36,7 @@ jest.mock("@config", () => {
     getOnChainAddressCreateAttemptLimits: jest.fn(() => limits),
     getRequestCodePerIpLimits: jest.fn(() => limits),
     getRequestCodePerLoginIdentifierLimits: jest.fn(() => limits),
+    getRequestCodeBlockedCountryPerIpLimits: jest.fn(() => limits),
     getSmsAuthUnsupportedCountries: jest.fn(() => []),
     getWhatsAppAuthUnsupportedCountries: jest.fn(() => []),
     getAccountsOnboardConfig: jest.fn(() => ({

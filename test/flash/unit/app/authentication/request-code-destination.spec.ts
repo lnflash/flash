@@ -2,7 +2,9 @@ const mockInitiateVerify = jest.fn()
 const mockGeetestValidate = jest.fn()
 const mockSmsUnsupported = jest.fn(() => [] as string[])
 const mockWhatsAppUnsupported = jest.fn(() => [] as string[])
-const mockFindByPhone = jest.fn()
+const mockGetUserIdFromIdentifier = jest.fn()
+const mockConsumeLimiter = jest.fn()
+const mockRewardLimiter = jest.fn()
 
 jest.mock("@config", () => {
   const limits = { points: 100, duration: 60, blockDuration: 60 }
@@ -22,6 +24,11 @@ jest.mock("@config", () => {
     getOnChainAddressCreateAttemptLimits: jest.fn(() => limits),
     getRequestCodePerIpLimits: jest.fn(() => limits),
     getRequestCodePerLoginIdentifierLimits: jest.fn(() => limits),
+    getRequestCodeBlockedCountryPerIpLimits: jest.fn(() => ({
+      points: 2,
+      duration: 3600,
+      blockDuration: 86400,
+    })),
     getSmsAuthUnsupportedCountries: () => mockSmsUnsupported(),
     getWhatsAppAuthUnsupportedCountries: () => mockWhatsAppUnsupported(),
   }
@@ -35,7 +42,12 @@ jest.mock("@services/geetest", () => ({
 }))
 
 jest.mock("@services/rate-limit", () => ({
-  consumeLimiter: jest.fn(async () => true),
+  consumeLimiter: (...args: unknown[]) => mockConsumeLimiter(...args),
+  RedisRateLimitService: jest.fn(() => ({
+    consume: jest.fn(async () => true),
+    reset: jest.fn(async () => true),
+    reward: (...args: unknown[]) => mockRewardLimiter(...args),
+  })),
 }))
 
 jest.mock("@services/twilio", () => ({
@@ -53,24 +65,26 @@ jest.mock("@services/kratos", () => ({
   AuthWithEmailPasswordlessService: jest.fn(() => ({
     sendEmailWithCode: jest.fn(),
   })),
+  IdentityRepository: jest.fn(() => ({
+    getUserIdFromIdentifier: (...args: unknown[]) => mockGetUserIdFromIdentifier(...args),
+  })),
 }))
 
 jest.mock("@services/logger", () => ({
   baseLogger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }))
 
-jest.mock("@services/mongoose", () => ({
-  UsersRepository: jest.fn(() => ({
-    findByPhone: (...args: unknown[]) => mockFindByPhone(...args),
-  })),
-}))
-
 import {
+  flushBlockedDestinationReports,
   requestPhoneCodeForAuthedUser,
   requestPhoneCodeWithCaptcha,
+  resetBlockedDestinationReporting,
 } from "@app/authentication/request-code"
+import { IdentifierNotFoundError } from "@domain/authentication/errors"
 import { PhoneCountryNotAllowedError } from "@domain/users/errors"
 import { InvalidPhoneNumber } from "@domain/errors"
+import { RateLimitPrefix } from "@domain/rate-limit"
+import { UserCodeAttemptBlockedCountryIpRateLimiterExceededError } from "@domain/rate-limit/errors"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
 import { baseLogger } from "@services/logger"
 
@@ -90,18 +104,38 @@ const requestCode = (phone: string, channel: string) =>
 
 const JAMAICA = "+18761234567"
 const UZBEKISTAN = "+998901234567"
+const TURKEY = "+905321234567"
 
-class CouldNotFindUserFromPhoneError extends Error {}
+class UnknownKratosError extends Error {}
+
+// The blocked-country probe budget is a distinct bucket from the per-IP
+// request-code budget; only the former is exhausted here.
+const exhaustProbeBudget = () =>
+  mockConsumeLimiter.mockImplementation(
+    async ({ rateLimitConfig }: { rateLimitConfig: { key: string } }) =>
+      rateLimitConfig.key === RateLimitPrefix.requestCodeBlockedCountryPerIp
+        ? new UserCodeAttemptBlockedCountryIpRateLimiterExceededError()
+        : true,
+  )
+
+const resetMocks = () => {
+  jest.clearAllMocks()
+  resetBlockedDestinationReporting()
+  mockInitiateVerify.mockResolvedValue(true)
+  mockSmsUnsupported.mockReturnValue([])
+  mockWhatsAppUnsupported.mockReturnValue([])
+  mockConsumeLimiter.mockImplementation(async () => true)
+  mockRewardLimiter.mockResolvedValue(true)
+  mockGetUserIdFromIdentifier.mockResolvedValue(new IdentifierNotFoundError())
+}
 
 describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
   beforeEach(() => {
-    jest.clearAllMocks()
+    resetMocks()
     mockGeetestValidate.mockResolvedValue(true)
-    mockInitiateVerify.mockResolvedValue(true)
-    mockSmsUnsupported.mockReturnValue([])
-    mockWhatsAppUnsupported.mockReturnValue([])
-    mockFindByPhone.mockResolvedValue(new CouldNotFindUserFromPhoneError())
   })
+
+  afterAll(resetBlockedDestinationReporting)
 
   it("sends to a supported country", async () => {
     const result = await requestCode(JAMAICA, "sms")
@@ -175,7 +209,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
   // existing account out of its own login code.
   it("still sends to an existing user in a blocked country", async () => {
     mockSmsUnsupported.mockReturnValue(["UZ"])
-    mockFindByPhone.mockResolvedValue({ id: "user-id" })
+    mockGetUserIdFromIdentifier.mockResolvedValue("user-id")
 
     const result = await requestCode(UZBEKISTAN, "sms")
 
@@ -184,17 +218,118 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
       to: UZBEKISTAN,
       channel: "sms",
     })
-    expect(notifyOpsEvent).not.toHaveBeenCalled()
   })
 
-  it("fails closed when the user lookup errors", async () => {
+  // Whether a number can log in is decided by Kratos, and the Mongo user doc is
+  // written afterwards by a webhook that can fail. Asking Mongo would refuse a
+  // login code to an account that logs in fine today.
+  it("still sends when Kratos knows the number and Mongo does not", async () => {
     mockSmsUnsupported.mockReturnValue(["UZ"])
-    mockFindByPhone.mockResolvedValue(new Error("mongo down"))
+    // No Mongo user record exists at all — the identity is the only evidence.
+    mockGetUserIdFromIdentifier.mockResolvedValue("kratos-only-user-id")
+
+    const result = await requestCode(UZBEKISTAN, "sms")
+
+    expect(mockGetUserIdFromIdentifier).toHaveBeenCalledWith(UZBEKISTAN)
+    expect(result).toBe(true)
+    expect(mockInitiateVerify).toHaveBeenCalledWith({
+      to: UZBEKISTAN,
+      channel: "sms",
+    })
+  })
+
+  it("blocks a number Kratos has never seen", async () => {
+    mockSmsUnsupported.mockReturnValue(["UZ"])
+    mockGetUserIdFromIdentifier.mockResolvedValue(new IdentifierNotFoundError())
 
     const result = await requestCode(UZBEKISTAN, "sms")
 
     expect(result).toBeInstanceOf(PhoneCountryNotAllowedError)
     expect(mockInitiateVerify).not.toHaveBeenCalled()
+  })
+
+  it("fails closed when the identity lookup errors", async () => {
+    mockSmsUnsupported.mockReturnValue(["UZ"])
+    mockGetUserIdFromIdentifier.mockResolvedValue(new UnknownKratosError("kratos down"))
+
+    const result = await requestCode(UZBEKISTAN, "sms")
+
+    expect(result).toBeInstanceOf(PhoneCountryNotAllowedError)
+    expect(mockInitiateVerify).not.toHaveBeenCalled()
+  })
+
+  // The carve-out answers "does this number hold an account" for free, so it
+  // needs a budget of its own — the per-IP request-code budget is far too
+  // generous to bound an enumeration sweep that costs the attacker nothing.
+  describe("existence-probe budget", () => {
+    it("blocks an existing user's number once the probe budget is spent", async () => {
+      mockSmsUnsupported.mockReturnValue(["UZ"])
+      mockGetUserIdFromIdentifier.mockResolvedValue("user-id")
+      exhaustProbeBudget()
+
+      const result = await requestCode(UZBEKISTAN, "sms")
+
+      // Same response as any other blocked number: no oracle.
+      expect(result).toBeInstanceOf(PhoneCountryNotAllowedError)
+      expect(mockInitiateVerify).not.toHaveBeenCalled()
+    })
+
+    it("spends the budget before the lookup, so a sweep cannot probe past it", async () => {
+      mockSmsUnsupported.mockReturnValue(["UZ"])
+      exhaustProbeBudget()
+
+      await requestCode(UZBEKISTAN, "sms")
+
+      expect(mockConsumeLimiter).toHaveBeenCalledWith(
+        expect.objectContaining({
+          rateLimitConfig: expect.objectContaining({
+            key: RateLimitPrefix.requestCodeBlockedCountryPerIp,
+          }),
+          keyToConsume: "1.2.3.4",
+        }),
+      )
+      expect(mockGetUserIdFromIdentifier).not.toHaveBeenCalled()
+    })
+
+    it("reports a burnt-out probe budget as its own phase", async () => {
+      mockSmsUnsupported.mockReturnValue(["UZ"])
+      exhaustProbeBudget()
+
+      await requestCode(UZBEKISTAN, "sms")
+
+      expect(notifyOpsEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ phase: "destination-blocked-probe-limit" }),
+      )
+    })
+
+    it("refunds the point for a confirmed account, so a real user is never spent out", async () => {
+      mockSmsUnsupported.mockReturnValue(["UZ"])
+      mockGetUserIdFromIdentifier.mockResolvedValue("user-id")
+
+      await requestCode(UZBEKISTAN, "sms")
+
+      expect(mockRewardLimiter).toHaveBeenCalledWith("1.2.3.4")
+    })
+
+    it("does not refund a number that holds no account", async () => {
+      mockSmsUnsupported.mockReturnValue(["UZ"])
+
+      await requestCode(UZBEKISTAN, "sms")
+
+      expect(mockRewardLimiter).not.toHaveBeenCalled()
+    })
+
+    it("never touches the probe budget for a supported country", async () => {
+      await requestCode(JAMAICA, "sms")
+
+      expect(mockConsumeLimiter).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          rateLimitConfig: expect.objectContaining({
+            key: RateLimitPrefix.requestCodeBlockedCountryPerIp,
+          }),
+        }),
+      )
+    })
   })
 
   describe("telemetry", () => {
@@ -235,6 +370,122 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
       expect(notifyOpsEvent).not.toHaveBeenCalled()
       expect(baseLogger.warn).not.toHaveBeenCalled()
     })
+
+    // The block list is meant to be tuned by watching this feed for real
+    // traffic. If the carve-out — which is exactly the real users — reported
+    // nothing, the feed could only ever say "no real users here".
+    it("reports a carve-out so served real users are visible in the feed", async () => {
+      mockSmsUnsupported.mockReturnValue(["UZ"])
+      mockGetUserIdFromIdentifier.mockResolvedValue("user-id")
+
+      await requestCode(UZBEKISTAN, "sms")
+
+      expect(notifyOpsEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          flow: "verification",
+          phase: "destination-blocked-existing-user",
+          status: "pending",
+          phone: UZBEKISTAN,
+          meta: expect.objectContaining({ country: "UZ", channel: "sms" }),
+        }),
+      )
+    })
+
+    // notifyOpsEvent feeds one 50-slot FIFO shared with cashout/deposit/etc.
+    // that drops its OLDEST entries: an embed per rejection would evict the
+    // rest of the ops feed during the very incident this telemetry is for.
+    describe("coalescing", () => {
+      it("pages immediately on the first rejection of a country", async () => {
+        mockSmsUnsupported.mockReturnValue(["UZ"])
+
+        await requestCode(UZBEKISTAN, "sms")
+
+        expect(notifyOpsEvent).toHaveBeenCalledTimes(1)
+      })
+
+      it("emits nothing more for the rest of the window", async () => {
+        mockSmsUnsupported.mockReturnValue(["UZ"])
+
+        for (let i = 0; i < 20; i++) await requestCode(UZBEKISTAN, "sms")
+
+        expect(baseLogger.warn).toHaveBeenCalledTimes(20)
+        expect(notifyOpsEvent).toHaveBeenCalledTimes(1)
+      })
+
+      it("flushes the rest as one counted summary", async () => {
+        mockSmsUnsupported.mockReturnValue(["UZ"])
+
+        for (let i = 0; i < 20; i++) await requestCode(UZBEKISTAN, "sms")
+        flushBlockedDestinationReports()
+
+        expect(notifyOpsEvent).toHaveBeenCalledTimes(2)
+        expect(notifyOpsEvent).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            phase: "destination-blocked",
+            meta: expect.objectContaining({ country: "UZ", count: "19" }),
+          }),
+        )
+      })
+
+      it("pages a new attack origin immediately even mid-flood", async () => {
+        mockSmsUnsupported.mockReturnValue(["UZ", "TR"])
+
+        for (let i = 0; i < 20; i++) await requestCode(UZBEKISTAN, "sms")
+        ;(notifyOpsEvent as jest.Mock).mockClear()
+
+        await requestCode(TURKEY, "sms")
+
+        expect(notifyOpsEvent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            phase: "destination-blocked",
+            meta: expect.objectContaining({ country: "TR" }),
+          }),
+        )
+      })
+
+      it("counts each country separately", async () => {
+        mockSmsUnsupported.mockReturnValue(["UZ", "TR"])
+
+        for (let i = 0; i < 3; i++) await requestCode(UZBEKISTAN, "sms")
+        for (let i = 0; i < 5; i++) await requestCode(TURKEY, "sms")
+        ;(notifyOpsEvent as jest.Mock).mockClear()
+        flushBlockedDestinationReports()
+
+        const counts = (notifyOpsEvent as jest.Mock).mock.calls.map(
+          ([event]) => `${event.meta.country}:${event.meta.count}`,
+        )
+        expect(counts.sort()).toEqual(["TR:4", "UZ:2"])
+      })
+
+      it("drains its pending summaries, so a flush emits nothing twice", async () => {
+        mockSmsUnsupported.mockReturnValue(["UZ"])
+
+        for (let i = 0; i < 3; i++) await requestCode(UZBEKISTAN, "sms")
+        flushBlockedDestinationReports()
+        ;(notifyOpsEvent as jest.Mock).mockClear()
+        flushBlockedDestinationReports()
+
+        expect(notifyOpsEvent).not.toHaveBeenCalled()
+      })
+
+      it("coalesces the carve-out on the same terms", async () => {
+        mockSmsUnsupported.mockReturnValue(["UZ"])
+        mockGetUserIdFromIdentifier.mockResolvedValue("user-id")
+
+        for (let i = 0; i < 4; i++) await requestCode(UZBEKISTAN, "sms")
+        expect(notifyOpsEvent).toHaveBeenCalledTimes(1)
+
+        flushBlockedDestinationReports()
+
+        expect(notifyOpsEvent).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            phase: "destination-blocked-existing-user",
+            status: "pending",
+            meta: expect.objectContaining({ country: "UZ", count: "3" }),
+          }),
+        )
+      })
+    })
   })
 })
 
@@ -249,13 +500,9 @@ describe("requestPhoneCodeForAuthedUser — destination country gate", () => {
       user,
     })
 
-  beforeEach(() => {
-    jest.clearAllMocks()
-    mockInitiateVerify.mockResolvedValue(true)
-    mockSmsUnsupported.mockReturnValue([])
-    mockWhatsAppUnsupported.mockReturnValue([])
-    mockFindByPhone.mockResolvedValue(new CouldNotFindUserFromPhoneError())
-  })
+  beforeEach(resetMocks)
+
+  afterAll(resetBlockedDestinationReporting)
 
   it("sends to a supported country", async () => {
     const result = await requestForAuthedUser(JAMAICA, "sms")
@@ -309,12 +556,12 @@ describe("requestPhoneCodeForAuthedUser — destination country gate", () => {
   // record for it must not open a hole in the gate.
   it("has no existing-user carve-out", async () => {
     mockSmsUnsupported.mockReturnValue(["UZ"])
-    mockFindByPhone.mockResolvedValue({ id: "someone-else" })
+    mockGetUserIdFromIdentifier.mockResolvedValue("someone-else")
 
     const result = await requestForAuthedUser(UZBEKISTAN, "sms")
 
     expect(result).toBeInstanceOf(PhoneCountryNotAllowedError)
-    expect(mockFindByPhone).not.toHaveBeenCalled()
+    expect(mockGetUserIdFromIdentifier).not.toHaveBeenCalled()
     expect(mockInitiateVerify).not.toHaveBeenCalled()
   })
 })

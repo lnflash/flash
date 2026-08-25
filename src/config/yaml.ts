@@ -203,6 +203,24 @@ export const getRequestCodePerLoginIdentifierLimits = () =>
 export const getRequestCodePerIpLimits = () =>
   getRateLimits(yamlConfig.rateLimits.requestCodePerIp)
 
+/**
+ * Auth-code requests for a country whose destinations we refuse to pay for,
+ * per IP.
+ *
+ * The country gate rejects these before any provider spend, which is the point
+ * — but it also means probing costs the attacker nothing, and the existing-user
+ * carve-out makes the response differ by whether the number holds an account.
+ * That is an account-existence oracle, and the per-IP request-code budget (8/h)
+ * is far too generous to bound it. Deliberately tiny: a real customer abroad
+ * asks for a code once or twice, and a confirmed account refunds its point, so
+ * only sweeps over numbers that do NOT exist burn the budget.
+ */
+export const getRequestCodeBlockedCountryPerIpLimits = () => ({
+  points: 2,
+  duration: toSeconds(3600), // 1 hour
+  blockDuration: toSeconds(86400), // 24 hours
+})
+
 export const getFailedLoginAttemptPerLoginIdentifierLimits = () =>
   getRateLimits(yamlConfig.rateLimits.failedLoginAttemptPerLoginIdentifier)
 

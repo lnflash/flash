@@ -10,6 +10,7 @@ export class UnknownRateLimitServiceError extends RateLimitServiceError {
 export class RateLimiterExceededError extends RateLimitServiceError {}
 export class UserCodeAttemptIdentifierRateLimiterExceededError extends RateLimiterExceededError {}
 export class UserCodeAttemptIpRateLimiterExceededError extends RateLimiterExceededError {}
+export class UserCodeAttemptBlockedCountryIpRateLimiterExceededError extends RateLimiterExceededError {}
 export class CreateDeviceAccountIpRateLimiterExceededError extends RateLimiterExceededError {}
 export class UserLoginIpRateLimiterExceededError extends RateLimiterExceededError {}
 export class UserLoginIdentifierRateLimiterExceededError extends RateLimiterExceededError {}

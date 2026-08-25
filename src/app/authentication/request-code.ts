@@ -8,17 +8,19 @@ import {
 } from "@config"
 import { TestAccountsChecker } from "@domain/accounts/test-accounts-checker"
 import { isAuthChannelSupportedForCountry } from "@domain/authentication"
-import { PhoneAlreadyExistsError } from "@domain/authentication/errors"
+import {
+  IdentifierNotFoundError,
+  PhoneAlreadyExistsError,
+} from "@domain/authentication/errors"
 import { PhoneCountryNotAllowedError } from "@domain/users/errors"
 import { InvalidPhoneNumber, NotImplementedError } from "@domain/errors"
 import { RateLimitConfig } from "@domain/rate-limit"
 import { RateLimiterExceededError } from "@domain/rate-limit/errors"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
 import Geetest from "@services/geetest"
-import { AuthWithEmailPasswordlessService } from "@services/kratos"
+import { AuthWithEmailPasswordlessService, IdentityRepository } from "@services/kratos"
 import { baseLogger } from "@services/logger"
-import { UsersRepository } from "@services/mongoose"
-import { consumeLimiter } from "@services/rate-limit"
+import { RedisRateLimitService, consumeLimiter } from "@services/rate-limit"
 import { TWILIO_ACCOUNT_TEST, TwilioClient } from "@services/twilio"
 import { parsePhoneNumberFromString } from "libphonenumber-js"
 
@@ -75,6 +77,7 @@ export const requestPhoneCodeWithCaptcha = async ({
   const destinationOk = await checkAuthCodeDestination({
     phone,
     channel,
+    ip,
     allowExistingUser: true,
   })
   if (destinationOk instanceof Error) return destinationOk
@@ -169,31 +172,215 @@ export const requestEmailCode = async ({
 // Blocked destinations are the whole point of the control, so they have to be
 // observable: without this you cannot answer "is the gate firing", "what did it
 // save", or "is it hitting real users in TR" without a redeploy.
+//
+// The trigger is attacker-controlled and free, though, and notifyOpsEvent feeds
+// a single 50-slot FIFO shared with cashout/deposit/upgrade/transfer that drops
+// its OLDEST entries on overflow. One embed per rejection would evict the rest
+// of the ops feed during exactly the incident this telemetry exists to
+// illuminate. So the first rejection of each kind pages immediately — a new
+// attack origin is still news the moment it appears — and everything after it
+// is counted and flushed as one summary per window.
+
+const BLOCKED_REPORT_WINDOW_MS = 5 * 60 * 1000
+const BLOCKED_REPORT_WINDOW_LABEL = `${BLOCKED_REPORT_WINDOW_MS / 60_000}m`
+
+type BlockedPhase =
+  | "destination-blocked"
+  | "destination-blocked-existing-user"
+  | "destination-blocked-probe-limit"
+
+const BLOCKED_LOG_MESSAGE: Record<BlockedPhase, string> = {
+  "destination-blocked": "auth code destination blocked",
+  "destination-blocked-existing-user":
+    "auth code destination in a blocked country allowed for an existing user",
+  "destination-blocked-probe-limit":
+    "auth code existing-user probe budget exhausted for a blocked country",
+}
+
+type BlockedReport = {
+  phone: PhoneNumber
+  channel: ChannelType
+  countryCode?: string
+  phase?: BlockedPhase
+  status?: "pending" | "failed"
+  error?: string
+}
+
+type BlockedBucket = {
+  phase: BlockedPhase
+  status: "pending" | "failed"
+  channel: ChannelType
+  countryCode?: string
+  error?: string
+  count: number
+}
+
+const pendingBlockedReports: Map<string, BlockedBucket> = new Map()
+const pagedBlockedKinds: Set<string> = new Set()
+let blockedReportTimer: NodeJS.Timeout | undefined
+
+/**
+ * Emits one summary event per (phase, channel, country) seen since the last
+ * flush. Exported so the interval is not the only way to drain it (tests).
+ */
+export const flushBlockedDestinationReports = (): void => {
+  for (const bucket of pendingBlockedReports.values()) {
+    notifyOpsEvent({
+      flow: "verification",
+      phase: bucket.phase,
+      status: bucket.status,
+      error: bucket.error,
+      meta: {
+        channel: String(bucket.channel),
+        country: bucket.countryCode ?? "unknown",
+        count: String(bucket.count),
+        window: BLOCKED_REPORT_WINDOW_LABEL,
+      },
+    })
+  }
+  pendingBlockedReports.clear()
+}
+
+/** Clears all coalescing state. Intended for tests. */
+export const resetBlockedDestinationReporting = (): void => {
+  pendingBlockedReports.clear()
+  pagedBlockedKinds.clear()
+  if (blockedReportTimer !== undefined) {
+    clearInterval(blockedReportTimer)
+    blockedReportTimer = undefined
+  }
+}
+
+const scheduleBlockedReportFlush = (): void => {
+  if (blockedReportTimer !== undefined) return
+  blockedReportTimer = setInterval(
+    flushBlockedDestinationReports,
+    BLOCKED_REPORT_WINDOW_MS,
+  )
+  // A telemetry timer must never be the reason the process stays alive.
+  blockedReportTimer.unref?.()
+}
+
 const reportBlockedDestination = ({
   phone,
   channel,
   countryCode,
-}: {
-  phone: PhoneNumber
-  channel: ChannelType
-  countryCode?: string
-}): void => {
-  baseLogger.warn({ countryCode, channel }, "auth code destination blocked")
-  notifyOpsEvent({
-    flow: "verification",
-    phase: "destination-blocked",
-    status: "failed",
-    phone,
-    error: countryCode ? PhoneCountryNotAllowedError.name : InvalidPhoneNumber.name,
-    meta: { channel: String(channel), country: countryCode ?? "unknown" },
+  phase = "destination-blocked",
+  status = "failed",
+  error,
+}: BlockedReport): void => {
+  const logPayload = { countryCode, channel }
+  if (status === "failed") {
+    baseLogger.warn(logPayload, BLOCKED_LOG_MESSAGE[phase])
+  } else {
+    baseLogger.info(logPayload, BLOCKED_LOG_MESSAGE[phase])
+  }
+
+  const key = `${phase}|${channel}|${countryCode ?? "unknown"}`
+
+  const bucket = pendingBlockedReports.get(key)
+  if (bucket) {
+    bucket.count += 1
+    return
+  }
+
+  if (!pagedBlockedKinds.has(key)) {
+    pagedBlockedKinds.add(key)
+    notifyOpsEvent({
+      flow: "verification",
+      phase,
+      status,
+      phone,
+      error,
+      meta: { channel: String(channel), country: countryCode ?? "unknown" },
+    })
+    return
+  }
+
+  // Summaries aggregate many numbers, so they carry no phone.
+  pendingBlockedReports.set(key, {
+    phase,
+    status,
+    channel,
+    countryCode,
+    error,
+    count: 1,
   })
+  scheduleBlockedReportFlush()
 }
 
+// Whether a number can actually log in is decided by Kratos, not Mongo:
+// login.ts resolves the identity with getUserIdFromIdentifier and, when it
+// resolves, skips onboarding entirely. The two stores are filled by a two-phase
+// write with no reconciliation — the identity exists before the /registration
+// webhook runs, and that webhook can fail — so asking Mongo would refuse a
+// login code to accounts that log in fine today, which is the exact lockout
+// this carve-out exists to prevent.
 const phoneBelongsToExistingUser = async (phone: PhoneNumber): Promise<boolean> => {
-  const user = await UsersRepository().findByPhone(phone)
-  // Any repository failure falls through to the block: the fraud control fails
-  // closed, never open.
-  return !(user instanceof Error)
+  const userId = await IdentityRepository().getUserIdFromIdentifier(phone)
+  if (userId instanceof IdentifierNotFoundError) return false
+  if (userId instanceof Error) {
+    // A Kratos fault is not evidence of absence, but the fraud control fails
+    // closed, never open.
+    baseLogger.warn(
+      { error: userId.name },
+      "kratos identity lookup failed for the auth code destination gate",
+    )
+    return false
+  }
+  return true
+}
+
+const rewardRequestCodeBlockedCountryPerIp = async (ip: IpAddress): Promise<void> => {
+  const limiter = RedisRateLimitService({
+    keyPrefix: RateLimitConfig.requestCodeBlockedCountryPerIp.key,
+    limitOptions: RateLimitConfig.requestCodeBlockedCountryPerIp.limits,
+  })
+  await limiter.reward(ip)
+}
+
+type CarveOutResult = "allowed" | "no-such-user" | "probe-budget-exhausted"
+
+// The carve-out answers "does this number hold a Flash account" without sending
+// anything, so probing it is free — the economic brake that bounds every other
+// enumeration attempt on this endpoint does not exist here. A tiny per-IP budget
+// is consumed BEFORE the lookup so a sweep runs out after a couple of tries; a
+// confirmed account refunds its point, so a real customer abroad is never spent
+// out of their own login code by asking twice.
+const allowBlockedCountryForExistingUser = async ({
+  phone,
+  ip,
+  channel,
+  countryCode,
+}: {
+  phone: PhoneNumber
+  ip: IpAddress
+  channel: ChannelType
+  countryCode: string
+}): Promise<CarveOutResult> => {
+  const budgetOk = await consumeLimiter({
+    rateLimitConfig: RateLimitConfig.requestCodeBlockedCountryPerIp,
+    keyToConsume: ip,
+  })
+  // Exhausted budget and limiter faults alike fall through to the block: the
+  // control fails closed, never open.
+  if (budgetOk instanceof Error) return "probe-budget-exhausted"
+
+  if (!(await phoneBelongsToExistingUser(phone))) return "no-such-user"
+
+  await rewardRequestCodeBlockedCountryPerIp(ip)
+  // Real users served by the carve-out are the signal the block list is tuned
+  // on. Reporting them locally only would guarantee the feed reads "no real
+  // users here" no matter how many there are, and no country would ever be
+  // pruned on its evidence.
+  reportBlockedDestination({
+    phone,
+    channel,
+    countryCode,
+    phase: "destination-blocked-existing-user",
+    status: "pending",
+  })
+  return "allowed"
 }
 
 // Rejects auth-code destinations before any Twilio spend. Countries are billed
@@ -202,10 +389,13 @@ const phoneBelongsToExistingUser = async (phone: PhoneNumber): Promise<boolean> 
 const checkAuthCodeDestination = async ({
   phone,
   channel,
+  ip,
   allowExistingUser = false,
 }: {
   phone: PhoneNumber
   channel: ChannelType
+  // Only needed for the existing-user carve-out, which is budgeted per IP.
+  ip?: IpAddress
   allowExistingUser?: boolean
 }): Promise<true | PhoneCountryNotAllowedError | InvalidPhoneNumber> => {
   // Callers hand us the raw channel string in at least one path
@@ -216,7 +406,11 @@ const checkAuthCodeDestination = async ({
 
   const countryCode = parsePhoneNumberFromString(phone)?.country
   if (countryCode === undefined) {
-    reportBlockedDestination({ phone, channel: normalizedChannel })
+    reportBlockedDestination({
+      phone,
+      channel: normalizedChannel,
+      error: InvalidPhoneNumber.name,
+    })
     // The country is unknown, not disallowed — say so, or the log line and the
     // client-facing error both misattribute a malformed number to the gate.
     return new InvalidPhoneNumber(phone)
@@ -230,15 +424,27 @@ const checkAuthCodeDestination = async ({
   })
   if (supported) return true
 
-  if (allowExistingUser && (await phoneBelongsToExistingUser(phone))) {
-    baseLogger.info(
-      { countryCode, channel: normalizedChannel },
-      "auth code destination in a blocked country allowed for an existing user",
-    )
-    return true
+  let phase: BlockedPhase = "destination-blocked"
+  if (allowExistingUser && ip !== undefined) {
+    const carveOut = await allowBlockedCountryForExistingUser({
+      phone,
+      ip,
+      channel: normalizedChannel,
+      countryCode,
+    })
+    if (carveOut === "allowed") return true
+    // The caller still gets PhoneCountryNotAllowedError either way — only the
+    // feed learns that this rejection was a burnt-out probe budget.
+    if (carveOut === "probe-budget-exhausted") phase = "destination-blocked-probe-limit"
   }
 
-  reportBlockedDestination({ phone, channel: normalizedChannel, countryCode })
+  reportBlockedDestination({
+    phone,
+    channel: normalizedChannel,
+    countryCode,
+    phase,
+    error: PhoneCountryNotAllowedError.name,
+  })
   return new PhoneCountryNotAllowedError()
 }
 
