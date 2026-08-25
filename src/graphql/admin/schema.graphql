@@ -36,6 +36,7 @@ type AccountReleaseNpubPayload {
   errors: [Error]
   previousNpub: String
   reassignedTo: AuditedAccount
+  reassignmentError: Error
 }
 
 enum AccountStatus {

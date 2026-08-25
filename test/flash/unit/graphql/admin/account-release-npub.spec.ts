@@ -29,7 +29,7 @@ jest.mock("@app", () => ({
 
 import { InvalidAccountIdError } from "@domain/accounts"
 import { CouldNotFindAccountFromIdError, NoNpubToReleaseError } from "@domain/errors"
-import { AccountAlreadyHasNpubError } from "@domain/nostr"
+import { AccountAlreadyHasNpubError, NpubNotAvailableError } from "@domain/nostr"
 import { mutationFields } from "@graphql/admin/mutations"
 import AccountReleaseNpubMutation from "@graphql/admin/root/mutation/account-release-npub"
 
@@ -42,6 +42,7 @@ type Result = {
   accountDetails?: { id: string; npub?: string }
   previousNpub?: string
   reassignedTo?: { id: string; npub?: string }
+  reassignmentError?: { message: string; code?: string }
 }
 
 // Mirrors what graphql-admin-server's Apollo `context` fn builds from the
@@ -174,6 +175,49 @@ describe("accountReleaseNpub", () => {
 
     expect(result.errors[0].code).toBe("INVALID_INPUT")
     expect(result.previousNpub).toBeUndefined()
+  })
+
+  describe("a reassignment that failed after the release landed", () => {
+    // The two writes are not a transaction, so the app layer reports this as a
+    // populated release carrying `reassignmentError` rather than as an error.
+    // Collapsing it back to `{ errors }` here would throw away the only signal
+    // that the key has already left the holder.
+    beforeEach(() => {
+      mockReleaseNpub.mockResolvedValue({
+        account: { id: ACCOUNT_ID, username: "jaceth2009" },
+        previousNpub: NPUB,
+        reassignmentError: new NpubNotAvailableError(NPUB),
+      })
+    })
+
+    it("still returns the account the key was taken off, and the key", async () => {
+      const result = await resolveMutation({
+        accountId: ACCOUNT_ID,
+        reassignToAccountId: TARGET_ACCOUNT_ID,
+      })
+
+      expect(result.accountDetails).toMatchObject({ id: ACCOUNT_ID })
+      expect(result.previousNpub).toBe(NPUB)
+      expect(result.reassignedTo).toBeUndefined()
+    })
+
+    it("names the failure as the reassignment's, not the release's", async () => {
+      const result = await resolveMutation({
+        accountId: ACCOUNT_ID,
+        reassignToAccountId: TARGET_ACCOUNT_ID,
+      })
+
+      expect(result.reassignmentError?.message).not.toContain("NpubNotAvailable")
+      expect(result.errors).toHaveLength(1)
+      expect(result.errors[0]).toEqual(result.reassignmentError)
+    })
+  })
+
+  it("leaves the reassignment error unset on a clean release", async () => {
+    const result = await resolveMutation({ accountId: ACCOUNT_ID })
+
+    expect(result.reassignmentError).toBeUndefined()
+    expect(result.errors).toEqual([])
   })
 
   it("surfaces an input coercion failure without calling the app layer", async () => {

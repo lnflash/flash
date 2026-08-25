@@ -3,7 +3,6 @@ import {
   CouldNotFindAccountFromIdError,
   CouldNotFindError,
   DuplicateKeyForPersistError,
-  NoNpubToReleaseError,
 } from "@domain/errors"
 import { AccountAlreadyHasNpubError, NpubNotAvailableError } from "@domain/nostr"
 import { baseLogger } from "@services/logger"
@@ -13,6 +12,10 @@ export type NpubRelease = {
   account: Account
   previousNpub: Npub
   reassignedTo?: Account
+  // Set when the release landed and the claim meant to follow it did not. This
+  // is not an alternative to the release: the key is off the holder either way,
+  // and re-running the mutation now fails with `NoNpubToReleaseError`.
+  reassignmentError?: ApplicationError
 }
 
 /**
@@ -30,17 +33,24 @@ export type NpubRelease = {
  * straight to the rightful owner. This repository has no MongoDB sessions
  * anywhere, so the two writes are not a transaction: the key is unclaimed for
  * the round-trip between them, and a claim that lands in that window makes the
- * reassignment fail with `NpubNotAvailableError` — the release still stands, so
- * the operator must retry the reassignment rather than assume it applied. The
- * target is read and checked before the release so that everything knowable up
- * front fails before the key is freed; the unique partial index is what
- * guarantees the reassignment cannot collide.
+ * reassignment fail with `NpubNotAvailableError`. The release still stands, so
+ * that failure comes back as `reassignmentError` on an otherwise populated
+ * `NpubRelease` rather than as a bare error — a bare error reads as "nothing
+ * happened", and the operator would neither know the key is now unclaimed nor
+ * that recovering it means finding its current holder with
+ * `accountDetailsByNpub` and releasing it from there. The target is read and
+ * checked before the release so that everything knowable up front fails before
+ * the key is freed; the unique partial index is what guarantees the
+ * reassignment cannot collide.
  *
  * `releasedByUserId` is the whole attribution trail. Neither the account
  * document nor the payload retains the npub that was removed, and the admin
  * server never assigns `req.gqlContext`, so the Pino request log records the
- * actor as undefined — the structured log line below is the only record that a
- * given admin took a given key off a given account.
+ * actor as undefined — the structured log lines below are the only record that
+ * a given admin took a given key off a given account. Refusals are logged for
+ * the same reason: a stolen admin token sweeping account ids leaves one line
+ * for the release that worked and, without them, nothing at all for the probes
+ * that did not.
  */
 export const releaseNpub = async ({
   id,
@@ -53,57 +63,105 @@ export const releaseNpub = async ({
 }): Promise<NpubRelease | ApplicationError> => {
   const accountsRepo = AccountsRepository()
 
+  const refuse = <E extends ApplicationError>(reason: string, error: E): E => {
+    baseLogger.warn(
+      { accountId: id, releasedByUserId, reassignToAccountId, reason },
+      "admin npub release refused",
+    )
+    return error
+  }
+
   const idChecked = checkedToAccountId(id)
-  if (idChecked instanceof Error) return idChecked
+  if (idChecked instanceof Error) return refuse("malformed account id", idChecked)
 
   const targetIdChecked =
     reassignToAccountId === undefined
       ? undefined
       : checkedToAccountId(reassignToAccountId)
-  if (targetIdChecked instanceof Error) return targetIdChecked
-
-  const holder = await accountsRepo.findById(idChecked)
-  if (holder instanceof CouldNotFindError) {
-    return new CouldNotFindAccountFromIdError(idChecked)
+  if (targetIdChecked instanceof Error) {
+    return refuse("malformed reassignment target id", targetIdChecked)
   }
-  if (holder instanceof Error) return holder
-
-  const previousNpub = holder.npub
-  if (previousNpub === undefined) return new NoNpubToReleaseError(idChecked)
 
   let target: Account | undefined
   if (targetIdChecked !== undefined) {
     const found = await accountsRepo.findById(targetIdChecked)
     if (found instanceof CouldNotFindError) {
-      return new CouldNotFindAccountFromIdError(targetIdChecked)
+      return refuse(
+        "unknown reassignment target",
+        new CouldNotFindAccountFromIdError(targetIdChecked),
+      )
     }
     if (found instanceof Error) return found
     // Also catches `reassignToAccountId === id`, where the target is the holder
     // and there is nothing to move.
-    if (found.npub !== undefined) return new AccountAlreadyHasNpubError(targetIdChecked)
+    //
+    // `typeof` rather than `!== undefined`: the field is `Npub | null` on the
+    // record and the migration deliberately leaves pre-existing `npub: null`
+    // documents alone, so an account that has never linked a key can arrive
+    // here holding an explicit null. That is not a claim, and treating it as
+    // one would make such an account permanently ineligible to receive one.
+    if (typeof found.npub === "string") {
+      return refuse(
+        "reassignment target already holds an npub",
+        new AccountAlreadyHasNpubError(targetIdChecked),
+      )
+    }
     target = found
   }
 
+  // The holder's existence and its npub are both established by `unsetNpub`
+  // off the pre-update document, so this branch carries the refusals that a
+  // separate holder read used to make here — plus genuine write failures.
   const released = await accountsRepo.unsetNpub(idChecked)
-  if (released instanceof Error) return released
+  if (released instanceof Error) return refuse(released.name, released)
+
+  const { account, previousNpub } = released
 
   baseLogger.info(
     {
       accountId: idChecked,
       previousNpub,
       releasedByUserId,
-      reassignedToAccountId: targetIdChecked,
+      // Intent, not outcome. The claim has not been attempted yet and can still
+      // lose to a concurrent one; an investigator reading this line must not
+      // conclude the key reached the target.
+      reassignToAccountId: targetIdChecked,
     },
     "admin released an npub claim",
   )
 
-  if (target === undefined) return { account: released, previousNpub }
+  if (target === undefined) return { account, previousNpub }
 
   const reassigned = await accountsRepo.claimNpub(target.id, previousNpub)
-  if (reassigned instanceof DuplicateKeyForPersistError) {
-    return new NpubNotAvailableError(previousNpub)
+  if (reassigned instanceof Error) {
+    baseLogger.error(
+      {
+        accountId: idChecked,
+        previousNpub,
+        reassignToAccountId: targetIdChecked,
+        releasedByUserId,
+      },
+      "npub released but reassignment failed",
+    )
+    return {
+      account,
+      previousNpub,
+      reassignmentError:
+        reassigned instanceof DuplicateKeyForPersistError
+          ? new NpubNotAvailableError(previousNpub)
+          : reassigned,
+    }
   }
-  if (reassigned instanceof Error) return reassigned
 
-  return { account: released, previousNpub, reassignedTo: reassigned }
+  baseLogger.info(
+    {
+      accountId: idChecked,
+      previousNpub,
+      releasedByUserId,
+      reassignedToAccountId: target.id,
+    },
+    "admin reassigned a released npub",
+  )
+
+  return { account, previousNpub, reassignedTo: reassigned }
 }

@@ -50,11 +50,21 @@ const AccountReleaseNpubMutation = GT.Field<
       return { errors: [mapAndParseErrorForGqlResponse(released)] }
     }
 
+    // A post-release reassignment failure is reported twice on purpose: in
+    // `errors` because something did fail, and in `reassignmentError` because
+    // `errors` alone is indistinguishable from a mutation that changed nothing
+    // — and here the key has already left the holder.
+    const reassignmentError =
+      released.reassignmentError === undefined
+        ? undefined
+        : mapAndParseErrorForGqlResponse(released.reassignmentError)
+
     return {
-      errors: [],
+      errors: reassignmentError === undefined ? [] : [reassignmentError],
       accountDetails: released.account,
       previousNpub: released.previousNpub,
       reassignedTo: released.reassignedTo,
+      reassignmentError,
     }
   },
 })

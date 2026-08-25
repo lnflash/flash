@@ -49,7 +49,20 @@ describe("AccountsRepository.unsetNpub", () => {
     expect(result).not.toBeInstanceOf(Error)
     // The document read back is the pre-update one, which still carries the
     // npub; the account handed to the caller must not.
-    expect((result as Account).npub).toBeUndefined()
+    expect((result as NpubUnset).account.npub).toBeUndefined()
+    // Nothing else can report it. The updated document no longer holds it, and
+    // a second read of the account is a later, potentially different, answer.
+    expect((result as NpubUnset).previousNpub).toBe(NPUB)
+  })
+
+  it("treats a legacy null npub as nothing to release", async () => {
+    // The partial index only covers strings, so documents predating it can
+    // still hold an explicit `npub: null`. `$unset` on one frees nothing.
+    findOneAndUpdate.mockResolvedValue({ ...accountRecord, npub: null })
+
+    expect(await AccountsRepository().unsetNpub(ACCOUNT_ID)).toBeInstanceOf(
+      NoNpubToReleaseError,
+    )
   })
 
   it("reports an unknown account", async () => {

@@ -21,6 +21,15 @@ const AccountReleaseNpubPayload = GT.Object({
     reassignedTo: {
       type: GraphQLAccount,
     },
+    // The release and the reassignment are two writes, not a transaction, so
+    // the second can fail with the first already applied. That cannot be
+    // reported by discarding the payload: `accountDetails` and `previousNpub`
+    // are what tell the operator the key is now unclaimed, that re-running the
+    // mutation will refuse with `NoNpubToReleaseError`, and which key to hunt
+    // down with `accountDetailsByNpub`.
+    reassignmentError: {
+      type: IError,
+    },
   }),
 })
 

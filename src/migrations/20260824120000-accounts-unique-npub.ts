@@ -130,10 +130,11 @@ module.exports = {
       for (const group of duplicates) {
         // Every account in the group loses the npub, including the oldest.
         // There is no way to tell from mongo which account still holds the
-        // nostr secret key, and picking wrong is unrecoverable in-product:
-        // `setNpub` refuses an already-claimed npub and no admin mutation can
-        // release one. Releasing the key lets the real owner re-link from the
-        // app; the unique index makes the re-link race safe.
+        // nostr secret key, and picking wrong locks the real owner out:
+        // `setNpub` refuses an already-claimed npub, so they would need a
+        // support-desk release before they could re-link at all. Releasing
+        // every claim here lets the real owner re-link straight from the app;
+        // the unique index makes the re-link race safe.
         const ids = group.docs.map((d) => d._id)
 
         console.log(

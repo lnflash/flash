@@ -187,6 +187,15 @@ type AccountValidator = {
   validateWalletForAccount(wallet: Wallet): true | ValidationError
 }
 
+// `unsetNpub` reads the pre-update document to decide whether anything was
+// actually freed, so it is the only place the removed npub still exists — the
+// updated document no longer carries it. Handing it back saves the caller a
+// second read that could disagree with what the `$unset` removed.
+type NpubUnset = {
+  account: Account
+  previousNpub: Npub
+}
+
 interface IAccountsRepository {
   listUnlockedAccounts(): AsyncGenerator<Account> | RepositoryError
   findById(accountId: AccountId): Promise<Account | RepositoryError>
@@ -198,7 +207,7 @@ interface IAccountsRepository {
   findByUsername(username: Username): Promise<Account | RepositoryError>
   // listBusinessesForMap(): Promise<BusinessMapMarker[] | RepositoryError>
   findByNpub(npub: Npub): Promise<Account | RepositoryError>
-  unsetNpub(accountId: AccountId): Promise<Account | RepositoryError>
+  unsetNpub(accountId: AccountId): Promise<NpubUnset | RepositoryError>
   claimNpub(accountId: AccountId, npub: Npub): Promise<Account | RepositoryError>
   update(account: Account): Promise<Account | RepositoryError>
 

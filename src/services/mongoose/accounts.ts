@@ -108,8 +108,17 @@ export const AccountsRepository = (): IAccountsRepository => {
   // identical in both cases and the operator would be told a release happened
   // when nothing was freed — then send the rightful owner off to re-link, where
   // `setNpub` refuses them because the squatter still holds the key. The
-  // pre-update document is the only thing that can tell the two apart.
-  const unsetNpub = async (accountId: AccountId): Promise<Account | RepositoryError> => {
+  // pre-update document is the only thing that can tell the two apart, which
+  // also makes it the only read that cannot disagree with the key this `$unset`
+  // removed — hence `previousNpub` comes back with the account rather than the
+  // caller re-reading it.
+  //
+  // `typeof` rather than a null check: the field is `Npub | null` and legacy
+  // documents holding an explicit null predate the partial index, which only
+  // covers strings. A null is not a claim and there is nothing to release.
+  const unsetNpub = async (
+    accountId: AccountId,
+  ): Promise<NpubUnset | RepositoryError> => {
     try {
       const before = await Account.findOneAndUpdate(
         { _id: toObjectId<AccountId>(accountId) },
@@ -118,7 +127,10 @@ export const AccountsRepository = (): IAccountsRepository => {
       )
       if (!before) return new CouldNotFindAccountFromIdError(accountId)
       if (typeof before.npub !== "string") return new NoNpubToReleaseError(accountId)
-      return { ...translateToAccount(before), npub: undefined }
+      return {
+        account: { ...translateToAccount(before), npub: undefined },
+        previousNpub: before.npub,
+      }
     } catch (err) {
       return parseRepositoryError(err)
     }
