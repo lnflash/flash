@@ -23,6 +23,23 @@ describe("getSupportedCountries", () => {
       },
     ])
   })
+
+  // The lists are raw configmap strings, never validated. A lowercase entry
+  // must not silently stop filtering the picker.
+  it("filters a lowercase configmap entry", () => {
+    const countries = getSupportedCountries({
+      allCountries: ["CA", "US"] as CountryCode[],
+      unsupportedSmsCountries: ["ca"] as CountryCode[],
+      unsupportedWhatsAppCountries: ["ca"] as CountryCode[],
+    })
+
+    expect(countries).toEqual([
+      {
+        id: "US",
+        supportedAuthChannels: ["sms", "whatsapp"],
+      },
+    ])
+  })
 })
 
 describe("isAuthChannelSupportedForCountry", () => {
@@ -53,6 +70,28 @@ describe("isAuthChannelSupportedForCountry", () => {
   it("blocks a country listed for both channels", () => {
     expect(check("UZ", ChannelType.Sms)).toBe(false)
     expect(check("UZ", ChannelType.Whatsapp)).toBe(false)
+  })
+
+  // An operator writing `- uz` in the Helm values must still get a working
+  // fraud control; a silently-inert blocklist is the worst failure mode here.
+  it("blocks a lowercase configmap entry", () => {
+    expect(
+      isAuthChannelSupportedForCountry({
+        countryCode: "UZ" as CountryCode,
+        channel: ChannelType.Sms,
+        unsupportedSmsCountries: ["uz"] as CountryCode[],
+        unsupportedWhatsAppCountries: [],
+      }),
+    ).toBe(false)
+
+    expect(
+      isAuthChannelSupportedForCountry({
+        countryCode: "uz" as CountryCode,
+        channel: ChannelType.Whatsapp,
+        unsupportedSmsCountries: [],
+        unsupportedWhatsAppCountries: ["UZ"] as CountryCode[],
+      }),
+    ).toBe(false)
   })
 
   it("allows every country when the lists are empty", () => {

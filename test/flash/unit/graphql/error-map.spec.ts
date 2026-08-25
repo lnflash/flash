@@ -7,6 +7,7 @@ import {
   BridgeDepositInstructionsMissingError,
 } from "@services/bridge/errors"
 import { IbexError, InsufficientIbexBalance } from "@services/ibex/errors"
+import { PhoneCountryNotAllowedError } from "@domain/users/errors"
 
 describe("error-map", () => {
   it("maps BridgeWithdrawalNotFoundError to BRIDGE_WITHDRAWAL_NOT_FOUND", () => {
@@ -28,6 +29,16 @@ describe("error-map", () => {
 
     expect(result.extensions.code).toBe("BRIDGE_DEPOSIT_INSTRUCTIONS_MISSING")
     expect(result.message).toContain("deposit instructions")
+  })
+
+  // A blocked auth-code destination is a policy decision, not a transient bug:
+  // it must never surface as "unexpected error, please try again".
+  it("maps PhoneCountryNotAllowedError to a validation error, not the catch-all", () => {
+    const result = mapError(new PhoneCountryNotAllowedError())
+
+    expect(result.message).toBe("Phone number is not from a valid region")
+    expect(result.message).not.toContain("Unexpected error")
+    expect(result.extensions.code).not.toBe("UNEXPECTED_CLIENT_ERROR")
   })
 
   it("maps PhoneAccountAlreadyExistsCannotUpgradeError to correct GQL error", () => {

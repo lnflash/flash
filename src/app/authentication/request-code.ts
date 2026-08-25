@@ -10,13 +10,14 @@ import { TestAccountsChecker } from "@domain/accounts/test-accounts-checker"
 import { isAuthChannelSupportedForCountry } from "@domain/authentication"
 import { PhoneAlreadyExistsError } from "@domain/authentication/errors"
 import { PhoneCountryNotAllowedError } from "@domain/users/errors"
-import { NotImplementedError } from "@domain/errors"
+import { InvalidPhoneNumber, NotImplementedError } from "@domain/errors"
 import { RateLimitConfig } from "@domain/rate-limit"
 import { RateLimiterExceededError } from "@domain/rate-limit/errors"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
 import Geetest from "@services/geetest"
 import { AuthWithEmailPasswordlessService } from "@services/kratos"
 import { baseLogger } from "@services/logger"
+import { UsersRepository } from "@services/mongoose"
 import { consumeLimiter } from "@services/rate-limit"
 import { TWILIO_ACCOUNT_TEST, TwilioClient } from "@services/twilio"
 import { parsePhoneNumberFromString } from "libphonenumber-js"
@@ -69,7 +70,13 @@ export const requestPhoneCodeWithCaptcha = async ({
     return true
   }
 
-  const destinationOk = checkAuthCodeDestination({ phone, channel })
+  // Login and signup share this entry point, so an existing account keeps its
+  // ability to receive a login code even if its country is on the block list.
+  const destinationOk = await checkAuthCodeDestination({
+    phone,
+    channel,
+    allowExistingUser: true,
+  })
   if (destinationOk instanceof Error) return destinationOk
 
   return TwilioClient().initiateVerify({ to: phone, channel })
@@ -85,7 +92,9 @@ export const requestPhoneCodeForAuthedUser = async ({
   ip: IpAddress
   channel: ChannelType
   user: User
-}): Promise<true | PhoneProviderServiceError | PhoneCountryNotAllowedError> => {
+}): Promise<
+  true | PhoneProviderServiceError | PhoneCountryNotAllowedError | InvalidPhoneNumber
+> => {
   {
     const limitOk = await checkRequestCodeAttemptPerIpLimits(ip)
     if (limitOk instanceof Error) return limitOk
@@ -113,7 +122,9 @@ export const requestPhoneCodeForAuthedUser = async ({
     return true
   }
 
-  const destinationOk = checkAuthCodeDestination({ phone, channel })
+  // Binding a phone to an already-authenticated account is always a new
+  // registration of that number, so there is no existing-user carve-out here.
+  const destinationOk = await checkAuthCodeDestination({ phone, channel })
   if (destinationOk instanceof Error) return destinationOk
 
   const verifyResp = await TwilioClient().initiateVerify({ to: phone, channel })
@@ -155,28 +166,80 @@ export const requestEmailCode = async ({
   return flow
 }
 
-// Rejects auth-code destinations before any Twilio spend. Countries are billed
-// per message whether or not a human is behind the request, so an unsupported
-// destination must never reach the provider.
-const checkAuthCodeDestination = ({
+// Blocked destinations are the whole point of the control, so they have to be
+// observable: without this you cannot answer "is the gate firing", "what did it
+// save", or "is it hitting real users in TR" without a redeploy.
+const reportBlockedDestination = ({
   phone,
   channel,
+  countryCode,
 }: {
   phone: PhoneNumber
   channel: ChannelType
-}): true | PhoneCountryNotAllowedError => {
+  countryCode?: string
+}): void => {
+  baseLogger.warn({ countryCode, channel }, "auth code destination blocked")
+  notifyOpsEvent({
+    flow: "verification",
+    phase: "destination-blocked",
+    status: "failed",
+    phone,
+    error: countryCode ? PhoneCountryNotAllowedError.name : InvalidPhoneNumber.name,
+    meta: { channel: String(channel), country: countryCode ?? "unknown" },
+  })
+}
+
+const phoneBelongsToExistingUser = async (phone: PhoneNumber): Promise<boolean> => {
+  const user = await UsersRepository().findByPhone(phone)
+  // Any repository failure falls through to the block: the fraud control fails
+  // closed, never open.
+  return !(user instanceof Error)
+}
+
+// Rejects auth-code destinations before any Twilio spend. Countries are billed
+// per message whether or not a human is behind the request, so an unsupported
+// destination must never reach the provider.
+const checkAuthCodeDestination = async ({
+  phone,
+  channel,
+  allowExistingUser = false,
+}: {
+  phone: PhoneNumber
+  channel: ChannelType
+  allowExistingUser?: boolean
+}): Promise<true | PhoneCountryNotAllowedError | InvalidPhoneNumber> => {
+  // Callers hand us the raw channel string in at least one path
+  // (POST /auth/phone/code does not lowercase it), and the supported-country
+  // lookup branches on the exact value. Normalize once, here, so every caller
+  // is gated against the list it actually asked for.
+  const normalizedChannel = String(channel).toLowerCase() as ChannelType
+
   const countryCode = parsePhoneNumberFromString(phone)?.country
-  if (countryCode === undefined) return new PhoneCountryNotAllowedError()
+  if (countryCode === undefined) {
+    reportBlockedDestination({ phone, channel: normalizedChannel })
+    // The country is unknown, not disallowed — say so, or the log line and the
+    // client-facing error both misattribute a malformed number to the gate.
+    return new InvalidPhoneNumber(phone)
+  }
 
   const supported = isAuthChannelSupportedForCountry({
     countryCode: countryCode as CountryCode,
-    channel,
+    channel: normalizedChannel,
     unsupportedSmsCountries: getSmsAuthUnsupportedCountries(),
     unsupportedWhatsAppCountries: getWhatsAppAuthUnsupportedCountries(),
   })
-  if (!supported) return new PhoneCountryNotAllowedError()
+  if (supported) return true
 
-  return true
+  if (allowExistingUser && (await phoneBelongsToExistingUser(phone))) {
+    baseLogger.info(
+      { countryCode, channel: normalizedChannel },
+      "auth code destination in a blocked country allowed for an existing user",
+    )
+    return true
+  }
+
+  reportBlockedDestination({ phone, channel: normalizedChannel, countryCode })
+  return new PhoneCountryNotAllowedError()
 }
 
 const checkRequestCodeAttemptPerIpLimits = async (

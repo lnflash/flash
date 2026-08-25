@@ -226,6 +226,12 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = "Phone number is not from a valid region"
       return new ValidationInternalError({ message, logger: baseLogger })
 
+    // A deliberate policy rejection, not a bug: it must not fall into the
+    // catch-all below, which would tell the user to retry and open a ticket.
+    case "PhoneCountryNotAllowedError":
+      message = "Phone number is not from a valid region"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
     case "PhoneProviderConnectionError":
     case "PhoneProviderUnavailableError":
       message = "Phone provider temporarily unreachable"
@@ -833,7 +839,6 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "PhoneProviderServiceError":
     case "ExpectedPhoneMetadataMissingError":
     case "PhoneCarrierTypeNotAllowedError":
-    case "PhoneCountryNotAllowedError":
     case "MissingIPMetadataError":
     case "UnauthorizedIPMetadataASNError":
     case "InvalidAccountStatusError":
