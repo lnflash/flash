@@ -46,23 +46,25 @@ export const getSupportedCountries = ({
   return countries
 }
 
+// The server-side fraud control, gated on the BLOCKED lists — not on the
+// picker's unsupported lists. The two are separate config keys on purpose: a
+// country hidden from the picker can never be selected, so the existing-user
+// carve-out in requestPhoneCode* would be unreachable for it.
 export const isAuthChannelSupportedForCountry = ({
   countryCode,
   channel,
-  unsupportedSmsCountries,
-  unsupportedWhatsAppCountries,
+  blockedSmsCountries,
+  blockedWhatsAppCountries,
 }: {
   countryCode: CountryCode
   channel: ChannelType
-  unsupportedSmsCountries: CountryCode[]
-  unsupportedWhatsAppCountries: CountryCode[]
+  blockedSmsCountries: CountryCode[]
+  blockedWhatsAppCountries: CountryCode[]
 }): boolean => {
-  const unsupportedCountries =
-    channel === ChannelType.Whatsapp
-      ? unsupportedWhatsAppCountries
-      : unsupportedSmsCountries
+  const blockedCountries =
+    channel === ChannelType.Whatsapp ? blockedWhatsAppCountries : blockedSmsCountries
 
-  return !normalizeCountryCodes(unsupportedCountries).includes(
+  return !normalizeCountryCodes(blockedCountries).includes(
     String(countryCode).toUpperCase(),
   )
 }

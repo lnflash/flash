@@ -238,6 +238,8 @@ type YamlSchema = {
   skipFeeProbeConfig: { pubkey: string[]; chanId: string[] }
   smsAuthUnsupportedCountries: string[]
   whatsAppAuthUnsupportedCountries: string[]
+  smsAuthBlockedCountries: string[]
+  whatsAppAuthBlockedCountries: string[]
   ibex: IbexConfig
   bridge: BridgeConfig
   exchangeRates: StaticRates

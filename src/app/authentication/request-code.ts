@@ -2,9 +2,9 @@ import {
   TWILIO_ACCOUNT_SID,
   UNSECURE_DEFAULT_LOGIN_CODE,
   getGeetestConfig,
-  getSmsAuthUnsupportedCountries,
+  getSmsAuthBlockedCountries,
   getTestAccounts,
-  getWhatsAppAuthUnsupportedCountries,
+  getWhatsAppAuthBlockedCountries,
 } from "@config"
 import { TestAccountsChecker } from "@domain/accounts/test-accounts-checker"
 import { isAuthChannelSupportedForCountry } from "@domain/authentication"
@@ -23,7 +23,11 @@ import { AuthWithEmailPasswordlessService, IdentityRepository } from "@services/
 import { baseLogger } from "@services/logger"
 import { RedisRateLimitService, consumeLimiter } from "@services/rate-limit"
 import { TWILIO_ACCOUNT_TEST, TwilioClient } from "@services/twilio"
-import { parsePhoneNumberFromString } from "libphonenumber-js"
+import {
+  getCountries,
+  getCountryCallingCode,
+  parsePhoneNumberFromString,
+} from "libphonenumber-js"
 
 export const requestPhoneCodeWithCaptcha = async ({
   phone,
@@ -96,9 +100,11 @@ export const requestPhoneCodeForAuthedUser = async ({
   ip: IpAddress
   channel: ChannelType
   user: User
-}): Promise<
-  true | PhoneProviderServiceError | PhoneCountryNotAllowedError | InvalidPhoneNumber
-> => {
+  // Rate limiting, the existence check and the country gate each reject with
+  // their own error type, so the union is the whole ApplicationError tree —
+  // same as requestPhoneCodeWithCaptcha. Narrowing it to the provider/country
+  // errors would lie to every caller that switches on the result.
+}): Promise<true | ApplicationError> => {
   {
     const limitOk = await checkRequestCodeAttemptPerIpLimits(ip)
     if (limitOk instanceof Error) return limitOk
@@ -187,11 +193,16 @@ const BLOCKED_REPORT_WINDOW_LABEL = `${BLOCKED_REPORT_WINDOW_MS / 60_000}m`
 
 type BlockedPhase =
   | "destination-blocked"
+  | "destination-unparsable"
   | "destination-blocked-existing-user"
   | "destination-blocked-probe-limit"
 
 const BLOCKED_LOG_MESSAGE: Record<BlockedPhase, string> = {
   "destination-blocked": "auth code destination blocked",
+  // Ordinary client input noise, not a policy rejection. It gets its own phase
+  // so it neither pollutes the counter the block list is tuned from nor
+  // competes with a real attack origin for the one-shot page.
+  "destination-unparsable": "auth code destination could not be parsed",
   "destination-blocked-existing-user":
     "auth code destination in a blocked country allowed for an existing user",
   "destination-blocked-probe-limit":
@@ -216,13 +227,21 @@ type BlockedBucket = {
   count: number
 }
 
+// How long a kind has to go unseen before it is news again. A kind is refreshed
+// on every rejection, so a sustained flood never re-pages; a wave that arrives
+// after the origin has been quiet for this long does — which is the property
+// the "a new attack origin is still news the moment it appears" rule above
+// claims, and which a page-once-per-process-lifetime Set does not have.
+const PAGED_KIND_QUIET_MS = 6 * BLOCKED_REPORT_WINDOW_MS
+
 const pendingBlockedReports: Map<string, BlockedBucket> = new Map()
-const pagedBlockedKinds: Set<string> = new Set()
+const pagedBlockedKinds: Map<string, number> = new Map()
 let blockedReportTimer: NodeJS.Timeout | undefined
 
 /**
  * Emits one summary event per (phase, channel, country) seen since the last
- * flush. Exported so the interval is not the only way to drain it (tests).
+ * flush, then expires the kinds that have gone quiet. Exported so the interval
+ * is not the only way to drain it (tests).
  */
 export const flushBlockedDestinationReports = (): void => {
   for (const bucket of pendingBlockedReports.values()) {
@@ -240,6 +259,13 @@ export const flushBlockedDestinationReports = (): void => {
     })
   }
   pendingBlockedReports.clear()
+
+  // Unbounded growth is not the only cost of keeping every kind forever: a kind
+  // that is never dropped can never page again.
+  const quietBefore = Date.now() - PAGED_KIND_QUIET_MS
+  for (const [key, lastSeenAt] of pagedBlockedKinds) {
+    if (lastSeenAt <= quietBefore) pagedBlockedKinds.delete(key)
+  }
 }
 
 /** Clears all coalescing state. Intended for tests. */
@@ -279,14 +305,15 @@ const reportBlockedDestination = ({
 
   const key = `${phase}|${channel}|${countryCode ?? "unknown"}`
 
-  const bucket = pendingBlockedReports.get(key)
-  if (bucket) {
-    bucket.count += 1
-    return
-  }
+  // Seen-recently is what suppresses the page, so every rejection refreshes the
+  // stamp: a flood stays one page, a wave after PAGED_KIND_QUIET_MS of silence
+  // is news again.
+  const now = Date.now()
+  const lastSeenAt = pagedBlockedKinds.get(key)
+  const kindIsNews = lastSeenAt === undefined || now - lastSeenAt > PAGED_KIND_QUIET_MS
+  pagedBlockedKinds.set(key, now)
 
-  if (!pagedBlockedKinds.has(key)) {
-    pagedBlockedKinds.add(key)
+  if (kindIsNews) {
     notifyOpsEvent({
       flow: "verification",
       phase,
@@ -295,6 +322,12 @@ const reportBlockedDestination = ({
       error,
       meta: { channel: String(channel), country: countryCode ?? "unknown" },
     })
+    return
+  }
+
+  const bucket = pendingBlockedReports.get(key)
+  if (bucket) {
+    bucket.count += 1
     return
   }
 
@@ -396,6 +429,27 @@ const allowBlockedCountryForExistingUser = async ({
   return "allowed"
 }
 
+// libphonenumber can parse a number without being able to name its region:
+// 340 of the 800 assigned NANP area codes are absent from the pinned metadata,
+// including in-service US overlays such as +1 738, +1 924, +1 983 and +1 472.
+// Treating "no region" as a rejection would kill signup AND login for real
+// customers on those codes — in a market that is deliberately on no block list
+// at all. So fall back to every region the calling code could denote and gate
+// on those: +1 passes because no NANP region is blocked, +7 still fails closed
+// because RU is.
+const regionsByCallingCode: Map<string, CountryCode[]> = new Map()
+
+const countriesForCallingCode = (callingCode: string): CountryCode[] => {
+  const cached = regionsByCallingCode.get(callingCode)
+  if (cached !== undefined) return cached
+
+  const regions = getCountries().filter(
+    (country) => getCountryCallingCode(country) === callingCode,
+  ) as CountryCode[]
+  regionsByCallingCode.set(callingCode, regions)
+  return regions
+}
+
 // Rejects auth-code destinations before any Twilio spend. Countries are billed
 // per message whether or not a human is behind the request, so an unsupported
 // destination must never reach the provider.
@@ -420,7 +474,7 @@ const checkAuthCodeDestination = async ({
   // value attacker-controlled, and it is baked into the coalescing key below
   // (`${phase}|${channel}|${countryCode}`) — so every distinct string is a
   // fresh "kind" that misses `pagedBlockedKinds`, pages the ops feed
-  // immediately, and adds a permanent Set entry in a long-lived process.
+  // immediately, and adds another entry to it in a long-lived process.
   // `isAuthChannelSupportedForCountry` already treats anything that is not
   // whatsapp as SMS, so collapsing here changes no gating decision — it only
   // bounds the key space to two values.
@@ -429,11 +483,12 @@ const checkAuthCodeDestination = async ({
       ? ChannelType.Whatsapp
       : ChannelType.Sms
 
-  const countryCode = parsePhoneNumberFromString(phone)?.country
-  if (countryCode === undefined) {
+  const parsed = parsePhoneNumberFromString(phone)
+  if (!parsed) {
     reportBlockedDestination({
       phone,
       channel: normalizedChannel,
+      phase: "destination-unparsable",
       error: InvalidPhoneNumber.name,
     })
     // The country is unknown, not disallowed — say so, or the log line and the
@@ -441,13 +496,34 @@ const checkAuthCodeDestination = async ({
     return new InvalidPhoneNumber(phone)
   }
 
-  const supported = isAuthChannelSupportedForCountry({
-    countryCode: countryCode as CountryCode,
-    channel: normalizedChannel,
-    unsupportedSmsCountries: getSmsAuthUnsupportedCountries(),
-    unsupportedWhatsAppCountries: getWhatsAppAuthUnsupportedCountries(),
-  })
+  // Only an unattributable region falls back to the calling code; a named
+  // region is gated on itself.
+  const candidateCountries: CountryCode[] =
+    parsed.country !== undefined
+      ? [parsed.country as CountryCode]
+      : countriesForCallingCode(parsed.countryCallingCode)
+
+  const blockedSmsCountries = getSmsAuthBlockedCountries()
+  const blockedWhatsAppCountries = getWhatsAppAuthBlockedCountries()
+
+  // Blocked if ANY region the number could belong to is blocked. An unassigned
+  // calling code yields no candidates and is left to the provider to refuse,
+  // exactly as it was before this gate existed — the gate is a country
+  // blocklist, and there is no country here to block.
+  const supported = candidateCountries.every((countryCode) =>
+    isAuthChannelSupportedForCountry({
+      countryCode,
+      channel: normalizedChannel,
+      blockedSmsCountries,
+      blockedWhatsAppCountries,
+    }),
+  )
   if (supported) return true
+
+  // Telemetry and the coalescing key need one label per destination. An
+  // unattributable region reports its calling code (`+7`), which is bounded and
+  // still tells ops which origin to tune.
+  const countryCode = parsed.country ?? `+${parsed.countryCallingCode}`
 
   let phase: BlockedPhase = "destination-blocked"
   if (allowExistingUser && ip !== undefined) {

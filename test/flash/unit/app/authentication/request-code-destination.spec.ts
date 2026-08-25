@@ -1,7 +1,7 @@
 const mockInitiateVerify = jest.fn()
 const mockGeetestValidate = jest.fn()
-const mockSmsUnsupported = jest.fn(() => [] as string[])
-const mockWhatsAppUnsupported = jest.fn(() => [] as string[])
+const mockSmsBlocked = jest.fn(() => [] as string[])
+const mockWhatsAppBlocked = jest.fn(() => [] as string[])
 const mockGetUserIdFromIdentifier = jest.fn()
 const mockConsumeLimiter = jest.fn()
 const mockRewardLimiter = jest.fn()
@@ -24,13 +24,15 @@ jest.mock("@config", () => {
     getOnChainAddressCreateAttemptLimits: jest.fn(() => limits),
     getRequestCodePerIpLimits: jest.fn(() => limits),
     getRequestCodePerLoginIdentifierLimits: jest.fn(() => limits),
+    // Mirrors the real getter exactly; test/flash/unit/config/rate-limits.spec.ts
+    // is what pins those values.
     getRequestCodeBlockedCountryPerIpLimits: jest.fn(() => ({
       points: 2,
       duration: 3600,
-      blockDuration: 86400,
+      blockDuration: 3600,
     })),
-    getSmsAuthUnsupportedCountries: () => mockSmsUnsupported(),
-    getWhatsAppAuthUnsupportedCountries: () => mockWhatsAppUnsupported(),
+    getSmsAuthBlockedCountries: () => mockSmsBlocked(),
+    getWhatsAppAuthBlockedCountries: () => mockWhatsAppBlocked(),
   }
 })
 
@@ -105,6 +107,12 @@ const requestCode = (phone: string, channel: string) =>
 const JAMAICA = "+18761234567"
 const UZBEKISTAN = "+998901234567"
 const TURKEY = "+905321234567"
+// In-service US overlay (+1 983). 340 of the 800 assigned NANP area codes are
+// absent from the pinned libphonenumber-js metadata, so `.country` is undefined
+// for it even though the number parses fine.
+const US_UNATTRIBUTED_OVERLAY = "+19835551234"
+// +7 is shared by RU and KZ, and this one attributes to neither.
+const PLUS_SEVEN_UNATTRIBUTED = "+70001234567"
 
 class UnknownKratosError extends Error {}
 
@@ -122,8 +130,8 @@ const resetMocks = () => {
   jest.clearAllMocks()
   resetBlockedDestinationReporting()
   mockInitiateVerify.mockResolvedValue(true)
-  mockSmsUnsupported.mockReturnValue([])
-  mockWhatsAppUnsupported.mockReturnValue([])
+  mockSmsBlocked.mockReturnValue([])
+  mockWhatsAppBlocked.mockReturnValue([])
   mockConsumeLimiter.mockImplementation(async () => true)
   mockRewardLimiter.mockResolvedValue(true)
   mockGetUserIdFromIdentifier.mockResolvedValue(new IdentifierNotFoundError())
@@ -145,7 +153,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
   })
 
   it("never reaches the provider for an unsupported country", async () => {
-    mockSmsUnsupported.mockReturnValue(["UZ"])
+    mockSmsBlocked.mockReturnValue(["UZ"])
 
     const result = await requestCode(UZBEKISTAN, "sms")
 
@@ -154,8 +162,8 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
   })
 
   it("gates each channel against its own list", async () => {
-    mockSmsUnsupported.mockReturnValue([])
-    mockWhatsAppUnsupported.mockReturnValue(["UZ"])
+    mockSmsBlocked.mockReturnValue([])
+    mockWhatsAppBlocked.mockReturnValue(["UZ"])
 
     const viaWhatsApp = await requestCode(UZBEKISTAN, "whatsapp")
     expect(viaWhatsApp).toBeInstanceOf(PhoneCountryNotAllowedError)
@@ -164,6 +172,56 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
     const viaSms = await requestCode(UZBEKISTAN, "sms")
     expect(viaSms).toBe(true)
     expect(mockInitiateVerify).toHaveBeenCalledTimes(1)
+  })
+
+  // libphonenumber cannot name a region for every number it parses. Rejecting
+  // on that would have killed signup AND login for real US customers on the
+  // ~340 NANP area codes the pinned metadata does not carry — for a market that
+  // is on no block list at all.
+  describe("numbers whose region libphonenumber cannot name", () => {
+    it("sends to a NANP overlay the metadata cannot attribute", async () => {
+      mockSmsBlocked.mockReturnValue(["UZ", "RU"])
+
+      const result = await requestCode(US_UNATTRIBUTED_OVERLAY, "sms")
+
+      expect(result).toBe(true)
+      expect(mockInitiateVerify).toHaveBeenCalledWith({
+        to: US_UNATTRIBUTED_OVERLAY,
+        channel: "sms",
+      })
+    })
+
+    // +7 could be RU or KZ. RU is blocked, so the gate must still fail closed.
+    it("blocks when any region the calling code could denote is blocked", async () => {
+      mockSmsBlocked.mockReturnValue(["RU"])
+
+      const result = await requestCode(PLUS_SEVEN_UNATTRIBUTED, "sms")
+
+      expect(result).toBeInstanceOf(PhoneCountryNotAllowedError)
+      expect(mockInitiateVerify).not.toHaveBeenCalled()
+    })
+
+    it("sends when none of those regions is blocked", async () => {
+      mockSmsBlocked.mockReturnValue(["UZ"])
+
+      const result = await requestCode(PLUS_SEVEN_UNATTRIBUTED, "sms")
+
+      expect(result).toBe(true)
+      expect(mockInitiateVerify).toHaveBeenCalled()
+    })
+
+    it("reports the calling code, not `unknown`, so ops can tune on it", async () => {
+      mockSmsBlocked.mockReturnValue(["RU"])
+
+      await requestCode(PLUS_SEVEN_UNATTRIBUTED, "sms")
+
+      expect(notifyOpsEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: "destination-blocked",
+          meta: expect.objectContaining({ country: "+7" }),
+        }),
+      )
+    })
   })
 
   it("never reaches the provider for an unparsable number", async () => {
@@ -175,7 +233,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
   })
 
   it("rejects before the provider even when the captcha passes", async () => {
-    mockSmsUnsupported.mockReturnValue(["UZ"])
+    mockSmsBlocked.mockReturnValue(["UZ"])
 
     await requestCode(UZBEKISTAN, "sms")
 
@@ -187,8 +245,8 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
   // unlike the GraphQL resolvers. Without normalization a WhatsApp request on
   // that route would be gated against the SMS list.
   it("normalizes the channel casing before picking a list", async () => {
-    mockSmsUnsupported.mockReturnValue([])
-    mockWhatsAppUnsupported.mockReturnValue(["UZ"])
+    mockSmsBlocked.mockReturnValue([])
+    mockWhatsAppBlocked.mockReturnValue(["UZ"])
 
     const result = await requestCode(UZBEKISTAN, "WHATSAPP")
 
@@ -197,7 +255,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
   })
 
   it("matches a lowercase configmap entry", async () => {
-    mockSmsUnsupported.mockReturnValue(["uz"])
+    mockSmsBlocked.mockReturnValue(["uz"])
 
     const result = await requestCode(UZBEKISTAN, "sms")
 
@@ -208,7 +266,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
   // A fraud control aimed at unregistered traffic must not permanently lock an
   // existing account out of its own login code.
   it("still sends to an existing user in a blocked country", async () => {
-    mockSmsUnsupported.mockReturnValue(["UZ"])
+    mockSmsBlocked.mockReturnValue(["UZ"])
     mockGetUserIdFromIdentifier.mockResolvedValue("user-id")
 
     const result = await requestCode(UZBEKISTAN, "sms")
@@ -224,7 +282,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
   // written afterwards by a webhook that can fail. Asking Mongo would refuse a
   // login code to an account that logs in fine today.
   it("still sends when Kratos knows the number and Mongo does not", async () => {
-    mockSmsUnsupported.mockReturnValue(["UZ"])
+    mockSmsBlocked.mockReturnValue(["UZ"])
     // No Mongo user record exists at all — the identity is the only evidence.
     mockGetUserIdFromIdentifier.mockResolvedValue("kratos-only-user-id")
 
@@ -239,7 +297,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
   })
 
   it("blocks a number Kratos has never seen", async () => {
-    mockSmsUnsupported.mockReturnValue(["UZ"])
+    mockSmsBlocked.mockReturnValue(["UZ"])
     mockGetUserIdFromIdentifier.mockResolvedValue(new IdentifierNotFoundError())
 
     const result = await requestCode(UZBEKISTAN, "sms")
@@ -249,7 +307,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
   })
 
   it("fails closed when the identity lookup errors", async () => {
-    mockSmsUnsupported.mockReturnValue(["UZ"])
+    mockSmsBlocked.mockReturnValue(["UZ"])
     mockGetUserIdFromIdentifier.mockResolvedValue(new UnknownKratosError("kratos down"))
 
     const result = await requestCode(UZBEKISTAN, "sms")
@@ -263,7 +321,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
   // generous to bound an enumeration sweep that costs the attacker nothing.
   describe("existence-probe budget", () => {
     it("blocks an existing user's number once the probe budget is spent", async () => {
-      mockSmsUnsupported.mockReturnValue(["UZ"])
+      mockSmsBlocked.mockReturnValue(["UZ"])
       mockGetUserIdFromIdentifier.mockResolvedValue("user-id")
       exhaustProbeBudget()
 
@@ -275,7 +333,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
     })
 
     it("spends the budget before the lookup, so a sweep cannot probe past it", async () => {
-      mockSmsUnsupported.mockReturnValue(["UZ"])
+      mockSmsBlocked.mockReturnValue(["UZ"])
       exhaustProbeBudget()
 
       await requestCode(UZBEKISTAN, "sms")
@@ -292,7 +350,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
     })
 
     it("reports a burnt-out probe budget as its own phase", async () => {
-      mockSmsUnsupported.mockReturnValue(["UZ"])
+      mockSmsBlocked.mockReturnValue(["UZ"])
       exhaustProbeBudget()
 
       await requestCode(UZBEKISTAN, "sms")
@@ -303,7 +361,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
     })
 
     it("refunds the point for a confirmed account, so a real user is never spent out", async () => {
-      mockSmsUnsupported.mockReturnValue(["UZ"])
+      mockSmsBlocked.mockReturnValue(["UZ"])
       mockGetUserIdFromIdentifier.mockResolvedValue("user-id")
 
       await requestCode(UZBEKISTAN, "sms")
@@ -312,7 +370,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
     })
 
     it("does not refund a number that holds no account", async () => {
-      mockSmsUnsupported.mockReturnValue(["UZ"])
+      mockSmsBlocked.mockReturnValue(["UZ"])
 
       await requestCode(UZBEKISTAN, "sms")
 
@@ -334,7 +392,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
 
   describe("telemetry", () => {
     it("logs and reports a blocked country", async () => {
-      mockSmsUnsupported.mockReturnValue(["UZ"])
+      mockSmsBlocked.mockReturnValue(["UZ"])
 
       await requestCode(UZBEKISTAN, "sms")
 
@@ -352,14 +410,36 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
       )
     })
 
-    it("reports an unparsable number as unknown, not as a blocked country", async () => {
+    // Client input noise is not a policy rejection. Sharing the
+    // `destination-blocked` phase would inflate the very counter the block list
+    // is tuned from, and burn that phase's one-shot page on a typo.
+    it("reports an unparsable number under its own phase", async () => {
       await requestCode("+000", "sms")
 
       expect(notifyOpsEvent).toHaveBeenCalledWith(
         expect.objectContaining({
-          phase: "destination-blocked",
+          phase: "destination-unparsable",
           error: "InvalidPhoneNumber",
           meta: expect.objectContaining({ country: "unknown" }),
+        }),
+      )
+      expect(notifyOpsEvent).not.toHaveBeenCalledWith(
+        expect.objectContaining({ phase: "destination-blocked" }),
+      )
+    })
+
+    it("does not spend the blocked-country page on client input noise", async () => {
+      mockSmsBlocked.mockReturnValue(["UZ"])
+
+      await requestCode("+000", "sms")
+      ;(notifyOpsEvent as jest.Mock).mockClear()
+
+      await requestCode(UZBEKISTAN, "sms")
+
+      expect(notifyOpsEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: "destination-blocked",
+          meta: expect.objectContaining({ country: "UZ" }),
         }),
       )
     })
@@ -375,7 +455,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
     // traffic. If the carve-out — which is exactly the real users — reported
     // nothing, the feed could only ever say "no real users here".
     it("reports a carve-out so served real users are visible in the feed", async () => {
-      mockSmsUnsupported.mockReturnValue(["UZ"])
+      mockSmsBlocked.mockReturnValue(["UZ"])
       mockGetUserIdFromIdentifier.mockResolvedValue("user-id")
 
       await requestCode(UZBEKISTAN, "sms")
@@ -396,7 +476,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
     // rest of the ops feed during the very incident this telemetry is for.
     describe("coalescing", () => {
       it("pages immediately on the first rejection of a country", async () => {
-        mockSmsUnsupported.mockReturnValue(["UZ"])
+        mockSmsBlocked.mockReturnValue(["UZ"])
 
         await requestCode(UZBEKISTAN, "sms")
 
@@ -404,7 +484,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
       })
 
       it("emits nothing more for the rest of the window", async () => {
-        mockSmsUnsupported.mockReturnValue(["UZ"])
+        mockSmsBlocked.mockReturnValue(["UZ"])
 
         for (let i = 0; i < 20; i++) await requestCode(UZBEKISTAN, "sms")
 
@@ -413,7 +493,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
       })
 
       it("does not let an attacker-chosen channel string reopen the pager", async () => {
-        mockSmsUnsupported.mockReturnValue(["UZ"])
+        mockSmsBlocked.mockReturnValue(["UZ"])
 
         // POST /auth/phone/code passes req.body.channel through unvalidated, and
         // the channel is part of the coalescing key. Before the channel was
@@ -427,7 +507,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
       })
 
       it("flushes the rest as one counted summary", async () => {
-        mockSmsUnsupported.mockReturnValue(["UZ"])
+        mockSmsBlocked.mockReturnValue(["UZ"])
 
         for (let i = 0; i < 20; i++) await requestCode(UZBEKISTAN, "sms")
         flushBlockedDestinationReports()
@@ -442,7 +522,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
       })
 
       it("pages a new attack origin immediately even mid-flood", async () => {
-        mockSmsUnsupported.mockReturnValue(["UZ", "TR"])
+        mockSmsBlocked.mockReturnValue(["UZ", "TR"])
 
         for (let i = 0; i < 20; i++) await requestCode(UZBEKISTAN, "sms")
         ;(notifyOpsEvent as jest.Mock).mockClear()
@@ -458,7 +538,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
       })
 
       it("counts each country separately", async () => {
-        mockSmsUnsupported.mockReturnValue(["UZ", "TR"])
+        mockSmsBlocked.mockReturnValue(["UZ", "TR"])
 
         for (let i = 0; i < 3; i++) await requestCode(UZBEKISTAN, "sms")
         for (let i = 0; i < 5; i++) await requestCode(TURKEY, "sms")
@@ -472,7 +552,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
       })
 
       it("drains its pending summaries, so a flush emits nothing twice", async () => {
-        mockSmsUnsupported.mockReturnValue(["UZ"])
+        mockSmsBlocked.mockReturnValue(["UZ"])
 
         for (let i = 0; i < 3; i++) await requestCode(UZBEKISTAN, "sms")
         flushBlockedDestinationReports()
@@ -482,8 +562,70 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
         expect(notifyOpsEvent).not.toHaveBeenCalled()
       })
 
+      // "A new attack origin is still news the moment it appears" only holds if
+      // a kind can stop being current. Paged kinds used to live for the pod's
+      // lifetime, so the second wave from a country — next week, after a month
+      // of silence — arrived as a delayed 5-minute summary and nothing else.
+      describe("a kind stops being current once its origin goes quiet", () => {
+        const THIRTY_ONE_MINUTES_MS = 31 * 60 * 1000
+        const FOUR_MINUTES_MS = 4 * 60 * 1000
+
+        let clock: number
+        let nowSpy: jest.SpyInstance<number, []>
+
+        beforeEach(() => {
+          clock = Date.now()
+          nowSpy = jest.spyOn(Date, "now").mockImplementation(() => clock)
+        })
+
+        afterEach(() => nowSpy.mockRestore())
+
+        const advance = (ms: number) => {
+          clock += ms
+        }
+
+        it("pages again for a wave that arrives after a quiet period", async () => {
+          mockSmsBlocked.mockReturnValue(["UZ"])
+
+          for (let i = 0; i < 5; i++) await requestCode(UZBEKISTAN, "sms")
+          flushBlockedDestinationReports()
+
+          advance(THIRTY_ONE_MINUTES_MS)
+          flushBlockedDestinationReports()
+          ;(notifyOpsEvent as jest.Mock).mockClear()
+
+          await requestCode(UZBEKISTAN, "sms")
+
+          expect(notifyOpsEvent).toHaveBeenCalledTimes(1)
+          expect(notifyOpsEvent).toHaveBeenCalledWith(
+            expect.objectContaining({
+              phase: "destination-blocked",
+              phone: UZBEKISTAN,
+              meta: expect.objectContaining({ country: "UZ" }),
+            }),
+          )
+        })
+
+        it("does not re-page during a sustained flood", async () => {
+          mockSmsBlocked.mockReturnValue(["UZ"])
+
+          // 40 minutes of continuous traffic — well past the quiet threshold,
+          // but never quiet.
+          for (let i = 0; i < 10; i++) {
+            await requestCode(UZBEKISTAN, "sms")
+            advance(FOUR_MINUTES_MS)
+            flushBlockedDestinationReports()
+          }
+          ;(notifyOpsEvent as jest.Mock).mockClear()
+
+          await requestCode(UZBEKISTAN, "sms")
+
+          expect(notifyOpsEvent).not.toHaveBeenCalled()
+        })
+      })
+
       it("coalesces the carve-out on the same terms", async () => {
-        mockSmsUnsupported.mockReturnValue(["UZ"])
+        mockSmsBlocked.mockReturnValue(["UZ"])
         mockGetUserIdFromIdentifier.mockResolvedValue("user-id")
 
         for (let i = 0; i < 4; i++) await requestCode(UZBEKISTAN, "sms")
@@ -526,7 +668,7 @@ describe("requestPhoneCodeForAuthedUser — destination country gate", () => {
   })
 
   it("never reaches the provider for an unsupported country", async () => {
-    mockSmsUnsupported.mockReturnValue(["UZ"])
+    mockSmsBlocked.mockReturnValue(["UZ"])
 
     const result = await requestForAuthedUser(UZBEKISTAN, "sms")
 
@@ -535,7 +677,7 @@ describe("requestPhoneCodeForAuthedUser — destination country gate", () => {
   })
 
   it("does not fire the otp-sent ops event for a blocked country", async () => {
-    mockSmsUnsupported.mockReturnValue(["UZ"])
+    mockSmsBlocked.mockReturnValue(["UZ"])
 
     await requestForAuthedUser(UZBEKISTAN, "sms")
 
@@ -548,7 +690,7 @@ describe("requestPhoneCodeForAuthedUser — destination country gate", () => {
   })
 
   it("gates each channel against its own list", async () => {
-    mockWhatsAppUnsupported.mockReturnValue(["UZ"])
+    mockWhatsAppBlocked.mockReturnValue(["UZ"])
 
     const viaWhatsApp = await requestForAuthedUser(UZBEKISTAN, "whatsapp")
     expect(viaWhatsApp).toBeInstanceOf(PhoneCountryNotAllowedError)
@@ -569,7 +711,7 @@ describe("requestPhoneCodeForAuthedUser — destination country gate", () => {
   // Binding a phone to an authed account registers that number, so an existing
   // record for it must not open a hole in the gate.
   it("has no existing-user carve-out", async () => {
-    mockSmsUnsupported.mockReturnValue(["UZ"])
+    mockSmsBlocked.mockReturnValue(["UZ"])
     mockGetUserIdFromIdentifier.mockResolvedValue("someone-else")
 
     const result = await requestForAuthedUser(UZBEKISTAN, "sms")

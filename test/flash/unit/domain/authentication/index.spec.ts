@@ -43,15 +43,15 @@ describe("getSupportedCountries", () => {
 })
 
 describe("isAuthChannelSupportedForCountry", () => {
-  const unsupportedSmsCountries = ["UZ", "RU"] as CountryCode[]
-  const unsupportedWhatsAppCountries = ["UZ", "BR"] as CountryCode[]
+  const blockedSmsCountries = ["UZ", "RU"] as CountryCode[]
+  const blockedWhatsAppCountries = ["UZ", "BR"] as CountryCode[]
 
   const check = (countryCode: string, channel: ChannelType) =>
     isAuthChannelSupportedForCountry({
       countryCode: countryCode as CountryCode,
       channel,
-      unsupportedSmsCountries,
-      unsupportedWhatsAppCountries,
+      blockedSmsCountries,
+      blockedWhatsAppCountries,
     })
 
   it("allows a country on neither list", () => {
@@ -79,8 +79,8 @@ describe("isAuthChannelSupportedForCountry", () => {
       isAuthChannelSupportedForCountry({
         countryCode: "UZ" as CountryCode,
         channel: ChannelType.Sms,
-        unsupportedSmsCountries: ["uz"] as CountryCode[],
-        unsupportedWhatsAppCountries: [],
+        blockedSmsCountries: ["uz"] as CountryCode[],
+        blockedWhatsAppCountries: [],
       }),
     ).toBe(false)
 
@@ -88,8 +88,8 @@ describe("isAuthChannelSupportedForCountry", () => {
       isAuthChannelSupportedForCountry({
         countryCode: "uz" as CountryCode,
         channel: ChannelType.Whatsapp,
-        unsupportedSmsCountries: [],
-        unsupportedWhatsAppCountries: ["UZ"] as CountryCode[],
+        blockedSmsCountries: [],
+        blockedWhatsAppCountries: ["UZ"] as CountryCode[],
       }),
     ).toBe(false)
   })
@@ -99,8 +99,8 @@ describe("isAuthChannelSupportedForCountry", () => {
       isAuthChannelSupportedForCountry({
         countryCode: "UZ" as CountryCode,
         channel: ChannelType.Sms,
-        unsupportedSmsCountries: [],
-        unsupportedWhatsAppCountries: [],
+        blockedSmsCountries: [],
+        blockedWhatsAppCountries: [],
       }),
     ).toBe(true)
   })

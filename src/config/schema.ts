@@ -691,17 +691,35 @@ export const configSchema = {
         chanId: [],
       },
     },
+    // Countries hidden from the client's country picker (`globals
+    // .supportedCountries`). This is a MARKET/PRESENTATION list, and it is
+    // deliberately NOT the fraud control: a country hidden here cannot be
+    // selected in the app at all, so a number in it never reaches the server
+    // and the existing-user carve-out in requestPhoneCode* is unreachable for
+    // it. Seeding this with the block list below would therefore lock every
+    // existing account in those countries out of its own login code.
+    smsAuthUnsupportedCountries: {
+      type: "array",
+      items: { type: "string" },
+      default: [],
+    },
+    whatsAppAuthUnsupportedCountries: {
+      type: "array",
+      items: { type: "string" },
+      default: [],
+    },
     // Destinations that produced auth-code traffic but never a single
     // conversion, and are the origin of the 2026-08-25 SMS-pumping attack.
-    // Enforced server-side in requestPhoneCode*, not just hidden in the
-    // client's country picker. Drop a country from this list when Flash
-    // opens that market.
-    smsAuthUnsupportedCountries: {
+    // This is the FRAUD CONTROL: enforced server-side in requestPhoneCode*
+    // before any Twilio spend, while the picker still offers the country so an
+    // existing account there can ask for a login code and be served by the
+    // carve-out. Drop a country from this list when Flash opens that market.
+    smsAuthBlockedCountries: {
       type: "array",
       items: { type: "string" },
       default: SMS_PUMPING_HIGH_RISK_COUNTRIES,
     },
-    whatsAppAuthUnsupportedCountries: {
+    whatsAppAuthBlockedCountries: {
       type: "array",
       items: { type: "string" },
       default: SMS_PUMPING_HIGH_RISK_COUNTRIES,

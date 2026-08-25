@@ -434,12 +434,26 @@ export const getSwapConfig = (): SwapConfig => {
   }
 }
 
+// Countries hidden from the client's country picker. Presentation only — a
+// country listed here can never be selected in the app, so nothing in it ever
+// reaches the auth-code endpoint.
 export const getSmsAuthUnsupportedCountries = (): CountryCode[] => {
   return yamlConfig.smsAuthUnsupportedCountries as CountryCode[]
 }
 
 export const getWhatsAppAuthUnsupportedCountries = (): CountryCode[] => {
   return yamlConfig.whatsAppAuthUnsupportedCountries as CountryCode[]
+}
+
+// Countries whose auth-code destinations are refused server-side before any
+// provider spend. Deliberately separate from the picker lists above: the
+// existing-user carve-out only works if the country can still be selected.
+export const getSmsAuthBlockedCountries = (): CountryCode[] => {
+  return yamlConfig.smsAuthBlockedCountries as CountryCode[]
+}
+
+export const getWhatsAppAuthBlockedCountries = (): CountryCode[] => {
+  return yamlConfig.whatsAppAuthBlockedCountries as CountryCode[]
 }
 
 const { ask } = yamlConfig.exchangeRates["USD"]["JMD"]

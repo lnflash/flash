@@ -39,6 +39,8 @@ jest.mock("@config", () => {
     getRequestCodeBlockedCountryPerIpLimits: jest.fn(() => limits),
     getSmsAuthUnsupportedCountries: jest.fn(() => []),
     getWhatsAppAuthUnsupportedCountries: jest.fn(() => []),
+    getSmsAuthBlockedCountries: jest.fn(() => []),
+    getWhatsAppAuthBlockedCountries: jest.fn(() => []),
     getAccountsOnboardConfig: jest.fn(() => ({
       phoneMetadataValidationSettings: { enabled: false },
       ipMetadataValidationSettings: { enabled: false },
