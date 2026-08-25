@@ -218,7 +218,15 @@ export const getRequestCodePerIpLimits = () =>
 export const getRequestCodeBlockedCountryPerIpLimits = () => ({
   points: 2,
   duration: toSeconds(3600), // 1 hour
-  blockDuration: toSeconds(86400), // 24 hours
+  // One hour, NOT the 24 used by the other auth limiters. This one is keyed on
+  // `req.originalIp` (the `x-real-ip` header), and a large share of Flash's
+  // users reach us from behind carrier-grade NAT — one mobile egress address
+  // covers many subscribers. A 24h block means two sweep probes from that
+  // address cost every real customer behind it a full day of their own login
+  // codes. The bound that actually limits a sweep is 2 probes/IP/hour, which is
+  // unchanged; the shorter block only decides how fast a shared-IP false
+  // positive heals.
+  blockDuration: toSeconds(3600), // 1 hour
 })
 
 export const getFailedLoginAttemptPerLoginIdentifierLimits = () =>

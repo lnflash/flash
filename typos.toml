@@ -31,3 +31,10 @@ nin = "nin"
 # Existing money quiz identifiers; changing them would be a cross-client data change.
 Governement = "Governement"
 Aggrement = "Aggrement"
+# ISO 3166-1 alpha-2 code in the SMS-pumping blocked-country list. "BA" (Bosnia
+# and Herzegovina) is flagged as a typo of "BY"/"BE" — and BY is already in that
+# same list, so accepting the suggestion would silently change which country the
+# gate blocks and duplicate an existing entry. Pinned to itself. Excluding
+# src/config/schema.ts instead would stop spell-checking a live config file, and
+# typos has no per-line suppression.
+BA = "BA"

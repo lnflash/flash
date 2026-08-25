@@ -166,7 +166,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
     expect(mockInitiateVerify).toHaveBeenCalledTimes(1)
   })
 
-  it("never reaches the provider for an unparseable number", async () => {
+  it("never reaches the provider for an unparsable number", async () => {
     const result = await requestCode("+000", "sms")
 
     expect(result).toBeInstanceOf(InvalidPhoneNumber)
@@ -352,7 +352,7 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
       )
     })
 
-    it("reports an unparseable number as unknown, not as a blocked country", async () => {
+    it("reports an unparsable number as unknown, not as a blocked country", async () => {
       await requestCode("+000", "sms")
 
       expect(notifyOpsEvent).toHaveBeenCalledWith(
@@ -409,6 +409,20 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
         for (let i = 0; i < 20; i++) await requestCode(UZBEKISTAN, "sms")
 
         expect(baseLogger.warn).toHaveBeenCalledTimes(20)
+        expect(notifyOpsEvent).toHaveBeenCalledTimes(1)
+      })
+
+      it("does not let an attacker-chosen channel string reopen the pager", async () => {
+        mockSmsUnsupported.mockReturnValue(["UZ"])
+
+        // POST /auth/phone/code passes req.body.channel through unvalidated, and
+        // the channel is part of the coalescing key. Before the channel was
+        // collapsed to the enum, each distinct string was a fresh "kind": it
+        // missed the paged set, paged immediately, and left a permanent entry
+        // behind — 20 requests produced 20 pages into the 50-slot ops feed
+        // shared with cashout, deposit, upgrade and transfer.
+        for (let i = 0; i < 20; i++) await requestCode(UZBEKISTAN, `sms${i}`)
+
         expect(notifyOpsEvent).toHaveBeenCalledTimes(1)
       })
 
@@ -545,7 +559,7 @@ describe("requestPhoneCodeForAuthedUser — destination country gate", () => {
     expect(mockInitiateVerify).toHaveBeenCalledTimes(1)
   })
 
-  it("rejects an unparseable number as invalid", async () => {
+  it("rejects an unparsable number as invalid", async () => {
     const result = await requestForAuthedUser("+000", "sms")
 
     expect(result).toBeInstanceOf(InvalidPhoneNumber)

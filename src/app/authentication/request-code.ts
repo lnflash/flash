@@ -14,6 +14,7 @@ import {
 } from "@domain/authentication/errors"
 import { PhoneCountryNotAllowedError } from "@domain/users/errors"
 import { InvalidPhoneNumber, NotImplementedError } from "@domain/errors"
+import { ChannelType } from "@domain/phone-provider"
 import { RateLimitConfig } from "@domain/rate-limit"
 import { RateLimiterExceededError } from "@domain/rate-limit/errors"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
@@ -336,7 +337,19 @@ const rewardRequestCodeBlockedCountryPerIp = async (ip: IpAddress): Promise<void
     keyPrefix: RateLimitConfig.requestCodeBlockedCountryPerIp.key,
     limitOptions: RateLimitConfig.requestCodeBlockedCountryPerIp.limits,
   })
-  await limiter.reward(ip)
+  const rewarded = await limiter.reward(ip)
+  // The refund is what keeps the carve-out honest: without it, a real customer
+  // abroad spends their own budget every time they ask. `reward` RETURNS its
+  // error rather than throwing, so swallowing it means a Redis fault silently
+  // turns "never spent out of their own login code" into a claim that is only
+  // true while Redis is healthy — and the resulting lockout has nothing in the
+  // logs tying it back here.
+  if (rewarded instanceof Error) {
+    baseLogger.warn(
+      { error: rewarded.name },
+      "blocked-country probe budget refund failed",
+    )
+  }
 }
 
 type CarveOutResult = "allowed" | "no-such-user" | "probe-budget-exhausted"
@@ -399,10 +412,22 @@ const checkAuthCodeDestination = async ({
   allowExistingUser?: boolean
 }): Promise<true | PhoneCountryNotAllowedError | InvalidPhoneNumber> => {
   // Callers hand us the raw channel string in at least one path
-  // (POST /auth/phone/code does not lowercase it), and the supported-country
-  // lookup branches on the exact value. Normalize once, here, so every caller
-  // is gated against the list it actually asked for.
-  const normalizedChannel = String(channel).toLowerCase() as ChannelType
+  // (POST /auth/phone/code passes `req.body.channel` through unvalidated), and
+  // the supported-country lookup branches on the exact value. Normalize once,
+  // here, so every caller is gated against the list it actually asked for.
+  //
+  // Collapsed to the ENUM, not merely lowercased. A lowercase cast leaves the
+  // value attacker-controlled, and it is baked into the coalescing key below
+  // (`${phase}|${channel}|${countryCode}`) — so every distinct string is a
+  // fresh "kind" that misses `pagedBlockedKinds`, pages the ops feed
+  // immediately, and adds a permanent Set entry in a long-lived process.
+  // `isAuthChannelSupportedForCountry` already treats anything that is not
+  // whatsapp as SMS, so collapsing here changes no gating decision — it only
+  // bounds the key space to two values.
+  const normalizedChannel: ChannelType =
+    String(channel).toLowerCase() === ChannelType.Whatsapp
+      ? ChannelType.Whatsapp
+      : ChannelType.Sms
 
   const countryCode = parsePhoneNumberFromString(phone)?.country
   if (countryCode === undefined) {
