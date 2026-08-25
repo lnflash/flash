@@ -13,9 +13,12 @@
 // EVERY region its calling code could denote, and blocks if any of them is
 // blocked. Adding DO (+1 809/829/849) or any other NANP region to this list
 // would therefore reject ordinary US numbers on those overlays — silently, from
-// a routine configmap edit. `assertNoAmbiguousBlockedCountries` in
-// src/config/yaml.ts re-checks the merged configmap at startup, and
-// test/flash/unit/config/schema.spec.ts pins it for the defaults below.
+// a routine configmap edit. `reportAmbiguousBlockedCountries` in
+// src/config/yaml.ts re-checks the merged configmap at startup and LOGS AT
+// ERROR LEVEL for a NANP entry — it does not throw, so a bad configmap entry
+// ships and a Ready pod quietly rejects those numbers; the log line is the only
+// backstop. Only the defaults below are pinned hard, by
+// test/flash/unit/config/schema.spec.ts.
 //
 // This list lives in its own file so typos.toml can exclude the ISO 3166-1
 // alpha-2 codes ("BA" is read as a misspelling of "BY"/"BE", and BY is itself
