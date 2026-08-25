@@ -8,6 +8,7 @@ import {
 } from "@services/bridge/errors"
 import { IbexError, InsufficientIbexBalance } from "@services/ibex/errors"
 import { PhoneCountryNotAllowedError } from "@domain/users/errors"
+import { InvalidPhoneNumber } from "@domain/errors"
 
 describe("error-map", () => {
   it("maps BridgeWithdrawalNotFoundError to BRIDGE_WITHDRAWAL_NOT_FOUND", () => {
@@ -38,6 +39,16 @@ describe("error-map", () => {
 
     expect(result.message).toBe("Phone number is not from a valid region")
     expect(result.message).not.toContain("Unexpected error")
+    expect(result.extensions.code).not.toBe("UNEXPECTED_CLIENT_ERROR")
+  })
+
+  // A malformed number is a client input error, and the number itself must not
+  // come back inside the message.
+  it("maps InvalidPhoneNumber to a validation error without echoing the number", () => {
+    const result = mapError(new InvalidPhoneNumber("+000123"))
+
+    expect(result.message).toBe("Phone number is not a valid phone number")
+    expect(result.message).not.toContain("+000123")
     expect(result.extensions.code).not.toBe("UNEXPECTED_CLIENT_ERROR")
   })
 

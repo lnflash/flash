@@ -218,7 +218,11 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = "Invoice must be a zero-amount invoice"
       return new ValidationInternalError({ message, logger: baseLogger })
 
+    // The domain-side twin of the provider error above. Left in the catch-all
+    // it rendered a malformed number as "unexpected error, contact support",
+    // and echoed the submitted number back inside that message.
     case "InvalidPhoneNumberPhoneProviderError":
+    case "InvalidPhoneNumber":
       message = "Phone number is not a valid phone number"
       return new ValidationInternalError({ message, logger: baseLogger })
 
@@ -775,7 +779,6 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "InvalidDeviceId":
     case "InvalidIdentityPassword":
     case "InvalidIdentityUsername":
-    case "InvalidPhoneNumber":
     case "InvalidTotpCode":
     case "InvalidEmailAddress":
     case "NoContactForUsernameError":
