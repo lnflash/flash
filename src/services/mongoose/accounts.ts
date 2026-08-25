@@ -4,6 +4,7 @@ import { AccountStatus } from "@domain/accounts"
 import {
   CouldNotFindAccountError,
   CouldNotFindAccountFromKratosIdError,
+  CouldNotFindAccountFromNpubError,
   CouldNotFindAccountFromUsernameError,
   CouldNotFindAccountFromUuidError,
   RepositoryError,
@@ -77,14 +78,16 @@ export const AccountsRepository = (): IAccountsRepository => {
     }
   }
 
+  // No `.collation(...)` here on purpose. bech32 npubs are a lowercase-only
+  // charset and both scalar coercion paths lowercase, so case-insensitivity
+  // buys nothing — and a non-simple collation would stop the query from using
+  // the unique `{ npub: 1 }` index, leaving every support-desk lookup a
+  // collection scan.
   const findByNpub = async (npub: Npub): Promise<Account | RepositoryError> => {
     try {
-      const result = await Account.findOne({ npub: { $eq: npub } }).collation({
-        locale: "en",
-        strength: 2,
-      })
+      const result = await Account.findOne({ npub: { $eq: npub } })
       if (!result) {
-        return new CouldNotFindAccountFromUsernameError(npub)
+        return new CouldNotFindAccountFromNpubError(npub)
       }
       return translateToAccount(result)
     } catch (err) {

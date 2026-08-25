@@ -63,6 +63,7 @@ export class CouldNotFindLnPaymentFromHashError extends CouldNotFindError {
 
 export class CouldNotFindAccountFromUuidError extends CouldNotFindError {}
 export class CouldNotFindAccountFromUsernameError extends CouldNotFindError {}
+export class CouldNotFindAccountFromNpubError extends CouldNotFindError {}
 export class CouldNotFindAccountFromPhoneError extends CouldNotFindError {}
 export class CouldNotFindMerchantFromUsernameError extends CouldNotFindError {}
 export class CouldNotFindMerchantFromIdError extends CouldNotFindError {}

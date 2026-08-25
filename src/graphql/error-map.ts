@@ -112,6 +112,10 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = `Account does not exist for username ${error.message}`
       return new NotFoundError({ message, logger: baseLogger })
 
+    case "CouldNotFindAccountFromNpubError":
+      message = `Account does not exist for npub ${error.message}`
+      return new NotFoundError({ message, logger: baseLogger })
+
     case "CouldNotFindMerchantFromUsernameError":
       message = `Merchant does not exist for username ${error.message}`
       return new NotFoundError({ message, logger: baseLogger })
@@ -380,6 +384,10 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "UsernameIsImmutableError":
       message = "username is immutable"
       return new UsernameError({ message, logger: baseLogger })
+
+    case "NpubNotAvailableError":
+      message = "npub is already linked to another account"
+      return new ValidationInternalError({ message, logger: baseLogger })
 
     case "InvalidWalletId":
       message = "Invalid walletId for account."
@@ -766,6 +774,7 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "LnRouteValidationError":
     case "BadAmountForRouteError":
     case "InvalidUsername":
+    case "InvalidNpubError":
     case "InvalidDeviceId":
     case "InvalidIdentityPassword":
     case "InvalidIdentityUsername":

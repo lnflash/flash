@@ -6,7 +6,14 @@ import { mapError } from "@graphql/error-map"
 
 import { Admin } from "@app"
 
-const AccountDetailsByNpubQuery = GT.Field({
+const AccountDetailsByNpubQuery = GT.Field<
+  null,
+  GraphQLAdminContext,
+  {
+    // FIXME: doesn't respect the input: {} pattern
+    npub: Npub | ValidationError
+  }
+>({
   type: GT.NonNull(GraphQLAccount),
   args: {
     npub: { type: GT.NonNull(Npub) },

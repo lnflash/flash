@@ -4,6 +4,7 @@ export * from "./update-user-phone"
 export * from "./send-cashout-notification"
 export * from "./send-user-notification"
 export * from "./invite"
+export * from "./get-account-by-npub"
 
 // Re-export query functions from invite module for admin GraphQL compatibility
 export { getInviteById, listInvites } from "../invite/queries"
@@ -18,13 +19,6 @@ export const getAccountByUsername = async (username: string) => {
 
   const accounts = AccountsRepository()
   return accounts.findByUsername(usernameValid)
-}
-
-export const getAccountByNpub = async (npub: string) => {
-  // Format validation happens at the GraphQL boundary (Npub scalar);
-  // the repository query is an exact $eq match so a raw string is safe.
-  const accounts = AccountsRepository()
-  return accounts.findByNpub(npub as Npub)
 }
 
 export const getAccountByUserPhone = async (phone: PhoneNumber) => {
