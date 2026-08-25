@@ -371,6 +371,64 @@ describe("Accounts.releaseNpub", () => {
         })
         expect(result).not.toMatchObject({ reassignedTo: expect.anything() })
       })
+
+      describe("naming which failure it was", () => {
+        /**
+         * Three different causes reach the one "npub released but reassignment
+         * failed" line, and each has its own recovery: the key is gone and must
+         * be hunted with `accountDetailsByNpub`; the key is unclaimed and the
+         * call should be re-run against another target; or the write failed and
+         * the same call should be retried. Without a discriminator the operator
+         * gets all three procedures at 3am behind one identical line — and the
+         * admin server never assigns `req.gqlContext`, so there is no request
+         * log to fall back on.
+         */
+        const causes: [string, ApplicationError, string][] = [
+          // The raw repository error, not the `NpubNotAvailableError` the
+          // caller is handed: logging the mapped name would hide that this was
+          // the unique index firing.
+          [
+            "a key claimed by someone else in the window",
+            new DuplicateKeyForPersistError(),
+            "DuplicateKeyForPersistError",
+          ],
+          [
+            "a target that self-claimed a different key",
+            new AccountAlreadyHasNpubError(TARGET_ACCOUNT_ID),
+            "AccountAlreadyHasNpubError",
+          ],
+          [
+            "a write that failed outright",
+            new UnknownRepositoryError("mongo down"),
+            "UnknownRepositoryError",
+          ],
+        ]
+
+        it.each(causes)("names %s", async (_label, failure, expectedReason) => {
+          claimNpub.mockResolvedValue(failure)
+
+          await release({ reassignToAccountId: TARGET_ACCOUNT_ID })
+
+          expect(error).toHaveBeenCalledWith(
+            expect.objectContaining({ reason: expectedReason }),
+            expect.any(String),
+          )
+        })
+
+        it("gives every cause a distinct reason", async () => {
+          // A shared or empty `name` would satisfy the assertions above while
+          // still collapsing the three recoveries into one line.
+          const reasons: unknown[] = []
+          for (const [, failure] of causes) {
+            error.mockReset()
+            claimNpub.mockResolvedValue(failure)
+            await release({ reassignToAccountId: TARGET_ACCOUNT_ID })
+            reasons.push(error.mock.calls[0][0].reason)
+          }
+
+          expect(new Set(reasons).size).toBe(causes.length)
+        })
+      })
     })
   })
 })

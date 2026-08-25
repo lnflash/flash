@@ -35,6 +35,38 @@
  * `sparse: true`: a sparse index still indexes documents holding an explicit
  * `npub: null`, and the second such document would collide.
  *
+ * Rollout
+ * -------
+ * THIS MIGRATION MUST COMPLETE BEFORE ANY POD RUNNING THE NEW IMAGE BOOTS.
+ * It is the first unique index on a field that holds duplicates in prod, and
+ * `schema.ts` now declares that index on `AccountSchema` too.
+ * `graphql-main-server.ts` boots with `setupMongoConnection(true)`, which runs
+ * `syncIndexes()` across every model. Against un-deduped data `createIndex`
+ * rejects with E11000, `setupMongoConnection` rethrows
+ * (`src/services/mongodb/index.ts:107`), and the `.catch` in
+ * `graphql-main-server.ts` logs a single "server error" line and returns:
+ * `bootstrap()` and both Apollo servers never start, the process stays alive
+ * on mongoose's open handles, and the pod reports Ready with no listener. One
+ * log line is the only clue.
+ *
+ * The chart already enforces the ordering: every galoy workload — api,
+ * websocket, trigger, exporter, the ibex/bridge/fygaro webhooks and the
+ * cronjobs — carries a `wait-for-mongodb-migrate` initContainer
+ * (`groundnuty/k8s-wait-for` `job-wr`) that blocks on the per-revision
+ * `<release>-mongodb-migrate-<revision>` Job and fails if that Job fails, so
+ * the app container cannot start ahead of the migration
+ * (`charts/flash/templates/api-deployment.yaml`,
+ * `charts/flash/templates/galoy-migration-job.yaml`).
+ *
+ * Two ways to lose that guarantee, both of which produce the dead-pod failure
+ * above: bumping `galoy.images.app.digest` without bumping
+ * `galoy.images.mongodbMigrate.digest` in the same release (the migrate Job
+ * then runs an older image that does not contain this file, succeeds, and lets
+ * the new app through against un-migrated data), and force-rolling or
+ * recreating a Deployment out of band so the initContainer's Job is not the
+ * one carrying this migration. If a pod is up with no listener, check that the
+ * revision's migrate Job ran this migration before touching anything else.
+ *
  * Rollback (down)
  * ---------------
  * Drops the unique index. The lowercasing and the unsets are NOT reverted —

@@ -86,9 +86,20 @@ export const AccountsRepository = (): IAccountsRepository => {
   // buys nothing — and a non-simple collation would stop the query from using
   // the unique `{ npub: 1 }` index, leaving every support-desk lookup a
   // collection scan.
+  //
+  // The redundant-looking `$type: "string"` is what actually gets the index
+  // used. The index is partial on `{ npub: { $type: "string" } }`, and mongo
+  // only picks a partial index when the query provably matches a subset of the
+  // partial filter. It cannot derive that from an equality against a string
+  // literal — `$type` is not one of the predicates its implication check
+  // understands — so `{ npub: { $eq: npub } }` alone plans as a COLLSCAN
+  // (verified on 6.0 in test/flash/integration/accounts/npub.spec.ts).
+  // Restating the type predicate makes it an IXSCAN. It cannot change the
+  // result set: `npub` is always a string here, so any document that could
+  // match the equality is a string-typed one.
   const findByNpub = async (npub: Npub): Promise<Account | RepositoryError> => {
     try {
-      const result = await Account.findOne({ npub: { $eq: npub } })
+      const result = await Account.findOne({ npub: { $eq: npub, $type: "string" } })
       if (!result) {
         return new CouldNotFindAccountFromNpubError(npub)
       }

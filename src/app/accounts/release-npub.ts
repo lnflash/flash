@@ -143,6 +143,23 @@ export const releaseNpub = async ({
         previousNpub,
         reassignToAccountId: targetIdChecked,
         releasedByUserId,
+        // Which failure, not just that one happened. Three distinct causes
+        // reach this branch and each has a different recovery, so a line that
+        // does not name the cause hands the operator all three procedures at
+        // once. `DuplicateKeyForPersistError` (surfaced to the caller as
+        // `NpubNotAvailableError`): someone else claimed the key in the window
+        // between the two writes — it is gone, find the new holder with
+        // `accountDetailsByNpub` and release it from there.
+        // `AccountAlreadyHasNpubError`: the target linked a different key
+        // after the pre-release check — the released key is still unclaimed,
+        // so re-run against another target. Anything else (e.g.
+        // `UnknownRepositoryError`): the write failed, retry the same call.
+        //
+        // Taken off the raw repository error, before the
+        // `DuplicateKeyForPersistError` → `NpubNotAvailableError` mapping
+        // below, so the line names the failure that actually happened.
+        reason: reassigned.name,
+        reassignmentError: reassigned.message,
       },
       "npub released but reassignment failed",
     )

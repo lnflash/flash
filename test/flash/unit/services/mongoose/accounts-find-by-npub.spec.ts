@@ -38,11 +38,19 @@ describe("AccountsRepository.findByNpub", () => {
     // index, so every support-desk lookup would be a collection scan. The old
     // implementation chained `.collation({ locale: "en", strength: 2 })` and
     // would blow up on this mock.
+    //
+    // The `$type` alongside the `$eq` is not decoration: the index is partial
+    // on `{ npub: { $type: "string" } }`, and mongo will not use a partial
+    // index unless the query provably matches a subset of its filter — which
+    // it cannot derive from an equality against a string literal. Without the
+    // restated predicate the lookup plans as a COLLSCAN. This mock cannot see
+    // that; `test/flash/integration/accounts/npub.spec.ts` explains the real
+    // plan and is what actually caught it.
     findOne.mockResolvedValue(accountRecord)
 
     const result = await AccountsRepository().findByNpub(NPUB)
 
-    expect(findOne).toHaveBeenCalledWith({ npub: { $eq: NPUB } })
+    expect(findOne).toHaveBeenCalledWith({ npub: { $eq: NPUB, $type: "string" } })
     expect(result).not.toBeInstanceOf(Error)
     expect((result as Account).npub).toBe(NPUB)
   })
