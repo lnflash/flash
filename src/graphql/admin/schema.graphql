@@ -26,6 +26,10 @@ enum AccountLevel {
   ZERO
 }
 
+input AccountReleaseNpubInput {
+  accountId: ID!
+}
+
 enum AccountStatus {
   ACTIVE
   CLOSED
@@ -429,6 +433,7 @@ type MerchantPayload {
 }
 
 type Mutation {
+  accountReleaseNpub(input: AccountReleaseNpubInput!): AccountDetailPayload!
   accountUpdateLevel(input: AccountUpdateLevelInput!): AccountDetailPayload!
   accountUpdateStatus(input: AccountUpdateStatusInput!): AccountDetailPayload!
   businessDeleteMapInfo(input: BusinessDeleteMapInfoInput!): AccountDetailPayload!

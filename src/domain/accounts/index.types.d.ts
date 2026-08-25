@@ -196,6 +196,7 @@ interface IAccountsRepository {
   findByUsername(username: Username): Promise<Account | RepositoryError>
   // listBusinessesForMap(): Promise<BusinessMapMarker[] | RepositoryError>
   findByNpub(npub: Npub): Promise<Account | RepositoryError>
+  unsetNpub(accountId: AccountId): Promise<Account | RepositoryError>
   update(account: Account): Promise<Account | RepositoryError>
 
   transitionBridgeKycStatus(

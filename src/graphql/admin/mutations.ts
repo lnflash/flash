@@ -2,6 +2,7 @@ import { GT } from "@graphql/index"
 
 import AccountUpdateLevelMutation from "@graphql/admin/root/mutation/account-update-level"
 import AccountUpdateStatusMutation from "@graphql/admin/root/mutation/account-update-status"
+import AccountReleaseNpubMutation from "@graphql/admin/root/mutation/account-release-npub"
 import BusinessUpdateMapInfoMutation from "@graphql/admin/root/mutation/business-update-map-info"
 import CashWalletCutoverUpdateMutation from "@graphql/admin/root/mutation/cash-wallet-cutover-update"
 import CashWalletCutoverRollbackMutation from "@graphql/admin/root/mutation/cash-wallet-cutover-rollback"
@@ -21,6 +22,7 @@ export const mutationFields = {
     userUpdatePhone: UserUpdatePhoneMutation,
     accountUpdateLevel: AccountUpdateLevelMutation,
     accountUpdateStatus: AccountUpdateStatusMutation,
+    accountReleaseNpub: AccountReleaseNpubMutation,
     merchantMapValidate: MerchantMapValidateMutation,
     merchantMapDelete: MerchantMapDeleteMutation,
     businessUpdateMapInfo: BusinessUpdateMapInfoMutation,

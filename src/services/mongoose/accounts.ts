@@ -95,6 +95,25 @@ export const AccountsRepository = (): IAccountsRepository => {
     }
   }
 
+  // An npub claim is permanently unique and carries no proof of key control, so
+  // support needs a way to hand one back. `update` cannot do it: mongoose strips
+  // undefined keys from an update doc, so clearing the field takes an explicit
+  // $unset — and the partial index only covers string npubs, so the released key
+  // is immediately re-claimable by whoever actually holds the secret key.
+  const unsetNpub = async (accountId: AccountId): Promise<Account | RepositoryError> => {
+    try {
+      const result = await Account.findOneAndUpdate(
+        { _id: toObjectId<AccountId>(accountId) },
+        { $unset: { npub: "" } },
+        { new: true },
+      )
+      if (!result) return new CouldNotFindAccountError()
+      return translateToAccount(result)
+    } catch (err) {
+      return parseRepositoryError(err)
+    }
+  }
+
   const update = async ({
     id,
     level,
@@ -296,6 +315,7 @@ export const AccountsRepository = (): IAccountsRepository => {
     findByUuid,
     findByUsername,
     findByNpub,
+    unsetNpub,
     update,
     transitionBridgeKycStatus,
     updateBridgeFields,

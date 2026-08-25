@@ -41,16 +41,13 @@
  * they are data repairs, and restoring known-ambiguous npubs would reintroduce
  * the identity collision.
  *
- * Manual recovery
- * ---------------
+ * Recovery
+ * --------
  * `setNpub` refuses an npub already held by another account
- * (`NpubNotAvailableError`) and the admin API exposes no mutation that can
- * unset or reassign one. So if an npub ends up on the wrong account, the only
- * way to free it is a hand-written write against mongo:
- *
- *   db.accounts.updateOne({ id: "<accountUuid>" }, { $unset: { npub: "" } })
- *
- * After that, the rightful owner re-links from the app.
+ * (`NpubNotAvailableError`), so once the index exists a wrong or squatted claim
+ * locks the rightful owner out. Support frees the key from the admin panel with
+ * the `accountReleaseNpub` mutation, which unsets it on the holding account; the
+ * owner then re-links from the app. No hand-written write against prod mongo.
  */
 
 const COLLECTION = "accounts"
