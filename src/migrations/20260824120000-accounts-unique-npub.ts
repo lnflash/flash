@@ -21,10 +21,14 @@
  *    case-insensitive collation which has been dropped (bech32 is a
  *    lowercase-only charset, and the collation blocked index use), so stored
  *    values must be normalised or they stop being findable.
- * 2. Audits for duplicate npubs. For each group it keeps the OLDEST account
- *    (earliest created_at) and UNSETS npub on the rest — accounts are never
- *    deleted or merged here. Every unset is logged with account id + npub so
- *    support can reach out and have the losing owners re-link.
+ * 2. Audits for duplicate npubs. When a group is found, npub is UNSET on EVERY
+ *    account in it — including the oldest. Accounts are never deleted or
+ *    merged here. Guessing an owner by created_at is worse than releasing the
+ *    key: the oldest account is often an abandoned one left behind by a phone
+ *    reset, while the live handset actually holding the nostr secret key is
+ *    the newer account. Once the unique index exists, whoever re-links first
+ *    wins, and the index makes that race safe. Every unset is logged with
+ *    account id + npub so support can tell the owners to re-link from the app.
  * 3. Creates the unique partial index.
  *
  * `partialFilterExpression: { npub: { $type: "string" } }` rather than
@@ -36,6 +40,17 @@
  * Drops the unique index. The lowercasing and the unsets are NOT reverted —
  * they are data repairs, and restoring known-ambiguous npubs would reintroduce
  * the identity collision.
+ *
+ * Manual recovery
+ * ---------------
+ * `setNpub` refuses an npub already held by another account
+ * (`NpubNotAvailableError`) and the admin API exposes no mutation that can
+ * unset or reassign one. So if an npub ends up on the wrong account, the only
+ * way to free it is a hand-written write against mongo:
+ *
+ *   db.accounts.updateOne({ id: "<accountUuid>" }, { $unset: { npub: "" } })
+ *
+ * After that, the rightful owner re-links from the app.
  */
 
 const COLLECTION = "accounts"
@@ -80,14 +95,18 @@ module.exports = {
     }
 
     if (mixedCase.length > 0) {
-      await col.updateMany({ npub: { $type: "string" } }, [
+      // Scoped to the ids just collected. Filtering on `{ npub: { $type:
+      // "string" } }` instead would rewrite every npub-bearing account —
+      // oplog churn and index re-touching during the deploy window for zero
+      // additional repairs.
+      await col.updateMany({ _id: { $in: mixedCase.map((d) => d._id) } }, [
         { $set: { npub: { $toLower: "$npub" } } },
       ])
     }
     console.log(`[migration] Normalised ${mixedCase.length} npub value(s) to lowercase.`)
 
-    // ── Step 2: find and resolve duplicate npub groups ───────────────────────
-    // Only the fields needed to pick a winner are pushed — `$$ROOT` would risk
+    // ── Step 2: find and release duplicate npub groups ───────────────────────
+    // Only the fields needed for the audit log are pushed — `$$ROOT` would risk
     // the 16MB per-group limit on a large accounts collection.
     const duplicates = await col
       .aggregate(
@@ -108,27 +127,30 @@ module.exports = {
 
     if (duplicates.length > 0) {
       console.log(
-        `[migration] Found ${duplicates.length} npub(s) claimed by more than one account. Resolving...`,
+        `[migration] Found ${duplicates.length} npub(s) claimed by more than one account. Releasing...`,
       )
 
       for (const group of duplicates) {
-        // Oldest account keeps the npub — it is the likeliest original owner.
-        const sorted = group.docs.sort(
-          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-        )
-        const [winner, ...losers] = sorted
-        const loserIds = losers.map((d) => d._id)
+        // Every account in the group loses the npub, including the oldest.
+        // There is no way to tell from mongo which account still holds the
+        // nostr secret key, and picking wrong is unrecoverable in-product:
+        // `setNpub` refuses an already-claimed npub and no admin mutation can
+        // release one. Releasing the key lets the real owner re-link from the
+        // app; the unique index makes the re-link race safe.
+        const ids = group.docs.map((d) => d._id)
 
         console.log(
-          `[migration] npub=${group._id} — keeping accountId=${winner.id} (_id=${winner._id}), unsetting npub on ${loserIds.length} account(s): ${losers
-            .map((d) => d.id)
+          `[migration] npub=${group._id} — releasing from ${ids.length} account(s): ${group.docs
+            .map((d) => `${d.id} (_id=${d._id}, created_at=${d.created_at})`)
             .join(", ")}`,
         )
 
-        await col.updateMany({ _id: { $in: loserIds } }, { $unset: { npub: "" } })
+        await col.updateMany({ _id: { $in: ids } }, { $unset: { npub: "" } })
       }
 
-      console.log("[migration] Duplicate npub resolution complete.")
+      console.log(
+        "[migration] Duplicate npub release complete. Affected owners must re-link from the app.",
+      )
     } else {
       console.log("[migration] No duplicate npub values found. Proceeding.")
     }

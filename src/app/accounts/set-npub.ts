@@ -1,5 +1,5 @@
 import { checkedToNpub, NpubNotAvailableError } from "@domain/nostr"
-import { CouldNotFindError } from "@domain/errors"
+import { CouldNotFindError, DuplicateKeyForPersistError } from "@domain/errors"
 import { AccountsRepository } from "@services/mongoose"
 
 export const setNpub = async ({
@@ -29,5 +29,16 @@ export const setNpub = async ({
   const account = await accountsRepo.findById(id)
   if (account instanceof Error) return account
   account.npub = npubChecked
-  return accountsRepo.update(account)
+
+  const updated = await accountsRepo.update(account)
+  // The probe above and this write are not atomic, so two concurrent claims on
+  // the same npub can both pass it. The loser's write trips the unique index,
+  // which `parseRepositoryError` surfaces as `DuplicateKeyForPersistError` —
+  // an error `error-map` buckets into `UnexpectedClientError` ("please contact
+  // support"). It is not unexpected: it is the same refusal as the probe, and
+  // the caller deserves the same answer.
+  if (updated instanceof DuplicateKeyForPersistError) {
+    return new NpubNotAvailableError(npubChecked)
+  }
+  return updated
 }

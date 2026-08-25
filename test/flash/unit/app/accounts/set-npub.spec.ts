@@ -13,7 +13,11 @@ jest.mock("@services/mongoose", () => ({
   AccountsRepository: () => ({ findByNpub, findById, update }),
 }))
 
-import { CouldNotFindAccountFromNpubError, UnknownRepositoryError } from "@domain/errors"
+import {
+  CouldNotFindAccountFromNpubError,
+  DuplicateKeyForPersistError,
+  UnknownRepositoryError,
+} from "@domain/errors"
 import { InvalidNpubError, NpubNotAvailableError } from "@domain/nostr"
 import { setNpub } from "@app/accounts/set-npub"
 
@@ -67,6 +71,26 @@ describe("Accounts.setNpub", () => {
 
     expect(findByNpub).toHaveBeenCalledWith(NPUB)
     expect(update).toHaveBeenCalledWith({ id: ACCOUNT_ID, npub: NPUB })
+  })
+
+  it("reports the lost concurrent-write race as NpubNotAvailable, not an unexpected error", async () => {
+    // Both callers pass the probe; the loser's write trips the unique index.
+    // `DuplicateKeyForPersistError` maps to UnexpectedClientError ("contact
+    // support") at the GraphQL edge — the wrong answer for a benign race.
+    update.mockResolvedValue(new DuplicateKeyForPersistError())
+
+    const result = await setNpub({ id: ACCOUNT_ID, npub: NPUB })
+
+    expect(result).toBeInstanceOf(NpubNotAvailableError)
+    expect(result).not.toBeInstanceOf(DuplicateKeyForPersistError)
+  })
+
+  it("passes through other repository failures from the write", async () => {
+    update.mockResolvedValue(new UnknownRepositoryError("mongo down"))
+
+    const result = await setNpub({ id: ACCOUNT_ID, npub: NPUB })
+
+    expect(result).toBeInstanceOf(UnknownRepositoryError)
   })
 
   it("does not claim the npub when the uniqueness probe itself fails", async () => {
