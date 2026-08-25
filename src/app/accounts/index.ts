@@ -34,6 +34,7 @@ export * from "./enable-notification-channel"
 export * from "./disable-notification-channel"
 export * from "./set-npub"
 export * from "./release-npub"
+export * from "./assign-npub"
 export * from "./find-by-npub"
 export * from "./update-external-wallet"
 

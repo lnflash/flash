@@ -2,6 +2,7 @@ import { GT } from "@graphql/index"
 
 import AccountUpdateLevelMutation from "@graphql/admin/root/mutation/account-update-level"
 import AccountUpdateStatusMutation from "@graphql/admin/root/mutation/account-update-status"
+import AccountAssignNpubMutation from "@graphql/admin/root/mutation/account-assign-npub"
 import AccountReleaseNpubMutation from "@graphql/admin/root/mutation/account-release-npub"
 import BusinessUpdateMapInfoMutation from "@graphql/admin/root/mutation/business-update-map-info"
 import CashWalletCutoverUpdateMutation from "@graphql/admin/root/mutation/cash-wallet-cutover-update"
@@ -23,6 +24,7 @@ export const mutationFields = {
     accountUpdateLevel: AccountUpdateLevelMutation,
     accountUpdateStatus: AccountUpdateStatusMutation,
     accountReleaseNpub: AccountReleaseNpubMutation,
+    accountAssignNpub: AccountAssignNpubMutation,
     merchantMapValidate: MerchantMapValidateMutation,
     merchantMapDelete: MerchantMapDeleteMutation,
     businessUpdateMapInfo: BusinessUpdateMapInfoMutation,

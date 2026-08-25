@@ -1,3 +1,13 @@
+input AccountAssignNpubInput {
+  accountId: ID!
+  npub: npub!
+}
+
+type AccountAssignNpubPayload {
+  accountDetails: AuditedAccount
+  errors: [Error]
+}
+
 type AccountCapabilities {
   """An approved bank account is on file for payouts."""
   bankPayout: Boolean!
@@ -442,6 +452,7 @@ type MerchantPayload {
 }
 
 type Mutation {
+  accountAssignNpub(input: AccountAssignNpubInput!): AccountAssignNpubPayload!
   accountReleaseNpub(input: AccountReleaseNpubInput!): AccountReleaseNpubPayload!
   accountUpdateLevel(input: AccountUpdateLevelInput!): AccountDetailPayload!
   accountUpdateStatus(input: AccountUpdateStatusInput!): AccountDetailPayload!

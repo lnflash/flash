@@ -146,14 +146,26 @@ export const releaseNpub = async ({
         // Which failure, not just that one happened. Three distinct causes
         // reach this branch and each has a different recovery, so a line that
         // does not name the cause hands the operator all three procedures at
-        // once. `DuplicateKeyForPersistError` (surfaced to the caller as
+        // once.
+        //
+        // What is true for ALL of them: the release already landed, so this
+        // account no longer holds the key and `accountReleaseNpub` cannot be
+        // re-run against it — it answers `NoNpubToReleaseError`. Recovery is
+        // `accountAssignNpub(accountId, npub)`, which is the second write on
+        // its own and carries the same two guards (unique index, write-time
+        // refusal of a target that already holds a key).
+        //
+        // `DuplicateKeyForPersistError` (surfaced to the caller as
         // `NpubNotAvailableError`): someone else claimed the key in the window
-        // between the two writes — it is gone, find the new holder with
-        // `accountDetailsByNpub` and release it from there.
+        // between the two writes — it is gone, so assignment will refuse too;
+        // find the new holder with `accountDetailsByNpub` and release it from
+        // there first.
         // `AccountAlreadyHasNpubError`: the target linked a different key
         // after the pre-release check — the released key is still unclaimed,
-        // so re-run against another target. Anything else (e.g.
-        // `UnknownRepositoryError`): the write failed, retry the same call.
+        // so assign it to the right account before anyone polling
+        // `isFlashNpub` takes it.
+        // Anything else (e.g. `UnknownRepositoryError`): the write failed and
+        // the key is unclaimed — assign it to the intended target.
         //
         // Taken off the raw repository error, before the
         // `DuplicateKeyForPersistError` → `NpubNotAvailableError` mapping
