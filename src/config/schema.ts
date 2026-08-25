@@ -1,38 +1,7 @@
 import { AccountRoles, AccountStatus } from "@domain/accounts/primitives"
 import { WalletCurrency } from "@domain/shared"
 
-// Every country here sent us auth-code traffic with zero conversions over the
-// full Twilio retention window, and each was a source of the 2026-08-25
-// SMS-pumping attack. Countries with even one real signup (JM, US, NG, IN, GB,
-// CA, DE, GH, KY, BJ, RW, SD, CD, MV, BD, BE, UG, TT, ML, CO, SK) are absent by
-// design: this is a fraud control, not a market policy.
-const SMS_PUMPING_HIGH_RISK_COUNTRIES = [
-  "TR",
-  "UZ",
-  "RU",
-  "IL",
-  "AM",
-  "UA",
-  "TZ",
-  "EC",
-  "BY",
-  "ZM",
-  "MR",
-  "BA",
-  "TN",
-  "CI",
-  "BI",
-  "TG",
-  "VE",
-  "XK",
-  "GN",
-  "SL",
-  "SN",
-  "CM",
-  "MZ",
-  "CF",
-  "LB",
-]
+import { SMS_PUMPING_HIGH_RISK_COUNTRIES } from "./blocked-countries"
 
 const displayCurrencyConfigSchema = {
   type: "object",
@@ -714,15 +683,25 @@ export const configSchema = {
     // before any Twilio spend, while the picker still offers the country so an
     // existing account there can ask for a login code and be served by the
     // carve-out. Drop a country from this list when Flash opens that market.
+    //
+    // Each key gets its OWN copy of the seed. Ajv's `useDefaults` assigns
+    // defaults by reference, so sharing one array instance would make
+    // `yamlConfig.smsAuthBlockedCountries`,
+    // `yamlConfig.whatsAppAuthBlockedCountries` and this schema object the same
+    // live array in every environment whose configmap sets neither key — and
+    // these two keys exist precisely so they can diverge.
+    //
+    // See src/config/blocked-countries.ts for the no-shared-calling-code
+    // invariant the gate depends on.
     smsAuthBlockedCountries: {
       type: "array",
       items: { type: "string" },
-      default: SMS_PUMPING_HIGH_RISK_COUNTRIES,
+      default: [...SMS_PUMPING_HIGH_RISK_COUNTRIES],
     },
     whatsAppAuthBlockedCountries: {
       type: "array",
       items: { type: "string" },
-      default: SMS_PUMPING_HIGH_RISK_COUNTRIES,
+      default: [...SMS_PUMPING_HIGH_RISK_COUNTRIES],
     },
     ibex: {
       type: "object",

@@ -27,7 +27,7 @@ jest.mock("@config", () => {
     // Mirrors the real getter exactly; test/flash/unit/config/rate-limits.spec.ts
     // is what pins those values.
     getRequestCodeBlockedCountryPerIpLimits: jest.fn(() => ({
-      points: 2,
+      points: 5,
       duration: 3600,
       blockDuration: 3600,
     })),
@@ -61,6 +61,7 @@ jest.mock("@services/twilio", () => ({
 
 jest.mock("@services/alerts/ops-events", () => ({
   notifyOpsEvent: jest.fn().mockResolvedValue(undefined),
+  opsEventsSettled: jest.fn().mockResolvedValue(undefined),
 }))
 
 jest.mock("@services/kratos", () => ({
@@ -77,6 +78,7 @@ jest.mock("@services/logger", () => ({
 }))
 
 import {
+  BLOCKED_REPORT_WINDOW_MS,
   flushBlockedDestinationReports,
   requestPhoneCodeForAuthedUser,
   requestPhoneCodeWithCaptcha,
@@ -519,6 +521,107 @@ describe("requestPhoneCodeWithCaptcha — destination country gate", () => {
             meta: expect.objectContaining({ country: "UZ", count: "19" }),
           }),
         )
+      })
+
+      // Every other test here drains the buckets by calling
+      // flushBlockedDestinationReports() by hand. Nothing exercised the
+      // interval that drains it in production, so deleting the
+      // scheduleBlockedReportFlush() call left the suite green while the
+      // summary embed never fired — ops would page once per country during a
+      // flood and never learn the volume.
+      describe("the window timer", () => {
+        beforeEach(() => jest.useFakeTimers())
+
+        afterEach(() => {
+          resetBlockedDestinationReporting()
+          jest.useRealTimers()
+        })
+
+        it("emits the summary on its own, with no manual flush", async () => {
+          mockSmsBlocked.mockReturnValue(["UZ"])
+
+          for (let i = 0; i < 3; i++) await requestCode(UZBEKISTAN, "sms")
+          expect(notifyOpsEvent).toHaveBeenCalledTimes(1)
+
+          jest.advanceTimersByTime(BLOCKED_REPORT_WINDOW_MS)
+
+          expect(notifyOpsEvent).toHaveBeenCalledTimes(2)
+          expect(notifyOpsEvent).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+              phase: "destination-blocked",
+              meta: expect.objectContaining({ country: "UZ", count: "2" }),
+            }),
+          )
+        })
+
+        it("keeps emitting one summary per window", async () => {
+          mockSmsBlocked.mockReturnValue(["UZ"])
+
+          for (let i = 0; i < 3; i++) await requestCode(UZBEKISTAN, "sms")
+          jest.advanceTimersByTime(BLOCKED_REPORT_WINDOW_MS)
+          ;(notifyOpsEvent as jest.Mock).mockClear()
+
+          for (let i = 0; i < 5; i++) await requestCode(UZBEKISTAN, "sms")
+          jest.advanceTimersByTime(BLOCKED_REPORT_WINDOW_MS)
+
+          expect(notifyOpsEvent).toHaveBeenCalledTimes(1)
+          expect(notifyOpsEvent).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+              meta: expect.objectContaining({ country: "UZ", count: "5" }),
+            }),
+          )
+        })
+
+        it("stays quiet while there is nothing pending", async () => {
+          await requestCode(JAMAICA, "sms")
+
+          jest.advanceTimersByTime(BLOCKED_REPORT_WINDOW_MS * 4)
+
+          expect(notifyOpsEvent).not.toHaveBeenCalled()
+        })
+      })
+
+      // Counts that live only in this map are lost on every rolling deploy, pod
+      // eviction and OOM kill — and a pod under attack load is the likeliest
+      // one to be cycled, so the block list would be tuned from data that is
+      // lossiest exactly when it matters.
+      describe("shutdown", () => {
+        it("drains the pending summaries on SIGTERM", async () => {
+          mockSmsBlocked.mockReturnValue(["UZ"])
+          const killSpy = jest.spyOn(process, "kill").mockImplementation(() => true)
+
+          try {
+            for (let i = 0; i < 3; i++) await requestCode(UZBEKISTAN, "sms")
+            ;(notifyOpsEvent as jest.Mock).mockClear()
+
+            process.emit("SIGTERM", "SIGTERM")
+
+            expect(notifyOpsEvent).toHaveBeenCalledWith(
+              expect.objectContaining({
+                phase: "destination-blocked",
+                meta: expect.objectContaining({ country: "UZ", count: "2" }),
+              }),
+            )
+
+            // A listener on SIGTERM suppresses Node's default terminate, so the
+            // handler must hand the signal back or the pod would never exit.
+            await new Promise((resolve) => setImmediate(resolve))
+            expect(killSpy).toHaveBeenCalledWith(process.pid, "SIGTERM")
+            expect(process.listenerCount("SIGTERM")).toBe(0)
+          } finally {
+            killSpy.mockRestore()
+          }
+        })
+
+        // The hook is installed on first coalesce, not at import, so a process
+        // that never rejects a destination never changes how it dies.
+        it("installs no signal listener until something is pending", async () => {
+          const before = process.listenerCount("SIGTERM")
+
+          await requestCode(JAMAICA, "sms")
+
+          expect(process.listenerCount("SIGTERM")).toBe(before)
+        })
       })
 
       it("pages a new attack origin immediately even mid-flood", async () => {

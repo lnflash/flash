@@ -480,7 +480,11 @@ authRouter.post("/phone/code", async (req: Request, res: Response) => {
     channel,
   })
 
-  if (result instanceof Error) return res.status(400).json({ error: result })
+  // `json({ error: result })` serializes an Error to `{}` — `name` and
+  // `message` are non-enumerable — so the client learned nothing about why the
+  // request failed. Send the mapped message, as /phone/login does below.
+  if (result instanceof Error)
+    return res.status(400).json({ error: mapError(result).message })
 
   return res.json({
     success: true,

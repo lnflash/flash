@@ -1,3 +1,5 @@
+import { getCountries, getCountryCallingCode } from "libphonenumber-js"
+
 import { configSchema } from "../../../../src/config/schema"
 
 describe("config schema", () => {
@@ -50,6 +52,69 @@ describe("config schema", () => {
       for (const code of [...smsDefault, ...whatsAppDefault]) {
         expect(code).toMatch(/^[A-Z]{2}$/)
       }
+    })
+
+    // checkAuthCodeDestination cannot name a region for every number it parses
+    // — ~340 assigned NANP area codes are absent from the pinned
+    // libphonenumber-js metadata — so it gates such a number against EVERY
+    // region its calling code could denote, and fails closed if any is blocked.
+    // The safety of the +1 path therefore rests on this invariant. Block DO
+    // (+1 809/829/849) and every US number on +1 983 / +1 738 / +1 924 /
+    // +1 472 starts getting PhoneCountryNotAllowedError.
+    describe("no entry shares a calling code with an unblocked region", () => {
+      type Region = ReturnType<typeof getCountries>[number]
+
+      const callingCodeOf = (code: string): string | undefined => {
+        try {
+          return getCountryCallingCode(code as Region)
+        } catch {
+          // Not a region libphonenumber knows (XK). It can never be a parsed
+          // number's region, so it cannot widen a candidate set either.
+          return undefined
+        }
+      }
+
+      it("blocks no NANP region, so +1 numbers the metadata cannot attribute still send", () => {
+        for (const code of [...smsDefault, ...whatsAppDefault]) {
+          expect(callingCodeOf(code)).not.toBe("1")
+        }
+      })
+
+      // Blocking a country also blocks any unattributable number on its calling
+      // code, which is collateral against a market we have not decided to
+      // block. RU/KZ (+7) is the one accepted instance; pinning the whole set
+      // means the next one has to be argued for here rather than shipped by
+      // appending a line to a configmap.
+      it("has exactly one accepted collateral region, and it is KZ behind RU", () => {
+        for (const list of [smsDefault, whatsAppDefault]) {
+          const blocked = new Set(list)
+          const collateral: Record<string, string[]> = {}
+
+          for (const code of list) {
+            const callingCode = callingCodeOf(code)
+            if (callingCode === undefined) continue
+
+            const unblockedSiblings = getCountries().filter(
+              (country) =>
+                country !== code &&
+                getCountryCallingCode(country) === callingCode &&
+                !blocked.has(country),
+            )
+            if (unblockedSiblings.length > 0) collateral[code] = unblockedSiblings
+          }
+
+          expect(collateral).toEqual({ RU: ["KZ"] })
+        }
+      })
+    })
+
+    // Ajv's `useDefaults` assigns by reference. One shared array instance would
+    // make both config keys — and this schema object — the same live array in
+    // every environment whose configmap sets neither key, so the first push or
+    // splice against one would silently change the other.
+    it("gives each key its own array instance", () => {
+      expect(smsDefault).not.toBe(whatsAppDefault)
+      expect(smsDefault).toEqual(whatsAppDefault)
     })
 
     it("never blocks a country that has produced a real signup", () => {

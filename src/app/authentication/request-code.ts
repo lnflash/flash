@@ -17,7 +17,7 @@ import { InvalidPhoneNumber, NotImplementedError } from "@domain/errors"
 import { ChannelType } from "@domain/phone-provider"
 import { RateLimitConfig } from "@domain/rate-limit"
 import { RateLimiterExceededError } from "@domain/rate-limit/errors"
-import { notifyOpsEvent } from "@services/alerts/ops-events"
+import { notifyOpsEvent, opsEventsSettled } from "@services/alerts/ops-events"
 import Geetest from "@services/geetest"
 import { AuthWithEmailPasswordlessService, IdentityRepository } from "@services/kratos"
 import { baseLogger } from "@services/logger"
@@ -188,7 +188,8 @@ export const requestEmailCode = async ({
 // attack origin is still news the moment it appears — and everything after it
 // is counted and flushed as one summary per window.
 
-const BLOCKED_REPORT_WINDOW_MS = 5 * 60 * 1000
+/** Exported so tests can advance exactly one window instead of pinning 300000. */
+export const BLOCKED_REPORT_WINDOW_MS = 5 * 60 * 1000
 const BLOCKED_REPORT_WINDOW_LABEL = `${BLOCKED_REPORT_WINDOW_MS / 60_000}m`
 
 type BlockedPhase =
@@ -276,9 +277,56 @@ export const resetBlockedDestinationReporting = (): void => {
     clearInterval(blockedReportTimer)
     blockedReportTimer = undefined
   }
+  unhookShutdownFlush()
+}
+
+// Counts that only exist in this map are lost on every rolling deploy, pod
+// eviction and OOM kill — and a pod under attack load is the likeliest one to
+// be cycled, so the data would be lossiest exactly when the block list is being
+// tuned from it. Drain on the way out.
+//
+// Registering a signal listener suppresses Node's default terminate-on-SIGTERM,
+// so the handler MUST hand the signal back: it removes itself, gives the
+// fire-and-forget ops queue a bounded moment to land the summaries, and
+// re-raises. A telemetry flush is never allowed to be the reason a pod misses
+// its termination grace period.
+const SHUTDOWN_SIGNALS: NodeJS.Signals[] = ["SIGTERM", "SIGINT"]
+const SHUTDOWN_FLUSH_TIMEOUT_MS = 2_000
+
+const onShutdownSignal = (signal: NodeJS.Signals): void => {
+  unhookShutdownFlush()
+  flushBlockedDestinationReports()
+
+  Promise.race([
+    opsEventsSettled(),
+    new Promise((resolve) => setTimeout(resolve, SHUTDOWN_FLUSH_TIMEOUT_MS).unref?.()),
+  ])
+    // Swallowed rather than `.finally`d: a rejection there would surface as an
+    // unhandled rejection at the exact moment the process is trying to die.
+    .catch(() => undefined)
+    .then(() => process.kill(process.pid, signal))
+}
+
+let shutdownFlushHooked = false
+
+const hookShutdownFlush = (): void => {
+  if (shutdownFlushHooked) return
+  shutdownFlushHooked = true
+  for (const signal of SHUTDOWN_SIGNALS) process.on(signal, onShutdownSignal)
+}
+
+function unhookShutdownFlush(): void {
+  if (!shutdownFlushHooked) return
+  shutdownFlushHooked = false
+  for (const signal of SHUTDOWN_SIGNALS) process.removeListener(signal, onShutdownSignal)
 }
 
 const scheduleBlockedReportFlush = (): void => {
+  // Hooked here rather than at import: a process that never coalesces a
+  // rejection never installs a signal listener, and so never changes how it
+  // dies.
+  hookShutdownFlush()
+
   if (blockedReportTimer !== undefined) return
   blockedReportTimer = setInterval(
     flushBlockedDestinationReports,

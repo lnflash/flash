@@ -16,6 +16,7 @@ const mockUpgradeAccountFromDeviceToPhone = jest.fn()
 
 jest.mock("@services/alerts/ops-events", () => ({
   notifyOpsEvent: jest.fn().mockResolvedValue(undefined),
+  opsEventsSettled: jest.fn().mockResolvedValue(undefined),
 }))
 
 jest.mock("@config", () => {
