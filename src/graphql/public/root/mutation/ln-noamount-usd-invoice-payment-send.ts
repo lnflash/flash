@@ -16,6 +16,7 @@ import { resolveCashWalletMutationWalletIdForAccount } from "@app/cash-wallet-cu
 import Ibex from "@services/ibex/client"
 
 import { IbexError } from "@services/ibex/errors"
+import { withPaymentIdempotency } from "@app/payments/idempotency"
 import { paymentSendStatusOrPending } from "@services/ibex/payment-status"
 
 const LnNoAmountUsdInvoicePaymentInput = GT.Input({
@@ -38,6 +39,11 @@ const LnNoAmountUsdInvoicePaymentInput = GT.Input({
       type: Memo,
       description: "Optional memo to associate with the lightning invoice.",
     },
+    idempotencyKey: {
+      type: GT.String,
+      description:
+        "Optional client-supplied key; a repeated send with the same key returns the original result instead of paying again.",
+    },
   }),
 })
 
@@ -50,6 +56,7 @@ const LnNoAmountUsdInvoicePaymentSendMutation = GT.Field<
       paymentRequest: string | InputValidationError
       amount: FractionalCentAmount | InputValidationError
       memo?: string | InputValidationError
+      idempotencyKey?: string | null
     }
   }
 >({
@@ -64,7 +71,7 @@ const LnNoAmountUsdInvoicePaymentSendMutation = GT.Field<
     input: { type: GT.NonNull(LnNoAmountUsdInvoicePaymentInput) },
   },
   resolve: async (_, args, { domainAccount, cashWalletClientCapabilities }) => {
-    const { walletId, paymentRequest, amount, memo } = args.input
+    const { walletId, paymentRequest, amount, memo, idempotencyKey } = args.input
 
     if (walletId instanceof InputValidationError) {
       return { errors: [{ message: walletId.message }] }
@@ -112,24 +119,39 @@ const LnNoAmountUsdInvoicePaymentSendMutation = GT.Field<
         errors: [mapAndParseErrorForGqlResponse(usCents)],
       }
     }
-    const PayLightningInvoice = await Ibex.payInvoice({
-      invoice: paymentRequest as Bolt11,
-      accountId: routedWalletId,
-      send: usCents,
+    // ENG-533: this resolver executes IBEX directly (FLASH FORK above), so the
+    // exactly-once wrapper the covered send functions get in @app/payments
+    // never ran here — a double-fire on the most common USD send path
+    // double-paid, exactly the 2026-07-23 incident class. Scoped to the ROUTED
+    // wallet (the one actually debited) so the same key behaves identically
+    // across the cash-wallet compat redirect. Only the money-moving call sits
+    // inside execute(); routing and amount conversion stay outside so a cached
+    // replay does no IBEX work at all.
+    const outcome = await withPaymentIdempotency({
+      idempotencyKey,
+      senderWalletId: routedWalletId,
+      requestFingerprint: `ln-noamount-usd|${paymentRequest}|${amount}`,
+      execute: async () => {
+        const PayLightningInvoice = await Ibex.payInvoice({
+          invoice: paymentRequest as Bolt11,
+          accountId: routedWalletId,
+          send: usCents,
+        })
+        if (PayLightningInvoice instanceof IbexError) return PayLightningInvoice
+        return paymentSendStatusOrPending(PayLightningInvoice)
+      },
     })
 
-    if (PayLightningInvoice instanceof IbexError) {
+    if (outcome instanceof Error) {
       return {
         status: "failed",
-        errors: [mapAndParseErrorForGqlResponse(PayLightningInvoice)],
+        errors: [mapAndParseErrorForGqlResponse(outcome)],
       }
     }
 
-    const status = paymentSendStatusOrPending(PayLightningInvoice)
-
     return {
       errors: [],
-      status: status.value,
+      status: outcome.value,
     }
   },
 })
