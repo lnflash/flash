@@ -16,6 +16,7 @@ const mockUpgradeAccountFromDeviceToPhone = jest.fn()
 
 jest.mock("@services/alerts/ops-events", () => ({
   notifyOpsEvent: jest.fn().mockResolvedValue(undefined),
+  opsEventsSettled: jest.fn().mockResolvedValue(undefined),
 }))
 
 jest.mock("@config", () => {
@@ -36,6 +37,11 @@ jest.mock("@config", () => {
     getOnChainAddressCreateAttemptLimits: jest.fn(() => limits),
     getRequestCodePerIpLimits: jest.fn(() => limits),
     getRequestCodePerLoginIdentifierLimits: jest.fn(() => limits),
+    getRequestCodeBlockedCountryPerIpLimits: jest.fn(() => limits),
+    getSmsAuthUnsupportedCountries: jest.fn(() => []),
+    getWhatsAppAuthUnsupportedCountries: jest.fn(() => []),
+    getSmsAuthBlockedCountries: jest.fn(() => []),
+    getWhatsAppAuthBlockedCountries: jest.fn(() => []),
     getAccountsOnboardConfig: jest.fn(() => ({
       phoneMetadataValidationSettings: { enabled: false },
       ipMetadataValidationSettings: { enabled: false },

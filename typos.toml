@@ -6,6 +6,14 @@ files.extend-exclude = [
   # global, so it would also stop flagging those words where they ARE typos, in
   # the English files. en.json stays checked.
   "src/config/locales/es.json",
+  # Nothing but a list of ISO 3166-1 alpha-2 codes. "BA" (Bosnia and
+  # Herzegovina) is read as a misspelling of "BY"/"BE" — and BY is an entry in
+  # that same list, so accepting the suggestion would silently change which
+  # country the SMS-pumping gate blocks and duplicate an existing entry. The
+  # list was split out of src/config/schema.ts so this suppression covers the
+  # data only: schema.ts keeps full spell checking, and no repo-global
+  # extend-words entry is needed (which would stop flagging "BA" everywhere).
+  "src/config/blocked-countries.ts",
   "src/domain/users/languages.ts",
   "src/services/loopd/protos",
   "docs/postman-collection/galoy_graphql_main_api.postman_collection.json",

@@ -1,6 +1,8 @@
 import { AccountRoles, AccountStatus } from "@domain/accounts/primitives"
 import { WalletCurrency } from "@domain/shared"
 
+import { SMS_PUMPING_HIGH_RISK_COUNTRIES } from "./blocked-countries"
+
 const displayCurrencyConfigSchema = {
   type: "object",
   properties: {
@@ -330,7 +332,7 @@ export const configSchema = {
           blockDuration: 10800,
         },
         requestCodePerIp: {
-          points: 16,
+          points: 8,
           duration: 3600,
           blockDuration: 86400,
         },
@@ -658,6 +660,13 @@ export const configSchema = {
         chanId: [],
       },
     },
+    // Countries hidden from the client's country picker (`globals
+    // .supportedCountries`). This is a MARKET/PRESENTATION list, and it is
+    // deliberately NOT the fraud control: a country hidden here cannot be
+    // selected in the app at all, so a number in it never reaches the server
+    // and the existing-user carve-out in requestPhoneCode* is unreachable for
+    // it. Seeding this with the block list below would therefore lock every
+    // existing account in those countries out of its own login code.
     smsAuthUnsupportedCountries: {
       type: "array",
       items: { type: "string" },
@@ -667,6 +676,32 @@ export const configSchema = {
       type: "array",
       items: { type: "string" },
       default: [],
+    },
+    // Destinations that produced auth-code traffic but never a single
+    // conversion, and are the origin of the 2026-08-25 SMS-pumping attack.
+    // This is the FRAUD CONTROL: enforced server-side in requestPhoneCode*
+    // before any Twilio spend, while the picker still offers the country so an
+    // existing account there can ask for a login code and be served by the
+    // carve-out. Drop a country from this list when Flash opens that market.
+    //
+    // Each key gets its OWN copy of the seed. Ajv's `useDefaults` assigns
+    // defaults by reference, so sharing one array instance would make
+    // `yamlConfig.smsAuthBlockedCountries`,
+    // `yamlConfig.whatsAppAuthBlockedCountries` and this schema object the same
+    // live array in every environment whose configmap sets neither key — and
+    // these two keys exist precisely so they can diverge.
+    //
+    // See src/config/blocked-countries.ts for the no-shared-calling-code
+    // invariant the gate depends on.
+    smsAuthBlockedCountries: {
+      type: "array",
+      items: { type: "string" },
+      default: [...SMS_PUMPING_HIGH_RISK_COUNTRIES],
+    },
+    whatsAppAuthBlockedCountries: {
+      type: "array",
+      items: { type: "string" },
+      default: [...SMS_PUMPING_HIGH_RISK_COUNTRIES],
     },
     ibex: {
       type: "object",

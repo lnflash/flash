@@ -8,6 +8,7 @@ import {
   getInvoiceCreateAttemptLimits,
   getInvoiceCreateForRecipientAttemptLimits,
   getOnChainAddressCreateAttemptLimits,
+  getRequestCodeBlockedCountryPerIpLimits,
   getRequestCodePerIpLimits,
   getRequestCodePerLoginIdentifierLimits,
 } from "@config"
@@ -24,11 +25,13 @@ import {
   UserLoginIdentifierRateLimiterExceededError,
   UserCodeAttemptIpRateLimiterExceededError,
   UserCodeAttemptIdentifierRateLimiterExceededError,
+  UserCodeAttemptBlockedCountryIpRateLimiterExceededError,
 } from "./errors"
 
 export const RateLimitPrefix = {
   requestCodeAttemptPerLoginIdentifier: "request_code_attempt_id",
   requestCodeAttemptPerIp: "request_code_attempt_ip",
+  requestCodeBlockedCountryPerIp: "request_code_blocked_country_ip",
   failedLoginAttemptPerLoginIdentifier: "login_attempt_id",
   failedLoginAttemptPerIp: "login_attempt_ip",
   invoiceCreate: "invoice_create",
@@ -50,6 +53,15 @@ export const RateLimitConfig: { [key: string]: RateLimitConfig } = {
     key: RateLimitPrefix.requestCodeAttemptPerIp,
     limits: getRequestCodePerIpLimits(),
     error: UserCodeAttemptIpRateLimiterExceededError,
+  },
+  // Requests for a destination country we refuse to pay for. The existing-user
+  // carve-out answers "does this number hold a Flash account" for free — no
+  // provider spend, so none of the economics that bound every other
+  // enumeration attempt apply. This bucket is what bounds it.
+  requestCodeBlockedCountryPerIp: {
+    key: RateLimitPrefix.requestCodeBlockedCountryPerIp,
+    limits: getRequestCodeBlockedCountryPerIpLimits(),
+    error: UserCodeAttemptBlockedCountryIpRateLimiterExceededError,
   },
   failedLoginAttemptPerLoginIdentifier: {
     key: RateLimitPrefix.failedLoginAttemptPerLoginIdentifier,

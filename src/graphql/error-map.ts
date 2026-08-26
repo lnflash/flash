@@ -230,11 +230,21 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = "Invoice must be a zero-amount invoice"
       return new ValidationInternalError({ message, logger: baseLogger })
 
+    // The domain-side twin of the provider error above. Left in the catch-all
+    // it rendered a malformed number as "unexpected error, contact support",
+    // and echoed the submitted number back inside that message.
     case "InvalidPhoneNumberPhoneProviderError":
+    case "InvalidPhoneNumber":
       message = "Phone number is not a valid phone number"
       return new ValidationInternalError({ message, logger: baseLogger })
 
     case "RestrictedRegionPhoneProviderError":
+      message = "Phone number is not from a valid region"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    // A deliberate policy rejection, not a bug: it must not fall into the
+    // catch-all below, which would tell the user to retry and open a ticket.
+    case "PhoneCountryNotAllowedError":
       message = "Phone number is not from a valid region"
       return new ValidationInternalError({ message, logger: baseLogger })
 
@@ -794,7 +804,6 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "InvalidDeviceId":
     case "InvalidIdentityPassword":
     case "InvalidIdentityUsername":
-    case "InvalidPhoneNumber":
     case "InvalidTotpCode":
     case "InvalidEmailAddress":
     case "NoContactForUsernameError":
@@ -858,7 +867,6 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "PhoneProviderServiceError":
     case "ExpectedPhoneMetadataMissingError":
     case "PhoneCarrierTypeNotAllowedError":
-    case "PhoneCountryNotAllowedError":
     case "MissingIPMetadataError":
     case "UnauthorizedIPMetadataASNError":
     case "InvalidAccountStatusError":

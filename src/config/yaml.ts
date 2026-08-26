@@ -5,6 +5,7 @@ import path from "path"
 import Ajv from "ajv"
 import { load as loadYaml } from "js-yaml"
 import { I18n } from "i18n"
+import { getCountries, getCountryCallingCode } from "libphonenumber-js"
 
 import { baseLogger } from "@services/logger"
 import { checkedToScanDepth } from "@domain/bitcoin/onchain"
@@ -202,6 +203,40 @@ export const getRequestCodePerLoginIdentifierLimits = () =>
 
 export const getRequestCodePerIpLimits = () =>
   getRateLimits(yamlConfig.rateLimits.requestCodePerIp)
+
+/**
+ * Auth-code requests for a country whose destinations we refuse to pay for,
+ * per IP.
+ *
+ * The country gate rejects these before any provider spend, which is the point
+ * — but it also means probing costs the attacker nothing, and the existing-user
+ * carve-out makes the response differ by whether the number holds an account.
+ * That is an account-existence oracle, and the per-IP request-code budget (8/h)
+ * is far too generous to bound it. Tighter than that budget: a confirmed
+ * account refunds its point, so only sweeps over numbers that do NOT exist burn
+ * it.
+ *
+ * Not tighter still. This bucket is keyed on `req.originalIp`, so it is spent
+ * by mistyped numbers and shared by everyone behind one office NAT or CGNAT
+ * egress. At 2 points a real UZ account holder who fat-fingers their number
+ * twice is denied their own login code for an hour, and so is the second person
+ * behind a shared address — no attacker involved. The bound 2 bought over 5 is
+ * negligible anyway: a sweep is equally dead at 5/IP/h, and the 2026-08-25
+ * attacker drove ~100 rotating IPs, so the per-IP ceiling was never the binding
+ * constraint on enumeration.
+ */
+export const getRequestCodeBlockedCountryPerIpLimits = () => ({
+  points: 5,
+  duration: toSeconds(3600), // 1 hour
+  // One hour, NOT the 24 used by the other auth limiters. This one is keyed on
+  // `req.originalIp` (the `x-real-ip` header), and a large share of Flash's
+  // users reach us from behind carrier-grade NAT — one mobile egress address
+  // covers many subscribers. A 24h block means two sweep probes from that
+  // address cost every real customer behind it a full day of their own login
+  // codes. The bound that actually limits a sweep is `points` probes/IP/hour;
+  // the shorter block only decides how fast a shared-IP false positive heals.
+  blockDuration: toSeconds(3600), // 1 hour
+})
 
 export const getFailedLoginAttemptPerLoginIdentifierLimits = () =>
   getRateLimits(yamlConfig.rateLimits.failedLoginAttemptPerLoginIdentifier)
@@ -408,6 +443,9 @@ export const getSwapConfig = (): SwapConfig => {
   }
 }
 
+// Countries hidden from the client's country picker. Presentation only — a
+// country listed here can never be selected in the app, so nothing in it ever
+// reaches the auth-code endpoint.
 export const getSmsAuthUnsupportedCountries = (): CountryCode[] => {
   return yamlConfig.smsAuthUnsupportedCountries as CountryCode[]
 }
@@ -415,6 +453,102 @@ export const getSmsAuthUnsupportedCountries = (): CountryCode[] => {
 export const getWhatsAppAuthUnsupportedCountries = (): CountryCode[] => {
   return yamlConfig.whatsAppAuthUnsupportedCountries as CountryCode[]
 }
+
+// Countries whose auth-code destinations are refused server-side before any
+// provider spend. Deliberately separate from the picker lists above: the
+// existing-user carve-out only works if the country can still be selected.
+export const getSmsAuthBlockedCountries = (): CountryCode[] => {
+  return yamlConfig.smsAuthBlockedCountries as CountryCode[]
+}
+
+export const getWhatsAppAuthBlockedCountries = (): CountryCode[] => {
+  return yamlConfig.whatsAppAuthBlockedCountries as CountryCode[]
+}
+
+const NANP_CALLING_CODE = "1"
+
+/**
+ * Reports blocked countries that share a calling code with a region that is NOT
+ * blocked.
+ *
+ * `checkAuthCodeDestination` cannot always name the region of a number it
+ * parses — ~340 assigned NANP area codes are absent from the pinned
+ * libphonenumber-js metadata — so it falls back to gating such a number against
+ * EVERY region its calling code could denote, and fails closed if any of them
+ * is blocked. Every entry on the list therefore blocks its unattributable
+ * siblings too.
+ *
+ * `+1` is a different order of severity from the rest, so it gets its own
+ * level. Blocking any NANP region (DO's 809/829/849, say) rejects ordinary US
+ * numbers on +1 983 / +1 738 / +1 924 / +1 472 — a core market, broken silently
+ * by a one-line configmap edit. Any other shared calling code costs a market we
+ * did not choose to block (today: KZ, behind RU on +7), which is worth a
+ * warning but is a deliberate trade.
+ *
+ * Checked here, against the MERGED config, because the list is operator-tunable
+ * from the ops feed: a configmap can break this without touching the schema
+ * default that test/flash/unit/config/schema.spec.ts pins. Logged, not thrown —
+ * a bad entry must be loud, but must not wedge every pod in a crash loop at 3am.
+ */
+export const reportAmbiguousBlockedCountries = (
+  key: string,
+  blocked: readonly string[],
+): void => {
+  // libphonenumber's own region type, not the branded domain `CountryCode`.
+  type Region = ReturnType<typeof getCountries>[number]
+
+  const normalized = new Set(blocked.map((code) => code.toUpperCase()))
+
+  for (const code of normalized) {
+    let callingCode: string
+    try {
+      callingCode = getCountryCallingCode(code as Region)
+    } catch {
+      // Not a region libphonenumber knows. The list is operator-editable via
+      // the configmap, so a typo or a non-region code (ZZ, say) must be skipped
+      // rather than thrown: such a code can never be a parsed number's region,
+      // so it cannot widen a candidate set either. Note XK does NOT land here —
+      // libphonenumber resolves it to +383.
+      continue
+    }
+
+    const unblockedSiblings = getCountries().filter(
+      (country) =>
+        country !== code &&
+        getCountryCallingCode(country) === callingCode &&
+        !normalized.has(country),
+    )
+    if (unblockedSiblings.length === 0) continue
+
+    const payload = { key, blockedCountry: code, callingCode, unblockedSiblings }
+
+    if (callingCode === NANP_CALLING_CODE) {
+      baseLogger.error(
+        payload,
+        `${key} blocks the NANP region ${code}: every +1 number whose region ` +
+          `libphonenumber cannot identify (~340 assigned US area codes) will now ` +
+          `be refused an auth code. Remove it.`,
+      )
+      continue
+    }
+
+    baseLogger.warn(
+      payload,
+      `${key} blocks ${code} (+${callingCode}), which shares that calling code ` +
+        `with ${unblockedSiblings.join(", ")}: numbers on it whose region cannot ` +
+        `be identified are refused for those regions too.`,
+    )
+  }
+}
+
+reportAmbiguousBlockedCountries(
+  "smsAuthBlockedCountries",
+  yamlConfig.smsAuthBlockedCountries as string[],
+)
+reportAmbiguousBlockedCountries(
+  "whatsAppAuthBlockedCountries",
+  yamlConfig.whatsAppAuthBlockedCountries as string[],
+)
 
 const { ask } = yamlConfig.exchangeRates["USD"]["JMD"]
 const sellRate = JMDAmount.dollars(ask)
