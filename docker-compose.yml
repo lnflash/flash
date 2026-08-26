@@ -131,6 +131,13 @@ services:
       dockerfile: Dockerfile-migrate
     environment:
       - MONGODB_ADDRESS=mongodb
+      # Required by the notification-topic migrations; they throw without it.
+      # Absent here, `make test-migrate` never got past 20260317125624 — and
+      # because the entrypoint swallowed the failure, CI reported the clean
+      # migration run as green anyway. Same defect that let prod go five
+      # months unmigrated (ENG-565). Values are placeholders: this is a
+      # throwaway database, so only the shape matters.
+      - NOTIFICATION_TOPICS=EMERGENCY,ATTENTION
   mongodb:
     image: mongo:${MONGODB_VERSION:-6.0.5}
     ports: []
