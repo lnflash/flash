@@ -10,6 +10,10 @@ type OnChainTxAbortSignal = RedlockAbortSignal & { readonly brand: unique symbol
 type IdempotencyKeyAbortSignal = RedlockAbortSignal & { readonly brand: unique symbol }
 
 interface ILockService {
+  lockAccountId<Res>(
+    accountId: AccountId,
+    asyncFn: (signal: AbortSignal) => Promise<Res>,
+  ): Promise<Res | LockServiceError>
   lockWalletId<Res>(
     walletId: WalletId,
     f: (signal: WalletIdAbortSignal) => Promise<Res>,

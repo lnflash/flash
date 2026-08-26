@@ -61,6 +61,7 @@ const timelockClient = new Redlock(
 )
 
 const getWalletLockResource = (path: WalletId) => `locks:wallet:${path}`
+const getAccountLockResource = (path: AccountId) => `locks:account:${path}`
 const getPaymentHashLockResource = (path: PaymentHash) => `locks:paymenthash:${path}`
 const getOnChainTxHashLockResource = (path: OnChainTxHash) =>
   `locks:onchaintxhash:${path}`
@@ -129,6 +130,15 @@ export const LockService = (): ILockService => {
     return redlock({ path, asyncFn })
   }
 
+  const lockAccountId = async <Res>(
+    accountId: AccountId,
+    asyncFn: (signal: AbortSignal) => Promise<Res>,
+  ): Promise<Res | LockServiceError> => {
+    const path = getAccountLockResource(accountId)
+
+    return redlock({ path, asyncFn })
+  }
+
   const lockPaymentHash = async <Res>(
     paymentHash: PaymentHash,
     asyncFn: (signal: PaymentHashAbortSignal) => Promise<Res>,
@@ -182,6 +192,7 @@ export const LockService = (): ILockService => {
     namespace: "services.lock",
     fns: {
       lockWalletId,
+      lockAccountId,
       lockPaymentHash,
       lockOnChainTxHash,
       lockOnChainTxHashAndVout,
