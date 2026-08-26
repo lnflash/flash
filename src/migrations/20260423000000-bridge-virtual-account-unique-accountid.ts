@@ -70,7 +70,12 @@ module.exports = {
     }
 
     // ── Step 2: drop stale plain index if it exists ──────────────────────────
-    const existingIndexes = await col.indexes()
+    // `.indexes()` throws "ns does not exist" on a collection the app has not
+    // created yet — which is every fresh database, including the clean run in
+    // `make test-migrate`. `createIndex` below creates the collection
+    // implicitly, so treating "no namespace" as "no indexes" is correct rather
+    // than merely tolerant.
+    const existingIndexes = await col.indexes().catch(() => [])
     const hasPlainIndex = existingIndexes.some(
       (idx) => idx.name === INDEX_NAME && !idx.unique,
     )
@@ -88,7 +93,7 @@ module.exports = {
     const col = db.collection(COLLECTION)
 
     // Drop the unique index
-    const existingIndexes = await col.indexes()
+    const existingIndexes = await col.indexes().catch(() => [])
     const hasUniqueIndex = existingIndexes.some(
       (idx) => idx.name === INDEX_NAME && idx.unique,
     )
