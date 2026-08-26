@@ -33,6 +33,9 @@ export * from "./enable-notification-category"
 export * from "./enable-notification-channel"
 export * from "./disable-notification-channel"
 export * from "./set-npub"
+export * from "./release-npub"
+export * from "./assign-npub"
+export * from "./find-by-npub"
 export * from "./update-external-wallet"
 
 const accounts = AccountsRepository()
@@ -41,10 +44,6 @@ export const getAccount = async (
   accountId: AccountId,
 ): Promise<Account | RepositoryError> => {
   return accounts.findById(accountId)
-}
-
-export const findByNpub = async (npub: Npub): Promise<Account | RepositoryError> => {
-  return accounts.findByNpub(npub)
 }
 
 export const getAccountFromUserId = async (

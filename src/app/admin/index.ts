@@ -4,6 +4,7 @@ export * from "./update-user-phone"
 export * from "./send-cashout-notification"
 export * from "./send-user-notification"
 export * from "./invite"
+export * from "./get-account-by-npub"
 
 // Re-export query functions from invite module for admin GraphQL compatibility
 export { getInviteById, listInvites } from "../invite/queries"

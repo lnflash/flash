@@ -13,6 +13,7 @@ import AccountDetailsByUserEmailQuery from "./root/query/account-details-by-emai
 import ListWalletIdsQuery from "./root/query/all-walletids"
 import WalletQuery from "./root/query/wallet"
 import AccountDetailsByAccountId from "./root/query/account-details-by-account-id"
+import AccountDetailsByNpubQuery from "./root/query/account-details-by-npub"
 import MerchantsPendingApprovalQuery from "./root/query/merchants-pending-approval-listing"
 import IdDocumentReadUrlQuery from "./root/query/id-document-read-url"
 import NotificationTopicsQuery from "./root/query/notification-topics"
@@ -29,6 +30,7 @@ export const queryFields = {
     accountDetailsByUsername: AccountDetailsByUsernameQuery,
     accountDetailsByEmail: AccountDetailsByUserEmailQuery,
     accountDetailsByAccountId: AccountDetailsByAccountId,
+    accountDetailsByNpub: AccountDetailsByNpubQuery,
     transactionById: TransactionByIdQuery,
     transactionDetailsById: TransactionDetailsByIdQuery,
     transactionsByHash: TransactionsByHashQuery,

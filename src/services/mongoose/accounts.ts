@@ -3,12 +3,16 @@ import { OnboardingEarn } from "@config"
 import { AccountStatus } from "@domain/accounts"
 import {
   CouldNotFindAccountError,
+  CouldNotFindAccountFromIdError,
   CouldNotFindAccountFromKratosIdError,
+  CouldNotFindAccountFromNpubError,
   CouldNotFindAccountFromUsernameError,
   CouldNotFindAccountFromUuidError,
+  NoNpubToReleaseError,
   RepositoryError,
 } from "@domain/errors"
 import { UsdDisplayCurrency } from "@domain/fiat"
+import { AccountAlreadyHasNpubError } from "@domain/nostr"
 
 import { Account } from "@services/mongoose/schema"
 
@@ -77,14 +81,107 @@ export const AccountsRepository = (): IAccountsRepository => {
     }
   }
 
+  // No `.collation(...)` here on purpose. bech32 npubs are a lowercase-only
+  // charset and both scalar coercion paths lowercase, so case-insensitivity
+  // buys nothing — and a non-simple collation would stop the query from using
+  // the unique `{ npub: 1 }` index, leaving every support-desk lookup a
+  // collection scan.
+  //
+  // The redundant-looking `$type: "string"` is what actually gets the index
+  // used. The index is partial on `{ npub: { $type: "string" } }`, and mongo
+  // only picks a partial index when the query provably matches a subset of the
+  // partial filter. It cannot derive that from an equality against a string
+  // literal — `$type` is not one of the predicates its implication check
+  // understands — so `{ npub: { $eq: npub } }` alone plans as a COLLSCAN
+  // (verified on 6.0 in test/flash/integration/accounts/npub.spec.ts).
+  // Restating the type predicate makes it an IXSCAN. It cannot change the
+  // result set: `npub` is always a string here, so any document that could
+  // match the equality is a string-typed one.
   const findByNpub = async (npub: Npub): Promise<Account | RepositoryError> => {
     try {
-      const result = await Account.findOne({ npub: { $eq: npub } }).collation({
-        locale: "en",
-        strength: 2,
-      })
+      const result = await Account.findOne({ npub: { $eq: npub, $type: "string" } })
       if (!result) {
-        return new CouldNotFindAccountFromUsernameError(npub)
+        return new CouldNotFindAccountFromNpubError(npub)
+      }
+      return translateToAccount(result)
+    } catch (err) {
+      return parseRepositoryError(err)
+    }
+  }
+
+  // An npub claim is permanently unique and carries no proof of key control, so
+  // support needs a way to hand one back. `update` cannot do it: mongoose strips
+  // undefined keys from an update doc, so clearing the field takes an explicit
+  // $unset — and the partial index only covers string npubs, so the released key
+  // is immediately re-claimable by whoever actually holds the secret key.
+  //
+  // `new: false` is load-bearing. `$unset` against a document that never held an
+  // npub is a no-op that still matches on `_id`, so the post-update document is
+  // identical in both cases and the operator would be told a release happened
+  // when nothing was freed — then send the rightful owner off to re-link, where
+  // `setNpub` refuses them because the squatter still holds the key. The
+  // pre-update document is the only thing that can tell the two apart, which
+  // also makes it the only read that cannot disagree with the key this `$unset`
+  // removed — hence `previousNpub` comes back with the account rather than the
+  // caller re-reading it.
+  //
+  // `typeof` rather than a null check: the field is `Npub | null` and legacy
+  // documents holding an explicit null predate the partial index, which only
+  // covers strings. A null is not a claim and there is nothing to release.
+  const unsetNpub = async (
+    accountId: AccountId,
+  ): Promise<NpubUnset | RepositoryError> => {
+    try {
+      const before = await Account.findOneAndUpdate(
+        { _id: toObjectId<AccountId>(accountId) },
+        { $unset: { npub: "" } },
+        { new: false },
+      )
+      if (!before) return new CouldNotFindAccountFromIdError(accountId)
+      if (typeof before.npub !== "string") return new NoNpubToReleaseError(accountId)
+      return {
+        account: { ...translateToAccount(before), npub: undefined },
+        previousNpub: before.npub,
+      }
+    } catch (err) {
+      return parseRepositoryError(err)
+    }
+  }
+
+  // The reassignment half of a release. A targeted `$set` rather than a
+  // read-modify-write through `update`, so the unique partial index is the only
+  // thing that decides whether the claim lands on the key side: a concurrent
+  // claimant of the same npub trips it and `parseRepositoryError` surfaces
+  // `DuplicateKeyForPersistError`.
+  //
+  // The filter guards the target side. The caller checks the target holds no
+  // npub before releasing, but that check is a read from before the release
+  // round-trip: if the target links a different key via `userUpdateNpub` in
+  // that window, an unguarded `$set` would silently overwrite the just-claimed
+  // key — which becomes unclaimed with no log line saying so. The unique index
+  // cannot catch this: it prevents duplicates, not overwrites. `$not:
+  // { $type: "string" }` rather than `$exists: false` because legacy documents
+  // predating the partial index hold an explicit `npub: null`, which is not a
+  // claim and must not block a reassignment.
+  //
+  // A no-match is ambiguous between "no such account" and "account claimed a
+  // key since the caller checked", so one follow-up read disambiguates. The
+  // claim did not land in either case, so a stale answer from that read still
+  // reports a refusal — the conservative outcome.
+  const claimNpub = async (
+    accountId: AccountId,
+    npub: Npub,
+  ): Promise<Account | RepositoryError | AccountAlreadyHasNpubError> => {
+    try {
+      const result = await Account.findOneAndUpdate(
+        { _id: toObjectId<AccountId>(accountId), npub: { $not: { $type: "string" } } },
+        { $set: { npub } },
+        { new: true },
+      )
+      if (!result) {
+        const existing = await Account.findOne({ _id: toObjectId<AccountId>(accountId) })
+        if (!existing) return new CouldNotFindAccountFromIdError(accountId)
+        return new AccountAlreadyHasNpubError(accountId)
       }
       return translateToAccount(result)
     } catch (err) {
@@ -293,6 +390,8 @@ export const AccountsRepository = (): IAccountsRepository => {
     findByUuid,
     findByUsername,
     findByNpub,
+    unsetNpub,
+    claimNpub,
     update,
     transitionBridgeKycStatus,
     updateBridgeFields,

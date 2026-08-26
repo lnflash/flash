@@ -61,8 +61,14 @@ export class CouldNotFindLnPaymentFromHashError extends CouldNotFindError {
   level = ErrorLevel.Critical
 }
 
+export class CouldNotFindAccountFromIdError extends CouldNotFindError {}
 export class CouldNotFindAccountFromUuidError extends CouldNotFindError {}
 export class CouldNotFindAccountFromUsernameError extends CouldNotFindError {}
+export class CouldNotFindAccountFromNpubError extends CouldNotFindError {}
+// An account that holds no npub has nothing to release. Distinct from
+// "account not found" because `$unset` on a document without the field is a
+// no-op that still matches, so the write alone cannot tell the two apart.
+export class NoNpubToReleaseError extends CouldNotFindError {}
 export class CouldNotFindAccountFromPhoneError extends CouldNotFindError {}
 export class CouldNotFindMerchantFromUsernameError extends CouldNotFindError {}
 export class CouldNotFindMerchantFromIdError extends CouldNotFindError {}

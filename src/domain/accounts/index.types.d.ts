@@ -80,7 +80,9 @@ type Account = {
   readonly uuid: AccountUuid
   readonly createdAt: Date
   username: Username
-  npub: Npub
+  // Optional: an account holds an npub only once it links one, and `releaseNpub`
+  // takes it back off.
+  npub?: Npub
   defaultWalletId: WalletId
   withdrawFee: Satoshis // TODO: make it optional. only save when not default value from yaml
   level: AccountLevel
@@ -185,6 +187,15 @@ type AccountValidator = {
   validateWalletForAccount(wallet: Wallet): true | ValidationError
 }
 
+// `unsetNpub` reads the pre-update document to decide whether anything was
+// actually freed, so it is the only place the removed npub still exists — the
+// updated document no longer carries it. Handing it back saves the caller a
+// second read that could disagree with what the `$unset` removed.
+type NpubUnset = {
+  account: Account
+  previousNpub: Npub
+}
+
 interface IAccountsRepository {
   listUnlockedAccounts(): AsyncGenerator<Account> | RepositoryError
   findById(accountId: AccountId): Promise<Account | RepositoryError>
@@ -196,6 +207,15 @@ interface IAccountsRepository {
   findByUsername(username: Username): Promise<Account | RepositoryError>
   // listBusinessesForMap(): Promise<BusinessMapMarker[] | RepositoryError>
   findByNpub(npub: Npub): Promise<Account | RepositoryError>
+  unsetNpub(accountId: AccountId): Promise<NpubUnset | RepositoryError>
+  // `AccountAlreadyHasNpubError` in the union is the write-time guard: the
+  // caller's "target holds no npub" check is a read from before the release,
+  // and a key the target claims in that window must refuse the reassignment
+  // rather than be silently overwritten.
+  claimNpub(
+    accountId: AccountId,
+    npub: Npub,
+  ): Promise<Account | RepositoryError | AccountAlreadyHasNpubError>
   update(account: Account): Promise<Account | RepositoryError>
 
   transitionBridgeKycStatus(

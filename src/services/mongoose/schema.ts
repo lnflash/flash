@@ -390,6 +390,18 @@ AccountSchema.index({
 
 AccountSchema.index({ bridgeEthereumAddress: 1 }, { sparse: true })
 
+// An npub identifies a customer to the admin/support lookup, so it must resolve
+// to exactly one account. `partialFilterExpression` rather than `sparse` — a
+// sparse index still indexes documents that hold an explicit `npub: null`, and
+// the second such document would collide. Mirrors the `username` index above.
+AccountSchema.index(
+  { npub: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { npub: { $type: "string" } },
+  },
+)
+
 export const Account = mongoose.model<AccountRecord>("Account", AccountSchema)
 
 const QuizSchema = new Schema<QuizCompletedRecord>({

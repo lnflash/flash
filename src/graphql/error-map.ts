@@ -104,12 +104,24 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = `User does not exist for id ${error.message}`
       return new NotFoundError({ message, logger: baseLogger })
 
+    case "CouldNotFindAccountFromIdError":
+      message = `Account does not exist for id ${error.message}`
+      return new NotFoundError({ message, logger: baseLogger })
+
     case "CouldNotFindAccountFromUuidError":
       message = `Account does not exist for uuid ${error.message}`
       return new NotFoundError({ message, logger: baseLogger })
 
     case "CouldNotFindAccountFromUsernameError":
       message = `Account does not exist for username ${error.message}`
+      return new NotFoundError({ message, logger: baseLogger })
+
+    case "CouldNotFindAccountFromNpubError":
+      message = `Account does not exist for npub ${error.message}`
+      return new NotFoundError({ message, logger: baseLogger })
+
+    case "NoNpubToReleaseError":
+      message = `Account ${error.message} has no npub linked`
       return new NotFoundError({ message, logger: baseLogger })
 
     case "CouldNotFindMerchantFromUsernameError":
@@ -380,6 +392,18 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "UsernameIsImmutableError":
       message = "username is immutable"
       return new UsernameError({ message, logger: baseLogger })
+
+    case "NpubNotAvailableError":
+      message = "npub is already linked to another account"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "AccountAlreadyHasNpubError":
+      message = "the receiving account already has an npub linked"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "InvalidAccountIdError":
+      message = `Invalid account id ${error.message}`
+      return new ValidationInternalError({ message, logger: baseLogger })
 
     case "InvalidWalletId":
       message = "Invalid walletId for account."
@@ -766,6 +790,7 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "LnRouteValidationError":
     case "BadAmountForRouteError":
     case "InvalidUsername":
+    case "InvalidNpubError":
     case "InvalidDeviceId":
     case "InvalidIdentityPassword":
     case "InvalidIdentityUsername":
@@ -888,7 +913,6 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "CaptchaError":
     case "InvalidNonHodlInvoiceError":
     case "InvalidAccountError":
-    case "InvalidAccountIdError":
     case "InvalidMinutesError":
     case "InvalidWalletForAccountError":
     case "AuthenticationError":

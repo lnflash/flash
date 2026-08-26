@@ -1,3 +1,13 @@
+input AccountAssignNpubInput {
+  accountId: ID!
+  npub: npub!
+}
+
+type AccountAssignNpubPayload {
+  accountDetails: AuditedAccount
+  errors: [Error]
+}
+
 type AccountCapabilities {
   """An approved bank account is on file for payouts."""
   bankPayout: Boolean!
@@ -24,6 +34,19 @@ enum AccountLevel {
   THREE
   TWO
   ZERO
+}
+
+input AccountReleaseNpubInput {
+  accountId: ID!
+  reassignToAccountId: ID
+}
+
+type AccountReleaseNpubPayload {
+  accountDetails: AuditedAccount
+  errors: [Error]
+  previousNpub: String
+  reassignedTo: AuditedAccount
+  reassignmentError: Error
 }
 
 enum AccountStatus {
@@ -429,6 +452,8 @@ type MerchantPayload {
 }
 
 type Mutation {
+  accountAssignNpub(input: AccountAssignNpubInput!): AccountAssignNpubPayload!
+  accountReleaseNpub(input: AccountReleaseNpubInput!): AccountReleaseNpubPayload!
   accountUpdateLevel(input: AccountUpdateLevelInput!): AccountDetailPayload!
   accountUpdateStatus(input: AccountUpdateStatusInput!): AccountDetailPayload!
   businessDeleteMapInfo(input: BusinessDeleteMapInfoInput!): AccountDetailPayload!
@@ -489,6 +514,7 @@ type PriceOfOneSettlementMinorUnitInDisplayMinorUnit implements PriceInterface {
 type Query {
   accountDetailsByAccountId(accountId: ID!): AuditedAccount!
   accountDetailsByEmail(email: EmailAddress!): AuditedAccount!
+  accountDetailsByNpub(npub: npub!): AuditedAccount!
   accountDetailsByUserPhone(phone: Phone!): AuditedAccount!
   accountDetailsByUsername(username: Username!): AuditedAccount!
   allLevels: [AccountLevel!]!
@@ -872,3 +898,6 @@ enum WalletCurrency {
 
 """Unique identifier of a wallet"""
 scalar WalletId
+
+"""Nostr Identity public key"""
+scalar npub
