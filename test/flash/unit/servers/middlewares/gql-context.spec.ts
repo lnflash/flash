@@ -31,7 +31,7 @@ const mockedSessionPublicContext = sessionPublicContext as jest.MockedFunction<
 const mockedRecordException = recordExceptionInCurrentSpan as jest.MockedFunction<
   typeof recordExceptionInCurrentSpan
 >
-const mockedLogger = baseLogger as unknown as { error: jest.Mock }
+const mockedLogger = baseLogger as unknown as { error: jest.Mock; warn: jest.Mock }
 
 const kratosUserId = "ebbe2b32-9a2e-4c77-80e4-5d7347c024bb"
 
@@ -57,6 +57,7 @@ describe("setGqlContext", () => {
     mockedSessionPublicContext.mockReset()
     mockedRecordException.mockReset()
     mockedLogger.error.mockReset()
+    mockedLogger.warn.mockReset()
     next = jest.fn()
   })
 
@@ -112,13 +113,15 @@ describe("setGqlContext", () => {
         },
       ],
     })
-    expect(mockedLogger.error).toHaveBeenCalledWith(
-      expect.objectContaining({ kratosUserId }),
-      "failed to build graphql context",
+    // Not a server fault: the repair site already recorded why the session
+    // has no account, and an orphan's pollers land here on every request. A
+    // warn line, no error line, no Critical span exception.
+    expect(mockedLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ err: authError, kratosUserId }),
+      "unauthenticated session",
     )
-    expect(mockedRecordException).toHaveBeenCalledWith(
-      expect.objectContaining({ error: authError }),
-    )
+    expect(mockedLogger.error).not.toHaveBeenCalled()
+    expect(mockedRecordException).not.toHaveBeenCalled()
   })
 
   it("answers any other failure as a 500 and does not reject", async () => {
@@ -132,8 +135,12 @@ describe("setGqlContext", () => {
     expect(next).not.toHaveBeenCalled()
     expect(res.status).toHaveBeenCalledWith(500)
     expect(res.json).toHaveBeenCalledWith({ error: "failed to build graphql context" })
+    expect(mockedLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ err: boom, kratosUserId }),
+      "failed to build graphql context",
+    )
     expect(mockedRecordException).toHaveBeenCalledWith(
-      expect.objectContaining({ error: boom }),
+      expect.objectContaining({ error: boom, level: "critical" }),
     )
   })
 })

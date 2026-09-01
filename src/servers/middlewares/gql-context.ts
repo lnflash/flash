@@ -53,15 +53,13 @@ export const setGqlContext = async (
     })
   } catch (err) {
     const kratosUserId = tokenPayload?.sub
-    baseLogger.error({ err, kratosUserId }, "failed to build graphql context")
-    recordExceptionInCurrentSpan({
-      error: err,
-      level: ErrorLevel.Critical,
-      attributes: { kratosUserId },
-      fallbackMsg: "failed to build graphql context",
-    })
 
     if (err instanceof AuthenticationError) {
+      // The session resolved; it just has no usable account. Not a server
+      // fault — whatever made it unrepairable was recorded where the repair
+      // ran — and an orphan's pollers hit this on every request, so no
+      // Critical span here.
+      baseLogger.warn({ err, kratosUserId }, "unauthenticated session")
       res.status(200).json({
         data: null,
         errors: [
@@ -74,6 +72,13 @@ export const setGqlContext = async (
       return
     }
 
+    baseLogger.error({ err, kratosUserId }, "failed to build graphql context")
+    recordExceptionInCurrentSpan({
+      error: err,
+      level: ErrorLevel.Critical,
+      attributes: { kratosUserId },
+      fallbackMsg: "failed to build graphql context",
+    })
     res.status(500).json({ error: "failed to build graphql context" })
     return
   }
