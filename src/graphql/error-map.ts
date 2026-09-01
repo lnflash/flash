@@ -527,6 +527,13 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "PhoneAlreadyExistsError":
       return new PhoneAlreadyExistsError({ logger: baseLogger })
 
+    // The pre-persist registration hook refused the number (unparseable, or
+    // carrier metadata failed validation). A policy answer, not a bug: it
+    // must not fall into the catch-all that tells the user to retry.
+    case "PhoneNotAllowedForRegistrationError":
+      message = "This phone number can't be used to sign up"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
     case "EmailAlreadyExistsError":
       return new EmailAlreadyExistsError({ logger: baseLogger })
 

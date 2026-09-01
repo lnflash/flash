@@ -111,25 +111,30 @@ selfservice:
       after:
         password:
           hooks:
-            # we are not sure if we need this hook yet.
-            # this could be used to check if the user is already registered in the backend
-            # before creating the user in kratos
-            # otherwise response: parse: false happens after kratos user creation
-            #
-            #
-            # - hook: web_hook
-            #   config:
-            #     url: http://bats-tests:4012/kratos/preregistration
-            #     method: POST
-            #     response:
-            #       parse: true
-            #     body: file:///home/ory/body.jsonnet # TODO: use a base64 encoding instead
-            #     auth:
-            #       type: api_key
-            #       config:
-            #         name: Authorization
-            #         value: The-Value-of-My-Key
-            #         in: header
+            # Pre-persist validation. `response.parse: true` makes Kratos run
+            # this hook BEFORE the identity is written (web_hook.go,
+            # ExecutePostRegistrationPrePersistHook): a 4xx with a `messages`
+            # body aborts the sign-up and nothing is persisted. The api only
+            # validates here (phone, carrier metadata, phone not already bound)
+            # and must not write — the account is created by the post-persist
+            # /registration hook below, once the identity exists. Note
+            # ctx.identity.id is the nil uuid at this point.
+            - hook: web_hook
+              config:
+                url: http://bats-tests:4012/kratos/preregistration
+                method: POST
+                response:
+                  parse: true
+                body: file:///home/ory/body.jsonnet # TODO: use a base64 encoding instead
+                auth:
+                  type: api_key
+                  config:
+                    name: Authorization
+                    value: The-Value-of-My-Key
+                    in: header
+            # Post-persist account creation (unchanged). parse: false → runs
+            # after the identity is committed; a failure here leaves an identity
+            # without an account, which the session middleware self-heals.
             - hook: web_hook
               config:
                 url: http://bats-tests:4012/kratos/registration

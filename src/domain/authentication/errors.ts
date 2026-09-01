@@ -6,6 +6,10 @@ export class LikelyUserAlreadyExistError extends AuthenticationError {}
 
 export class AccountHasPositiveBalanceError extends AuthenticationError {}
 export class PhoneAlreadyExistsError extends AuthenticationError {}
+// The pre-persist registration hook rejected the phone (unparseable, or its
+// carrier metadata failed validation). Distinct from "already exists": the
+// user cannot fix it by logging in instead.
+export class PhoneNotAllowedForRegistrationError extends AuthenticationError {}
 
 export class EmailCodeInvalidError extends AuthenticationError {}
 export class EmailUnverifiedError extends AuthenticationError {}

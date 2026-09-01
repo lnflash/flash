@@ -8,9 +8,17 @@ import {
 } from "@services/bridge/errors"
 import { IbexError, InsufficientIbexBalance } from "@services/ibex/errors"
 import { PhoneCountryNotAllowedError } from "@domain/users/errors"
+import { PhoneNotAllowedForRegistrationError } from "@domain/authentication/errors"
 import { InvalidPhoneNumber } from "@domain/errors"
 
 describe("error-map", () => {
+  it("maps PhoneNotAllowedForRegistrationError to a user-readable validation error, not the catch-all", () => {
+    const result = mapError(new PhoneNotAllowedForRegistrationError())
+
+    expect(result.extensions.code).not.toBe("UNEXPECTED_CLIENT_ERROR")
+    expect(result.message).toBe("This phone number can't be used to sign up")
+  })
+
   it("maps BridgeWithdrawalNotFoundError to BRIDGE_WITHDRAWAL_NOT_FOUND", () => {
     const result = mapError(new BridgeWithdrawalNotFoundError())
 

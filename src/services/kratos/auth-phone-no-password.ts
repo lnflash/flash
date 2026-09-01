@@ -19,6 +19,7 @@ import {
   UnknownKratosError,
 } from "./errors"
 import { kratosAdmin, kratosPublic, toDomainIdentityPhone } from "./private"
+import { mapRegistrationFlowRejection } from "./registration-flow-error"
 import { SchemaIdType } from "./schema"
 
 // login with phone
@@ -173,9 +174,8 @@ export const AuthWithPhonePasswordlessService = (): IAuthWithPhonePasswordlessSe
 
       return { authToken, kratosUserId }
     } catch (err) {
-      if (err instanceof Error && err.message === "Request failed with status code 400") {
-        return new LikelyUserAlreadyExistError(err.message || err)
-      }
+      const rejection = mapRegistrationFlowRejection(err)
+      if (rejection) return rejection
 
       return new UnknownKratosError(err)
     }
@@ -265,9 +265,8 @@ export const AuthWithPhonePasswordlessService = (): IAuthWithPhonePasswordlessSe
       const kratosUserId = result.data.identity.id as UserId
       return { cookiesToSendBackToClient, kratosUserId }
     } catch (err) {
-      if (err instanceof Error && err.message === "Request failed with status code 400") {
-        return new LikelyUserAlreadyExistError(err.message || err)
-      }
+      const rejection = mapRegistrationFlowRejection(err)
+      if (rejection) return rejection
       return new UnknownKratosError(err)
     }
   }
