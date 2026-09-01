@@ -29,6 +29,7 @@ import { parseUnknownDomainErrorFromUnknown } from "@domain/shared"
 import { MAXIMUM_QUERY_COMPLEXITY, createComplexityPlugin } from "./plugins/complexity"
 
 import authRouter from "./authorization"
+import consentLogRouter from "./consent-log"
 import kratosCallback from "./event-handlers/kratos"
 import { apiKeyRateLimitMiddleware } from "./middlewares/api-key-rate-limit"
 import healthzHandler from "./middlewares/healthz"
@@ -140,6 +141,13 @@ export const startApolloServer = async ({
 
   app.use("/auth", authRouter)
   app.use("/kratos", kratosCallback)
+
+  // Public consent-evidence intake from the getflash.io/invite page
+  // (ENG-568). Anonymous callers, so it mounts only on the public server and
+  // BEFORE the JWT middleware below.
+  if (type === "main") {
+    app.use("/consent", consentLogRouter)
+  }
 
   // Health check
   app.get(

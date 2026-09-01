@@ -265,6 +265,12 @@ export const getInviteTargetAttemptLimits = () => ({
   blockDuration: toSeconds(86400), // 24 hours
 })
 
+export const getConsentLogAttemptLimits = () => ({
+  points: 20,
+  duration: toSeconds(3600), // 1 hour
+  blockDuration: toSeconds(3600), // 1 hour
+})
+
 /**
  * Card top-up checkout links, per account.
  *

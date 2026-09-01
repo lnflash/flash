@@ -26,6 +26,7 @@ jest.mock("@config", () => {
     UNSECURE_DEFAULT_LOGIN_CODE: undefined,
     getGeetestConfig: jest.fn(() => ({})),
     getTestAccounts: jest.fn(() => []),
+    getConsentLogAttemptLimits: jest.fn(() => limits),
     getFailedLoginAttemptPerIpLimits: jest.fn(() => limits),
     getFailedLoginAttemptPerLoginIdentifierLimits: jest.fn(() => limits),
     getFygaroCheckoutCreateAttemptLimits: jest.fn(() => limits),
