@@ -56,17 +56,28 @@ type OrphanRepairArgs = {
 //   (phone collides on `users.phone`, no phone trait, Kratos unreachable).
 //   Without it every request from that identity costs a Kratos admin read plus
 //   two Mongo writes and emits a Critical span exception, and the mobile app's
-//   pollers keep firing on NOT_AUTHENTICATED. One attempt per window; the
-//   first failure is an error log with a Critical span, later ones warn.
-const REPAIR_RETRY_WINDOW_MS = 60_000
+//   pollers keep firing on NOT_AUTHENTICATED. The window doubles on every
+//   consecutive failure (60s, 2m, 4m, ... capped at an hour) so an identity
+//   that will never repair costs one attempt an hour per replica, not one a
+//   minute. The first failure is an error log with a Critical span, later
+//   ones warn.
+// - `carrierLookups` remembers the Twilio carrier lookup per identity so a
+//   retried repair does not bill Twilio again for the same number.
+export const REPAIR_RETRY_WINDOW_MS = 60_000
+export const REPAIR_RETRY_MAX_MS = 60 * 60_000
 
 const inFlightRepairs = new Map<UserId, Promise<Account | RepositoryError>>()
 const failedRepairs = new Map<UserId, { retryAfter: number; failures: number }>()
+const carrierLookups = new Map<UserId, PhoneMetadata>()
+
+export const repairRetryDelayMs = (failures: number): number =>
+  Math.min(REPAIR_RETRY_MAX_MS, REPAIR_RETRY_WINDOW_MS * 2 ** Math.max(0, failures - 1))
 
 // The maps above live for the process; specs reset them between cases.
 export const clearOrphanRepairState = (): void => {
   inFlightRepairs.clear()
   failedRepairs.clear()
+  carrierLookups.clear()
 }
 
 const recordRepairFailure = ({
@@ -80,8 +91,9 @@ const recordRepairFailure = ({
   reason: string
 }): CouldNotFindAccountFromKratosIdError => {
   const failures = (failedRepairs.get(userId)?.failures ?? 0) + 1
+  const retryAfterMs = repairRetryDelayMs(failures)
   failedRepairs.set(userId, {
-    retryAfter: Date.now() + REPAIR_RETRY_WINDOW_MS,
+    retryAfter: Date.now() + retryAfterMs,
     failures,
   })
 
@@ -93,7 +105,7 @@ const recordRepairFailure = ({
     attributes,
   })
 
-  const details = { err: cause, ...attributes, retryAfterMs: REPAIR_RETRY_WINDOW_MS }
+  const details = { err: cause, ...attributes, retryAfterMs }
   const msg = `orphaned kratos identity: ${reason}`
   if (isFirstFailure) {
     logger.error(details, msg)
@@ -136,12 +148,15 @@ const attemptRepair = async ({
   // would leave the account permanently ineligible with nothing pointing at
   // why. Best effort, as on the webhook path: a lookup failure must not fail
   // the repair, it just gets the warn line below so the gap is attributable.
-  const carrier = await TwilioClient().getCarrier(identity.phone)
+  const cachedCarrier = carrierLookups.get(userId)
+  const carrier = cachedCarrier ?? (await TwilioClient().getCarrier(identity.phone))
   if (carrier instanceof Error) {
     logger.warn(
       { err: carrier, kratosUserId: userId },
       "orphaned kratos identity: carrier lookup failed, repairing without phone metadata",
     )
+  } else if (!cachedCarrier) {
+    carrierLookups.set(userId, carrier)
   }
 
   const created = await createAccountWithPhoneIdentifier({
@@ -157,6 +172,7 @@ const attemptRepair = async ({
     const existing = await Accounts.getAccountFromUserId(userId)
     if (!(existing instanceof Error)) {
       failedRepairs.delete(userId)
+      carrierLookups.delete(userId)
       logger.warn(
         { kratosUserId: userId, accountId: existing.id },
         "orphaned kratos identity repaired by a concurrent request",
@@ -176,6 +192,7 @@ const attemptRepair = async ({
   }
 
   failedRepairs.delete(userId)
+  carrierLookups.delete(userId)
   logger.warn(
     { kratosUserId: userId, accountId: created.id },
     "orphaned kratos identity repaired",

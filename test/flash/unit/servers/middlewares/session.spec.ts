@@ -10,6 +10,9 @@ import { ErrorLevel } from "@domain/shared"
 import { AuthenticationError } from "@graphql/error"
 import {
   clearOrphanRepairState,
+  REPAIR_RETRY_MAX_MS,
+  REPAIR_RETRY_WINDOW_MS,
+  repairRetryDelayMs,
   sessionPublicContext,
 } from "@servers/middlewares/session"
 import { IdentityRepository, UnknownKratosError } from "@services/kratos"
@@ -445,6 +448,79 @@ describe("sessionPublicContext", () => {
         expect.objectContaining({ kratosUserId, accountId: account.id }),
         "orphaned kratos identity repaired",
       )
+    })
+
+    // An identity that will never repair (phone collides on users.phone, no
+    // phone trait) must not cost a Kratos read, two Mongo writes and a billed
+    // Twilio lookup every minute per replica for as long as its app polls.
+    it("doubles the retry window on every consecutive failure, capped at an hour", () => {
+      expect(repairRetryDelayMs(1)).toBe(REPAIR_RETRY_WINDOW_MS)
+      expect(repairRetryDelayMs(2)).toBe(REPAIR_RETRY_WINDOW_MS * 2)
+      expect(repairRetryDelayMs(3)).toBe(REPAIR_RETRY_WINDOW_MS * 4)
+      expect(repairRetryDelayMs(7)).toBe(REPAIR_RETRY_MAX_MS) // 64 min > cap
+      expect(repairRetryDelayMs(20)).toBe(REPAIR_RETRY_MAX_MS)
+      expect(repairRetryDelayMs(0)).toBe(REPAIR_RETRY_WINDOW_MS)
+    })
+
+    it("backs off: the second failure holds for two windows before the next attempt", async () => {
+      const start = new Date("2026-09-01T12:00:00Z").getTime()
+      jest.useFakeTimers({ now: start })
+      getIdentity.mockResolvedValue(new UnknownKratosError("kratos down"))
+
+      await expectNotAuthenticated(sessionPublicContext({ tokenPayload, ip }))
+      jest.setSystemTime(start + 61_000)
+      await expectNotAuthenticated(sessionPublicContext({ tokenPayload, ip }))
+      expect(getIdentity).toHaveBeenCalledTimes(2)
+
+      // 90s after the second failure: inside its 120s window, no attempt.
+      jest.setSystemTime(start + 61_000 + 90_000)
+      await expectNotAuthenticated(sessionPublicContext({ tokenPayload, ip }))
+      expect(getIdentity).toHaveBeenCalledTimes(2)
+      expect(childLogger.debug).toHaveBeenLastCalledWith(
+        expect.objectContaining({ kratosUserId, repairFailures: 2 }),
+        "orphaned kratos identity: repair skipped, last attempt failed recently",
+      )
+
+      // 121s after the second failure: window elapsed, third attempt.
+      jest.setSystemTime(start + 61_000 + 121_000)
+      await expectNotAuthenticated(sessionPublicContext({ tokenPayload, ip }))
+      expect(getIdentity).toHaveBeenCalledTimes(3)
+      expect(childLogger.warn).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          kratosUserId,
+          repairFailures: 3,
+          retryAfterMs: REPAIR_RETRY_WINDOW_MS * 4,
+        }),
+        "orphaned kratos identity: could not load identity",
+      )
+    })
+
+    it("bills the carrier lookup once per identity across repair attempts", async () => {
+      const start = new Date("2026-09-01T12:00:00Z").getTime()
+      jest.useFakeTimers({ now: start })
+      getIdentity.mockResolvedValue({ id: kratosUserId, phone })
+      // users.phone collision: the account stays missing, so the repair fails.
+      mockedCreateAccount.mockResolvedValue(
+        new DuplicateKeyForPersistError("E11000 users.phone"),
+      )
+
+      await expectNotAuthenticated(sessionPublicContext({ tokenPayload, ip }))
+      expect(getCarrier).toHaveBeenCalledTimes(1)
+
+      jest.setSystemTime(start + 61_000)
+      await expectNotAuthenticated(sessionPublicContext({ tokenPayload, ip }))
+      expect(mockedCreateAccount).toHaveBeenCalledTimes(2)
+      expect(getCarrier).toHaveBeenCalledTimes(1)
+      expect(mockedCreateAccount).toHaveBeenLastCalledWith(
+        expect.objectContaining({ phoneMetadata }),
+      )
+
+      // Once the repair succeeds the cached lookup is dropped with the failure record.
+      jest.setSystemTime(start + 61_000 + 121_000)
+      mockedCreateAccount.mockResolvedValue(account)
+      const context = await sessionPublicContext({ tokenPayload, ip })
+      expect(context.domainAccount).toBe(account)
+      expect(getCarrier).toHaveBeenCalledTimes(1)
     })
   })
 })
