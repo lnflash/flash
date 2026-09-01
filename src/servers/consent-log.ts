@@ -124,7 +124,20 @@ consentLogRouter.use(
 // Same rule as the invites collection: the raw token never touches disk.
 // (authRouter dodges this by mounting BEFORE PinoHttp; the consent router
 // mounts after it so the public write path still gets an access-log line.)
-export const redactConsentBodyForLog = (req: { url?: string; body?: unknown }) =>
-  req.url?.startsWith("/consent") ? "[consent body redacted]" : req.body
+// Keyed on originalUrl, never url: Express 4 strips the mount path off
+// req.url when dispatching into a router mounted at "/consent" (req.url
+// becomes "/log") and only restores it on a later next() that never comes,
+// because every consent handler terminates the response. pino-http evaluates
+// customProps again at response-finish against that mutated req — the moment
+// req.body actually holds the parsed (token-bearing) payload — so matching on
+// req.url would pass raw tokens straight into the access log.
+export const redactConsentBodyForLog = (req: {
+  originalUrl?: string
+  url?: string
+  body?: unknown
+}) =>
+  (req.originalUrl ?? req.url)?.startsWith("/consent")
+    ? "[consent body redacted]"
+    : req.body
 
 export default consentLogRouter

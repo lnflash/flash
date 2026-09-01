@@ -307,10 +307,15 @@ describe("access-log body redaction (redactConsentBodyForLog)", () => {
   // express.json() inside the consent router has populated req.body, so an
   // unredacted body log would write the raw invite token to disk on every
   // status path (204/400/429/503).
-  it("redacts the body for /consent/log requests so the raw token never reaches logs", () => {
+  it("redacts at RESPONSE-FINISH shape: url mutated to /log by the router mount, originalUrl intact", () => {
+    // Inside a router mounted at "/consent", Express rewrites req.url to
+    // "/log" and never restores it (the handler ends the response, so the
+    // restoring next() never runs). This is the shape pino-http actually
+    // evaluates when the body is populated — url alone is untrustworthy here.
     const token = "a".repeat(40)
     const logged = redactConsentBodyForLog({
-      url: "/consent/log",
+      url: "/log",
+      originalUrl: "/consent/log",
       body: validBody(),
     })
 
@@ -318,15 +323,33 @@ describe("access-log body redaction (redactConsentBodyForLog)", () => {
     expect(JSON.stringify(logged)).not.toContain(token)
   })
 
-  it("redacts any path under /consent, on every status path", () => {
-    expect(redactConsentBodyForLog({ url: "/consent", body: { token: "x" } })).toBe(
-      "[consent body redacted]",
-    )
+  it("redacts at middleware-time shape too (originalUrl === url)", () => {
+    expect(
+      redactConsentBodyForLog({
+        url: "/consent/log",
+        originalUrl: "/consent/log",
+        body: { token: "x" },
+      }),
+    ).toBe("[consent body redacted]")
+  })
+
+  it("would leak if the helper keyed on the mutated url — pin the failure mode", () => {
+    // The regression this guards: a helper reading only req.url sees "/log"
+    // at finish time and returns the raw body. originalUrl must win.
+    expect(
+      redactConsentBodyForLog({
+        url: "/log",
+        originalUrl: "/consent/log",
+        body: { token: "x" },
+      }),
+    ).not.toEqual({ token: "x" })
   })
 
   it("leaves non-consent request bodies untouched for the access log", () => {
     const body = { query: "{ me { id } }" }
-    expect(redactConsentBodyForLog({ url: "/graphql", body })).toBe(body)
+    expect(
+      redactConsentBodyForLog({ url: "/graphql", originalUrl: "/graphql", body }),
+    ).toBe(body)
     expect(redactConsentBodyForLog({ body })).toBe(body)
   })
 })
