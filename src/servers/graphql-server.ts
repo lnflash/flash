@@ -29,7 +29,7 @@ import { parseUnknownDomainErrorFromUnknown } from "@domain/shared"
 import { MAXIMUM_QUERY_COMPLEXITY, createComplexityPlugin } from "./plugins/complexity"
 
 import authRouter from "./authorization"
-import consentLogRouter from "./consent-log"
+import consentLogRouter, { redactConsentBodyForLog } from "./consent-log"
 import kratosCallback from "./event-handlers/kratos"
 import { apiKeyRateLimitMiddleware } from "./middlewares/api-key-rate-limit"
 import healthzHandler from "./middlewares/healthz"
@@ -162,8 +162,13 @@ export const startApolloServer = async ({
         // @ts-ignore-next-line no-implicit-any error
         const account = req["gqlContext"]?.domainAccount
         return {
+          // pino-http evaluates customProps again at response finish, after
+          // the consent router's express.json() has populated req.body — so
+          // the raw invite token would land in the access logs without this
+          // redaction. Guarded by tests in
+          // test/flash/unit/servers/consent-log.spec.ts.
           // @ts-ignore-next-line no-implicit-any error
-          "body": req["body"],
+          "body": redactConsentBodyForLog(req),
           // @ts-ignore-next-line no-implicit-any error
           "token.sub": req["token"]?.sub,
           // @ts-ignore-next-line no-implicit-any error
@@ -198,7 +203,9 @@ export const startApolloServer = async ({
   // Public consent-evidence intake from the getflash.io/invite page
   // (ENG-568). Anonymous callers, so it mounts only on the public server and
   // BEFORE the JWT middleware below — but AFTER PinoHttp, so a public
-  // unauthenticated write path shows up in the access logs.
+  // unauthenticated write path shows up in the access logs. The logged body
+  // for /consent requests is redacted (redactConsentBodyForLog above) so the
+  // raw invite token never reaches the logs.
   if (type === "main") {
     app.use("/consent", consentLogRouter)
   }

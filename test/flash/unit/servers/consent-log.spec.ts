@@ -3,7 +3,7 @@ import { Request, Response } from "express"
 import { ConsentLogIpRateLimiterExceededError } from "@domain/rate-limit/errors"
 import { ConsentLogRepository } from "@services/mongoose/models/consent-log"
 import { consumeLimiter } from "@services/rate-limit"
-import consentLogRouter from "@servers/consent-log"
+import consentLogRouter, { redactConsentBodyForLog } from "@servers/consent-log"
 import { hashToken } from "@utils"
 
 // Deterministic IP source: always resolve from headers, the way the k8s
@@ -247,5 +247,86 @@ describe("consent router CORS", () => {
     expect(headers["access-control-allow-origin"]).toBe("https://getflash.io")
     expect(res.end).toHaveBeenCalled()
     expect(next).not.toHaveBeenCalled()
+  })
+
+  it("also answers the www.getflash.io preflight — www visitors must not be dropped", () => {
+    const headers: Record<string, string> = {}
+    const req = {
+      method: "OPTIONS",
+      headers: {
+        "origin": "https://www.getflash.io",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "content-type",
+      },
+    }
+    const res = {
+      statusCode: 200,
+      setHeader: (name: string, value: string | string[]) => {
+        headers[name.toLowerCase()] = String(value)
+      },
+      getHeader: (name: string) => headers[name.toLowerCase()],
+      end: jest.fn(),
+    }
+    const next = jest.fn()
+
+    corsMiddleware(req, res, next)
+
+    expect(headers["access-control-allow-origin"]).toBe("https://www.getflash.io")
+    expect(res.end).toHaveBeenCalled()
+    expect(next).not.toHaveBeenCalled()
+  })
+
+  it("does not allow arbitrary origins", () => {
+    const headers: Record<string, string> = {}
+    const req = {
+      method: "OPTIONS",
+      headers: {
+        "origin": "https://evil.example",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "content-type",
+      },
+    }
+    const res = {
+      statusCode: 200,
+      setHeader: (name: string, value: string | string[]) => {
+        headers[name.toLowerCase()] = String(value)
+      },
+      getHeader: (name: string) => headers[name.toLowerCase()],
+      end: jest.fn(),
+    }
+    const next = jest.fn()
+
+    corsMiddleware(req, res, next)
+
+    expect(headers["access-control-allow-origin"]).toBeUndefined()
+  })
+})
+
+describe("access-log body redaction (redactConsentBodyForLog)", () => {
+  // pino-http re-evaluates customProps at response finish — by then
+  // express.json() inside the consent router has populated req.body, so an
+  // unredacted body log would write the raw invite token to disk on every
+  // status path (204/400/429/503).
+  it("redacts the body for /consent/log requests so the raw token never reaches logs", () => {
+    const token = "a".repeat(40)
+    const logged = redactConsentBodyForLog({
+      url: "/consent/log",
+      body: validBody(),
+    })
+
+    expect(logged).toBe("[consent body redacted]")
+    expect(JSON.stringify(logged)).not.toContain(token)
+  })
+
+  it("redacts any path under /consent, on every status path", () => {
+    expect(redactConsentBodyForLog({ url: "/consent", body: { token: "x" } })).toBe(
+      "[consent body redacted]",
+    )
+  })
+
+  it("leaves non-consent request bodies untouched for the access log", () => {
+    const body = { query: "{ me { id } }" }
+    expect(redactConsentBodyForLog({ url: "/graphql", body })).toBe(body)
+    expect(redactConsentBodyForLog({ body })).toBe(body)
   })
 })

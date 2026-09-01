@@ -27,7 +27,11 @@ const consentLogRouter = express.Router({ caseSensitive: true })
 // The submitter is a browser on getflash.io posting cross-origin to
 // api.flashapp.me — without CORS the preflight fails and the (fail-open)
 // page call silently drops every record. No credentials involved.
-consentLogRouter.use(cors({ origin: "https://getflash.io" }))
+// Both the apex and www hosts are allowed: if a visitor reaches the invite
+// page at www.getflash.io (or the www→apex redirect hasn't happened before
+// the page fires its fail-open POST), an apex-only allowlist would silently
+// drop those records — the original incident, resurrected for that subset.
+consentLogRouter.use(cors({ origin: ["https://getflash.io", "https://www.getflash.io"] }))
 
 consentLogRouter.use(express.json({ limit: "8kb" }))
 
@@ -112,5 +116,15 @@ consentLogRouter.use(
     return res.status(500).json({ error: "could not record consent" })
   },
 )
+
+// Used by the app-level PinoHttp access logger (graphql-server.ts). pino-http
+// re-evaluates customProps at response finish — by then express.json() inside
+// this router has populated req.body, so logging the raw body would write the
+// raw invite token to the access logs on every status path (204/400/429/503).
+// Same rule as the invites collection: the raw token never touches disk.
+// (authRouter dodges this by mounting BEFORE PinoHttp; the consent router
+// mounts after it so the public write path still gets an access-log line.)
+export const redactConsentBodyForLog = (req: { url?: string; body?: unknown }) =>
+  req.url?.startsWith("/consent") ? "[consent body redacted]" : req.body
 
 export default consentLogRouter
