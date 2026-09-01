@@ -75,6 +75,46 @@ const rateLimitConfigSchema = {
   additionalProperties: false,
 }
 
+// Fallback allowlist for the Bridge KYC country gate, used only when the
+// ERPNext "Allowed Country" doctype cannot be read. Seeded 2026-09-01 on
+// Jabari's instruction: the Caribbean, US/CA/GB, MX, SV, SN (Dakar), KE.
+// Haiti and Cuba are deliberately absent (Bridge: no ACH/FedWire for HT, CU
+// prohibited). KE is included on instruction although Bridge's published
+// country table marks it ineligible for ACH/FedWire — ops can flip it in
+// ERPNext without a release.
+export const BRIDGE_KYC_DEFAULT_COUNTRIES = [
+  "JM",
+  "TT",
+  "BB",
+  "BS",
+  "DO",
+  "KY",
+  "AG",
+  "DM",
+  "GD",
+  "KN",
+  "LC",
+  "VC",
+  "BZ",
+  "GY",
+  "SR",
+  "AW",
+  "CW",
+  "SX",
+  "BM",
+  "TC",
+  "VG",
+  "AI",
+  "MS",
+  "US",
+  "CA",
+  "GB",
+  "MX",
+  "SV",
+  "SN",
+  "KE",
+]
+
 export const configSchema = {
   type: "object",
   properties: {
@@ -762,6 +802,44 @@ export const configSchema = {
           },
         },
         timeoutMs: { type: "integer", default: 10000 },
+        // Gate on bridgeInitiateKyc (see src/app/bridge/kyc-gate.ts). Absent
+        // key => these defaults (same pattern as referralReward).
+        //
+        // countryAllowlist: the user's PHONE country (Twilio Lookup) must be a
+        // country Bridge can issue Flash a USD virtual account for. The live
+        // list is the ERPNext "Allowed Country" doctype (flash_allowed = 1,
+        // toggled by ops at /app/allowed-country); `defaultCountries` is only
+        // the fallback when ERPNext cannot be read. No account-age rule: real
+        // users must be able to start KYC the moment they sign up.
+        kycGate: {
+          type: "object",
+          properties: {
+            requireVerifiedEmail: { type: "boolean", default: false },
+            countryAllowlist: {
+              type: "object",
+              properties: {
+                enabled: { type: "boolean", default: true },
+                defaultCountries: {
+                  type: "array",
+                  items: { type: "string", pattern: "^[A-Z]{2}$" },
+                  default: BRIDGE_KYC_DEFAULT_COUNTRIES,
+                },
+              },
+              required: ["enabled", "defaultCountries"],
+              additionalProperties: false,
+              default: { enabled: true, defaultCountries: BRIDGE_KYC_DEFAULT_COUNTRIES },
+            },
+          },
+          required: ["requireVerifiedEmail", "countryAllowlist"],
+          additionalProperties: false,
+          default: {
+            requireVerifiedEmail: false,
+            countryAllowlist: {
+              enabled: true,
+              defaultCountries: BRIDGE_KYC_DEFAULT_COUNTRIES,
+            },
+          },
+        },
         webhook: {
           type: "object",
           properties: {

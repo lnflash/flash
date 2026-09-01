@@ -57,6 +57,16 @@ type BridgeWithdrawalFeeEstimateConfig = {
   ethUsdFallback?: number
 }
 
+type BridgeKycCountryAllowlistConfig = {
+  enabled: boolean
+  defaultCountries: string[]
+}
+
+type BridgeKycGateConfig = {
+  requireVerifiedEmail: boolean
+  countryAllowlist: BridgeKycCountryAllowlistConfig
+}
+
 type BridgeConfig = {
   enabled: boolean
   apiKey: string
@@ -65,6 +75,7 @@ type BridgeConfig = {
   developerFeePercent: number
   withdrawalFeeEstimate?: BridgeWithdrawalFeeEstimateConfig
   timeoutMs?: number
+  kycGate: BridgeKycGateConfig
   webhook: BridgeWebhook
 }
 
