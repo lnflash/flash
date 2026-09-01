@@ -8,7 +8,8 @@
  * someone teaches one of them a new encoding, and because both coercions fail
  * soft the divergence would be silent.
  *
- * Consumers: fee-discounts.ts, fygaro/webhook-server/fygaro-settings.ts.
+ * Consumers: fee-discounts.ts, fygaro/webhook-server/fygaro-settings.ts,
+ * app/invite/referral-settings.ts.
  */
 
 /**

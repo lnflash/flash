@@ -124,21 +124,42 @@ describe("awardReferralRewardOnKycApproval", () => {
     await awardReferralRewardOnKycApproval({ accountId: INVITEE })
 
     // Deferral means the invite is left exactly as found: unclaimed and
-    // retryable. Nothing is queried, claimed, paid, or marked failed.
+    // retryable. Nothing is claimed, paid, or marked failed — and the log
+    // names a genuinely deferred reward (a pending invite was found first).
+    expect(mockFindOne).toHaveBeenCalled()
     expect(mockFindOneAndUpdate).not.toHaveBeenCalled()
     expect(mockPay).not.toHaveBeenCalled()
     expect(mockUpdateOne).not.toHaveBeenCalled()
+    expect(baseLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: INVITEE }),
+      expect.stringContaining("deferred"),
+    )
   })
 
-  it("treats an unreadable kill switch the same as off — no affirmative yes, no money", async () => {
-    // referralRewardsEnabledInErp itself maps errors to false; the award path
-    // must not distinguish. This pins the calling contract.
+  it("never consults ERP or logs a deferral for a non-referred KYC approval", async () => {
+    // This hook fires on EVERY Bridge KYC approval. With the switch off, an
+    // ops grep for "deferred" must return only genuinely deferred rewards —
+    // accounts with no invite must not touch the ERP reader or log at all.
     mockErpEnabled.mockResolvedValue(false)
+    mockFindOne.mockResolvedValue(null) // not a referred user
 
     await awardReferralRewardOnKycApproval({ accountId: INVITEE })
 
-    expect(mockPay).not.toHaveBeenCalled()
+    expect(mockErpEnabled).not.toHaveBeenCalled()
+    expect(baseLogger.info).not.toHaveBeenCalled()
     expect(mockFindOneAndUpdate).not.toHaveBeenCalled()
+    expect(mockPay).not.toHaveBeenCalled()
+  })
+
+  it("never consults ERP when the account's reward was already processed", async () => {
+    mockErpEnabled.mockResolvedValue(false)
+    mockExists.mockResolvedValue({ _id: "earlier-invite" })
+
+    await awardReferralRewardOnKycApproval({ accountId: INVITEE })
+
+    expect(mockErpEnabled).not.toHaveBeenCalled()
+    expect(baseLogger.info).not.toHaveBeenCalled()
+    expect(mockPay).not.toHaveBeenCalled()
   })
 
   it("never pays a second reward for the same account (KYC re-approval flap)", async () => {

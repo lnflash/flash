@@ -54,21 +54,6 @@ export const awardReferralRewardOnKycApproval = async ({
     const config = getReferralRewardConfig()
     if (!config.enabled) return
 
-    // Operator kill switch (ERPNext "Referral Settings" single). Checked
-    // BEFORE the atomic reward claim on purpose: returning here leaves the
-    // invite ACCEPTED and unrewarded — a DEFERRED payout, not a failed one.
-    // It pays on any later trigger (KYC status re-fire, or an ops sweep of
-    // ACCEPTED+unrewarded invites) once the switch is re-enabled. Disabled
-    // and unreadable are treated identically: no affirmative yes, no money.
-    const erpEnabled = await referralRewardsEnabledInErp()
-    if (!erpEnabled) {
-      baseLogger.info(
-        { accountId },
-        "referral reward deferred: ERPNext kill switch is off or unreadable",
-      )
-      return
-    }
-
     // One reward per invitee, ever. Bridge KYC can flap back to "approved"
     // (approved -> under_review -> approved re-fires this hook), and redemption
     // history may hold more than one accepted invite — if ANY invite for this
@@ -86,6 +71,24 @@ export const awardReferralRewardOnKycApproval = async ({
       rewardStatus: { $exists: false },
     })
     if (!pending) return // not a referred user, or already claimed
+
+    // Operator kill switch (ERPNext "Referral Settings" single). Checked
+    // AFTER the invite lookups (so non-referred KYC approvals never touch the
+    // ERP reader or log a bogus deferral — this hook fires on EVERY Bridge KYC
+    // approval) but BEFORE the atomic reward claim on purpose: returning here
+    // leaves the invite ACCEPTED and unrewarded — a DEFERRED payout, not a
+    // failed one. It pays on any later trigger (KYC status re-fire, or an ops
+    // sweep of ACCEPTED+unrewarded invites) once the switch is re-enabled.
+    // Disabled and unreadable are treated identically: no affirmative yes, no
+    // money.
+    const erpEnabled = await referralRewardsEnabledInErp()
+    if (!erpEnabled) {
+      baseLogger.info(
+        { accountId },
+        "referral reward deferred: ERPNext kill switch is off or unreadable",
+      )
+      return
+    }
 
     // Atomic claim — only one caller flips absent -> "processing".
     const invite = await InviteRepository.findOneAndUpdate(
