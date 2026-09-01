@@ -92,7 +92,13 @@ export const checkedToConsentLogSubmission = (
   if (sourceUrl instanceof ValidationError) return sourceUrl
   const userAgent = boundedString(raw.userAgent, MAX_USER_AGENT, "userAgent")
   if (userAgent instanceof ValidationError) return userAgent
-  const clientTimestamp = boundedString(raw.timestamp, MAX_TIMESTAMP, "timestamp")
+  // Same convergence path as sourceUrl: the page sends `timestamp` today;
+  // accept the canonical `clientTimestamp` too.
+  const clientTimestamp = boundedString(
+    raw.clientTimestamp ?? raw.timestamp,
+    MAX_TIMESTAMP,
+    "timestamp",
+  )
   if (clientTimestamp instanceof ValidationError) return clientTimestamp
   const token = boundedString(raw.token, MAX_TOKEN, "token")
   if (token instanceof ValidationError) return token

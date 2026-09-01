@@ -113,6 +113,11 @@ export const RateLimitConfig: { [key: string]: RateLimitConfig } = {
   // no amount argument, so nothing can short-circuit before the trailing-24h
   // list query runs. Its own key so a customer who has spent the mutation's
   // budget can still be told what is left of their allowance.
+  fygaroTopupAllowance: {
+    key: RateLimitPrefix.fygaroTopupAllowance,
+    limits: getFygaroTopupAllowanceAttemptLimits(),
+    error: FygaroTopupAllowanceRateLimiterExceededError,
+  },
   // Public, unauthenticated write endpoint (consent evidence from the
   // getflash.io/invite page). Per-IP: one legitimate submission per accept
   // click, so the ceiling is far above any real use and far below abuse.
@@ -120,10 +125,5 @@ export const RateLimitConfig: { [key: string]: RateLimitConfig } = {
     key: RateLimitPrefix.consentLog,
     limits: getConsentLogAttemptLimits(),
     error: ConsentLogIpRateLimiterExceededError,
-  },
-  fygaroTopupAllowance: {
-    key: RateLimitPrefix.fygaroTopupAllowance,
-    limits: getFygaroTopupAllowanceAttemptLimits(),
-    error: FygaroTopupAllowanceRateLimiterExceededError,
   },
 }

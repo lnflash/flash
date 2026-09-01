@@ -30,6 +30,20 @@ describe("checkedToConsentLogSubmission", () => {
     expect(result.sourceUrl).toBe("https://getflash.io/invite/?token=abc")
   })
 
+  it("accepts the canonical field names (sourceUrl, clientTimestamp) too", () => {
+    const body = validBody() as Record<string, unknown>
+    delete body.page
+    delete body.timestamp
+    body.sourceUrl = "https://getflash.io/invite/?token=abc"
+    body.clientTimestamp = "2026-09-01T18:00:00.000Z"
+
+    const result = checkedToConsentLogSubmission(body)
+
+    if (result instanceof Error) throw result
+    expect(result.sourceUrl).toBe("https://getflash.io/invite/?token=abc")
+    expect(result.clientTimestamp).toBe("2026-09-01T18:00:00.000Z")
+  })
+
   it("discards fields it does not know", () => {
     const body = { ...validBody(), admin: true, $where: "1" }
 
