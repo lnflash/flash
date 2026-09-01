@@ -5,6 +5,7 @@ import {
   DuplicateKeyForPersistError,
   UnknownRepositoryError,
 } from "@domain/errors"
+import { UnknownPhoneProviderServiceError } from "@domain/phone-provider"
 import { ErrorLevel } from "@domain/shared"
 import { AuthenticationError } from "@graphql/error"
 import {
@@ -15,6 +16,7 @@ import { IdentityRepository, UnknownKratosError } from "@services/kratos"
 import { baseLogger } from "@services/logger"
 import { UsersRepository } from "@services/mongoose"
 import { recordExceptionInCurrentSpan } from "@services/tracing"
+import { TwilioClient } from "@services/twilio"
 
 jest.mock("@app", () => ({
   Accounts: {
@@ -54,6 +56,10 @@ jest.mock("@services/tracing", () => ({
   recordExceptionInCurrentSpan: jest.fn(),
 }))
 
+jest.mock("@services/twilio", () => ({
+  TwilioClient: jest.fn(),
+}))
+
 // The real error map runs (no mock): what the client is answered with is part
 // of what is under test. CustomApolloError binds `logger[level]`, so every
 // pino level it can name has to exist on the mock.
@@ -86,6 +92,7 @@ const mockedUsersRepository = UsersRepository as jest.MockedFunction<
 const mockedRecordException = recordExceptionInCurrentSpan as jest.MockedFunction<
   typeof recordExceptionInCurrentSpan
 >
+const mockedTwilioClient = TwilioClient as jest.MockedFunction<typeof TwilioClient>
 const childLogger = (
   baseLogger as unknown as {
     child: () => { error: jest.Mock; warn: jest.Mock; debug: jest.Mock }
@@ -103,7 +110,21 @@ const account = {
 } as unknown as Account
 const user = { id: kratosUserId, phone } as unknown as User
 
+// What the registration webhook stores on the users row from Twilio's carrier
+// lookup (login.ts → transient_payload → RegistrationPayloadValidator).
+const phoneMetadata = {
+  carrier: {
+    error_code: "",
+    mobile_country_code: "621",
+    mobile_network_code: "30",
+    name: "MTN Nigeria",
+    type: "mobile",
+  },
+  countryCode: "NG",
+} as PhoneMetadata
+
 const getIdentity = jest.fn()
+const getCarrier = jest.fn()
 
 const tokenPayload = { sub: kratosUserId, session_id: "sess", expires_at: "later" }
 
@@ -128,13 +149,18 @@ describe("sessionPublicContext", () => {
     mockedCreateAccount.mockReset()
     mockedRecordException.mockReset()
     mockedIdentityRepository.mockReset()
+    mockedTwilioClient.mockReset()
     getIdentity.mockReset()
+    getCarrier.mockReset()
     childLogger.error.mockReset()
     childLogger.warn.mockReset()
     childLogger.debug.mockReset()
     mockedIdentityRepository.mockReturnValue({
       getIdentity,
     } as unknown as ReturnType<typeof IdentityRepository>)
+    mockedTwilioClient.mockReturnValue({
+      getCarrier,
+    } as unknown as ReturnType<typeof TwilioClient>)
     mockedUsersRepository.mockReturnValue({
       findById: jest.fn().mockResolvedValue(user),
     } as unknown as ReturnType<typeof UsersRepository>)
@@ -182,6 +208,7 @@ describe("sessionPublicContext", () => {
 
     beforeEach(() => {
       mockedGetAccount.mockResolvedValue(orphan)
+      getCarrier.mockResolvedValue(phoneMetadata)
     })
 
     it("repairs it from the identity's phone trait and continues as that account", async () => {
@@ -193,6 +220,7 @@ describe("sessionPublicContext", () => {
       expect(mockedCreateAccount).toHaveBeenCalledWith({
         newAccountInfo: { kratosUserId, phone },
         config: expect.any(Object),
+        phoneMetadata,
       })
       expect(context.domainAccount).toBe(account)
       expect(context.user).toBe(user)
@@ -200,6 +228,51 @@ describe("sessionPublicContext", () => {
         expect.objectContaining({ kratosUserId, accountId: account.id }),
         "orphaned kratos identity repaired",
       )
+      expect(mockedRecordException).not.toHaveBeenCalled()
+    })
+
+    // The webhook path stores Twilio's carrier lookup as users.phoneMetadata.
+    // Quiz rewards (add-earn → PhoneMetadataAuthorizer) fail closed when it is
+    // missing, so a repair that skipped the lookup would leave the account
+    // permanently ineligible for rewards with nothing pointing at why.
+    it("looks up the carrier and stores it with the repair, as the registration webhook would", async () => {
+      getIdentity.mockResolvedValue({ id: kratosUserId, phone })
+      mockedCreateAccount.mockResolvedValue(account)
+
+      await sessionPublicContext({ tokenPayload, ip })
+
+      expect(getCarrier).toHaveBeenCalledTimes(1)
+      expect(getCarrier).toHaveBeenCalledWith(phone)
+      expect(mockedCreateAccount).toHaveBeenCalledWith(
+        expect.objectContaining({ phoneMetadata }),
+      )
+    })
+
+    it("still repairs when the carrier lookup fails, just without phone metadata", async () => {
+      getIdentity.mockResolvedValue({ id: kratosUserId, phone })
+      const lookupFailed = new UnknownPhoneProviderServiceError("twilio lookups down")
+      getCarrier.mockResolvedValue(lookupFailed)
+      mockedCreateAccount.mockResolvedValue(account)
+
+      const context = await sessionPublicContext({ tokenPayload, ip })
+
+      expect(context.domainAccount).toBe(account)
+      expect(context.user).toBe(user)
+      expect(mockedCreateAccount).toHaveBeenCalledWith({
+        newAccountInfo: { kratosUserId, phone },
+        config: expect.any(Object),
+        phoneMetadata: undefined,
+      })
+      // Attributable, but not a failure: no error line, no span exception.
+      expect(childLogger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ err: lookupFailed, kratosUserId }),
+        "orphaned kratos identity: carrier lookup failed, repairing without phone metadata",
+      )
+      expect(childLogger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ kratosUserId, accountId: account.id }),
+        "orphaned kratos identity repaired",
+      )
+      expect(childLogger.error).not.toHaveBeenCalled()
       expect(mockedRecordException).not.toHaveBeenCalled()
     })
 
@@ -271,9 +344,11 @@ describe("sessionPublicContext", () => {
       const second = sessionPublicContext({ tokenPayload, ip })
       await flushMicrotasks()
 
-      // Both requests are past the lookup and parked on the same repair.
+      // Both requests are past the lookup and parked on the same repair. The
+      // carrier lookup is a billed Twilio call, so it is single-flighted too.
       expect(mockedCreateAccount).toHaveBeenCalledTimes(1)
       expect(getIdentity).toHaveBeenCalledTimes(1)
+      expect(getCarrier).toHaveBeenCalledTimes(1)
 
       releaseCreate(account)
       const [one, two] = await Promise.all([first, second])

@@ -21,6 +21,7 @@ import { ErrorLevel, ValidationError } from "@domain/shared"
 import { IdentityRepository } from "@services/kratos"
 import { baseLogger } from "@services/logger"
 import { UsersRepository } from "@services/mongoose"
+import { TwilioClient } from "@services/twilio"
 import { IbexError } from "@services/ibex/errors"
 
 type SessionLogger = typeof baseLogger
@@ -36,8 +37,10 @@ type OrphanRepairArgs = {
 // account. A failed write (duplicate key, wallet provider down) therefore
 // leaves a logged-in identity with no account, and every request it makes
 // lands here. Re-run the registration write from the identity's own phone
-// trait. If that is not possible the original not-found error stands and the
-// caller answers it as "not authenticated" — it must never crash on it.
+// trait, including the Twilio carrier lookup the webhook path stores as
+// `users.phoneMetadata`. If that is not possible the original not-found error
+// stands and the caller answers it as "not authenticated" — it must never
+// crash on it.
 //
 // Two pieces of replica-local state keep that from becoming a storm:
 //
@@ -127,9 +130,24 @@ const attemptRepair = async ({
     })
   }
 
+  // The webhook path stores the Twilio carrier lookup on the users row
+  // (login.ts → transient_payload → RegistrationPayloadValidator). Rewards
+  // (add-earn) fail closed on a missing phoneMetadata, so a repair without it
+  // would leave the account permanently ineligible with nothing pointing at
+  // why. Best effort, as on the webhook path: a lookup failure must not fail
+  // the repair, it just gets the warn line below so the gap is attributable.
+  const carrier = await TwilioClient().getCarrier(identity.phone)
+  if (carrier instanceof Error) {
+    logger.warn(
+      { err: carrier, kratosUserId: userId },
+      "orphaned kratos identity: carrier lookup failed, repairing without phone metadata",
+    )
+  }
+
   const created = await createAccountWithPhoneIdentifier({
     newAccountInfo: { kratosUserId: userId, phone: identity.phone },
     config: getDefaultAccountsConfig(),
+    phoneMetadata: carrier instanceof Error ? undefined : carrier,
   })
 
   if (created instanceof DuplicateKeyForPersistError) {
