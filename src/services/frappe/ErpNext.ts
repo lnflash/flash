@@ -17,12 +17,21 @@ import {
   FeeDiscountQueryError,
   FygaroSettingsQueryError,
   FygaroTopupHistoryQueryError,
+  IdVerificationCreateError,
+  IdVerificationQueryError,
+  IdVerificationUpdateError,
   JournalEntryDeleteError,
   SetDocTypeValueError,
   UpgradeRequestCreateError,
   UpgradeRequestQueryError,
 } from "./errors"
 import { AccountUpgradeRequest, RequestStatus } from "./models/AccountUpgradeRequest"
+import {
+  ErpNextIdVerificationDoc,
+  ErpNextIdVerificationEvidenceRow,
+  IdVerification,
+  fromFrappeDatetime,
+} from "./models/IdVerification"
 import { Bank } from "./models/Bank"
 import { BankAccount } from "./models/BankAccount"
 import {
@@ -57,6 +66,16 @@ export const toJson = (filters: AccountUpgradeRequestFilters): string => {
 }
 
 export type CashoutId = string & { readonly brand: unique symbol }
+
+// Decision state of an Account Upgrade Request, as the retention job needs
+// it. `decidedAt` is the doc's `reviewed_at` when the ERPNext side records
+// one, else its `modified` timestamp (the last status change).
+export type UpgradeRequestDecision = {
+  name: string
+  username: string
+  status: string
+  decidedAt?: Date
+}
 
 // Topup rows are written by two independent webhook streams (Bridge deposit
 // events and the IBEX crypto receive). Statuses must only ever move forward —
@@ -251,8 +270,15 @@ export class ErpNext {
       return { name: resp.data.data.name }
     } catch (err) {
       const responseData = isAxiosError(err) ? err.response?.data : undefined
+      // Only identifiers — the request body carries the applicant's name,
+      // phone, email and address, which must not land in logs.
       baseLogger.error(
-        { err, responseData, ...req.toErpnext() },
+        {
+          err,
+          responseData,
+          username: req.username,
+          requestedLevel: req.requestedLevel,
+        },
         "Error creating Account Upgrade Request in ERPNext",
       )
       recordExceptionInCurrentSpan({
@@ -319,10 +345,164 @@ export class ErpNext {
     }
   }
 
+  // Decision state only (status + when), for the evidence retention job.
+  async getUpgradeRequestDecision(
+    id: string,
+  ): Promise<UpgradeRequestDecision | UpgradeRequestQueryError> {
+    try {
+      const resp = await axios.get(
+        `${this.url}/api/resource/Account Upgrade Request/${id}`,
+        { headers: this.headers },
+      )
+
+      const request = resp.data?.data
+      if (!request) return new UpgradeRequestQueryError("No data in detail response")
+      return {
+        name: request.name,
+        username: request.username,
+        status: request.status,
+        decidedAt: fromFrappeDatetime(request.reviewed_at || request.modified),
+      }
+    } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error(
+        { err, responseData, id },
+        "Error querying Account Upgrade Request decision from ERPNext",
+      )
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
+      return new UpgradeRequestQueryError(err)
+    }
+  }
+
   closeAccountUpgradeRequests = this.setStatusForRequests(
     AccountUpgradeRequest.doctype,
     RequestStatus.Closed,
   )
+
+  // ---- ID Verification (companion of Account Upgrade Request) ----
+
+  async postIdVerification(
+    doc: IdVerification,
+  ): Promise<{ name: string } | IdVerificationCreateError> {
+    try {
+      const resp = await axios.post(
+        `${this.url}/api/resource/${IdVerification.doctype}`,
+        doc.toErpnext(),
+        { headers: this.headers },
+      )
+      const name = resp.data?.data?.name
+      if (!name) return new IdVerificationCreateError("No name in create response")
+      return { name }
+    } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      const status = isAxiosError(err) ? err.response?.status : undefined
+      baseLogger.warn(
+        {
+          err,
+          status,
+          responseData,
+          upgradeRequest: doc.upgradeRequest,
+          identitySource: doc.identitySource,
+          evidenceCount: doc.evidence.length,
+        },
+        "Error creating ID Verification in ERPNext",
+      )
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
+      return new IdVerificationCreateError(err)
+    }
+  }
+
+  async getIdVerificationList({
+    limitStart = 0,
+    pageLength = 100,
+  }: {
+    limitStart?: number
+    pageLength?: number
+  } = {}): Promise<string[] | IdVerificationQueryError> {
+    try {
+      const resp = await axios.get(`${this.url}/api/resource/${IdVerification.doctype}`, {
+        params: {
+          fields: JSON.stringify(["name"]),
+          order_by: "creation asc",
+          limit_start: limitStart,
+          limit_page_length: pageLength,
+        },
+        headers: this.headers,
+      })
+      const rows: { name: string }[] = resp.data?.data ?? []
+      return rows.map((r) => r.name)
+    } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error(
+        { err, responseData, limitStart, pageLength },
+        "Error listing ID Verification from ERPNext",
+      )
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
+      return new IdVerificationQueryError(err)
+    }
+  }
+
+  async getIdVerificationById(
+    id: string,
+  ): Promise<IdVerification | IdVerificationQueryError> {
+    try {
+      const resp = await axios.get(
+        `${this.url}/api/resource/${IdVerification.doctype}/${id}`,
+        { headers: this.headers },
+      )
+      const doc: ErpNextIdVerificationDoc | undefined = resp.data?.data
+      if (!doc) return new IdVerificationQueryError("No data in detail response")
+      return IdVerification.fromErpnext(doc)
+    } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error(
+        { err, responseData, id },
+        "Error querying ID Verification from ERPNext",
+      )
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
+      return new IdVerificationQueryError(err)
+    }
+  }
+
+  // Rewrite the evidence child table of one ID Verification. Frappe's REST
+  // update is a PUT on the parent: rows are matched by child `name`, and any
+  // row missing from the payload is removed — so callers must pass the full
+  // table, not just the rows they changed.
+  async updateIdVerificationEvidence(
+    id: string,
+    evidence: ErpNextIdVerificationEvidenceRow[],
+  ): Promise<void | IdVerificationUpdateError> {
+    try {
+      await axios.put(
+        `${this.url}/api/resource/${IdVerification.doctype}/${id}`,
+        { evidence },
+        { headers: this.headers },
+      )
+    } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error(
+        { err, responseData, id, rows: evidence.length },
+        "Error updating ID Verification evidence in ERPNext",
+      )
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
+      return new IdVerificationUpdateError(err)
+    }
+  }
 
   closeBankAccountUpdateRequests = this.setStatusForRequests(
     BankAccountUpdateRequest.doctype,

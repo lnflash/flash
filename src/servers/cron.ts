@@ -1,4 +1,4 @@
-import { OnChain, Lightning, Wallets, Payments, Swap } from "@app"
+import { OnChain, Lightning, Wallets, Payments, Swap, Accounts } from "@app"
 
 import { BridgeConfig, getCronConfig, TWO_MONTHS_IN_MS } from "@config"
 
@@ -96,6 +96,17 @@ const checkFygaroFloatJob = async () => {
   await checkFygaroTreasuryFloat()
 }
 
+// ID-verification evidence retention (docs/id-verification.md). Deletes
+// Spaces objects whose retention window has passed and stamps deleted_at on
+// the ERPNext evidence row. Dry-run by default (EVIDENCE_RETENTION_DRY_RUN);
+// self-guards when ERPNext is not configured and never throws on a single
+// bad record — per-record failures are counted and logged.
+const evidenceRetentionJob = async () => {
+  const summary = await Accounts.runEvidenceRetention()
+  if (summary instanceof Error) throw summary
+  logger.info({ summary }, "evidence retention finished")
+}
+
 const main = async () => {
   console.log("cronjob started")
   const start = new Date()
@@ -134,6 +145,7 @@ const main = async () => {
     reconcileBridgeDepositsJob,
     reconcileBridgeWithdrawalsJob,
     checkFygaroFloatJob,
+    evidenceRetentionJob,
     deleteExpiredPaymentFlows,
     deleteExpiredInvoices,
     ...(cronConfig.lndTasksEnabled

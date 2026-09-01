@@ -16,3 +16,6 @@ export class BridgeTransferRequestUpsertError extends ErpNextError {}
 export class FygaroSettingsQueryError extends ErpNextError {}
 export class FeeDiscountQueryError extends ErpNextError {}
 export class FygaroTopupHistoryQueryError extends ErpNextError {}
+export class IdVerificationCreateError extends ErpNextError {}
+export class IdVerificationQueryError extends ErpNextError {}
+export class IdVerificationUpdateError extends ErpNextError {}

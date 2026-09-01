@@ -1,6 +1,17 @@
 import { createEnv } from "@t3-oss/env-core"
 import { ZodError, z } from "zod"
 
+// "false" / "0" / "no" / "off" read as false. (z.coerce.boolean() would turn
+// the string "false" into true, which makes a default-on flag impossible to
+// turn off from the environment.)
+const booleanFromEnv = z
+  .union([z.boolean(), z.string()])
+  .transform((value) =>
+    typeof value === "boolean"
+      ? value
+      : !["false", "0", "no", "off", ""].includes(value.trim().toLowerCase()),
+  )
+
 export const env = createEnv({
   onValidationError: (error: ZodError) => {
     console.error("❌ Invalid environment variables:", error.flatten().fieldErrors)
@@ -152,6 +163,17 @@ export const env = createEnv({
     DO_SPACES_BUCKET: z.string().min(1).optional(),
     DO_SPACES_ACCESS_KEY: z.string().min(1).optional(),
     DO_SPACES_SECRET_KEY: z.string().min(1).optional(),
+
+    // ID verification (docs/id-verification.md). Strict evidence validation is
+    // off until the mobile capture flow ships; retention deletes are dry-run
+    // by default for the first release.
+    UPGRADE_EVIDENCE_STRICT: booleanFromEnv.default(false),
+    EVIDENCE_RETENTION_YEARS: z
+      .number()
+      .or(z.string())
+      .pipe(z.coerce.number().int().positive())
+      .default(7),
+    EVIDENCE_RETENTION_DRY_RUN: booleanFromEnv.default(true),
   },
 
   runtimeEnvStrict: {
@@ -271,5 +293,9 @@ export const env = createEnv({
     DO_SPACES_BUCKET: process.env.DO_SPACES_BUCKET,
     DO_SPACES_ACCESS_KEY: process.env.DO_SPACES_ACCESS_KEY,
     DO_SPACES_SECRET_KEY: process.env.DO_SPACES_SECRET_KEY,
+
+    UPGRADE_EVIDENCE_STRICT: process.env.UPGRADE_EVIDENCE_STRICT,
+    EVIDENCE_RETENTION_YEARS: process.env.EVIDENCE_RETENTION_YEARS,
+    EVIDENCE_RETENTION_DRY_RUN: process.env.EVIDENCE_RETENTION_DRY_RUN,
   },
 })

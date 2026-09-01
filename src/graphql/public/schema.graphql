@@ -50,7 +50,14 @@ input AccountCapabilityUpgradeRequestInput {
   address: AddressInput!
   bankAccount: BankAccountInput
   capability: AccountCapability!
+
+  """Structured identity evidence for the request (ID verification tool)."""
+  evidence: [UpgradeEvidenceInput!]
   fullName: String!
+
+  """
+  Storage key of the ID document (legacy). Prefer `evidence`; when both are given the key is folded in as an ID_FRONT row.
+  """
   idDocument: String
   terminalsRequested: Int = 0
 }
@@ -603,7 +610,14 @@ type BuildInformation {
 input BusinessAccountUpgradeRequestInput {
   address: AddressInput!
   bankAccount: BankAccountInput
+
+  """Structured identity evidence for the request (ID verification tool)."""
+  evidence: [UpgradeEvidenceInput!]
   fullName: String!
+
+  """
+  Storage key of the ID document (legacy). Prefer `evidence`; when both are given the key is folded in as an ID_FRONT row.
+  """
   idDocument: String
   level: AccountLevel!
   terminalsRequested: Int = 0
@@ -2337,6 +2351,37 @@ input UpdateExternalWalletInput {
 type UpdateExternalWalletPayload {
   errors: [Error!]!
   walletId: WalletId
+}
+
+input UpgradeEvidenceInput {
+  """Free-form document kind, e.g. passport, drivers_licence, national_id."""
+  documentType: String
+
+  """
+  Storage key returned by idDocumentUploadUrlGenerate. Required for every type except BRIDGE_KYC.
+  """
+  fileKey: String
+
+  """ISO 3166-1 alpha-2 country that issued the document."""
+  issuingCountry: String
+
+  """Hex SHA-256 of the uploaded file, computed client-side."""
+  sha256: String
+  type: UpgradeEvidenceType!
+}
+
+enum UpgradeEvidenceType {
+  """
+  Identity established by the account's approved Bridge KYC; carries no file.
+  """
+  BRIDGE_KYC
+  BUSINESS_REGISTRATION
+  ID_BACK
+  ID_FRONT
+  LIVENESS_FRAME
+  PROOF_OF_ADDRESS
+  SELFIE
+  TRN
 }
 
 type UpgradePayload {

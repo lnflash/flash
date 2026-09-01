@@ -77,6 +77,15 @@ export interface Customer {
   last_name?: string
   email?: string
   business_name?: string
+  // Per-product approval state (e.g. "base", "sepa"); snapshotted onto the
+  // ID Verification record when Bridge KYC is the identity source.
+  endorsements?: CustomerEndorsement[]
+}
+
+export interface CustomerEndorsement {
+  name: string
+  status: string
+  requirements?: unknown
 }
 
 export interface KycLink {

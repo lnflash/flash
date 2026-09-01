@@ -7,6 +7,7 @@ const mockGetIdentity = jest.fn()
 const mockGetUpgradeRequestList = jest.fn()
 const mockCloseUpgradeRequests = jest.fn()
 const mockPostUpgradeRequest = jest.fn()
+const mockPostIdVerification = jest.fn()
 
 jest.mock("@services/alerts/ops-events", () => ({
   notifyOpsEvent: jest.fn().mockResolvedValue(undefined),
@@ -38,6 +39,7 @@ jest.mock("@services/frappe/ErpNext", () => ({
     closeAccountUpgradeRequests: (...args: unknown[]) =>
       mockCloseUpgradeRequests(...args),
     postUpgradeRequest: (...args: unknown[]) => mockPostUpgradeRequest(...args),
+    postIdVerification: (...args: unknown[]) => mockPostIdVerification(...args),
   },
 }))
 
@@ -183,6 +185,7 @@ describe("ops events — accounts hooks", () => {
       mockGetIdentity.mockResolvedValue({ email: "biz@example.com" })
       mockGetUpgradeRequestList.mockResolvedValue([])
       mockCloseUpgradeRequests.mockResolvedValue(true)
+      mockPostIdVerification.mockResolvedValue({ name: "IDV-0001" })
     })
 
     it("notifies requested after the ERPNext post succeeds", async () => {
