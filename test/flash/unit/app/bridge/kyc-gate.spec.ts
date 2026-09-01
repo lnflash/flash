@@ -102,7 +102,7 @@ describe("resolvePhoneCountry", () => {
     expect(resolvePhoneCountry(undefined)).toBeUndefined()
   })
 
-  it("returns undefined for an unparseable number", () => {
+  it("returns undefined for an unparsable number", () => {
     expect(
       resolvePhoneCountry({
         phoneMetadata: undefined,

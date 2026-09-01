@@ -39,7 +39,9 @@ export type BridgeKycGateError =
   | BridgeKycPhoneRequiredError
 
 export type BridgeKycGateRule =
-  "email-not-verified" | "country-not-supported" | "phone-required"
+  | "email-not-verified"
+  | "country-not-supported"
+  | "phone-required"
 
 const ALPHA2 = /^[A-Z]{2}$/
 
