@@ -40,7 +40,10 @@ export const parseRepositoryError = (err: Error | string | unknown) => {
       return new InvalidDocumentIdForDbError()
 
     case match(KnownRepositoryErrorMessages.MongoDuplicateKeyForPersist):
-      return new DuplicateKeyForPersistError()
+      // Keep the driver message: it names the collection and index that
+      // collided, which is the only way to attribute a failed write after
+      // the fact (e.g. accounts.kratosUserId vs users.phone).
+      return new DuplicateKeyForPersistError(errMsg)
 
     default:
       return new UnknownRepositoryError(errMsg)

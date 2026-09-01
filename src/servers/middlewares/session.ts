@@ -5,14 +5,76 @@ import { DEFAULT_CASH_WALLET_CLIENT_CAPABILITIES } from "@app/cash-wallet-cutove
 import { recordExceptionInCurrentSpan } from "@services/tracing"
 import jsonwebtoken from "jsonwebtoken"
 
+import { getDefaultAccountsConfig } from "@config"
+
 import { mapError } from "@graphql/error-map"
 
+import { createAccountWithPhoneIdentifier } from "@app/accounts"
 import { maybeExtendSession } from "@app/authentication"
 import { checkedToUserId } from "@domain/accounts"
-import { ValidationError } from "@domain/shared"
+import { CouldNotFindAccountFromKratosIdError } from "@domain/errors"
+import { ErrorLevel, ValidationError } from "@domain/shared"
+import { IdentityRepository } from "@services/kratos"
 import { baseLogger } from "@services/logger"
 import { UsersRepository } from "@services/mongoose"
 import { IbexError } from "@services/ibex/errors"
+
+// The Kratos after-registration web_hook runs with `response.parse: false`:
+// the identity is committed whether or not the api managed to write its
+// account. A failed write (duplicate key, wallet provider down) therefore
+// leaves a logged-in identity with no account, and every request it makes
+// lands here. Re-run the registration write from the identity's own phone
+// trait. If that is not possible the original not-found error stands and the
+// caller answers it as "not authenticated" — it must never crash on it.
+const repairOrphanedIdentity = async ({
+  userId,
+  orphanError,
+  logger,
+}: {
+  userId: UserId
+  orphanError: CouldNotFindAccountFromKratosIdError
+  logger: typeof baseLogger
+}): Promise<Account | RepositoryError> => {
+  const identity = await IdentityRepository().getIdentity(userId)
+  if (identity instanceof Error) {
+    logger.error(
+      { err: identity, kratosUserId: userId },
+      "orphaned kratos identity: could not load identity",
+    )
+    return orphanError
+  }
+
+  if (!identity.phone) {
+    logger.error(
+      { kratosUserId: userId },
+      "orphaned kratos identity: no phone trait to repair from",
+    )
+    return orphanError
+  }
+
+  const account = await createAccountWithPhoneIdentifier({
+    newAccountInfo: { kratosUserId: userId, phone: identity.phone },
+    config: getDefaultAccountsConfig(),
+  })
+  if (account instanceof Error) {
+    recordExceptionInCurrentSpan({
+      error: account,
+      level: ErrorLevel.Critical,
+      attributes: { kratosUserId: userId },
+    })
+    logger.error(
+      { err: account, kratosUserId: userId },
+      "orphaned kratos identity: repair failed",
+    )
+    return orphanError
+  }
+
+  logger.warn(
+    { kratosUserId: userId, accountId: account.id },
+    "orphaned kratos identity repaired",
+  )
+  return account
+}
 
 export const sessionPublicContext = async ({
   tokenPayload,
@@ -39,7 +101,10 @@ export const sessionPublicContext = async ({
 
   if (!(maybeUserId instanceof ValidationError)) {
     const userId = maybeUserId
-    const account = await Accounts.getAccountFromUserId(userId)
+    let account = await Accounts.getAccountFromUserId(userId)
+    if (account instanceof CouldNotFindAccountFromKratosIdError) {
+      account = await repairOrphanedIdentity({ userId, orphanError: account, logger })
+    }
     if (account instanceof Error) {
       throw mapError(account)
     } else {

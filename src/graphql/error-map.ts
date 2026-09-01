@@ -1,5 +1,6 @@
 import { ValidationError } from "@domain/shared"
 import {
+  AuthenticationError,
   TransactionRestrictedError,
   LightningPaymentError,
   NotFoundError,
@@ -107,6 +108,15 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "CouldNotFindAccountFromIdError":
       message = `Account does not exist for id ${error.message}`
       return new NotFoundError({ message, logger: baseLogger })
+
+    // A session whose Kratos identity has no account: the registration write
+    // failed after the identity was committed and could not be repaired. Not a
+    // transient fault the client should retry against — the session is
+    // unusable until an account exists, so it reads as unauthenticated rather
+    // than "unexpected error, please try again".
+    case "CouldNotFindAccountFromKratosIdError":
+      message = "No account is linked to this session"
+      return new AuthenticationError({ message, logger: baseLogger })
 
     case "CouldNotFindAccountFromUuidError":
       message = `Account does not exist for uuid ${error.message}`
@@ -894,7 +904,6 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "InvalidCurrencyBaseAmountError":
     case "NoTransactionToUpdateError":
     case "BalanceLessThanZeroError":
-    case "CouldNotFindAccountFromKratosIdError":
     case "MissingPhoneError":
     case "InvalidUserId":
     case "InvalidLightningPaymentFlowBuilderStateError":

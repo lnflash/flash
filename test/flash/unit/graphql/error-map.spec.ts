@@ -8,9 +8,23 @@ import {
 } from "@services/bridge/errors"
 import { IbexError, InsufficientIbexBalance } from "@services/ibex/errors"
 import { PhoneCountryNotAllowedError } from "@domain/users/errors"
-import { InvalidPhoneNumber } from "@domain/errors"
+import { CouldNotFindAccountFromKratosIdError, InvalidPhoneNumber } from "@domain/errors"
 
 describe("error-map", () => {
+  // A logged-in Kratos identity with no account (registration write failed
+  // after the identity was committed). It used to fall into the catch-all
+  // "unexpected error, please try again", which invites the client to retry
+  // the very request that crashed the api on 2026-09-01.
+  it("maps CouldNotFindAccountFromKratosIdError to NOT_AUTHENTICATED, not the catch-all", () => {
+    const result = mapError(
+      new CouldNotFindAccountFromKratosIdError("ebbe2b32-9a2e-4c77-80e4-5d7347c024bb"),
+    )
+
+    expect(result.extensions.code).toBe("NOT_AUTHENTICATED")
+    expect(result.message).toBe("No account is linked to this session")
+    expect(result.extensions.code).not.toBe("UNEXPECTED_CLIENT_ERROR")
+  })
+
   it("maps BridgeWithdrawalNotFoundError to BRIDGE_WITHDRAWAL_NOT_FOUND", () => {
     const result = mapError(new BridgeWithdrawalNotFoundError())
 
