@@ -98,7 +98,7 @@ describe("POST /kratos/preregistration", () => {
     )
   })
 
-  it("answers 400 'not allowed' for an unparseable phone", async () => {
+  it("answers 400 'not allowed' for an unparsable phone", async () => {
     mockValidate.mockResolvedValue(new InvalidPhoneNumber())
     const res = makeRes()
 
