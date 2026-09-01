@@ -142,13 +142,6 @@ export const startApolloServer = async ({
   app.use("/auth", authRouter)
   app.use("/kratos", kratosCallback)
 
-  // Public consent-evidence intake from the getflash.io/invite page
-  // (ENG-568). Anonymous callers, so it mounts only on the public server and
-  // BEFORE the JWT middleware below.
-  if (type === "main") {
-    app.use("/consent", consentLogRouter)
-  }
-
   // Health check
   app.get(
     "/healthz",
@@ -201,6 +194,14 @@ export const startApolloServer = async ({
       },
     }),
   )
+
+  // Public consent-evidence intake from the getflash.io/invite page
+  // (ENG-568). Anonymous callers, so it mounts only on the public server and
+  // BEFORE the JWT middleware below — but AFTER PinoHttp, so a public
+  // unauthenticated write path shows up in the access logs.
+  if (type === "main") {
+    app.use("/consent", consentLogRouter)
+  }
 
   const secret = jwksRsa.expressJwtSecret(getJwksArgs()) as GetVerificationKey // https://github.com/auth0/express-jwt/issues/288#issuecomment-1122524366
 
