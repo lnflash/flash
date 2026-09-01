@@ -43,6 +43,11 @@ jest.mock("@app/payments/send-intraledger", () => ({
   intraledgerPaymentSendWalletIdForUsdWallet: (...a: unknown[]) => mockPay(...a),
 }))
 
+const mockErpEnabled = jest.fn()
+jest.mock("@app/invite/referral-settings", () => ({
+  referralRewardsEnabledInErp: (...a: unknown[]) => mockErpEnabled(...a),
+}))
+
 const mockRewardPush = jest.fn()
 jest.mock("@app/invite/send-referral-notifications", () => ({
   sendReferralRewardNotificationBestEffort: (...a: unknown[]) => mockRewardPush(...a),
@@ -89,6 +94,7 @@ const lastSet = () =>
 
 describe("awardReferralRewardOnKycApproval", () => {
   beforeEach(() => {
+    mockErpEnabled.mockResolvedValue(true)
     jest.clearAllMocks()
     mockGetConfig.mockReturnValue({ enabled: true, tiers: DEFAULT_TIERS })
     mockExists.mockResolvedValue(null) // no prior processed invite for the account
@@ -110,6 +116,29 @@ describe("awardReferralRewardOnKycApproval", () => {
     await awardReferralRewardOnKycApproval({ accountId: INVITEE })
     expect(mockFindOne).not.toHaveBeenCalled()
     expect(mockPay).not.toHaveBeenCalled()
+  })
+
+  it("defers (no claim, no failure mark) when the ERPNext kill switch is off", async () => {
+    mockErpEnabled.mockResolvedValue(false)
+
+    await awardReferralRewardOnKycApproval({ accountId: INVITEE })
+
+    // Deferral means the invite is left exactly as found: unclaimed and
+    // retryable. Nothing is queried, claimed, paid, or marked failed.
+    expect(mockFindOneAndUpdate).not.toHaveBeenCalled()
+    expect(mockPay).not.toHaveBeenCalled()
+    expect(mockUpdateOne).not.toHaveBeenCalled()
+  })
+
+  it("treats an unreadable kill switch the same as off — no affirmative yes, no money", async () => {
+    // referralRewardsEnabledInErp itself maps errors to false; the award path
+    // must not distinguish. This pins the calling contract.
+    mockErpEnabled.mockResolvedValue(false)
+
+    await awardReferralRewardOnKycApproval({ accountId: INVITEE })
+
+    expect(mockPay).not.toHaveBeenCalled()
+    expect(mockFindOneAndUpdate).not.toHaveBeenCalled()
   })
 
   it("never pays a second reward for the same account (KYC re-approval flap)", async () => {

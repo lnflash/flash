@@ -16,6 +16,7 @@ import {
   ExchangeRateQueryError,
   FeeDiscountQueryError,
   FygaroSettingsQueryError,
+  ReferralSettingsQueryError,
   FygaroTopupHistoryQueryError,
   JournalEntryDeleteError,
   SetDocTypeValueError,
@@ -135,6 +136,12 @@ export type FygaroSettingsDoc = {
   l1_daily_limit?: number | string
   l2_daily_limit?: number | string
   l3_daily_limit?: number | string
+}
+
+// The ERPNext "Referral Settings" Single doctype: the operator-facing kill
+// switch for referral reward payouts. One Check field by design.
+export type ReferralSettingsDoc = {
+  rewards_enabled?: unknown
 }
 
 // Raw "Fee Discount" doctype row as ERPNext returns it (one row per username,
@@ -460,6 +467,31 @@ export class ErpNext {
   // cashouts). The consumers read this through a 60s cache and fail open to a
   // 0% discount, so an ERPNext blip can never block a credit or an offer —
   // it just charges the standard fee.
+
+  // Reads the "Referral Settings" Single doctype — the operator kill switch
+  // for referral reward payouts. Consulted before every payout (through a 60s
+  // cache in @app/invite/referral-settings); a read failure means "defer the
+  // payout", so this must return the error rather than a default.
+  async getReferralSettings(): Promise<ReferralSettingsDoc | ReferralSettingsQueryError> {
+    try {
+      const resp = await axios.get(
+        `${this.url}/api/resource/${encodeURIComponent("Referral Settings")}/${encodeURIComponent("Referral Settings")}`,
+        { headers: this.headers },
+      )
+      const data = resp.data?.data
+      if (!data)
+        return new ReferralSettingsQueryError("No data in Referral Settings response")
+      return data as ReferralSettingsDoc
+    } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error(
+        { err, responseData },
+        "Error querying Referral Settings from ERPNext",
+      )
+      return new ReferralSettingsQueryError(err)
+    }
+  }
+
   async getFeeDiscounts(): Promise<FeeDiscountDoc[] | FeeDiscountQueryError> {
     try {
       // Serialized through axios `params` (not hand-interpolated into the URL)

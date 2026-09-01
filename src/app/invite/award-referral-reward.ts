@@ -7,8 +7,11 @@ import { WalletCurrency } from "@domain/shared"
 
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import { InviteRepository } from "@services/mongoose/models/invite"
+
 import { nextReferralRewardSeq } from "@services/mongoose/models/referral-reward-counter"
 import { baseLogger } from "@services/logger"
+
+import { referralRewardsEnabledInErp } from "./referral-settings"
 
 import { sendReferralRewardNotificationBestEffort } from "./send-referral-notifications"
 
@@ -50,6 +53,21 @@ export const awardReferralRewardOnKycApproval = async ({
   try {
     const config = getReferralRewardConfig()
     if (!config.enabled) return
+
+    // Operator kill switch (ERPNext "Referral Settings" single). Checked
+    // BEFORE the atomic reward claim on purpose: returning here leaves the
+    // invite ACCEPTED and unrewarded — a DEFERRED payout, not a failed one.
+    // It pays on any later trigger (KYC status re-fire, or an ops sweep of
+    // ACCEPTED+unrewarded invites) once the switch is re-enabled. Disabled
+    // and unreadable are treated identically: no affirmative yes, no money.
+    const erpEnabled = await referralRewardsEnabledInErp()
+    if (!erpEnabled) {
+      baseLogger.info(
+        { accountId },
+        "referral reward deferred: ERPNext kill switch is off or unreadable",
+      )
+      return
+    }
 
     // One reward per invitee, ever. Bridge KYC can flap back to "approved"
     // (approved -> under_review -> approved re-fires this hook), and redemption
