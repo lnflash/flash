@@ -8,7 +8,11 @@ import {
 } from "@services/bridge/errors"
 import { IbexError, InsufficientIbexBalance } from "@services/ibex/errors"
 import { PhoneCountryNotAllowedError } from "@domain/users/errors"
-import { PhoneNotAllowedForRegistrationError } from "@domain/authentication/errors"
+import {
+  PhoneAlreadyRegisteredError,
+  PhoneNotAllowedForRegistrationError,
+} from "@domain/authentication/errors"
+import { RegistrationHookFailedError } from "@services/kratos/errors"
 import { InvalidPhoneNumber } from "@domain/errors"
 
 describe("error-map", () => {
@@ -17,6 +21,27 @@ describe("error-map", () => {
 
     expect(result.extensions.code).not.toBe("UNEXPECTED_CLIENT_ERROR")
     expect(result.message).toBe("This phone number can't be used to sign up")
+  })
+
+  it("maps PhoneAlreadyRegisteredError to sign-up wording, not the add-phone PHONE_ALREADY_ATTACHED_ERROR", () => {
+    const result = mapError(new PhoneAlreadyRegisteredError())
+
+    expect(result.extensions.code).toBe("INVALID_INPUT")
+    expect(result.extensions.code).not.toBe("PHONE_ALREADY_ATTACHED_ERROR")
+    expect(result.message).toBe(
+      "This phone number is already registered. Contact support if you can't sign in",
+    )
+    expect(result.message).not.toMatch(/this account/)
+  })
+
+  it("maps RegistrationHookFailedError to the unexpected-error catch-all under its own name", () => {
+    const result = mapError(new RegistrationHookFailedError("hook message id 4100500"))
+
+    expect(result.extensions.code).toBe("UNEXPECTED_CLIENT_ERROR")
+    expect(result.message).toContain(
+      "RegistrationHookFailedError: hook message id 4100500",
+    )
+    expect(result.message).not.toContain("LikelyUserAlreadyExistError")
   })
 
   it("maps BridgeWithdrawalNotFoundError to BRIDGE_WITHDRAWAL_NOT_FOUND", () => {

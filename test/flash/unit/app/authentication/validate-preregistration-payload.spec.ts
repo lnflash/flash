@@ -2,7 +2,7 @@ import { validatePreRegistrationPayload } from "@app/authentication/validate-pre
 import {
   InvalidSecretForAuthNCallbackError,
   MissingSecretForAuthNCallbackError,
-  PhoneAlreadyExistsError,
+  PhoneAlreadyRegisteredError,
   UnsupportedSchemaTypeError,
 } from "@domain/authentication/errors"
 import { CouldNotFindUserFromPhoneError, UnknownRepositoryError } from "@domain/errors"
@@ -26,8 +26,14 @@ jest.mock("@services/kratos", () => ({
 }))
 
 const mockFindByPhone = jest.fn()
+const mockFindById = jest.fn()
+const mockUpdate = jest.fn()
 jest.mock("@services/mongoose", () => ({
-  UsersRepository: jest.fn(() => ({ findByPhone: mockFindByPhone })),
+  UsersRepository: jest.fn(() => ({
+    findById: mockFindById,
+    findByPhone: mockFindByPhone,
+    update: mockUpdate,
+  })),
 }))
 
 const NIL_UUID = "00000000-0000-0000-0000-000000000000"
@@ -53,6 +59,8 @@ const body = (overrides: Record<string, unknown> = {}) => ({
 describe("validatePreRegistrationPayload", () => {
   beforeEach(() => {
     mockFindByPhone.mockReset()
+    mockFindById.mockReset()
+    mockUpdate.mockReset()
     mockFindByPhone.mockResolvedValue(new CouldNotFindUserFromPhoneError())
   })
 
@@ -68,12 +76,20 @@ describe("validatePreRegistrationPayload", () => {
   })
 
   it("never writes and never looks anything up by the nil identity id", async () => {
-    const repo = UsersRepository() as unknown as Record<string, unknown>
     await validatePreRegistrationPayload({ secret: CALLBACK_KEY, body: body() })
 
-    expect(Object.keys(repo)).toStrictEqual(["findByPhone"])
+    expect(mockUpdate).not.toHaveBeenCalled()
+    expect(mockFindById).not.toHaveBeenCalled()
     expect(mockFindByPhone).toHaveBeenCalledTimes(1)
     expect(mockFindByPhone.mock.calls[0][0]).not.toBe(NIL_UUID)
+  })
+
+  it("does not write even when it rejects", async () => {
+    mockFindByPhone.mockResolvedValue({ id: "other-user", phone })
+
+    await validatePreRegistrationPayload({ secret: CALLBACK_KEY, body: body() })
+
+    expect(mockUpdate).not.toHaveBeenCalled()
   })
 
   it("rejects a missing or wrong secret before touching the payload", async () => {
@@ -117,7 +133,7 @@ describe("validatePreRegistrationPayload", () => {
       body: body(),
     })
 
-    expect(result).toBeInstanceOf(PhoneAlreadyExistsError)
+    expect(result).toBeInstanceOf(PhoneAlreadyRegisteredError)
   })
 
   it("surfaces repository failures so the route answers 500 and the sign-up aborts", async () => {

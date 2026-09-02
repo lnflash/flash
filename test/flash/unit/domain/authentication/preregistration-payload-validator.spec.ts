@@ -2,20 +2,18 @@ import {
   MissingRegistrationPayloadPropertiesError,
   UnsupportedSchemaTypeError,
 } from "@domain/authentication/errors"
-import {
-  PreRegistrationPayloadValidator,
-  RegistrationPayloadValidator,
-} from "@domain/authentication/registration-payload-validator"
+import { PreRegistrationPayloadValidator } from "@domain/authentication/registration-payload-validator"
 import { InvalidPhoneNumber } from "@domain/errors"
 import {
   InvalidCarrierForPhoneMetadataError,
   InvalidCarrierTypeForPhoneMetadataError,
   InvalidCountryCodeForPhoneMetadataError,
+  PhoneMetadataValidationError,
 } from "@domain/users/errors"
 
 import { SchemaIdType } from "@services/kratos"
 
-import { randomPhone, randomUserId } from "test/galoy/helpers/random"
+import { randomPhone } from "test/galoy/helpers/random"
 
 // Kratos assigns the identity id only at persist time; the pre-persist hook
 // receives this placeholder and the validator must never look at it.
@@ -116,55 +114,29 @@ describe("PreRegistrationPayloadValidator", () => {
       },
     })
     expect(validated).toBeInstanceOf(InvalidCarrierTypeForPhoneMetadataError)
+    // The hook route matches on the parent class.
+    expect(validated).toBeInstanceOf(PhoneMetadataValidationError)
   })
 
   it("rejects malformed carrier metadata", () => {
-    expect(
-      validator.validate({
-        phone: randomPhone(),
-        schema_id: SchemaIdType.PhoneNoPasswordV0,
-        transient_payload: {
-          phoneMetadata: { carrier: "not-an-object", countryCode: "JM" } as never,
-        },
-      }),
-    ).toBeInstanceOf(InvalidCarrierForPhoneMetadataError)
-
-    expect(
-      validator.validate({
-        phone: randomPhone(),
-        schema_id: SchemaIdType.PhoneNoPasswordV0,
-        transient_payload: {
-          phoneMetadata: { carrier: validCarrier } as never,
-        },
-      }),
-    ).toBeInstanceOf(InvalidCountryCodeForPhoneMetadataError)
-  })
-})
-
-describe("RegistrationPayloadValidator (post-persist hook) is unchanged", () => {
-  const validator = RegistrationPayloadValidator(SchemaIdType.PhoneNoPasswordV0)
-
-  it("still requires a real identity id", () => {
-    const rawUserId = randomUserId()
-    const phone = randomPhone()
-
-    expect(
-      validator.validate({
-        identity_id: rawUserId,
-        phone,
-        schema_id: SchemaIdType.PhoneNoPasswordV0,
-        transient_payload: {
-          phoneMetadata: { carrier: validCarrier, countryCode: "JM" },
-        },
-      }),
-    ).toStrictEqual({
-      userId: rawUserId,
-      phone,
-      phoneMetadata: { carrier: validCarrier, countryCode: "JM" },
+    const badCarrier = validator.validate({
+      phone: randomPhone(),
+      schema_id: SchemaIdType.PhoneNoPasswordV0,
+      transient_payload: {
+        phoneMetadata: { carrier: "not-an-object", countryCode: "JM" } as never,
+      },
     })
+    expect(badCarrier).toBeInstanceOf(InvalidCarrierForPhoneMetadataError)
+    expect(badCarrier).toBeInstanceOf(PhoneMetadataValidationError)
 
-    expect(
-      validator.validate({ phone, schema_id: SchemaIdType.PhoneNoPasswordV0 }),
-    ).toBeInstanceOf(MissingRegistrationPayloadPropertiesError)
+    const noCountry = validator.validate({
+      phone: randomPhone(),
+      schema_id: SchemaIdType.PhoneNoPasswordV0,
+      transient_payload: {
+        phoneMetadata: { carrier: validCarrier } as never,
+      },
+    })
+    expect(noCountry).toBeInstanceOf(InvalidCountryCodeForPhoneMetadataError)
+    expect(noCountry).toBeInstanceOf(PhoneMetadataValidationError)
   })
 })

@@ -534,6 +534,14 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = "This phone number can't be used to sign up"
       return new ValidationInternalError({ message, logger: baseLogger })
 
+    // Same hook, phone already bound to a users document. The caller is on the
+    // sign-up path with no account and no session, so this must not reuse
+    // PhoneAlreadyExistsError's "one phone per account" text.
+    case "PhoneAlreadyRegisteredError":
+      message =
+        "This phone number is already registered. Contact support if you can't sign in"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
     case "EmailAlreadyExistsError":
       return new EmailAlreadyExistsError({ logger: baseLogger })
 
@@ -953,6 +961,7 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "MissingTotpKratosError":
     case "IncompatibleSchemaUpgradeError":
     case "UnknownKratosError":
+    case "RegistrationHookFailedError":
     case "BriaEventError":
     case "BriaPayloadError":
     case "KratosError":

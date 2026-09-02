@@ -2,7 +2,7 @@ import { KRATOS_CALLBACK_API_KEY } from "@config"
 
 import { CallbackSecretValidator } from "@domain/authentication/secret-validator"
 import { PreRegistrationPayloadValidator } from "@domain/authentication/registration-payload-validator"
-import { PhoneAlreadyExistsError } from "@domain/authentication/errors"
+import { PhoneAlreadyRegisteredError } from "@domain/authentication/errors"
 import { CouldNotFindUserFromPhoneError } from "@domain/errors"
 
 import { addAttributesToCurrentSpan } from "@services/tracing"
@@ -52,5 +52,5 @@ export const validatePreRegistrationPayload = async ({
   if (existing instanceof CouldNotFindUserFromPhoneError) return true
   if (existing instanceof Error) return existing
 
-  return new PhoneAlreadyExistsError()
+  return new PhoneAlreadyRegisteredError()
 }

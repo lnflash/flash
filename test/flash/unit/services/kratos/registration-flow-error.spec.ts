@@ -1,9 +1,11 @@
 import {
   LikelyUserAlreadyExistError,
   PhoneAlreadyExistsError,
+  PhoneAlreadyRegisteredError,
   PhoneNotAllowedForRegistrationError,
 } from "@domain/authentication/errors"
 import { KratosHookMessageId } from "@domain/authentication/kratos-hook-messages"
+import { RegistrationHookFailedError } from "@services/kratos/errors"
 import { mapRegistrationFlowRejection } from "@services/kratos/registration-flow-error"
 
 // Shape @ory/client (axios) throws when Kratos answers updateRegistrationFlow
@@ -36,28 +38,43 @@ describe("mapRegistrationFlowRejection", () => {
     expect(mapRegistrationFlowRejection(undefined)).toBeNull()
   })
 
-  it("maps the pre-hook 'already registered' id to PhoneAlreadyExistsError", () => {
-    expect(
-      mapRegistrationFlowRejection(
-        axios400(flowWithHookMessage(KratosHookMessageId.PhoneAlreadyRegistered)),
-      ),
-    ).toBeInstanceOf(PhoneAlreadyExistsError)
+  it("maps the pre-hook 'already registered' id to PhoneAlreadyRegisteredError, never the add-phone error", () => {
+    const mapped = mapRegistrationFlowRejection(
+      axios400(flowWithHookMessage(KratosHookMessageId.PhoneAlreadyRegistered)),
+    )
+
+    expect(mapped).toBeInstanceOf(PhoneAlreadyRegisteredError)
+    // PhoneAlreadyExistsError reads "one phone per account" on the GraphQL
+    // boundary; a caller on the sign-up path has no account.
+    expect(mapped).not.toBeInstanceOf(PhoneAlreadyExistsError)
   })
 
-  it("maps the pre-hook 'not allowed' and 'payload invalid' ids to PhoneNotAllowedForRegistrationError", () => {
+  it("maps the pre-hook 'not allowed' id to PhoneNotAllowedForRegistrationError", () => {
     expect(
       mapRegistrationFlowRejection(
         axios400(flowWithHookMessage(KratosHookMessageId.PhoneNotAllowed)),
       ),
     ).toBeInstanceOf(PhoneNotAllowedForRegistrationError)
-    expect(
-      mapRegistrationFlowRejection(
-        axios400(flowWithHookMessage(KratosHookMessageId.PayloadInvalid)),
-      ),
-    ).toBeInstanceOf(PhoneNotAllowedForRegistrationError)
   })
 
-  it("prefers 'already registered' when both ids are present", () => {
+  it.each([
+    ["payload invalid", KratosHookMessageId.PayloadInvalid],
+    ["unauthorized", KratosHookMessageId.Unauthorized],
+    ["internal error", KratosHookMessageId.InternalError],
+  ])(
+    "maps the '%s' id to RegistrationHookFailedError carrying the id, not to a phone-policy answer",
+    (_label, id) => {
+      const mapped = mapRegistrationFlowRejection(axios400(flowWithHookMessage(id)))
+
+      expect(mapped).toBeInstanceOf(RegistrationHookFailedError)
+      expect((mapped as Error).message).toBe(`hook message id ${id}`)
+      expect(mapped).not.toBeInstanceOf(PhoneNotAllowedForRegistrationError)
+      expect(mapped).not.toBeInstanceOf(PhoneAlreadyRegisteredError)
+      expect(mapped).not.toBeInstanceOf(LikelyUserAlreadyExistError)
+    },
+  )
+
+  it("prefers 'already registered' when both phone ids are present", () => {
     const flow = {
       ui: {
         messages: [{ id: KratosHookMessageId.PhoneNotAllowed, text: "x", type: "error" }],
@@ -75,7 +92,25 @@ describe("mapRegistrationFlowRejection", () => {
       },
     }
     expect(mapRegistrationFlowRejection(axios400(flow))).toBeInstanceOf(
-      PhoneAlreadyExistsError,
+      PhoneAlreadyRegisteredError,
+    )
+  })
+
+  it("prefers a phone-policy id over a hook-failure id when both are present", () => {
+    const flow = {
+      ui: {
+        messages: [{ id: KratosHookMessageId.InternalError, text: "x", type: "error" }],
+        nodes: [
+          {
+            messages: [
+              { id: KratosHookMessageId.PhoneNotAllowed, text: "y", type: "error" },
+            ],
+          },
+        ],
+      },
+    }
+    expect(mapRegistrationFlowRejection(axios400(flow))).toBeInstanceOf(
+      PhoneNotAllowedForRegistrationError,
     )
   })
 

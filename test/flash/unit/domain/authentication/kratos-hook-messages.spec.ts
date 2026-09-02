@@ -25,6 +25,16 @@ describe("kratos hook messages", () => {
     expect(KRATOS_HOOK_PHONE_INSTANCE_PTR).toBe("#/traits/phone")
   })
 
+  it("keeps every id inside the 4100000 block no Kratos allocation touches", () => {
+    // text/id.go (Kratos v1.0.0): info blocks 1010000..1080000, validation
+    // blocks 4000000, 4010000, 4040000, 4050000, 4060000, 4070000, system
+    // 5000000 — each 10000 wide. 4100000 is the first free block above them.
+    for (const id of Object.values(KratosHookMessageId)) {
+      expect(id).toBeGreaterThanOrEqual(4100000)
+      expect(id).toBeLessThan(4110000)
+    }
+  })
+
   it("has a distinct id and user-readable text for every rejection kind", () => {
     const ids = Object.values(KratosHookMessageId)
     expect(new Set(ids).size).toBe(ids.length)

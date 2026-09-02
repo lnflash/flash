@@ -6,8 +6,13 @@ export class LikelyUserAlreadyExistError extends AuthenticationError {}
 
 export class AccountHasPositiveBalanceError extends AuthenticationError {}
 export class PhoneAlreadyExistsError extends AuthenticationError {}
+// The pre-persist registration hook found the phone already bound to a users
+// document. Raised on the sign-up path, where the caller has no account and no
+// session — so it must not read as "one phone per account"
+// (PhoneAlreadyExistsError belongs to the add-phone-to-account flow).
+export class PhoneAlreadyRegisteredError extends AuthenticationError {}
 // The pre-persist registration hook rejected the phone (unparsable, or its
-// carrier metadata failed validation). Distinct from "already exists": the
+// carrier metadata failed validation). Distinct from "already registered": the
 // user cannot fix it by logging in instead.
 export class PhoneNotAllowedForRegistrationError extends AuthenticationError {}
 

@@ -8,7 +8,7 @@ import { maskPhone } from "@services/alerts/ops-events"
 import { Authentication } from "@app"
 
 import {
-  PhoneAlreadyExistsError,
+  PhoneAlreadyRegisteredError,
   RegistrationPayloadValidationError,
   SecretForAuthNCallbackError,
 } from "@domain/authentication/errors"
@@ -17,12 +17,7 @@ import {
   kratosHookRejection,
 } from "@domain/authentication/kratos-hook-messages"
 import { InvalidPhoneNumber } from "@domain/errors"
-import {
-  InvalidCarrierForPhoneMetadataError,
-  InvalidCarrierTypeForPhoneMetadataError,
-  InvalidCountryCodeForPhoneMetadataError,
-  PhoneMetadataValidationError,
-} from "@domain/users/errors"
+import { PhoneMetadataValidationError } from "@domain/users/errors"
 
 const errorResponseMessages: { [key: string]: string } = {
   MissingSecretForAuthNCallbackError: "missing authorization header",
@@ -67,26 +62,27 @@ kratosCallback.post(
             res.status(401).json(kratosHookRejection(KratosHookMessageId.Unauthorized))
             return
 
-          case result instanceof PhoneAlreadyExistsError:
+          case result instanceof PhoneAlreadyRegisteredError:
             baseLogger.warn({ phone, rejection: result.name }, "preregistration rejected")
             res
               .status(400)
               .json(kratosHookRejection(KratosHookMessageId.PhoneAlreadyRegistered))
             return
 
+          // Every carrier-metadata failure extends PhoneMetadataValidationError.
           case result instanceof InvalidPhoneNumber:
           case result instanceof PhoneMetadataValidationError:
-          case result instanceof InvalidCarrierForPhoneMetadataError:
-          case result instanceof InvalidCarrierTypeForPhoneMetadataError:
-          case result instanceof InvalidCountryCodeForPhoneMetadataError:
             baseLogger.warn({ phone, rejection: result.name }, "preregistration rejected")
             res.status(400).json(kratosHookRejection(KratosHookMessageId.PhoneNotAllowed))
             return
 
+          // Not a user error: the body Kratos' template produced does not match
+          // what the api expects (missing field, unknown schema_id). Kratos
+          // config and the api disagree, so every sign-up is failing.
           case result instanceof RegistrationPayloadValidationError:
-            baseLogger.warn(
+            baseLogger.error(
               { phone, rejection: result.name, schemaId: body.schema_id },
-              "preregistration rejected",
+              "preregistration: hook payload rejected, Kratos config and api disagree",
             )
             res.status(400).json(kratosHookRejection(KratosHookMessageId.PayloadInvalid))
             return

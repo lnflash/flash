@@ -4,11 +4,18 @@ import { Authentication } from "@app"
 import {
   InvalidSecretForAuthNCallbackError,
   MissingRegistrationPayloadPropertiesError,
-  PhoneAlreadyExistsError,
+  PhoneAlreadyRegisteredError,
+  UnsupportedSchemaTypeError,
 } from "@domain/authentication/errors"
 import { InvalidPhoneNumber, UnknownRepositoryError } from "@domain/errors"
-import { InvalidCarrierTypeForPhoneMetadataError } from "@domain/users/errors"
+import {
+  InvalidCarrierForPhoneMetadataError,
+  InvalidCarrierTypeForPhoneMetadataError,
+  InvalidCountryCodeForPhoneMetadataError,
+  PhoneMetadataValidationError,
+} from "@domain/users/errors"
 import kratosCallback from "@servers/event-handlers/kratos"
+import { baseLogger } from "@services/logger"
 
 jest.mock("@app", () => ({
   Authentication: {
@@ -86,17 +93,26 @@ describe("POST /kratos/preregistration", () => {
     expect(res.send).not.toHaveBeenCalled()
   })
 
-  it("answers 400 with the Kratos messages body on a carrier-type rejection", async () => {
-    mockValidate.mockResolvedValue(new InvalidCarrierTypeForPhoneMetadataError())
-    const res = makeRes()
+  it.each([
+    ["carrier type", new InvalidCarrierTypeForPhoneMetadataError()],
+    ["carrier shape", new InvalidCarrierForPhoneMetadataError()],
+    ["country code", new InvalidCountryCodeForPhoneMetadataError()],
+  ])(
+    "answers 400 with the Kratos messages body on a %s rejection",
+    async (_label, err) => {
+      // The route matches the parent class; every carrier error must be one.
+      expect(err).toBeInstanceOf(PhoneMetadataValidationError)
+      mockValidate.mockResolvedValue(err)
+      const res = makeRes()
 
-    await handler(makeReq(), res)
+      await handler(makeReq(), res)
 
-    expect(res.status).toHaveBeenCalledWith(400)
-    expect(res.json).toHaveBeenCalledWith(
-      rejection(4100001, "This phone number can't be used to sign up."),
-    )
-  })
+      expect(res.status).toHaveBeenCalledWith(400)
+      expect(res.json).toHaveBeenCalledWith(
+        rejection(4100001, "This phone number can't be used to sign up."),
+      )
+    },
+  )
 
   it("answers 400 'not allowed' for an unparsable phone", async () => {
     mockValidate.mockResolvedValue(new InvalidPhoneNumber())
@@ -111,7 +127,7 @@ describe("POST /kratos/preregistration", () => {
   })
 
   it("answers 400 'already registered' when the phone is bound to another identity", async () => {
-    mockValidate.mockResolvedValue(new PhoneAlreadyExistsError())
+    mockValidate.mockResolvedValue(new PhoneAlreadyRegisteredError())
     const res = makeRes()
 
     await handler(makeReq(), res)
@@ -132,6 +148,47 @@ describe("POST /kratos/preregistration", () => {
     expect(res.json).toHaveBeenCalledWith(
       rejection(4100003, "Sign-up request was invalid. Please try again."),
     )
+  })
+
+  it("logs a malformed hook payload at error, not warn: Kratos config and the api disagree", async () => {
+    const errorSpy = jest.spyOn(baseLogger, "error").mockImplementation(() => undefined)
+    const warnSpy = jest.spyOn(baseLogger, "warn").mockImplementation(() => undefined)
+    try {
+      mockValidate.mockResolvedValue(new UnsupportedSchemaTypeError())
+
+      await handler(makeReq({ schema_id: "email_no_password_v0" }), makeRes())
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          rejection: "UnsupportedSchemaTypeError",
+          schemaId: "email_no_password_v0",
+        }),
+        expect.stringContaining("Kratos config and api disagree"),
+      )
+      expect(warnSpy).not.toHaveBeenCalled()
+    } finally {
+      errorSpy.mockRestore()
+      warnSpy.mockRestore()
+    }
+  })
+
+  it("logs a phone-policy rejection at warn: expected, not a defect", async () => {
+    const errorSpy = jest.spyOn(baseLogger, "error").mockImplementation(() => undefined)
+    const warnSpy = jest.spyOn(baseLogger, "warn").mockImplementation(() => undefined)
+    try {
+      mockValidate.mockResolvedValue(new InvalidCarrierTypeForPhoneMetadataError())
+
+      await handler(makeReq(), makeRes())
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ rejection: "InvalidCarrierTypeForPhoneMetadataError" }),
+        "preregistration rejected",
+      )
+      expect(errorSpy).not.toHaveBeenCalled()
+    } finally {
+      errorSpy.mockRestore()
+      warnSpy.mockRestore()
+    }
   })
 
   it("answers 401 as JSON on a bad callback secret", async () => {
