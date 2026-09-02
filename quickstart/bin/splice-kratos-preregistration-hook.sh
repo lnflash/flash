@@ -28,9 +28,17 @@ file=${1:?usage: $0 <kratos.yml>}
 registration_url='http://flash:4012/kratos/registration'
 preregistration_url='http://flash:4012/kratos/preregistration'
 
-if grep -Eq "^[[:space:]]*url: ${preregistration_url}[[:space:]]*\$" "${file}"; then
-  echo "${file}: pre-persist registration hook already present, nothing to splice" >&2
-  exit 0
+existing_line=$(grep -nE "^[[:space:]]*url: ${preregistration_url}[[:space:]]*\$" "${file}" | head -1 | cut -d: -f1 || true)
+if [ -n "${existing_line}" ]; then
+  # A hook at that url only does its job pre-persist. If upstream ever ships
+  # it with `parse: false` (or drops `response` entirely) this must fail
+  # loudly, not report "already present".
+  if sed -n "${existing_line},$((existing_line + 4))p" "${file}" | grep -Eq '^[[:space:]]*parse: true[[:space:]]*$'; then
+    echo "${file}: pre-persist registration hook already present, nothing to splice" >&2
+    exit 0
+  fi
+  echo "${file}: a /kratos/preregistration hook is present but is not pre-persist (no 'response.parse: true' within 4 lines of line ${existing_line}); fix it by hand" >&2
+  exit 1
 fi
 
 # Anchor on the post-persist hook, expected as three consecutive lines:

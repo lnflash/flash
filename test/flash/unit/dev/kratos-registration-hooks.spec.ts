@@ -180,6 +180,22 @@ log:
     expect(output).toBe(spliced)
   })
 
+  it("refuses a file whose /kratos/preregistration hook is not pre-persist, and leaves it as it was", () => {
+    const spliced = runOn(upstream).output
+    // Flip the config line of the spliced hook itself, not the comment above it.
+    const postPersist = spliced.replace(
+      /(url: http:\/\/flash:4012\/kratos\/preregistration[\s\S]*?parse: )true/,
+      "$1false",
+    )
+    expect(postPersist).not.toBe(spliced)
+
+    const { result, output } = runOn(postPersist)
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain("not pre-persist")
+    expect(output).toBe(postPersist)
+  })
+
   it("refuses a file it cannot find the /registration anchor in, and leaves it as it was", () => {
     const unrewritten = upstream.replace(
       "http://flash:4012/kratos/registration",
