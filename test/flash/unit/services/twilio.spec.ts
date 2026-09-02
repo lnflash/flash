@@ -116,6 +116,37 @@ describe("TwilioClient.initiateVerify", () => {
     expect(result).toBeInstanceOf(PhoneProviderRateLimitExceededError)
   })
 
+  it("does not attribute Twilio's unrelated concurrent-request throttle (429, non-60203) to the global_sends cap", async () => {
+    // Twilio's "Too many concurrent requests" throttle also returns HTTP 429,
+    // but with a different error code than the exhausted-bucket case (60203).
+    // The log line must not claim the global_sends cap tripped, or an
+    // on-call engineer grepping for it during a real concurrent-request
+    // event will misdiagnose it as the send cap.
+    verificationsCreate.mockRejectedValue(
+      Object.assign(new Error("Too many concurrent requests"), {
+        status: 429,
+        code: 20429,
+      }),
+    )
+
+    const result = await TwilioClient().initiateVerify({ to: phone, channel: "sms" })
+
+    expect(result).toBeInstanceOf(PhoneProviderRateLimitExceededError)
+    expect(mockedLogger.warn).toHaveBeenCalledTimes(1)
+    const [fields, message] = mockedLogger.warn.mock.calls[0]
+    expect(fields).toEqual(
+      expect.objectContaining({
+        to: "+1876…00",
+        channel: "sms",
+        twilioStatus: 429,
+        twilioCode: 20429,
+      }),
+    )
+    expect(fields).not.toHaveProperty("rateLimitKey")
+    expect(message).not.toBe("verify send rejected by twilio rate limit")
+    expect(mockedLogger.error).not.toHaveBeenCalled()
+  })
+
   it("keeps the existing message-based mapping for everything else", async () => {
     verificationsCreate.mockRejectedValue(
       Object.assign(
