@@ -150,36 +150,26 @@ consentLogRouter.use(
 // Same rule as the invites collection: the raw token never touches disk.
 // (authRouter dodges this by mounting BEFORE PinoHttp; the consent router
 // mounts after it so the public write path still gets an access-log line.)
-// Keyed on originalUrl, never url: Express 4 strips the mount path off
-// req.url when dispatching into a router mounted at "/consent" (req.url
-// becomes "/log") and only restores it on a later next() that never comes,
-// because every consent handler terminates the response. pino-http evaluates
-// customProps again at response-finish against that mutated req — the moment
-// req.body actually holds the parsed (token-bearing) payload — so matching on
-// req.url would pass raw tokens straight into the access log.
 //
-// Matched with the trailing slash ("/consent/", not "/consent") so this
-// stays scoped to this router's actual mount point — a bare "/consent"
-// prefix would also swallow any future unrelated route mounted alongside it
-// (e.g. "/consent-status", "/consent-preferences"), redacting bodies that
-// have nothing to do with this router.
-//
-// Compared lower-cased on both sides: the app-level mount
-// (graphql-server.ts, `app.use("/consent", consentLogRouter)`) runs on a
-// bare express() with no "case sensitive routing" setting, so Express
-// matches that mount case-insensitively regardless of this router's own
-// `caseSensitive: true` (which only governs matching *within* the router,
-// e.g. "/log" vs "/Log"). A request to "/CONSENT/log" still dispatches into
-// this router and still persists — its originalUrl is just differently
-// cased. A plain case-sensitive startsWith here would miss that request
-// and leak its raw invite token into the access log.
-export const redactConsentBodyForLog = (req: {
-  originalUrl?: string
-  url?: string
-  body?: unknown
-}) =>
-  (req.originalUrl ?? req.url)?.toLowerCase().startsWith("/consent/")
-    ? "[consent body redacted]"
-    : req.body
+// Gated on res.locals.consentLogIp, not the request URL. Two rounds of
+// URL-string matching here each shipped a distinct bypass that leaked a raw
+// token into the access log: req.url loses the "/consent" mount prefix that
+// Express strips before dispatching into the router (originalUrl fixed
+// that), and matching "/consent/" with a trailing slash to avoid swallowing
+// a sibling route like "/consent-status" let a bare "POST /consent" (no
+// trailing slash, no "/log") straight through unredacted — Express still
+// dispatches that request into this router's middleware (so the rate
+// limiter runs and express.json() parses a real body) before it falls
+// through to a 404 with no matching route, and pino-http logs the
+// now-populated req.body at response finish regardless of the 404.
+// consentLogIp is the one signal immune to path-shape bypasses: it's set
+// unconditionally by enforceConsentLogRateLimit, router-level middleware
+// that runs for every request Express dispatches into this router no
+// matter which path it targets or whether any route inside ultimately
+// matches it.
+export const redactConsentBodyForLog = (
+  res: { locals?: { consentLogIp?: unknown } },
+  body: unknown,
+) => (res.locals?.consentLogIp !== undefined ? "[consent body redacted]" : body)
 
 export default consentLogRouter

@@ -157,7 +157,7 @@ export const startApolloServer = async ({
     PinoHttp({
       logger: graphqlLogger,
       wrapSerializers: true,
-      customProps: (req) => {
+      customProps: (req, res) => {
         /* eslint @typescript-eslint/ban-ts-comment: "off" */
         // @ts-ignore-next-line no-implicit-any error
         const account = req["gqlContext"]?.domainAccount
@@ -168,7 +168,7 @@ export const startApolloServer = async ({
           // redaction. Guarded by tests in
           // test/flash/unit/servers/consent-log.spec.ts.
           // @ts-ignore-next-line no-implicit-any error
-          "body": redactConsentBodyForLog(req),
+          "body": redactConsentBodyForLog(res, req.body),
           // @ts-ignore-next-line no-implicit-any error
           "token.sub": req["token"]?.sub,
           // @ts-ignore-next-line no-implicit-any error

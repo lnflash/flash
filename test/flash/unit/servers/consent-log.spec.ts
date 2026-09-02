@@ -434,90 +434,64 @@ describe("access-log body redaction (redactConsentBodyForLog)", () => {
   // pino-http re-evaluates customProps at response finish — by then
   // express.json() inside the consent router has populated req.body, so an
   // unredacted body log would write the raw invite token to disk on every
-  // status path (204/400/429/503).
-  it("redacts at RESPONSE-FINISH shape: url mutated to /log by the router mount, originalUrl intact", () => {
-    // Inside a router mounted at "/consent", Express rewrites req.url to
-    // "/log" and never restores it (the handler ends the response, so the
-    // restoring next() never runs). This is the shape pino-http actually
-    // evaluates when the body is populated — url alone is untrustworthy here.
+  // status path (204/400/429/503/404).
+  //
+  // Gated on res.locals.consentLogIp, not the request URL. Two rounds of
+  // URL-string matching here each shipped a distinct token-leak bypass:
+  // req.url loses the "/consent" mount prefix Express strips before
+  // dispatching into the router, and even originalUrl matching broke again
+  // once the match was tightened to require a trailing slash (to stop
+  // over-matching a sibling route like "/consent-status") — a bare
+  // "POST /consent" has no trailing slash, dispatches into this router's
+  // rate-limit + json-parsing middleware just the same, and then 404s with
+  // req.body already populated. consentLogIp is set unconditionally by
+  // enforceConsentLogRateLimit for every request Express dispatches into
+  // this router, regardless of path shape or whether any route matches —
+  // the one signal immune to a URL-shape bypass.
+
+  it("redacts once the rate limiter has run, regardless of path shape", () => {
     const token = "a".repeat(40)
-    const logged = redactConsentBodyForLog({
-      url: "/log",
-      originalUrl: "/consent/log",
-      body: validBody(),
-    })
+    const logged = redactConsentBodyForLog(
+      { locals: { consentLogIp: "1.2.3.4" } },
+      validBody(),
+    )
 
     expect(logged).toBe("[consent body redacted]")
     expect(JSON.stringify(logged)).not.toContain(token)
   })
 
-  it("redacts at middleware-time shape too (originalUrl === url)", () => {
+  it("redacts the bare mount path with no trailing slash and no matching route (e.g. POST /consent)", () => {
+    // The regression this pins: Express dispatches a bare "/consent" (no
+    // trailing slash, no "/log") into this router's middleware — the rate
+    // limiter and express.json() both still run — before falling through to
+    // a 404 with no matching route. The rate limiter sets consentLogIp
+    // regardless, so this must still redact even though no route handled it.
     expect(
-      redactConsentBodyForLog({
-        url: "/consent/log",
-        originalUrl: "/consent/log",
-        body: { token: "x" },
-      }),
+      redactConsentBodyForLog({ locals: { consentLogIp: "1.2.3.4" } }, { token: "x" }),
     ).toBe("[consent body redacted]")
   })
 
-  it("would leak if the helper keyed on the mutated url — pin the failure mode", () => {
-    // The regression this guards: a helper reading only req.url sees "/log"
-    // at finish time and returns the raw body. originalUrl must win.
-    expect(
-      redactConsentBodyForLog({
-        url: "/log",
-        originalUrl: "/consent/log",
-        body: { token: "x" },
-      }),
-    ).not.toEqual({ token: "x" })
-  })
-
   it("leaves non-consent request bodies untouched for the access log", () => {
+    // A /graphql request never dispatches into the consent router, so
+    // enforceConsentLogRateLimit never runs and consentLogIp is never set.
     const body = { query: "{ me { id } }" }
-    expect(
-      redactConsentBodyForLog({ url: "/graphql", originalUrl: "/graphql", body }),
-    ).toBe(body)
-    expect(redactConsentBodyForLog({ body })).toBe(body)
+    expect(redactConsentBodyForLog({ locals: {} }, body)).toBe(body)
+    expect(redactConsentBodyForLog({}, body)).toBe(body)
   })
 
-  it("does not over-match a sibling route that merely starts with /consent (e.g. /consent-status)", () => {
-    // A loose "/consent" prefix (no trailing slash) would also swallow any
-    // future unrelated route mounted alongside this router — this pins the
-    // helper to this router's actual mount point instead.
+  it("does not redact a sibling route that merely starts with /consent (e.g. /consent-status)", () => {
+    // A route mounted alongside this router (not under it) never runs
+    // enforceConsentLogRateLimit either, so its body must pass through.
     const body = { some: "unrelated payload" }
-    expect(
-      redactConsentBodyForLog({
-        url: "/consent-status",
-        originalUrl: "/consent-status",
-        body,
-      }),
-    ).toBe(body)
+    expect(redactConsentBodyForLog({ locals: {} }, body)).toBe(body)
   })
 
-  it("redacts a differently-cased mount segment that still dispatches into this router (e.g. /CONSENT/log)", () => {
-    // The app-level mount (`app.use("/consent", consentLogRouter)` in
-    // graphql-server.ts) runs on a bare express() with no
-    // "case sensitive routing" setting, so Express matches that mount
-    // case-insensitively regardless of this router's own
-    // `caseSensitive: true` (which only governs matching *within* the
-    // router). A request to "/CONSENT/log" still reaches the "/log" route
-    // and still persists a real submission — only originalUrl's casing
-    // differs from the lower-case check. A case-sensitive startsWith here
-    // would miss it and leak the raw invite token to the access log.
-    const token = "a".repeat(40)
-    const logged = redactConsentBodyForLog({
-      originalUrl: "/CONSENT/log",
-      body: validBody(),
-    })
-
-    expect(logged).toBe("[consent body redacted]")
-    expect(JSON.stringify(logged)).not.toContain(token)
-  })
-
-  it("redacts regardless of casing on either the mount segment or the sub-route segment", () => {
+  it("treats consentLogIp explicitly set to a falsy-but-defined value as still gated", () => {
+    // Guards against a future "if (res.locals.consentLogIp)" rewrite that
+    // would stop redacting for a (currently impossible, but not
+    // type-prevented) empty-string IP.
     expect(
-      redactConsentBodyForLog({ originalUrl: "/Consent/Log", body: validBody() }),
+      redactConsentBodyForLog({ locals: { consentLogIp: "" } }, { token: "x" }),
     ).toBe("[consent body redacted]")
   })
 })
