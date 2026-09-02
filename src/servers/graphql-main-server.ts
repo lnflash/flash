@@ -1,6 +1,6 @@
 import { applyMiddleware } from "graphql-middleware"
 
-import { GALOY_API_PORT, UNSECURE_IP_FROM_REQUEST_OBJECT } from "@config"
+import { GALOY_API_PORT } from "@config"
 
 import { AuthorizationError } from "@graphql/error"
 import { gqlMainSchema, mutationFields, queryFields } from "@graphql/public"
@@ -10,17 +10,10 @@ import { baseLogger } from "@services/logger"
 import { setupMongoConnection } from "@services/mongodb"
 import { and, shield } from "graphql-shield"
 import { ShieldRule } from "graphql-shield/typings/types"
-import {
-  ACCOUNT_USERNAME,
-  SemanticAttributes,
-  addAttributesToCurrentSpanAndPropagate,
-} from "@services/tracing"
+import { recordExceptionInCurrentSpan } from "@services/tracing"
 
-import { NextFunction, Request, Response } from "express"
-
-import { parseIps } from "@domain/accounts-ips"
 import { apiKeyNestedFieldScopes } from "@domain/api-keys"
-import { parseCashWalletClientCapabilities } from "@app/cash-wallet-cutover/client-capability"
+import { ErrorLevel } from "@domain/shared"
 
 import { startApiKeyMetricsServer } from "./api-key-metrics"
 import { startApolloServerForAdminSchema } from "./graphql-admin-server"
@@ -30,52 +23,8 @@ import {
   scopedApiKeyTypeField,
   startApolloServer,
 } from "./graphql-server"
+import { setGqlContext } from "./middlewares/gql-context"
 import { walletIdMiddleware } from "./middlewares/wallet-id"
-
-import { sessionPublicContext } from "./middlewares/session"
-
-const setGqlContext = async (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): Promise<void> => {
-  const tokenPayload = req.token
-
-  const ipString = UNSECURE_IP_FROM_REQUEST_OBJECT
-    ? req.ip
-    : req.headers["x-real-ip"] || req.headers["x-forwarded-for"]
-
-  const ip = parseIps(ipString)
-
-  const gqlContext = await sessionPublicContext({
-    tokenPayload,
-    ip,
-  })
-  const cashWalletClientCapabilities = parseCashWalletClientCapabilities(req.headers)
-
-  req.gqlContext = {
-    ...gqlContext,
-    cashWalletClientCapabilities,
-  }
-
-  return addAttributesToCurrentSpanAndPropagate(
-    {
-      "token.iss": tokenPayload?.iss,
-      "token.session_id": tokenPayload?.session_id,
-      "token.expires_at": tokenPayload?.expires_at,
-      [SemanticAttributes.HTTP_CLIENT_IP]: ip,
-      [SemanticAttributes.HTTP_USER_AGENT]: req.headers["user-agent"],
-      [ACCOUNT_USERNAME]: gqlContext?.domainAccount?.username,
-      [SemanticAttributes.ENDUSER_ID]: tokenPayload?.sub,
-      "cash_wallet.client_presentation":
-        cashWalletClientCapabilities.cashWalletPresentation,
-      "cash_wallet.client_usdt_supported": String(
-        cashWalletClientCapabilities.hasUsdtCashWalletSupport,
-      ),
-    },
-    next,
-  )
-}
 
 export async function startApolloServerForCoreSchema() {
   const authedQueryFields: { [key: string]: ShieldRule } = {}
@@ -135,6 +84,18 @@ export async function startApolloServerForCoreSchema() {
 }
 
 if (require.main === module) {
+  // A rejected promise nobody awaits must be logged, not fatal: Node's default
+  // `--unhandled-rejections=throw` exits the whole api replica on one stray
+  // rejection (see setGqlContext for the 2026-09-01 crash loop).
+  process.on("unhandledRejection", (reason) => {
+    baseLogger.error({ reason }, "unhandledRejection")
+    recordExceptionInCurrentSpan({
+      error: reason,
+      level: ErrorLevel.Critical,
+      fallbackMsg: "unhandledRejection",
+    })
+  })
+
   setupMongoConnection(true)
     .then(async () => {
       // activateLndHealthCheck()
