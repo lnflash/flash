@@ -39,6 +39,7 @@ services:
     depends_on:
       - redis
       - mongodb
+      - kratos
       # - bitcoind
       # - bitcoind-signer
       # - stablesats
@@ -177,6 +178,14 @@ services:
       - ${TMP_ENV_CI:-.env.ci}
     volumes:
       - ./:/repo
+    # dev/ory/kratos.yml points the registration web hooks at
+    # http://bats-tests:4012 (the bats container; host-gateway under the local
+    # override). The integration suite serves those hooks from inside jest, so
+    # Kratos must resolve that name to this container too.
+    networks:
+      default:
+        aliases:
+          - bats-tests
   oathkeeper:
     image: oryd/oathkeeper:v0.40.4-distroless
     ports: []

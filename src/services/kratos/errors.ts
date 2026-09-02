@@ -46,3 +46,12 @@ export class CodeExpiredKratosError extends KratosError {}
 export class UnknownKratosError extends KratosError {
   level = ErrorLevel.Critical
 }
+
+// The pre-persist registration hook answered with an id that is never a
+// phone-policy answer: the hook payload Kratos sent was malformed, the callback
+// secret did not match, or the api could not reach its repository. Kratos
+// config and the api disagree, or infra is down — a deploy defect, not a user
+// error, so it must never be reported as one.
+export class RegistrationHookFailedError extends KratosError {
+  level = ErrorLevel.Critical
+}

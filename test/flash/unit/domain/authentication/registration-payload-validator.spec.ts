@@ -4,6 +4,7 @@ import {
 } from "@domain/authentication/errors"
 import { RegistrationPayloadValidator } from "@domain/authentication/registration-payload-validator"
 import { InvalidPhoneNumber, InvalidUserId } from "@domain/errors"
+import { InvalidCarrierTypeForPhoneMetadataError } from "@domain/users/errors"
 
 import { SchemaIdType } from "@services/kratos"
 
@@ -28,6 +29,52 @@ describe("RegistrationPayloadValidator", () => {
     })
 
     expect(validated).toStrictEqual(expectedPayload)
+  })
+
+  it("carries validated phone metadata through", () => {
+    const rawUserId = randomUserId()
+    const rawPhone = randomPhone()
+    const carrier = {
+      error_code: "",
+      mobile_country_code: "338",
+      mobile_network_code: "050",
+      name: "Digicel",
+      type: "mobile",
+    }
+
+    const validated = validator.validate({
+      identity_id: rawUserId,
+      phone: rawPhone,
+      schema_id: SchemaIdType.PhoneNoPasswordV0,
+      transient_payload: { phoneMetadata: { carrier, countryCode: "JM" } },
+    })
+
+    expect(validated).toStrictEqual({
+      userId: rawUserId,
+      phone: rawPhone,
+      phoneMetadata: { carrier, countryCode: "JM" },
+    })
+  })
+
+  it("returns invalid carrier type error", () => {
+    const validated = validator.validate({
+      identity_id: randomUserId(),
+      phone: randomPhone(),
+      schema_id: SchemaIdType.PhoneNoPasswordV0,
+      transient_payload: {
+        phoneMetadata: {
+          carrier: {
+            error_code: "",
+            mobile_country_code: "",
+            mobile_network_code: "",
+            name: "",
+            type: "",
+          },
+          countryCode: "NG",
+        },
+      },
+    })
+    expect(validated).toBeInstanceOf(InvalidCarrierTypeForPhoneMetadataError)
   })
 
   it("returns missing inputs error", () => {
