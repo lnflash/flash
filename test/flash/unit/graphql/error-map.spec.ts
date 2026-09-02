@@ -8,9 +8,47 @@ import {
 } from "@services/bridge/errors"
 import { IbexError, InsufficientIbexBalance } from "@services/ibex/errors"
 import { PhoneCountryNotAllowedError } from "@domain/users/errors"
-import { InvalidPhoneNumber } from "@domain/errors"
+import {
+  CouldNotFindAccountFromKratosIdError,
+  DuplicateKeyForPersistError,
+  InvalidPhoneNumber,
+} from "@domain/errors"
 
 describe("error-map", () => {
+  // The same domain error reaches mapError from admin lookups of OTHER users
+  // (accountDetailsByUserPhone / accountDetailsByUserEmail → findByUserId) and
+  // from the caller's own session. Here it is a plain not-found like its
+  // id/uuid siblings. The session middleware is the one site that answers it
+  // as NOT_AUTHENTICATED, because only it knows the account is the caller's
+  // own — an operator reconciling an orphan must not be told their session is
+  // broken.
+  it("maps CouldNotFindAccountFromKratosIdError to NOT_FOUND, never NOT_AUTHENTICATED", () => {
+    const kratosUserId = "ebbe2b32-9a2e-4c77-80e4-5d7347c024bb"
+    const result = mapError(new CouldNotFindAccountFromKratosIdError(kratosUserId))
+
+    expect(result.extensions.code).toBe("NOT_FOUND")
+    expect(result.message).toBe(`Account does not exist for user id ${kratosUserId}`)
+    expect(result.extensions.code).not.toBe("NOT_AUTHENTICATED")
+    expect(result.extensions.code).not.toBe("UNEXPECTED_CLIENT_ERROR")
+  })
+
+  // parseRepositoryError keeps the Mongo driver text on the domain error for
+  // logs and spans. It names internal collections, indexes and the colliding
+  // value (a setUsername that loses the race after its availability check is
+  // the everyday case), so it must not reach the client.
+  it("maps DuplicateKeyForPersistError without leaking the driver message", () => {
+    const driverMessage =
+      'E11000 duplicate key error collection: galoy.accounts index: username_1 dup key: { username: "alice" }'
+    const result = mapError(new DuplicateKeyForPersistError(driverMessage))
+
+    expect(result.extensions.code).toBe("UNEXPECTED_CLIENT_ERROR")
+    expect(result.message).toContain("code: DuplicateKeyForPersistError")
+    expect(result.message).not.toContain("E11000")
+    expect(result.message).not.toContain("galoy.accounts")
+    expect(result.message).not.toContain("username_1")
+    expect(result.message).not.toContain("alice")
+  })
+
   it("maps BridgeWithdrawalNotFoundError to BRIDGE_WITHDRAWAL_NOT_FOUND", () => {
     const result = mapError(new BridgeWithdrawalNotFoundError())
 

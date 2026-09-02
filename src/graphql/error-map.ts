@@ -108,6 +108,16 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = `Account does not exist for id ${error.message}`
       return new NotFoundError({ message, logger: baseLogger })
 
+    // Same shape as the id/uuid/username siblings: a not-found for whichever
+    // user the caller looked up. Admin lookups (accountDetailsByUserPhone,
+    // accountDetailsByUserEmail) resolve OTHER users through findByUserId, so
+    // this must never read as "your session is unauthenticated". The one site
+    // that knows the missing account is the caller's own is the session
+    // middleware, which raises AuthenticationError itself.
+    case "CouldNotFindAccountFromKratosIdError":
+      message = `Account does not exist for user id ${error.message}`
+      return new NotFoundError({ message, logger: baseLogger })
+
     case "CouldNotFindAccountFromUuidError":
       message = `Account does not exist for uuid ${error.message}`
       return new NotFoundError({ message, logger: baseLogger })
@@ -855,7 +865,6 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "CouldNotFindTransactionMetadataError":
     case "CouldNotFindExpectedTransactionMetadataError":
     case "InvalidDocumentIdForDbError":
-    case "DuplicateKeyForPersistError":
     case "MismatchedResultForTransactionMetadataQuery":
     case "InvalidLedgerTransactionId":
     case "MultiplePendingPaymentsForHashError":
@@ -894,7 +903,6 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "InvalidCurrencyBaseAmountError":
     case "NoTransactionToUpdateError":
     case "BalanceLessThanZeroError":
-    case "CouldNotFindAccountFromKratosIdError":
     case "MissingPhoneError":
     case "InvalidUserId":
     case "InvalidLightningPaymentFlowBuilderStateError":
@@ -973,6 +981,13 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = `Unexpected error occurred, please try again or contact support if it persists (code: ${
         error.name
       }${error.message ? ": " + error.message : ""})`
+      return new UnexpectedClientError({ message, logger: baseLogger })
+
+    // parseRepositoryError keeps the Mongo driver text on this error for logs
+    // and spans. It names internal collections, indexes and the colliding
+    // value, so unlike the catch-all above the message is not interpolated.
+    case "DuplicateKeyForPersistError":
+      message = `Unexpected error occurred, please try again or contact support if it persists (code: ${error.name})`
       return new UnexpectedClientError({ message, logger: baseLogger })
 
     case "MissingSessionIdError":
