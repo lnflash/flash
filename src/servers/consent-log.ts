@@ -33,9 +33,22 @@ const consentLogRouter = express.Router({ caseSensitive: true })
 // drop those records — the original incident, resurrected for that subset.
 consentLogRouter.use(cors({ origin: ["https://getflash.io", "https://www.getflash.io"] }))
 
-consentLogRouter.use(express.json({ limit: "8kb" }))
-
-consentLogRouter.post("/log", async (req, res) => {
+// Resolves the caller's IP and consumes the per-IP rate limit BEFORE
+// express.json() gets a chance to run. This has to be router-level
+// middleware, not logic inside the /log handler: express.json() routes a
+// parse failure (oversized body -> "entity.too.large", malformed JSON ->
+// "entity.parse.failed") straight to the error handler below, skipping the
+// route handler entirely. If the limiter were only consumed inside that
+// handler, an attacker could flood this endpoint at wire speed with
+// oversized/malformed bodies and never touch the limiter — only a
+// well-formed submission would ever be capped. Consuming here means every
+// request that reaches this router is charged against the bucket
+// regardless of whether its body goes on to parse.
+const enforceConsentLogRateLimit = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
   // Same header conventions as the rest of the public surface: x-real-ip
   // from ingress, x-forwarded-for as fallback (graphql-main-server does the
   // same). A missing IP would collapse the rate limit into one global
@@ -66,6 +79,19 @@ consentLogRouter.post("/log", async (req, res) => {
     baseLogger.error({ error: limited }, "consent-log rate limiter unavailable")
     return res.status(503).json({ error: "temporarily unavailable" })
   }
+
+  // Hand the resolved IP to the route handler (it's stored on the record)
+  // without re-deriving it from headers a second time.
+  res.locals.consentLogIp = ip
+  return next()
+}
+
+consentLogRouter.use(enforceConsentLogRateLimit)
+
+consentLogRouter.use(express.json({ limit: "8kb" }))
+
+consentLogRouter.post("/log", async (req, res) => {
+  const ip = res.locals.consentLogIp as IpAddress
 
   const submission = checkedToConsentLogSubmission(req.body)
   if (submission instanceof ValidationError) {
@@ -131,12 +157,18 @@ consentLogRouter.use(
 // customProps again at response-finish against that mutated req — the moment
 // req.body actually holds the parsed (token-bearing) payload — so matching on
 // req.url would pass raw tokens straight into the access log.
+//
+// Matched with the trailing slash ("/consent/", not "/consent") so this
+// stays scoped to this router's actual mount point — a bare "/consent"
+// prefix would also swallow any future unrelated route mounted alongside it
+// (e.g. "/consent-status", "/consent-preferences"), redacting bodies that
+// have nothing to do with this router.
 export const redactConsentBodyForLog = (req: {
   originalUrl?: string
   url?: string
   body?: unknown
 }) =>
-  (req.originalUrl ?? req.url)?.startsWith("/consent")
+  (req.originalUrl ?? req.url)?.startsWith("/consent/")
     ? "[consent body redacted]"
     : req.body
 
