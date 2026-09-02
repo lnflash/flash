@@ -98,12 +98,29 @@ describe("TwilioClient.initiateVerify", () => {
         channel: "sms",
         twilioStatus: 429,
         twilioCode: 60203,
-        rateLimitKey: "global_sends",
       }),
-      "verify send rejected by twilio rate limit",
+      "verify send rejected with HTTP 429 (rate limit, cause unconfirmed — not necessarily the global send cap)",
     )
     expect(mockedLogger.error).not.toHaveBeenCalled()
     expect(JSON.stringify(mockedLogger.warn.mock.calls)).not.toContain(phone)
+  })
+
+  it("does NOT attribute a 60203 rejection to the global_sends cap, since Twilio's built-in per-number Verify limit returns the identical code", async () => {
+    // 60203 ("Max send attempts reached") is Twilio's answer for BOTH the
+    // built-in per-number Verify limit (a normal user mashing "resend
+    // code") and the programmable global_sends cap (an actual attack).
+    // There is no field in the error that tells them apart, so the log
+    // must never claim the global_sends key/cause just because code ===
+    // 60203 — that would misdiagnose routine per-number throttling as the
+    // attack-mitigation cap tripping.
+    verificationsCreate.mockRejectedValue(rateLimitRejection())
+
+    const result = await TwilioClient().initiateVerify({ to: phone, channel: "sms" })
+
+    expect(result).toBeInstanceOf(PhoneProviderRateLimitExceededError)
+    const [fields, message] = mockedLogger.warn.mock.calls[0]
+    expect(fields).not.toHaveProperty("rateLimitKey")
+    expect(message).not.toBe("verify send rejected by twilio rate limit")
   })
 
   it("still maps a 429 whose text drifts away from the known regex", async () => {
