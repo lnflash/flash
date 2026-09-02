@@ -523,6 +523,10 @@ export class ErpNext {
         { err, responseData },
         "Error querying Referral Settings from ERPNext",
       )
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
       return new ReferralSettingsQueryError(err)
     }
   }
