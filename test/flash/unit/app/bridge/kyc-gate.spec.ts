@@ -29,7 +29,7 @@ import {
   assertBridgeKycEligible,
   checkBridgeKycEligibility,
   countryDisplayName,
-  resolvePhoneCountry,
+  resolvePhoneCountries,
 } from "@app/bridge/kyc-gate"
 import {
   BridgeKycCountryNotSupportedError,
@@ -39,12 +39,23 @@ import {
 
 const ALLOWED = new Set(["JM", "US", "GB"])
 
+// +1 924 is an assigned, in-service US overlay that the pinned
+// libphonenumber-js metadata (1.13.11) has no region for; +7 000 is a +7
+// number no RU/KZ pattern claims. Both parse, neither has a `country`.
+const UNATTRIBUTABLE_US = "+19245551234" as PhoneNumber
+const UNATTRIBUTABLE_RU_KZ = "+70005551234" as PhoneNumber
+
 const config = (
-  overrides: Partial<{ requireVerifiedEmail: boolean; enabled: boolean }> = {},
+  overrides: Partial<{
+    requireVerifiedEmail: boolean
+    enabled: boolean
+    source: BridgeKycCountryAllowlistSource
+  }> = {},
 ): BridgeKycGateConfig => ({
   requireVerifiedEmail: overrides.requireVerifiedEmail ?? false,
   countryAllowlist: {
     enabled: overrides.enabled ?? true,
+    source: overrides.source ?? "config",
     defaultCountries: ["JM"],
   },
 })
@@ -52,7 +63,7 @@ const config = (
 const gate = (
   overrides: Partial<{
     emailVerified: boolean | undefined
-    phoneCountry: string | undefined
+    phoneCountries: string[]
     allowed: Set<string>
     requireVerifiedEmail: boolean
     enabled: boolean
@@ -62,53 +73,76 @@ const gate = (
     identity: {
       emailVerified: "emailVerified" in overrides ? overrides.emailVerified : true,
     },
-    phoneCountry: "phoneCountry" in overrides ? overrides.phoneCountry : "JM",
+    phoneCountries: overrides.phoneCountries ?? ["JM"],
     allowedCountries: overrides.allowed ?? ALLOWED,
     config: config(overrides),
   })
 
-describe("resolvePhoneCountry", () => {
+describe("resolvePhoneCountries", () => {
   it("prefers the Twilio Lookup country stamped at signup", () => {
     expect(
-      resolvePhoneCountry({
+      resolvePhoneCountries({
         phoneMetadata: { countryCode: "jm" } as PhoneMetadata,
         phone: "+12125551234" as PhoneNumber,
       }),
-    ).toBe("JM")
+    ).toEqual({ countries: ["JM"], source: "lookup" })
   })
 
   it("falls back to parsing the phone number when lookup metadata is missing", () => {
     expect(
-      resolvePhoneCountry({
+      resolvePhoneCountries({
         phoneMetadata: undefined,
         phone: "+442071234567" as PhoneNumber,
       }),
-    ).toBe("GB")
+    ).toEqual({ countries: ["GB"], source: "number" })
   })
 
   it("ignores a malformed lookup country and parses the number instead", () => {
     expect(
-      resolvePhoneCountry({
+      resolvePhoneCountries({
         phoneMetadata: { countryCode: "" } as PhoneMetadata,
         phone: "+919876543210" as PhoneNumber,
       }),
-    ).toBe("IN")
+    ).toEqual({ countries: ["IN"], source: "number" })
   })
 
-  it("returns undefined when there is no phone at all (device account)", () => {
-    expect(
-      resolvePhoneCountry({ phoneMetadata: undefined, phone: undefined }),
-    ).toBeUndefined()
-    expect(resolvePhoneCountry(undefined)).toBeUndefined()
+  it("resolves a number the metadata cannot attribute to every region on its calling code", () => {
+    const resolution = resolvePhoneCountries({
+      phoneMetadata: undefined,
+      phone: UNATTRIBUTABLE_US,
+    })
+
+    expect(resolution.source).toBe("calling-code")
+    expect(resolution.callingCode).toBe("1")
+    expect(resolution.countries).toEqual(expect.arrayContaining(["US", "PR", "JM"]))
+    for (const code of resolution.countries) expect(code).toMatch(/^[A-Z]{2}$/)
   })
 
-  it("returns undefined for an unparsable number", () => {
+  it("keeps a shared non-NANP calling code as its candidate set too", () => {
+    const resolution = resolvePhoneCountries({
+      phoneMetadata: undefined,
+      phone: UNATTRIBUTABLE_RU_KZ,
+    })
+
+    expect(resolution.source).toBe("calling-code")
+    expect(resolution.callingCode).toBe("7")
+    expect([...resolution.countries].sort()).toEqual(["KZ", "RU"])
+  })
+
+  it("resolves nothing when there is no phone at all (device account)", () => {
+    expect(resolvePhoneCountries({ phoneMetadata: undefined, phone: undefined })).toEqual(
+      { countries: [], source: "none" },
+    )
+    expect(resolvePhoneCountries(undefined)).toEqual({ countries: [], source: "none" })
+  })
+
+  it("resolves nothing for an unparsable number", () => {
     expect(
-      resolvePhoneCountry({
+      resolvePhoneCountries({
         phoneMetadata: undefined,
         phone: "not-a-phone" as PhoneNumber,
       }),
-    ).toBeUndefined()
+    ).toEqual({ countries: [], source: "none" })
   })
 })
 
@@ -129,7 +163,7 @@ describe("checkBridgeKycEligibility", () => {
 
   describe("country allowlist rule", () => {
     it("rejects a phone country that is not allowed, naming the country", () => {
-      const err = gate({ phoneCountry: "IN" })
+      const err = gate({ phoneCountries: ["IN"] })
       expect(err).toBeInstanceOf(BridgeKycCountryNotSupportedError)
       expect((err as BridgeKycCountryNotSupportedError).countryCode).toBe("IN")
       expect((err as BridgeKycCountryNotSupportedError).message).toBe(
@@ -138,20 +172,46 @@ describe("checkBridgeKycEligibility", () => {
     })
 
     it("falls back to the code in the message when the country cannot be named", () => {
-      const err = gate({ phoneCountry: "ZZ" }) as BridgeKycCountryNotSupportedError
+      const err = gate({ phoneCountries: ["ZZ"] }) as BridgeKycCountryNotSupportedError
       expect(err.message).toBe("US virtual accounts aren't available in ZZ yet.")
     })
 
     it("is case-insensitive on the resolved country", () => {
-      expect(gate({ phoneCountry: "jm" })).toBe(true)
+      expect(gate({ phoneCountries: ["jm"] })).toBe(true)
     })
 
     it("rejects when no phone country can be resolved", () => {
-      expect(gate({ phoneCountry: undefined })).toBeInstanceOf(
-        BridgeKycPhoneRequiredError,
-      )
-      expect((gate({ phoneCountry: undefined }) as Error).message).toBe(
+      expect(gate({ phoneCountries: [] })).toBeInstanceOf(BridgeKycPhoneRequiredError)
+      expect((gate({ phoneCountries: [] }) as Error).message).toBe(
         "Add and verify a phone number before starting identity verification.",
+      )
+    })
+
+    // The unattributable-+1 case: the candidate set is every NANP region, and
+    // one allowed member (US) is enough. Denying here would refuse a real US
+    // user with a verified phone, and tell them to add one.
+    it("passes a candidate set when any member is allowed", () => {
+      expect(gate({ phoneCountries: ["DO", "PR", "US", "CA"] })).toBe(true)
+      expect(gate({ phoneCountries: ["kz", "ru", "gb"] })).toBe(true)
+    })
+
+    it("denies a candidate set with no allowed member, naming the candidates", () => {
+      const err = gate({ phoneCountries: ["KZ", "RU"] })
+      expect(err).toBeInstanceOf(BridgeKycCountryNotSupportedError)
+      expect((err as BridgeKycCountryNotSupportedError).countryCode).toBe("KZ/RU")
+      expect((err as BridgeKycCountryNotSupportedError).message).toBe(
+        "US virtual accounts aren't available in Kazakhstan or Russia yet.",
+      )
+    })
+
+    it("uses the generic wording for a long denied candidate set", () => {
+      const err = gate({
+        phoneCountries: ["AG", "AI", "AS", "BB"],
+        allowed: new Set(["JM"]),
+      }) as BridgeKycCountryNotSupportedError
+      expect(err.countryCode).toBe("AG/AI/AS/BB")
+      expect(err.message).toBe(
+        "US virtual accounts aren't available in your country yet.",
       )
     })
 
@@ -159,11 +219,14 @@ describe("checkBridgeKycEligibility", () => {
       expect(gate({ allowed: new Set() })).toBeInstanceOf(
         BridgeKycCountryNotSupportedError,
       )
+      expect(gate({ allowed: new Set(), phoneCountries: ["US", "CA"] })).toBeInstanceOf(
+        BridgeKycCountryNotSupportedError,
+      )
     })
 
     it("ignores the country (and a missing phone) when the rule is disabled", () => {
-      expect(gate({ phoneCountry: "IN", enabled: false })).toBe(true)
-      expect(gate({ phoneCountry: undefined, enabled: false })).toBe(true)
+      expect(gate({ phoneCountries: ["IN"], enabled: false })).toBe(true)
+      expect(gate({ phoneCountries: [], enabled: false })).toBe(true)
     })
   })
 
@@ -202,7 +265,7 @@ describe("checkBridgeKycEligibility", () => {
 
   it("reports the email rule first when both fail", () => {
     expect(
-      gate({ emailVerified: false, requireVerifiedEmail: true, phoneCountry: "IN" }),
+      gate({ emailVerified: false, requireVerifiedEmail: true, phoneCountries: ["IN"] }),
     ).toBeInstanceOf(BridgeKycEmailNotVerifiedError)
   })
 
@@ -211,7 +274,7 @@ describe("checkBridgeKycEligibility", () => {
       gate({
         emailVerified: false,
         requireVerifiedEmail: false,
-        phoneCountry: undefined,
+        phoneCountries: [],
         enabled: false,
       }),
     ).toBe(true)
@@ -239,8 +302,32 @@ describe("assertBridgeKycEligible", () => {
       assertBridgeKycEligible({ account, user: jamaicanUser, config: config() }),
     ).resolves.toBe(true)
     expect(mockGetIdentity).not.toHaveBeenCalled()
-    expect(mockGetAllowedCountries).toHaveBeenCalledWith({ fallback: ["JM"] })
+    expect(mockGetAllowedCountries).toHaveBeenCalledWith({
+      source: "config",
+      fallback: ["JM"],
+    })
     expect(mockWarn).not.toHaveBeenCalled()
+  })
+
+  it("hands the configured allowlist source to the reader", async () => {
+    await assertBridgeKycEligible({
+      account,
+      user: jamaicanUser,
+      config: config({ source: "erpnext" }),
+    })
+
+    expect(mockGetAllowedCountries).toHaveBeenCalledWith({
+      source: "erpnext",
+      fallback: ["JM"],
+    })
+  })
+
+  it("stamps where the phone country came from on every evaluation, denied or not", async () => {
+    await assertBridgeKycEligible({ account, user: jamaicanUser, config: config() })
+
+    expect(mockAddAttributes).toHaveBeenCalledWith({
+      "bridge.kyc_gate.country_source": "lookup",
+    })
   })
 
   it("denies, logs and stamps the span for a country that is not allowed", async () => {
@@ -253,7 +340,12 @@ describe("assertBridgeKycEligible", () => {
 
     expect(result).toBeInstanceOf(BridgeKycCountryNotSupportedError)
     expect(mockWarn).toHaveBeenCalledWith(
-      { accountId: "account-1", countryCode: "NG", rule: "country-not-supported" },
+      {
+        accountId: "account-1",
+        countryCode: "NG",
+        countrySource: "lookup",
+        rule: "country-not-supported",
+      },
       "bridge kyc gate denied initiation",
     )
     expect(mockAddAttributes).toHaveBeenCalledWith({
@@ -261,6 +353,46 @@ describe("assertBridgeKycEligible", () => {
       "bridge.kyc_gate.rule": "country-not-supported",
       "bridge.kyc_gate.country": "NG",
     })
+  })
+
+  // The hole this closes: Twilio Lookup failed at signup (login.ts returns
+  // undefined metadata when validation is off), the number is on one of the
+  // ~340 NANP area codes the pinned metadata lacks, and the old gate answered
+  // "add and verify a phone number" to a user who had done exactly that.
+  it("passes a US number on an area code the metadata cannot attribute, via the calling code", async () => {
+    const result = await assertBridgeKycEligible({
+      account,
+      user: { phoneMetadata: undefined, phone: UNATTRIBUTABLE_US },
+      config: config(),
+    })
+
+    expect(result).toBe(true)
+    expect(mockWarn).not.toHaveBeenCalled()
+    expect(mockAddAttributes).toHaveBeenCalledWith({
+      "bridge.kyc_gate.country_source": "calling-code",
+    })
+  })
+
+  it("denies an unattributable number on a calling code with no allowed region, labelled by that code", async () => {
+    const result = await assertBridgeKycEligible({
+      account,
+      user: { phoneMetadata: undefined, phone: UNATTRIBUTABLE_RU_KZ },
+      config: config(),
+    })
+
+    expect(result).toBeInstanceOf(BridgeKycCountryNotSupportedError)
+    expect(mockWarn).toHaveBeenCalledWith(
+      {
+        accountId: "account-1",
+        countryCode: "+7",
+        countrySource: "calling-code",
+        rule: "country-not-supported",
+      },
+      "bridge kyc gate denied initiation",
+    )
+    expect(mockAddAttributes).toHaveBeenCalledWith(
+      expect.objectContaining({ "bridge.kyc_gate.country": "+7" }),
+    )
   })
 
   it("denies a user with no resolvable phone country", async () => {
@@ -271,6 +403,9 @@ describe("assertBridgeKycEligible", () => {
     })
 
     expect(result).toBeInstanceOf(BridgeKycPhoneRequiredError)
+    expect(mockAddAttributes).toHaveBeenCalledWith({
+      "bridge.kyc_gate.country_source": "none",
+    })
     expect(mockAddAttributes).toHaveBeenCalledWith(
       expect.objectContaining({
         "bridge.kyc_gate.rule": "phone-required",

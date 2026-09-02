@@ -151,3 +151,79 @@ describe("config schema", () => {
     })
   })
 })
+
+// These defaults ARE the Bridge KYC country gate for any environment whose
+// configmap omits `bridge.kycGate`. Every spec that exercises the gate mocks
+// @config, so without this the seed could be reverted to [], `enabled`
+// flipped to false, or `source` flipped to "erpnext" ahead of the reseed, and
+// the suite would stay green.
+describe("bridge KYC gate defaults", () => {
+  const kycGate = configSchema.properties.bridge.properties.kycGate
+  const allowlist = kycGate.properties.countryAllowlist
+  const defaults = kycGate.default.countryAllowlist.defaultCountries as string[]
+
+  it("enables the country rule and keeps the email rule off", () => {
+    expect(kycGate.default.requireVerifiedEmail).toBe(false)
+    expect(kycGate.properties.requireVerifiedEmail.default).toBe(false)
+    expect(kycGate.default.countryAllowlist.enabled).toBe(true)
+    expect(allowlist.default.enabled).toBe(true)
+    expect(allowlist.properties.enabled.default).toBe(true)
+  })
+
+  // The ERPNext doctype as seeded before the frappe-flash-admin reseed ticks
+  // flash_allowed for 165 countries — NG and IN among them. Reading it before
+  // that patch has run would admit the wave this gate exists to stop, so the
+  // default must be the config list; "erpnext" is a deliberate, later flip.
+  it("reads the config list, not ERPNext, until the configmap says otherwise", () => {
+    expect(kycGate.default.countryAllowlist.source).toBe("config")
+    expect(allowlist.default.source).toBe("config")
+    expect(allowlist.properties.source).toEqual({
+      type: "string",
+      enum: ["config", "erpnext"],
+      default: "config",
+    })
+  })
+
+  it("seeds the allowlist with the Caribbean, North America and the operator additions", () => {
+    expect(defaults).toHaveLength(35)
+    expect(defaults).toEqual(
+      expect.arrayContaining(["JM", "US", "CA", "GB", "MX", "SV", "SN", "KE"]),
+    )
+    expect(new Set(defaults).size).toBe(defaults.length)
+  })
+
+  it("seeds every layer with the same list", () => {
+    expect(allowlist.default.defaultCountries).toEqual(defaults)
+    expect(allowlist.properties.defaultCountries.default).toEqual(defaults)
+  })
+
+  it("never seeds the wave origins, nor the countries Bridge cannot serve", () => {
+    expect(defaults).not.toEqual(expect.arrayContaining(["IN"]))
+    expect(defaults).not.toEqual(expect.arrayContaining(["NG"]))
+    expect(defaults).not.toEqual(expect.arrayContaining(["HT"]))
+    expect(defaults).not.toEqual(expect.arrayContaining(["CU"]))
+  })
+
+  it("keeps every entry an uppercase ISO-3166 alpha-2 code libphonenumber knows", () => {
+    type Region = ReturnType<typeof getCountries>[number]
+    for (const code of defaults) {
+      expect(code).toMatch(/^[A-Z]{2}$/)
+      expect(() => getCountryCallingCode(code as Region)).not.toThrow()
+    }
+  })
+
+  // Twilio Lookup reports the US territories by territory (+1 787 ⇒ "PR"),
+  // not as "US". They are US persons Bridge can serve; omitting them tells a
+  // Puerto Rico user "US virtual accounts aren't available in Puerto Rico
+  // yet." With them the list covers every NANP region, so an unattributable
+  // +1 number's candidate set is allowed in full, not only through "US".
+  it("includes the NANP US territories, and with them every NANP region", () => {
+    expect(defaults).toEqual(expect.arrayContaining(["PR", "VI", "GU", "AS", "MP"]))
+
+    const nanp = getCountries().filter(
+      (country) => getCountryCallingCode(country) === "1",
+    )
+    expect(nanp.length).toBeGreaterThan(20)
+    expect(defaults).toEqual(expect.arrayContaining(nanp))
+  })
+})

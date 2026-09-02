@@ -1,6 +1,8 @@
 import { parsePhoneNumberFromString } from "libphonenumber-js"
 
+import { countriesForCallingCode } from "@domain/users/phone-regions"
 import { getAllowedCountries } from "@services/frappe/allowed-countries"
+import { toAlpha2 } from "@services/frappe/coerce"
 import { IdentityRepository } from "@services/kratos"
 import { baseLogger } from "@services/logger"
 import { addAttributesToCurrentSpan } from "@services/tracing"
@@ -22,9 +24,10 @@ import {
 // user's PHONE country one Bridge can serve? The phone country comes from
 // Twilio Lookup at signup (`user.phoneMetadata.countryCode`) — the hardest
 // signal to fake (the wave typed "Jamaica" into the address form while
-// verifying real Indian and Nigerian SIMs). The allowed set is ops-managed in
-// ERPNext ("Allowed Country", flash_allowed = 1), with the config list as the
-// fallback when ERPNext cannot be read.
+// verifying real Indian and Nigerian SIMs). The allowed set is the config
+// list, or — once `countryAllowlist.source` is flipped to "erpnext" — the
+// ops-managed ERPNext "Allowed Country" doctype (flash_allowed = 1) with the
+// config list as the fallback when ERPNext cannot be read.
 //
 // Deliberately NO account-age rule: a real user must be able to start KYC the
 // moment they sign up (Jabari, 2026-09-01).
@@ -43,32 +46,52 @@ export type BridgeKycGateRule =
   | "country-not-supported"
   | "phone-required"
 
-const ALPHA2 = /^[A-Z]{2}$/
+/** Where a user's phone country came from — stamped on the span so ops can see how often each path fires. */
+export type PhoneCountrySource = "lookup" | "number" | "calling-code" | "none"
+
+export type PhoneCountryResolution = {
+  /** Candidate ISO alpha-2 codes, upper-case. Empty when nothing could be resolved. */
+  countries: string[]
+  source: PhoneCountrySource
+  /** Only for `source: "calling-code"`: the calling code the candidates were derived from (no "+"). */
+  callingCode?: string
+}
+
+const NONE: PhoneCountryResolution = { countries: [], source: "none" }
 
 /**
- * The user's phone country as upper-case ISO alpha-2, or undefined. Prefers
- * the Twilio Lookup country stamped at signup; falls back to parsing the
- * phone number itself (region may be undefined for NANP numbers whose area
- * code is missing from the pinned libphonenumber metadata — that is a
- * "phone required" outcome, not a guess).
+ * The user's phone country (or countries) as upper-case ISO alpha-2.
+ *
+ * Prefers the Twilio Lookup country stamped at signup. Falls back to parsing
+ * the number: its region when libphonenumber can name one, otherwise every
+ * region the calling code could denote. That last step matters: ~340
+ * assigned NANP area codes are absent from the pinned metadata (+1 924,
+ * +1 472, +1 861…), so a US number on one of them parses with no region.
+ * Such a user has a verified phone on file; telling them to "add and verify
+ * a phone number" is an instruction they cannot act on. The auth
+ * destination check (request-code.ts) makes the same fallback.
  */
-export const resolvePhoneCountry = (
+export const resolvePhoneCountries = (
   user: Pick<User, "phoneMetadata" | "phone"> | undefined,
-): string | undefined => {
-  if (!user) return undefined
+): PhoneCountryResolution => {
+  if (!user) return NONE
 
-  const fromLookup = user.phoneMetadata?.countryCode
-  if (typeof fromLookup === "string") {
-    const code = fromLookup.trim().toUpperCase()
-    if (ALPHA2.test(code)) return code
-  }
+  const fromLookup = toAlpha2(user.phoneMetadata?.countryCode)
+  if (fromLookup) return { countries: [fromLookup], source: "lookup" }
 
-  if (user.phone) {
-    const parsed = parsePhoneNumberFromString(user.phone)
-    if (parsed?.country && ALPHA2.test(parsed.country)) return parsed.country
-  }
+  if (!user.phone) return NONE
+  const parsed = parsePhoneNumberFromString(user.phone)
+  if (!parsed) return NONE
 
-  return undefined
+  const fromNumber = toAlpha2(parsed.country)
+  if (fromNumber) return { countries: [fromNumber], source: "number" }
+
+  const callingCode = parsed.countryCallingCode
+  const candidates = countriesForCallingCode(callingCode)
+    .map(toAlpha2)
+    .filter((code): code is string => code !== undefined)
+  if (candidates.length === 0) return NONE
+  return { countries: candidates, source: "calling-code", callingCode }
 }
 
 /** English display name for an alpha-2 code, or undefined if the runtime cannot name it. */
@@ -82,14 +105,36 @@ export const countryDisplayName = (countryCode: string): string | undefined => {
   }
 }
 
+// Message inputs for a denial. One resolved country names itself. A
+// calling-code candidate set is named in full when short ("Kazakhstan or
+// Russia"); past that the user gets the generic wording and ops get the codes.
+const MAX_NAMED_CANDIDATES = 3
+
+const describeDeniedCountries = (
+  countryCodes: readonly string[],
+): { countryCode: string; countryName: string | undefined } => {
+  if (countryCodes.length === 1) {
+    const [countryCode] = countryCodes
+    return { countryCode, countryName: countryDisplayName(countryCode) }
+  }
+  return {
+    countryCode: countryCodes.join("/"),
+    countryName:
+      countryCodes.length <= MAX_NAMED_CANDIDATES
+        ? countryCodes.map((code) => countryDisplayName(code) ?? code).join(" or ")
+        : "your country",
+  }
+}
+
 export const checkBridgeKycEligibility = ({
   identity,
-  phoneCountry,
+  phoneCountries,
   allowedCountries,
   config,
 }: {
   identity: Pick<AnyIdentity, "emailVerified"> | undefined
-  phoneCountry: string | undefined
+  /** Candidate phone countries (see resolvePhoneCountries). Empty = unresolved. */
+  phoneCountries: readonly string[]
   allowedCountries: ReadonlySet<string>
   config: BridgeKycGateConfig
 }): true | BridgeKycGateError => {
@@ -98,13 +143,17 @@ export const checkBridgeKycEligibility = ({
   }
 
   if (config.countryAllowlist.enabled) {
-    if (!phoneCountry) return new BridgeKycPhoneRequiredError()
-    const countryCode = phoneCountry.toUpperCase()
-    if (!allowedCountries.has(countryCode)) {
-      return new BridgeKycCountryNotSupportedError({
-        countryCode,
-        countryName: countryDisplayName(countryCode),
-      })
+    if (phoneCountries.length === 0) return new BridgeKycPhoneRequiredError()
+    const countryCodes = phoneCountries.map((code) => code.toUpperCase())
+    // Any allowed candidate passes. The candidate set is wider than one
+    // country only for a number libphonenumber could not attribute, which in
+    // practice is a US number on an area code the pinned metadata lacks;
+    // with US allowed, denying it would refuse a real US user. The trade is
+    // that an unattributable number on a calling code shared between an
+    // allowed and a disallowed region (+44: GB vs GG/IM/JE) passes — none of
+    // those pairings is an attack origin.
+    if (!countryCodes.some((code) => allowedCountries.has(code))) {
+      return new BridgeKycCountryNotSupportedError(describeDeniedCountries(countryCodes))
     }
   }
 
@@ -117,11 +166,20 @@ const ruleFor = (error: BridgeKycGateError): BridgeKycGateRule => {
   return "country-not-supported"
 }
 
+// Span/log label for the phone country: the code when there is one, the
+// calling code when only that is known, "unknown" otherwise.
+const countryLabel = ({ countries, callingCode }: PhoneCountryResolution): string => {
+  if (callingCode !== undefined) return `+${callingCode}`
+  return countries[0] ?? "unknown"
+}
+
 // Resolver-facing wrapper: gathers the inputs (Kratos identity only when the
 // email rule is on; the allowlist only when the country rule is on) and
 // applies the pure check. A Kratos lookup failure is returned, not thrown, so
 // the caller answers it like any other error. Every denial is logged and
-// stamped on the current span so ops can count them per rule and country.
+// stamped on the current span so ops can count them per rule and country;
+// the country source is stamped on every evaluation so the calling-code
+// fallback rate is visible.
 export const assertBridgeKycEligible = async ({
   account,
   user,
@@ -138,28 +196,34 @@ export const assertBridgeKycEligible = async ({
     identity = loaded
   }
 
-  const phoneCountry = resolvePhoneCountry(user)
+  const resolution = resolvePhoneCountries(user)
   const allowedCountries = config.countryAllowlist.enabled
-    ? await getAllowedCountries({ fallback: config.countryAllowlist.defaultCountries })
+    ? await getAllowedCountries({
+        source: config.countryAllowlist.source,
+        fallback: config.countryAllowlist.defaultCountries,
+      })
     : new Set<string>()
+
+  addAttributesToCurrentSpan({ "bridge.kyc_gate.country_source": resolution.source })
 
   const result = checkBridgeKycEligibility({
     identity,
-    phoneCountry,
+    phoneCountries: resolution.countries,
     allowedCountries,
     config,
   })
 
   if (result instanceof Error) {
     const rule = ruleFor(result)
+    const countryCode = countryLabel(resolution)
     baseLogger.warn(
-      { accountId: account.id, countryCode: phoneCountry, rule },
+      { accountId: account.id, countryCode, countrySource: resolution.source, rule },
       "bridge kyc gate denied initiation",
     )
     addAttributesToCurrentSpan({
       "bridge.kyc_gate.denied": true,
       "bridge.kyc_gate.rule": rule,
-      "bridge.kyc_gate.country": phoneCountry ?? "unknown",
+      "bridge.kyc_gate.country": countryCode,
     })
   }
 

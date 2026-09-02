@@ -13,6 +13,7 @@ import {
   PhoneAlreadyExistsError,
 } from "@domain/authentication/errors"
 import { PhoneCountryNotAllowedError } from "@domain/users/errors"
+import { countriesForCallingCode } from "@domain/users/phone-regions"
 import { InvalidPhoneNumber, NotImplementedError } from "@domain/errors"
 import { ChannelType } from "@domain/phone-provider"
 import { RateLimitConfig } from "@domain/rate-limit"
@@ -23,11 +24,7 @@ import { AuthWithEmailPasswordlessService, IdentityRepository } from "@services/
 import { baseLogger } from "@services/logger"
 import { RedisRateLimitService, consumeLimiter } from "@services/rate-limit"
 import { TWILIO_ACCOUNT_TEST, TwilioClient } from "@services/twilio"
-import {
-  getCountries,
-  getCountryCallingCode,
-  parsePhoneNumberFromString,
-} from "libphonenumber-js"
+import { parsePhoneNumberFromString } from "libphonenumber-js"
 
 export const requestPhoneCodeWithCaptcha = async ({
   phone,
@@ -491,26 +488,13 @@ const allowBlockedCountryForExistingUser = async ({
   return "allowed"
 }
 
-// libphonenumber can parse a number without being able to name its region:
-// 340 of the 800 assigned NANP area codes are absent from the pinned metadata,
-// including in-service US overlays such as +1 738, +1 924, +1 983 and +1 472.
-// Treating "no region" as a rejection would kill signup AND login for real
-// customers on those codes — in a market that is deliberately on no block list
-// at all. So fall back to every region the calling code could denote and gate
-// on those: +1 passes because no NANP region is blocked, +7 still fails closed
-// because RU is.
-const regionsByCallingCode: Map<string, CountryCode[]> = new Map()
-
-const countriesForCallingCode = (callingCode: string): CountryCode[] => {
-  const cached = regionsByCallingCode.get(callingCode)
-  if (cached !== undefined) return cached
-
-  const regions = getCountries().filter(
-    (country) => getCountryCallingCode(country) === callingCode,
-  ) as CountryCode[]
-  regionsByCallingCode.set(callingCode, regions)
-  return regions
-}
+// libphonenumber can parse a number without being able to name its region
+// (~340 assigned NANP area codes are absent from the pinned metadata — see
+// @domain/users/phone-regions). Treating "no region" as a rejection would kill
+// signup AND login for real customers on those codes — in a market that is
+// deliberately on no block list at all. So fall back to every region the
+// calling code could denote and gate on those: +1 passes because no NANP
+// region is blocked, +7 still fails closed because RU is.
 
 // Rejects auth-code destinations before any Twilio spend. Countries are billed
 // per message whether or not a human is behind the request, so an unsupported

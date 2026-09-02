@@ -63,37 +63,77 @@ describe("validateAllowedCountryDoc", () => {
   })
 })
 
-describe("getAllowedCountries", () => {
+// `source: "config"` is the default, and what makes this PR safe to deploy
+// before the frappe-flash-admin reseed: the ERPNext doctype as seeded before
+// that patch ticks flash_allowed for 165 countries, NG and IN included.
+describe("getAllowedCountries with source: config", () => {
+  it("returns the config list and never reads ERPNext", async () => {
+    const allowed = await getAllowedCountries({ source: "config", fallback: FALLBACK })
+
+    expect([...allowed].sort()).toEqual(["GB", "JM"])
+    expect(mockGetAllowedCountries).not.toHaveBeenCalled()
+  })
+
+  it("normalises the config list and drops garbage in it", async () => {
+    const allowed = await getAllowedCountries({
+      source: "config",
+      fallback: [" jm", "gb ", "JAM", "", "j1"],
+    })
+
+    expect([...allowed].sort()).toEqual(["GB", "JM"])
+  })
+
+  it("does not poison the ERPNext cache: a later erpnext read still reads", async () => {
+    await getAllowedCountries({ source: "config", fallback: FALLBACK })
+
+    const allowed = await getAllowedCountries({ source: "erpnext", fallback: FALLBACK })
+
+    expect(mockGetAllowedCountries).toHaveBeenCalledTimes(1)
+    expect([...allowed].sort()).toEqual(["JM", "US"])
+  })
+
+  it("is empty for an empty config list — denies by default rather than widening", async () => {
+    const allowed = await getAllowedCountries({ source: "config", fallback: [] })
+
+    expect(allowed.size).toBe(0)
+    expect(mockGetAllowedCountries).not.toHaveBeenCalled()
+  })
+})
+
+describe("getAllowedCountries with source: erpnext", () => {
   it("returns the ERPNext allowlist as upper-case codes", async () => {
-    const allowed = await getAllowedCountries({ fallback: FALLBACK })
+    const allowed = await getAllowedCountries({ source: "erpnext", fallback: FALLBACK })
     expect([...allowed].sort()).toEqual(["JM", "US"])
   })
 
   it("falls back to the config list when the ERPNext read errors, and caches it", async () => {
     mockGetAllowedCountries.mockResolvedValue(new AllowedCountryQueryError("boom"))
 
-    const allowed = await getAllowedCountries({ fallback: FALLBACK })
+    const allowed = await getAllowedCountries({ source: "erpnext", fallback: FALLBACK })
     expect([...allowed].sort()).toEqual(["GB", "JM"])
 
-    await getAllowedCountries({ fallback: FALLBACK })
+    await getAllowedCountries({ source: "erpnext", fallback: FALLBACK })
     expect(mockGetAllowedCountries).toHaveBeenCalledTimes(1)
   })
 
   it("falls back to the config list when the reader throws unexpectedly", async () => {
     mockGetAllowedCountries.mockRejectedValue(new Error("network down"))
-    const allowed = await getAllowedCountries({ fallback: FALLBACK })
+    const allowed = await getAllowedCountries({ source: "erpnext", fallback: FALLBACK })
     expect([...allowed].sort()).toEqual(["GB", "JM"])
   })
 
   it("falls back to the config list when ERPNext returns no allowed rows", async () => {
     mockGetAllowedCountries.mockResolvedValue([])
-    const allowed = await getAllowedCountries({ fallback: FALLBACK })
+    const allowed = await getAllowedCountries({ source: "erpnext", fallback: FALLBACK })
     expect([...allowed].sort()).toEqual(["GB", "JM"])
   })
 
   it("normalises the fallback list and drops garbage in it", async () => {
     mockGetAllowedCountries.mockResolvedValue([])
-    const allowed = await getAllowedCountries({ fallback: [" jm", "gb ", "JAM", ""] })
+    const allowed = await getAllowedCountries({
+      source: "erpnext",
+      fallback: [" jm", "gb ", "JAM", ""],
+    })
     expect([...allowed].sort()).toEqual(["GB", "JM"])
   })
 
@@ -103,7 +143,7 @@ describe("getAllowedCountries", () => {
       { alpha2_code: "JM", flash_allowed: 1 },
       { alpha2_code: "IN", flash_allowed: 0 },
     ])
-    const allowed = await getAllowedCountries({ fallback: FALLBACK })
+    const allowed = await getAllowedCountries({ source: "erpnext", fallback: FALLBACK })
     expect([...allowed]).toEqual(["JM"])
   })
 
@@ -112,19 +152,19 @@ describe("getAllowedCountries", () => {
       { alpha2_code: "???", flash_allowed: 1 },
       { alpha2_code: "JM", flash_allowed: 1 },
     ])
-    const allowed = await getAllowedCountries({ fallback: FALLBACK })
+    const allowed = await getAllowedCountries({ source: "erpnext", fallback: FALLBACK })
     expect([...allowed]).toEqual(["JM"])
   })
 
   it("serves from cache within the TTL and re-reads after it", async () => {
-    await getAllowedCountries({ fallback: FALLBACK })
+    await getAllowedCountries({ source: "erpnext", fallback: FALLBACK })
     now += 30_000
-    await getAllowedCountries({ fallback: FALLBACK })
+    await getAllowedCountries({ source: "erpnext", fallback: FALLBACK })
     expect(mockGetAllowedCountries).toHaveBeenCalledTimes(1)
 
     now += 31_000 // past the 60s TTL
     mockGetAllowedCountries.mockResolvedValue([{ alpha2_code: "TT", flash_allowed: 1 }])
-    const allowed = await getAllowedCountries({ fallback: FALLBACK })
+    const allowed = await getAllowedCountries({ source: "erpnext", fallback: FALLBACK })
     expect([...allowed]).toEqual(["TT"])
     expect(mockGetAllowedCountries).toHaveBeenCalledTimes(2)
   })

@@ -75,13 +75,19 @@ const rateLimitConfigSchema = {
   additionalProperties: false,
 }
 
-// Fallback allowlist for the Bridge KYC country gate, used only when the
-// ERPNext "Allowed Country" doctype cannot be read. Seeded 2026-09-01 on
-// Jabari's instruction: the Caribbean, US/CA/GB, MX, SV, SN (Dakar), KE.
-// Haiti and Cuba are deliberately absent (Bridge: no ACH/FedWire for HT, CU
-// prohibited). KE is included on instruction although Bridge's published
-// country table marks it ineligible for ACH/FedWire — ops can flip it in
-// ERPNext without a release.
+// Allowlist for the Bridge KYC country gate. With
+// `countryAllowlist.source: "config"` (the default) this IS the list; with
+// `"erpnext"` it is only the fallback when the "Allowed Country" doctype
+// cannot be read. Seeded 2026-09-01 on Jabari's instruction: the Caribbean,
+// US/CA/GB, MX, SV, SN (Dakar), KE. Haiti and Cuba are deliberately absent
+// (Bridge: no ACH/FedWire for HT, CU prohibited). KE is included on
+// instruction although Bridge's published country table marks it ineligible
+// for ACH/FedWire — ops can flip it in ERPNext without a release.
+//
+// The five US territories in the NANP (PR, VI, GU, AS, MP) are US persons
+// Bridge can serve; Twilio Lookup reports them by territory (+1 787 ⇒ "PR"),
+// not as "US", so they need their own entries. With them the list covers
+// every NANP region, which schema.spec.ts pins.
 export const BRIDGE_KYC_DEFAULT_COUNTRIES = [
   "JM",
   "TT",
@@ -107,6 +113,11 @@ export const BRIDGE_KYC_DEFAULT_COUNTRIES = [
   "AI",
   "MS",
   "US",
+  "PR",
+  "VI",
+  "GU",
+  "AS",
+  "MP",
   "CA",
   "GB",
   "MX",
@@ -806,11 +817,22 @@ export const configSchema = {
         // key => these defaults (same pattern as referralReward).
         //
         // countryAllowlist: the user's PHONE country (Twilio Lookup) must be a
-        // country Bridge can issue Flash a USD virtual account for. The live
-        // list is the ERPNext "Allowed Country" doctype (flash_allowed = 1,
-        // toggled by ops at /app/allowed-country); `defaultCountries` is only
-        // the fallback when ERPNext cannot be read. No account-age rule: real
-        // users must be able to start KYC the moment they sign up.
+        // country Bridge can issue Flash a USD virtual account for.
+        //
+        // `source` picks where the allowed set comes from:
+        //   "config"  — `defaultCountries` is the list. The default, so this
+        //               gate is safe to deploy on its own.
+        //   "erpnext" — the ERPNext "Allowed Country" doctype (flash_allowed
+        //               = 1, toggled by ops at /app/allowed-country), with
+        //               `defaultCountries` as the fallback when ERPNext cannot
+        //               be read. Flip to this ONLY after the frappe-flash-admin
+        //               reseed has run on that site: as seeded before it, the
+        //               doctype ticks flash_allowed for 165 countries — NG and
+        //               IN among them — and reading it would admit exactly the
+        //               wave this gate exists to stop.
+        //
+        // No account-age rule: real users must be able to start KYC the moment
+        // they sign up.
         kycGate: {
           type: "object",
           properties: {
@@ -819,15 +841,24 @@ export const configSchema = {
               type: "object",
               properties: {
                 enabled: { type: "boolean", default: true },
+                source: {
+                  type: "string",
+                  enum: ["config", "erpnext"],
+                  default: "config",
+                },
                 defaultCountries: {
                   type: "array",
                   items: { type: "string", pattern: "^[A-Z]{2}$" },
                   default: BRIDGE_KYC_DEFAULT_COUNTRIES,
                 },
               },
-              required: ["enabled", "defaultCountries"],
+              required: ["enabled", "source", "defaultCountries"],
               additionalProperties: false,
-              default: { enabled: true, defaultCountries: BRIDGE_KYC_DEFAULT_COUNTRIES },
+              default: {
+                enabled: true,
+                source: "config",
+                defaultCountries: BRIDGE_KYC_DEFAULT_COUNTRIES,
+              },
             },
           },
           required: ["requireVerifiedEmail", "countryAllowlist"],
@@ -836,6 +867,7 @@ export const configSchema = {
             requireVerifiedEmail: false,
             countryAllowlist: {
               enabled: true,
+              source: "config",
               defaultCountries: BRIDGE_KYC_DEFAULT_COUNTRIES,
             },
           },

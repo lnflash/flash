@@ -23,9 +23,9 @@ jest.mock("@services/tracing", () => ({
   addAttributesToCurrentSpan: jest.fn(),
 }))
 
-const GATE_DEFAULTS = () => ({
+const GATE_DEFAULTS = (): BridgeKycGateConfig => ({
   requireVerifiedEmail: false,
-  countryAllowlist: { enabled: true, defaultCountries: ["JM"] },
+  countryAllowlist: { enabled: true, source: "config", defaultCountries: ["JM"] },
 })
 
 jest.mock("@config", () => ({
@@ -33,7 +33,7 @@ jest.mock("@config", () => ({
     enabled: true,
     kycGate: {
       requireVerifiedEmail: false,
-      countryAllowlist: { enabled: true, defaultCountries: ["JM"] },
+      countryAllowlist: { enabled: true, source: "config", defaultCountries: ["JM"] },
     },
   },
   getOnChainWalletConfig: jest.fn().mockReturnValue({ dustThreshold: 546 }),
@@ -114,7 +114,10 @@ describe("bridgeInitiateKyc gate", () => {
 
     expect(result.errors).toEqual([])
     expect(result.kycLink).toEqual({ url: "https://bridge.example/kyc" })
-    expect(mockGetAllowedCountries).toHaveBeenCalledWith({ fallback: ["JM"] })
+    expect(mockGetAllowedCountries).toHaveBeenCalledWith({
+      source: "config",
+      fallback: ["JM"],
+    })
     // Email rule is off by default: Kratos is not consulted.
     expect(mockGetIdentity).not.toHaveBeenCalled()
     expect(mockInitiateKyc).toHaveBeenCalledWith({
@@ -151,11 +154,28 @@ describe("bridgeInitiateKyc gate", () => {
     expect(mockInitiateKyc).not.toHaveBeenCalled()
   })
 
-  it("does not start KYC immediately after signup any differently: no age rule", async () => {
-    // A brand-new account with an allowed phone country goes straight through.
-    const result = await resolveWith()
+  // No Twilio Lookup metadata, and an area code (+1 924) the pinned
+  // libphonenumber metadata cannot attribute: a real US user with a verified
+  // phone. The gate must reach Bridge, not answer "add and verify a phone".
+  it("passes a US number the metadata cannot attribute, via its calling code", async () => {
+    const result = await resolveWith({ phoneCountry: undefined, phone: "+19245551234" })
+
     expect(result.errors).toEqual([])
     expect(mockInitiateKyc).toHaveBeenCalledTimes(1)
+  })
+
+  it("passes the configured allowlist source through to the reader", async () => {
+    mockBridgeConfig.kycGate = {
+      ...GATE_DEFAULTS(),
+      countryAllowlist: { enabled: true, source: "erpnext", defaultCountries: ["JM"] },
+    }
+
+    await resolveWith()
+
+    expect(mockGetAllowedCountries).toHaveBeenCalledWith({
+      source: "erpnext",
+      fallback: ["JM"],
+    })
   })
 
   it("enforces the verified-email rule when it is switched on", async () => {
@@ -175,7 +195,7 @@ describe("bridgeInitiateKyc gate", () => {
   it("lets the country rule be switched off in config", async () => {
     mockBridgeConfig.kycGate = {
       requireVerifiedEmail: false,
-      countryAllowlist: { enabled: false, defaultCountries: [] },
+      countryAllowlist: { enabled: false, source: "config", defaultCountries: [] },
     }
 
     const result = await resolveWith({ phoneCountry: "IN", phone: "+919876543210" })

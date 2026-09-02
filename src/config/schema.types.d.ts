@@ -57,8 +57,11 @@ type BridgeWithdrawalFeeEstimateConfig = {
   ethUsdFallback?: number
 }
 
+type BridgeKycCountryAllowlistSource = "config" | "erpnext"
+
 type BridgeKycCountryAllowlistConfig = {
   enabled: boolean
+  source: BridgeKycCountryAllowlistSource
   defaultCountries: string[]
 }
 

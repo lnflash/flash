@@ -1,29 +1,32 @@
 /**
- * Cached reader for the ERPNext "Allowed Country" doctype — the ops-managed
- * list of countries whose residents Bridge can issue Flash a USD virtual
- * account for (rows with `flash_allowed` ticked, toggled at
- * /app/allowed-country). Consulted by the bridgeInitiateKyc country gate.
+ * The set of countries whose residents Bridge can issue Flash a USD virtual
+ * account for, consulted by the bridgeInitiateKyc country gate.
  *
- * Memoised for ~60s (successes AND failures, mirroring fee-discounts.ts) so
- * an ERPNext outage never turns into a fetch storm and recovers within the
- * TTL.
+ * Where it comes from is `bridge.kycGate.countryAllowlist.source`:
  *
- * Failure polarity is neither fail-open nor fail-closed: when ERPNext cannot
- * be read, or hands back nothing usable, the reader falls back to the
- * CONFIG default list (`bridge.kycGate.countryAllowlist.defaultCountries`).
- * "Allow everyone" would resume sending ineligible users into a KYC Bridge
- * then refuses; "deny everyone" would block real users from their US account
- * over an ERPNext blip. The config list is the last-known-good policy.
+ * - `"config"` (default): `defaultCountries` IS the list. No ERPNext read, no
+ *   cache. This makes the gate safe to deploy on its own — the ERPNext
+ *   doctype as seeded before the frappe-flash-admin reseed ticks
+ *   `flash_allowed` for 165 countries, NG and IN among them.
+ * - `"erpnext"`: the ops-managed ERPNext "Allowed Country" doctype (rows with
+ *   `flash_allowed` ticked, toggled at /app/allowed-country), memoised for
+ *   ~60s (successes AND failures, mirroring fee-discounts.ts) so an ERPNext
+ *   outage never turns into a fetch storm and recovers within the TTL.
+ *
+ *   Failure polarity is neither fail-open nor fail-closed: when ERPNext
+ *   cannot be read, or hands back nothing usable, the reader falls back to
+ *   `defaultCountries`. "Allow everyone" would resume sending ineligible users
+ *   into a KYC Bridge then refuses; "deny everyone" would block real users
+ *   from their US account over an ERPNext blip. The config list is the
+ *   last-known-good policy.
  */
-import { toBoolean } from "@services/frappe/coerce"
+import { toAlpha2, toBoolean } from "@services/frappe/coerce"
 import ErpNext, { type AllowedCountryDoc } from "@services/frappe/ErpNext"
 import { baseLogger } from "@services/logger"
 
 const CACHE_TTL_MS = 60_000
 
 let cache: { value: Set<string>; at: number } | undefined
-
-const ALPHA2 = /^[A-Z]{2}$/
 
 /**
  * Normalises one raw row to an upper-case ISO alpha-2 code, or undefined for
@@ -33,24 +36,34 @@ const ALPHA2 = /^[A-Z]{2}$/
 export const validateAllowedCountryDoc = (doc: AllowedCountryDoc): string | undefined => {
   if (!doc || typeof doc !== "object") return undefined
   if (!toBoolean(doc.flash_allowed)) return undefined
-  const code =
-    typeof doc.alpha2_code === "string" ? doc.alpha2_code.trim().toUpperCase() : ""
-  return ALPHA2.test(code) ? code : undefined
+  return toAlpha2(doc.alpha2_code)
 }
 
-const normaliseFallback = (fallback: readonly string[]): Set<string> =>
-  new Set(fallback.map((c) => c.trim().toUpperCase()).filter((c) => ALPHA2.test(c)))
+const normaliseFallback = (fallback: readonly string[]): Set<string> => {
+  const codes = new Set<string>()
+  for (const entry of fallback) {
+    const code = toAlpha2(entry)
+    if (code) codes.add(code)
+  }
+  return codes
+}
 
 /**
- * The set of allowed alpha-2 country codes. Never throws. On any read
- * failure, or an empty/malformed result, returns the config fallback and
- * caches that decision for the TTL.
+ * The set of allowed alpha-2 country codes. Never throws. With
+ * `source: "config"` this is the normalised `fallback` list and nothing else
+ * is consulted. With `source: "erpnext"`, on any read failure or an
+ * empty/malformed result, returns the config fallback and caches that
+ * decision for the TTL.
  */
 export const getAllowedCountries = async ({
+  source,
   fallback,
 }: {
+  source: BridgeKycCountryAllowlistSource
   fallback: readonly string[]
 }): Promise<Set<string>> => {
+  if (source === "config") return normaliseFallback(fallback)
+
   const now = Date.now()
   if (cache && now - cache.at < CACHE_TTL_MS) return cache.value
 
