@@ -494,4 +494,30 @@ describe("access-log body redaction (redactConsentBodyForLog)", () => {
       }),
     ).toBe(body)
   })
+
+  it("redacts a differently-cased mount segment that still dispatches into this router (e.g. /CONSENT/log)", () => {
+    // The app-level mount (`app.use("/consent", consentLogRouter)` in
+    // graphql-server.ts) runs on a bare express() with no
+    // "case sensitive routing" setting, so Express matches that mount
+    // case-insensitively regardless of this router's own
+    // `caseSensitive: true` (which only governs matching *within* the
+    // router). A request to "/CONSENT/log" still reaches the "/log" route
+    // and still persists a real submission — only originalUrl's casing
+    // differs from the lower-case check. A case-sensitive startsWith here
+    // would miss it and leak the raw invite token to the access log.
+    const token = "a".repeat(40)
+    const logged = redactConsentBodyForLog({
+      originalUrl: "/CONSENT/log",
+      body: validBody(),
+    })
+
+    expect(logged).toBe("[consent body redacted]")
+    expect(JSON.stringify(logged)).not.toContain(token)
+  })
+
+  it("redacts regardless of casing on either the mount segment or the sub-route segment", () => {
+    expect(
+      redactConsentBodyForLog({ originalUrl: "/Consent/Log", body: validBody() }),
+    ).toBe("[consent body redacted]")
+  })
 })

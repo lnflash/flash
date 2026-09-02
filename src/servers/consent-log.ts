@@ -163,12 +163,22 @@ consentLogRouter.use(
 // prefix would also swallow any future unrelated route mounted alongside it
 // (e.g. "/consent-status", "/consent-preferences"), redacting bodies that
 // have nothing to do with this router.
+//
+// Compared lower-cased on both sides: the app-level mount
+// (graphql-server.ts, `app.use("/consent", consentLogRouter)`) runs on a
+// bare express() with no "case sensitive routing" setting, so Express
+// matches that mount case-insensitively regardless of this router's own
+// `caseSensitive: true` (which only governs matching *within* the router,
+// e.g. "/log" vs "/Log"). A request to "/CONSENT/log" still dispatches into
+// this router and still persists — its originalUrl is just differently
+// cased. A plain case-sensitive startsWith here would miss that request
+// and leak its raw invite token into the access log.
 export const redactConsentBodyForLog = (req: {
   originalUrl?: string
   url?: string
   body?: unknown
 }) =>
-  (req.originalUrl ?? req.url)?.startsWith("/consent/")
+  (req.originalUrl ?? req.url)?.toLowerCase().startsWith("/consent/")
     ? "[consent body redacted]"
     : req.body
 
