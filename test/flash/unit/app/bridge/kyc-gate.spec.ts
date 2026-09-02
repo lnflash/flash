@@ -39,9 +39,11 @@ import {
 
 const ALLOWED = new Set(["JM", "US", "GB"])
 
-// +1 924 is an assigned, in-service US overlay that the pinned
-// libphonenumber-js metadata (1.13.11) has no region for; +7 000 is a +7
-// number no RU/KZ pattern claims. Both parse, neither has a `country`.
+// +1 924 is an assigned, in-service US overlay that the lockfile's
+// libphonenumber-js metadata (1.12.25 — what `yarn install --frozen-lockfile`
+// ships and CI tests, whatever a local node_modules has drifted to) has no
+// region for; +7 000 is a +7 number no RU/KZ pattern claims. Both parse,
+// neither has a `country`.
 const UNATTRIBUTABLE_US = "+19245551234" as PhoneNumber
 const UNATTRIBUTABLE_RU_KZ = "+70005551234" as PhoneNumber
 
@@ -83,7 +85,53 @@ describe("resolvePhoneCountries", () => {
     expect(
       resolvePhoneCountries({
         phoneMetadata: { countryCode: "jm" } as PhoneMetadata,
-        phone: "+12125551234" as PhoneNumber,
+        phone: "+18765550100" as PhoneNumber,
+      }),
+    ).toEqual({ countries: ["JM"], source: "lookup" })
+  })
+
+  // The stamp is written once, at signup. userPhoneDelete keeps it with no
+  // phone and userPhoneRegistrationValidate writes the new number with no
+  // fresh Lookup, so a JM signup that re-registers a Nigerian SIM carries
+  // countryCode "JM" over phone "+234…" — the wave this gate exists to stop.
+  it("overrules a lookup stamp the number on file contradicts, and says so", () => {
+    expect(
+      resolvePhoneCountries({
+        phoneMetadata: { countryCode: "JM" } as PhoneMetadata,
+        phone: "+2348012345678" as PhoneNumber,
+      }),
+    ).toEqual({ countries: ["NG"], source: "number", lookupStale: true })
+  })
+
+  it("overrules a stale stamp with the calling-code candidates when the number is unattributable", () => {
+    const resolution = resolvePhoneCountries({
+      phoneMetadata: { countryCode: "JM" } as PhoneMetadata,
+      phone: UNATTRIBUTABLE_RU_KZ,
+    })
+
+    expect(resolution).toEqual({
+      countries: expect.arrayContaining(["KZ", "RU"]),
+      source: "calling-code",
+      callingCode: "7",
+      lookupStale: true,
+    })
+    expect(resolution.countries).toHaveLength(2)
+  })
+
+  it("keeps a lookup stamp an unattributable number cannot contradict (+1 924 with a NANP stamp)", () => {
+    expect(
+      resolvePhoneCountries({
+        phoneMetadata: { countryCode: "JM" } as PhoneMetadata,
+        phone: UNATTRIBUTABLE_US,
+      }),
+    ).toEqual({ countries: ["JM"], source: "lookup" })
+  })
+
+  it("keeps a lookup stamp when there is no number to check it against", () => {
+    expect(
+      resolvePhoneCountries({
+        phoneMetadata: { countryCode: "JM" } as PhoneMetadata,
+        phone: undefined,
       }),
     ).toEqual({ countries: ["JM"], source: "lookup" })
   })
@@ -353,6 +401,81 @@ describe("assertBridgeKycEligible", () => {
       "bridge.kyc_gate.rule": "country-not-supported",
       "bridge.kyc_gate.country": "NG",
     })
+  })
+
+  // The stale-stamp hole: sign up on a JM SIM, userPhoneDelete, re-register a
+  // Nigerian number. phoneMetadata still says JM; the number says NG. Trusting
+  // the stamp would send this user through KYC to the virtual-account refusal.
+  it("denies a stale JM lookup stamp over a Nigerian number and flags the stale stamp for ops", async () => {
+    const result = await assertBridgeKycEligible({
+      account,
+      user: {
+        phoneMetadata: { countryCode: "JM" } as PhoneMetadata,
+        phone: "+2348012345678" as PhoneNumber,
+      },
+      config: config(),
+    })
+
+    expect(result).toBeInstanceOf(BridgeKycCountryNotSupportedError)
+    expect((result as BridgeKycCountryNotSupportedError).countryCode).toBe("NG")
+    expect((result as BridgeKycCountryNotSupportedError).message).toBe(
+      "US virtual accounts aren't available in Nigeria yet.",
+    )
+    expect(mockAddAttributes).toHaveBeenCalledWith({
+      "bridge.kyc_gate.country_source": "number",
+      "bridge.kyc_gate.lookup_stale": true,
+    })
+    expect(mockWarn).toHaveBeenCalledWith(
+      {
+        accountId: "account-1",
+        countryCode: "NG",
+        countrySource: "number",
+        rule: "country-not-supported",
+        lookupStale: true,
+      },
+      "bridge kyc gate denied initiation",
+    )
+  })
+
+  // The reverse: the stamp is the disallowed one and the number on file is
+  // allowed. The number decides either way; the cross-check is not a
+  // deny-only rule.
+  it("passes a stale NG stamp over a Jamaican number: the number on file decides", async () => {
+    const result = await assertBridgeKycEligible({
+      account,
+      user: {
+        phoneMetadata: { countryCode: "NG" } as PhoneMetadata,
+        phone: "+18765550100" as PhoneNumber,
+      },
+      config: config(),
+    })
+
+    expect(result).toBe(true)
+    expect(mockWarn).not.toHaveBeenCalled()
+    expect(mockAddAttributes).toHaveBeenCalledWith({
+      "bridge.kyc_gate.country_source": "number",
+      "bridge.kyc_gate.lookup_stale": true,
+    })
+  })
+
+  it("passes a JM stamp over an unattributable +1 number: the calling code includes JM, so the stamp stands", async () => {
+    const result = await assertBridgeKycEligible({
+      account,
+      user: {
+        phoneMetadata: { countryCode: "JM" } as PhoneMetadata,
+        phone: UNATTRIBUTABLE_US,
+      },
+      config: config(),
+    })
+
+    expect(result).toBe(true)
+    expect(mockWarn).not.toHaveBeenCalled()
+    expect(mockAddAttributes).toHaveBeenCalledWith({
+      "bridge.kyc_gate.country_source": "lookup",
+    })
+    expect(mockAddAttributes).not.toHaveBeenCalledWith(
+      expect.objectContaining({ "bridge.kyc_gate.lookup_stale": true }),
+    )
   })
 
   // The hole this closes: Twilio Lookup failed at signup (login.ts returns
