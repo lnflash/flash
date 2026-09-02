@@ -1,3 +1,7 @@
+jest.mock("@services/logger", () => ({
+  baseLogger: { warn: jest.fn(), info: jest.fn(), error: jest.fn() },
+}))
+
 import { IdentitySource, UpgradeEvidenceType } from "@domain/accounts"
 import {
   IdVerification,
@@ -5,6 +9,7 @@ import {
   contentTypeFromFileKey,
   fromFrappeDatetime,
 } from "@services/frappe/models/IdVerification"
+import { baseLogger } from "@services/logger"
 
 const capturedAt = new Date("2026-09-01T12:00:00.000Z")
 
@@ -171,6 +176,53 @@ describe("IdVerification.fromErpnext", () => {
     expect(doc.identitySource).toBe(IdentitySource.Capture)
     expect(doc.bridgeSnapshot).toBeUndefined()
     expect(doc.evidence).toEqual([])
+  })
+
+  it("falls back an unrecognized evidence_type to id_front but logs a warning", () => {
+    ;(baseLogger.warn as jest.Mock).mockClear()
+
+    const doc = IdVerification.fromErpnext({
+      name: "IDV-0002",
+      upgrade_request: "AUR-0002",
+      status: "Checks pending",
+      identity_source: "capture",
+      evidence: [
+        {
+          name: "row-9",
+          evidence_type: "passport_scan", // not a real UpgradeEvidenceType
+          file_key: "id_documents/alice/weird.jpg",
+        },
+      ],
+    })
+
+    expect(doc.evidence).toEqual([
+      expect.objectContaining({
+        rowName: "row-9",
+        type: UpgradeEvidenceType.IdFront,
+      }),
+    ])
+    expect(baseLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idVerification: "IDV-0002",
+        upgradeRequest: "AUR-0002",
+        evidenceRow: "row-9",
+        rawEvidenceType: "passport_scan",
+      }),
+      expect.stringContaining("Unrecognized evidence_type"),
+    )
+  })
+
+  it("does not warn for a recognized evidence_type", () => {
+    ;(baseLogger.warn as jest.Mock).mockClear()
+
+    IdVerification.fromErpnext({
+      upgrade_request: "AUR-0003",
+      status: "Checks pending",
+      identity_source: "capture",
+      evidence: [{ name: "row-1", evidence_type: "selfie" }],
+    })
+
+    expect(baseLogger.warn).not.toHaveBeenCalled()
   })
 
   it("round-trips rows through evidenceRowToErpnext keeping the child name", () => {

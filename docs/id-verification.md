@@ -45,7 +45,9 @@ input BusinessAccountUpgradeRequestInput {
 ```
 
 Files are uploaded exactly as today: `idDocumentUploadUrlGenerate` returns a
-15-minute presigned PUT and the object key `id_documents/<username>_<file>`;
+15-minute presigned PUT and the object key `id_documents/<username>/<file>`
+(the `/` separator is deliberate — usernames may contain `_`, so only a
+character `UsernameRegex` forbids can unambiguously mark the boundary);
 the client then references that key from an evidence row.
 
 ### Normalization (`src/domain/accounts/upgrade-evidence.ts`)
@@ -76,7 +78,7 @@ Always:
 - a `BRIDGE_KYC` row is rejected unless the account's `bridgeKycStatus` is
   `approved`;
 - a structured capture row must have a `fileKey`, and that key must start
-  with `id_documents/<username>_` (the requesting account's own uploads);
+  with `id_documents/<username>/` (the requesting account's own uploads);
 - `sha256`, when present, must be 64 hex characters.
 
 Only when `strict` is true (`UPGRADE_EVIDENCE_STRICT=true`, default false):
@@ -122,7 +124,7 @@ POST /api/resource/ID Verification
                                      // business_registration | trn | proof_of_address | bridge_kyc
       "document_type": "passport",
       "issuing_country": "JM",
-      "file_key": "id_documents/alice_front.jpg",
+      "file_key": "id_documents/alice/front.jpg",
       "sha256": "…64 hex…",
       "content_type": "image/jpeg",  // derived from the key's extension
       "captured_at": "2026-09-01 12:00:00"  // UTC, Frappe datetime

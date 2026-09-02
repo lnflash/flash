@@ -4,6 +4,7 @@ import {
   UpgradeEvidenceType,
   isUpgradeEvidenceType,
 } from "@domain/accounts"
+import { baseLogger } from "@services/logger"
 
 import { toFrappeDatetime } from "./BridgeTransferRequest"
 
@@ -200,19 +201,32 @@ export class IdVerification {
           : IdentitySource.Capture,
       bridgeCustomerId: data.bridge_customer_id || undefined,
       bridgeSnapshot,
-      evidence: (data.evidence ?? []).map((row) => ({
-        rowName: row.name,
-        type: isUpgradeEvidenceType(row.evidence_type)
-          ? row.evidence_type
-          : UpgradeEvidenceType.IdFront,
-        documentType: row.document_type || undefined,
-        issuingCountry: row.issuing_country || undefined,
-        fileKey: row.file_key || undefined,
-        sha256: row.sha256 || undefined,
-        contentType: row.content_type || undefined,
-        capturedAt: fromFrappeDatetime(row.captured_at),
-        deletedAt: fromFrappeDatetime(row.deleted_at),
-      })),
+      evidence: (data.evidence ?? []).map((row) => {
+        if (!isUpgradeEvidenceType(row.evidence_type)) {
+          baseLogger.warn(
+            {
+              idVerification: data.name,
+              upgradeRequest: data.upgrade_request,
+              evidenceRow: row.name,
+              rawEvidenceType: row.evidence_type,
+            },
+            "Unrecognized evidence_type on an ID Verification row; falling back to id_front",
+          )
+        }
+        return {
+          rowName: row.name,
+          type: isUpgradeEvidenceType(row.evidence_type)
+            ? row.evidence_type
+            : UpgradeEvidenceType.IdFront,
+          documentType: row.document_type || undefined,
+          issuingCountry: row.issuing_country || undefined,
+          fileKey: row.file_key || undefined,
+          sha256: row.sha256 || undefined,
+          contentType: row.content_type || undefined,
+          capturedAt: fromFrappeDatetime(row.captured_at),
+          deletedAt: fromFrappeDatetime(row.deleted_at),
+        }
+      }),
     })
   }
 }

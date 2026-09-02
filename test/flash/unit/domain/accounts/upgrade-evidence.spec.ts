@@ -11,7 +11,7 @@ import {
 import { ValidationError } from "@domain/shared"
 
 const username = "alice"
-const own = (file: string) => `id_documents/${username}_${file}`
+const own = (file: string) => `id_documents/${username}/${file}`
 const SHA = "a".repeat(64)
 
 describe("normalizeEvidence", () => {
@@ -130,18 +130,39 @@ describe("validateEvidence", () => {
       expect(validateEvidence({ ...base, evidence, strict: false })).toBe(true)
     })
 
-    it("still holds structured rows to the id_documents/<username>_ prefix", () => {
+    it("still holds structured rows to the id_documents/<username>/ prefix", () => {
       const foreign = [
-        { type: UpgradeEvidenceType.IdFront, fileKey: "id_documents/bob_f.jpg" },
+        { type: UpgradeEvidenceType.IdFront, fileKey: "id_documents/bob/f.jpg" },
       ]
       expect(
         validateEvidence({ ...base, evidence: foreign, strict: false }),
       ).toBeInstanceOf(ValidationError)
       const outside = [
-        { type: UpgradeEvidenceType.IdFront, fileKey: "other/alice_f.jpg" },
+        { type: UpgradeEvidenceType.IdFront, fileKey: "other/alice/f.jpg" },
       ]
       expect(
         validateEvidence({ ...base, evidence: outside, strict: false }),
+      ).toBeInstanceOf(ValidationError)
+    })
+
+    // Regression for a prefix-boundary bug: `username` is a plain
+    // string-prefix test with no delimiter enforcement, so a username that is
+    // an exact prefix of another user's username (`alice` vs. `alice_smith`)
+    // used to let `alice` claim ownership of `alice_smith`'s upload —
+    // `id_documents/alice_` is a valid string prefix of
+    // `id_documents/alice_smith_front.jpg`. The `/` separator in
+    // idDocumentKeyPrefixForUsername closes this off structurally, but this
+    // case is pinned directly against the historical `_`-joined key shape so
+    // a future change back to an ambiguous delimiter fails loudly here.
+    it("rejects another account's upload even when its username extends this one's", () => {
+      const collision = [
+        {
+          type: UpgradeEvidenceType.IdFront,
+          fileKey: "id_documents/alice_smith_front.jpg",
+        },
+      ]
+      expect(
+        validateEvidence({ ...base, evidence: collision, strict: false }),
       ).toBeInstanceOf(ValidationError)
     })
 

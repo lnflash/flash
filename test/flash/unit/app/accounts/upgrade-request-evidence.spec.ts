@@ -72,7 +72,7 @@ import { baseLogger } from "@services/logger"
 const userId = "11111111-1111-4111-8111-111111111111" as UserId
 const accountId = "64df1a2b3c4d5e6f78901234" as AccountId
 const phone = "+18765550100" as PhoneNumber
-const own = (file: string) => `id_documents/alice_${file}`
+const own = (file: string) => `id_documents/alice/${file}`
 
 const baseAccount = {
   id: accountId,
@@ -156,7 +156,26 @@ describe("createUpgradeRequest with evidence", () => {
     const result = await createUpgradeRequest(accountId, {
       ...input,
       evidence: [
-        { type: UpgradeEvidenceType.IdFront, fileKey: "id_documents/bob_front.jpg" },
+        { type: UpgradeEvidenceType.IdFront, fileKey: "id_documents/bob/front.jpg" },
+      ],
+    })
+
+    expect(result).toBeInstanceOf(ValidationError)
+    expect(mockGetUpgradeRequestList).not.toHaveBeenCalled()
+    expect(mockPostUpgradeRequest).not.toHaveBeenCalled()
+  })
+
+  // Regression: `alice` must not be able to claim `alice_smith`'s upload by
+  // exploiting the shared `_`/username-boundary ambiguity (see
+  // domain/accounts/upgrade-evidence.spec.ts for the unit-level pin).
+  it("rejects an upload whose username merely starts with this account's username", async () => {
+    const result = await createUpgradeRequest(accountId, {
+      ...input,
+      evidence: [
+        {
+          type: UpgradeEvidenceType.IdFront,
+          fileKey: "id_documents/alice_smith_front.jpg",
+        },
       ],
     })
 

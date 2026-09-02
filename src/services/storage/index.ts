@@ -93,7 +93,11 @@ export const generateIdDocumentUploadUrl = async ({
       }
 
       const sanitizedFilename = filename.replace(/[^a-zA-Z0-9.-]/g, "_")
-      const objectKey = `id_documents/${username}_${sanitizedFilename}`
+      // `/` (not `_`) separates the username from the filename: usernames may
+      // contain underscores, so `_` would make the ownership prefix check in
+      // domain/accounts/upgrade-evidence.ts ambiguous between accounts whose
+      // usernames overlap that way. See idDocumentKeyPrefixForUsername.
+      const objectKey = `id_documents/${username}/${sanitizedFilename}`
 
       try {
         const command = new PutObjectCommand({

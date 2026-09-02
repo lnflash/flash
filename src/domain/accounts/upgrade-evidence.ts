@@ -34,11 +34,21 @@ export const isUpgradeEvidenceType = (value: unknown): value is UpgradeEvidenceT
   (UPGRADE_EVIDENCE_TYPES as readonly string[]).includes(value)
 
 // Where the storage service puts every ID document (services/storage):
-// `id_documents/<username>_<filename>`.
+// `id_documents/<username>/<filename>`.
+//
+// The separator between the username and the filename MUST be a character
+// `UsernameRegex` (src/domain/accounts/index.ts) cannot produce — currently
+// `/`. Usernames are user-chosen and may contain underscores, so an
+// underscore delimiter is ambiguous: a user with username `U1` could always
+// find (or register) some `U2 = U1_<suffix>` and have
+// `id_documents/U1_` accepted as a "same account" prefix of U2's real key
+// `id_documents/U1_<suffix>_<file>`, i.e. the ownership check below would
+// pass on someone else's upload. `/` closes that off structurally, since no
+// valid username can ever introduce an extra path segment.
 export const ID_DOCUMENTS_PREFIX = "id_documents/"
 
 export const idDocumentKeyPrefixForUsername = (username: string) =>
-  `${ID_DOCUMENTS_PREFIX}${username}_`
+  `${ID_DOCUMENTS_PREFIX}${username}/`
 
 export type UpgradeEvidenceInput = {
   type: UpgradeEvidenceType
