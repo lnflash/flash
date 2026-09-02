@@ -39,12 +39,15 @@ describe("config schema", () => {
     })
 
     it("seeds the sms auth blocklist with the attack-origin countries", () => {
-      expect(smsDefault).toHaveLength(25)
+      expect(smsDefault).toHaveLength(24)
+      // SN removed 2026-09-02: Senegal is a served market (US virtual account).
+      expect(smsDefault).not.toContain("SN")
       expect(smsDefault).toEqual(expect.arrayContaining(["UZ", "TR"]))
     })
 
     it("seeds the whatsapp auth blocklist with the attack-origin countries", () => {
-      expect(whatsAppDefault).toHaveLength(25)
+      expect(whatsAppDefault).toHaveLength(24)
+      expect(whatsAppDefault).not.toContain("SN")
       expect(whatsAppDefault).toEqual(expect.arrayContaining(["UZ", "TR"]))
     })
 
