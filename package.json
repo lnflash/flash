@@ -34,7 +34,8 @@
     "bridge-webhook": ". ./.env && ts-node --transpile-only -r tsconfig-paths/register src/servers/bridge-webhook-server.ts --configPath dev/config/base-config.yaml",
     "fygaro-webhook": ". ./.env && ts-node --transpile-only -r tsconfig-paths/register src/servers/fygaro-webhook-server.ts --configPath dev/config/base-config.yaml",
     "replay-bridge-events": "yarn build && node lib/scripts/replay-bridge-events.js",
-    "reconcile-bridge-ibex-deposits": "yarn build && node lib/scripts/reconcile-bridge-ibex-deposits.js"
+    "reconcile-bridge-ibex-deposits": "yarn build && node lib/scripts/reconcile-bridge-ibex-deposits.js",
+    "retry-deferred-referral-rewards": "yarn build && node lib/scripts/retry-deferred-referral-rewards.js"
   },
   "engines": {
     "node": ">=24.0.0 <25"
