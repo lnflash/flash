@@ -20,6 +20,7 @@ import {
   UnknownPhoneProviderServiceError,
   UnsubscribedRecipientPhoneProviderError,
 } from "@domain/phone-provider"
+import { maskPhone } from "@services/alerts/ops-events"
 import { baseLogger } from "@services/logger"
 
 import { TestAccountsChecker } from "@domain/accounts/test-accounts-checker"
@@ -31,6 +32,49 @@ import { isAxiosError } from "axios"
 import { wrapAsyncFunctionsToRunInSpan } from "./tracing"
 
 export const TWILIO_ACCOUNT_TEST = "AC_twilio_id"
+
+// Service-wide send cap, enforced by Twilio (Verify Programmable Rate Limits).
+//
+// The 2026-09-02 09:04Z SMS-pumping probe fired 392 OTP requests in one
+// minute from 364 rotating IPs; per-IP and per-number limits are blind to that
+// shape, and the Verify geo-permission allowlist that caught most of it is
+// being opened for global signups. A rate limit keyed on a CONSTANT value
+// applies to every send regardless of IP or destination, so the service can
+// never send faster than the buckets allow. Configured on the Flash Verify
+// service: unique_name `global_sends`, buckets 40 per 60s and 600 per 3600s
+// (legitimate peak on 2026-09-01 was 18 per minute).
+//
+// Twilio only enforces a programmable rate limit when the verification request
+// carries its key, so this must go on every send. Whether Twilio rejects a
+// request whose key names a rate limit that no longer exists on the service
+// is not documented; do not delete the rate limit without redeploying without
+// this key.
+export const VERIFY_GLOBAL_SEND_CAP_KEY = "global_sends"
+export const VERIFY_GLOBAL_SEND_CAP_VALUE = "all"
+
+// Twilio answers an exhausted Verify rate-limit bucket (built-in per-number or
+// programmable) with HTTP 429 and error 60203 "Max send attempts reached".
+// Twilio also answers its unrelated "Too many concurrent requests" throttle
+// with HTTP 429 (a different, undocumented-here error code). We still treat
+// any 429 as a rate-limit rejection — Twilio's error text/codes for the
+// bucket case have drifted before.
+//
+// Critically, 60203 does NOT confirm the global_sends cap tripped: Twilio
+// returns the exact same code for its built-in per-number Verify limit,
+// which a single legitimate user hits just by mashing "resend code" — a
+// routine, frequent event, unlike an actual attack tripping the
+// service-wide cap. There is no code-level signal in Twilio's response
+// that distinguishes which bucket exhausted, so never attach the
+// global_sends key or framing to any 429/60203 rejection below — doing so
+// would misdiagnose ordinary per-number throttling as the send cap tripping.
+const TWILIO_RATE_LIMIT_HTTP_STATUS = 429
+const TWILIO_RATE_LIMIT_ERROR_CODE = 60203
+
+const isTwilioRateLimitRejection = (err: unknown): boolean => {
+  if (!err || typeof err !== "object") return false
+  const { status, code } = err as { status?: unknown; code?: unknown }
+  return status === TWILIO_RATE_LIMIT_HTTP_STATUS || code === TWILIO_RATE_LIMIT_ERROR_CODE
+}
 
 export const TwilioClient = (): IPhoneProviderService => {
   const accountSid = TWILIO_ACCOUNT_SID
@@ -48,8 +92,36 @@ export const TwilioClient = (): IPhoneProviderService => {
     channel: ChannelType
   }): Promise<true | PhoneProviderServiceError> => {
     try {
-      await verify.verifications.create({ to, channel })
+      await verify.verifications.create({
+        to,
+        channel,
+        rateLimits: { [VERIFY_GLOBAL_SEND_CAP_KEY]: VERIFY_GLOBAL_SEND_CAP_VALUE },
+      })
     } catch (err) {
+      if (isTwilioRateLimitRejection(err)) {
+        // One line per rejection is fine here: the cap itself bounds how many
+        // of these a probe can produce. Not an ops-feed event on purpose — a
+        // per-rejection embed would evict the rest of the feed during exactly
+        // the burst this exists for (see the coalescing in request-code.ts).
+        const { status, code } = err as { status?: unknown; code?: unknown }
+        // No code Twilio returns (60203 included) distinguishes the
+        // global_sends cap from its built-in per-number Verify limit, so
+        // never claim the global_sends cause or key here — an on-call
+        // engineer grepping this line during ordinary per-number
+        // throttling would otherwise misdiagnose it as the send cap
+        // tripping. See the comment above TWILIO_RATE_LIMIT_HTTP_STATUS.
+        baseLogger.warn(
+          {
+            to: maskPhone(to),
+            channel,
+            twilioStatus: status,
+            twilioCode: code,
+          },
+          "verify send rejected with HTTP 429 (rate limit, cause unconfirmed — not necessarily the global send cap)",
+        )
+        return new PhoneProviderRateLimitExceededError(parseErrorMessageFromUnknown(err))
+      }
+
       baseLogger.error({ err }, "impossible to send text")
       return handleCommonErrors(err)
     }
