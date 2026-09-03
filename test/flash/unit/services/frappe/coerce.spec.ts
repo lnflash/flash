@@ -1,10 +1,10 @@
 /**
- * The two ERPNext field coercions are shared by every raw-doctype reader
- * (fee-discounts, fygaro-settings). They used to be copy-pasted per reader;
- * these cases pin the contract in one place so teaching one reader a new
- * encoding cannot silently diverge from the other.
+ * The ERPNext field coercions are shared by every raw-doctype reader
+ * (fee-discounts, fygaro-settings, allowed-countries). They used to be
+ * copy-pasted per reader; these cases pin the contract in one place so
+ * teaching one reader a new encoding cannot silently diverge from the other.
  */
-import { toBoolean, toFiniteNumber } from "@services/frappe/coerce"
+import { toAlpha2, toBoolean, toFiniteNumber } from "@services/frappe/coerce"
 
 describe("toFiniteNumber", () => {
   it.each([
@@ -51,5 +51,35 @@ describe("toBoolean", () => {
     ['"Yes"', "Yes"],
   ])("treats %s as false", (_label, input) => {
     expect(toBoolean(input)).toBe(false)
+  })
+})
+
+// One rule for every place a country code enters the system: an ERPNext row,
+// a config list entry, a Twilio Lookup result, a parsed phone number. The
+// Bridge KYC gate and the Allowed Country reader both call this, so a code
+// that passes one cannot fail the other.
+describe("toAlpha2", () => {
+  it.each([
+    ["JM", "JM"],
+    ["jm", "JM"],
+    ["  us ", "US"],
+    ["Gb", "GB"],
+  ])("normalises %p to %p", (input, expected) => {
+    expect(toAlpha2(input)).toBe(expected)
+  })
+
+  it.each([
+    ["an empty string", ""],
+    ["a blank string", "   "],
+    ["an alpha-3 code", "JAM"],
+    ["a single letter", "J"],
+    ["a digit", "J1"],
+    ["a calling code", "+1"],
+    ["null", null],
+    ["undefined", undefined],
+    ["a number", 1],
+    ["an object", {}],
+  ])("returns undefined for %s", (_label, input) => {
+    expect(toAlpha2(input)).toBeUndefined()
   })
 })

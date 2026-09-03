@@ -108,6 +108,16 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = `Account does not exist for id ${error.message}`
       return new NotFoundError({ message, logger: baseLogger })
 
+    // Same shape as the id/uuid/username siblings: a not-found for whichever
+    // user the caller looked up. Admin lookups (accountDetailsByUserPhone,
+    // accountDetailsByUserEmail) resolve OTHER users through findByUserId, so
+    // this must never read as "your session is unauthenticated". The one site
+    // that knows the missing account is the caller's own is the session
+    // middleware, which raises AuthenticationError itself.
+    case "CouldNotFindAccountFromKratosIdError":
+      message = `Account does not exist for user id ${error.message}`
+      return new NotFoundError({ message, logger: baseLogger })
+
     case "CouldNotFindAccountFromUuidError":
       message = `Account does not exist for uuid ${error.message}`
       return new NotFoundError({ message, logger: baseLogger })
@@ -527,6 +537,21 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "PhoneAlreadyExistsError":
       return new PhoneAlreadyExistsError({ logger: baseLogger })
 
+    // The pre-persist registration hook refused the number (unparsable, or
+    // carrier metadata failed validation). A policy answer, not a bug: it
+    // must not fall into the catch-all that tells the user to retry.
+    case "PhoneNotAllowedForRegistrationError":
+      message = "This phone number can't be used to sign up"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    // Same hook, phone already bound to a users document. The caller is on the
+    // sign-up path with no account and no session, so this must not reuse
+    // PhoneAlreadyExistsError's "one phone per account" text.
+    case "PhoneAlreadyRegisteredError":
+      message =
+        "This phone number is already registered. Contact support if you can't sign in"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
     case "EmailAlreadyExistsError":
       return new EmailAlreadyExistsError({ logger: baseLogger })
 
@@ -590,6 +615,32 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = error.message || "Bridge requires at least a Personal account (Level 1+)"
       return bridgeGqlError({
         code: "BRIDGE_ACCOUNT_LEVEL_ERROR",
+        message,
+      })
+
+    case "BridgeKycEmailNotVerifiedError":
+      message =
+        error.message ||
+        "Verify your email address before starting identity verification."
+      return bridgeGqlError({
+        code: "BRIDGE_KYC_EMAIL_NOT_VERIFIED",
+        message,
+      })
+
+    case "BridgeKycCountryNotSupportedError":
+      message =
+        error.message || "US virtual accounts aren't available in your country yet."
+      return bridgeGqlError({
+        code: "BRIDGE_KYC_COUNTRY_NOT_SUPPORTED",
+        message,
+      })
+
+    case "BridgeKycPhoneRequiredError":
+      message =
+        error.message ||
+        "Add and verify a phone number before starting identity verification."
+      return bridgeGqlError({
+        code: "BRIDGE_KYC_PHONE_REQUIRED",
         message,
       })
 
@@ -855,7 +906,6 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "CouldNotFindTransactionMetadataError":
     case "CouldNotFindExpectedTransactionMetadataError":
     case "InvalidDocumentIdForDbError":
-    case "DuplicateKeyForPersistError":
     case "MismatchedResultForTransactionMetadataQuery":
     case "InvalidLedgerTransactionId":
     case "MultiplePendingPaymentsForHashError":
@@ -894,7 +944,6 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "InvalidCurrencyBaseAmountError":
     case "NoTransactionToUpdateError":
     case "BalanceLessThanZeroError":
-    case "CouldNotFindAccountFromKratosIdError":
     case "MissingPhoneError":
     case "InvalidUserId":
     case "InvalidLightningPaymentFlowBuilderStateError":
@@ -946,6 +995,7 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "MissingTotpKratosError":
     case "IncompatibleSchemaUpgradeError":
     case "UnknownKratosError":
+    case "RegistrationHookFailedError":
     case "BriaEventError":
     case "BriaPayloadError":
     case "KratosError":
@@ -973,6 +1023,13 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = `Unexpected error occurred, please try again or contact support if it persists (code: ${
         error.name
       }${error.message ? ": " + error.message : ""})`
+      return new UnexpectedClientError({ message, logger: baseLogger })
+
+    // parseRepositoryError keeps the Mongo driver text on this error for logs
+    // and spans. It names internal collections, indexes and the colliding
+    // value, so unlike the catch-all above the message is not interpolated.
+    case "DuplicateKeyForPersistError":
+      message = `Unexpected error occurred, please try again or contact support if it persists (code: ${error.name})`
       return new UnexpectedClientError({ message, logger: baseLogger })
 
     case "MissingSessionIdError":

@@ -15,6 +15,7 @@ import {
   CashoutSubmitError,
   ExchangeRateQueryError,
   FeeDiscountQueryError,
+  AllowedCountryQueryError,
   FygaroSettingsQueryError,
   ReferralSettingsQueryError,
   FygaroTopupHistoryQueryError,
@@ -154,6 +155,12 @@ export type FeeDiscountDoc = {
   applies_to_topup?: number | boolean | string
   applies_to_cashout?: number | boolean | string
   active?: number | boolean | string
+}
+
+export type AllowedCountryDoc = {
+  alpha2_code?: string
+  country_name?: string
+  flash_allowed?: number | boolean | string
 }
 
 export class ErpNext {
@@ -528,6 +535,41 @@ export class ErpNext {
         attributes: { "erpnext.exception": responseData?.exception },
       })
       return new ReferralSettingsQueryError(err)
+    }
+  }
+
+  // Countries whose residents Bridge can issue Flash a USD virtual account
+  // for: the ERPNext "Allowed Country" doctype rows ops have ticked
+  // `flash_allowed`. Read by the bridgeInitiateKyc country gate. Only the
+  // allowed rows are fetched; `flash_allowed` is fetched as well as filtered
+  // on so the reader can re-check it (a dropped filter must not turn the
+  // allowlist into "every country").
+  async getAllowedCountries(): Promise<AllowedCountryDoc[] | AllowedCountryQueryError> {
+    try {
+      const fields = JSON.stringify(["alpha2_code", "country_name", "flash_allowed"])
+      const filters = JSON.stringify([["flash_allowed", "=", 1]])
+      const resp = await axios.get(
+        `${this.url}/api/resource/${encodeURIComponent("Allowed Country")}`,
+        {
+          params: { filters, fields, limit_page_length: 1000 },
+          headers: this.headers,
+        },
+      )
+      const data = resp.data?.data
+      if (!Array.isArray(data))
+        return new AllowedCountryQueryError("No data in Allowed Country response")
+      return data as AllowedCountryDoc[]
+    } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error(
+        { err, responseData },
+        "Error querying Allowed Country from ERPNext",
+      )
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
+      return new AllowedCountryQueryError(err)
     }
   }
 

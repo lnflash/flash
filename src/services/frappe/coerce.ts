@@ -9,7 +9,8 @@
  * soft the divergence would be silent.
  *
  * Consumers: fee-discounts.ts, fygaro/webhook-server/fygaro-settings.ts,
- * app/invite/referral-settings.ts.
+ * app/invite/referral-settings.ts, allowed-countries.ts (and, for the same
+ * alpha-2 rule, app/bridge/kyc-gate.ts).
  */
 
 /**
@@ -30,3 +31,18 @@ export const toFiniteNumber = (value: unknown): number | undefined => {
 /** ERPNext Check fields come back as 1/0; be liberal about truthy encodings. */
 export const toBoolean = (value: unknown): boolean =>
   value === 1 || value === true || value === "1"
+
+const ALPHA2 = /^[A-Z]{2}$/
+
+/**
+ * Normalise a value that should be an ISO 3166-1 alpha-2 country code to its
+ * canonical upper-case form, or undefined for anything else (blank, padded
+ * garbage, alpha-3, digits, non-strings). One rule for every place a country
+ * code enters the system — an ERPNext row, a config list entry, a Twilio
+ * Lookup result — so none of them can drift on what "a code" means.
+ */
+export const toAlpha2 = (value: unknown): string | undefined => {
+  if (typeof value !== "string") return undefined
+  const code = value.trim().toUpperCase()
+  return ALPHA2.test(code) ? code : undefined
+}

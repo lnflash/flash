@@ -42,6 +42,11 @@ rewrite_flash_quickstart_hosts() {
 
 rewrite_flash_quickstart_hosts
 
+# Upstream galoy ships the pre-persist registration hook commented out; the
+# api needs it live or rejected sign-ups leave orphaned identities (see the
+# script header). Must run after the host rewrite: it anchors on the flash host.
+"${REPO_ROOT}/quickstart/bin/splice-kratos-preregistration-hook.sh" dev/ory/kratos.yml
+
 ytt -f ./docker-compose.tmpl.yml -f ${GALOY_ROOT_DIR}/docker-compose.yml -f ${GALOY_ROOT_DIR}/docker-compose.override.yml > docker-compose.yml
 
 pushd ${GALOY_ROOT_DIR}

@@ -75,13 +75,33 @@ type RegistrationPayload = {
   phone: PhoneNumber
   phoneMetadata: PhoneMetadata | undefined
 }
+type RawPhoneMetadataPayload = Record<string, string | Record<string, string>>
+
 type RegistrationPayloadValidator = {
   validate(rawBody: {
     identity_id?: string
     phone?: string
     schema_id?: string
-    transient_payload?: { phoneMetadata?: Record<string, Record<string, string>> }
+    transient_payload?: { phoneMetadata?: RawPhoneMetadataPayload }
   }): RegistrationPayload | ValidationError
+}
+
+// What the pre-persist registration hook can know: the identity has no id yet
+// (Kratos sends the nil uuid), so only the phone and its metadata are checked.
+type PreRegistrationPayload = {
+  phone: PhoneNumber
+  phoneMetadata: PhoneMetadata | undefined
+}
+
+type PreRegistrationPayloadValidator = {
+  validate(rawBody: {
+    identity_id?: string | null
+    phone?: string
+    schema_id?: string
+    transient_payload?: { phoneMetadata?: RawPhoneMetadataPayload } | null
+    flow_id?: string | null
+    flow_type?: string | null
+  }): PreRegistrationPayload | ValidationError
 }
 
 interface IAuthWithPhonePasswordlessService {

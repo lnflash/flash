@@ -21,6 +21,7 @@ import axios from "axios"
 import { recordExceptionInCurrentSpan } from "@services/tracing"
 import { ErpNext } from "@services/frappe/ErpNext"
 import {
+  AllowedCountryQueryError,
   FeeDiscountQueryError,
   ReferralSettingsQueryError,
 } from "@services/frappe/errors"
@@ -521,6 +522,66 @@ describe("ErpNext.completeBridgeTopupByTxHash", () => {
     const result = await client.completeBridgeTopupByTxHash({ txHash: "tx_123" })
 
     expect(result).toBeInstanceOf(Error)
+  })
+})
+
+// The Bridge KYC country gate reads this. allowed-countries.spec.ts mocks
+// the whole method, so these are the only cases that would go red if the
+// query shape regressed — and a regression here degrades silently to the
+// config fallback, not to an error the gate would surface.
+describe("ErpNext.getAllowedCountries", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+  })
+
+  it("returns the raw rows", async () => {
+    const rows = [
+      { alpha2_code: "JM", country_name: "Jamaica", flash_allowed: 1 },
+      { alpha2_code: "US", country_name: "United States", flash_allowed: 1 },
+    ]
+    mockedAxios.get.mockResolvedValue({ data: { data: rows } })
+
+    const result = await client.getAllowedCountries()
+
+    expect(result).toEqual(rows)
+  })
+
+  it("asks for only the flash_allowed rows, with the fields the reader re-checks, uncapped", async () => {
+    mockedAxios.get.mockResolvedValue({ data: { data: [] } })
+
+    await client.getAllowedCountries()
+
+    const [url, config] = mockedAxios.get.mock.calls[0]
+    expect(url).toBe("https://erp.example/api/resource/Allowed%20Country")
+    expect(JSON.parse(config.params.filters)).toEqual([["flash_allowed", "=", 1]])
+    // flash_allowed is fetched as well as filtered on: validateAllowedCountryDoc
+    // re-checks it, so a lost filter cannot turn the allowlist into "every
+    // country".
+    expect(JSON.parse(config.params.fields)).toEqual([
+      "alpha2_code",
+      "country_name",
+      "flash_allowed",
+    ])
+    // Frappe's default page is 20 rows; a capped read would silently drop
+    // countries from the allowlist.
+    expect(config.params.limit_page_length).toBeGreaterThanOrEqual(250)
+    expect(config.headers).toEqual(client.headers)
+  })
+
+  it("returns AllowedCountryQueryError when the response has no data array", async () => {
+    mockedAxios.get.mockResolvedValue({ data: {} })
+
+    const result = await client.getAllowedCountries()
+
+    expect(result).toBeInstanceOf(AllowedCountryQueryError)
+  })
+
+  it("returns AllowedCountryQueryError when the read fails", async () => {
+    mockedAxios.get.mockRejectedValue(new Error("erpnext down"))
+
+    const result = await client.getAllowedCountries()
+
+    expect(result).toBeInstanceOf(AllowedCountryQueryError)
   })
 })
 

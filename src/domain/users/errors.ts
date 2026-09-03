@@ -13,6 +13,6 @@ export class InvalidPhoneMetadataForOnboardingError extends UnauthorizedPhoneErr
 }
 
 export class PhoneMetadataValidationError extends ValidationError {}
-export class InvalidCarrierForPhoneMetadataError extends ValidationError {}
-export class InvalidCarrierTypeForPhoneMetadataError extends ValidationError {}
-export class InvalidCountryCodeForPhoneMetadataError extends ValidationError {}
+export class InvalidCarrierForPhoneMetadataError extends PhoneMetadataValidationError {}
+export class InvalidCarrierTypeForPhoneMetadataError extends PhoneMetadataValidationError {}
+export class InvalidCountryCodeForPhoneMetadataError extends PhoneMetadataValidationError {}

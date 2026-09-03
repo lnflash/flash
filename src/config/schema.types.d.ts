@@ -57,6 +57,19 @@ type BridgeWithdrawalFeeEstimateConfig = {
   ethUsdFallback?: number
 }
 
+type BridgeKycCountryAllowlistSource = "config" | "erpnext"
+
+type BridgeKycCountryAllowlistConfig = {
+  enabled: boolean
+  source: BridgeKycCountryAllowlistSource
+  defaultCountries: string[]
+}
+
+type BridgeKycGateConfig = {
+  requireVerifiedEmail: boolean
+  countryAllowlist: BridgeKycCountryAllowlistConfig
+}
+
 type BridgeConfig = {
   enabled: boolean
   apiKey: string
@@ -65,6 +78,7 @@ type BridgeConfig = {
   developerFeePercent: number
   withdrawalFeeEstimate?: BridgeWithdrawalFeeEstimateConfig
   timeoutMs?: number
+  kycGate: BridgeKycGateConfig
   webhook: BridgeWebhook
 }
 
