@@ -4,7 +4,8 @@
 // full Twilio retention window, and each was a source of the 2026-08-25
 // SMS-pumping attack. Countries with even one real signup (JM, US, NG, IN, GB,
 // CA, DE, GH, KY, BJ, RW, SD, CD, MV, BD, BE, UG, TT, ML, CO, SK) are absent by
-// design: this is a fraud control, not a market policy.
+// design: this is a fraud control, not a market policy. SN was removed on
+// 2026-09-02: Senegal (Dakar) is a served market for the US virtual account.
 //
 // INVARIANT — no entry may share a calling code with a region that is NOT
 // blocked. `checkAuthCodeDestination` cannot always name the region of a number
@@ -45,7 +46,6 @@ export const SMS_PUMPING_HIGH_RISK_COUNTRIES = [
   "XK",
   "GN",
   "SL",
-  "SN",
   "CM",
   "MZ",
   "CF",
