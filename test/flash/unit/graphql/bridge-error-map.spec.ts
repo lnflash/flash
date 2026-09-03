@@ -9,6 +9,9 @@ import {
   BridgeInsufficientFundsError,
   BridgeInvalidAmountError,
   BridgeInvalidPlaidTokenError,
+  BridgeKycCountryNotSupportedError,
+  BridgeKycEmailNotVerifiedError,
+  BridgeKycPhoneRequiredError,
   BridgeKycOffboardedError,
   BridgeKycPendingError,
   BridgeKycRejectedError,
@@ -28,6 +31,12 @@ describe("error-map: Bridge errors", () => {
     [new BridgeBelowMinimumWithdrawalError(10), "BRIDGE_BELOW_MINIMUM_WITHDRAWAL"],
     [new BridgeDisabledError(), "BRIDGE_DISABLED"],
     [new BridgeAccountLevelError(), "BRIDGE_ACCOUNT_LEVEL_ERROR"],
+    [new BridgeKycEmailNotVerifiedError(), "BRIDGE_KYC_EMAIL_NOT_VERIFIED"],
+    [
+      new BridgeKycCountryNotSupportedError({ countryCode: "IN", countryName: "India" }),
+      "BRIDGE_KYC_COUNTRY_NOT_SUPPORTED",
+    ],
+    [new BridgeKycPhoneRequiredError(), "BRIDGE_KYC_PHONE_REQUIRED"],
     [new BridgeKycPendingError(), "BRIDGE_KYC_PENDING"],
     [new BridgeKycRejectedError(), "BRIDGE_KYC_REJECTED"],
     [new BridgeKycOffboardedError(), "BRIDGE_KYC_OFFBOARDED"],
@@ -57,6 +66,26 @@ describe("error-map: Bridge errors", () => {
     expect(result.code).toBe(expectedCode)
     expect(result.code).not.toBe("INVALID_INPUT")
     expect(result.message).toBeTruthy()
+  })
+
+  it("keeps the KYC gate messages verbatim for the app to show", () => {
+    expect(mapError(new BridgeKycEmailNotVerifiedError()).message).toBe(
+      "Verify your email address before starting identity verification.",
+    )
+    expect(
+      mapError(
+        new BridgeKycCountryNotSupportedError({
+          countryCode: "IN",
+          countryName: "India",
+        }),
+      ).message,
+    ).toBe("US virtual accounts aren't available in India yet.")
+    expect(
+      mapError(new BridgeKycCountryNotSupportedError({ countryCode: "ZZ" })).message,
+    ).toBe("US virtual accounts aren't available in ZZ yet.")
+    expect(mapError(new BridgeKycPhoneRequiredError()).message).toBe(
+      "Add and verify a phone number before starting identity verification.",
+    )
   })
 })
 

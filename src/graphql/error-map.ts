@@ -618,6 +618,32 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         message,
       })
 
+    case "BridgeKycEmailNotVerifiedError":
+      message =
+        error.message ||
+        "Verify your email address before starting identity verification."
+      return bridgeGqlError({
+        code: "BRIDGE_KYC_EMAIL_NOT_VERIFIED",
+        message,
+      })
+
+    case "BridgeKycCountryNotSupportedError":
+      message =
+        error.message || "US virtual accounts aren't available in your country yet."
+      return bridgeGqlError({
+        code: "BRIDGE_KYC_COUNTRY_NOT_SUPPORTED",
+        message,
+      })
+
+    case "BridgeKycPhoneRequiredError":
+      message =
+        error.message ||
+        "Add and verify a phone number before starting identity verification."
+      return bridgeGqlError({
+        code: "BRIDGE_KYC_PHONE_REQUIRED",
+        message,
+      })
+
     case "BridgeKycPendingError":
       message = "KYC verification is pending"
       return bridgeGqlError({

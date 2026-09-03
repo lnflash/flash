@@ -73,6 +73,41 @@ export class BridgeAccountLevelError extends BridgeError {
   }
 }
 
+// bridgeInitiateKyc gate (config `bridge.kycGate`). Messages are shown to the
+// user verbatim by the mobile app, so they read as instructions, not faults.
+export class BridgeKycEmailNotVerifiedError extends BridgeError {
+  constructor(
+    message: string = "Verify your email address before starting identity verification.",
+  ) {
+    super(message)
+  }
+}
+
+export class BridgeKycCountryNotSupportedError extends BridgeError {
+  readonly countryCode: string
+  readonly countryName: string | undefined
+
+  constructor({
+    countryCode,
+    countryName,
+  }: {
+    countryCode: string
+    countryName?: string
+  }) {
+    super(`US virtual accounts aren't available in ${countryName || countryCode} yet.`)
+    this.countryCode = countryCode
+    this.countryName = countryName
+  }
+}
+
+export class BridgeKycPhoneRequiredError extends BridgeError {
+  constructor(
+    message: string = "Add and verify a phone number before starting identity verification.",
+  ) {
+    super(message)
+  }
+}
+
 export class BridgeBelowMinimumWithdrawalError extends BridgeError {
   constructor(minimum: number) {
     super(`Withdrawal amount is below the minimum of ${minimum} USDT`)

@@ -15,4 +15,5 @@ export class ExchangeRateQueryError extends ErpNextError {}
 export class BridgeTransferRequestUpsertError extends ErpNextError {}
 export class FygaroSettingsQueryError extends ErpNextError {}
 export class FeeDiscountQueryError extends ErpNextError {}
+export class AllowedCountryQueryError extends ErpNextError {}
 export class FygaroTopupHistoryQueryError extends ErpNextError {}
