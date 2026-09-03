@@ -9,9 +9,15 @@ import {
 } from "@services/frappe/models/AccountUpgradeRequest"
 import { BankAccount } from "@services/frappe/models/BankAccount"
 import { DomainError, ValidationError } from "@domain/shared"
-import { AccountLevel } from "@domain/accounts"
+import { AccountLevel, UpgradeEvidenceInput, legacyIdDocumentKey } from "@domain/accounts"
 import { SetDocTypeValueError, UpgradeRequestQueryError } from "@services/frappe/errors"
 import { SearchFilter } from "@services/frappe/SearchFilters"
+
+import {
+  maybeSnapshotBridgeCustomer,
+  prepareUpgradeEvidence,
+  recordIdVerification,
+} from "./record-id-verification"
 
 type RequestId = string & { __brand: "UpgradeRequestId" }
 type UpgradeStatusResponse = {
@@ -39,6 +45,9 @@ type ProUpgradeRequest = {
   terminalsRequested: number
   bankAccount?: BankAccount
   idDocument: string
+  // Structured identity evidence (docs/id-verification.md). Optional: the
+  // legacy idDocument key alone is still accepted.
+  evidence?: UpgradeEvidenceInput[] | null
 }
 
 type MerchantUpgradeRequest = {
@@ -51,6 +60,7 @@ type MerchantUpgradeRequest = {
   // in ERPNext (ENG-516 capability flow), in which case none is re-submitted.
   bankAccount?: BankAccount
   idDocument: string
+  evidence?: UpgradeEvidenceInput[] | null
 }
 
 type UpgradeRequest = ProUpgradeRequest | MerchantUpgradeRequest
@@ -73,6 +83,19 @@ export const createUpgradeRequest = async (
 
   const context = { account, user, kratos: identity }
 
+  const prepared = prepareUpgradeEvidence({
+    account,
+    level: input.level as AccountLevel,
+    evidence: input.evidence,
+    idDocument: input.idDocument,
+  })
+  if (prepared instanceof Error) return prepared
+  const { evidence, bridgeKycApproved } = prepared
+
+  // The legacy field keeps carrying the first ID_FRONT key so the existing
+  // reviewer screen and the public idDocument: Boolean resolver see it.
+  const idDocument = input.idDocument || legacyIdDocumentKey(evidence)
+
   const pendingRequests = await ErpNext.getAccountUpgradeRequestList({
     username: SearchFilter.Eq(account.username),
     status: SearchFilter.Eq(RequestStatus.Pending),
@@ -92,15 +115,29 @@ export const createUpgradeRequest = async (
     input.fullName,
     user.phone as PhoneNumber,
     identity.email as EmailAddress,
-    input.idDocument,
+    idDocument,
     input.address,
     input.terminalsRequested,
     input.bankAccount,
   ).validate(context)
   if (Array.isArray(req)) return new ValidationError(req)
 
+  const bridgeSnapshot = await maybeSnapshotBridgeCustomer({
+    account,
+    evidence,
+    bridgeKycApproved,
+  })
+
   const requestResult = await ErpNext.postUpgradeRequest(req)
   if (requestResult instanceof Error) return requestResult
+
+  await recordIdVerification({
+    upgradeRequestName: requestResult.name,
+    account,
+    evidence,
+    bridgeKycApproved,
+    bridgeSnapshot,
+  })
 
   notifyOpsEvent({
     flow: "upgrade",

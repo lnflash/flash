@@ -5,6 +5,7 @@ import { apolloErrorResponse, mapToGqlErrorList } from "@graphql/error-map"
 import IError from "@graphql/shared/types/abstract/error"
 import { SetDocTypeValueError } from "@services/frappe/errors"
 import { InternalServerError } from "@graphql/error"
+import UpgradeEvidenceInput from "@graphql/public/types/input/upgrade-evidence-input"
 
 import {
   AddressInput,
@@ -31,7 +32,15 @@ const AccountCapabilityUpgradeRequestInput = GT.Input({
     address: { type: GT.NonNull(AddressInput) },
     terminalsRequested: { type: GT.Int, defaultValue: 0 },
     bankAccount: { type: BankAccountInput },
-    idDocument: { type: GT.String },
+    idDocument: {
+      type: GT.String,
+      description:
+        "Storage key of the ID document (legacy). Prefer `evidence`; when both are given the key is folded in as an ID_FRONT row.",
+    },
+    evidence: {
+      type: GT.List(GT.NonNull(UpgradeEvidenceInput)),
+      description: "Structured identity evidence for the request (ID verification tool).",
+    },
   }),
 })
 

@@ -3,6 +3,7 @@ import { ValidationError } from "@domain/shared"
 import {
   AccountLevel,
   RequestableCapability,
+  UpgradeEvidenceInput,
   deriveLevelFromCapabilities,
 } from "@domain/accounts"
 
@@ -18,6 +19,7 @@ export type CapabilityUpgradeRequest = {
   terminalsRequested: number
   bankAccount?: BankAccount
   idDocument?: string
+  evidence?: UpgradeEvidenceInput[] | null
 }
 
 // ENG-516: "add a capability" transition. Instead of the client picking a
@@ -78,6 +80,7 @@ export const requestCapabilityUpgrade = async (
     address: input.address,
     terminalsRequested: input.terminalsRequested,
     idDocument: input.idDocument ?? "",
+    evidence: input.evidence,
   }
 
   if (level === AccountLevel.Three) {

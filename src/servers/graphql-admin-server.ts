@@ -1,8 +1,8 @@
 import { createServer } from "http"
 
 import { applyMiddleware } from "graphql-middleware"
-import { or, rule, shield } from "graphql-shield"
-import { Rule, RuleOr } from "graphql-shield/typings/rules"
+import { shield } from "graphql-shield"
+import { Rule } from "graphql-shield/typings/rules"
 import { baseLogger } from "@services/logger"
 import { setupMongoConnection } from "@services/mongodb"
 import { adminMutationFields, adminQueryFields, gqlAdminSchema } from "@graphql/admin"
@@ -23,7 +23,7 @@ import requestIp from "request-ip"
 
 import jwt from "jsonwebtoken"
 
-import { ErpNextRole, ErpNextRoles } from "@services/frappe/Roles"
+import { buildAdminPermissionRules, hasRole } from "./authorization/admin-permissions"
 
 import { createComplexityPlugin } from "./plugins/complexity"
 import healthzHandler from "./middlewares/healthz"
@@ -52,12 +52,9 @@ function parseAuthHeader(authHeader: string | undefined): JWTPayload {
   }
 }
 
-export const hasRole = (role: ErpNextRole) =>
-  rule({ cache: "contextual" })((parent, args, ctx: GraphQLAdminContext) => {
-    return ctx.user.roles.includes(role)
-      ? true
-      : new AuthorizationError({ logger: graphqlLogger })
-  })
+// Role rules live in ./authorization/admin-permissions; re-exported for
+// existing call sites.
+export { hasRole }
 
 //   // const ipString = UNSECURE_IP_FROM_REQUEST_OBJECT
 //   //   ? req.ip
@@ -223,30 +220,19 @@ const startAdminServer = async ({
 }
 
 export async function startApolloServerForAdminSchema() {
-  const defaultRule = or(
-    hasRole(ErpNextRoles.SystemManager),
-    hasRole(ErpNextRoles.AccountsManager),
-  )
-
-  const authedQueryFields: { [key: string]: RuleOr } = {}
-  for (const key of Object.keys(adminQueryFields.authed)) {
-    authedQueryFields[key] = defaultRule
-  }
-
   const mutationRoleOverrides: { [key: string]: Rule } = {
     // sendNotification: hasRole(ErpNextRoles.SystemManager)
   }
 
-  const authedMutationFields: { [key: string]: Rule | RuleOr } = {}
-  for (const key of Object.keys(adminMutationFields.authed)) {
-    authedMutationFields[key] = mutationRoleOverrides[key] ?? defaultRule
-  }
-
+  // Default: System Manager / Accounts Manager on every field. The
+  // ID-verification reviewer role (Flash Admin) is added only on the explicit
+  // allowlist in ./authorization/admin-permissions.
   const permissions = shield(
-    {
-      Query: authedQueryFields,
-      Mutation: authedMutationFields,
-    },
+    buildAdminPermissionRules({
+      queryFields: Object.keys(adminQueryFields.authed),
+      mutationFields: Object.keys(adminMutationFields.authed),
+      mutationRoleOverrides,
+    }),
     {
       allowExternalErrors: true,
       fallbackError: new AuthorizationError({ logger: baseLogger }),
