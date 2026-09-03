@@ -43,6 +43,11 @@ jest.mock("@app/payments/send-intraledger", () => ({
   intraledgerPaymentSendWalletIdForUsdWallet: (...a: unknown[]) => mockPay(...a),
 }))
 
+const mockErpEnabled = jest.fn()
+jest.mock("@app/invite/referral-settings", () => ({
+  referralRewardsEnabledInErp: (...a: unknown[]) => mockErpEnabled(...a),
+}))
+
 const mockRewardPush = jest.fn()
 jest.mock("@app/invite/send-referral-notifications", () => ({
   sendReferralRewardNotificationBestEffort: (...a: unknown[]) => mockRewardPush(...a),
@@ -89,6 +94,7 @@ const lastSet = () =>
 
 describe("awardReferralRewardOnKycApproval", () => {
   beforeEach(() => {
+    mockErpEnabled.mockResolvedValue(true)
     jest.clearAllMocks()
     mockGetConfig.mockReturnValue({ enabled: true, tiers: DEFAULT_TIERS })
     mockExists.mockResolvedValue(null) // no prior processed invite for the account
@@ -109,6 +115,50 @@ describe("awardReferralRewardOnKycApproval", () => {
     mockGetConfig.mockReturnValue({ enabled: false, tiers: DEFAULT_TIERS })
     await awardReferralRewardOnKycApproval({ accountId: INVITEE })
     expect(mockFindOne).not.toHaveBeenCalled()
+    expect(mockPay).not.toHaveBeenCalled()
+  })
+
+  it("defers (no claim, no failure mark) when the ERPNext kill switch is off", async () => {
+    mockErpEnabled.mockResolvedValue(false)
+
+    await awardReferralRewardOnKycApproval({ accountId: INVITEE })
+
+    // Deferral means the invite is left exactly as found: unclaimed and
+    // retryable. Nothing is claimed, paid, or marked failed — and the log
+    // names a genuinely deferred reward (a pending invite was found first).
+    expect(mockFindOne).toHaveBeenCalled()
+    expect(mockFindOneAndUpdate).not.toHaveBeenCalled()
+    expect(mockPay).not.toHaveBeenCalled()
+    expect(mockUpdateOne).not.toHaveBeenCalled()
+    expect(baseLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: INVITEE }),
+      expect.stringContaining("deferred"),
+    )
+  })
+
+  it("never consults ERP or logs a deferral for a non-referred KYC approval", async () => {
+    // This hook fires on EVERY Bridge KYC approval. With the switch off, an
+    // ops grep for "deferred" must return only genuinely deferred rewards —
+    // accounts with no invite must not touch the ERP reader or log at all.
+    mockErpEnabled.mockResolvedValue(false)
+    mockFindOne.mockResolvedValue(null) // not a referred user
+
+    await awardReferralRewardOnKycApproval({ accountId: INVITEE })
+
+    expect(mockErpEnabled).not.toHaveBeenCalled()
+    expect(baseLogger.info).not.toHaveBeenCalled()
+    expect(mockFindOneAndUpdate).not.toHaveBeenCalled()
+    expect(mockPay).not.toHaveBeenCalled()
+  })
+
+  it("never consults ERP when the account's reward was already processed", async () => {
+    mockErpEnabled.mockResolvedValue(false)
+    mockExists.mockResolvedValue({ _id: "earlier-invite" })
+
+    await awardReferralRewardOnKycApproval({ accountId: INVITEE })
+
+    expect(mockErpEnabled).not.toHaveBeenCalled()
+    expect(baseLogger.info).not.toHaveBeenCalled()
     expect(mockPay).not.toHaveBeenCalled()
   })
 

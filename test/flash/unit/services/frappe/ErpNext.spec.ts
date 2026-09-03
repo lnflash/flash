@@ -18,8 +18,13 @@ jest.mock("@config", () => ({
 }))
 
 import axios from "axios"
+import { recordExceptionInCurrentSpan } from "@services/tracing"
 import { ErpNext } from "@services/frappe/ErpNext"
-import { AllowedCountryQueryError, FeeDiscountQueryError } from "@services/frappe/errors"
+import {
+  AllowedCountryQueryError,
+  FeeDiscountQueryError,
+  ReferralSettingsQueryError,
+} from "@services/frappe/errors"
 import {
   BridgeTransferRequest,
   BridgeTransferRequestStatus,
@@ -33,6 +38,8 @@ const mockedAxios = axios as unknown as {
   post: jest.Mock
   put: jest.Mock
 }
+
+const mockedRecordExceptionInCurrentSpan = recordExceptionInCurrentSpan as jest.Mock
 
 const client = new ErpNext("https://erp.example", "erp.example", {
   apiKey: "key",
@@ -1012,5 +1019,48 @@ describe("ErpNext.getFeeDiscounts", () => {
     mockedAxios.get.mockRejectedValue(new Error("erpnext down"))
 
     expect(await client.getFeeDiscounts()).toBeInstanceOf(FeeDiscountQueryError)
+  })
+})
+
+describe("ErpNext.getReferralSettings", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+  })
+
+  it("returns the doc as-is for the caller to coerce", async () => {
+    mockedAxios.get.mockResolvedValue({ data: { data: { rewards_enabled: 1 } } })
+
+    expect(await client.getReferralSettings()).toEqual({ rewards_enabled: 1 })
+  })
+
+  it("returns an error when the response has no data", async () => {
+    mockedAxios.get.mockResolvedValue({ data: {} })
+
+    expect(await client.getReferralSettings()).toBeInstanceOf(ReferralSettingsQueryError)
+  })
+
+  it("returns the error rather than throwing when the request rejects", async () => {
+    mockedAxios.get.mockRejectedValue(new Error("erpnext down"))
+
+    expect(await client.getReferralSettings()).toBeInstanceOf(ReferralSettingsQueryError)
+  })
+
+  // Consulted before every payout — the kill-switch reader must feed the
+  // same APM/tracing visibility as every other query method in this class
+  // on failure, not just a log line, since it's exactly what's read during
+  // an ERP outage.
+  it("records the exception in the current span when the request rejects", async () => {
+    const err = {
+      isAxiosError: true,
+      response: { status: 500, data: { exception: "InternalServerError" } },
+    }
+    mockedAxios.get.mockRejectedValue(err)
+
+    await client.getReferralSettings()
+
+    expect(mockedRecordExceptionInCurrentSpan).toHaveBeenCalledWith({
+      error: err,
+      attributes: { "erpnext.exception": "InternalServerError" },
+    })
   })
 })
