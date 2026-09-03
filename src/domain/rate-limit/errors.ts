@@ -12,6 +12,7 @@ export class UserCodeAttemptIdentifierRateLimiterExceededError extends RateLimit
 export class UserCodeAttemptIpRateLimiterExceededError extends RateLimiterExceededError {}
 export class UserCodeAttemptBlockedCountryIpRateLimiterExceededError extends RateLimiterExceededError {}
 export class CreateDeviceAccountIpRateLimiterExceededError extends RateLimiterExceededError {}
+export class ConsentLogIpRateLimiterExceededError extends RateLimiterExceededError {}
 export class UserLoginIpRateLimiterExceededError extends RateLimiterExceededError {}
 export class UserLoginIdentifierRateLimiterExceededError extends RateLimiterExceededError {}
 export class InvoiceCreateRateLimiterExceededError extends RateLimiterExceededError {}
