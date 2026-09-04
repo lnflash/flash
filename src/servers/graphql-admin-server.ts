@@ -18,6 +18,7 @@ import { mapError } from "@graphql/error-map"
 import { fieldExtensionsEstimator, simpleEstimator } from "graphql-query-complexity"
 
 import { parseUnknownDomainErrorFromUnknown } from "@domain/shared"
+import { assertStrongSecret } from "@utils/weak-secrets"
 
 import requestIp from "request-ip"
 
@@ -46,7 +47,9 @@ function parseAuthHeader(authHeader: string | undefined): JWTPayload {
   }
   try {
     const token = authHeader.slice(7)
-    return jwt.verify(token, ADMIN_CONFIG.ERPNEXT_JWT_SECRET as string) as JWTPayload // process.env.ERPNEXT_JWT_SECRET
+    return jwt.verify(token, ADMIN_CONFIG.ERPNEXT_JWT_SECRET as string, {
+      algorithms: ["HS256"],
+    }) as JWTPayload
   } catch (error) {
     throw new AuthenticationError({ message: "Invalid Token", logger: graphqlLogger })
   }
@@ -83,6 +86,10 @@ const startAdminServer = async ({
   port: string | number
   type: string
 }): Promise<Record<string, unknown>> => {
+  // Fail closed at boot: the admin API's only auth is this HMAC secret, and a
+  // placeholder value from the public repo would let anyone forge admin JWTs.
+  assertStrongSecret("ERPNEXT_JWT_SECRET", ADMIN_CONFIG.ERPNEXT_JWT_SECRET)
+
   const app = express()
   const httpServer = createServer(app)
 

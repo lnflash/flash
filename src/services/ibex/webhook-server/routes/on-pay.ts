@@ -5,7 +5,7 @@ import rateLimitMiddleware from "express-rate-limit"
 import { WalletsRepository } from "@services/mongoose/wallets"
 import { ZapRequestModel } from "@services/mongoose/zap-request"
 import { LnurlInvoiceModel } from "@services/mongoose/lnurl-invoice"
-import axios from "axios"
+import axios, { AxiosRequestConfig } from "axios"
 import { baseLogger as logger } from "@services/logger"
 import { AccountsRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
@@ -13,6 +13,7 @@ import { ibexWebhookPaths, ibexWebhookEndpoints } from "@services/ibex/webhook-c
 import { extractPaymentHashFromBolt11 } from "@utils"
 
 import { authenticate, logRequest, validateIbexIp } from "../middleware"
+import { ssrfAxiosOptions, validatePublicHttpUrl } from "../ssrf-guard"
 
 const lnurlCorsOptions: CorsOptions = {
   origin: [
@@ -181,15 +182,40 @@ router.get(
       const callbackUrl = decoded.decodedLnurl
       if (!callbackUrl)
         return resp.status(500).json({ error: "Failed to decode lnurl callback URL" })
-      const lnurlResponse = await axios.get(callbackUrl)
+
+      // The lnurlp is user-controlled (updateExternalWallet only checks the
+      // bech32 encoding, not the decoded URL) — every hop is validated before
+      // the server fetches it, or this public route is an SSRF oracle into the
+      // internal network / cloud metadata.
+      const checkedCallbackUrl = await validatePublicHttpUrl(callbackUrl)
+      if (checkedCallbackUrl instanceof Error) {
+        logger.warn(
+          { err: checkedCallbackUrl, username },
+          "LNURL-pay: blocked unsafe callback URL",
+        )
+        return resp.status(502).json({ error: "Invalid lnurl callback URL" })
+      }
+      const lnurlResponse = await axios.get(
+        checkedCallbackUrl.toString(),
+        ssrfAxiosOptions,
+      )
       const invoiceAddress = lnurlResponse.data.callback
+      const checkedInvoiceAddress = await validatePublicHttpUrl(invoiceAddress)
+      if (checkedInvoiceAddress instanceof Error) {
+        logger.warn(
+          { err: checkedInvoiceAddress, username },
+          "LNURL-pay: blocked unsafe invoice callback URL",
+        )
+        return resp.status(502).json({ error: "Invalid lnurl invoice callback URL" })
+      }
       // 3. Call original invoice callback URL to generate invoice
-      const invoiceResp = await axios.get(invoiceAddress, {
+      const invoiceResp = await axios.get(checkedInvoiceAddress.toString(), {
+        ...ssrfAxiosOptions,
         params: {
           amount,
           comment: comment || "Zap payment",
         },
-      })
+      } as AxiosRequestConfig)
       const { pr: bolt11, successAction } = invoiceResp.data
       if (!bolt11) return resp.status(500).json({ error: "Failed to generate invoice" })
 

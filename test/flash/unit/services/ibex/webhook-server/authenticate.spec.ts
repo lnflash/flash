@@ -1,6 +1,16 @@
 jest.mock("@config", () => ({
   IbexConfig: { webhook: { secret: "Kramerica" } },
 }))
+jest.mock("@services/logger", () => {
+  const logger = {
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+    child: jest.fn(() => logger),
+  }
+  return { baseLogger: logger }
+})
 
 import { Request, Response } from "express"
 
@@ -58,7 +68,7 @@ describe("IBEX webhook authenticate middleware", () => {
     }
   })
 
-  it("fails closed when the webhook secret is unconfigured", () => {
+  it("fails closed with 503 when the webhook secret is unconfigured", () => {
     // The old `!==` compare passed when both sides were undefined (or both
     // empty), silently disabling auth on unconfigured deployments.
     const { IbexConfig } = jest.requireMock("@config")
@@ -68,15 +78,40 @@ describe("IBEX webhook authenticate middleware", () => {
       for (const unconfigured of [undefined, ""]) {
         IbexConfig.webhook.secret = unconfigured
 
-        for (const provided of [undefined, ""]) {
+        for (const provided of [undefined, "", unconfigured]) {
           const res = makeRes()
           const next = jest.fn()
 
           authenticate(makeReq(provided), res, next)
 
           expect(next).not.toHaveBeenCalled()
-          expect(res.status).toHaveBeenCalledWith(401)
+          expect(res.status).toHaveBeenCalledWith(503)
         }
+      }
+    } finally {
+      IbexConfig.webhook.secret = configuredSecret
+    }
+  })
+
+  it("fails closed with 503 when the configured secret is a known-public placeholder", () => {
+    // "not-so-secret" ships in this public repo's dev configs — a deployment
+    // that forgot to override it would otherwise authenticate ANYONE, and the
+    // matching request body would be accepted.
+    const { IbexConfig } = jest.requireMock("@config")
+    const configuredSecret = IbexConfig.webhook.secret
+
+    try {
+      for (const weak of ["not-so-secret", "also-not-so-secret", "change-me"]) {
+        IbexConfig.webhook.secret = weak
+
+        const res = makeRes()
+        const next = jest.fn()
+
+        authenticate(makeReq(weak), res, next)
+
+        expect(next).not.toHaveBeenCalled()
+        expect(res.status).toHaveBeenCalledWith(503)
+        expect(res.end).toHaveBeenCalledWith("Webhook secret not configured")
       }
     } finally {
       IbexConfig.webhook.secret = configuredSecret
