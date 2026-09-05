@@ -1,6 +1,9 @@
 import dns from "dns"
+import http from "http"
+import https from "https"
+import { LookupFunction } from "net"
 
-import { AxiosRequestConfig } from "axios"
+import axios, { AxiosRequestConfig, AxiosResponse } from "axios"
 
 // SSRF guard for URLs derived from user-controlled data (e.g. a wallet's
 // stored lnurlp, decoded and then fetched server-side by the LNURL-pay proxy).
@@ -77,7 +80,7 @@ const isPrivateIpv6 = (raw: string): boolean => {
   }
   const first = ip.split(":")[0]
   const firstWord = parseInt(first || "0", 16)
-  if (Number.isNaN(firstWord)) return true // unparseable → treat as unsafe
+  if (Number.isNaN(firstWord)) return true // unparsable → treat as unsafe
   return (
     (firstWord & 0xfe00) === 0xfc00 || // fc00::/7 unique-local
     (firstWord & 0xffc0) === 0xfe80 || // fe80::/10 link-local
@@ -122,7 +125,7 @@ export const validatePublicHttpUrl = async (rawUrl: string): Promise<URL | Error
   try {
     url = new URL(rawUrl)
   } catch {
-    return new SsrfBlockedUrlError(rawUrl, "unparseable URL")
+    return new SsrfBlockedUrlError(rawUrl, "unparsable URL")
   }
 
   const syncError = checkUrlSync(url)
@@ -150,21 +153,87 @@ export const validatePublicHttpUrl = async (rawUrl: string): Promise<URL | Error
   return url
 }
 
-// Axios options for fetching user-derived URLs: bounded redirects, each
-// redirect target re-checked (sync-only — DNS re-check per redirect isn't
-// possible here; the initial host IS DNS-checked), and a hard timeout so a
-// hostile/slow endpoint can't tie up the server.
-export const ssrfAxiosOptions: AxiosRequestConfig = {
-  maxRedirects: 3,
-  timeout: 10_000,
-  beforeRedirect: (options: Record<string, unknown>) => {
-    let url: URL
-    try {
-      url = new URL(String(options.href))
-    } catch {
-      throw new SsrfBlockedUrlError(String(options.href), "unparseable redirect URL")
+// Connect-time DNS validation, plugged into the HTTP(S) agents axios uses.
+// The address handed to the socket is the one that has been checked — this
+// closes the validate-then-fetch TOCTOU where a short-TTL rebind swaps the DNS
+// answer between our async check and axios's own resolution.
+const ssrfLookup: LookupFunction = (hostname, _options, callback) => {
+  dns.promises
+    .lookup(hostname, { all: true, verbatim: true })
+    .then((addresses) => {
+      if (!isDevNetwork()) {
+        for (const { address } of addresses) {
+          if (isPrivateIpLiteral(address)) {
+            callback(
+              new SsrfBlockedUrlError(
+                hostname,
+                `connect-time DNS resolved to private address ${address}`,
+              ) as NodeJS.ErrnoException,
+              "",
+              4,
+            )
+            return
+          }
+        }
+      }
+      if (addresses.length === 0) {
+        callback(
+          new SsrfBlockedUrlError(
+            hostname,
+            "connect-time DNS returned no addresses",
+          ) as NodeJS.ErrnoException,
+          "",
+          4,
+        )
+        return
+      }
+      callback(null, addresses[0].address, addresses[0].family)
+    })
+    .catch((err) => callback(err as NodeJS.ErrnoException, "", 4))
+}
+
+const ssrfAgents = {
+  httpAgent: new http.Agent({ lookup: ssrfLookup }),
+  httpsAgent: new https.Agent({ lookup: ssrfLookup }),
+}
+
+const MAX_REDIRECT_HOPS = 3
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
+
+// Fetch a previously validated URL, following redirects manually: axios's
+// built-in redirect following can only re-check targets synchronously (no
+// DNS), so a public first hop could 302 to a host that resolves into the
+// internal network. Here every hop target goes through the full async
+// validatePublicHttpUrl before being fetched, and the agents above re-validate
+// the resolved address again at connect time.
+export const ssrfFetch = async (
+  url: URL,
+  config: AxiosRequestConfig = {},
+): Promise<AxiosResponse> => {
+  let current = url
+  for (let hop = 0; ; hop++) {
+    const resp = await axios.get(current.toString(), {
+      timeout: 10_000,
+      maxRedirects: 0,
+      // 3xx is not an error here — redirects are followed manually so each
+      // target gets the full async (DNS) validation first.
+      validateStatus: (status) => status >= 200 && status < 400,
+      ...ssrfAgents,
+      ...config,
+    })
+
+    const location: unknown = resp.headers?.location
+    if (!REDIRECT_STATUSES.has(resp.status) || typeof location !== "string") {
+      return resp
     }
-    const err = checkUrlSync(url)
-    if (err) throw err
-  },
+    if (hop >= MAX_REDIRECT_HOPS) {
+      throw new SsrfBlockedUrlError(
+        url.toString(),
+        `too many redirects (limit ${MAX_REDIRECT_HOPS})`,
+      )
+    }
+    const next = await validatePublicHttpUrl(new URL(location, current).toString())
+    if (next instanceof Error) throw next
+    current = next
+  }
 }

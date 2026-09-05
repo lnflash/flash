@@ -157,4 +157,57 @@ describe("GET /pay/lnurl/:username — SSRF guard wiring", () => {
     expect(res.status).not.toHaveBeenCalledWith(502)
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ pr: "lnbc1invoice" }))
   })
+
+  it("blocks a redirect to a literal private IP — the follow-up request is never made", async () => {
+    decodeLnurl.mockResolvedValue({ decodedLnurl: "https://pay.example.com/lnurl" })
+    axiosGet.mockResolvedValueOnce({
+      status: 302,
+      headers: { location: "http://169.254.169.254/latest" },
+    })
+
+    const res = makeRes()
+    await lnurlHandler()(makeReq(), res as unknown as Response)
+
+    expect(axiosGet).toHaveBeenCalledTimes(1) // first hop only — redirect not followed
+    expect(res.status).toHaveBeenCalledWith(502)
+    expect(LnurlInvoiceModel.create).not.toHaveBeenCalled()
+  })
+
+  it("re-validates redirect targets with DNS — a public-looking host resolving inside is blocked", async () => {
+    decodeLnurl.mockResolvedValue({ decodedLnurl: "https://pay.example.com/lnurl" })
+    lookup
+      .mockResolvedValueOnce(PUBLIC_ADDR) // initial URL validation
+      .mockResolvedValueOnce([{ address: "10.0.0.5", family: 4 }]) // redirect hop
+    axiosGet.mockResolvedValueOnce({
+      status: 302,
+      headers: { location: "https://b.example.com/internal" },
+    })
+
+    const res = makeRes()
+    await lnurlHandler()(makeReq(), res as unknown as Response)
+
+    expect(axiosGet).toHaveBeenCalledTimes(1) // redirect target never fetched
+    expect(res.status).toHaveBeenCalledWith(502)
+  })
+
+  it("follows a redirect whose target validates as public and serves the invoice", async () => {
+    decodeLnurl.mockResolvedValue({ decodedLnurl: "https://pay.example.com/lnurl" })
+    axiosGet
+      .mockResolvedValueOnce({
+        status: 302,
+        headers: { location: "https://cdn.example.com/lnurl2" },
+      })
+      .mockResolvedValueOnce({
+        data: { callback: "https://pay.example.com/invoice" },
+      })
+      .mockResolvedValueOnce({ data: { pr: "lnbc1invoice", successAction: null } })
+    ;(extractPaymentHashFromBolt11 as jest.Mock).mockReturnValue("ab".repeat(32))
+
+    const res = makeRes()
+    await lnurlHandler()(makeReq(), res as unknown as Response)
+
+    expect(axiosGet).toHaveBeenCalledTimes(3)
+    expect(res.status).not.toHaveBeenCalledWith(502)
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ pr: "lnbc1invoice" }))
+  })
 })

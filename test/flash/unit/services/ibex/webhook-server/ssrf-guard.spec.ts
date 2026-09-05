@@ -58,7 +58,7 @@ describe("validatePublicHttpUrl", () => {
     expect(lookup).not.toHaveBeenCalled()
   })
 
-  it("rejects unparseable URLs", async () => {
+  it("rejects unparsable URLs", async () => {
     for (const url of ["", "not-a-url", "https://"]) {
       expect(await validatePublicHttpUrl(url)).toBeInstanceOf(SsrfBlockedUrlError)
     }

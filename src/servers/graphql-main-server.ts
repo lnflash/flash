@@ -113,5 +113,13 @@ if (require.main === module) {
       // processes must never bind this port.
       startApiKeyMetricsServer()
     })
-    .catch((err) => baseLogger.error(err, "server error"))
+    .catch((err) => {
+      baseLogger.error(err, "server error")
+      // Boot failures must take the process down. The weak-secret guard
+      // (assertStrongSecret) throws WeakSecretError when ERPNEXT_JWT_SECRET is
+      // missing/placeholder — if that were only logged, the core API would
+      // keep serving and the pod would look healthy while the admin API is
+      // silently dead. Crash loudly and let the orchestrator restart us.
+      process.exit(1)
+    })
 }

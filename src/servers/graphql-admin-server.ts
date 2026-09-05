@@ -259,5 +259,11 @@ if (require.main === module) {
     .then(async () => {
       await startApolloServerForAdminSchema()
     })
-    .catch((err) => graphqlLogger.error(err, "server error"))
+    .catch((err) => {
+      graphqlLogger.error(err, "server error")
+      // Same contract as the combined entrypoint: a refused boot (e.g.
+      // WeakSecretError from the placeholder-secret guard) must take the
+      // process down, not leave a silently degraded pod.
+      process.exit(1)
+    })
 }

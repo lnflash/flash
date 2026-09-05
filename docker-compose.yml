@@ -256,7 +256,9 @@ services:
       # running on the host. Test/prod k8s must override this with an internal
       # service or gateway URL for the admin GraphQL /graphql endpoint.
       FLASH_API: "${FRAPPE_FLASH_API:-http://host.docker.internal:4001/graphql}"
-      FLASH_SECRET: "not-so-secret"
+      # Must match the ERPNEXT_JWT_SECRET the host admin server signs/verifies
+      # with (frappe-flash-admin uses admin_api_key as the HS256 secret).
+      FLASH_SECRET: "${ERPNEXT_JWT_SECRET}"
     volumes:
       - frappe-sites:/home/frappe/frappe-bench/sites
       - frappe-logs:/home/frappe/frappe-bench/logs

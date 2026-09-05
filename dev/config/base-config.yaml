@@ -10,7 +10,7 @@ ibex:
   webhook:
     uri: "" # external uri defined in overrides
     port: 4008
-    secret: "7189c07e9a60977492c9471a527b0d9040c1fa3c5b7bfd7e87e58db018160ddb"  # dev-only; deployed envs override; placeholders are refused at request time
+    secret: "7189c07e9a60977492c9471a527b0d9040c1fa3c5b7bfd7e87e58db018160ddb" # dev-only; deployed envs override; placeholders are refused at request time
     # Ibex's published source IPs / CIDRs for webhook delivery. Populate in
     # production overrides to enforce the allowlist; empty disables it (ISL-112).
     allowedIps: []
