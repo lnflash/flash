@@ -42,6 +42,7 @@ import { WalletsRepository } from "@services/mongoose/wallets"
 import { LnurlInvoiceModel } from "@services/mongoose/lnurl-invoice"
 import Ibex from "@services/ibex/client"
 import { router } from "@services/ibex/webhook-server/routes/on-pay"
+import { MAX_REDIRECT_HOPS } from "@services/ibex/webhook-server/ssrf-guard"
 import { ibexWebhookPaths } from "@services/ibex/webhook-config"
 import { extractPaymentHashFromBolt11 } from "@utils"
 
@@ -209,5 +210,21 @@ describe("GET /pay/lnurl/:username — SSRF guard wiring", () => {
     expect(axiosGet).toHaveBeenCalledTimes(3)
     expect(res.status).not.toHaveBeenCalledWith(502)
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ pr: "lnbc1invoice" }))
+  })
+
+  it("returns 502 when a public redirect chain exceeds the hop limit", async () => {
+    decodeLnurl.mockResolvedValue({ decodedLnurl: "https://pay.example.com/lnurl" })
+    // Every hop is a public 302 — the loop must still terminate.
+    axiosGet.mockResolvedValue({
+      status: 302,
+      headers: { location: "https://cdn.example.com/next" },
+    })
+
+    const res = makeRes()
+    await lnurlHandler()(makeReq(), res as unknown as Response)
+
+    expect(axiosGet).toHaveBeenCalledTimes(MAX_REDIRECT_HOPS + 1)
+    expect(res.status).toHaveBeenCalledWith(502)
+    expect(LnurlInvoiceModel.create).not.toHaveBeenCalled()
   })
 })

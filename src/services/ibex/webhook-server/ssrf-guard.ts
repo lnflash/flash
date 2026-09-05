@@ -157,7 +157,9 @@ export const validatePublicHttpUrl = async (rawUrl: string): Promise<URL | Error
 // The address handed to the socket is the one that has been checked — this
 // closes the validate-then-fetch TOCTOU where a short-TTL rebind swaps the DNS
 // answer between our async check and axios's own resolution.
-const ssrfLookup: LookupFunction = (hostname, _options, callback) => {
+// Exported for tests: this closure is the load-bearing half of the SSRF guard
+// and is exercised directly (axios specs mock the agents away).
+export const ssrfLookup: LookupFunction = (hostname, _options, callback) => {
   dns.promises
     .lookup(hostname, { all: true, verbatim: true })
     .then((addresses) => {
@@ -197,7 +199,7 @@ const ssrfAgents = {
   httpsAgent: new https.Agent({ lookup: ssrfLookup }),
 }
 
-const MAX_REDIRECT_HOPS = 3
+export const MAX_REDIRECT_HOPS = 3
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
 
 // Fetch a previously validated URL, following redirects manually: axios's
@@ -213,13 +215,17 @@ export const ssrfFetch = async (
   let current = url
   for (let hop = 0; ; hop++) {
     const resp = await axios.get(current.toString(), {
+      ...config,
+      // Guard fields come LAST so caller config can never silently override
+      // them: the agents re-validate DNS at connect time (the TOCTOU half of
+      // the guard), and axios's unchecked built-in redirect following must
+      // stay disabled — every 3xx target is re-validated manually below.
+      ...ssrfAgents,
       timeout: 10_000,
       maxRedirects: 0,
       // 3xx is not an error here — redirects are followed manually so each
       // target gets the full async (DNS) validation first.
       validateStatus: (status) => status >= 200 && status < 400,
-      ...ssrfAgents,
-      ...config,
     })
 
     const location: unknown = resp.headers?.location
