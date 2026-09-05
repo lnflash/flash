@@ -81,12 +81,6 @@ services:
     env_file: ${HOST_PROJECT_PATH:-.}/${GALOY_QUICKSTART_PATH:-vendor/galoy-quickstart}/.env.galoy
     environment:
     - FLASH_ENABLE_IBEX_MOCK=true
-    # Dev-only admin JWT secret for the quickstart stack (mirrors .env). The boot
-    # guard (src/utils/weak-secrets.ts) refuses an unset or placeholder
-    # ERPNEXT_JWT_SECRET and exits the api process. This value is on the guard's
-    # dev-only allowlist and is only honoured with the explicit dev flag below.
-    # It lives here, not in .env.galoy: that file is rendered from the vendored
-    # upstream galoy .env.ci, which vendir restores on every re-render.
     - ERPNEXT_JWT_SECRET=0a1cb6ba85cda40291e3ca4f2a777041cc59b48ba9fac2488e0bf752340c4588
     - ALLOW_REPO_DEV_SECRETS=true
     volumes:
