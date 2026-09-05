@@ -57,7 +57,10 @@ export type SendAmountInput =
   | { currency: "BTC"; sats: number | bigint }
 
 export type SendRejectionReason =
-  "rate-limited" | "invalid-amount" | "over-daily-limit" | "limits-unavailable"
+  | "rate-limited"
+  | "invalid-amount"
+  | "over-daily-limit"
+  | "limits-unavailable"
 
 type AuthorizeSendArgs = {
   senderAccount: Account
