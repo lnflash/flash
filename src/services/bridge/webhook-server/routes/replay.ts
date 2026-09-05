@@ -6,6 +6,7 @@ import ipaddr from "ipaddr.js"
 import { BridgeConfig } from "@config"
 
 import { baseLogger } from "@services/logger"
+import { isWeakSecret } from "@utils/weak-secrets"
 
 import { createBridgeReplay } from "@services/mongoose/bridge-replay-log"
 
@@ -28,7 +29,6 @@ const HANDLERS: Record<RouteKey, (req: Request, res: Response) => Promise<Respon
   external_account: externalAccountHandler,
 }
 
-const WEAK_REPLAY_SECRETS = new Set(["also-not-so-secret", "change-me", "<replace>"])
 const REPLAY_ALLOWED_IPS_ENV = "BRIDGE_WEBHOOK_REPLAY_ALLOWED_IPS"
 
 const DEPOSIT_EVENT_TYPES = new Set([
@@ -199,12 +199,10 @@ export const replayAuthMiddleware = (req: Request, res: Response, next: () => vo
     BridgeConfig.webhook.replaySecret ||
     ""
   ).trim()
-  if (!secret) {
-    baseLogger.warn("Replay secret not configured, rejecting replay request")
-    return res.status(503).json({ error: "Replay secret not configured" })
-  }
-  if (WEAK_REPLAY_SECRETS.has(secret)) {
-    baseLogger.warn("Weak replay secret configured, rejecting replay request")
+  if (isWeakSecret(secret)) {
+    baseLogger.warn(
+      "Replay secret missing or a known placeholder, rejecting replay request",
+    )
     return res.status(503).json({ error: "Replay secret not configured" })
   }
 

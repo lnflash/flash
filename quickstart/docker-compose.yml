@@ -81,6 +81,8 @@ services:
     env_file: ${HOST_PROJECT_PATH:-.}/${GALOY_QUICKSTART_PATH:-vendor/galoy-quickstart}/.env.galoy
     environment:
     - FLASH_ENABLE_IBEX_MOCK=true
+    - ERPNEXT_JWT_SECRET=0a1cb6ba85cda40291e3ca4f2a777041cc59b48ba9fac2488e0bf752340c4588
+    - ALLOW_REPO_DEV_SECRETS=true
     volumes:
     - ${FLASH_PROJECT_PATH:-..}/dev/config:/app/dev/config:ro
     - ${FLASH_PROJECT_PATH:-..}/quickstart/config:/app/quickstart/config:ro
