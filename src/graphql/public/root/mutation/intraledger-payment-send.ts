@@ -1,4 +1,5 @@
 import { Accounts, Payments } from "@app"
+import { authorizeSend } from "@app/payments/authorize-send"
 import { resolveCashWalletRecipientMutationWalletId } from "@app/cash-wallet-cutover"
 import { checkedToWalletId } from "@domain/wallets"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
@@ -52,6 +53,18 @@ const IntraLedgerPaymentSendMutation = GT.Field<null, GraphQLPublicContextAuth>(
     const recipientWalletIdChecked = checkedToWalletId(recipientWalletId)
     if (recipientWalletIdChecked instanceof Error) {
       return { errors: [mapAndParseErrorForGqlResponse(recipientWalletIdChecked)] }
+    }
+
+    // ENG-573 send guard: attempt budget + amount sanity + daily-limit cap,
+    // before anything reaches IBEX.
+    const authorized = await authorizeSend({
+      senderAccount: domainAccount,
+      senderWalletId: senderWalletId,
+      amount: { currency: "BTC", sats: amount },
+      kind: "intraledger",
+    })
+    if (authorized instanceof Error) {
+      return { status: "failed", errors: [mapAndParseErrorForGqlResponse(authorized)] }
     }
 
     // TODO: confirm whether we need to check for username here

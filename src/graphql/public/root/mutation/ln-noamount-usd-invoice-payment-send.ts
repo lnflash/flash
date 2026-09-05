@@ -17,6 +17,7 @@ import Ibex from "@services/ibex/client"
 
 import { IbexError } from "@services/ibex/errors"
 import { withPaymentIdempotency } from "@app/payments/idempotency"
+import { authorizeSend } from "@app/payments/authorize-send"
 import { paymentSendStatusOrPending } from "@services/ibex/payment-status"
 
 const LnNoAmountUsdInvoicePaymentInput = GT.Input({
@@ -107,6 +108,18 @@ const LnNoAmountUsdInvoicePaymentSendMutation = GT.Field<
         status: "failed",
         errors: [mapAndParseErrorForGqlResponse(routedWalletId)],
       }
+    }
+
+    // ENG-573 send guard: attempt budget + amount sanity + daily-limit cap,
+    // before anything reaches IBEX.
+    const authorized = await authorizeSend({
+      senderAccount: domainAccount,
+      senderWalletId: routedWalletId,
+      amount: { currency: "USD", cents: amount },
+      kind: "lightning",
+    })
+    if (authorized instanceof Error) {
+      return { status: "failed", errors: [mapAndParseErrorForGqlResponse(authorized)] }
     }
 
     const usCents = await usdWalletAmountFromWalletId({

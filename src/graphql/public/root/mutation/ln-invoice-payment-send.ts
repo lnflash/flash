@@ -8,11 +8,13 @@ import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import dedent from "dedent"
 
 // FLASH FORK: import ibex dependencies
-import { PaymentSendStatus } from "@domain/bitcoin/lightning"
+import { PaymentSendStatus, decodeInvoice } from "@domain/bitcoin/lightning"
+import { LnPaymentRequestNonZeroAmountRequiredError } from "@domain/payments/errors"
 import Ibex from "@services/ibex/client"
 import { IbexError, InsufficientIbexBalance } from "@services/ibex/errors"
 import { paymentSendStatusOrPending } from "@services/ibex/payment-status"
 import { withPaymentIdempotency } from "@app/payments/idempotency"
+import { authorizeSend } from "@app/payments/authorize-send"
 
 const LnInvoicePaymentInput = GT.Input({
   name: "LnInvoicePaymentInput",
@@ -82,6 +84,36 @@ const LnInvoicePaymentSendMutation = GT.Field<
      */
 
     if (!domainAccount) throw new Error("Authentication required")
+
+    // ENG-573 send guard. The amount is inside the bolt11, so decode it first;
+    // a no-amount invoice cannot be paid through this mutation anyway.
+    const decodedInvoice = decodeInvoice(paymentRequest)
+    if (decodedInvoice instanceof Error) {
+      return {
+        status: "failed",
+        errors: [mapAndParseErrorForGqlResponse(decodedInvoice)],
+      }
+    }
+    if (decodedInvoice.paymentAmount === null) {
+      return {
+        status: "failed",
+        errors: [
+          mapAndParseErrorForGqlResponse(
+            new LnPaymentRequestNonZeroAmountRequiredError(),
+          ),
+        ],
+      }
+    }
+
+    const authorized = await authorizeSend({
+      senderAccount: domainAccount,
+      senderWalletId: walletId,
+      amount: { currency: "BTC", sats: decodedInvoice.paymentAmount.amount },
+      kind: "lightning",
+    })
+    if (authorized instanceof Error) {
+      return { status: "failed", errors: [mapAndParseErrorForGqlResponse(authorized)] }
+    }
 
     // ENG-530: dedupe on (senderWalletId, idempotencyKey) when a key is supplied.
     // This resolver pays IBEX directly (the app-layer path is stubbed above), so the

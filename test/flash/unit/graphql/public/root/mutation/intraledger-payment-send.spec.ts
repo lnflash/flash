@@ -1,3 +1,13 @@
+const mockAuthorizeSend = jest.fn()
+jest.mock("@app/payments/authorize-send", () => ({
+  // ENG-573 send guard. Default-allow so the existing cases exercise the
+  // resolver body; the wiring cases below flip it to a rejection.
+  authorizeSend: async (args: unknown) => {
+    const result = await mockAuthorizeSend(args)
+    return result === undefined ? true : result
+  },
+}))
+
 const mockIntraledgerPaymentSendWalletIdForBtcWallet = jest.fn()
 const mockGetUsernameFromWalletId = jest.fn()
 const mockResolveCashWalletRecipientMutationWalletId = jest.fn()
@@ -26,7 +36,10 @@ jest.mock("@app/cash-wallet-cutover", () => ({
   ) => mockResolveCashWalletRecipientMutationWalletId(...args),
 }))
 
-import { MismatchedCurrencyForWalletError } from "@domain/errors"
+import {
+  MismatchedCurrencyForWalletError,
+  IntraledgerLimitsExceededError,
+} from "@domain/errors"
 import IntraLedgerPaymentSendMutation from "@graphql/public/root/mutation/intraledger-payment-send"
 
 const senderWalletId = "11111111-1111-4111-8111-111111111111" as WalletId
@@ -110,5 +123,57 @@ describe("IntraLedgerPaymentSendMutation", () => {
         meta: expect.objectContaining({ reason: "recipient-routing" }),
       }),
     )
+  })
+})
+
+describe("ENG-573 send guard wiring", () => {
+  const input = {
+    walletId: senderWalletId,
+    recipientWalletId,
+    amount,
+    memo: null,
+    idempotencyKey: null,
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockGetUsernameFromWalletId.mockResolvedValue("recipient" as Username)
+    mockResolveCashWalletRecipientMutationWalletId.mockResolvedValue(
+      routedRecipientWalletId,
+    )
+    mockIntraledgerPaymentSendWalletIdForBtcWallet.mockResolvedValue({
+      value: "success",
+    })
+  })
+
+  it("authorises the sats amount as an intraledger send before any lookup", async () => {
+    await resolve(input)
+
+    expect(mockAuthorizeSend).toHaveBeenCalledTimes(1)
+    expect(mockAuthorizeSend).toHaveBeenCalledWith({
+      senderAccount: domainAccount,
+      senderWalletId,
+      amount: { currency: "BTC", sats: amount },
+      kind: "intraledger",
+    })
+    expect(mockIntraledgerPaymentSendWalletIdForBtcWallet).toHaveBeenCalledTimes(1)
+  })
+
+  it("fails before the recipient lookup, routing, or payment when the guard rejects", async () => {
+    const rejection = new IntraledgerLimitsExceededError(
+      "Cannot transfer more than $125.00 in 24 hours",
+    )
+    mockAuthorizeSend.mockResolvedValueOnce(rejection)
+
+    const result = (await resolve(input)) as {
+      status?: string
+      errors: { message: string }[]
+    }
+
+    expect(result.status).toBe("failed")
+    expect(result.errors[0]).toMatchObject({ message: rejection.message })
+    expect(mockGetUsernameFromWalletId).not.toHaveBeenCalled()
+    expect(mockResolveCashWalletRecipientMutationWalletId).not.toHaveBeenCalled()
+    expect(mockIntraledgerPaymentSendWalletIdForBtcWallet).not.toHaveBeenCalled()
   })
 })

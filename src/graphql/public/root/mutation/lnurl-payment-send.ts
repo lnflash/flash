@@ -1,4 +1,5 @@
 import { withPaymentIdempotency } from "@app/payments/idempotency"
+import { authorizeSend } from "@app/payments/authorize-send"
 import axios from "axios"
 import dedent from "dedent"
 
@@ -137,6 +138,18 @@ const LnurlPaymentSendMutation = GT.Field<
         status: "failed",
         errors: [mapAndParseErrorForGqlResponse(routedWalletId)],
       }
+    }
+
+    // ENG-573 send guard: attempt budget + amount sanity + daily-limit cap,
+    // before anything reaches IBEX.
+    const authorized = await authorizeSend({
+      senderAccount: domainAccount,
+      senderWalletId: routedWalletId,
+      amount: { currency: "USD", cents: amount },
+      kind: "lnurl",
+    })
+    if (authorized instanceof Error) {
+      return { status: "failed", errors: [mapAndParseErrorForGqlResponse(authorized)] }
     }
 
     // ENG-533: direct-IBEX execution, so the exactly-once wrapper never ran on

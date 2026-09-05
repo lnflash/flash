@@ -1,4 +1,5 @@
 import { Payments } from "@app"
+import { authorizeSend } from "@app/payments/authorize-send"
 import {
   resolveCashWalletMutationWalletIdForAccount,
   resolveCashWalletRecipientMutationWalletId,
@@ -104,6 +105,18 @@ const IntraLedgerUsdPaymentSendMutation = GT.Field<null, GraphQLPublicContextAut
         status: "failed",
         errors: [mapAndParseErrorForGqlResponse(routedSenderWalletId)],
       }
+    }
+
+    // ENG-573 send guard: attempt budget + amount sanity + daily-limit cap,
+    // before anything reaches IBEX.
+    const authorized = await authorizeSend({
+      senderAccount: domainAccount,
+      senderWalletId: routedSenderWalletId,
+      amount: { currency: "USD", cents: amount },
+      kind: "intraledger",
+    })
+    if (authorized instanceof Error) {
+      return { status: "failed", errors: [mapAndParseErrorForGqlResponse(authorized)] }
     }
 
     const routedRecipientWalletId = await resolveCashWalletRecipientMutationWalletId({

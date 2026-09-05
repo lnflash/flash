@@ -11,8 +11,13 @@ type RateLimitInput = {
 
 type AccountLimitsConfig = {
   level: {
+    0: number
     1: number
     2: number
+    // ENG-573. Not `required` in the schema, so a partial override can leave it
+    // absent at runtime: getAccountLimits then yields NaN and the send guard
+    // fails closed for level-3 accounts.
+    3: number
   }
 }
 
@@ -180,6 +185,8 @@ type YamlSchema = {
     invoiceCreateAttempt: RateLimitInput
     invoiceCreateForRecipientAttempt: RateLimitInput
     onChainAddressCreateAttempt: RateLimitInput
+    paymentSendAttempt: RateLimitInput
+    paymentSendDailyAttempt: RateLimitInput
   }
   accounts: {
     initialStatus: string

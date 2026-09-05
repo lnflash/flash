@@ -4,6 +4,7 @@ import Memo from "@graphql/shared/types/scalar/memo"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import SatAmount from "@graphql/shared/types/scalar/sat-amount"
 import { Payments } from "@app"
+import { authorizeSend } from "@app/payments/authorize-send"
 import PaymentSendPayload from "@graphql/public/types/payload/payment-send"
 import LnIPaymentRequest from "@graphql/shared/types/scalar/ln-payment-request"
 import { InputValidationError } from "@graphql/error"
@@ -74,6 +75,18 @@ const LnNoAmountInvoicePaymentSendMutation = GT.Field<
     }
     if (memo instanceof InputValidationError) {
       return { errors: [{ message: memo.message }] }
+    }
+
+    // ENG-573 send guard: attempt budget + amount sanity + daily-limit cap,
+    // before anything reaches IBEX.
+    const authorized = await authorizeSend({
+      senderAccount: domainAccount,
+      senderWalletId: walletId,
+      amount: { currency: "BTC", sats: amount },
+      kind: "lightning",
+    })
+    if (authorized instanceof Error) {
+      return { status: "failed", errors: [mapAndParseErrorForGqlResponse(authorized)] }
     }
 
     const status = await Payments.payNoAmountInvoiceByWalletIdForBtcWallet({

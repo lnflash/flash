@@ -55,6 +55,9 @@ const accountLimitConfigSchema = {
         0: { type: "integer" },
         1: { type: "integer" },
         2: { type: "integer" },
+        // ENG-573: Business (L3) accounts exist in prod; without a limit here
+        // getAccountLimits({ level: 3 }) is NaN and the send guard fails closed.
+        3: { type: "integer" },
       },
       required: ["0", "1", "2"],
       additionalProperties: false,
@@ -365,6 +368,18 @@ export const configSchema = {
         invoiceCreateAttempt: rateLimitConfigSchema,
         invoiceCreateForRecipientAttempt: rateLimitConfigSchema,
         onChainAddressCreateAttempt: rateLimitConfigSchema,
+        // ENG-573 send guard: per-account budget on send *attempts*. Property-
+        // level defaults rather than `required` entries, because prod overrides
+        // the whole rateLimits block (deployments flash-values.tmpl.yaml) and a
+        // new required key there would fail config validation at boot.
+        paymentSendAttempt: {
+          ...rateLimitConfigSchema,
+          default: { points: 10, duration: 60, blockDuration: 60 },
+        },
+        paymentSendDailyAttempt: {
+          ...rateLimitConfigSchema,
+          default: { points: 200, duration: 86400, blockDuration: 3600 },
+        },
       },
       required: [
         "requestCodePerLoginIdentifier",
@@ -502,6 +517,7 @@ export const configSchema = {
             "0": 12500,
             "1": 100000,
             "2": 5000000,
+            "3": 5000000, // ENG-573 placeholder: L3 inherits L2 until the ladder is decided
           },
         },
         intraLedger: {
@@ -509,6 +525,7 @@ export const configSchema = {
             "0": 12500,
             "1": 200000,
             "2": 5000000,
+            "3": 5000000, // ENG-573 placeholder: L3 inherits L2 until the ladder is decided
           },
         },
         tradeIntraAccount: {
@@ -516,6 +533,7 @@ export const configSchema = {
             "0": 200000,
             "1": 5000000,
             "2": 20000000,
+            "3": 20000000, // ENG-573 placeholder: L3 inherits L2 until the ladder is decided
           },
         },
       },

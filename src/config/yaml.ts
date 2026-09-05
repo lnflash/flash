@@ -247,6 +247,13 @@ export const getFailedLoginAttemptPerIpLimits = () =>
 export const getInvoiceCreateAttemptLimits = () =>
   getRateLimits(yamlConfig.rateLimits.invoiceCreateAttempt)
 
+// ENG-573 send guard attempt budgets (see src/app/payments/authorize-send.ts).
+export const getPaymentSendAttemptLimits = () =>
+  getRateLimits(yamlConfig.rateLimits.paymentSendAttempt)
+
+export const getPaymentSendDailyAttemptLimits = () =>
+  getRateLimits(yamlConfig.rateLimits.paymentSendDailyAttempt)
+
 export const getInvoiceCreateForRecipientAttemptLimits = () =>
   getRateLimits(yamlConfig.rateLimits.invoiceCreateForRecipientAttempt)
 
