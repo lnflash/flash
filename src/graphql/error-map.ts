@@ -75,6 +75,14 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = error.message
       return new TransactionRestrictedError({ message, logger: baseLogger })
 
+    case "InvalidSendAmountError":
+      message = error.message || "Amount must be greater than zero"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "SendLimitsUnavailableError":
+      message = "Sending is temporarily unavailable, please try again later."
+      return new TransactionRestrictedError({ message, logger: baseLogger })
+
     case "CompletedInvoice":
     case "AlreadyPaidError":
       message = "Invoice is already paid"
@@ -284,6 +292,10 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "InvalidContactAlias":
       message = "ContactAlias has incorrect characters or length"
       return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "PaymentSendRateLimiterExceededError":
+      message = "Too many payment attempts, please wait for a while and try again."
+      return new TooManyRequestError({ message, logger: baseLogger })
 
     case "InvoiceCreateRateLimiterExceededError":
     case "InvoiceCreateForRecipientRateLimiterExceededError":

@@ -1,3 +1,25 @@
+const mockAuthorizeSend = jest.fn()
+jest.mock("@app/payments/authorize-send", () => ({
+  // ENG-573 send guard. Default-allow so the existing cases exercise the
+  // resolver body; the wiring cases below flip it to a rejection.
+  authorizeSend: async (args: unknown) => {
+    const result = await mockAuthorizeSend(args)
+    return result === undefined ? true : result
+  },
+}))
+
+const mockDecodeInvoice = jest.fn()
+jest.mock("@domain/bitcoin/lightning", () => ({
+  ...jest.requireActual("@domain/bitcoin/lightning"),
+  // ENG-573: the resolver now decodes the bolt11 to learn the amount. The
+  // fixture invoice is not a real bolt11, so decoding is stubbed to an
+  // amount-bearing invoice by default.
+  decodeInvoice: (paymentRequest: string) => mockDecodeInvoice(paymentRequest),
+}))
+mockDecodeInvoice.mockReturnValue({
+  paymentAmount: { amount: 21_000n, currency: "BTC" },
+})
+
 const mockPayInvoice = jest.fn()
 const mockRecordExceptionInCurrentSpan = jest.fn()
 const mockAddEventToCurrentSpan = jest.fn()
@@ -21,6 +43,8 @@ jest.mock("@app/payments/idempotency", () => ({
 }))
 
 import { ErrorLevel } from "@domain/shared"
+import { WithdrawalLimitsExceededError } from "@domain/errors"
+import { LnInvoiceDecodeError } from "@domain/bitcoin/lightning/errors"
 import LnInvoicePaymentSendMutation from "@graphql/public/root/mutation/ln-invoice-payment-send"
 import {
   IbexError,
@@ -190,5 +214,66 @@ describe("lnInvoicePaymentSend IBEX status reader wiring", () => {
     const result = await resolvePayment()
 
     expect(result).toEqual({ errors: [], status: "pending" })
+  })
+})
+
+describe("ENG-573 send guard wiring", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockDecodeInvoice.mockReturnValue({
+      paymentAmount: { amount: 21_000n, currency: "BTC" },
+    })
+    mockPayInvoice.mockResolvedValue({
+      status: 0,
+      transaction: { payment: { status: { id: 2 } } },
+    })
+  })
+
+  it("decodes the invoice and authorises its sats amount as a lightning send", async () => {
+    await resolvePayment()
+
+    expect(mockDecodeInvoice).toHaveBeenCalledWith("lnbc1")
+    expect(mockAuthorizeSend).toHaveBeenCalledTimes(1)
+    expect(mockAuthorizeSend).toHaveBeenCalledWith({
+      senderAccount: { id: "account-1" },
+      senderWalletId: "wallet-1",
+      amount: { currency: "BTC", sats: 21_000n },
+      kind: "lightning",
+    })
+    expect(mockPayInvoice).toHaveBeenCalledTimes(1)
+  })
+
+  it("fails before IBEX when the guard rejects", async () => {
+    const rejection = new WithdrawalLimitsExceededError(
+      "Cannot transfer more than $125.00 in 24 hours",
+    )
+    mockAuthorizeSend.mockResolvedValueOnce(rejection)
+
+    const result = await resolvePayment()
+
+    expect(result.status).toBe("failed")
+    expect(result.errors[0]).toMatchObject({ message: rejection.message })
+    expect(mockPayInvoice).not.toHaveBeenCalled()
+  })
+
+  it("rejects a no-amount invoice on this mutation without consulting the guard or IBEX", async () => {
+    mockDecodeInvoice.mockReturnValue({ paymentAmount: null })
+
+    const result = await resolvePayment()
+
+    expect(result.status).toBe("failed")
+    expect(result.errors[0].message).toBeTruthy()
+    expect(mockAuthorizeSend).not.toHaveBeenCalled()
+    expect(mockPayInvoice).not.toHaveBeenCalled()
+  })
+
+  it("rejects an undecodable invoice without consulting the guard or IBEX", async () => {
+    mockDecodeInvoice.mockReturnValue(new LnInvoiceDecodeError("bad bolt11"))
+
+    const result = await resolvePayment()
+
+    expect(result.status).toBe("failed")
+    expect(mockAuthorizeSend).not.toHaveBeenCalled()
+    expect(mockPayInvoice).not.toHaveBeenCalled()
   })
 })

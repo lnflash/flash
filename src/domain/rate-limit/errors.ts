@@ -22,3 +22,7 @@ export class InviteCreateRateLimiterExceededError extends RateLimiterExceededErr
 export class InviteTargetRateLimiterExceededError extends RateLimiterExceededError {}
 export class FygaroCheckoutCreateRateLimiterExceededError extends RateLimiterExceededError {}
 export class FygaroTopupAllowanceRateLimiterExceededError extends RateLimiterExceededError {}
+// ENG-573: per-account budget on payment-send *attempts* (every call to a send
+// mutation, including ones the send guard rejects), so a probe that walks the
+// amount space burns its own budget instead of IBEX's.
+export class PaymentSendRateLimiterExceededError extends RateLimiterExceededError {}

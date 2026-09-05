@@ -9,6 +9,7 @@ import PayoutSpeed from "@graphql/public/types/scalar/payout-speed"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 
 import { Wallets } from "@app"
+import { authorizeSend } from "@app/payments/authorize-send"
 import { getBalanceForWallet } from "@app/wallets"
 import { USDAmount, WalletCurrency } from "@domain/shared"
 
@@ -70,6 +71,18 @@ const OnChainPaymentSendAllMutation = GT.Field<
     if (amount instanceof Error) return amount
     if (!(amount instanceof USDAmount)) {
       return { errors: [{ message: "Onchain payments require a USD wallet" }] }
+    }
+
+    // ENG-573 send guard: attempt budget + amount sanity + daily-limit cap,
+    // before anything reaches IBEX.
+    const authorized = await authorizeSend({
+      senderAccount: domainAccount,
+      senderWalletId: walletId,
+      amount: { currency: "USD", cents: amount.asPaymentAmount().amount },
+      kind: "onchain",
+    })
+    if (authorized instanceof Error) {
+      return { status: "failed", errors: [mapAndParseErrorForGqlResponse(authorized)] }
     }
 
     const result = await Wallets.payOnChainByWalletId({
