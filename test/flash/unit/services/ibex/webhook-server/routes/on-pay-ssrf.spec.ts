@@ -19,6 +19,10 @@ jest.mock("@services/logger", () => {
   }
   return { baseLogger: logger }
 })
+jest.mock("@services/tracing", () => ({
+  ...jest.requireActual("@services/tracing"),
+  recordExceptionInCurrentSpan: jest.fn(),
+}))
 jest.mock("@services/mongoose/wallets", () => ({ WalletsRepository: jest.fn() }))
 jest.mock("@services/mongoose/zap-request", () => ({ ZapRequestModel: jest.fn() }))
 jest.mock("@services/mongoose/lnurl-invoice", () => ({
@@ -42,6 +46,7 @@ import { WalletsRepository } from "@services/mongoose/wallets"
 import { LnurlInvoiceModel } from "@services/mongoose/lnurl-invoice"
 import Ibex from "@services/ibex/client"
 import { router } from "@services/ibex/webhook-server/routes/on-pay"
+import { recordExceptionInCurrentSpan } from "@services/tracing"
 import { MAX_REDIRECT_HOPS } from "@utils/ssrf-guard"
 import { ibexWebhookPaths } from "@services/ibex/webhook-config"
 import { extractPaymentHashFromBolt11 } from "@utils"
@@ -54,6 +59,15 @@ import {
 const lookup = dns.promises.lookup as jest.Mock
 const axiosGet = axios.get as jest.Mock
 const decodeLnurl = Ibex.decodeLnurl as jest.Mock
+const recordException = recordExceptionInCurrentSpan as jest.Mock
+
+// https-only is a cutover on a live payments path: a wallet whose stored
+// lnurlp decodes to http:// was payable before this PR and 502s after it. A
+// logger.warn is not a rate anyone can alert on, so every blocked branch has
+// to reach the span too — otherwise the blast radius is invisible until users
+// report that their Lightning Address stopped working.
+const blockedStages = () =>
+  recordException.mock.calls.map((c) => c[0].attributes?.["lnurlpay.blocked.stage"])
 
 // The route handler is the last function on the GET /pay/lnurl/:username
 // layer (rate-limit/cors/logRequest run ahead of it in production; unit-tested
@@ -129,6 +143,26 @@ describe("GET /pay/lnurl/:username — SSRF guard wiring", () => {
     expect(axiosGet).not.toHaveBeenCalled()
     expect(res.status).toHaveBeenCalledWith(502)
     expect(LnurlInvoiceModel.create).not.toHaveBeenCalled()
+    expect(blockedStages()).toEqual(["lnurlp-callback"])
+  })
+
+  it("records the http:// cutover on the span, not just in the log", async () => {
+    // The concrete regression this PR introduces: plain http was legal for a
+    // stored lnurlp until now (the old code was a bare axios.get).
+    decodeLnurl.mockResolvedValue({ decodedLnurl: "http://pay.example.com/lnurl" })
+
+    const res = makeRes()
+    await lnurlHandler()(makeReq(), res as unknown as Response)
+
+    expect(res.status).toHaveBeenCalledWith(502)
+    expect(recordException).toHaveBeenCalledTimes(1)
+    const recorded = recordException.mock.calls[0][0]
+    expect(recorded.attributes["lnurlpay.blocked"]).toBe(true)
+    expect(recorded.attributes["lnurlpay.blocked.stage"]).toBe("lnurlp-callback")
+    expect(recorded.attributes["lnurlpay.blocked.username"]).toBe("alice")
+    // The reason has to survive onto the span, or the alert says nothing about
+    // whether this is the scheme cutover or a genuine SSRF attempt.
+    expect(recorded.error.message).toMatch(/scheme http: not allowed/)
   })
 
   it("blocks a user-supplied lnurlp that decodes to an internal RFC1918 address", async () => {
@@ -151,6 +185,7 @@ describe("GET /pay/lnurl/:username — SSRF guard wiring", () => {
     expect(axiosGet).toHaveBeenCalledTimes(1) // first hop only
     expect(res.status).toHaveBeenCalledWith(502)
     expect(LnurlInvoiceModel.create).not.toHaveBeenCalled()
+    expect(blockedStages()).toEqual(["invoice-callback"])
   })
 
   it("serves the invoice when both hops validate as public", async () => {
@@ -168,6 +203,16 @@ describe("GET /pay/lnurl/:username — SSRF guard wiring", () => {
     expect(axiosGet).toHaveBeenCalledTimes(2)
     expect(res.status).not.toHaveBeenCalledWith(502)
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ pr: "lnbc1invoice" }))
+    // A clean pay must not report a block, or the alert is unusable.
+    expect(recordException).not.toHaveBeenCalled()
+    // The amount/comment this route asks for ride in the invoice URL, once.
+    // Left on the axios config they would be re-appended to any redirect
+    // target that already carried its own `amount`, and a first-wins upstream
+    // would quote an amount the payer never requested.
+    expect(axiosGet.mock.calls[1][0]).toBe(
+      "https://pay.example.com/invoice?amount=1000&comment=Zap+payment",
+    )
+    expect(axiosGet.mock.calls[1][1].params).toBeUndefined()
   })
 
   it("blocks a redirect to a literal private IP — the follow-up request is never made", async () => {
@@ -183,6 +228,26 @@ describe("GET /pay/lnurl/:username — SSRF guard wiring", () => {
     expect(axiosGet).toHaveBeenCalledTimes(1) // first hop only — redirect not followed
     expect(res.status).toHaveBeenCalledWith(502)
     expect(LnurlInvoiceModel.create).not.toHaveBeenCalled()
+    expect(blockedStages()).toEqual(["redirect-or-connect"])
+  })
+
+  // A malformed Location used to escape ssrfFetch as a bare TypeError, so an
+  // attacker-chosen host could pick 500 + logger.error over the 502 +
+  // logger.warn every other blocked target gets.
+  it("answers 502 for a malformed redirect Location, like every other blocked target", async () => {
+    decodeLnurl.mockResolvedValue({ decodedLnurl: "https://pay.example.com/lnurl" })
+    axiosGet.mockResolvedValueOnce({
+      status: 302,
+      headers: { location: "http://" },
+    })
+
+    const res = makeRes()
+    await lnurlHandler()(makeReq(), res as unknown as Response)
+
+    expect(axiosGet).toHaveBeenCalledTimes(1)
+    expect(res.status).toHaveBeenCalledWith(502)
+    expect(res.status).not.toHaveBeenCalledWith(500)
+    expect(blockedStages()).toEqual(["redirect-or-connect"])
   })
 
   it("re-validates redirect targets with DNS — a public-looking host resolving inside is blocked", async () => {

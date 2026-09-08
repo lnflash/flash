@@ -9,6 +9,8 @@ import { baseLogger as logger } from "@services/logger"
 import { AccountsRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
 import { ibexWebhookPaths, ibexWebhookEndpoints } from "@services/ibex/webhook-config"
+import { recordExceptionInCurrentSpan } from "@services/tracing"
+import { ErrorLevel } from "@domain/shared"
 import { extractPaymentHashFromBolt11 } from "@utils"
 import { isSsrfBlockedError, ssrfFetch, validatePublicHttpUrl } from "@utils/ssrf-guard"
 
@@ -52,6 +54,32 @@ const webhookRateLimit = rateLimitMiddleware({
 const paths = ibexWebhookPaths.onPay
 
 const PAYMENT_HASH_RE = /^[0-9a-f]{64}$/i
+
+// Every URL the SSRF guard refuses on this route, on the span as well as in
+// the log. The https-only policy is a cutover on a live payments path — a
+// wallet whose stored lnurlp decodes to http:// used to work and now 502s —
+// and a log line is not something you can alert on or graph. Warn, not
+// Critical: one user with a stale lnurlp is expected noise; a step change in
+// the rate is the signal, and the stage attribute says which hop refused.
+const recordBlockedLnurlUrl = ({
+  err,
+  stage,
+  username,
+}: {
+  err: unknown
+  stage: "lnurlp-callback" | "invoice-callback" | "redirect-or-connect"
+  username?: unknown
+}) =>
+  recordExceptionInCurrentSpan({
+    error: err,
+    level: ErrorLevel.Warn,
+    fallbackMsg: "LNURL-pay: blocked unsafe URL",
+    attributes: {
+      "lnurlpay.blocked": true,
+      "lnurlpay.blocked.stage": stage,
+      ...(typeof username === "string" ? { "lnurlpay.blocked.username": username } : {}),
+    },
+  })
 
 // IBEX invoice states: 0 OPEN / 1 SETTLED / 2 CANCEL / 3 ACCEPTED. The
 // preimage is proof of payment, so its release is gated on the single strict
@@ -188,6 +216,19 @@ router.get(
       // internal network / cloud metadata.
       const checkedCallbackUrl = await validatePublicHttpUrl(callbackUrl)
       if (checkedCallbackUrl instanceof Error) {
+        // This guard is a behaviour change on a live payments path: before it,
+        // the fetch was a bare axios.get, so a wallet whose stored lnurlp
+        // decodes to plain http (legal until now) starts 502-ing here and
+        // returning InvalidLnurlError from lnurlPaymentSend. A logger.warn
+        // alone makes the blast radius invisible until users report that their
+        // Lightning Address stopped working — so every blocked branch also
+        // lands on the span, where the rate is alertable and the reason
+        // (scheme / blocked host / private literal / DNS) is queryable.
+        recordBlockedLnurlUrl({
+          err: checkedCallbackUrl,
+          stage: "lnurlp-callback",
+          username,
+        })
         logger.warn(
           { err: checkedCallbackUrl, username },
           "LNURL-pay: blocked unsafe callback URL",
@@ -198,6 +239,11 @@ router.get(
       const invoiceAddress = lnurlResponse.data.callback
       const checkedInvoiceAddress = await validatePublicHttpUrl(invoiceAddress)
       if (checkedInvoiceAddress instanceof Error) {
+        recordBlockedLnurlUrl({
+          err: checkedInvoiceAddress,
+          stage: "invoice-callback",
+          username,
+        })
         logger.warn(
           { err: checkedInvoiceAddress, username },
           "LNURL-pay: blocked unsafe invoice callback URL",
@@ -261,6 +307,7 @@ router.get(
       // instanceof. Treat both like the other blocked-URL cases rather than a
       // generic 500 so callers see a consistent upstream failure.
       if (isSsrfBlockedError(err)) {
+        recordBlockedLnurlUrl({ err, stage: "redirect-or-connect" })
         logger.warn({ err }, "LNURL-pay: blocked unsafe redirect target")
         return resp.status(502).json({ error: "Invalid lnurl callback URL" })
       }

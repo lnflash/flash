@@ -208,7 +208,10 @@ const ssrfAgents = {
 export const MAX_REDIRECT_HOPS = 3
 // One budget for the whole chain, not per hop: with a per-hop timeout a
 // 3-hop chain of slow-loris responses pins a request (and an API worker) for
-// 4x as long as the number says.
+// 4x as long as the number says. Enforced twice over in ssrfFetch — the
+// shrinking per-hop `timeout` between hops, and one wall-clock AbortSignal
+// spanning the whole chain, because axios's `timeout` alone is an inactivity
+// timer a trickling host resets forever (see the comment there).
 export const TOTAL_FETCH_TIMEOUT_MS = 10_000
 // An LNURL-pay response is well under 2 KB. Without a cap axios buffers
 // whatever an attacker-chosen host streams, and this route is public and
@@ -223,6 +226,10 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
 // `Authorization: Basic ...` header at request time, so dropping `headers`
 // alone would still hand the credential to the redirect target. Dropped before
 // following a redirect to a different origin.
+//
+// `params` is already off the per-hop config by then (withCallerParams folds it
+// into the first hop's URL below), but it stays in this list so the strip is
+// still complete if a future caller path puts it back.
 const withoutCallerCredentials = (config: AxiosRequestConfig): AxiosRequestConfig => {
   const stripped = { ...config }
   delete stripped.headers
@@ -230,6 +237,46 @@ const withoutCallerCredentials = (config: AxiosRequestConfig): AxiosRequestConfi
   delete stripped.auth
   return stripped
 }
+
+// The caller's `params` belong to the FIRST hop only, so they are serialised
+// into its URL instead of riding on the per-hop config. axios re-serialises
+// `params` onto whatever URL it is handed, and buildURL joins with `&` when
+// that URL already carries a query string — so keeping them on the config
+// re-appends them to every redirect target. A server that redirects
+// `/invoice` to `/invoice?amount=1000` would be fetched as
+// `?amount=1000&amount=1000&comment=...`, and a first-wins or last-wins
+// upstream then quotes an amount the payer never asked for (on-pay.ts passes
+// exactly that `{ amount, comment }`). `follow-redirects`, the library this
+// manual loop replaces, never re-appended them either: whatever query string
+// the `Location` carries is the one the redirect target gets.
+const withCallerParams = (url: URL, params: unknown): URL => {
+  if (!params || typeof params !== "object") return url
+  const entries =
+    params instanceof URLSearchParams
+      ? [...params.entries()]
+      : Object.entries(params as Record<string, unknown>)
+  if (entries.length === 0) return url
+
+  const withParams = new URL(url.toString())
+  for (const [key, value] of entries) {
+    // axios omits null/undefined params; matching that keeps a caller's
+    // optional field from being sent as the literal string "undefined".
+    if (value === undefined || value === null) continue
+    withParams.searchParams.set(key, String(value))
+  }
+  return withParams
+}
+
+// A caller's own cancellation must still work. The guard fields deliberately
+// come last so caller config can never override them, which for `signal` would
+// otherwise mean silently dropping the caller's.
+const combineSignals = (
+  chainSignal: AbortSignal,
+  callerSignal: AxiosRequestConfig["signal"],
+): AbortSignal =>
+  callerSignal instanceof AbortSignal
+    ? AbortSignal.any([chainSignal, callerSignal])
+    : chainSignal
 
 // Fetch a previously validated URL, following redirects manually: axios's
 // built-in redirect following can only re-check targets synchronously (no
@@ -242,10 +289,28 @@ export const ssrfFetch = async (
   config: AxiosRequestConfig = {},
 ): Promise<AxiosResponse> => {
   const deadline = Date.now() + TOTAL_FETCH_TIMEOUT_MS
-  let current = url
-  // Caller config for the CURRENT hop. Narrowed on a cross-origin redirect —
-  // see withoutCallerCredentials below.
-  let hopConfig = config
+  // axios's `timeout` is a socket INACTIVITY timer — it maps to
+  // req.setTimeout(), which resets on every byte, and the one wall-clock timer
+  // the adapter keeps (connectPhaseTimer) is cleared the moment response
+  // headers arrive. So a host that answers 200 immediately and then writes one
+  // byte every few seconds is never cut off by it, never reaches
+  // maxContentLength, and pins a socket, an fd and a pending request for as
+  // long as it likes — on a public unauthenticated route (GET
+  // /pay/lnurl/:username), and while holding the sender's wallet redlock on
+  // lnurlPaymentSend. Only a wall-clock abort closes that, and it has to be
+  // ONE signal created before the loop: a per-hop signal would hand a 3-hop
+  // chain 4x the budget this constant advertises, which is the same bug the
+  // per-hop `timeout` had. AbortSignal.timeout's timer is unref'd, so it never
+  // holds the process open on its own.
+  const chainSignal = AbortSignal.timeout(TOTAL_FETCH_TIMEOUT_MS)
+  const signal = combineSignals(chainSignal, config.signal)
+
+  let current = withCallerParams(url, config.params)
+  // Caller config for the CURRENT hop. `params` never rides along — it was
+  // folded into the first hop's URL above. Narrowed further on a cross-origin
+  // redirect — see withoutCallerCredentials below.
+  let hopConfig: AxiosRequestConfig = { ...config }
+  delete hopConfig.params
   for (let hop = 0; ; hop++) {
     const remainingMs = deadline - Date.now()
     if (remainingMs <= 0) {
@@ -255,22 +320,41 @@ export const ssrfFetch = async (
       )
     }
 
-    const resp = await axios.get(current.toString(), {
-      ...hopConfig,
-      // Guard fields come LAST so caller config can never silently override
-      // them: the agents re-validate DNS at connect time (the TOCTOU half of
-      // the guard), the body size and the total time are capped, and axios's
-      // unchecked built-in redirect following must stay disabled — every 3xx
-      // target is re-validated manually below.
-      ...ssrfAgents,
-      timeout: remainingMs,
-      maxContentLength: MAX_RESPONSE_BYTES,
-      maxBodyLength: MAX_RESPONSE_BYTES,
-      maxRedirects: 0,
-      // 3xx is not an error here — redirects are followed manually so each
-      // target gets the full async (DNS) validation first.
-      validateStatus: (status) => status >= 200 && status < 400,
-    })
+    let resp: AxiosResponse
+    try {
+      resp = await axios.get(current.toString(), {
+        ...hopConfig,
+        // Guard fields come LAST so caller config can never silently override
+        // them: the agents re-validate DNS at connect time (the TOCTOU half of
+        // the guard), the body size and the total time are capped, and axios's
+        // unchecked built-in redirect following must stay disabled — every 3xx
+        // target is re-validated manually below.
+        ...ssrfAgents,
+        // Both limits are needed, and they catch different hosts: `timeout`
+        // cuts a hop that goes quiet, `signal` cuts one that keeps dribbling.
+        timeout: remainingMs,
+        signal,
+        maxContentLength: MAX_RESPONSE_BYTES,
+        maxBodyLength: MAX_RESPONSE_BYTES,
+        maxRedirects: 0,
+        // 3xx is not an error here — redirects are followed manually so each
+        // target gets the full async (DNS) validation first.
+        validateStatus: (status) => status >= 200 && status < 400,
+      })
+    } catch (err) {
+      // The chain abort surfaces as an axios CanceledError, which callers
+      // would answer with a 500: isSsrfBlockedError is what maps a refused
+      // fetch to the 502 every other blocked-target case returns. Report the
+      // budget for what it is, in the same shape as the between-hops check
+      // above. A caller's own signal firing is not ours to relabel.
+      if (chainSignal.aborted) {
+        throw new SsrfBlockedUrlError(
+          url.toString(),
+          `exceeded the ${TOTAL_FETCH_TIMEOUT_MS}ms total fetch budget`,
+        )
+      }
+      throw err
+    }
 
     const location: unknown = resp.headers?.location
     if (!REDIRECT_STATUSES.has(resp.status) || typeof location !== "string") {
@@ -282,7 +366,19 @@ export const ssrfFetch = async (
         `too many redirects (limit ${MAX_REDIRECT_HOPS})`,
       )
     }
-    const next = await validatePublicHttpUrl(new URL(location, current).toString())
+    // A malformed Location (`Location: http://`) makes `new URL` throw a bare
+    // TypeError, and an unwrapped TypeError escapes ssrfFetch as a
+    // non-SsrfBlockedUrlError: the proxy route then falls past
+    // isSsrfBlockedError into logger.error + 500 instead of the 502 every
+    // other blocked-target case returns, letting an attacker-chosen host pick
+    // the status code and log level the pod emits.
+    let nextRaw: string
+    try {
+      nextRaw = new URL(location, current).toString()
+    } catch {
+      throw new SsrfBlockedUrlError(url.toString(), "unparsable redirect Location")
+    }
+    const next = await validatePublicHttpUrl(nextRaw)
     if (next instanceof Error) throw next
     // Redirect targets are attacker-chosen on these routes: the user picks the
     // lnurl host, and that host picks the Location. `follow-redirects`

@@ -2,7 +2,7 @@ import dns from "dns"
 import http from "http"
 import { AddressInfo } from "net"
 
-import { MAX_RESPONSE_BYTES, ssrfFetch } from "@utils/ssrf-guard"
+import { MAX_RESPONSE_BYTES, ssrfFetch, TOTAL_FETCH_TIMEOUT_MS } from "@utils/ssrf-guard"
 
 import {
   clearDevUnsafeModeFlags,
@@ -42,6 +42,10 @@ describe("ssrfFetch over a real socket", () => {
 
   let lookupSpy: jest.SpyInstance
 
+  // Any timer a handler starts, so teardown can stop it even when the test it
+  // belongs to failed before its own cleanup line ran.
+  const openIntervals: NodeJS.Timeout[] = []
+
   beforeAll(async () => {
     server = http.createServer((req, res) => {
       requestCount += 1
@@ -52,6 +56,11 @@ describe("ssrfFetch over a real socket", () => {
   })
 
   afterAll(async () => {
+    // The trickle case below deliberately leaves a socket writing. If the
+    // chain-abort guarantee ever regresses, that connection is still open here
+    // and server.close() would hang the whole hook (and stop jest exiting) —
+    // burying a red test under a CI timeout. Hang up on it explicitly.
+    server.closeAllConnections()
     await new Promise<void>((resolve, reject) =>
       server.close((err) => (err ? reject(err) : resolve())),
     )
@@ -60,6 +69,7 @@ describe("ssrfFetch over a real socket", () => {
 
   beforeEach(() => {
     requestCount = 0
+    openIntervals.length = 0
     handler = (_req, res) => {
       res.writeHead(200, { "content-type": "application/json" })
       res.end(JSON.stringify({ ok: true }))
@@ -73,6 +83,8 @@ describe("ssrfFetch over a real socket", () => {
   })
 
   afterEach(() => {
+    for (const timer of openIntervals) clearInterval(timer)
+    openIntervals.length = 0
     lookupSpy.mockRestore()
     restoreEnv()
   })
@@ -157,4 +169,43 @@ describe("ssrfFetch over a real socket", () => {
       /maxContentLength/i,
     )
   })
+
+  // The slow-loris case the time budget exists for, and the one the mocked
+  // specs cannot prove: they stub both axios and Date.now, so they pass whether
+  // or not anything actually cuts a live socket. axios's `timeout` maps to
+  // req.setTimeout(), a socket INACTIVITY timer that resets on every byte, and
+  // the adapter's only wall-clock timer is cleared as soon as response headers
+  // arrive. So a host that answers 200 immediately and then trickles a byte at
+  // a time is never cut off by `timeout`, never reaches maxContentLength, and
+  // holds a socket, an fd and a pending request open indefinitely — on a
+  // public unauthenticated route, and under the sender's wallet redlock on
+  // lnurlPaymentSend. Only the chain-wide AbortSignal ends it.
+  it(
+    "aborts a trickling host at the chain budget — `timeout` alone never fires",
+    async () => {
+      setDevContext(true)
+      handler = (_req, res) => {
+        res.writeHead(200, { "content-type": "application/octet-stream" })
+        // Well inside any inactivity timeout, so `timeout: remainingMs` keeps
+        // being reset and never fires. Far too little data to trip the body cap.
+        const trickle = setInterval(() => res.write("."), 250)
+        openIntervals.push(trickle)
+        res.on("close", () => clearInterval(trickle))
+      }
+
+      const startedAt = Date.now()
+      const err = await ssrfFetch(new URL(`http://trickle.test:${port}/pay`)).catch(
+        (e) => e,
+      )
+      const elapsed = Date.now() - startedAt
+
+      expect(err).toBeInstanceOf(Error)
+      // Whatever axios labels it, the guard must have ended it on the budget
+      // rather than let it run — and it must not have taken materially longer.
+      expect(elapsed).toBeGreaterThanOrEqual(TOTAL_FETCH_TIMEOUT_MS - 1_000)
+      expect(elapsed).toBeLessThan(TOTAL_FETCH_TIMEOUT_MS + 5_000)
+      expect(err.message).toMatch(/total fetch budget/)
+    },
+    TOTAL_FETCH_TIMEOUT_MS + 20_000,
+  )
 })

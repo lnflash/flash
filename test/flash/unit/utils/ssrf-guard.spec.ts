@@ -421,6 +421,7 @@ describe("ssrfFetch — guard wiring", () => {
   const URL_PUBLIC = new URL("https://pay.example.com/lnurl")
 
   const lastAxiosConfig = () => axiosGet.mock.calls[axiosGet.mock.calls.length - 1][1]
+  const lastAxiosUrl = () => axiosGet.mock.calls[axiosGet.mock.calls.length - 1][0]
 
   beforeEach(() => {
     jest.clearAllMocks()
@@ -477,17 +478,138 @@ describe("ssrfFetch — guard wiring", () => {
     expect(config.validateStatus(404)).toBe(false)
   })
 
-  it("still passes caller params, headers and auth through", async () => {
+  // axios's `timeout` is a socket inactivity timer that a host resets by
+  // dribbling one byte at a time, so the wall-clock abort is what actually
+  // enforces the budget. It has to be ONE signal for the whole chain — a
+  // per-hop one would give a 3-hop chain 4x the advertised budget, which is
+  // the very bug the shrinking per-hop timeout exists to avoid. The
+  // socket-level spec proves it fires; this proves it is wired and shared.
+  it("sends one wall-clock abort signal, shared by every hop", async () => {
+    axiosGet
+      .mockResolvedValueOnce({
+        status: 302,
+        headers: { location: "https://pay.example.com/hop1" },
+        data: {},
+      })
+      .mockResolvedValueOnce({ status: 200, headers: {}, data: { ok: true } })
+
+    await ssrfFetch(URL_PUBLIC)
+
+    const [first, second] = axiosGet.mock.calls.map((c) => c[1].signal)
+    expect(first).toBeInstanceOf(AbortSignal)
+    expect(second).toBe(first)
+  })
+
+  it("combines a caller signal with the chain budget instead of dropping it", async () => {
+    const controller = new AbortController()
+    await ssrfFetch(URL_PUBLIC, { signal: controller.signal })
+
+    const { signal } = lastAxiosConfig()
+    expect(signal).toBeInstanceOf(AbortSignal)
+    // Not the caller's own signal (that would drop the budget) and not
+    // un-aborted by the caller's (that would drop their cancellation).
+    expect(signal).not.toBe(controller.signal)
+    expect(signal.aborted).toBe(false)
+    controller.abort()
+    expect(signal.aborted).toBe(true)
+  })
+
+  it("reports a chain-budget abort as SsrfBlockedUrlError, not a raw CanceledError", async () => {
+    // What axios throws when the signal fires mid-response: without the
+    // translation this reaches the route as a plain error and answers 500 with
+    // logger.error, instead of the 502 every other blocked-fetch case returns.
+    axiosGet.mockImplementation(async (_url: string, config: { signal: AbortSignal }) => {
+      // Abort the guard's own signal, the way the 10s timer would.
+      const err = Object.assign(new Error("canceled"), { code: "ERR_CANCELED" })
+      const abortedSignal = config.signal
+      Object.defineProperty(abortedSignal, "aborted", { value: true, configurable: true })
+      throw err
+    })
+
+    const err = await ssrfFetch(URL_PUBLIC).catch((e) => e)
+
+    expect(err).toBeInstanceOf(SsrfBlockedUrlError)
+    expect(err.message).toMatch(/total fetch budget/)
+  })
+
+  it("propagates a non-budget failure unchanged", async () => {
+    axiosGet.mockRejectedValue(new Error("socket hang up"))
+
+    const err = await ssrfFetch(URL_PUBLIC).catch((e) => e)
+
+    expect(err).not.toBeInstanceOf(SsrfBlockedUrlError)
+    expect(err.message).toBe("socket hang up")
+  })
+
+  // A malformed Location makes `new URL` throw a bare TypeError. Unwrapped, it
+  // escapes as a non-SsrfBlockedUrlError and the proxy route answers 500 +
+  // logger.error rather than 502 — letting an attacker-chosen host pick the
+  // status code and log level the pod emits.
+  it.each(["http://", "http://[", "https://exa mple.com", "//"])(
+    "reports a malformed redirect Location (%s) as a blocked URL",
+    async (location) => {
+      axiosGet.mockResolvedValueOnce({ status: 302, headers: { location }, data: {} })
+
+      const err = await ssrfFetch(URL_PUBLIC).catch((e) => e)
+
+      expect(err).toBeInstanceOf(SsrfBlockedUrlError)
+      expect(err.message).toMatch(/unparsable redirect Location/)
+      expect(axiosGet).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it("still passes caller headers and auth through, with params serialised into the first URL", async () => {
     await ssrfFetch(URL_PUBLIC, {
-      params: { amount: 1000 },
+      params: { amount: 1000, comment: "a zap" },
       headers: { "x-custom": "yes" },
       auth: { username: "svc", password: "s3cret" },
     })
 
+    // The params reach the first hop, but as part of its URL rather than as a
+    // config axios would re-serialise onto every later hop.
+    expect(lastAxiosUrl()).toBe("https://pay.example.com/lnurl?amount=1000&comment=a+zap")
     const config = lastAxiosConfig()
-    expect(config.params).toEqual({ amount: 1000 })
+    expect(config.params).toBeUndefined()
     expect(config.headers).toEqual({ "x-custom": "yes" })
     expect(config.auth).toEqual({ username: "svc", password: "s3cret" })
+  })
+
+  it("does not mutate the caller's config or URL", async () => {
+    const callerConfig = { params: { amount: 1000 } }
+    await ssrfFetch(URL_PUBLIC, callerConfig)
+
+    expect(callerConfig.params).toEqual({ amount: 1000 })
+    expect(URL_PUBLIC.toString()).toBe("https://pay.example.com/lnurl")
+  })
+
+  it("skips null/undefined params rather than sending them as strings", async () => {
+    await ssrfFetch(URL_PUBLIC, {
+      params: { amount: 1000, comment: undefined, nostr: null },
+    })
+
+    expect(lastAxiosUrl()).toBe("https://pay.example.com/lnurl?amount=1000")
+  })
+
+  // The bug this closes: with `params` left on the per-hop config, axios
+  // re-serialises them onto the redirect target too, and buildURL joins with
+  // `&` when that target already has a query string. An lnurl server that
+  // redirects /invoice to /invoice?amount=1000 would then be fetched as
+  // ?amount=1000&amount=1000&comment=..., and a first-wins upstream quotes an
+  // amount nobody requested. follow-redirects, which this loop replaced, never
+  // re-appended them.
+  it("does not re-append caller params to a redirect target that carries its own", async () => {
+    axiosGet
+      .mockResolvedValueOnce({
+        status: 302,
+        headers: { location: "https://pay.example.com/invoice?amount=1000" },
+        data: {},
+      })
+      .mockResolvedValueOnce({ status: 200, headers: {}, data: { ok: true } })
+
+    await ssrfFetch(URL_PUBLIC, { params: { amount: 5000, comment: "zap" } })
+
+    expect(axiosGet.mock.calls[1][0]).toBe("https://pay.example.com/invoice?amount=1000")
+    expect(axiosGet.mock.calls[1][1].params).toBeUndefined()
   })
 
   // Redirect targets on this route are attacker-chosen twice over: the wallet
@@ -506,8 +628,9 @@ describe("ssrfFetch — guard wiring", () => {
     }
 
     const configOfCall = (index: number) => axiosGet.mock.calls[index][1]
+    const urlOfCall = (index: number) => axiosGet.mock.calls[index][0]
 
-    it("drops caller headers, params and auth on a cross-origin redirect", async () => {
+    it("drops caller headers and auth on a cross-origin redirect, and never carries params over", async () => {
       axiosGet
         .mockResolvedValueOnce({
           status: 302,
@@ -519,16 +642,21 @@ describe("ssrfFetch — guard wiring", () => {
       await ssrfFetch(URL_PUBLIC, CALLER_CONFIG)
 
       expect(axiosGet).toHaveBeenCalledTimes(2)
-      // The first hop is the host the caller chose to talk to, so it keeps them.
+      // The first hop is the host the caller chose to talk to, so it keeps
+      // them — params as part of its URL, headers and auth on the config.
+      expect(urlOfCall(0)).toBe("https://pay.example.com/lnurl?amount=1000")
       expect(configOfCall(0).headers).toEqual(CALLER_CONFIG.headers)
-      expect(configOfCall(0).params).toEqual(CALLER_CONFIG.params)
       expect(configOfCall(0).auth).toEqual(CALLER_CONFIG.auth)
+      // Params are a credential surface too (signed URLs, tokens): the
+      // redirect target gets the query string its own Location carried, and
+      // nothing else.
+      expect(urlOfCall(1)).toBe("https://someone-elses-host.example.net/next")
       expect(configOfCall(1).headers).toBeUndefined()
       expect(configOfCall(1).params).toBeUndefined()
       expect(configOfCall(1).auth).toBeUndefined()
     })
 
-    it("keeps them on a same-origin redirect", async () => {
+    it("keeps headers and auth on a same-origin redirect", async () => {
       axiosGet
         .mockResolvedValueOnce({
           status: 302,
@@ -540,8 +668,11 @@ describe("ssrfFetch — guard wiring", () => {
       await ssrfFetch(URL_PUBLIC, CALLER_CONFIG)
 
       expect(configOfCall(1).headers).toEqual(CALLER_CONFIG.headers)
-      expect(configOfCall(1).params).toEqual(CALLER_CONFIG.params)
       expect(configOfCall(1).auth).toEqual(CALLER_CONFIG.auth)
+      // Even same-origin, the caller's params are not re-applied: the Location
+      // is the whole request target, exactly as under follow-redirects.
+      expect(urlOfCall(1)).toBe("https://pay.example.com/hop1")
+      expect(configOfCall(1).params).toBeUndefined()
     })
 
     // Once dropped, they stay dropped: a chain that bounces off-origin and

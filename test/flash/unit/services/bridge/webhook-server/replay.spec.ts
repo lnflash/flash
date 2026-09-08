@@ -171,10 +171,17 @@ describe("replayAuthMiddleware", () => {
     BridgeConfig.webhook.replaySecret = saved
   })
 
-  it("returns 503 when replaySecret is a known placeholder", () => {
+  // Not a denylist test: WEAK_REPLAY_SECRETS was deleted in this PR because
+  // every placeholder it listed was already refused by the length floor, which
+  // made the set unreachable. "also-not-so-secret" is refused here for that
+  // reason and no other, and the assertion below pins it — naming this
+  // "a known placeholder" would re-create the same false claim of denylist
+  // coverage that weak-secrets.spec.ts guards against one directory over.
+  it("returns 503 when replaySecret is under the length floor", () => {
     const { BridgeConfig } = jest.requireMock("@config")
     const saved = BridgeConfig.webhook.replaySecret
     BridgeConfig.webhook.replaySecret = "also-not-so-secret"
+    expect("also-not-so-secret".length).toBeLessThan(MIN_SECRET_LENGTH)
 
     const res = makeRes()
     const next = jest.fn()

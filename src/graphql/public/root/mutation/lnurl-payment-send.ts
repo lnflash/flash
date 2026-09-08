@@ -21,6 +21,8 @@ import { baseLogger } from "@services/logger"
 import Ibex from "@services/ibex/client"
 import { IbexError } from "@services/ibex/errors"
 import { lnurlPaymentSendStatusOrPending } from "@services/ibex/payment-status"
+import { recordExceptionInCurrentSpan } from "@services/tracing"
+import { ErrorLevel } from "@domain/shared"
 import { ssrfFetch, validatePublicHttpUrl } from "@utils/ssrf-guard"
 
 type LnurlPayMetadata = {
@@ -181,6 +183,20 @@ const LnurlPaymentSendMutation = GT.Field<
           // trace to alert on or attribute, and "my LNURL payment says Invalid
           // LNURL" is undiagnosable. The sibling proxy route already logs this
           // (services/ibex/webhook-server/routes/on-pay.ts).
+          //
+          // The span carries the same event, because https-only is a cutover
+          // on a live payments path: a payer whose lnurl decodes to http://
+          // used to be paid and now fails, and a log line is not a rate you
+          // can alert on.
+          recordExceptionInCurrentSpan({
+            error: checkedMetadataUrl,
+            level: ErrorLevel.Warn,
+            fallbackMsg: "lnurlPaymentSend: blocked unsafe lnurl target",
+            attributes: {
+              "lnurlpay.blocked": true,
+              "lnurlpay.blocked.stage": "send-metadata-url",
+            },
+          })
           baseLogger.warn(
             { err: checkedMetadataUrl, accountId: domainAccount.id },
             "lnurlPaymentSend: blocked unsafe lnurl target",
@@ -200,6 +216,15 @@ const LnurlPaymentSendMutation = GT.Field<
           // Which of scheme / DNS / a blocked redirect hop / the 64KB body cap /
           // the 10s budget fired is the whole diagnosis, and it is thrown away
           // without this.
+          recordExceptionInCurrentSpan({
+            error: err,
+            level: ErrorLevel.Warn,
+            fallbackMsg: "lnurlPaymentSend: lnurl metadata fetch failed",
+            attributes: {
+              "lnurlpay.blocked": true,
+              "lnurlpay.blocked.stage": "send-metadata-fetch",
+            },
+          })
           baseLogger.warn(
             { err, accountId: domainAccount.id },
             "lnurlPaymentSend: lnurl metadata fetch failed",
