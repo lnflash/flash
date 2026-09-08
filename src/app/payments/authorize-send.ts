@@ -63,7 +63,9 @@ import { recordExceptionInCurrentSpan } from "@services/tracing"
  * `rate-limited` rejections deliberately post NO ops event: the limiter has
  * already bounded that caller, its counters live in Redis, and a client in a
  * retry loop would otherwise flood the shared 50-deep ops queue and push the
- * verification / cashout / deposit feed out of it.
+ * verification / cashout / deposit feed out of it. `limits-unavailable` is
+ * coalesced to one event per minute for the same reason — see
+ * `OPS_EVENT_COALESCE_MS`.
  *
  * Not applied to system credits (rewards, referral payouts, top-up credits,
  * reimbursements): those call the `@app` layer directly and never pass
@@ -108,6 +110,66 @@ const usdDisplay = (cents: number) => ({
   value: (cents / 100).toFixed(2),
   currency: "USD",
 })
+
+/**
+ * Ceiling on `limits-unavailable` ops events: at most one per window, with the
+ * count of suppressed ones carried on the next event that posts.
+ *
+ * `rate-limited` is silent because the limiter has already bounded that caller.
+ * `limits-unavailable` needs a ceiling for the opposite reason: nothing bounds
+ * it. It is not a per-account fact at all — a Redis fault or a price-pod outage
+ * past the 10-minute price cache makes EVERY send in flight report it at the
+ * same instant. The shared ops queue is 50 deep, drains sequentially and drops
+ * its oldest entries on overflow (`@services/alerts/ops-events`), so at any
+ * real send rate a 30-second Redis blip would bury the verification / cashout /
+ * deposit feed under identical `limits-unavailable` embeds plus "N events
+ * dropped" summaries — during exactly the incident the mode switch was added to
+ * survive, and making the log-only sample the rollout depends on silently
+ * lossy. `recordExceptionInCurrentSpan` below is the durable, unthrottled
+ * signal for this reason; docs/send-guard.md tells ops to alert on it.
+ *
+ * `over-daily-limit` and `invalid-amount` are NOT coalesced: they are
+ * per-account facts (which account, which level, what amount) that the log-only
+ * rollout exists to read one by one, and each caller's own attempt budget
+ * already bounds how many they can produce.
+ */
+export const OPS_EVENT_COALESCE_MS = 60_000
+
+const COALESCED_REASONS: ReadonlySet<SendRejectionReason> = new Set([
+  SendRejectionReasons.limitsUnavailable,
+])
+
+const opsEventWindows = new Map<
+  SendRejectionReason,
+  { openedAt: number; muted: number }
+>()
+
+// Returns whether this rejection gets an ops event, and how many events of the
+// same reason were muted since the last one that did.
+const claimOpsEventSlot = (
+  reason: SendRejectionReason,
+): { post: false } | { post: true; muted: number } => {
+  if (!COALESCED_REASONS.has(reason)) return { post: true, muted: 0 }
+
+  const now = Date.now()
+  const lastWindow = opsEventWindows.get(reason)
+  if (lastWindow && now - lastWindow.openedAt < OPS_EVENT_COALESCE_MS) {
+    lastWindow.muted += 1
+    return { post: false }
+  }
+
+  // Muted events are counted onto the next event that posts, but only while
+  // they are still the same news: a count carried out of a window that closed
+  // long ago belongs to a different incident, so it is dropped rather than
+  // pinned to an unrelated rejection.
+  const carried =
+    lastWindow && now - lastWindow.openedAt < 2 * OPS_EVENT_COALESCE_MS
+      ? lastWindow.muted
+      : 0
+
+  opsEventWindows.set(reason, { openedAt: now, muted: 0 })
+  return { post: true, muted: carried }
+}
 
 // An account document with no `level` field hydrates as `undefined` (the
 // mongoose schema has no default; ~300 prod accounts are in this state). An
@@ -251,7 +313,13 @@ const report = ({
   // The shared ops queue is 50 deep and drops its oldest events on overflow, so
   // one client in a retry loop would bury the verification / cashout / deposit
   // feed under its own rejections — exactly when ops needs to read it.
-  if (reason !== SendRejectionReasons.rateLimited) {
+  // `limits-unavailable` is unbounded in the other direction (every send at
+  // once) and is coalesced instead of silenced — see OPS_EVENT_COALESCE_MS.
+  const slot =
+    reason === SendRejectionReasons.rateLimited
+      ? { post: false as const }
+      : claimOpsEventSlot(reason)
+  if (slot.post) {
     notifyOpsEvent({
       flow: "transfer",
       // `would-reject` is not a euphemism: in log-only mode the send went
@@ -270,6 +338,9 @@ const report = ({
         kind,
         level: String(effectiveLevel(senderAccount)),
         mode,
+        // How many events of this reason were coalesced away since the last one
+        // that posted, so the feed stays countable rather than silently lossy.
+        ...(slot.muted > 0 ? { muted: String(slot.muted) } : {}),
       },
     })
   }

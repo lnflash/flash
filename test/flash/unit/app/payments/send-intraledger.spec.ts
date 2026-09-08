@@ -132,6 +132,7 @@ jest.mock("@app/payments/helpers", () => ({
 import { intraledgerPaymentSendWalletIdForUsdWallet } from "@app/payments/send-intraledger"
 import {
   IdempotencyKeyReuseError,
+  IntraledgerLimitsExceededError,
   MismatchedCurrencyForWalletError,
 } from "@domain/errors"
 import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
@@ -715,6 +716,63 @@ describe("intraledger idempotency (ENG-530)", () => {
 
     // Different sender wallet => different scope => both execute.
     expect(mockAddInvoice).toHaveBeenCalledTimes(2)
+  })
+
+  // ENG-573 round 2. The guard used to be awaited in the resolver, AHEAD of
+  // this wrapper. A client whose $140 send timed out and retried therefore spent
+  // a burst point on every retry before ever reaching the replay: past 10/min it
+  // got `{status:"failed"}` + "Too many payment attempts" for a payment that had
+  // already settled, and a client that reads "failed" as "retry with a fresh
+  // key" then double-pays — the exact ENG-530 class this wrapper exists to
+  // prevent. Threaded through as `authorize`, the guard runs only on the path
+  // that actually pays.
+  it("does not re-run the guard on a replayed idempotency key", async () => {
+    const authorize = jest.fn().mockResolvedValue(true)
+
+    const first = await intraledgerPaymentSendWalletIdForUsdWallet({
+      ...sendArgs,
+      idempotencyKey: "guard-replay",
+      authorize,
+    })
+    const second = await intraledgerPaymentSendWalletIdForUsdWallet({
+      ...sendArgs,
+      idempotencyKey: "guard-replay",
+      authorize,
+    })
+
+    expect(first).toEqual({ value: "success" })
+    expect(second).toEqual({ value: "success" })
+    // One attempt-budget point spent, one amount check, one payment.
+    expect(authorize).toHaveBeenCalledTimes(1)
+    expect(mockPayInvoice).toHaveBeenCalledTimes(1)
+  })
+
+  it("returns the guard's rejection without sending, and leaves the key retryable", async () => {
+    const rejection = new IntraledgerLimitsExceededError(
+      "Cannot transfer more than $125.00 in 24 hours",
+    )
+    const authorize = jest.fn().mockResolvedValueOnce(rejection).mockResolvedValue(true)
+
+    const blocked = await intraledgerPaymentSendWalletIdForUsdWallet({
+      ...sendArgs,
+      idempotencyKey: "guard-reject",
+      authorize,
+    })
+
+    expect(blocked).toBe(rejection)
+    expect(mockAddInvoice).not.toHaveBeenCalled()
+    expect(mockPayInvoice).not.toHaveBeenCalled()
+
+    // An error return is never cached, so the same key still works once the
+    // guard allows the send.
+    const retried = await intraledgerPaymentSendWalletIdForUsdWallet({
+      ...sendArgs,
+      idempotencyKey: "guard-reject",
+      authorize,
+    })
+
+    expect(retried).toEqual({ value: "success" })
+    expect(mockPayInvoice).toHaveBeenCalledTimes(1)
   })
 
   it("rejects the same key reused for a different payment instead of replaying", async () => {

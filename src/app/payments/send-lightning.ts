@@ -225,6 +225,9 @@ export const payNoAmountInvoiceByWalletIdForBtcWallet = async (
     idempotencyKey: args.idempotencyKey,
     senderWalletId: args.senderWalletId,
     requestFingerprint: `ln-noamount|${args.uncheckedPaymentRequest}|${args.amount}`,
+    // ENG-573 send guard. Inside the wrapper, so a replayed key never spends
+    // attempt budget nor gets re-judged against a moved mid price.
+    authorize: args.authorize,
     execute: async () => {
       const validated = await validateIsBtcWallet(args.senderWalletId)
       const result =
@@ -241,6 +244,8 @@ export const payNoAmountInvoiceByWalletIdForUsdWallet = async (
     idempotencyKey: args.idempotencyKey,
     senderWalletId: args.senderWalletId,
     requestFingerprint: `ln-noamount|${args.uncheckedPaymentRequest}|${args.amount}`,
+    // ENG-573 send guard — see the BTC wrapper above.
+    authorize: args.authorize,
     execute: async () => {
       const validated = await validateIsUsdWallet(args.senderWalletId, {
         includeUsdt: true,

@@ -74,7 +74,15 @@ describe("ENG-573 send guard wiring", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     mockResolveCashWalletMutationWalletIdForAccount.mockResolvedValue(routedWalletId)
-    mockPayNoAmountInvoiceByWalletIdForBtcWallet.mockResolvedValue({ value: "success" })
+    // Mirror the real send function's contract: it hands `authorize` to
+    // withPaymentIdempotency, which runs it only on the path that will pay and
+    // short-circuits on a rejection.
+    mockPayNoAmountInvoiceByWalletIdForBtcWallet.mockImplementation(
+      async ({ authorize }: { authorize?: () => Promise<unknown> }) => {
+        const authorized = await authorize?.()
+        return authorized instanceof Error ? authorized : { value: "success" }
+      },
+    )
     mockPayOnChainByWalletId.mockResolvedValue({ status: { value: "success" } })
     mockUsdWalletAmountFromWalletId.mockResolvedValue(USDAmount.cents("700"))
     mockGetBalanceForWallet.mockResolvedValue(USDAmount.cents("12345"))
@@ -89,8 +97,17 @@ describe("ENG-573 send guard wiring", () => {
       idempotencyKey: null,
     }
 
-    it("authorises the sats amount as a lightning send, then pays", async () => {
+    // ENG-573 round 2: the guard is handed DOWN as the idempotency wrapper's
+    // `authorize` hook (withPaymentIdempotency lives inside
+    // payNoAmountInvoiceByWalletIdForBtcWallet), not awaited ahead of it. Ahead
+    // of the wrapper, every retry of a timed-out send burned a burst point
+    // before reaching the replay and was re-priced against a moved mid price.
+    it("hands the guard down to the app layer instead of running it first", async () => {
       const result = await run(LnNoAmountInvoicePaymentSendMutation, input)
+
+      expect(mockPayNoAmountInvoiceByWalletIdForBtcWallet).toHaveBeenCalledTimes(1)
+      const { authorize } = mockPayNoAmountInvoiceByWalletIdForBtcWallet.mock.calls[0][0]
+      expect(typeof authorize).toBe("function")
 
       expect(mockAuthorizeSend).toHaveBeenCalledWith({
         senderAccount: domainAccount,
@@ -98,18 +115,27 @@ describe("ENG-573 send guard wiring", () => {
         amount: { currency: "BTC", sats: 700 },
         kind: "lightning",
       })
-      expect(mockPayNoAmountInvoiceByWalletIdForBtcWallet).toHaveBeenCalledTimes(1)
       expect(result).toEqual({ errors: [], status: "success" })
     })
 
-    it("fails before the app layer when the guard rejects", async () => {
+    it("does not consult the guard when the wrapper never runs the hook (a replay)", async () => {
+      mockPayNoAmountInvoiceByWalletIdForBtcWallet.mockResolvedValueOnce({
+        value: "success",
+      })
+
+      const result = await run(LnNoAmountInvoicePaymentSendMutation, input)
+
+      expect(result).toEqual({ errors: [], status: "success" })
+      expect(mockAuthorizeSend).not.toHaveBeenCalled()
+    })
+
+    it("returns a failed payload carrying the guard's error when the hook rejects", async () => {
       mockAuthorizeSend.mockResolvedValueOnce(rejection)
 
       const result = await run(LnNoAmountInvoicePaymentSendMutation, input)
 
       expect(result.status).toBe("failed")
       expect(result.errors[0]).toMatchObject({ message: rejection.message })
-      expect(mockPayNoAmountInvoiceByWalletIdForBtcWallet).not.toHaveBeenCalled()
     })
   })
 

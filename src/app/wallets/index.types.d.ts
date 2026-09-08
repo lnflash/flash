@@ -80,6 +80,12 @@ type GetOnChainFeeArgs = GetOnChainFeeWithoutCurrencyArgs & {
   amountCurrency: WalletCurrency
 }
 
+// ENG-573: the send guard, as the idempotency wrapper's `authorize` hook. A
+// resolver hands this down instead of awaiting the guard itself, so a replayed
+// idempotency key returns the cached result without spending attempt budget or
+// being re-judged against a moved mid price. See @app/payments/idempotency.
+type SendGuardHook = () => Promise<true | ApplicationError>
+
 type PaymentSendArgs = {
   senderWalletId: WalletId
   senderAccount?: Account
@@ -99,6 +105,10 @@ type PayNoAmountInvoiceByWalletIdArgs = PaymentSendArgs & {
   uncheckedPaymentRequest: string
   amount: number
   senderAccount: Account
+  // ENG-573 send guard, handed to `withPaymentIdempotency` as its `authorize`
+  // hook so it runs only on the path that will actually pay. See
+  // `SendGuardHook` above.
+  authorize?: SendGuardHook
 }
 
 type IntraLedgerPaymentSendUsernameArgs = PaymentSendArgs & {
@@ -109,6 +119,10 @@ type IntraLedgerPaymentSendUsernameArgs = PaymentSendArgs & {
 type IntraLedgerPaymentSendWalletIdArgs = PaymentSendArgs & {
   recipientWalletId: WalletId
   amount: number
+  // ENG-573 send guard, handed to `withPaymentIdempotency` as its `authorize`
+  // hook so it runs only on the path that will actually pay. See
+  // `SendGuardHook` above.
+  authorize?: SendGuardHook
 }
 
 type PayOnChainByWalletIdResult = {

@@ -13,12 +13,21 @@ jest.mock("@domain/bitcoin/lightning", () => ({
   ...jest.requireActual("@domain/bitcoin/lightning"),
   // ENG-573: the resolver now decodes the bolt11 to learn the amount. The
   // fixture invoice is not a real bolt11, so decoding is stubbed to an
-  // amount-bearing invoice by default.
+  // amount-bearing invoice by default. The "real bolt11" cases below route this
+  // back through the genuine implementation.
   decodeInvoice: (paymentRequest: string) => mockDecodeInvoice(paymentRequest),
 }))
 mockDecodeInvoice.mockReturnValue({
   paymentAmount: { amount: 21_000n, currency: "BTC" },
 })
+
+// The operator switch. `off` must restore pre-ENG-573 behaviour on this rail,
+// and the decode gate is part of what it has to switch off.
+const mockSendGuardMode = jest.fn<SendGuardMode, []>(() => "log-only")
+jest.mock("@config", () => ({
+  ...jest.requireActual("@config"),
+  getSendGuardMode: () => mockSendGuardMode(),
+}))
 
 const mockPayInvoice = jest.fn()
 const mockRecordExceptionInCurrentSpan = jest.fn()
@@ -95,6 +104,7 @@ const resolvePayment = async (): Promise<PaymentSendResult> => {
 describe("lnInvoicePaymentSend IBEX error surfacing (issue #93)", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    mockSendGuardMode.mockReturnValue("log-only")
   })
 
   it("returns a typed INSUFFICIENT_BALANCE error for insufficient-balance failures", async () => {
@@ -150,6 +160,7 @@ describe("lnInvoicePaymentSend IBEX error surfacing (issue #93)", () => {
 describe("lnInvoicePaymentSend IBEX status reader wiring", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    mockSendGuardMode.mockReturnValue("log-only")
   })
 
   it("settles on a payment-level SUCCEEDED even when the top-level status is 0", async () => {
@@ -235,6 +246,7 @@ describe("lnInvoicePaymentSend IBEX status reader wiring", () => {
 describe("ENG-573 send guard wiring", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    mockSendGuardMode.mockReturnValue("log-only")
     mockDecodeInvoice.mockReturnValue({
       paymentAmount: { amount: 21_000n, currency: "BTC" },
     })
@@ -303,5 +315,100 @@ describe("ENG-573 send guard wiring", () => {
     expect(result.status).toBe("failed")
     expect(mockAuthorizeSend).not.toHaveBeenCalled()
     expect(mockPayInvoice).not.toHaveBeenCalled()
+  })
+})
+
+// The decode gate is a rejection class this rail never had: before ENG-573 the
+// resolver handed the raw bolt11 straight to IBEX and let IBEX judge it.
+// `decodeInvoice` refuses anything `invoices.parsePaymentRequest` cannot parse
+// and any invoice with no payment secret, so if it ever refuses an invoice IBEX
+// would have paid, the operator switch — not a code deploy — has to be the
+// remedy. That is what docs/send-guard.md promises `off` does.
+describe("ENG-573 sendGuard.mode: off restores pre-ENG-573 behaviour on this rail", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockSendGuardMode.mockReturnValue("off")
+    mockPayInvoice.mockResolvedValue({
+      status: 0,
+      transaction: { payment: { status: { id: 2 } } },
+    })
+  })
+
+  it("still pays an invoice the decode gate refuses", async () => {
+    mockDecodeInvoice.mockReturnValue(new LnInvoiceDecodeError("bad bolt11"))
+
+    const result = await resolvePayment()
+
+    expect(result).toEqual({ errors: [], status: "success" })
+    expect(mockPayInvoice).toHaveBeenCalledTimes(1)
+    expect(mockAuthorizeSend).not.toHaveBeenCalled()
+  })
+
+  it("still pays a no-amount invoice, as it did before the guard existed", async () => {
+    mockDecodeInvoice.mockReturnValue({ paymentAmount: null })
+
+    const result = await resolvePayment()
+
+    expect(result).toEqual({ errors: [], status: "success" })
+    expect(mockPayInvoice).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not decode at all — no Redis, no price lookup, no new rejection class", async () => {
+    await resolvePayment()
+
+    expect(mockDecodeInvoice).not.toHaveBeenCalled()
+    expect(mockAuthorizeSend).not.toHaveBeenCalled()
+    expect(mockPayInvoice).toHaveBeenCalledTimes(1)
+  })
+})
+
+// Every other case here stubs decodeInvoice, so none of them exercises the real
+// parser on a real bolt11 — the one thing that says whether the new gate lets
+// ordinary invoices through.
+describe("ENG-573 decode gate against a real bolt11", () => {
+  const realDecodeInvoice = jest.requireActual("@domain/bitcoin/lightning").decodeInvoice
+
+  // 140n = 14 sats. A genuine mainnet-encoded invoice with a payment secret.
+  const realInvoice =
+    "lnbc140n1p3k6yzupp53p305l6de6s9xw2j0qaa59pl7lahys4f2uavwncll9z2vq0syvvsdqqcqzpgxqzuysp5mdgsaa734eg7srwx92rsn3hyc4xzt5tphfpadl5c6fanhppwaz4s9qyyssqm6yhnnhl8jltwjtclzk4g7nxr99ycsp4sqd6vksevqh06h8l3gm5fdhtl59t6g3fsalv26sj5zvwhxwlghc9wcfgkrjrtuh4873ejnspc5xksy"
+
+  const resolveReal = async (): Promise<PaymentSendResult> => {
+    const resolve = LnInvoicePaymentSendMutation.resolve as unknown as (
+      source: null,
+      args: { input: Record<string, unknown> },
+      ctx: { domainAccount: Record<string, unknown> },
+    ) => Promise<PaymentSendResult>
+
+    return resolve(
+      null,
+      { input: { walletId: "wallet-1", paymentRequest: realInvoice } },
+      { domainAccount: { id: "account-1" } },
+    )
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockSendGuardMode.mockReturnValue("log-only")
+    mockDecodeInvoice.mockImplementation(realDecodeInvoice)
+    mockPayInvoice.mockResolvedValue({
+      status: 0,
+      transaction: { payment: { status: { id: 2 } } },
+    })
+  })
+
+  it("passes an ordinary amount-bearing invoice through to IBEX with its real sats amount", async () => {
+    const result = await resolveReal()
+
+    expect(result).toEqual({ errors: [], status: "success" })
+    expect(mockAuthorizeSend).toHaveBeenCalledWith({
+      senderAccount: { id: "account-1" },
+      senderWalletId: "wallet-1",
+      amount: { currency: "BTC", sats: 14n },
+      kind: "lightning",
+    })
+    expect(mockPayInvoice).toHaveBeenCalledWith({
+      invoice: realInvoice,
+      accountId: "wallet-1",
+    })
   })
 })

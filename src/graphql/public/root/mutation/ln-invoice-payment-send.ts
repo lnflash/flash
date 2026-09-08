@@ -15,6 +15,7 @@ import { IbexError, InsufficientIbexBalance } from "@services/ibex/errors"
 import { paymentSendStatusOrPending } from "@services/ibex/payment-status"
 import { withPaymentIdempotency } from "@app/payments/idempotency"
 import { authorizeSend } from "@app/payments/authorize-send"
+import { getSendGuardMode } from "@config"
 
 const LnInvoicePaymentInput = GT.Input({
   name: "LnInvoicePaymentInput",
@@ -85,30 +86,6 @@ const LnInvoicePaymentSendMutation = GT.Field<
 
     if (!domainAccount) throw new Error("Authentication required")
 
-    // ENG-573 send guard needs the amount, and it is inside the bolt11, so decode
-    // first; a no-amount invoice cannot be paid through this mutation anyway.
-    const decodedInvoice = decodeInvoice(paymentRequest)
-    if (decodedInvoice instanceof Error) {
-      return {
-        status: "failed",
-        errors: [mapAndParseErrorForGqlResponse(decodedInvoice)],
-      }
-    }
-    if (decodedInvoice.paymentAmount === null) {
-      return {
-        status: "failed",
-        errors: [
-          mapAndParseErrorForGqlResponse(
-            new LnPaymentRequestNonZeroAmountRequiredError(),
-          ),
-        ],
-      }
-    }
-
-    // Bind the narrowed amount before the closure below: TS re-widens
-    // `decodedInvoice.paymentAmount` to nullable inside a callback.
-    const invoiceSats = decodedInvoice.paymentAmount.amount
-
     // ENG-530: dedupe on (senderWalletId, idempotencyKey) when a key is supplied.
     // This resolver pays IBEX directly (the app-layer path is stubbed above), so the
     // idempotency wrapper goes around the inline call here rather than in @app.
@@ -120,13 +97,30 @@ const LnInvoicePaymentSendMutation = GT.Field<
       idempotencyKey,
       senderWalletId: walletId,
       requestFingerprint: `ln|${paymentRequest}`,
-      authorize: () =>
-        authorizeSend({
+      authorize: async () => {
+        // The bolt11 decode is PART of the guard, not a precondition of it: the
+        // guard needs the amount and the amount is inside the invoice. It
+        // therefore has to answer to the same switch. `decodeInvoice` refuses
+        // any request `invoices.parsePaymentRequest` cannot parse and any
+        // invoice with no payment secret — a rejection class this rail never
+        // had, since it used to hand the raw bolt11 straight to IBEX. If that
+        // gate turns out to refuse an invoice IBEX would have paid, `off` must
+        // restore service without a code deploy.
+        if (getSendGuardMode() === "off") return true
+
+        const decodedInvoice = decodeInvoice(paymentRequest)
+        if (decodedInvoice instanceof Error) return decodedInvoice
+        if (decodedInvoice.paymentAmount === null) {
+          return new LnPaymentRequestNonZeroAmountRequiredError()
+        }
+
+        return authorizeSend({
           senderAccount: domainAccount,
           senderWalletId: walletId,
-          amount: { currency: "BTC", sats: invoiceSats },
+          amount: { currency: "BTC", sats: decodedInvoice.paymentAmount.amount },
           kind: "lightning",
-        }),
+        })
+      },
       execute: async (): Promise<PaymentSendStatus | ApplicationError> => {
         const PayLightningInvoice = await Ibex.payInvoice({
           invoice: paymentRequest as Bolt11,

@@ -77,18 +77,12 @@ const LnNoAmountInvoicePaymentSendMutation = GT.Field<
       return { errors: [{ message: memo.message }] }
     }
 
-    // ENG-573 send guard: attempt budget + amount sanity + daily-limit cap,
-    // before anything reaches IBEX.
-    const authorized = await authorizeSend({
-      senderAccount: domainAccount,
-      senderWalletId: walletId,
-      amount: { currency: "BTC", sats: amount },
-      kind: "lightning",
-    })
-    if (authorized instanceof Error) {
-      return { status: "failed", errors: [mapAndParseErrorForGqlResponse(authorized)] }
-    }
-
+    // ENG-573 send guard (attempt budget + amount sanity + daily-limit cap) is
+    // handed DOWN as the idempotency wrapper's `authorize` hook rather than
+    // awaited here: running it ahead of the wrapper made every retry of a
+    // timed-out send spend burst budget and be re-priced, so a client past
+    // 10/min got "Too many payment attempts" — or "Cannot transfer more than
+    // $X" after a mid-price tick — for a payment that had already settled.
     const status = await Payments.payNoAmountInvoiceByWalletIdForBtcWallet({
       senderWalletId: walletId,
       uncheckedPaymentRequest: paymentRequest,
@@ -96,6 +90,13 @@ const LnNoAmountInvoicePaymentSendMutation = GT.Field<
       amount,
       senderAccount: domainAccount,
       idempotencyKey,
+      authorize: () =>
+        authorizeSend({
+          senderAccount: domainAccount,
+          senderWalletId: walletId,
+          amount: { currency: "BTC", sats: amount },
+          kind: "lightning",
+        }),
     })
 
     if (status instanceof Error) {

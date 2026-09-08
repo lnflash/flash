@@ -29,7 +29,11 @@ jest.mock("@config", () => ({
 
 import { getAccountLimits } from "@config"
 
-import { SendRejectionReasons, authorizeSend } from "@app/payments/authorize-send"
+import {
+  OPS_EVENT_COALESCE_MS,
+  SendRejectionReasons,
+  authorizeSend,
+} from "@app/payments/authorize-send"
 
 import { AccountLevel } from "@domain/accounts"
 import {
@@ -74,8 +78,15 @@ const L2 = getAccountLimits({ level: AccountLevel.Two })
 const L3 = getAccountLimits({ level: AccountLevel.Three })
 
 describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
+  // The `limits-unavailable` ops-event ceiling is module state (a per-reason
+  // window), so the clock is faked and wound past two full windows between
+  // tests: each case starts with no open window and no carried mute count.
+  beforeAll(() => jest.useFakeTimers())
+  afterAll(() => jest.useRealTimers())
+
   beforeEach(() => {
     jest.clearAllMocks()
+    jest.advanceTimersByTime(2 * OPS_EVENT_COALESCE_MS + 1)
     mockConsumeLimiter.mockResolvedValue(true)
     mockSendGuardMode.mockReturnValue("enforce")
   })
@@ -140,6 +151,51 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
       expect(mockRecordExceptionInCurrentSpan).toHaveBeenCalledWith(
         expect.objectContaining({ error: result, level: ErrorLevel.Critical }),
       )
+    })
+
+    // The ceiling the round-1 fix fitted to `rate-limited` was missing from the
+    // one reason that fires on 100% of sends at once. A Redis fault is not one
+    // noisy caller: every send in flight reports it in the same instant, into a
+    // shared 50-deep FIFO that drops its oldest entries — burying the
+    // verification / cashout / deposit feed during exactly the incident the
+    // mode switch exists to survive.
+    it("posts at most one ops event however many consecutive store faults it sees", async () => {
+      mockConsumeLimiter.mockResolvedValue(new UnknownRateLimitServiceError("redis down"))
+
+      for (let i = 0; i < 50; i++) {
+        expect(await send()).toBeInstanceOf(SendLimitsUnavailableError)
+      }
+
+      expect(mockNotifyOpsEvent).toHaveBeenCalledTimes(1)
+      // The span exception is the durable, unthrottled signal — docs/send-guard.md
+      // tells ops to alert on it — so the ceiling costs no visibility.
+      expect(mockRecordExceptionInCurrentSpan).toHaveBeenCalledTimes(50)
+    })
+
+    it("counts the muted events onto the next one that posts, so the feed is not silently lossy", async () => {
+      mockConsumeLimiter.mockResolvedValue(new UnknownRateLimitServiceError("redis down"))
+
+      for (let i = 0; i < 12; i++) await send()
+      expect(mockNotifyOpsEvent).toHaveBeenCalledTimes(1)
+      expect(lastOpsEvent()?.meta).not.toHaveProperty("muted")
+
+      jest.advanceTimersByTime(OPS_EVENT_COALESCE_MS + 1)
+      await send()
+
+      expect(mockNotifyOpsEvent).toHaveBeenCalledTimes(2)
+      expect(lastOpsEvent()?.meta.muted).toBe("11")
+    })
+
+    // A per-account fact the log-only rollout exists to read one by one, and
+    // already bounded by the caller's own attempt budget. Coalescing these would
+    // hide which account, which level and what amount the cap would have refused.
+    it("does not coalesce over-daily-limit events", async () => {
+      for (let i = 0; i < 5; i++) {
+        await send({ amount: { currency: "USD", cents: L0.intraLedgerLimit + 1 } })
+      }
+
+      expect(mockNotifyOpsEvent).toHaveBeenCalledTimes(5)
+      expect(lastOpsEvent()?.step).toBe(SendRejectionReasons.overDailyLimit)
     })
 
     it("charges the budget even for an attempt it then rejects on amount", async () => {
