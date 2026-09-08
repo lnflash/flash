@@ -290,7 +290,11 @@ describe("lnurlPaymentSend — SSRF guard wiring", () => {
     expect(baseLogger.warn).toHaveBeenCalledTimes(1)
     expect(baseLogger.warn.mock.calls[0][0]).toMatchObject({ accountId: "account-id" })
     expect(blockedStages()).toEqual(["send-metadata-fetch"])
-    expect(recordException.mock.calls[0][0].attributes["lnurlpay.blocked"]).toBe(true)
+    // A socket hang up is the upstream breaking, not a target being refused.
+    // `lnurlpay.blocked` is the blocked-target alert signal; filing upstream
+    // faults under it would fire that alert on every flaky wallet host and
+    // contradict the invariant ssrf-guard.ts establishes deliberately.
+    expect(recordException.mock.calls[0][0].attributes["lnurlpay.blocked"]).toBe(false)
   })
 
   // The guard's other two limits — the per-hop inactivity timeout and the 64KB
@@ -324,6 +328,24 @@ describe("lnurlPaymentSend — SSRF guard wiring", () => {
       expect(recordException.mock.calls[0][0].error.message).toContain(message)
     },
   )
+
+  it("files a genuinely refused redirect target under the blocked-target signal", async () => {
+    const { recordExceptionInCurrentSpan } = jest.requireMock("@services/tracing")
+    recordExceptionInCurrentSpan.mockClear()
+    mockDecodeLnurl.mockResolvedValue({ decodedLnurl: "https://pay.example.com/lnurl" })
+    axiosGet.mockResolvedValueOnce({
+      status: 302,
+      headers: { location: "http://169.254.169.254/latest/meta-data" },
+      data: "",
+    })
+
+    await resolveMutation()
+
+    expect(recordExceptionInCurrentSpan).toHaveBeenCalledTimes(1)
+    expect(
+      recordExceptionInCurrentSpan.mock.calls[0][0].attributes["lnurlpay.blocked"],
+    ).toBe(true)
+  })
 
   it("still pays when the decoded lnurl is a public https host", async () => {
     mockDecodeLnurl.mockResolvedValue({ decodedLnurl: "https://pay.example.com/lnurl" })

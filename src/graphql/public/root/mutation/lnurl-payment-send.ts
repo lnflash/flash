@@ -23,7 +23,7 @@ import { IbexError } from "@services/ibex/errors"
 import { lnurlPaymentSendStatusOrPending } from "@services/ibex/payment-status"
 import { recordExceptionInCurrentSpan } from "@services/tracing"
 import { ErrorLevel } from "@domain/shared"
-import { ssrfFetch, validatePublicHttpUrl } from "@utils/ssrf-guard"
+import { isSsrfBlockedError, ssrfFetch, validatePublicHttpUrl } from "@utils/ssrf-guard"
 
 type LnurlPayMetadata = {
   callback: string
@@ -221,7 +221,15 @@ const LnurlPaymentSendMutation = GT.Field<
             level: ErrorLevel.Warn,
             fallbackMsg: "lnurlPaymentSend: lnurl metadata fetch failed",
             attributes: {
-              "lnurlpay.blocked": true,
+              // Only a refused target is `blocked`. A third-party lnurl server
+              // answering 500, a reset connection, an NXDOMAIN — all land in
+              // this same catch and are upstream faults, not SSRF refusals.
+              // Filing them under the blocked-target signal would break the
+              // invariant ssrf-guard.ts establishes deliberately (and its own
+              // spec pins): a broken upstream is not a refused target, and an
+              // alert on `lnurlpay.blocked` would fire on every flaky wallet
+              // host.
+              "lnurlpay.blocked": isSsrfBlockedError(err),
               "lnurlpay.blocked.stage": "send-metadata-fetch",
             },
           })
