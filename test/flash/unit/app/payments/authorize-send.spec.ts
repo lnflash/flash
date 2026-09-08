@@ -609,14 +609,22 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
       },
     )
 
-    it("carries the amount that was refused, in cents", async () => {
+    // Numeric, unlike the level: this is the measure the rollout aggregates —
+    // step 3 of the runbook decides whether to raise a level's limit from the
+    // distribution of refused amounts, which needs MAX/percentiles, and string
+    // ordering would sort "9900" above "125000".
+    it("carries the amount that was refused as a number, so it can be aggregated", async () => {
       await send({ amount: { currency: "USD", cents: L0.intraLedgerLimit + 1 } })
-      // A string for the same reason as the level: a zero-cent amount (1 sat at
-      // a mid price that rounds to nothing, refused by the limits-unavailable
-      // branch) would otherwise be dropped rather than recorded as 0.
-      expect(lastSpanAttributes()["sendGuard.cents"]).toBe(
-        String(L0.intraLedgerLimit + 1),
-      )
+      expect(lastSpanAttributes()["sendGuard.cents"]).toBe(L0.intraLedgerLimit + 1)
+    })
+
+    it("emits the level as a string label and the amount as a number in the same span", async () => {
+      await send({ amount: { currency: "USD", cents: L0.intraLedgerLimit + 1 } })
+      const attrs = lastSpanAttributes()
+      // A level-0 (or level-less) account must be countable: "0" is present,
+      // never dropped as falsy.
+      expect(attrs["sendGuard.level"]).toBe("0")
+      expect(typeof attrs["sendGuard.cents"]).toBe("number")
     })
 
     it("omits the amount when the guard never got one", async () => {

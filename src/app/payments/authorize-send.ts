@@ -376,14 +376,21 @@ const report = ({
   // `AccountLevel.Zero === 0` — so a numeric level would drop the attribute for
   // exactly the cohort this rollout exists to measure (~300 unleveled prod
   // accounts, plus every genuine L0 user), and "attribute absent" means level 0
-  // nowhere in the runbook. A zero-cent amount would vanish the same way.
+  // nowhere in the runbook.
+  //
+  // `cents` stays a NUMBER: it is the one field whose distribution the rollout
+  // reads (step 3 decides whether to raise a level's limit from the refused
+  // amounts), and a string gives neither a heatmap nor a MAX — string ordering
+  // even sorts "9900" above "125000". The falsy-drop that stringifying would
+  // guard against is unreachable here: cents is attached on only two paths, and
+  // the over-limit one is provably `cents > limit >= 12500`.
   addAttributesToCurrentSpan({
     "sendGuard.rejection": reason,
     "sendGuard.mode": mode,
     "sendGuard.kind": kind,
     "sendGuard.level": String(level),
     "sendGuard.error": error.constructor.name,
-    ...(cents === undefined ? {} : { "sendGuard.cents": String(cents) }),
+    ...(cents === undefined ? {} : { "sendGuard.cents": cents }),
   })
 
   const slot = claimOpsEventSlot(reason)

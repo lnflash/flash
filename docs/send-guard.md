@@ -161,7 +161,12 @@ there, not a hunt through the call sites. The price of putting it there is that
    **What to count from.** Every rejection, of every reason, coalesced or not,
    is also written to the current span as `sendGuard.rejection`,
    `sendGuard.mode`, `sendGuard.kind`, `sendGuard.level`, `sendGuard.error` and
-   (when the guard got as far as an amount) `sendGuard.cents`. Count from
+   (when the guard got as far as an amount) `sendGuard.cents`. Every one of
+   those is a **string** except `sendGuard.cents`, which is a number so it can
+   be aggregated — so query `sendGuard.level = "0"`, not `= 0`, and read a
+   level-0 or level-less account as the literal `"0"` rather than as an absent
+   attribute. Range and percentile filters on `sendGuard.cents` are numeric.
+   Count from
    tracing, not from Discord: the ops feed is fire-and-forget, does nothing at
    all when `OPS_DISCORD_WEBHOOK_URL` is unset, and drops its oldest entries on
    overflow behind an unattributed "N events dropped" summary. Read the feed,
