@@ -1,10 +1,24 @@
 const mockAuthorizeSend = jest.fn()
+const mockGateSend = jest.fn()
 jest.mock("@app/payments/authorize-send", () => ({
   // ENG-573 send guard. Default-allow so the existing cases exercise the
   // resolver body; the wiring cases below flip it to a rejection.
   authorizeSend: async (args: unknown) => {
     const result = await mockAuthorizeSend(args)
     return result === undefined ? true : result
+  },
+  // Stands in for the real `gateSend`, keeping the one behaviour under test:
+  // report, then defer to the mode. The decode gate is the only caller.
+  gateSend: (args: { error: Error }) => {
+    mockGateSend(args)
+    return mockSendGuardMode() === "enforce" ? args.error : true
+  },
+  SendRejectionReasons: {
+    rateLimited: "rate-limited",
+    invalidAmount: "invalid-amount",
+    overDailyLimit: "over-daily-limit",
+    limitsUnavailable: "limits-unavailable",
+    undecodableInvoice: "undecodable-invoice",
   },
 }))
 
@@ -296,25 +310,44 @@ describe("ENG-573 send guard wiring", () => {
     expect(mockPayInvoice).not.toHaveBeenCalled()
   })
 
-  it("rejects a no-amount invoice on this mutation without consulting the guard or IBEX", async () => {
-    mockDecodeInvoice.mockReturnValue({ paymentAmount: null })
+  // The decode gate used to return its error in every mode but `off`, which
+  // made this the one rail that enforced while the docs and the PR said the
+  // rollout was only observing — and the week-long would-reject sample carried
+  // no trace of the invoices it turned away. It answers to the mode now.
+  describe("the decode gate honours the mode", () => {
+    for (const [label, decoded] of [
+      ["a no-amount invoice", { paymentAmount: null }],
+      ["an undecodable invoice", new LnInvoiceDecodeError("bad bolt11")],
+    ] as const) {
+      it(`reports ${label} in log-only and still pays it`, async () => {
+        mockDecodeInvoice.mockReturnValue(decoded)
 
-    const result = await resolvePayment()
+        const result = await resolvePayment()
 
-    expect(result.status).toBe("failed")
-    expect(result.errors[0].message).toBeTruthy()
-    expect(mockAuthorizeSend).not.toHaveBeenCalled()
-    expect(mockPayInvoice).not.toHaveBeenCalled()
-  })
+        expect(mockGateSend).toHaveBeenCalledTimes(1)
+        expect(mockGateSend).toHaveBeenCalledWith(
+          expect.objectContaining({ reason: "undecodable-invoice" }),
+        )
+        // log-only means the raw bolt11 reaches IBEX exactly as it did
+        // pre-ENG-573; the guard never learns an amount, so it is not consulted.
+        expect(mockPayInvoice).toHaveBeenCalledTimes(1)
+        expect(result).toEqual({ errors: [], status: "success" })
+        expect(mockAuthorizeSend).not.toHaveBeenCalled()
+      })
 
-  it("rejects an undecodable invoice without consulting the guard or IBEX", async () => {
-    mockDecodeInvoice.mockReturnValue(new LnInvoiceDecodeError("bad bolt11"))
+      it(`refuses ${label} when enforcing`, async () => {
+        mockSendGuardMode.mockReturnValue("enforce")
+        mockDecodeInvoice.mockReturnValue(decoded)
 
-    const result = await resolvePayment()
+        const result = await resolvePayment()
 
-    expect(result.status).toBe("failed")
-    expect(mockAuthorizeSend).not.toHaveBeenCalled()
-    expect(mockPayInvoice).not.toHaveBeenCalled()
+        expect(result.status).toBe("failed")
+        expect(result.errors[0].message).toBeTruthy()
+        expect(mockGateSend).toHaveBeenCalledTimes(1)
+        expect(mockAuthorizeSend).not.toHaveBeenCalled()
+        expect(mockPayInvoice).not.toHaveBeenCalled()
+      })
+    }
   })
 })
 

@@ -14,7 +14,11 @@ import Ibex from "@services/ibex/client"
 import { IbexError, InsufficientIbexBalance } from "@services/ibex/errors"
 import { paymentSendStatusOrPending } from "@services/ibex/payment-status"
 import { withPaymentIdempotency } from "@app/payments/idempotency"
-import { authorizeSend } from "@app/payments/authorize-send"
+import {
+  authorizeSend,
+  gateSend,
+  SendRejectionReasons,
+} from "@app/payments/authorize-send"
 import { getSendGuardMode } from "@config"
 
 const LnInvoicePaymentInput = GT.Input({
@@ -100,18 +104,31 @@ const LnInvoicePaymentSendMutation = GT.Field<
       authorize: async () => {
         // The bolt11 decode is PART of the guard, not a precondition of it: the
         // guard needs the amount and the amount is inside the invoice. It
-        // therefore has to answer to the same switch. `decodeInvoice` refuses
-        // any request `invoices.parsePaymentRequest` cannot parse and any
-        // invoice with no payment secret — a rejection class this rail never
-        // had, since it used to hand the raw bolt11 straight to IBEX. If that
-        // gate turns out to refuse an invoice IBEX would have paid, `off` must
-        // restore service without a code deploy.
+        // therefore answers to the same switch — including in `log-only`, where
+        // it must NOT block. `decodeInvoice` refuses any request
+        // `invoices.parsePaymentRequest` cannot parse and any invoice with no
+        // payment secret — a rejection class this rail never had, since it used
+        // to hand the raw bolt11 straight to IBEX. Returning that error in
+        // log-only would have made this the one rail that enforces while the
+        // docs and the PR say nothing is being enforced, and the week-long
+        // would-reject sample would contain no trace of the invoices it turned
+        // away. `gateSend` posts the ops event and then defers to the mode, so
+        // in log-only the raw bolt11 reaches IBEX exactly as it did before.
         if (getSendGuardMode() === "off") return true
 
+        const gate = (error: ApplicationError) =>
+          gateSend({
+            error,
+            reason: SendRejectionReasons.undecodableInvoice,
+            senderAccount: domainAccount,
+            senderWalletId: walletId,
+            kind: "lightning",
+          })
+
         const decodedInvoice = decodeInvoice(paymentRequest)
-        if (decodedInvoice instanceof Error) return decodedInvoice
+        if (decodedInvoice instanceof Error) return gate(decodedInvoice)
         if (decodedInvoice.paymentAmount === null) {
-          return new LnPaymentRequestNonZeroAmountRequiredError()
+          return gate(new LnPaymentRequestNonZeroAmountRequiredError())
         }
 
         return authorizeSend({

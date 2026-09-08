@@ -33,7 +33,7 @@ The checks:
 | mode       | behaviour                                                                                              |
 | ---------- | ------------------------------------------------------------------------------------------------------ |
 | `off`      | Returns immediately. No Redis, no price lookup, no ops event. Pre-ENG-573 behaviour.                     |
-| `log-only` | All checks run, every would-be rejection posts a `transfer / would-reject` ops event — the send proceeds. |
+| `log-only` | All checks run, every would-be rejection posts a `transfer / would-reject` ops event — the send proceeds. Includes `lnInvoicePaymentSend`'s bolt11 decode gate: an undecodable or no-amount invoice is reported and still handed to IBEX, exactly as before ENG-573. |
 | `enforce`  | Rejections are real.                                                                                     |
 
 Anything unrecognised degrades to `log-only`. The failure mode of this switch
@@ -79,17 +79,27 @@ accounts.
      (`ErrorLevel.Critical` when enforcing, `Warn` in log-only) — alert on that
      signal, because a price-pod outage past the 10-minute price cache rejects
      every amount-bearing lightning send and every BTC intraledger send.
-   - `rate-limited` posts **no** ops event by design: the limiter has already
-     bounded that caller, its counters live in Redis, and a client in a retry
-     loop would otherwise fill the 50-deep ops queue and push the verification /
-     cashout / deposit feed out of it.
+   - `rate-limited` is **coalesced**, not silent. Silencing it would leave one
+     of the three checks with no observable output at all — unreadable during
+     the very rollout this mode exists for, so an operator would count a week of
+     would-reject embeds, see no rate-limit signal by construction, flip to
+     enforce, and hand a 30-payment payout batch twenty `TooManyRequestError`s.
+   - `undecodable-invoice` is `lnInvoicePaymentSend` only: the bolt11 could not
+     be decoded, or carried no amount. The guard introduced that decode, so this
+     is a rejection class the rail never had — count it before enforcing.
 
-   `limits-unavailable` is **coalesced to one embed per minute** for the mirror
-   reason: nothing bounds it. It is not a per-account fact — a Redis fault or a
+   `rate-limited` and `limits-unavailable` are **coalesced to one embed per
+   minute**: nothing bounds either one — a retry loop on the first, a Redis or
+   price-pod fault making every in-flight send report the second in the same
+   instant — and the 50-deep queue would drop the rest of the feed. It is not a per-account fact — a Redis fault or a
    price-pod outage makes every send in flight report it in the same instant,
-   and the 50-deep queue would drop the rest of the feed. The embed that does
-   post carries `muted: N` in its meta (how many were coalesced away since the
-   last one), and the span exception is emitted for **every** occurrence,
+   The embed that does post carries `muted: N` in its meta (how many were
+   coalesced away since the last one that posted) plus `mutedAgeS` (how long ago
+   that window opened, so a count delivered late reads as an older incident).
+   A count is only ever cleared by being delivered — a 40-second blip that mutes
+   499 rejections and then goes quiet reports them on the next embed of that
+   reason, however much later, rather than losing them. For
+   `limits-unavailable` the span exception is emitted for **every** occurrence,
    unthrottled — that is the signal to alert on and to count from.
    `over-daily-limit` and `invalid-amount` are never coalesced: they are the
    per-account facts this rollout exists to read, and each caller's own attempt

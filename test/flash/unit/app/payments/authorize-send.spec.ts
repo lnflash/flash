@@ -33,6 +33,7 @@ import {
   OPS_EVENT_COALESCE_MS,
   SendRejectionReasons,
   authorizeSend,
+  __resetOpsEventCoalescingForTest,
 } from "@app/payments/authorize-send"
 
 import { AccountLevel } from "@domain/accounts"
@@ -86,7 +87,9 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
-    jest.advanceTimersByTime(2 * OPS_EVENT_COALESCE_MS + 1)
+    // A muted count is cleared only by being delivered, so it would otherwise
+    // carry from one test into the next test's first ops event.
+    __resetOpsEventCoalescingForTest()
     mockConsumeLimiter.mockResolvedValue(true)
     mockSendGuardMode.mockReturnValue("enforce")
   })
@@ -115,20 +118,30 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
       expect(mockConsumeLimiter).toHaveBeenCalledTimes(2)
     })
 
-    // Every further attempt from a blocked caller still consumes, still rejects
-    // and would still post. The shared ops queue is 50 deep and drops its oldest
-    // events on overflow, so one client in a retry loop must not be able to bury
-    // the verification / cashout / deposit feed under its own rejections. The
-    // limiter's Redis counters are the record for this reason.
-    it("posts NO ops event for a rate-limited caller, however many times it retries", async () => {
+    // Coalesced, not silenced. A retry loop must not bury the 50-deep ops feed,
+    // but a check with zero observable output cannot be read during the very
+    // rollout the mode switch exists for: an operator would count a week of
+    // would-reject embeds, see no rate-limit signal by construction, flip to
+    // enforce, and hand a payout batch a wall of TooManyRequestErrors.
+    it("coalesces a retrying rate-limited caller to one ops event per window", async () => {
       mockConsumeLimiter.mockResolvedValue(new PaymentSendRateLimiterExceededError())
 
       for (let i = 0; i < 25; i++) {
         expect(await send()).toBeInstanceOf(PaymentSendRateLimiterExceededError)
       }
 
-      expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+      expect(mockNotifyOpsEvent).toHaveBeenCalledTimes(1)
+      expect(lastOpsEvent()).toMatchObject({
+        step: SendRejectionReasons.rateLimited,
+        error: "PaymentSendRateLimiterExceededError",
+      })
+      // Not an infrastructure fault — no span exception, unlike limits-unavailable.
       expect(mockRecordExceptionInCurrentSpan).not.toHaveBeenCalled()
+
+      // ...and the 24 it swallowed are recoverable from the feed.
+      jest.advanceTimersByTime(OPS_EVENT_COALESCE_MS + 1)
+      await send()
+      expect(lastOpsEvent()?.meta.muted).toBe("24")
     })
 
     // A store fault is not the caller being noisy — it is Redis being down, and
@@ -184,6 +197,24 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
 
       expect(mockNotifyOpsEvent).toHaveBeenCalledTimes(2)
       expect(lastOpsEvent()?.meta.muted).toBe("11")
+    })
+
+    // The shape a staleness cutoff silently lost: a short blip mutes a pile of
+    // rejections, the fault clears, and no further event of that reason arrives
+    // for a long time. Ops must not read the feed as "one send was affected".
+    it("keeps the muted count through an arbitrarily long silence, and dates it", async () => {
+      mockConsumeLimiter.mockResolvedValue(new UnknownRateLimitServiceError("redis down"))
+      for (let i = 0; i < 500; i++) await send()
+      expect(mockNotifyOpsEvent).toHaveBeenCalledTimes(1)
+
+      // Fault clears; nothing of this reason happens for an hour.
+      jest.advanceTimersByTime(60 * 60 * 1000)
+      await send()
+
+      expect(lastOpsEvent()?.meta.muted).toBe("499")
+      // Dated, so a late count reads as an older incident rather than as 499
+      // rejections that just happened.
+      expect(Number(lastOpsEvent()?.meta.mutedAgeS)).toBeGreaterThanOrEqual(3600)
     })
 
     // A per-account fact the log-only rollout exists to read one by one, and
@@ -463,10 +494,16 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
         )
       })
 
-      it("still says nothing about a rate-limited caller", async () => {
+      it("reports a rate-limited caller as would-reject rather than saying nothing", async () => {
         mockConsumeLimiter.mockResolvedValue(new PaymentSendRateLimiterExceededError())
+
         expect(await send()).toBe(true)
-        expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+
+        expect(lastOpsEvent()).toMatchObject({
+          phase: "would-reject",
+          step: SendRejectionReasons.rateLimited,
+          meta: { mode: "log-only" },
+        })
       })
     })
   })

@@ -88,6 +88,10 @@ export const SendRejectionReasons = {
   invalidAmount: "invalid-amount",
   overDailyLimit: "over-daily-limit",
   limitsUnavailable: "limits-unavailable",
+  // lnInvoicePaymentSend only: the bolt11 could not be decoded, or carried no
+  // amount. Its own reason so the rollout can count a rejection class this rail
+  // never had before the guard introduced the decode.
+  undecodableInvoice: "undecodable-invoice",
 } as const
 
 export type SendRejectionReason =
@@ -137,6 +141,16 @@ export const OPS_EVENT_COALESCE_MS = 60_000
 
 const COALESCED_REASONS: ReadonlySet<SendRejectionReason> = new Set([
   SendRejectionReasons.limitsUnavailable,
+  // Coalesced, NOT silenced. A rate-limited caller is already bounded by their
+  // own Redis budget, so the reason silencing was tempting — but the whole PR
+  // is a log-only rollout, and a check with no observable output cannot be read
+  // before flipping to enforce. An operator counting a week of would-reject
+  // embeds would see no rate-limit signal by construction and conclude the
+  // burst bucket never fires, then enforce and hand a 30-payment payout batch
+  // twenty TooManyRequestErrors. One embed per minute carrying `muted: N`
+  // bounds the 50-deep ops queue exactly as it does for limits-unavailable and
+  // still yields a count.
+  SendRejectionReasons.rateLimited,
 ])
 
 const opsEventWindows = new Map<
@@ -144,12 +158,23 @@ const opsEventWindows = new Map<
   { openedAt: number; muted: number }
 >()
 
+// Test-only. The windows above are per-process by design and a muted count is
+// now cleared only by being delivered, so without this one test's swallowed
+// events surface as another's `muted`. The spec used to lean on the staleness
+// cutoff to isolate itself — and that cutoff was the bug it hid, since a short
+// incident's mutes were dropped. Nothing in production calls this.
+export const __resetOpsEventCoalescingForTest = (): void => {
+  opsEventWindows.clear()
+}
+
 // Returns whether this rejection gets an ops event, and how many events of the
 // same reason were muted since the last one that did.
 const claimOpsEventSlot = (
   reason: SendRejectionReason,
-): { post: false } | { post: true; muted: number } => {
-  if (!COALESCED_REASONS.has(reason)) return { post: true, muted: 0 }
+): { post: false } | { post: true; muted: number; mutedWindowAgeS: number } => {
+  if (!COALESCED_REASONS.has(reason)) {
+    return { post: true, muted: 0, mutedWindowAgeS: 0 }
+  }
 
   const now = Date.now()
   const lastWindow = opsEventWindows.get(reason)
@@ -158,17 +183,19 @@ const claimOpsEventSlot = (
     return { post: false }
   }
 
-  // Muted events are counted onto the next event that posts, but only while
-  // they are still the same news: a count carried out of a window that closed
-  // long ago belongs to a different incident, so it is dropped rather than
-  // pinned to an unrelated rejection.
-  const carried =
-    lastWindow && now - lastWindow.openedAt < 2 * OPS_EVENT_COALESCE_MS
-      ? lastWindow.muted
-      : 0
+  // Muted events are carried onto the next event that posts, however long that
+  // takes. A staleness cutoff here looked tidy but silently lost the most
+  // common incident shape: a 40-second Redis blip mutes 499 rejections, Redis
+  // recovers, no further event of that reason arrives inside the cutoff, and
+  // ops reads a feed saying one send was affected. The count is only ever
+  // cleared by being delivered. `mutedWindowAgeS` dates it so a late carry is
+  // legible as an older incident rather than pinned to this rejection.
+  const carried = lastWindow?.muted ?? 0
+  const carriedAgeS =
+    carried > 0 && lastWindow ? Math.round((now - lastWindow.openedAt) / 1000) : 0
 
   opsEventWindows.set(reason, { openedAt: now, muted: 0 })
-  return { post: true, muted: carried }
+  return { post: true, muted: carried, mutedWindowAgeS: carriedAgeS }
 }
 
 // An account document with no `level` field hydrates as `undefined` (the
@@ -308,17 +335,7 @@ const report = ({
   const { error, reason, cents } = rejection
   const enforcing = mode === "enforce"
 
-  // A rate-limited caller is already bounded by their own Redis budget, and
-  // every further attempt still consumes, still rejects and would still post.
-  // The shared ops queue is 50 deep and drops its oldest events on overflow, so
-  // one client in a retry loop would bury the verification / cashout / deposit
-  // feed under its own rejections — exactly when ops needs to read it.
-  // `limits-unavailable` is unbounded in the other direction (every send at
-  // once) and is coalesced instead of silenced — see OPS_EVENT_COALESCE_MS.
-  const slot =
-    reason === SendRejectionReasons.rateLimited
-      ? { post: false as const }
-      : claimOpsEventSlot(reason)
+  const slot = claimOpsEventSlot(reason)
   if (slot.post) {
     notifyOpsEvent({
       flow: "transfer",
@@ -340,7 +357,14 @@ const report = ({
         mode,
         // How many events of this reason were coalesced away since the last one
         // that posted, so the feed stays countable rather than silently lossy.
-        ...(slot.muted > 0 ? { muted: String(slot.muted) } : {}),
+        ...(slot.muted > 0
+          ? {
+              muted: String(slot.muted),
+              // How long ago the window that accumulated them opened, so a
+              // count delivered late reads as an older incident.
+              mutedAgeS: String(slot.mutedWindowAgeS),
+            }
+          : {}),
       },
     })
   }
@@ -361,6 +385,45 @@ const report = ({
       },
     })
   }
+}
+
+/**
+ * For a rail-local check that is part of the guard but cannot live inside
+ * `authorizeSend` — today only the bolt11 decode on `lnInvoicePaymentSend`,
+ * which has to happen before the amount is even knowable.
+ *
+ * Without this, such a check silently ignored the mode: it returned its error
+ * in `log-only` too, so a rail the docs promised was only observing refused
+ * invoices IBEX would have paid, with no ops event and nothing in the
+ * would-reject sample to show for it. Routing it through here gives it the
+ * same switch, the same feed entry and the same rollout evidence as every
+ * other check.
+ */
+export const gateSend = ({
+  error,
+  reason,
+  senderAccount,
+  senderWalletId,
+  kind,
+}: {
+  error: ApplicationError
+  reason: SendRejectionReason
+  senderAccount: Account
+  senderWalletId: WalletId
+  kind: SendKind
+}): true | ApplicationError => {
+  const mode = getSendGuardMode()
+  if (mode === "off") return true
+
+  report({
+    rejection: { error, reason },
+    mode,
+    senderAccount,
+    senderWalletId,
+    kind,
+  })
+
+  return mode === "enforce" ? error : true
 }
 
 export const authorizeSend = async (
