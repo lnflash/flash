@@ -19,7 +19,7 @@ import { warnIfDevContext } from "@utils/dev-context"
 
 import { startApiKeyMetricsServer } from "./api-key-metrics"
 import { exitOnBootFailure, startServersOrExit } from "./boot"
-import { startApolloServerForAdminSchema } from "./graphql-admin-server"
+import { startAdminSchemaIfConfigured } from "./graphql-admin-server"
 import {
   isAuthenticated,
   scopedApiKeyAccess,
@@ -115,9 +115,12 @@ if (require.main === module) {
       // Each start carries its own fatal handler, so a failure in EITHER server
       // kills the process regardless of which one settles first — see
       // @servers/boot for why racing a single shared `.catch` did not.
+      // The admin start is the *conditional* one: an env that never set
+      // ERPNEXT_JWT_SECRET skips the mount rather than taking the public API
+      // down with it. A secret that is set but weak still crashes here.
       await startServersOrExit([
         startApolloServerForCoreSchema,
-        startApolloServerForAdminSchema,
+        startAdminSchemaIfConfigured,
       ])
 
       // FIP-07 (ENG-103): per-pod prometheus listener for the API key

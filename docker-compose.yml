@@ -258,6 +258,15 @@ services:
       FLASH_API: "${FRAPPE_FLASH_API:-http://host.docker.internal:4001/graphql}"
       # Must match the ERPNEXT_JWT_SECRET the host admin server signs/verifies
       # with (frappe-flash-admin uses admin_api_key as the HS256 secret).
+      #
+      # ROTATION IS LOCKSTEP, and there is no rotation window on this pair: the
+      # admin server verifies against exactly one secret. Rotating
+      # ERPNEXT_JWT_SECRET without also running
+      # `bench set-config -g admin_api_key <new value>` in every frappe-flash-admin
+      # environment leaves ERPNext -> Flash calls (KYC status writes, cashout
+      # ops) failing with "Invalid Token" and no other symptom. Deployed
+      # environments carry the same coupling: this compose file just makes it
+      # visible because both sides read the one variable.
       FLASH_SECRET: "${ERPNEXT_JWT_SECRET}"
     volumes:
       - frappe-sites:/home/frappe/frappe-bench/sites

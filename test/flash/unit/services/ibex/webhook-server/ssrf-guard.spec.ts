@@ -488,6 +488,96 @@ describe("ssrfFetch — guard wiring", () => {
     expect(config.headers).toEqual({ "x-custom": "yes" })
   })
 
+  // Redirect targets on this route are attacker-chosen twice over: the wallet
+  // owner picks the lnurlp host, and that host picks the Location. This loop
+  // replaced follow-redirects, which strips Authorization/Cookie on a
+  // cross-host redirect — so it has to do the same, or the next caller to add
+  // an API-key header hands it to wherever a user's lnurlp points.
+  describe("credentials across redirects", () => {
+    const CALLER_CONFIG = {
+      params: { amount: 1000 },
+      headers: { authorization: "Bearer caller-credential" },
+    }
+
+    const configOfCall = (index: number) => axiosGet.mock.calls[index][1]
+
+    it("drops caller headers and params on a cross-origin redirect", async () => {
+      axiosGet
+        .mockResolvedValueOnce({
+          status: 302,
+          headers: { location: "https://someone-elses-host.example.net/next" },
+          data: {},
+        })
+        .mockResolvedValueOnce({ status: 200, headers: {}, data: { ok: true } })
+
+      await ssrfFetch(URL_PUBLIC, CALLER_CONFIG)
+
+      expect(axiosGet).toHaveBeenCalledTimes(2)
+      // The first hop is the host the caller chose to talk to, so it keeps them.
+      expect(configOfCall(0).headers).toEqual(CALLER_CONFIG.headers)
+      expect(configOfCall(0).params).toEqual(CALLER_CONFIG.params)
+      expect(configOfCall(1).headers).toBeUndefined()
+      expect(configOfCall(1).params).toBeUndefined()
+    })
+
+    it("keeps them on a same-origin redirect", async () => {
+      axiosGet
+        .mockResolvedValueOnce({
+          status: 302,
+          headers: { location: "https://pay.example.com/hop1" },
+          data: {},
+        })
+        .mockResolvedValueOnce({ status: 200, headers: {}, data: { ok: true } })
+
+      await ssrfFetch(URL_PUBLIC, CALLER_CONFIG)
+
+      expect(configOfCall(1).headers).toEqual(CALLER_CONFIG.headers)
+      expect(configOfCall(1).params).toEqual(CALLER_CONFIG.params)
+    })
+
+    // Once dropped, they stay dropped: a chain that bounces off-origin and
+    // back must not hand the credential to the origin's second hop either.
+    it("does not restore them on a later hop", async () => {
+      axiosGet
+        .mockResolvedValueOnce({
+          status: 302,
+          headers: { location: "https://someone-elses-host.example.net/a" },
+          data: {},
+        })
+        .mockResolvedValueOnce({
+          status: 302,
+          headers: { location: "https://someone-elses-host.example.net/b" },
+          data: {},
+        })
+        .mockResolvedValueOnce({ status: 200, headers: {}, data: { ok: true } })
+
+      await ssrfFetch(URL_PUBLIC, CALLER_CONFIG)
+
+      expect(axiosGet).toHaveBeenCalledTimes(3)
+      expect(configOfCall(2).headers).toBeUndefined()
+      expect(configOfCall(2).params).toBeUndefined()
+    })
+
+    // A cross-origin hop must not cost the guard's own fields.
+    it("keeps the guard fields on the post-redirect hop", async () => {
+      axiosGet
+        .mockResolvedValueOnce({
+          status: 302,
+          headers: { location: "https://someone-elses-host.example.net/next" },
+          data: {},
+        })
+        .mockResolvedValueOnce({ status: 200, headers: {}, data: { ok: true } })
+
+      await ssrfFetch(URL_PUBLIC, CALLER_CONFIG)
+
+      const config = configOfCall(1)
+      expect(config.httpAgent.options.lookup).toBe(ssrfLookup)
+      expect(config.httpsAgent.options.lookup).toBe(ssrfLookup)
+      expect(config.maxRedirects).toBe(0)
+      expect(config.maxContentLength).toBe(MAX_RESPONSE_BYTES)
+    })
+  })
+
   it(`throws SsrfBlockedUrlError after ${MAX_REDIRECT_HOPS} redirect hops`, async () => {
     axiosGet.mockResolvedValue({
       status: 302,

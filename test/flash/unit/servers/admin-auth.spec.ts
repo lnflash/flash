@@ -37,8 +37,18 @@ import crypto from "crypto"
 import jwt from "jsonwebtoken"
 
 import { AuthenticationError } from "@graphql/error"
-import { parseAuthHeader, startAdminServer } from "@servers/graphql-admin-server"
-import { WeakSecretError } from "@utils/weak-secrets"
+import {
+  parseAuthHeader,
+  startAdminSchemaIfConfigured,
+  startAdminServer,
+} from "@servers/graphql-admin-server"
+import { baseLogger } from "@services/logger"
+import { MIN_SECRET_LENGTH, WeakSecretError } from "@utils/weak-secrets"
+
+import {
+  clearDevUnsafeModeFlags,
+  restoreDevUnsafeModeFlags,
+} from "test/flash/helpers/dev-context-env"
 
 // The live object the server reads its secret from, so a test can swap it.
 const mockAdminConfig = jest.requireMock("@config").ADMIN_CONFIG as {
@@ -131,13 +141,72 @@ describe("admin API: boot guard", () => {
 
   it("refuses to start on the repo's placeholder secret", async () => {
     // The admin API's only auth is this HMAC secret; booting with a value
-    // published in this repo means anyone can forge admin JWTs.
+    // published in this repo means anyone can forge admin JWTs. This one is
+    // refused by the length floor — it is 13 chars.
+    expect("not-so-secret".length).toBeLessThan(MIN_SECRET_LENGTH)
     await expect(startWith("not-so-secret")).rejects.toThrow(WeakSecretError)
     await expect(startWith("not-so-secret")).rejects.toThrow(/ERPNEXT_JWT_SECRET/)
+  })
+
+  // The case no length floor can catch: 64 random-looking hex chars, committed
+  // to this repo's .env. A deployment that ships the repo default is as open as
+  // one running "change-me".
+  it("refuses to start on the committed dev-only secret outside a dev context", async () => {
+    const savedNetwork = process.env.NETWORK
+    const committed = "0a1cb6ba85cda40291e3ca4f2a777041cc59b48ba9fac2488e0bf752340c4588"
+    try {
+      expect(committed.length).toBeGreaterThanOrEqual(MIN_SECRET_LENGTH)
+      process.env.NETWORK = "mainnet"
+      clearDevUnsafeModeFlags()
+      await expect(startWith(committed)).rejects.toThrow(WeakSecretError)
+    } finally {
+      if (savedNetwork === undefined) delete process.env.NETWORK
+      else process.env.NETWORK = savedNetwork
+      restoreDevUnsafeModeFlags()
+    }
   })
 
   it("refuses to start when the secret is unset or too short", async () => {
     await expect(startWith(undefined)).rejects.toThrow(WeakSecretError)
     await expect(startWith("x")).rejects.toThrow(WeakSecretError)
+  })
+})
+
+// In the api process both server starts carry exitOnBootFailure (@servers/boot),
+// so a throw out of the admin start kills the PUBLIC GraphQL API too. An
+// environment with no ERP integration — a fresh staging namespace, a bare
+// `docker compose up` of the api — never sets ERPNEXT_JWT_SECRET at all, and
+// must not go from "admin API rejects every token" to CrashLoopBackOff on the
+// payments API.
+describe("admin schema mount in the api process", () => {
+  let warnSpy: jest.SpyInstance
+
+  beforeEach(() => {
+    warnSpy = jest.spyOn(baseLogger, "warn").mockImplementation(() => baseLogger)
+  })
+
+  afterEach(() => {
+    warnSpy.mockRestore()
+    mockAdminConfig.ERPNEXT_JWT_SECRET = STRONG_SECRET
+  })
+
+  it.each([
+    ["unset", undefined],
+    ["empty", ""],
+    ["blank", "   "],
+  ])("skips the mount and stays alive when the secret is %s", async (_label, secret) => {
+    mockAdminConfig.ERPNEXT_JWT_SECRET = secret as string
+
+    await expect(startAdminSchemaIfConfigured()).resolves.toBeUndefined()
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(String(warnSpy.mock.calls[0][0])).toContain("ERPNEXT_JWT_SECRET")
+  })
+
+  // "Configured badly" is not "not configured": a value that IS set still has
+  // to clear the floor, and failing that is still fatal.
+  it("still fails hard when the secret is set but weak", async () => {
+    mockAdminConfig.ERPNEXT_JWT_SECRET = "x"
+
+    await expect(startAdminSchemaIfConfigured()).rejects.toThrow(WeakSecretError)
   })
 })

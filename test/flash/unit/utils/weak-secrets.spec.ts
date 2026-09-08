@@ -1,5 +1,6 @@
 import {
   assertStrongSecret,
+  isUnsetSecret,
   isWeakSecret,
   MIN_SECRET_LENGTH,
   WeakSecretError,
@@ -18,18 +19,24 @@ describe("isWeakSecret", () => {
     }
   })
 
-  it("flags every known-public placeholder", () => {
+  // The placeholder values this repo has shipped in its dev configs. They are
+  // refused by the LENGTH FLOOR, not by a denylist — every one of them is under
+  // MIN_SECRET_LENGTH, which is why the WEAK_SECRETS set that used to list them
+  // was unreachable dead code. Asserting the reason as well as the result keeps
+  // this test from claiming denylist coverage it does not have.
+  it("refuses the repo's short placeholders, via the length floor", () => {
     for (const secret of [
       "not-so-secret",
       "also-not-so-secret",
       "change-me",
       "<replace>",
     ]) {
+      expect(secret.length).toBeLessThan(MIN_SECRET_LENGTH)
       expect(isWeakSecret(secret)).toBe(true)
     }
   })
 
-  it("flags placeholders with surrounding whitespace", () => {
+  it("refuses a padded placeholder — the trimmed value is what is measured", () => {
     expect(isWeakSecret("  not-so-secret  ")).toBe(true)
   })
 
@@ -106,6 +113,40 @@ describe("committed dev-only values", () => {
     process.env[DEV_UNSAFE_MODE_FLAG] = "true"
     for (const secret of DEV_VALUES) {
       expect(isWeakSecret(secret)).toBe(false)
+    }
+  })
+
+  // The invariant that keeps this denylist from becoming what WEAK_SECRETS
+  // was: a listed value shorter than the floor can never be reached, because
+  // the length check returns first. A denylist entry only earns its place by
+  // being a *long* published value.
+  it("only lists values the length floor cannot already refuse", () => {
+    for (const secret of DEV_VALUES) {
+      expect(secret.trim().length).toBeGreaterThanOrEqual(MIN_SECRET_LENGTH)
+    }
+    process.env.NETWORK = "mainnet"
+    clearDevUnsafeModeFlags()
+    // Reached only because it clears the floor — this is the denylist doing
+    // work no length check can do.
+    expect(isWeakSecret(DEV_VALUES[0])).toBe(true)
+  })
+})
+
+// "Never configured" vs "configured badly". The admin schema mount uses this
+// to skip itself rather than take the public GraphQL API down with it when an
+// env has no ERP integration at all; a value that IS set still has to clear
+// isWeakSecret.
+describe("isUnsetSecret", () => {
+  it("is true only for absent or blank values", () => {
+    for (const secret of [undefined, null, "", "   ", "\n"]) {
+      expect(isUnsetSecret(secret)).toBe(true)
+    }
+  })
+
+  it("is false for a set-but-weak value", () => {
+    for (const secret of ["x", "not-so-secret", "a".repeat(MIN_SECRET_LENGTH - 1)]) {
+      expect(isUnsetSecret(secret)).toBe(false)
+      expect(isWeakSecret(secret)).toBe(true)
     }
   })
 })

@@ -766,7 +766,29 @@ export const configSchema = {
           properties: {
             port: { type: "integer" },
             uri: { type: "string" },
+            // The secret registered with IBEX on every NEW webhook-bearing
+            // object (invoice, lnurlp, on-chain address).
             secret: { type: "string" },
+            // Rotation window. IBEX binds the secret PER OBJECT at creation
+            // time (src/services/ibex/client.ts sends webhookSecret on
+            // addInvoice / generateBitcoinAddress / lnurlp creation), and two
+            // of those objects are long-lived: a wallet's lnurlp is created
+            // once at wallet creation and stored on the wallet forever, and a
+            // handed-out on-chain deposit address stays valid indefinitely.
+            // Rotating `secret` therefore does NOT re-key existing objects —
+            // IBEX keeps delivering them with the value they were registered
+            // with. Without a second accepted value those deliveries 401 and
+            // settled payments silently stop crediting balances.
+            //
+            // So: put the outgoing value here for as long as pre-rotation
+            // objects can still be paid, and drop it only once they are
+            // re-registered. Entries are held to the same strength floor as
+            // `secret` (a weak one is ignored, not accepted).
+            previousSecrets: {
+              type: "array",
+              items: { type: "string" },
+              default: [],
+            },
             // Ibex's published source IPs / CIDRs for webhook delivery. Empty
             // disables the allowlist check (see ISL-112).
             allowedIps: {

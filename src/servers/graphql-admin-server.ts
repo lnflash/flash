@@ -18,7 +18,7 @@ import { mapError } from "@graphql/error-map"
 import { fieldExtensionsEstimator, simpleEstimator } from "graphql-query-complexity"
 
 import { parseUnknownDomainErrorFromUnknown } from "@domain/shared"
-import { assertStrongSecret } from "@utils/weak-secrets"
+import { assertStrongSecret, isUnsetSecret } from "@utils/weak-secrets"
 import { warnIfDevContext } from "@utils/dev-context"
 
 import requestIp from "request-ip"
@@ -262,6 +262,35 @@ export async function startApolloServerForAdminSchema() {
     port: ADMIN_CONFIG.GALOY_ADMIN_PORT,
     type: "admin",
   })
+}
+
+// What the api process mounts, as opposed to what the dedicated admin process
+// runs.
+//
+// startAdminServer fails closed on a weak secret, which is right: serving the
+// admin API with a forgeable HMAC key is worse than not serving it. But "unset"
+// is not "configured badly" — an environment with no ERP integration (a fresh
+// staging namespace, a bare `docker compose up` of the api) never sets
+// ERPNEXT_JWT_SECRET at all, and in the api process a throw from this start is
+// fatal for the PUBLIC GraphQL API too (see @servers/boot: every start carries
+// exitOnBootFailure). Crashing the payments API because an unrelated admin
+// feature is unconfigured is a bigger outage than the one the guard prevents,
+// so an entirely absent secret skips the mount instead. A secret that IS set
+// still has to clear the floor and the denylist — that path still crashes.
+//
+// The dedicated admin entrypoint below deliberately does NOT use this: that
+// process exists to serve the admin API, so an unset secret there is a boot
+// failure, not a feature to skip.
+export async function startAdminSchemaIfConfigured() {
+  if (isUnsetSecret(ADMIN_CONFIG.ERPNEXT_JWT_SECRET)) {
+    baseLogger.warn(
+      "ERPNEXT_JWT_SECRET is unset — not mounting the admin GraphQL schema. " +
+        "The admin API (ERPNext -> Flash) will not be served by this process; " +
+        "the public API is unaffected. Set ERPNEXT_JWT_SECRET to enable it.",
+    )
+    return undefined
+  }
+  return startApolloServerForAdminSchema()
 }
 
 if (require.main === module) {

@@ -161,8 +161,11 @@ export const env = createEnv({
     // load — a legible "Invalid environment variables: ERPNEXT_JWT_SECRET"
     // before any port is bound — rather than as a WeakSecretError surfacing
     // from one of the two server starts the api process races (see
-    // @servers/boot). Optional stays: an env that never sets it is unaffected;
-    // only a value that IS set and too short is refused.
+    // @servers/boot). Optional stays, and is safe to keep, because unset is
+    // handled where it belongs: `startAdminSchemaIfConfigured` skips mounting
+    // the admin schema in the api process when the secret is absent, so an env
+    // with no ERP integration loses the admin API rather than the public one.
+    // Only a value that IS set and too short is refused here.
     // `refine` on the trimmed length, not `.min()`: isWeakSecret trims before
     // measuring, so a value whose raw length is 32 but trims to 31 (a k8s
     // --from-file trailing newline, a padded yaml value) would pass config load

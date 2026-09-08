@@ -212,6 +212,17 @@ export const TOTAL_FETCH_TIMEOUT_MS = 10_000
 export const MAX_RESPONSE_BYTES = 64 * 1024
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
 
+// Everything a caller may have put on the request that could carry a
+// credential or a user identifier: headers (Authorization, Cookie, API keys)
+// and query params (signed URLs, tokens). Dropped before following a redirect
+// to a different origin.
+const withoutCallerCredentials = (config: AxiosRequestConfig): AxiosRequestConfig => {
+  const stripped = { ...config }
+  delete stripped.headers
+  delete stripped.params
+  return stripped
+}
+
 // Fetch a previously validated URL, following redirects manually: axios's
 // built-in redirect following can only re-check targets synchronously (no
 // DNS), so a public first hop could 302 to a host that resolves into the
@@ -224,6 +235,9 @@ export const ssrfFetch = async (
 ): Promise<AxiosResponse> => {
   const deadline = Date.now() + TOTAL_FETCH_TIMEOUT_MS
   let current = url
+  // Caller config for the CURRENT hop. Narrowed on a cross-origin redirect —
+  // see withoutCallerCredentials below.
+  let hopConfig = config
   for (let hop = 0; ; hop++) {
     const remainingMs = deadline - Date.now()
     if (remainingMs <= 0) {
@@ -234,7 +248,7 @@ export const ssrfFetch = async (
     }
 
     const resp = await axios.get(current.toString(), {
-      ...config,
+      ...hopConfig,
       // Guard fields come LAST so caller config can never silently override
       // them: the agents re-validate DNS at connect time (the TOCTOU half of
       // the guard), the body size and the total time are capped, and axios's
@@ -262,6 +276,14 @@ export const ssrfFetch = async (
     }
     const next = await validatePublicHttpUrl(new URL(location, current).toString())
     if (next instanceof Error) throw next
+    // Redirect targets are attacker-chosen on this route: the wallet owner
+    // picks the lnurlp host, and that host picks the Location. `follow-redirects`
+    // — the library this manual loop replaces — strips Authorization/Cookie on a
+    // cross-host redirect for exactly that reason, so this loop has to as well,
+    // or a caller that adds an API-key header hands it to whatever host a user's
+    // lnurlp redirects to. No caller sends credentials today; this is a shared
+    // security utility, and the next one must not have to know.
+    if (next.origin !== current.origin) hopConfig = withoutCallerCredentials(hopConfig)
     current = next
   }
 }
