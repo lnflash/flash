@@ -114,9 +114,63 @@ const checkUrlSync = (url: URL): Error | null => {
   return null
 }
 
+// Default bound on the DNS half of validation. `dns.promises.lookup` accepts
+// neither a timeout nor an AbortSignal — Node's LookupOptions is
+// family/hints/all/verbatim and nothing else — so the only thing that ends a
+// lookup of a blackholed domain is the OS resolver giving up: glibc's default
+// is timeout:5 x attempts:2 PER nameserver, i.e. tens of seconds. Every host
+// that reaches here was chosen by a user (the payee's stored lnurlp, the
+// payer's `lnurl` argument, or a `Location` the host they picked returned), on
+// a public unauthenticated route and — for lnurlPaymentSend — while holding
+// the sender's wallet redlock.
+//
+// Racing a timer does not cancel the in-flight getaddrinfo: it keeps its libuv
+// threadpool slot (4 by default, shared pod-wide with fs and crypto) until the
+// resolver gives up. What it does is stop the request waiting on it, which is
+// what a budget is for.
+export const DNS_VALIDATION_TIMEOUT_MS = 5_000
+
+class DnsBudgetExceededError extends Error {}
+
+const lookupWithinBudget = async (
+  host: string,
+  timeoutMs: number,
+): Promise<dns.LookupAddress[]> => {
+  let timer: NodeJS.Timeout | undefined
+  try {
+    return await Promise.race([
+      dns.promises.lookup(host, { all: true, verbatim: true }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new DnsBudgetExceededError(
+                `DNS resolution exceeded the ${timeoutMs}ms budget`,
+              ),
+            ),
+          Math.max(0, timeoutMs),
+        )
+        // Never hold the process open for a lookup nobody is waiting on.
+        timer.unref()
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 // Full async validation: sync checks + DNS resolution, rejecting the host if
 // ANY resolved address is private/reserved. Returns the URL or an Error.
-export const validatePublicHttpUrl = async (rawUrl: string): Promise<URL | Error> => {
+//
+// `timeoutMs` bounds the DNS half. ssrfFetch passes what is left of the chain
+// budget when it validates a redirect target, so an attacker-chosen `Location`
+// naming a domain whose nameservers blackhole queries cannot hold the request
+// past the deadline this module advertises; direct callers get
+// DNS_VALIDATION_TIMEOUT_MS.
+export const validatePublicHttpUrl = async (
+  rawUrl: string,
+  timeoutMs: number = DNS_VALIDATION_TIMEOUT_MS,
+): Promise<URL | Error> => {
   let url: URL
   try {
     url = new URL(rawUrl)
@@ -134,8 +188,11 @@ export const validatePublicHttpUrl = async (rawUrl: string): Promise<URL | Error
 
   let addresses: dns.LookupAddress[]
   try {
-    addresses = await dns.promises.lookup(host, { all: true, verbatim: true })
+    addresses = await lookupWithinBudget(host, timeoutMs)
   } catch (err) {
+    if (err instanceof DnsBudgetExceededError) {
+      return new SsrfBlockedUrlError(rawUrl, err.message)
+    }
     return new SsrfBlockedUrlError(rawUrl, `DNS resolution failed: ${err}`)
   }
   if (addresses.length === 0) {
@@ -208,10 +265,12 @@ const ssrfAgents = {
 export const MAX_REDIRECT_HOPS = 3
 // One budget for the whole chain, not per hop: with a per-hop timeout a
 // 3-hop chain of slow-loris responses pins a request (and an API worker) for
-// 4x as long as the number says. Enforced twice over in ssrfFetch — the
-// shrinking per-hop `timeout` between hops, and one wall-clock AbortSignal
-// spanning the whole chain, because axios's `timeout` alone is an inactivity
-// timer a trickling host resets forever (see the comment there).
+// 4x as long as the number says. Enforced on both halves of a hop — the
+// shrinking per-hop `timeout` plus one wall-clock AbortSignal spanning the
+// whole chain for the fetch (axios's `timeout` alone is an inactivity timer a
+// trickling host resets forever — see the comment there), and the same
+// remaining budget handed to validatePublicHttpUrl for the DNS lookup of each
+// redirect target, which has no timeout of its own.
 export const TOTAL_FETCH_TIMEOUT_MS = 10_000
 // An LNURL-pay response is well under 2 KB. Without a cap axios buffers
 // whatever an attacker-chosen host streams, and this route is public and
@@ -270,13 +329,68 @@ const withCallerParams = (url: URL, params: unknown): URL => {
 // A caller's own cancellation must still work. The guard fields deliberately
 // come last so caller config can never override them, which for `signal` would
 // otherwise mean silently dropping the caller's.
+//
+// `AxiosRequestConfig["signal"]` is axios's structural `GenericAbortSignal`
+// (`{ aborted, addEventListener?, ... }`), not necessarily a real AbortSignal:
+// a polyfilled or cross-realm signal type-checks, and axios honours it — its
+// adapter subscribes with `addEventListener("abort", ...)` exactly as below.
+// An `instanceof` narrow would drop such a signal on the floor AND overwrite
+// the one riding on the caller's config, so their cancellation would stop
+// working precisely because they routed the fetch through this guard. Bridge
+// it onto a real signal instead. (A signal with no `addEventListener` could
+// never have cancelled an axios request in the first place; its `aborted`
+// state at call time is still honoured.)
 const combineSignals = (
   chainSignal: AbortSignal,
   callerSignal: AxiosRequestConfig["signal"],
-): AbortSignal =>
-  callerSignal instanceof AbortSignal
-    ? AbortSignal.any([chainSignal, callerSignal])
-    : chainSignal
+): AbortSignal => {
+  if (!callerSignal) return chainSignal
+  if (callerSignal instanceof AbortSignal) {
+    return AbortSignal.any([chainSignal, callerSignal])
+  }
+
+  const bridge = new AbortController()
+  if (callerSignal.aborted) {
+    bridge.abort()
+  } else {
+    callerSignal.addEventListener?.("abort", () => bridge.abort(), { once: true })
+  }
+  return AbortSignal.any([chainSignal, bridge.signal])
+}
+
+// The guard imposes three limits on every hop and only one of them arrives as
+// something a caller can recognise. The chain `signal` is translated in the
+// catch below; the per-hop inactivity `timeout` and the body cap surface as
+// ordinary AxiosErrors, so without this a host that streams 65KB or that
+// accepts and then goes silent gets 500 + logger.error from the public
+// unauthenticated proxy route, while the identical refusal via a redirect or a
+// connect-time rebind gets 502 + logger.warn and lands on the
+// `lnurlpay.blocked` span. Same attacker, same refusal class, one signal.
+//
+// Classified on the message rather than the code alone: axios reuses
+// ERR_BAD_RESPONSE for any 5xx that fails validateStatus, and an upstream that
+// is merely broken is not a blocked target.
+const AXIOS_TIMEOUT_CODES = new Set(["ECONNABORTED", "ETIMEDOUT"])
+
+const hopLimitReason = (err: unknown): string | null => {
+  // Structural, like axios's own `isAxiosError`, so the check survives a test
+  // (or a future caller) that stubs the axios module without that helper.
+  const axiosError = err as { isAxiosError?: unknown; code?: unknown; message?: unknown }
+  if (!axiosError || axiosError.isAxiosError !== true) return null
+
+  const message = typeof axiosError.message === "string" ? axiosError.message : ""
+  if (
+    typeof axiosError.code === "string" &&
+    AXIOS_TIMEOUT_CODES.has(axiosError.code) &&
+    /timeout/i.test(message)
+  ) {
+    return `hop stalled — ${message} (per-hop limit inside the ${TOTAL_FETCH_TIMEOUT_MS}ms total fetch budget)`
+  }
+  if (/max(?:ContentLength|BodyLength)/i.test(message)) {
+    return `exceeded the ${MAX_RESPONSE_BYTES}-byte body cap (${message})`
+  }
+  return null
+}
 
 // Fetch a previously validated URL, following redirects manually: axios's
 // built-in redirect following can only re-check targets synchronously (no
@@ -353,6 +467,14 @@ export const ssrfFetch = async (
           `exceeded the ${TOTAL_FETCH_TIMEOUT_MS}ms total fetch budget`,
         )
       }
+      // The other two limits this guard sets — the per-hop timeout and the
+      // body cap — come back as plain AxiosErrors. Report them as the
+      // refusals they are, so every limit the guard advertises reaches the
+      // caller through the single isSsrfBlockedError branch. Named by the hop
+      // that actually failed, which on a redirect chain is a different host
+      // from the URL the caller handed in.
+      const limitReason = hopLimitReason(err)
+      if (limitReason) throw new SsrfBlockedUrlError(current.toString(), limitReason)
       throw err
     }
 
@@ -378,7 +500,10 @@ export const ssrfFetch = async (
     } catch {
       throw new SsrfBlockedUrlError(url.toString(), "unparsable redirect Location")
     }
-    const next = await validatePublicHttpUrl(nextRaw)
+    // The DNS half of validation gets what is left of the chain budget: it
+    // runs AFTER the per-iteration check above, and an unbounded lookup of an
+    // attacker-named host would blow through the deadline all over again.
+    const next = await validatePublicHttpUrl(nextRaw, deadline - Date.now())
     if (next instanceof Error) throw next
     // Redirect targets are attacker-chosen on these routes: the user picks the
     // lnurl host, and that host picks the Location. `follow-redirects`

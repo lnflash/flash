@@ -35,6 +35,12 @@ const axiosGet = axios.get as jest.Mock
 
 const PUBLIC_ADDR = [{ address: "93.184.216.34", family: 4 }]
 
+// A lookup that never answers: a domain whose authoritative nameservers
+// blackhole queries. dns.promises.lookup takes no timeout and no AbortSignal,
+// so this is exactly what an attacker-chosen host buys without an explicit
+// bound — the wait ends only when the OS resolver gives up.
+const neverResolves = () => new Promise<never>(() => undefined)
+
 // The dev escape hatch is NETWORK=regtest OR FLASH_DEV_UNSAFE_MODE=true, and
 // the repo's .env (which `make unit-in-ci` sources) sets the latter — so a
 // "mainnet" case has to clear it explicitly or it is testing dev behaviour.
@@ -84,6 +90,27 @@ describe("validatePublicHttpUrl", () => {
       expect(result).toBeInstanceOf(SsrfBlockedUrlError)
     }
     expect(lookup).not.toHaveBeenCalled()
+  })
+
+  // dns.promises.lookup takes neither a timeout nor an AbortSignal — Node's
+  // LookupOptions is family/hints/all/verbatim and nothing else — so without an
+  // explicit bound a host whose authoritative nameservers blackhole queries
+  // holds the request for as long as the OS resolver retries (glibc default:
+  // timeout 5s x 2 attempts per nameserver), on a public unauthenticated route
+  // and past whatever budget the caller believes it has.
+  it("gives up on a DNS lookup that outlives the budget it was given", async () => {
+    lookup.mockImplementation(neverResolves)
+
+    const result = await validatePublicHttpUrl("https://blackhole.example.com/lnurl", 20)
+
+    expect(result).toBeInstanceOf(SsrfBlockedUrlError)
+    expect((result as Error).message).toMatch(/DNS resolution exceeded the 20ms budget/)
+  })
+
+  it("still resolves normally when the lookup answers inside the budget", async () => {
+    const result = await validatePublicHttpUrl("https://pay.example.com/lnurl", 5_000)
+
+    expect(result).not.toBeInstanceOf(Error)
   })
 
   it("rejects unparsable URLs", async () => {
@@ -514,6 +541,39 @@ describe("ssrfFetch — guard wiring", () => {
     expect(signal.aborted).toBe(true)
   })
 
+  // axios's `signal` is the structural GenericAbortSignal, not necessarily a
+  // real AbortSignal: a polyfilled or cross-realm one type-checks and axios
+  // honours it (its adapter subscribes with addEventListener, exactly as the
+  // bridge does). An instanceof narrow would drop it AND overwrite the signal
+  // riding on the caller's config, so their cancellation would stop working
+  // precisely because they routed the fetch through this guard.
+  it("bridges a duck-typed caller signal instead of dropping it", async () => {
+    const listeners: (() => void)[] = []
+    const callerSignal = {
+      aborted: false,
+      addEventListener: (_event: string, cb: () => void) => listeners.push(cb),
+      removeEventListener: () => undefined,
+    }
+
+    await ssrfFetch(URL_PUBLIC, { signal: callerSignal })
+
+    const { signal } = lastAxiosConfig()
+    expect(signal).toBeInstanceOf(AbortSignal)
+    expect(signal.aborted).toBe(false)
+    expect(listeners).toHaveLength(1)
+    for (const abort of listeners) abort()
+    expect(signal.aborted).toBe(true)
+  })
+
+  it("honours a duck-typed caller signal that is already aborted", async () => {
+    const callerSignal = { aborted: true, addEventListener: jest.fn() }
+
+    await ssrfFetch(URL_PUBLIC, { signal: callerSignal })
+
+    expect(lastAxiosConfig().signal.aborted).toBe(true)
+    expect(callerSignal.addEventListener).not.toHaveBeenCalled()
+  })
+
   it("reports a chain-budget abort as SsrfBlockedUrlError, not a raw CanceledError", async () => {
     // What axios throws when the signal fires mid-response: without the
     // translation this reaches the route as a plain error and answers 500 with
@@ -539,6 +599,68 @@ describe("ssrfFetch — guard wiring", () => {
 
     expect(err).not.toBeInstanceOf(SsrfBlockedUrlError)
     expect(err.message).toBe("socket hang up")
+  })
+
+  // The chain abort is not the only limit this guard sets. The per-hop
+  // inactivity `timeout` and the body cap come back as ordinary AxiosErrors,
+  // and untranslated they reach the public unauthenticated proxy route as 500
+  // + logger.error with no lnurlpay.blocked span — while the identical refusal
+  // one branch earlier (a blocked redirect target, a connect-time rebind) is
+  // 502 + logger.warn. Same attacker, same refusal class, one signal.
+  const axiosFailure = (code: string, message: string) =>
+    Object.assign(new Error(message), { isAxiosError: true, code })
+
+  it.each([
+    [
+      "a hop that accepts and then goes silent",
+      "ECONNABORTED",
+      "timeout of 800ms exceeded",
+    ],
+    [
+      "the same timeout under clarifyTimeoutError",
+      "ETIMEDOUT",
+      "timeout of 800ms exceeded",
+    ],
+  ])("reports %s as a blocked fetch", async (_case, code, message) => {
+    axiosGet.mockRejectedValue(axiosFailure(code, message))
+
+    const err = await ssrfFetch(URL_PUBLIC).catch((e) => e)
+
+    expect(err).toBeInstanceOf(SsrfBlockedUrlError)
+    expect(isSsrfBlockedError(err)).toBe(true)
+    // The reason has to survive, or the alert cannot tell a stalled host from
+    // a rebind attempt.
+    expect(err.message).toMatch(/timeout of 800ms exceeded/)
+  })
+
+  it("reports a body over the cap as a blocked fetch", async () => {
+    axiosGet.mockRejectedValue(
+      axiosFailure(
+        "ERR_BAD_RESPONSE",
+        `maxContentLength size of ${MAX_RESPONSE_BYTES} exceeded`,
+      ),
+    )
+
+    const err = await ssrfFetch(URL_PUBLIC).catch((e) => e)
+
+    expect(err).toBeInstanceOf(SsrfBlockedUrlError)
+    expect(isSsrfBlockedError(err)).toBe(true)
+    expect(err.message).toMatch(new RegExp(`${MAX_RESPONSE_BYTES}-byte body cap`))
+  })
+
+  // axios reuses ERR_BAD_RESPONSE for any 5xx that fails validateStatus, so
+  // classifying on the code alone would file every broken upstream under the
+  // blocked-target alert this translation exists to feed.
+  it("does not relabel an upstream 5xx as a blocked target", async () => {
+    axiosGet.mockRejectedValue(
+      axiosFailure("ERR_BAD_RESPONSE", "Request failed with status code 500"),
+    )
+
+    const err = await ssrfFetch(URL_PUBLIC).catch((e) => e)
+
+    expect(err).not.toBeInstanceOf(SsrfBlockedUrlError)
+    expect(isSsrfBlockedError(err)).toBe(false)
+    expect(err.message).toBe("Request failed with status code 500")
   })
 
   // A malformed Location makes `new URL` throw a bare TypeError. Unwrapped, it
@@ -786,6 +908,33 @@ describe("ssrfFetch — guard wiring", () => {
 
       const timeouts = axiosGet.mock.calls.map((c) => c[1].timeout)
       expect(timeouts).toEqual([TOTAL_FETCH_TIMEOUT_MS, TOTAL_FETCH_TIMEOUT_MS - 4_000])
+    })
+
+    // The budget covered the fetch half only. validatePublicHttpUrl runs AFTER
+    // the per-iteration check, and its DNS lookup had no bound of its own — so
+    // an attacker-chosen Location naming a blackholed domain held the request
+    // for as long as the OS resolver kept retrying, tens of seconds past the
+    // deadline this module advertises.
+    it("bounds the DNS lookup of a redirect target with what is left of the budget", async () => {
+      axiosGet.mockImplementation(async () => {
+        now += TOTAL_FETCH_TIMEOUT_MS - 50
+        return {
+          status: 302,
+          headers: { location: "https://blackhole.example.com/next" },
+          data: {},
+        }
+      })
+      lookup.mockImplementation(neverResolves)
+
+      // Date.now is mocked here, so wall-clock proof needs a real clock.
+      const startedNs = process.hrtime.bigint()
+      const err = await ssrfFetch(URL_PUBLIC).catch((e) => e)
+      const elapsedMs = Number(process.hrtime.bigint() - startedNs) / 1e6
+
+      expect(err).toBeInstanceOf(SsrfBlockedUrlError)
+      expect(err.message).toMatch(/DNS resolution exceeded/)
+      expect(axiosGet).toHaveBeenCalledTimes(1) // the redirect target is never fetched
+      expect(elapsedMs).toBeLessThan(2_000)
     })
 
     it("aborts the chain once the budget is spent", async () => {

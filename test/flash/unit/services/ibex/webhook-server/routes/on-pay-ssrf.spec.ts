@@ -250,6 +250,38 @@ describe("GET /pay/lnurl/:username — SSRF guard wiring", () => {
     expect(blockedStages()).toEqual(["redirect-or-connect"])
   })
 
+  // The guard sets three limits on every hop and only the chain abort used to
+  // be translated. A host that streams past the 64KB cap, or that accepts and
+  // then goes quiet, came back as a plain AxiosError: 500 + logger.error and
+  // no lnurlpay.blocked span, on the same public unauthenticated route where a
+  // redirect into the cluster answers 502 + logger.warn. Same wallet owner,
+  // same refusal class — the alert has to see all three.
+  it.each([
+    [
+      "a hop that accepts and then goes silent",
+      "ECONNABORTED",
+      "timeout of 800ms exceeded",
+    ],
+    [
+      "a body past the cap",
+      "ERR_BAD_RESPONSE",
+      "maxContentLength size of 65536 exceeded",
+    ],
+  ])("answers 502 and records the block for %s", async (_case, code, message) => {
+    decodeLnurl.mockResolvedValue({ decodedLnurl: "https://pay.example.com/lnurl" })
+    axiosGet.mockRejectedValueOnce(
+      Object.assign(new Error(message), { isAxiosError: true, code }),
+    )
+
+    const res = makeRes()
+    await lnurlHandler()(makeReq(), res as unknown as Response)
+
+    expect(res.status).toHaveBeenCalledWith(502)
+    expect(res.status).not.toHaveBeenCalledWith(500)
+    expect(blockedStages()).toEqual(["redirect-or-connect"])
+    expect(LnurlInvoiceModel.create).not.toHaveBeenCalled()
+  })
+
   it("re-validates redirect targets with DNS — a public-looking host resolving inside is blocked", async () => {
     decodeLnurl.mockResolvedValue({ decodedLnurl: "https://pay.example.com/lnurl" })
     lookup

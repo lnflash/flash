@@ -15,6 +15,17 @@ jest.mock("@services/logger", () => {
   return { baseLogger: logger }
 })
 
+// The blocked branches record on the span as well as in the log: a warn line
+// is not a rate anyone can alert on, and https-only is a cutover on a live
+// payments path. Mocked here (as in the sibling on-pay-ssrf spec) so the
+// attributes the alert matches on are pinned by a test — otherwise deleting
+// the call, or typoing the attribute key, keeps this suite green while the
+// alert silently stops firing.
+jest.mock("@services/tracing", () => ({
+  ...jest.requireActual("@services/tracing"),
+  recordExceptionInCurrentSpan: jest.fn(),
+}))
+
 jest.mock("dns", () => ({
   promises: { lookup: jest.fn() },
 }))
@@ -69,6 +80,7 @@ import axios from "axios"
 
 import { paymentAmountFromNumber, USDTAmount, WalletCurrency } from "@domain/shared"
 import LnurlPaymentSendMutation from "@graphql/public/root/mutation/lnurl-payment-send"
+import { recordExceptionInCurrentSpan } from "@services/tracing"
 import { MAX_REDIRECT_HOPS, MAX_RESPONSE_BYTES, ssrfLookup } from "@utils/ssrf-guard"
 
 import {
@@ -78,6 +90,10 @@ import {
 
 const lookup = dns.promises.lookup as jest.Mock
 const axiosGet = axios.get as jest.Mock
+const recordException = recordExceptionInCurrentSpan as jest.Mock
+
+const blockedStages = () =>
+  recordException.mock.calls.map((c) => c[0].attributes?.["lnurlpay.blocked.stage"])
 
 const PUBLIC_ADDR = [{ address: "93.184.216.34", family: 4 }]
 
@@ -253,6 +269,14 @@ describe("lnurlPaymentSend — SSRF guard wiring", () => {
     expect(context).toMatchObject({ accountId: "account-id" })
     expect((context as { err: unknown }).err).toBeInstanceOf(Error)
     expect(String(message)).toContain("lnurlPaymentSend")
+    // The span is the half you can alert on, so it is asserted, not assumed.
+    expect(recordException).toHaveBeenCalledTimes(1)
+    const recorded = recordException.mock.calls[0][0]
+    expect(recorded.attributes["lnurlpay.blocked"]).toBe(true)
+    expect(recorded.attributes["lnurlpay.blocked.stage"]).toBe("send-metadata-url")
+    // The reason has to survive onto the span, or the alert cannot tell the
+    // http:// scheme cutover from a genuine SSRF attempt.
+    expect(recorded.error.message).toMatch(/scheme http: not allowed/)
   })
 
   it("logs the account and the reason when the metadata fetch is rejected mid-chain", async () => {
@@ -265,7 +289,41 @@ describe("lnurlPaymentSend — SSRF guard wiring", () => {
 
     expect(baseLogger.warn).toHaveBeenCalledTimes(1)
     expect(baseLogger.warn.mock.calls[0][0]).toMatchObject({ accountId: "account-id" })
+    expect(blockedStages()).toEqual(["send-metadata-fetch"])
+    expect(recordException.mock.calls[0][0].attributes["lnurlpay.blocked"]).toBe(true)
   })
+
+  // The guard's other two limits — the per-hop inactivity timeout and the 64KB
+  // body cap — reach the caller as SsrfBlockedUrlError like every other
+  // refusal, so this branch reports them on the same span as a blocked
+  // redirect rather than losing them.
+  it.each([
+    [
+      "a hop that accepts and then goes silent",
+      "ECONNABORTED",
+      "timeout of 800ms exceeded",
+    ],
+    [
+      "a body past the cap",
+      "ERR_BAD_RESPONSE",
+      "maxContentLength size of 65536 exceeded",
+    ],
+  ])(
+    "records the block when the metadata fetch hits %s",
+    async (_case, code, message) => {
+      mockDecodeLnurl.mockResolvedValue({ decodedLnurl: "https://pay.example.com/lnurl" })
+      axiosGet.mockRejectedValueOnce(
+        Object.assign(new Error(message), { isAxiosError: true, code }),
+      )
+
+      const result = await resolveMutation()
+
+      expect(result.status).toBe("failed")
+      expect(mockPayToLnurl).not.toHaveBeenCalled()
+      expect(blockedStages()).toEqual(["send-metadata-fetch"])
+      expect(recordException.mock.calls[0][0].error.message).toContain(message)
+    },
+  )
 
   it("still pays when the decoded lnurl is a public https host", async () => {
     mockDecodeLnurl.mockResolvedValue({ decodedLnurl: "https://pay.example.com/lnurl" })
@@ -275,5 +333,7 @@ describe("lnurlPaymentSend — SSRF guard wiring", () => {
 
     expect(result).toEqual({ errors: [], status: "success" })
     expect(mockPayToLnurl).toHaveBeenCalledTimes(1)
+    // A clean payment must not report a block, or the alert is unusable.
+    expect(recordException).not.toHaveBeenCalled()
   })
 })
