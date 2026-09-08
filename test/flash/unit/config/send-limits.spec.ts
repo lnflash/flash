@@ -1,9 +1,11 @@
 import Ajv from "ajv"
+import { RateLimiterMemory, RateLimiterRes } from "rate-limiter-flexible"
 
 import {
   getAccountLimits,
   getPaymentSendAttemptLimits,
   getPaymentSendDailyAttemptLimits,
+  getSendGuardMode,
 } from "@config"
 
 import { AccountLevel } from "@domain/accounts"
@@ -53,6 +55,78 @@ describe("send-guard config (ENG-573)", () => {
         tradeIntraAccountLimit: 20000000,
       })
     })
+
+    // The `accountLimits` block carries ONE default, applied by Ajv only when
+    // the key is absent entirely. The moment a values file sets `accountLimits`
+    // — the edit ENG-573 explicitly schedules once the L3 ladder is decided —
+    // that default is gone and only what the file spells out survives. Levels
+    // 0-2 are `required`, so a partial override fails loudly at boot. Level 3
+    // must fail the same way: without the `required` entry it resolves to NaN
+    // and every Business (L3) account silently loses the ability to send, one
+    // account at a time, at runtime.
+    it("fails validation at boot when a deployment overrides accountLimits without level 3", () => {
+      const validate = new Ajv({ useDefaults: true }).compile({
+        type: "object",
+        properties: { accountLimits: configSchema.properties.accountLimits },
+        required: ["accountLimits"],
+      })
+      const withoutLevelThree = {
+        withdrawal: { level: { 0: 12500, 1: 100000, 2: 5000000 } },
+        intraLedger: { level: { 0: 12500, 1: 200000, 2: 5000000 } },
+        tradeIntraAccount: { level: { 0: 200000, 1: 5000000, 2: 20000000 } },
+      }
+
+      expect(validate({ accountLimits: withoutLevelThree })).toBe(false)
+      expect(validate.errors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ params: { missingProperty: "3" } }),
+        ]),
+      )
+
+      // ...and a complete override still validates.
+      const complete = {
+        withdrawal: { level: { 0: 12500, 1: 100000, 2: 5000000, 3: 5000000 } },
+        intraLedger: { level: { 0: 12500, 1: 200000, 2: 5000000, 3: 5000000 } },
+        tradeIntraAccount: { level: { 0: 200000, 1: 5000000, 2: 20000000, 3: 20000000 } },
+      }
+      expect(validate({ accountLimits: complete })).toBe(true)
+    })
+  })
+
+  // The operator switch in front of the guard (src/app/payments/authorize-send.ts).
+  // Its failure mode must be "the guard does not block", never "every send is
+  // refused", so every path back from a missing or malformed value lands on
+  // log-only.
+  describe("sendGuard.mode", () => {
+    const compileSendGuard = () =>
+      new Ajv({ useDefaults: true }).compile({
+        type: "object",
+        properties: { sendGuard: configSchema.properties.sendGuard },
+      })
+
+    it("ships as log-only so the first Flash-side amount cap does not go straight to enforcing", () => {
+      expect(getSendGuardMode()).toBe("log-only")
+    })
+
+    it("defaults the whole block when a deployment yaml has no sendGuard key", () => {
+      const config: Record<string, unknown> = {}
+      expect(compileSendGuard()(config)).toBe(true)
+      expect(config.sendGuard).toEqual({ mode: "log-only" })
+    })
+
+    it("defaults `mode` when a deployment sets sendGuard but not mode", () => {
+      const config: Record<string, unknown> = { sendGuard: {} }
+      expect(compileSendGuard()(config)).toBe(true)
+      expect(config.sendGuard).toEqual({ mode: "log-only" })
+    })
+
+    it("rejects a mode outside the three known values at boot", () => {
+      expect(compileSendGuard()({ sendGuard: { mode: "enforced" } })).toBe(false)
+    })
+
+    it.each(["off", "log-only", "enforce"])("accepts %p", (mode) => {
+      expect(compileSendGuard()({ sendGuard: { mode } })).toBe(true)
+    })
   })
 
   describe("payment-send attempt budgets", () => {
@@ -68,8 +142,29 @@ describe("send-guard config (ENG-573)", () => {
       expect(getPaymentSendDailyAttemptLimits()).toEqual({
         points: 200,
         duration: 86400,
-        blockDuration: 3600,
+        blockDuration: 86400,
       })
+    })
+
+    // The claim in the name above is a behavioural one, and the numbers alone
+    // do not make it true. rate-limiter-flexible rewrites the key's TTL to
+    // `blockDuration` on the first breach (RateLimiterStoreAbstract._afterConsume
+    // -> _block), so a block SHORTER than the window throws the daily counter
+    // away early and hands the caller a fresh `points` budget: 200 points over
+    // 86400s blocked for only 3600s is 200 per HOUR, ~4,800 attempts a day.
+    it("keeps the daily counter alive for the whole window after a breach", async () => {
+      const { duration, blockDuration } = getPaymentSendDailyAttemptLimits()
+      const limiter = new RateLimiterMemory({ points: 1, duration, blockDuration })
+
+      await limiter.consume("account-id")
+      const breach = await limiter
+        .consume("account-id")
+        .then(() => null)
+        .catch((err) => err)
+
+      expect(breach).toBeInstanceOf(RateLimiterRes)
+      // Within a second of a full day, not an hour.
+      expect(breach.msBeforeNext).toBeGreaterThan(duration * 1000 - 1000)
     })
 
     it("is wired into RateLimitConfig with its own prefixes and error", () => {
@@ -118,7 +213,7 @@ describe("send-guard config (ENG-573)", () => {
       expect(rateLimits.paymentSendDailyAttempt).toEqual({
         points: 200,
         duration: 86400,
-        blockDuration: 3600,
+        blockDuration: 86400,
       })
     })
   })

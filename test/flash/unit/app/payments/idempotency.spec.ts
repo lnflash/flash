@@ -269,4 +269,150 @@ describe("withPaymentIdempotency", () => {
     expect(execute).toHaveBeenCalledTimes(2)
     expect(mockCacheStore.size).toBe(2)
   })
+
+  // ENG-573. The send guard used to run in the resolver, ahead of this wrapper.
+  // That put the two things in the wrong order: a client retrying a timed-out
+  // send burned a point of attempt budget on every retry and had its amount
+  // re-judged against a mid price that may have moved, for a payment that had
+  // already settled. Past the burst budget it got "Too many payment attempts"
+  // instead of the cached success. A replay must cost nothing.
+  describe("authorize hook (ENG-573 send guard)", () => {
+    it("does not authorize a replayed key — the cached result is returned untouched", async () => {
+      const execute = jest.fn().mockResolvedValue(PaymentSendStatus.Success)
+      const authorize = jest.fn().mockResolvedValue(true)
+
+      const first = await withPaymentIdempotency({
+        idempotencyKey: "key-1",
+        senderWalletId: walletA,
+        requestFingerprint: fingerprint,
+        authorize,
+        execute,
+      })
+
+      // The guard now rejects — a moved price, or the burst budget spent by the
+      // retries themselves. The replay must not notice.
+      authorize.mockResolvedValue(new MismatchedCurrencyForWalletError())
+      const replay = await withPaymentIdempotency({
+        idempotencyKey: "key-1",
+        senderWalletId: walletA,
+        requestFingerprint: fingerprint,
+        authorize,
+        execute,
+      })
+
+      expect(first).toEqual(PaymentSendStatus.Success)
+      expect(replay).toEqual(PaymentSendStatus.Success)
+      expect(execute).toHaveBeenCalledTimes(1)
+      expect(authorize).toHaveBeenCalledTimes(1)
+    })
+
+    it("does not authorize when a concurrent same-key request holds the lock", async () => {
+      const execute = jest.fn().mockResolvedValue(PaymentSendStatus.Success)
+      const authorize = jest.fn().mockResolvedValue(true)
+      mockLockHeld = true
+
+      const result = await withPaymentIdempotency({
+        idempotencyKey: "key-1",
+        senderWalletId: walletA,
+        requestFingerprint: fingerprint,
+        authorize,
+        execute,
+      })
+
+      expect(result).toBeInstanceOf(ResourceAttemptsLockServiceError)
+      expect(authorize).not.toHaveBeenCalled()
+      expect(execute).not.toHaveBeenCalled()
+    })
+
+    it("does not authorize a key reused for a different payment", async () => {
+      const execute = jest.fn().mockResolvedValue(PaymentSendStatus.Success)
+      const authorize = jest.fn().mockResolvedValue(true)
+
+      await withPaymentIdempotency({
+        idempotencyKey: "key-1",
+        senderWalletId: walletA,
+        requestFingerprint: fingerprint,
+        authorize,
+        execute,
+      })
+      const reused = await withPaymentIdempotency({
+        idempotencyKey: "key-1",
+        senderWalletId: walletA,
+        requestFingerprint: "someone-else|999",
+        authorize,
+        execute,
+      })
+
+      expect(reused).toBeInstanceOf(IdempotencyKeyReuseError)
+      expect(authorize).toHaveBeenCalledTimes(1)
+    })
+
+    it("authorizes before executing on the path that will actually pay", async () => {
+      const order: string[] = []
+      const authorize = jest.fn(async () => {
+        order.push("authorize")
+        return true as const
+      })
+      const execute = jest.fn(async () => {
+        order.push("execute")
+        return PaymentSendStatus.Success
+      })
+
+      const result = await withPaymentIdempotency({
+        idempotencyKey: "key-1",
+        senderWalletId: walletA,
+        requestFingerprint: fingerprint,
+        authorize,
+        execute,
+      })
+
+      expect(result).toEqual(PaymentSendStatus.Success)
+      expect(order).toEqual(["authorize", "execute"])
+    })
+
+    it("returns the rejection without executing, and leaves the key retryable", async () => {
+      const rejection = new MismatchedCurrencyForWalletError()
+      const execute = jest.fn().mockResolvedValue(PaymentSendStatus.Success)
+
+      const rejected = await withPaymentIdempotency({
+        idempotencyKey: "key-1",
+        senderWalletId: walletA,
+        requestFingerprint: fingerprint,
+        authorize: async () => rejection,
+        execute,
+      })
+
+      expect(rejected).toBe(rejection)
+      expect(execute).not.toHaveBeenCalled()
+      // Errors are never cached, so the same key can still be used once the
+      // reason for the rejection clears.
+      expect(mockCacheStore.size).toBe(0)
+
+      const retried = await withPaymentIdempotency({
+        idempotencyKey: "key-1",
+        senderWalletId: walletA,
+        requestFingerprint: fingerprint,
+        authorize: async () => true,
+        execute,
+      })
+      expect(retried).toEqual(PaymentSendStatus.Success)
+      expect(execute).toHaveBeenCalledTimes(1)
+    })
+
+    it("still authorizes when no key is supplied", async () => {
+      const rejection = new MismatchedCurrencyForWalletError()
+      const execute = jest.fn().mockResolvedValue(PaymentSendStatus.Success)
+
+      const result = await withPaymentIdempotency({
+        idempotencyKey: undefined,
+        senderWalletId: walletA,
+        requestFingerprint: fingerprint,
+        authorize: async () => rejection,
+        execute,
+      })
+
+      expect(result).toBe(rejection)
+      expect(execute).not.toHaveBeenCalled()
+    })
+  })
 })

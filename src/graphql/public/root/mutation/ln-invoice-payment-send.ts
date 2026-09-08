@@ -85,8 +85,8 @@ const LnInvoicePaymentSendMutation = GT.Field<
 
     if (!domainAccount) throw new Error("Authentication required")
 
-    // ENG-573 send guard. The amount is inside the bolt11, so decode it first;
-    // a no-amount invoice cannot be paid through this mutation anyway.
+    // ENG-573 send guard needs the amount, and it is inside the bolt11, so decode
+    // first; a no-amount invoice cannot be paid through this mutation anyway.
     const decodedInvoice = decodeInvoice(paymentRequest)
     if (decodedInvoice instanceof Error) {
       return {
@@ -105,23 +105,28 @@ const LnInvoicePaymentSendMutation = GT.Field<
       }
     }
 
-    const authorized = await authorizeSend({
-      senderAccount: domainAccount,
-      senderWalletId: walletId,
-      amount: { currency: "BTC", sats: decodedInvoice.paymentAmount.amount },
-      kind: "lightning",
-    })
-    if (authorized instanceof Error) {
-      return { status: "failed", errors: [mapAndParseErrorForGqlResponse(authorized)] }
-    }
+    // Bind the narrowed amount before the closure below: TS re-widens
+    // `decodedInvoice.paymentAmount` to nullable inside a callback.
+    const invoiceSats = decodedInvoice.paymentAmount.amount
 
     // ENG-530: dedupe on (senderWalletId, idempotencyKey) when a key is supplied.
     // This resolver pays IBEX directly (the app-layer path is stubbed above), so the
     // idempotency wrapper goes around the inline call here rather than in @app.
+    //
+    // ENG-573: the guard is the wrapper's `authorize` hook, not a call ahead of
+    // it, so a replayed key returns the cached result without spending attempt
+    // budget or being re-judged against a moved mid price.
     const status = await withPaymentIdempotency({
       idempotencyKey,
       senderWalletId: walletId,
       requestFingerprint: `ln|${paymentRequest}`,
+      authorize: () =>
+        authorizeSend({
+          senderAccount: domainAccount,
+          senderWalletId: walletId,
+          amount: { currency: "BTC", sats: invoiceSats },
+          kind: "lightning",
+        }),
       execute: async (): Promise<PaymentSendStatus | ApplicationError> => {
         const PayLightningInvoice = await Ibex.payInvoice({
           invoice: paymentRequest as Bolt11,

@@ -140,18 +140,6 @@ const LnurlPaymentSendMutation = GT.Field<
       }
     }
 
-    // ENG-573 send guard: attempt budget + amount sanity + daily-limit cap,
-    // before anything reaches IBEX.
-    const authorized = await authorizeSend({
-      senderAccount: domainAccount,
-      senderWalletId: routedWalletId,
-      amount: { currency: "USD", cents: amount },
-      kind: "lnurl",
-    })
-    if (authorized instanceof Error) {
-      return { status: "failed", errors: [mapAndParseErrorForGqlResponse(authorized)] }
-    }
-
     // ENG-533: direct-IBEX execution, so the exactly-once wrapper never ran on
     // this path. Scoped to the ROUTED wallet. EVERYTHING after routing —
     // decode, metadata fetch, wallet-amount conversion, msat conversion,
@@ -166,10 +154,21 @@ const LnurlPaymentSendMutation = GT.Field<
     // different payment because the price ticked. Failure branches return
     // ApplicationErrors, which the wrapper never caches, so first-attempt
     // failures stay retryable.
+    //
+    // ENG-573 send guard (attempt budget + amount sanity + daily-limit cap) is
+    // the wrapper's `authorize` hook rather than a call ahead of it, so a
+    // replayed key returns the cached result without spending attempt budget.
     const outcome = await withPaymentIdempotency({
       idempotencyKey,
       senderWalletId: routedWalletId,
       requestFingerprint: `lnurl|${lnurl}|${amount}`,
+      authorize: () =>
+        authorizeSend({
+          senderAccount: domainAccount,
+          senderWalletId: routedWalletId,
+          amount: { currency: "USD", cents: amount },
+          kind: "lnurl",
+        }),
       execute: async () => {
         const decoded = await Ibex.decodeLnurl({ lnurl })
         if (decoded instanceof IbexError) return decoded

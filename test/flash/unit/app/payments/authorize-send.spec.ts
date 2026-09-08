@@ -13,9 +13,23 @@ jest.mock("@services/alerts/ops-events", () => ({
   notifyOpsEvent: (event: unknown) => mockNotifyOpsEvent(event),
 }))
 
+const mockRecordExceptionInCurrentSpan = jest.fn()
+jest.mock("@services/tracing", () => ({
+  recordExceptionInCurrentSpan: (args: unknown) => mockRecordExceptionInCurrentSpan(args),
+  addAttributesToCurrentSpan: jest.fn(),
+}))
+
+// The operator switch. Defaults to `enforce` here so the check cases below read
+// as the behaviour they describe; the mode cases drive it explicitly.
+const mockSendGuardMode = jest.fn<SendGuardMode, []>(() => "enforce")
+jest.mock("@config", () => ({
+  ...jest.requireActual("@config"),
+  getSendGuardMode: () => mockSendGuardMode(),
+}))
+
 import { getAccountLimits } from "@config"
 
-import { authorizeSend } from "@app/payments/authorize-send"
+import { SendRejectionReasons, authorizeSend } from "@app/payments/authorize-send"
 
 import { AccountLevel } from "@domain/accounts"
 import {
@@ -32,7 +46,7 @@ import {
   UnknownRateLimitServiceError,
 } from "@domain/rate-limit/errors"
 import { DealerPriceServiceError } from "@domain/dealer-price"
-import { WalletCurrency } from "@domain/shared"
+import { ErrorLevel, WalletCurrency } from "@domain/shared"
 
 const ACCOUNT_ID = "507f1f77bcf86cd799439011" as AccountId
 const WALLET_ID = "ea9e6e57-430e-4c87-bd54-4eee0f7869b8" as WalletId
@@ -63,6 +77,7 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     mockConsumeLimiter.mockResolvedValue(true)
+    mockSendGuardMode.mockReturnValue("enforce")
   })
 
   describe("attempt budget", () => {
@@ -80,14 +95,6 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
       mockConsumeLimiter.mockResolvedValueOnce(err)
       expect(await send()).toBe(err)
       expect(mockConsumeLimiter).toHaveBeenCalledTimes(1)
-      expect(lastOpsEvent()).toMatchObject({
-        flow: "transfer",
-        phase: "rejected",
-        status: "failed",
-        accountId: ACCOUNT_ID,
-        error: "PaymentSendRateLimiterExceededError",
-        meta: { reason: "rate-limited", senderWalletId: WALLET_ID, kind: "intraledger" },
-      })
     })
 
     it("rejects when the daily bucket is exhausted", async () => {
@@ -97,11 +104,42 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
       expect(mockConsumeLimiter).toHaveBeenCalledTimes(2)
     })
 
-    it("fails closed on a rate-limit store fault", async () => {
+    // Every further attempt from a blocked caller still consumes, still rejects
+    // and would still post. The shared ops queue is 50 deep and drops its oldest
+    // events on overflow, so one client in a retry loop must not be able to bury
+    // the verification / cashout / deposit feed under its own rejections. The
+    // limiter's Redis counters are the record for this reason.
+    it("posts NO ops event for a rate-limited caller, however many times it retries", async () => {
+      mockConsumeLimiter.mockResolvedValue(new PaymentSendRateLimiterExceededError())
+
+      for (let i = 0; i < 25; i++) {
+        expect(await send()).toBeInstanceOf(PaymentSendRateLimiterExceededError)
+      }
+
+      expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+      expect(mockRecordExceptionInCurrentSpan).not.toHaveBeenCalled()
+    })
+
+    // A store fault is not the caller being noisy — it is Redis being down, and
+    // when enforcing that stops every send on every rail. It must not reach the
+    // user as "too many attempts" on their first send of the day, and it must
+    // reach on-call as an exception.
+    it("treats a rate-limit store fault as an infrastructure fault, not as a rate limit", async () => {
       const fault = new UnknownRateLimitServiceError("redis down")
       mockConsumeLimiter.mockResolvedValueOnce(fault)
-      expect(await send()).toBe(fault)
-      expect(lastOpsEvent()?.meta.reason).toBe("rate-limited")
+
+      const result = await send()
+
+      expect(result).toBeInstanceOf(SendLimitsUnavailableError)
+      expect(result).not.toBeInstanceOf(PaymentSendRateLimiterExceededError)
+      expect((result as Error).message).toContain("redis down")
+      expect(lastOpsEvent()).toMatchObject({
+        step: SendRejectionReasons.limitsUnavailable,
+        error: "SendLimitsUnavailableError",
+      })
+      expect(mockRecordExceptionInCurrentSpan).toHaveBeenCalledWith(
+        expect.objectContaining({ error: result, level: ErrorLevel.Critical }),
+      )
     })
 
     it("charges the budget even for an attempt it then rejects on amount", async () => {
@@ -117,7 +155,7 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
       async (cents) => {
         const result = await send({ amount: { currency: "USD", cents } })
         expect(result).toBeInstanceOf(InvalidSendAmountError)
-        expect(lastOpsEvent()?.meta.reason).toBe("invalid-amount")
+        expect(lastOpsEvent()?.step).toBe(SendRejectionReasons.invalidAmount)
       },
     )
 
@@ -160,10 +198,24 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
       )
       expect(lastOpsEvent()).toMatchObject({
         phase: "rejected",
+        status: "failed",
         amount: { value: ((L0.intraLedgerLimit + 1) / 100).toFixed(2), currency: "USD" },
         error: "IntraledgerLimitsExceededError",
-        meta: { reason: "over-daily-limit", level: "0" },
+        step: SendRejectionReasons.overDailyLimit,
+        meta: { level: "0", mode: "enforce" },
       })
+    })
+
+    // buildEmbed runs every `meta` value through truncateId (12 chars) and
+    // leaves `step` alone, so a reason carried in meta reaches the feed as
+    // "over-dai…". The reason is the whole point of the event; it goes in step.
+    it("carries the reason in `step`, the one embed field that is never truncated", async () => {
+      await send({ amount: { currency: "USD", cents: L0.intraLedgerLimit + 1 } })
+
+      const event = lastOpsEvent()
+      expect(event.step).toBe("over-daily-limit")
+      expect(event.step.length).toBeGreaterThan(12)
+      expect(event.meta).not.toHaveProperty("reason")
     })
 
     it.each(["lightning", "lnurl", "onchain"] as const)(
@@ -237,10 +289,13 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
       expect(lastOpsEvent()?.meta.level).toBe("0")
     })
 
-    it("fails closed for a level with no configured limit", async () => {
+    it("fails closed for a level with no configured limit, and alerts", async () => {
       const result = await send({ senderAccount: account(9 as AccountLevel) })
       expect(result).toBeInstanceOf(SendLimitsUnavailableError)
-      expect(lastOpsEvent()?.meta.reason).toBe("limits-unavailable")
+      expect(lastOpsEvent()?.step).toBe(SendRejectionReasons.limitsUnavailable)
+      expect(mockRecordExceptionInCurrentSpan).toHaveBeenCalledWith(
+        expect.objectContaining({ error: result, level: ErrorLevel.Critical }),
+      )
     })
   })
 
@@ -271,14 +326,92 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
       ).toBe(true)
     })
 
-    it("fails closed when no price is available", async () => {
+    it("fails closed when no price is available, and alerts", async () => {
       mockUsdFromBtcMidPriceFn.mockResolvedValue(new DealerPriceServiceError("offline"))
       const result = await send({
         amount: { currency: "BTC", sats: 1 },
         kind: "lightning",
       })
       expect(result).toBeInstanceOf(SendLimitsUnavailableError)
-      expect(lastOpsEvent()?.meta.reason).toBe("limits-unavailable")
+      expect(lastOpsEvent()?.step).toBe(SendRejectionReasons.limitsUnavailable)
+      // A price-pod outage past the 10-minute cache window rejects every
+      // amount-bearing lightning send and every BTC intraledger send. On-call
+      // must see "the guard is blocking sends", not a wave of unexplained
+      // payment failures.
+      expect(mockRecordExceptionInCurrentSpan).toHaveBeenCalledWith(
+        expect.objectContaining({ error: result, level: ErrorLevel.Critical }),
+      )
+    })
+  })
+
+  // The operator switch. This is the first Flash-side amount cap that has ever
+  // rejected anything and it sits in front of every send on every rail, so it
+  // must be flippable without a deploy — and must not go straight to hard
+  // enforcement before anyone has measured what it would refuse.
+  describe("sendGuard.mode", () => {
+    const overLimit = { currency: "USD", cents: L0.intraLedgerLimit + 1 } as const
+
+    it("defaults to log-only, not enforce, when the config is untouched", () => {
+      // Not the mocked reader: the real one, against the real schema default.
+      const { getSendGuardMode } = jest.requireActual("@config")
+      expect(getSendGuardMode()).toBe("log-only")
+    })
+
+    describe("off", () => {
+      beforeEach(() => mockSendGuardMode.mockReturnValue("off"))
+
+      it("authorises without consuming budget, pricing, or reporting", async () => {
+        expect(await send({ amount: overLimit })).toBe(true)
+        expect(mockConsumeLimiter).not.toHaveBeenCalled()
+        expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+        expect(mockRecordExceptionInCurrentSpan).not.toHaveBeenCalled()
+      })
+
+      it("cannot be blocked by a Redis outage or a missing price", async () => {
+        mockConsumeLimiter.mockResolvedValue(new UnknownRateLimitServiceError("down"))
+        mockUsdFromBtcMidPriceFn.mockResolvedValue(new DealerPriceServiceError("offline"))
+        expect(
+          await send({ amount: { currency: "BTC", sats: 21_000 }, kind: "lightning" }),
+        ).toBe(true)
+      })
+    })
+
+    describe("log-only", () => {
+      beforeEach(() => mockSendGuardMode.mockReturnValue("log-only"))
+
+      it("runs every check and reports the would-be rejection, but authorises the send", async () => {
+        expect(await send({ amount: overLimit })).toBe(true)
+
+        expect(mockConsumeLimiter).toHaveBeenCalledTimes(2)
+        expect(lastOpsEvent()).toMatchObject({
+          flow: "transfer",
+          // Nothing was blocked; the feed must not read as if it was.
+          phase: "would-reject",
+          status: "pending",
+          accountId: ACCOUNT_ID,
+          step: SendRejectionReasons.overDailyLimit,
+          error: "IntraledgerLimitsExceededError",
+          meta: { level: "0", mode: "log-only" },
+        })
+      })
+
+      it("does not block on a fail-closed condition either — it only reports it", async () => {
+        mockUsdFromBtcMidPriceFn.mockResolvedValue(new DealerPriceServiceError("offline"))
+
+        expect(
+          await send({ amount: { currency: "BTC", sats: 21_000 }, kind: "lightning" }),
+        ).toBe(true)
+        expect(lastOpsEvent()?.step).toBe(SendRejectionReasons.limitsUnavailable)
+        expect(mockRecordExceptionInCurrentSpan).toHaveBeenCalledWith(
+          expect.objectContaining({ level: ErrorLevel.Warn }),
+        )
+      })
+
+      it("still says nothing about a rate-limited caller", async () => {
+        mockConsumeLimiter.mockResolvedValue(new PaymentSendRateLimiterExceededError())
+        expect(await send()).toBe(true)
+        expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+      })
     })
   })
 })

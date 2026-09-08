@@ -9,14 +9,18 @@ type RateLimitInput = {
   blockDuration: number
 }
 
+// ENG-573 send guard operator switch — see `sendGuard` in src/config/schema.ts.
+type SendGuardMode = "off" | "log-only" | "enforce"
+
 type AccountLimitsConfig = {
   level: {
     0: number
     1: number
     2: number
-    // ENG-573. Not `required` in the schema, so a partial override can leave it
-    // absent at runtime: getAccountLimits then yields NaN and the send guard
-    // fails closed for level-3 accounts.
+    // ENG-573. `required` in the schema alongside 0-2, so a deployment that
+    // overrides `accountLimits` without a level 3 fails validation at boot
+    // rather than resolving to NaN and silently blocking every Business
+    // account's sends at runtime.
     3: number
   }
 }
@@ -205,6 +209,12 @@ type YamlSchema = {
     withdrawal: AccountLimitsConfig
     intraLedger: AccountLimitsConfig
     tradeIntraAccount: AccountLimitsConfig
+  }
+  // ENG-573 send guard operator switch. Optional here because a deployment
+  // yaml written before this key existed simply doesn't have it; the schema
+  // default fills it in and getSendGuardMode() coerces anything unexpected.
+  sendGuard?: {
+    mode?: SendGuardMode
   }
   spamLimits: {
     memoSharingSatsThreshold: number

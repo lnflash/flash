@@ -1,4 +1,4 @@
-import { getAccountLimits } from "@config"
+import { getAccountLimits, getSendGuardMode } from "@config"
 
 import { usdFromBtcMidPriceFn } from "@app/prices/mid-price"
 
@@ -12,10 +12,12 @@ import {
   SendLimitsUnavailableError,
 } from "@domain/payments/errors"
 import { RateLimitConfig } from "@domain/rate-limit"
-import { WalletCurrency } from "@domain/shared"
+import { RateLimiterExceededError } from "@domain/rate-limit/errors"
+import { ErrorLevel, WalletCurrency } from "@domain/shared"
 
 import { notifyOpsEvent } from "@services/alerts/ops-events"
 import { consumeLimiter } from "@services/rate-limit"
+import { recordExceptionInCurrentSpan } from "@services/tracing"
 
 /**
  * ENG-573 Phase 0 — the send guard.
@@ -36,12 +38,32 @@ import { consumeLimiter } from "@services/rate-limit"
  *      the remaining allowance. Intraledger sends use the intraLedger limit,
  *      everything that leaves Flash uses the withdrawal limit.
  *
- * Fails closed: no limit configured for the level, or no BTC→USD price when
- * the amount is in sats, rejects the send with `SendLimitsUnavailableError`.
+ * MODE (`sendGuard.mode` in yaml, `getSendGuardMode()` — default `log-only`):
  *
- * Every rejection is posted to the ops feed as `transfer / rejected`, so a
- * wall-of-nines probe shows up with the account attached instead of as an
- * anonymous IbexError.
+ *   off       returns immediately. No Redis, no price lookup, no ops event;
+ *             sends behave exactly as they did before ENG-573. The escape
+ *             hatch if the guard itself turns out to be the outage.
+ *   log-only  DEFAULT. All checks run and every would-be rejection posts a
+ *             `transfer / would-reject` ops event — but the send is authorised.
+ *             This is the first Flash-side amount cap that has ever rejected
+ *             anything and nobody has yet measured what fraction of real
+ *             traffic it would refuse; in particular the ~300 prod accounts
+ *             with no `level` field (174 with usernames) land on the level-0
+ *             $125 cap. Read a day of `would-reject` events, confirm the
+ *             distribution, then flip to enforce.
+ *   enforce   rejections are real.
+ *
+ * Fails closed *when enforcing*: no limit configured for the level, no BTC→USD
+ * price for a sats amount, or a rate-limit store fault all reject the send with
+ * `SendLimitsUnavailableError`. Those are infrastructure faults, not user error
+ * — they are reported to the ops feed AND recorded as span exceptions, so a
+ * Redis or price-pod outage surfaces as "the guard is blocking sends" rather
+ * than as a wave of unexplained payment failures.
+ *
+ * `rate-limited` rejections deliberately post NO ops event: the limiter has
+ * already bounded that caller, its counters live in Redis, and a client in a
+ * retry loop would otherwise flood the shared 50-deep ops queue and push the
+ * verification / cashout / deposit feed out of it.
  *
  * Not applied to system credits (rewards, referral payouts, top-up credits,
  * reimbursements): those call the `@app` layer directly and never pass
@@ -56,11 +78,18 @@ export type SendAmountInput =
   | { currency: "USD"; cents: number | bigint | string }
   | { currency: "BTC"; sats: number | bigint }
 
+// Rejection reasons the guard attaches to the ops event. The union is derived
+// from the value, so the strings have exactly one source: the guard, the specs
+// and the Phase 1 counter all reference these rather than retyping literals.
+export const SendRejectionReasons = {
+  rateLimited: "rate-limited",
+  invalidAmount: "invalid-amount",
+  overDailyLimit: "over-daily-limit",
+  limitsUnavailable: "limits-unavailable",
+} as const
+
 export type SendRejectionReason =
-  | "rate-limited"
-  | "invalid-amount"
-  | "over-daily-limit"
-  | "limits-unavailable"
+  (typeof SendRejectionReasons)[keyof typeof SendRejectionReasons]
 
 type AuthorizeSendArgs = {
   senderAccount: Account
@@ -69,14 +98,11 @@ type AuthorizeSendArgs = {
   kind: SendKind
 }
 
-// Rejection reasons the guard attaches to the ops event, kept as a value so
-// tests and the Phase 1 counter can reference them without retyping strings.
-export const SendRejectionReasons = {
-  rateLimited: "rate-limited",
-  invalidAmount: "invalid-amount",
-  overDailyLimit: "over-daily-limit",
-  limitsUnavailable: "limits-unavailable",
-} as const
+type SendRejection = {
+  error: ApplicationError
+  reason: SendRejectionReason
+  cents?: number
+}
 
 const usdDisplay = (cents: number) => ({
   value: (cents / 100).toFixed(2),
@@ -86,7 +112,8 @@ const usdDisplay = (cents: number) => ({
 // An account document with no `level` field hydrates as `undefined` (the
 // mongoose schema has no default; ~300 prod accounts are in this state). An
 // unleveled account is an unverified one, so it gets the level-0 limits rather
-// than a closed door.
+// than a closed door. This assumption is exactly what `log-only` mode exists to
+// verify before it can refuse anybody.
 const effectiveLevel = (account: Account): AccountLevel =>
   account.level ?? AccountLevel.Zero
 
@@ -106,18 +133,19 @@ const toPositiveNumber = (
 
 const usdCentsFromSendAmount = async (
   amount: SendAmountInput,
-): Promise<
-  | { cents: number; reason?: undefined }
-  | { error: ApplicationError; reason: SendRejectionReason }
-> => {
+): Promise<{ cents: number } | SendRejection> => {
   if (amount.currency === "USD") {
     const cents = toPositiveNumber(amount.cents, { integer: false })
-    if (cents instanceof Error) return { error: cents, reason: "invalid-amount" }
+    if (cents instanceof Error) {
+      return { error: cents, reason: SendRejectionReasons.invalidAmount }
+    }
     return { cents }
   }
 
   const sats = toPositiveNumber(amount.sats, { integer: true })
-  if (sats instanceof Error) return { error: sats, reason: "invalid-amount" }
+  if (sats instanceof Error) {
+    return { error: sats, reason: SendRejectionReasons.invalidAmount }
+  }
 
   const usd = await usdFromBtcMidPriceFn({
     amount: BigInt(sats),
@@ -126,37 +154,22 @@ const usdCentsFromSendAmount = async (
   if (usd instanceof Error) {
     return {
       error: new SendLimitsUnavailableError(`BTC→USD price unavailable: ${usd.message}`),
-      reason: "limits-unavailable",
+      reason: SendRejectionReasons.limitsUnavailable,
     }
   }
   return { cents: Number(usd.amount) }
 }
 
-export const authorizeSend = async ({
+/**
+ * Runs the three checks and returns the first rejection, or `true`. Knows
+ * nothing about the mode: whether a rejection actually stops the send is
+ * `authorizeSend`'s decision.
+ */
+const evaluateSend = async ({
   senderAccount,
-  senderWalletId,
   amount,
   kind,
-}: AuthorizeSendArgs): Promise<true | ApplicationError> => {
-  const level = effectiveLevel(senderAccount)
-
-  const reject = <E extends ApplicationError>(
-    error: E,
-    reason: SendRejectionReason,
-    cents?: number,
-  ): E => {
-    notifyOpsEvent({
-      flow: "transfer",
-      phase: "rejected",
-      status: "failed",
-      accountId: senderAccount.id,
-      amount: cents === undefined ? undefined : usdDisplay(cents),
-      error: error.constructor.name,
-      meta: { senderWalletId, kind, reason, level: String(level) },
-    })
-    return error
-  }
-
+}: AuthorizeSendArgs): Promise<true | SendRejection> => {
   // 1. attempt budget — every attempt costs a point, rejected ones included
   for (const rateLimitConfig of [
     RateLimitConfig.paymentSend,
@@ -166,33 +179,138 @@ export const authorizeSend = async ({
       rateLimitConfig,
       keyToConsume: senderAccount.id,
     })
-    if (budget instanceof Error) return reject(budget, "rate-limited")
+    if (budget instanceof RateLimiterExceededError) {
+      return { error: budget, reason: SendRejectionReasons.rateLimited }
+    }
+    if (budget instanceof Error) {
+      // Not a breach — the Redis store itself failed. Reported and alerted as an
+      // infrastructure fault, and surfaced to the caller as the generic
+      // "temporarily unavailable" rather than "too many attempts", which would
+      // tell a user on their first send of the day that they are rate limited.
+      return {
+        error: new SendLimitsUnavailableError(
+          `send attempt budget unavailable: ${budget.message}`,
+        ),
+        reason: SendRejectionReasons.limitsUnavailable,
+      }
+    }
   }
 
   // 2. amount sanity + normalisation to USD cents
   const normalised = await usdCentsFromSendAmount(amount)
-  if (normalised.reason !== undefined) return reject(normalised.error, normalised.reason)
+  if ("error" in normalised) return normalised
   const { cents } = normalised
 
   // 3. daily limit for the level doubles as the per-transaction cap (Phase 0)
+  const level = effectiveLevel(senderAccount)
   const limits = getAccountLimits({ level })
   const limit = kind === "intraledger" ? limits.intraLedgerLimit : limits.withdrawalLimit
   if (!Number.isFinite(limit)) {
-    return reject(
-      new SendLimitsUnavailableError(`no daily send limit configured for level ${level}`),
-      "limits-unavailable",
+    return {
+      error: new SendLimitsUnavailableError(
+        `no daily send limit configured for level ${level}`,
+      ),
+      reason: SendRejectionReasons.limitsUnavailable,
       cents,
-    )
+    }
   }
   if (cents > limit) {
     const limitAsUsd = `$${(limit / 100).toFixed(2)}`
     const message = `Cannot transfer more than ${limitAsUsd} in 24 hours`
-    const error =
-      kind === "intraledger"
-        ? new IntraledgerLimitsExceededError(message)
-        : new WithdrawalLimitsExceededError(message)
-    return reject(error, "over-daily-limit", cents)
+    return {
+      error:
+        kind === "intraledger"
+          ? new IntraledgerLimitsExceededError(message)
+          : new WithdrawalLimitsExceededError(message),
+      reason: SendRejectionReasons.overDailyLimit,
+      cents,
+    }
   }
 
   return true
+}
+
+const report = ({
+  rejection,
+  mode,
+  senderAccount,
+  senderWalletId,
+  kind,
+}: {
+  rejection: SendRejection
+  mode: SendGuardMode
+  senderAccount: Account
+  senderWalletId: WalletId
+  kind: SendKind
+}): void => {
+  const { error, reason, cents } = rejection
+  const enforcing = mode === "enforce"
+
+  // A rate-limited caller is already bounded by their own Redis budget, and
+  // every further attempt still consumes, still rejects and would still post.
+  // The shared ops queue is 50 deep and drops its oldest events on overflow, so
+  // one client in a retry loop would bury the verification / cashout / deposit
+  // feed under its own rejections — exactly when ops needs to read it.
+  if (reason !== SendRejectionReasons.rateLimited) {
+    notifyOpsEvent({
+      flow: "transfer",
+      // `would-reject` is not a euphemism: in log-only mode the send went
+      // through. The feed must not read as if the guard blocked something.
+      phase: enforcing ? "rejected" : "would-reject",
+      status: enforcing ? "failed" : "pending",
+      accountId: senderAccount.id,
+      amount: cents === undefined ? undefined : usdDisplay(cents),
+      // `step` is the one field buildEmbed does not run through truncateId
+      // (12 chars), so the reason arrives whole — "over-daily-limit", not
+      // "over-dai…". Everything in `meta` is truncated.
+      step: reason,
+      error: error.constructor.name,
+      meta: {
+        senderWalletId,
+        kind,
+        level: String(effectiveLevel(senderAccount)),
+        mode,
+      },
+    })
+  }
+
+  // Not a user doing something wrong: Redis or the price feed is down, and when
+  // enforcing that stops every amount-bearing send on every rail. Record it so
+  // on-call sees "the guard is blocking sends" instead of a wave of
+  // unexplained payment failures.
+  if (reason === SendRejectionReasons.limitsUnavailable) {
+    recordExceptionInCurrentSpan({
+      error,
+      level: enforcing ? ErrorLevel.Critical : ErrorLevel.Warn,
+      fallbackMsg: "ENG-573 send guard could not evaluate a send",
+      attributes: {
+        "sendGuard.mode": mode,
+        "sendGuard.kind": kind,
+        "sendGuard.accountId": senderAccount.id,
+      },
+    })
+  }
+}
+
+export const authorizeSend = async (
+  args: AuthorizeSendArgs,
+): Promise<true | ApplicationError> => {
+  const mode = getSendGuardMode()
+  // Off is off: no Redis round-trip, no price lookup, no ops event. A guard
+  // that cannot be turned off without a deploy is a new hard dependency in
+  // front of every send on every rail.
+  if (mode === "off") return true
+
+  const outcome = await evaluateSend(args)
+  if (outcome === true) return true
+
+  report({
+    rejection: outcome,
+    mode,
+    senderAccount: args.senderAccount,
+    senderWalletId: args.senderWalletId,
+    kind: args.kind,
+  })
+
+  return mode === "enforce" ? outcome.error : true
 }

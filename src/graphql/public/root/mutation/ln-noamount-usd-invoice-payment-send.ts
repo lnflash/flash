@@ -110,41 +110,38 @@ const LnNoAmountUsdInvoicePaymentSendMutation = GT.Field<
       }
     }
 
-    // ENG-573 send guard: attempt budget + amount sanity + daily-limit cap,
-    // before anything reaches IBEX.
-    const authorized = await authorizeSend({
-      senderAccount: domainAccount,
-      senderWalletId: routedWalletId,
-      amount: { currency: "USD", cents: amount },
-      kind: "lightning",
-    })
-    if (authorized instanceof Error) {
-      return { status: "failed", errors: [mapAndParseErrorForGqlResponse(authorized)] }
-    }
-
-    const usCents = await usdWalletAmountFromWalletId({
-      walletId: routedWalletId,
-      amount: amount.toString(),
-    })
-    if (usCents instanceof Error) {
-      return {
-        status: "failed",
-        errors: [mapAndParseErrorForGqlResponse(usCents)],
-      }
-    }
     // ENG-533: this resolver executes IBEX directly (FLASH FORK above), so the
     // exactly-once wrapper the covered send functions get in @app/payments
     // never ran here — a double-fire on the most common USD send path
     // double-paid, exactly the 2026-07-23 incident class. Scoped to the ROUTED
     // wallet (the one actually debited) so the same key behaves identically
-    // across the cash-wallet compat redirect. Only the money-moving call sits
-    // inside execute(); routing and amount conversion stay outside so a cached
-    // replay does no IBEX work at all.
+    // across the cash-wallet compat redirect. Only routing sits outside
+    // execute(); everything else — the guard, the wallet-amount conversion and
+    // the money-moving call — is inside, so a cached replay short-circuits
+    // before doing any of it.
+    //
+    // ENG-573 send guard (attempt budget + amount sanity + daily-limit cap) is
+    // the wrapper's `authorize` hook rather than a call ahead of it, so a
+    // replayed key returns the cached result without spending attempt budget or
+    // being re-judged, and a guard rejection stops before the conversion.
     const outcome = await withPaymentIdempotency({
       idempotencyKey,
       senderWalletId: routedWalletId,
       requestFingerprint: `ln-noamount-usd|${paymentRequest}|${amount}`,
+      authorize: () =>
+        authorizeSend({
+          senderAccount: domainAccount,
+          senderWalletId: routedWalletId,
+          amount: { currency: "USD", cents: amount },
+          kind: "lightning",
+        }),
       execute: async () => {
+        const usCents = await usdWalletAmountFromWalletId({
+          walletId: routedWalletId,
+          amount: amount.toString(),
+        })
+        if (usCents instanceof Error) return usCents
+
         const PayLightningInvoice = await Ibex.payInvoice({
           invoice: paymentRequest as Bolt11,
           accountId: routedWalletId,

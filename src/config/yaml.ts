@@ -247,6 +247,24 @@ export const getFailedLoginAttemptPerIpLimits = () =>
 export const getInvoiceCreateAttemptLimits = () =>
   getRateLimits(yamlConfig.rateLimits.invoiceCreateAttempt)
 
+/**
+ * ENG-573 send guard operator switch.
+ *
+ * `off` skips the guard entirely, `log-only` runs every check and reports but
+ * always authorises, `enforce` rejects. Ships as `log-only` so the first
+ * Flash-side amount cap does not go straight to hard enforcement on 100% of
+ * sends; ops flips it to `enforce` once a day of `transfer / would-reject`
+ * events shows what real traffic it would have blocked.
+ *
+ * Anything unrecognised (a typo in a values file, a key from an older schema)
+ * degrades to `log-only`. The failure mode of this switch must be "the guard
+ * does not block", never "every send is refused".
+ */
+export const getSendGuardMode = (): SendGuardMode => {
+  const mode = yamlConfig.sendGuard?.mode
+  return mode === "off" || mode === "enforce" || mode === "log-only" ? mode : "log-only"
+}
+
 // ENG-573 send guard attempt budgets (see src/app/payments/authorize-send.ts).
 export const getPaymentSendAttemptLimits = () =>
   getRateLimits(yamlConfig.rateLimits.paymentSendAttempt)

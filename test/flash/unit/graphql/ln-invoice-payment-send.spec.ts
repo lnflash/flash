@@ -36,10 +36,25 @@ jest.mock("@services/ibex/client", () => ({
   default: { payInvoice: (...args: unknown[]) => mockPayInvoice(...args) },
 }))
 
-// Run the resolver's execute() directly — idempotency plumbing is not under test
+// Run the resolver's authorize()/execute() directly — idempotency plumbing is
+// not under test, but the wrapper's contract (authorize, then execute, and
+// neither on a replay) is, so the passthrough mirrors its no-key path.
+const mockWithPaymentIdempotency = jest.fn(
+  async ({
+    authorize,
+    execute,
+  }: {
+    authorize?: () => Promise<unknown>
+    execute: () => Promise<unknown>
+  }) => {
+    const authorized = await authorize?.()
+    if (authorized instanceof Error) return authorized
+    return execute()
+  },
+)
 jest.mock("@app/payments/idempotency", () => ({
-  withPaymentIdempotency: async ({ execute }: { execute: () => Promise<unknown> }) =>
-    execute(),
+  withPaymentIdempotency: (...args: Parameters<typeof mockWithPaymentIdempotency>) =>
+    mockWithPaymentIdempotency(...args),
 }))
 
 import { ErrorLevel } from "@domain/shared"
@@ -241,6 +256,19 @@ describe("ENG-573 send guard wiring", () => {
       kind: "lightning",
     })
     expect(mockPayInvoice).toHaveBeenCalledTimes(1)
+  })
+
+  // ENG-573: the guard is the wrapper's `authorize` hook, not a call ahead of
+  // it. Running it first made every retry of a timed-out send spend attempt
+  // budget and get re-judged against a moved mid price, so a client past its
+  // burst budget got "Too many payment attempts" instead of the cached success
+  // of a payment that had already moved money.
+  it("hands the guard to the idempotency wrapper instead of running it first", async () => {
+    await resolvePayment()
+
+    expect(mockWithPaymentIdempotency).toHaveBeenCalledTimes(1)
+    const { authorize } = mockWithPaymentIdempotency.mock.calls[0][0]
+    expect(typeof authorize).toBe("function")
   })
 
   it("fails before IBEX when the guard rejects", async () => {

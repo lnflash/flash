@@ -100,7 +100,18 @@ describe("LnNoAmountUsdInvoicePaymentSendMutation", () => {
       transaction: { payment: { status: { id: 2 } } },
     })
     mockWithPaymentIdempotency.mockImplementation(
-      async ({ execute }: { execute: () => Promise<unknown> }) => execute(),
+      // Mirrors the real wrapper's no-key path: authorize (ENG-573), then execute.
+      async ({
+        authorize,
+        execute,
+      }: {
+        authorize?: () => Promise<unknown>
+        execute: () => Promise<unknown>
+      }) => {
+        const authorized = await authorize?.()
+        if (authorized instanceof Error) return authorized
+        return execute()
+      },
     )
   })
 
@@ -279,7 +290,18 @@ describe("ENG-573 send guard wiring", () => {
       transaction: { payment: { status: { id: 2 } } },
     })
     mockWithPaymentIdempotency.mockImplementation(
-      async ({ execute }: { execute: () => Promise<unknown> }) => execute(),
+      // Mirrors the real wrapper's no-key path: authorize (ENG-573), then execute.
+      async ({
+        authorize,
+        execute,
+      }: {
+        authorize?: () => Promise<unknown>
+        execute: () => Promise<unknown>
+      }) => {
+        const authorized = await authorize?.()
+        if (authorized instanceof Error) return authorized
+        return execute()
+      },
     )
   })
 
@@ -296,7 +318,7 @@ describe("ENG-573 send guard wiring", () => {
     expect(mockPayInvoice).toHaveBeenCalledTimes(1)
   })
 
-  it("fails before amount resolution, idempotency, or IBEX when the guard rejects", async () => {
+  it("fails before amount resolution or IBEX when the guard rejects", async () => {
     const rejection = new WithdrawalLimitsExceededError(
       "Cannot transfer more than $125.00 in 24 hours",
     )
@@ -307,7 +329,19 @@ describe("ENG-573 send guard wiring", () => {
     expect(result.status).toBe("failed")
     expect(result.errors[0]).toMatchObject({ message: rejection.message })
     expect(mockUsdWalletAmountFromWalletId).not.toHaveBeenCalled()
-    expect(mockWithPaymentIdempotency).not.toHaveBeenCalled()
     expect(mockPayInvoice).not.toHaveBeenCalled()
+  })
+
+  // ENG-573: the guard is the wrapper's `authorize` hook, not a call ahead of
+  // it. Running it first made every retry of a timed-out send spend attempt
+  // budget and get re-judged against a moved price, so a client past its burst
+  // budget got "Too many payment attempts" instead of the cached success of a
+  // payment that had already moved money.
+  it("hands the guard to the idempotency wrapper instead of running it first", async () => {
+    await resolveMutation()
+
+    expect(mockWithPaymentIdempotency).toHaveBeenCalledTimes(1)
+    const { authorize } = mockWithPaymentIdempotency.mock.calls[0][0]
+    expect(typeof authorize).toBe("function")
   })
 })
