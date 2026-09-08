@@ -82,15 +82,20 @@ const OnChainPaymentSendAllMutation = GT.Field<
     // migrated account's legacy USD wallet
     // (@app/wallets/get-balance-for-wallet) — and `asPaymentAmount()` truncates
     // sub-cent dust to the same `0n`. Handed to the guard, that is
-    // `invalid-amount`: enforcing, a user tapping "send all" on an empty wallet
-    // would get "Amount must be greater than zero" instead of the balance error
-    // this rail has always returned, and in log-only every such tap would land
-    // in the one census bucket the runbook calls malformed client input and
-    // says should be near zero — during the very sample the enforce decision is
-    // made from. Skipping the guard does not authorise anything: the send is
-    // refused one layer down, by `OnchainUsdPaymentValidator`'s
-    // `checkOnchainMin` inside `payOnChainByWalletId`, exactly as before
-    // ENG-573.
+    // `invalid-amount`, and in log-only every ordinary empty-wallet tap would
+    // land in the one census bucket the runbook calls malformed client input
+    // and says should be near zero — during the very sample the enforce
+    // decision is made from. That census bucket is the reason for the skip.
+    //
+    // It is NOT that the rail has a nicer answer. Skipping the guard does not
+    // authorise anything: `payOnChainByWalletId` refuses one layer down, at
+    // `OnchainUsdPaymentValidator`'s `checkOnchainMin`, which returns a bare
+    // `ValidationError("Amount must be greater than 0")` — and `mapError` has
+    // no case for that beyond the catch-all, so the client sees "Unexpected
+    // error occurred, please try again or contact support if it persists (code:
+    // ValidationError: Amount must be greater than 0)". Poor wording, but
+    // exactly what this rail returned before ENG-573; fixing it is not the
+    // guard's job. Pinned by test/flash/unit/graphql/error-map.spec.ts.
     const cents = amount.asPaymentAmount().amount
     if (cents !== 0n) {
       const authorized = await authorizeSend({

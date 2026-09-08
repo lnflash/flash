@@ -24,9 +24,25 @@ jest.mock("@services/tracing", () => ({
   // the six keyed rails, the GraphQL resolver span everywhere else). Recorded
   // and executed, so the assertions below can pin the name the runbook tells
   // operators to query.
-  asyncRunInSpan: <T>(spanName: string, options: unknown, fn: () => Promise<T>) => {
+  //
+  // The `instanceof Error` branch is modelled, not elided: the real helper does
+  // `if (ret instanceof Error) recordException(span, ret)` on whatever the
+  // wrapped function returns (src/services/tracing.ts). A passthrough mock left
+  // "keeps the span-exception signal for limits-unavailable only" unfalsifiable
+  // — returning `outcome.error` instead of `outcome` from `runInGuardSpan`
+  // would keep that test green while production recorded a span exception for
+  // every over-limit rejection on the platform, burying the one signal the
+  // runbook says to page on. Routed into the same spy because both paths end in
+  // the same place: an exception recorded on the guard's span.
+  asyncRunInSpan: async <T>(
+    spanName: string,
+    options: unknown,
+    fn: () => Promise<T>,
+  ): Promise<T> => {
     mockAsyncRunInSpan(spanName, options)
-    return fn()
+    const ret = await fn()
+    if (ret instanceof Error) mockRecordExceptionInCurrentSpan({ error: ret })
+    return ret
   },
   SemanticAttributes: {
     CODE_FUNCTION: "code.function",
@@ -378,6 +394,53 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
         ).toBe(true)
       },
     )
+
+    // `kind` is the RAIL, not the destination. A bolt11 or LN-address payment
+    // to another Flash user never leaves Flash, but the resolver hands the
+    // guard `kind: "lightning"` / `"lnurl"` regardless — the destination is not
+    // resolved until the payment flow is built, after the guard — so it is
+    // judged against `withdrawalLimit`. docs/send-guard.md (check 3) states
+    // that approximation and its scope: level 1 is the only level whose two
+    // limits differ, so it is the only level on which the distinction can
+    // change an outcome. Both halves are pinned here on purpose. Raising
+    // `accountLimits.withdrawal.level.1` to 200000 — one of the two options the
+    // doc says to pick between before enforcing — fails this test, which is the
+    // reminder that the doc and the decision move with it.
+    it("judges an inside-Flash lightning send by the rail, and only level 1 can tell", async () => {
+      expect(L1.withdrawalLimit).toBe(100_000)
+      expect(L1.intraLedgerLimit).toBe(200_000)
+      for (const limits of [L0, L2, L3]) {
+        expect(limits.withdrawalLimit).toBe(limits.intraLedgerLimit)
+      }
+
+      // $1,500 from an L1 account to another Flash user, over their invoice.
+      const insideFlash = { currency: "USD", cents: 150_000 } as const
+      expect(
+        await send({
+          senderAccount: account(AccountLevel.One),
+          amount: insideFlash,
+          kind: "lightning",
+        }),
+      ).toBeInstanceOf(WithdrawalLimitsExceededError)
+
+      // ...and in the census it is `lightning`, indistinguishable from a
+      // genuinely external send. That is what the `over-daily-limit` bullet in
+      // the runbook warns the operator about before they triage the bucket.
+      expect(lastSpanAttributes()).toMatchObject({
+        "sendGuard.rejection": SendRejectionReasons.overDailyLimit,
+        "sendGuard.kind": "lightning",
+        "sendGuard.level": "1",
+      })
+
+      // The same $1,500 to the same user, over their username, is allowed.
+      expect(
+        await send({
+          senderAccount: account(AccountLevel.One),
+          amount: insideFlash,
+          kind: "intraledger",
+        }),
+      ).toBe(true)
+    })
 
     it("rejects the 2026-09-03 wall-of-nines ($999,999,999.99) at every level", async () => {
       for (const level of [

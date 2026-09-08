@@ -7,9 +7,11 @@ rejects; on 2026-09-03 a $999,999,999.99 intraledger request reached IBEX
 untouched.
 
 It is **not** the only user-initiated path that moves a user's money. Cashout
-pays a bolt11 out of the user's own wallet without ever touching the guard —
-read [Not covered by the guard at all](#not-covered-by-the-guard-at-all) before
-concluding from this page that a rail is guarded.
+pays a bolt11 out of the user's own wallet, and `bridgeInitiateWithdrawal` sends
+the user's own USDT out through IBEX, without either one ever touching the
+guard — read [Not covered by the guard at
+all](#not-covered-by-the-guard-at-all) before concluding from this page that a
+rail is guarded.
 
 Every send mutation runs it before anything reaches IBEX. On every rail that
 accepts an `idempotencyKey`, it runs as `withPaymentIdempotency`'s `authorize`
@@ -27,9 +29,29 @@ The checks:
    budget.
 2. **amount sanity** — positive and finite. USD/USDT cents may be fractional
    (USDT settles in micros); sats must be whole.
-3. **daily limit as per-transaction cap** — `amount <= dailyLimit(level)`.
-   Intraledger sends use the intraLedger limit; everything leaving Flash uses the
-   withdrawal limit. Phase 1 replaces this with the remaining allowance.
+3. **daily limit as per-transaction cap** — `amount <= dailyLimit(level)`. The
+   `intraledger` rails use the intraLedger limit; every lightning, lnurl and
+   on-chain rail uses the withdrawal limit. Phase 1 replaces this with the
+   remaining allowance.
+
+   **"Withdrawal" here means the rail, not the destination.** A bolt11 or
+   LN-address payment to another Flash user never leaves Flash, but every
+   lightning and lnurl rail passes `kind: "lightning"` / `"lnurl"` and is judged
+   against `withdrawalLimit` — the destination is not knowable at the guard,
+   which runs before the payment flow that resolves it. That is a deliberate
+   approximation for Phase 0, and it is visible in exactly one place: **level
+   1**, the only level whose two schema defaults differ — withdrawal $1,000,
+   intraLedger $2,000 (`src/config/schema.ts`, and no deployment overrides
+   `accountLimits`). Levels 0, 2 and 3 carry equal limits, so on those the
+   distinction cannot change an outcome. On `enforce`, an L1 user paying another
+   Flash user $1,500 is therefore refused by their lightning invoice and allowed
+   by their username.
+
+   Decide this before flipping, not after: either raise
+   `accountLimits.withdrawal.level.1` to `200000` so the two agree and the
+   approximation stops mattering, or accept the L1 discrepancy knowingly. Phase
+   1, which resolves the destination before charging an allowance, is where the
+   approximation actually goes away.
 
 ## The operator switch
 
@@ -118,6 +140,19 @@ per-transaction cap, and nothing in the `would-reject` sample or the
   limits`. Raising or lowering `accountLimits` does nothing here, and
   `sendGuard.mode: enforce` does not cap a cashout. Phase 1 should wire this
   rail in next.
+- **Bridge USDT withdrawal — a gap, not a decision.** `bridgeInitiateWithdrawal`
+  (`src/graphql/public/root/mutation/bridge-initiate-withdrawal.ts`) →
+  `BridgeService.initiateWithdrawal` (`src/services/bridge/index.ts:1269`) moves
+  the user's own USDT out through `IbexClient.sendCrypto` (`:1442`). Its only
+  controls are a Bridge KYC-approved customer (`requireApprovedBridgeCustomer`),
+  an account level of at least 1 (`checkAccountLevel`, `:299`, plus the
+  resolver's own `level <= 0` guard), and an execution-time balance re-check.
+  There is **no per-transaction ceiling at all** on this rail: the requesting
+  half only asserts `amount > 0` and `amount <= balance`
+  (`src/services/bridge/index.ts:1127` and `:1132`), there is no configured
+  min/max the way cashout has one, and `accountLimits` is never consulted. These
+  are the largest per-transaction amounts on the platform. Phase 1 should wire
+  this rail in alongside cashout.
 - **System credits — deliberate.** Quiz rewards, referral payouts, card top-up
   credits, operator reimbursements. They move money out of a Flash-owned funding
   wallet on our own instruction, so an account-scoped attempt budget and a
@@ -160,15 +195,31 @@ there, not a hunt through the call sites. The price of putting it there is that
 3. Count them by `step`:
    - `over-daily-limit` — real traffic the cap would have refused. If any of it
      is legitimate, raise the level's limit or the account's level *before*
-     enforcing; do not enforce and then triage support tickets.
+     enforcing; do not enforce and then triage support tickets. Read this bucket
+     knowing it conflates two things at level 1: a `sendGuard.kind` of
+     `lightning` or `lnurl` says which rail was used, not where the money went,
+     so a payment that would have settled *inside* Flash is in here judged
+     against the $1,000 withdrawal limit and is indistinguishable from a real
+     external send (see check 3 above). L1 rows between $1,000 and $2,000 are
+     the affected band; on every other level the two limits are equal and the
+     bucket is unambiguous.
    - `invalid-amount` — malformed client input. Should be near zero. A
      send-all on an empty wallet is deliberately **not** in this bucket:
      `getBalanceForWallet` reads a drained or never-funded wallet as
      `USDAmount.ZERO` — post-cutover the default for every migrated account's
      legacy USD wallet — so `onchain-payment-send-all.ts` skips the guard when
-     the balance rounds to zero cents and lets the rail return its own balance
-     error. Otherwise every ordinary empty-wallet tap would read here as
-     malformed client input, in the sample the enforce decision is made from.
+     the balance rounds to zero cents and leaves the refusal to the rail, one
+     layer down. Be clear about what that refusal is: `payOnChainByWalletId`
+     reaches `OnchainUsdPaymentValidator`'s `checkOnchainMin`, which returns a
+     bare `ValidationError("Amount must be greater than 0")`, and `mapError`
+     has no case for it beyond the catch-all — the client gets `Unexpected error
+     occurred, please try again or contact support if it persists (code:
+     ValidationError: Amount must be greater than 0)`. That is unchanged by
+     ENG-573 and not a good message, but it is not the guard's to fix here. The
+     reason for the skip is the census: otherwise every ordinary empty-wallet
+     tap would read as malformed client input, in the one bucket the runbook
+     says should be near zero, in the sample the enforce decision is made
+     from.
    - `limits-unavailable` — Redis or the price feed failing, i.e. the guard
      itself unable to decide. Must be zero before enforcing: on `enforce` these
      block the send. They are also recorded as span exceptions

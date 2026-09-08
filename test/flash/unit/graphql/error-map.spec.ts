@@ -1,4 +1,4 @@
-import { ErrorLevel } from "@domain/shared"
+import { ErrorLevel, ValidationError } from "@domain/shared"
 import { mapAndParseErrorForGqlResponse, mapError } from "@graphql/error-map"
 import { PhoneAccountAlreadyExistsCannotUpgradeError } from "@services/kratos"
 import {
@@ -219,6 +219,25 @@ describe("error-map", () => {
       )
       expect(result.message).not.toContain("level 3")
       expect(result.message).not.toContain("daily send limit")
+    })
+
+    // Not a guard error — the one the guard deliberately steps aside for.
+    // `onchain-payment-send-all.ts` skips `authorizeSend` when the balance
+    // rounds to zero cents so ordinary empty-wallet taps stay out of the
+    // `invalid-amount` census bucket, and leaves the refusal to
+    // `OnchainUsdPaymentValidator`'s `checkOnchainMin`, which returns exactly
+    // this bare ValidationError. mapError has no case for it beyond the
+    // catch-all, so what the user actually sees is the generic unexpected-error
+    // string — NOT a clean balance message. The resolver comment and
+    // docs/send-guard.md both say so now; this is what holds them honest.
+    it("maps checkOnchainMin's ValidationError to the catch-all, not to a balance message", () => {
+      const result = mapError(new ValidationError("Amount must be greater than 0"))
+
+      expect(result.extensions.code).toBe("UNEXPECTED_CLIENT_ERROR")
+      expect(result.message).toBe(
+        "Unexpected error occurred, please try again or contact support if it persists (code: ValidationError: Amount must be greater than 0)",
+      )
+      expect(result.message).not.toMatch(/balance/i)
     })
 
     it("maps PaymentSendRateLimiterExceededError to a too-many-requests error", () => {

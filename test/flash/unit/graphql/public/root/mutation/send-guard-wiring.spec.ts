@@ -36,6 +36,9 @@ jest.mock("@app/cash-wallet-cutover", () => ({
     mockResolveCashWalletMutationWalletIdForAccount(args),
 }))
 
+import fs from "fs"
+import path from "path"
+
 import { SEND_GUARD_NOT_APPLICABLE } from "@app/payments/send-guard-optout"
 import { WithdrawalLimitsExceededError } from "@domain/errors"
 import { USDAmount } from "@domain/shared"
@@ -208,13 +211,14 @@ describe("ENG-573 send guard wiring", () => {
     // `getBalanceForWallet` returns USDAmount.ZERO for a drained or
     // never-funded wallet as a NORMAL value, not an error — post-cutover that is
     // the default read of every migrated account's legacy USD wallet. Handing
-    // the guard `cents: 0n` made it reject with InvalidSendAmountError: on
-    // enforce a user tapping "send all" on an empty wallet would get "Amount
-    // must be greater than zero" instead of the balance error this rail has
-    // always returned, and in log-only every such tap would land in the
-    // `invalid-amount` census bucket the runbook says should be near zero —
-    // ordinary empty-wallet taps reading as malformed client input during the
-    // very sample the enforce decision is made from.
+    // the guard `cents: 0n` made it reject with InvalidSendAmountError, so in
+    // log-only every ordinary empty-wallet tap landed in the `invalid-amount`
+    // census bucket the runbook says should be near zero — malformed client
+    // input, during the very sample the enforce decision is made from. That
+    // census bucket is the reason for the skip. It is NOT that the rail has a
+    // nicer answer: `checkOnchainMin` returns a bare ValidationError that
+    // mapError sends to the unexpected-error catch-all (pinned in
+    // test/flash/unit/graphql/error-map.spec.ts).
     it.each([
       ["a zero balance", USDAmount.ZERO],
       ["sub-cent dust, which truncates to the same zero cents", USDAmount.cents("0.4")],
@@ -225,7 +229,8 @@ describe("ENG-573 send guard wiring", () => {
 
       expect(mockAuthorizeSend).not.toHaveBeenCalled()
       // Not authorised — refused one layer down, by OnchainUsdPaymentValidator's
-      // checkOnchainMin inside payOnChainByWalletId, exactly as before ENG-573.
+      // checkOnchainMin inside payOnChainByWalletId (mocked here), exactly as
+      // before ENG-573.
       expect(mockPayOnChainByWalletId).toHaveBeenCalledTimes(1)
       expect(result).toEqual({ errors: [], status: "success" })
     })
@@ -296,5 +301,40 @@ describe("ENG-573: the guard hook is required, not optional", () => {
     }
 
     expect(await args.authorize()).toBe(true)
+  })
+})
+
+// docs/send-guard.md, "Not covered by the guard at all", is the inventory the
+// page sends a reader to before they conclude a rail is guarded — so an
+// omission there is a defect, not a doc nit. It has already been wrong once:
+// the Bridge USDT withdrawal rail, which carries the largest per-transaction
+// amounts on the platform, was missing from it while cashout was listed.
+//
+// These keep page and tree in step from both directions. Wire one of these
+// rails into the guard and the first assertion fails; add a new unguarded
+// money-moving rail and nothing here changes until someone adds it to the list,
+// at which point the second assertion makes them name it in the doc too.
+describe("ENG-573: the unguarded-rail inventory in docs/send-guard.md", () => {
+  const repoRoot = path.resolve(__dirname, "../".repeat(7))
+  const read = (relative: string) =>
+    fs.readFileSync(path.join(repoRoot, relative), "utf8")
+  const doc = read("docs/send-guard.md")
+
+  // [rail, the source that moves the money, the identifier the doc must name]
+  const unguarded: [string, string, string][] = [
+    ["cashout", "src/app/offers/ValidOffer.ts", "src/app/offers/ValidOffer.ts"],
+    [
+      "Bridge USDT withdrawal",
+      "src/services/bridge/index.ts",
+      "bridge-initiate-withdrawal.ts",
+    ],
+  ]
+
+  it.each(unguarded)("%s still does not call the guard", (_rail, source) => {
+    expect(read(source)).not.toContain("authorizeSend")
+  })
+
+  it.each(unguarded)("%s is named in the inventory", (_rail, _source, identifier) => {
+    expect(doc).toContain(identifier)
   })
 })

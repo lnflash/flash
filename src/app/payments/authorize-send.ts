@@ -31,10 +31,17 @@ import {
  * internal ledger, so Galoy's `AccountLimitsChecker` reads a volume of zero for
  * every account and never rejects; until the Phase 1 allowance counter exists
  * this is the only Flash-side check on the send mutations. It is NOT the only
- * user-initiated path that moves a user's money: the cashout rail pays a bolt11
- * out of the user's own wallet from `ValidOffer.execute` (@app/offers) with no
- * attempt budget and no daily cap, bounded only by `Cashout.validations`. See
- * "Not covered by the guard at all" in docs/send-guard.md.
+ * user-initiated path that moves a user's money:
+ *   - cashout pays a bolt11 out of the user's own wallet from
+ *     `ValidOffer.execute` (@app/offers) with no attempt budget and no daily
+ *     cap, bounded only by `Cashout.validations`;
+ *   - `bridgeInitiateWithdrawal` sends the user's own USDT out through
+ *     `IbexClient.sendCrypto` (@services/bridge `initiateWithdrawal`) with no
+ *     attempt budget, no `accountLimits` cap and no configured min/max at all —
+ *     its only controls are a Bridge KYC-approved customer, account level >= 1,
+ *     and an execution-time balance re-check, on the largest per-transaction
+ *     amounts on the platform.
+ * See "Not covered by the guard at all" in docs/send-guard.md.
  *
  * Checks, in order:
  *   1. attempt budget  — two Redis buckets keyed on the account (burst + daily).
@@ -44,8 +51,16 @@ import {
  *      (USDT settles in micros); sats must be whole.
  *   3. daily limit     — `amount <= dailyLimit(level)`. Per the ENG-573 decision
  *      the daily limit *is* the per-transaction cap; Phase 1 tightens this to
- *      the remaining allowance. Intraledger sends use the intraLedger limit,
- *      everything that leaves Flash uses the withdrawal limit.
+ *      the remaining allowance. `kind === "intraledger"` uses the intraLedger
+ *      limit; every lightning, lnurl and on-chain rail uses the withdrawal
+ *      limit. That is the RAIL, not the destination: a bolt11 or LN-address
+ *      payment to another Flash user never leaves Flash but still arrives here
+ *      as `lightning` / `lnurl`, because the destination is not resolved until
+ *      the payment flow is built, after the guard. The approximation is only
+ *      observable at level 1, the one level whose defaults differ ($1,000
+ *      withdrawal vs $2,000 intraLedger); levels 0, 2 and 3 carry equal limits.
+ *      docs/send-guard.md, check 3, says which way to settle it before
+ *      enforcing.
  *
  * MODE (`sendGuard.mode` in yaml, `getSendGuardMode()` — default `log-only`):
  *
