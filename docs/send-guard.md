@@ -39,19 +39,20 @@ The checks:
    lightning and lnurl rail passes `kind: "lightning"` / `"lnurl"` and is judged
    against `withdrawalLimit` — the destination is not knowable at the guard,
    which runs before the payment flow that resolves it. That is a deliberate
-   approximation for Phase 0, and it is visible in exactly one place: **level
-   1**, the only level whose two schema defaults differ — withdrawal $1,000,
-   intraLedger $2,000 (`src/config/schema.ts`, and no deployment overrides
-   `accountLimits`). Levels 0, 2 and 3 carry equal limits, so on those the
-   distinction cannot change an outcome. On `enforce`, an L1 user paying another
-   Flash user $1,500 is therefore refused by their lightning invoice and allowed
-   by their username.
+   approximation for Phase 0, and **as the ladder stands it cannot change any
+   outcome**: every level carries equal withdrawal and intraLedger limits.
+   Level 1 was the one exception — Galoy shipped $1,000 external against
+   $2,000 internal — and it was settled on 2026-09-08 to a single $1,000 rather
+   than by raising the external cap. So an L1 user paying another Flash user
+   $1,500 is refused either way, by their lightning invoice and by their
+   username alike, and the rail/destination distinction is invisible.
 
-   Decide this before flipping, not after: either raise
-   `accountLimits.withdrawal.level.1` to `200000` so the two agree and the
-   approximation stops mattering, or accept the L1 discrepancy knowingly. Phase
-   1, which resolves the destination before charging an allowance, is where the
-   approximation actually goes away.
+   This is the thing to re-check if the ladder ever changes. Give any level a
+   larger intraLedger limit than its withdrawal limit and the approximation goes
+   live on that level immediately: inside-Flash payments made over a bolt11 or
+   an LN address get judged against the smaller external cap. Phase 1, which
+   resolves the destination before charging an allowance, is where it goes away
+   for good.
 
 ## The operator switch
 
@@ -195,14 +196,13 @@ there, not a hunt through the call sites. The price of putting it there is that
 3. Count them by `step`:
    - `over-daily-limit` — real traffic the cap would have refused. If any of it
      is legitimate, raise the level's limit or the account's level *before*
-     enforcing; do not enforce and then triage support tickets. Read this bucket
-     knowing it conflates two things at level 1: a `sendGuard.kind` of
-     `lightning` or `lnurl` says which rail was used, not where the money went,
-     so a payment that would have settled *inside* Flash is in here judged
-     against the $1,000 withdrawal limit and is indistinguishable from a real
-     external send (see check 3 above). L1 rows between $1,000 and $2,000 are
-     the affected band; on every other level the two limits are equal and the
-     bucket is unambiguous.
+     enforcing; do not enforce and then triage support tickets. A `sendGuard.kind`
+     of `lightning` or `lnurl` says which rail was used, not where the money
+     went, so an inside-Flash payment is counted here as though it were external
+     (see check 3 above). With every level's two limits equal that costs nothing
+     — the same amount is refused either way — but it becomes a real ambiguity
+     in this bucket the moment any level's intraLedger limit exceeds its
+     withdrawal limit.
    - `invalid-amount` — malformed client input. Should be near zero. A
      send-all on an empty wallet is deliberately **not** in this bucket:
      `getBalanceForWallet` reads a drained or never-funded wallet as

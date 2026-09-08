@@ -60,14 +60,16 @@ describe("send-guard config (ENG-573)", () => {
       }
     })
 
-    it("keeps the Galoy defaults for levels 0-2", () => {
+    // Level 1 deliberately departs from Galoy's split ladder: see the comment
+    // on `intraLedger.level.1` in src/config/schema.ts.
+    it("keeps the Galoy defaults for levels 0-2, except the settled level-1 limit", () => {
       expect(getAccountLimits({ level: AccountLevel.Zero })).toEqual({
         intraLedgerLimit: 12500,
         withdrawalLimit: 12500,
         tradeIntraAccountLimit: 200000,
       })
       expect(getAccountLimits({ level: AccountLevel.One })).toEqual({
-        intraLedgerLimit: 200000,
+        intraLedgerLimit: 100000,
         withdrawalLimit: 100000,
         tradeIntraAccountLimit: 5000000,
       })
@@ -94,7 +96,7 @@ describe("send-guard config (ENG-573)", () => {
       })
       const withoutLevelThree = {
         withdrawal: { level: { 0: 12500, 1: 100000, 2: 5000000 } },
-        intraLedger: { level: { 0: 12500, 1: 200000, 2: 5000000 } },
+        intraLedger: { level: { 0: 12500, 1: 100000, 2: 5000000 } },
         tradeIntraAccount: { level: { 0: 200000, 1: 5000000, 2: 20000000 } },
       }
 
@@ -108,7 +110,7 @@ describe("send-guard config (ENG-573)", () => {
       // ...and a complete override still validates.
       const complete = {
         withdrawal: { level: { 0: 12500, 1: 100000, 2: 5000000, 3: 5000000 } },
-        intraLedger: { level: { 0: 12500, 1: 200000, 2: 5000000, 3: 5000000 } },
+        intraLedger: { level: { 0: 12500, 1: 100000, 2: 5000000, 3: 5000000 } },
         tradeIntraAccount: { level: { 0: 200000, 1: 5000000, 2: 20000000, 3: 20000000 } },
       }
       expect(validate({ accountLimits: complete })).toBe(true)

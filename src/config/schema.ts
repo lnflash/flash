@@ -534,7 +534,13 @@ export const configSchema = {
         intraLedger: {
           level: {
             "0": 12500,
-            "1": 200000,
+            // ENG-573 decision (2026-09-08, operator): level 1 is ONE limit,
+            // $1,000, not $1,000 external / $2,000 internal. Galoy shipped them
+            // split; that split was the only place the guard's rail-vs-
+            // destination approximation could change an outcome, and closing it
+            // downward is the conservative resolution. Every level now carries
+            // equal withdrawal and intraLedger limits.
+            "1": 100000,
             "2": 5000000,
             "3": 5000000, // ENG-573 placeholder: L3 inherits L2 until the ladder is decided
           },

@@ -56,11 +56,12 @@ import {
  *      limit. That is the RAIL, not the destination: a bolt11 or LN-address
  *      payment to another Flash user never leaves Flash but still arrives here
  *      as `lightning` / `lnurl`, because the destination is not resolved until
- *      the payment flow is built, after the guard. The approximation is only
- *      observable at level 1, the one level whose defaults differ ($1,000
- *      withdrawal vs $2,000 intraLedger); levels 0, 2 and 3 carry equal limits.
- *      docs/send-guard.md, check 3, says which way to settle it before
- *      enforcing.
+ *      the payment flow is built, after the guard. As of the 2026-09-08 ladder
+ *      decision every level carries EQUAL withdrawal and intraLedger limits, so
+ *      the approximation currently cannot change any outcome — level 1 was the
+ *      only level whose defaults differed, and it was settled downward to a
+ *      single $1,000. Reintroduce a per-level split and this becomes live
+ *      again: see docs/send-guard.md, check 3.
  *
  * MODE (`sendGuard.mode` in yaml, `getSendGuardMode()` — default `log-only`):
  *

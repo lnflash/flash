@@ -65,9 +65,20 @@ jest.mock("@services/tracing", () => ({
 // The operator switch. Defaults to `enforce` here so the check cases below read
 // as the behaviour they describe; the mode cases drive it explicitly.
 const mockSendGuardMode = jest.fn<SendGuardMode, []>(() => "enforce")
+// `getAccountLimits` passes through to the real schema defaults unless a test
+// sets an override. Since the 2026-09-08 ladder decision every level carries
+// equal withdrawal and intraLedger limits, so no real level can demonstrate
+// which of the two a given `kind` consults — that mapping is pinned below with
+// synthetic limits instead, and stays pinned if the ladder ever splits again.
+const mockAccountLimitsOverride = jest.fn<IAccountLimits | null, [AccountLevel]>(
+  () => null,
+)
 jest.mock("@config", () => ({
   ...jest.requireActual("@config"),
   getSendGuardMode: () => mockSendGuardMode(),
+  getAccountLimits: (args: { level: AccountLevel }) =>
+    mockAccountLimitsOverride(args.level) ??
+    jest.requireActual("@config").getAccountLimits(args),
 }))
 
 import { getAccountLimits } from "@config"
@@ -153,6 +164,7 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
+    mockAccountLimitsOverride.mockReturnValue(null)
     // A muted count is cleared only by being delivered, so it would otherwise
     // carry from one test into the next test's first ops event.
     __resetOpsEventCoalescingForTest()
@@ -371,12 +383,21 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
       expect(event.meta).not.toHaveProperty("reason")
     })
 
+    // Synthetic limits, because the real ladder deliberately has none that
+    // differ (see the config mock above): with every level equal, an amount
+    // refused on `lightning` is refused on `intraledger` too, and the mapping
+    // would be unfalsifiable against the defaults.
+    const SPLIT_LIMITS = {
+      withdrawalLimit: 100_000,
+      intraLedgerLimit: 200_000,
+      tradeIntraAccountLimit: 5_000_000,
+    } as IAccountLimits
+
     it.each(["lightning", "lnurl", "onchain"] as const)(
       "applies the withdrawal limit to %s sends",
       async (kind) => {
-        // Level 1 has distinct intraledger ($2,000) and withdrawal ($1,000) limits.
-        expect(L1.withdrawalLimit).toBeLessThan(L1.intraLedgerLimit)
-        const between = L1.withdrawalLimit + 1
+        mockAccountLimitsOverride.mockReturnValue(SPLIT_LIMITS)
+        const between = SPLIT_LIMITS.withdrawalLimit + 1
 
         const result = await send({
           senderAccount: account(AccountLevel.One),
@@ -399,17 +420,17 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
     // to another Flash user never leaves Flash, but the resolver hands the
     // guard `kind: "lightning"` / `"lnurl"` regardless — the destination is not
     // resolved until the payment flow is built, after the guard — so it is
-    // judged against `withdrawalLimit`. docs/send-guard.md (check 3) states
-    // that approximation and its scope: level 1 is the only level whose two
-    // limits differ, so it is the only level on which the distinction can
-    // change an outcome. Both halves are pinned here on purpose. Raising
-    // `accountLimits.withdrawal.level.1` to 200000 — one of the two options the
-    // doc says to pick between before enforcing — fails this test, which is the
-    // reminder that the doc and the decision move with it.
-    it("judges an inside-Flash lightning send by the rail, and only level 1 can tell", async () => {
+    // judged against `withdrawalLimit`.
+    //
+    // That approximation is inert only while no level's intraLedger limit
+    // exceeds its withdrawal limit. Level 1 used to be the exception ($1,000 vs
+    // $2,000) and was settled downward to a single $1,000 on 2026-09-08; this
+    // asserts the whole ladder, so reintroducing a split anywhere fails here and
+    // sends the author to docs/send-guard.md check 3 before enforcing.
+    it("keeps every level's two limits equal, so the rail approximation stays inert", async () => {
       expect(L1.withdrawalLimit).toBe(100_000)
-      expect(L1.intraLedgerLimit).toBe(200_000)
-      for (const limits of [L0, L2, L3]) {
+      expect(L1.intraLedgerLimit).toBe(100_000)
+      for (const limits of [L0, L1, L2, L3]) {
         expect(limits.withdrawalLimit).toBe(limits.intraLedgerLimit)
       }
 
@@ -425,21 +446,25 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
 
       // ...and in the census it is `lightning`, indistinguishable from a
       // genuinely external send. That is what the `over-daily-limit` bullet in
-      // the runbook warns the operator about before they triage the bucket.
+      // the runbook warns the operator about before they triage the bucket —
+      // the rail is recorded, the destination is not.
       expect(lastSpanAttributes()).toMatchObject({
         "sendGuard.rejection": SendRejectionReasons.overDailyLimit,
         "sendGuard.kind": "lightning",
         "sendGuard.level": "1",
       })
 
-      // The same $1,500 to the same user, over their username, is allowed.
+      // The same $1,500 to the same user over their username is refused too —
+      // that is the point of settling level 1 to one number. Before the
+      // 2026-09-08 decision this was allowed, and which rail the payer happened
+      // to use decided whether their money moved.
       expect(
         await send({
           senderAccount: account(AccountLevel.One),
           amount: insideFlash,
           kind: "intraledger",
         }),
-      ).toBe(true)
+      ).toBeInstanceOf(IntraledgerLimitsExceededError)
     })
 
     it("rejects the 2026-09-03 wall-of-nines ($999,999,999.99) at every level", async () => {
