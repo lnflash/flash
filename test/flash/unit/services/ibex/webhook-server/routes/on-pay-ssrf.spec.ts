@@ -42,7 +42,7 @@ import { WalletsRepository } from "@services/mongoose/wallets"
 import { LnurlInvoiceModel } from "@services/mongoose/lnurl-invoice"
 import Ibex from "@services/ibex/client"
 import { router } from "@services/ibex/webhook-server/routes/on-pay"
-import { MAX_REDIRECT_HOPS } from "@services/ibex/webhook-server/ssrf-guard"
+import { MAX_REDIRECT_HOPS } from "@utils/ssrf-guard"
 import { ibexWebhookPaths } from "@services/ibex/webhook-config"
 import { extractPaymentHashFromBolt11 } from "@utils"
 

@@ -10,9 +10,9 @@ import { AccountsRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
 import { ibexWebhookPaths, ibexWebhookEndpoints } from "@services/ibex/webhook-config"
 import { extractPaymentHashFromBolt11 } from "@utils"
+import { isSsrfBlockedError, ssrfFetch, validatePublicHttpUrl } from "@utils/ssrf-guard"
 
 import { authenticate, logRequest, validateIbexIp } from "../middleware"
-import { isSsrfBlockedError, ssrfFetch, validatePublicHttpUrl } from "../ssrf-guard"
 
 const lnurlCorsOptions: CorsOptions = {
   origin: [

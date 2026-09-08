@@ -67,4 +67,20 @@ describe("ERPNEXT_JWT_SECRET length floor at config load", () => {
   it("leaves an unset secret alone", () => {
     expect(loadEnvWithSecret(undefined)).toBeNull()
   })
+
+  // The floor and `isUnsetSecret` (@utils/weak-secrets) have to agree on what
+  // "unset" means, or the two layers contradict each other: the servers use
+  // isUnsetSecret to tell "no ERP integration here" from "configured badly" and
+  // skip the admin mount (see admin-auth.spec.ts, which asserts exactly "" and
+  // "   " keep the process alive) — but a config-load refusal never lets the
+  // process reach that branch. A chart or compose file rendering
+  // ERPNEXT_JWT_SECRET: "" for a fresh namespace would put the whole payments
+  // API in CrashLoopBackOff instead. Blank is still weak everywhere it
+  // matters: the dedicated admin entrypoint calls assertStrongSecret.
+  it.each([
+    ["empty", ""],
+    ["blank", "   "],
+  ])("treats an %s value as unset, matching isUnsetSecret", (_label, secret) => {
+    expect(loadEnvWithSecret(secret)).toBeNull()
+  })
 })

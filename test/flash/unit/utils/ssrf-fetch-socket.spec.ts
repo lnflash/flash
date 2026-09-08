@@ -2,7 +2,7 @@ import dns from "dns"
 import http from "http"
 import { AddressInfo } from "net"
 
-import { MAX_RESPONSE_BYTES, ssrfFetch } from "@services/ibex/webhook-server/ssrf-guard"
+import { MAX_RESPONSE_BYTES, ssrfFetch } from "@utils/ssrf-guard"
 
 import {
   clearDevUnsafeModeFlags,

@@ -22,7 +22,7 @@ import {
   ssrfLookup,
   TOTAL_FETCH_TIMEOUT_MS,
   validatePublicHttpUrl,
-} from "@services/ibex/webhook-server/ssrf-guard"
+} from "@utils/ssrf-guard"
 import { DEPRECATED_DEV_UNSAFE_MODE_FLAG, DEV_UNSAFE_MODE_FLAG } from "@utils/dev-context"
 
 import {
@@ -477,15 +477,17 @@ describe("ssrfFetch — guard wiring", () => {
     expect(config.validateStatus(404)).toBe(false)
   })
 
-  it("still passes caller params and headers through", async () => {
+  it("still passes caller params, headers and auth through", async () => {
     await ssrfFetch(URL_PUBLIC, {
       params: { amount: 1000 },
       headers: { "x-custom": "yes" },
+      auth: { username: "svc", password: "s3cret" },
     })
 
     const config = lastAxiosConfig()
     expect(config.params).toEqual({ amount: 1000 })
     expect(config.headers).toEqual({ "x-custom": "yes" })
+    expect(config.auth).toEqual({ username: "svc", password: "s3cret" })
   })
 
   // Redirect targets on this route are attacker-chosen twice over: the wallet
@@ -497,11 +499,15 @@ describe("ssrfFetch — guard wiring", () => {
     const CALLER_CONFIG = {
       params: { amount: 1000 },
       headers: { authorization: "Bearer caller-credential" },
+      // axios expands `auth` into an `Authorization: Basic ...` header at
+      // request time, so it is a credential even though it is not in `headers`
+      // — dropping headers alone would still hand it to the redirect target.
+      auth: { username: "svc", password: "caller-credential" },
     }
 
     const configOfCall = (index: number) => axiosGet.mock.calls[index][1]
 
-    it("drops caller headers and params on a cross-origin redirect", async () => {
+    it("drops caller headers, params and auth on a cross-origin redirect", async () => {
       axiosGet
         .mockResolvedValueOnce({
           status: 302,
@@ -516,8 +522,10 @@ describe("ssrfFetch — guard wiring", () => {
       // The first hop is the host the caller chose to talk to, so it keeps them.
       expect(configOfCall(0).headers).toEqual(CALLER_CONFIG.headers)
       expect(configOfCall(0).params).toEqual(CALLER_CONFIG.params)
+      expect(configOfCall(0).auth).toEqual(CALLER_CONFIG.auth)
       expect(configOfCall(1).headers).toBeUndefined()
       expect(configOfCall(1).params).toBeUndefined()
+      expect(configOfCall(1).auth).toBeUndefined()
     })
 
     it("keeps them on a same-origin redirect", async () => {
@@ -533,6 +541,7 @@ describe("ssrfFetch — guard wiring", () => {
 
       expect(configOfCall(1).headers).toEqual(CALLER_CONFIG.headers)
       expect(configOfCall(1).params).toEqual(CALLER_CONFIG.params)
+      expect(configOfCall(1).auth).toEqual(CALLER_CONFIG.auth)
     })
 
     // Once dropped, they stay dropped: a chain that bounces off-origin and
@@ -556,6 +565,7 @@ describe("ssrfFetch — guard wiring", () => {
       expect(axiosGet).toHaveBeenCalledTimes(3)
       expect(configOfCall(2).headers).toBeUndefined()
       expect(configOfCall(2).params).toBeUndefined()
+      expect(configOfCall(2).auth).toBeUndefined()
     })
 
     // A cross-origin hop must not cost the guard's own fields.

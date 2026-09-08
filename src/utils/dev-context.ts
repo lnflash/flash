@@ -12,8 +12,9 @@ import { baseLogger } from "@services/logger"
 // it is much more than "let the repo's committed secrets authenticate" (its
 // former name, ALLOW_REPO_DEV_SECRETS, promised only that). Every guard with a
 // "dev stacks keep working" escape hatch reads THIS predicate, so setting it
-// ALSO disables the entire SSRF guard on `GET /pay/lnurl/:username` — a
-// public, unauthenticated route: https-only, the cloud-metadata hostname
+// ALSO disables the entire SSRF guard on every URL the server fetches on a
+// user's behalf — `GET /pay/lnurl/:username` (public and unauthenticated) and
+// the `lnurlPaymentSend` mutation: https-only, the cloud-metadata hostname
 // denylist, the private-IP-literal check, and both the pre-flight and
 // connect-time DNS checks all go away. A shared or staging box with this set
 // is an SSRF proxy into whatever network it sits in, on top of authenticating

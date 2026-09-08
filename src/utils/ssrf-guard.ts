@@ -8,8 +8,13 @@ import ipaddr from "ipaddr.js"
 
 import { isDevContext } from "@utils/dev-context"
 
-// SSRF guard for URLs derived from user-controlled data (e.g. a wallet's
-// stored lnurlp, decoded and then fetched server-side by the LNURL-pay proxy).
+// SSRF guard for URLs derived from user-controlled data. Two callers today,
+// both fetching a bech32 LNURL the user chose, decoded to an arbitrary URL:
+// the public LNURL-pay proxy (`GET /pay/lnurl/:username`, from the payee's
+// stored lnurlp) and the `lnurlPaymentSend` mutation (from the payer's `lnurl`
+// argument). It lives in @utils rather than under the webhook server because
+// it is neither webhook- nor ibex-specific: anything that fetches a URL the
+// caller supplied belongs behind it.
 //
 // Policy (deployed environments):
 //   - https only
@@ -213,13 +218,16 @@ export const MAX_RESPONSE_BYTES = 64 * 1024
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
 
 // Everything a caller may have put on the request that could carry a
-// credential or a user identifier: headers (Authorization, Cookie, API keys)
-// and query params (signed URLs, tokens). Dropped before following a redirect
-// to a different origin.
+// credential or a user identifier: headers (Authorization, Cookie, API keys),
+// query params (signed URLs, tokens) and `auth` — which axios expands into an
+// `Authorization: Basic ...` header at request time, so dropping `headers`
+// alone would still hand the credential to the redirect target. Dropped before
+// following a redirect to a different origin.
 const withoutCallerCredentials = (config: AxiosRequestConfig): AxiosRequestConfig => {
   const stripped = { ...config }
   delete stripped.headers
   delete stripped.params
+  delete stripped.auth
   return stripped
 }
 
@@ -276,8 +284,8 @@ export const ssrfFetch = async (
     }
     const next = await validatePublicHttpUrl(new URL(location, current).toString())
     if (next instanceof Error) throw next
-    // Redirect targets are attacker-chosen on this route: the wallet owner
-    // picks the lnurlp host, and that host picks the Location. `follow-redirects`
+    // Redirect targets are attacker-chosen on these routes: the user picks the
+    // lnurl host, and that host picks the Location. `follow-redirects`
     // — the library this manual loop replaces — strips Authorization/Cookie on a
     // cross-host redirect for exactly that reason, so this loop has to as well,
     // or a caller that adds an API-key header hands it to whatever host a user's

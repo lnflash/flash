@@ -172,9 +172,17 @@ export const env = createEnv({
     // and then throw WeakSecretError mid-boot — the failure this floor exists to
     // convert into a legible config error. Not `.trim()`, so the string handed to
     // jwt.verify is byte-for-byte what the operator configured.
+    // The empty/blank exemption is what keeps this floor in step with
+    // `isUnsetSecret` (@utils/weak-secrets), which the servers use to tell
+    // "never configured" from "configured badly": a chart or compose file that
+    // renders ERPNEXT_JWT_SECRET as "" for a namespace with no ERP integration
+    // must reach `startAdminSchemaIfConfigured` and take the skip path, not put
+    // the whole payments API in CrashLoopBackOff at config load. It still fails
+    // hard where the secret is mandatory — the dedicated admin entrypoint calls
+    // assertStrongSecret, and isWeakSecret counts blank as weak.
     ERPNEXT_JWT_SECRET: z
       .string()
-      .refine((v) => v.trim().length >= MIN_SECRET_LENGTH, {
+      .refine((v) => v.trim() === "" || v.trim().length >= MIN_SECRET_LENGTH, {
         message: `must be at least ${MIN_SECRET_LENGTH} characters`,
       })
       .optional(),

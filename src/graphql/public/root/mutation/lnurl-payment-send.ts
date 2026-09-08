@@ -1,5 +1,4 @@
 import { withPaymentIdempotency } from "@app/payments/idempotency"
-import axios from "axios"
 import dedent from "dedent"
 
 import { resolveCashWalletMutationWalletIdForAccount } from "@app/cash-wallet-cutover"
@@ -21,6 +20,7 @@ import { DealerPriceService } from "@services/dealer-price"
 import Ibex from "@services/ibex/client"
 import { IbexError } from "@services/ibex/errors"
 import { lnurlPaymentSendStatusOrPending } from "@services/ibex/payment-status"
+import { ssrfFetch, validatePublicHttpUrl } from "@utils/ssrf-guard"
 
 type LnurlPayMetadata = {
   callback: string
@@ -162,13 +162,24 @@ const LnurlPaymentSendMutation = GT.Field<
         if (decoded instanceof IbexError) return decoded
         if (!decoded.decodedLnurl) return new InvalidLnurlError()
 
-        // A metadata-fetch rejection (non-2xx or network error) must become a
-        // typed error like every sibling branch — a bare throw here would
-        // propagate through the redlock callback as an unhandled GraphQL error
-        // instead of the failed payload.
+        // The lnurl is straight from the caller's input — the Lnurl scalar
+        // validates nothing about the URL it decodes to — so this fetch is the
+        // same SSRF hole the LNURL-pay proxy has, from an authenticated but
+        // otherwise unprivileged mutation. Every hop goes through the shared
+        // guard (@utils/ssrf-guard): https-only, no private/metadata targets,
+        // DNS re-checked at connect time, a capped body and one time budget
+        // for the whole redirect chain. A bare axios.get here would fetch any
+        // in-cluster URL and buffer whatever the host streams back.
+        const checkedMetadataUrl = await validatePublicHttpUrl(decoded.decodedLnurl)
+        if (checkedMetadataUrl instanceof Error) return new InvalidLnurlError()
+
+        // A metadata-fetch rejection (non-2xx, a blocked hop, or a network
+        // error) must become a typed error like every sibling branch — a bare
+        // throw here would propagate through the redlock callback as an
+        // unhandled GraphQL error instead of the failed payload.
         let metadata: unknown
         try {
-          const metadataResponse = await axios.get(decoded.decodedLnurl)
+          const metadataResponse = await ssrfFetch(checkedMetadataUrl)
           metadata = metadataResponse.data
         } catch {
           return new InvalidLnurlError()
