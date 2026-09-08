@@ -86,10 +86,16 @@ const PUBLIC_ADDR = [{ address: "93.184.216.34", family: 4 }]
 
 describe("GET /pay/lnurl/:username — SSRF guard wiring", () => {
   const savedNetwork = process.env.NETWORK
+  const savedAllowDevSecrets = process.env.ALLOW_REPO_DEV_SECRETS
 
   beforeEach(() => {
     jest.clearAllMocks()
+    // A deployed environment: mainnet AND no dev-secrets opt-in. The repo's
+    // .env (which `make unit-in-ci` sources) sets ALLOW_REPO_DEV_SECRETS, and
+    // that flag is half the SSRF guard's dev-context predicate — leaving it
+    // set here would silently test the dev escape hatch instead of the guard.
     process.env.NETWORK = "mainnet"
+    delete process.env.ALLOW_REPO_DEV_SECRETS
     lookup.mockResolvedValue(PUBLIC_ADDR)
     ;(AccountsRepository as jest.Mock).mockReturnValue({
       findByUsername: jest.fn().mockResolvedValue({ defaultWalletId: "w1" }),
@@ -104,6 +110,11 @@ describe("GET /pay/lnurl/:username — SSRF guard wiring", () => {
       delete process.env.NETWORK
     } else {
       process.env.NETWORK = savedNetwork
+    }
+    if (savedAllowDevSecrets === undefined) {
+      delete process.env.ALLOW_REPO_DEV_SECRETS
+    } else {
+      process.env.ALLOW_REPO_DEV_SECRETS = savedAllowDevSecrets
     }
   })
 

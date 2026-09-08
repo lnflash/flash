@@ -4,7 +4,8 @@
 jest.mock("@config", () => ({
   ...jest.requireActual("@config"),
   BridgeConfig: {
-    webhook: { replaySecret: "super-secret-replay-token-xyz" },
+    // >= 32 chars: the weak-secret guard refuses short secrets outright.
+    webhook: { replaySecret: "super-secret-replay-token-xyz-abcdefghij" },
   },
 }))
 
@@ -208,7 +209,7 @@ describe("replayAuthMiddleware", () => {
     const res = makeRes()
     const next = jest.fn()
     replayAuthMiddleware(
-      makeReq({}, { authorization: "Bearer super-secret-replay-token-xyz" }),
+      makeReq({}, { authorization: "Bearer super-secret-replay-token-xyz-abcdefghij" }),
       res,
       next,
     )
@@ -222,7 +223,7 @@ describe("replayAuthMiddleware", () => {
     const next = jest.fn()
     // A prefix of the real secret — same content up to length, but different length
     replayAuthMiddleware(
-      makeReq({}, { authorization: "Bearer super-secret-replay-token-xy" }),
+      makeReq({}, { authorization: "Bearer super-secret-replay-token-xyz-abcdefghi" }),
       res,
       next,
     )

@@ -23,8 +23,25 @@ describe("isWeakSecret", () => {
   })
 
   it("accepts real secrets", () => {
-    expect(isWeakSecret("Kramerica")).toBe(false)
+    expect(isWeakSecret("Kramerica-Industries-Latex-Salesman")).toBe(false)
     expect(isWeakSecret("0a1cb6ba85cda40291e3ca4f2a777041cc59b48b")).toBe(false)
+  })
+
+  // A denylist only catches the placeholders someone thought to list. A
+  // 1-char ERPNEXT_JWT_SECRET is not on any list and is recoverable offline
+  // from a single issued admin JWT — full admin-API takeover, reported by the
+  // guard as a correctly configured deployment.
+  it("flags secrets below the length floor, however random they look", () => {
+    for (const secret of ["x", "hunter2", "a1b2c3d4", "0a1cb6ba85cda40291e3ca4f"]) {
+      expect(isWeakSecret(secret)).toBe(true)
+    }
+    // 31 chars is refused, 32 is not.
+    expect(isWeakSecret("a".repeat(31))).toBe(true)
+    expect(isWeakSecret("a".repeat(32))).toBe(false)
+  })
+
+  it("measures the trimmed length, not the padded one", () => {
+    expect(isWeakSecret(`   ${"a".repeat(20)}   `)).toBe(true)
   })
 })
 
@@ -86,9 +103,19 @@ describe("assertStrongSecret", () => {
     }
   })
 
+  it("throws for a short secret and says why", () => {
+    expect(() => assertStrongSecret("ERPNEXT_JWT_SECRET", "x")).toThrow(WeakSecretError)
+    expect(() => assertStrongSecret("ERPNEXT_JWT_SECRET", "x")).toThrow(/too short/)
+  })
+
   it("passes for a strong secret", () => {
+    // 64 hex chars — what `openssl rand -hex 32` produces, and what the error
+    // message tells operators to use.
     expect(() =>
-      assertStrongSecret("ERPNEXT_JWT_SECRET", "actual-random-hex-value"),
+      assertStrongSecret(
+        "ERPNEXT_JWT_SECRET",
+        "d3f9a1c85b2e47ad9c06f1b8e5427ac31f0d6b9e84c27a5f0b93e1d6c48a7b02",
+      ),
     ).not.toThrow()
   })
 })

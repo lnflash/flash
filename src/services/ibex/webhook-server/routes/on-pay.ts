@@ -12,7 +12,7 @@ import { ibexWebhookPaths, ibexWebhookEndpoints } from "@services/ibex/webhook-c
 import { extractPaymentHashFromBolt11 } from "@utils"
 
 import { authenticate, logRequest, validateIbexIp } from "../middleware"
-import { SsrfBlockedUrlError, ssrfFetch, validatePublicHttpUrl } from "../ssrf-guard"
+import { isSsrfBlockedError, ssrfFetch, validatePublicHttpUrl } from "../ssrf-guard"
 
 const lnurlCorsOptions: CorsOptions = {
   origin: [
@@ -256,9 +256,11 @@ router.get(
       })
     } catch (err) {
       // A redirect hop that fails validation surfaces here (the initial URLs
-      // are checked above) — treat it like the other blocked-URL cases rather
-      // than a generic 500 so callers see a consistent upstream failure.
-      if (err instanceof SsrfBlockedUrlError) {
+      // are checked above), as does a connect-time rebind refusal — which
+      // arrives wrapped in an AxiosError, hence isSsrfBlockedError rather than
+      // instanceof. Treat both like the other blocked-URL cases rather than a
+      // generic 500 so callers see a consistent upstream failure.
+      if (isSsrfBlockedError(err)) {
         logger.warn({ err }, "LNURL-pay: blocked unsafe redirect target")
         return resp.status(502).json({ error: "Invalid lnurl callback URL" })
       }

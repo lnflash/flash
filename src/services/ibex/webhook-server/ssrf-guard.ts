@@ -4,25 +4,49 @@ import https from "https"
 import { LookupFunction } from "net"
 
 import axios, { AxiosRequestConfig, AxiosResponse } from "axios"
+import ipaddr from "ipaddr.js"
+
+import { isDevContext } from "@utils/dev-context"
 
 // SSRF guard for URLs derived from user-controlled data (e.g. a wallet's
 // stored lnurlp, decoded and then fetched server-side by the LNURL-pay proxy).
 //
-// Policy (non-dev networks):
+// Policy (deployed environments):
 //   - https only
-//   - hostname must not be an IP literal in a private/loopback/link-local/
-//     reserved range, nor a well-known cloud-metadata name
-//   - DNS must not resolve the host to any such address
+//   - hostname must not be an IP literal outside the public unicast range,
+//     nor a well-known cloud-metadata name
+//   - DNS must not resolve the host to any such address, at validation time
+//     AND again at connect time
+//   - the response body is capped, and the whole redirect chain shares one
+//     time budget
 //
-// On regtest the private-IP checks are skipped and plain http is allowed so
-// local dev stacks (http://localhost:3000 lnurl servers) keep working. The
-// network is read at call time, not import time, so tests can flip it.
+// In a dev context the private-IP checks are skipped and plain http is
+// allowed so local dev stacks (http://localhost:3000 lnurl servers) keep
+// working. "Dev context" is the shared predicate in @utils/dev-context —
+// NETWORK=regtest OR ALLOW_REPO_DEV_SECRETS=true — because the repo's own dev
+// stack runs NETWORK=mainnet against the Ibex sandbox, so NETWORK alone can't
+// mark it as dev. It is read at call time, not import time, so tests can flip
+// it.
 
 export class SsrfBlockedUrlError extends Error {
   constructor(url: string, reason: string) {
     super(`Blocked outbound fetch to ${url}: ${reason}`)
     this.name = "SsrfBlockedUrlError"
   }
+}
+
+// A connect-time refusal happens inside the socket's lookup, so axios hands
+// the caller an AxiosError with the SsrfBlockedUrlError as its `cause` — an
+// `instanceof` on the top-level error alone would miss exactly the rebind case
+// the connect-time check exists to catch, and the route would answer 500
+// instead of "blocked upstream URL".
+export const isSsrfBlockedError = (err: unknown): boolean => {
+  let cursor: unknown = err
+  for (let depth = 0; cursor instanceof Error && depth < 5; depth++) {
+    if (cursor instanceof SsrfBlockedUrlError) return true
+    cursor = (cursor as { cause?: unknown }).cause
+  }
+  return false
 }
 
 const BLOCKED_HOSTNAMES = new Set([
@@ -32,82 +56,47 @@ const BLOCKED_HOSTNAMES = new Set([
   "instance-data",
 ])
 
-const isDevNetwork = () => process.env.NETWORK === "regtest"
+// ipaddr.js sorts every address into exactly one range, and "unicast" is the
+// only one that means "an ordinary routable public address". Everything else
+// either points inside our own network (private, loopback, linkLocal,
+// uniqueLocal, carrierGradeNat, unspecified, broadcast, multicast, reserved)
+// or is a translation/tunnel prefix that carries one of those inside a
+// public-looking address (ipv4Mapped, rfc6052 NAT64, 6to4, teredo). The NAT64
+// case is not theoretical: on a DNS64 network — how IPv6-only node pools reach
+// IPv4 — the resolver synthesises 64:ff9b::a9fe:a9fe for a host whose A record
+// is 169.254.169.254.
+//
+// Using the library (already a direct dependency, already used for exactly
+// this job in ./middleware/validate-ibex-ip.ts) instead of hand-rolled octet
+// arithmetic is what keeps that list complete as new prefixes are assigned.
+const PUBLIC_RANGE = "unicast"
 
-// dotted-quad → reserved/private per RFC 6890 et al.
-const isPrivateIpv4 = (ip: string): boolean => {
-  const parts = ip.split(".")
-  if (parts.length !== 4) return false
-  const octets = parts.map((p) => Number(p))
-  if (octets.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false
-  const [a, b, c] = octets
-  return (
-    a === 0 || // "this" network
-    a === 10 || // RFC 1918
-    a === 127 || // loopback
-    (a === 169 && b === 254) || // link-local (cloud metadata lives here)
-    (a === 172 && b >= 16 && b <= 31) || // RFC 1918
-    (a === 192 && b === 0) || // IETF protocol assignments
-    (a === 192 && b === 168) || // RFC 1918
-    (a === 198 && (b === 18 || b === 19)) || // benchmark nets
-    (a === 100 && b >= 64 && b <= 127) || // CGNAT
-    (a === 198 && b === 51 && c === 100) || // TEST-NET-2
-    (a === 203 && b === 0 && c === 113) || // TEST-NET-3
-    a >= 224 // multicast + reserved
-  )
-}
-
-// Handles IPv4-mapped IPv6 by unwrapping to IPv4 first — both the dotted form
-// (::ffff:1.2.3.4) and the hex-serialized form WHATWG URL produces
-// (::ffff:7f00:1).
-const isPrivateIpv6 = (raw: string): boolean => {
-  const ip = raw.toLowerCase()
-  const mappedDotted = ip.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/)
-  if (mappedDotted) return isPrivateIpv4(mappedDotted[1])
-  const mappedHex = ip.match(/::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/)
-  if (mappedHex) {
-    const hi = parseInt(mappedHex[1], 16)
-    const lo = parseInt(mappedHex[2], 16)
-    return isPrivateIpv4(`${(hi >> 8) & 255}.${hi & 255}.${(lo >> 8) & 255}.${lo & 255}`)
-  }
-  if (
-    ip === "::" ||
-    ip === "::1" ||
-    ip === "0:0:0:0:0:0:0:0" ||
-    ip === "0:0:0:0:0:0:0:1"
-  ) {
-    return true
-  }
-  const first = ip.split(":")[0]
-  const firstWord = parseInt(first || "0", 16)
-  if (Number.isNaN(firstWord)) return true // unparsable → treat as unsafe
-  return (
-    (firstWord & 0xfe00) === 0xfc00 || // fc00::/7 unique-local
-    (firstWord & 0xffc0) === 0xfe80 || // fe80::/10 link-local
-    (firstWord & 0xff00) === 0xff00 || // ff00::/8 multicast
-    (firstWord === 0x2001 && ip.startsWith("2001:db8")) // documentation range
-  )
-}
-
-export const isPrivateIpLiteral = (host: string): boolean => {
-  // WHATWG URL keeps the brackets on IPv6 literals ("[::1]") — strip them.
-  const bare = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host
-  return isPrivateIpv4(bare) || (bare.includes(":") && isPrivateIpv6(bare))
-}
+const stripBrackets = (host: string): string =>
+  host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host
 
 // True for any IP literal (public or private), i.e. "nothing to DNS-resolve".
 export const isIpLiteral = (host: string): boolean => {
-  const bare = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host
+  const bare = stripBrackets(host)
   return /^\d{1,3}(\.\d{1,3}){3}$/.test(bare) || bare.includes(":")
 }
 
-// Cheap synchronous checks usable where async DNS isn't possible (redirect
-// validation). Scheme + blocked names + literal IPs only.
+// True for anything that is not a public unicast address. Hostnames answer
+// false — they are not literals, so DNS resolution decides for them — but a
+// literal-shaped string ipaddr can't parse fails closed.
+export const isPrivateIpLiteral = (host: string): boolean => {
+  const bare = stripBrackets(host)
+  if (!ipaddr.isValid(bare)) return isIpLiteral(bare)
+  return ipaddr.parse(bare).range() !== PUBLIC_RANGE
+}
+
+// Scheme, blocked-name and literal-IP checks — the half of the policy that
+// needs no network IO. The DNS half lives in validatePublicHttpUrl, which is
+// what every caller (including redirect validation) actually uses.
 const checkUrlSync = (url: URL): Error | null => {
-  if (url.protocol !== "https:" && !(isDevNetwork() && url.protocol === "http:")) {
+  if (url.protocol !== "https:" && !(isDevContext() && url.protocol === "http:")) {
     return new SsrfBlockedUrlError(url.toString(), `scheme ${url.protocol} not allowed`)
   }
-  if (isDevNetwork()) return null
+  if (isDevContext()) return null
   const host = url.hostname.toLowerCase()
   if (BLOCKED_HOSTNAMES.has(host) || host.endsWith(".localhost")) {
     return new SsrfBlockedUrlError(url.toString(), "blocked hostname")
@@ -130,7 +119,7 @@ export const validatePublicHttpUrl = async (rawUrl: string): Promise<URL | Error
 
   const syncError = checkUrlSync(url)
   if (syncError) return syncError
-  if (isDevNetwork()) return url
+  if (isDevContext()) return url
 
   const host = url.hostname.toLowerCase()
   // Literals need no resolution — private ones were already rejected above.
@@ -157,41 +146,51 @@ export const validatePublicHttpUrl = async (rawUrl: string): Promise<URL | Error
 // The address handed to the socket is the one that has been checked — this
 // closes the validate-then-fetch TOCTOU where a short-TTL rebind swaps the DNS
 // answer between our async check and axios's own resolution.
-// Exported for tests: this closure is the load-bearing half of the SSRF guard
-// and is exercised directly (axios specs mock the agents away).
-export const ssrfLookup: LookupFunction = (hostname, _options, callback) => {
+//
+// Contract note: `options.all` MUST be honoured. Node >= 20 defaults
+// autoSelectFamily to true, so net.connect calls this with { all: true } and
+// then expects callback(err, LookupAddress[]). Handing it a bare string there
+// makes every hostname connection die with ERR_INVALID_IP_ADDRESS — see the
+// socket-level spec, which connects for real rather than mocking the agents.
+export const ssrfLookup: LookupFunction = (hostname, options, callback) => {
+  const opts: dns.LookupOptions = typeof options === "object" && options ? options : {}
+  // Forward what the socket asked for (family/hints) so the answers we
+  // validate are the answers it would have gotten on its own; `all` is forced
+  // on because every address has to be checked, not just the first.
+  const resolveOptions: dns.LookupAllOptions = { all: true, verbatim: true }
+  if (typeof opts.family === "number") resolveOptions.family = opts.family
+  if (typeof opts.hints === "number") resolveOptions.hints = opts.hints
+
+  const fail = (err: Error) => callback(err as NodeJS.ErrnoException, "", 4)
+
   dns.promises
-    .lookup(hostname, { all: true, verbatim: true })
+    .lookup(hostname, resolveOptions)
     .then((addresses) => {
-      if (!isDevNetwork()) {
+      if (!isDevContext()) {
         for (const { address } of addresses) {
           if (isPrivateIpLiteral(address)) {
-            callback(
+            fail(
               new SsrfBlockedUrlError(
                 hostname,
                 `connect-time DNS resolved to private address ${address}`,
-              ) as NodeJS.ErrnoException,
-              "",
-              4,
+              ),
             )
             return
           }
         }
       }
       if (addresses.length === 0) {
-        callback(
-          new SsrfBlockedUrlError(
-            hostname,
-            "connect-time DNS returned no addresses",
-          ) as NodeJS.ErrnoException,
-          "",
-          4,
-        )
+        fail(new SsrfBlockedUrlError(hostname, "connect-time DNS returned no addresses"))
+        return
+      }
+      // Every address passed the check, so happy-eyeballs may use any of them.
+      if (opts.all) {
+        callback(null, addresses)
         return
       }
       callback(null, addresses[0].address, addresses[0].family)
     })
-    .catch((err) => callback(err as NodeJS.ErrnoException, "", 4))
+    .catch((err) => fail(err as Error))
 }
 
 const ssrfAgents = {
@@ -200,6 +199,15 @@ const ssrfAgents = {
 }
 
 export const MAX_REDIRECT_HOPS = 3
+// One budget for the whole chain, not per hop: with a per-hop timeout a
+// 3-hop chain of slow-loris responses pins a request (and an API worker) for
+// 4x as long as the number says.
+export const TOTAL_FETCH_TIMEOUT_MS = 10_000
+// An LNURL-pay response is well under 2 KB. Without a cap axios buffers
+// whatever an attacker-chosen host streams, and this route is public and
+// unauthenticated — a user points their lnurlp at a server that never stops
+// sending and OOMs the pod.
+export const MAX_RESPONSE_BYTES = 64 * 1024
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
 
 // Fetch a previously validated URL, following redirects manually: axios's
@@ -212,16 +220,28 @@ export const ssrfFetch = async (
   url: URL,
   config: AxiosRequestConfig = {},
 ): Promise<AxiosResponse> => {
+  const deadline = Date.now() + TOTAL_FETCH_TIMEOUT_MS
   let current = url
   for (let hop = 0; ; hop++) {
+    const remainingMs = deadline - Date.now()
+    if (remainingMs <= 0) {
+      throw new SsrfBlockedUrlError(
+        url.toString(),
+        `exceeded the ${TOTAL_FETCH_TIMEOUT_MS}ms total fetch budget`,
+      )
+    }
+
     const resp = await axios.get(current.toString(), {
       ...config,
       // Guard fields come LAST so caller config can never silently override
       // them: the agents re-validate DNS at connect time (the TOCTOU half of
-      // the guard), and axios's unchecked built-in redirect following must
-      // stay disabled — every 3xx target is re-validated manually below.
+      // the guard), the body size and the total time are capped, and axios's
+      // unchecked built-in redirect following must stay disabled — every 3xx
+      // target is re-validated manually below.
       ...ssrfAgents,
-      timeout: 10_000,
+      timeout: remainingMs,
+      maxContentLength: MAX_RESPONSE_BYTES,
+      maxBodyLength: MAX_RESPONSE_BYTES,
       maxRedirects: 0,
       // 3xx is not an error here — redirects are followed manually so each
       // target gets the full async (DNS) validation first.

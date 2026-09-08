@@ -37,8 +37,13 @@ interface JWTPayload {
   roles: string[]
 }
 
-// Parse the "Authorization" header to verify the JWT token and return its payload
-function parseAuthHeader(authHeader: string | undefined): JWTPayload {
+// Parse the "Authorization" header to verify the JWT token and return its
+// payload. The `algorithms` pin below keeps this to HMAC-SHA256 explicitly
+// rather than relying on jsonwebtoken's key-type defaulting, so an `alg: none`
+// or attacker-chosen-RS256 token can never be accepted even if the secret is
+// later handed over as a KeyObject/PEM. Exported so both the pin and the
+// refusals are covered by test/flash/unit/servers/admin-auth.spec.ts.
+export function parseAuthHeader(authHeader: string | undefined): JWTPayload {
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     throw new AuthenticationError({
       message: "Invalid authorization header",
@@ -77,7 +82,9 @@ export { hasRole }
 //   )
 // }
 
-const startAdminServer = async ({
+// Exported for the boot-guard spec: deleting the assertStrongSecret call
+// below must fail a test, not just review.
+export const startAdminServer = async ({
   schema,
   port,
   type,

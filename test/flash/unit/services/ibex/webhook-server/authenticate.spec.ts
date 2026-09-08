@@ -1,5 +1,7 @@
+// A strong fixture: the weak-secret guard now also refuses anything under 32
+// chars, so a short placeholder here would 503 before the comparison runs.
 jest.mock("@config", () => ({
-  IbexConfig: { webhook: { secret: "Kramerica" } },
+  IbexConfig: { webhook: { secret: "Kramerica-Industries-32-chars-plus" } },
 }))
 jest.mock("@services/logger", () => {
   const logger = {
@@ -38,7 +40,7 @@ describe("IBEX webhook authenticate middleware", () => {
     const res = makeRes()
     const next = jest.fn()
 
-    authenticate(makeReq("Kramerica"), res, next)
+    authenticate(makeReq("Kramerica-Industries-32-chars-plus"), res, next)
 
     expect(next).toHaveBeenCalledTimes(1)
     expect(res.status).not.toHaveBeenCalled()
@@ -48,7 +50,7 @@ describe("IBEX webhook authenticate middleware", () => {
     const res = makeRes()
     const next = jest.fn()
 
-    authenticate(makeReq("Kramerics"), res, next)
+    authenticate(makeReq("Kramerica-Industries-32-chars-pluX"), res, next)
 
     expect(next).not.toHaveBeenCalled()
     expect(res.status).toHaveBeenCalledWith(401)

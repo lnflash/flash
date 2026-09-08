@@ -1,3 +1,5 @@
+import { isDevContext } from "./dev-context"
+
 // Known-public placeholder secrets. These values (or close variants) appear in
 // this public repo's dev configs, so they authenticate ANYONE — an auth path
 // configured with one of them is an auth path with no secret at all.
@@ -23,19 +25,22 @@ const DEV_ONLY_SECRETS = new Set([
   "7189c07e9a60977492c9471a527b0d9040c1fa3c5b7bfd7e87e58db018160ddb",
 ])
 
-// Dev contexts may legitimately run the committed repo values: regtest
-// networks, or an explicit opt-in via ALLOW_REPO_DEV_SECRETS=true (the local
-// dev stack sets it in .env — it runs NETWORK=mainnet against the Ibex
-// sandbox, so NETWORK alone can't mark it as dev). Deployed environments must
-// never set that flag; with it unset and NETWORK !== regtest, the committed
-// values above are treated as no secret at all. Read at call time so tests
-// can flip it.
-const isDevContext = () =>
-  process.env.NETWORK === "regtest" || process.env.ALLOW_REPO_DEV_SECRETS === "true"
+// Length floor. A denylist only catches the placeholders we thought of; a
+// short secret is just as fatal for the surfaces this guards, which are all
+// HMAC/shared-secret auth. A 1-char ERPNEXT_JWT_SECRET is brute-forced offline
+// from any issued admin JWT in milliseconds, and the guard would have reported
+// the deployment as correctly configured. 32 is what the error message tells
+// operators to generate (`openssl rand -hex 32` → 64 hex chars), so anything
+// materially shorter is a misconfiguration, not a choice.
+const MIN_SECRET_LENGTH = 32
 
+// Dev contexts may legitimately run the committed repo values — see
+// @utils/dev-context for what counts as one. With no dev signal the
+// DEV_ONLY_SECRETS above are treated as no secret at all.
 export const isWeakSecret = (secret: string | undefined | null): boolean => {
   if (!secret || secret.trim() === "") return true
   const trimmed = secret.trim()
+  if (trimmed.length < MIN_SECRET_LENGTH) return true
   if (WEAK_SECRETS.has(trimmed)) return true
   if (!isDevContext() && DEV_ONLY_SECRETS.has(trimmed)) return true
   return false
@@ -44,8 +49,9 @@ export const isWeakSecret = (secret: string | undefined | null): boolean => {
 export class WeakSecretError extends Error {
   constructor(name: string) {
     super(
-      `${name} is unset or a known-public placeholder value — refusing to start. ` +
-        `Set a strong, unique secret (e.g. \`openssl rand -hex 32\`).`,
+      `${name} is unset, too short (< ${MIN_SECRET_LENGTH} chars), or a ` +
+        `known-public placeholder value — refusing to start. Set a strong, ` +
+        `unique secret (e.g. \`openssl rand -hex 32\`).`,
     )
     this.name = "WeakSecretError"
   }
