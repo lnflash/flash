@@ -204,6 +204,44 @@ describe("ENG-573 send guard wiring", () => {
       expect(result.errors[0]).toMatchObject({ message: rejection.message })
       expect(mockPayOnChainByWalletId).not.toHaveBeenCalled()
     })
+
+    // `getBalanceForWallet` returns USDAmount.ZERO for a drained or
+    // never-funded wallet as a NORMAL value, not an error — post-cutover that is
+    // the default read of every migrated account's legacy USD wallet. Handing
+    // the guard `cents: 0n` made it reject with InvalidSendAmountError: on
+    // enforce a user tapping "send all" on an empty wallet would get "Amount
+    // must be greater than zero" instead of the balance error this rail has
+    // always returned, and in log-only every such tap would land in the
+    // `invalid-amount` census bucket the runbook says should be near zero —
+    // ordinary empty-wallet taps reading as malformed client input during the
+    // very sample the enforce decision is made from.
+    it.each([
+      ["a zero balance", USDAmount.ZERO],
+      ["sub-cent dust, which truncates to the same zero cents", USDAmount.cents("0.4")],
+    ])("skips the guard on %s and lets the rail answer", async (_label, balance) => {
+      mockGetBalanceForWallet.mockResolvedValueOnce(balance)
+
+      const result = await run(OnChainPaymentSendAllMutation, input)
+
+      expect(mockAuthorizeSend).not.toHaveBeenCalled()
+      // Not authorised — refused one layer down, by OnchainUsdPaymentValidator's
+      // checkOnchainMin inside payOnChainByWalletId, exactly as before ENG-573.
+      expect(mockPayOnChainByWalletId).toHaveBeenCalledTimes(1)
+      expect(result).toEqual({ errors: [], status: "success" })
+    })
+
+    it("still guards a balance of one cent", async () => {
+      mockGetBalanceForWallet.mockResolvedValueOnce(USDAmount.cents("1"))
+
+      await run(OnChainPaymentSendAllMutation, input)
+
+      expect(mockAuthorizeSend).toHaveBeenCalledWith({
+        senderAccount: domainAccount,
+        senderWalletId: walletId,
+        amount: { currency: "USD", cents: 1n },
+        kind: "onchain",
+      })
+    })
   })
 })
 

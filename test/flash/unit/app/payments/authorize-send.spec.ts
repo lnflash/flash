@@ -15,8 +15,23 @@ jest.mock("@services/alerts/ops-events", () => ({
 
 const mockRecordExceptionInCurrentSpan = jest.fn()
 const mockAddAttributesToCurrentSpan = jest.fn()
+const mockAsyncRunInSpan = jest.fn()
 jest.mock("@services/tracing", () => ({
   recordExceptionInCurrentSpan: (args: unknown) => mockRecordExceptionInCurrentSpan(args),
+  // The guard opens its own span so the census lands on ONE name whatever the
+  // call path — ahead of this, `addAttributesToCurrentSpan` wrote to whichever
+  // span happened to be active (`services.lock.lockPaymentIdempotencyKey` on
+  // the six keyed rails, the GraphQL resolver span everywhere else). Recorded
+  // and executed, so the assertions below can pin the name the runbook tells
+  // operators to query.
+  asyncRunInSpan: <T>(spanName: string, options: unknown, fn: () => Promise<T>) => {
+    mockAsyncRunInSpan(spanName, options)
+    return fn()
+  },
+  SemanticAttributes: {
+    CODE_FUNCTION: "code.function",
+    CODE_NAMESPACE: "code.namespace",
+  },
   // Deliberately NOT a passthrough, because the real one is not: it sets an
   // attribute only `if (value)` (src/services/tracing.ts), so every falsy value
   // is dropped before it reaches a span. That filter is pinned by
@@ -43,11 +58,16 @@ import { getAccountLimits } from "@config"
 
 import {
   OPS_EVENT_COALESCE_MS,
+  SEND_GUARD_SPAN_NAME,
   SendRejectionReasons,
   authorizeSend,
   gateSend,
   __resetOpsEventCoalescingForTest,
 } from "@app/payments/authorize-send"
+
+// Type-only: no runtime import, so the barrel's module graph (Redis-backed rate
+// limiter, IBEX client) is never loaded by this spec.
+import type * as PaymentsBarrel from "@app/payments"
 
 import { AccountLevel } from "@domain/accounts"
 import {
@@ -547,13 +567,14 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
       expect(lastOpsEvent()).toMatchObject({ phase: "rejected", status: "failed" })
     })
 
-    it("does nothing at all on off — no budget, no event, no span attribute", async () => {
+    it("does nothing at all on off — no budget, no event, no span", async () => {
       mockSendGuardMode.mockReturnValue("off")
 
       expect(await gateUndecodableInvoice()).toBe(true)
       expect(mockConsumeLimiter).not.toHaveBeenCalled()
       expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
       expect(mockAddAttributesToCurrentSpan).not.toHaveBeenCalled()
+      expect(mockAsyncRunInSpan).not.toHaveBeenCalled()
     })
   })
 
@@ -658,6 +679,79 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
       expect(await send()).toBe(true)
       expect(mockAddAttributesToCurrentSpan).not.toHaveBeenCalled()
     })
+
+    // The census has to be queryable by ONE span name.
+    // `addAttributesToCurrentSpan` writes to whatever span is active, and that
+    // span differs by call path: on the six rails that take an
+    // `idempotencyKey` the guard runs inside
+    // `LockService().lockPaymentIdempotencyKey`, which
+    // `wrapAsyncFunctionsToRunInSpan` makes the active span, so the attributes
+    // landed on `services.lock.lockPaymentIdempotencyKey`; without a key, and
+    // on both on-chain rails, they landed on the GraphQL resolver span. An
+    // operator scoping the go/no-go query to one of those names counts a
+    // fraction of the traffic — and the fraction that goes missing is the newer
+    // mobile clients that send idempotency keys, i.e. exactly the traffic the
+    // flip to enforce is judged on. So the guard opens its own span.
+    it("opens the guard's own span, so one query counts every call path", async () => {
+      await send({ amount: { currency: "USD", cents: L0.intraLedgerLimit + 1 } })
+
+      expect(SEND_GUARD_SPAN_NAME).toBe("app.payments.authorizeSend")
+      expect(mockAsyncRunInSpan.mock.calls).toEqual([
+        [
+          SEND_GUARD_SPAN_NAME,
+          {
+            attributes: {
+              "code.function": "authorizeSend",
+              "code.namespace": "app.payments",
+            },
+          },
+        ],
+      ])
+      // Opened BEFORE the census is written, not around some later step: the
+      // whole point is that the attributes land on the guard's span rather than
+      // on whatever the caller had open.
+      expect(mockAsyncRunInSpan.mock.invocationCallOrder[0]).toBeLessThan(
+        mockAddAttributesToCurrentSpan.mock.invocationCallOrder[0],
+      )
+    })
+
+    // `undecodable-invoice` is `lnInvoicePaymentSend`-only and coalesced in the
+    // feed, so the span is the only place it can be counted. A second span name
+    // here would reintroduce exactly the undercount above for the one reason
+    // that has nowhere else to be read.
+    it("reports the decode gate onto the same span name, marked by entry point", async () => {
+      await gateUndecodableInvoice()
+
+      expect(mockAsyncRunInSpan.mock.calls).toEqual([
+        [
+          SEND_GUARD_SPAN_NAME,
+          {
+            attributes: {
+              "code.function": "gateSend",
+              "code.namespace": "app.payments",
+            },
+          },
+        ],
+      ])
+      expect(lastSpanAttributes()).toMatchObject({
+        "sendGuard.rejection": SendRejectionReasons.undecodableInvoice,
+      })
+      expect(mockAsyncRunInSpan.mock.invocationCallOrder[0]).toBeLessThan(
+        mockAddAttributesToCurrentSpan.mock.invocationCallOrder[0],
+      )
+    })
+
+    // `asyncRunInSpan` records a span exception for any Error the wrapped
+    // function returns. An enforced over-limit rejection is an ordinary user
+    // outcome, and letting it out through the span would bury the one signal
+    // the runbook says to alert on — `limits-unavailable`, "the guard cannot
+    // decide" — under every capped payment on the platform.
+    it("keeps the span-exception signal for limits-unavailable only, even when enforcing", async () => {
+      expect(
+        await send({ amount: { currency: "USD", cents: L0.intraLedgerLimit + 1 } }),
+      ).toBeInstanceOf(IntraledgerLimitsExceededError)
+      expect(mockRecordExceptionInCurrentSpan).not.toHaveBeenCalled()
+    })
   })
 
   // The operator switch. This is the first Flash-side amount cap that has ever
@@ -681,6 +775,9 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
         expect(mockConsumeLimiter).not.toHaveBeenCalled()
         expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
         expect(mockRecordExceptionInCurrentSpan).not.toHaveBeenCalled()
+        // Not even a span: `off` is off.
+        expect(mockAsyncRunInSpan).not.toHaveBeenCalled()
+        expect(mockAddAttributesToCurrentSpan).not.toHaveBeenCalled()
       })
 
       it("cannot be blocked by a Redis outage or a missing price", async () => {
@@ -735,5 +832,34 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
         })
       })
     })
+  })
+})
+
+// The guard's module is imported directly everywhere it is used, but
+// `src/app/payments/index.ts` also decides what lands on the `Payments` public
+// surface. `export * from "./authorize-send"` put
+// `__resetOpsEventCoalescingForTest` there — a test-only mutator of the
+// ops-event coalescing windows, one autocomplete away from a request handler,
+// and calling it drops every accumulated `muted` count, making the ops feed
+// silently lossy in exactly the way the coalescing design exists to prevent.
+//
+// This is a type-level test and `yarn tsc-check` covers test/**, so the
+// annotation below IS the test: put the wildcard back and it becomes an
+// "Unused '@ts-expect-error' directive" error. Keeping it type-only also means
+// this spec never loads the barrel's module graph at runtime.
+describe("the Payments barrel surface", () => {
+  it("re-exports the guard but not the test-only coalescing reset", () => {
+    type Exported = [
+      typeof PaymentsBarrel.authorizeSend,
+      typeof PaymentsBarrel.gateSend,
+      typeof PaymentsBarrel.SendRejectionReasons,
+      typeof PaymentsBarrel.OPS_EVENT_COALESCE_MS,
+      typeof PaymentsBarrel.SEND_GUARD_SPAN_NAME,
+      // @ts-expect-error test-only module-state mutator: never on `Payments`
+      typeof PaymentsBarrel.__resetOpsEventCoalescingForTest,
+    ]
+
+    const surface: Exported | null = null
+    expect(surface).toBeNull()
   })
 })

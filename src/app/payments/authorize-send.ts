@@ -19,16 +19,22 @@ import { notifyOpsEvent } from "@services/alerts/ops-events"
 import { consumeLimiter } from "@services/rate-limit"
 import {
   addAttributesToCurrentSpan,
+  asyncRunInSpan,
   recordExceptionInCurrentSpan,
+  SemanticAttributes,
 } from "@services/tracing"
 
 /**
  * ENG-573 Phase 0 — the send guard.
  *
- * Every user-initiated send mutation calls this before anything reaches IBEX.
- * Flash has no internal ledger, so Galoy's `AccountLimitsChecker` reads a
- * volume of zero for every account and never rejects; until the Phase 1
- * allowance counter exists this is the only Flash-side check on a send.
+ * Every send mutation calls this before anything reaches IBEX. Flash has no
+ * internal ledger, so Galoy's `AccountLimitsChecker` reads a volume of zero for
+ * every account and never rejects; until the Phase 1 allowance counter exists
+ * this is the only Flash-side check on the send mutations. It is NOT the only
+ * user-initiated path that moves a user's money: the cashout rail pays a bolt11
+ * out of the user's own wallet from `ValidOffer.execute` (@app/offers) with no
+ * attempt budget and no daily cap, bounded only by `Cashout.validations`. See
+ * "Not covered by the guard at all" in docs/send-guard.md.
  *
  * Checks, in order:
  *   1. attempt budget  — two Redis buckets keyed on the account (burst + daily).
@@ -63,20 +69,24 @@ import {
  * Redis or price-pod outage surfaces as "the guard is blocking sends" rather
  * than as a wave of unexplained payment failures.
  *
- * EVERY rejection, coalesced or not, also lands on the current span as
- * `sendGuard.*` attributes. The ops feed is fire-and-forget: it no-ops entirely
- * when `OPS_DISCORD_WEBHOOK_URL` is unset, drops its oldest entries on overflow
- * with only an unattributed "N events dropped" summary, and coalesces the
- * unbounded reasons. That makes it a fine place to *read* a rejection and a bad
- * one to *count* rejections — and the go/no-go for `enforce` is a count. The
- * span attributes are the countable instrument; the feed is the human one.
+ * EVERY rejection, coalesced or not, also lands on a span named
+ * `app.payments.authorizeSend` as `sendGuard.*` attributes — the guard opens
+ * that span itself (`SEND_GUARD_SPAN_NAME`) rather than writing to whatever
+ * span happens to be active, so one query counts every rail. The ops feed, by
+ * contrast, is fire-and-forget: it no-ops entirely when
+ * `OPS_DISCORD_WEBHOOK_URL` is unset, drops its oldest entries on overflow with
+ * only an unattributed "N events dropped" summary, and coalesces the unbounded
+ * reasons. That makes it a fine place to *read* a rejection and a bad one to
+ * *count* rejections — and the go/no-go for `enforce` is a count. The span
+ * attributes are the countable instrument; the feed is the human one.
  *
  * The unbounded reasons are coalesced to one ops event per minute — see
  * `OPS_EVENT_COALESCE_MS` and `COALESCED_REASONS`.
  *
  * Not applied to system credits (rewards, referral payouts, top-up credits,
  * reimbursements): those call the `@app` layer directly and never pass
- * through a send mutation.
+ * through a send mutation. Not applied to cashout either — that one is a gap,
+ * not a decision; docs/send-guard.md says so in the operator's own words.
  */
 
 export type SendKind = "intraledger" | "lightning" | "lnurl" | "onchain"
@@ -348,6 +358,43 @@ const evaluateSend = async ({
   return true
 }
 
+/**
+ * The one span name the rejection census is queryable by.
+ *
+ * `addAttributesToCurrentSpan` writes to whatever span is active, and that span
+ * differs by call path: on the six rails that accept an `idempotencyKey` the
+ * guard runs as `withPaymentIdempotency`'s `authorize` hook, inside
+ * `LockService().lockPaymentIdempotencyKey`, which
+ * `wrapAsyncFunctionsToRunInSpan` turns into the active span — so the
+ * attributes landed on `services.lock.lockPaymentIdempotencyKey`. With no
+ * idempotency key, and on both on-chain rails, they landed on the GraphQL
+ * resolver span instead. An operator scoping the go/no-go query to one span
+ * name counted a fraction of the traffic, and the half that went missing was
+ * the newer mobile clients that send idempotency keys — i.e. exactly the
+ * traffic the flip to `enforce` is judged on.
+ *
+ * So the guard opens its own span and the census lands there, every rail, every
+ * call path. `gateSend` shares the name deliberately: it is the same guard
+ * reporting the same `sendGuard.*` attributes for the same rollout, and a
+ * second span name would reintroduce the undercount for `undecodable-invoice`.
+ * The entry point stays legible as `code.function`.
+ *
+ * Named in docs/send-guard.md, "What to count from".
+ */
+export const SEND_GUARD_SPAN_NAME = "app.payments.authorizeSend"
+
+const runInGuardSpan = async <T>(entryPoint: string, fn: () => Promise<T>): Promise<T> =>
+  asyncRunInSpan(
+    SEND_GUARD_SPAN_NAME,
+    {
+      attributes: {
+        [SemanticAttributes.CODE_FUNCTION]: entryPoint,
+        [SemanticAttributes.CODE_NAMESPACE]: "app.payments",
+      },
+    },
+    fn,
+  )
+
 const report = ({
   rejection,
   mode,
@@ -486,15 +533,25 @@ export const gateSend = async ({
   const mode = getSendGuardMode()
   if (mode === "off") return true
 
-  const budget = await consumeAttemptBudget(senderAccount)
-  const rejection: SendRejection = budget === true ? { error, reason } : budget
+  // The census, not the verdict, is what has to be inside the span: `report`
+  // writes the `sendGuard.*` attributes to the active span. The mode decision
+  // stays outside so an enforced rejection is not also recorded as a span
+  // exception by `asyncRunInSpan`'s `instanceof Error` branch — that signal is
+  // reserved for `limits-unavailable` (see `report`), and drowning it in
+  // ordinary over-limit rejections is what the runbook alerts off.
+  const rejection = await runInGuardSpan("gateSend", async () => {
+    const budget = await consumeAttemptBudget(senderAccount)
+    const rejection: SendRejection = budget === true ? { error, reason } : budget
 
-  report({
-    rejection,
-    mode,
-    senderAccount,
-    senderWalletId,
-    kind,
+    report({
+      rejection,
+      mode,
+      senderAccount,
+      senderWalletId,
+      kind,
+    })
+
+    return rejection
   })
 
   return mode === "enforce" ? rejection.error : true
@@ -509,16 +566,24 @@ export const authorizeSend = async (
   // front of every send on every rail.
   if (mode === "off") return true
 
-  const outcome = await evaluateSend(args)
-  if (outcome === true) return true
+  // Same reason as `gateSend`: evaluate and report inside the guard's own span
+  // so the census is queryable by one name, decide outside it so only
+  // `limits-unavailable` records a span exception.
+  const outcome = await runInGuardSpan("authorizeSend", async () => {
+    const outcome = await evaluateSend(args)
+    if (outcome === true) return true
 
-  report({
-    rejection: outcome,
-    mode,
-    senderAccount: args.senderAccount,
-    senderWalletId: args.senderWalletId,
-    kind: args.kind,
+    report({
+      rejection: outcome,
+      mode,
+      senderAccount: args.senderAccount,
+      senderWalletId: args.senderWalletId,
+      kind: args.kind,
+    })
+
+    return outcome
   })
+  if (outcome === true) return true
 
   return mode === "enforce" ? outcome.error : true
 }

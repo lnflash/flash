@@ -75,14 +75,33 @@ const OnChainPaymentSendAllMutation = GT.Field<
 
     // ENG-573 send guard: attempt budget + amount sanity + daily-limit cap,
     // before anything reaches IBEX.
-    const authorized = await authorizeSend({
-      senderAccount: domainAccount,
-      senderWalletId: walletId,
-      amount: { currency: "USD", cents: amount.asPaymentAmount().amount },
-      kind: "onchain",
-    })
-    if (authorized instanceof Error) {
-      return { status: "failed", errors: [mapAndParseErrorForGqlResponse(authorized)] }
+    //
+    // Skipped when the balance rounds to zero cents. `getBalanceForWallet`
+    // returns `USDAmount.ZERO` for a drained or never-funded wallet as a normal
+    // value, not an error — post-cutover that is the default read of every
+    // migrated account's legacy USD wallet
+    // (@app/wallets/get-balance-for-wallet) — and `asPaymentAmount()` truncates
+    // sub-cent dust to the same `0n`. Handed to the guard, that is
+    // `invalid-amount`: enforcing, a user tapping "send all" on an empty wallet
+    // would get "Amount must be greater than zero" instead of the balance error
+    // this rail has always returned, and in log-only every such tap would land
+    // in the one census bucket the runbook calls malformed client input and
+    // says should be near zero — during the very sample the enforce decision is
+    // made from. Skipping the guard does not authorise anything: the send is
+    // refused one layer down, by `OnchainUsdPaymentValidator`'s
+    // `checkOnchainMin` inside `payOnChainByWalletId`, exactly as before
+    // ENG-573.
+    const cents = amount.asPaymentAmount().amount
+    if (cents !== 0n) {
+      const authorized = await authorizeSend({
+        senderAccount: domainAccount,
+        senderWalletId: walletId,
+        amount: { currency: "USD", cents },
+        kind: "onchain",
+      })
+      if (authorized instanceof Error) {
+        return { status: "failed", errors: [mapAndParseErrorForGqlResponse(authorized)] }
+      }
     }
 
     const result = await Wallets.payOnChainByWalletId({

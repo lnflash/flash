@@ -1,10 +1,15 @@
 # Send guard (ENG-573 Phase 0)
 
 `Payments.authorizeSend` (`src/app/payments/authorize-send.ts`) is the only
-Flash-side check on a user-initiated send. Flash has no internal ledger, so
-Galoy's `AccountLimitsChecker` reads a volume of zero for every account and never
+Flash-side check on the send mutations. Flash has no internal ledger, so Galoy's
+`AccountLimitsChecker` reads a volume of zero for every account and never
 rejects; on 2026-09-03 a $999,999,999.99 intraledger request reached IBEX
 untouched.
+
+It is **not** the only user-initiated path that moves a user's money. Cashout
+pays a bolt11 out of the user's own wallet without ever touching the guard —
+read [Not covered by the guard at all](#not-covered-by-the-guard-at-all) before
+concluding from this page that a rail is guarded.
 
 Every send mutation runs it before anything reaches IBEX. On every rail that
 accepts an `idempotencyKey`, it runs as `withPaymentIdempotency`'s `authorize`
@@ -91,6 +96,41 @@ unleveled account has to send above the level-0 cap during an incident,
 `sendGuard.mode: off` will not do it. Raise that account's `level`, or raise
 `accountLimits.*.level` for level 0, and roll the pods.
 
+## Not covered by the guard at all
+
+`off` / `log-only` / `enforce` describe the rails that *call* the guard. The
+following move money without it, on every mode — no attempt budget, no
+per-transaction cap, and nothing in the `would-reject` sample or the
+`sendGuard.*` census to count:
+
+- **Cashout / offers — a gap, not a decision.** `ValidOffer.execute()` pays a
+  bolt11 out of the user's own wallet via `Ibex.payInvoice`
+  (`src/app/offers/ValidOffer.ts:68`), reached from the `initiateCashout`
+  mutation through `CashoutManager.executeCashout`. Its compensating controls
+  are `CashoutValidator`'s configured min/max — `cashout.minimum.amount` /
+  `cashout.maximum.amount` in the values file, checked at
+  `src/app/offers/Validator.ts:29` and `:44` — plus a balance check
+  (`hasSufficientBalance`, `:75`), an account-level floor
+  (`cashout.accountLevel`), and the bank-account / ERP-party checks. So the
+  per-transaction ceiling on this rail is one number for every level, not
+  `accountLimits`, and there is no attempt budget and no daily volume limit at
+  all: the validator list ends with `// TODO daily/weekly/monthly volume
+  limits`. Raising or lowering `accountLimits` does nothing here, and
+  `sendGuard.mode: enforce` does not cap a cashout. Phase 1 should wire this
+  rail in next.
+- **System credits — deliberate.** Quiz rewards, referral payouts, card top-up
+  credits, operator reimbursements. They move money out of a Flash-owned funding
+  wallet on our own instruction, so an account-scoped attempt budget and a
+  per-account daily cap describe nothing about them (a 30-payment referral batch
+  would rate-limit itself). They opt out **by name** via
+  `SEND_GUARD_NOT_APPLICABLE` (`src/app/payments/send-guard-optout.ts`), which is
+  also the grep that answers "what still sends without the guard".
+- **The two stubbed on-chain resolvers.** `onchain-payment-send.ts` and
+  `onchain-usd-payment-send-as-sats.ts` return `UnsupportedCurrencyError` with
+  their send bodies commented out one line below. Nothing sends today; whoever
+  re-enables them gets a compile error from the required `authorize` hook rather
+  than an unguarded rail.
+
 ## Why it ships in log-only
 
 These caps are the first Flash-side amount limits that have ever rejected
@@ -121,7 +161,14 @@ there, not a hunt through the call sites. The price of putting it there is that
    - `over-daily-limit` — real traffic the cap would have refused. If any of it
      is legitimate, raise the level's limit or the account's level *before*
      enforcing; do not enforce and then triage support tickets.
-   - `invalid-amount` — malformed client input. Should be near zero.
+   - `invalid-amount` — malformed client input. Should be near zero. A
+     send-all on an empty wallet is deliberately **not** in this bucket:
+     `getBalanceForWallet` reads a drained or never-funded wallet as
+     `USDAmount.ZERO` — post-cutover the default for every migrated account's
+     legacy USD wallet — so `onchain-payment-send-all.ts` skips the guard when
+     the balance rounds to zero cents and lets the rail return its own balance
+     error. Otherwise every ordinary empty-wallet tap would read here as
+     malformed client input, in the sample the enforce decision is made from.
    - `limits-unavailable` — Redis or the price feed failing, i.e. the guard
      itself unable to decide. Must be zero before enforcing: on `enforce` these
      block the send. They are also recorded as span exceptions
@@ -158,19 +205,30 @@ there, not a hunt through the call sites. The price of putting it there is that
    on the next embed of that reason, however much later, and `mutedAgeS` is what
    tells you they are an older incident rather than 499 that just happened.
 
-   **What to count from.** Every rejection, of every reason, coalesced or not,
-   is also written to the current span as `sendGuard.rejection`,
-   `sendGuard.mode`, `sendGuard.kind`, `sendGuard.level`, `sendGuard.error` and
-   (when the guard got as far as an amount) `sendGuard.cents`. Every one of
-   those is a **string** except `sendGuard.cents`, which is a number so it can
-   be aggregated — so query `sendGuard.level = "0"`, not `= 0`, and read a
-   level-0 or level-less account as the literal `"0"` rather than as an absent
-   attribute. Range and percentile filters on `sendGuard.cents` are numeric.
-   Count from
-   tracing, not from Discord: the ops feed is fire-and-forget, does nothing at
-   all when `OPS_DISCORD_WEBHOOK_URL` is unset, and drops its oldest entries on
-   overflow behind an unattributed "N events dropped" summary. Read the feed,
-   count the spans.
+   **What to count from.** One span name: **`app.payments.authorizeSend`**
+   (`SEND_GUARD_SPAN_NAME` in `src/app/payments/authorize-send.ts`). Every
+   rejection, of every reason, coalesced or not, from every rail, is written
+   there as `sendGuard.rejection`, `sendGuard.mode`, `sendGuard.kind`,
+   `sendGuard.level`, `sendGuard.error` and (when the guard got as far as an
+   amount) `sendGuard.cents`. The guard opens that span itself rather than
+   writing to whatever span happens to be active, and that is load-bearing for
+   this step: the ambient span differs by call path — on the six rails that take
+   an `idempotencyKey` the guard runs inside
+   `services.lock.lockPaymentIdempotencyKey`, and without a key, or on either
+   on-chain rail, inside the GraphQL resolver span — so a query scoped to one of
+   those names would have counted a fraction of the traffic, and the fraction
+   that went missing is the newer mobile clients that send idempotency keys.
+   Both entry points share the name; `code.function` on the span says whether it
+   was `authorizeSend` or the `gateSend` decode gate.
+
+   Every attribute is a **string** except `sendGuard.cents`, which is a number
+   so it can be aggregated — so query `sendGuard.level = "0"`, not `= 0`, and
+   read a level-0 or level-less account as the literal `"0"` rather than as an
+   absent attribute. Range and percentile filters on `sendGuard.cents` are
+   numeric. Count from tracing, not from Discord: the ops feed is
+   fire-and-forget, does nothing at all when `OPS_DISCORD_WEBHOOK_URL` is unset,
+   and drops its oldest entries on overflow behind an unattributed "N events
+   dropped" summary. Read the feed, count the spans.
 
    **What to alert on.** `limits-unavailable` additionally records a span
    *exception* on every occurrence, unthrottled — `ErrorLevel.Critical` when
