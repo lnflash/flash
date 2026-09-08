@@ -136,12 +136,16 @@ export const creditFygaroTopup = async ({
   const { intraledgerPaymentSendWalletIdForUsdWallet } = await import(
     "@app/payments/send-intraledger"
   )
+  const { SEND_GUARD_NOT_APPLICABLE } = await import("@app/payments/send-guard-optout")
   const result = await intraledgerPaymentSendWalletIdForUsdWallet({
     senderWalletId: fundingWallet.id,
     recipientWalletId: recipientWallet.id,
     amount: amountCents,
     memo: `Card top-up (Fygaro ${transactionId})`,
     idempotencyKey: `fygaro:${transactionId}` as IdempotencyKey,
+    // A card top-up credit is a system credit out of the treasury float, not a
+    // user-initiated send: see SEND_GUARD_NOT_APPLICABLE.
+    authorize: SEND_GUARD_NOT_APPLICABLE,
   })
 
   if (result instanceof Error) {

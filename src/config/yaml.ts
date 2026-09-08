@@ -18,7 +18,7 @@ import { toDays, toSeconds } from "@domain/primitives"
 
 import { BigIntConversionError, JMDAmount, WalletCurrency } from "@domain/shared"
 
-import { AccountLevel } from "@domain/accounts"
+import { AccountLevel, effectiveAccountLevel } from "@domain/accounts"
 import { DAILY_INVITE_LIMIT, TARGET_INVITE_LIMIT } from "@domain/invite"
 
 import mergeWith from "lodash.mergewith"
@@ -179,10 +179,15 @@ export const getAccountLimits = ({
   level,
   accountLimits = yamlConfig.accountLimits,
 }: AccountLimitsArgs): IAccountLimits => {
+  // Resolve a missing level HERE rather than at one call site, so the send
+  // guard, `Account.limits` and `remainingLimit` all read the same numbers for
+  // the ~300 unleveled prod accounts. Indexing the level map with `undefined`
+  // yields NaN, which `Number.isFinite` then reports as "no limit configured".
+  const accountLevel = effectiveAccountLevel(level)
   return {
-    intraLedgerLimit: toCents(accountLimits.intraLedger.level[level]),
-    withdrawalLimit: toCents(accountLimits.withdrawal.level[level]),
-    tradeIntraAccountLimit: toCents(accountLimits.tradeIntraAccount.level[level]),
+    intraLedgerLimit: toCents(accountLimits.intraLedger.level[accountLevel]),
+    withdrawalLimit: toCents(accountLimits.withdrawal.level[accountLevel]),
+    tradeIntraAccountLimit: toCents(accountLimits.tradeIntraAccount.level[accountLevel]),
   }
 }
 

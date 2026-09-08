@@ -8,7 +8,7 @@ import {
   getSendGuardMode,
 } from "@config"
 
-import { AccountLevel } from "@domain/accounts"
+import { AccountLevel, effectiveAccountLevel } from "@domain/accounts"
 import { RateLimitConfig, RateLimitPrefix } from "@domain/rate-limit"
 import { PaymentSendRateLimiterExceededError } from "@domain/rate-limit/errors"
 
@@ -36,6 +36,28 @@ describe("send-guard config (ENG-573)", () => {
       expect(getAccountLimits({ level: AccountLevel.Three })).toEqual(
         getAccountLimits({ level: AccountLevel.Two }),
       )
+    })
+
+    // ~300 prod account documents have no `level` field at all (174 of them
+    // with usernames). The rule that reads that as level 0 lives in ONE place —
+    // `effectiveAccountLevel`, applied inside `getAccountLimits` — because
+    // every consumer has to agree: `account-limit.ts` and `payments/helpers.ts`
+    // pass `account.level` straight through, so a rule applied only inside the
+    // send guard meant the guard refused an unleveled user at $125 while
+    // `Account.limits` / `remainingLimit` resolved to NaN and the limits screen
+    // showed them something else entirely.
+    it("resolves an account with no level to the level-0 limits, not to NaN", () => {
+      expect(getAccountLimits({ level: undefined })).toEqual(
+        getAccountLimits({ level: AccountLevel.Zero }),
+      )
+    })
+
+    it("resolves it through the shared rule every other consumer uses", () => {
+      expect(effectiveAccountLevel(undefined)).toBe(AccountLevel.Zero)
+      // ...and leaves a level that IS set alone.
+      for (const level of [AccountLevel.One, AccountLevel.Two, AccountLevel.Three]) {
+        expect(effectiveAccountLevel(level)).toBe(level)
+      }
     })
 
     it("keeps the Galoy defaults for levels 0-2", () => {

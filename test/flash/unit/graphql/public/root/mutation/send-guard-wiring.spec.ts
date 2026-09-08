@@ -36,6 +36,7 @@ jest.mock("@app/cash-wallet-cutover", () => ({
     mockResolveCashWalletMutationWalletIdForAccount(args),
 }))
 
+import { SEND_GUARD_NOT_APPLICABLE } from "@app/payments/send-guard-optout"
 import { WithdrawalLimitsExceededError } from "@domain/errors"
 import { USDAmount } from "@domain/shared"
 import LnNoAmountInvoicePaymentSendMutation from "@graphql/public/root/mutation/ln-noamount-invoice-payment-send"
@@ -203,5 +204,59 @@ describe("ENG-573 send guard wiring", () => {
       expect(result.errors[0]).toMatchObject({ message: rejection.message })
       expect(mockPayOnChainByWalletId).not.toHaveBeenCalled()
     })
+  })
+})
+
+// `authorize` used to be optional on the arg types that carry it, which meant a
+// send path that simply forgot the hook compiled, passed its tests and shipped
+// unguarded. Not hypothetical: `onchain-payment-send.ts` and
+// `onchain-usd-payment-send-as-sats.ts` are stubbed resolvers with their full
+// send bodies sitting commented out one line below, so whoever re-enables them
+// gets no compile error and no failing test from an omission.
+//
+// `yarn tsc-check` covers test/**, so the @ts-expect-error annotations below
+// ARE the test: make `authorize` optional again and each one becomes an
+// "Unused '@ts-expect-error' directive" error.
+describe("ENG-573: the guard hook is required, not optional", () => {
+  it("refuses to type-check an intraledger send with no guard hook", () => {
+    const unguarded = {
+      senderWalletId: walletId,
+      recipientWalletId: routedWalletId,
+      amount: 100,
+      memo: null,
+    }
+    // @ts-expect-error `authorize` is required — a send path cannot ship unguarded
+    const args: IntraLedgerPaymentSendWalletIdArgs = unguarded
+
+    expect(args).toBe(unguarded)
+  })
+
+  it("refuses to type-check a no-amount lightning send with no guard hook", () => {
+    const unguarded = {
+      senderWalletId: walletId,
+      uncheckedPaymentRequest: "lnbc1noamount",
+      amount: 700,
+      memo: null,
+      senderAccount: domainAccount,
+    }
+    // @ts-expect-error `authorize` is required — a send path cannot ship unguarded
+    const args: PayNoAmountInvoiceByWalletIdArgs = unguarded
+
+    expect(args).toBe(unguarded)
+  })
+
+  // The escape hatch, so "required" does not push somebody back to `as any`:
+  // system credits opt out by name, which is also the grep that answers "what
+  // still sends without the guard".
+  it("accepts the named opt-out the system-credit callers use", async () => {
+    const args: IntraLedgerPaymentSendWalletIdArgs = {
+      senderWalletId: walletId,
+      recipientWalletId: routedWalletId,
+      amount: 100,
+      memo: null,
+      authorize: SEND_GUARD_NOT_APPLICABLE,
+    }
+
+    expect(await args.authorize()).toBe(true)
   })
 })

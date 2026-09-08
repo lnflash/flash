@@ -7,9 +7,11 @@ jest.mock("@app/payments/authorize-send", () => ({
     const result = await mockAuthorizeSend(args)
     return result === undefined ? true : result
   },
-  // Stands in for the real `gateSend`, keeping the one behaviour under test:
-  // report, then defer to the mode. The decode gate is the only caller.
-  gateSend: (args: { error: Error }) => {
+  // Stands in for the real `gateSend`, keeping the two behaviours under test:
+  // charge the attempt budget, then report and defer to the mode. Async, like
+  // the real one — the budget charge made it so, and a resolver that forgets to
+  // await it would hand IBEX a `Promise` instead of a decision.
+  gateSend: async (args: { error: Error }) => {
     mockGateSend(args)
     return mockSendGuardMode() === "enforce" ? args.error : true
   },

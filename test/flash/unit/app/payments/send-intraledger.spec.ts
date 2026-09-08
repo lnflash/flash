@@ -139,6 +139,12 @@ import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
 import { addEventToCurrentSpan, recordExceptionInCurrentSpan } from "@services/tracing"
 
+// ENG-573: `authorize` is required on the arg type precisely so that no send
+// path can ship without the guard. These cases exercise the intraledger rail,
+// not the guard, so they hand it an explicit allow-through; the guard's own
+// behaviour lives in test/flash/unit/app/payments/authorize-send.spec.ts.
+const allowSend: SendGuardHook = async () => true
+
 const senderUsdWalletId = "11111111-1111-4111-8111-111111111111" as WalletId
 const senderUsdtWalletId = "22222222-2222-4222-8222-222222222222" as WalletId
 const recipientUsdWalletId = "33333333-3333-4333-8333-333333333333" as WalletId
@@ -215,6 +221,7 @@ describe("intraledgerPaymentSendWalletIdForUsdWallet", () => {
       recipientWalletId: recipientUsdWalletId,
       amount: 19446,
       memo: "USD intraledger",
+      authorize: allowSend,
     })
 
     expect(result).toEqual({ value: "success" })
@@ -252,6 +259,7 @@ describe("intraledgerPaymentSendWalletIdForUsdWallet", () => {
       recipientWalletId: recipientUsdtWalletId,
       amount: 19446,
       memo: "USDT intraledger",
+      authorize: allowSend,
     })
 
     expect(result).toEqual({ value: "success" })
@@ -289,6 +297,7 @@ describe("intraledgerPaymentSendWalletIdForUsdWallet", () => {
       recipientWalletId: recipientUsdtWalletId,
       amount: 100,
       memo: "mixed currency",
+      authorize: allowSend,
     })
 
     expect(result).toBeInstanceOf(MismatchedCurrencyForWalletError)
@@ -317,6 +326,7 @@ describe("intraledgerPaymentSendWalletIdForUsdWallet", () => {
       recipientWalletId: recipientUsdWalletId,
       amount: 100,
       memo: "mixed currency",
+      authorize: allowSend,
     })
 
     expect(result).toBeInstanceOf(MismatchedCurrencyForWalletError)
@@ -351,6 +361,7 @@ describe("intraledger IBEX status reading", () => {
     recipientWalletId: recipientUsdWalletId,
     amount: 100,
     memo: "status reading",
+    authorize: allowSend,
   }
 
   it("settles on a payment-level SUCCEEDED even when the top-level status is 0", async () => {
@@ -486,6 +497,7 @@ describe("intraledger send ops events", () => {
     recipientWalletId: recipientUsdWalletId,
     amount: 100,
     memo: "ops event test",
+    authorize: allowSend,
   }
 
   it("notifies a succeeded transfer event with display amount on success", async () => {
@@ -597,6 +609,7 @@ describe("intraledger idempotency (ENG-530)", () => {
     recipientWalletId: recipientUsdWalletId,
     amount: 14000,
     memo: "idempotency test",
+    authorize: allowSend,
   }
 
   beforeEach(() => {
@@ -705,6 +718,7 @@ describe("intraledger idempotency (ENG-530)", () => {
       amount: 100,
       memo: null,
       idempotencyKey: "shared",
+      authorize: allowSend,
     })
     await intraledgerPaymentSendWalletIdForUsdWallet({
       senderWalletId: senderUsdtWalletId,
@@ -712,6 +726,7 @@ describe("intraledger idempotency (ENG-530)", () => {
       amount: 100,
       memo: null,
       idempotencyKey: "shared",
+      authorize: allowSend,
     })
 
     // Different sender wallet => different scope => both execute.

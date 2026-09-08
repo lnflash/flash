@@ -2,7 +2,7 @@ import { getAccountLimits, getSendGuardMode } from "@config"
 
 import { usdFromBtcMidPriceFn } from "@app/prices/mid-price"
 
-import { AccountLevel } from "@domain/accounts"
+import { effectiveAccountLevel } from "@domain/accounts"
 import {
   IntraledgerLimitsExceededError,
   WithdrawalLimitsExceededError,
@@ -17,7 +17,10 @@ import { ErrorLevel, WalletCurrency } from "@domain/shared"
 
 import { notifyOpsEvent } from "@services/alerts/ops-events"
 import { consumeLimiter } from "@services/rate-limit"
-import { recordExceptionInCurrentSpan } from "@services/tracing"
+import {
+  addAttributesToCurrentSpan,
+  recordExceptionInCurrentSpan,
+} from "@services/tracing"
 
 /**
  * ENG-573 Phase 0 — the send guard.
@@ -60,12 +63,16 @@ import { recordExceptionInCurrentSpan } from "@services/tracing"
  * Redis or price-pod outage surfaces as "the guard is blocking sends" rather
  * than as a wave of unexplained payment failures.
  *
- * `rate-limited` rejections deliberately post NO ops event: the limiter has
- * already bounded that caller, its counters live in Redis, and a client in a
- * retry loop would otherwise flood the shared 50-deep ops queue and push the
- * verification / cashout / deposit feed out of it. `limits-unavailable` is
- * coalesced to one event per minute for the same reason — see
- * `OPS_EVENT_COALESCE_MS`.
+ * EVERY rejection, coalesced or not, also lands on the current span as
+ * `sendGuard.*` attributes. The ops feed is fire-and-forget: it no-ops entirely
+ * when `OPS_DISCORD_WEBHOOK_URL` is unset, drops its oldest entries on overflow
+ * with only an unattributed "N events dropped" summary, and coalesces the
+ * unbounded reasons. That makes it a fine place to *read* a rejection and a bad
+ * one to *count* rejections — and the go/no-go for `enforce` is a count. The
+ * span attributes are the countable instrument; the feed is the human one.
+ *
+ * The unbounded reasons are coalesced to one ops event per minute — see
+ * `OPS_EVENT_COALESCE_MS` and `COALESCED_REASONS`.
  *
  * Not applied to system credits (rewards, referral payouts, top-up credits,
  * reimbursements): those call the `@app` layer directly and never pass
@@ -116,31 +123,47 @@ const usdDisplay = (cents: number) => ({
 })
 
 /**
- * Ceiling on `limits-unavailable` ops events: at most one per window, with the
- * count of suppressed ones carried on the next event that posts.
+ * Ceiling on the ops events of a coalesced reason: at most one per window, with
+ * the count of suppressed ones carried on the next event that posts.
  *
- * `rate-limited` is silent because the limiter has already bounded that caller.
- * `limits-unavailable` needs a ceiling for the opposite reason: nothing bounds
- * it. It is not a per-account fact at all — a Redis fault or a price-pod outage
- * past the 10-minute price cache makes EVERY send in flight report it at the
- * same instant. The shared ops queue is 50 deep, drains sequentially and drops
- * its oldest entries on overflow (`@services/alerts/ops-events`), so at any
- * real send rate a 30-second Redis blip would bury the verification / cashout /
- * deposit feed under identical `limits-unavailable` embeds plus "N events
- * dropped" summaries — during exactly the incident the mode switch was added to
- * survive, and making the log-only sample the rollout depends on silently
- * lossy. `recordExceptionInCurrentSpan` below is the durable, unthrottled
- * signal for this reason; docs/send-guard.md tells ops to alert on it.
+ * A reason gets a ceiling when nothing else bounds how many of it one caller
+ * can produce. The shared ops queue is 50 deep, drains sequentially and drops
+ * its oldest entries on overflow (`@services/alerts/ops-events`), so an
+ * unbounded reason buries the verification / cashout / deposit feed under
+ * identical embeds plus "N events dropped" summaries — during exactly the
+ * incident the mode switch was added to survive, and making the log-only sample
+ * the rollout depends on silently lossy.
+ *
+ * `limits-unavailable` is not a per-account fact at all: a Redis fault or a
+ * price-pod outage past the 10-minute price cache makes EVERY send in flight
+ * report it at the same instant. `rate-limited` and `undecodable-invoice` are
+ * per-caller but unbounded — the first because a client in a retry loop keeps
+ * producing it after the budget is spent, the second because it is raised
+ * BEFORE the amount is knowable and therefore, on this rail, is the outcome of
+ * a request the caller can repeat at will.
  *
  * `over-daily-limit` and `invalid-amount` are NOT coalesced: they are
  * per-account facts (which account, which level, what amount) that the log-only
- * rollout exists to read one by one, and each caller's own attempt budget
- * already bounds how many they can produce.
+ * rollout exists to read one by one, and each of them is raised only after the
+ * caller's attempt budget has been charged, so the budget bounds them.
+ *
+ * Nothing is lost to coalescing that the rollout needs to count: the span
+ * attributes in `report()` are emitted for every rejection of every reason,
+ * unthrottled.
  */
 export const OPS_EVENT_COALESCE_MS = 60_000
 
 const COALESCED_REASONS: ReadonlySet<SendRejectionReason> = new Set([
   SendRejectionReasons.limitsUnavailable,
+  // The decode gate runs on `lnInvoicePaymentSend` before the amount is
+  // knowable, so it is the one rejection an authenticated caller can produce
+  // from a single-field request body — `paymentRequest: "lnx"` satisfies the
+  // LnPaymentRequest scalar (/^ln[a-z0-9]+$/i) and fails `decodeInvoice`. A
+  // truncated QR scan retrying in a loop would otherwise post one embed per
+  // HTTP request into the 50-deep FIFO. `gateSend` now charges the attempt
+  // budget for these too, but the budget is 10/min per account and a handful of
+  // accounts still outruns the queue; the ceiling is what bounds the feed.
+  SendRejectionReasons.undecodableInvoice,
   // Coalesced, NOT silenced. A rate-limited caller is already bounded by their
   // own Redis budget, so the reason silencing was tempting — but the whole PR
   // is a log-only rollout, and a check with no observable output cannot be read
@@ -198,14 +221,6 @@ const claimOpsEventSlot = (
   return { post: true, muted: carried, mutedWindowAgeS: carriedAgeS }
 }
 
-// An account document with no `level` field hydrates as `undefined` (the
-// mongoose schema has no default; ~300 prod accounts are in this state). An
-// unleveled account is an unverified one, so it gets the level-0 limits rather
-// than a closed door. This assumption is exactly what `log-only` mode exists to
-// verify before it can refuse anybody.
-const effectiveLevel = (account: Account): AccountLevel =>
-  account.level ?? AccountLevel.Zero
-
 const toPositiveNumber = (
   raw: number | bigint | string,
   { integer }: { integer: boolean },
@@ -250,16 +265,14 @@ const usdCentsFromSendAmount = async (
 }
 
 /**
- * Runs the three checks and returns the first rejection, or `true`. Knows
- * nothing about the mode: whether a rejection actually stops the send is
- * `authorizeSend`'s decision.
+ * Check 1, on its own so that `gateSend` — a rail-local rejection raised before
+ * the amount is knowable — costs the caller a point exactly as a rejection
+ * inside `evaluateSend` does. Exactly one of the two charges per request: a
+ * request that reaches `gateSend` never reaches `authorizeSend`.
  */
-const evaluateSend = async ({
-  senderAccount,
-  amount,
-  kind,
-}: AuthorizeSendArgs): Promise<true | SendRejection> => {
-  // 1. attempt budget — every attempt costs a point, rejected ones included
+const consumeAttemptBudget = async (
+  senderAccount: Account,
+): Promise<true | SendRejection> => {
   for (const rateLimitConfig of [
     RateLimitConfig.paymentSend,
     RateLimitConfig.paymentSendDaily,
@@ -284,6 +297,22 @@ const evaluateSend = async ({
       }
     }
   }
+  return true
+}
+
+/**
+ * Runs the three checks and returns the first rejection, or `true`. Knows
+ * nothing about the mode: whether a rejection actually stops the send is
+ * `authorizeSend`'s decision.
+ */
+const evaluateSend = async ({
+  senderAccount,
+  amount,
+  kind,
+}: AuthorizeSendArgs): Promise<true | SendRejection> => {
+  // 1. attempt budget — every attempt costs a point, rejected ones included
+  const budget = await consumeAttemptBudget(senderAccount)
+  if (budget !== true) return budget
 
   // 2. amount sanity + normalisation to USD cents
   const normalised = await usdCentsFromSendAmount(amount)
@@ -291,7 +320,7 @@ const evaluateSend = async ({
   const { cents } = normalised
 
   // 3. daily limit for the level doubles as the per-transaction cap (Phase 0)
-  const level = effectiveLevel(senderAccount)
+  const level = effectiveAccountLevel(senderAccount.level)
   const limits = getAccountLimits({ level })
   const limit = kind === "intraledger" ? limits.intraLedgerLimit : limits.withdrawalLimit
   if (!Number.isFinite(limit)) {
@@ -334,6 +363,22 @@ const report = ({
 }): void => {
   const { error, reason, cents } = rejection
   const enforcing = mode === "enforce"
+  const level = effectiveAccountLevel(senderAccount.level)
+
+  // The census the rollout is read from. Unconditional and unthrottled, unlike
+  // the ops feed below: that queue is fire-and-forget, no-ops when
+  // `OPS_DISCORD_WEBHOOK_URL` is unset, drops its oldest entries on overflow,
+  // and coalesces the unbounded reasons — so "count them by reason before
+  // flipping to enforce" cannot be answered from it alone. Counted from
+  // tracing, every rejection of every reason is there exactly once.
+  addAttributesToCurrentSpan({
+    "sendGuard.rejection": reason,
+    "sendGuard.mode": mode,
+    "sendGuard.kind": kind,
+    "sendGuard.level": level,
+    "sendGuard.error": error.constructor.name,
+    ...(cents === undefined ? {} : { "sendGuard.cents": cents }),
+  })
 
   const slot = claimOpsEventSlot(reason)
   if (slot.post) {
@@ -353,7 +398,7 @@ const report = ({
       meta: {
         senderWalletId,
         kind,
-        level: String(effectiveLevel(senderAccount)),
+        level: String(level),
         mode,
         // How many events of this reason were coalesced away since the last one
         // that posted, so the feed stays countable rather than silently lossy.
@@ -398,8 +443,21 @@ const report = ({
  * would-reject sample to show for it. Routing it through here gives it the
  * same switch, the same feed entry and the same rollout evidence as every
  * other check.
+ *
+ * It also charges the attempt budget, for the same reason `evaluateSend`
+ * charges it before any other check: a rejected attempt has to cost the caller
+ * a point, or the rail has a check an authenticated client can fail without
+ * limit. On `lnInvoicePaymentSend` that check is reachable from a one-field
+ * request body — `paymentRequest: "lnx"` passes the LnPaymentRequest scalar and
+ * fails `decodeInvoice` — so before this it was the one send outcome that cost
+ * nothing to produce. The budget is charged exactly once per request either
+ * way: a request that reaches `gateSend` never reaches `authorizeSend`.
+ *
+ * An exhausted budget is reported as `rate-limited` and returned in place of
+ * the rail-local error: the caller IS rate limited, and saying so is both truer
+ * and the answer that stops the loop.
  */
-export const gateSend = ({
+export const gateSend = async ({
   error,
   reason,
   senderAccount,
@@ -411,19 +469,22 @@ export const gateSend = ({
   senderAccount: Account
   senderWalletId: WalletId
   kind: SendKind
-}): true | ApplicationError => {
+}): Promise<true | ApplicationError> => {
   const mode = getSendGuardMode()
   if (mode === "off") return true
 
+  const budget = await consumeAttemptBudget(senderAccount)
+  const rejection: SendRejection = budget === true ? { error, reason } : budget
+
   report({
-    rejection: { error, reason },
+    rejection,
     mode,
     senderAccount,
     senderWalletId,
     kind,
   })
 
-  return mode === "enforce" ? error : true
+  return mode === "enforce" ? rejection.error : true
 }
 
 export const authorizeSend = async (

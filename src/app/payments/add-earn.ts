@@ -22,6 +22,8 @@ import { AccountsIpsRepository } from "@services/mongoose/accounts-ips"
 
 import { intraledgerPaymentSendWalletIdForBtcWallet } from "./send-intraledger"
 
+import { SEND_GUARD_NOT_APPLICABLE } from "./send-guard-optout"
+
 export const addEarn = async ({
   quizQuestionId: quizQuestionIdString,
   accountId,
@@ -90,6 +92,9 @@ export const addEarn = async ({
     amount,
     memo: quizQuestionId,
     senderAccount: funderAccount,
+    // A quiz reward is a system credit out of the funder wallet, not a
+    // user-initiated send: see SEND_GUARD_NOT_APPLICABLE.
+    authorize: SEND_GUARD_NOT_APPLICABLE,
   })
   if (payment instanceof Error) return payment
 

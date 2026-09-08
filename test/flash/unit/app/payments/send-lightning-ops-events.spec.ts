@@ -164,6 +164,9 @@ describe("ops events — payInvoiceByWalletId", () => {
       memo: null,
       senderWalletId,
       senderAccount,
+      // ENG-573: required on the arg type so no send path can omit the guard.
+      // This case is about the ops feed, not the guard — allow it through.
+      authorize: async () => true,
     })
 
     expect(result).toBe(PaymentSendStatus.AlreadyPaid)
@@ -192,6 +195,9 @@ describe("ops events — payInvoiceByWalletId", () => {
       memo: null,
       senderWalletId,
       senderAccount,
+      // ENG-573: required on the arg type so no send path can omit the guard.
+      // This case is about the ops feed, not the guard — allow it through.
+      authorize: async () => true,
     })
 
     expect(result).toBeInstanceOf(MismatchedCurrencyForWalletError)

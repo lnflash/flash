@@ -114,6 +114,11 @@ const LnInvoicePaymentSendMutation = GT.Field<
         // would-reject sample would contain no trace of the invoices it turned
         // away. `gateSend` posts the ops event and then defers to the mode, so
         // in log-only the raw bolt11 reaches IBEX exactly as it did before.
+        //
+        // `gateSend` also charges the attempt budget, so a client looping on an
+        // invoice this gate refuses is bounded exactly as one looping on an
+        // over-limit amount is. Exactly one charge per request: an invoice that
+        // gets past the gate is charged by `authorizeSend` instead.
         if (getSendGuardMode() === "off") return true
 
         const gate = (error: ApplicationError) =>

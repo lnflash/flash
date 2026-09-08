@@ -14,9 +14,10 @@ jest.mock("@services/alerts/ops-events", () => ({
 }))
 
 const mockRecordExceptionInCurrentSpan = jest.fn()
+const mockAddAttributesToCurrentSpan = jest.fn()
 jest.mock("@services/tracing", () => ({
   recordExceptionInCurrentSpan: (args: unknown) => mockRecordExceptionInCurrentSpan(args),
-  addAttributesToCurrentSpan: jest.fn(),
+  addAttributesToCurrentSpan: (args: unknown) => mockAddAttributesToCurrentSpan(args),
 }))
 
 // The operator switch. Defaults to `enforce` here so the check cases below read
@@ -33,6 +34,7 @@ import {
   OPS_EVENT_COALESCE_MS,
   SendRejectionReasons,
   authorizeSend,
+  gateSend,
   __resetOpsEventCoalescingForTest,
 } from "@app/payments/authorize-send"
 
@@ -51,6 +53,7 @@ import {
   UnknownRateLimitServiceError,
 } from "@domain/rate-limit/errors"
 import { DealerPriceServiceError } from "@domain/dealer-price"
+import { LnInvoiceDecodeError } from "@domain/bitcoin/lightning/errors"
 import { ErrorLevel, WalletCurrency } from "@domain/shared"
 
 const ACCOUNT_ID = "507f1f77bcf86cd799439011" as AccountId
@@ -71,6 +74,22 @@ const send = (
   })
 
 const lastOpsEvent = () => mockNotifyOpsEvent.mock.calls.at(-1)?.[0]
+
+const lastSpanAttributes = () => mockAddAttributesToCurrentSpan.mock.calls.at(-1)?.[0]
+
+// The rail-local gate, as `lnInvoicePaymentSend` calls it: an invoice the new
+// bolt11 decode refuses, before any amount is knowable.
+const gateUndecodableInvoice = (
+  overrides: Partial<Parameters<typeof gateSend>[0]> = {},
+): Promise<true | ApplicationError> =>
+  gateSend({
+    error: new LnInvoiceDecodeError("bad bolt11"),
+    reason: SendRejectionReasons.undecodableInvoice,
+    senderAccount: account(AccountLevel.Zero),
+    senderWalletId: WALLET_ID,
+    kind: "lightning",
+    ...overrides,
+  })
 
 // Schema defaults (src/config/schema.ts) — the numbers the guard enforces today.
 const L0 = getAccountLimits({ level: AccountLevel.Zero })
@@ -428,6 +447,166 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
       expect(mockRecordExceptionInCurrentSpan).toHaveBeenCalledWith(
         expect.objectContaining({ error: result, level: ErrorLevel.Critical }),
       )
+    })
+  })
+
+  // The rail-local gate on `lnInvoicePaymentSend`: the bolt11 decode, which has
+  // to run before the amount is knowable and therefore cannot live inside
+  // `evaluateSend`. It is the one guard outcome an authenticated caller can
+  // produce from a single request field — the LnPaymentRequest scalar is
+  // /^ln[a-z0-9]+$/i, so `paymentRequest: "lnx"` reaches `decodeInvoice` and
+  // fails it — and for a while it was neither budgeted nor coalesced.
+  describe("gateSend (the rail-local decode gate)", () => {
+    // log-only is what ships: the budget charge and the ops-event ceiling are
+    // the same in every mode, and the mode only decides the return value.
+    beforeEach(() => mockSendGuardMode.mockReturnValue("log-only"))
+
+    it("charges the attempt budget, so a refused invoice is not free to produce", async () => {
+      expect(await gateUndecodableInvoice()).toBe(true)
+
+      expect(mockConsumeLimiter.mock.calls).toEqual([
+        [{ rateLimitConfig: RateLimitConfig.paymentSend, keyToConsume: ACCOUNT_ID }],
+        [{ rateLimitConfig: RateLimitConfig.paymentSendDaily, keyToConsume: ACCOUNT_ID }],
+      ])
+    })
+
+    // Exactly one charge per HTTP request: a request that reaches the gate
+    // never reaches `authorizeSend`, and vice versa. Charging in both places
+    // would silently halve every caller's budget.
+    it("is the only charge on the requests it handles", async () => {
+      await gateUndecodableInvoice()
+      expect(mockConsumeLimiter).toHaveBeenCalledTimes(2)
+
+      mockConsumeLimiter.mockClear()
+      await send()
+      expect(mockConsumeLimiter).toHaveBeenCalledTimes(2)
+    })
+
+    it("reports the caller as rate-limited once their budget is spent", async () => {
+      mockConsumeLimiter.mockResolvedValue(new PaymentSendRateLimiterExceededError())
+      mockSendGuardMode.mockReturnValue("enforce")
+
+      const result = await gateUndecodableInvoice()
+
+      expect(result).toBeInstanceOf(PaymentSendRateLimiterExceededError)
+      expect(lastOpsEvent()?.step).toBe(SendRejectionReasons.rateLimited)
+    })
+
+    // The bug this case exists for: `undecodable-invoice` was absent from
+    // COALESCED_REASONS while the code's justification for leaving reasons
+    // uncoalesced — "each caller's attempt budget already bounds them" — was
+    // false for this one, because the decode ran ahead of the budget. A client
+    // loop (a truncated QR scan retrying, or a deliberate one) posted one embed
+    // per HTTP request into a shared 50-deep FIFO that drops its oldest
+    // entries, starving the verification / cashout / deposit feed and
+    // truncating the very would-reject census this rollout depends on.
+    it("posts at most one ops event per window however many invoices it refuses", async () => {
+      for (let i = 0; i < 25; i++) {
+        expect(await gateUndecodableInvoice()).toBe(true)
+      }
+
+      expect(mockNotifyOpsEvent).toHaveBeenCalledTimes(1)
+      expect(lastOpsEvent()).toMatchObject({
+        step: SendRejectionReasons.undecodableInvoice,
+        error: "LnInvoiceDecodeError",
+      })
+
+      // ...and the 24 it swallowed are still countable from the feed.
+      jest.advanceTimersByTime(OPS_EVENT_COALESCE_MS + 1)
+      await gateUndecodableInvoice()
+      expect(mockNotifyOpsEvent).toHaveBeenCalledTimes(2)
+      expect(lastOpsEvent()?.meta.muted).toBe("24")
+    })
+
+    it("still reports every refusal on the span, coalesced or not", async () => {
+      for (let i = 0; i < 25; i++) await gateUndecodableInvoice()
+
+      expect(mockNotifyOpsEvent).toHaveBeenCalledTimes(1)
+      expect(mockAddAttributesToCurrentSpan).toHaveBeenCalledTimes(25)
+      expect(lastSpanAttributes()).toMatchObject({
+        "sendGuard.rejection": SendRejectionReasons.undecodableInvoice,
+      })
+    })
+
+    it("refuses the invoice when enforcing and reports it as rejected", async () => {
+      mockSendGuardMode.mockReturnValue("enforce")
+      const error = new LnInvoiceDecodeError("bad bolt11")
+
+      expect(await gateUndecodableInvoice({ error })).toBe(error)
+      expect(lastOpsEvent()).toMatchObject({ phase: "rejected", status: "failed" })
+    })
+
+    it("does nothing at all on off — no budget, no event, no span attribute", async () => {
+      mockSendGuardMode.mockReturnValue("off")
+
+      expect(await gateUndecodableInvoice()).toBe(true)
+      expect(mockConsumeLimiter).not.toHaveBeenCalled()
+      expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+      expect(mockAddAttributesToCurrentSpan).not.toHaveBeenCalled()
+    })
+  })
+
+  // The ops feed is the human instrument and a bad counter: it no-ops entirely
+  // when OPS_DISCORD_WEBHOOK_URL is unset, drops its oldest entries on overflow
+  // behind an unattributed "N events dropped" summary, and coalesces the
+  // unbounded reasons. The go/no-go for `enforce` is "count them by reason", so
+  // the count has to come from somewhere lossless.
+  describe("the rejection census on the span", () => {
+    it.each([
+      [
+        "over-daily-limit",
+        { amount: { currency: "USD", cents: L0.intraLedgerLimit + 1 } as const },
+        SendRejectionReasons.overDailyLimit,
+      ],
+      [
+        "invalid-amount",
+        { amount: { currency: "USD", cents: -1 } as const },
+        SendRejectionReasons.invalidAmount,
+      ],
+    ])("records %s on the span, not only in Discord", async (_label, args, reason) => {
+      await send(args)
+
+      expect(mockAddAttributesToCurrentSpan).toHaveBeenCalledTimes(1)
+      expect(lastSpanAttributes()).toMatchObject({
+        "sendGuard.rejection": reason,
+        "sendGuard.mode": "enforce",
+        "sendGuard.kind": "intraledger",
+        "sendGuard.level": AccountLevel.Zero,
+      })
+    })
+
+    it("carries the amount that was refused, in cents", async () => {
+      await send({ amount: { currency: "USD", cents: L0.intraLedgerLimit + 1 } })
+      expect(lastSpanAttributes()["sendGuard.cents"]).toBe(L0.intraLedgerLimit + 1)
+    })
+
+    it("omits the amount when the guard never got one", async () => {
+      mockConsumeLimiter.mockResolvedValue(new PaymentSendRateLimiterExceededError())
+      await send()
+      expect(lastSpanAttributes()).not.toHaveProperty("sendGuard.cents")
+    })
+
+    // The case the ops feed cannot answer: 50 identical rejections, one embed.
+    it("counts every rejection even while the ops feed is coalescing them away", async () => {
+      mockConsumeLimiter.mockResolvedValue(new UnknownRateLimitServiceError("redis down"))
+
+      for (let i = 0; i < 50; i++) await send()
+
+      expect(mockNotifyOpsEvent).toHaveBeenCalledTimes(1)
+      expect(mockAddAttributesToCurrentSpan).toHaveBeenCalledTimes(50)
+    })
+
+    it("records the mode, so log-only and enforce rejections are countable apart", async () => {
+      mockSendGuardMode.mockReturnValue("log-only")
+      expect(
+        await send({ amount: { currency: "USD", cents: L0.intraLedgerLimit + 1 } }),
+      ).toBe(true)
+      expect(lastSpanAttributes()["sendGuard.mode"]).toBe("log-only")
+    })
+
+    it("says nothing when there is nothing to say", async () => {
+      expect(await send()).toBe(true)
+      expect(mockAddAttributesToCurrentSpan).not.toHaveBeenCalled()
     })
   })
 

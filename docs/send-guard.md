@@ -49,6 +49,13 @@ inside the same `authorize` hook and answers to the same switch: on `off` the
 resolver does not decode at all, so an invoice IBEX would have paid is restored
 by the flag rather than by a deploy.
 
+The decode gate charges the attempt budget too, exactly once per request — a
+request the gate handles never reaches `authorizeSend`, and vice versa. It has
+to: the `LnPaymentRequest` scalar is `/^ln[a-z0-9]+$/i`, so `paymentRequest:
+"lnx"` is a well-formed request that fails the decode, and without a charge it
+would be the one send outcome an authenticated caller could produce without
+limit.
+
 ## Why it ships in log-only
 
 These caps are the first Flash-side amount limits that have ever rejected
@@ -58,6 +65,11 @@ The sharpest case is the decision to read a missing `level` field as level 0:
 users), and on `enforce` they are capped at $125 per transaction. "An unleveled
 account is an unverified one" is an assumption, not a verified fact about those
 accounts.
+
+That assumption lives in exactly one place — `effectiveAccountLevel`, applied
+inside `getAccountLimits` — so the guard, `Account.limits` and `remainingLimit`
+all read the same numbers for those accounts. Revising it is a one-line change
+there, not a hunt through the call sites.
 
 `log-only` turns that assumption into data instead of into an incident.
 
@@ -86,34 +98,75 @@ accounts.
      enforce, and hand a 30-payment payout batch twenty `TooManyRequestError`s.
    - `undecodable-invoice` is `lnInvoicePaymentSend` only: the bolt11 could not
      be decoded, or carried no amount. The guard introduced that decode, so this
-     is a rejection class the rail never had — count it before enforcing.
+     is a rejection class the rail never had — count it before enforcing. Also
+     **coalesced**; count it from the span attributes below, not by tallying
+     embeds.
 
-   `rate-limited` and `limits-unavailable` are **coalesced to one embed per
-   minute**: nothing bounds either one — a retry loop on the first, a Redis or
-   price-pod fault making every in-flight send report the second in the same
-   instant — and the 50-deep queue would drop the rest of the feed. It is not a per-account fact — a Redis fault or a
-   price-pod outage makes every send in flight report it in the same instant,
-   The embed that does post carries `muted: N` in its meta (how many were
-   coalesced away since the last one that posted) plus `mutedAgeS` (how long ago
-   that window opened, so a count delivered late reads as an older incident).
-   A count is only ever cleared by being delivered — a 40-second blip that mutes
-   499 rejections and then goes quiet reports them on the next embed of that
-   reason, however much later, rather than losing them. For
-   `limits-unavailable` the span exception is emitted for **every** occurrence,
-   unthrottled — that is the signal to alert on and to count from.
-   `over-daily-limit` and `invalid-amount` are never coalesced: they are the
-   per-account facts this rollout exists to read, and each caller's own attempt
-   budget already bounds them.
-4. Set `sendGuard.mode: enforce` and redeploy.
+   **What is coalesced.** `rate-limited`, `limits-unavailable` and
+   `undecodable-invoice` are capped at **one embed per minute each**, because
+   nothing else bounds how many of them can arrive at once: a client in a retry
+   loop keeps producing the first and the third after its budget is spent, and a
+   Redis or price-pod fault makes every send in flight report the second in the
+   same instant. Uncapped, any of the three fills the 50-deep queue and pushes
+   the verification / cashout / deposit feed out of it. `over-daily-limit` and
+   `invalid-amount` are never coalesced: they are the per-account facts this
+   rollout exists to read one by one, and each is raised only after the caller's
+   attempt budget has been charged, so the budget bounds them.
 
-Rolling back is the same flag: `log-only`, or `off` if the guard itself is the
-outage.
+   **What the embed tells you.** The one that does post carries `muted: N` in
+   its meta — how many events of that reason were coalesced away since the last
+   one that posted — plus `mutedAgeS`, how many seconds ago the window that
+   accumulated them opened. A count is only ever cleared by being delivered: a
+   40-second blip that mutes 499 rejections and then goes quiet reports all 499
+   on the next embed of that reason, however much later, and `mutedAgeS` is what
+   tells you they are an older incident rather than 499 that just happened.
+
+   **What to count from.** Every rejection, of every reason, coalesced or not,
+   is also written to the current span as `sendGuard.rejection`,
+   `sendGuard.mode`, `sendGuard.kind`, `sendGuard.level`, `sendGuard.error` and
+   (when the guard got as far as an amount) `sendGuard.cents`. Count from
+   tracing, not from Discord: the ops feed is fire-and-forget, does nothing at
+   all when `OPS_DISCORD_WEBHOOK_URL` is unset, and drops its oldest entries on
+   overflow behind an unattributed "N events dropped" summary. Read the feed,
+   count the spans.
+
+   **What to alert on.** `limits-unavailable` additionally records a span
+   *exception* on every occurrence, unthrottled — `ErrorLevel.Critical` when
+   enforcing, `Warn` in log-only. That is the page-worthy signal: it means the
+   guard cannot decide, and on `enforce` that blocks the send.
+4. Set `sendGuard.mode: enforce`, `helm upgrade`, and **restart the api pods**
+   (see below) — the mode is read once at process start.
+
+## Rolling back
+
+Same flag: `log-only`, or `off` if the guard itself is the outage.
+
+**It is not live-reloaded.** `yamlConfig` is read once from `--configPath` when
+the process starts (`src/config/yaml.ts`), and `getSendGuardMode()` reads that
+frozen object. Editing the value in the values file changes nothing until the
+pods are replaced:
+
+```sh
+# 1. change sendGuard.mode in the values file, then
+helm upgrade <release> <chart> -f <values>
+# 2. replace the pods — unless the chart carries a configmap-checksum
+#    annotation that already does it (verify before relying on it)
+kubectl rollout restart deploy/<api>
+kubectl rollout status  deploy/<api>
+```
+
+Budget for a pod roll, not for an instant flag flip. If you need the guard to
+stop blocking *now* and the roll is too slow, `off` costs the same restart —
+there is no faster switch, which is worth knowing before the incident rather
+than during it.
 
 ## Related config
 
 - `accountLimits.*.level` — the caps. **Every level 0-3 is `required`**: a
   deployment that overrides `accountLimits` partially fails at boot rather than
   resolving a missing level to `NaN` and silently blocking that level's sends.
+  An *account* with no level is separate: `getAccountLimits` resolves that to
+  level 0 via `effectiveAccountLevel` before indexing.
 - `rateLimits.paymentSendAttempt` / `paymentSendDailyAttempt` — the two buckets.
   `blockDuration` must be **>= `duration`**: rate-limiter-flexible rewrites the
   key's TTL to `blockDuration` on the first breach, so a shorter block throws the

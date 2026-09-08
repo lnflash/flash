@@ -84,6 +84,14 @@ type GetOnChainFeeArgs = GetOnChainFeeWithoutCurrencyArgs & {
 // resolver hands this down instead of awaiting the guard itself, so a replayed
 // idempotency key returns the cached result without spending attempt budget or
 // being re-judged against a moved mid price. See @app/payments/idempotency.
+//
+// REQUIRED on every arg type that carries it. It was optional, and optional
+// means a send path that forgets the hook compiles, passes its tests and ships
+// unguarded — not hypothetical, since `onchain-payment-send.ts` and
+// `onchain-usd-payment-send-as-sats.ts` are stubbed resolvers whose full send
+// bodies sit commented out one line below, waiting to be re-enabled. A caller
+// that genuinely must not be guarded says so with `SEND_GUARD_NOT_APPLICABLE`
+// below; silence is no longer an option the compiler accepts.
 type SendGuardHook = () => Promise<true | ApplicationError>
 
 type PaymentSendArgs = {
@@ -107,8 +115,9 @@ type PayNoAmountInvoiceByWalletIdArgs = PaymentSendArgs & {
   senderAccount: Account
   // ENG-573 send guard, handed to `withPaymentIdempotency` as its `authorize`
   // hook so it runs only on the path that will actually pay. See
-  // `SendGuardHook` above.
-  authorize?: SendGuardHook
+  // `SendGuardHook` above. Required — pass `SEND_GUARD_NOT_APPLICABLE` to opt a
+  // system credit out explicitly.
+  authorize: SendGuardHook
 }
 
 type IntraLedgerPaymentSendUsernameArgs = PaymentSendArgs & {
@@ -121,8 +130,9 @@ type IntraLedgerPaymentSendWalletIdArgs = PaymentSendArgs & {
   amount: number
   // ENG-573 send guard, handed to `withPaymentIdempotency` as its `authorize`
   // hook so it runs only on the path that will actually pay. See
-  // `SendGuardHook` above.
-  authorize?: SendGuardHook
+  // `SendGuardHook` above. Required — pass `SEND_GUARD_NOT_APPLICABLE` to opt a
+  // system credit out explicitly.
+  authorize: SendGuardHook
 }
 
 type PayOnChainByWalletIdResult = {

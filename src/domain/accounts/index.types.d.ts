@@ -33,7 +33,9 @@ type DepositFeeRatioAsBasisPoints = bigint & { readonly brand: unique symbol }
 type ContactAlias = string & { readonly brand: unique symbol }
 
 type AccountLimitsArgs = {
-  level: AccountLevel
+  // `undefined` is a real runtime value here: ~300 prod account documents have
+  // no `level` field. `getAccountLimits` resolves it via `effectiveAccountLevel`.
+  level: AccountLevel | undefined
   accountLimits?: {
     intraLedger: {
       level: {
