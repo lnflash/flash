@@ -3,6 +3,7 @@ import { IbexConfig } from "@config"
 import { baseLogger as logger } from "@services/logger"
 import { ibexWebhookEndpoints, ibexWebhookSecret } from "@services/ibex/webhook-config"
 
+import { warnIfIbexWebhookSecretWeak } from "./middleware/authenticate"
 import { onPay, onReceive, cryptoReceive } from "./routes"
 
 const start = () => {
@@ -21,6 +22,8 @@ const start = () => {
   app.use(onReceive.router)
   app.use(onPay.router)
   app.use(cryptoReceive.router)
+  warnIfIbexWebhookSecretWeak()
+
   app.listen(IbexConfig.webhook.port, () =>
     logger.info(
       `Listening for ibex events on port ${IbexConfig.webhook.port}. Can be reached at ${IbexConfig.webhook.uri}`,

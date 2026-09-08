@@ -16,7 +16,11 @@ jest.mock("@services/logger", () => {
 
 import { Request, Response } from "express"
 
-import { authenticate } from "@services/ibex/webhook-server/middleware/authenticate"
+import {
+  authenticate,
+  warnIfIbexWebhookSecretWeak,
+} from "@services/ibex/webhook-server/middleware/authenticate"
+import { MIN_SECRET_LENGTH } from "@utils/weak-secrets"
 
 const makeReq = (webhookSecret?: string) =>
   ({
@@ -93,6 +97,79 @@ describe("IBEX webhook authenticate middleware", () => {
     } finally {
       IbexConfig.webhook.secret = configuredSecret
     }
+  })
+
+  // The 32-char floor is the half of the guard this PR adds, and the half an
+  // operator is most likely to trip: a real, random, but short rotated value
+  // looks configured everywhere except here.
+  it("fails closed with 503 when the configured secret is shorter than the floor", () => {
+    const { IbexConfig } = jest.requireMock("@config")
+    const configuredSecret = IbexConfig.webhook.secret
+    try {
+      const short = "a".repeat(MIN_SECRET_LENGTH - 1)
+      IbexConfig.webhook.secret = short
+      const res = makeRes()
+      const next = jest.fn()
+      // Even the *correct* secret is refused — the floor is about the value,
+      // not about whether the caller knows it.
+      authenticate(makeReq(short), res, next)
+      expect(next).not.toHaveBeenCalled()
+      expect(res.status).toHaveBeenCalledWith(503)
+      expect(res.end).toHaveBeenCalledWith("Webhook secret not configured")
+    } finally {
+      IbexConfig.webhook.secret = configuredSecret
+    }
+  })
+
+  it("names the length floor, not just placeholders, when it refuses", () => {
+    const { IbexConfig } = jest.requireMock("@config")
+    const { baseLogger } = jest.requireMock("@services/logger")
+    const configuredSecret = IbexConfig.webhook.secret
+    try {
+      IbexConfig.webhook.secret = "a".repeat(MIN_SECRET_LENGTH - 1)
+      authenticate(makeReq("whatever"), makeRes(), jest.fn())
+      const logged = String(baseLogger.error.mock.calls.at(-1)?.[0])
+      // An operator who rotated to a short random value greps the log for why:
+      // a message that only says "placeholder" sends them looking for one they
+      // do not have.
+      expect(logged).toContain(String(MIN_SECRET_LENGTH))
+    } finally {
+      IbexConfig.webhook.secret = configuredSecret
+    }
+  })
+
+  describe("warnIfIbexWebhookSecretWeak (boot signal)", () => {
+    // Without this, a short or placeholder secret 503s every /receive/* call —
+    // settled invoices and on-chain receives stop crediting balances — while
+    // /health still answers 200 and the boot log says nothing.
+    it("warns at boot for unset, short, and placeholder secrets", () => {
+      const { IbexConfig } = jest.requireMock("@config")
+      const { baseLogger } = jest.requireMock("@services/logger")
+      const configuredSecret = IbexConfig.webhook.secret
+      try {
+        for (const weak of [
+          undefined,
+          "",
+          "not-so-secret",
+          "a".repeat(MIN_SECRET_LENGTH - 1),
+        ]) {
+          baseLogger.warn.mockClear()
+          IbexConfig.webhook.secret = weak
+          warnIfIbexWebhookSecretWeak()
+          expect(baseLogger.warn).toHaveBeenCalledTimes(1)
+          expect(String(baseLogger.warn.mock.calls[0][0])).toContain("503")
+        }
+      } finally {
+        IbexConfig.webhook.secret = configuredSecret
+      }
+    })
+
+    it("stays silent for a usable secret", () => {
+      const { baseLogger } = jest.requireMock("@services/logger")
+      baseLogger.warn.mockClear()
+      warnIfIbexWebhookSecretWeak()
+      expect(baseLogger.warn).not.toHaveBeenCalled()
+    })
   })
 
   it("fails closed with 503 when the configured secret is a known-public placeholder", () => {

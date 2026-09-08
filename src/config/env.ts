@@ -163,7 +163,18 @@ export const env = createEnv({
     // from one of the two server starts the api process races (see
     // @servers/boot). Optional stays: an env that never sets it is unaffected;
     // only a value that IS set and too short is refused.
-    ERPNEXT_JWT_SECRET: z.string().min(MIN_SECRET_LENGTH).optional(),
+    // `refine` on the trimmed length, not `.min()`: isWeakSecret trims before
+    // measuring, so a value whose raw length is 32 but trims to 31 (a k8s
+    // --from-file trailing newline, a padded yaml value) would pass config load
+    // and then throw WeakSecretError mid-boot — the failure this floor exists to
+    // convert into a legible config error. Not `.trim()`, so the string handed to
+    // jwt.verify is byte-for-byte what the operator configured.
+    ERPNEXT_JWT_SECRET: z
+      .string()
+      .refine((v) => v.trim().length >= MIN_SECRET_LENGTH, {
+        message: `must be at least ${MIN_SECRET_LENGTH} characters`,
+      })
+      .optional(),
     NOSTR_PRIVATE_KEY: z.string().min(63).optional(),
 
     // DigitalOcean Spaces

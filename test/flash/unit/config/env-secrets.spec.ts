@@ -36,6 +36,20 @@ describe("ERPNEXT_JWT_SECRET length floor at config load", () => {
     else process.env.ERPNEXT_JWT_SECRET = savedSecret
   })
 
+  // isWeakSecret trims before measuring; a bare `.min()` counts raw bytes. A
+  // k8s --from-file secret carries a trailing newline, so a 31-char value can
+  // present as 32 raw — passing config load and then throwing WeakSecretError
+  // from inside a raced server start, which is what this floor exists to stop.
+  it("measures the trimmed length, so a padded short secret is still refused", () => {
+    const padded = "a".repeat(MIN_SECRET_LENGTH - 1) + "\n"
+    expect(padded.length).toBeGreaterThanOrEqual(MIN_SECRET_LENGTH)
+    expect(loadEnvWithSecret(padded)).toBeInstanceOf(Error)
+  })
+
+  it("accepts a secret that only reaches the floor once padding is ignored", () => {
+    expect(loadEnvWithSecret("a".repeat(MIN_SECRET_LENGTH) + "\n")).toBeNull()
+  })
+
   it("rejects a set-but-short secret, naming the variable", () => {
     const err = loadEnvWithSecret("a".repeat(MIN_SECRET_LENGTH - 1))
 

@@ -19,10 +19,13 @@ import { fieldExtensionsEstimator, simpleEstimator } from "graphql-query-complex
 
 import { parseUnknownDomainErrorFromUnknown } from "@domain/shared"
 import { assertStrongSecret } from "@utils/weak-secrets"
+import { warnIfDevContext } from "@utils/dev-context"
 
 import requestIp from "request-ip"
 
 import jwt from "jsonwebtoken"
+
+import { exitOnBootFailure } from "./boot"
 
 import { buildAdminPermissionRules, hasRole } from "./authorization/admin-permissions"
 
@@ -262,15 +265,14 @@ export async function startApolloServerForAdminSchema() {
 }
 
 if (require.main === module) {
+  // This process IS the admin API — the surface the secret guard exists for —
+  // so it must announce a dev flag that lets the committed repo secret through
+  // just as loudly as the combined entrypoint does.
+  warnIfDevContext()
+
   setupMongoConnection()
     .then(async () => {
       await startApolloServerForAdminSchema()
     })
-    .catch((err) => {
-      graphqlLogger.error(err, "server error")
-      // Same contract as the combined entrypoint: a refused boot (e.g.
-      // WeakSecretError from the placeholder-secret guard) must take the
-      // process down, not leave a silently degraded pod.
-      process.exit(1)
-    })
+    .catch(exitOnBootFailure)
 }

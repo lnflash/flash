@@ -123,7 +123,12 @@ if (require.main === module) {
       // FIP-07 (ENG-103): per-pod prometheus listener for the API key
       // counters. Main API entrypoint only — the admin/ws/trigger/exporter
       // processes must never bind this port.
-      startApiKeyMetricsServer()
+      // Awaited so it is genuinely inside the chain the .catch below guards.
+      // It is synchronous today, which makes this a no-op — but the moment it
+      // grows an await, an un-awaited rejection would route to the
+      // unhandledRejection handler (log only) and leave a healthy pod with a
+      // dead metrics endpoint: the exact shape @servers/boot exists to kill.
+      await startApiKeyMetricsServer()
     })
     // Everything else in the boot chain — mongo, bootstrap, the metrics
     // listener — is fatal too. The two server starts already carry their own
