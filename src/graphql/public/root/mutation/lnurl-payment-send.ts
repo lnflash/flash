@@ -17,6 +17,7 @@ import Lnurl from "@graphql/shared/types/scalar/lnurl"
 import Memo from "@graphql/shared/types/scalar/memo"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import { DealerPriceService } from "@services/dealer-price"
+import { baseLogger } from "@services/logger"
 import Ibex from "@services/ibex/client"
 import { IbexError } from "@services/ibex/errors"
 import { lnurlPaymentSendStatusOrPending } from "@services/ibex/payment-status"
@@ -171,7 +172,21 @@ const LnurlPaymentSendMutation = GT.Field<
         // for the whole redirect chain. A bare axios.get here would fetch any
         // in-cluster URL and buffer whatever the host streams back.
         const checkedMetadataUrl = await validatePublicHttpUrl(decoded.decodedLnurl)
-        if (checkedMetadataUrl instanceof Error) return new InvalidLnurlError()
+        if (checkedMetadataUrl instanceof Error) {
+          // Both this branch and the fetch catch below collapse to
+          // InvalidLnurlError, and nothing downstream logs: the error map reads
+          // only message/path/code, and CustomApolloError binds logger.warn
+          // without ever calling it. Unlogged, an authenticated user probing
+          // in-cluster hosts and 169.254.169.254 through this mutation leaves no
+          // trace to alert on or attribute, and "my LNURL payment says Invalid
+          // LNURL" is undiagnosable. The sibling proxy route already logs this
+          // (services/ibex/webhook-server/routes/on-pay.ts).
+          baseLogger.warn(
+            { err: checkedMetadataUrl, accountId: domainAccount.id },
+            "lnurlPaymentSend: blocked unsafe lnurl target",
+          )
+          return new InvalidLnurlError()
+        }
 
         // A metadata-fetch rejection (non-2xx, a blocked hop, or a network
         // error) must become a typed error like every sibling branch — a bare
@@ -181,7 +196,14 @@ const LnurlPaymentSendMutation = GT.Field<
         try {
           const metadataResponse = await ssrfFetch(checkedMetadataUrl)
           metadata = metadataResponse.data
-        } catch {
+        } catch (err) {
+          // Which of scheme / DNS / a blocked redirect hop / the 64KB body cap /
+          // the 10s budget fired is the whole diagnosis, and it is thrown away
+          // without this.
+          baseLogger.warn(
+            { err, accountId: domainAccount.id },
+            "lnurlPaymentSend: lnurl metadata fetch failed",
+          )
           return new InvalidLnurlError()
         }
         if (!isLnurlPayMetadata(metadata)) return new InvalidLnurlError()

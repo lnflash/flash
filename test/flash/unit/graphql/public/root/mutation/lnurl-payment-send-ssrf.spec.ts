@@ -4,6 +4,17 @@
 // the host this server fetches — the same hole the public proxy route has,
 // reachable from the public schema. These cases fail on a bare
 // `axios.get(decoded.decodedLnurl)`.
+jest.mock("@services/logger", () => {
+  const logger = {
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+    child: jest.fn(() => logger),
+  }
+  return { baseLogger: logger }
+})
+
 jest.mock("dns", () => ({
   promises: { lookup: jest.fn() },
 }))
@@ -221,6 +232,39 @@ describe("lnurlPaymentSend — SSRF guard wiring", () => {
     expect(axiosGet).toHaveBeenCalledTimes(MAX_REDIRECT_HOPS + 1)
     expect(result.status).toBe("failed")
     expect(mockPayToLnurl).not.toHaveBeenCalled()
+  })
+
+  // Both blocked branches collapse to InvalidLnurlError and nothing downstream
+  // logs — the error map reads only message/path/code, and CustomApolloError
+  // binds logger.warn without calling it. Unlogged, an authenticated user
+  // sweeping in-cluster hosts through this mutation leaves nothing to alert on
+  // or attribute, and support cannot tell scheme from DNS from a blocked hop.
+  it("logs the account and the reason when it blocks an unsafe lnurl target", async () => {
+    const { baseLogger } = jest.requireMock("@services/logger")
+    baseLogger.warn.mockClear()
+    mockDecodeLnurl.mockResolvedValue({
+      decodedLnurl: "http://169.254.169.254/latest/meta-data",
+    })
+
+    await resolveMutation()
+
+    expect(baseLogger.warn).toHaveBeenCalledTimes(1)
+    const [context, message] = baseLogger.warn.mock.calls[0]
+    expect(context).toMatchObject({ accountId: "account-id" })
+    expect((context as { err: unknown }).err).toBeInstanceOf(Error)
+    expect(String(message)).toContain("lnurlPaymentSend")
+  })
+
+  it("logs the account and the reason when the metadata fetch is rejected mid-chain", async () => {
+    const { baseLogger } = jest.requireMock("@services/logger")
+    baseLogger.warn.mockClear()
+    mockDecodeLnurl.mockResolvedValue({ decodedLnurl: "https://pay.example.com/lnurl" })
+    axiosGet.mockRejectedValueOnce(new Error("socket hang up"))
+
+    await resolveMutation()
+
+    expect(baseLogger.warn).toHaveBeenCalledTimes(1)
+    expect(baseLogger.warn.mock.calls[0][0]).toMatchObject({ accountId: "account-id" })
   })
 
   it("still pays when the decoded lnurl is a public https host", async () => {
