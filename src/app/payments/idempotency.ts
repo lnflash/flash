@@ -54,9 +54,14 @@ type CachedPaymentSend = { fingerprint: string; result: PaymentSendStatus }
  * fresh attempt with the same key can retry. The lock still guards the concurrent
  * window regardless of caching.
  *
- * ENG-573: the optional `authorize` hook (the send guard) runs INSIDE the lock,
- * after the in-lock cache re-check and immediately before `execute` — i.e. only
- * on the path that is about to execute a new payment. Running it in the
+ * ENG-573: the `authorize` hook (the send guard) runs INSIDE the lock, after
+ * the in-lock cache re-check and immediately before `execute` — i.e. only on
+ * the path that is about to execute a new payment. It is REQUIRED: while it was
+ * optional, wiring a new rail through this wrapper and forgetting the guard
+ * compiled, passed its tests and shipped unguarded — and this fork keeps adding
+ * rails that pay IBEX directly from a resolver (ENG-533). A caller that must
+ * not be guarded says so with `SEND_GUARD_NOT_APPLICABLE`
+ * (@app/payments/send-guard-optout), which is greppable; silence is not. Running it in the
  * resolver ahead of this wrapper (the original wiring) made every retry of a
  * timed-out send spend attempt budget and re-check the amount cap, so a client
  * retrying past the burst budget got "Too many payment attempts" instead of the
@@ -91,15 +96,15 @@ export const withPaymentIdempotency = async ({
   senderWalletId: WalletId
   requestFingerprint: string
   // Runs only on the path that will actually execute a new payment; a rejection
-  // short-circuits without executing. See the ENG-573 note above.
-  authorize?: () => Promise<true | ApplicationError>
+  // short-circuits without executing. Required — pass
+  // `SEND_GUARD_NOT_APPLICABLE` to opt a system credit out explicitly. See the
+  // ENG-573 note above.
+  authorize: SendGuardHook
   execute: () => Promise<PaymentSendResult>
 }): Promise<PaymentSendResult> => {
   const authorizeThenExecute = async (): Promise<PaymentSendResult> => {
-    if (authorize) {
-      const authorized = await authorize()
-      if (authorized instanceof Error) return authorized
-    }
+    const authorized = await authorize()
+    if (authorized instanceof Error) return authorized
     return execute()
   }
 

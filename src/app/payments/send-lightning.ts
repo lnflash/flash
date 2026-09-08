@@ -124,6 +124,10 @@ export const payInvoiceByWalletId = async (
     idempotencyKey: args.idempotencyKey,
     senderWalletId: args.senderWalletId,
     requestFingerprint: `ln|${args.uncheckedPaymentRequest}`,
+    // ENG-573 send guard — see the no-amount wrappers below. Stubbed out of
+    // `lnInvoicePaymentSend` today (that resolver pays IBEX inline and guards
+    // it there), so this is what makes re-enabling it carry the guard.
+    authorize: args.authorize,
     execute: async () => {
       const result = await executePayInvoiceByWalletId(args)
       notifyLightningSendResult(args, result)

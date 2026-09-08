@@ -139,6 +139,9 @@ describe("ops events — payInvoiceByWalletId", () => {
       memo: null,
       senderWalletId,
       senderAccount,
+      // ENG-573: required on the arg type so no send path can omit the guard.
+      // This case is about the ops feed, not the guard — allow it through.
+      authorize: async () => true,
     })
 
     expect(result).toBe(PaymentSendStatus.AlreadyPaid)
@@ -237,12 +240,41 @@ describe("ops events — payInvoiceByWalletId", () => {
     expect(notifyOpsEvent).not.toHaveBeenCalled()
   })
 
+  // Round 4: the same, on the amount-bearing rail. `payInvoiceByWalletId` wired
+  // `withPaymentIdempotency` with no `authorize` at all, so the hook the arg
+  // type now demands went nowhere — the rail `lnInvoicePaymentSend` is a
+  // `Todo: reintroduce` block away from calling again, at which point that
+  // resolver's inline guard is deleted and nothing replaces it. Rejecting here
+  // proves the hook is threaded, not merely accepted.
+  it("returns the guard's rejection from payInvoiceByWalletId without sending", async () => {
+    const rejection = new WithdrawalLimitsExceededError(
+      "Cannot transfer more than $125.00 in 24 hours",
+    )
+
+    const result = await payInvoiceByWalletId({
+      uncheckedPaymentRequest: "lnbc1...",
+      memo: null,
+      senderWalletId,
+      senderAccount,
+      authorize: async () => rejection,
+    })
+
+    expect(result).toBe(rejection)
+    // `executePayInvoiceByWalletId` resolves the sender wallet first thing; it
+    // never ran.
+    expect(mockFindWalletById).not.toHaveBeenCalled()
+    expect(notifyOpsEvent).not.toHaveBeenCalled()
+  })
+
   it("notifies a failed transfer event with the error name on error return", async () => {
     const result = await payInvoiceByWalletId({
       uncheckedPaymentRequest: "lnbc1...",
       memo: null,
       senderWalletId: invalidWalletId,
       senderAccount,
+      // ENG-573: required on the arg type so no send path can omit the guard.
+      // This case is about the ops feed, not the guard — allow it through.
+      authorize: async () => true,
     })
 
     expect(result).toBeInstanceOf(Error)

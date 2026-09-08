@@ -17,7 +17,18 @@ const mockRecordExceptionInCurrentSpan = jest.fn()
 const mockAddAttributesToCurrentSpan = jest.fn()
 jest.mock("@services/tracing", () => ({
   recordExceptionInCurrentSpan: (args: unknown) => mockRecordExceptionInCurrentSpan(args),
-  addAttributesToCurrentSpan: (args: unknown) => mockAddAttributesToCurrentSpan(args),
+  // Deliberately NOT a passthrough, because the real one is not: it sets an
+  // attribute only `if (value)` (src/services/tracing.ts), so every falsy value
+  // is dropped before it reaches a span. That filter is pinned by
+  // test/flash/unit/services/tracing.spec.ts and mirrored here, so the census
+  // assertions below read what production would actually record rather than
+  // what this file passed in. A passthrough mock green-lit
+  // `"sendGuard.level": AccountLevel.Zero` — a value production dropped for
+  // every level-0 account, i.e. the whole cohort the rollout exists to count.
+  addAttributesToCurrentSpan: (attributes: Record<string, unknown>) =>
+    mockAddAttributesToCurrentSpan(
+      Object.fromEntries(Object.entries(attributes).filter(([, value]) => value)),
+    ),
 }))
 
 // The operator switch. Defaults to `enforce` here so the check cases below read
@@ -571,19 +582,50 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
         "sendGuard.rejection": reason,
         "sendGuard.mode": "enforce",
         "sendGuard.kind": "intraledger",
-        "sendGuard.level": AccountLevel.Zero,
+        "sendGuard.level": "0",
       })
     })
 
+    // The cohort the rollout exists to measure. `AccountLevel.Zero === 0` and
+    // `addAttributesToCurrentSpan` drops falsy values, so a numeric level never
+    // reached a span for a level-0 account: `sendGuard.level = 0` matched
+    // nothing in tracing, and "the attribute is absent" is documented nowhere
+    // as meaning level 0. Every level goes on as a string for that reason.
+    const levelCases: [string, AccountLevel | undefined, string][] = [
+      ["a level-0 account", AccountLevel.Zero, "0"],
+      ["an account with no level at all, read as level 0", undefined, "0"],
+      ["a level that is set", AccountLevel.Two, "2"],
+    ]
+    it.each(levelCases)(
+      "counts %s by a value the census can match on",
+      async (_label, level, emitted) => {
+        const limits = getAccountLimits({ level })
+        await send({
+          senderAccount: account(level),
+          amount: { currency: "USD", cents: limits.intraLedgerLimit + 1 },
+        })
+
+        expect(lastSpanAttributes()["sendGuard.level"]).toBe(emitted)
+      },
+    )
+
     it("carries the amount that was refused, in cents", async () => {
       await send({ amount: { currency: "USD", cents: L0.intraLedgerLimit + 1 } })
-      expect(lastSpanAttributes()["sendGuard.cents"]).toBe(L0.intraLedgerLimit + 1)
+      // A string for the same reason as the level: a zero-cent amount (1 sat at
+      // a mid price that rounds to nothing, refused by the limits-unavailable
+      // branch) would otherwise be dropped rather than recorded as 0.
+      expect(lastSpanAttributes()["sendGuard.cents"]).toBe(
+        String(L0.intraLedgerLimit + 1),
+      )
     })
 
     it("omits the amount when the guard never got one", async () => {
       mockConsumeLimiter.mockResolvedValue(new PaymentSendRateLimiterExceededError())
       await send()
-      expect(lastSpanAttributes()).not.toHaveProperty("sendGuard.cents")
+      // Array path, not "sendGuard.cents": jest reads a dotted string as a path
+      // (`sendGuard` -> `cents`), so the string form passes whether the key is
+      // there or not.
+      expect(lastSpanAttributes()).not.toHaveProperty(["sendGuard.cents"])
     })
 
     // The case the ops feed cannot answer: 50 identical rejections, one embed.

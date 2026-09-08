@@ -371,13 +371,19 @@ const report = ({
   // and coalesces the unbounded reasons — so "count them by reason before
   // flipping to enforce" cannot be answered from it alone. Counted from
   // tracing, every rejection of every reason is there exactly once.
+  // Every value goes on as a STRING. `addAttributesToCurrentSpan` sets an
+  // attribute only `if (value)` (src/services/tracing.ts), and
+  // `AccountLevel.Zero === 0` — so a numeric level would drop the attribute for
+  // exactly the cohort this rollout exists to measure (~300 unleveled prod
+  // accounts, plus every genuine L0 user), and "attribute absent" means level 0
+  // nowhere in the runbook. A zero-cent amount would vanish the same way.
   addAttributesToCurrentSpan({
     "sendGuard.rejection": reason,
     "sendGuard.mode": mode,
     "sendGuard.kind": kind,
-    "sendGuard.level": level,
+    "sendGuard.level": String(level),
     "sendGuard.error": error.constructor.name,
-    ...(cents === undefined ? {} : { "sendGuard.cents": cents }),
+    ...(cents === undefined ? {} : { "sendGuard.cents": String(cents) }),
   })
 
   const slot = claimOpsEventSlot(reason)

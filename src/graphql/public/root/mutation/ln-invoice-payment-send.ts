@@ -86,6 +86,11 @@ const LnInvoicePaymentSendMutation = GT.Field<
      *   uncheckedPaymentRequest: paymentRequest,
      *   memo: memo ?? null,
      *   senderAccount: domainAccount,
+     *   idempotencyKey,
+     *   // ENG-573: required by PayInvoiceByWalletIdArgs — hand it the same
+     *   // hook the inline path below builds (decode gate + authorizeSend), or
+     *   // re-enabling this drops the guard this rail has today.
+     *   authorize,
      */
 
     if (!domainAccount) throw new Error("Authentication required")

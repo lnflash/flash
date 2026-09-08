@@ -32,22 +32,23 @@ The checks:
 
 | mode       | behaviour                                                                                              |
 | ---------- | ------------------------------------------------------------------------------------------------------ |
-| `off`      | Returns immediately. No Redis, no price lookup, no ops event. Pre-ENG-573 behaviour.                     |
+| `off`      | Returns immediately. No Redis, no price lookup, no ops event, no span attribute. Pre-ENG-573 behaviour **for the guard** — but not for the level-0 default: an account with no `level` field is still capped at the level-0 limits, unconditionally, by Galoy's own checker. See [What `off` does not cover](#what-off-does-not-cover). |
 | `log-only` | All checks run, every would-be rejection posts a `transfer / would-reject` ops event — the send proceeds. Includes `lnInvoicePaymentSend`'s bolt11 decode gate: an undecodable or no-amount invoice is reported and still handed to IBEX, exactly as before ENG-573. |
 | `enforce`  | Rejections are real.                                                                                     |
 
 Anything unrecognised degrades to `log-only`. The failure mode of this switch
 must be "the guard does not block", never "every send is refused".
 
-`off` covers **everything** ENG-573 added, not just the three checks.
-`lnInvoicePaymentSend` also gained a bolt11 decode gate — the guard needs the
-amount and the amount is inside the invoice, so the resolver decodes it where it
-previously handed the raw bolt11 straight to IBEX. `decodeInvoice` refuses
-anything `invoices.parsePaymentRequest` cannot parse and any invoice with no
-payment secret, which is a rejection class that rail never had. That gate lives
-inside the same `authorize` hook and answers to the same switch: on `off` the
-resolver does not decode at all, so an invoice IBEX would have paid is restored
-by the flag rather than by a deploy.
+`off` covers every check the guard itself runs, not just the three above (see
+[What `off` does not cover](#what-off-does-not-cover) for the one thing ENG-573
+changed that it does not). `lnInvoicePaymentSend` also gained a bolt11 decode
+gate — the guard needs the amount and the amount is inside the invoice, so the
+resolver decodes it where it previously handed the raw bolt11 straight to IBEX.
+`decodeInvoice` refuses anything `invoices.parsePaymentRequest` cannot parse and
+any invoice with no payment secret, which is a rejection class that rail never
+had. That gate lives inside the same `authorize` hook and answers to the same
+switch: on `off` the resolver does not decode at all, so an invoice IBEX would
+have paid is restored by the flag rather than by a deploy.
 
 The decode gate charges the attempt budget too, exactly once per request — a
 request the gate handles never reaches `authorizeSend`, and vice versa. It has
@@ -55,6 +56,40 @@ to: the `LnPaymentRequest` scalar is `/^ln[a-z0-9]+$/i`, so `paymentRequest:
 "lnx"` is a well-formed request that fails the decode, and without a charge it
 would be the one send outcome an authenticated caller could produce without
 limit.
+
+### What `off` does not cover
+
+One thing ENG-573 changed is **not** behind the switch: reading an account with
+no `level` field as level 0. That default lives in `effectiveAccountLevel`,
+applied inside `getAccountLimits` (`src/config/yaml.ts:186`) — the config layer,
+deliberately, so the guard, `Account.limits` and `remainingLimit` cannot
+disagree about those ~300 accounts. Galoy's own `AccountLimitsChecker` reads the
+same function (`src/app/payments/helpers.ts:185`), so it caps an unleveled
+account at the level-0 limits **on every mode, `off` included** — and because
+the guard is not involved, there is no ops event, no `would-reject` embed and no
+`sendGuard.*` span attribute to explain it.
+
+Where that bites is the BTC no-amount lightning pair, the only user-facing rails
+still routed through `@app/payments` (the USD and amount-bearing resolvers are
+FLASH FORK bodies that pay IBEX directly and never reach the checker, so on
+those `off` really is pre-ENG-573 behaviour):
+
+- `lnNoAmountInvoicePaymentSend` — `checkIntraledgerLimits` /
+  `checkTradeIntraAccountLimits` at `src/app/payments/send-lightning.ts:484`
+  when the invoice settles inside Flash, `checkWithdrawalLimits` at `:682` when
+  it leaves. Over the cap, the caller gets Galoy's own
+  `Cannot transfer more than $125.00 in 24 hours`.
+- `lnNoAmountInvoiceFeeProbe` — the same three checks at
+  `src/app/payments/get-protocol-fee.ts:178`, `:187` and `:196`, so the probe
+  refuses before the send is ever attempted.
+
+This is not a regression. Before ENG-573 that cohort indexed the level map with
+`undefined`, got `NaN` limits, and `paymentAmountFromNumber(NaN)` returned a
+`BigIntConversionError` out of `checkLimit` — the send failed anyway, with a
+type error instead of a limit message. But it is not switchable either: if an
+unleveled account has to send above the level-0 cap during an incident,
+`sendGuard.mode: off` will not do it. Raise that account's `level`, or raise
+`accountLimits.*.level` for level 0, and roll the pods.
 
 ## Why it ships in log-only
 
@@ -69,7 +104,9 @@ accounts.
 That assumption lives in exactly one place — `effectiveAccountLevel`, applied
 inside `getAccountLimits` — so the guard, `Account.limits` and `remainingLimit`
 all read the same numbers for those accounts. Revising it is a one-line change
-there, not a hunt through the call sites.
+there, not a hunt through the call sites. The price of putting it there is that
+`sendGuard.mode` does not reach it: see
+[What `off` does not cover](#what-off-does-not-cover).
 
 `log-only` turns that assumption into data instead of into an incident.
 
@@ -139,7 +176,11 @@ there, not a hunt through the call sites.
 
 ## Rolling back
 
-Same flag: `log-only`, or `off` if the guard itself is the outage.
+Same flag: `log-only`, or `off` if the guard itself is the outage. Neither
+restores sends for an account with **no `level` field** — that cap is enforced a
+layer below the flag, silently, and no amount of mode-flipping lifts it. Read
+[What `off` does not cover](#what-off-does-not-cover) before concluding the
+rollback failed.
 
 **It is not live-reloaded.** `yamlConfig` is read once from `--configPath` when
 the process starts (`src/config/yaml.ts`), and `getSendGuardMode()` reads that
@@ -166,7 +207,13 @@ than during it.
   deployment that overrides `accountLimits` partially fails at boot rather than
   resolving a missing level to `NaN` and silently blocking that level's sends.
   An *account* with no level is separate: `getAccountLimits` resolves that to
-  level 0 via `effectiveAccountLevel` before indexing.
+  level 0 via `effectiveAccountLevel` before indexing. That resolution is in the
+  config layer, not the guard, so it is **unconditional** — `sendGuard.mode`,
+  `off` included, does not lift it, and Galoy's `AccountLimitsChecker` goes on
+  enforcing the level-0 cap on `lnNoAmountInvoicePaymentSend` and
+  `lnNoAmountInvoiceFeeProbe` regardless of mode, with none of the guard's
+  ops-event or span output to show for it. See
+  [What `off` does not cover](#what-off-does-not-cover).
 - `rateLimits.paymentSendAttempt` / `paymentSendDailyAttempt` — the two buckets.
   `blockDuration` must be **>= `duration`**: rate-limiter-flexible rewrites the
   key's TTL to `blockDuration` on the first breach, so a shorter block throws the

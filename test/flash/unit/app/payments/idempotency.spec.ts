@@ -58,6 +58,11 @@ import {
 import { ResourceAttemptsLockServiceError } from "@domain/lock"
 import { recordExceptionInCurrentSpan } from "@services/tracing"
 
+// ENG-573: `authorize` is required on the wrapper — a rail that forgets the
+// send guard must not compile. These cases predate the guard and are not about
+// it, so they pass the same explicit no-op the system credits use.
+const allowSend: SendGuardHook = async () => true
+
 const walletA = "11111111-1111-4111-8111-111111111111" as WalletId
 const walletB = "22222222-2222-4222-8222-222222222222" as WalletId
 const fingerprint = "recipient-1|100"
@@ -77,6 +82,7 @@ describe("withPaymentIdempotency", () => {
       idempotencyKey: undefined,
       senderWalletId: walletA,
       requestFingerprint: fingerprint,
+      authorize: allowSend,
       execute,
     })
 
@@ -93,6 +99,7 @@ describe("withPaymentIdempotency", () => {
       idempotencyKey: "   ",
       senderWalletId: walletA,
       requestFingerprint: fingerprint,
+      authorize: allowSend,
       execute,
     })
 
@@ -108,6 +115,7 @@ describe("withPaymentIdempotency", () => {
       idempotencyKey: "x".repeat(257),
       senderWalletId: walletA,
       requestFingerprint: fingerprint,
+      authorize: allowSend,
       execute,
     })
 
@@ -122,12 +130,14 @@ describe("withPaymentIdempotency", () => {
       idempotencyKey: "key-1",
       senderWalletId: walletA,
       requestFingerprint: fingerprint,
+      authorize: allowSend,
       execute,
     })
     const second = await withPaymentIdempotency({
       idempotencyKey: "key-1",
       senderWalletId: walletA,
       requestFingerprint: fingerprint,
+      authorize: allowSend,
       execute,
     })
 
@@ -144,12 +154,14 @@ describe("withPaymentIdempotency", () => {
       idempotencyKey: "key-1",
       senderWalletId: walletA,
       requestFingerprint: fingerprint,
+      authorize: allowSend,
       execute,
     })
     const replay = await withPaymentIdempotency({
       idempotencyKey: "key-1",
       senderWalletId: walletA,
       requestFingerprint: fingerprint,
+      authorize: allowSend,
       execute,
     })
 
@@ -167,12 +179,14 @@ describe("withPaymentIdempotency", () => {
       idempotencyKey: "shared-key",
       senderWalletId: walletA,
       requestFingerprint: "pay-to-alice|100",
+      authorize: allowSend,
       execute,
     })
     const second = await withPaymentIdempotency({
       idempotencyKey: "shared-key",
       senderWalletId: walletA,
       requestFingerprint: "pay-to-bob|100",
+      authorize: allowSend,
       execute,
     })
 
@@ -191,6 +205,7 @@ describe("withPaymentIdempotency", () => {
       idempotencyKey: "key-1",
       senderWalletId: walletA,
       requestFingerprint: fingerprint,
+      authorize: allowSend,
       execute,
     })
 
@@ -208,12 +223,14 @@ describe("withPaymentIdempotency", () => {
       idempotencyKey: "key-1",
       senderWalletId: walletA,
       requestFingerprint: fingerprint,
+      authorize: allowSend,
       execute,
     })
     const second = await withPaymentIdempotency({
       idempotencyKey: "key-1",
       senderWalletId: walletA,
       requestFingerprint: fingerprint,
+      authorize: allowSend,
       execute,
     })
 
@@ -231,6 +248,7 @@ describe("withPaymentIdempotency", () => {
       idempotencyKey: "key-1",
       senderWalletId: walletA,
       requestFingerprint: fingerprint,
+      authorize: allowSend,
       execute,
     })
 
@@ -256,12 +274,14 @@ describe("withPaymentIdempotency", () => {
       idempotencyKey: "shared-key",
       senderWalletId: walletA,
       requestFingerprint: fingerprint,
+      authorize: allowSend,
       execute,
     })
     await withPaymentIdempotency({
       idempotencyKey: "shared-key",
       senderWalletId: walletB,
       requestFingerprint: fingerprint,
+      authorize: allowSend,
       execute,
     })
 
