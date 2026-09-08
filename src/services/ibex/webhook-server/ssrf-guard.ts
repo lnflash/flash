@@ -23,10 +23,12 @@ import { isDevContext } from "@utils/dev-context"
 // In a dev context the private-IP checks are skipped and plain http is
 // allowed so local dev stacks (http://localhost:3000 lnurl servers) keep
 // working. "Dev context" is the shared predicate in @utils/dev-context —
-// NETWORK=regtest OR ALLOW_REPO_DEV_SECRETS=true — because the repo's own dev
-// stack runs NETWORK=mainnet against the Ibex sandbox, so NETWORK alone can't
-// mark it as dev. It is read at call time, not import time, so tests can flip
-// it.
+// NETWORK=regtest OR FLASH_DEV_UNSAFE_MODE=true (formerly, and still as a
+// deprecated alias, ALLOW_REPO_DEV_SECRETS) — because the repo's own dev stack
+// runs NETWORK=mainnet against the Ibex sandbox, so NETWORK alone can't mark
+// it as dev. It is read at call time, not import time, so tests can flip it.
+// Turning it on is what warnIfDevContext() announces at boot: this whole guard
+// is off, on a public unauthenticated route.
 
 export class SsrfBlockedUrlError extends Error {
   constructor(url: string, reason: string) {

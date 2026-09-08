@@ -1,4 +1,15 @@
-import { assertStrongSecret, isWeakSecret, WeakSecretError } from "@utils/weak-secrets"
+import {
+  assertStrongSecret,
+  isWeakSecret,
+  MIN_SECRET_LENGTH,
+  WeakSecretError,
+} from "@utils/weak-secrets"
+import { DEV_UNSAFE_MODE_FLAG } from "@utils/dev-context"
+
+import {
+  clearDevUnsafeModeFlags,
+  restoreDevUnsafeModeFlags,
+} from "test/flash/helpers/dev-context-env"
 
 describe("isWeakSecret", () => {
   it("treats unset and blank secrets as weak", () => {
@@ -40,6 +51,15 @@ describe("isWeakSecret", () => {
     expect(isWeakSecret("a".repeat(32))).toBe(false)
   })
 
+  // src/config/env.ts reuses this constant so a short ERPNEXT_JWT_SECRET is
+  // refused at config load as well as at the admin server's boot guard. The
+  // two must not be able to drift apart.
+  it("exports the floor it enforces", () => {
+    expect(MIN_SECRET_LENGTH).toBe(32)
+    expect(isWeakSecret("a".repeat(MIN_SECRET_LENGTH - 1))).toBe(true)
+    expect(isWeakSecret("a".repeat(MIN_SECRET_LENGTH))).toBe(false)
+  })
+
   it("measures the trimmed length, not the padded one", () => {
     expect(isWeakSecret(`   ${"a".repeat(20)}   `)).toBe(true)
   })
@@ -54,18 +74,16 @@ describe("committed dev-only values", () => {
   ]
 
   const savedNetwork = process.env.NETWORK
-  const savedAllow = process.env.ALLOW_REPO_DEV_SECRETS
 
   afterEach(() => {
     if (savedNetwork === undefined) delete process.env.NETWORK
     else process.env.NETWORK = savedNetwork
-    if (savedAllow === undefined) delete process.env.ALLOW_REPO_DEV_SECRETS
-    else process.env.ALLOW_REPO_DEV_SECRETS = savedAllow
+    restoreDevUnsafeModeFlags()
   })
 
   it("refuses them on non-regtest networks without the dev flag", () => {
     process.env.NETWORK = "mainnet"
-    delete process.env.ALLOW_REPO_DEV_SECRETS
+    clearDevUnsafeModeFlags()
     for (const secret of DEV_VALUES) {
       expect(isWeakSecret(secret)).toBe(true)
     }
@@ -76,7 +94,7 @@ describe("committed dev-only values", () => {
 
   it("accepts them on regtest", () => {
     process.env.NETWORK = "regtest"
-    delete process.env.ALLOW_REPO_DEV_SECRETS
+    clearDevUnsafeModeFlags()
     for (const secret of DEV_VALUES) {
       expect(isWeakSecret(secret)).toBe(false)
     }
@@ -84,7 +102,8 @@ describe("committed dev-only values", () => {
 
   it("accepts them with the explicit dev flag (local dev stack)", () => {
     process.env.NETWORK = "mainnet"
-    process.env.ALLOW_REPO_DEV_SECRETS = "true"
+    clearDevUnsafeModeFlags()
+    process.env[DEV_UNSAFE_MODE_FLAG] = "true"
     for (const secret of DEV_VALUES) {
       expect(isWeakSecret(secret)).toBe(false)
     }

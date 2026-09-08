@@ -32,11 +32,17 @@ const DEV_ONLY_SECRETS = new Set([
 // the deployment as correctly configured. 32 is what the error message tells
 // operators to generate (`openssl rand -hex 32` → 64 hex chars), so anything
 // materially shorter is a misconfiguration, not a choice.
-const MIN_SECRET_LENGTH = 32
+//
+// Exported so the floor is stated once: src/config/env.ts uses it to reject a
+// short ERPNEXT_JWT_SECRET at config load — before anything binds a port — so
+// operators get "Invalid environment variables: ERPNEXT_JWT_SECRET" instead of
+// a WeakSecretError surfacing from inside a raced server start.
+export const MIN_SECRET_LENGTH = 32
 
 // Dev contexts may legitimately run the committed repo values — see
-// @utils/dev-context for what counts as one. With no dev signal the
-// DEV_ONLY_SECRETS above are treated as no secret at all.
+// @utils/dev-context for what counts as one (NETWORK=regtest or
+// FLASH_DEV_UNSAFE_MODE=true). With no dev signal the DEV_ONLY_SECRETS above
+// are treated as no secret at all.
 export const isWeakSecret = (secret: string | undefined | null): boolean => {
   if (!secret || secret.trim() === "") return true
   const trimmed = secret.trim()

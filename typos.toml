@@ -26,7 +26,11 @@ default.extend-ignore-identifiers-re = [
   "^lnbc1\\w+",
 ]
 
-default.extend-ignore-re = ["\"eyJ[a-zA-Z0-9_\\-\\.]+\""]
+# JWTs, and long hex literals (dev-only secrets, key fixtures, mongo ids). Hex
+# is not prose: "0a1cb6ba85cda402..." trips on "ba" -> "by"/"be", and taking
+# the suggestion would corrupt the value. Only quoted, fully-hex runs of 16+
+# characters match, so ordinary identifiers stay spell-checked.
+default.extend-ignore-re = ["\"eyJ[a-zA-Z0-9_\\-\\.]+\"", "\"[0-9a-f]{16,}\""]
 
 [default.extend-words]
 # returned from twilio API referenced in src/debug/text-sms.ts

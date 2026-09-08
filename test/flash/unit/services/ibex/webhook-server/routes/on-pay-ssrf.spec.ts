@@ -46,6 +46,11 @@ import { MAX_REDIRECT_HOPS } from "@services/ibex/webhook-server/ssrf-guard"
 import { ibexWebhookPaths } from "@services/ibex/webhook-config"
 import { extractPaymentHashFromBolt11 } from "@utils"
 
+import {
+  clearDevUnsafeModeFlags,
+  restoreDevUnsafeModeFlags,
+} from "test/flash/helpers/dev-context-env"
+
 const lookup = dns.promises.lookup as jest.Mock
 const axiosGet = axios.get as jest.Mock
 const decodeLnurl = Ibex.decodeLnurl as jest.Mock
@@ -86,16 +91,15 @@ const PUBLIC_ADDR = [{ address: "93.184.216.34", family: 4 }]
 
 describe("GET /pay/lnurl/:username — SSRF guard wiring", () => {
   const savedNetwork = process.env.NETWORK
-  const savedAllowDevSecrets = process.env.ALLOW_REPO_DEV_SECRETS
 
   beforeEach(() => {
     jest.clearAllMocks()
-    // A deployed environment: mainnet AND no dev-secrets opt-in. The repo's
-    // .env (which `make unit-in-ci` sources) sets ALLOW_REPO_DEV_SECRETS, and
+    // A deployed environment: mainnet AND no unsafe-dev-mode opt-in. The repo's
+    // .env (which `make unit-in-ci` sources) sets FLASH_DEV_UNSAFE_MODE, and
     // that flag is half the SSRF guard's dev-context predicate — leaving it
     // set here would silently test the dev escape hatch instead of the guard.
     process.env.NETWORK = "mainnet"
-    delete process.env.ALLOW_REPO_DEV_SECRETS
+    clearDevUnsafeModeFlags()
     lookup.mockResolvedValue(PUBLIC_ADDR)
     ;(AccountsRepository as jest.Mock).mockReturnValue({
       findByUsername: jest.fn().mockResolvedValue({ defaultWalletId: "w1" }),
@@ -111,11 +115,7 @@ describe("GET /pay/lnurl/:username — SSRF guard wiring", () => {
     } else {
       process.env.NETWORK = savedNetwork
     }
-    if (savedAllowDevSecrets === undefined) {
-      delete process.env.ALLOW_REPO_DEV_SECRETS
-    } else {
-      process.env.ALLOW_REPO_DEV_SECRETS = savedAllowDevSecrets
-    }
+    restoreDevUnsafeModeFlags()
   })
 
   it("blocks a user-supplied lnurlp that decodes to cloud metadata — axios is never called", async () => {

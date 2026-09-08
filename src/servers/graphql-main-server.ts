@@ -15,7 +15,10 @@ import { recordExceptionInCurrentSpan } from "@services/tracing"
 import { apiKeyNestedFieldScopes } from "@domain/api-keys"
 import { ErrorLevel } from "@domain/shared"
 
+import { warnIfDevContext } from "@utils/dev-context"
+
 import { startApiKeyMetricsServer } from "./api-key-metrics"
+import { exitOnBootFailure, startServersOrExit } from "./boot"
 import { startApolloServerForAdminSchema } from "./graphql-admin-server"
 import {
   isAuthenticated,
@@ -84,6 +87,12 @@ export async function startApolloServerForCoreSchema() {
 }
 
 if (require.main === module) {
+  // Say out loud when the guards are off (committed repo secrets accepted, SSRF
+  // guard disabled on the public GET /pay/lnurl/:username). A process running
+  // in that state must announce it in its own logs, not only in whatever
+  // config file set the flag.
+  warnIfDevContext()
+
   // A rejected promise nobody awaits must be logged, not fatal: Node's default
   // `--unhandled-rejections=throw` exits the whole api replica on one stray
   // rejection (see setGqlContext for the 2026-09-01 crash loop).
@@ -103,9 +112,12 @@ if (require.main === module) {
       await bootstrap()
       // if (res instanceof Error) throw res
 
-      await Promise.race([
-        startApolloServerForCoreSchema(),
-        startApolloServerForAdminSchema(),
+      // Each start carries its own fatal handler, so a failure in EITHER server
+      // kills the process regardless of which one settles first — see
+      // @servers/boot for why racing a single shared `.catch` did not.
+      await startServersOrExit([
+        startApolloServerForCoreSchema,
+        startApolloServerForAdminSchema,
       ])
 
       // FIP-07 (ENG-103): per-pod prometheus listener for the API key
@@ -113,13 +125,8 @@ if (require.main === module) {
       // processes must never bind this port.
       startApiKeyMetricsServer()
     })
-    .catch((err) => {
-      baseLogger.error(err, "server error")
-      // Boot failures must take the process down. The weak-secret guard
-      // (assertStrongSecret) throws WeakSecretError when ERPNEXT_JWT_SECRET is
-      // missing/placeholder — if that were only logged, the core API would
-      // keep serving and the pod would look healthy while the admin API is
-      // silently dead. Crash loudly and let the orchestrator restart us.
-      process.exit(1)
-    })
+    // Everything else in the boot chain — mongo, bootstrap, the metrics
+    // listener — is fatal too. The two server starts already carry their own
+    // handler (startServersOrExit), so this is the net for the rest.
+    .catch(exitOnBootFailure)
 }

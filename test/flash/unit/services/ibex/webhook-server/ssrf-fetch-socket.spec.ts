@@ -4,6 +4,11 @@ import { AddressInfo } from "net"
 
 import { MAX_RESPONSE_BYTES, ssrfFetch } from "@services/ibex/webhook-server/ssrf-guard"
 
+import {
+  clearDevUnsafeModeFlags,
+  restoreDevUnsafeModeFlags,
+} from "test/flash/helpers/dev-context-env"
+
 // Socket-level spec: NOTHING here is mocked except DNS, so axios really opens
 // a connection through the guarded agents. The other ssrf specs mock axios
 // wholesale, which means they never exercise ssrfLookup's actual contract with
@@ -13,22 +18,20 @@ import { MAX_RESPONSE_BYTES, ssrfFetch } from "@services/ibex/webhook-server/ssr
 // hostname connection with ERR_INVALID_IP_ADDRESS).
 
 const savedNetwork = process.env.NETWORK
-const savedAllowDevSecrets = process.env.ALLOW_REPO_DEV_SECRETS
 
 const setDevContext = (dev: boolean) => {
   if (dev) {
     process.env.NETWORK = "regtest"
   } else {
     process.env.NETWORK = "mainnet"
-    delete process.env.ALLOW_REPO_DEV_SECRETS
+    clearDevUnsafeModeFlags()
   }
 }
 
 const restoreEnv = () => {
   if (savedNetwork === undefined) delete process.env.NETWORK
   else process.env.NETWORK = savedNetwork
-  if (savedAllowDevSecrets === undefined) delete process.env.ALLOW_REPO_DEV_SECRETS
-  else process.env.ALLOW_REPO_DEV_SECRETS = savedAllowDevSecrets
+  restoreDevUnsafeModeFlags()
 }
 
 describe("ssrfFetch over a real socket", () => {

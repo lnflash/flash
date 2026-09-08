@@ -1,6 +1,8 @@
 import { createEnv } from "@t3-oss/env-core"
 import { ZodError, z } from "zod"
 
+import { MIN_SECRET_LENGTH } from "@utils/weak-secrets"
+
 // "false" / "0" / "no" / "off" read as false. (z.coerce.boolean() would turn
 // the string "false" into true, which makes a default-on flag impossible to
 // turn off from the environment.)
@@ -154,7 +156,14 @@ export const env = createEnv({
     SVIX_SECRET: z.string().optional(),
     SVIX_ENDPOINT: z.union([z.string().url().nullish(), z.literal("")]), // optional url
 
-    ERPNEXT_JWT_SECRET: z.string().min(1).optional(),
+    // The admin API's only auth. The length floor is enforced HERE as well as
+    // in the boot guard (assertStrongSecret) so a short value fails at config
+    // load — a legible "Invalid environment variables: ERPNEXT_JWT_SECRET"
+    // before any port is bound — rather than as a WeakSecretError surfacing
+    // from one of the two server starts the api process races (see
+    // @servers/boot). Optional stays: an env that never sets it is unaffected;
+    // only a value that IS set and too short is refused.
+    ERPNEXT_JWT_SECRET: z.string().min(MIN_SECRET_LENGTH).optional(),
     NOSTR_PRIVATE_KEY: z.string().min(63).optional(),
 
     // DigitalOcean Spaces

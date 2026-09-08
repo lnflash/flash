@@ -23,15 +23,19 @@ import {
   TOTAL_FETCH_TIMEOUT_MS,
   validatePublicHttpUrl,
 } from "@services/ibex/webhook-server/ssrf-guard"
+import { DEPRECATED_DEV_UNSAFE_MODE_FLAG, DEV_UNSAFE_MODE_FLAG } from "@utils/dev-context"
+
+import {
+  clearDevUnsafeModeFlags,
+  restoreDevUnsafeModeFlags,
+} from "test/flash/helpers/dev-context-env"
 
 const lookup = dns.promises.lookup as jest.Mock
 const axiosGet = axios.get as jest.Mock
 
 const PUBLIC_ADDR = [{ address: "93.184.216.34", family: 4 }]
 
-const savedAllowDevSecrets = process.env.ALLOW_REPO_DEV_SECRETS
-
-// The dev escape hatch is NETWORK=regtest OR ALLOW_REPO_DEV_SECRETS=true, and
+// The dev escape hatch is NETWORK=regtest OR FLASH_DEV_UNSAFE_MODE=true, and
 // the repo's .env (which `make unit-in-ci` sources) sets the latter — so a
 // "mainnet" case has to clear it explicitly or it is testing dev behaviour.
 const setNetwork = (network?: string) => {
@@ -40,13 +44,10 @@ const setNetwork = (network?: string) => {
   } else {
     process.env.NETWORK = network
   }
-  if (network !== "regtest") delete process.env.ALLOW_REPO_DEV_SECRETS
+  if (network !== "regtest") clearDevUnsafeModeFlags()
 }
 
-const restoreDevSecretsFlag = () => {
-  if (savedAllowDevSecrets === undefined) delete process.env.ALLOW_REPO_DEV_SECRETS
-  else process.env.ALLOW_REPO_DEV_SECRETS = savedAllowDevSecrets
-}
+const restoreDevSecretsFlag = restoreDevUnsafeModeFlags
 
 describe("validatePublicHttpUrl", () => {
   const savedNetwork = process.env.NETWORK
@@ -233,15 +234,13 @@ describe("validatePublicHttpUrl", () => {
   // The repo's own dev stack runs NETWORK=mainnet against the Ibex sandbox, so
   // the SSRF guard has to read the same dev-context predicate the weak-secret
   // guard does or a developer with a localhost lnurlp gets a 502.
-  describe("ALLOW_REPO_DEV_SECRETS (local dev stack on mainnet)", () => {
+  describe("FLASH_DEV_UNSAFE_MODE (local dev stack on mainnet)", () => {
     beforeEach(() => {
       setNetwork("mainnet")
-      process.env.ALLOW_REPO_DEV_SECRETS = "true"
+      process.env[DEV_UNSAFE_MODE_FLAG] = "true"
     })
 
-    afterEach(() => {
-      delete process.env.ALLOW_REPO_DEV_SECRETS
-    })
+    afterEach(clearDevUnsafeModeFlags)
 
     it("allows http and loopback the way regtest does", async () => {
       expect(
@@ -252,8 +251,18 @@ describe("validatePublicHttpUrl", () => {
       ).not.toBeInstanceOf(Error)
     })
 
+    // The rename kept the old spelling working for one release; an install
+    // still carrying it in its .env must not silently lose the escape hatch.
+    it("honours the deprecated ALLOW_REPO_DEV_SECRETS spelling too", async () => {
+      clearDevUnsafeModeFlags()
+      process.env[DEPRECATED_DEV_UNSAFE_MODE_FLAG] = "true"
+      expect(
+        await validatePublicHttpUrl("http://localhost:3000/lnurl"),
+      ).not.toBeInstanceOf(Error)
+    })
+
     it("is off without the flag — the same URLs are blocked", async () => {
-      delete process.env.ALLOW_REPO_DEV_SECRETS
+      clearDevUnsafeModeFlags()
       expect(await validatePublicHttpUrl("http://localhost:3000/lnurl")).toBeInstanceOf(
         SsrfBlockedUrlError,
       )
