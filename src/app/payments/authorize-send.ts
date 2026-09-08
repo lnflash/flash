@@ -100,8 +100,12 @@ import {
  *
  * Not applied to system credits (rewards, referral payouts, top-up credits,
  * reimbursements): those call the `@app` layer directly and never pass
- * through a send mutation. Not applied to cashout either — that one is a gap,
- * not a decision; docs/send-guard.md says so in the operator's own words.
+ * through a send mutation. Two user-facing rails are gaps rather than
+ * decisions — cashout (`offers/initiate-cash-out.ts`) and Bridge USDT
+ * withdrawal (`bridge-initiate-withdrawal.ts`, the largest per-transaction
+ * amounts on the platform); docs/send-guard.md lists both under "Not covered by
+ * the guard at all". Keep this sentence and that list in step: it is what a
+ * maintainer skims for "what still sends unguarded".
  */
 
 export type SendKind = "intraledger" | "lightning" | "lnurl" | "onchain"

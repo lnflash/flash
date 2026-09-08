@@ -320,12 +320,23 @@ describe("ENG-573: the unguarded-rail inventory in docs/send-guard.md", () => {
     fs.readFileSync(path.join(repoRoot, relative), "utf8")
   const doc = read("docs/send-guard.md")
 
-  // [rail, the source that moves the money, the identifier the doc must name]
+  // [rail, the RESOLVER that would do the wiring, the identifier the doc must name]
+  //
+  // The second element has to be the resolver, not the service that moves the
+  // money: every one of the eight guarded rails calls `authorizeSend` from its
+  // GraphQL resolver (intraledger-payment-send.ts, lnurl-payment-send.ts,
+  // onchain-payment-send-all.ts, …), never from `@app` or `@services`. Pointed
+  // at a service file this assertion is true forever and the stated invariant
+  // above — wire a rail in and this fails — does not hold.
   const unguarded: [string, string, string][] = [
-    ["cashout", "src/app/offers/ValidOffer.ts", "src/app/offers/ValidOffer.ts"],
+    [
+      "cashout",
+      "src/graphql/public/root/mutation/offers/initiate-cash-out.ts",
+      "src/app/offers/ValidOffer.ts",
+    ],
     [
       "Bridge USDT withdrawal",
-      "src/services/bridge/index.ts",
+      "src/graphql/public/root/mutation/bridge-initiate-withdrawal.ts",
       "bridge-initiate-withdrawal.ts",
     ],
   ]
