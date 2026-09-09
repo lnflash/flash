@@ -21,6 +21,7 @@ import {
   replayAuthMiddleware,
   replayHandler,
   replayIngressMiddleware,
+  warnIfReplaySecretWeak,
 } from "./routes/replay"
 
 type RawBodyRequest = express.Request & { rawBody?: string }
@@ -104,11 +105,11 @@ export const startBridgeWebhookServer = () => {
     replayHandler,
   )
 
-  if (!(process.env.BRIDGE_WEBHOOK_REPLAY_SECRET || BridgeConfig.webhook.replaySecret)) {
-    baseLogger.warn(
-      "replaySecret not configured (neither BridgeConfig.webhook.replaySecret nor BRIDGE_WEBHOOK_REPLAY_SECRET) — /internal/replay will reject all requests with 503",
-    )
-  }
+  // Boot warning covers everything replayAuthMiddleware refuses — unset, a
+  // known-public placeholder, or under the length floor — not just "unset".
+  // Warning on unset alone meant a short or placeholder secret booted clean and
+  // only showed up as a 503 on the first replay attempt.
+  warnIfReplaySecretWeak()
 
   // Start server
   const port = BridgeConfig.webhook.port

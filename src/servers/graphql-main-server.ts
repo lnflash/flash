@@ -15,8 +15,11 @@ import { recordExceptionInCurrentSpan } from "@services/tracing"
 import { apiKeyNestedFieldScopes } from "@domain/api-keys"
 import { ErrorLevel } from "@domain/shared"
 
+import { warnIfDevContext } from "@utils/dev-context"
+
 import { startApiKeyMetricsServer } from "./api-key-metrics"
-import { startApolloServerForAdminSchema } from "./graphql-admin-server"
+import { exitOnBootFailure, startServersOrExit } from "./boot"
+import { startAdminSchemaIfConfigured } from "./graphql-admin-server"
 import {
   isAuthenticated,
   scopedApiKeyAccess,
@@ -84,6 +87,12 @@ export async function startApolloServerForCoreSchema() {
 }
 
 if (require.main === module) {
+  // Say out loud when the guards are off (committed repo secrets accepted, SSRF
+  // guard disabled on the public GET /pay/lnurl/:username). A process running
+  // in that state must announce it in its own logs, not only in whatever
+  // config file set the flag.
+  warnIfDevContext()
+
   // A rejected promise nobody awaits must be logged, not fatal: Node's default
   // `--unhandled-rejections=throw` exits the whole api replica on one stray
   // rejection (see setGqlContext for the 2026-09-01 crash loop).
@@ -103,15 +112,29 @@ if (require.main === module) {
       await bootstrap()
       // if (res instanceof Error) throw res
 
-      await Promise.race([
-        startApolloServerForCoreSchema(),
-        startApolloServerForAdminSchema(),
+      // Each start carries its own fatal handler, so a failure in EITHER server
+      // kills the process regardless of which one settles first — see
+      // @servers/boot for why racing a single shared `.catch` did not.
+      // The admin start is the *conditional* one: an env that never set
+      // ERPNEXT_JWT_SECRET skips the mount rather than taking the public API
+      // down with it. A secret that is set but weak still crashes here.
+      await startServersOrExit([
+        startApolloServerForCoreSchema,
+        startAdminSchemaIfConfigured,
       ])
 
       // FIP-07 (ENG-103): per-pod prometheus listener for the API key
       // counters. Main API entrypoint only — the admin/ws/trigger/exporter
       // processes must never bind this port.
-      startApiKeyMetricsServer()
+      // Awaited so it is genuinely inside the chain the .catch below guards.
+      // It is synchronous today, which makes this a no-op — but the moment it
+      // grows an await, an un-awaited rejection would route to the
+      // unhandledRejection handler (log only) and leave a healthy pod with a
+      // dead metrics endpoint: the exact shape @servers/boot exists to kill.
+      await startApiKeyMetricsServer()
     })
-    .catch((err) => baseLogger.error(err, "server error"))
+    // Everything else in the boot chain — mongo, bootstrap, the metrics
+    // listener — is fatal too. The two server starts already carry their own
+    // handler (startServersOrExit), so this is the net for the rest.
+    .catch(exitOnBootFailure)
 }

@@ -159,8 +159,12 @@ describe("LnurlPaymentSendMutation", () => {
     expect(mockDecodeLnurl).toHaveBeenCalledWith({
       lnurl: "LNURL1DP68GURN8GHJ7MRWW4EXCTN",
     })
+    // The metadata fetch goes through the shared SSRF guard now, so the call
+    // carries the guard's own fields alongside the URL. Blocking behaviour is
+    // covered in lnurl-payment-send-ssrf.spec.ts.
     expect(mockAxiosGet).toHaveBeenCalledWith(
       "https://lnurl.example/.well-known/lnurlp/alice",
+      expect.objectContaining({ maxRedirects: 0 }),
     )
     expect(mockPayToLnurl).toHaveBeenCalledWith({
       accountId: routedWalletId,

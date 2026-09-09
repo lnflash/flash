@@ -1,6 +1,5 @@
 import { withPaymentIdempotency } from "@app/payments/idempotency"
 import { authorizeSend } from "@app/payments/authorize-send"
-import axios from "axios"
 import dedent from "dedent"
 
 import { resolveCashWalletMutationWalletIdForAccount } from "@app/cash-wallet-cutover"
@@ -19,9 +18,13 @@ import Lnurl from "@graphql/shared/types/scalar/lnurl"
 import Memo from "@graphql/shared/types/scalar/memo"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import { DealerPriceService } from "@services/dealer-price"
+import { baseLogger } from "@services/logger"
 import Ibex from "@services/ibex/client"
 import { IbexError } from "@services/ibex/errors"
 import { lnurlPaymentSendStatusOrPending } from "@services/ibex/payment-status"
+import { recordExceptionInCurrentSpan } from "@services/tracing"
+import { ErrorLevel } from "@domain/shared"
+import { isSsrfBlockedError, ssrfFetch, validatePublicHttpUrl } from "@utils/ssrf-guard"
 
 type LnurlPayMetadata = {
   callback: string
@@ -174,15 +177,78 @@ const LnurlPaymentSendMutation = GT.Field<
         if (decoded instanceof IbexError) return decoded
         if (!decoded.decodedLnurl) return new InvalidLnurlError()
 
-        // A metadata-fetch rejection (non-2xx or network error) must become a
-        // typed error like every sibling branch — a bare throw here would
-        // propagate through the redlock callback as an unhandled GraphQL error
-        // instead of the failed payload.
+        // The lnurl is straight from the caller's input — the Lnurl scalar
+        // validates nothing about the URL it decodes to — so this fetch is the
+        // same SSRF hole the LNURL-pay proxy has, from an authenticated but
+        // otherwise unprivileged mutation. Every hop goes through the shared
+        // guard (@utils/ssrf-guard): https-only, no private/metadata targets,
+        // DNS re-checked at connect time, a capped body and one time budget
+        // for the whole redirect chain. A bare axios.get here would fetch any
+        // in-cluster URL and buffer whatever the host streams back.
+        const checkedMetadataUrl = await validatePublicHttpUrl(decoded.decodedLnurl)
+        if (checkedMetadataUrl instanceof Error) {
+          // Both this branch and the fetch catch below collapse to
+          // InvalidLnurlError, and nothing downstream logs: the error map reads
+          // only message/path/code, and CustomApolloError binds logger.warn
+          // without ever calling it. Unlogged, an authenticated user probing
+          // in-cluster hosts and 169.254.169.254 through this mutation leaves no
+          // trace to alert on or attribute, and "my LNURL payment says Invalid
+          // LNURL" is undiagnosable. The sibling proxy route already logs this
+          // (services/ibex/webhook-server/routes/on-pay.ts).
+          //
+          // The span carries the same event, because https-only is a cutover
+          // on a live payments path: a payer whose lnurl decodes to http://
+          // used to be paid and now fails, and a log line is not a rate you
+          // can alert on.
+          recordExceptionInCurrentSpan({
+            error: checkedMetadataUrl,
+            level: ErrorLevel.Warn,
+            fallbackMsg: "lnurlPaymentSend: blocked unsafe lnurl target",
+            attributes: {
+              "lnurlpay.blocked": true,
+              "lnurlpay.blocked.stage": "send-metadata-url",
+            },
+          })
+          baseLogger.warn(
+            { err: checkedMetadataUrl, accountId: domainAccount.id },
+            "lnurlPaymentSend: blocked unsafe lnurl target",
+          )
+          return new InvalidLnurlError()
+        }
+
+        // A metadata-fetch rejection (non-2xx, a blocked hop, or a network
+        // error) must become a typed error like every sibling branch — a bare
+        // throw here would propagate through the redlock callback as an
+        // unhandled GraphQL error instead of the failed payload.
         let metadata: unknown
         try {
-          const metadataResponse = await axios.get(decoded.decodedLnurl)
+          const metadataResponse = await ssrfFetch(checkedMetadataUrl)
           metadata = metadataResponse.data
-        } catch {
+        } catch (err) {
+          // Which of scheme / DNS / a blocked redirect hop / the 64KB body cap /
+          // the 10s budget fired is the whole diagnosis, and it is thrown away
+          // without this.
+          recordExceptionInCurrentSpan({
+            error: err,
+            level: ErrorLevel.Warn,
+            fallbackMsg: "lnurlPaymentSend: lnurl metadata fetch failed",
+            attributes: {
+              // Only a refused target is `blocked`. A third-party lnurl server
+              // answering 500, a reset connection, an NXDOMAIN — all land in
+              // this same catch and are upstream faults, not SSRF refusals.
+              // Filing them under the blocked-target signal would break the
+              // invariant ssrf-guard.ts establishes deliberately (and its own
+              // spec pins): a broken upstream is not a refused target, and an
+              // alert on `lnurlpay.blocked` would fire on every flaky wallet
+              // host.
+              "lnurlpay.blocked": isSsrfBlockedError(err),
+              "lnurlpay.blocked.stage": "send-metadata-fetch",
+            },
+          })
+          baseLogger.warn(
+            { err, accountId: domainAccount.id },
+            "lnurlPaymentSend: lnurl metadata fetch failed",
+          )
           return new InvalidLnurlError()
         }
         if (!isLnurlPayMetadata(metadata)) return new InvalidLnurlError()

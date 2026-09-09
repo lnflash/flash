@@ -18,10 +18,14 @@ import { mapError } from "@graphql/error-map"
 import { fieldExtensionsEstimator, simpleEstimator } from "graphql-query-complexity"
 
 import { parseUnknownDomainErrorFromUnknown } from "@domain/shared"
+import { assertStrongSecret, isUnsetSecret } from "@utils/weak-secrets"
+import { warnIfDevContext } from "@utils/dev-context"
 
 import requestIp from "request-ip"
 
 import jwt from "jsonwebtoken"
+
+import { exitOnBootFailure } from "./boot"
 
 import { buildAdminPermissionRules, hasRole } from "./authorization/admin-permissions"
 
@@ -36,8 +40,13 @@ interface JWTPayload {
   roles: string[]
 }
 
-// Parse the "Authorization" header to verify the JWT token and return its payload
-function parseAuthHeader(authHeader: string | undefined): JWTPayload {
+// Parse the "Authorization" header to verify the JWT token and return its
+// payload. The `algorithms` pin below keeps this to HMAC-SHA256 explicitly
+// rather than relying on jsonwebtoken's key-type defaulting, so an `alg: none`
+// or attacker-chosen-RS256 token can never be accepted even if the secret is
+// later handed over as a KeyObject/PEM. Exported so both the pin and the
+// refusals are covered by test/flash/unit/servers/admin-auth.spec.ts.
+export function parseAuthHeader(authHeader: string | undefined): JWTPayload {
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     throw new AuthenticationError({
       message: "Invalid authorization header",
@@ -46,7 +55,9 @@ function parseAuthHeader(authHeader: string | undefined): JWTPayload {
   }
   try {
     const token = authHeader.slice(7)
-    return jwt.verify(token, ADMIN_CONFIG.ERPNEXT_JWT_SECRET as string) as JWTPayload // process.env.ERPNEXT_JWT_SECRET
+    return jwt.verify(token, ADMIN_CONFIG.ERPNEXT_JWT_SECRET as string, {
+      algorithms: ["HS256"],
+    }) as JWTPayload
   } catch (error) {
     throw new AuthenticationError({ message: "Invalid Token", logger: graphqlLogger })
   }
@@ -74,7 +85,9 @@ export { hasRole }
 //   )
 // }
 
-const startAdminServer = async ({
+// Exported for the boot-guard spec: deleting the assertStrongSecret call
+// below must fail a test, not just review.
+export const startAdminServer = async ({
   schema,
   port,
   type,
@@ -83,6 +96,10 @@ const startAdminServer = async ({
   port: string | number
   type: string
 }): Promise<Record<string, unknown>> => {
+  // Fail closed at boot: the admin API's only auth is this HMAC secret, and a
+  // placeholder value from the public repo would let anyone forge admin JWTs.
+  assertStrongSecret("ERPNEXT_JWT_SECRET", ADMIN_CONFIG.ERPNEXT_JWT_SECRET)
+
   const app = express()
   const httpServer = createServer(app)
 
@@ -247,10 +264,44 @@ export async function startApolloServerForAdminSchema() {
   })
 }
 
+// What the api process mounts, as opposed to what the dedicated admin process
+// runs.
+//
+// startAdminServer fails closed on a weak secret, which is right: serving the
+// admin API with a forgeable HMAC key is worse than not serving it. But "unset"
+// is not "configured badly" — an environment with no ERP integration (a fresh
+// staging namespace, a bare `docker compose up` of the api) never sets
+// ERPNEXT_JWT_SECRET at all, and in the api process a throw from this start is
+// fatal for the PUBLIC GraphQL API too (see @servers/boot: every start carries
+// exitOnBootFailure). Crashing the payments API because an unrelated admin
+// feature is unconfigured is a bigger outage than the one the guard prevents,
+// so an entirely absent secret skips the mount instead. A secret that IS set
+// still has to clear the floor and the denylist — that path still crashes.
+//
+// The dedicated admin entrypoint below deliberately does NOT use this: that
+// process exists to serve the admin API, so an unset secret there is a boot
+// failure, not a feature to skip.
+export async function startAdminSchemaIfConfigured() {
+  if (isUnsetSecret(ADMIN_CONFIG.ERPNEXT_JWT_SECRET)) {
+    baseLogger.warn(
+      "ERPNEXT_JWT_SECRET is unset — not mounting the admin GraphQL schema. " +
+        "The admin API (ERPNext -> Flash) will not be served by this process; " +
+        "the public API is unaffected. Set ERPNEXT_JWT_SECRET to enable it.",
+    )
+    return undefined
+  }
+  return startApolloServerForAdminSchema()
+}
+
 if (require.main === module) {
+  // This process IS the admin API — the surface the secret guard exists for —
+  // so it must announce a dev flag that lets the committed repo secret through
+  // just as loudly as the combined entrypoint does.
+  warnIfDevContext()
+
   setupMongoConnection()
     .then(async () => {
       await startApolloServerForAdminSchema()
     })
-    .catch((err) => graphqlLogger.error(err, "server error"))
+    .catch(exitOnBootFailure)
 }
