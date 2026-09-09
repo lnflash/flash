@@ -179,11 +179,18 @@ export const awardReferralRewardOnKycApproval = async ({
         const { intraledgerPaymentSendWalletIdForUsdWallet } = await import(
           "@app/payments/send-intraledger"
         )
+        const { SEND_GUARD_NOT_APPLICABLE } = await import(
+          "@app/payments/send-guard-optout"
+        )
         const result = await intraledgerPaymentSendWalletIdForUsdWallet({
           senderWalletId: rewardsWallet.id,
           recipientWalletId,
           amount: amountCents,
           memo,
+          // A referral payout is a system credit out of the rewards wallet, not
+          // a user-initiated send: see SEND_GUARD_NOT_APPLICABLE. Guarding it
+          // would rate-limit a payout batch against itself.
+          authorize: SEND_GUARD_NOT_APPLICABLE,
         })
         if (result instanceof Error) {
           baseLogger.error(

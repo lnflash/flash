@@ -4,6 +4,7 @@ import Memo from "@graphql/shared/types/scalar/memo"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import SatAmount from "@graphql/shared/types/scalar/sat-amount"
 import { Payments } from "@app"
+import { authorizeSend } from "@app/payments/authorize-send"
 import PaymentSendPayload from "@graphql/public/types/payload/payment-send"
 import LnIPaymentRequest from "@graphql/shared/types/scalar/ln-payment-request"
 import { InputValidationError } from "@graphql/error"
@@ -76,6 +77,12 @@ const LnNoAmountInvoicePaymentSendMutation = GT.Field<
       return { errors: [{ message: memo.message }] }
     }
 
+    // ENG-573 send guard (attempt budget + amount sanity + daily-limit cap) is
+    // handed DOWN as the idempotency wrapper's `authorize` hook rather than
+    // awaited here: running it ahead of the wrapper made every retry of a
+    // timed-out send spend burst budget and be re-priced, so a client past
+    // 10/min got "Too many payment attempts" — or "Cannot transfer more than
+    // $X" after a mid-price tick — for a payment that had already settled.
     const status = await Payments.payNoAmountInvoiceByWalletIdForBtcWallet({
       senderWalletId: walletId,
       uncheckedPaymentRequest: paymentRequest,
@@ -83,6 +90,13 @@ const LnNoAmountInvoicePaymentSendMutation = GT.Field<
       amount,
       senderAccount: domainAccount,
       idempotencyKey,
+      authorize: () =>
+        authorizeSend({
+          senderAccount: domainAccount,
+          senderWalletId: walletId,
+          amount: { currency: "BTC", sats: amount },
+          kind: "lightning",
+        }),
     })
 
     if (status instanceof Error) {

@@ -1,4 +1,5 @@
 import { Accounts, Payments } from "@app"
+import { authorizeSend } from "@app/payments/authorize-send"
 import { resolveCashWalletRecipientMutationWalletId } from "@app/cash-wallet-cutover"
 import { checkedToWalletId } from "@domain/wallets"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
@@ -84,6 +85,12 @@ const IntraLedgerPaymentSendMutation = GT.Field<null, GraphQLPublicContextAuth>(
       }
     }
 
+    // ENG-573 send guard (attempt budget + amount sanity + daily-limit cap) is
+    // handed DOWN as the idempotency wrapper's `authorize` hook rather than
+    // awaited here: running it ahead of the wrapper made every retry of a
+    // timed-out send spend burst budget and be re-priced, so a client past
+    // 10/min got "Too many payment attempts" — or "Cannot transfer more than
+    // $X" after a mid-price tick — for a payment that had already settled.
     const status = await Payments.intraledgerPaymentSendWalletIdForBtcWallet({
       recipientWalletId: routedRecipientWalletId,
       memo,
@@ -91,6 +98,13 @@ const IntraLedgerPaymentSendMutation = GT.Field<null, GraphQLPublicContextAuth>(
       senderWalletId,
       senderAccount: domainAccount,
       idempotencyKey,
+      authorize: () =>
+        authorizeSend({
+          senderAccount: domainAccount,
+          senderWalletId,
+          amount: { currency: "BTC", sats: amount },
+          kind: "intraledger",
+        }),
     })
     if (status instanceof Error) {
       return { status: "failed", errors: [mapAndParseErrorForGqlResponse(status)] }

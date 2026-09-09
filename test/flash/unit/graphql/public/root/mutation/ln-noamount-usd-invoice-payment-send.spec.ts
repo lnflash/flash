@@ -1,3 +1,13 @@
+const mockAuthorizeSend = jest.fn()
+jest.mock("@app/payments/authorize-send", () => ({
+  // ENG-573 send guard. Default-allow so the existing cases exercise the
+  // resolver body; the wiring cases below flip it to a rejection.
+  authorizeSend: async (args: unknown) => {
+    const result = await mockAuthorizeSend(args)
+    return result === undefined ? true : result
+  },
+}))
+
 const mockPayInvoice = jest.fn()
 const mockResolveCashWalletMutationWalletIdForAccount = jest.fn()
 const mockUsdWalletAmountFromWalletId = jest.fn()
@@ -41,7 +51,7 @@ jest.mock("@app/wallets", () => ({
   ) => mockUsdWalletAmountFromWalletId(...args),
 }))
 
-import { IdempotencyKeyReuseError } from "@domain/errors"
+import { IdempotencyKeyReuseError, WithdrawalLimitsExceededError } from "@domain/errors"
 import { ErrorLevel, USDTAmount } from "@domain/shared"
 import LnNoAmountUsdInvoicePaymentSendMutation from "@graphql/public/root/mutation/ln-noamount-usd-invoice-payment-send"
 import { IbexError, UnconfirmedIbexPayment } from "@services/ibex/errors"
@@ -90,7 +100,18 @@ describe("LnNoAmountUsdInvoicePaymentSendMutation", () => {
       transaction: { payment: { status: { id: 2 } } },
     })
     mockWithPaymentIdempotency.mockImplementation(
-      async ({ execute }: { execute: () => Promise<unknown> }) => execute(),
+      // Mirrors the real wrapper's no-key path: authorize (ENG-573), then execute.
+      async ({
+        authorize,
+        execute,
+      }: {
+        authorize?: () => Promise<unknown>
+        execute: () => Promise<unknown>
+      }) => {
+        const authorized = await authorize?.()
+        if (authorized instanceof Error) return authorized
+        return execute()
+      },
     )
   })
 
@@ -254,5 +275,73 @@ describe("LnNoAmountUsdInvoicePaymentSendMutation", () => {
       expect(mockWithPaymentIdempotency.mock.calls[0][0].idempotencyKey).toBeUndefined()
       expect(mockPayInvoice).toHaveBeenCalledTimes(1)
     })
+  })
+})
+
+describe("ENG-573 send guard wiring", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockResolveCashWalletMutationWalletIdForAccount.mockResolvedValue(routedWalletId)
+    mockUsdWalletAmountFromWalletId.mockResolvedValue(
+      USDTAmount.usdCents("1234") as USDTAmount,
+    )
+    mockPayInvoice.mockResolvedValue({
+      status: 0,
+      transaction: { payment: { status: { id: 2 } } },
+    })
+    mockWithPaymentIdempotency.mockImplementation(
+      // Mirrors the real wrapper's no-key path: authorize (ENG-573), then execute.
+      async ({
+        authorize,
+        execute,
+      }: {
+        authorize?: () => Promise<unknown>
+        execute: () => Promise<unknown>
+      }) => {
+        const authorized = await authorize?.()
+        if (authorized instanceof Error) return authorized
+        return execute()
+      },
+    )
+  })
+
+  it("authorises the cent amount against the routed wallet as a lightning send", async () => {
+    await resolveMutation()
+
+    expect(mockAuthorizeSend).toHaveBeenCalledTimes(1)
+    expect(mockAuthorizeSend).toHaveBeenCalledWith({
+      senderAccount: domainAccount,
+      senderWalletId: routedWalletId,
+      amount: { currency: "USD", cents: 1234 },
+      kind: "lightning",
+    })
+    expect(mockPayInvoice).toHaveBeenCalledTimes(1)
+  })
+
+  it("fails before amount resolution or IBEX when the guard rejects", async () => {
+    const rejection = new WithdrawalLimitsExceededError(
+      "Cannot transfer more than $125.00 in 24 hours",
+    )
+    mockAuthorizeSend.mockResolvedValueOnce(rejection)
+
+    const result = await resolveMutation()
+
+    expect(result.status).toBe("failed")
+    expect(result.errors[0]).toMatchObject({ message: rejection.message })
+    expect(mockUsdWalletAmountFromWalletId).not.toHaveBeenCalled()
+    expect(mockPayInvoice).not.toHaveBeenCalled()
+  })
+
+  // ENG-573: the guard is the wrapper's `authorize` hook, not a call ahead of
+  // it. Running it first made every retry of a timed-out send spend attempt
+  // budget and get re-judged against a moved price, so a client past its burst
+  // budget got "Too many payment attempts" instead of the cached success of a
+  // payment that had already moved money.
+  it("hands the guard to the idempotency wrapper instead of running it first", async () => {
+    await resolveMutation()
+
+    expect(mockWithPaymentIdempotency).toHaveBeenCalledTimes(1)
+    const { authorize } = mockWithPaymentIdempotency.mock.calls[0][0]
+    expect(typeof authorize).toBe("function")
   })
 })

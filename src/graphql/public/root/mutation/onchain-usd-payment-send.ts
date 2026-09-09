@@ -11,6 +11,7 @@ import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { Wallets } from "@app/index"
+import { authorizeSend } from "@app/payments/authorize-send"
 import { usdWalletAmountFromWalletId } from "@app/wallets"
 import { resolveCashWalletMutationWalletIdForAccount } from "@app/cash-wallet-cutover"
 
@@ -77,6 +78,21 @@ const OnChainUsdPaymentSendMutation = GT.Field<
       return {
         status: PaymentSendStatus.Failure.value,
         errors: [mapAndParseErrorForGqlResponse(routedWalletId)],
+      }
+    }
+
+    // ENG-573 send guard: attempt budget + amount sanity + daily-limit cap,
+    // before anything reaches IBEX.
+    const authorized = await authorizeSend({
+      senderAccount: domainAccount,
+      senderWalletId: routedWalletId,
+      amount: { currency: "USD", cents: amount },
+      kind: "onchain",
+    })
+    if (authorized instanceof Error) {
+      return {
+        status: PaymentSendStatus.Failure.value,
+        errors: [mapAndParseErrorForGqlResponse(authorized)],
       }
     }
 

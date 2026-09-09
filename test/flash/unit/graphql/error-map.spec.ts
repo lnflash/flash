@@ -1,4 +1,4 @@
-import { ErrorLevel } from "@domain/shared"
+import { ErrorLevel, ValidationError } from "@domain/shared"
 import { mapAndParseErrorForGqlResponse, mapError } from "@graphql/error-map"
 import { PhoneAccountAlreadyExistsCannotUpgradeError } from "@services/kratos"
 import {
@@ -18,6 +18,11 @@ import {
   DuplicateKeyForPersistError,
   InvalidPhoneNumber,
 } from "@domain/errors"
+import {
+  InvalidSendAmountError,
+  SendLimitsUnavailableError,
+} from "@domain/payments/errors"
+import { PaymentSendRateLimiterExceededError } from "@domain/rate-limit/errors"
 
 describe("error-map", () => {
   it("maps PhoneNotAllowedForRegistrationError to a user-readable validation error, not the catch-all", () => {
@@ -183,6 +188,66 @@ describe("error-map", () => {
 
       expect(result.extensions.code).toBe("IBEX_ERROR")
       expect(result.message).toContain("An error occurred")
+    })
+  })
+
+  // ENG-573 send guard. mapError's default branch is assertUnreachable, which
+  // THROWS — an unmapped guard error is a 500 out of the resolver, not an error
+  // payload. These pin that the three new errors stay mapped, and that the
+  // fail-closed one keeps its generic wording.
+  describe("send guard errors (ENG-573)", () => {
+    it("maps InvalidSendAmountError to a validation error the client can read", () => {
+      const result = mapError(
+        new InvalidSendAmountError("Amount must be greater than zero"),
+      )
+
+      expect(result.extensions.code).not.toBe("UNEXPECTED_CLIENT_ERROR")
+      expect(result.message).toBe("Amount must be greater than zero")
+    })
+
+    // The internal text says things like "no daily send limit configured for
+    // level 3" and "BTC→USD price unavailable: ...". That is an operator's
+    // sentence, not a user's: it names our config and our outages.
+    it("maps SendLimitsUnavailableError to generic wording, never the internal reason", () => {
+      const result = mapError(
+        new SendLimitsUnavailableError("no daily send limit configured for level 3"),
+      )
+
+      expect(result.extensions.code).not.toBe("UNEXPECTED_CLIENT_ERROR")
+      expect(result.message).toBe(
+        "Sending is temporarily unavailable, please try again later.",
+      )
+      expect(result.message).not.toContain("level 3")
+      expect(result.message).not.toContain("daily send limit")
+    })
+
+    // Not a guard error — the one the guard deliberately steps aside for.
+    // `onchain-payment-send-all.ts` skips `authorizeSend` when the balance
+    // rounds to zero cents so ordinary empty-wallet taps stay out of the
+    // `invalid-amount` census bucket, and leaves the refusal to
+    // `OnchainUsdPaymentValidator`'s `checkOnchainMin`, which returns exactly
+    // this bare ValidationError. mapError has no case for it beyond the
+    // catch-all, so what the user actually sees is the generic unexpected-error
+    // string — NOT a clean balance message. The resolver comment and
+    // docs/send-guard.md both say so now; this is what holds them honest.
+    it("maps checkOnchainMin's ValidationError to the catch-all, not to a balance message", () => {
+      const result = mapError(new ValidationError("Amount must be greater than 0"))
+
+      expect(result.extensions.code).toBe("UNEXPECTED_CLIENT_ERROR")
+      expect(result.message).toBe(
+        "Unexpected error occurred, please try again or contact support if it persists (code: ValidationError: Amount must be greater than 0)",
+      )
+      expect(result.message).not.toMatch(/balance/i)
+    })
+
+    it("maps PaymentSendRateLimiterExceededError to a too-many-requests error", () => {
+      const result = mapError(new PaymentSendRateLimiterExceededError())
+
+      expect(result.extensions.code).not.toBe("UNEXPECTED_CLIENT_ERROR")
+      expect(result.extensions.code).toBe("TOO_MANY_REQUEST")
+      expect(result.message).toBe(
+        "Too many payment attempts, please wait for a while and try again.",
+      )
     })
   })
 })

@@ -13,6 +13,7 @@
  */
 
 import { Payments } from "@app"
+import { SEND_GUARD_NOT_APPLICABLE } from "@app/payments/send-guard-optout"
 import { checkedToSats } from "@domain/bitcoin"
 import { WalletCurrency } from "@domain/shared"
 import { checkedToWalletId } from "@domain/wallets"
@@ -62,6 +63,9 @@ const reimburse = async (reimbursements: Array<reimbursement>) => {
       senderWalletId: bankOwnerWalletId,
       senderAccount: bankOwnerAccount,
       memo: reimbursement.memo,
+      // An operator reimbursement out of the bank-owner wallet is not a
+      // user-initiated send: see SEND_GUARD_NOT_APPLICABLE.
+      authorize: SEND_GUARD_NOT_APPLICABLE,
     })
     console.log({ ...reimbursement, reimbursementStatus: reimburseResult })
   }

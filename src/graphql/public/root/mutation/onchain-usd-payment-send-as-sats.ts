@@ -50,6 +50,10 @@ const OnChainUsdPaymentSendAsBtcDenominatedMutation = GT.Field<
   },
   resolve: async () => {
     return new UnsupportedCurrencyError("Currently do not support Bitcoin denomination.")
+    // ENG-573: this body is unguarded. The on-chain rails do not go through
+    // `withPaymentIdempotency`, so nothing here fails to compile without the
+    // send guard — re-enabling this means calling `authorizeSend` first, the
+    // way `onchain-payment-send-all.ts` and `onchain-usd-payment-send.ts` do.
     // const { walletId, address, amount, memo, speed } = args.input
 
     // if (walletId instanceof Error) {

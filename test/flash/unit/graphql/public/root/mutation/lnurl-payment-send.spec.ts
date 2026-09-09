@@ -1,3 +1,13 @@
+const mockAuthorizeSend = jest.fn()
+jest.mock("@app/payments/authorize-send", () => ({
+  // ENG-573 send guard. Default-allow so the existing cases exercise the
+  // resolver body; the wiring cases below flip it to a rejection.
+  authorizeSend: async (args: unknown) => {
+    const result = await mockAuthorizeSend(args)
+    return result === undefined ? true : result
+  },
+}))
+
 const mockResolveCashWalletMutationWalletIdForAccount = jest.fn()
 const mockUsdWalletAmountFromWalletId = jest.fn()
 const mockDecodeLnurl = jest.fn()
@@ -50,7 +60,7 @@ jest.mock("axios", () => ({
 }))
 
 import LnurlPaymentSendMutation from "@graphql/public/root/mutation/lnurl-payment-send"
-import { IdempotencyKeyReuseError } from "@domain/errors"
+import { IdempotencyKeyReuseError, WithdrawalLimitsExceededError } from "@domain/errors"
 import { paymentAmountFromNumber, USDTAmount, WalletCurrency } from "@domain/shared"
 import { IbexError } from "@services/ibex/errors"
 
@@ -119,7 +129,18 @@ describe("LnurlPaymentSendMutation", () => {
       transaction: { payment: { status: { id: 2 } } },
     })
     mockWithPaymentIdempotency.mockImplementation(
-      async ({ execute }: { execute: () => Promise<unknown> }) => execute(),
+      // Mirrors the real wrapper's no-key path: authorize (ENG-573), then execute.
+      async ({
+        authorize,
+        execute,
+      }: {
+        authorize?: () => Promise<unknown>
+        execute: () => Promise<unknown>
+      }) => {
+        const authorized = await authorize?.()
+        if (authorized instanceof Error) return authorized
+        return execute()
+      },
     )
   })
 
@@ -304,5 +325,67 @@ describe("LnurlPaymentSendMutation", () => {
       expect(mockWithPaymentIdempotency.mock.calls[0][0].idempotencyKey).toBeUndefined()
       expect(mockPayToLnurl).toHaveBeenCalledTimes(1)
     })
+  })
+})
+
+describe("ENG-573 send guard wiring", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockResolveCashWalletMutationWalletIdForAccount.mockResolvedValue(routedWalletId)
+    mockWithPaymentIdempotency.mockImplementation(
+      // Mirrors the real wrapper's no-key path: authorize (ENG-573), then execute.
+      async ({
+        authorize,
+        execute,
+      }: {
+        authorize?: () => Promise<unknown>
+        execute: () => Promise<unknown>
+      }) => {
+        const authorized = await authorize?.()
+        if (authorized instanceof Error) return authorized
+        return execute()
+      },
+    )
+    mockDecodeLnurl.mockResolvedValue({ decodedLnurl: null })
+  })
+
+  it("authorises the cent amount against the routed wallet as an lnurl send", async () => {
+    await resolveMutation()
+
+    expect(mockAuthorizeSend).toHaveBeenCalledTimes(1)
+    expect(mockAuthorizeSend).toHaveBeenCalledWith({
+      senderAccount: domainAccount,
+      senderWalletId: routedWalletId,
+      amount: { currency: "USD", cents: 19446 },
+      kind: "lnurl",
+    })
+    expect(mockDecodeLnurl).toHaveBeenCalledTimes(1)
+  })
+
+  it("fails before LNURL decoding or IBEX when the guard rejects", async () => {
+    const rejection = new WithdrawalLimitsExceededError(
+      "Cannot transfer more than $125.00 in 24 hours",
+    )
+    mockAuthorizeSend.mockResolvedValueOnce(rejection)
+
+    const result = await resolveMutation()
+
+    expect(result.status).toBe("failed")
+    expect(result.errors[0]).toMatchObject({ message: rejection.message })
+    expect(mockDecodeLnurl).not.toHaveBeenCalled()
+    expect(mockPayToLnurl).not.toHaveBeenCalled()
+  })
+
+  // ENG-573: the guard is the wrapper's `authorize` hook, not a call ahead of
+  // it. Running it first made every retry of a timed-out send spend attempt
+  // budget and get re-judged against a moved price, so a client past its burst
+  // budget got "Too many payment attempts" instead of the cached success of a
+  // payment that had already moved money.
+  it("hands the guard to the idempotency wrapper instead of running it first", async () => {
+    await resolveMutation()
+
+    expect(mockWithPaymentIdempotency).toHaveBeenCalledTimes(1)
+    const { authorize } = mockWithPaymentIdempotency.mock.calls[0][0]
+    expect(typeof authorize).toBe("function")
   })
 })

@@ -101,7 +101,11 @@ import {
   payNoAmountInvoiceByWalletIdForUsdWallet,
 } from "@app/payments/send-lightning"
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
-import { AlreadyPaidError, MismatchedCurrencyForWalletError } from "@domain/errors"
+import {
+  AlreadyPaidError,
+  MismatchedCurrencyForWalletError,
+  WithdrawalLimitsExceededError,
+} from "@domain/errors"
 import { validateIsBtcWallet } from "@app/wallets"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
 
@@ -135,6 +139,9 @@ describe("ops events — payInvoiceByWalletId", () => {
       memo: null,
       senderWalletId,
       senderAccount,
+      // ENG-573: required on the arg type so no send path can omit the guard.
+      // This case is about the ops feed, not the guard — allow it through.
+      authorize: async () => true,
     })
 
     expect(result).toBe(PaymentSendStatus.AlreadyPaid)
@@ -160,6 +167,9 @@ describe("ops events — payInvoiceByWalletId", () => {
       memo: null,
       senderWalletId,
       senderAccount,
+      // ENG-573: required on the arg type so no send path can omit the guard.
+      // This case is about the ops feed, not the guard — allow it through.
+      authorize: async () => true,
     })
 
     expect(result).toBe(PaymentSendStatus.AlreadyPaid)
@@ -188,6 +198,9 @@ describe("ops events — payInvoiceByWalletId", () => {
       memo: null,
       senderWalletId,
       senderAccount,
+      // ENG-573: required on the arg type so no send path can omit the guard.
+      // This case is about the ops feed, not the guard — allow it through.
+      authorize: async () => true,
     })
 
     expect(result).toBeInstanceOf(MismatchedCurrencyForWalletError)
@@ -204,12 +217,64 @@ describe("ops events — payInvoiceByWalletId", () => {
     )
   })
 
+  // ENG-573 round 2: the guard is threaded into withPaymentIdempotency as its
+  // `authorize` hook rather than awaited in the resolver ahead of it, so a
+  // replayed idempotency key never spends attempt budget nor gets re-priced.
+  it("returns the guard's rejection without validating, sending, or posting an ops event", async () => {
+    const rejection = new WithdrawalLimitsExceededError(
+      "Cannot transfer more than $125.00 in 24 hours",
+    )
+
+    const result = await payNoAmountInvoiceByWalletIdForBtcWallet({
+      uncheckedPaymentRequest: "lnbc1...",
+      amount: 2100,
+      memo: null,
+      senderWalletId,
+      senderAccount,
+      authorize: async () => rejection,
+    })
+
+    expect(result).toBe(rejection)
+    expect(validateIsBtcWallet).not.toHaveBeenCalled()
+    // The send never executed, so there is nothing for the feed to report.
+    expect(notifyOpsEvent).not.toHaveBeenCalled()
+  })
+
+  // Round 4: the same, on the amount-bearing rail. `payInvoiceByWalletId` wired
+  // `withPaymentIdempotency` with no `authorize` at all, so the hook the arg
+  // type now demands went nowhere — the rail `lnInvoicePaymentSend` is a
+  // `Todo: reintroduce` block away from calling again, at which point that
+  // resolver's inline guard is deleted and nothing replaces it. Rejecting here
+  // proves the hook is threaded, not merely accepted.
+  it("returns the guard's rejection from payInvoiceByWalletId without sending", async () => {
+    const rejection = new WithdrawalLimitsExceededError(
+      "Cannot transfer more than $125.00 in 24 hours",
+    )
+
+    const result = await payInvoiceByWalletId({
+      uncheckedPaymentRequest: "lnbc1...",
+      memo: null,
+      senderWalletId,
+      senderAccount,
+      authorize: async () => rejection,
+    })
+
+    expect(result).toBe(rejection)
+    // `executePayInvoiceByWalletId` resolves the sender wallet first thing; it
+    // never ran.
+    expect(mockFindWalletById).not.toHaveBeenCalled()
+    expect(notifyOpsEvent).not.toHaveBeenCalled()
+  })
+
   it("notifies a failed transfer event with the error name on error return", async () => {
     const result = await payInvoiceByWalletId({
       uncheckedPaymentRequest: "lnbc1...",
       memo: null,
       senderWalletId: invalidWalletId,
       senderAccount,
+      // ENG-573: required on the arg type so no send path can omit the guard.
+      // This case is about the ops feed, not the guard — allow it through.
+      authorize: async () => true,
     })
 
     expect(result).toBeInstanceOf(Error)

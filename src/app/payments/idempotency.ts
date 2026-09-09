@@ -36,7 +36,7 @@ type CachedPaymentSend = { fingerprint: string; result: PaymentSendStatus }
  *  - Completed result cached, same fingerprint → returns the stored result.
  *    `execute()` is never called, so no new IBEX invoice is minted, no second
  *    payment, and (because the ops-event notify lives inside `execute`) no duplicate
- *    ops event fires.
+ *    ops event fires. `authorize()` is not called either — see below.
  *  - Completed result cached, DIFFERENT fingerprint → returns `IdempotencyKeyReuseError`
  *    and does NOT execute. Replaying the original result here would silently drop the
  *    new payment while reporting the old one's success. This check runs on both the
@@ -53,6 +53,23 @@ type CachedPaymentSend = { fingerprint: string; result: PaymentSendStatus }
  * `ApplicationError` return (validation / transient failure) is left uncached so a
  * fresh attempt with the same key can retry. The lock still guards the concurrent
  * window regardless of caching.
+ *
+ * ENG-573: the `authorize` hook (the send guard) runs INSIDE the lock, after
+ * the in-lock cache re-check and immediately before `execute` — i.e. only on
+ * the path that is about to execute a new payment. It is REQUIRED: while it was
+ * optional, wiring a new rail through this wrapper and forgetting the guard
+ * compiled, passed its tests and shipped unguarded — and this fork keeps adding
+ * rails that pay IBEX directly from a resolver (ENG-533). A caller that must
+ * not be guarded says so with `SEND_GUARD_NOT_APPLICABLE`
+ * (@app/payments/send-guard-optout), which is greppable; silence is not. Running it in the
+ * resolver ahead of this wrapper (the original wiring) made every retry of a
+ * timed-out send spend attempt budget and re-check the amount cap, so a client
+ * retrying past the burst budget got "Too many payment attempts" instead of the
+ * cached success of a payment that had already moved money — and a sats send
+ * near the cap could flip to "Cannot transfer more than $X" on retry because
+ * the mid price had ticked. A replay must cost nothing and must not be
+ * re-judged. An `authorize` rejection is an ApplicationError, so like any other
+ * error it is returned uncached and the key stays retryable.
  *
  * Reuses existing primitives: `RedisCacheService` for the result store and
  * `LockService().lockPaymentIdempotencyKey` (a redlock `.using` lock that releases
@@ -72,19 +89,31 @@ export const withPaymentIdempotency = async ({
   idempotencyKey,
   senderWalletId,
   requestFingerprint,
+  authorize,
   execute,
 }: {
   idempotencyKey: string | null | undefined
   senderWalletId: WalletId
   requestFingerprint: string
+  // Runs only on the path that will actually execute a new payment; a rejection
+  // short-circuits without executing. Required — pass
+  // `SEND_GUARD_NOT_APPLICABLE` to opt a system credit out explicitly. See the
+  // ENG-573 note above.
+  authorize: SendGuardHook
   execute: () => Promise<PaymentSendResult>
 }): Promise<PaymentSendResult> => {
+  const authorizeThenExecute = async (): Promise<PaymentSendResult> => {
+    const authorized = await authorize()
+    if (authorized instanceof Error) return authorized
+    return execute()
+  }
+
   // No key supplied → unchanged behavior.
-  if (!idempotencyKey) return execute()
+  if (!idempotencyKey) return authorizeThenExecute()
 
   const trimmedKey = idempotencyKey.trim()
   // A blank / whitespace-only key is treated as "no key" (unchanged behavior).
-  if (trimmedKey.length === 0) return execute()
+  if (trimmedKey.length === 0) return authorizeThenExecute()
   if (trimmedKey.length > MAX_KEY_LENGTH) {
     return new InvalidIdempotencyKeyError(idempotencyKey)
   }
@@ -112,7 +141,7 @@ export const withPaymentIdempotency = async ({
       const cachedInLock = await cache.get<CachedPaymentSend>({ key: cacheKey })
       if (!(cachedInLock instanceof Error)) return resolveCached(cachedInLock)
 
-      const outcome = await execute()
+      const outcome = await authorizeThenExecute()
 
       // Persist only a definitive payment outcome. Errors stay uncached so a
       // fresh attempt with the same key can retry.

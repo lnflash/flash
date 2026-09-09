@@ -132,11 +132,18 @@ jest.mock("@app/payments/helpers", () => ({
 import { intraledgerPaymentSendWalletIdForUsdWallet } from "@app/payments/send-intraledger"
 import {
   IdempotencyKeyReuseError,
+  IntraledgerLimitsExceededError,
   MismatchedCurrencyForWalletError,
 } from "@domain/errors"
 import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
 import { addEventToCurrentSpan, recordExceptionInCurrentSpan } from "@services/tracing"
+
+// ENG-573: `authorize` is required on the arg type precisely so that no send
+// path can ship without the guard. These cases exercise the intraledger rail,
+// not the guard, so they hand it an explicit allow-through; the guard's own
+// behaviour lives in test/flash/unit/app/payments/authorize-send.spec.ts.
+const allowSend: SendGuardHook = async () => true
 
 const senderUsdWalletId = "11111111-1111-4111-8111-111111111111" as WalletId
 const senderUsdtWalletId = "22222222-2222-4222-8222-222222222222" as WalletId
@@ -214,6 +221,7 @@ describe("intraledgerPaymentSendWalletIdForUsdWallet", () => {
       recipientWalletId: recipientUsdWalletId,
       amount: 19446,
       memo: "USD intraledger",
+      authorize: allowSend,
     })
 
     expect(result).toEqual({ value: "success" })
@@ -251,6 +259,7 @@ describe("intraledgerPaymentSendWalletIdForUsdWallet", () => {
       recipientWalletId: recipientUsdtWalletId,
       amount: 19446,
       memo: "USDT intraledger",
+      authorize: allowSend,
     })
 
     expect(result).toEqual({ value: "success" })
@@ -288,6 +297,7 @@ describe("intraledgerPaymentSendWalletIdForUsdWallet", () => {
       recipientWalletId: recipientUsdtWalletId,
       amount: 100,
       memo: "mixed currency",
+      authorize: allowSend,
     })
 
     expect(result).toBeInstanceOf(MismatchedCurrencyForWalletError)
@@ -316,6 +326,7 @@ describe("intraledgerPaymentSendWalletIdForUsdWallet", () => {
       recipientWalletId: recipientUsdWalletId,
       amount: 100,
       memo: "mixed currency",
+      authorize: allowSend,
     })
 
     expect(result).toBeInstanceOf(MismatchedCurrencyForWalletError)
@@ -350,6 +361,7 @@ describe("intraledger IBEX status reading", () => {
     recipientWalletId: recipientUsdWalletId,
     amount: 100,
     memo: "status reading",
+    authorize: allowSend,
   }
 
   it("settles on a payment-level SUCCEEDED even when the top-level status is 0", async () => {
@@ -485,6 +497,7 @@ describe("intraledger send ops events", () => {
     recipientWalletId: recipientUsdWalletId,
     amount: 100,
     memo: "ops event test",
+    authorize: allowSend,
   }
 
   it("notifies a succeeded transfer event with display amount on success", async () => {
@@ -596,6 +609,7 @@ describe("intraledger idempotency (ENG-530)", () => {
     recipientWalletId: recipientUsdWalletId,
     amount: 14000,
     memo: "idempotency test",
+    authorize: allowSend,
   }
 
   beforeEach(() => {
@@ -704,6 +718,7 @@ describe("intraledger idempotency (ENG-530)", () => {
       amount: 100,
       memo: null,
       idempotencyKey: "shared",
+      authorize: allowSend,
     })
     await intraledgerPaymentSendWalletIdForUsdWallet({
       senderWalletId: senderUsdtWalletId,
@@ -711,10 +726,68 @@ describe("intraledger idempotency (ENG-530)", () => {
       amount: 100,
       memo: null,
       idempotencyKey: "shared",
+      authorize: allowSend,
     })
 
     // Different sender wallet => different scope => both execute.
     expect(mockAddInvoice).toHaveBeenCalledTimes(2)
+  })
+
+  // ENG-573 round 2. The guard used to be awaited in the resolver, AHEAD of
+  // this wrapper. A client whose $140 send timed out and retried therefore spent
+  // a burst point on every retry before ever reaching the replay: past 10/min it
+  // got `{status:"failed"}` + "Too many payment attempts" for a payment that had
+  // already settled, and a client that reads "failed" as "retry with a fresh
+  // key" then double-pays — the exact ENG-530 class this wrapper exists to
+  // prevent. Threaded through as `authorize`, the guard runs only on the path
+  // that actually pays.
+  it("does not re-run the guard on a replayed idempotency key", async () => {
+    const authorize = jest.fn().mockResolvedValue(true)
+
+    const first = await intraledgerPaymentSendWalletIdForUsdWallet({
+      ...sendArgs,
+      idempotencyKey: "guard-replay",
+      authorize,
+    })
+    const second = await intraledgerPaymentSendWalletIdForUsdWallet({
+      ...sendArgs,
+      idempotencyKey: "guard-replay",
+      authorize,
+    })
+
+    expect(first).toEqual({ value: "success" })
+    expect(second).toEqual({ value: "success" })
+    // One attempt-budget point spent, one amount check, one payment.
+    expect(authorize).toHaveBeenCalledTimes(1)
+    expect(mockPayInvoice).toHaveBeenCalledTimes(1)
+  })
+
+  it("returns the guard's rejection without sending, and leaves the key retryable", async () => {
+    const rejection = new IntraledgerLimitsExceededError(
+      "Cannot transfer more than $125.00 in 24 hours",
+    )
+    const authorize = jest.fn().mockResolvedValueOnce(rejection).mockResolvedValue(true)
+
+    const blocked = await intraledgerPaymentSendWalletIdForUsdWallet({
+      ...sendArgs,
+      idempotencyKey: "guard-reject",
+      authorize,
+    })
+
+    expect(blocked).toBe(rejection)
+    expect(mockAddInvoice).not.toHaveBeenCalled()
+    expect(mockPayInvoice).not.toHaveBeenCalled()
+
+    // An error return is never cached, so the same key still works once the
+    // guard allows the send.
+    const retried = await intraledgerPaymentSendWalletIdForUsdWallet({
+      ...sendArgs,
+      idempotencyKey: "guard-reject",
+      authorize,
+    })
+
+    expect(retried).toEqual({ value: "success" })
+    expect(mockPayInvoice).toHaveBeenCalledTimes(1)
   })
 
   it("rejects the same key reused for a different payment instead of replaying", async () => {

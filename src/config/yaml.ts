@@ -18,7 +18,7 @@ import { toDays, toSeconds } from "@domain/primitives"
 
 import { BigIntConversionError, JMDAmount, WalletCurrency } from "@domain/shared"
 
-import { AccountLevel } from "@domain/accounts"
+import { AccountLevel, effectiveAccountLevel } from "@domain/accounts"
 import { DAILY_INVITE_LIMIT, TARGET_INVITE_LIMIT } from "@domain/invite"
 
 import mergeWith from "lodash.mergewith"
@@ -179,10 +179,15 @@ export const getAccountLimits = ({
   level,
   accountLimits = yamlConfig.accountLimits,
 }: AccountLimitsArgs): IAccountLimits => {
+  // Resolve a missing level HERE rather than at one call site, so the send
+  // guard, `Account.limits` and `remainingLimit` all read the same numbers for
+  // the ~300 unleveled prod accounts. Indexing the level map with `undefined`
+  // yields NaN, which `Number.isFinite` then reports as "no limit configured".
+  const accountLevel = effectiveAccountLevel(level)
   return {
-    intraLedgerLimit: toCents(accountLimits.intraLedger.level[level]),
-    withdrawalLimit: toCents(accountLimits.withdrawal.level[level]),
-    tradeIntraAccountLimit: toCents(accountLimits.tradeIntraAccount.level[level]),
+    intraLedgerLimit: toCents(accountLimits.intraLedger.level[accountLevel]),
+    withdrawalLimit: toCents(accountLimits.withdrawal.level[accountLevel]),
+    tradeIntraAccountLimit: toCents(accountLimits.tradeIntraAccount.level[accountLevel]),
   }
 }
 
@@ -246,6 +251,31 @@ export const getFailedLoginAttemptPerIpLimits = () =>
 
 export const getInvoiceCreateAttemptLimits = () =>
   getRateLimits(yamlConfig.rateLimits.invoiceCreateAttempt)
+
+/**
+ * ENG-573 send guard operator switch.
+ *
+ * `off` skips the guard entirely, `log-only` runs every check and reports but
+ * always authorises, `enforce` rejects. Ships as `log-only` so the first
+ * Flash-side amount cap does not go straight to hard enforcement on 100% of
+ * sends; ops flips it to `enforce` once a day of `transfer / would-reject`
+ * events shows what real traffic it would have blocked.
+ *
+ * Anything unrecognised (a typo in a values file, a key from an older schema)
+ * degrades to `log-only`. The failure mode of this switch must be "the guard
+ * does not block", never "every send is refused".
+ */
+export const getSendGuardMode = (): SendGuardMode => {
+  const mode = yamlConfig.sendGuard?.mode
+  return mode === "off" || mode === "enforce" || mode === "log-only" ? mode : "log-only"
+}
+
+// ENG-573 send guard attempt budgets (see src/app/payments/authorize-send.ts).
+export const getPaymentSendAttemptLimits = () =>
+  getRateLimits(yamlConfig.rateLimits.paymentSendAttempt)
+
+export const getPaymentSendDailyAttemptLimits = () =>
+  getRateLimits(yamlConfig.rateLimits.paymentSendDailyAttempt)
 
 export const getInvoiceCreateForRecipientAttemptLimits = () =>
   getRateLimits(yamlConfig.rateLimits.invoiceCreateForRecipientAttempt)

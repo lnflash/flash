@@ -26,9 +26,14 @@ jest.mock("@services/tracing", () => ({
   recordExceptionInCurrentSpan: jest.fn(),
 }))
 
-jest.mock("dns", () => ({
-  promises: { lookup: jest.fn() },
-}))
+// Spread the real module rather than replacing it: ENG-573 put `authorizeSend`
+// in this resolver's import chain, which reaches the grpc price client, which
+// constructs `dns.promises.Resolver`. A bare `{ promises: { lookup } }` stub
+// drops it and the suite fails to load.
+jest.mock("dns", () => {
+  const actual = jest.requireActual("dns")
+  return { ...actual, promises: { ...actual.promises, lookup: jest.fn() } }
+})
 jest.mock("axios", () => ({
   __esModule: true,
   default: { get: jest.fn() },

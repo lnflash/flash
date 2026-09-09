@@ -55,8 +55,17 @@ const accountLimitConfigSchema = {
         0: { type: "integer" },
         1: { type: "integer" },
         2: { type: "integer" },
+        // ENG-573: Business (L3) accounts exist in prod; without a limit here
+        // getAccountLimits({ level: 3 }) is NaN and the send guard fails closed.
+        // `required` like its siblings: the block-level default below carries a
+        // level 3, but a deployment that overrides `accountLimits` PARTIALLY
+        // replaces that default wholesale, and Ajv fills nothing back in. Levels
+        // 0-2 fail loudly at boot in that case; without this entry level 3 would
+        // instead resolve to NaN and silently block every Business account's
+        // sends at runtime. Boot-time failure is the cheaper of the two.
+        3: { type: "integer" },
       },
-      required: ["0", "1", "2"],
+      required: ["0", "1", "2", "3"],
       additionalProperties: false,
     },
   },
@@ -365,6 +374,23 @@ export const configSchema = {
         invoiceCreateAttempt: rateLimitConfigSchema,
         invoiceCreateForRecipientAttempt: rateLimitConfigSchema,
         onChainAddressCreateAttempt: rateLimitConfigSchema,
+        // ENG-573 send guard: per-account budget on send *attempts*. Property-
+        // level defaults rather than `required` entries, because prod overrides
+        // the whole rateLimits block (deployments flash-values.tmpl.yaml) and a
+        // new required key there would fail config validation at boot.
+        paymentSendAttempt: {
+          ...rateLimitConfigSchema,
+          default: { points: 10, duration: 60, blockDuration: 60 },
+        },
+        // `blockDuration` MUST match `duration` here. rate-limiter-flexible
+        // rewrites the key's TTL to blockDuration on the first breach
+        // (RateLimiterStoreAbstract._afterConsume -> _block), so a shorter block
+        // throws the daily counter away early and grants a fresh 200 points: a
+        // 3600 block against an 86400 window is really 200/hour, ~4,800/day.
+        paymentSendDailyAttempt: {
+          ...rateLimitConfigSchema,
+          default: { points: 200, duration: 86400, blockDuration: 86400 },
+        },
       },
       required: [
         "requestCodePerLoginIdentifier",
@@ -502,13 +528,21 @@ export const configSchema = {
             "0": 12500,
             "1": 100000,
             "2": 5000000,
+            "3": 5000000, // ENG-573 placeholder: L3 inherits L2 until the ladder is decided
           },
         },
         intraLedger: {
           level: {
             "0": 12500,
-            "1": 200000,
+            // ENG-573 decision (2026-09-08, operator): level 1 is ONE limit,
+            // $1,000, not $1,000 external / $2,000 internal. Galoy shipped them
+            // split; that split was the only place the guard's rail-vs-
+            // destination approximation could change an outcome, and closing it
+            // downward is the conservative resolution. Every level now carries
+            // equal withdrawal and intraLedger limits.
+            "1": 100000,
             "2": 5000000,
+            "3": 5000000, // ENG-573 placeholder: L3 inherits L2 until the ladder is decided
           },
         },
         tradeIntraAccount: {
@@ -516,9 +550,42 @@ export const configSchema = {
             "0": 200000,
             "1": 5000000,
             "2": 20000000,
+            "3": 20000000, // ENG-573 placeholder: L3 inherits L2 until the ladder is decided
           },
         },
       },
+    },
+    // ENG-573 send guard (src/app/payments/authorize-send.ts). The guard is the
+    // first Flash-side amount cap that has ever rejected anything, so it ships
+    // with an operator switch rather than going straight to hard enforcement on
+    // 100% of sends:
+    //
+    //   off       — the guard returns immediately. No Redis, no price lookup, no
+    //               ops event. Sends behave exactly as they did before ENG-573.
+    //   log-only  — DEFAULT. All three checks run and every would-be rejection
+    //               posts a `transfer / would-reject` ops event, but the send is
+    //               authorised. Read a day of those before flipping to enforce:
+    //               nobody has yet measured what fraction of real traffic these
+    //               numbers reject, and the ~300 prod accounts with no `level`
+    //               field (174 with usernames) fall to the level-0 $125 cap.
+    //   enforce   — rejections are real.
+    //
+    // `mode` carries a property-level default AND the block carries one, so a
+    // partial yaml override can never leave it undefined (cf. accountLimits
+    // level 3 above). getSendGuardMode() coerces anything unrecognised back to
+    // log-only: a typo in a values file must not turn the guard into a
+    // fail-closed wall in front of every send.
+    sendGuard: {
+      type: "object",
+      properties: {
+        mode: {
+          type: "string",
+          enum: ["off", "log-only", "enforce"],
+          default: "log-only",
+        },
+      },
+      additionalProperties: false,
+      default: { mode: "log-only" },
     },
     spamLimits: {
       type: "object",

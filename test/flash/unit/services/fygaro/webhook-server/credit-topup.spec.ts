@@ -25,6 +25,8 @@ const mockFindByRole = jest.fn()
 const mockListByAccountId = jest.fn()
 const mockIntraledgerSend = jest.fn()
 
+import { SEND_GUARD_NOT_APPLICABLE } from "@app/payments/send-guard-optout"
+
 import {
   creditFygaroTopup,
   FygaroCreditError,
@@ -76,6 +78,11 @@ describe("creditFygaroTopup", () => {
       amount: 1000,
       memo: `Card top-up (Fygaro ${TX_ID})`,
       idempotencyKey: `fygaro:${TX_ID}`,
+      // ENG-573: a top-up credit is a system credit out of the treasury float,
+      // not a user-initiated send. It opts out of the send guard BY NAME —
+      // `authorize` is required on the arg type, so the opt-out is a visible
+      // decision here rather than a field somebody forgot.
+      authorize: SEND_GUARD_NOT_APPLICABLE,
     })
     expect(result).toEqual({ walletId: "r-usdt", status: "success" })
   })

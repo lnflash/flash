@@ -1,4 +1,5 @@
 import { Payments } from "@app"
+import { authorizeSend } from "@app/payments/authorize-send"
 import {
   resolveCashWalletMutationWalletIdForAccount,
   resolveCashWalletRecipientMutationWalletId,
@@ -124,6 +125,11 @@ const IntraLedgerUsdPaymentSendMutation = GT.Field<null, GraphQLPublicContextAut
       }
     }
 
+    // ENG-573 send guard (attempt budget + amount sanity + daily-limit cap) is
+    // handed DOWN as the idempotency wrapper's `authorize` hook rather than
+    // awaited here: running it ahead of the wrapper made every retry of a
+    // timed-out send spend burst budget, so a client past 10/min got "Too many
+    // payment attempts" for a payment that had already settled.
     const status = await Payments.intraledgerPaymentSendWalletIdForUsdWallet({
       recipientWalletId: routedRecipientWalletId,
       memo,
@@ -131,6 +137,13 @@ const IntraLedgerUsdPaymentSendMutation = GT.Field<null, GraphQLPublicContextAut
       senderWalletId: routedSenderWalletId,
       senderAccount: domainAccount,
       idempotencyKey,
+      authorize: () =>
+        authorizeSend({
+          senderAccount: domainAccount,
+          senderWalletId: routedSenderWalletId,
+          amount: { currency: "USD", cents: amount },
+          kind: "intraledger",
+        }),
     })
     if (status instanceof Error) {
       return { status: "failed", errors: [mapAndParseErrorForGqlResponse(status)] }

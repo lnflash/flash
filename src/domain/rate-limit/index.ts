@@ -9,6 +9,8 @@ import {
   getInvoiceCreateAttemptLimits,
   getInvoiceCreateForRecipientAttemptLimits,
   getOnChainAddressCreateAttemptLimits,
+  getPaymentSendAttemptLimits,
+  getPaymentSendDailyAttemptLimits,
   getRequestCodeBlockedCountryPerIpLimits,
   getRequestCodePerIpLimits,
   getRequestCodePerLoginIdentifierLimits,
@@ -23,6 +25,7 @@ import {
   InvoiceCreateForRecipientRateLimiterExceededError,
   InvoiceCreateRateLimiterExceededError,
   OnChainAddressCreateRateLimiterExceededError,
+  PaymentSendRateLimiterExceededError,
   UserLoginIpRateLimiterExceededError,
   UserLoginIdentifierRateLimiterExceededError,
   UserCodeAttemptIpRateLimiterExceededError,
@@ -44,6 +47,8 @@ export const RateLimitPrefix = {
   fygaroCheckoutCreate: "fygaro_checkout_create",
   consentLog: "consent_log_ip",
   fygaroTopupAllowance: "fygaro_topup_allowance",
+  paymentSend: "payment_send",
+  paymentSendDaily: "payment_send_daily",
 } as const
 
 export const RateLimitConfig: { [key: string]: RateLimitConfig } = {
@@ -117,6 +122,19 @@ export const RateLimitConfig: { [key: string]: RateLimitConfig } = {
     key: RateLimitPrefix.fygaroTopupAllowance,
     limits: getFygaroTopupAllowanceAttemptLimits(),
     error: FygaroTopupAllowanceRateLimiterExceededError,
+  },
+  // ENG-573 send guard: two buckets on the same per-account key — a burst
+  // bucket and a daily bucket. Both count *attempts*, rejected ones included,
+  // so probing the amount space is bounded by the caller's own budget.
+  paymentSend: {
+    key: RateLimitPrefix.paymentSend,
+    limits: getPaymentSendAttemptLimits(),
+    error: PaymentSendRateLimiterExceededError,
+  },
+  paymentSendDaily: {
+    key: RateLimitPrefix.paymentSendDaily,
+    limits: getPaymentSendDailyAttemptLimits(),
+    error: PaymentSendRateLimiterExceededError,
   },
   // Public, unauthenticated write endpoint (consent evidence from the
   // getflash.io/invite page). Per-IP: one legitimate submission per accept

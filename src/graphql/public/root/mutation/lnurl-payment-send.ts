@@ -1,4 +1,5 @@
 import { withPaymentIdempotency } from "@app/payments/idempotency"
+import { authorizeSend } from "@app/payments/authorize-send"
 import dedent from "dedent"
 
 import { resolveCashWalletMutationWalletIdForAccount } from "@app/cash-wallet-cutover"
@@ -156,10 +157,21 @@ const LnurlPaymentSendMutation = GT.Field<
     // different payment because the price ticked. Failure branches return
     // ApplicationErrors, which the wrapper never caches, so first-attempt
     // failures stay retryable.
+    //
+    // ENG-573 send guard (attempt budget + amount sanity + daily-limit cap) is
+    // the wrapper's `authorize` hook rather than a call ahead of it, so a
+    // replayed key returns the cached result without spending attempt budget.
     const outcome = await withPaymentIdempotency({
       idempotencyKey,
       senderWalletId: routedWalletId,
       requestFingerprint: `lnurl|${lnurl}|${amount}`,
+      authorize: () =>
+        authorizeSend({
+          senderAccount: domainAccount,
+          senderWalletId: routedWalletId,
+          amount: { currency: "USD", cents: amount },
+          kind: "lnurl",
+        }),
       execute: async () => {
         const decoded = await Ibex.decodeLnurl({ lnurl })
         if (decoded instanceof IbexError) return decoded

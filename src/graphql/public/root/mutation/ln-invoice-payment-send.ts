@@ -8,11 +8,18 @@ import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import dedent from "dedent"
 
 // FLASH FORK: import ibex dependencies
-import { PaymentSendStatus } from "@domain/bitcoin/lightning"
+import { PaymentSendStatus, decodeInvoice } from "@domain/bitcoin/lightning"
+import { LnPaymentRequestNonZeroAmountRequiredError } from "@domain/payments/errors"
 import Ibex from "@services/ibex/client"
 import { IbexError, InsufficientIbexBalance } from "@services/ibex/errors"
 import { paymentSendStatusOrPending } from "@services/ibex/payment-status"
 import { withPaymentIdempotency } from "@app/payments/idempotency"
+import {
+  authorizeSend,
+  gateSend,
+  SendRejectionReasons,
+} from "@app/payments/authorize-send"
+import { getSendGuardMode } from "@config"
 
 const LnInvoicePaymentInput = GT.Input({
   name: "LnInvoicePaymentInput",
@@ -79,6 +86,11 @@ const LnInvoicePaymentSendMutation = GT.Field<
      *   uncheckedPaymentRequest: paymentRequest,
      *   memo: memo ?? null,
      *   senderAccount: domainAccount,
+     *   idempotencyKey,
+     *   // ENG-573: required by PayInvoiceByWalletIdArgs — hand it the same
+     *   // hook the inline path below builds (decode gate + authorizeSend), or
+     *   // re-enabling this drops the guard this rail has today.
+     *   authorize,
      */
 
     if (!domainAccount) throw new Error("Authentication required")
@@ -86,10 +98,56 @@ const LnInvoicePaymentSendMutation = GT.Field<
     // ENG-530: dedupe on (senderWalletId, idempotencyKey) when a key is supplied.
     // This resolver pays IBEX directly (the app-layer path is stubbed above), so the
     // idempotency wrapper goes around the inline call here rather than in @app.
+    //
+    // ENG-573: the guard is the wrapper's `authorize` hook, not a call ahead of
+    // it, so a replayed key returns the cached result without spending attempt
+    // budget or being re-judged against a moved mid price.
     const status = await withPaymentIdempotency({
       idempotencyKey,
       senderWalletId: walletId,
       requestFingerprint: `ln|${paymentRequest}`,
+      authorize: async () => {
+        // The bolt11 decode is PART of the guard, not a precondition of it: the
+        // guard needs the amount and the amount is inside the invoice. It
+        // therefore answers to the same switch — including in `log-only`, where
+        // it must NOT block. `decodeInvoice` refuses any request
+        // `invoices.parsePaymentRequest` cannot parse and any invoice with no
+        // payment secret — a rejection class this rail never had, since it used
+        // to hand the raw bolt11 straight to IBEX. Returning that error in
+        // log-only would have made this the one rail that enforces while the
+        // docs and the PR say nothing is being enforced, and the week-long
+        // would-reject sample would contain no trace of the invoices it turned
+        // away. `gateSend` posts the ops event and then defers to the mode, so
+        // in log-only the raw bolt11 reaches IBEX exactly as it did before.
+        //
+        // `gateSend` also charges the attempt budget, so a client looping on an
+        // invoice this gate refuses is bounded exactly as one looping on an
+        // over-limit amount is. Exactly one charge per request: an invoice that
+        // gets past the gate is charged by `authorizeSend` instead.
+        if (getSendGuardMode() === "off") return true
+
+        const gate = (error: ApplicationError) =>
+          gateSend({
+            error,
+            reason: SendRejectionReasons.undecodableInvoice,
+            senderAccount: domainAccount,
+            senderWalletId: walletId,
+            kind: "lightning",
+          })
+
+        const decodedInvoice = decodeInvoice(paymentRequest)
+        if (decodedInvoice instanceof Error) return gate(decodedInvoice)
+        if (decodedInvoice.paymentAmount === null) {
+          return gate(new LnPaymentRequestNonZeroAmountRequiredError())
+        }
+
+        return authorizeSend({
+          senderAccount: domainAccount,
+          senderWalletId: walletId,
+          amount: { currency: "BTC", sats: decodedInvoice.paymentAmount.amount },
+          kind: "lightning",
+        })
+      },
       execute: async (): Promise<PaymentSendStatus | ApplicationError> => {
         const PayLightningInvoice = await Ibex.payInvoice({
           invoice: paymentRequest as Bolt11,

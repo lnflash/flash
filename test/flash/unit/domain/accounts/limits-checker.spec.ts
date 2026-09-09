@@ -106,3 +106,73 @@ describe("LimitsChecker", () => {
     expect(withdrawalLimitCheck).toBeInstanceOf(LimitsExceededError)
   })
 })
+
+// ENG-573 moved "an account with no `level` is level 0" into
+// `getAccountLimits`, the config layer — so THIS checker, which is Galoy's and
+// predates the send guard, reads it too (`@app/payments/helpers` passes
+// `account.level` straight through). Its only inputs are the limits and a price
+// ratio: there is no `sendGuard.mode` parameter and no way for it to consult
+// one, which is precisely why `sendGuard.mode: off` cannot lift the cap it
+// applies here. docs/send-guard.md ("What `off` does not cover") is the runbook
+// half of this; these cases are the executable half.
+describe("LimitsChecker — an account with no level (ENG-573)", () => {
+  const unleveledLimits = getAccountLimits({ level: undefined })
+  const noVolume = [
+    { outgoingBaseAmount: ZERO_CENTS, incomingBaseAmount: ZERO_CENTS },
+  ] as TxBaseVolumeAmount<WalletCurrency>[]
+  const twoHundredDollars: UsdPaymentAmount = {
+    amount: 20_000n,
+    currency: WalletCurrency.Usd,
+  }
+
+  const checkerForUnleveledAccount = () =>
+    AccountLimitsChecker({ accountLimits: unleveledLimits, priceRatio })
+
+  it("is handed the level-0 caps, not NaN", () => {
+    expect(unleveledLimits).toEqual(getAccountLimits({ level: 0 as AccountLevel }))
+    expect(unleveledLimits.withdrawalLimit).toBe(12500)
+    expect(unleveledLimits.intraLedgerLimit).toBe(12500)
+  })
+
+  // Zero volume, because Flash has no internal ledger — so the amount alone is
+  // what refuses this, and the message the caller sees is Galoy's, not the
+  // guard's. This is the string the runbook quotes.
+  it("refuses a $200 withdrawal on the amount alone, with the level-0 message", async () => {
+    const check = await checkerForUnleveledAccount().checkWithdrawal({
+      amount: twoHundredDollars,
+      walletVolumes: noVolume,
+    })
+
+    expect(check).toBeInstanceOf(LimitsExceededError)
+    expect((check as LimitsExceededError).message).toBe(
+      "Cannot transfer more than $125.00 in 24 hours",
+    )
+  })
+
+  it("refuses the same amount intraledger", async () => {
+    const check = await checkerForUnleveledAccount().checkIntraledger({
+      amount: twoHundredDollars,
+      walletVolumes: noVolume,
+    })
+
+    expect(check).toBeInstanceOf(LimitsExceededError)
+    expect((check as LimitsExceededError).message).toBe(
+      "Cannot transfer more than $125.00 in 24 hours",
+    )
+  })
+
+  // Pre-ENG-573 this cohort indexed the level map with `undefined`, got NaN
+  // limits, and `paymentAmountFromNumber(NaN)` returned a BigIntConversionError
+  // out of `checkLimit` — the send failed with a type error rather than a limit.
+  // Under the cap the send now goes through, which is the improvement; above it
+  // the refusal is a real limit message.
+  it("lets a send under the level-0 cap through, where NaN limits used to error", async () => {
+    const atTheCap: UsdPaymentAmount = { amount: 12_500n, currency: WalletCurrency.Usd }
+    const check = await checkerForUnleveledAccount().checkWithdrawal({
+      amount: atTheCap,
+      walletVolumes: noVolume,
+    })
+
+    expect(check).not.toBeInstanceOf(Error)
+  })
+})

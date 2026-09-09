@@ -1,3 +1,13 @@
+const mockAuthorizeSend = jest.fn()
+jest.mock("@app/payments/authorize-send", () => ({
+  // ENG-573 send guard. Default-allow so the existing cases exercise the
+  // resolver body; the wiring cases below flip it to a rejection.
+  authorizeSend: async (args: unknown) => {
+    const result = await mockAuthorizeSend(args)
+    return result === undefined ? true : result
+  },
+}))
+
 const mockIntraledgerPaymentSendWalletIdForBtcWallet = jest.fn()
 const mockGetUsernameFromWalletId = jest.fn()
 const mockResolveCashWalletRecipientMutationWalletId = jest.fn()
@@ -26,7 +36,10 @@ jest.mock("@app/cash-wallet-cutover", () => ({
   ) => mockResolveCashWalletRecipientMutationWalletId(...args),
 }))
 
-import { MismatchedCurrencyForWalletError } from "@domain/errors"
+import {
+  MismatchedCurrencyForWalletError,
+  IntraledgerLimitsExceededError,
+} from "@domain/errors"
 import IntraLedgerPaymentSendMutation from "@graphql/public/root/mutation/intraledger-payment-send"
 
 const senderWalletId = "11111111-1111-4111-8111-111111111111" as WalletId
@@ -81,6 +94,8 @@ describe("IntraLedgerPaymentSendMutation", () => {
       senderWalletId,
       senderAccount: domainAccount,
       idempotencyKey: "idem-1",
+      // ENG-573: the guard travels down as the idempotency wrapper's hook.
+      authorize: expect.any(Function),
     })
     expect(result).toEqual({ errors: [], status: "success" })
     expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
@@ -110,5 +125,83 @@ describe("IntraLedgerPaymentSendMutation", () => {
         meta: expect.objectContaining({ reason: "recipient-routing" }),
       }),
     )
+  })
+})
+
+describe("ENG-573 send guard wiring", () => {
+  const input = {
+    walletId: senderWalletId,
+    recipientWalletId,
+    amount,
+    memo: null,
+    idempotencyKey: null,
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockGetUsernameFromWalletId.mockResolvedValue("recipient" as Username)
+    mockResolveCashWalletRecipientMutationWalletId.mockResolvedValue(
+      routedRecipientWalletId,
+    )
+    // Mirror the real send function's contract: it hands `authorize` to
+    // withPaymentIdempotency, which runs it only on the path that will pay and
+    // short-circuits on a rejection.
+    mockIntraledgerPaymentSendWalletIdForBtcWallet.mockImplementation(
+      async ({ authorize }: { authorize?: () => Promise<unknown> }) => {
+        const authorized = await authorize?.()
+        return authorized instanceof Error ? authorized : { value: "success" }
+      },
+    )
+  })
+
+  // ENG-573 round 2: the guard must NOT be awaited in the resolver ahead of
+  // Payments.*, because withPaymentIdempotency lives inside that call. Ahead of
+  // it, every retry of a timed-out send burned a burst point before reaching the
+  // replay, so a client past 10/min got `{status:"failed"}` + "Too many payment
+  // attempts" for a payment that had already settled — and a sats send near the
+  // cap could flip to "Cannot transfer more than $X" on a mid-price tick. Both
+  // are the ENG-530 double-pay class this rail's wrapper exists to prevent.
+  it("hands the guard down to the send function instead of running it first", async () => {
+    await resolve(input)
+
+    expect(mockIntraledgerPaymentSendWalletIdForBtcWallet).toHaveBeenCalledTimes(1)
+    const { authorize } = mockIntraledgerPaymentSendWalletIdForBtcWallet.mock.calls[0][0]
+    expect(typeof authorize).toBe("function")
+
+    // ...and it authorises the sats amount as an intraledger send when invoked.
+    expect(mockAuthorizeSend).toHaveBeenCalledTimes(1)
+    expect(mockAuthorizeSend).toHaveBeenCalledWith({
+      senderAccount: domainAccount,
+      senderWalletId,
+      amount: { currency: "BTC", sats: amount },
+      kind: "intraledger",
+    })
+  })
+
+  it("does not consult the guard when the wrapper never runs the hook (a replay)", async () => {
+    // A cached replay returns the stored result without calling authorize.
+    mockIntraledgerPaymentSendWalletIdForBtcWallet.mockResolvedValueOnce({
+      value: "success",
+    })
+
+    const result = await resolve(input)
+
+    expect(result).toEqual({ errors: [], status: "success" })
+    expect(mockAuthorizeSend).not.toHaveBeenCalled()
+  })
+
+  it("returns a failed payload carrying the guard's error when the hook rejects", async () => {
+    const rejection = new IntraledgerLimitsExceededError(
+      "Cannot transfer more than $125.00 in 24 hours",
+    )
+    mockAuthorizeSend.mockResolvedValueOnce(rejection)
+
+    const result = (await resolve(input)) as {
+      status?: string
+      errors: { message: string }[]
+    }
+
+    expect(result.status).toBe("failed")
+    expect(result.errors[0]).toMatchObject({ message: rejection.message })
   })
 })
