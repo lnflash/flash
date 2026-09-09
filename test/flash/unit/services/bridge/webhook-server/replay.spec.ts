@@ -4,7 +4,8 @@
 jest.mock("@config", () => ({
   ...jest.requireActual("@config"),
   BridgeConfig: {
-    webhook: { replaySecret: "super-secret-replay-token-xyz" },
+    // >= 32 chars: the weak-secret guard refuses short secrets outright.
+    webhook: { replaySecret: "super-secret-replay-token-xyz-abcdefghij" },
   },
 }))
 
@@ -35,7 +36,10 @@ import {
   replayAuthMiddleware,
   replayHandler,
   replayIngressMiddleware,
+  warnIfReplaySecretWeak,
 } from "@services/bridge/webhook-server/routes/replay"
+import { baseLogger } from "@services/logger"
+import { MIN_SECRET_LENGTH } from "@utils/weak-secrets"
 import * as ReplayLog from "@services/mongoose/bridge-replay-log"
 import { depositHandler } from "@services/bridge/webhook-server/routes/deposit"
 import { kycHandler } from "@services/bridge/webhook-server/routes/kyc"
@@ -167,10 +171,17 @@ describe("replayAuthMiddleware", () => {
     BridgeConfig.webhook.replaySecret = saved
   })
 
-  it("returns 503 when replaySecret is a known placeholder", () => {
+  // Not a denylist test: WEAK_REPLAY_SECRETS was deleted in this PR because
+  // every placeholder it listed was already refused by the length floor, which
+  // made the set unreachable. "also-not-so-secret" is refused here for that
+  // reason and no other, and the assertion below pins it — naming this
+  // "a known placeholder" would re-create the same false claim of denylist
+  // coverage that weak-secrets.spec.ts guards against one directory over.
+  it("returns 503 when replaySecret is under the length floor", () => {
     const { BridgeConfig } = jest.requireMock("@config")
     const saved = BridgeConfig.webhook.replaySecret
     BridgeConfig.webhook.replaySecret = "also-not-so-secret"
+    expect("also-not-so-secret".length).toBeLessThan(MIN_SECRET_LENGTH)
 
     const res = makeRes()
     const next = jest.fn()
@@ -208,7 +219,7 @@ describe("replayAuthMiddleware", () => {
     const res = makeRes()
     const next = jest.fn()
     replayAuthMiddleware(
-      makeReq({}, { authorization: "Bearer super-secret-replay-token-xyz" }),
+      makeReq({}, { authorization: "Bearer super-secret-replay-token-xyz-abcdefghij" }),
       res,
       next,
     )
@@ -222,13 +233,69 @@ describe("replayAuthMiddleware", () => {
     const next = jest.fn()
     // A prefix of the real secret — same content up to length, but different length
     replayAuthMiddleware(
-      makeReq({}, { authorization: "Bearer super-secret-replay-token-xy" }),
+      makeReq({}, { authorization: "Bearer super-secret-replay-token-xyz-abcdefghi" }),
       res,
       next,
     )
 
     expect(res.status as jest.Mock).toHaveBeenCalledWith(401)
     expect(next).not.toHaveBeenCalled()
+  })
+})
+
+// ── warnIfReplaySecretWeak ────────────────────────────────────────────────────
+
+// The boot warning used to fire only when the secret was UNSET, while the
+// middleware 503s on anything isWeakSecret() rejects. A placeholder or a secret
+// under the length floor therefore booted clean and only surfaced as a 503 on
+// the first replay attempt — i.e. mid-incident, which is the only time anyone
+// calls /internal/replay.
+describe("warnIfReplaySecretWeak", () => {
+  const { BridgeConfig } = jest.requireMock("@config")
+  const savedConfigSecret = BridgeConfig.webhook.replaySecret
+  const savedEnvSecret = process.env.BRIDGE_WEBHOOK_REPLAY_SECRET
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    delete process.env.BRIDGE_WEBHOOK_REPLAY_SECRET
+  })
+
+  afterEach(() => {
+    BridgeConfig.webhook.replaySecret = savedConfigSecret
+    if (savedEnvSecret === undefined) delete process.env.BRIDGE_WEBHOOK_REPLAY_SECRET
+    else process.env.BRIDGE_WEBHOOK_REPLAY_SECRET = savedEnvSecret
+  })
+
+  const warn = () => baseLogger.warn as unknown as jest.Mock
+
+  it.each([
+    ["unset", undefined],
+    ["a known-public placeholder", "not-so-secret"],
+    ["shorter than the length floor", "a".repeat(MIN_SECRET_LENGTH - 1)],
+  ])("warns at boot when the replay secret is %s", (_label, secret) => {
+    BridgeConfig.webhook.replaySecret = secret
+
+    warnIfReplaySecretWeak()
+
+    expect(warn()).toHaveBeenCalledTimes(1)
+    expect(String(warn().mock.calls[0][0])).toMatch(/503/)
+  })
+
+  it("says nothing for a usable secret", () => {
+    BridgeConfig.webhook.replaySecret = "a".repeat(MIN_SECRET_LENGTH)
+
+    warnIfReplaySecretWeak()
+
+    expect(warn()).not.toHaveBeenCalled()
+  })
+
+  it("reads the env override the middleware reads", () => {
+    BridgeConfig.webhook.replaySecret = undefined
+    process.env.BRIDGE_WEBHOOK_REPLAY_SECRET = "a".repeat(MIN_SECRET_LENGTH)
+
+    warnIfReplaySecretWeak()
+
+    expect(warn()).not.toHaveBeenCalled()
   })
 })
 

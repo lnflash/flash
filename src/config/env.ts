@@ -1,6 +1,8 @@
 import { createEnv } from "@t3-oss/env-core"
 import { ZodError, z } from "zod"
 
+import { MIN_SECRET_LENGTH } from "@utils/weak-secrets"
+
 // "false" / "0" / "no" / "off" read as false. (z.coerce.boolean() would turn
 // the string "false" into true, which makes a default-on flag impossible to
 // turn off from the environment.)
@@ -154,7 +156,36 @@ export const env = createEnv({
     SVIX_SECRET: z.string().optional(),
     SVIX_ENDPOINT: z.union([z.string().url().nullish(), z.literal("")]), // optional url
 
-    ERPNEXT_JWT_SECRET: z.string().min(1).optional(),
+    // The admin API's only auth. The length floor is enforced HERE as well as
+    // in the boot guard (assertStrongSecret) so a short value fails at config
+    // load — a legible "Invalid environment variables: ERPNEXT_JWT_SECRET"
+    // before any port is bound — rather than as a WeakSecretError surfacing
+    // from one of the two server starts the api process races (see
+    // @servers/boot). Optional stays, and is safe to keep, because unset is
+    // handled where it belongs: `startAdminSchemaIfConfigured` skips mounting
+    // the admin schema in the api process when the secret is absent, so an env
+    // with no ERP integration loses the admin API rather than the public one.
+    // Only a value that IS set and too short is refused here.
+    // `refine` on the trimmed length, not `.min()`: isWeakSecret trims before
+    // measuring, so a value whose raw length is 32 but trims to 31 (a k8s
+    // --from-file trailing newline, a padded yaml value) would pass config load
+    // and then throw WeakSecretError mid-boot — the failure this floor exists to
+    // convert into a legible config error. Not `.trim()`, so the string handed to
+    // jwt.verify is byte-for-byte what the operator configured.
+    // The empty/blank exemption is what keeps this floor in step with
+    // `isUnsetSecret` (@utils/weak-secrets), which the servers use to tell
+    // "never configured" from "configured badly": a chart or compose file that
+    // renders ERPNEXT_JWT_SECRET as "" for a namespace with no ERP integration
+    // must reach `startAdminSchemaIfConfigured` and take the skip path, not put
+    // the whole payments API in CrashLoopBackOff at config load. It still fails
+    // hard where the secret is mandatory — the dedicated admin entrypoint calls
+    // assertStrongSecret, and isWeakSecret counts blank as weak.
+    ERPNEXT_JWT_SECRET: z
+      .string()
+      .refine((v) => v.trim() === "" || v.trim().length >= MIN_SECRET_LENGTH, {
+        message: `must be at least ${MIN_SECRET_LENGTH} characters`,
+      })
+      .optional(),
     NOSTR_PRIVATE_KEY: z.string().min(63).optional(),
 
     // DigitalOcean Spaces

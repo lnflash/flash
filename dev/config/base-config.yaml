@@ -10,7 +10,14 @@ ibex:
   webhook:
     uri: "" # external uri defined in overrides
     port: 4008
-    secret: "not-so-secret"
+    secret: "7189c07e9a60977492c9471a527b0d9040c1fa3c5b7bfd7e87e58db018160ddb" # dev-only; deployed envs override; placeholders are refused at request time
+    # Rotation window. IBEX binds the secret PER OBJECT at creation time, and a
+    # wallet's lnurlp and its on-chain deposit addresses outlive any rotation —
+    # they keep delivering with the value they were registered with. Put the
+    # OUTGOING secret here when rotating `secret` above, and remove it only once
+    # pre-rotation objects are re-registered; otherwise those deliveries 401 and
+    # settled payments stop crediting balances.
+    previousSecrets: []
     # Ibex's published source IPs / CIDRs for webhook delivery. Populate in
     # production overrides to enforce the allowlist; empty disables it (ISL-112).
     allowedIps: []

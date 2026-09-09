@@ -6,6 +6,7 @@ import ipaddr from "ipaddr.js"
 import { BridgeConfig } from "@config"
 
 import { baseLogger } from "@services/logger"
+import { isWeakSecret, MIN_SECRET_LENGTH } from "@utils/weak-secrets"
 
 import { createBridgeReplay } from "@services/mongoose/bridge-replay-log"
 
@@ -28,7 +29,6 @@ const HANDLERS: Record<RouteKey, (req: Request, res: Response) => Promise<Respon
   external_account: externalAccountHandler,
 }
 
-const WEAK_REPLAY_SECRETS = new Set(["also-not-so-secret", "change-me", "<replace>"])
 const REPLAY_ALLOWED_IPS_ENV = "BRIDGE_WEBHOOK_REPLAY_ALLOWED_IPS"
 
 const DEPOSIT_EVENT_TYPES = new Set([
@@ -193,18 +193,38 @@ const toHandlerBody = ({
   }
 }
 
-export const replayAuthMiddleware = (req: Request, res: Response, next: () => void) => {
-  const secret = (
+// One resolution of the replay secret for both the request-time check below
+// and the boot warning above it, so the two can never disagree about what
+// "configured" means.
+export const resolveReplaySecret = (): string =>
+  (
     process.env.BRIDGE_WEBHOOK_REPLAY_SECRET ||
     BridgeConfig.webhook.replaySecret ||
     ""
   ).trim()
-  if (!secret) {
-    baseLogger.warn("Replay secret not configured, rejecting replay request")
-    return res.status(503).json({ error: "Replay secret not configured" })
-  }
-  if (WEAK_REPLAY_SECRETS.has(secret)) {
-    baseLogger.warn("Weak replay secret configured, rejecting replay request")
+
+// Boot-time notice, called from the webhook server's start. Without it the
+// only signal that /internal/replay is dead is a 503 on the first replay
+// attempt — which is exactly when an operator is mid-incident. It checks the
+// same predicate the middleware enforces (isWeakSecret), not just "is it
+// unset": a placeholder or a secret under the length floor 503s identically
+// and used to boot silently.
+export const warnIfReplaySecretWeak = (): void => {
+  if (!isWeakSecret(resolveReplaySecret())) return
+  baseLogger.warn(
+    `Replay secret unusable (BRIDGE_WEBHOOK_REPLAY_SECRET / ` +
+      `BridgeConfig.webhook.replaySecret is unset, shorter than ` +
+      `${MIN_SECRET_LENGTH} chars, or a known-public placeholder) — ` +
+      `/internal/replay will reject all requests with 503`,
+  )
+}
+
+export const replayAuthMiddleware = (req: Request, res: Response, next: () => void) => {
+  const secret = resolveReplaySecret()
+  if (isWeakSecret(secret)) {
+    baseLogger.warn(
+      "Replay secret missing or a known placeholder, rejecting replay request",
+    )
     return res.status(503).json({ error: "Replay secret not configured" })
   }
 

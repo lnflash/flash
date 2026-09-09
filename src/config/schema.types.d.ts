@@ -19,7 +19,12 @@ type AccountLimitsConfig = {
 type WebhookServer = {
   uri: string
   port: number
+  // Registered with IBEX on every new webhook-bearing object.
   secret: string
+  // Accepted-but-not-registered values, for the window in which pre-rotation
+  // objects (a wallet's lnurlp, a handed-out on-chain address) are still
+  // delivering with the secret they were created with.
+  previousSecrets?: string[]
   allowedIps?: string[]
 }
 

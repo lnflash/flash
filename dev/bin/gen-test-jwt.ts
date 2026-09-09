@@ -19,8 +19,10 @@ const jwk = jwks.keys[0]
 const keystore = jose.JWK.createKeyStore()
 const isDev = true
 
-// Admin JWT configuration
-const ADMIN_JWT_SECRET = process.env.ERPNEXT_JWT_SECRET || "not-so-secret"
+// Admin JWT configuration. No fallback: signing with a publicly known default
+// produces tokens any deployment that forgot to override would accept. Source
+// .env (or export ERPNEXT_JWT_SECRET) before running with --admin.
+const ADMIN_JWT_SECRET = process.env.ERPNEXT_JWT_SECRET
 
 async function main() {
   // Check if --admin flag is passed
@@ -60,6 +62,10 @@ async function main() {
 }
 
 function genAdminToken(): string {
+  if (!ADMIN_JWT_SECRET) {
+    console.error("ERPNEXT_JWT_SECRET is not set — source .env first (`. ./.env`).")
+    process.exit(1)
+  }
   // Create admin JWT payload with required fields
   const payload = {
     userId: "admin-test-user",

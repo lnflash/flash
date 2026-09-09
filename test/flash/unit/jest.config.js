@@ -17,6 +17,7 @@ module.exports = {
     "^@config$": ["<rootDir>src/config/index"],
     "^@app$": ["<rootDir>src/app/index"],
     "^@utils$": ["<rootDir>src/utils/index"],
+    "^@utils/(.*)$": ["<rootDir>src/utils/$1"],
 
     "^@core/(.*)$": ["<rootDir>src/core/$1"],
     "^@app/(.*)$": ["<rootDir>src/app/$1"],
