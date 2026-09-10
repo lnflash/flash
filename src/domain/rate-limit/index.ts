@@ -3,6 +3,7 @@ import {
   getFailedLoginAttemptPerIpLimits,
   getFailedLoginAttemptPerLoginIdentifierLimits,
   getFygaroCheckoutCreateAttemptLimits,
+  getGiftCardPurchaseAttemptLimits,
   getFygaroTopupAllowanceAttemptLimits,
   getInviteCreateAttemptLimits,
   getInviteTargetAttemptLimits,
@@ -19,6 +20,7 @@ import {
 import {
   ConsentLogIpRateLimiterExceededError,
   FygaroCheckoutCreateRateLimiterExceededError,
+  GiftCardPurchaseRateLimiterExceededError,
   FygaroTopupAllowanceRateLimiterExceededError,
   InviteCreateRateLimiterExceededError,
   InviteTargetRateLimiterExceededError,
@@ -45,6 +47,7 @@ export const RateLimitPrefix = {
   inviteCreate: "invite_daily",
   inviteTarget: "invite_target",
   fygaroCheckoutCreate: "fygaro_checkout_create",
+  giftCardPurchase: "gift_card_purchase",
   consentLog: "consent_log_ip",
   fygaroTopupAllowance: "fygaro_topup_allowance",
   paymentSend: "payment_send",
@@ -113,6 +116,11 @@ export const RateLimitConfig: { [key: string]: RateLimitConfig } = {
     key: RateLimitPrefix.fygaroCheckoutCreate,
     limits: getFygaroCheckoutCreateAttemptLimits(),
     error: FygaroCheckoutCreateRateLimiterExceededError,
+  },
+  giftCardPurchase: {
+    key: RateLimitPrefix.giftCardPurchase,
+    limits: getFygaroCheckoutCreateAttemptLimits(),
+    error: GiftCardPurchaseRateLimiterExceededError,
   },
   // The read side of the same ERPNext dependency, and the CHEAPER one to abuse:
   // no amount argument, so nothing can short-circuit before the trailing-24h

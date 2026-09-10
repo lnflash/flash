@@ -318,6 +318,12 @@ export const getFygaroCheckoutCreateAttemptLimits = () => ({
   blockDuration: toSeconds(300), // 5 minutes
 })
 
+export const getGiftCardPurchaseAttemptLimits = () => ({
+  points: 10,
+  duration: toSeconds(60), // 1 minute
+  blockDuration: toSeconds(300), // 5 minutes
+})
+
 /**
  * The card top-up allowance READ, per account.
  *
@@ -629,5 +635,7 @@ export const IbexConfig = yamlConfig.ibex as IbexConfig
 export const BridgeConfig = yamlConfig.bridge as BridgeConfig
 
 export const FygaroConfig = yamlConfig.fygaro as FygaroConfig
+
+export const GiftCardsConfig = yamlConfig.giftCards as GiftCardsConfig
 
 export const FrappeConfig = yamlConfig.frappe as FrappeConfig

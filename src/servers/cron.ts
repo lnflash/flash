@@ -1,6 +1,7 @@
-import { OnChain, Lightning, Wallets, Payments, Swap, Accounts } from "@app"
+import { OnChain, Lightning, Wallets, Payments, Swap, Accounts, GiftCards } from "@app"
+import { syncGiftCardCatalogs } from "@app/gift-cards/sync-catalog"
 
-import { BridgeConfig, getCronConfig, TWO_MONTHS_IN_MS } from "@config"
+import { BridgeConfig, GiftCardsConfig, getCronConfig, TWO_MONTHS_IN_MS } from "@config"
 
 import { ErrorLevel } from "@domain/shared"
 import { OperationInterruptedError } from "@domain/errors"
@@ -96,6 +97,30 @@ const checkFygaroFloatJob = async () => {
   await checkFygaroTreasuryFloat()
 }
 
+// Gift card fulfilment safety net (ENG-581): expires stale invoices, re-reads
+// pending payments, polls the vendor for PAID orders and escalates to
+// REFUND_REQUIRED after 24h. The trigger server runs the same function every
+// 30s under the same Redis lock; this pass catches what that misses. Self-guards
+// on GiftCardsConfig.enabled and never throws for a single bad order.
+const reconcileGiftCardOrdersJob = async () => {
+  await GiftCards.reconcileGiftCardOrdersJob()
+}
+
+// Gift card catalog refresh (ENG-578). Pulls each enabled vendor's catalog into
+// the Redis read model the storefront serves from. The cron ticks far more often
+// than the catalog needs refreshing, so the run honours
+// giftCards.catalog.syncIntervalSeconds via a Redis marker and a second replica
+// is held off by a distributed lock. Self-guards on GiftCardsConfig.enabled;
+// syncGiftCardCatalogs never throws and one vendor failing does not stop the rest.
+const syncGiftCardCatalogsJob = async () => {
+  if (!GiftCardsConfig.enabled) return
+
+  const summaries = await syncGiftCardCatalogs({
+    minIntervalSeconds: GiftCardsConfig.catalog.syncIntervalSeconds,
+  })
+  logger.info({ summaries }, "gift card catalog sync finished")
+}
+
 // ID-verification evidence retention (docs/id-verification.md). Deletes
 // Spaces objects whose retention window has passed and stamps deleted_at on
 // the ERPNext evidence row. Dry-run by default (EVIDENCE_RETENTION_DRY_RUN);
@@ -145,6 +170,8 @@ const main = async () => {
     reconcileBridgeDepositsJob,
     reconcileBridgeWithdrawalsJob,
     checkFygaroFloatJob,
+    syncGiftCardCatalogsJob,
+    reconcileGiftCardOrdersJob,
     evidenceRetentionJob,
     deleteExpiredPaymentFlows,
     deleteExpiredInvoices,

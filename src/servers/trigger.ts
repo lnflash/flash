@@ -27,6 +27,7 @@ import {
   Wallets as WalletWithSpans,
 } from "@app"
 import { uploadBackup } from "@app/admin/backup"
+import { startGiftCardReconcileInterval } from "@app/gift-cards/reconcile-orders"
 import { lnd1LoopConfig, lnd2LoopConfig } from "@app/swap/get-active-loopd"
 import * as Wallets from "@app/wallets"
 
@@ -505,6 +506,11 @@ const main = () => {
 
   // activateLndHealthCheck()
   publishCurrentPrice()
+
+  // Gift card fulfilment worker (ENG-581): every 30s, under a Redis lock shared
+  // with the cron pass, so a PAID order reaches FULFILLED in seconds. No-op
+  // (returns null) while GiftCardsConfig.enabled is false.
+  startGiftCardReconcileInterval()
 
   if (getSwapConfig().feeAccountingEnabled) listenerSwapMonitor()
 

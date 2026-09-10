@@ -16,6 +16,7 @@ import * as MerchantsMod from "./merchants"
 import * as SwapMod from "./swap"
 import * as CashWalletCutoverMod from "./cash-wallet-cutover"
 import * as ApiKeysMod from "./api-keys"
+import * as GiftCardsMod from "./gift-cards"
 
 const allFunctions = {
   Accounts: { ...AccountsMod },
@@ -34,6 +35,7 @@ const allFunctions = {
   Swap: { ...SwapMod },
   CashWalletCutover: { ...CashWalletCutoverMod },
   ApiKeys: { ...ApiKeysMod },
+  GiftCards: { ...GiftCardsMod },
 } as const
 
 let subModule: keyof typeof allFunctions
@@ -66,4 +68,5 @@ export const {
   Swap,
   CashWalletCutover,
   ApiKeys,
+  GiftCards,
 } = allFunctions

@@ -31,6 +31,7 @@ import * as IbexErrors from "@services/ibex/errors"
 import * as ErpNextErrors from "@services/frappe/errors"
 import * as BridgeErrors from "@services/bridge/errors"
 import * as FygaroErrors from "@services/fygaro/errors"
+import * as GiftCardErrors from "@domain/gift-cards/errors"
 import * as ApiKeyErrors from "@domain/api-keys/errors"
 
 export const ApplicationErrors = {
@@ -68,5 +69,6 @@ export const ApplicationErrors = {
   ...ErpNextErrors,
   ...BridgeErrors,
   ...FygaroErrors,
+  ...GiftCardErrors,
   ...ApiKeyErrors,
 } as const

@@ -1147,6 +1147,127 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       })`
       return new UnknownClientError({ message, logger: baseLogger })
 
+    // Gift cards (ENG-574). Messages come from the domain error so the client
+    // sees the same wording the use case decided on.
+    case "GiftCardsDisabledError":
+      message = error.message
+      return bridgeGqlError({
+        code: "GIFT_CARDS_DISABLED",
+        message,
+      })
+
+    case "GiftCardProviderUnavailableError":
+      message = error.message
+      return bridgeGqlError({
+        code: "GIFT_CARD_PROVIDER_UNAVAILABLE",
+        message,
+      })
+
+    case "GiftCardProductNotFoundError":
+      message = error.message
+      return bridgeGqlError({
+        code: "GIFT_CARD_PRODUCT_NOT_FOUND",
+        message,
+      })
+
+    case "GiftCardProductNotAvailableInCountryError":
+      message = error.message
+      return bridgeGqlError({
+        code: "GIFT_CARD_PRODUCT_NOT_AVAILABLE_IN_COUNTRY",
+        message,
+      })
+
+    case "GiftCardInvalidValueError":
+      message = error.message
+      return bridgeGqlError({
+        code: "GIFT_CARD_INVALID_VALUE",
+        message,
+      })
+
+    case "GiftCardLimitExceededError":
+      message = error.message
+      return bridgeGqlError({
+        code: "GIFT_CARD_LIMIT_EXCEEDED",
+        message,
+      })
+
+    case "GiftCardLevelNotEligibleError":
+      message = error.message
+      return bridgeGqlError({
+        code: "GIFT_CARD_LEVEL_NOT_ELIGIBLE",
+        message,
+      })
+
+    case "GiftCardQuoteMismatchError":
+      message = error.message
+      return bridgeGqlError({
+        code: "GIFT_CARD_QUOTE_MISMATCH",
+        message,
+      })
+
+    case "GiftCardOrderNotFoundError":
+      message = error.message
+      return bridgeGqlError({
+        code: "GIFT_CARD_ORDER_NOT_FOUND",
+        message,
+      })
+
+    case "GiftCardOrderStateError":
+      message = error.message
+      return bridgeGqlError({
+        code: "GIFT_CARD_ORDER_STATE",
+        message,
+      })
+
+    case "GiftCardVendorRejectedOrderError":
+      message = error.message
+      return bridgeGqlError({
+        code: "GIFT_CARD_VENDOR_REJECTED",
+        message,
+      })
+
+    case "GiftCardVendorUnavailableError":
+      message = error.message
+      return bridgeGqlError({
+        code: "GIFT_CARD_VENDOR_UNAVAILABLE",
+        message,
+      })
+
+    case "GiftCardCatalogUnavailableError":
+      message = error.message
+      return bridgeGqlError({
+        code: "GIFT_CARD_CATALOG_UNAVAILABLE",
+        message,
+      })
+
+    case "GiftCardClaimCryptoError":
+      message = error.message
+      return bridgeGqlError({
+        code: "GIFT_CARD_CLAIM_UNAVAILABLE",
+        message,
+      })
+
+    case "GiftCardIdempotencyKeyReuseError":
+      message = error.message
+      return bridgeGqlError({
+        code: "GIFT_CARD_IDEMPOTENCY_KEY_REUSE",
+        message,
+      })
+
+    case "GiftCardPurchaseRateLimiterExceededError":
+      message = error.message
+      return bridgeGqlError({
+        code: "GIFT_CARD_PURCHASE_RATE_LIMITED",
+        message,
+      })
+
+    case "UnknownGiftCardError":
+      message = "Something went wrong with your gift card request"
+      return bridgeGqlError({
+        code: "GIFT_CARD_UNKNOWN",
+        message,
+      })
+
     default:
       return assertUnreachable(errorName)
   }
