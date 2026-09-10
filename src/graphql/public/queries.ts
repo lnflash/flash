@@ -34,6 +34,10 @@ import ApiKeysQuery from "./root/query/api-keys"
 import InvitePreviewQuery from "./root/query/invite-preview"
 import CashoutRateQuery from "./root/query/cashout-rate"
 import MyReferralsQuery from "./root/query/my-referrals"
+import GiftCardCatalogQuery from "./root/query/gift-card-catalog"
+import GiftCardQuoteQuery from "./root/query/gift-card-quote"
+import GiftCardOrderQuery from "./root/query/gift-card-order"
+import GiftCardOrdersQuery from "./root/query/gift-card-orders"
 
 export const queryFields = {
   unauthed: {
@@ -70,6 +74,10 @@ export const queryFields = {
       apiKeys: ApiKeysQuery,
       cashoutRate: CashoutRateQuery,
       myReferrals: MyReferralsQuery,
+      giftCardCatalog: GiftCardCatalogQuery,
+      giftCardQuote: GiftCardQuoteQuery,
+      giftCardOrder: GiftCardOrderQuery,
+      giftCardOrders: GiftCardOrdersQuery,
     },
     atWalletLevel: {
       onChainTxFee: OnChainTxFeeQuery,

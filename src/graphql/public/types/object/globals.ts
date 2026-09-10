@@ -60,6 +60,13 @@ const Globals = GT.Object({
         instance-wide referralReward feature flag; when false the referral payout is
         disabled, so reward-promising UI must stay hidden.`,
     },
+    giftCardsEnabled: {
+      type: GT.NonNull(GT.Boolean),
+      description: dedent`Whether gift card entry points (the storefront tab, "buy a
+        gift card" actions) should be shown to the user. True only when the
+        instance-wide giftCards feature flag is on AND at least one gift card
+        provider is enabled; when false every giftCard* field refuses.`,
+    },
     fygaroTopup: {
       type: FygaroTopupInfo,
       description: dedent`Fee parameters for Fygaro card top-ups so the app can
