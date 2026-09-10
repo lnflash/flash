@@ -24,6 +24,7 @@ import { Request, Response } from "express"
 import { LockService } from "@services/lock"
 import * as DepositLog from "@services/mongoose/bridge-deposit-log"
 import { writeBridgeDepositRequest } from "@services/frappe/BridgeTransferRequestWriter"
+import { reconcileByTxHash } from "@services/bridge/reconciliation"
 import { depositHandler } from "@services/bridge/webhook-server/routes/deposit"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -307,5 +308,82 @@ describe("depositHandler — fee persistence (AC3)", () => {
       error: "Failed to persist ERPNext audit row",
     })
     expect(lockFn).not.toHaveBeenCalled()
+  })
+})
+
+// ── Real-time reconciliation gate ─────────────────────────────────────────────
+
+// Regression: reconciliation used to be gated on `event_category === "transfer"`.
+// Virtual-account deposits arrive as "virtual_account.activity" with the
+// processed state nested in event_object.type, so the gate was false for every
+// one of them and reconcileByTxHash never ran — silently disabling orphan
+// detection for the only deposit type that was actually failing.
+describe("depositHandler — real-time reconciliation gate", () => {
+  const VA_TX_HASH = "0x254a27d301086533832c8094342a1c509c2dba2f6c4b78b635443dd71cc25112"
+
+  const VA_BODY = {
+    api_version: "v0",
+    event_id: "wh_t3ZhAQH3U6Jewgp63DYiaKH",
+    event_category: "virtual_account.activity",
+    event_type: "virtual_account.activity.created",
+    event_object_id: "0a7b2ae3-c58d-423f-a58d-60a1916d733b",
+    event_object: {
+      id: "0a7b2ae3-c58d-423f-a58d-60a1916d733b",
+      type: "payment_processed",
+      amount: "23.36",
+      currency: "usdt",
+      customer_id: "1f114470-09bf-4eb4-9701-0224441a5e86",
+      deposit_id: "e359e6d6-71fc-4adc-9814-36f71680413a",
+      virtual_account_id: "f4d1e0e4-ba5a-4a6d-97eb-b6bb31482ee3",
+      product_type: "virtual_account",
+      destination_tx_hash: VA_TX_HASH,
+      receipt: {
+        initial_amount: "23.87",
+        developer_fee: "0.48",
+        subtotal_amount: "23.36",
+        final_amount: "23.36",
+        destination_tx_hash: VA_TX_HASH,
+      },
+      created_at: "2026-08-27T21:22:45.729Z",
+    },
+    event_object_changes: {},
+    event_created_at: "2026-08-27T21:22:47.099Z",
+  }
+
+  it("reconciles a virtual-account deposit that reached payment_processed", async () => {
+    await depositHandler(makeReq(VA_BODY), makeRes())
+
+    expect(reconcileByTxHash as jest.Mock).toHaveBeenCalledWith({
+      txHash: VA_TX_HASH,
+    })
+  })
+
+  it("still reconciles the transfer payload shape", async () => {
+    await depositHandler(
+      makeReq({
+        ...VALID_BODY,
+        event_object: { ...VALID_EVENT_OBJECT, state: "payment_processed" },
+      }),
+      makeRes(),
+    )
+
+    expect(reconcileByTxHash as jest.Mock).toHaveBeenCalledWith({
+      txHash: VALID_EVENT_OBJECT.receipt.destination_tx_hash,
+    })
+  })
+
+  it("does not reconcile before an on-chain tx hash exists", async () => {
+    const objWithoutReceipt: Record<string, unknown> = { ...VA_BODY.event_object }
+    delete objWithoutReceipt.receipt
+    delete objWithoutReceipt.destination_tx_hash
+    await depositHandler(
+      makeReq({
+        ...VA_BODY,
+        event_object: { ...objWithoutReceipt, type: "funds_received" },
+      }),
+      makeRes(),
+    )
+
+    expect(reconcileByTxHash as jest.Mock).not.toHaveBeenCalled()
   })
 })

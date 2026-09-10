@@ -156,13 +156,21 @@ export const depositHandler = async (req: Request, res: Response) => {
       return res.status(500).json({ error: "Failed to persist deposit log" })
     }
 
-    // Real-time reconciliation: only trigger for transfer events that have
-    // reached payment_processed with an on-chain tx hash.
-    if (
-      event_category === "transfer" &&
-      state === "payment_processed" &&
-      rxReceipt?.destination_tx_hash
-    ) {
+    // Real-time reconciliation: trigger for any deposit that has reached
+    // payment_processed with an on-chain tx hash, whatever payload shape it
+    // arrived in.
+    //
+    // This used to also require `event_category === "transfer"`. Virtual-account
+    // deposits (bank/ACH -> virtual account -> USDT) arrive as
+    // `event_category: "virtual_account.activity"` with the processed state
+    // nested in `event_object.type`, so the clause was false for every one of
+    // them and reconcileByTxHash never ran. That silently disabled orphan
+    // detection and alerting for exactly the deposit type that needs it: from
+    // 2026-07-16 to 2026-09-10, six VA deposits landed unattributed and nothing
+    // reported it. `state` above already normalises both shapes
+    // (`obj.state ?? obj.type`), so the category check was never load-bearing —
+    // the on-chain hash is the real precondition.
+    if (state === "payment_processed" && rxReceipt?.destination_tx_hash) {
       const txHash = rxReceipt.destination_tx_hash
       reconcileByTxHash({ txHash }).catch((err) => {
         baseLogger.error({ err, event_id, id: obj.id }, "Real-time reconciliation failed")
