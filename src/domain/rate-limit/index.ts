@@ -119,7 +119,7 @@ export const RateLimitConfig: { [key: string]: RateLimitConfig } = {
   },
   giftCardPurchase: {
     key: RateLimitPrefix.giftCardPurchase,
-    limits: getFygaroCheckoutCreateAttemptLimits(),
+    limits: getGiftCardPurchaseAttemptLimits(),
     error: GiftCardPurchaseRateLimiterExceededError,
   },
   // The read side of the same ERPNext dependency, and the CHEAPER one to abuse:

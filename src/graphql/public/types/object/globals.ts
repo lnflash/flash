@@ -65,7 +65,8 @@ const Globals = GT.Object({
       description: dedent`Whether gift card entry points (the storefront tab, "buy a
         gift card" actions) should be shown to the user. True only when the
         instance-wide giftCards feature flag is on AND at least one gift card
-        provider is enabled; when false every giftCard* field refuses.`,
+        provider is enabled; when false the catalog, quote, and purchase fields
+        refuse. Order history and delivered codes stay readable regardless.`,
     },
     fygaroTopup: {
       type: FygaroTopupInfo,
