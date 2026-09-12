@@ -105,8 +105,13 @@ caller owns the order, `status` is `FULFILLED`, and the ciphertext decrypts
 under the currently configured key. This is enforced twice: the app layer
 decrypts only for the owner once fulfilled, and `toGiftCardOrderSource` drops
 any claim unless `status === FULFILLED`. A `FULFILLED` order whose claim cannot
-be decrypted throws `GIFT_CARD_CLAIM_UNAVAILABLE` rather than returning an
-empty claim.
+be decrypted (key missing, rotated, or one pod on stale config) is **still
+returned**, with `claim: null`, so the customer can always see the order they
+paid for; the fault is recorded server-side at Critical (span + log, never the
+ciphertext) rather than thrown to the client. Only `giftCardPurchase` surfaces
+it, as `GIFT_CARD_CLAIM_UNAVAILABLE` alongside the order. A client polling
+`giftCardOrder` that sees `FULFILLED` with `claim: null` should show "contact
+support" and keep polling; the claim appears once the key is restored.
 
 ### `giftCardOrders`
 
@@ -150,13 +155,21 @@ Behaviour:
   `quoteToleranceBps` from the quote. No money moves on any refusal.
 - Money moves at most once per `idempotencyKey`. Retry a timed-out call with
   the **same** key: same key + same parameters returns the existing order in
-  whatever state it reached; same key + different parameters is refused.
+  whatever state it reached; same key + different parameters is refused. One
+  exception: an `INVOICE_ISSUED` order still inside its expiry is **resumed**,
+  not returned. The server re-enters the payment step under its own
+  server-side key (`giftcard:<orderId>`), so a first call that died
+  mid-payment is finished (cached outcome replayed, or the one send that never
+  happened made) rather than left to expire. `CREATED` is returned as-is.
 - `order` is returned in whatever state the purchase reached: often already
   `FULFILLED` with `claim` attached, otherwise `PAID` or `PAYMENT_PENDING`
   (poll `giftCardOrder`), or `FAILED` / `PAYMENT_FAILED` (see
-  `failureReason`). `order` is absent when refused before a row existed. It
-  can be present **alongside** an error when the card was issued but the
-  claim could not be read.
+  `failureReason`). A send whose outcome IBEX could not confirm (network
+  fault, gateway error or timeout after the request was accepted) comes back
+  as a `PAYMENT_PENDING` order, **not** as an error: poll, do not buy again.
+  `order` is absent when refused before a row existed. It can be present
+  **alongside** an error when the card was issued but the claim could not be
+  read.
 - Attempt budget: 10 per minute per account, 5-minute block
   (`RateLimitConfig.giftCardPurchase`), charged before any vendor call.
 
@@ -164,10 +177,10 @@ Behaviour:
 
 | Value | Meaning for the client |
 | --- | --- |
-| `CREATED`, `INVOICE_ISSUED`, `PAYMENT_PENDING`, `PAID` | Transient. Keep polling. Never purchase again. `PAYMENT_PENDING` can take minutes |
+| `CREATED`, `INVOICE_ISSUED`, `PAYMENT_PENDING`, `PAID` | Transient. Keep polling. Never purchase again. `PAYMENT_PENDING` can take minutes: the worker re-reads IBEX and, when IBEX cannot account for the send, asks the vendor |
 | `FULFILLED` | Terminal. `claim` and `fulfilledAt` are set |
 | `FAILED` | Terminal, nothing paid: vendor rejected, price moved past tolerance, or unreadable invoice. Safe to retry with a new key |
-| `PAYMENT_FAILED` | Terminal, nothing paid: the Lightning payment failed. Safe to retry with a new key |
+| `PAYMENT_FAILED` | Terminal, nothing paid: IBEX **provably** refused or failed the Lightning payment (insufficient balance, a corroborated payment failure, a send-guard rejection). Only proven refusals land here; a send whose outcome is unknown is `PAYMENT_PENDING`. Safe to retry with a new key |
 | `EXPIRED` | Terminal, nothing paid: invoice not paid in time |
 | `REFUND_REQUIRED` | Terminal. The wallet paid, no card arrived; Flash has been paged. Do **not** tell the customer to buy again |
 
@@ -191,9 +204,10 @@ From `src/graphql/error-map.ts`. On queries they arrive as a GraphQL error with
 | `GIFT_CARD_VENDOR_REJECTED` | Vendor returned a definitive 4xx on order creation, or an unreadable invoice; `FAILED`, nothing paid | Show message; retry later with a new key |
 | `GIFT_CARD_VENDOR_UNAVAILABLE` | Vendor unreachable, 5xx, auth failure, or unexpected response shape | "Temporarily unavailable"; retry later |
 | `GIFT_CARD_CATALOG_UNAVAILABLE` | Catalog key missing from Redis or Redis unreadable | Retry later; the sync job repopulates |
-| `GIFT_CARD_CLAIM_UNAVAILABLE` | Claim ciphertext could not be decrypted (key missing, rotated, corrupt) | Show "contact support"; the order is still `FULFILLED` |
+| `GIFT_CARD_CLAIM_UNAVAILABLE` | Claim ciphertext could not be decrypted (key missing, rotated, corrupt). Returned only by `giftCardPurchase`, alongside the order; `giftCardOrder` returns the order with `claim: null` instead | Show "contact support"; the order is still `FULFILLED` |
 | `GIFT_CARD_IDEMPOTENCY_KEY_REUSE` | Same key, different product/value/quantity | Generate a new key for a new purchase |
 | `GIFT_CARD_PURCHASE_RATE_LIMITED` | More than 10 purchase attempts in a minute | Back off 5 minutes |
+| `GIFT_CARD_QUOTE_RATE_LIMITED` | More than 30 `giftCardQuote` calls in a minute | Back off 5 minutes; reuse the last quote until its `expiresAt` |
 | `GIFT_CARD_UNKNOWN` | Limits store unreadable (`limits-unavailable` in enforce mode) or an adapter threw | Retry later; this pages on the Flash side |
 
 Errors that are **not** `GIFT_CARD_*` can also come back from the mutation:

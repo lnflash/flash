@@ -14,14 +14,14 @@ Local overrides go in `$CONFIG_PATH/dev-overrides.yaml`
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `enabled` | boolean | `false` | Master switch. Off: `giftCardCatalog`, `giftCardQuote` and `giftCardPurchase` return `GIFT_CARDS_DISABLED`, `globals.giftCardsEnabled` is false, both jobs are no-ops. `giftCardOrder` / `giftCardOrders` still resolve (owner-scoped reads of paid orders) |
+| `enabled` | boolean | `false` | Master switch for **new money only**. Off: `giftCardCatalog`, `giftCardQuote` and `giftCardPurchase` return `GIFT_CARDS_DISABLED`, `globals.giftCardsEnabled` is false, catalog sync is a no-op, a same-key replay of an unpaid `INVOICE_ISSUED` order is not resumed. The reconcile worker keeps running while any non-terminal order exists (settlement and the 24 h `REFUND_REQUIRED` alert outlive the switch; RUNBOOK d). `giftCardOrder` / `giftCardOrders` still resolve (owner-scoped reads of paid orders) |
 | `allowOpenLoop` | boolean | `false` | Show and sell open-loop (Visa/Mastercard-style) cards. Off: hidden from the catalog, `GIFT_CARD_PRODUCT_NOT_FOUND` by id, `GIFT_CARDS_DISABLED` on purchase. On: still requires account level >= 2 |
 | `feeBps` | integer | `0` | Flash markup on face value, basis points. **Not read by any code path today** (reserved) |
 | `claimDataEncryptionKey` | string | `""` | 32-byte AES-256-GCM key: 64 hex chars, or base64 of exactly 32 bytes. Empty key: fulfilment leaves orders `PAID` and pages (`claim-encrypt-failed`); reads throw `GIFT_CARD_CLAIM_UNAVAILABLE` |
 | `quoteToleranceBps` | integer | `100` | Max the vendor invoice may exceed the quote (1% default) before the purchase is refused with `GIFT_CARD_QUOTE_MISMATCH`. Overrides the domain constant `GIFT_CARD_QUOTE_TOLERANCE_BPS` |
 | `routing.default` | `bitcoinCompany` \| `bitrefill` | `bitcoinCompany` | Provider for any country not listed in `byCountry`, including unknown (`"XX"`) |
 | `routing.byCountry` | map CC -> provider id | `{}` | ISO 3166-1 alpha-2 (upper case; lookups are normalised) -> provider id |
-| `providers.bitcoinCompany.enabled` | boolean | `false` | Provider switch. A country routed to a disabled provider gets `GIFT_CARD_PROVIDER_UNAVAILABLE` |
+| `providers.bitcoinCompany.enabled` | boolean | `false` | Provider switch for new money. A country routed to a disabled provider gets `GIFT_CARD_PROVIDER_UNAVAILABLE`; orders that already exist still settle through the registered adapter |
 | `providers.bitcoinCompany.baseUrl` | string | `https://api.dev.thebitcoincompany.com` | Sandbox (Mutinynet). Production is `https://api.thebitcoincompany.com` |
 | `providers.bitcoinCompany.email` / `password` | string | `""` | Login credentials for `POST /auth/login`. Empty: every authenticated call fails with `GIFT_CARD_VENDOR_UNAVAILABLE` (`BitcoinCompanyAuthError`) |
 | `providers.bitcoinCompany.referralCode` | string | `""` | **Not read by the client today** |
@@ -120,5 +120,6 @@ orders count toward the daily sum (money left); `FAILED`, `PAYMENT_FAILED`,
 `EXPIRED` do not. A Mongo or Redis fault is `limits-unavailable`: allowed in
 `log-only`, refused (`GIFT_CARD_UNKNOWN`, level Critical) in `enforce`.
 
-Independent of mode: the 10/min purchase attempt limiter and the ENG-573 send
-guard on the payment itself always run.
+Independent of mode: the 10/min purchase attempt limiter, the 30/min
+`giftCardQuote` attempt limiter (`GIFT_CARD_QUOTE_RATE_LIMITED`, 5 min block) and
+the ENG-573 send guard on the payment itself always run.

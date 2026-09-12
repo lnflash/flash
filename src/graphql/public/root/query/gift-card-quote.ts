@@ -15,6 +15,7 @@ type GiftCardQuoteArgs = {
 }
 
 const GiftCardQuoteQuery = GT.Field<null, GraphQLPublicContextAuth, GiftCardQuoteArgs>({
+  extensions: { complexity: 120 }, // one live vendor POST per resolve; see giftCardPurchase
   type: GT.NonNull(GiftCardQuote),
   description:
     "What a purchase would cost right now, in sats, for a product at a face value. " +

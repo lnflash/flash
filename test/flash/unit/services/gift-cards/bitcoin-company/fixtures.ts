@@ -271,3 +271,25 @@ export const failThen = (failures: Error[], then: AxiosLikeResponse): RouteHandl
     return then
   }
 }
+
+// ============ Catalog paging helpers ============
+
+/**
+ * A `/giftcards` handler that serves `rows` by `offset`/`size` the way a real
+ * offset-paginated endpoint does, and an empty page past the end.
+ * `maxPageSize` emulates a vendor that clamps `size` regardless of the request.
+ */
+export const pagedCatalog =
+  (rows: unknown[], opts: { maxPageSize?: number } = {}): RouteHandler =>
+  (ctx) => {
+    const offset = Number(ctx.query.get("offset") ?? 0)
+    const requested = Number(ctx.query.get("size") ?? rows.length)
+    const size = opts.maxPageSize ? Math.min(requested, opts.maxPageSize) : requested
+    return catalogPage(rows.slice(offset, offset + size))
+  }
+
+/** The `offset` query param of every `/giftcards` request, oldest first. */
+export const catalogOffsets = (mock: jest.Mock): string[] =>
+  callsTo(mock, "/giftcards").map(
+    ([url]) => new URL(url as string).searchParams.get("offset") ?? "",
+  )

@@ -60,7 +60,12 @@ type GiftCardProviderOrder = {
   readonly providerOrderId: GiftCardProviderOrderId
   readonly paymentRequest: string // BOLT11
   readonly amountSats: Satoshis
-  readonly expiresAt: Date
+  /**
+   * Vendor-stated order expiry, when the vendor reports one; null when it does
+   * not. Adapters never fabricate it: the BOLT11's own expiry is decoded by
+   * `purchaseGiftCard` and bounds how long the order stays payable.
+   */
+  readonly expiresAt: Date | null
 }
 
 type GiftCardProviderOrderStatus =

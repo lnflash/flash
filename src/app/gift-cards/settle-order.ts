@@ -1,6 +1,6 @@
 import { GiftCardOrderStateError, GiftCardOrderStatus } from "@domain/gift-cards"
 import { encryptGiftCardClaim } from "@services/gift-cards/claim-crypto"
-import { getEnabledGiftCardProvider } from "@services/gift-cards/registry"
+import { getRegisteredGiftCardProviderOrError } from "@services/gift-cards/registry"
 import { baseLogger } from "@services/logger"
 import { GiftCardOrdersRepository } from "@services/mongoose"
 import {
@@ -209,13 +209,18 @@ const vendorFailed = async (
 
 /**
  * Ask the vendor where the order stands and settle on the answer. The
- * reconcile worker's PAID path, and the purchase mutation's single
- * fulfilled-already? poll.
+ * reconcile worker's PAID path, its fallback for payments IBEX cannot account
+ * for, and the purchase mutation's single fulfilled-already? poll.
+ *
+ * Resolves the order's provider by registration, not by `enabled`: the kill
+ * switch (`giftCards.enabled`, `providers.<id>.enabled`) stops NEW money
+ * leaving via quote/purchase. An order that already exists has already paid or
+ * may have, and refusing to look it up would strand the customer's code.
  */
 export const fetchAndSettle = async (
   order: GiftCardOrder,
 ): Promise<GiftCardOrder | ApplicationError> => {
-  const provider = getEnabledGiftCardProvider(order.providerId)
+  const provider = getRegisteredGiftCardProviderOrError(order.providerId)
   if (provider instanceof Error) return provider
 
   if (!order.providerOrderId) {

@@ -4,6 +4,7 @@ import {
   getFailedLoginAttemptPerLoginIdentifierLimits,
   getFygaroCheckoutCreateAttemptLimits,
   getGiftCardPurchaseAttemptLimits,
+  getGiftCardQuoteAttemptLimits,
   getFygaroTopupAllowanceAttemptLimits,
   getInviteCreateAttemptLimits,
   getInviteTargetAttemptLimits,
@@ -21,6 +22,7 @@ import {
   ConsentLogIpRateLimiterExceededError,
   FygaroCheckoutCreateRateLimiterExceededError,
   GiftCardPurchaseRateLimiterExceededError,
+  GiftCardQuoteRateLimiterExceededError,
   FygaroTopupAllowanceRateLimiterExceededError,
   InviteCreateRateLimiterExceededError,
   InviteTargetRateLimiterExceededError,
@@ -48,6 +50,7 @@ export const RateLimitPrefix = {
   inviteTarget: "invite_target",
   fygaroCheckoutCreate: "fygaro_checkout_create",
   giftCardPurchase: "gift_card_purchase",
+  giftCardQuote: "gift_card_quote",
   consentLog: "consent_log_ip",
   fygaroTopupAllowance: "fygaro_topup_allowance",
   paymentSend: "payment_send",
@@ -121,6 +124,16 @@ export const RateLimitConfig: { [key: string]: RateLimitConfig } = {
     key: RateLimitPrefix.giftCardPurchase,
     limits: getGiftCardPurchaseAttemptLimits(),
     error: GiftCardPurchaseRateLimiterExceededError,
+  },
+  // The read side of the same vendor dependency, and the CHEAPER one to abuse:
+  // no idempotency key, no wallet, nothing written, so every call is a live
+  // POST through the one shared reseller login that every purchase also needs.
+  // Its own key so a customer who has spent the purchase budget can still be
+  // told what a card costs.
+  giftCardQuote: {
+    key: RateLimitPrefix.giftCardQuote,
+    limits: getGiftCardQuoteAttemptLimits(),
+    error: GiftCardQuoteRateLimiterExceededError,
   },
   // The read side of the same ERPNext dependency, and the CHEAPER one to abuse:
   // no amount argument, so nothing can short-circuit before the trailing-24h

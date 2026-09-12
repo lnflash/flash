@@ -115,7 +115,7 @@ export const BitcoinCompanyProvider = (
       label: reference,
     })
     if (vendor instanceof Error) return vendor
-    return mapVendorPurchase(vendor, now())
+    return mapVendorPurchase(vendor)
   }
 
   const getOrder = async (

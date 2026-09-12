@@ -100,8 +100,11 @@ const checkFygaroFloatJob = async () => {
 // Gift card fulfilment safety net (ENG-581): expires stale invoices, re-reads
 // pending payments, polls the vendor for PAID orders and escalates to
 // REFUND_REQUIRED after 24h. The trigger server runs the same function every
-// 30s under the same Redis lock; this pass catches what that misses. Self-guards
-// on GiftCardsConfig.enabled and never throws for a single bad order.
+// 30s under the same Redis lock; this pass catches what that misses.
+// Deliberately NOT gated on GiftCardsConfig.enabled: the kill switch stops new
+// money leaving, but orders already paid still need their codes and the 24h
+// alert must still fire. The job gates itself on "any non-terminal order
+// exists" instead, and never throws for a single bad order.
 const reconcileGiftCardOrdersJob = async () => {
   await GiftCards.reconcileGiftCardOrdersJob()
 }

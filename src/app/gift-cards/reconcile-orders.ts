@@ -1,9 +1,11 @@
 import { randomUUID } from "crypto"
 
-import { GiftCardsConfig } from "@config"
-
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
-import { GiftCardOrderStatus, UnknownGiftCardError } from "@domain/gift-cards"
+import {
+  GiftCardOrderStatus,
+  isGiftCardTerminalStatus,
+  UnknownGiftCardError,
+} from "@domain/gift-cards"
 import Ibex from "@services/ibex/client"
 import { UnconfirmedIbexPayment } from "@services/ibex/errors"
 import { paymentSendStatusFromIbex } from "@services/ibex/payment-status"
@@ -28,15 +30,29 @@ const logger = baseLogger.child({ module: "gift-cards.reconcile" })
  *
  * Everything the purchase mutation does not wait for ends up here:
  *
- *   CREATED / INVOICE_ISSUED past `expiresAt`  → EXPIRED (after one payment re-read)
- *   PAYMENT_PENDING                           → PAID | PAYMENT_FAILED (payment re-read)
+ *   CREATED / INVOICE_ISSUED past `expiresAt`  → EXPIRED (after one payment re-read
+ *                                               and, for INVOICE_ISSUED, one vendor poll)
+ *   PAYMENT_PENDING                           → PAID | PAYMENT_FAILED (payment re-read);
+ *                                               IBEX unknown / no ref → vendor poll
  *   PAID                                      → poll vendor with backoff → FULFILLED
- *                                               | REFUND_REQUIRED; 24h → REFUND_REQUIRED
+ *                                               | REFUND_REQUIRED; 24h → final vendor
+ *                                               poll, then REFUND_REQUIRED
+ *
+ * The vendor is the arbiter of last resort: `settleOrderFromVendor` accepts a
+ * vendor `fulfilled` on an INVOICE_ISSUED or PAYMENT_PENDING order as proof of
+ * payment, so an order whose send IBEX cannot account for (no transaction id,
+ * IBEX unreachable, an error after IBEX accepted the request) is never written
+ * off while the vendor says a card shipped.
  *
  * Runs under a Redis lock so the cron pod and the trigger's 30s interval never
  * work the same batch at once. Never throws: a per-order failure is logged,
  * counted, and the loop moves on — one vendor 500 must not strand the other
  * orders in the batch.
+ *
+ * NOT gated on `giftCards.enabled`. The kill switch stops new money leaving
+ * (quote / purchase); orders that already exist still need settling, and the
+ * 24h REFUND_REQUIRED alert must still fire. The job and interval entry points
+ * gate on "a non-terminal order exists" instead (`hasOpenGiftCardOrders`).
  *
  * Backoff per PAID order: 5s, 15s, 60s, 5m, then every 15m, measured from the
  * PAID transition. Attempts are tracked in process memory (nothing on the
@@ -62,9 +78,14 @@ const SECOND = 1000
 const MINUTE = 60 * SECOND
 export const GIFT_CARD_PAID_TIMEOUT_MS = 24 * 60 * MINUTE
 // Pending payments have their own horizon: IBEX reports in-flight sends for a
-// bounded time, and an order our own rail cannot tell us about after this long
-// needs a human, not another poll.
+// bounded time, and an order neither our rail nor the vendor can tell us about
+// after this long needs a human, not another poll.
 const PAYMENT_PENDING_WARN_MS = 60 * MINUTE
+
+/** Every status the worker still has work to do on. */
+export const GIFT_CARD_OPEN_STATUSES: readonly GiftCardOrderStatus[] = Object.values(
+  GiftCardOrderStatus,
+).filter((status) => !isGiftCardTerminalStatus(status))
 
 /**
  * Gap to the next poll given how long the order had been PAID at the last
@@ -112,16 +133,20 @@ type SentPaymentStatus = "settled" | "failed" | "pending" | "unknown"
  * (`payment.statusId`, `payment.status.id`, `payment.failureId`), so the one
  * reader, `paymentSendStatusFromIbex`, maps both.
  *
- * No ref → "unknown". That is an order that crashed between the IBEX call and
- * the transition that would have written the ref, or a 200 whose
- * `transaction.id` was empty. THERE IS NO HASH-BASED FALLBACK: the
- * `getAccountTransactions` (IBEX `G`) 200 items carry only id / createdAt /
- * accountId / amount / networkFee / exchangeRateCurrencySats / currencyId /
- * transactionTypeId — no `payment.hash` and no `bolt11` — and `invoiceFromHash`
- * resolves only invoices WE issued. Such an order stays PAYMENT_PENDING and is
- * warned on after PAYMENT_PENDING_WARN_MS; resolving it needs the IBEX
- * dashboard. (The LND-rail `lnpayments` collection is not consulted: nothing
- * writes it on this IBEX-custodial deployment.)
+ * No ref → "unknown". That is an order whose send errored before IBEX handed
+ * back an id (a socket reset, gateway 5xx or timeout after IBEX may have
+ * accepted the request), one that crashed between the IBEX call and the
+ * transition that would have written the ref, or a 200 whose `transaction.id`
+ * was empty. THERE IS NO HASH-BASED FALLBACK: the `getAccountTransactions`
+ * (IBEX `G`) 200 items carry only id / createdAt / accountId / amount /
+ * networkFee / exchangeRateCurrencySats / currencyId / transactionTypeId — no
+ * `payment.hash` and no `bolt11` — and `invoiceFromHash` resolves only
+ * invoices WE issued. The caller falls back to the vendor instead
+ * (`fetchAndSettle`): a vendor `fulfilled` is proof of payment. An order the
+ * vendor cannot vouch for either stays PAYMENT_PENDING and is warned on after
+ * PAYMENT_PENDING_WARN_MS; resolving it needs the IBEX dashboard. (The LND-rail
+ * `lnpayments` collection is not consulted: nothing writes it on this
+ * IBEX-custodial deployment.)
  *
  * An IbexError (network, 5xx, 404) is "unknown" too: it says nothing about
  * whether money moved, and the next run retries. An UnconfirmedIbexPayment —
@@ -193,6 +218,62 @@ const releaseLock = async (token: string): Promise<void> => {
   }
 }
 
+/**
+ * Book what a vendor poll did to an order. `settleOrderFromVendor` performs
+ * and reports every transition itself; this only keeps the run summary and the
+ * in-memory poll schedule honest.
+ */
+const countVendorOutcome = (
+  before: GiftCardOrder,
+  after: GiftCardOrder,
+  summary: GiftCardReconcileSummary,
+): void => {
+  const wasPaid = before.status === GiftCardOrderStatus.Paid
+  switch (after.status) {
+    case GiftCardOrderStatus.Fulfilled:
+      if (!wasPaid) summary.paymentSettled += 1
+      summary.fulfilled += 1
+      lastAttemptAt.delete(after.id)
+      return
+    case GiftCardOrderStatus.Paid:
+      // Vendor vouched for the payment but the claim could not be stored yet;
+      // the PAID path picks it up on its schedule.
+      if (!wasPaid) summary.paymentSettled += 1
+      lastAttemptAt.set(after.id, Date.now())
+      return
+    case GiftCardOrderStatus.RefundRequired:
+      summary.refundRequired += 1
+      lastAttemptAt.delete(after.id)
+      return
+    default:
+      return
+  }
+}
+
+/**
+ * Ask the vendor about an order IBEX could not account for. Returns the order
+ * the vendor's answer produced when it moved the order, null when it did not
+ * (still awaiting payment, vendor unreachable, or the vendor's word is not
+ * enough for this state — `settleOrderFromVendor` decides).
+ */
+const settleFromVendorIfMoved = async (
+  order: GiftCardOrder,
+  summary: GiftCardReconcileSummary,
+): Promise<GiftCardOrder | null> => {
+  if (!order.providerOrderId) return null
+  const settled = await fetchAndSettle(order)
+  if (settled instanceof Error) {
+    logger.info(
+      { orderId: order.id, status: order.status, error: settled.constructor.name },
+      "Vendor poll for an unaccounted payment did not settle",
+    )
+    return null
+  }
+  if (settled.status === order.status) return null
+  countVendorOutcome(order, settled, summary)
+  return settled
+}
+
 const settleAsPaid = async (
   order: GiftCardOrder,
   summary: GiftCardReconcileSummary,
@@ -233,13 +314,13 @@ const processExpiry = async (
 ): Promise<void> => {
   if (order.expiresAt.getTime() >= now.getTime()) return
 
-  // An INVOICE_ISSUED order may have been paid by a call that crashed before
-  // recording it. One re-read before writing it off: settled → PAID, in
-  // flight → leave it for the PAYMENT_PENDING path next run. Only possible
-  // when the IBEX transaction id was persisted; a crash BETWEEN the IBEX call
-  // and the transition that writes it leaves no ref, the lookup answers
-  // "unknown", and the order is expired — the one window where a paid invoice
-  // can be written off, logged here so it is at least visible.
+  // An INVOICE_ISSUED order may have been paid by a call that crashed or
+  // errored before recording it. One IBEX re-read before writing it off:
+  // settled → PAID, in flight → leave it for the next run. When IBEX cannot
+  // answer (no transaction id was ever persisted, or the re-read failed) the
+  // vendor gets the last word: a card that shipped is proof of payment, and
+  // `settleOrderFromVendor` records it as such. Only an invoice neither IBEX
+  // nor the vendor knows as paid is expired.
   if (order.status === GiftCardOrderStatus.InvoiceIssued) {
     const payment = await lookupSentPaymentStatus(order)
     if (payment === "settled") {
@@ -252,6 +333,10 @@ const processExpiry = async (
         "Expired gift card invoice still has an in-flight payment; not expiring",
       )
       return
+    }
+    if (payment === "unknown") {
+      const moved = await settleFromVendorIfMoved(order, summary)
+      if (moved) return
     }
   }
 
@@ -299,20 +384,30 @@ const processPendingPayment = async (
       })
       return
     }
-    default: {
-      const pendingSince = lastTransitionAt(order, GiftCardOrderStatus.PaymentPending)
-      if (now.getTime() - pendingSince.getTime() > PAYMENT_PENDING_WARN_MS) {
-        logger.warn(
-          {
-            orderId: order.id,
-            paymentHash: order.paymentHash,
-            providerPaymentRef: order.providerPaymentRef,
-            since: pendingSince,
-          },
-          "Gift card payment has been pending for over an hour with no resolvable status",
-        )
-      }
+    case "unknown": {
+      // IBEX cannot account for this send (no transaction id, or the re-read
+      // failed). The vendor can: `fulfilled` settles the order as paid and
+      // fulfilled in one step. Anything else leaves it pending for next run.
+      const moved = await settleFromVendorIfMoved(order, summary)
+      if (moved) return
+      break
     }
+    case "pending":
+      // IBEX still reports the send in flight; its word beats a vendor poll.
+      break
+  }
+
+  const pendingSince = lastTransitionAt(order, GiftCardOrderStatus.PaymentPending)
+  if (now.getTime() - pendingSince.getTime() > PAYMENT_PENDING_WARN_MS) {
+    logger.warn(
+      {
+        orderId: order.id,
+        paymentHash: order.paymentHash,
+        providerPaymentRef: order.providerPaymentRef,
+        since: pendingSince,
+      },
+      "Gift card payment has been pending for over an hour with no resolvable status",
+    )
   }
 }
 
@@ -325,6 +420,21 @@ const processPaid = async (
   const nowMs = now.getTime()
 
   if (nowMs - paidAtMs >= GIFT_CARD_PAID_TIMEOUT_MS) {
+    // One final vendor poll before escalating. A worker gap longer than 24h
+    // (outage, kill switch, stuck lock) must not turn every order the vendor
+    // fulfilled in the meantime into a refund.
+    lastAttemptAt.set(order.id, nowMs)
+    const settled = await fetchAndSettle(order)
+    if (settled instanceof Error) {
+      logger.warn(
+        { orderId: order.id, error: settled.constructor.name },
+        "Final vendor poll before fulfilment timeout failed; escalating",
+      )
+    } else if (settled.status !== GiftCardOrderStatus.Paid) {
+      countVendorOutcome(order, settled, summary)
+      return
+    }
+
     const refund = await GiftCardOrdersRepository().transition({
       id: order.id,
       from: [GiftCardOrderStatus.Paid],
@@ -340,7 +450,11 @@ const processPaid = async (
       status: "failed",
       order: refund,
       error: "fulfillment-timeout",
-      meta: { reason: "fulfillment-timeout" },
+      meta: {
+        reason: "fulfillment-timeout",
+        lastVendorPoll:
+          settled instanceof Error ? settled.constructor.name : "not-fulfilled",
+      },
     })
     return
   }
@@ -458,12 +572,27 @@ export const reconcileGiftCardOrders = async (
 }
 
 /**
- * Cron entry (src/servers/cron.ts). Self-guards on the master switch; a
- * returned error is thrown so the cron runner logs and counts the failure the
- * way it does every other task.
+ * Is there anything for the worker to do? One indexed `limit: 1` read, so an
+ * idle deployment (feature off, nothing in flight) costs no lock and no batch
+ * listings per tick. A repository fault answers true: the run itself logs the
+ * listing failure, which is the signal an operator needs.
+ */
+export const hasOpenGiftCardOrders = async (): Promise<boolean> => {
+  const open = await GiftCardOrdersRepository().listByStatus({
+    statuses: [...GIFT_CARD_OPEN_STATUSES],
+    limit: 1,
+  })
+  if (open instanceof Error) return true
+  return open.length > 0
+}
+
+/**
+ * Cron entry (src/servers/cron.ts). Gated on open orders, NOT on the master
+ * switch: see the module doc. A returned error is thrown so the cron runner
+ * logs and counts the failure the way it does every other task.
  */
 export const reconcileGiftCardOrdersJob = async (): Promise<void> => {
-  if (!GiftCardsConfig?.enabled) return
+  if (!(await hasOpenGiftCardOrders())) return
   const summary = await reconcileGiftCardOrders()
   if (summary instanceof Error) throw summary
   logger.info({ summary }, "gift card reconcile finished")
@@ -474,17 +603,18 @@ export const GIFT_CARD_RECONCILE_INTERVAL_MS = 30 * SECOND
 /**
  * In-process schedule for the trigger server, so a PAID order reaches
  * FULFILLED in seconds rather than at the next 15-minute cron. Overlapping
- * ticks are skipped locally; cross-pod overlap is the Redis lock's job.
+ * ticks are skipped locally; cross-pod overlap is the Redis lock's job. Runs
+ * regardless of `giftCards.enabled`; each tick first checks for open orders.
  */
 export const startGiftCardReconcileInterval = (
   intervalMs: number = GIFT_CARD_RECONCILE_INTERVAL_MS,
-): NodeJS.Timeout | null => {
-  if (!GiftCardsConfig?.enabled) return null
+): NodeJS.Timeout => {
   let running = false
   return setInterval(async () => {
     if (running) return
     running = true
     try {
+      if (!(await hasOpenGiftCardOrders())) return
       const summary = await reconcileGiftCardOrders()
       if (summary instanceof Error) {
         logger.warn({ error: summary }, "gift card reconcile tick failed")

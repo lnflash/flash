@@ -160,7 +160,11 @@ export const runGiftCardProviderContract = (
       expect(order.providerOrderId).not.toBe("")
       expect(order.paymentRequest).not.toBe("")
       expect(Number.isSafeInteger(order.amountSats) && order.amountSats > 0).toBe(true)
-      expect(order.expiresAt.getTime()).toBeGreaterThan(now().getTime())
+      // Null when the vendor states no order expiry (the BOLT11 carries its own);
+      // when stated, it must be in the future.
+      expect(
+        order.expiresAt === null || order.expiresAt.getTime() > now().getTime(),
+      ).toBe(true)
 
       const status = unwrap(
         await provider.getOrder({

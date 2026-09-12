@@ -21,7 +21,6 @@ import {
 export const BITCOIN_COMPANY_PROVIDER_ID: GiftCardProviderId = "bitcoinCompany"
 
 export const QUOTE_TTL_MS = 60 * 1000
-export const ORDER_TTL_MS = 15 * 60 * 1000
 
 /** Vendor money is in major units of the product currency; the domain is minor units. */
 export const toMinorUnits = (major: number): number => Math.round(major * 100)
@@ -131,14 +130,17 @@ export const mapVendorQuote = ({
   expiresAt: new Date(now.getTime() + QUOTE_TTL_MS),
 })
 
-export const mapVendorPurchase = (
-  vendor: VendorPurchase,
-  now: Date,
-): GiftCardProviderOrder => ({
+/**
+ * The vendor's purchase response carries no order expiry; the only expiry is
+ * the one encoded in the BOLT11 itself, which `purchaseGiftCard` decodes. Not
+ * invented here: a fabricated "now + 15 min" would silently outlive a shorter
+ * invoice and keep an unpayable order open.
+ */
+export const mapVendorPurchase = (vendor: VendorPurchase): GiftCardProviderOrder => ({
   providerOrderId: toGiftCardProviderOrderId(String(vendor.uuid)),
   paymentRequest: vendor.invoice,
   amountSats: toSats(Math.round(vendor.amount)),
-  expiresAt: new Date(now.getTime() + ORDER_TTL_MS),
+  expiresAt: null,
 })
 
 /** Returns null when there is nothing a customer could redeem. */

@@ -23,6 +23,21 @@ export const getRegisteredGiftCardProvider = (
   id: GiftCardProviderId,
 ): IGiftCardProvider | undefined => providers.get(id)
 
+/**
+ * Registered provider by id, regardless of `enabled`. For orders that already
+ * exist: settlement and reconciliation must keep working after the kill switch
+ * flips, otherwise a customer who has already paid never receives their code
+ * and the 24h REFUND_REQUIRED alert goes quiet. New money (quote / purchase)
+ * goes through `getEnabledGiftCardProvider`, never this.
+ */
+export const getRegisteredGiftCardProviderOrError = (
+  id: GiftCardProviderId,
+): IGiftCardProvider | GiftCardProviderUnavailableError => {
+  const provider = providers.get(id)
+  if (!provider) return new GiftCardProviderUnavailableError()
+  return provider
+}
+
 export const isGiftCardProviderEnabled = (id: GiftCardProviderId): boolean =>
   GiftCardsConfig.enabled === true && GiftCardsConfig.providers[id]?.enabled === true
 
@@ -49,7 +64,11 @@ export const getGiftCardProviderForCountry = (
   return provider
 }
 
-/** Enabled provider by id, for orders that already know their provider. */
+/**
+ * Enabled provider by id. For quote and purchase only — the paths that create
+ * new orders and move new money. An order that already exists settles through
+ * `getRegisteredGiftCardProviderOrError`, so the kill switch never strands it.
+ */
 export const getEnabledGiftCardProvider = (
   id: GiftCardProviderId,
 ): IGiftCardProvider | GiftCardProviderUnavailableError => {

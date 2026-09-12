@@ -28,6 +28,7 @@ import {
   GiftCardInvalidValueError,
   GiftCardLevelNotEligibleError,
   GiftCardLimitExceededError,
+  GiftCardOrderNotFoundError,
   GiftCardProductNotAvailableInCountryError,
   GiftCardProductNotFoundError,
   GiftCardProviderUnavailableError,
@@ -97,6 +98,7 @@ beforeEach(() => {
   mockGetGiftCardOrderForAccount.mockResolvedValue({
     order: makeOrder({ status: "FULFILLED" }),
     claim: CLAIM,
+    claimError: null,
   })
   mockConsumeLimiter.mockResolvedValue(true)
 })
@@ -383,14 +385,41 @@ describe("giftCardPurchase resolver", () => {
     it("still returns a FULFILLED order when its claim cannot be read — with the error alongside", async () => {
       // The card IS issued; hiding the order would tell the customer nothing
       // happened. But a FULFILLED order with a silently empty claim is worse, so
-      // the read failure rides along in `errors`.
-      mockPurchaseGiftCard.mockResolvedValue(makeOrder({ status: "FULFILLED" }))
-      mockGetGiftCardOrderForAccount.mockResolvedValue(new GiftCardClaimCryptoError())
+      // the read failure rides along in `errors`. The owner-scoped read hands
+      // the decrypt failure back as data (`claimError`), not as its own error.
+      const order = makeOrder({
+        status: "FULFILLED",
+        claimCiphertext: "enc:...",
+        claimKeyId: "k1",
+      })
+      mockPurchaseGiftCard.mockResolvedValue(order)
+      mockGetGiftCardOrderForAccount.mockResolvedValue({
+        order,
+        claim: null,
+        claimError: new GiftCardClaimCryptoError("key rotated"),
+      })
 
       const result = await resolve()
 
       expect(result.errors).toHaveLength(1)
       expect(result.errors[0].code).toBe("GIFT_CARD_CLAIM_UNAVAILABLE")
+      expect(result.order?.status).toBe("FULFILLED")
+      expect(result.order?.claim).toBeNull()
+    })
+
+    it("still returns a FULFILLED order when the owner-scoped read itself fails — with the error alongside", async () => {
+      // Distinct from a decrypt failure: here the read could not produce the
+      // order at all (store fault, row gone between write and read). The order
+      // the purchase already returned is still handed back.
+      const order = makeOrder({ status: "FULFILLED" })
+      mockPurchaseGiftCard.mockResolvedValue(order)
+      mockGetGiftCardOrderForAccount.mockResolvedValue(new GiftCardOrderNotFoundError())
+
+      const result = await resolve()
+
+      expect(result.errors).toHaveLength(1)
+      expect(result.errors[0].code).toBe("GIFT_CARD_ORDER_NOT_FOUND")
+      expect(result.order?.id).toBe(order.id)
       expect(result.order?.status).toBe("FULFILLED")
       expect(result.order?.claim).toBeNull()
     })

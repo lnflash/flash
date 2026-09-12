@@ -1,6 +1,5 @@
 import {
   KNOWN_VENDOR_STATUSES,
-  ORDER_TTL_MS,
   QUOTE_TTL_MS,
   isProductMappingSkip,
   mapDenominationType,
@@ -275,17 +274,20 @@ describe("mapVendorQuote", () => {
 
 describe("mapVendorPurchase", () => {
   it("maps invoice, amount, and uuid into the provider order", () => {
-    expect(mapVendorPurchase(PURCHASE_RESULT, now)).toEqual({
+    expect(mapVendorPurchase(PURCHASE_RESULT)).toEqual({
       providerOrderId: PURCHASE_RESULT.uuid,
       paymentRequest: PURCHASE_RESULT.invoice,
       amountSats: 39000,
-      expiresAt: new Date(NOW + ORDER_TTL_MS),
+      expiresAt: null,
     })
-    expect(ORDER_TTL_MS).toBe(15 * 60_000)
+  })
+
+  it("never fabricates an order expiry: the vendor reports none, the BOLT11 carries it", () => {
+    expect(mapVendorPurchase(PURCHASE_RESULT).expiresAt).toBeNull()
   })
 
   it("stringifies a numeric uuid and rounds the amount", () => {
-    const order = mapVendorPurchase({ ...PURCHASE_RESULT, uuid: 42, amount: 100.6 }, now)
+    const order = mapVendorPurchase({ ...PURCHASE_RESULT, uuid: 42, amount: 100.6 })
     expect(order.providerOrderId).toBe("42")
     expect(order.amountSats).toBe(101)
   })

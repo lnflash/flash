@@ -30,7 +30,7 @@ delivering the claim.
 | Layer | Files | Responsibility |
 | --- | --- | --- |
 | Domain | `src/domain/gift-cards/index.ts`, `index.types.d.ts`, `primitives.ts`, `errors.ts` | Status enum + transition table, product/quote/order/claim types, the `IGiftCardProvider` port, product-id codec, value/quantity validation, every `GiftCard*` error |
-| Registry | `src/services/gift-cards/registry.ts`, `index.ts` | Adapters self-register at import; config-driven routing (`routing.byCountry[cc] ?? routing.default`, gated by `providers.<id>.enabled`) |
+| Registry | `src/services/gift-cards/registry.ts`, `index.ts` | Adapters self-register at import; config-driven routing (`routing.byCountry[cc] ?? routing.default`, gated by `providers.<id>.enabled`) for new money; `getRegisteredGiftCardProviderOrError` (registration only, no `enabled` gate) for orders that already exist |
 | Adapter (TBC) | `src/services/gift-cards/bitcoin-company/{index,client,mapping,schemas,errors}.ts` | HTTP transport, auth token lifecycle in Redis, retries (idempotent reads only), zod validation, vendor-to-domain mapping. Nothing vendor-shaped leaves this directory |
 | Catalog cache | `src/services/gift-cards/catalog-cache.ts` | Redis read model of the catalog; sync job writes, every request reads |
 | Claim crypto | `src/services/gift-cards/claim-crypto.ts` | AES-256-GCM at rest for claim data; `claimKeyId` derivation |
@@ -105,7 +105,10 @@ REFUND_REQUIRED -> (terminal)
 ```
 
 `REFUND_REQUIRED` is the only state meaning "money left Flash and no card
-arrived". `FAILED`, `PAYMENT_FAILED` and `EXPIRED` all mean nothing was paid.
+arrived". `FAILED`, `PAYMENT_FAILED` and `EXPIRED` all mean nothing was paid:
+`PAYMENT_FAILED` is written only for a send IBEX provably refused, a send
+whose outcome is unknown goes to `PAYMENT_PENDING`, and an expiring invoice is
+checked against IBEX and the vendor first.
 The repository refuses an illegal move before touching Mongo, and the write is
 `findOneAndUpdate({ id, status: { $in: from } })`, so of two racing settlers
 exactly one wins and the loser gets `GiftCardOrderStateError`.
@@ -116,12 +119,12 @@ Who moves what:
 | --- | --- |
 | `CREATED -> INVOICE_ISSUED` | `purchaseGiftCard`, after `provider.createOrder` and the tolerance check |
 | `CREATED/INVOICE_ISSUED -> FAILED` | `purchaseGiftCard` (`failUnpaidOrder`), `settleOrderFromVendor` on vendor `failed`/`refunded` before payment |
-| `INVOICE_ISSUED -> PAID / PAYMENT_PENDING / PAYMENT_FAILED` | `purchaseGiftCard` from the `PaymentSendStatus` |
+| `INVOICE_ISSUED -> PAID / PAYMENT_PENDING / PAYMENT_FAILED` | `purchaseGiftCard` from the `PaymentSendStatus`, or from the send error's class: a proven refusal is `PAYMENT_FAILED`, anything else `PAYMENT_PENDING` (FLOWS 4a). Also entered by a same-key replay of an unpaid `INVOICE_ISSUED` order |
 | `PAYMENT_PENDING -> PAID / PAYMENT_FAILED` | `reconcileGiftCardOrders` (`processPendingPayment`) after re-reading IBEX |
-| `INVOICE_ISSUED/PAYMENT_PENDING -> PAID` | `settleOrderFromVendor` when the vendor reports fulfilled before we recorded payment |
-| `CREATED/INVOICE_ISSUED -> EXPIRED` | reconcile (`processExpiry`) past `expiresAt`, after one payment re-read |
+| `INVOICE_ISSUED/PAYMENT_PENDING -> PAID` | `settleOrderFromVendor` when the vendor reports fulfilled before we recorded payment — including the reconcile worker's vendor fallback when IBEX cannot account for the send |
+| `CREATED/INVOICE_ISSUED -> EXPIRED` | reconcile (`processExpiry`) past `expiresAt`, after one payment re-read and, when IBEX cannot answer, one vendor poll |
 | `PAID -> FULFILLED` | `settleOrderFromVendor` (`fulfil`) with the encrypted claim |
-| `PAID -> REFUND_REQUIRED` | `settleOrderFromVendor` on vendor `failed`/`refunded`; reconcile after 24h in PAID (`fulfillment-timeout`) |
+| `PAID -> REFUND_REQUIRED` | `settleOrderFromVendor` on vendor `failed`/`refunded`; reconcile after 24h in PAID when a final vendor poll does not report fulfilled (`fulfillment-timeout`) |
 
 ## Decisive facts
 
@@ -214,7 +217,7 @@ The E11000 on `walletId_1_idempotencyKey_1` is mapped to
 | Job | Where | Cadence | Guard |
 | --- | --- | --- | --- |
 | Catalog sync | `cron.ts` `syncGiftCardCatalogsJob` | every cron run, throttled to `catalog.syncIntervalSeconds` by the Redis marker | `giftCards.enabled`; distributed lock |
-| Reconcile | `trigger.ts` `startGiftCardReconcileInterval` (30 s) and `cron.ts` `reconcileGiftCardOrdersJob` | 30 s in the trigger pod; cron as safety net | `giftCards.enabled`; shared Redis lock |
+| Reconcile | `trigger.ts` `startGiftCardReconcileInterval` (30 s) and `cron.ts` `reconcileGiftCardOrdersJob` | 30 s in the trigger pod; cron as safety net | any non-terminal order exists (`hasOpenGiftCardOrders`, one `limit: 1` read) — **not** `giftCards.enabled`, so the kill switch never strands a paid order; shared Redis lock |
 
 Reconcile PAID backoff: 5s, 15s, 60s, 5m, then every 15m from the PAID
 transition. Attempt timing is process memory, so the cron (a fresh process)

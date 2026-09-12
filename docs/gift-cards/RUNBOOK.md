@@ -79,8 +79,8 @@ Normal fulfilment is seconds. The worker polls at 5s/15s/60s/5m then every
 2. Is the worker running? In the trigger pod logs look for
    `gift card reconcile finished` (cron) or reconcile tick warnings. If every
    run says `skipped: lock-held`, a run died holding the lock; it lapses after
-   5 min (`giftcards:reconcile:lock`). Check `giftCards.enabled` is true in the
-   trigger and cron config, not just the api.
+   5 min (`giftcards:reconcile:lock`). The worker runs regardless of
+   `giftCards.enabled`; a tick only skips when no non-terminal order exists.
 3. Check the vendor for that invoice (step (a)3). `unpaid`/`underpaid`/
    `confirming` while we show PAID means IBEX settled and TBC has not seen it:
    compare `paidSats` with the invoice amount and escalate to TBC. `pending` /
@@ -94,9 +94,12 @@ Normal fulfilment is seconds. The worker polls at 5s/15s/60s/5m then every
 ## (c) Order stuck in `PAYMENT_PENDING` with no `providerPaymentRef`
 
 The worker cannot re-read IBEX without the transaction id, and there is no
-hash-based fallback on this rail (`lookupSentPaymentStatus`). After 60 min it
-logs `Gift card payment has been pending for over an hour with no resolvable
-status` every run.
+hash-based fallback on this rail (`lookupSentPaymentStatus`), so every run it
+asks the vendor instead (`fetchAndSettle`): a vendor `fulfilled` settles the
+order as `PAID` then `FULFILLED` on its own, no operator needed. An order still
+`PAYMENT_PENDING` after 60 min is therefore one the vendor shows as unpaid (or
+cannot be reached for); the worker logs `Gift card payment has been pending
+for over an hour with no resolvable status` every run.
 
 1. `Q='{"status":"PAYMENT_PENDING","providerPaymentRef":null}'`. Read
    `paymentHash`, `paymentRequest`, `walletId`, `invoiceSats`.
@@ -120,19 +123,23 @@ status. Escalate to IBEX with the transaction id.
 One config change, then roll api + trigger + cron:
 
 - Whole rail: `giftCards.enabled: false`. Catalog, quote and purchase return
-  `GIFT_CARDS_DISABLED`, `globals.giftCardsEnabled` is false, both jobs
-  no-op. `giftCardOrder` / `giftCardOrders` keep working so customers can
-  still read cards they own. **In-flight orders stop being reconciled**;
-  expect to come back within 24 h or handle PAID orders by hand.
+  `GIFT_CARDS_DISABLED`, `globals.giftCardsEnabled` is false, catalog sync
+  no-ops. **The reconcile worker keeps running** (trigger interval and cron)
+  for as long as any non-terminal order exists: in-flight orders still settle,
+  customers who already paid still receive their codes, and the 24 h
+  `REFUND_REQUIRED` alert still fires. The switch stops new money leaving,
+  nothing else: a same-key replay of an unpaid `INVOICE_ISSUED` order is not
+  resumed while it is off (the worker expires that order after checking IBEX
+  and the vendor). `giftCardOrder` / `giftCardOrders` keep working so
+  customers can still read cards they own.
 - One provider: `giftCards.providers.bitcoinCompany.enabled: false`. Countries
-  routed to it get `GIFT_CARD_PROVIDER_UNAVAILABLE`; `fetchAndSettle` refuses
-  those orders (`getEnabledGiftCardProvider`), so the same in-flight caveat
-  applies to that provider's orders.
+  routed to it get `GIFT_CARD_PROVIDER_UNAVAILABLE` on catalog, quote and
+  purchase. Settlement resolves the adapter by registration
+  (`getRegisteredGiftCardProviderOrError`), so that provider's in-flight orders
+  keep reconciling exactly as above.
 - Open-loop only: `giftCards.allowOpenLoop: false`.
-- Kill new purchases but keep settling: there is no such switch today; the
-  closest is `limits.mode: enforce` with `perLevel.*.perCardCents: 0`, which
-  refuses every purchase with `GIFT_CARD_LIMIT_EXCEEDED` while the worker
-  keeps running.
+- Kill new purchases but keep settling: that is what `giftCards.enabled:
+  false` does.
 
 Not live-reloaded; budget for a pod roll.
 

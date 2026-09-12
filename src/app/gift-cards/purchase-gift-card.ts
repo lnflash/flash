@@ -8,13 +8,14 @@ import {
 import { payLnInvoiceViaIbex } from "@app/payments/pay-invoice-via-ibex"
 import { toSats } from "@domain/bitcoin"
 import { decodeInvoice, PaymentSendStatus } from "@domain/bitcoin/lightning"
-import { InvalidIdempotencyKeyError } from "@domain/errors"
+import { IdempotencyKeyReuseError, InvalidIdempotencyKeyError } from "@domain/errors"
 import {
   checkedGiftCardQuantity,
   checkedGiftCardValue,
   GIFT_CARD_QUOTE_TOLERANCE_BPS,
   GiftCardIdempotencyKeyReuseError,
   GiftCardOrderNotFoundError,
+  GiftCardOrderStateError,
   GiftCardOrderStatus,
   GiftCardProductNotAvailableInCountryError,
   GiftCardProductNotFoundError,
@@ -28,6 +29,7 @@ import { RateLimitConfig } from "@domain/rate-limit"
 import { GiftCardPurchaseRateLimiterExceededError } from "@domain/rate-limit/errors"
 import { ValidationError } from "@domain/shared"
 import { getEnabledGiftCardProvider } from "@services/gift-cards/registry"
+import { FailedIbexPayment, InsufficientIbexBalance } from "@services/ibex/errors"
 import { baseLogger } from "@services/logger"
 import {
   AccountsRepository,
@@ -65,6 +67,14 @@ import { fetchAndSettle } from "./settle-order"
  * is unique on (walletId, idempotencyKey), so a replayed mutation finds the
  * existing order before it ever reaches the vendor.
  *
+ * PAYMENT_FAILED is reserved for outcomes that PROVE IBEX never accepted the
+ * send (see `isDefinitiveSendRejection`). The client reads that state as
+ * "nothing left the wallet, buy again with a new key", so an error that merely
+ * says "we don't know" — a socket reset or gateway 5xx after IBEX took the
+ * request, an unreadable 200, a busy idempotency lock — must never land there.
+ * Those go to PAYMENT_PENDING and the reconcile worker settles them against
+ * IBEX and, failing that, the vendor.
+ *
  * Claim data never passes through this module: fulfilment is `settle-order`'s
  * job and it stores ciphertext only.
  */
@@ -78,7 +88,7 @@ export type PurchaseGiftCardArgs = {
 }
 
 // How long a CREATED / INVOICE_ISSUED order stays payable before the reconcile
-// worker expires it. Vendor invoices are usually shorter; we take the earlier.
+// worker expires it. The vendor's BOLT11 is usually shorter; we take the earlier.
 const ORDER_TTL_MS = 15 * 60 * 1000
 
 const MAX_IDEMPOTENCY_KEY_LENGTH = 256
@@ -100,47 +110,105 @@ const sameParameters = (
   order.valueMinor === args.valueMinor &&
   order.quantity === args.quantity
 
+const isValidDate = (value: unknown): value is Date =>
+  value instanceof Date && !Number.isNaN(value.getTime())
+
+/** The earliest of `first` and every valid Date among `rest`. */
+const earliestDate = (
+  first: Date,
+  ...rest: ReadonlyArray<Date | null | undefined>
+): Date => rest.reduce<Date>((min, d) => (isValidDate(d) && d < min ? d : min), first)
+
 /**
  * The ENG-573 send guard, built exactly as `lnInvoicePaymentSend` builds it:
  * decode is part of the guard (so log-only never blocks on it), a zero-amount
  * invoice is a gated rejection, and the decoded sats are what the cap is
  * judged on. Runs inside the idempotency lock, only on the path that pays.
+ *
+ * `onReject` fires when the guard refuses. The wrapper runs the guard
+ * immediately before `execute`, so a refusal here is proof that IBEX was never
+ * called — which is what lets the caller file it under PAYMENT_FAILED.
  */
 const buildSendGuardHook =
   ({
     senderAccount,
     senderWalletId,
     paymentRequest,
+    onReject,
   }: {
     senderAccount: Account
     senderWalletId: WalletId
     paymentRequest: string
+    onReject: () => void
   }): SendGuardHook =>
   async () => {
-    if (getSendGuardMode() === "off") return true
+    const verdict = await judgeSend({ senderAccount, senderWalletId, paymentRequest })
+    if (verdict instanceof Error) onReject()
+    return verdict
+  }
 
-    const gate = (error: ApplicationError) =>
-      gateSend({
-        error,
-        reason: SendRejectionReasons.undecodableInvoice,
-        senderAccount,
-        senderWalletId,
-        kind: "lightning",
-      })
+const judgeSend = async ({
+  senderAccount,
+  senderWalletId,
+  paymentRequest,
+}: {
+  senderAccount: Account
+  senderWalletId: WalletId
+  paymentRequest: string
+}): Promise<true | ApplicationError> => {
+  if (getSendGuardMode() === "off") return true
 
-    const decoded = decodeInvoice(paymentRequest)
-    if (decoded instanceof Error) return gate(decoded)
-    if (decoded.paymentAmount === null) {
-      return gate(new LnPaymentRequestNonZeroAmountRequiredError())
-    }
-
-    return authorizeSend({
+  const gate = (error: ApplicationError) =>
+    gateSend({
+      error,
+      reason: SendRejectionReasons.undecodableInvoice,
       senderAccount,
       senderWalletId,
-      amount: { currency: "BTC", sats: decoded.paymentAmount.amount },
       kind: "lightning",
     })
+
+  const decoded = decodeInvoice(paymentRequest)
+  if (decoded instanceof Error) return gate(decoded)
+  if (decoded.paymentAmount === null) {
+    return gate(new LnPaymentRequestNonZeroAmountRequiredError())
   }
+
+  return authorizeSend({
+    senderAccount,
+    senderWalletId,
+    amount: { currency: "BTC", sats: decoded.paymentAmount.amount },
+    kind: "lightning",
+  })
+}
+
+/**
+ * Does this error prove IBEX never accepted the send? Only then is
+ * PAYMENT_FAILED honest.
+ *
+ *  - send guard refused: runs inside the idempotency lock immediately before
+ *    `execute`, so `execute` (and the IBEX call) never ran
+ *  - InvalidIdempotencyKeyError / IdempotencyKeyReuseError: the wrapper
+ *    refused before `execute`, or replayed a cached result for a different
+ *    fingerprint without executing
+ *  - InsufficientIbexBalance: IBEX's 400 for "no funds"; nothing was sent
+ *  - FailedIbexPayment: IBEX's 200 carrying a corroborated FAILED
+ *
+ * Everything else — the generic IbexError for a network fault, timeout, 5xx or
+ * auth failure; UnconfirmedIbexPayment; CompletedInvoice ("already prepared",
+ * which may be OUR earlier attempt); the busy LockServiceError while a
+ * concurrent same-key attempt is mid-flight — says nothing about whether money
+ * moved. That is the KNOWN GAP `withPaymentIdempotency` documents: IBEX may
+ * have debited and then errored to us.
+ */
+const isDefinitiveSendRejection = (
+  error: ApplicationError,
+  guardRejected: boolean,
+): boolean =>
+  guardRejected ||
+  error instanceof InvalidIdempotencyKeyError ||
+  error instanceof IdempotencyKeyReuseError ||
+  error instanceof InsufficientIbexBalance ||
+  error instanceof FailedIbexPayment
 
 /** Move an unpaid order to FAILED and report it. Transition errors are logged, not surfaced. */
 const failUnpaidOrder = async (
@@ -214,8 +282,9 @@ export const purchaseGiftCard = async (
   const repo = GiftCardOrdersRepository()
 
   // Replay: the row is unique on (walletId, idempotencyKey). Same key, same
-  // parameters → the existing order, whatever state it reached. Same key,
-  // different parameters → refused, never silently swapped for the old order.
+  // parameters → the existing order (see `replayExistingOrder` for the one
+  // state that is resumed rather than returned). Same key, different
+  // parameters → refused, never silently swapped for the old order.
   const parsed = parseGiftCardProductId(productId)
   if (parsed instanceof Error) return parsed
 
@@ -236,7 +305,7 @@ export const purchaseGiftCard = async (
       "giftcard.orderId": existing.id,
       "giftcard.replay": true,
     })
-    return existing
+    return replayExistingOrder({ existing, account, walletId })
   }
 
   // Master gate with the account's routing country.
@@ -360,11 +429,9 @@ export const purchaseGiftCard = async (
     return error
   }
 
-  const vendorExpiresAt =
-    vendorOrder.expiresAt instanceof Date &&
-    !Number.isNaN(vendorOrder.expiresAt.getTime())
-      ? vendorOrder.expiresAt
-      : created.expiresAt
+  // The order is payable only as long as the invoice is. The BOLT11's own
+  // expiry is the source of truth; the order TTL caps it; a vendor that states
+  // an explicit order expiry (TBC does not) can only bring it forward.
   const issued = await repo.transition({
     id: created.id,
     from: [GiftCardOrderStatus.Created],
@@ -375,8 +442,11 @@ export const purchaseGiftCard = async (
       paymentRequest: vendorOrder.paymentRequest,
       invoiceSats,
       paymentHash: decoded.paymentHash,
-      expiresAt:
-        vendorExpiresAt < created.expiresAt ? vendorExpiresAt : created.expiresAt,
+      expiresAt: earliestDate(
+        created.expiresAt,
+        decoded.expiresAt,
+        vendorOrder.expiresAt,
+      ),
     },
   })
   if (issued instanceof Error) {
@@ -385,26 +455,105 @@ export const purchaseGiftCard = async (
     return issued
   }
 
-  // IBEX-custodial rail (see @app/payments/pay-invoice-via-ibex): the same
-  // idempotency wrapper and send guard as lnInvoicePaymentSend. The
-  // fingerprint binds the cached result to THIS order as well as the invoice,
-  // so a different order can never replay a previous success.
-  //
-  // The IBEX transaction id is the only handle the reconcile worker has to
-  // re-query an in-flight send; it is captured from the raw 200 and written
-  // with whichever transition follows. A crash between the IBEX call and that
-  // transition leaves INVOICE_ISSUED with no ref — see reconcile-orders.ts.
-  const captured: { providerPaymentRef: string | null } = { providerPaymentRef: null }
+  return payIssuedOrder({
+    account,
+    walletId,
+    order: issued,
+    paymentRequest: vendorOrder.paymentRequest,
+    invoiceSats,
+  })
+}
+
+/**
+ * Same key, same parameters. Every state is handed back as it is, with one
+ * exception: a still-payable INVOICE_ISSUED row. That is a first attempt that
+ * died between issuing the invoice and recording the payment's outcome, and
+ * handing it back as "keep polling" could only ever end in EXPIRED — writing
+ * the money off if IBEX had in fact paid. Re-entering the pay step is safe by
+ * construction: `withPaymentIdempotency` under `giftcard:<orderId>` replays a
+ * cached outcome, refuses to run alongside an in-flight attempt, or makes the
+ * one send that never happened.
+ *
+ * CREATED is left alone (the vendor's createOrder is not idempotent; the worker
+ * expires it), as is an INVOICE_ISSUED row past its expiry (the worker re-reads
+ * IBEX and the vendor before expiring it). The kill switch stops the resume
+ * too — it is new money leaving — and the worker's vendor poll still settles
+ * an invoice the first attempt did pay.
+ */
+const replayExistingOrder = async ({
+  existing,
+  account,
+  walletId,
+}: {
+  existing: GiftCardOrder
+  account: Account
+  walletId: WalletId
+}): Promise<GiftCardOrder | ApplicationError> => {
+  if (existing.status !== GiftCardOrderStatus.InvoiceIssued) return existing
+  if (existing.expiresAt.getTime() <= Date.now()) return existing
+  if (!existing.paymentRequest) return existing
+  if (GiftCardsConfig.enabled !== true) return existing
+
+  addAttributesToCurrentSpan({ "giftcard.replay.resumedPayment": true })
+  baseLogger.info(
+    { orderId: existing.id },
+    "Gift card purchase replayed on an unpaid INVOICE_ISSUED order; resuming the payment",
+  )
+  return payIssuedOrder({
+    account,
+    walletId,
+    order: existing,
+    paymentRequest: existing.paymentRequest,
+    invoiceSats: existing.invoiceSats ?? existing.quoteSats,
+  })
+}
+
+/**
+ * The pay step and the transitions that follow it, for an INVOICE_ISSUED
+ * order. Entered by the purchase flow once and by a same-key replay of an
+ * unpaid order; both are idempotent under `giftcard:<orderId>`.
+ *
+ * IBEX-custodial rail (see @app/payments/pay-invoice-via-ibex): the same
+ * idempotency wrapper and send guard as lnInvoicePaymentSend. The fingerprint
+ * binds the cached result to THIS order as well as the invoice, so a different
+ * order can never replay a previous success.
+ *
+ * The IBEX transaction id is the only handle the reconcile worker has to
+ * re-query an in-flight send; it is captured from the raw 200 and written with
+ * whichever transition follows. A crash between the IBEX call and that
+ * transition leaves INVOICE_ISSUED with no ref — a same-key replay resumes it,
+ * and the worker polls the vendor before expiring it.
+ */
+const payIssuedOrder = async ({
+  account,
+  walletId,
+  order,
+  paymentRequest,
+  invoiceSats,
+}: {
+  account: Account
+  walletId: WalletId
+  order: GiftCardOrder
+  paymentRequest: string
+  invoiceSats: Satoshis
+}): Promise<GiftCardOrder | ApplicationError> => {
+  const captured: { providerPaymentRef: string | null; guardRejected: boolean } = {
+    providerPaymentRef: null,
+    guardRejected: false,
+  }
   const payment = await payLnInvoiceViaIbex({
     senderWalletId: walletId,
     senderAccount: account,
-    paymentRequest: vendorOrder.paymentRequest,
-    idempotencyKey: `giftcard:${created.id}`,
-    requestFingerprint: `ln|${vendorOrder.paymentRequest}|giftcard|${created.id}`,
+    paymentRequest,
+    idempotencyKey: `giftcard:${order.id}`,
+    requestFingerprint: `ln|${paymentRequest}|giftcard|${order.id}`,
     authorize: buildSendGuardHook({
       senderAccount: account,
       senderWalletId: walletId,
-      paymentRequest: vendorOrder.paymentRequest,
+      paymentRequest,
+      onReject: () => {
+        captured.guardRejected = true
+      },
     }),
     onResponse: (response) => {
       const id = response?.transaction?.id
@@ -415,13 +564,16 @@ export const purchaseGiftCard = async (
   addAttributesToCurrentSpan({ "giftcard.providerPaymentRef": providerPaymentRef ?? "" })
 
   if (payment instanceof Error) {
-    await markPaymentFailed(
-      issued,
-      `payment-error: ${payment.constructor.name}`,
-      payment,
-      providerPaymentRef,
-    )
-    return payment
+    if (isDefinitiveSendRejection(payment, captured.guardRejected)) {
+      await markPaymentFailed(
+        order,
+        `payment-error: ${payment.constructor.name}`,
+        payment,
+        providerPaymentRef,
+      )
+      return payment
+    }
+    return markPaymentUnconfirmed(order, payment, providerPaymentRef)
   }
 
   // Compare by value: a replayed status comes back from the idempotency cache
@@ -429,33 +581,73 @@ export const purchaseGiftCard = async (
   switch (payment.value) {
     case PaymentSendStatus.Success.value:
     case PaymentSendStatus.AlreadyPaid.value:
-      return markPaidAndSettle(issued, invoiceSats, providerPaymentRef)
-    case PaymentSendStatus.Pending.value: {
-      const pending = await repo.transition({
-        id: issued.id,
-        from: [GiftCardOrderStatus.InvoiceIssued],
-        to: GiftCardOrderStatus.PaymentPending,
-        reason: "payment-pending",
-        patch: { providerPaymentRef },
-      })
-      if (pending instanceof Error) return pending
-      notifyGiftCardOpsEvent({
-        phase: "payment-pending",
-        status: "pending",
-        order: pending,
-      })
-      return pending
-    }
+      return markPaidAndSettle(order, invoiceSats, providerPaymentRef)
+    case PaymentSendStatus.Pending.value:
+      return markPaymentPending(order, { reason: "payment-pending", providerPaymentRef })
     default: {
       const failed = await markPaymentFailed(
-        issued,
+        order,
         "payment-failed",
         null,
         providerPaymentRef,
       )
-      return failed ?? issued
+      return failed ?? order
     }
   }
+}
+
+/**
+ * The send errored without proving IBEX refused it: money may have left the
+ * wallet. PAYMENT_PENDING is the only honest state — the reconcile worker
+ * re-reads IBEX when it has a transaction id and asks the vendor when it does
+ * not. Returns the pending order, not the error: the client must poll, never
+ * retry with a fresh key.
+ */
+const markPaymentUnconfirmed = async (
+  order: GiftCardOrder,
+  error: ApplicationError,
+  providerPaymentRef: string | null,
+): Promise<GiftCardOrder | ApplicationError> => {
+  const reason = `payment-unconfirmed: ${error.constructor.name}`
+  recordExceptionInCurrentSpan({ error })
+  baseLogger.warn(
+    { orderId: order.id, providerPaymentRef, error: error.constructor.name },
+    "Gift card payment outcome unknown after send error; holding as PAYMENT_PENDING",
+  )
+  return markPaymentPending(order, { reason, providerPaymentRef, error })
+}
+
+const markPaymentPending = async (
+  order: GiftCardOrder,
+  {
+    reason,
+    providerPaymentRef,
+    error,
+  }: { reason: string; providerPaymentRef: string | null; error?: ApplicationError },
+): Promise<GiftCardOrder | ApplicationError> => {
+  const repo = GiftCardOrdersRepository()
+  const pending = await repo.transition({
+    id: order.id,
+    from: [GiftCardOrderStatus.InvoiceIssued],
+    to: GiftCardOrderStatus.PaymentPending,
+    reason,
+    patch: { providerPaymentRef },
+  })
+  if (pending instanceof GiftCardOrderStateError) {
+    // A concurrent same-key attempt already moved the order on — to its own
+    // PAYMENT_PENDING, or to the PAID / PAYMENT_FAILED its send resolved to.
+    // Whatever it wrote is the truth.
+    return repo.findById(order.id)
+  }
+  if (pending instanceof Error) return pending
+  notifyGiftCardOpsEvent({
+    phase: "payment-pending",
+    status: "pending",
+    order: pending,
+    error: error?.constructor.name,
+    meta: { reason },
+  })
+  return pending
 }
 
 const markPaymentFailed = async (

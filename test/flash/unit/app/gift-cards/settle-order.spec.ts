@@ -21,7 +21,7 @@ jest.mock("@services/gift-cards/claim-crypto", () => ({
   encryptGiftCardClaim: (...a: unknown[]) => mockEncrypt(...a),
 }))
 jest.mock("@services/gift-cards/registry", () => ({
-  getEnabledGiftCardProvider: (...a: unknown[]) => mockGetProvider(...a),
+  getRegisteredGiftCardProviderOrError: (...a: unknown[]) => mockGetProvider(...a),
 }))
 jest.mock("@app/gift-cards/send-fulfilled-notification", () => ({
   sendGiftCardFulfilledNotificationBestEffort: (...a: unknown[]) =>
@@ -313,7 +313,16 @@ describe("fetchAndSettle", () => {
     expect(repo.transition).not.toHaveBeenCalled()
   })
 
-  it("returns an error when the provider is disabled", async () => {
+  it("resolves the provider by registration, not by the enabled switch", async () => {
+    // The kill switch must not strand an order that already exists: settlement
+    // asks the registry for the registered adapter, never the enabled one.
+    const res = await fetchAndSettle(paidOrder())
+    if (res instanceof Error) throw res
+    expect(mockGetProvider).toHaveBeenCalledWith("bitcoinCompany")
+    expect(res.status).toBe("FULFILLED")
+  })
+
+  it("returns an error when the provider is not registered", async () => {
     mockGetProvider.mockReturnValue(new GiftCardProviderUnavailableError())
     const res = await fetchAndSettle(paidOrder())
     expect(res).toBeInstanceOf(GiftCardProviderUnavailableError)

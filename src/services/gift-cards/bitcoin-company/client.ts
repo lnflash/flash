@@ -84,7 +84,8 @@ const RETRY_BASE_MS = 200
 const RETRY_JITTER_MS = 100
 
 export const CATALOG_PAGE_SIZE = 500
-const CATALOG_MAX_PAGES = 100
+/** Hard stop so a vendor that never returns an empty page cannot loop forever. */
+export const CATALOG_MAX_PAGES = 200
 
 const LOG_BODY_PREVIEW_CHARS = 2000
 
@@ -292,13 +293,27 @@ export class BitcoinCompanyClient {
   /**
    * Full catalog, paginated. Public endpoint, no auth. A product row that
    * fails validation is skipped and counted, not fatal to the sync.
+   *
+   * The offset advances by the rows the vendor actually returned, never by the
+   * requested page size: a vendor that clamps `size` (100 is a common cap) or
+   * returns short pages for any other reason would otherwise silently truncate
+   * the catalog or skip products. The only end-of-catalog signal is an empty
+   * page, so every sync costs one extra request. Invalid rows still count
+   * toward the offset; they occupy a slot on the vendor's side regardless.
+   *
+   * Hitting the page cap without an empty page fails the sync rather than
+   * returning a partial catalog: a vendor that ignores `offset` would
+   * otherwise hand the sync a duplicate-heavy list that overwrites the last
+   * good catalog wholesale. Failing keeps the previous catalog serving.
    */
   async listProducts(): Promise<VendorProduct[] | GiftCardError> {
     const products: VendorProduct[] = []
     let skipped = 0
+    let offset = 0
+    let pages = 0
+    let reachedEnd = false
 
-    for (let page = 0; page < CATALOG_MAX_PAGES; page++) {
-      const offset = page * CATALOG_PAGE_SIZE
+    while (pages < CATALOG_MAX_PAGES) {
       const result = await this.call({
         op: "listProducts",
         method: "GET",
@@ -308,6 +323,12 @@ export class BitcoinCompanyClient {
         schema: catalogPageSchema,
       })
       if (result instanceof Error) return result
+      pages++
+
+      if (result.svs.length === 0) {
+        reachedEnd = true
+        break
+      }
 
       for (const row of result.svs) {
         const parsed = vendorProductSchema.safeParse(row)
@@ -317,8 +338,15 @@ export class BitcoinCompanyClient {
           skipped++
         }
       }
+      offset += result.svs.length
+    }
 
-      if (result.svs.length < CATALOG_PAGE_SIZE) break
+    if (!reachedEnd) {
+      baseLogger.warn(
+        { provider: PROVIDER, op: "listProducts", pages, offset, kept: products.length },
+        "Bitcoin Company catalog page cap reached before an empty page; failing the sync",
+      )
+      return new GiftCardVendorUnavailableError()
     }
 
     if (skipped > 0) {

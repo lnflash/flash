@@ -199,7 +199,8 @@ describe("bitcoinCompany adapter specifics", () => {
       providerOrderId: PURCHASE_RESULT.uuid,
       paymentRequest: PURCHASE_RESULT.invoice,
       amountSats: 39000,
-      expiresAt: new Date(NOW + 15 * 60_000),
+      // TBC reports no order expiry; the BOLT11's own expiry governs.
+      expiresAt: null,
     })
   })
 

@@ -58,8 +58,10 @@ const STATUS_ENUM_VALUES: Record<
   PAYMENT_FAILED: {
     value: OrderStatus.PaymentFailed,
     description:
-      "Terminal. The Lightning payment failed and nothing left the wallet. Safe to " +
-      "try again with a new idempotencyKey.",
+      "Terminal. Only proven refusals land here (insufficient balance, a rejected " +
+      "send, a bad idempotency key): nothing left the wallet and it is safe to try " +
+      "again with a new idempotencyKey. An indeterminate send error goes to " +
+      "PAYMENT_PENDING instead, never here.",
   },
   EXPIRED: {
     value: OrderStatus.Expired,

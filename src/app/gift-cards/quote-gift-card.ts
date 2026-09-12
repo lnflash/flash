@@ -4,8 +4,12 @@ import {
   GiftCardProductNotAvailableInCountryError,
   GiftCardProductNotFoundError,
 } from "@domain/gift-cards"
+import { RateLimitConfig } from "@domain/rate-limit"
+import { GiftCardQuoteRateLimiterExceededError } from "@domain/rate-limit/errors"
 import { getEnabledGiftCardProvider } from "@services/gift-cards/registry"
+import { baseLogger } from "@services/logger"
 import { AccountsRepository } from "@services/mongoose"
+import { consumeLimiter } from "@services/rate-limit"
 import { addAttributesToCurrentSpan } from "@services/tracing"
 
 import {
@@ -17,7 +21,7 @@ import { getGiftCardProduct } from "./list-products"
 /**
  * ENG-582 — a price for the storefront, BEFORE any order exists.
  *
- *   gate → product → validate → provider.quote
+ *   attempt budget → gate → product → validate → provider.quote
  *
  * Deliberately the same first four steps as `purchaseGiftCard`, in the same
  * order with the same errors, so the quote can never say yes where the
@@ -25,7 +29,13 @@ import { getGiftCardProduct } from "./list-products"
  * is not routed to, an out-of-stock row, an off-denomination value — every one
  * of those is refused here with the error the mutation would give.
  *
- * Nothing is written and no limit is consumed: a quote is not a reservation.
+ * Nothing is written and no purchase limit is consumed: a quote is not a
+ * reservation. The only thing charged is the per-account ATTEMPT budget
+ * (`RateLimitConfig.giftCardQuote`), because every call past it is a live POST
+ * to the vendor through the one shared reseller login that every purchase also
+ * needs — a client looping on this field could get that login throttled or
+ * locked and fail every customer's purchase.
+ *
  * The number comes straight from the vendor and is good until `expiresAt`; the
  * purchase re-quotes and refuses to pay an invoice that drifted past tolerance
  * (`GIFT_CARD_QUOTE_TOLERANCE_BPS`), so a stale quote costs the customer a
@@ -49,6 +59,22 @@ export const quoteGiftCard = async ({
     "giftcard.valueMinor": valueMinor,
     "giftcard.quantity": quantity,
   })
+
+  // Attempt budget, charged before any store or vendor round-trip so a client
+  // looping on a refused request bounds its own cost. A limiter STORE fault
+  // falls through (same posture as purchaseGiftCard): refusing every quote
+  // during a Redis blip would page nobody and block everyone.
+  const limitOk = await consumeLimiter({
+    rateLimitConfig: RateLimitConfig.giftCardQuote,
+    keyToConsume: accountId,
+  })
+  if (limitOk instanceof GiftCardQuoteRateLimiterExceededError) return limitOk
+  if (limitOk instanceof Error) {
+    baseLogger.warn(
+      { accountId, error: limitOk.constructor.name },
+      "Gift card quote rate limiter unavailable; continuing",
+    )
+  }
 
   const account = await AccountsRepository().findById(accountId)
   if (account instanceof Error) return account

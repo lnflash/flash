@@ -52,6 +52,7 @@ import {
   BITCOIN_COMPANY_AUTH_LOCK_KEY,
   BitcoinCompanyClient,
   BitcoinCompanyClientDeps,
+  CATALOG_MAX_PAGES,
   CATALOG_PAGE_SIZE,
   RETRY_MAX,
   redactForLog,
@@ -76,12 +77,14 @@ import {
   bearerOf,
   bitcoinCompanyConfigFixture,
   callsTo,
+  catalogOffsets,
   catalogPage,
   failThen,
   httpError,
   httpOk,
   makeCatalog,
   networkError,
+  pagedCatalog,
   routeGet,
   routePost,
   sequence,
@@ -345,16 +348,9 @@ describe("BitcoinCompanyClient auth", () => {
 })
 
 describe("BitcoinCompanyClient catalog", () => {
-  it("pages through the catalog until a short page (500 + 355 = 855)", async () => {
+  it("pages through the catalog until an empty page (500 + 355 = 855)", async () => {
     mockedAxios.get.mockImplementation(
-      routeGet({
-        "/giftcards": (ctx) => {
-          const offset = Number(ctx.query.get("offset"))
-          return catalogPage(
-            offset === 0 ? makeCatalog(CATALOG_PAGE_SIZE, 0) : makeCatalog(355, offset),
-          )
-        },
-      }),
+      routeGet({ "/giftcards": pagedCatalog(makeCatalog(855)) }),
     )
 
     const result = await makeClient().listProducts()
@@ -363,19 +359,79 @@ describe("BitcoinCompanyClient catalog", () => {
     expect(result).toHaveLength(855)
     expect(new Set(result.map((p) => p.id)).size).toBe(855)
 
+    // A short page is not treated as the end; only the empty page at 855 is.
     const pages = callsTo(mockedAxios.get, "/giftcards")
-    expect(pages).toHaveLength(2)
-    expect(pages.map(([url]) => new URL(url).searchParams.get("offset"))).toEqual([
-      "0",
-      "500",
-    ])
+    expect(pages).toHaveLength(3)
+    expect(catalogOffsets(mockedAxios.get)).toEqual(["0", "500", "855"])
     expect(pages.map(([url]) => new URL(url).searchParams.get("size"))).toEqual([
+      "500",
       "500",
       "500",
     ])
     // Public endpoint: no auth round-trip.
     expect(bearerOf(pages[0][1])).toBeNull()
     expect(mockedAxios.post).not.toHaveBeenCalled()
+    expect(mockedLogger.warn).not.toHaveBeenCalled()
+  })
+
+  it("collects every row when the vendor clamps the page size to 100 (100 + 100 + 55 = 255)", async () => {
+    mockedAxios.get.mockImplementation(
+      routeGet({ "/giftcards": pagedCatalog(makeCatalog(255), { maxPageSize: 100 }) }),
+    )
+
+    const result = await makeClient().listProducts()
+
+    if (result instanceof Error) throw result
+    expect(result).toHaveLength(255)
+    expect(new Set(result.map((p) => p.id)).size).toBe(255)
+
+    // Offsets advance by rows received, not by the 500 we asked for; the
+    // trailing empty page at 255 is the stop signal.
+    expect(catalogOffsets(mockedAxios.get)).toEqual(["0", "100", "200", "255"])
+    const pages = callsTo(mockedAxios.get, "/giftcards")
+    expect(pages.every(([url]) => new URL(url).searchParams.get("size") === "500")).toBe(
+      true,
+    )
+    expect(mockedLogger.warn).not.toHaveBeenCalled()
+  })
+
+  it("returns an empty catalog after a single request when the first page is empty", async () => {
+    mockedAxios.get.mockImplementation(routeGet({ "/giftcards": pagedCatalog([]) }))
+
+    const result = await makeClient().listProducts()
+
+    expect(result).toEqual([])
+    expect(catalogOffsets(mockedAxios.get)).toEqual(["0"])
+    expect(mockedLogger.warn).not.toHaveBeenCalled()
+  })
+
+  it("fails the sync with a warning at the page cap when the vendor never returns an empty page", async () => {
+    // One fresh row per page, forever: a vendor that never signals the end.
+    mockedAxios.get.mockImplementation(
+      routeGet({
+        "/giftcards": (ctx) =>
+          catalogPage(makeCatalog(1, Number(ctx.query.get("offset")))),
+      }),
+    )
+
+    const result = await makeClient().listProducts()
+
+    // The partial catalog is never returned: a vendor that ignores `offset`
+    // would otherwise overwrite the last good catalog with duplicates.
+    expect(result).toBeInstanceOf(GiftCardVendorUnavailableError)
+    expect(callsTo(mockedAxios.get, "/giftcards")).toHaveLength(CATALOG_MAX_PAGES)
+    expect(catalogOffsets(mockedAxios.get)).toEqual(
+      Array.from({ length: CATALOG_MAX_PAGES }, (_, i) => String(i)),
+    )
+    expect(mockedLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        op: "listProducts",
+        pages: CATALOG_MAX_PAGES,
+        offset: CATALOG_MAX_PAGES,
+        kept: CATALOG_MAX_PAGES,
+      }),
+      expect.stringContaining("page cap"),
+    )
   })
 
   it("stops after a full page followed by an empty one", async () => {
@@ -398,15 +454,14 @@ describe("BitcoinCompanyClient catalog", () => {
   it("skips catalog rows that fail validation instead of failing the sync", async () => {
     mockedAxios.get.mockImplementation(
       routeGet({
-        "/giftcards": () =>
-          catalogPage([
-            vendorProductFixture(),
-            { id: 42, name: "broken" },
-            vendorProductFixture({
-              id: "prod-2",
-              isOpenLoop: "yes" as unknown as boolean,
-            }),
-          ]),
+        "/giftcards": pagedCatalog([
+          vendorProductFixture(),
+          { id: 42, name: "broken" },
+          vendorProductFixture({
+            id: "prod-2",
+            isOpenLoop: "yes" as unknown as boolean,
+          }),
+        ]),
       }),
     )
 
@@ -414,6 +469,8 @@ describe("BitcoinCompanyClient catalog", () => {
 
     if (result instanceof Error) throw result
     expect(result.map((p) => p.id)).toEqual(["prod-amazon-us"])
+    // Skipped rows still advance the offset: the next page starts at 3, not 1.
+    expect(catalogOffsets(mockedAxios.get)).toEqual(["0", "3"])
     expect(mockedLogger.warn).toHaveBeenCalledWith(
       expect.objectContaining({ op: "listProducts", skipped: 2, kept: 1 }),
       expect.any(String),
@@ -421,12 +478,14 @@ describe("BitcoinCompanyClient catalog", () => {
   })
 
   it("retries a GET after a network error and then succeeds", async () => {
+    const firstPage = failThen(
+      [networkError("ECONNRESET")],
+      catalogPage([vendorProductFixture()]),
+    )
     mockedAxios.get.mockImplementation(
       routeGet({
-        "/giftcards": failThen(
-          [networkError("ECONNRESET")],
-          catalogPage([vendorProductFixture()]),
-        ),
+        "/giftcards": (ctx) =>
+          Number(ctx.query.get("offset")) === 0 ? firstPage(ctx) : catalogPage([]),
       }),
     )
 
@@ -434,7 +493,8 @@ describe("BitcoinCompanyClient catalog", () => {
 
     if (result instanceof Error) throw result
     expect(result).toHaveLength(1)
-    expect(callsTo(mockedAxios.get, "/giftcards")).toHaveLength(2)
+    // Failed attempt, successful retry, then the terminating empty page.
+    expect(catalogOffsets(mockedAxios.get)).toEqual(["0", "0", "1"])
     expect(mockedLogger.warn).toHaveBeenCalledWith(
       expect.objectContaining({ op: "listProducts", attempt: 1 }),
       expect.any(String),

@@ -1495,7 +1495,7 @@ enum GiftCardOrderStatus
   PAID @join__enumValue(graph: PUBLIC)
 
   """
-  Terminal. The Lightning payment failed and nothing left the wallet. Safe to try again with a new idempotencyKey.
+  Terminal. Only proven refusals land here (insufficient balance, a rejected send, a bad idempotency key): nothing left the wallet and it is safe to try again with a new idempotencyKey. An indeterminate send error goes to PAYMENT_PENDING instead, never here.
   """
   PAYMENT_FAILED @join__enumValue(graph: PUBLIC)
 
@@ -2904,7 +2904,7 @@ type Query
   ): GiftCardProductConnection!
 
   """
-  One of the calling account's gift card orders, by id — the endpoint to poll after giftCardPurchase, and the ONLY place the claim is returned. Null when the id is unknown or belongs to another account; the two are deliberately indistinguishable.
+  One of the calling account's gift card orders, by id — the endpoint to poll after giftCardPurchase, and the ONLY place the claim is returned. Null when the id is unknown or belongs to another account; the two are deliberately indistinguishable. A FULFILLED order whose claim cannot currently be read is still returned, with `claim` null.
   """
   giftCardOrder(
     """A GiftCardOrder.id from giftCardPurchase or giftCardOrders."""

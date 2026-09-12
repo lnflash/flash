@@ -1,4 +1,8 @@
-import { CouldNotFindWalletFromIdError, InvalidIdempotencyKeyError } from "@domain/errors"
+import {
+  CouldNotFindWalletFromIdError,
+  IdempotencyKeyReuseError,
+  InvalidIdempotencyKeyError,
+} from "@domain/errors"
 import {
   GiftCardIdempotencyKeyReuseError,
   GiftCardInvalidValueError,
@@ -9,8 +13,16 @@ import {
   GiftCardVendorRejectedOrderError,
   GiftCardVendorUnavailableError,
 } from "@domain/gift-cards"
+import { ResourceAttemptsLockServiceError } from "@domain/lock"
 import { GiftCardPurchaseRateLimiterExceededError } from "@domain/rate-limit/errors"
 import { ValidationError } from "@domain/shared"
+import {
+  CompletedInvoice,
+  FailedIbexPayment,
+  IbexError,
+  InsufficientIbexBalance,
+  UnconfirmedIbexPayment,
+} from "@services/ibex/errors"
 
 const mockFindAccountById = jest.fn()
 const mockFindWalletById = jest.fn()
@@ -63,6 +75,7 @@ jest.mock("@app/gift-cards/authorize-purchase", () => ({
 }))
 jest.mock("@services/gift-cards/registry", () => ({
   getEnabledGiftCardProvider: (...a: unknown[]) => mockGetProvider(...a),
+  getRegisteredGiftCardProviderOrError: (...a: unknown[]) => mockGetProvider(...a),
 }))
 jest.mock("@services/gift-cards/claim-crypto", () => ({
   encryptGiftCardClaim: (...a: unknown[]) => mockEncrypt(...a),
@@ -133,11 +146,12 @@ const CLAIM: GiftCardClaim = {
   barcode: null,
 }
 
+// What the TBC adapter returns: no vendor-stated expiry, the BOLT11 carries it.
 const VENDOR_ORDER = {
   providerOrderId: "tbc-123" as GiftCardProviderOrderId,
   paymentRequest: PAYMENT_REQUEST,
   amountSats: 40_100 as Satoshis,
-  expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+  expiresAt: null,
 }
 
 const decoded = (sats: number) => ({
@@ -418,6 +432,110 @@ describe("purchaseGiftCard", () => {
       expect(res).toBeInstanceOf(InvalidIdempotencyKeyError)
       expect(mockFindAccountById).not.toHaveBeenCalled()
     })
+
+    describe("replay of an unpaid INVOICE_ISSUED order", () => {
+      // A first attempt that died after issuing the invoice but before recording
+      // the payment's outcome. The row must not be handed back as "keep polling".
+      const issued = (overrides: Partial<GiftCardOrder> = {}) =>
+        repo.seed(
+          makeOrder({
+            status: "INVOICE_ISSUED",
+            idempotencyKey: "idem-1",
+            providerOrderId: "tbc-123" as GiftCardProviderOrderId,
+            paymentRequest: PAYMENT_REQUEST,
+            paymentHash: PAYMENT_HASH,
+            invoiceSats: 40_100 as Satoshis,
+            expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+            statusHistory: [
+              { status: "CREATED", at: new Date(Date.now() - 2000), reason: null },
+              { status: "INVOICE_ISSUED", at: new Date(Date.now() - 1000), reason: null },
+            ],
+            ...overrides,
+          }),
+        )
+
+      it("resumes from the pay step instead of returning the row", async () => {
+        const existing = issued()
+        const res = await purchase()
+        if (res instanceof Error) throw res
+        expect(res.id).toBe(existing.id)
+        expect(res.status).toBe("FULFILLED")
+        expect(res.paidSats).toBe(40_100)
+        expect(res.statusHistory.map((h) => h.status)).toEqual([
+          "CREATED",
+          "INVOICE_ISSUED",
+          "PAID",
+          "FULFILLED",
+        ])
+        // Same key and fingerprint as the first attempt: a cached outcome is
+        // replayed, an in-flight attempt is refused, a send that never happened
+        // is made exactly once.
+        expect(mockPayInvoice).toHaveBeenCalledTimes(1)
+        expect(mockPayInvoice.mock.calls[0][0]).toMatchObject({
+          paymentRequest: PAYMENT_REQUEST,
+          senderWalletId: WALLET_ID,
+          idempotencyKey: `giftcard:${existing.id}`,
+          requestFingerprint: `ln|${PAYMENT_REQUEST}|giftcard|${existing.id}`,
+        })
+        // Nothing upstream of the pay step runs again.
+        expect(mockMasterGate).not.toHaveBeenCalled()
+        expect(mockQuote).not.toHaveBeenCalled()
+        expect(mockAuthorize).not.toHaveBeenCalled()
+        expect(repo.create).not.toHaveBeenCalled()
+        expect(mockCreateOrder).not.toHaveBeenCalled()
+      })
+
+      it("a resumed send the first attempt already made replays as AlreadyPaid -> PAID", async () => {
+        issued()
+        mockPayInvoice.mockResolvedValue({ value: "already_paid" })
+        mockGetOrder.mockResolvedValue({ kind: "paidPendingFulfillment" })
+        const res = await purchase()
+        if (res instanceof Error) throw res
+        expect(res.status).toBe("PAID")
+      })
+
+      it("a resumed send with an unknown outcome -> PAYMENT_PENDING", async () => {
+        issued()
+        mockPayInvoice.mockResolvedValue(new IbexError(new Error("timeout")))
+        const res = await purchase()
+        if (res instanceof Error) throw res
+        expect(res.status).toBe("PAYMENT_PENDING")
+      })
+
+      it("an INVOICE_ISSUED order past its expiry is returned as-is", async () => {
+        const existing = issued({ expiresAt: new Date(Date.now() - 1) })
+        const res = await purchase()
+        expect(res).toBe(existing)
+        expect(mockPayInvoice).not.toHaveBeenCalled()
+      })
+
+      it("does not resume while the kill switch is off: that is new money leaving", async () => {
+        mockConfig = makeGiftCardsConfig({ enabled: false })
+        const existing = issued()
+        const res = await purchase()
+        expect(res).toBe(existing)
+        expect(mockPayInvoice).not.toHaveBeenCalled()
+      })
+
+      it("a CREATED order is returned as-is: vendor createOrder is not idempotent", async () => {
+        const existing = repo.seed(
+          makeOrder({ status: "CREATED", idempotencyKey: "idem-1" }),
+        )
+        const res = await purchase()
+        expect(res).toBe(existing)
+        expect(mockCreateOrder).not.toHaveBeenCalled()
+        expect(mockPayInvoice).not.toHaveBeenCalled()
+      })
+
+      it("a PAYMENT_PENDING order is returned as-is for the worker to settle", async () => {
+        const existing = repo.seed(
+          makeOrder({ status: "PAYMENT_PENDING", idempotencyKey: "idem-1" }),
+        )
+        const res = await purchase()
+        expect(res).toBe(existing)
+        expect(mockPayInvoice).not.toHaveBeenCalled()
+      })
+    })
   })
 
   describe("refusals before any order exists", () => {
@@ -557,12 +675,38 @@ describe("purchaseGiftCard", () => {
       expect(res).toBeInstanceOf(GiftCardQuoteMismatchError)
     })
 
-    it("order expiry is capped at the vendor invoice expiry", async () => {
+    it("order expiry is capped at the decoded BOLT11 expiry", async () => {
       const soon = new Date(Date.now() + 2 * 60 * 1000)
-      mockCreateOrder.mockResolvedValue({ ...VENDOR_ORDER, expiresAt: soon })
+      mockDecodeInvoice.mockReturnValue({ ...decoded(40_100), expiresAt: soon })
       const res = await purchase()
       if (res instanceof Error) throw res
       expect(res.expiresAt).toEqual(soon)
+    })
+
+    it("falls back to the order TTL when the invoice carries no usable expiry", async () => {
+      mockDecodeInvoice.mockReturnValue({ ...decoded(40_100), expiresAt: new Date(NaN) })
+      const res = await purchase()
+      if (res instanceof Error) throw res
+      const created = repo.create.mock.calls[0][0] as { expiresAt: Date }
+      expect(res.expiresAt).toEqual(created.expiresAt)
+      expect(res.expiresAt.getTime() - Date.now()).toBeGreaterThan(14 * 60 * 1000)
+    })
+
+    it("the order TTL caps an invoice that outlives it", async () => {
+      const late = new Date(Date.now() + 60 * 60 * 1000)
+      mockDecodeInvoice.mockReturnValue({ ...decoded(40_100), expiresAt: late })
+      const res = await purchase()
+      if (res instanceof Error) throw res
+      const created = repo.create.mock.calls[0][0] as { expiresAt: Date }
+      expect(res.expiresAt).toEqual(created.expiresAt)
+    })
+
+    it("a vendor-stated expiry earlier than the invoice's is honoured", async () => {
+      const vendorSoon = new Date(Date.now() + 60 * 1000)
+      mockCreateOrder.mockResolvedValue({ ...VENDOR_ORDER, expiresAt: vendorSoon })
+      const res = await purchase()
+      if (res instanceof Error) throw res
+      expect(res.expiresAt).toEqual(vendorSoon)
     })
   })
 
@@ -577,15 +721,135 @@ describe("purchaseGiftCard", () => {
       expect(mockNotifyOpsEvent.mock.calls[1][0].meta.reason).toBe("payment-failed")
     })
 
-    it("an error from the send -> PAYMENT_FAILED, the error is returned", async () => {
-      const sendError = new ValidationError("insufficient balance")
-      mockPayInvoice.mockResolvedValue(sendError)
-      const res = await purchase()
-      expect(res).toBe(sendError)
-      const order = [...repo.store.values()][0]
-      expect(order.status).toBe("PAYMENT_FAILED")
-      expect(order.failureReason).toContain("ValidationError")
-      expect(mockGetOrder).not.toHaveBeenCalled()
+    describe("errors that PROVE IBEX never accepted the send -> PAYMENT_FAILED", () => {
+      // Only these may tell the client "nothing left the wallet, buy again".
+      it.each([
+        [
+          "InsufficientIbexBalance (IBEX 400)",
+          () =>
+            new InsufficientIbexBalance(
+              new Error("400"),
+              undefined,
+              "insufficient balance, account: abc",
+            ),
+        ],
+        [
+          "FailedIbexPayment (corroborated FAILED on the 200)",
+          () => new FailedIbexPayment("no route"),
+        ],
+        [
+          "InvalidIdempotencyKeyError (wrapper refused)",
+          () => new InvalidIdempotencyKeyError("k"),
+        ],
+        [
+          "IdempotencyKeyReuseError (wrapper refused)",
+          () => new IdempotencyKeyReuseError(),
+        ],
+      ])("%s", async (_label, make) => {
+        const sendError = make()
+        mockPayInvoice.mockResolvedValue(sendError)
+        const res = await purchase()
+        expect(res).toBe(sendError)
+        const order = [...repo.store.values()][0]
+        expect(order.status).toBe("PAYMENT_FAILED")
+        expect(order.failureReason).toContain(sendError.constructor.name)
+        expect(mockGetOrder).not.toHaveBeenCalled()
+        expect(opsPhases()).toEqual(["order-created", "order-failed"])
+      })
+
+      it("a send-guard rejection (the guard runs before the IBEX call)", async () => {
+        mockSendGuardMode = "enforce"
+        const rejection = new ValidationError("over daily limit")
+        mockAuthorizeSend.mockResolvedValue(rejection)
+        // Mirror the wrapper: authorize immediately before execute, and a
+        // rejection short-circuits without calling IBEX.
+        mockPayInvoice.mockImplementation(
+          async (args: { authorize: () => Promise<true | Error> }) => {
+            const verdict = await args.authorize()
+            return verdict instanceof Error ? verdict : PaymentSendStatus.Success
+          },
+        )
+        const res = await purchase()
+        expect(res).toBe(rejection)
+        const order = [...repo.store.values()][0]
+        expect(order.status).toBe("PAYMENT_FAILED")
+        expect(order.failureReason).toContain("ValidationError")
+      })
+    })
+
+    describe("errors that leave the outcome unknown -> PAYMENT_PENDING, never PAYMENT_FAILED", () => {
+      // A socket reset / gateway 5xx / timeout after IBEX accepted the request
+      // (the KNOWN GAP in @app/payments/idempotency) may have moved money. The
+      // pending order is returned so the client polls instead of buying again.
+      it.each([
+        ["a generic IbexError", () => new IbexError(new Error("socket hang up"))],
+        ["UnconfirmedIbexPayment", () => new UnconfirmedIbexPayment("unreadable 200")],
+        [
+          "CompletedInvoice (already prepared — possibly by our first attempt)",
+          () => new CompletedInvoice(new Error("payment already prepared")),
+        ],
+        [
+          "a busy idempotency lock (concurrent same-key attempt in flight)",
+          () => new ResourceAttemptsLockServiceError(),
+        ],
+      ])("%s", async (_label, make) => {
+        const sendError = make()
+        mockPayInvoice.mockResolvedValue(sendError)
+        const res = await purchase()
+        if (res instanceof Error) throw res
+        expect(res.status).toBe("PAYMENT_PENDING")
+        expect(res.providerPaymentRef).toBeNull()
+        expect(res.failureReason).toBeNull()
+        expect(res.statusHistory[res.statusHistory.length - 1].reason).toBe(
+          `payment-unconfirmed: ${sendError.constructor.name}`,
+        )
+        expect(mockGetOrder).not.toHaveBeenCalled()
+        expect(opsPhases()).toEqual(["order-created", "payment-pending"])
+        expect(mockNotifyOpsEvent.mock.calls[1][0]).toMatchObject({
+          status: "pending",
+          error: sendError.constructor.name,
+          meta: expect.objectContaining({
+            reason: `payment-unconfirmed: ${sendError.constructor.name}`,
+          }),
+        })
+        expect(mockLogger.warn).toHaveBeenCalledWith(
+          expect.objectContaining({ orderId: res.id, error: sendError.constructor.name }),
+          expect.stringContaining("PAYMENT_PENDING"),
+        )
+      })
+
+      it("keeps the IBEX transaction id when the error came after IBEX answered", async () => {
+        mockPayInvoice.mockImplementation(
+          async (args: { onResponse?: (r: unknown) => void }) => {
+            args.onResponse?.({ transaction: { id: "ibex-tx-1" } })
+            return new IbexError(new Error("connection reset while reading body"))
+          },
+        )
+        const res = await purchase()
+        if (res instanceof Error) throw res
+        expect(res.status).toBe("PAYMENT_PENDING")
+        expect(res.providerPaymentRef).toBe("ibex-tx-1")
+      })
+
+      it("a concurrent attempt that already moved the order on wins", async () => {
+        // The replay's send hits the busy lock while the first attempt, still
+        // running, records PAID. The replay must not clobber that.
+        mockPayInvoice.mockImplementation(async () => {
+          const [order] = [...repo.store.values()]
+          await repo.transition({
+            id: order.id,
+            from: ["INVOICE_ISSUED"],
+            to: "PAID",
+            reason: "payment-settled",
+            patch: { paidSats: 40_100 as Satoshis, providerPaymentRef: "ibex-tx-1" },
+          })
+          return new ResourceAttemptsLockServiceError()
+        })
+        const res = await purchase()
+        if (res instanceof Error) throw res
+        expect(res.status).toBe("PAID")
+        expect(res.providerPaymentRef).toBe("ibex-tx-1")
+      })
     })
 
     it("Pending -> PAYMENT_PENDING, no vendor poll", async () => {

@@ -1261,6 +1261,13 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         message,
       })
 
+    case "GiftCardQuoteRateLimiterExceededError":
+      message = error.message
+      return bridgeGqlError({
+        code: "GIFT_CARD_QUOTE_RATE_LIMITED",
+        message,
+      })
+
     case "UnknownGiftCardError":
       message = "Something went wrong with your gift card request"
       return bridgeGqlError({

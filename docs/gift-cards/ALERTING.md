@@ -23,11 +23,11 @@ event by construction: the helper takes an order, not a claim.
 | Phase | Status | Emitted by | Meaning | Action |
 | --- | --- | --- | --- | --- |
 | `order-created` | pending | `purchaseGiftCard` | Row written, vendor not yet called | none |
-| `payment-pending` | pending | `purchaseGiftCard` | IBEX reported the send in flight | none; worker resolves. Warn if the same order is still pending after 60 min (see log line below) |
+| `payment-pending` | pending | `purchaseGiftCard` | IBEX reported the send in flight (`meta.reason` `payment-pending`), or the send errored without a verdict — socket reset, gateway 5xx, timeout, unreadable 200, busy idempotency lock (`meta.reason` `payment-unconfirmed: <Error>`, `error` naming the class) | none; worker resolves against IBEX, then the vendor. Warn if the same order is still pending after 60 min (see log line below). A burst of `payment-unconfirmed` is an IBEX connectivity problem |
 | `order-paid` | success | `purchaseGiftCard`, `settleOrderFromVendor`, reconcile `settleAsPaid` | Payment settled; awaiting the card | none |
 | `order-fulfilled` | success | `settleOrderFromVendor` | Claim stored; push sent | none |
-| `order-failed` | failed | `purchaseGiftCard`, `settleOrderFromVendor`, reconcile | Refused or expired **before** payment (`meta.reason`: `vendor-create-failed: <Error>`, `vendor-invoice-undecodable`, `quote-mismatch: ...`, `payment-error: <Error>`, `payment-failed`, `expired`, `vendor-failed: ...`) | Warn on rate. A burst of `quote-mismatch` means the vendor's pricing moved faster than tolerance; a burst of `vendor-create-failed` means the vendor is rejecting or down |
-| `refund-required` | failed | `settleOrderFromVendor`, reconcile `processPaid` | **Money left Flash and no card came.** `error` is `vendor-failed`, `vendor-refunded`, or `fulfillment-timeout` | **Page.** RUNBOOK (a). Every occurrence is a customer owed money |
+| `order-failed` | failed | `purchaseGiftCard`, `settleOrderFromVendor`, reconcile | Refused or expired **before** payment (`meta.reason`: `vendor-create-failed: <Error>`, `vendor-invoice-undecodable`, `quote-mismatch: ...`, `payment-error: <Error>` — only for a send IBEX provably refused, `payment-failed`, `expired`, `vendor-failed: ...`) | Warn on rate. A burst of `quote-mismatch` means the vendor's pricing moved faster than tolerance; a burst of `vendor-create-failed` means the vendor is rejecting or down |
+| `refund-required` | failed | `settleOrderFromVendor`, reconcile `processPaid` | **Money left Flash and no card came.** `error` is `vendor-failed`, `vendor-refunded`, or `fulfillment-timeout` (24 h in PAID and a final vendor poll did not report fulfilled; `meta.lastVendorPoll` is `not-fulfilled` or the poll error's class) | **Page.** RUNBOOK (a). Every occurrence is a customer owed money |
 | `claim-encrypt-failed` | failed | `settleOrderFromVendor` | Card issued at the vendor; Flash could not encrypt the claim (key missing/invalid). Order stays `PAID` | **Page.** Fix `claimDataEncryptionKey`; the next poll retries |
 | `vendor-fulfilled-unexpected` | failed | `settleOrderFromVendor` | Vendor says fulfilled but our order is terminal-unpaid (`meta.orderStatus`). Someone paid; our records say not us | **Page.** Reconcile by hand |
 | `would-reject` | pending | `authorizeGiftCardPurchase` (log-only) | A limits check would have refused; `meta.reason`, `meta.level`, `meta.productId`, `error` | Review weekly before flipping to enforce (RUNBOOK f). `reason: limits-unavailable` must be zero |
@@ -66,7 +66,9 @@ All from `baseLogger` with `module: "gift-cards.reconcile"` unless noted:
 
 | Level | Message | Meaning |
 | --- | --- | --- |
-| warn | `Gift card payment has been pending for over an hour with no resolvable status` | PAYMENT_PENDING with no `providerPaymentRef` or an IBEX lookup that never resolves; carries `orderId`, `paymentHash`, `providerPaymentRef` |
+| warn | `Gift card payment has been pending for over an hour with no resolvable status` | PAYMENT_PENDING with no `providerPaymentRef` or an IBEX lookup that never resolves, AND the vendor does not report fulfilled; carries `orderId`, `paymentHash`, `providerPaymentRef` |
+| warn | `Gift card payment outcome unknown after send error; holding as PAYMENT_PENDING` (purchase) | The send errored without proving IBEX refused it; carries `orderId`, `providerPaymentRef`, `error`. The worker settles it |
+| warn | `Final vendor poll before fulfilment timeout failed; escalating` | 24 h in PAID and the vendor could not be reached; the order is now REFUND_REQUIRED and the page names the poll error |
 | warn | `Expired gift card invoice still has an in-flight payment; not expiring` | IBEX says pending on an expired invoice; watch it |
 | error | `Gift card reconcile failed for order` | One order threw; the batch continued |
 | error | `Gift card payment settled but PAID transition failed` (purchase) | Money moved, bookkeeping lost a race; the worker will re-read IBEX |

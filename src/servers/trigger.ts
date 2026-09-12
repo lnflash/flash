@@ -508,8 +508,9 @@ const main = () => {
   publishCurrentPrice()
 
   // Gift card fulfilment worker (ENG-581): every 30s, under a Redis lock shared
-  // with the cron pass, so a PAID order reaches FULFILLED in seconds. No-op
-  // (returns null) while GiftCardsConfig.enabled is false.
+  // with the cron pass, so a PAID order reaches FULFILLED in seconds. Runs
+  // regardless of GiftCardsConfig.enabled (the kill switch only stops new
+  // purchases); each tick first checks that a non-terminal order exists.
   startGiftCardReconcileInterval()
 
   if (getSwapConfig().feeAccountingEnabled) listenerSwapMonitor()

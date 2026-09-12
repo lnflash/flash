@@ -95,7 +95,8 @@ const GiftCardPurchaseMutation = GT.Field<
     // owner-scoped read — so it is called rather than re-implemented. If the
     // claim cannot be read, the order is still returned (the card IS issued) and
     // the error rides alongside so the client does not show a FULFILLED order
-    // with a silently empty claim.
+    // with a silently empty claim. The read reports a decrypt failure as data
+    // (`claimError`) rather than as its own error, so both are mapped here.
     const withClaim = await getGiftCardOrderForAccount({
       accountId: domainAccount.id,
       orderId: order.id,
@@ -104,6 +105,12 @@ const GiftCardPurchaseMutation = GT.Field<
       return {
         errors: [mapAndParseErrorForGqlResponse(withClaim)],
         order: toGiftCardOrderSource(order),
+      }
+    }
+    if (withClaim.claimError) {
+      return {
+        errors: [mapAndParseErrorForGqlResponse(withClaim.claimError)],
+        order: toGiftCardOrderSource(withClaim.order),
       }
     }
 

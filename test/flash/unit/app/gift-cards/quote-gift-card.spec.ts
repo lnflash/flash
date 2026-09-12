@@ -7,6 +7,7 @@ import {
   GiftCardsDisabledError,
   GiftCardVendorUnavailableError,
 } from "@domain/gift-cards"
+import { GiftCardQuoteRateLimiterExceededError } from "@domain/rate-limit/errors"
 
 import { quoteGiftCard } from "@app/gift-cards/quote-gift-card"
 
@@ -18,6 +19,8 @@ const mockResolveCountry = jest.fn()
 const mockGetGiftCardProduct = jest.fn()
 const mockGetProvider = jest.fn()
 const mockQuote = jest.fn()
+const mockConsumeLimiter = jest.fn()
+const mockLogger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() }
 
 jest.mock("@services/mongoose", () => ({
   AccountsRepository: () => ({
@@ -37,6 +40,19 @@ jest.mock("@services/gift-cards/registry", () => ({
 jest.mock("@services/tracing", () => ({
   addAttributesToCurrentSpan: jest.fn(),
   recordExceptionInCurrentSpan: jest.fn(),
+}))
+jest.mock("@services/rate-limit", () => ({
+  consumeLimiter: (...a: unknown[]) => mockConsumeLimiter(...a),
+}))
+jest.mock("@domain/rate-limit", () => ({
+  RateLimitConfig: { giftCardQuote: { key: "gift_card_quote" } },
+}))
+jest.mock("@services/logger", () => ({
+  baseLogger: {
+    info: (...a: unknown[]) => mockLogger.info(...a),
+    warn: (...a: unknown[]) => mockLogger.warn(...a),
+    error: (...a: unknown[]) => mockLogger.error(...a),
+  },
 }))
 
 const PRODUCT = makeProduct() // variable, 500..50_000 minor, bitcoinCompany
@@ -63,6 +79,7 @@ const quote = (overrides: Record<string, unknown> = {}) =>
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockConsumeLimiter.mockResolvedValue(true)
   mockFindAccountById.mockResolvedValue(makeAccount())
   mockResolveCountry.mockResolvedValue("US")
   mockMasterGate.mockReturnValue({ ok: true, providerId: "bitcoinCompany" })
@@ -72,6 +89,61 @@ beforeEach(() => {
 })
 
 describe("quoteGiftCard", () => {
+  // Every call past the budget is a live POST to the vendor through the ONE
+  // shared reseller login every purchase also needs. The budget is charged
+  // first, on the ACCOUNT, and counts attempts — refused ones included — so a
+  // client looping on this field bounds its own cost, not every customer's.
+  describe("attempt budget", () => {
+    it("charges the per-account quote budget before any store or vendor call", async () => {
+      await quote()
+
+      expect(mockConsumeLimiter).toHaveBeenCalledTimes(1)
+      expect(mockConsumeLimiter).toHaveBeenCalledWith({
+        rateLimitConfig: { key: "gift_card_quote" },
+        keyToConsume: ACCOUNT_ID,
+      })
+      const limiterOrder = mockConsumeLimiter.mock.invocationCallOrder[0]
+      expect(limiterOrder).toBeLessThan(mockFindAccountById.mock.invocationCallOrder[0])
+      expect(limiterOrder).toBeLessThan(mockQuote.mock.invocationCallOrder[0])
+    })
+
+    it("returns the limiter's refusal without reading the account or calling the vendor", async () => {
+      mockConsumeLimiter.mockResolvedValue(new GiftCardQuoteRateLimiterExceededError())
+
+      const result = await quote()
+
+      expect(result).toBeInstanceOf(GiftCardQuoteRateLimiterExceededError)
+      expect(mockFindAccountById).not.toHaveBeenCalled()
+      expect(mockGetGiftCardProduct).not.toHaveBeenCalled()
+      expect(mockQuote).not.toHaveBeenCalled()
+    })
+
+    it("falls through on a limiter STORE fault, warning rather than refusing", async () => {
+      // `consumeLimiter` hands back UnknownRateLimitServiceError (not the
+      // exceeded error) when Redis itself fails. Refusing every quote during a
+      // store blip would page nobody and block everyone; the same posture as
+      // purchaseGiftCard.
+      mockConsumeLimiter.mockResolvedValue(new Error("redis down"))
+
+      const result = await quote()
+
+      expect(result).toBe(QUOTE)
+      expect(mockQuote).toHaveBeenCalledTimes(1)
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ accountId: ACCOUNT_ID, error: "Error" }),
+        expect.stringContaining("rate limiter unavailable"),
+      )
+    })
+
+    it("counts a refused attempt against the budget too", async () => {
+      mockMasterGate.mockReturnValue({ ok: false, error: new GiftCardsDisabledError() })
+
+      await quote()
+
+      expect(mockConsumeLimiter).toHaveBeenCalledTimes(1)
+    })
+  })
+
   it("returns the vendor's quote for the checked value and quantity", async () => {
     const result = await quote({ valueMinor: 2500, quantity: 2 })
 

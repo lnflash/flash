@@ -1,4 +1,14 @@
-import { getRequestCodeBlockedCountryPerIpLimits } from "@config"
+import {
+  getGiftCardPurchaseAttemptLimits,
+  getGiftCardQuoteAttemptLimits,
+  getRequestCodeBlockedCountryPerIpLimits,
+} from "@config"
+
+import { RateLimitConfig, RateLimitPrefix } from "@domain/rate-limit"
+import {
+  GiftCardPurchaseRateLimiterExceededError,
+  GiftCardQuoteRateLimiterExceededError,
+} from "@domain/rate-limit/errors"
 
 describe("getRequestCodeBlockedCountryPerIpLimits", () => {
   // Both numbers are load-bearing and neither comes from the yaml, so nothing
@@ -31,5 +41,46 @@ describe("getRequestCodeBlockedCountryPerIpLimits", () => {
   // person makes would defeat it without an attacker in the picture.
   it("leaves room for a real customer's mistyped digits and a shared egress IP", () => {
     expect(getRequestCodeBlockedCountryPerIpLimits().points).toBeGreaterThanOrEqual(5)
+  })
+})
+
+describe("getGiftCardQuoteAttemptLimits", () => {
+  // Hardcoded like the purchase budget beside it — not in the yaml — so nothing
+  // else in the suite pins these; the app spec mocks the whole registry.
+  //
+  // points: 30/min — a confirm screen renders this and a customer adjusting a
+  //               value or quantity can honestly ask several times a minute.
+  //               Each call is a live vendor POST through the ONE shared
+  //               reseller login, so the bound is what keeps a looping client
+  //               from getting that login throttled for every customer.
+  // blockDuration: 5 min, same as the purchase — a quote is good until its
+  //               `expiresAt`, so a client told to back off loses nothing by
+  //               reusing the last one.
+  it("bounds quotes at 30/min with a 5 minute block", () => {
+    expect(getGiftCardQuoteAttemptLimits()).toEqual({
+      points: 30,
+      duration: 60,
+      blockDuration: 300,
+    })
+  })
+
+  it("is looser than the purchase budget: pricing is cheaper than buying", () => {
+    expect(getGiftCardQuoteAttemptLimits().points).toBeGreaterThan(
+      getGiftCardPurchaseAttemptLimits().points,
+    )
+  })
+
+  it("is wired into RateLimitConfig under its own prefix and error, apart from the purchase", () => {
+    expect(RateLimitConfig.giftCardQuote).toEqual({
+      key: RateLimitPrefix.giftCardQuote,
+      limits: getGiftCardQuoteAttemptLimits(),
+      error: GiftCardQuoteRateLimiterExceededError,
+    })
+    expect(RateLimitPrefix.giftCardQuote).toBe("gift_card_quote")
+    // Its own bucket: spending the purchase budget must not silence the price.
+    expect(RateLimitPrefix.giftCardQuote).not.toBe(RateLimitPrefix.giftCardPurchase)
+    expect(RateLimitConfig.giftCardQuote.error).not.toBe(
+      GiftCardPurchaseRateLimiterExceededError,
+    )
   })
 })
