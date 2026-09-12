@@ -40,6 +40,50 @@ fygaro:
     # auto-credit limit so ops has runway to top up before the well runs dry.
     floorUsd: 2000
 
+giftCards:
+  enabled: false # flags-off baseline; enable per environment via config overrides
+  allowOpenLoop: false
+  feeBps: 0
+  # 32-byte key for AES-256-GCM encryption of claim codes at rest.
+  # Real key injected via config overrides; never commit a real key.
+  claimDataEncryptionKey: ""
+  quoteToleranceBps: 100
+  routing:
+    default: bitcoinCompany
+    byCountry: {} # e.g. { JM: bitrefill, TT: bitrefill } once the Bitrefill adapter is live
+  providers:
+    bitcoinCompany:
+      enabled: false
+      baseUrl: "https://api.dev.thebitcoincompany.com" # sandbox (Mutinynet); prod is https://api.thebitcoincompany.com
+      email: "" # real credentials injected via config overrides; never commit real credentials
+      password: ""
+      referralCode: ""
+      timeoutMs: 10000
+    bitrefill:
+      enabled: false
+      baseUrl: "" # set once Bitrefill Business API credentials are issued
+      apiId: ""
+      apiSecret: ""
+      webhookSecret: ""
+      timeoutMs: 10000
+  catalog:
+    syncIntervalSeconds: 21600
+    ttlSeconds: 21600
+    staleAfterSeconds: 86400
+  limits:
+    mode: log-only # off | log-only | enforce — same rollout discipline as the send guard
+    minAccountLevel: 1
+    minAccountAgeHours: 24
+    maxOrdersPerHour: 5
+    vendorDailyCapCents: 1000000 # $10,000 — TBC FinCEN prepaid-access exemption
+    vendorOpenLoopCardCapCents: 100000 # $1,000
+    vendorClosedLoopCardCapCents: 200000 # $2,000
+    perLevel:
+      level0: { perCardCents: 0, dailyCents: 0 }
+      level1: { perCardCents: 20000, dailyCents: 50000 }
+      level2: { perCardCents: 50000, dailyCents: 200000 }
+      level3: { perCardCents: 100000, dailyCents: 500000 }
+
 bridge:
   enabled: false # flags-off baseline; enable per environment via config overrides
   apiKey: "" # real key injected via config overrides; never commit a real key

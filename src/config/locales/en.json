@@ -134,6 +134,12 @@
         "title": "Top-up on its way",
         "body": "We're crediting {{amount}} to your wallet now. It should appear shortly."
       }
+    },
+    "giftCard": {
+      "fulfilled": {
+        "title": "Your {{brand}} gift card is ready",
+        "body": "Your {{amount}} {{brand}} gift card is ready. Open Flash to view your code."
+      }
     }
   }
 }
