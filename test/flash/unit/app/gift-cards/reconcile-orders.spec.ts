@@ -1,10 +1,15 @@
-import { GiftCardVendorUnavailableError, UnknownGiftCardError } from "@domain/gift-cards"
+import {
+  GiftCardClaimCryptoError,
+  GiftCardVendorUnavailableError,
+  UnknownGiftCardError,
+} from "@domain/gift-cards"
 import { IbexError } from "@services/ibex/errors"
 
 import {
   __resetGiftCardReconcileStateForTest,
   GIFT_CARD_OPEN_STATUSES,
   GIFT_CARD_PAID_TIMEOUT_MS,
+  GIFT_CARD_PAYMENT_UNRESOLVED_GRACE_MS,
   GIFT_CARD_RECONCILE_LOCK_KEY,
   hasOpenGiftCardOrders,
   nextGiftCardPollAt,
@@ -23,6 +28,8 @@ import {
 
 const mockGetTransactionDetails = jest.fn()
 const mockFetchAndSettle = jest.fn()
+const mockFetchVendorStatus = jest.fn()
+const mockSettleFromVendor = jest.fn()
 const mockNotifyOpsEvent = jest.fn()
 const mockRedisSet = jest.fn()
 const mockRedisGet = jest.fn()
@@ -48,6 +55,8 @@ jest.mock("@services/ibex/client", () => ({
 }))
 jest.mock("@app/gift-cards/settle-order", () => ({
   fetchAndSettle: (...a: unknown[]) => mockFetchAndSettle(...a),
+  fetchVendorOrderStatus: (...a: unknown[]) => mockFetchVendorStatus(...a),
+  settleOrderFromVendor: (...a: unknown[]) => mockSettleFromVendor(...a),
 }))
 jest.mock("@services/redis", () => ({
   redis: {
@@ -159,6 +168,14 @@ beforeEach(() => {
   mockRedisDel.mockResolvedValue(1)
   mockGetTransactionDetails.mockResolvedValue(new IbexError(new Error("not found")))
   mockFetchAndSettle.mockImplementation(async (order: GiftCardOrder) => order)
+  // The unaccounted-payment path asks the vendor in two halves (it needs the
+  // vendor's own answer, not just its effect on the order). By default the
+  // vendor says "still working" and settling delegates to `mockFetchAndSettle`,
+  // so `vendorFulfils()` drives both paths the same way.
+  mockFetchVendorStatus.mockResolvedValue({ kind: "paidPendingFulfillment" })
+  mockSettleFromVendor.mockImplementation(async (order: GiftCardOrder) =>
+    mockFetchAndSettle(order),
+  )
 })
 
 afterEach(() => {
@@ -202,6 +219,7 @@ describe("reconcileGiftCardOrders", () => {
         refundRequired: 0,
         expired: 0,
         paymentSettled: 0,
+        finalPollFailed: 0,
         skipped: "lock-held",
       })
       expect(repo.listByStatus).not.toHaveBeenCalled()
@@ -249,42 +267,40 @@ describe("reconcileGiftCardOrders", () => {
       )
     })
 
-    it("INVOICE_ISSUED past expiresAt with no payment record -> EXPIRED", async () => {
+    it("INVOICE_ISSUED past expiresAt never consults IBEX: no path writes a ref without leaving the state", async () => {
+      // Every transition that captures an IBEX transaction id also leaves
+      // INVOICE_ISSUED in the same write, so an INVOICE_ISSUED row has nothing
+      // to re-read. The vendor is the only party who can vouch for it.
       repo.seed(
         makeOrder({
           id: "i" as GiftCardOrderId,
           status: "INVOICE_ISSUED",
+          providerOrderId: "tbc-i" as GiftCardProviderOrderId,
           paymentHash: PAYMENT_HASH,
-          providerPaymentRef: "ibex-tx",
           expiresAt: at(-1),
         }),
       )
       const res = await runAt(0)
       if (res instanceof Error) throw res
+      expect(mockGetTransactionDetails).not.toHaveBeenCalled()
+      expect(mockFetchVendorStatus).toHaveBeenCalledTimes(1)
       expect(res.expired).toBe(1)
-      expect(mockGetTransactionDetails).toHaveBeenCalledWith("ibex-tx")
       expect(repo.store.get("i")?.status).toBe("EXPIRED")
     })
 
-    it("INVOICE_ISSUED past expiresAt whose payment actually settled -> PAID, then polled", async () => {
-      mockGetTransactionDetails.mockResolvedValue(ibexTransaction(2))
+    it("INVOICE_ISSUED past expiresAt with no vendor order id -> EXPIRED without a vendor call", async () => {
       repo.seed(
         makeOrder({
           id: "i" as GiftCardOrderId,
           status: "INVOICE_ISSUED",
-          paymentHash: PAYMENT_HASH,
-          providerPaymentRef: "ibex-tx",
-          invoiceSats: 40_100 as Satoshis,
+          providerOrderId: null,
           expiresAt: at(-1),
         }),
       )
       const res = await runAt(0)
       if (res instanceof Error) throw res
-      expect(res.expired).toBe(0)
-      expect(res.paymentSettled).toBe(1)
-      expect(repo.store.get("i")?.status).toBe("PAID")
-      expect(repo.store.get("i")?.paidSats).toBe(40_100)
-      expect(mockFetchAndSettle).toHaveBeenCalledTimes(1)
+      expect(mockFetchVendorStatus).not.toHaveBeenCalled()
+      expect(res.expired).toBe(1)
     })
 
     it("INVOICE_ISSUED past expiresAt with no ref asks the vendor; fulfilled -> FULFILLED, not EXPIRED", async () => {
@@ -331,39 +347,74 @@ describe("reconcileGiftCardOrders", () => {
       expect(repo.store.get("i")?.status).toBe("EXPIRED")
     })
 
-    it("INVOICE_ISSUED past expiresAt whose payment IBEX reports FAILED is expired without a vendor poll", async () => {
-      mockGetTransactionDetails.mockResolvedValue(ibexTransaction(3))
+    it.each(["failed", "refunded"] as const)(
+      "INVOICE_ISSUED past expiresAt that the vendor reports %s -> FAILED via the vendor, not EXPIRED",
+      async (kind) => {
+        // The vendor's answer is handed to `settleOrderFromVendor`, which
+        // decides (INVOICE_ISSUED + vendor failed → FAILED, nothing was paid).
+        mockFetchVendorStatus.mockResolvedValue({ kind, reason: "cancelled" })
+        mockSettleFromVendor.mockImplementation(async (o: GiftCardOrder) => {
+          const failed = {
+            ...o,
+            status: "FAILED" as const,
+            failureReason: `vendor-${kind}`,
+          }
+          repo.store.set(o.id, failed)
+          return failed
+        })
+        const order = repo.seed(
+          makeOrder({
+            id: "i" as GiftCardOrderId,
+            status: "INVOICE_ISSUED",
+            providerOrderId: "tbc-i" as GiftCardProviderOrderId,
+            expiresAt: at(-1),
+          }),
+        )
+        const res = await runAt(0)
+        if (res instanceof Error) throw res
+        expect(mockSettleFromVendor).toHaveBeenCalledWith(order, {
+          kind,
+          reason: "cancelled",
+        })
+        expect(res.expired).toBe(0)
+        expect(repo.store.get("i")?.status).toBe("FAILED")
+        expect(repo.transition).not.toHaveBeenCalled()
+      },
+    )
+
+    it("INVOICE_ISSUED past expiresAt with the vendor unreachable is expired (the vendor could not vouch for it)", async () => {
+      mockFetchVendorStatus.mockResolvedValue(new GiftCardVendorUnavailableError())
       repo.seed(
         makeOrder({
           id: "i" as GiftCardOrderId,
           status: "INVOICE_ISSUED",
           providerOrderId: "tbc-i" as GiftCardProviderOrderId,
-          paymentHash: PAYMENT_HASH,
-          providerPaymentRef: "ibex-tx",
           expiresAt: at(-1),
         }),
       )
       const res = await runAt(0)
       if (res instanceof Error) throw res
-      expect(mockFetchAndSettle).not.toHaveBeenCalled()
+      expect(mockSettleFromVendor).not.toHaveBeenCalled()
       expect(res.expired).toBe(1)
     })
 
-    it("INVOICE_ISSUED past expiresAt with an in-flight payment is not expired", async () => {
-      mockGetTransactionDetails.mockResolvedValue(ibexTransaction(1))
+    it("EXPIRED orders are never listed or polled: their one exit is the purchase path's", async () => {
       repo.seed(
         makeOrder({
-          id: "i" as GiftCardOrderId,
-          status: "INVOICE_ISSUED",
-          paymentHash: PAYMENT_HASH,
-          providerPaymentRef: "ibex-tx",
-          expiresAt: at(-1),
+          id: "x" as GiftCardOrderId,
+          status: "EXPIRED",
+          providerOrderId: "tbc-x" as GiftCardProviderOrderId,
+          expiresAt: at(-HOUR),
         }),
       )
       const res = await runAt(0)
       if (res instanceof Error) throw res
-      expect(res.expired).toBe(0)
-      expect(repo.store.get("i")?.status).toBe("INVOICE_ISSUED")
+      expect(res.scanned).toBe(0)
+      expect(mockFetchVendorStatus).not.toHaveBeenCalled()
+      expect(mockFetchAndSettle).not.toHaveBeenCalled()
+      for (const call of repo.listByStatus.mock.calls) {
+        expect(call[0].statuses).not.toContain("EXPIRED")
+      }
     })
 
     it("orders not yet expired are untouched", async () => {
@@ -465,13 +516,148 @@ describe("reconcileGiftCardOrders", () => {
       })
 
       it("a vendor error leaves the order pending for the next run", async () => {
-        mockFetchAndSettle.mockResolvedValue(new GiftCardVendorUnavailableError())
+        mockFetchVendorStatus.mockResolvedValue(new GiftCardVendorUnavailableError())
         noRef()
         const res = await runAt(0)
         if (res instanceof Error) throw res
         expect(repo.store.get("noref")?.status).toBe("PAYMENT_PENDING")
+        expect(mockSettleFromVendor).not.toHaveBeenCalled()
         expect(mockLogger.error).not.toHaveBeenCalled()
       })
+
+      it.each(["failed", "refunded"] as const)(
+        "vendor says %s: left for the payment re-read, never PAYMENT_FAILED on the vendor's word",
+        async (kind) => {
+          // `settleOrderFromVendor` leaves a PAYMENT_PENDING order alone on
+          // failed/refunded (our send may still be in flight); the unresolved
+          // exit below needs the vendor's positive "awaiting payment", which
+          // this is not — even long past the grace period.
+          mockFetchVendorStatus.mockResolvedValue({ kind, reason: "cancelled" })
+          mockSettleFromVendor.mockImplementation(async (o: GiftCardOrder) => o)
+          const order = noRef()
+          const res = await runAt(GIFT_CARD_PAYMENT_UNRESOLVED_GRACE_MS + 2 * HOUR)
+          if (res instanceof Error) throw res
+          expect(mockSettleFromVendor).toHaveBeenCalledWith(order, {
+            kind,
+            reason: "cancelled",
+          })
+          expect(repo.store.get("noref")?.status).toBe("PAYMENT_PENDING")
+          expect(repo.transition).not.toHaveBeenCalled()
+        },
+      )
+
+      describe("unresolved: vendor never saw a payment and the invoice is long expired", () => {
+        // No ref means IBEX never handed back an id, so only the vendor can
+        // ever resolve this row. Once the invoice has been expired a full day
+        // and the vendor still says unpaid, no send can settle it: the money
+        // did not leave. This is the only terminal exit for a ref-less
+        // PAYMENT_PENDING, which otherwise pins the front of listByStatus.
+        const awaitingPayment = () =>
+          mockFetchVendorStatus.mockResolvedValue({ kind: "awaitingPayment" })
+        const pastGrace = GIFT_CARD_PAYMENT_UNRESOLVED_GRACE_MS + 15 * MINUTE + 1
+
+        it("-> PAYMENT_FAILED with reason payment-unresolved-expired, and an ops event", async () => {
+          awaitingPayment()
+          noRef() // expiresAt = NOW + 15m
+          const res = await runAt(pastGrace)
+          if (res instanceof Error) throw res
+          const after = repo.store.get("noref")
+          expect(after?.status).toBe("PAYMENT_FAILED")
+          expect(after?.failureReason).toBe("payment-unresolved-expired")
+          expect(after?.statusHistory.at(-1)?.reason).toBe("payment-unresolved-expired")
+          expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+            expect.objectContaining({
+              flow: "giftcard",
+              phase: "order-failed",
+              status: "failed",
+              meta: expect.objectContaining({
+                orderId: "noref",
+                reason: "payment-unresolved-expired",
+                vendorStatus: "awaitingPayment",
+              }),
+            }),
+          )
+        })
+
+        it("not before expiresAt + 24h: stays PAYMENT_PENDING", async () => {
+          awaitingPayment()
+          noRef()
+          const res = await runAt(
+            GIFT_CARD_PAYMENT_UNRESOLVED_GRACE_MS + 15 * MINUTE - SECOND,
+          )
+          if (res instanceof Error) throw res
+          expect(repo.store.get("noref")?.status).toBe("PAYMENT_PENDING")
+          expect(repo.transition).not.toHaveBeenCalled()
+        })
+
+        it("not when the vendor says paid-pending-fulfillment: a card may still come", async () => {
+          mockFetchVendorStatus.mockResolvedValue({ kind: "paidPendingFulfillment" })
+          noRef()
+          const res = await runAt(pastGrace)
+          if (res instanceof Error) throw res
+          expect(repo.store.get("noref")?.status).toBe("PAYMENT_PENDING")
+          expect(repo.transition).not.toHaveBeenCalled()
+        })
+
+        it("not when the order HAS an IBEX ref: IBEX, not the vendor, owns that answer", async () => {
+          awaitingPayment()
+          repo.seed(
+            makeOrder({
+              id: "ref" as GiftCardOrderId,
+              status: "PAYMENT_PENDING",
+              providerOrderId: "tbc-ref" as GiftCardProviderOrderId,
+              providerPaymentRef: "ibex-tx",
+            }),
+          )
+          const res = await runAt(pastGrace)
+          if (res instanceof Error) throw res
+          expect(repo.store.get("ref")?.status).toBe("PAYMENT_PENDING")
+          expect(repo.transition).not.toHaveBeenCalled()
+        })
+
+        it("not when the vendor could not be asked", async () => {
+          mockFetchVendorStatus.mockResolvedValue(new GiftCardVendorUnavailableError())
+          noRef()
+          const res = await runAt(pastGrace)
+          if (res instanceof Error) throw res
+          expect(repo.store.get("noref")?.status).toBe("PAYMENT_PENDING")
+        })
+      })
+    })
+
+    it("a poll that leaves the status unchanged bumps updatedAt so the batch rotates", async () => {
+      // listByStatus is oldest-updatedAt first; a stuck row that is never
+      // touched would sit at the front of every run.
+      const order = pending()
+      await runAt(5 * SECOND)
+      expect(repo.touch).toHaveBeenCalledWith("p")
+      expect(repo.store.get("p")?.updatedAt.getTime()).toBe(NOW_MS + 5 * SECOND)
+      expect(repo.store.get("p")?.updatedAt.getTime()).toBeGreaterThan(
+        order.updatedAt.getTime(),
+      )
+      expect(repo.store.get("p")?.status).toBe("PAYMENT_PENDING")
+      expect(repo.store.get("p")?.statusHistory).toEqual(order.statusHistory)
+    })
+
+    it("a poll that moves the order does not touch it: the transition already moved updatedAt", async () => {
+      mockGetTransactionDetails.mockResolvedValue(ibexTransaction(3))
+      pending()
+      await runAt(0)
+      expect(repo.touch).not.toHaveBeenCalled()
+    })
+
+    it("a touch failure is logged and does not fail the order", async () => {
+      repo.touch.mockResolvedValueOnce(
+        new (jest.requireActual("@domain/errors").RepositoryError)("mongo"),
+      )
+      pending()
+      const res = await runAt(0)
+      if (res instanceof Error) throw res
+      expect(mockLogger.error).not.toHaveBeenCalled()
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ orderId: "p" }),
+        expect.stringContaining("updatedAt"),
+      )
     })
 
     it("an IBEX lookup error falls back to the vendor and leaves the order pending", async () => {
@@ -564,10 +750,28 @@ describe("reconcileGiftCardOrders", () => {
       if (res instanceof Error) throw res
       expect(res.refundRequired).toBe(1)
     })
+
+    it("a poll that leaves the order PAID bumps updatedAt; one that moves it does not", async () => {
+      const order = paidOrder("a", -10 * SECOND)
+      await runAt(0)
+      expect(repo.touch).toHaveBeenCalledWith("a")
+      expect(repo.store.get("a")?.updatedAt.getTime()).toBeGreaterThan(
+        order.updatedAt.getTime(),
+      )
+
+      repo.touch.mockClear()
+      mockFetchAndSettle.mockImplementation(async (o: GiftCardOrder) => {
+        const fulfilled = { ...o, status: "FULFILLED" as const }
+        repo.store.set(o.id, fulfilled)
+        return fulfilled
+      })
+      await runAt(20 * SECOND)
+      expect(repo.touch).not.toHaveBeenCalled()
+    })
   })
 
   describe("24h escalation", () => {
-    it("PAID for 24h with nothing new at the vendor -> REFUND_REQUIRED with reason fulfillment-timeout, and pages", async () => {
+    it("PAID for 24h with the vendor positively reporting no card -> REFUND_REQUIRED with reason fulfillment-timeout, and pages", async () => {
       const order = paidOrder("old", -GIFT_CARD_PAID_TIMEOUT_MS)
       const res = await runAt(0)
       if (res instanceof Error) throw res
@@ -625,21 +829,56 @@ describe("reconcileGiftCardOrders", () => {
       expect(repo.transition).not.toHaveBeenCalled()
     })
 
-    it("a vendor error on the final poll still escalates, naming the error", async () => {
-      mockFetchAndSettle.mockResolvedValue(new GiftCardVendorUnavailableError())
-      paidOrder("old", -GIFT_CARD_PAID_TIMEOUT_MS)
-      const res = await runAt(0)
-      if (res instanceof Error) throw res
-      expect(res.refundRequired).toBe(1)
-      expect(repo.store.get("old")?.status).toBe("REFUND_REQUIRED")
-      expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          phase: "refund-required",
-          meta: expect.objectContaining({
-            lastVendorPoll: "GiftCardVendorUnavailableError",
-          }),
-        }),
+    describe("an error on the final poll says nothing about the card: stay PAID, retry next run", () => {
+      // REFUND_REQUIRED means "money left and no card is coming". A vendor 5xx,
+      // a claim-key fault (the card IS issued; only our storage failed) or a
+      // repository error cannot establish that, and escalating on one would
+      // refund a delivered card.
+      it.each([
+        ["a vendor 5xx", () => new GiftCardVendorUnavailableError()],
+        ["a claim-key fault", () => new GiftCardClaimCryptoError("no key")],
+        [
+          "a repository fault",
+          () =>
+            new (jest.requireActual("@domain/errors").UnknownRepositoryError)("mongo"),
+        ],
+      ])(
+        "%s at 24h keeps the order PAID, counted and logged at warn",
+        async (_label, make) => {
+          const error = make()
+          mockFetchAndSettle.mockResolvedValue(error)
+          paidOrder("old", -GIFT_CARD_PAID_TIMEOUT_MS)
+          const res = await runAt(0)
+          if (res instanceof Error) throw res
+          expect(res.refundRequired).toBe(0)
+          expect(res.finalPollFailed).toBe(1)
+          expect(repo.store.get("old")?.status).toBe("PAID")
+          expect(repo.transition).not.toHaveBeenCalled()
+          expect(mockNotifyOpsEvent).not.toHaveBeenCalledWith(
+            expect.objectContaining({ phase: "refund-required" }),
+          )
+          expect(mockLogger.warn).toHaveBeenCalledWith(
+            expect.objectContaining({ orderId: "old", error: error.constructor.name }),
+            expect.stringContaining("keeping PAID"),
+          )
+          expect(mockLogger.error).not.toHaveBeenCalled()
+          // ...and the row is touched so it does not pin the front of the batch.
+          expect(repo.touch).toHaveBeenCalledWith("old")
+        },
       )
+
+      it("retries on the next run and escalates once the vendor answers 'still PAID'", async () => {
+        mockFetchAndSettle.mockResolvedValueOnce(new GiftCardVendorUnavailableError())
+        paidOrder("old", -GIFT_CARD_PAID_TIMEOUT_MS)
+        const first = await runAt(0)
+        if (first instanceof Error) throw first
+        expect(repo.store.get("old")?.status).toBe("PAID")
+
+        const second = await runAt(15 * MINUTE)
+        if (second instanceof Error) throw second
+        expect(second.refundRequired).toBe(1)
+        expect(repo.store.get("old")?.status).toBe("REFUND_REQUIRED")
+      })
     })
 
     it("one second short of 24h still polls", async () => {

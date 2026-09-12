@@ -73,6 +73,8 @@ const product = (
   termsUrl: null,
   rewardBps: 0,
   inStock: true,
+  maxQuantity: 1,
+  wholeUnitsOnly: false,
 })
 
 const provider = (
@@ -160,6 +162,27 @@ describe("syncGiftCardCatalogForProvider", () => {
     const res = await syncGiftCardCatalogForProvider(tbc)
 
     expect(res).toBe(vendorDown)
+    expect(mockWrite).not.toHaveBeenCalled()
+    expect(opsEvents()).toEqual([
+      {
+        flow: "giftcard",
+        phase: "catalog-sync-failed",
+        status: "failed",
+        error: "GiftCardVendorUnavailableError",
+        meta: { providerId: "bitcoinCompany" },
+      },
+    ])
+  })
+
+  it("treats an empty catalog as a failed sync: nothing written, failure event emitted", async () => {
+    // A vendor that answers 200 with zero rows is a failed pull, not a catalog.
+    // Writing it would blank the countries index and every listing until the
+    // next sync; the last good catalog must keep serving instead.
+    const tbc = provider("bitcoinCompany", jest.fn().mockResolvedValue([]))
+
+    const res = await syncGiftCardCatalogForProvider(tbc)
+
+    expect(res).toBeInstanceOf(GiftCardVendorUnavailableError)
     expect(mockWrite).not.toHaveBeenCalled()
     expect(opsEvents()).toEqual([
       {
@@ -391,6 +414,17 @@ describe("syncGiftCardCatalogs", () => {
 
       await syncGiftCardCatalogs({ minIntervalSeconds: INTERVAL })
 
+      expect(mockRedisDel).toHaveBeenCalledWith(GIFT_CARD_CATALOG_SYNC_MARKER_KEY)
+    })
+
+    it("frees the marker when the only provider returned an empty catalog", async () => {
+      const tbc = provider("bitcoinCompany", jest.fn().mockResolvedValue([]))
+      mockEnabledProviders.mockReturnValue([tbc])
+
+      const summaries = await syncGiftCardCatalogs({ minIntervalSeconds: INTERVAL })
+
+      expect(summaries).toEqual([])
+      expect(mockWrite).not.toHaveBeenCalled()
       expect(mockRedisDel).toHaveBeenCalledWith(GIFT_CARD_CATALOG_SYNC_MARKER_KEY)
     })
 

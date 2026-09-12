@@ -21,6 +21,7 @@ const create = jest.fn()
 const findOne = jest.fn()
 const findOneAndUpdate = jest.fn()
 const find = jest.fn()
+const updateOne = jest.fn()
 
 jest.mock("@services/mongoose/schema", () => ({
   GiftCardOrders: {
@@ -28,6 +29,7 @@ jest.mock("@services/mongoose/schema", () => ({
     findOne: (...args: unknown[]) => findOne(...args),
     findOneAndUpdate: (...args: unknown[]) => findOneAndUpdate(...args),
     find: (...args: unknown[]) => find(...args),
+    updateOne: (...args: unknown[]) => updateOne(...args),
   },
 }))
 
@@ -85,6 +87,7 @@ describe("GiftCardOrdersRepository", () => {
     findOne.mockReset()
     findOneAndUpdate.mockReset()
     find.mockReset()
+    updateOne.mockReset()
   })
 
   describe("create", () => {
@@ -262,6 +265,43 @@ describe("GiftCardOrdersRepository", () => {
       expect(sort).toHaveBeenCalledWith({ updatedAt: 1 })
       expect(limit).toHaveBeenCalledWith(50)
       expect((result as GiftCardOrder[])[0].status).toBe("PAID")
+    })
+  })
+
+  describe("touch", () => {
+    // The reconcile worker bumps `updatedAt` after a poll that changed nothing,
+    // so `listByStatus` (oldest `updatedAt` first) rotates through a batch
+    // instead of pinning the same stuck rows at its front run after run.
+    it("sets only updatedAt, by id, and changes nothing else", async () => {
+      updateOne.mockResolvedValue({ matchedCount: 1, modifiedCount: 1 })
+
+      const result = await GiftCardOrdersRepository().touch(ORDER_ID)
+
+      expect(result).toBe(true)
+      expect(updateOne).toHaveBeenCalledTimes(1)
+      const [filter, update] = updateOne.mock.calls[0]
+      expect(filter).toEqual({ id: { $eq: ORDER_ID } })
+      expect(Object.keys(update)).toEqual(["$set"])
+      expect(Object.keys(update.$set)).toEqual(["updatedAt"])
+      expect(update.$set.updatedAt).toBeInstanceOf(Date)
+      // No status, no history entry: a touch is not a transition.
+      expect(findOneAndUpdate).not.toHaveBeenCalled()
+    })
+
+    it("reports not-found when no row matched", async () => {
+      updateOne.mockResolvedValue({ matchedCount: 0, modifiedCount: 0 })
+
+      const result = await GiftCardOrdersRepository().touch(ORDER_ID)
+
+      expect(result).toBeInstanceOf(GiftCardOrderNotFoundError)
+    })
+
+    it("returns a repository error rather than throwing", async () => {
+      updateOne.mockRejectedValue(new Error("connection closed"))
+
+      const result = await GiftCardOrdersRepository().touch(ORDER_ID)
+
+      expect(result).toBeInstanceOf(UnknownRepositoryError)
     })
   })
 

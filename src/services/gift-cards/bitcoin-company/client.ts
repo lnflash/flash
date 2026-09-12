@@ -7,6 +7,7 @@ import { GiftCardsConfig } from "@config"
 
 import {
   GiftCardError,
+  GiftCardInvalidValueError,
   GiftCardVendorRejectedOrderError,
   GiftCardVendorUnavailableError,
 } from "@domain/gift-cards"
@@ -260,6 +261,23 @@ export type BitcoinCompanyClientDeps = {
 const defaultSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms))
 
+/**
+ * Vendor catalog as the client hands it to the adapter: the rows that validated
+ * plus a count of those that did not, so the sync log can report
+ * received-vs-kept without the client having to know mapping rules.
+ */
+export type VendorCatalog = {
+  products: VendorProduct[]
+  /** Rows that failed `vendorProductSchema` and were dropped. */
+  invalid: number
+}
+
+// Fixed customer-facing messages. The vendor's own text is useful to an
+// operator reading the warn log and to nobody else: it names internal limits,
+// SKUs, and account state that must not reach a customer or a failureReason.
+const CUSTOMER_MSG_ORDER_REJECTED = "The provider declined this order"
+const CUSTOMER_MSG_QUOTE_REJECTED = "The provider could not quote this amount"
+
 const extractVendorError = (data: unknown): string | null => {
   if (!data || typeof data !== "object") return null
   const { error, message } = data as { error?: unknown; message?: unknown }
@@ -306,9 +324,9 @@ export class BitcoinCompanyClient {
    * otherwise hand the sync a duplicate-heavy list that overwrites the last
    * good catalog wholesale. Failing keeps the previous catalog serving.
    */
-  async listProducts(): Promise<VendorProduct[] | GiftCardError> {
+  async listProducts(): Promise<VendorCatalog | GiftCardError> {
     const products: VendorProduct[] = []
-    let skipped = 0
+    let invalid = 0
     let offset = 0
     let pages = 0
     let reachedEnd = false
@@ -335,7 +353,7 @@ export class BitcoinCompanyClient {
         if (parsed.success) {
           products.push(parsed.data)
         } else {
-          skipped++
+          invalid++
         }
       }
       offset += result.svs.length
@@ -349,13 +367,13 @@ export class BitcoinCompanyClient {
       return new GiftCardVendorUnavailableError()
     }
 
-    if (skipped > 0) {
+    if (invalid > 0) {
       baseLogger.warn(
-        { provider: PROVIDER, op: "listProducts", skipped, kept: products.length },
+        { provider: PROVIDER, op: "listProducts", invalid, kept: products.length },
         "Bitcoin Company catalog rows failed validation and were skipped",
       )
     }
-    return products
+    return { products, invalid }
   }
 
   async quoteCard(args: {
@@ -407,15 +425,22 @@ export class BitcoinCompanyClient {
     })
   }
 
-  /** Idempotent read despite being a POST; retried like a GET. */
-  async invoiceStatus(invoice: string): Promise<VendorPurchasedProduct | GiftCardError> {
+  /**
+   * Idempotent read despite being a POST; retried like a GET by default.
+   * `retry: false` makes one attempt with the normal timeout, for callers
+   * (the reconcile worker) that schedule their own retries.
+   */
+  async invoiceStatus(
+    invoice: string,
+    opts: { retry?: boolean } = {},
+  ): Promise<VendorPurchasedProduct | GiftCardError> {
     return this.call({
       op: "getOrder",
       method: "POST",
       path: "/giftcards/invoice-status",
       body: { invoice },
       auth: true,
-      retry: true,
+      retry: opts.retry ?? true,
       schema: purchasedProductSchema,
     })
   }
@@ -575,13 +600,17 @@ export class BitcoinCompanyClient {
         { provider: PROVIDER, op, status: err.status, vendorError: err.vendorError },
         "Bitcoin Company rejected the request",
       )
-      if (
-        op === "createOrder" &&
-        err.status >= 400 &&
-        err.status < 500 &&
-        err.vendorError
-      ) {
-        return new GiftCardVendorRejectedOrderError(err.vendorError)
+      // A 4xx carrying a vendor message is a deterministic rejection of OUR
+      // input, not an outage: retrying the same request will not help, and
+      // paging on it would be noise. Without a message we cannot tell the two
+      // apart and stay on the unavailable (Critical) path.
+      const rejectedInput =
+        err.status >= 400 && err.status < 500 && Boolean(err.vendorError)
+      if (rejectedInput && op === "createOrder") {
+        return new GiftCardVendorRejectedOrderError(CUSTOMER_MSG_ORDER_REJECTED)
+      }
+      if (rejectedInput && op === "quote") {
+        return new GiftCardInvalidValueError(CUSTOMER_MSG_QUOTE_REJECTED)
       }
       return new GiftCardVendorUnavailableError()
     }

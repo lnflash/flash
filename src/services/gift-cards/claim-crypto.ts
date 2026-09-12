@@ -11,6 +11,16 @@ import { GiftCardClaimCryptoError } from "@domain/gift-cards"
  *
  *   version (1 byte, 0x01) | iv (12) | authTag (16) | data
  *
+ * Additional authenticated data (not stored, recomputed on decrypt):
+ *
+ *   version (1 byte) ‖ keyId (16 ascii hex) ‖ orderId (utf8)
+ *
+ * Binding the order id into the AAD means a ciphertext is only ever readable
+ * on the order it was sealed for: anyone with write access to the orders
+ * collection can copy `claimCiphertext` from one row to another, but the tag
+ * will not verify there. `keyId` is fixed-length, so the concatenation is
+ * unambiguous without a separator.
+ *
  * `keyId` is the first 16 hex chars of sha256(rawKeyBytes) and is stored next
  * to every ciphertext so a future multi-key map can pick the right key during
  * rotation. Today there is exactly one key; a mismatch is reported, never
@@ -29,6 +39,10 @@ const ALGORITHM = "aes-256-gcm"
 
 const HEX_KEY = /^[0-9a-fA-F]{64}$/
 const BASE64_KEY = /^[A-Za-z0-9+/]+={0,2}$/
+// Strict base64: whole quads, at most two '=' of padding, nothing else.
+// `Buffer.from(x, "base64")` never throws — it silently skips bad characters —
+// so malformed input has to be refused up front.
+const STRICT_BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/
 
 const loadKey = (): Buffer | GiftCardClaimCryptoError => {
   const raw = GiftCardsConfig?.claimDataEncryptionKey
@@ -53,6 +67,13 @@ const loadKey = (): Buffer | GiftCardClaimCryptoError => {
 
 const keyIdFor = (key: Buffer): string =>
   createHash("sha256").update(key).digest("hex").slice(0, KEY_ID_LENGTH)
+
+const aadFor = (keyId: string, orderId: string): Buffer =>
+  Buffer.concat([
+    Buffer.from([VERSION]),
+    Buffer.from(keyId, "utf8"),
+    Buffer.from(orderId, "utf8"),
+  ])
 
 const isClaimCode = (value: unknown): value is GiftCardClaimCode =>
   typeof value === "object" &&
@@ -89,16 +110,30 @@ export const giftCardClaimKeyId = (): string | GiftCardClaimCryptoError => {
   return keyIdFor(key)
 }
 
+/**
+ * Can a claim be sealed right now? Loads and validates the configured key
+ * without encrypting anything. The purchase path asks this BEFORE paying: a
+ * card the vendor issues for an order whose claim we then cannot store is a
+ * customer who paid for something they cannot see, so a missing or malformed
+ * key must refuse the purchase while it is still free to refuse.
+ */
+export const claimCryptoReady = (): true | GiftCardClaimCryptoError => {
+  const key = loadKey()
+  return key instanceof Error ? key : true
+}
+
 export const encryptGiftCardClaim = (
   claim: GiftCardClaim,
+  { orderId }: { orderId: GiftCardOrderId },
 ): { ciphertext: string; keyId: string } | GiftCardClaimCryptoError => {
   const key = loadKey()
   if (key instanceof Error) return key
+  const keyId = keyIdFor(key)
 
   try {
     const iv = randomBytes(IV_LENGTH)
     const cipher = createCipheriv(ALGORITHM, key, iv, { authTagLength: TAG_LENGTH })
-    cipher.setAAD(Buffer.from([VERSION]))
+    cipher.setAAD(aadFor(keyId, orderId))
     const plaintext = Buffer.from(JSON.stringify(claim), "utf8")
     const data = Buffer.concat([cipher.update(plaintext), cipher.final()])
     const authTag = cipher.getAuthTag()
@@ -108,7 +143,7 @@ export const encryptGiftCardClaim = (
       authTag,
       data,
     ]).toString("base64")
-    return { ciphertext, keyId: keyIdFor(key) }
+    return { ciphertext, keyId }
   } catch {
     return new GiftCardClaimCryptoError("Could not encrypt gift card details")
   }
@@ -117,9 +152,11 @@ export const encryptGiftCardClaim = (
 export const decryptGiftCardClaim = ({
   ciphertext,
   keyId,
+  orderId,
 }: {
   ciphertext: string
   keyId: string
+  orderId: GiftCardOrderId
 }): GiftCardClaim | GiftCardClaimCryptoError => {
   const key = loadKey()
   if (key instanceof Error) return key
@@ -128,12 +165,10 @@ export const decryptGiftCardClaim = ({
     return new GiftCardClaimCryptoError("key rotated")
   }
 
-  let packed: Buffer
-  try {
-    packed = Buffer.from(ciphertext, "base64")
-  } catch {
+  if (ciphertext.length === 0 || !STRICT_BASE64.test(ciphertext)) {
     return new GiftCardClaimCryptoError("Gift card claim ciphertext is malformed")
   }
+  const packed = Buffer.from(ciphertext, "base64")
   if (packed.length < 1 + IV_LENGTH + TAG_LENGTH) {
     return new GiftCardClaimCryptoError("Gift card claim ciphertext is malformed")
   }
@@ -148,7 +183,7 @@ export const decryptGiftCardClaim = ({
   let plaintext: string
   try {
     const decipher = createDecipheriv(ALGORITHM, key, iv, { authTagLength: TAG_LENGTH })
-    decipher.setAAD(Buffer.from([VERSION]))
+    decipher.setAAD(aadFor(keyId, orderId))
     decipher.setAuthTag(authTag)
     plaintext = Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8")
   } catch {

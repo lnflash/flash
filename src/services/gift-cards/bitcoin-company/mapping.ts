@@ -22,6 +22,18 @@ export const BITCOIN_COMPANY_PROVIDER_ID: GiftCardProviderId = "bitcoinCompany"
 
 export const QUOTE_TTL_MS = 60 * 1000
 
+/**
+ * Cards per order this adapter will place. Held at 1 until a sandbox
+ * `/giftcards/invoice-status` response for a quantity-2 order has been
+ * captured: `purchasedProductSchema` models exactly one `{ status, claimData }`
+ * and a per-card array would fail validation on every status poll, stranding a
+ * paid order. Raising this is a fixture-plus-schema change, not a config flip.
+ */
+export const BITCOIN_COMPANY_MAX_QUANTITY = 1
+
+/** The vendor's name for the payment rail we settle over. */
+export const LIGHTNING_PAYMENT_TYPE = "Lightning"
+
 /** Vendor money is in major units of the product currency; the domain is minor units. */
 export const toMinorUnits = (major: number): number => Math.round(major * 100)
 export const toMajorUnits = (minor: number): number => minor / 100
@@ -55,14 +67,47 @@ export const mapDenominationType = (raw: string): GiftCardDenominationType | nul
   }
 }
 
+/**
+ * Why a catalog row was left out. `invalid` (failed schema validation) is
+ * counted by the client, which never hands such rows to the mapper; it is
+ * listed here so the sync log reports every reason under one key set.
+ */
 export type ProductMappingSkipReason =
-  "no-country" | "unknown-denomination-type" | "no-denominations"
+  | "invalid"
+  | "noCountry"
+  | "physical"
+  | "noLightning"
+  | "unknownDenominationType"
+  | "noDenominations"
+
+export const PRODUCT_MAPPING_SKIP_REASONS: readonly ProductMappingSkipReason[] = [
+  "invalid",
+  "noCountry",
+  "physical",
+  "noLightning",
+  "unknownDenominationType",
+  "noDenominations",
+]
 
 export type ProductMappingSkip = { readonly skipped: ProductMappingSkipReason }
 
 export const isProductMappingSkip = (
   value: GiftCardProduct | ProductMappingSkip,
 ): value is ProductMappingSkip => "skipped" in value
+
+/**
+ * `resellingEnabled: false` on a row we nevertheless keep. The public catalog
+ * shows false on every product until the account is KYB'd, so skipping would
+ * empty the catalog; the adapter counts these and warns instead.
+ * TODO(ENG-586): flip to a skip reason once KYB flips resellingEnabled.
+ */
+export const isResellingDisabled = (product: VendorProduct): boolean =>
+  product.resellingEnabled === false
+
+const acceptsLightning = (paymentTypes: readonly string[]): boolean =>
+  paymentTypes.some(
+    (type) => type.trim().toLowerCase() === LIGHTNING_PAYMENT_TYPE.toLowerCase(),
+  )
 
 const toMinorDenominations = (major: readonly number[]): number[] =>
   [
@@ -73,13 +118,21 @@ export const mapVendorProduct = (
   product: VendorProduct,
 ): GiftCardProduct | ProductMappingSkip => {
   const rawCountry = product.countries.find((c) => c.trim().length > 0)
-  if (!rawCountry) return { skipped: "no-country" }
+  if (!rawCountry) return { skipped: "noCountry" }
+
+  // We deliver codes in-app; a shipped card has nothing to deliver.
+  if (product.isPhysical === true) return { skipped: "physical" }
+
+  // Absent means the vendor did not say; present-but-without-Lightning means no.
+  if (product.paymentTypes && !acceptsLightning(product.paymentTypes)) {
+    return { skipped: "noLightning" }
+  }
 
   const denominationType = mapDenominationType(product.denominationType)
-  if (!denominationType) return { skipped: "unknown-denomination-type" }
+  if (!denominationType) return { skipped: "unknownDenominationType" }
 
   const denominations = toMinorDenominations(product.denominations)
-  if (denominations.length === 0) return { skipped: "no-denominations" }
+  if (denominations.length === 0) return { skipped: "noDenominations" }
 
   const logoUrl = product.logo || product.panelImg || null
 
@@ -103,6 +156,10 @@ export const mapVendorProduct = (
     termsUrl: null,
     rewardBps: Math.round(product.satsBackPercentage * 100),
     inStock: product.stock !== 0,
+    maxQuantity: BITCOIN_COMPANY_MAX_QUANTITY,
+    // Fixed products: every denomination is already a whole unit and the value
+    // must match one exactly, so the extra rule would be redundant.
+    wholeUnitsOnly: product.denominationType === "VariableNoCents",
   }
 }
 
@@ -126,7 +183,10 @@ export const mapVendorQuote = ({
   fiatCostMinor: toMinorUnits(vendor.fiatCost),
   satsCost: toSats(Math.round(vendor.satsCost)),
   rewardSats: toSats(Math.round(vendor.satsBack)),
-  bitcoinPriceMinor: toMinorUnits(vendor.bitcoinPrice),
+  bitcoinPriceMinor:
+    vendor.bitcoinPrice === null || vendor.bitcoinPrice === undefined
+      ? null
+      : toMinorUnits(vendor.bitcoinPrice),
   expiresAt: new Date(now.getTime() + QUOTE_TTL_MS),
 })
 
@@ -135,11 +195,16 @@ export const mapVendorQuote = ({
  * the one encoded in the BOLT11 itself, which `purchaseGiftCard` decodes. Not
  * invented here: a fabricated "now + 15 min" would silently outlive a shorter
  * invoice and keep an unpayable order open.
+ *
+ * `amountSats` is non-null on the port, so a missing vendor `amount` maps to 0.
+ * That is safe because the purchase path decodes the BOLT11 and pays
+ * `max(invoiceSats, amountSats)`: the invoice amount governs, the vendor's
+ * figure can only ever raise it, never lower it.
  */
 export const mapVendorPurchase = (vendor: VendorPurchase): GiftCardProviderOrder => ({
   providerOrderId: toGiftCardProviderOrderId(String(vendor.uuid)),
   paymentRequest: vendor.invoice,
-  amountSats: toSats(Math.round(vendor.amount)),
+  amountSats: toSats(Math.round(vendor.amount ?? 0)),
   expiresAt: null,
 })
 
@@ -160,7 +225,13 @@ export const mapVendorClaim = (
   return { codes, claimLink, barcode }
 }
 
-type VendorStatusBucket = GiftCardProviderOrderStatus["kind"]
+/**
+ * Port status, plus `held`: a vendor status that is neither settled nor
+ * terminal for us (a dispute in flight). Held orders stay
+ * `paidPendingFulfillment` with a warning until a later Refunded / ClawedBack /
+ * Completed poll, or the 24h REFUND_REQUIRED timeout, decides.
+ */
+type VendorStatusBucket = GiftCardProviderOrderStatus["kind"] | "held"
 
 // Keys are lower-cased so a casing change on the vendor side does not turn a
 // known status into an "unknown" one.
@@ -177,7 +248,9 @@ const VENDOR_STATUS_TABLE: Readonly<Record<string, VendorStatusBucket>> = {
   expired: "failed",
   cancelled: "failed",
   refunded: "refunded",
-  disputed: "refunded",
+  // A dispute is not a refund: money may still come back as a card or as a
+  // refund, and calling it terminal either way would be a guess.
+  disputed: "held",
   clawedback: "refunded",
 }
 
@@ -201,6 +274,11 @@ export const mapVendorOrderStatus = (
     case "failed":
     case "refunded":
       return { status: { kind: bucket, reason: vendorStatus }, warning: null }
+    case "held":
+      return {
+        status: { kind: "paidPendingFulfillment" },
+        warning: `Bitcoin Company reported "${vendorStatus}"; holding as pending until the vendor settles it or the timeout decides`,
+      }
     case "fulfilled": {
       const claim = mapVendorClaim(vendor.claimData)
       if (!claim) {

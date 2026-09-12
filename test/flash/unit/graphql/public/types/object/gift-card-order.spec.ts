@@ -184,6 +184,8 @@ describe("GraphQL type shapes", () => {
         "logoUrl",
         "termsUrl",
         "rewardBps",
+        "maxQuantity",
+        "wholeUnitsOnly",
       ].sort(),
     )
   })

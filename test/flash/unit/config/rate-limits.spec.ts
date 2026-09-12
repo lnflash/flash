@@ -44,6 +44,36 @@ describe("getRequestCodeBlockedCountryPerIpLimits", () => {
   })
 })
 
+describe("getGiftCardPurchaseAttemptLimits", () => {
+  // Hardcoded in src/config/yaml.ts, not in the yaml, so nothing else pins it:
+  // the purchase spec mocks the limiter and the error map does not care about
+  // the numbers. Charged once per mutation, before any vendor or store call,
+  // so it is the only thing that bounds a client looping on a refused request.
+  //
+  // points: 10/min — a customer retrying a timed-out call with the SAME key
+  //               replays and does not spend a point (purchase-gift-card.ts),
+  //               so 10 fresh attempts a minute is already far beyond honest
+  //               use. Each fresh attempt is a live vendor quote + createOrder.
+  // blockDuration: 5 min — long enough to stop a looping client, short enough
+  //               that a customer who hit it can still buy the card they want.
+  it("bounds fresh purchase attempts at 10/min with a 5 minute block", () => {
+    expect(getGiftCardPurchaseAttemptLimits()).toEqual({
+      points: 10,
+      duration: 60,
+      blockDuration: 300,
+    })
+  })
+
+  it("is wired into RateLimitConfig under its own prefix and error, with those numbers", () => {
+    expect(RateLimitConfig.giftCardPurchase).toEqual({
+      key: "gift_card_purchase",
+      limits: { points: 10, duration: 60, blockDuration: 300 },
+      error: GiftCardPurchaseRateLimiterExceededError,
+    })
+    expect(RateLimitPrefix.giftCardPurchase).toBe("gift_card_purchase")
+  })
+})
+
 describe("getGiftCardQuoteAttemptLimits", () => {
   // Hardcoded like the purchase budget beside it — not in the yaml — so nothing
   // else in the suite pins these; the app spec mocks the whole registry.
@@ -71,9 +101,11 @@ describe("getGiftCardQuoteAttemptLimits", () => {
   })
 
   it("is wired into RateLimitConfig under its own prefix and error, apart from the purchase", () => {
+    // Literal numbers, not the getter: a config that restates itself would
+    // stay green if both sides drifted together.
     expect(RateLimitConfig.giftCardQuote).toEqual({
-      key: RateLimitPrefix.giftCardQuote,
-      limits: getGiftCardQuoteAttemptLimits(),
+      key: "gift_card_quote",
+      limits: { points: 30, duration: 60, blockDuration: 300 },
       error: GiftCardQuoteRateLimiterExceededError,
     })
     expect(RateLimitPrefix.giftCardQuote).toBe("gift_card_quote")

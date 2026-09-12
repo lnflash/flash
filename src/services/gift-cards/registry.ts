@@ -9,7 +9,10 @@ import {
  * Provider registry. Adapters call `registerGiftCardProvider` at module load
  * (from `src/services/gift-cards/index.ts`), so adding a vendor is one import
  * line plus config. Routing is config-driven: `routing.byCountry[cc]`, else
- * `routing.default`; a provider is eligible only when `providers.<id>.enabled`.
+ * `routing.default`; a provider is eligible only when `providers.<id>.enabled`
+ * AND an adapter is registered under the id. Config alone is not enough: an
+ * enabled-but-unregistered id would advertise gift cards (the globals flag,
+ * the country gate) while every read and write failed.
  *
  * Config is read at call time, not module load, so tests can mock `@config`.
  */
@@ -38,18 +41,29 @@ export const getRegisteredGiftCardProviderOrError = (
   return provider
 }
 
+/** Master switch on, provider switch on, and an adapter registered under the id. */
 export const isGiftCardProviderEnabled = (id: GiftCardProviderId): boolean =>
-  GiftCardsConfig.enabled === true && GiftCardsConfig.providers[id]?.enabled === true
+  GiftCardsConfig.enabled === true &&
+  GiftCardsConfig.providers[id]?.enabled === true &&
+  providers.has(id)
 
 /** Registered AND enabled providers, for the catalog sync job. */
 export const enabledGiftCardProviders = (): IGiftCardProvider[] =>
   [...providers.values()].filter((p) => isGiftCardProviderEnabled(p.id))
 
+// Country keys are compared normalised on both sides so `{ jm: bitrefill }` in
+// the yaml routes the same as `{ JM: bitrefill }`.
+const routedProviderId = (cc: string): GiftCardProviderId => {
+  for (const [key, id] of Object.entries(GiftCardsConfig.routing.byCountry)) {
+    if (normalizeCountryCode(key) === cc) return id
+  }
+  return GiftCardsConfig.routing.default
+}
+
 export const resolveGiftCardProviderIdForCountry = (
   countryCode: string,
 ): GiftCardProviderId | GiftCardProviderUnavailableError => {
-  const cc = normalizeCountryCode(countryCode)
-  const routed = GiftCardsConfig.routing.byCountry[cc] ?? GiftCardsConfig.routing.default
+  const routed = routedProviderId(normalizeCountryCode(countryCode))
   if (!isGiftCardProviderEnabled(routed)) return new GiftCardProviderUnavailableError()
   return routed
 }

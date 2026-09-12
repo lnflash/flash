@@ -271,7 +271,10 @@ describe("checkGiftCardOrderTransition", () => {
     ).toBeInstanceOf(GiftCardOrderStateError)
   })
 
-  it("never lets a terminal state move anywhere", () => {
+  it("never lets a terminal state move anywhere, except EXPIRED → PAID", () => {
+    // A send still in flight at IBEX when the worker expired the row, then
+    // settled: the money left, and the order must be able to say so. Nothing
+    // else terminal has a way back.
     const terminal = [
       GiftCardOrderStatus.Fulfilled,
       GiftCardOrderStatus.Failed,
@@ -279,13 +282,27 @@ describe("checkGiftCardOrderTransition", () => {
       GiftCardOrderStatus.Expired,
       GiftCardOrderStatus.RefundRequired,
     ]
-    for (const from of terminal) {
-      for (const to of allStatuses) {
-        expect(checkGiftCardOrderTransition([from], to)).toBeInstanceOf(
-          GiftCardOrderStateError,
+    const exits = terminal.flatMap((from) =>
+      allStatuses
+        .filter((to) => checkGiftCardOrderTransition([from], to) === true)
+        .map((to) => `${from} → ${to}`),
+    )
+    expect(exits).toEqual(["EXPIRED → PAID"])
+
+    const refusals = terminal.flatMap((from) =>
+      allStatuses
+        .filter(
+          (to) =>
+            !(from === GiftCardOrderStatus.Expired && to === GiftCardOrderStatus.Paid),
         )
-      }
-    }
+        .map((to) => checkGiftCardOrderTransition([from], to)),
+    )
+    expect(refusals).toHaveLength(terminal.length * allStatuses.length - 1)
+    expect(refusals.every((r) => r instanceof GiftCardOrderStateError)).toBe(true)
+  })
+
+  it("EXPIRED has exactly one exit, to PAID", () => {
+    expect(GIFT_CARD_TRANSITIONS.EXPIRED).toEqual([GiftCardOrderStatus.Paid])
   })
 })
 

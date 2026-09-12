@@ -23,10 +23,21 @@ import { addAttributesToCurrentSpan } from "@services/tracing"
  * mutation then refuses.
  *
  * Hands back the provider id it gated on, so a caller cannot pass the gate for
- * one provider and then order from another.
+ * one provider and then order from another, and the normalised country it
+ * routed on, so quote and purchase can refuse a product from a different
+ * country's catalog (`product.countryCode`) the way API.md says they do.
+ * `countryKnown` is false when the country was `UNKNOWN_COUNTRY_CODE`; callers
+ * skip the product-country comparison then — we cannot know the user's
+ * country, and the routed provider's catalog is all we have.
  */
 export type GiftCardsMasterGate =
-  | { ok: true; providerId: GiftCardProviderId }
+  | {
+      ok: true
+      providerId: GiftCardProviderId
+      /** Normalised (trimmed, upper-cased) country the route was resolved for; `UNKNOWN_COUNTRY_CODE` when unknown. */
+      countryCode: string
+      countryKnown: boolean
+    }
   | { ok: false; error: GiftCardsDisabledError | GiftCardProviderUnavailableError }
 
 /**
@@ -45,7 +56,12 @@ export const giftCardsMasterGate = (countryCode: string): GiftCardsMasterGate =>
   const providerId = resolveGiftCardProviderIdForCountry(cc)
   if (providerId instanceof Error) return { ok: false, error: providerId }
 
-  return { ok: true, providerId }
+  return {
+    ok: true,
+    providerId,
+    countryCode: cc,
+    countryKnown: cc !== UNKNOWN_COUNTRY_CODE,
+  }
 }
 
 /**

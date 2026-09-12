@@ -7,6 +7,11 @@ import { z } from "zod"
  *
  * `z.object` strips unknown keys, which is what we want: vendor fields we do
  * not model never travel past the adapter (and never reach a log line).
+ *
+ * Strictness is deliberate per field: anything that decides money or state
+ * (`invoice`, `uuid`, `fiatCost`, `satsCost`, `status`) is required; fields we
+ * only display or log (`bitcoinPrice`, `satsBack`, `amount`, `orderId`) are
+ * `nullish` so a vendor dropping one cannot stall a purchase.
  */
 
 /** Numbers the vendor may serialise as strings. Rejects null/empty rather than coercing to 0. */
@@ -84,8 +89,10 @@ export const quoteResultSchema = z.object({
   // Major units of the product currency.
   fiatCost: numeric,
   satsCost: numeric,
-  satsBack: numeric,
-  bitcoinPrice: numeric,
+  // Reward is informational: absent or null reads as "no reward", never as a failed quote.
+  satsBack: numeric.nullish().transform((value) => value ?? 0),
+  // Informational; surfaced to the client as-is when present.
+  bitcoinPrice: numeric.nullish(),
   quoteMode: z.string().nullish(),
   customerDiscountFiat: numeric.nullish(),
 })
@@ -94,8 +101,11 @@ export type VendorQuote = z.infer<typeof quoteResultSchema>
 export const purchaseResultSchema = z.object({
   invoice: z.string().min(1),
   address: z.string().nullish(),
-  amount: numeric,
-  orderId: z.union([z.string(), z.number()]),
+  // Sats the vendor says the invoice is for. Informational: the BOLT11 itself
+  // is decoded by the purchase path and its amount governs what we pay.
+  amount: numeric.nullish(),
+  // Vendor's human-facing order number; `uuid` is the key we store and query by.
+  orderId: z.union([z.string(), z.number()]).nullish(),
   uuid: z.union([z.string(), z.number()]),
   satsBack: numeric.nullish(),
 })
@@ -116,6 +126,12 @@ export const claimDataSchema = z.object({
 })
 export type VendorClaimData = z.infer<typeof claimDataSchema>
 
+/**
+ * Exactly one `{ status, claimData }`. No sandbox capture exists yet of what
+ * `/giftcards/invoice-status` returns for an order of two or more cards (one
+ * entry? an array?), which is why the adapter caps `maxQuantity` at 1: a
+ * per-card array here would fail this schema on every status poll.
+ */
 export const purchasedProductSchema = z.object({
   status: z.string(),
   claimData: claimDataSchema.nullish(),

@@ -66,8 +66,10 @@ import {
   GiftCardCatalogCache,
   giftCardCatalogKey,
   giftCardCountriesKey,
+  giftCardProductIdsKey,
   giftCardProductKey,
 } from "@services/gift-cards/catalog-cache"
+import { baseLogger } from "@services/logger"
 
 const NOW_MS = 1_800_000_000_000
 const TTL_MS = mockGiftCardsConfig.catalog.ttlSeconds * 1000
@@ -91,8 +93,20 @@ const product = (id: string, over: Partial<GiftCardProduct> = {}): GiftCardProdu
   termsUrl: null,
   rewardBps: 0,
   inStock: true,
+  maxQuantity: 1,
+  wholeUnitsOnly: false,
   ...over,
 })
+
+/** A product as the sync wrote it BEFORE `maxQuantity` / `wholeUnitsOnly` existed. */
+const legacyRow = (p: GiftCardProduct): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(p).filter(
+      ([key]) => key !== "maxQuantity" && key !== "wholeUnitsOnly",
+    ),
+  )
+
+const seed = (key: string, value: unknown) => mockStore.set(key, { value, ttlSecs: 1 })
 
 const US_A = product("us-a")
 const US_B = product("us-b")
@@ -162,7 +176,95 @@ describe("GiftCardCatalogCache.write", () => {
     })
 
     expect(mockWriteOrder[mockWriteOrder.length - 1]).toBe(giftCardCountriesKey(PROVIDER))
-    expect(mockWriteOrder).toHaveLength(6) // 2 catalogs + 3 products + 1 index
+    // The id set lands just before the index, after every product key it lists.
+    expect(mockWriteOrder[mockWriteOrder.length - 2]).toBe(
+      giftCardProductIdsKey(PROVIDER),
+    )
+    expect(mockWriteOrder).toHaveLength(7) // 2 catalogs + 3 products + ids + index
+  })
+
+  it("records the ids it wrote under the provider's product id set", async () => {
+    await cache.write({
+      providerId: PROVIDER,
+      products: [US_B, JM_C, US_A],
+      syncedAt: new Date(NOW_MS),
+    })
+
+    expect(mockStore.get(giftCardProductIdsKey(PROVIDER))?.value).toEqual(
+      [US_A.id, US_B.id, JM_C.id].sort(),
+    )
+  })
+
+  it("deletes product keys the previous sync wrote and this one did not", async () => {
+    await cache.write({
+      providerId: PROVIDER,
+      products: [US_A, US_B, JM_C],
+      syncedAt: new Date(NOW_MS),
+    })
+
+    await cache.write({
+      providerId: PROVIDER,
+      products: [US_A],
+      syncedAt: new Date(NOW_MS),
+    })
+
+    // Delisted: gone, so it can no longer be quoted or ordered.
+    expect(mockStore.has(giftCardProductKey(US_B.id))).toBe(false)
+    expect(mockStore.has(giftCardProductKey(JM_C.id))).toBe(false)
+    expect(mockStore.get(giftCardProductKey(US_A.id))?.value).toEqual(US_A)
+    expect(mockStore.get(giftCardProductIdsKey(PROVIDER))?.value).toEqual([US_A.id])
+    expect(baseLogger.info).toHaveBeenCalledWith(
+      { providerId: PROVIDER, delisted: 2 },
+      expect.stringContaining("delisted"),
+    )
+  })
+
+  it("deletes nothing it did not write: keys outside the id set are left alone", async () => {
+    // No id set yet (first sync after deploy) and an unrelated product key.
+    seed(giftCardProductKey(US_B.id), US_B)
+
+    await cache.write({
+      providerId: PROVIDER,
+      products: [US_A],
+      syncedAt: new Date(NOW_MS),
+    })
+
+    expect(mockStore.has(giftCardProductKey(US_B.id))).toBe(true)
+    expect(mockStore.get(giftCardProductIdsKey(PROVIDER))?.value).toEqual([US_A.id])
+  })
+
+  it("still writes, and skips the diff with a warning, when the id set cannot be read", async () => {
+    mockFailures.get = true
+
+    const res = await cache.write({
+      providerId: PROVIDER,
+      products: [US_A],
+      syncedAt: new Date(NOW_MS),
+    })
+
+    expect(res).toEqual({ countries: ["US"] })
+    expect(mockStore.get(giftCardProductKey(US_A.id))?.value).toEqual(US_A)
+    expect(baseLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ providerId: PROVIDER }),
+      expect.stringContaining("skipping stale-key cleanup"),
+    )
+  })
+
+  it("ignores an id set of the wrong shape rather than deleting by it", async () => {
+    seed(giftCardProductIdsKey(PROVIDER), [{ nope: true }, 42])
+    seed(giftCardProductKey(US_B.id), US_B)
+
+    await cache.write({
+      providerId: PROVIDER,
+      products: [US_A],
+      syncedAt: new Date(NOW_MS),
+    })
+
+    expect(mockStore.has(giftCardProductKey(US_B.id))).toBe(true)
+    expect(baseLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ providerId: PROVIDER }),
+      expect.stringContaining("unexpected shape"),
+    )
   })
 
   it("retains every key for staleAfterSeconds, not ttlSeconds", async () => {
@@ -176,7 +278,7 @@ describe("GiftCardCatalogCache.write", () => {
     })
 
     const ttls = [...mockStore.values()].map((entry) => entry.ttlSecs)
-    expect(ttls).toHaveLength(5)
+    expect(ttls).toHaveLength(6) // 2 catalogs + 2 products + ids + index
     expect(new Set(ttls)).toEqual(
       new Set([mockGiftCardsConfig.catalog.staleAfterSeconds]),
     )
@@ -204,6 +306,7 @@ describe("GiftCardCatalogCache.write", () => {
 
     expect(res).toEqual({ countries: [] })
     expect(mockStore.get(giftCardCountriesKey(PROVIDER))?.value).toEqual([])
+    expect(mockStore.get(giftCardProductIdsKey(PROVIDER))?.value).toEqual([])
   })
 })
 
@@ -273,6 +376,44 @@ describe("GiftCardCatalogCache.read", () => {
     expect(res).toBeInstanceOf(GiftCardCatalogUnavailableError)
   })
 
+  it("defaults maxQuantity and wholeUnitsOnly for rows cached before they existed", async () => {
+    // The running cache must stay usable across the deploy that added the two
+    // fields; the next sync writes real values.
+    seed(giftCardCatalogKey(PROVIDER, "US"), {
+      syncedAt: new Date(NOW_MS).toISOString(),
+      products: [legacyRow(US_A), legacyRow(US_B)],
+    })
+
+    const res = await cache.read({ providerId: PROVIDER, countryCode: "US" })
+    if (res instanceof Error) throw res
+
+    expect(res.products).toEqual([US_A, US_B])
+    expect(
+      res.products.every((p) => p.maxQuantity === 1 && p.wholeUnitsOnly === false),
+    ).toBe(true)
+  })
+
+  it("drops rows of an unexpected shape from a catalog record and serves the rest", async () => {
+    seed(giftCardCatalogKey(PROVIDER, "US"), {
+      syncedAt: new Date(NOW_MS).toISOString(),
+      products: [US_A, { id: "bitcoinCompany:half-written" }, "garbage", US_B],
+    })
+
+    const res = await cache.read({ providerId: PROVIDER, countryCode: "US" })
+    if (res instanceof Error) throw res
+
+    expect(res.products).toEqual([US_A, US_B])
+    expect(baseLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: PROVIDER,
+        countryCode: "US",
+        dropped: 2,
+        kept: 2,
+      }),
+      expect.stringContaining("dropped"),
+    )
+  })
+
   it("refuses a record it cannot interpret rather than serving garbage", async () => {
     mockStore.set(giftCardCatalogKey(PROVIDER, "US"), {
       value: { products: "not-a-list" },
@@ -303,6 +444,55 @@ describe("GiftCardCatalogCache.readProduct", () => {
     expect(await cache.readProduct(JM_C.id)).toEqual(JM_C)
   })
 
+  it("defaults maxQuantity and wholeUnitsOnly for a product cached before they existed", async () => {
+    seed(giftCardProductKey(US_A.id), legacyRow(US_A))
+
+    const res = await cache.readProduct(US_A.id)
+
+    expect(res).toEqual(US_A)
+    expect(res).toEqual(
+      expect.objectContaining({ maxQuantity: 1, wholeUnitsOnly: false }),
+    )
+  })
+
+  it("keeps the written maxQuantity and wholeUnitsOnly when present", async () => {
+    const whole = product("whole", {
+      denominationType: "variable",
+      denominations: [],
+      minValue: 500,
+      maxValue: 5000,
+      maxQuantity: 3,
+      wholeUnitsOnly: true,
+    })
+    await cache.write({ providerId: PROVIDER, products: [whole], syncedAt: new Date() })
+
+    expect(await cache.readProduct(whole.id)).toEqual(whole)
+  })
+
+  it.each([
+    ["a non-object", "garbage"],
+    [
+      "a half-written product",
+      { id: "bitcoinCompany:half", providerId: "bitcoinCompany" },
+    ],
+    ["an unknown provider id", { ...US_A, providerId: "someoneElse" }],
+    ["an unknown denomination type", { ...US_A, denominationType: "tiered" }],
+    ["a maxQuantity below 1", { ...US_A, maxQuantity: 0 }],
+  ])(
+    "returns GiftCardProductNotFoundError for %s rather than serving it",
+    async (_label, raw) => {
+      seed(giftCardProductKey(US_A.id), raw)
+
+      const res = await cache.readProduct(US_A.id)
+
+      expect(res).toBeInstanceOf(GiftCardProductNotFoundError)
+      expect(baseLogger.error).toHaveBeenCalledWith(
+        { productId: US_A.id },
+        expect.stringContaining("unexpected shape"),
+      )
+    },
+  )
+
   it("returns GiftCardProductNotFoundError on a miss", async () => {
     const res = await cache.readProduct("bitcoinCompany:nope" as GiftCardProductId)
 
@@ -316,32 +506,5 @@ describe("GiftCardCatalogCache.readProduct", () => {
 
     expect(res).toBeInstanceOf(GiftCardCatalogUnavailableError)
     expect(res).not.toBeInstanceOf(GiftCardProductNotFoundError)
-  })
-})
-
-describe("GiftCardCatalogCache.countries", () => {
-  it("returns the sorted index the last write produced", async () => {
-    await cache.write({
-      providerId: PROVIDER,
-      products: [US_A, JM_C],
-      syncedAt: new Date(),
-    })
-
-    expect(await cache.countries(PROVIDER)).toEqual(["JM", "US"])
-  })
-
-  it("returns GiftCardCatalogUnavailableError when the index is missing", async () => {
-    expect(await cache.countries(PROVIDER)).toBeInstanceOf(
-      GiftCardCatalogUnavailableError,
-    )
-  })
-
-  it("returns GiftCardCatalogUnavailableError when Redis cannot be read", async () => {
-    await cache.write({ providerId: PROVIDER, products: [US_A], syncedAt: new Date() })
-    mockFailures.get = true
-
-    expect(await cache.countries(PROVIDER)).toBeInstanceOf(
-      GiftCardCatalogUnavailableError,
-    )
   })
 })

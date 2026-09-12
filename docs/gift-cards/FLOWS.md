@@ -6,23 +6,26 @@ use case in `src/app/gift-cards/`, `Repo` `GiftCardOrdersRepository`, `Vendor`
 the `IGiftCardProvider` adapter, `IBEX` the payment rail via
 `payLnInvoiceViaIbex`, `Worker` `reconcileGiftCardOrders`.
 
-Every purchase opens the same way (steps 1-7 below): gate, product, validate,
-`provider.quote`, `authorizeGiftCardPurchase`, `repo.create` (CREATED),
-`releaseGiftCardReservation`. The diagrams that follow start after that unless
-they say otherwise.
+Every purchase opens as flow 1 up to `repo.create`: wallet ownership, the
+same-key replay lookup (a hit returns or resumes the existing order and charges
+nothing, flow 7), `consumeLimiter`, gate, claim-key check, product, validation
+(value, `wholeUnitsOnly`, quantity up to `maxQuantity`, product country vs
+account country), `provider.quote`, `authorizeGiftCardPurchase`, `repo.create`
+(CREATED), `releaseGiftCardReservation`. Later diagrams start after that.
 
 ## 1. Purchase, happy path
 
 ```ascii
 App            API                UC (purchaseGiftCard)      Repo         Vendor        IBEX
  |  giftCardPurchase(input)         |                           |            |             |
- |------------->|                   |                           |            |             |
- |              | gateGiftCardsForAccount                       |            |             |
- |              |------------------>| consumeLimiter (10/min)   |            |             |
+ |------------->| (no gate here)    |                           |            |             |
+ |              |------------------>| wallet belongs to account |            |             |
  |              |                   | findByIdempotencyKey  --> | (miss)     |             |
+ |              |                   | consumeLimiter (10/min)   |            |             |
  |              |                   | giftCardsMasterGate       |            |             |
+ |              |                   | giftCardClaimKeyId loads? |            |             |
  |              |                   | getGiftCardProduct (Redis)|            |             |
- |              |                   | checkedGiftCardValue/Quantity          |             |
+ |              |                   | checkedGiftCardValue/Quantity, country |             |
  |              |                   | provider.quote ------------------------>|             |
  |              |                   | authorizeGiftCardPurchase (limits, hold)|             |
  |              |                   | repo.create  ------------>| CREATED    |             |
@@ -48,8 +51,8 @@ App            API                UC (purchaseGiftCard)      Repo         Vendor
  |<-------------| { order: FULFILLED, claim }                                |             |
 ```
 
-If the first `fetchAndSettle` returns pending or errors, the mutation returns
-the `PAID` order and the worker finishes the job (flow 4's second half).
+If the first `fetchAndSettle` is pending or errors, the mutation returns the
+`PAID` order and the worker finishes the job (flow 4's second half).
 
 ## 2. Vendor rejects the order
 
@@ -66,8 +69,9 @@ UC (purchaseGiftCard)          Repo              Vendor
  |                                  | GIFT_CARD_VENDOR_UNAVAILABLE] }
 ```
 
-Nothing was paid. The client may retry with a **new** idempotency key. The
-same applies to an undecodable invoice (`vendor-invoice-undecodable`).
+Nothing was paid; the client may retry with a **new** key. Same for an
+undecodable invoice (`vendor-invoice-undecodable`). The `GIFT_CARD_VENDOR_REJECTED`
+message is a fixed customer string; the vendor's own text is logged, not relayed.
 
 ## 3. Quote mismatch
 
@@ -86,8 +90,7 @@ UC                              Repo            Vendor
  |   return GiftCardQuoteMismatchError -> GIFT_CARD_QUOTE_MISMATCH
 ```
 
-The vendor's invoice is left unpaid and expires on its side. The customer sees
-"The gift card price changed; please try again" and re-quotes.
+The vendor's invoice expires unpaid on its side; the customer re-quotes.
 
 ## 4. Payment pending, settled by the worker
 
@@ -112,15 +115,19 @@ UC                     Repo                 IBEX                  Worker (30s)  
                                                           | pending -> leave (IBEX's word beats a vendor poll)
                                                           | unknown / no ref -> fetchAndSettle ------------->|
                                                           |            fulfilled -> PAID -> FULFILLED
+                                                          |            not paid AND now > expiresAt + 24h
+                                                          |              -> PAYMENT_FAILED (payment-unresolved-expired)
                                                           |            else leave; warn after 60 min
 ```
 
 An order with **no** `providerPaymentRef` (the send errored before IBEX handed
 back an id, or a crash between the IBEX call and the transition that writes
 it) answers "unknown" every run: there is no hash-based fallback on the IBEX
-rail. The worker asks the vendor instead: a vendor `fulfilled` is proof of
-payment (below). An order the vendor cannot vouch for either stays pending;
-RUNBOOK (c) after 60 min.
+rail, so the worker asks the vendor; a vendor `fulfilled` is proof of payment
+(below). While the vendor reports the invoice unpaid the order stays pending
+(RUNBOOK c after 60 min) until 24 h past `expiresAt`, when it is closed as
+`PAYMENT_FAILED` (`payment-unresolved-expired`). A vendor error leaves it
+pending for the next run.
 
 ### 4a. A send error without a verdict
 
@@ -131,18 +138,24 @@ runs immediately before the IBEX call), `InvalidIdempotencyKeyError` /
 `InsufficientIbexBalance` (IBEX's 400), `FailedIbexPayment` (a corroborated
 FAILED on the 200). Every other error (the generic `IbexError` for a socket
 reset, gateway 5xx or timeout after the request was accepted;
-`UnconfirmedIbexPayment`; `CompletedInvoice`; a busy idempotency lock while a
-concurrent same-key attempt is in flight) says nothing about whether money
+`UnconfirmedIbexPayment`; `CompletedInvoice`) says nothing about whether money
 moved, so the order goes `INVOICE_ISSUED -> PAYMENT_PENDING` with reason
-`payment-unconfirmed: <Error>` in `statusHistory` (`[ops: payment-pending]`,
-`error` naming the class) and the **pending order** is returned. This flow
-then settles it. A replayed order that lost to a concurrent attempt returns
-whatever that attempt wrote.
+`payment-unconfirmed: <Error>` (`[ops: payment-pending]`, `error` naming the
+class) and the **pending order** is returned. A 200 naming no recognised status
+is converted to `Pending` by `paymentSendStatusOrPending` and lands the same
+way with reason `payment-pending`. This flow then settles it. A replayed order
+that lost to a concurrent attempt returns whatever that attempt wrote.
+
+Once IBEX has answered, the mutation always returns the order. If the `PAID`
+write fails after a Success (lost race, store fault) the order is re-read and
+returned as it stands and a Critical `paid-not-recorded` event fires (RUNBOOK
+i): an error payload would read as "nothing happened" for money already gone.
+A Success for a row the worker expired while the send was in flight is written
+`EXPIRED -> PAID` (`payment-settled-after-expiry`).
 
 If the vendor reports `fulfilled` while Flash still shows `INVOICE_ISSUED` or
-`PAYMENT_PENDING`, `settleOrderFromVendor` treats the vendor's word as proof of
-payment and moves the order to `PAID` (reason `vendor-reported-fulfilled`) and
-then `FULFILLED`.
+`PAYMENT_PENDING`, `settleOrderFromVendor` takes the vendor's word as proof of
+payment: `PAID` (reason `vendor-reported-fulfilled`), then `FULFILLED`.
 
 ## 5. Paid, then the vendor cancels (REFUND_REQUIRED)
 
@@ -159,39 +172,41 @@ Worker                        Repo                   Vendor
 ```
 
 After `GIFT_CARD_PAID_TIMEOUT_MS` (24 h) in `PAID`, `processPaid` makes one
-final `fetchAndSettle` before escalating: a vendor `fulfilled` ends
-`FULFILLED` (a worker gap over 24 h must not refund cards that shipped), a
-vendor `failed` / `refunded` takes the path above, and only otherwise —
-including a vendor error, which the event names in `meta.lastVendorPoll` — does
-it write `REFUND_REQUIRED` with reason `fulfillment-timeout`. From here on the
-order is an operator's problem: RUNBOOK (a). The customer must not be told to
-buy again.
+final `fetchAndSettle` before escalating: a vendor `fulfilled` ends `FULFILLED`
+(a worker gap over 24 h must not refund cards that shipped), `failed` /
+`refunded` takes the path above, and **only** a positive not-fulfilled answer
+(`awaitingPayment` / `paidPendingFulfillment`) writes `REFUND_REQUIRED` with
+reason `fulfillment-timeout`. A vendor error keeps the order `PAID` (warned)
+and the next run polls again; a page never rests on an unreachable vendor.
+TBC's `disputed` is held as pending, not refunded, so it reaches this point
+only via the timeout. From here the order is an operator's problem: RUNBOOK (a).
+The customer must not be told to buy again.
 
 ## 6. Expiry
 
 ```ascii
-Worker                              Repo                      IBEX
+Worker                              Repo                      Vendor
  | listByStatus(CREATED, INVOICE_ISSUED)                       |
  | filter expiresAt < now             |                        |
  | processExpiry:                     |                        |
- |   INVOICE_ISSUED? lookupSentPaymentStatus ----------------->|
- |     settled -> settleAsPaid (payment-settled-on-reconcile)  |
- |     pending -> warn, do not expire                          |
- |     unknown -> fetchAndSettle (vendor): fulfilled -> PAID -> FULFILLED
- |     failed / vendor has nothing -> fall through             |
+ |   INVOICE_ISSUED? fetchAndSettle (vendor) --------------------------------->|
+ |     fulfilled -> PAID (vendor-reported-fulfilled) -> FULFILLED
+ |     anything else (not paid, vendor error) -> fall through  |
  |   transition CREATED|INVOICE_ISSUED->EXPIRED (reason expired)
  |   [ops: order-failed, reason expired]                       |
 ```
 
 `expiresAt` is `min(order TTL 15 min, decoded BOLT11 expiry, vendor-stated
 expiry if the adapter reports one)` set at INVOICE_ISSUED; TBC reports none, so
-the invoice governs. An order that reached INVOICE_ISSUED but crashed before the
-IBEX call has no payment and is correctly expired. An order that crashed *after*
-the IBEX call but before the transition that writes `providerPaymentRef` looks
-the same to IBEX, so the worker asks the vendor before expiring it: a card that
-shipped is proof of payment and the order settles. Only an invoice neither IBEX
-nor the vendor knows as paid is expired. (A same-key replay before expiry
-resumes the payment instead: flow 7.)
+the invoice governs. There is no IBEX re-read here: an `INVOICE_ISSUED` row
+never carries a `providerPaymentRef` (the ref is written with the transition
+out of it), so IBEX could only answer "unknown". A row that crashed before the
+IBEX call has no payment and is correctly expired; one that crashed *after* the
+call but before the ref was written looks the same, so the worker asks the
+vendor first: a card that shipped is proof of payment. Two safety nets remain
+for a payment that surfaces later: a same-key replay before expiry resumes it
+(flow 7), and a late IBEX Success on an `EXPIRED` row is written `EXPIRED ->
+PAID` (flow 4a). The worker never polls `EXPIRED`.
 
 ## 7. Idempotent replay / double tap
 
@@ -199,6 +214,7 @@ resumes the payment instead: flow 7.)
 App                    API                    UC                          Repo
  | giftCardPurchase(key K, P, V, Q)            |                            |
  |--------------------->|--------------------->| findByIdempotencyKey(wallet, K) --> hit
+ |                      |                      | (before consumeLimiter: no budget spent)
  |                      |                      | providerId/product/value/quantity equal?
  |                      |                      |   yes -> return existing order (any state) ...
  |                      |                      |          span giftcard.replay=true
@@ -215,22 +231,23 @@ Concurrent double tap (both miss the lookup):
  |  tap 1 continues alone to the vendor and IBEX.
 ```
 
-The replay never reaches the vendor and never spends attempt budget beyond the
-single `consumeLimiter` call at the top. A replay of an order that already
-paid also cannot re-pay: even if the row check were bypassed,
+The replay never reaches the vendor, never runs the master gate (a retry still
+finds its order after the kill switch flips; the resolver does not gate
+either), and never spends attempt budget (the lookup precedes `consumeLimiter`).
+A replay of a paid order cannot re-pay: even past the row check,
 `withPaymentIdempotency` returns the cached result for `giftcard:<orderId>` and
-`onResponse` does not run, so `providerPaymentRef` stays whatever the first
-call wrote.
+`onResponse` does not run, so `providerPaymentRef` stays as first written.
 
 **Resumed INVOICE_ISSUED.** A first attempt that died between issuing the
 invoice and recording the payment's outcome leaves a row that, handed back as
-"keep polling", could only ever end in `EXPIRED` — writing the money off if
-IBEX had in fact paid. So the replay re-enters `payLnInvoiceViaIbex` (send
-guard, IBEX, the same transitions as flow 1/4/4a) under the same
-`giftcard:<orderId>` key: a cached outcome is replayed, an in-flight attempt is
-refused (busy lock -> `PAYMENT_PENDING`, flow 4a), or the one send that never
-happened is made. Nothing upstream of the pay step (gate, quote, limits,
-vendor) runs again. Not resumed: `CREATED` (vendor `createOrder` is not
-idempotent), an `INVOICE_ISSUED` row past `expiresAt` (flow 6 handles it), and
-any row while `giftCards.enabled` is false (that would be new money leaving;
-the worker still settles an invoice the first attempt did pay).
+"keep polling", could only end in `EXPIRED` — writing the money off if IBEX had
+in fact paid. So the replay re-enters `payLnInvoiceViaIbex` (send guard, IBEX,
+the transitions of flow 1/4/4a) under the same `giftcard:<orderId>` key: a
+cached outcome is replayed, or the one send that never happened is made. If
+the key's lock is busy (the first call is still inside IBEX) the current row is
+returned **unchanged** — still `INVOICE_ISSUED`, the client polls — rather than
+moved to `PAYMENT_PENDING` on a guess. Nothing upstream of the pay step runs
+again. Not resumed: `CREATED` (vendor `createOrder` is not idempotent), an
+`INVOICE_ISSUED` row past `expiresAt` (flow 6), and any row while
+`giftCards.enabled` is false (new money leaving; the worker still settles an
+invoice the first attempt did pay).

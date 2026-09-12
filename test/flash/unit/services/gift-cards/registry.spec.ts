@@ -14,6 +14,7 @@ import {
   getEnabledGiftCardProvider,
   getGiftCardProviderForCountry,
   getRegisteredGiftCardProviderOrError,
+  isGiftCardProviderEnabled,
   registerGiftCardProvider,
   resolveGiftCardProviderIdForCountry,
 } from "@services/gift-cards/registry"
@@ -104,5 +105,62 @@ describe("routing", () => {
     expect(resolveGiftCardProviderIdForCountry("JM")).toBeInstanceOf(
       GiftCardProviderUnavailableError,
     )
+  })
+
+  it("matches byCountry keys case-insensitively: { jm: bitrefill } routes JM", () => {
+    registerGiftCardProvider(fakeProvider("bitrefill"))
+    mockConfig = makeGiftCardsConfig({
+      routing: { default: "bitcoinCompany", byCountry: { jm: "bitrefill" } },
+    })
+    mockConfig.providers.bitrefill.enabled = true
+
+    expect(resolveGiftCardProviderIdForCountry("JM")).toBe("bitrefill")
+    expect(resolveGiftCardProviderIdForCountry("jm")).toBe("bitrefill")
+    expect(resolveGiftCardProviderIdForCountry(" Jm ")).toBe("bitrefill")
+    // Everything else still falls through to the default.
+    expect(resolveGiftCardProviderIdForCountry("US")).toBe("bitcoinCompany")
+  })
+})
+
+describe("registration gate", () => {
+  // Config can name a provider no adapter registered under (a typo, or an
+  // adapter whose import was dropped). That id must read as NOT enabled, or
+  // the globals flag and the country gate would advertise gift cards while
+  // every quote, purchase, and catalog read failed.
+  it("an enabled id with no registered adapter is not enabled and does not route", () => {
+    mockConfig = makeGiftCardsConfig({
+      routing: { default: "bitcoinCompany", byCountry: { JM: "bitrefill" } },
+    })
+    mockConfig.providers.bitrefill.enabled = true
+
+    expect(isGiftCardProviderEnabled("bitrefill")).toBe(false)
+    expect(resolveGiftCardProviderIdForCountry("JM")).toBeInstanceOf(
+      GiftCardProviderUnavailableError,
+    )
+    expect(getGiftCardProviderForCountry("JM")).toBeInstanceOf(
+      GiftCardProviderUnavailableError,
+    )
+    expect(enabledGiftCardProviders()).toEqual([tbc])
+  })
+
+  it("the same id becomes enabled the moment an adapter registers under it", () => {
+    mockConfig = makeGiftCardsConfig({
+      routing: { default: "bitcoinCompany", byCountry: { JM: "bitrefill" } },
+    })
+    mockConfig.providers.bitrefill.enabled = true
+    const bitrefill = fakeProvider("bitrefill")
+
+    registerGiftCardProvider(bitrefill)
+
+    expect(isGiftCardProviderEnabled("bitrefill")).toBe(true)
+    expect(resolveGiftCardProviderIdForCountry("JM")).toBe("bitrefill")
+    expect(getGiftCardProviderForCountry("JM")).toBe(bitrefill)
+    expect(enabledGiftCardProviders()).toEqual([tbc, bitrefill])
+  })
+
+  it("a registered adapter whose config is off stays not enabled", () => {
+    expect(isGiftCardProviderEnabled("bitcoinCompany")).toBe(true)
+    mockConfig.providers.bitcoinCompany.enabled = false
+    expect(isGiftCardProviderEnabled("bitcoinCompany")).toBe(false)
   })
 })

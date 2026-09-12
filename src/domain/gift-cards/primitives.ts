@@ -5,6 +5,9 @@ export const GIFT_CARD_PROVIDER_IDS: readonly GiftCardProviderId[] = [
   "bitrefill",
 ]
 
+/** Flash-wide ceiling on cards per order, whatever the vendor allows. */
+export const GIFT_CARD_MAX_QUANTITY = 10
+
 export const isGiftCardProviderId = (value: string): value is GiftCardProviderId =>
   (GIFT_CARD_PROVIDER_IDS as readonly string[]).includes(value)
 
@@ -50,13 +53,13 @@ export const decodeGiftCardProductCursor = (cursor: string): string =>
 
 /**
  * Validates a requested face value (minor units) against the product's
- * denomination rules. Integers only; fixed products must match exactly;
- * variable products must sit inside [min, max].
+ * denomination rules. Integers only; whole-unit-only cards refuse cents; fixed
+ * products must match exactly; variable products must sit inside [min, max].
  */
 export const checkedGiftCardValue = (
   product: Pick<
     GiftCardProduct,
-    "denominationType" | "denominations" | "minValue" | "maxValue"
+    "denominationType" | "denominations" | "minValue" | "maxValue" | "wholeUnitsOnly"
   >,
   valueMinor: number,
 ): number | GiftCardInvalidValueError => {
@@ -64,6 +67,9 @@ export const checkedGiftCardValue = (
     return new GiftCardInvalidValueError(
       "Gift card value must be a positive whole amount",
     )
+  }
+  if (product.wholeUnitsOnly && valueMinor % 100 !== 0) {
+    return new GiftCardInvalidValueError("This card only accepts whole-unit amounts")
   }
   if (product.denominationType === "fixed") {
     return product.denominations.includes(valueMinor)
@@ -85,9 +91,25 @@ export const checkedGiftCardValue = (
   return valueMinor
 }
 
+/**
+ * Validates the number of cards. The effective cap is the lower of the
+ * product's vendor-stated `maxQuantity` and Flash's own ceiling; a malformed
+ * vendor cap (non-integer, below 1) is treated as single-card rather than
+ * trusted.
+ */
 export const checkedGiftCardQuantity = (
   quantity: number,
-): number | GiftCardInvalidValueError =>
-  Number.isSafeInteger(quantity) && quantity >= 1 && quantity <= 10
-    ? quantity
-    : new GiftCardInvalidValueError("Quantity must be between 1 and 10")
+  maxQuantity: number,
+): number | GiftCardInvalidValueError => {
+  const vendorCap =
+    Number.isSafeInteger(maxQuantity) && maxQuantity >= 1 ? maxQuantity : 1
+  const cap = Math.min(vendorCap, GIFT_CARD_MAX_QUANTITY)
+  if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > cap) {
+    return new GiftCardInvalidValueError(
+      cap === 1
+        ? "This card can only be bought one at a time"
+        : `Quantity must be between 1 and ${cap}`,
+    )
+  }
+  return quantity
+}

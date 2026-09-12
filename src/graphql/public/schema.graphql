@@ -1173,7 +1173,7 @@ type GiftCardOrder {
   id: ID!
 
   """
-  What actually left the wallet, in sats. Null until the payment settles (and forever null for an order that never paid).
+  The vendor invoice amount in sats — what was paid for the card, excluding the Lightning routing fee. Null until the payment settles (and forever null for an order that never paid).
   """
   paidSats: SatAmount
 
@@ -1294,6 +1294,11 @@ type GiftCardProduct {
   """Brand artwork, when the vendor supplies one."""
   logoUrl: String
 
+  """
+  Largest quantity a single order may carry for this product. Vendor-specific; 1 while a vendor's multi-card fulfilment response has not been verified.
+  """
+  maxQuantity: Int!
+
   """Largest face value for a VARIABLE card, minor units. Null for FIXED."""
   maxValue: CentAmount
 
@@ -1310,6 +1315,11 @@ type GiftCardProduct {
 
   """The card's terms and conditions, when the vendor supplies a link."""
   termsUrl: String
+
+  """
+  True when the vendor only accepts whole currency units for a variable-value card (no cents). Values that are not a multiple of 100 minor units are refused.
+  """
+  wholeUnitsOnly: Boolean!
 }
 
 """A connection to a list of items."""

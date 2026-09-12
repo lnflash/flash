@@ -1,6 +1,10 @@
 import { randomBytes } from "crypto"
 
-import { GiftCardError, UnknownGiftCardError } from "@domain/gift-cards"
+import {
+  GiftCardError,
+  GiftCardVendorUnavailableError,
+  UnknownGiftCardError,
+} from "@domain/gift-cards"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
 import { enabledGiftCardProviders } from "@services/gift-cards"
 import { GiftCardCatalogCache } from "@services/gift-cards/catalog-cache"
@@ -78,6 +82,16 @@ const syncForProvider = async (
     return fail(new UnknownGiftCardError(err))
   }
   if (products instanceof Error) return fail(products)
+
+  // Zero products is a failed pull wearing a success status, not a catalog.
+  // Writing it would blank the countries index and every country's listing
+  // until the next sync; failing keeps the last good catalog serving and
+  // frees the interval marker so the next tick retries.
+  if (products.length === 0) {
+    return fail(
+      new GiftCardVendorUnavailableError("gift card provider returned an empty catalog"),
+    )
+  }
 
   const written = await GiftCardCatalogCache().write({
     providerId,

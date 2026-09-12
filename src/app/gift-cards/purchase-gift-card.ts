@@ -22,12 +22,16 @@ import {
   GiftCardQuoteMismatchError,
   GiftCardVendorRejectedOrderError,
   GiftCardVendorUnavailableError,
+  normalizeCountryCode,
   parseGiftCardProductId,
+  UnknownGiftCardError,
 } from "@domain/gift-cards"
+import { LockServiceError } from "@domain/lock"
 import { LnPaymentRequestNonZeroAmountRequiredError } from "@domain/payments"
 import { RateLimitConfig } from "@domain/rate-limit"
 import { GiftCardPurchaseRateLimiterExceededError } from "@domain/rate-limit/errors"
-import { ValidationError } from "@domain/shared"
+import { ErrorLevel, ValidationError } from "@domain/shared"
+import { claimCryptoReady } from "@services/gift-cards/claim-crypto"
 import { getEnabledGiftCardProvider } from "@services/gift-cards/registry"
 import { FailedIbexPayment, InsufficientIbexBalance } from "@services/ibex/errors"
 import { baseLogger } from "@services/logger"
@@ -71,12 +75,22 @@ import { fetchAndSettle } from "./settle-order"
  * send (see `isDefinitiveSendRejection`). The client reads that state as
  * "nothing left the wallet, buy again with a new key", so an error that merely
  * says "we don't know" — a socket reset or gateway 5xx after IBEX took the
- * request, an unreadable 200, a busy idempotency lock — must never land there.
- * Those go to PAYMENT_PENDING and the reconcile worker settles them against
- * IBEX and, failing that, the vendor.
+ * request, an unreadable 200 — must never land there. Those go to
+ * PAYMENT_PENDING and the reconcile worker settles them against IBEX and,
+ * failing that, the vendor. A busy idempotency lock writes NOTHING: a
+ * concurrent same-key attempt owns the outcome and will record it.
+ *
+ * Once IBEX has answered Success or Pending this function never returns a bare
+ * error. If the row cannot record the outcome (a concurrent attempt moved it,
+ * the worker expired it, Mongo failed) the caller still gets an order — the
+ * row as it now stands when that is consistent with the money having moved,
+ * otherwise the in-memory order with a Critical `paid-not-recorded` page.
+ * Returning an error there would invite the client to buy again.
  *
  * Claim data never passes through this module: fulfilment is `settle-order`'s
- * job and it stores ciphertext only.
+ * job and it stores ciphertext only. The claim KEY is checked before paying,
+ * though: a card we could not store the code for is a customer who paid for
+ * something they cannot see.
  */
 export type PurchaseGiftCardArgs = {
   accountId: AccountId
@@ -253,22 +267,6 @@ export const purchaseGiftCard = async (
     return new InvalidIdempotencyKeyError(args.idempotencyKey)
   }
 
-  // Attempt budget, charged before any vendor or store round-trip so a client
-  // looping on a refused request bounds its own cost. A limiter STORE fault
-  // falls through (same posture as fygaroCheckoutCreate): refusing every first
-  // attempt during a Redis blip would page nobody and block everyone.
-  const limitOk = await consumeLimiter({
-    rateLimitConfig: RateLimitConfig.giftCardPurchase,
-    keyToConsume: accountId,
-  })
-  if (limitOk instanceof GiftCardPurchaseRateLimiterExceededError) return limitOk
-  if (limitOk instanceof Error) {
-    baseLogger.warn(
-      { accountId, error: limitOk.constructor.name },
-      "Gift card purchase rate limiter unavailable; continuing",
-    )
-  }
-
   const account = await AccountsRepository().findById(accountId)
   if (account instanceof Error) return account
 
@@ -308,6 +306,24 @@ export const purchaseGiftCard = async (
     return replayExistingOrder({ existing, account, walletId })
   }
 
+  // Attempt budget, charged before any vendor round-trip so a client looping
+  // on a refused request bounds its own cost — but AFTER the replay lookup, so
+  // polling an order you already own by re-sending its key costs nothing. A
+  // limiter STORE fault falls through (same posture as fygaroCheckoutCreate):
+  // refusing every first attempt during a Redis blip would page nobody and
+  // block everyone.
+  const limitOk = await consumeLimiter({
+    rateLimitConfig: RateLimitConfig.giftCardPurchase,
+    keyToConsume: accountId,
+  })
+  if (limitOk instanceof GiftCardPurchaseRateLimiterExceededError) return limitOk
+  if (limitOk instanceof Error) {
+    baseLogger.warn(
+      { accountId, error: limitOk.constructor.name },
+      "Gift card purchase rate limiter unavailable; continuing",
+    )
+  }
+
   // Master gate with the account's routing country.
   const countryCode = await resolveAccountCountryCodeOrUnknown(account)
   const gate = giftCardsMasterGate(countryCode)
@@ -321,13 +337,23 @@ export const purchaseGiftCard = async (
   if (product.providerId !== gate.providerId) {
     return new GiftCardProductNotAvailableInCountryError()
   }
+  // ...and from this country's catalog. The storefront lists by country, so a
+  // mismatch is a client that browsed one country and bought from another.
+  // Skipped when the account's country is unknown: the routed provider's
+  // catalog is all we have to go on then.
+  if (
+    gate.countryKnown &&
+    normalizeCountryCode(product.countryCode) !== gate.countryCode
+  ) {
+    return new GiftCardProductNotAvailableInCountryError()
+  }
   if (!product.inStock) {
     return new GiftCardProductNotFoundError("This gift card is currently out of stock")
   }
 
   const valueMinor = checkedGiftCardValue(product, args.valueMinor)
   if (valueMinor instanceof Error) return valueMinor
-  const quantity = checkedGiftCardQuantity(args.quantity)
+  const quantity = checkedGiftCardQuantity(args.quantity, product.maxQuantity)
   if (quantity instanceof Error) return quantity
 
   const provider = getEnabledGiftCardProvider(gate.providerId)
@@ -373,7 +399,21 @@ export const purchaseGiftCard = async (
         ? raced
         : new GiftCardIdempotencyKeyReuseError()
     }
-    return created
+    // No winner to hand back: the create failed for a reason that was not the
+    // index, or the re-read failed too. Either way a repository fault, and
+    // surfaced as one — never as the repository-private duplicate-key error,
+    // which the GraphQL error map does not know and would turn into a 500.
+    recordExceptionInCurrentSpan({ error: created })
+    baseLogger.error(
+      {
+        accountId,
+        walletId,
+        error: created.constructor.name,
+        reread: raced.constructor.name,
+      },
+      "Could not create gift card order",
+    )
+    return new UnknownGiftCardError("Could not create gift card order")
   }
   addAttributesToCurrentSpan({ "giftcard.orderId": created.id })
   notifyGiftCardOpsEvent({ phase: "order-created", status: "pending", order: created })
@@ -475,10 +515,11 @@ export const purchaseGiftCard = async (
  * one send that never happened.
  *
  * CREATED is left alone (the vendor's createOrder is not idempotent; the worker
- * expires it), as is an INVOICE_ISSUED row past its expiry (the worker re-reads
- * IBEX and the vendor before expiring it). The kill switch stops the resume
- * too — it is new money leaving — and the worker's vendor poll still settles
- * an invoice the first attempt did pay.
+ * expires it), as is an INVOICE_ISSUED row past its expiry (the worker asks the
+ * vendor before expiring it, and a send that settles after expiry revives the
+ * row from the pay step: EXPIRED → PAID). The kill switch stops the resume too
+ * — it is new money leaving — and the worker's vendor poll still settles an
+ * invoice the first attempt did pay.
  */
 const replayExistingOrder = async ({
   existing,
@@ -537,6 +578,17 @@ const payIssuedOrder = async ({
   paymentRequest: string
   invoiceSats: Satoshis
 }): Promise<GiftCardOrder | ApplicationError> => {
+  // Last free refusal. The vendor will hand back a claim code the moment this
+  // invoice is paid; if the key that seals it is missing or malformed we could
+  // take the money and then be unable to store what it bought. Checked on the
+  // first attempt and on every replay-resume, both of which pass through here.
+  const cryptoReady = claimCryptoReady()
+  if (cryptoReady instanceof Error) {
+    recordExceptionInCurrentSpan({ error: cryptoReady })
+    await failUnpaidOrder(order, "claim-key-not-configured", cryptoReady)
+    return cryptoReady
+  }
+
   const captured: { providerPaymentRef: string | null; guardRejected: boolean } = {
     providerPaymentRef: null,
     guardRejected: false,
@@ -564,6 +616,19 @@ const payIssuedOrder = async ({
   addAttributesToCurrentSpan({ "giftcard.providerPaymentRef": providerPaymentRef ?? "" })
 
   if (payment instanceof Error) {
+    if (payment instanceof LockServiceError) {
+      // A concurrent same-key attempt holds the payment lock. IBEX was not
+      // asked by THIS call, and that attempt's outcome — with its transaction
+      // id — is the order's. Writing anything here would race its transition
+      // and could overwrite the ref it captured with null. Hand back the row
+      // as it stands; the client polls.
+      addAttributesToCurrentSpan({ "giftcard.replay.lockBusy": true })
+      baseLogger.info(
+        { orderId: order.id, error: payment.constructor.name },
+        "Gift card payment lock busy; a concurrent attempt owns the outcome",
+      )
+      return GiftCardOrdersRepository().findById(order.id)
+    }
     if (isDefinitiveSendRejection(payment, captured.guardRejected)) {
       await markPaymentFailed(
         order,
@@ -584,16 +649,69 @@ const payIssuedOrder = async ({
       return markPaidAndSettle(order, invoiceSats, providerPaymentRef)
     case PaymentSendStatus.Pending.value:
       return markPaymentPending(order, { reason: "payment-pending", providerPaymentRef })
-    default: {
-      const failed = await markPaymentFailed(
-        order,
-        "payment-failed",
-        null,
-        providerPaymentRef,
-      )
-      return failed ?? order
-    }
+    default:
+      return markPaymentFailed(order, "payment-failed", null, providerPaymentRef)
   }
+}
+
+/**
+ * The `providerPaymentRef` half of a transition patch. Only written when IBEX
+ * actually handed one back on this call: a replayed (cached) outcome never
+ * invokes `onResponse`, and `$set: { providerPaymentRef: null }` from such a
+ * replay would erase the ref the first attempt recorded.
+ */
+const refPatch = (providerPaymentRef: string | null): { providerPaymentRef?: string } =>
+  providerPaymentRef ? { providerPaymentRef } : {}
+
+/** The row already says the money moved (or may have). Nothing to add. */
+const MONEY_MOVED_STATUSES: readonly GiftCardOrderStatus[] = [
+  GiftCardOrderStatus.PaymentPending,
+  GiftCardOrderStatus.Paid,
+  GiftCardOrderStatus.Fulfilled,
+]
+
+/**
+ * IBEX answered Success or Pending but the order row could not take the
+ * transition that records it. The money has (or may have) left the wallet and
+ * the row says otherwise: page, and hand the caller the order as this call last
+ * knew it rather than an error — an error would read as "buy again".
+ */
+const paidNotRecorded = ({
+  order,
+  providerPaymentRef,
+  intended,
+  cause,
+  rowStatus,
+}: {
+  order: GiftCardOrder
+  providerPaymentRef: string | null
+  intended: GiftCardOrderStatus
+  cause: ApplicationError
+  rowStatus?: GiftCardOrderStatus
+}): GiftCardOrder => {
+  recordExceptionInCurrentSpan({ error: cause, level: ErrorLevel.Critical })
+  baseLogger.error(
+    {
+      orderId: order.id,
+      providerPaymentRef,
+      intended,
+      rowStatus: rowStatus ?? "unreadable",
+      error: cause.constructor.name,
+    },
+    "Gift card payment answered by IBEX but the order row could not record it",
+  )
+  notifyGiftCardOpsEvent({
+    phase: "paid-not-recorded",
+    status: "failed",
+    order,
+    error: cause.constructor.name,
+    meta: {
+      providerPaymentRef: providerPaymentRef ?? "none",
+      intendedStatus: intended,
+      rowStatus: rowStatus ?? "unreadable",
+    },
+  })
+  return order
 }
 
 /**
@@ -607,7 +725,7 @@ const markPaymentUnconfirmed = async (
   order: GiftCardOrder,
   error: ApplicationError,
   providerPaymentRef: string | null,
-): Promise<GiftCardOrder | ApplicationError> => {
+): Promise<GiftCardOrder> => {
   const reason = `payment-unconfirmed: ${error.constructor.name}`
   recordExceptionInCurrentSpan({ error })
   baseLogger.warn(
@@ -624,22 +742,46 @@ const markPaymentPending = async (
     providerPaymentRef,
     error,
   }: { reason: string; providerPaymentRef: string | null; error?: ApplicationError },
-): Promise<GiftCardOrder | ApplicationError> => {
+): Promise<GiftCardOrder> => {
   const repo = GiftCardOrdersRepository()
   const pending = await repo.transition({
     id: order.id,
     from: [GiftCardOrderStatus.InvoiceIssued],
     to: GiftCardOrderStatus.PaymentPending,
     reason,
-    patch: { providerPaymentRef },
+    patch: refPatch(providerPaymentRef),
   })
   if (pending instanceof GiftCardOrderStateError) {
     // A concurrent same-key attempt already moved the order on — to its own
-    // PAYMENT_PENDING, or to the PAID / PAYMENT_FAILED its send resolved to.
-    // Whatever it wrote is the truth.
-    return repo.findById(order.id)
+    // PAYMENT_PENDING, or to the PAID / FULFILLED its send resolved to.
+    // Whatever it wrote is the truth. A row in any other state contradicts an
+    // IBEX that says the send is in flight: page it.
+    const latest = await repo.findById(order.id)
+    if (latest instanceof Error) {
+      return paidNotRecorded({
+        order,
+        providerPaymentRef,
+        intended: GiftCardOrderStatus.PaymentPending,
+        cause: latest,
+      })
+    }
+    if (MONEY_MOVED_STATUSES.includes(latest.status)) return latest
+    return paidNotRecorded({
+      order,
+      providerPaymentRef,
+      intended: GiftCardOrderStatus.PaymentPending,
+      cause: pending,
+      rowStatus: latest.status,
+    })
   }
-  if (pending instanceof Error) return pending
+  if (pending instanceof Error) {
+    return paidNotRecorded({
+      order,
+      providerPaymentRef,
+      intended: GiftCardOrderStatus.PaymentPending,
+      cause: pending,
+    })
+  }
   notifyGiftCardOpsEvent({
     phase: "payment-pending",
     status: "pending",
@@ -650,20 +792,42 @@ const markPaymentPending = async (
   return pending
 }
 
+/**
+ * Nothing left the wallet. Returns the PAYMENT_FAILED row, or — if a
+ * concurrent same-key attempt already recorded an outcome — that row, or — if
+ * the write itself failed — the order as last known, logged; the client reads
+ * the row's true state on its next poll either way.
+ */
 const markPaymentFailed = async (
   order: GiftCardOrder,
   reason: string,
   error: ApplicationError | null,
   providerPaymentRef: string | null,
-): Promise<GiftCardOrder | null> => {
-  const failed = await GiftCardOrdersRepository().transition({
+): Promise<GiftCardOrder> => {
+  const repo = GiftCardOrdersRepository()
+  const failed = await repo.transition({
     id: order.id,
     from: [GiftCardOrderStatus.InvoiceIssued, GiftCardOrderStatus.PaymentPending],
     to: GiftCardOrderStatus.PaymentFailed,
     reason,
-    patch: { failureReason: reason, providerPaymentRef },
+    patch: { failureReason: reason, ...refPatch(providerPaymentRef) },
   })
+  if (failed instanceof GiftCardOrderStateError) {
+    // A concurrent attempt got there first and has already reported whatever
+    // it recorded. Whatever it wrote is the truth; do not report it twice.
+    const latest = await repo.findById(order.id)
+    baseLogger.warn(
+      {
+        orderId: order.id,
+        reason,
+        rowStatus: latest instanceof Error ? "unreadable" : latest.status,
+      },
+      "Gift card payment failed but a concurrent attempt already moved the order",
+    )
+    return latest instanceof Error ? order : latest
+  }
   if (failed instanceof Error) {
+    recordExceptionInCurrentSpan({ error: failed })
     baseLogger.error(
       { orderId: order.id, reason, error: failed.constructor.name },
       "Could not mark gift card order PAYMENT_FAILED",
@@ -676,7 +840,7 @@ const markPaymentFailed = async (
     error: error?.constructor.name ?? "PaymentSendStatusFailure",
     meta: { reason },
   })
-  return failed instanceof Error ? null : failed
+  return failed instanceof Error ? order : failed
 }
 
 const markPaidAndSettle = async (
@@ -684,31 +848,61 @@ const markPaidAndSettle = async (
   invoiceSats: Satoshis,
   providerPaymentRef: string | null,
 ): Promise<GiftCardOrder | ApplicationError> => {
-  const paid = await GiftCardOrdersRepository().transition({
+  const repo = GiftCardOrdersRepository()
+  const patch = { paidSats: invoiceSats, ...refPatch(providerPaymentRef) }
+  const notRecorded = (cause: ApplicationError, rowStatus?: GiftCardOrderStatus) =>
+    paidNotRecorded({
+      order,
+      providerPaymentRef,
+      intended: GiftCardOrderStatus.Paid,
+      cause,
+      rowStatus,
+    })
+
+  let paid = await repo.transition({
     id: order.id,
     from: [GiftCardOrderStatus.InvoiceIssued, GiftCardOrderStatus.PaymentPending],
     to: GiftCardOrderStatus.Paid,
     reason: "payment-settled",
-    patch: { paidSats: invoiceSats, providerPaymentRef },
+    patch,
   })
-  if (paid instanceof Error) {
-    // The payment went through; only the bookkeeping failed. Critical: until
-    // the reconcile worker picks this up, an order shows unpaid for money that
-    // has left the wallet.
-    recordExceptionInCurrentSpan({ error: paid })
-    baseLogger.error(
-      { orderId: order.id, error: paid.constructor.name },
-      "Gift card payment settled but PAID transition failed",
-    )
-    return paid
+  if (paid instanceof GiftCardOrderStateError) {
+    // The row is no longer INVOICE_ISSUED / PAYMENT_PENDING. Either a
+    // concurrent same-key attempt recorded the outcome first, or the reconcile
+    // worker expired the row while this send was in flight at IBEX.
+    const latest = await repo.findById(order.id)
+    if (latest instanceof Error) return notRecorded(latest)
+    if (latest.status === GiftCardOrderStatus.Expired) {
+      // The invoice outlived its expiry on our books, not at IBEX: the money
+      // left. EXPIRED → PAID exists for exactly this.
+      paid = await repo.transition({
+        id: order.id,
+        from: [GiftCardOrderStatus.Expired],
+        to: GiftCardOrderStatus.Paid,
+        reason: "payment-settled-after-expiry",
+        patch,
+      })
+      if (paid instanceof GiftCardOrderStateError) {
+        const again = await repo.findById(order.id)
+        if (again instanceof Error) return notRecorded(again)
+        if (MONEY_MOVED_STATUSES.includes(again.status)) return again
+        return notRecorded(paid, again.status)
+      }
+    } else if (MONEY_MOVED_STATUSES.includes(latest.status)) {
+      return latest
+    } else {
+      return notRecorded(paid, latest.status)
+    }
   }
+  if (paid instanceof Error) return notRecorded(paid)
   notifyGiftCardOpsEvent({ phase: "order-paid", status: "success", order: paid })
 
   // One immediate look: most vendors fulfil within seconds of payment, and a
   // card in the mutation response is a better experience than a push a moment
-  // later. A vendor error here is NOT the order's error — PAID is returned and
-  // the reconcile worker finishes the job.
-  const settled = await fetchAndSettle(paid)
+  // later. No retries — the customer is waiting on this response and the
+  // reconcile worker asks again in seconds. A vendor error here is NOT the
+  // order's error — PAID is returned and the worker finishes the job.
+  const settled = await fetchAndSettle(paid, { retry: false })
   if (settled instanceof Error) {
     baseLogger.info(
       { orderId: paid.id, error: settled.constructor.name },

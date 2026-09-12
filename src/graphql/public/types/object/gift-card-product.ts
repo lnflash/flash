@@ -112,6 +112,18 @@ const GiftCardProduct = GT.Object<GiftCardProduct>({
         "Vendor reward on face value, in basis points (100 = 1%). Informational; the " +
         "sats actually rebated for a given purchase are on the quote as rewardSats.",
     },
+    maxQuantity: {
+      type: GT.NonNull(GT.Int),
+      description:
+        "Largest quantity a single order may carry for this product. Vendor-specific; " +
+        "1 while a vendor's multi-card fulfilment response has not been verified.",
+    },
+    wholeUnitsOnly: {
+      type: GT.NonNull(GT.Boolean),
+      description:
+        "True when the vendor only accepts whole currency units for a variable-value " +
+        "card (no cents). Values that are not a multiple of 100 minor units are refused.",
+    },
   }),
 })
 

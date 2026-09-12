@@ -68,6 +68,8 @@ const contractProduct = (providerId: GiftCardProviderId): GiftCardProduct => ({
   termsUrl: null,
   rewardBps: 0,
   inStock: true,
+  maxQuantity: 1,
+  wholeUnitsOnly: false,
 })
 
 export const runGiftCardProviderContract = (

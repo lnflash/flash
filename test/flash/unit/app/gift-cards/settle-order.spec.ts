@@ -43,7 +43,11 @@ jest.mock("@services/tracing", () => ({
   recordExceptionInCurrentSpan: jest.fn(),
 }))
 
-import { fetchAndSettle, settleOrderFromVendor } from "@app/gift-cards/settle-order"
+import {
+  fetchAndSettle,
+  fetchVendorOrderStatus,
+  settleOrderFromVendor,
+} from "@app/gift-cards/settle-order"
 
 import {
   allMockCallText,
@@ -101,7 +105,8 @@ describe("settleOrderFromVendor", () => {
       expect(res.claimCiphertext).toBe("ENCRYPTED")
       expect(res.claimKeyId).toBe("k1")
       expect(res.fulfilledAt).toBeInstanceOf(Date)
-      expect(mockEncrypt).toHaveBeenCalledWith(CLAIM)
+      // Sealed to THIS order: the ciphertext will not open on any other row.
+      expect(mockEncrypt).toHaveBeenCalledWith(CLAIM, { orderId: order.id })
 
       expect(opsPhases()).toEqual(["order-fulfilled"])
       expect(mockNotifyOpsEvent.mock.calls[0][0]).toMatchObject({
@@ -189,14 +194,52 @@ describe("settleOrderFromVendor", () => {
       expect(res.paidSats).toBe(40_000)
     })
 
-    it("a terminal non-paid order that the vendor says is fulfilled pages", async () => {
-      const order = repo.seed(makeOrder({ status: "PAYMENT_FAILED" }))
+    it("EXPIRED -> PAID -> FULFILLED when a send still in flight at expiry settled at the vendor", async () => {
+      // The worker expired the row while the pay was in flight at IBEX; the
+      // vendor then saw the payment and shipped. The money left: EXPIRED → PAID
+      // exists for exactly this, and the card goes to the customer.
+      const order = repo.seed(
+        makeOrder({
+          status: "EXPIRED",
+          failureReason: "expired",
+          invoiceSats: 40_100 as Satoshis,
+          providerOrderId: "tbc-123" as GiftCardProviderOrderId,
+          expiresAt: new Date(NOW_MS - 60_000),
+        }),
+      )
       const res = await settleOrderFromVendor(order, FULFILLED)
-      expect(res).toBeInstanceOf(GiftCardOrderStateError)
-      expect(mockEncrypt).not.toHaveBeenCalled()
-      expect(opsPhases()).toEqual(["vendor-fulfilled-unexpected"])
-      expect(mockNotifyOpsEvent.mock.calls[0][0].status).toBe("failed")
+      if (res instanceof Error) throw res
+      expect(res.status).toBe("FULFILLED")
+      expect(res.paidSats).toBe(40_100)
+      expect(res.statusHistory.map((h) => h.status)).toEqual([
+        "EXPIRED",
+        "PAID",
+        "FULFILLED",
+      ])
+      expect(res.statusHistory[1].reason).toBe("vendor-reported-fulfilled")
+      expect(opsPhases()).toEqual(["order-paid", "order-fulfilled"])
+      expect(mockSendFulfilledPush).toHaveBeenCalledTimes(1)
     })
+
+    it.each(["FAILED", "PAYMENT_FAILED", "REFUND_REQUIRED"] as const)(
+      "a %s order that the vendor says is fulfilled pages and is not moved",
+      async (status) => {
+        // Someone paid for a card; our records say not us. The only terminal
+        // state with a way back is EXPIRED (above); these stay put and page.
+        const order = repo.seed(makeOrder({ status }))
+        const res = await settleOrderFromVendor(order, FULFILLED)
+        expect(res).toBeInstanceOf(GiftCardOrderStateError)
+        expect(repo.transition).not.toHaveBeenCalled()
+        expect(repo.store.get(order.id)?.status).toBe(status)
+        expect(mockEncrypt).not.toHaveBeenCalled()
+        expect(mockSendFulfilledPush).not.toHaveBeenCalled()
+        expect(opsPhases()).toEqual(["vendor-fulfilled-unexpected"])
+        expect(mockNotifyOpsEvent.mock.calls[0][0]).toMatchObject({
+          status: "failed",
+          meta: expect.objectContaining({ orderStatus: status }),
+        })
+      },
+    )
 
     it("an encryption failure leaves the order PAID and pages", async () => {
       mockEncrypt.mockReturnValue(new GiftCardClaimCryptoError("no key"))
@@ -225,6 +268,39 @@ describe("settleOrderFromVendor", () => {
       expect(res.status).toBe("FULFILLED")
       expect(res.claimCiphertext).toBe("THEIRS")
       // The loser does not notify twice.
+      expect(mockSendFulfilledPush).not.toHaveBeenCalled()
+      expect(opsPhases()).toEqual([])
+    })
+
+    it("losing the FULFILLED race to anything but FULFILLED returns the state error", async () => {
+      // The re-read is only a winner if it says FULFILLED. A row another
+      // settler moved to REFUND_REQUIRED in the meantime is not "our" success
+      // and must not be handed back as the settled order.
+      const order = paidOrder()
+      const realTransition = repo.transition.getMockImplementation()
+      repo.transition.mockImplementationOnce(async (args) => {
+        await realTransition?.({
+          ...args,
+          to: "REFUND_REQUIRED",
+          patch: { failureReason: "vendor-refunded: raced" },
+        })
+        return new GiftCardOrderStateError("raced")
+      })
+      const res = await settleOrderFromVendor(order, FULFILLED)
+      expect(res).toBeInstanceOf(GiftCardOrderStateError)
+      expect(repo.store.get(order.id)?.status).toBe("REFUND_REQUIRED")
+      expect(mockSendFulfilledPush).not.toHaveBeenCalled()
+      expect(opsPhases()).toEqual([])
+    })
+
+    it("returns the re-read fault when the race re-read itself fails", async () => {
+      const order = paidOrder()
+      repo.transition.mockResolvedValueOnce(new GiftCardOrderStateError("raced"))
+      repo.findById.mockResolvedValueOnce(
+        new (jest.requireActual("@domain/errors").UnknownRepositoryError)("mongo"),
+      )
+      const res = await settleOrderFromVendor(order, FULFILLED)
+      expect(res).toBeInstanceOf(GiftCardOrderStateError)
       expect(mockSendFulfilledPush).not.toHaveBeenCalled()
     })
   })
@@ -263,19 +339,44 @@ describe("settleOrderFromVendor", () => {
       expect(opsPhases()).toEqual(["order-failed"])
     })
 
-    it("failed on PAYMENT_PENDING is left for the payment re-read", async () => {
-      const order = repo.seed(makeOrder({ status: "PAYMENT_PENDING" }))
-      const res = await settleOrderFromVendor(order, { kind: "failed", reason: "x" })
-      expect(res).toBe(order)
-      expect(repo.transition).not.toHaveBeenCalled()
-      expect(mockLogger.warn).toHaveBeenCalled()
+    it.each(["failed", "refunded"] as const)(
+      "%s on PAYMENT_PENDING is left for the payment re-read",
+      async (kind) => {
+        // Our payment may still be in flight. Whether it settled decides
+        // PAID→REFUND_REQUIRED or PAYMENT_FAILED; that is the worker's IBEX
+        // re-read, not the vendor's word.
+        const order = repo.seed(makeOrder({ status: "PAYMENT_PENDING" }))
+        const res = await settleOrderFromVendor(order, { kind, reason: "x" })
+        expect(res).toBe(order)
+        expect(repo.transition).not.toHaveBeenCalled()
+        expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+        expect(mockLogger.warn).toHaveBeenCalledWith(
+          expect.objectContaining({ orderId: order.id, vendorStatus: kind }),
+          expect.stringContaining("payment is pending"),
+        )
+      },
+    )
+
+    it("refunded on CREATED -> FAILED (nothing was paid)", async () => {
+      const order = repo.seed(makeOrder({ status: "CREATED" }))
+      const res = await settleOrderFromVendor(order, { kind: "refunded", reason: "x" })
+      if (res instanceof Error) throw res
+      expect(res.status).toBe("FAILED")
+      expect(res.failureReason).toBe("vendor-refunded: x")
     })
 
-    it("refunded on an already-terminal order is a no-op", async () => {
-      const order = repo.seed(makeOrder({ status: "REFUND_REQUIRED" }))
+    it.each([
+      "FULFILLED",
+      "FAILED",
+      "PAYMENT_FAILED",
+      "EXPIRED",
+      "REFUND_REQUIRED",
+    ] as const)("refunded on an already-terminal %s order is a no-op", async (status) => {
+      const order = repo.seed(makeOrder({ status }))
       const res = await settleOrderFromVendor(order, { kind: "refunded", reason: "x" })
       expect(res).toBe(order)
       expect(repo.transition).not.toHaveBeenCalled()
+      expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
     })
   })
 
@@ -292,16 +393,57 @@ describe("settleOrderFromVendor", () => {
   })
 })
 
+describe("fetchVendorOrderStatus", () => {
+  it("asks the order's provider by providerOrderId + paymentRequest and returns the answer untouched", async () => {
+    const order = paidOrder()
+    const res = await fetchVendorOrderStatus(order)
+    expect(mockGetProvider).toHaveBeenCalledWith("bitcoinCompany")
+    expect(mockGetOrder).toHaveBeenCalledWith(
+      { providerOrderId: "tbc-123", paymentRequest: "lnbc1..." },
+      undefined,
+    )
+    expect(res).toBe(FULFILLED)
+    // Reading is not settling.
+    expect(repo.transition).not.toHaveBeenCalled()
+    expect(mockEncrypt).not.toHaveBeenCalled()
+  })
+
+  it("passes the retry option through to the adapter", async () => {
+    await fetchVendorOrderStatus(paidOrder(), { retry: false })
+    expect(mockGetOrder).toHaveBeenCalledWith(expect.anything(), { retry: false })
+  })
+
+  it("returns the provider lookup error", async () => {
+    mockGetOrder.mockResolvedValue(new GiftCardVendorUnavailableError())
+    expect(await fetchVendorOrderStatus(paidOrder())).toBeInstanceOf(
+      GiftCardVendorUnavailableError,
+    )
+  })
+
+  it("refuses an order with no provider order id", async () => {
+    const res = await fetchVendorOrderStatus(paidOrder({ providerOrderId: null }))
+    expect(res).toBeInstanceOf(GiftCardOrderStateError)
+    expect(mockGetOrder).not.toHaveBeenCalled()
+  })
+})
+
 describe("fetchAndSettle", () => {
   it("asks the order's provider by providerOrderId + paymentRequest and settles", async () => {
     const order = paidOrder()
     const res = await fetchAndSettle(order)
     if (res instanceof Error) throw res
     expect(mockGetProvider).toHaveBeenCalledWith("bitcoinCompany")
-    expect(mockGetOrder).toHaveBeenCalledWith({
-      providerOrderId: "tbc-123",
-      paymentRequest: "lnbc1...",
-    })
+    expect(mockGetOrder).toHaveBeenCalledWith(
+      { providerOrderId: "tbc-123", paymentRequest: "lnbc1..." },
+      undefined,
+    )
+    expect(res.status).toBe("FULFILLED")
+  })
+
+  it("hands the retry option to the adapter: the purchase path's inline poll asks once", async () => {
+    const res = await fetchAndSettle(paidOrder(), { retry: false })
+    if (res instanceof Error) throw res
+    expect(mockGetOrder).toHaveBeenCalledWith(expect.anything(), { retry: false })
     expect(res.status).toBe("FULFILLED")
   })
 

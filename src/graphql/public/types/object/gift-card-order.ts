@@ -245,8 +245,9 @@ const GiftCardOrder = GT.Object<GiftCardOrderSource>({
     paidSats: {
       type: SatAmount,
       description:
-        "What actually left the wallet, in sats. Null until the payment settles " +
-        "(and forever null for an order that never paid).",
+        "The vendor invoice amount in sats — what was paid for the card, excluding " +
+        "the Lightning routing fee. Null until the payment settles (and forever null " +
+        "for an order that never paid).",
     },
     claim: {
       type: GiftCardClaim,

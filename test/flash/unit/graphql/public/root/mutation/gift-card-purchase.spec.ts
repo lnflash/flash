@@ -176,33 +176,52 @@ describe("giftCardPurchase resolver", () => {
   })
 
   describe("master gate", () => {
-    it("returns GIFT_CARDS_DISABLED in the payload when the rail is off, without purchasing", async () => {
+    // The resolver does NOT run the deploy-level gate. purchaseGiftCard gates
+    // AFTER its same-key replay lookup, so a retry of a timed-out purchase finds
+    // its order even once the kill switch is off. A gate here would answer that
+    // retry with GIFT_CARDS_DISABLED and make the app layer's branch dead code.
+    it("is not run here: a same-key replay while the rail is off still returns the existing order", async () => {
       mockMasterGate.mockReturnValue({ ok: false, error: new GiftCardsDisabledError() })
+      const existing = makeOrder({
+        status: "PAID",
+        paidSats: 40_000 as Satoshis,
+        providerPaymentRef: "ibex-tx-1",
+      })
+      mockPurchaseGiftCard.mockResolvedValue(existing)
+
+      const result = await resolve()
+
+      expect(mockMasterGate).not.toHaveBeenCalled()
+      expect(mockResolveCountry).not.toHaveBeenCalled()
+      expect(mockPurchaseGiftCard).toHaveBeenCalledTimes(1)
+      expect(result.errors).toEqual([])
+      expect(result.order).toMatchObject({
+        id: existing.id,
+        status: "PAID",
+        paidSats: 40_000,
+        claim: null,
+      })
+    })
+
+    it("relays the app layer's GIFT_CARDS_DISABLED for a FRESH purchase while the rail is off", async () => {
+      // Same switch, no existing order: the app layer's gate (which runs after
+      // the replay lookup) is the one that refuses, and it reaches the wire.
+      mockPurchaseGiftCard.mockResolvedValue(new GiftCardsDisabledError())
 
       const result = await resolve()
 
       expect(result.errors).toHaveLength(1)
       expect(result.errors[0].code).toBe("GIFT_CARDS_DISABLED")
       expect(result.order).toBeUndefined()
-      expect(mockPurchaseGiftCard).not.toHaveBeenCalled()
     })
 
-    it("gates on the calling account's country", async () => {
-      await resolve()
-
-      expect(mockResolveCountry).toHaveBeenCalledWith(ctx.domainAccount)
-      expect(mockMasterGate).toHaveBeenCalledWith("JM")
-    })
-
-    it("returns GIFT_CARD_PROVIDER_UNAVAILABLE when no provider serves the country", async () => {
-      mockMasterGate.mockReturnValue({
-        ok: false,
-        error: new GiftCardProviderUnavailableError(),
-      })
+    it("relays GIFT_CARD_PROVIDER_UNAVAILABLE from the app layer when no provider serves the country", async () => {
+      mockPurchaseGiftCard.mockResolvedValue(new GiftCardProviderUnavailableError())
 
       const result = await resolve()
 
       expect(result.errors[0].code).toBe("GIFT_CARD_PROVIDER_UNAVAILABLE")
+      expect(result.order).toBeUndefined()
     })
   })
 
@@ -252,9 +271,11 @@ describe("giftCardPurchase resolver", () => {
   })
 
   describe("error mapping", () => {
-    // Every ApplicationError the use case can return, and the code the client
-    // must see for it. A new error class that is not in the error map would
-    // throw `assertUnreachable` here instead of reaching the customer as a 500.
+    // Every ApplicationError the use case can return BEFORE any payment, and the
+    // code the client must see for it. A new error class that is not in the
+    // error map would throw `assertUnreachable` here instead of reaching the
+    // customer as a 500. Once IBEX has answered, purchaseGiftCard never returns
+    // a bare error — see "after IBEX has answered" under success.
     const CASES: Array<[string, Error, string]> = [
       ["disabled", new GiftCardsDisabledError(), "GIFT_CARDS_DISABLED"],
       [
@@ -333,6 +354,54 @@ describe("giftCardPurchase resolver", () => {
   })
 
   describe("success", () => {
+    describe("after IBEX has answered, the order comes back — never a bare error", () => {
+      // Once the send reached IBEX, purchaseGiftCard returns the order in
+      // whatever state bookkeeping reached: PAID, or PAYMENT_PENDING with or
+      // without a transaction id. A lost PAID write is a Critical ops event in
+      // the app layer (`paid-not-recorded`), not an error, because an error
+      // payload would read as "nothing happened, buy again" for money that
+      // has already left the wallet. The payload carries the order, `claim`
+      // is null (nothing to decrypt yet), and `errors` is empty so the client
+      // polls giftCardOrder instead of retrying with a fresh key.
+      const ROWS: Array<[string, GiftCardOrder]> = [
+        [
+          "PAID with the IBEX transaction id",
+          makeOrder({
+            status: "PAID",
+            paidSats: 40_000 as Satoshis,
+            providerPaymentRef: "ibex-tx-1",
+          }),
+        ],
+        [
+          "PAYMENT_PENDING with the IBEX transaction id",
+          makeOrder({ status: "PAYMENT_PENDING", providerPaymentRef: "ibex-tx-1" }),
+        ],
+        [
+          "PAYMENT_PENDING with no transaction id (send errored without a verdict)",
+          makeOrder({ status: "PAYMENT_PENDING", providerPaymentRef: null }),
+        ],
+      ]
+
+      it.each(ROWS)(
+        "carries a %s order with claim null and no errors",
+        async (_label, order) => {
+          mockPurchaseGiftCard.mockResolvedValue(order)
+
+          const result = await resolve()
+
+          expect(result.errors).toEqual([])
+          expect(result.order).toMatchObject({
+            id: order.id,
+            status: order.status,
+            paidSats: order.paidSats,
+            claim: null,
+          })
+          // Nothing to decrypt before FULFILLED: the owner-scoped read is skipped.
+          expect(mockGetGiftCardOrderForAccount).not.toHaveBeenCalled()
+        },
+      )
+    })
+
     it("returns the order, without a claim, while it is still in flight", async () => {
       const order = makeOrder({ status: "PAYMENT_PENDING" })
       mockPurchaseGiftCard.mockResolvedValue(order)

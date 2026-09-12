@@ -5,6 +5,11 @@ import {
 } from "@domain/gift-cards"
 
 import {
+  __resetGiftCardProvidersForTest,
+  registerGiftCardProvider,
+} from "@services/gift-cards/registry"
+
+import {
   giftCardsMasterGate,
   resolveAccountCountryCode,
   resolveAccountCountryCodeOrUnknown,
@@ -41,16 +46,38 @@ const withConfig = (overrides: Record<string, unknown>) => {
   mockConfig = makeGiftCardsConfig(overrides)
 }
 
+// The registry routes only to an id that is enabled in config AND has an
+// adapter registered; the gate is about the config half, so register stubs for
+// both ids and let config decide.
+const stubProvider = (id: GiftCardProviderId): IGiftCardProvider =>
+  ({ id }) as unknown as IGiftCardProvider
+
 beforeEach(() => {
   jest.clearAllMocks()
   mockConfig = makeGiftCardsConfig()
+  __resetGiftCardProvidersForTest()
+  registerGiftCardProvider(stubProvider("bitcoinCompany"))
+  registerGiftCardProvider(stubProvider("bitrefill"))
   mockFindUserById.mockResolvedValue({ id: "kratos-1", phone: "+18765550100" })
   mockResolvePhoneCountries.mockReturnValue({ countries: ["JM"], source: "lookup" })
 })
 
 describe("giftCardsMasterGate", () => {
-  it("opens with the routed provider", () => {
-    expect(giftCardsMasterGate("US")).toEqual({ ok: true, providerId: "bitcoinCompany" })
+  it("opens with the routed provider and the normalised country it routed on", () => {
+    expect(giftCardsMasterGate("US")).toEqual({
+      ok: true,
+      providerId: "bitcoinCompany",
+      countryCode: "US",
+      countryKnown: true,
+    })
+  })
+
+  it("normalises the country it hands back (trim, upper-case) so callers compare like with like", () => {
+    expect(giftCardsMasterGate(" us ")).toMatchObject({
+      ok: true,
+      countryCode: "US",
+      countryKnown: true,
+    })
   })
 
   it("closes with GiftCardsDisabledError when the rail is off", () => {
@@ -84,8 +111,18 @@ describe("giftCardsMasterGate", () => {
         bitrefill: { ...base.providers.bitrefill, enabled: true },
       },
     })
-    expect(giftCardsMasterGate("jm")).toEqual({ ok: true, providerId: "bitrefill" })
-    expect(giftCardsMasterGate("US")).toEqual({ ok: true, providerId: "bitcoinCompany" })
+    expect(giftCardsMasterGate("jm")).toEqual({
+      ok: true,
+      providerId: "bitrefill",
+      countryCode: "JM",
+      countryKnown: true,
+    })
+    expect(giftCardsMasterGate("US")).toEqual({
+      ok: true,
+      providerId: "bitcoinCompany",
+      countryCode: "US",
+      countryKnown: true,
+    })
   })
 
   it("a country routed to a disabled provider is unavailable even though the default is on", () => {
@@ -96,12 +133,22 @@ describe("giftCardsMasterGate", () => {
     })
   })
 
-  it("the unknown-country sentinel and an empty string both take the default route", () => {
+  it("the unknown-country sentinel and an empty string both take the default route and report the country as unknown", () => {
+    // `countryKnown: false` is what lets quote/purchase skip the
+    // product-country comparison: we cannot know where the user is, and the
+    // routed provider's catalog is all we have.
     expect(giftCardsMasterGate(UNKNOWN_COUNTRY_CODE)).toEqual({
       ok: true,
       providerId: "bitcoinCompany",
+      countryCode: UNKNOWN_COUNTRY_CODE,
+      countryKnown: false,
     })
-    expect(giftCardsMasterGate("")).toEqual({ ok: true, providerId: "bitcoinCompany" })
+    expect(giftCardsMasterGate("")).toEqual({
+      ok: true,
+      providerId: "bitcoinCompany",
+      countryCode: UNKNOWN_COUNTRY_CODE,
+      countryKnown: false,
+    })
   })
 })
 

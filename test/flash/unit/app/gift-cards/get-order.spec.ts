@@ -112,6 +112,26 @@ describe("getGiftCardOrderForAccount", () => {
       expect(result.claimError).toBeNull()
       expect(mockDecrypt).not.toHaveBeenCalled()
     })
+  })
+
+  describe("FULFILLED", () => {
+    it("decrypts the stored claim under the stored key id, bound to this order's id, and returns it", async () => {
+      fulfilledOrder()
+
+      const result = ok(await read())
+
+      expect(mockDecrypt).toHaveBeenCalledTimes(1)
+      // The order id is authenticated data: a ciphertext copied from another
+      // row will not open here.
+      expect(mockDecrypt).toHaveBeenCalledWith({
+        ciphertext: CIPHERTEXT,
+        keyId: KEY_ID,
+        orderId: ORDER_ID,
+      })
+      expect(result.order.status).toBe("FULFILLED")
+      expect(result.claim).toEqual(CLAIM)
+      expect(result.claimError).toBeNull()
+    })
 
     it("does not decrypt a FULFILLED order that carries no ciphertext", async () => {
       fulfilledOrder({ claimCiphertext: null, claimKeyId: null })
@@ -121,20 +141,6 @@ describe("getGiftCardOrderForAccount", () => {
       expect(result.claim).toBeNull()
       expect(result.claimError).toBeNull()
       expect(mockDecrypt).not.toHaveBeenCalled()
-    })
-  })
-
-  describe("FULFILLED", () => {
-    it("decrypts the stored claim under the stored key id and returns it", async () => {
-      fulfilledOrder()
-
-      const result = ok(await read())
-
-      expect(mockDecrypt).toHaveBeenCalledTimes(1)
-      expect(mockDecrypt).toHaveBeenCalledWith({ ciphertext: CIPHERTEXT, keyId: KEY_ID })
-      expect(result.order.status).toBe("FULFILLED")
-      expect(result.claim).toEqual(CLAIM)
-      expect(result.claimError).toBeNull()
     })
 
     it("returns the order with claim null and the crypto error as DATA when the claim will not decrypt", async () => {

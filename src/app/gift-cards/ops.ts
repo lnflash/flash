@@ -18,6 +18,8 @@ export type GiftCardOpsPhase =
   | "refund-required"
   | "claim-encrypt-failed"
   | "vendor-fulfilled-unexpected"
+  /** IBEX answered Success/Pending but the order row could not record it. Money moved; the row lies. */
+  | "paid-not-recorded"
 
 export const notifyGiftCardOpsEvent = ({
   phase,

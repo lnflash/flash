@@ -44,6 +44,7 @@ jest.mock("@services/redis", () => ({
 import axios from "axios"
 
 import {
+  GiftCardInvalidValueError,
   GiftCardVendorRejectedOrderError,
   GiftCardVendorUnavailableError,
 } from "@domain/gift-cards"
@@ -356,8 +357,9 @@ describe("BitcoinCompanyClient catalog", () => {
     const result = await makeClient().listProducts()
 
     if (result instanceof Error) throw result
-    expect(result).toHaveLength(855)
-    expect(new Set(result.map((p) => p.id)).size).toBe(855)
+    expect(result.products).toHaveLength(855)
+    expect(result.invalid).toBe(0)
+    expect(new Set(result.products.map((p) => p.id)).size).toBe(855)
 
     // A short page is not treated as the end; only the empty page at 855 is.
     const pages = callsTo(mockedAxios.get, "/giftcards")
@@ -382,8 +384,8 @@ describe("BitcoinCompanyClient catalog", () => {
     const result = await makeClient().listProducts()
 
     if (result instanceof Error) throw result
-    expect(result).toHaveLength(255)
-    expect(new Set(result.map((p) => p.id)).size).toBe(255)
+    expect(result.products).toHaveLength(255)
+    expect(new Set(result.products.map((p) => p.id)).size).toBe(255)
 
     // Offsets advance by rows received, not by the 500 we asked for; the
     // trailing empty page at 255 is the stop signal.
@@ -400,7 +402,7 @@ describe("BitcoinCompanyClient catalog", () => {
 
     const result = await makeClient().listProducts()
 
-    expect(result).toEqual([])
+    expect(result).toEqual({ products: [], invalid: 0 })
     expect(catalogOffsets(mockedAxios.get)).toEqual(["0"])
     expect(mockedLogger.warn).not.toHaveBeenCalled()
   })
@@ -447,7 +449,7 @@ describe("BitcoinCompanyClient catalog", () => {
     const result = await makeClient().listProducts()
 
     if (result instanceof Error) throw result
-    expect(result).toHaveLength(CATALOG_PAGE_SIZE)
+    expect(result.products).toHaveLength(CATALOG_PAGE_SIZE)
     expect(callsTo(mockedAxios.get, "/giftcards")).toHaveLength(2)
   })
 
@@ -468,13 +470,25 @@ describe("BitcoinCompanyClient catalog", () => {
     const result = await makeClient().listProducts()
 
     if (result instanceof Error) throw result
-    expect(result.map((p) => p.id)).toEqual(["prod-amazon-us"])
+    expect(result.products.map((p) => p.id)).toEqual(["prod-amazon-us"])
+    // The adapter's received-vs-kept accounting needs the count, not just a log line.
+    expect(result.invalid).toBe(2)
     // Skipped rows still advance the offset: the next page starts at 3, not 1.
     expect(catalogOffsets(mockedAxios.get)).toEqual(["0", "3"])
     expect(mockedLogger.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ op: "listProducts", skipped: 2, kept: 1 }),
+      expect.objectContaining({ op: "listProducts", invalid: 2, kept: 1 }),
       expect.any(String),
     )
+  })
+
+  it("reports every row as invalid when the whole page fails validation", async () => {
+    mockedAxios.get.mockImplementation(
+      routeGet({ "/giftcards": pagedCatalog([{ id: 1 }, { id: 2 }, { id: 3 }]) }),
+    )
+
+    const result = await makeClient().listProducts()
+
+    expect(result).toEqual({ products: [], invalid: 3 })
   })
 
   it("retries a GET after a network error and then succeeds", async () => {
@@ -492,7 +506,7 @@ describe("BitcoinCompanyClient catalog", () => {
     const result = await makeClient().listProducts()
 
     if (result instanceof Error) throw result
-    expect(result).toHaveLength(1)
+    expect(result.products).toHaveLength(1)
     // Failed attempt, successful retry, then the terminating empty page.
     expect(catalogOffsets(mockedAxios.get)).toEqual(["0", "0", "1"])
     expect(mockedLogger.warn).toHaveBeenCalledWith(
@@ -568,17 +582,32 @@ describe("BitcoinCompanyClient purchase", () => {
     expect(callsTo(mockedAxios.post, "/giftcards/purchase/bitcoin")).toHaveLength(1)
   })
 
-  it("maps a 4xx with a vendor message to GiftCardVendorRejectedOrderError", async () => {
+  it("maps a 4xx with a vendor message to a fixed-message GiftCardVendorRejectedOrderError", async () => {
     mockedAxios.post.mockImplementation(
       routePost({
-        "/giftcards/purchase/bitcoin": () => httpError(400, "Insufficient stock"),
+        "/giftcards/purchase/bitcoin": () =>
+          httpError(400, "Insufficient stock for SKU 991 on reseller acct 77"),
       }),
     )
 
     const result = await makeClient().purchase(PURCHASE_ARGS)
 
     expect(result).toBeInstanceOf(GiftCardVendorRejectedOrderError)
-    expect((result as Error).message).toBe("Insufficient stock")
+    // The vendor's text names SKUs and account state: operators read it in the
+    // log, customers (and the order's failureReason) get the fixed message.
+    expect((result as Error).message).toBe("The provider declined this order")
+    expect((result as Error).message).not.toContain("Insufficient stock")
+    expect(mockedLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        op: "createOrder",
+        status: 400,
+        vendorError: "Insufficient stock for SKU 991 on reseller acct 77",
+      }),
+      expect.any(String),
+    )
+    expect(mockedRecordException).toHaveBeenCalledWith(
+      expect.objectContaining({ level: "warn" }),
+    )
   })
 
   it("maps a 2xx envelope with a 4xx statusCode, null result and an error to a rejection", async () => {
@@ -594,7 +623,40 @@ describe("BitcoinCompanyClient purchase", () => {
     const result = await makeClient().purchase(PURCHASE_ARGS)
 
     expect(result).toBeInstanceOf(GiftCardVendorRejectedOrderError)
-    expect((result as Error).message).toBe("Card value not allowed")
+    expect((result as Error).message).toBe("The provider declined this order")
+    expect(mockedLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        op: "createOrder",
+        vendorError: "Card value not allowed",
+      }),
+      expect.any(String),
+    )
+  })
+
+  it("accepts a purchase result without amount, orderId, or satsBack", async () => {
+    mockedAxios.post.mockImplementation(
+      routePost({
+        "/giftcards/purchase/bitcoin": () =>
+          httpOk({ invoice: INVOICE, uuid: PURCHASE_RESULT.uuid }),
+      }),
+    )
+
+    const result = await makeClient().purchase(PURCHASE_ARGS)
+
+    expect(result).toEqual({ invoice: INVOICE, uuid: PURCHASE_RESULT.uuid })
+  })
+
+  it.each([
+    ["invoice", { ...PURCHASE_RESULT, invoice: undefined }],
+    ["uuid", { ...PURCHASE_RESULT, uuid: undefined }],
+  ])("still refuses a purchase result without %s", async (_field, data) => {
+    mockedAxios.post.mockImplementation(
+      routePost({ "/giftcards/purchase/bitcoin": () => httpOk(data) }),
+    )
+
+    const result = await makeClient().purchase(PURCHASE_ARGS)
+
+    expect(result).toBeInstanceOf(GiftCardVendorUnavailableError)
   })
 
   it("maps a 4xx without a vendor message to GiftCardVendorUnavailableError", async () => {
@@ -608,8 +670,134 @@ describe("BitcoinCompanyClient purchase", () => {
   })
 })
 
+describe("BitcoinCompanyClient quote rejection", () => {
+  beforeEach(() => seedTokens(FRESH_TOKENS))
+
+  it("maps a 4xx with a vendor message to GiftCardInvalidValueError at warn, never critical", async () => {
+    // A deterministic rejection of our input is not an outage: the same
+    // request will fail the same way, so it must not page as "vendor down".
+    mockedAxios.post.mockImplementation(
+      routePost({
+        "/svs/quote-card": () => httpError(400, "cardValue must be a multiple of 5"),
+      }),
+    )
+
+    const result = await makeClient().quoteCard(QUOTE_ARGS)
+
+    expect(result).toBeInstanceOf(GiftCardInvalidValueError)
+    expect(result).not.toBeInstanceOf(GiftCardVendorUnavailableError)
+    expect((result as Error).message).toBe("The provider could not quote this amount")
+    expect((result as Error).message).not.toContain("multiple of 5")
+    expect(mockedLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        op: "quote",
+        status: 400,
+        vendorError: "cardValue must be a multiple of 5",
+      }),
+      expect.any(String),
+    )
+    expect(mockedRecordException).toHaveBeenCalledWith(
+      expect.objectContaining({ level: "warn" }),
+    )
+    expect(mockedRecordException).not.toHaveBeenCalledWith(
+      expect.objectContaining({ level: "critical" }),
+    )
+    expect(callsTo(mockedAxios.post, "/svs/quote-card")).toHaveLength(1)
+  })
+
+  it("maps a 2xx envelope with a 4xx statusCode and an error to GiftCardInvalidValueError", async () => {
+    mockedAxios.post.mockImplementation(
+      routePost({
+        "/svs/quote-card": () => ({
+          status: 200,
+          data: { statusCode: 422, result: null, error: "Amount below minimum" },
+        }),
+      }),
+    )
+
+    const result = await makeClient().quoteCard(QUOTE_ARGS)
+
+    expect(result).toBeInstanceOf(GiftCardInvalidValueError)
+    expect((result as Error).message).toBe("The provider could not quote this amount")
+  })
+
+  it("keeps a 4xx without a vendor message as vendor-unavailable", async () => {
+    mockedAxios.post.mockImplementation(
+      routePost({ "/svs/quote-card": () => ({ status: 422, data: {} }) }),
+    )
+
+    expect(await makeClient().quoteCard(QUOTE_ARGS)).toBeInstanceOf(
+      GiftCardVendorUnavailableError,
+    )
+  })
+
+  it("keeps a 5xx as vendor-unavailable without retrying the quote", async () => {
+    mockedAxios.post.mockImplementation(
+      routePost({ "/svs/quote-card": () => httpError(503, "Service Unavailable") }),
+    )
+
+    expect(await makeClient().quoteCard(QUOTE_ARGS)).toBeInstanceOf(
+      GiftCardVendorUnavailableError,
+    )
+    expect(callsTo(mockedAxios.post, "/svs/quote-card")).toHaveLength(1)
+  })
+
+  it("keeps a network failure as vendor-unavailable", async () => {
+    mockedAxios.post.mockRejectedValue(networkError("ECONNRESET"))
+
+    expect(await makeClient().quoteCard(QUOTE_ARGS)).toBeInstanceOf(
+      GiftCardVendorUnavailableError,
+    )
+  })
+})
+
 describe("BitcoinCompanyClient invoice status", () => {
   beforeEach(() => seedTokens(FRESH_TOKENS))
+
+  it("retries a persistent 5xx up to the budget by default", async () => {
+    mockedAxios.post.mockImplementation(
+      routePost({ "/giftcards/invoice-status": () => httpError(502, "Bad Gateway") }),
+    )
+
+    const result = await makeClient().invoiceStatus(INVOICE)
+
+    expect(result).toBeInstanceOf(GiftCardVendorUnavailableError)
+    expect(callsTo(mockedAxios.post, "/giftcards/invoice-status")).toHaveLength(
+      RETRY_MAX + 1,
+    )
+  })
+
+  it("makes exactly one attempt, with the normal timeout, when retry is false", async () => {
+    mockedAxios.post.mockImplementation(
+      routePost({ "/giftcards/invoice-status": () => httpError(502, "Bad Gateway") }),
+    )
+
+    const result = await makeClient().invoiceStatus(INVOICE, { retry: false })
+
+    expect(result).toBeInstanceOf(GiftCardVendorUnavailableError)
+    const calls = callsTo(mockedAxios.post, "/giftcards/invoice-status")
+    expect(calls).toHaveLength(1)
+    expect(calls[0][2]).toEqual(
+      expect.objectContaining({ timeout: bitcoinCompanyConfigFixture.timeoutMs }),
+    )
+  })
+
+  it("still refreshes once on a 401 when retry is false: auth is not a retry", async () => {
+    mockedAxios.get.mockImplementation(routeGet(refreshRoute))
+    mockedAxios.post.mockImplementation(
+      routePost({
+        "/giftcards/invoice-status": sequence(
+          httpError(401, "Unauthorized"),
+          httpOk(FULFILLED_RESULT),
+        ),
+      }),
+    )
+
+    const result = await makeClient().invoiceStatus(INVOICE, { retry: false })
+
+    expect(result).toEqual(FULFILLED_RESULT)
+    expect(callsTo(mockedAxios.post, "/giftcards/invoice-status")).toHaveLength(2)
+  })
 
   it("sends the invoice and retries the status POST on a 5xx", async () => {
     mockedAxios.post.mockImplementation(
@@ -672,6 +860,47 @@ describe("BitcoinCompanyClient response validation", () => {
         level: "critical",
         attributes: { "giftcard.provider": "bitcoinCompany", "giftcard.op": "quote" },
       }),
+    )
+  })
+
+  it("accepts a quote result without satsBack or bitcoinPrice, defaulting the reward to 0", async () => {
+    mockedAxios.post.mockImplementation(
+      routePost({ "/svs/quote-card": () => httpOk({ fiatCost: 25, satsCost: 39000 }) }),
+    )
+
+    const result = await makeClient().quoteCard(QUOTE_ARGS)
+
+    expect(result).toEqual({ fiatCost: 25, satsCost: 39000, satsBack: 0 })
+  })
+
+  it("reads explicit nulls for satsBack and bitcoinPrice the same way", async () => {
+    mockedAxios.post.mockImplementation(
+      routePost({
+        "/svs/quote-card": () =>
+          httpOk({ fiatCost: 25, satsCost: 39000, satsBack: null, bitcoinPrice: null }),
+      }),
+    )
+
+    const result = await makeClient().quoteCard(QUOTE_ARGS)
+
+    expect(result).toEqual({
+      fiatCost: 25,
+      satsCost: 39000,
+      satsBack: 0,
+      bitcoinPrice: null,
+    })
+  })
+
+  it.each([
+    ["fiatCost", { satsCost: 39000, satsBack: 585, bitcoinPrice: 64102.56 }],
+    ["satsCost", { fiatCost: 25, satsBack: 585, bitcoinPrice: 64102.56 }],
+  ])("still refuses a quote result without %s", async (_field, data) => {
+    mockedAxios.post.mockImplementation(
+      routePost({ "/svs/quote-card": () => httpOk(data) }),
+    )
+
+    expect(await makeClient().quoteCard(QUOTE_ARGS)).toBeInstanceOf(
+      GiftCardVendorUnavailableError,
     )
   })
 

@@ -89,6 +89,13 @@ export interface IGiftCardOrdersRepository {
   ): Promise<
     GiftCardOrder | GiftCardOrderStateError | GiftCardOrderNotFoundError | RepositoryError
   >
+  /**
+   * Bump `updatedAt` without changing anything else. The reconcile worker
+   * calls this after a poll that left the status where it was, so
+   * `listByStatus` (oldest `updatedAt` first) rotates through a batch instead
+   * of pinning the same stuck rows at the front of every run.
+   */
+  touch(id: GiftCardOrderId): Promise<true | GiftCardOrderNotFoundError | RepositoryError>
 }
 
 /**
@@ -282,6 +289,21 @@ export const GiftCardOrdersRepository = (): IGiftCardOrdersRepository => {
     }
   }
 
+  const touch = async (
+    id: GiftCardOrderId,
+  ): Promise<true | GiftCardOrderNotFoundError | RepositoryError> => {
+    try {
+      const result = await GiftCardOrders.updateOne(
+        { id: { $eq: id } },
+        { $set: { updatedAt: new Date() } },
+      )
+      if (result.matchedCount === 0) return new GiftCardOrderNotFoundError()
+      return true
+    } catch (err) {
+      return parseRepositoryError(err)
+    }
+  }
+
   return {
     create,
     findById,
@@ -290,5 +312,6 @@ export const GiftCardOrdersRepository = (): IGiftCardOrdersRepository => {
     listByAccount,
     listByStatus,
     transition,
+    touch,
   }
 }

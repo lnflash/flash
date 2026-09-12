@@ -8,6 +8,15 @@ export * from "./primitives"
  *
  * Terminal: FULFILLED, FAILED, PAYMENT_FAILED, EXPIRED, REFUND_REQUIRED.
  * REFUND_REQUIRED is the only state meaning "money left Flash and no card arrived".
+ *
+ * EXPIRED has one way out: EXPIRED → PAID. An INVOICE_ISSUED pay can still be
+ * in flight at IBEX when `expiresAt` passes and the reconcile worker expires
+ * the row; if that send then settles (a late Success on the purchase path, or
+ * the vendor reporting the card shipped) the money has left and the order must
+ * be able to say so. EXPIRED is still "terminal" for every listing purpose —
+ * the worker never polls it and `hasOpenGiftCardOrders` does not count it —
+ * because nothing the worker could do would revive it: only the purchase
+ * path's late Success or a vendor poll from that path can.
  */
 export const GiftCardOrderStatus = {
   Created: "CREATED",
@@ -21,6 +30,12 @@ export const GiftCardOrderStatus = {
   RefundRequired: "REFUND_REQUIRED",
 } as const
 
+/**
+ * "Nothing left for the worker to do." EXPIRED is included even though it has
+ * a legal exit (→ PAID): that exit is only ever taken by the purchase path
+ * (see the lifecycle doc above), never by the worker, so an EXPIRED order is
+ * not open work.
+ */
 export const GIFT_CARD_TERMINAL_STATUSES: readonly GiftCardOrderStatus[] = [
   GiftCardOrderStatus.Fulfilled,
   GiftCardOrderStatus.Failed,
@@ -40,7 +55,8 @@ export const GIFT_CARD_TRANSITIONS: Readonly<
   FULFILLED: [],
   FAILED: [],
   PAYMENT_FAILED: [],
-  EXPIRED: [],
+  // A pay still in flight when the worker expired the row, then settled.
+  EXPIRED: ["PAID"],
   REFUND_REQUIRED: [],
 }
 

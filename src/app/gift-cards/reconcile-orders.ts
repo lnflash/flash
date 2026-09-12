@@ -17,7 +17,11 @@ import {
 } from "@services/tracing"
 
 import { notifyGiftCardOpsEvent } from "./ops"
-import { fetchAndSettle } from "./settle-order"
+import {
+  fetchAndSettle,
+  fetchVendorOrderStatus,
+  settleOrderFromVendor,
+} from "./settle-order"
 
 // Lazy, for the same reason as reservation-store.ts: no live Redis client as
 // an import-time side effect of anything that pulls in the app barrel.
@@ -30,19 +34,33 @@ const logger = baseLogger.child({ module: "gift-cards.reconcile" })
  *
  * Everything the purchase mutation does not wait for ends up here:
  *
- *   CREATED / INVOICE_ISSUED past `expiresAt`  → EXPIRED (after one payment re-read
- *                                               and, for INVOICE_ISSUED, one vendor poll)
+ *   CREATED past `expiresAt`                  → EXPIRED
+ *   INVOICE_ISSUED past `expiresAt`           → EXPIRED, after one vendor poll (an
+ *                                               INVOICE_ISSUED row never carries an
+ *                                               IBEX ref — every path that writes one
+ *                                               leaves the state — so the vendor is
+ *                                               the only one who can vouch for it)
  *   PAYMENT_PENDING                           → PAID | PAYMENT_FAILED (payment re-read);
- *                                               IBEX unknown / no ref → vendor poll
+ *                                               IBEX unknown / no ref → vendor poll;
+ *                                               no ref + vendor "awaiting payment" +
+ *                                               24h past `expiresAt` → PAYMENT_FAILED
  *   PAID                                      → poll vendor with backoff → FULFILLED
  *                                               | REFUND_REQUIRED; 24h → final vendor
- *                                               poll, then REFUND_REQUIRED
+ *                                               poll, then REFUND_REQUIRED only if the
+ *                                               vendor positively says not fulfilled
+ *   EXPIRED                                   → never polled here. Its one exit
+ *                                               (→ PAID) is taken by the purchase path
+ *                                               when a send that was in flight at
+ *                                               expiry comes back settled.
  *
  * The vendor is the arbiter of last resort: `settleOrderFromVendor` accepts a
- * vendor `fulfilled` on an INVOICE_ISSUED or PAYMENT_PENDING order as proof of
- * payment, so an order whose send IBEX cannot account for (no transaction id,
- * IBEX unreachable, an error after IBEX accepted the request) is never written
- * off while the vendor says a card shipped.
+ * vendor `fulfilled` on an INVOICE_ISSUED, PAYMENT_PENDING or EXPIRED order as
+ * proof of payment, so an order whose send IBEX cannot account for (no
+ * transaction id, IBEX unreachable, an error after IBEX accepted the request)
+ * is never written off while the vendor says a card shipped. Conversely the
+ * 24h escalation to REFUND_REQUIRED needs the vendor's positive "not
+ * fulfilled": a 5xx, a claim-key fault or a repository error says nothing about
+ * the card, so the order stays PAID and the next run asks again.
  *
  * Runs under a Redis lock so the cron pod and the trigger's 30s interval never
  * work the same batch at once. Never throws: a per-order failure is logged,
@@ -55,10 +73,12 @@ const logger = baseLogger.child({ module: "gift-cards.reconcile" })
  * gate on "a non-terminal order exists" instead (`hasOpenGiftCardOrders`).
  *
  * Backoff per PAID order: 5s, 15s, 60s, 5m, then every 15m, measured from the
- * PAID transition. Attempts are tracked in process memory (nothing on the
- * order changes on a poll, by design — `transition` is the only write), which
- * gives the trigger's interval its real schedule and costs the cron exactly one
- * attempt per run, which is what a 15-minute cadence would do anyway.
+ * PAID transition. Attempts are tracked in process memory, which gives the
+ * trigger's interval its real schedule and costs the cron exactly one attempt
+ * per run, which is what a 15-minute cadence would do anyway. A poll that
+ * leaves the status where it was still bumps the row's `updatedAt` (`touch`),
+ * so `listByStatus` — oldest `updatedAt` first — rotates through a batch
+ * instead of pinning the same stuck rows at its front run after run.
  */
 export type GiftCardReconcileSummary = {
   scanned: number
@@ -66,6 +86,8 @@ export type GiftCardReconcileSummary = {
   refundRequired: number
   expired: number
   paymentSettled: number
+  /** PAID orders whose 24h final vendor poll errored and were left PAID for the next run. */
+  finalPollFailed: number
   /** Set when another worker held the lock and this run did nothing. */
   skipped?: "lock-held"
 }
@@ -81,6 +103,10 @@ export const GIFT_CARD_PAID_TIMEOUT_MS = 24 * 60 * MINUTE
 // bounded time, and an order neither our rail nor the vendor can tell us about
 // after this long needs a human, not another poll.
 const PAYMENT_PENDING_WARN_MS = 60 * MINUTE
+// A PAYMENT_PENDING order with no IBEX ref can only be resolved by the vendor.
+// Once the invoice has been expired this long AND the vendor still reports it
+// unpaid, no send can settle it any more: the money never left.
+export const GIFT_CARD_PAYMENT_UNRESOLVED_GRACE_MS = 24 * 60 * MINUTE
 
 /** Every status the worker still has work to do on. */
 export const GIFT_CARD_OPEN_STATUSES: readonly GiftCardOrderStatus[] = Object.values(
@@ -113,6 +139,17 @@ const lastAttemptAt = new Map<string, number>()
 
 export const __resetGiftCardReconcileStateForTest = (): void => {
   lastAttemptAt.clear()
+}
+
+/** Bump `updatedAt` after a poll that changed nothing, so the batch rotates. Best effort. */
+const touch = async (order: GiftCardOrder): Promise<void> => {
+  const touched = await GiftCardOrdersRepository().touch(order.id)
+  if (touched instanceof Error) {
+    logger.warn(
+      { orderId: order.id, error: touched.constructor.name },
+      "Could not bump updatedAt on a polled gift card order",
+    )
+  }
 }
 
 const lastTransitionAt = (order: GiftCardOrder, status: GiftCardOrderStatus): Date => {
@@ -250,28 +287,44 @@ const countVendorOutcome = (
   }
 }
 
+type VendorPoll = {
+  /** What the vendor said, when it could be asked. */
+  vendorStatus: GiftCardProviderOrderStatus["kind"] | null
+  /** The order the vendor's answer produced, when it moved the order. */
+  moved: GiftCardOrder | null
+}
+
 /**
- * Ask the vendor about an order IBEX could not account for. Returns the order
- * the vendor's answer produced when it moved the order, null when it did not
- * (still awaiting payment, vendor unreachable, or the vendor's word is not
- * enough for this state — `settleOrderFromVendor` decides).
+ * Ask the vendor about an order IBEX could not account for, and settle on the
+ * answer. `moved` is null when the order stayed put (still awaiting payment,
+ * vendor unreachable, or the vendor's word is not enough for this state —
+ * `settleOrderFromVendor` decides); `vendorStatus` is kept separately because
+ * the PAYMENT_PENDING path needs the vendor's own answer, not just its effect.
  */
-const settleFromVendorIfMoved = async (
+const pollVendor = async (
   order: GiftCardOrder,
   summary: GiftCardReconcileSummary,
-): Promise<GiftCardOrder | null> => {
-  if (!order.providerOrderId) return null
-  const settled = await fetchAndSettle(order)
+): Promise<VendorPoll> => {
+  if (!order.providerOrderId) return { vendorStatus: null, moved: null }
+  const status = await fetchVendorOrderStatus(order)
+  if (status instanceof Error) {
+    logger.info(
+      { orderId: order.id, status: order.status, error: status.constructor.name },
+      "Vendor poll for an unaccounted payment failed",
+    )
+    return { vendorStatus: null, moved: null }
+  }
+  const settled = await settleOrderFromVendor(order, status)
   if (settled instanceof Error) {
     logger.info(
       { orderId: order.id, status: order.status, error: settled.constructor.name },
       "Vendor poll for an unaccounted payment did not settle",
     )
-    return null
+    return { vendorStatus: status.kind, moved: null }
   }
-  if (settled.status === order.status) return null
+  if (settled.status === order.status) return { vendorStatus: status.kind, moved: null }
   countVendorOutcome(order, settled, summary)
-  return settled
+  return { vendorStatus: status.kind, moved: settled }
 }
 
 const settleAsPaid = async (
@@ -315,29 +368,16 @@ const processExpiry = async (
   if (order.expiresAt.getTime() >= now.getTime()) return
 
   // An INVOICE_ISSUED order may have been paid by a call that crashed or
-  // errored before recording it. One IBEX re-read before writing it off:
-  // settled → PAID, in flight → leave it for the next run. When IBEX cannot
-  // answer (no transaction id was ever persisted, or the re-read failed) the
-  // vendor gets the last word: a card that shipped is proof of payment, and
-  // `settleOrderFromVendor` records it as such. Only an invoice neither IBEX
-  // nor the vendor knows as paid is expired.
+  // errored before recording it. It never carries an IBEX transaction id
+  // (every path that captures one leaves INVOICE_ISSUED in the same write), so
+  // there is nothing to re-read at IBEX; the vendor gets the last word: a card
+  // that shipped is proof of payment, and `settleOrderFromVendor` records it
+  // as such. Only an invoice the vendor does not know as paid is expired — and
+  // if a send was still in flight at IBEX, a late Success revives it
+  // (EXPIRED → PAID) from the purchase path.
   if (order.status === GiftCardOrderStatus.InvoiceIssued) {
-    const payment = await lookupSentPaymentStatus(order)
-    if (payment === "settled") {
-      await settleAsPaid(order, summary, "payment-settled-on-reconcile")
-      return
-    }
-    if (payment === "pending") {
-      logger.warn(
-        { orderId: order.id },
-        "Expired gift card invoice still has an in-flight payment; not expiring",
-      )
-      return
-    }
-    if (payment === "unknown") {
-      const moved = await settleFromVendorIfMoved(order, summary)
-      if (moved) return
-    }
+    const { moved } = await pollVendor(order, summary)
+    if (moved) return
   }
 
   const expired = await GiftCardOrdersRepository().transition({
@@ -387,9 +427,34 @@ const processPendingPayment = async (
     case "unknown": {
       // IBEX cannot account for this send (no transaction id, or the re-read
       // failed). The vendor can: `fulfilled` settles the order as paid and
-      // fulfilled in one step. Anything else leaves it pending for next run.
-      const moved = await settleFromVendorIfMoved(order, summary)
+      // fulfilled in one step. Anything else leaves it pending for next run —
+      // with one terminal exit. No ref means IBEX never handed back an id, so
+      // only the vendor can ever resolve this row; once the invoice has been
+      // expired a full day and the vendor still says it was never paid, no send
+      // can settle it any more. The money did not leave.
+      const { vendorStatus, moved } = await pollVendor(order, summary)
       if (moved) return
+      if (
+        !order.providerPaymentRef &&
+        vendorStatus === "awaitingPayment" &&
+        now.getTime() > order.expiresAt.getTime() + GIFT_CARD_PAYMENT_UNRESOLVED_GRACE_MS
+      ) {
+        const failed = await GiftCardOrdersRepository().transition({
+          id: order.id,
+          from: [GiftCardOrderStatus.PaymentPending],
+          to: GiftCardOrderStatus.PaymentFailed,
+          reason: "payment-unresolved-expired",
+          patch: { failureReason: "payment-unresolved-expired" },
+        })
+        if (failed instanceof Error) throw failed
+        notifyGiftCardOpsEvent({
+          phase: "order-failed",
+          status: "failed",
+          order: failed,
+          meta: { reason: "payment-unresolved-expired", vendorStatus },
+        })
+        return
+      }
       break
     }
     case "pending":
@@ -409,6 +474,7 @@ const processPendingPayment = async (
       "Gift card payment has been pending for over an hour with no resolvable status",
     )
   }
+  await touch(order)
 }
 
 const processPaid = async (
@@ -426,15 +492,24 @@ const processPaid = async (
     lastAttemptAt.set(order.id, nowMs)
     const settled = await fetchAndSettle(order)
     if (settled instanceof Error) {
+      // A vendor 5xx, a claim-key fault (the card IS issued; only our storage
+      // failed), a repository error — none of these say the card is not
+      // coming. REFUND_REQUIRED on such an answer would refund a delivered
+      // card. Stay PAID; log the class; ask again next run.
+      summary.finalPollFailed += 1
       logger.warn(
         { orderId: order.id, error: settled.constructor.name },
-        "Final vendor poll before fulfilment timeout failed; escalating",
+        "Final vendor poll before fulfilment timeout errored; keeping PAID for the next run",
       )
-    } else if (settled.status !== GiftCardOrderStatus.Paid) {
+      await touch(order)
+      return
+    }
+    if (settled.status !== GiftCardOrderStatus.Paid) {
       countVendorOutcome(order, settled, summary)
       return
     }
 
+    // The vendor answered and positively reports no card after 24h.
     const refund = await GiftCardOrdersRepository().transition({
       id: order.id,
       from: [GiftCardOrderStatus.Paid],
@@ -450,11 +525,7 @@ const processPaid = async (
       status: "failed",
       order: refund,
       error: "fulfillment-timeout",
-      meta: {
-        reason: "fulfillment-timeout",
-        lastVendorPoll:
-          settled instanceof Error ? settled.constructor.name : "not-fulfilled",
-      },
+      meta: { reason: "fulfillment-timeout", lastVendorPoll: "not-fulfilled" },
     })
     return
   }
@@ -470,6 +541,8 @@ const processPaid = async (
   } else if (settled.status === GiftCardOrderStatus.RefundRequired) {
     summary.refundRequired += 1
     lastAttemptAt.delete(order.id)
+  } else {
+    await touch(order)
   }
 }
 
@@ -502,6 +575,7 @@ export const reconcileGiftCardOrders = async (
     refundRequired: 0,
     expired: 0,
     paymentSettled: 0,
+    finalPollFailed: 0,
   }
 
   let token: string | null
@@ -564,6 +638,7 @@ export const reconcileGiftCardOrders = async (
       "giftcard.reconcile.refundRequired": summary.refundRequired,
       "giftcard.reconcile.expired": summary.expired,
       "giftcard.reconcile.paymentSettled": summary.paymentSettled,
+      "giftcard.reconcile.finalPollFailed": summary.finalPollFailed,
     })
     return summary
   } finally {

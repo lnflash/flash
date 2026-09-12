@@ -1,7 +1,10 @@
 import {
+  BITCOIN_COMPANY_MAX_QUANTITY,
   KNOWN_VENDOR_STATUSES,
+  PRODUCT_MAPPING_SKIP_REASONS,
   QUOTE_TTL_MS,
   isProductMappingSkip,
+  isResellingDisabled,
   mapDenominationType,
   mapVendorClaim,
   mapVendorOrderStatus,
@@ -78,7 +81,15 @@ describe("mapVendorProduct", () => {
       termsUrl: null,
       rewardBps: 150,
       inStock: true,
+      maxQuantity: 1,
+      wholeUnitsOnly: false,
     })
+  })
+
+  it("caps every product at one card per order until a multi-card status fixture exists", () => {
+    expect(BITCOIN_COMPANY_MAX_QUANTITY).toBe(1)
+    expect(mapped(vendorProductFixture()).maxQuantity).toBe(1)
+    expect(mapped(vendorVariableProductFixture()).maxQuantity).toBe(1)
   })
 
   it("maps a variable product to a min/max range with no fixed denominations", () => {
@@ -92,18 +103,29 @@ describe("mapVendorProduct", () => {
         maxValue: 50000,
         isOpenLoop: true,
         rewardBps: 50,
+        wholeUnitsOnly: false,
       }),
     )
   })
 
-  it("treats VariableNoCents as variable", () => {
+  it("treats VariableNoCents as variable that only accepts whole units", () => {
     const product = mapped(
       vendorVariableProductFixture({ denominationType: "VariableNoCents" }),
     )
     expect(product.denominationType).toBe("variable")
     expect(product.minValue).toBe(500)
     expect(product.maxValue).toBe(50000)
+    expect(product.wholeUnitsOnly).toBe(true)
   })
+
+  it.each(["Fixed", "Variable"])(
+    "%p products are not whole-units-only",
+    (denominationType) => {
+      expect(
+        mapped(vendorVariableProductFixture({ denominationType })).wholeUnitsOnly,
+      ).toBe(false)
+    },
+  )
 
   it("dedupes, sorts, and drops non-positive denominations", () => {
     const product = mapped(
@@ -121,30 +143,79 @@ describe("mapVendorProduct", () => {
   })
 
   it.each([
-    ["no countries", vendorProductFixture({ countries: [] }), "no-country"],
-    ["blank countries", vendorProductFixture({ countries: ["", "  "] }), "no-country"],
+    ["no countries", vendorProductFixture({ countries: [] }), "noCountry"],
+    ["blank countries", vendorProductFixture({ countries: ["", "  "] }), "noCountry"],
+    ["a physical card", vendorProductFixture({ isPhysical: true }), "physical"],
+    [
+      "payment types that exclude Lightning",
+      vendorProductFixture({ paymentTypes: ["OnChain", "Card"] }),
+      "noLightning",
+    ],
+    [
+      "an empty payment types list",
+      vendorProductFixture({ paymentTypes: [] }),
+      "noLightning",
+    ],
     [
       "an unknown denomination type",
       vendorProductFixture({ denominationType: "Tiered" }),
-      "unknown-denomination-type",
+      "unknownDenominationType",
     ],
     [
       "a fixed product with no denominations",
       vendorProductFixture({ denominations: [] }),
-      "no-denominations",
+      "noDenominations",
     ],
     [
       "a variable product with no denominations",
       vendorVariableProductFixture({ denominations: [] }),
-      "no-denominations",
+      "noDenominations",
     ],
     [
       "only non-positive denominations",
       vendorProductFixture({ denominations: [0, -1] }),
-      "no-denominations",
+      "noDenominations",
     ],
   ])("skips a product with %s", (_label, json, reason) => {
     expect(skipReason(json)).toBe(reason)
+    // Every reason the mapper can produce is one the adapter zero-initialises
+    // in its sync log, so a new reason cannot silently go uncounted.
+    expect(PRODUCT_MAPPING_SKIP_REASONS).toContain(reason)
+  })
+
+  it.each([
+    ["isPhysical absent", vendorProductFixture({ isPhysical: undefined })],
+    ["isPhysical null", vendorProductFixture({ isPhysical: null as unknown as boolean })],
+    ["isPhysical false", vendorProductFixture({ isPhysical: false })],
+    [
+      "paymentTypes absent (vendor did not say)",
+      vendorProductFixture({ paymentTypes: undefined }),
+    ],
+    [
+      "paymentTypes null",
+      vendorProductFixture({ paymentTypes: null as unknown as string[] }),
+    ],
+    [
+      "Lightning among other rails",
+      vendorProductFixture({ paymentTypes: ["OnChain", "Lightning"] }),
+    ],
+    ["Lightning in another case", vendorProductFixture({ paymentTypes: ["lightning"] })],
+  ])("keeps a product with %s", (_label, json) => {
+    expect(skipReason(json)).toBeNull()
+  })
+
+  it("keeps resellingEnabled=false rows and exposes the flag for the adapter to count", () => {
+    // Every product shows false until the account is KYB'd; skipping would
+    // empty the catalog. TODO(ENG-586): flip to skip once KYB flips it.
+    const notResellable = vendorProductFixture({ resellingEnabled: false })
+    expect(skipReason(notResellable)).toBeNull()
+    expect(isResellingDisabled(parsed(notResellable))).toBe(true)
+    expect(
+      isResellingDisabled(parsed(vendorProductFixture({ resellingEnabled: true }))),
+    ).toBe(false)
+    expect(
+      isResellingDisabled(parsed(vendorProductFixture({ resellingEnabled: undefined }))),
+    ).toBe(false)
   })
 
   it("uses the first non-blank country, normalised", () => {
@@ -270,6 +341,31 @@ describe("mapVendorQuote", () => {
     expect(quote.rewardSats).toBe(585)
     expect(quote.quantity).toBe(2)
   })
+
+  it("reports a null bitcoinPrice as null rather than 0, and a 0 satsBack as no reward", () => {
+    const quote = mapVendorQuote({
+      product,
+      valueMinor: 2500,
+      quantity: 1,
+      vendor: { fiatCost: 25, satsCost: 39000, satsBack: 0, bitcoinPrice: null },
+      now,
+    })
+    expect(quote.bitcoinPriceMinor).toBeNull()
+    expect(quote.rewardSats).toBe(0)
+    expect(quote.satsCost).toBe(39000)
+    expect(quote.fiatCostMinor).toBe(2500)
+  })
+
+  it("reports an absent bitcoinPrice as null", () => {
+    const quote = mapVendorQuote({
+      product,
+      valueMinor: 2500,
+      quantity: 1,
+      vendor: { fiatCost: 25, satsCost: 39000, satsBack: 585 },
+      now,
+    })
+    expect(quote.bitcoinPriceMinor).toBeNull()
+  })
 })
 
 describe("mapVendorPurchase", () => {
@@ -290,6 +386,24 @@ describe("mapVendorPurchase", () => {
     const order = mapVendorPurchase({ ...PURCHASE_RESULT, uuid: 42, amount: 100.6 })
     expect(order.providerOrderId).toBe("42")
     expect(order.amountSats).toBe(101)
+  })
+
+  it("maps a missing or null amount to 0 sats: the decoded BOLT11 amount governs what is paid", () => {
+    // `amountSats` is non-null on the port. 0 is safe because the purchase path
+    // pays max(invoiceSats, amountSats): the vendor figure can only raise the
+    // charge, never lower it below the invoice.
+    expect(mapVendorPurchase({ ...PURCHASE_RESULT, amount: null }).amountSats).toBe(0)
+    expect(mapVendorPurchase({ invoice: PURCHASE_RESULT.invoice, uuid: "u-1" })).toEqual({
+      providerOrderId: "u-1",
+      paymentRequest: PURCHASE_RESULT.invoice,
+      amountSats: 0,
+      expiresAt: null,
+    })
+  })
+
+  it("does not need orderId: uuid is the key we store and query by", () => {
+    const order = mapVendorPurchase({ ...PURCHASE_RESULT, orderId: null })
+    expect(order.providerOrderId).toBe(PURCHASE_RESULT.uuid)
   })
 })
 
@@ -335,7 +449,9 @@ describe("mapVendorOrderStatus", () => {
     claimLink: CLAIM_LINK,
   }
 
-  it.each([
+  // Statuses the adapter settles without comment. Disputed is deliberately
+  // absent: it is held, with a warning, and tested on its own below.
+  const SETTLED: ReadonlyArray<[string, GiftCardProviderOrderStatus["kind"]]> = [
     ["Unpaid", "awaitingPayment"],
     ["Underpaid", "awaitingPayment"],
     ["Confirming", "awaitingPayment"],
@@ -348,17 +464,44 @@ describe("mapVendorOrderStatus", () => {
     ["Expired", "failed"],
     ["Cancelled", "failed"],
     ["Refunded", "refunded"],
-    ["Disputed", "refunded"],
     ["ClawedBack", "refunded"],
-  ])("maps vendor status %p to %p without a warning", (vendorStatus, kind) => {
-    const { status, warning } = mapVendorOrderStatus({ status: vendorStatus, claimData })
-    expect(status.kind).toBe(kind)
-    expect(warning).toBeNull()
+  ]
+  const HELD = ["Disputed"]
+
+  it.each(SETTLED)(
+    "maps vendor status %p to %p without a warning",
+    (vendorStatus, kind) => {
+      const { status, warning } = mapVendorOrderStatus({
+        status: vendorStatus,
+        claimData,
+      })
+      expect(status.kind).toBe(kind)
+      expect(warning).toBeNull()
+    },
+  )
+
+  it("the settled + held rows above are exactly the statuses the adapter knows", () => {
+    // Derived from the exported list, not a hard-coded count: adding a status
+    // to the adapter without a row here fails this test by name.
+    const covered = [...SETTLED.map(([s]) => s), ...HELD].map((s) => s.toLowerCase())
+    expect(covered.sort()).toEqual([...KNOWN_VENDOR_STATUSES].sort())
   })
 
-  it("covers every known vendor status in the table test above", () => {
-    expect(KNOWN_VENDOR_STATUSES).toHaveLength(14)
-  })
+  it.each(HELD)(
+    "holds %p as paidPendingFulfillment with a warning, even when claim data is present",
+    (vendorStatus) => {
+      // A dispute is not a refund: money may still come back as a card or as a
+      // refund. A later Refunded / ClawedBack / Completed poll, or the 24h
+      // timeout, decides; calling it terminal now would be a guess.
+      const { status, warning } = mapVendorOrderStatus({
+        status: vendorStatus,
+        claimData,
+      })
+      expect(status).toEqual({ kind: "paidPendingFulfillment" })
+      expect(warning).toContain(vendorStatus)
+      expect(warning).toContain("holding as pending")
+    },
+  )
 
   it("carries the vendor status as the reason for failed and refunded", () => {
     expect(mapVendorOrderStatus({ status: "Expired" }).status).toEqual({

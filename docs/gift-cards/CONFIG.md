@@ -14,14 +14,14 @@ Local overrides go in `$CONFIG_PATH/dev-overrides.yaml`
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `enabled` | boolean | `false` | Master switch for **new money only**. Off: `giftCardCatalog`, `giftCardQuote` and `giftCardPurchase` return `GIFT_CARDS_DISABLED`, `globals.giftCardsEnabled` is false, catalog sync is a no-op, a same-key replay of an unpaid `INVOICE_ISSUED` order is not resumed. The reconcile worker keeps running while any non-terminal order exists (settlement and the 24 h `REFUND_REQUIRED` alert outlive the switch; RUNBOOK d). `giftCardOrder` / `giftCardOrders` still resolve (owner-scoped reads of paid orders) |
-| `allowOpenLoop` | boolean | `false` | Show and sell open-loop (Visa/Mastercard-style) cards. Off: hidden from the catalog, `GIFT_CARD_PRODUCT_NOT_FOUND` by id, `GIFT_CARDS_DISABLED` on purchase. On: still requires account level >= 2 |
+| `enabled` | boolean | `false` | Master switch for **new money only**. Off: `giftCardCatalog` and `giftCardQuote` return `GIFT_CARDS_DISABLED`, `globals.giftCardsEnabled` is false, catalog sync is a no-op. A **fresh** `giftCardPurchase` returns `GIFT_CARDS_DISABLED`; a same-key replay still returns the order it already created (the gate runs after the replay lookup), except that an unpaid `INVOICE_ISSUED` row is returned as-is rather than resumed. The reconcile worker keeps running while any non-terminal order exists (settlement and the 24 h `REFUND_REQUIRED` alert outlive the switch; RUNBOOK d). `giftCardOrder` / `giftCardOrders` still resolve (owner-scoped reads of paid orders) |
+| `allowOpenLoop` | boolean | `false` | Show and sell open-loop (Visa/Mastercard-style) cards. Off: hidden from the catalog, and `GIFT_CARD_PRODUCT_NOT_FOUND` by id, on quote and on purchase (the product lookup hides them before any other check). On: still requires account level >= 2 |
 | `feeBps` | integer | `0` | Flash markup on face value, basis points. **Not read by any code path today** (reserved) |
-| `claimDataEncryptionKey` | string | `""` | 32-byte AES-256-GCM key: 64 hex chars, or base64 of exactly 32 bytes. Empty key: fulfilment leaves orders `PAID` and pages (`claim-encrypt-failed`); reads throw `GIFT_CARD_CLAIM_UNAVAILABLE` |
+| `claimDataEncryptionKey` | string | `""` | 32-byte AES-256-GCM key: 64 hex chars, or base64 of exactly 32 bytes. Empty or malformed: `giftCardPurchase` fails the order immediately before the pay step, after the vendor order exists but before any money moves (order `FAILED`, `failureReason` `claim-key-not-configured`, client sees `GIFT_CARD_CLAIM_UNAVAILABLE`); fulfilment of an order that already exists leaves it `PAID` and pages (`claim-encrypt-failed`); `giftCardOrder` returns a FULFILLED order with `claim: null` and logs Critical; only the `giftCardPurchase` payload carries `GIFT_CARD_CLAIM_UNAVAILABLE` |
 | `quoteToleranceBps` | integer | `100` | Max the vendor invoice may exceed the quote (1% default) before the purchase is refused with `GIFT_CARD_QUOTE_MISMATCH`. Overrides the domain constant `GIFT_CARD_QUOTE_TOLERANCE_BPS` |
 | `routing.default` | `bitcoinCompany` \| `bitrefill` | `bitcoinCompany` | Provider for any country not listed in `byCountry`, including unknown (`"XX"`) |
-| `routing.byCountry` | map CC -> provider id | `{}` | ISO 3166-1 alpha-2 (upper case; lookups are normalised) -> provider id |
-| `providers.bitcoinCompany.enabled` | boolean | `false` | Provider switch for new money. A country routed to a disabled provider gets `GIFT_CARD_PROVIDER_UNAVAILABLE`; orders that already exist still settle through the registered adapter |
+| `routing.byCountry` | map CC -> provider id | `{}` | ISO 3166-1 alpha-2 -> provider id. Keys and lookups are both case-normalised (trim + upper case), so `jm:` and `JM:` are the same entry |
+| `providers.bitcoinCompany.enabled` | boolean | `false` | Provider switch for new money. A country routed to a disabled (or unregistered) provider gets `GIFT_CARD_PROVIDER_UNAVAILABLE`; orders that already exist still settle through the registered adapter |
 | `providers.bitcoinCompany.baseUrl` | string | `https://api.dev.thebitcoincompany.com` | Sandbox (Mutinynet). Production is `https://api.thebitcoincompany.com` |
 | `providers.bitcoinCompany.email` / `password` | string | `""` | Login credentials for `POST /auth/login`. Empty: every authenticated call fails with `GIFT_CARD_VENDOR_UNAVAILABLE` (`BitcoinCompanyAuthError`) |
 | `providers.bitcoinCompany.referralCode` | string | `""` | **Not read by the client today** |
@@ -29,7 +29,7 @@ Local overrides go in `$CONFIG_PATH/dev-overrides.yaml`
 | `providers.bitrefill.*` | | disabled, empty | Schema only. **No Bitrefill adapter exists**; routing to it is always unavailable |
 | `catalog.syncIntervalSeconds` | integer | `21600` (6 h) | Minimum gap between catalog pulls, enforced by the `giftcards:catalog-sync:last-run` marker |
 | `catalog.ttlSeconds` | integer | `21600` (6 h) | Age past which a catalog is served `stale: true` and a `catalog-stale` ops event posts |
-| `catalog.staleAfterSeconds` | integer | `86400` (24 h) | Redis TTL on every catalog key. Past this the catalog is gone and reads throw `GIFT_CARD_CATALOG_UNAVAILABLE`. Must be > `ttlSeconds` and > `syncIntervalSeconds` |
+| `catalog.staleAfterSeconds` | integer | `86400` (24 h) | Redis TTL on every catalog key. Past this the catalog is gone and reads throw `GIFT_CARD_CATALOG_UNAVAILABLE`. Must be > `ttlSeconds` and > `syncIntervalSeconds`. De-listed cards do not wait for it: each sync deletes their product keys; rows cached before `maxQuantity` / `wholeUnitsOnly` existed read as 1 / false until rewritten |
 | `limits.mode` | `off` \| `log-only` \| `enforce` | `log-only` | See "Limits modes" |
 | `limits.minAccountLevel` | integer | `1` | Level floor. Level 0 is refused regardless |
 | `limits.minAccountAgeHours` | integer | `24` | New-account cooldown |
@@ -42,6 +42,10 @@ Local overrides go in `$CONFIG_PATH/dev-overrides.yaml`
 
 A level the config does not name (a future level 4) inherits `level3`
 (`levelLimits` in `src/app/gift-cards/authorize-purchase.ts`).
+
+Vendor-side, not configurable: TBC's `disputed` order status is held as pending
+(the order stays `PAID` and keeps being polled), never mapped to a refund; a
+dispute resolves through TBC or the 24 h `fulfillment-timeout`.
 
 Every sub-object is `additionalProperties: false`; a typo in an override fails
 config validation at boot rather than being ignored.
@@ -80,23 +84,31 @@ openssl rand -base64 32       # 44 chars, decodes to 32 bytes
 
 Both formats are accepted; surrounding whitespace from an override is
 tolerated. The key id stored on orders is derived from the raw bytes, so the
-same key in either encoding yields the same `claimKeyId`.
+same key in either encoding yields the same `claimKeyId`. The key must be
+loadable before the rail is enabled: with it empty, every purchase is failed at
+the pay step (`claim-key-not-configured`, after the vendor order is created but
+before any money moves) rather than allowed to pay for a card whose claim could
+not be stored.
 
 ## How routing works
 
 `resolveGiftCardProviderIdForCountry(cc)` (`src/services/gift-cards/registry.ts`):
 
-1. Normalise `cc` (trim, upper case).
+1. Normalise `cc` (trim, upper case); `byCountry` keys are normalised the same
+   way when read.
 2. `routing.byCountry[cc]`, else `routing.default`.
-3. The result must be enabled (`enabled && providers.<id>.enabled`) **and**
-   registered by an adapter; otherwise `GiftCardProviderUnavailableError`.
+3. The result must be **registered** by an adapter **and** enabled
+   (`enabled && providers.<id>.enabled`); otherwise
+   `GiftCardProviderUnavailableError`.
 
 The account's country is its phone country when that is unambiguous
 (`resolveAccountCountryCode`); otherwise the sentinel `"XX"`, which is
 user-assigned in ISO 3166 and can never appear in `byCountry`, so unknown
 countries always take `routing.default`. `giftCardCatalog(countryCode:)` lets
 the client browse another country, but the purchase always routes by the
-account's country.
+account's country, and a product whose own `countryCode` differs from a known
+account country is refused at quote and purchase
+(`GIFT_CARD_PRODUCT_NOT_AVAILABLE_IN_COUNTRY`); the check is skipped for `"XX"`.
 
 Because only `bitcoinCompany` is registered, the only useful `byCountry`
 entries today are none; the map exists so a second provider is config, not
@@ -120,6 +132,7 @@ orders count toward the daily sum (money left); `FAILED`, `PAYMENT_FAILED`,
 `EXPIRED` do not. A Mongo or Redis fault is `limits-unavailable`: allowed in
 `log-only`, refused (`GIFT_CARD_UNKNOWN`, level Critical) in `enforce`.
 
-Independent of mode: the 10/min purchase attempt limiter, the 30/min
-`giftCardQuote` attempt limiter (`GIFT_CARD_QUOTE_RATE_LIMITED`, 5 min block) and
-the ENG-573 send guard on the payment itself always run.
+Independent of mode: the 10/min purchase attempt limiter (5 min block; not
+charged on a same-key replay), the 30/min `giftCardQuote` attempt limiter
+(`GIFT_CARD_QUOTE_RATE_LIMITED`, 5 min block) and the ENG-573 send guard on the
+payment itself always run.

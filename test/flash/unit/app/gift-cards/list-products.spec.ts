@@ -70,6 +70,8 @@ const product = (id: string, over: Partial<GiftCardProduct> = {}): GiftCardProdu
   termsUrl: null,
   rewardBps: 0,
   inStock: true,
+  maxQuantity: 1,
+  wholeUnitsOnly: false,
   ...over,
 })
 

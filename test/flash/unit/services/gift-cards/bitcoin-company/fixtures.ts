@@ -293,3 +293,42 @@ export const catalogOffsets = (mock: jest.Mock): string[] =>
   callsTo(mock, "/giftcards").map(
     ([url]) => new URL(url as string).searchParams.get("offset") ?? "",
   )
+
+// ============ Quantity-aware vendor routes ============
+
+/** `quantity` from a quote/purchase request body; 1 when the body carries none. */
+export const quantityOf = (body: unknown): number => {
+  if (!body || typeof body !== "object") return 1
+  const { quantity } = body as { quantity?: unknown }
+  return typeof quantity === "number" && quantity >= 1 ? quantity : 1
+}
+
+/** `QUOTE_RESULT` for `quantity` cards: per-card money and sats scaled by the count. */
+export const quoteResultFor = (quantity: number) => ({
+  ...QUOTE_RESULT,
+  fiatCost: QUOTE_RESULT.fiatCost * quantity,
+  satsCost: QUOTE_RESULT.satsCost * quantity,
+  satsBack: QUOTE_RESULT.satsBack * quantity,
+})
+
+/** `PURCHASE_RESULT` for `quantity` cards. */
+export const purchaseResultFor = (quantity: number) => ({
+  ...PURCHASE_RESULT,
+  amount: PURCHASE_RESULT.amount * quantity,
+  satsBack: PURCHASE_RESULT.satsBack * quantity,
+})
+
+/**
+ * `/svs/quote-card` and `/giftcards/purchase/bitcoin` handlers that price by
+ * the requested quantity, so a test asserting "the price of one" fails if the
+ * adapter ever sends more than one.
+ *
+ * There is deliberately NO multi-card `/giftcards/invoice-status` fixture: the
+ * sandbox response for a quantity-2 order has not been captured (one entry? a
+ * per-card array?), and the adapter caps `maxQuantity` at 1 until it is.
+ */
+export const quoteCardRoute: RouteHandler = (ctx) =>
+  httpOk(quoteResultFor(quantityOf(ctx.body)))
+
+export const purchaseRoute: RouteHandler = (ctx) =>
+  httpOk(purchaseResultFor(quantityOf(ctx.body)))

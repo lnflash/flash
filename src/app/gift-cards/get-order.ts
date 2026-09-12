@@ -59,9 +59,12 @@ export const getGiftCardOrderForAccount = async ({
     return { order, claim: null, claimError: null }
   }
 
+  // The ciphertext is bound to its order id: one transplanted from another
+  // row fails here the same way a tampered one does.
   const claim = decryptGiftCardClaim({
     ciphertext: order.claimCiphertext,
     keyId: order.claimKeyId,
+    orderId: order.id,
   })
   if (claim instanceof Error) return { order, claim: null, claimError: claim }
 

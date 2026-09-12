@@ -31,6 +31,14 @@ type GiftCardProduct = {
   readonly termsUrl: string | null
   readonly rewardBps: number // vendor reward/commission on face value, basis points
   readonly inStock: boolean
+  /**
+   * Cards the vendor will fulfil in one order. Flash clamps the request to
+   * `min(maxQuantity, GIFT_CARD_MAX_QUANTITY)`; adapters set 1 until a vendor's
+   * multi-card response shape has been captured and validated.
+   */
+  readonly maxQuantity: number
+  /** Variable-value cards that refuse cents (e.g. TBC "VariableNoCents"). */
+  readonly wholeUnitsOnly: boolean
 }
 
 type GiftCardQuote = {
@@ -99,6 +107,14 @@ interface IGiftCardProvider {
   }): Promise<GiftCardProviderOrder | GiftCardError>
   getOrder(
     ref: GiftCardProviderOrderRef,
+    opts?: {
+      /**
+       * Retry transient failures (network, 5xx) before giving up. Default
+       * true. Callers with their own retry loop pass false so one poll is
+       * one vendor call.
+       */
+      retry?: boolean
+    },
   ): Promise<GiftCardProviderOrderStatus | GiftCardError>
 }
 

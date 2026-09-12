@@ -1,7 +1,9 @@
 // Shared fixtures for the gift-card app-layer specs. Not a spec itself (no
 // `.spec.ts` suffix), so jest never tries to run it.
 
+import { RepositoryError } from "@domain/errors"
 import { GiftCardOrderNotFoundError, GiftCardOrderStateError } from "@domain/gift-cards"
+import { checkGiftCardOrderTransition } from "@services/mongoose/gift-card-orders.mapping"
 
 export const ACCOUNT_ID = "6a8203ce490716aa69381454" as AccountId
 export const WALLET_ID = "6a8203ce490716aa69381455" as WalletId
@@ -30,6 +32,8 @@ export const makeProduct = (
   termsUrl: null,
   rewardBps: 100,
   inStock: true,
+  maxQuantity: 10,
+  wholeUnitsOnly: false,
   ...overrides,
 })
 
@@ -143,9 +147,14 @@ export const makeGiftCardsConfig = (overrides: Record<string, unknown> = {}) => 
 
 /**
  * In-memory `GiftCardOrdersRepository` with the real transition semantics:
- * `from` must include the current status, the patch is applied, the history
- * grows, `updatedAt` moves. Every method is a `jest.fn` so specs can assert
- * calls or override one method for a single test.
+ * every `from` → `to` must be legal per the domain table (the same
+ * `checkGiftCardOrderTransition` the real repository runs before touching
+ * Mongo, so an illegal transition fails here the way it fails in prod), `from`
+ * must include the current status, the patch is applied, the history grows,
+ * `updatedAt` moves. Every method is a `jest.fn` so specs can assert calls or
+ * override one method for a single test. Return types are widened to the real
+ * repository's (`| RepositoryError`) so a spec can mock a store fault without
+ * casting.
  */
 export const makeFakeOrdersRepo = () => {
   const store = new Map<string, GiftCardOrder>()
@@ -153,27 +162,35 @@ export const makeFakeOrdersRepo = () => {
 
   const now = () => new Date(Date.now())
 
+  type Found = GiftCardOrder | GiftCardOrderNotFoundError | RepositoryError
+  type Listed = GiftCardOrder[] | RepositoryError
+  type Transitioned =
+    GiftCardOrder | GiftCardOrderStateError | GiftCardOrderNotFoundError | RepositoryError
+
   const repo = {
     store,
     seed: (order: GiftCardOrder) => {
       store.set(order.id, order)
       return order
     },
-    create: jest.fn(async (args: Record<string, unknown>) => {
-      seq += 1
-      const order = makeOrder({
-        ...(args as Partial<GiftCardOrder>),
-        id: `order-${seq}` as GiftCardOrderId,
-        status: "CREATED",
-        statusHistory: [{ status: "CREATED", at: now(), reason: null }],
-        createdAt: now(),
-        updatedAt: now(),
-      })
-      store.set(order.id, order)
-      return order
-    }),
+    create: jest.fn(
+      async (args: Record<string, unknown>): Promise<GiftCardOrder | RepositoryError> => {
+        seq += 1
+        const order = makeOrder({
+          ...(args as Partial<GiftCardOrder>),
+          id: `order-${seq}` as GiftCardOrderId,
+          status: "CREATED",
+          statusHistory: [{ status: "CREATED", at: now(), reason: null }],
+          createdAt: now(),
+          updatedAt: now(),
+        })
+        store.set(order.id, order)
+        return order
+      },
+    ),
     findById: jest.fn(
-      async (id: string) => store.get(id) ?? new GiftCardOrderNotFoundError(),
+      async (id: string): Promise<Found> =>
+        store.get(id) ?? new GiftCardOrderNotFoundError(),
     ),
     findByIdempotencyKey: jest.fn(
       async ({
@@ -182,13 +199,13 @@ export const makeFakeOrdersRepo = () => {
       }: {
         walletId: string
         idempotencyKey: string
-      }) =>
+      }): Promise<Found> =>
         [...store.values()].find(
           (o) => o.walletId === walletId && o.idempotencyKey === idempotencyKey,
         ) ?? new GiftCardOrderNotFoundError(),
     ),
     findByProviderOrderId: jest.fn(
-      async ({ providerOrderId }: { providerOrderId: string }) =>
+      async ({ providerOrderId }: { providerOrderId: string }): Promise<Found> =>
         [...store.values()].find((o) => o.providerOrderId === providerOrderId) ??
         new GiftCardOrderNotFoundError(),
     ),
@@ -201,7 +218,7 @@ export const makeFakeOrdersRepo = () => {
         accountId: string
         limit: number
         before?: Date
-      }) =>
+      }): Promise<Listed> =>
         [...store.values()]
           .filter((o) => o.accountId === accountId)
           .filter((o) => !before || o.createdAt < before)
@@ -209,7 +226,13 @@ export const makeFakeOrdersRepo = () => {
           .slice(0, limit),
     ),
     listByStatus: jest.fn(
-      async ({ statuses, limit }: { statuses: GiftCardOrderStatus[]; limit: number }) =>
+      async ({
+        statuses,
+        limit,
+      }: {
+        statuses: GiftCardOrderStatus[]
+        limit: number
+      }): Promise<Listed> =>
         [...store.values()].filter((o) => statuses.includes(o.status)).slice(0, limit),
     ),
     transition: jest.fn(
@@ -225,7 +248,9 @@ export const makeFakeOrdersRepo = () => {
         to: GiftCardOrderStatus
         reason?: string
         patch?: Partial<GiftCardOrder>
-      }) => {
+      }): Promise<Transitioned> => {
+        const allowed = checkGiftCardOrderTransition(from, to)
+        if (allowed instanceof Error) return allowed
         const current = store.get(id)
         if (!current) return new GiftCardOrderNotFoundError()
         if (!from.includes(current.status)) {
@@ -243,6 +268,16 @@ export const makeFakeOrdersRepo = () => {
         }
         store.set(id, next)
         return next
+      },
+    ),
+    touch: jest.fn(
+      async (
+        id: string,
+      ): Promise<true | GiftCardOrderNotFoundError | RepositoryError> => {
+        const current = store.get(id)
+        if (!current) return new GiftCardOrderNotFoundError()
+        store.set(id, { ...current, updatedAt: now() })
+        return true
       },
     ),
   }

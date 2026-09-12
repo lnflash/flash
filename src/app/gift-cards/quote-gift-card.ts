@@ -3,6 +3,7 @@ import {
   checkedGiftCardValue,
   GiftCardProductNotAvailableInCountryError,
   GiftCardProductNotFoundError,
+  normalizeCountryCode,
 } from "@domain/gift-cards"
 import { RateLimitConfig } from "@domain/rate-limit"
 import { GiftCardQuoteRateLimiterExceededError } from "@domain/rate-limit/errors"
@@ -89,13 +90,23 @@ export const quoteGiftCard = async ({
   if (product.providerId !== gate.providerId) {
     return new GiftCardProductNotAvailableInCountryError()
   }
+  // Same provider, another country's catalog: the storefront lists by country,
+  // so a mismatch here is a client that browsed one country and bought from
+  // another. Skipped when the account's country is unknown — the routed
+  // provider's catalog is all we have to go on then.
+  if (
+    gate.countryKnown &&
+    normalizeCountryCode(product.countryCode) !== gate.countryCode
+  ) {
+    return new GiftCardProductNotAvailableInCountryError()
+  }
   if (!product.inStock) {
     return new GiftCardProductNotFoundError("This gift card is currently out of stock")
   }
 
   const checkedValue = checkedGiftCardValue(product, valueMinor)
   if (checkedValue instanceof Error) return checkedValue
-  const checkedQuantity = checkedGiftCardQuantity(quantity)
+  const checkedQuantity = checkedGiftCardQuantity(quantity, product.maxQuantity)
   if (checkedQuantity instanceof Error) return checkedQuantity
 
   const provider = getEnabledGiftCardProvider(gate.providerId)

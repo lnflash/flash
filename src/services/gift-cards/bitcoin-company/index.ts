@@ -1,4 +1,8 @@
-import { GiftCardError, GiftCardVendorUnavailableError } from "@domain/gift-cards"
+import {
+  GiftCardError,
+  GiftCardInvalidValueError,
+  GiftCardVendorUnavailableError,
+} from "@domain/gift-cards"
 import { baseLogger } from "@services/logger"
 import {
   addAttributesToCurrentSpan,
@@ -9,9 +13,12 @@ import { getRegisteredGiftCardProvider, registerGiftCardProvider } from "../regi
 
 import { BitcoinCompanyClient, BitcoinCompanyClientDeps } from "./client"
 import {
+  BITCOIN_COMPANY_MAX_QUANTITY,
   BITCOIN_COMPANY_PROVIDER_ID,
+  PRODUCT_MAPPING_SKIP_REASONS,
   ProductMappingSkipReason,
   isProductMappingSkip,
+  isResellingDisabled,
   mapVendorOrderStatus,
   mapVendorProduct,
   mapVendorPurchase,
@@ -42,6 +49,25 @@ const spanAttributes = (op: string) => ({
   "giftcard.op": op,
 })
 
+const emptySkipCounts = (): Record<ProductMappingSkipReason, number> =>
+  Object.fromEntries(PRODUCT_MAPPING_SKIP_REASONS.map((reason) => [reason, 0])) as Record<
+    ProductMappingSkipReason,
+    number
+  >
+
+/**
+ * Every product this adapter lists carries `maxQuantity: 1`, so the app layer
+ * rejects a larger order before reaching here. This is the belt to that brace:
+ * a caller that bypasses the product check still never sends the vendor a
+ * quantity whose status response we cannot read back.
+ */
+const checkQuantity = (quantity: number): GiftCardInvalidValueError | null =>
+  quantity > BITCOIN_COMPANY_MAX_QUANTITY
+    ? new GiftCardInvalidValueError(
+        "Only one card per order is supported for this provider",
+      )
+    : null
+
 export const BitcoinCompanyProvider = (
   deps: BitcoinCompanyProviderDeps = {},
 ): IGiftCardProvider => {
@@ -50,30 +76,55 @@ export const BitcoinCompanyProvider = (
 
   const listProducts = async (): Promise<GiftCardProduct[] | GiftCardError> => {
     addAttributesToCurrentSpan(spanAttributes("listProducts"))
-    const rows = await client.listProducts()
-    if (rows instanceof Error) return rows
+    const catalog = await client.listProducts()
+    if (catalog instanceof Error) return catalog
 
     const products: GiftCardProduct[] = []
-    const skipped: Partial<Record<ProductMappingSkipReason, number>> = {}
-    for (const row of rows) {
+    const skipped = emptySkipCounts()
+    skipped.invalid = catalog.invalid
+    let notResellable = 0
+    for (const row of catalog.products) {
       const mapped = mapVendorProduct(row)
       if (isProductMappingSkip(mapped)) {
-        skipped[mapped.skipped] = (skipped[mapped.skipped] ?? 0) + 1
+        skipped[mapped.skipped] += 1
         continue
       }
+      if (isResellingDisabled(row)) notResellable += 1
       products.push(mapped)
     }
 
-    baseLogger.info(
-      {
-        provider: BITCOIN_COMPANY_PROVIDER_ID,
-        op: "listProducts",
-        received: rows.length,
-        mapped: products.length,
-        skipped,
-      },
-      "Bitcoin Company catalog mapped",
-    )
+    const received = catalog.products.length + catalog.invalid
+    const summary = {
+      provider: BITCOIN_COMPANY_PROVIDER_ID,
+      op: "listProducts",
+      received,
+      kept: products.length,
+      skipped,
+      flagged: { notResellable },
+    }
+
+    // Rows came back but none survived mapping: that is a vendor-side shape or
+    // policy change, not a catalog. Returning [] would let the sync blank the
+    // read model; failing keeps the last good catalog serving.
+    if (received > 0 && products.length === 0) {
+      baseLogger.error(
+        summary,
+        "Bitcoin Company catalog received rows but kept none; failing the sync",
+      )
+      return new GiftCardVendorUnavailableError(
+        "Bitcoin Company catalog produced no usable products",
+      )
+    }
+
+    if (notResellable > 0) {
+      // TODO(ENG-586): flip to skip once KYB flips resellingEnabled.
+      baseLogger.warn(
+        { provider: BITCOIN_COMPANY_PROVIDER_ID, op: "listProducts", notResellable },
+        "Bitcoin Company catalog rows have resellingEnabled=false; kept pending KYB",
+      )
+    }
+
+    baseLogger.info(summary, "Bitcoin Company catalog mapped")
     return products
   }
 
@@ -87,6 +138,8 @@ export const BitcoinCompanyProvider = (
     quantity: number
   }): Promise<GiftCardQuote | GiftCardError> => {
     addAttributesToCurrentSpan(spanAttributes("quote"))
+    const tooMany = checkQuantity(quantity)
+    if (tooMany) return tooMany
     const vendor = await client.quoteCard({
       productId: product.providerProductId,
       cardValue: toMajorUnits(valueMinor),
@@ -108,6 +161,8 @@ export const BitcoinCompanyProvider = (
     reference: GiftCardOrderId
   }): Promise<GiftCardProviderOrder | GiftCardError> => {
     addAttributesToCurrentSpan(spanAttributes("createOrder"))
+    const tooMany = checkQuantity(quantity)
+    if (tooMany) return tooMany
     const vendor = await client.purchase({
       productId: product.providerProductId,
       cardValue: toMajorUnits(valueMinor),
@@ -120,13 +175,16 @@ export const BitcoinCompanyProvider = (
 
   const getOrder = async (
     ref: GiftCardProviderOrderRef,
+    opts: { retry?: boolean } = {},
   ): Promise<GiftCardProviderOrderStatus | GiftCardError> => {
     addAttributesToCurrentSpan(spanAttributes("getOrder"))
     // The vendor keys order status by invoice, not by order id.
     if (!ref.paymentRequest) {
       return new GiftCardVendorUnavailableError("status lookup requires payment request")
     }
-    const vendor = await client.invoiceStatus(ref.paymentRequest)
+    const vendor = await client.invoiceStatus(ref.paymentRequest, {
+      retry: opts.retry ?? true,
+    })
     if (vendor instanceof Error) return vendor
 
     const { status, warning } = mapVendorOrderStatus(vendor)

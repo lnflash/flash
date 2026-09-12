@@ -3,7 +3,6 @@ import { GiftCardOrderStatus } from "@domain/gift-cards"
 import { InputValidationError } from "@graphql/error"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import { GT } from "@graphql/index"
-import { gateGiftCardsForAccount } from "@graphql/public/root/gift-card-gate"
 import GiftCardPurchaseInput from "@graphql/public/types/input/gift-card-purchase-input"
 import { toGiftCardOrderSource } from "@graphql/public/types/object/gift-card-order"
 import GiftCardPurchasePayload from "@graphql/public/types/payload/gift-card-purchase"
@@ -64,12 +63,13 @@ const GiftCardPurchaseMutation = GT.Field<
       }
     }
 
-    // The deploy-level gate, before anything else — the same one the catalog
-    // and quote opened with, so nothing offered upstream is refused here for a
-    // different reason. `purchaseGiftCard` gates again internally (it must stand
-    // alone); the cost is one user read.
-    const gate = await gateGiftCardsForAccount({ account: domainAccount })
-    if (!gate.ok) return { errors: [mapAndParseErrorForGqlResponse(gate.error)] }
+    // No deploy-level gate here, on purpose. `purchaseGiftCard` runs it AFTER
+    // the same-key replay lookup, so a retry of a timed-out purchase still finds
+    // its order once the kill switch is off. A gate at this layer would answer
+    // that retry with GIFT_CARDS_DISABLED and leave the app layer's "rail off →
+    // return the existing order" branch unreachable from the wire. The catalog
+    // and quote still open with `gateGiftCardsForAccount`; a fresh purchase
+    // while the rail is off gets the same GIFT_CARDS_DISABLED from the app layer.
 
     // The purchase attempt budget (RateLimitConfig.giftCardPurchase) is consumed
     // INSIDE purchaseGiftCard, before any vendor or store round-trip. Not here:

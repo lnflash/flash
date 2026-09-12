@@ -82,7 +82,12 @@ beforeEach(() => {
   mockConsumeLimiter.mockResolvedValue(true)
   mockFindAccountById.mockResolvedValue(makeAccount())
   mockResolveCountry.mockResolvedValue("US")
-  mockMasterGate.mockReturnValue({ ok: true, providerId: "bitcoinCompany" })
+  mockMasterGate.mockReturnValue({
+    ok: true,
+    providerId: "bitcoinCompany",
+    countryCode: "US",
+    countryKnown: true,
+  })
   mockGetGiftCardProduct.mockResolvedValue(PRODUCT)
   mockGetProvider.mockReturnValue({ id: "bitcoinCompany", quote: mockQuote })
   mockQuote.mockResolvedValue(QUOTE)
@@ -203,6 +208,40 @@ describe("quoteGiftCard", () => {
     expect(mockQuote).not.toHaveBeenCalled()
   })
 
+  describe("product country", () => {
+    // API.md: a product is refused when it is not sold in the account's
+    // country. The provider check alone cannot see that — the same provider
+    // serves many countries — so the gated country is compared too.
+    it("refuses a same-provider product from another country's catalog", async () => {
+      mockGetGiftCardProduct.mockResolvedValue(makeProduct({ countryCode: "GB" }))
+
+      expect(await quote()).toBeInstanceOf(GiftCardProductNotAvailableInCountryError)
+      expect(mockQuote).not.toHaveBeenCalled()
+    })
+
+    it("compares normalised codes, so a lower-case catalog row is not refused", async () => {
+      mockGetGiftCardProduct.mockResolvedValue(makeProduct({ countryCode: "us" }))
+
+      expect(await quote()).toBe(QUOTE)
+    })
+
+    it("skips the comparison when the account's country is unknown (XX)", async () => {
+      // We cannot know where the user is; the routed provider's catalog is all
+      // we have, and refusing every product would make the feature unusable
+      // for anyone without a resolvable phone country.
+      mockMasterGate.mockReturnValue({
+        ok: true,
+        providerId: "bitcoinCompany",
+        countryCode: "XX",
+        countryKnown: false,
+      })
+      mockGetGiftCardProduct.mockResolvedValue(makeProduct({ countryCode: "GB" }))
+
+      expect(await quote()).toBe(QUOTE)
+      expect(mockQuote).toHaveBeenCalledTimes(1)
+    })
+  })
+
   it("refuses a sold-out product as not found", async () => {
     mockGetGiftCardProduct.mockResolvedValue(makeProduct({ inStock: false }))
 
@@ -245,6 +284,14 @@ describe("quoteGiftCard", () => {
       expect(await quote({ quantity: 0 })).toBeInstanceOf(GiftCardInvalidValueError)
       expect(await quote({ quantity: 11 })).toBeInstanceOf(GiftCardInvalidValueError)
       expect(mockQuote).not.toHaveBeenCalled()
+    })
+
+    it("caps quantity at the product's own maxQuantity when that is lower", async () => {
+      mockGetGiftCardProduct.mockResolvedValue(makeProduct({ maxQuantity: 1 }))
+
+      expect(await quote({ quantity: 2 })).toBeInstanceOf(GiftCardInvalidValueError)
+      expect(mockQuote).not.toHaveBeenCalled()
+      expect(await quote({ quantity: 1 })).toBe(QUOTE)
     })
   })
 

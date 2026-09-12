@@ -135,13 +135,37 @@ describe("payLnInvoiceViaIbex", () => {
       expect(mockPayInvoice).not.toHaveBeenCalled()
     })
 
-    it("a replayed result never calls IBEX or onResponse", async () => {
-      mockWithPaymentIdempotency.mockResolvedValue({ value: "success" })
+    it("a replayed result never calls IBEX or onResponse: both live inside execute", async () => {
+      // A wrapper that caches by key, like the real one: the first call runs
+      // `execute`, the second returns the cached result without it. If this
+      // module called IBEX or `onResponse` anywhere but inside `execute`, the
+      // second call would show a second IBEX call or a second onResponse.
+      const cache = new Map<string, unknown>()
+      mockWithPaymentIdempotency.mockImplementation(async (args: WrapperArgs) => {
+        const cached = cache.get(args.idempotencyKey)
+        if (cached !== undefined) return cached
+        const authorized = await args.authorize()
+        if (authorized instanceof Error) return authorized
+        const result = await args.execute()
+        cache.set(args.idempotencyKey, result)
+        return result
+      })
       const onResponse = jest.fn()
-      const res = await pay({ onResponse })
-      expect(res).toEqual({ value: "success" })
-      expect(mockPayInvoice).not.toHaveBeenCalled()
-      expect(onResponse).not.toHaveBeenCalled()
+
+      const first = await pay({ onResponse })
+      expect(first).toBe(PaymentSendStatus.Success)
+      expect(mockPayInvoice).toHaveBeenCalledTimes(1)
+      expect(onResponse).toHaveBeenCalledTimes(1)
+
+      const replay = await pay({ onResponse })
+      expect(replay).toBe(PaymentSendStatus.Success)
+      expect(mockPayInvoice).toHaveBeenCalledTimes(1)
+      expect(onResponse).toHaveBeenCalledTimes(1)
+
+      // A different key is a different payment and does execute.
+      await pay({ onResponse, idempotencyKey: "giftcard:order-2" })
+      expect(mockPayInvoice).toHaveBeenCalledTimes(2)
+      expect(onResponse).toHaveBeenCalledTimes(2)
     })
   })
 })

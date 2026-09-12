@@ -58,15 +58,21 @@ const fulfil = async (
 
   let current = order
   // The vendor saw our payment before we recorded it (a crash between the pay
-  // call and the PAID transition, or a Pending that settled). Their word that
-  // the card shipped is proof of payment; record it so the order can proceed.
+  // call and the PAID transition, a Pending that settled, or a send still in
+  // flight when the worker expired the row). Their word that the card shipped
+  // is proof of payment; record it so the order can proceed.
   if (
     current.status === GiftCardOrderStatus.InvoiceIssued ||
-    current.status === GiftCardOrderStatus.PaymentPending
+    current.status === GiftCardOrderStatus.PaymentPending ||
+    current.status === GiftCardOrderStatus.Expired
   ) {
     const paid = await repo.transition({
       id: current.id,
-      from: [GiftCardOrderStatus.InvoiceIssued, GiftCardOrderStatus.PaymentPending],
+      from: [
+        GiftCardOrderStatus.InvoiceIssued,
+        GiftCardOrderStatus.PaymentPending,
+        GiftCardOrderStatus.Expired,
+      ],
       to: GiftCardOrderStatus.Paid,
       reason: "vendor-reported-fulfilled",
       patch: { paidSats: current.invoiceSats ?? current.quoteSats },
@@ -77,8 +83,8 @@ const fulfil = async (
   }
 
   if (current.status !== GiftCardOrderStatus.Paid) {
-    // FAILED / PAYMENT_FAILED / EXPIRED / REFUND_REQUIRED, yet the vendor says
-    // a card was issued. Someone paid for it; our records say not us. Page.
+    // FAILED / PAYMENT_FAILED / REFUND_REQUIRED, yet the vendor says a card
+    // was issued. Someone paid for it; our records say not us. Page.
     const error = new GiftCardOrderStateError(
       `Vendor reports fulfilled but order is ${current.status}`,
     )
@@ -93,7 +99,8 @@ const fulfil = async (
     return error
   }
 
-  const encrypted = encryptGiftCardClaim(claim)
+  // Sealed to THIS order: the ciphertext will not open on any other row.
+  const encrypted = encryptGiftCardClaim(claim, { orderId: current.id })
   if (encrypted instanceof Error) {
     // The card exists at the vendor; only our storage failed. Leave PAID so the
     // next poll retries once the key is fixed, and page because until then the
@@ -207,19 +214,28 @@ const vendorFailed = async (
   }
 }
 
+export type FetchVendorOrderOptions = {
+  /**
+   * Passed through to the adapter. The purchase mutation's inline first poll
+   * sets `retry: false`: the customer is waiting on the response, and the
+   * reconcile worker will ask again in seconds anyway. The worker leaves the
+   * adapter's default.
+   */
+  retry?: boolean
+}
+
 /**
- * Ask the vendor where the order stands and settle on the answer. The
- * reconcile worker's PAID path, its fallback for payments IBEX cannot account
- * for, and the purchase mutation's single fulfilled-already? poll.
+ * Ask the vendor where the order stands, without acting on the answer.
  *
  * Resolves the order's provider by registration, not by `enabled`: the kill
  * switch (`giftCards.enabled`, `providers.<id>.enabled`) stops NEW money
  * leaving via quote/purchase. An order that already exists has already paid or
  * may have, and refusing to look it up would strand the customer's code.
  */
-export const fetchAndSettle = async (
+export const fetchVendorOrderStatus = async (
   order: GiftCardOrder,
-): Promise<GiftCardOrder | ApplicationError> => {
+  opts?: FetchVendorOrderOptions,
+): Promise<GiftCardProviderOrderStatus | ApplicationError> => {
   const provider = getRegisteredGiftCardProviderOrError(order.providerId)
   if (provider instanceof Error) return provider
 
@@ -227,10 +243,27 @@ export const fetchAndSettle = async (
     return new GiftCardOrderStateError("Order has no provider order id to look up")
   }
 
-  const status = await provider.getOrder({
-    providerOrderId: order.providerOrderId,
-    paymentRequest: order.paymentRequest,
-  })
+  return provider.getOrder(
+    {
+      providerOrderId: order.providerOrderId,
+      paymentRequest: order.paymentRequest,
+    },
+    opts,
+  )
+}
+
+/**
+ * Ask the vendor where the order stands and settle on the answer. The
+ * reconcile worker's PAID path and the purchase mutation's single
+ * fulfilled-already? poll. (The worker's fallback for payments IBEX cannot
+ * account for uses the two halves separately: it needs the vendor's answer
+ * itself, not just what it did to the order.)
+ */
+export const fetchAndSettle = async (
+  order: GiftCardOrder,
+  opts?: FetchVendorOrderOptions,
+): Promise<GiftCardOrder | ApplicationError> => {
+  const status = await fetchVendorOrderStatus(order, opts)
   if (status instanceof Error) return status
 
   return settleOrderFromVendor(order, status)
