@@ -4,6 +4,9 @@ jest.mock("@config", () => ({
   get OPS_DISCORD_WEBHOOK_URL() {
     return mockWebhookUrl
   },
+  // The env stamp follows the IBEX environment, never NETWORK (both clusters
+  // run mainnet). regtest + sandbox is the local dev stack shape.
+  IbexConfig: { environment: "sandbox" },
   NETWORK: "regtest",
 }))
 
@@ -149,7 +152,7 @@ describe("buildEmbed", () => {
     expect(byName.step).toBe("payInvoice")
     expect(byName.error).toBe("IbexError")
     expect(byName.offerId).toBe("aaaaaaaa…")
-    expect(byName.env).toBe("regtest")
+    expect(byName.env).toBe("TEST (ibex:sandbox)")
     expect(embed.timestamp).toEqual(expect.any(String))
 
     const rendered = JSON.stringify(embed)

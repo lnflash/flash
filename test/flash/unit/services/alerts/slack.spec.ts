@@ -1,11 +1,15 @@
-const mockNetwork = { value: "signet" as string | undefined }
+// Both clusters run NETWORK=mainnet; only the IBEX environment differs.
+const mockEnv = { ibex: "sandbox" as string | undefined, network: "mainnet" }
 const mockSlackUrl = { value: "https://slack.test/webhook" as string | undefined }
 jest.mock("@config", () => ({
   get ALERT_SLACK_WEBHOOK_URL() {
     return mockSlackUrl.value
   },
+  get IbexConfig() {
+    return { environment: mockEnv.ibex }
+  },
   get NETWORK() {
-    return mockNetwork.value
+    return mockEnv.network
   },
 }))
 
@@ -36,7 +40,8 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockPost.mockResolvedValue({ status: 200 })
   mockSlackUrl.value = "https://slack.test/webhook"
-  mockNetwork.value = "signet"
+  mockEnv.ibex = "sandbox"
+  mockEnv.network = "mainnet"
 })
 
 describe("sendSlack", () => {
@@ -46,21 +51,34 @@ describe("sendSlack", () => {
     expect(mockPost).not.toHaveBeenCalled()
   })
 
-  it("stamps TEST in the headline and the env line on a non-mainnet network", async () => {
+  // Regression: the TEST cluster is NETWORK=mainnet + ibex sandbox. A
+  // NETWORK-derived tag rendered it as PROD.
+  it("stamps TEST in the headline and the env line on ibex sandbox, even with NETWORK=mainnet", async () => {
+    mockEnv.network = "mainnet"
+    mockEnv.ibex = "sandbox"
     await sendSlack(baseAlert)
     const [headline, meta] = lastText().split("\n")
     expect(headline).toBe(`:warning: *[TEST] Bridge alert* - ${baseAlert.title}`)
     expect(meta).toBe(
-      "*env:* `TEST (signet)`  *source:* `fygaro-webhook`  *severity:* `warning`",
+      "*env:* `TEST (ibex:sandbox)`  *source:* `fygaro-webhook`  *severity:* `warning`",
     )
+    expect(lastText()).not.toContain("PROD")
   })
 
-  it("stamps PROD on mainnet and uses the siren for critical", async () => {
-    mockNetwork.value = "mainnet"
+  it("stamps PROD on ibex production and uses the siren for critical", async () => {
+    mockEnv.ibex = "production"
     await sendSlack({ ...baseAlert, severity: "critical" })
     const [headline, meta] = lastText().split("\n")
     expect(headline.startsWith(":rotating_light: *[PROD] Bridge alert*")).toBe(true)
-    expect(meta.startsWith("*env:* `PROD (mainnet)`")).toBe(true)
+    expect(meta.startsWith("*env:* `PROD (ibex:production)`")).toBe(true)
+  })
+
+  it("stamps UNKNOWN when the ibex environment is unset", async () => {
+    mockEnv.ibex = undefined
+    await sendSlack(baseAlert)
+    const [headline, meta] = lastText().split("\n")
+    expect(headline.startsWith(":warning: *[UNKNOWN] Bridge alert*")).toBe(true)
+    expect(meta.startsWith("*env:* `UNKNOWN (ibex:unset)`")).toBe(true)
   })
 
   it("keeps detail and context in the body", async () => {

@@ -9,13 +9,18 @@ jest.mock("axios", () => ({
 const mockAlertDiscordUrl = {
   value: "https://discord.test/webhook" as string | undefined,
 }
-const mockNetwork = { value: "signet" as string | undefined }
+// Both clusters run NETWORK=mainnet; only the IBEX environment differs. The
+// mock exposes both so the tests can pin that NETWORK is ignored.
+const mockEnv = { ibex: "sandbox" as string | undefined, network: "mainnet" }
 jest.mock("@config", () => ({
   get ALERT_DISCORD_WEBHOOK_URL() {
     return mockAlertDiscordUrl.value
   },
+  get IbexConfig() {
+    return { environment: mockEnv.ibex }
+  },
   get NETWORK() {
-    return mockNetwork.value
+    return mockEnv.network
   },
 }))
 
@@ -42,7 +47,8 @@ const lastEmbed = () => mockPost.mock.calls.at(-1)?.[1]?.embeds?.[0]
 beforeEach(() => {
   jest.clearAllMocks()
   mockAlertDiscordUrl.value = "https://discord.test/webhook"
-  mockNetwork.value = "signet"
+  mockEnv.ibex = "sandbox"
+  mockEnv.network = "mainnet"
 })
 
 describe("sendDiscord", () => {
@@ -68,41 +74,57 @@ describe("sendDiscord", () => {
     // A test-cluster probe and a prod outage used to render identically; the
     // env must be visible in the author line, the title, AND a field so it
     // survives whichever part of the embed the reader (or Discord) trims.
-    it("stamps TEST on every non-mainnet network", async () => {
-      for (const network of ["signet", "testnet", "regtest"]) {
-        mockNetwork.value = network
-        await sendDiscord(baseAlert)
-        const embed = lastEmbed()
-        expect(embed.author.name).toBe("Fygaro · TEST")
-        expect(embed.title.startsWith("[TEST] ")).toBe(true)
-        expect(embed.fields[0]).toEqual({
-          name: "Env",
-          value: `TEST (${network})`,
-          inline: true,
-        })
-      }
+    // Regression: the TEST cluster is NETWORK=mainnet + ibex sandbox (chart
+    // default, not overridden). A NETWORK-derived tag rendered every TEST
+    // alert as PROD — the exact curl probe this PR was opened for.
+    it("stamps TEST on ibex sandbox even though NETWORK is mainnet (the real TEST cluster)", async () => {
+      mockEnv.network = "mainnet"
+      mockEnv.ibex = "sandbox"
+      await sendDiscord(baseAlert)
+      const embed = lastEmbed()
+      expect(embed.author.name).toBe("Fygaro · TEST")
+      expect(embed.title).toBe(`[TEST] ${baseAlert.title}`)
+      expect(embed.fields[0]).toEqual({
+        name: "Env",
+        value: "TEST (ibex:sandbox)",
+        inline: true,
+      })
+      expect(JSON.stringify(embed)).not.toContain("PROD")
     })
 
-    it("stamps PROD only on mainnet", async () => {
-      mockNetwork.value = "mainnet"
+    it("stamps PROD only on ibex production", async () => {
+      mockEnv.ibex = "production"
       await sendDiscord(baseAlert)
       const embed = lastEmbed()
       expect(embed.author.name).toBe("Fygaro · PROD")
       expect(embed.title).toBe(`[PROD] ${baseAlert.title}`)
       expect(embed.fields[0]).toEqual({
         name: "Env",
-        value: "PROD (mainnet)",
+        value: "PROD (ibex:production)",
         inline: true,
       })
     })
 
-    it("never claims PROD when the network is unset", async () => {
-      mockNetwork.value = undefined
+    it.each(["mainnet", "signet", "testnet", "regtest"])(
+      "ignores NETWORK=%s — the tag follows the ibex environment only",
+      async (network) => {
+        mockEnv.network = network
+        mockEnv.ibex = "sandbox"
+        await sendDiscord(baseAlert)
+        expect(lastEmbed().author.name).toBe("Fygaro · TEST")
+        mockEnv.ibex = "production"
+        await sendDiscord(baseAlert)
+        expect(lastEmbed().author.name).toBe("Fygaro · PROD")
+      },
+    )
+
+    it("never claims PROD or TEST when the ibex environment is unset", async () => {
+      mockEnv.ibex = undefined
       await sendDiscord(baseAlert)
       const embed = lastEmbed()
       expect(embed.author.name).toBe("Fygaro · UNKNOWN")
       expect(embed.title.startsWith("[UNKNOWN] ")).toBe(true)
-      expect(embed.fields[0].value.startsWith("UNKNOWN (")).toBe(true)
+      expect(embed.fields[0].value).toBe("UNKNOWN (ibex:unset)")
     })
 
     it("keeps the env field ahead of Source/Severity/context so budget trimming drops it last", async () => {

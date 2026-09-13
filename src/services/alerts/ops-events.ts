@@ -8,7 +8,7 @@ import {
   makeFieldBuilder,
   postEmbed,
 } from "./discord-embed"
-import { envLabel } from "./env-label"
+import { envSummary } from "./env-label"
 
 /**
  * Fire-and-forget ops event feed: posts color-coded Discord embeds to
@@ -118,7 +118,7 @@ export const buildEmbed = (event: OpsEvent): DiscordEmbed => {
   for (const [key, value] of Object.entries(event.meta ?? {})) {
     if (typeof value === "string" && value) field(key, truncateId(value))
   }
-  field("env", envLabel())
+  field("env", envSummary())
 
   return {
     title: `${FLOW_EMOJI[event.flow]} ${flowTitle} — ${titleCase(event.phase)}`,
@@ -131,7 +131,7 @@ export const buildEmbed = (event: OpsEvent): DiscordEmbed => {
 const droppedSummaryEmbed = (dropped: number): DiscordEmbed => ({
   title: `⚠️ Ops events — ${dropped} event${dropped === 1 ? "" : "s"} dropped`,
   color: EMBED_COLOR.failed,
-  fields: [{ name: "env", value: envLabel(), inline: true }],
+  fields: [{ name: "env", value: envSummary(), inline: true }],
   timestamp: new Date().toISOString(),
 })
 
