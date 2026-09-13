@@ -305,5 +305,116 @@ describe("verifyFygaroSignature", () => {
       expect(alert.title).toMatch(/skew|clock/i)
       expect(alert.context).toEqual({ key_id: "key1" })
     })
+
+    describe("unknown key id (probe / scanner / stale credential)", () => {
+      // A genuine Fygaro webhook always names the credential it was signed
+      // with. A well-formed header under a key id we hold no secret for can
+      // only ever fail verification and says nothing about OUR secret or OUR
+      // clock — it must be 401'd and logged, never paged. The 2026-09-12
+      // test-cluster curl probe (key id "x") paged ops twice for exactly this.
+      it("401s a signature mismatch under an unknown key id WITHOUT alerting", () => {
+        const t = nowSeconds()
+        const res = makeRes()
+        const next = jest.fn()
+        const req = makeReq({
+          signature: `t=${t},v1=${sign(t, RAW_BODY, "wrong-secret")}`,
+          keyId: "x",
+        })
+
+        verifyFygaroSignature(req, res, next)
+
+        expect(res.status).toHaveBeenCalledWith(401)
+        expect(next).not.toHaveBeenCalled()
+        expect(mockAlertBridge).not.toHaveBeenCalled()
+      })
+
+      it("401s a stale timestamp under an unknown key id WITHOUT alerting", () => {
+        const t = "1789000000"
+        const res = makeRes()
+        const next = jest.fn()
+        const req = makeReq({
+          signature: `t=${t},v1=${sign(t, RAW_BODY, "secret-one")}`,
+          keyId: "x",
+        })
+
+        verifyFygaroSignature(req, res, next)
+
+        expect(res.status).toHaveBeenCalledWith(401)
+        expect(next).not.toHaveBeenCalled()
+        expect(mockAlertBridge).not.toHaveBeenCalled()
+      })
+
+      it("401s a signature mismatch with NO key id header WITHOUT alerting", () => {
+        // Absent key id: every secret is tried (rotation-friendly) but the
+        // request cannot be attributed to a credential we hold, so no page.
+        const t = nowSeconds()
+        const res = makeRes()
+        const req = makeReq({
+          signature: `t=${t},v1=${sign(t, RAW_BODY, "wrong-secret")}`,
+        })
+
+        verifyFygaroSignature(req, res, jest.fn())
+
+        expect(res.status).toHaveBeenCalledWith(401)
+        expect(mockAlertBridge).not.toHaveBeenCalled()
+      })
+
+      it("401s a stale timestamp with NO key id header WITHOUT alerting", () => {
+        const t = String(Math.floor(Date.now() / 1000) - 3600)
+        const res = makeRes()
+        const req = makeReq({
+          signature: `t=${t},v1=${sign(t, RAW_BODY, "secret-one")}`,
+        })
+
+        verifyFygaroSignature(req, res, jest.fn())
+
+        expect(res.status).toHaveBeenCalledWith(401)
+        expect(mockAlertBridge).not.toHaveBeenCalled()
+      })
+
+      it("does not treat inherited object keys as known key ids", () => {
+        const t = nowSeconds()
+        const res = makeRes()
+        const req = makeReq({
+          signature: `t=${t},v1=${sign(t, RAW_BODY, "wrong-secret")}`,
+          keyId: "constructor",
+        })
+
+        verifyFygaroSignature(req, res, jest.fn())
+
+        expect(res.status).toHaveBeenCalledWith(401)
+        expect(mockAlertBridge).not.toHaveBeenCalled()
+      })
+
+      it("still alerts when NO secrets are configured, even under an unknown key id", () => {
+        // That one is our misconfiguration regardless of what the request says.
+        mockFygaroConfig.webhook.secrets = {}
+        const t = nowSeconds()
+        const req = makeReq({
+          signature: `t=${t},v1=${sign(t, RAW_BODY, "secret-one")}`,
+          keyId: "x",
+        })
+
+        verifyFygaroSignature(req, makeRes(), jest.fn())
+
+        expect(mockAlertBridge).toHaveBeenCalledTimes(1)
+        expect(mockAlertBridge.mock.calls[0][0]).toMatchObject({
+          dedupKey: "fygaro:signature-failure",
+        })
+      })
+
+      it("still alerts a mismatch under a KNOWN key id (rotated / mispasted secret)", () => {
+        const t = nowSeconds()
+        const req = makeReq({
+          signature: `t=${t},v1=${sign(t, RAW_BODY, "wrong-secret")}`,
+          keyId: "key2",
+        })
+
+        verifyFygaroSignature(req, makeRes(), jest.fn())
+
+        expect(mockAlertBridge).toHaveBeenCalledTimes(1)
+        expect(mockAlertBridge.mock.calls[0][0].context).toEqual({ key_id: "key2" })
+      })
+    })
   })
 })

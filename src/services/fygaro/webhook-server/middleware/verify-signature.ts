@@ -20,10 +20,20 @@ type RawBodyRequest = express.Request & { rawBody?: string }
  * Each uses a STATIC dedup key so the built-in TTL suppression collapses the
  * flood to one alert per window rather than one per rejected request. Clock skew
  * carries its OWN static key (generateDedupKey.fygaroClockSkew) so a stuck clock
- * and a bad secret never mask one another. Deliberately NOT fired for a plain
- * missing/malformed signature (random internet noise) — those never indicate a
- * misconfiguration and would be pure alert spam. Never carries the secret
- * itself — only the (public) key id.
+ * and a bad secret never mask one another.
+ *
+ * The bad-secret and clock-skew alerts fire ONLY when the request names a key
+ * id we actually hold a secret for. A genuine Fygaro webhook always carries the
+ * credential id it was signed with, so a rotated secret or a drifted clock
+ * shows up under a KNOWN key id and still pages. A well-formed header under an
+ * unknown (or absent) key id — a curl probe, a scanner that learned the header
+ * names, a stale credential Fygaro no longer uses — can only ever fail
+ * verification and says nothing about our configuration; it is 401'd and
+ * logged, never paged. (The 2026-09-12 test-cluster probe with key id "x"
+ * paged ops twice for exactly this.) Deliberately NOT fired either for a plain
+ * missing/malformed signature (random internet noise). The no-secrets-configured
+ * alert is the exception: that is our misconfiguration regardless of what the
+ * request says. Never carries the secret itself — only the (public) key id.
  */
 const SIGNATURE_FAILURE_TITLE =
   "Fygaro webhook signature verification failing — check the webhook secret"
@@ -93,10 +103,18 @@ export const verifyFygaroSignature = (
 
     const keyId = req.headers["fygaro-key-id"]
     const secretsById = FygaroConfig.webhook?.secrets ?? {}
-    const candidateSecrets =
-      typeof keyId === "string" && keyId && secretsById[keyId]
-        ? [secretsById[keyId]]
-        : Object.values(secretsById)
+    // A request is attributable to us only when it names a key id we hold a
+    // secret for. Everything below that fails verification under an unknown
+    // key id is logged and rejected but never paged — see the alerting note
+    // above. Own-property check so "constructor"/"__proto__" can't match.
+    const knownKeyId =
+      typeof keyId === "string" &&
+      keyId.length > 0 &&
+      Object.prototype.hasOwnProperty.call(secretsById, keyId) &&
+      Boolean(secretsById[keyId])
+    const candidateSecrets = knownKeyId
+      ? [secretsById[keyId as string]]
+      : Object.values(secretsById)
     if (candidateSecrets.length === 0) {
       baseLogger.error(
         { keyId },
@@ -123,21 +141,27 @@ export const verifyFygaroSignature = (
     const timestampMs = timestamp.length > 11 ? timestampNum : timestampNum * 1000
     const skewMs = FygaroConfig.webhook?.timestampSkewMs ?? 300000
     if (Math.abs(Date.now() - timestampMs) > skewMs) {
-      baseLogger.warn({ timestamp }, "Fygaro webhook rejected: timestamp outside skew")
+      baseLogger.warn(
+        { timestamp, keyId, knownKeyId },
+        "Fygaro webhook rejected: timestamp outside skew",
+      )
       // A one-off stale/replayed webhook is noise, but a SYSTEMATIC skew — our
       // clock drifted past the tolerance, or NTP is down — 401s every real
       // payment while the service looks healthy, the same silent-misconfig class
       // the secret alerts guard against. Fire with its own static dedup key so
       // replayed old webhooks collapse to one warning per window and a stuck
-      // clock never masks (or is masked by) a bad-secret alert.
-      alertSignatureFailure(
-        "timestamp outside skew tolerance — check the server clock / NTP",
-        typeof keyId === "string" ? keyId : undefined,
-        {
-          dedupKey: generateDedupKey.fygaroClockSkew(),
-          title: "Fygaro webhook rejected: timestamp skew — check server clock/NTP",
-        },
-      )
+      // clock never masks (or is masked by) a bad-secret alert. Only under a
+      // known key id: a forged timestamp on a probe says nothing about our clock.
+      if (knownKeyId) {
+        alertSignatureFailure(
+          "timestamp outside skew tolerance — check the server clock / NTP",
+          keyId as string,
+          {
+            dedupKey: generateDedupKey.fygaroClockSkew(),
+            title: "Fygaro webhook rejected: timestamp skew — check server clock/NTP",
+          },
+        )
+      }
       return res.status(401).json({ error: "Signature timestamp outside tolerance" })
     }
 
@@ -159,11 +183,19 @@ export const verifyFygaroSignature = (
       return hashes.some((hash) => timingSafeHexEqual(expected, hash))
     })
     if (!valid) {
-      baseLogger.warn({ keyId }, "Fygaro webhook rejected: signature mismatch")
-      alertSignatureFailure(
-        "HMAC signature mismatch — secret likely rotated or wrong",
-        typeof keyId === "string" ? keyId : undefined,
+      baseLogger.warn(
+        { keyId, knownKeyId },
+        "Fygaro webhook rejected: signature mismatch",
       )
+      // Only page when we hold the secret the request claims to be signed
+      // with — then a mismatch means OUR copy is wrong (rotated/mispasted). An
+      // unknown key id can only ever mismatch and is not our misconfiguration.
+      if (knownKeyId) {
+        alertSignatureFailure(
+          "HMAC signature mismatch — secret likely rotated or wrong",
+          keyId as string,
+        )
+      }
       return res.status(401).json({ error: "Invalid signature" })
     }
 
