@@ -4,6 +4,7 @@ import { recordExceptionInCurrentSpan } from "@services/tracing"
 import axios from "axios"
 
 import { BridgeAlert } from "./index.types"
+import { envSummary, envTagPrefix } from "./env-label"
 
 // Slack / Mattermost-compatible incoming webhook ({ text }).
 export const sendSlack = async (alert: BridgeAlert): Promise<void> => {
@@ -11,8 +12,8 @@ export const sendSlack = async (alert: BridgeAlert): Promise<void> => {
 
   const icon = alert.severity === "critical" ? ":rotating_light:" : ":warning:"
   const lines = [
-    `${icon} *Bridge alert* - ${alert.title}`,
-    `*source:* \`${alert.source}\`  *severity:* \`${alert.severity}\``,
+    `${icon} *${envTagPrefix()} Bridge alert* - ${alert.title}`,
+    `*env:* \`${envSummary()}\`  *source:* \`${alert.source}\`  *severity:* \`${alert.severity}\``,
   ]
   if (alert.detail) lines.push(alert.detail)
   if (alert.context) {

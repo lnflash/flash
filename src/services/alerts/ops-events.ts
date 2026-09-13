@@ -1,4 +1,4 @@
-import { NETWORK, OPS_DISCORD_WEBHOOK_URL } from "@config"
+import { OPS_DISCORD_WEBHOOK_URL } from "@config"
 import { ErrorLevel, JMDAmount, USDAmount, USDTAmount } from "@domain/shared"
 import { recordExceptionInCurrentSpan } from "@services/tracing"
 
@@ -8,6 +8,7 @@ import {
   makeFieldBuilder,
   postEmbed,
 } from "./discord-embed"
+import { envLabel } from "./env-label"
 
 /**
  * Fire-and-forget ops event feed: posts color-coded Discord embeds to
@@ -92,8 +93,6 @@ export const toDisplayAmount = (
   value: amount instanceof USDTAmount ? amount.asNumber(2) : amount.asDollars(),
   currency: amount.currencyCode,
 })
-
-const envLabel = (): string => NETWORK ?? process.env.NODE_ENV ?? "unknown"
 
 const titleCase = (phrase: string): string =>
   phrase

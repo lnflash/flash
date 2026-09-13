@@ -1,5 +1,6 @@
 jest.mock("@config", () => ({
   ALERT_PAGERDUTY_ROUTING_KEY: "test-routing-key",
+  NETWORK: "mainnet",
 }))
 
 jest.mock("@services/tracing", () => ({
@@ -34,8 +35,9 @@ describe("sendPagerDuty", () => {
         event_action: "trigger",
         dedup_key: "bridge-api:5xx",
         payload: expect.objectContaining({
-          summary: "[bridge:bridge-api] Bridge API 502 on GET /transfers",
+          summary: "[PROD] [bridge:bridge-api] Bridge API 502 on GET /transfers",
           severity: "critical",
+          custom_details: expect.objectContaining({ env: "PROD (mainnet)" }),
         }),
       }),
       expect.any(Object),

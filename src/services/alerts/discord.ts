@@ -1,6 +1,7 @@
 import { ALERT_DISCORD_WEBHOOK_URL } from "@config"
 
 import { BridgeAlert } from "./index.types"
+import { envSummary, envTag, envTagPrefix } from "./env-label"
 import {
   DiscordEmbed,
   DiscordEmbedField,
@@ -56,13 +57,18 @@ export const sendDiscord = async (alert: BridgeAlert): Promise<void> => {
 
   const fields: DiscordEmbedField[] = []
   const field = makeFieldBuilder(fields)
+  // Env first so it is never the field that clampEmbedToBudget trims away.
+  field("Env", envSummary())
   field("Source", alert.source)
   field("Severity", alert.severity)
   fields.push(...contextFields(alert.context))
 
+  // The env is stamped three times on purpose — author line, title prefix,
+  // and a field — so it is unmissable whichever part of the embed the reader
+  // looks at. A test-cluster probe must never read as a prod incident.
   const embed: DiscordEmbed = {
-    author: { name: SOURCE_LABEL[alert.source] ?? alert.source },
-    title: truncate(alert.title, MAX_TITLE),
+    author: { name: `${SOURCE_LABEL[alert.source] ?? alert.source} · ${envTag()}` },
+    title: truncate(`${envTagPrefix()} ${alert.title}`, MAX_TITLE),
     description: alert.detail ? truncate(alert.detail, MAX_DESCRIPTION) : undefined,
     color: alert.severity === "critical" ? COLOR_CRITICAL : COLOR_WARNING,
     // Field count is capped centrally by clampEmbedToBudget (applied in

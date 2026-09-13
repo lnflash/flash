@@ -9,9 +9,13 @@ jest.mock("axios", () => ({
 const mockAlertDiscordUrl = {
   value: "https://discord.test/webhook" as string | undefined,
 }
+const mockNetwork = { value: "signet" as string | undefined }
 jest.mock("@config", () => ({
   get ALERT_DISCORD_WEBHOOK_URL() {
     return mockAlertDiscordUrl.value
+  },
+  get NETWORK() {
+    return mockNetwork.value
   },
 }))
 
@@ -38,6 +42,7 @@ const lastEmbed = () => mockPost.mock.calls.at(-1)?.[1]?.embeds?.[0]
 beforeEach(() => {
   jest.clearAllMocks()
   mockAlertDiscordUrl.value = "https://discord.test/webhook"
+  mockNetwork.value = "signet"
 })
 
 describe("sendDiscord", () => {
@@ -53,10 +58,65 @@ describe("sendDiscord", () => {
 
   it("uses a friendly author label per source, not a hardcoded 'Bridge alert'", async () => {
     await sendDiscord(baseAlert)
-    expect(lastEmbed().author.name).toBe("Fygaro")
+    expect(lastEmbed().author.name).toBe("Fygaro · TEST")
 
     await sendDiscord({ ...baseAlert, source: "bridge-webhook" })
-    expect(lastEmbed().author.name).toBe("Bridge")
+    expect(lastEmbed().author.name).toBe("Bridge · TEST")
+  })
+
+  describe("environment stamp", () => {
+    // A test-cluster probe and a prod outage used to render identically; the
+    // env must be visible in the author line, the title, AND a field so it
+    // survives whichever part of the embed the reader (or Discord) trims.
+    it("stamps TEST on every non-mainnet network", async () => {
+      for (const network of ["signet", "testnet", "regtest"]) {
+        mockNetwork.value = network
+        await sendDiscord(baseAlert)
+        const embed = lastEmbed()
+        expect(embed.author.name).toBe("Fygaro · TEST")
+        expect(embed.title.startsWith("[TEST] ")).toBe(true)
+        expect(embed.fields[0]).toEqual({
+          name: "Env",
+          value: `TEST (${network})`,
+          inline: true,
+        })
+      }
+    })
+
+    it("stamps PROD only on mainnet", async () => {
+      mockNetwork.value = "mainnet"
+      await sendDiscord(baseAlert)
+      const embed = lastEmbed()
+      expect(embed.author.name).toBe("Fygaro · PROD")
+      expect(embed.title).toBe(`[PROD] ${baseAlert.title}`)
+      expect(embed.fields[0]).toEqual({
+        name: "Env",
+        value: "PROD (mainnet)",
+        inline: true,
+      })
+    })
+
+    it("never claims PROD when the network is unset", async () => {
+      mockNetwork.value = undefined
+      await sendDiscord(baseAlert)
+      const embed = lastEmbed()
+      expect(embed.author.name).toBe("Fygaro · UNKNOWN")
+      expect(embed.title.startsWith("[UNKNOWN] ")).toBe(true)
+      expect(embed.fields[0].value.startsWith("UNKNOWN (")).toBe(true)
+    })
+
+    it("keeps the env field ahead of Source/Severity/context so budget trimming drops it last", async () => {
+      await sendDiscord(baseAlert)
+      const names = lastEmbed().fields.map((f: { name: string }) => f.name)
+      expect(names.slice(0, 3)).toEqual(["Env", "Source", "Severity"])
+    })
+
+    it("still caps the prefixed title at Discord's limit", async () => {
+      await sendDiscord({ ...baseAlert, title: "x".repeat(300) })
+      const title = lastEmbed().title
+      expect(title.length).toBeLessThanOrEqual(256)
+      expect(title.startsWith("[TEST] ")).toBe(true)
+    })
   })
 
   it("colors critical red and warning amber", async () => {
@@ -132,7 +192,7 @@ describe("sendDiscord", () => {
   it("falls back to the raw source string for an unmapped author label", async () => {
     const alert = { ...baseAlert, source: "unmapped-source" } as unknown as BridgeAlert
     await sendDiscord(alert)
-    expect(lastEmbed().author.name).toBe("unmapped-source")
+    expect(lastEmbed().author.name).toBe("unmapped-source · TEST")
   })
 
   it("keeps the embed under Discord's 6000-char aggregate limit, dropping trailing fields", async () => {
