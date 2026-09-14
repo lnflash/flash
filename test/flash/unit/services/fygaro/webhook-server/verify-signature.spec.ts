@@ -126,7 +126,10 @@ describe("verifyFygaroSignature", () => {
         keyId: "k_9f3a",
         configuredKeyIds: ["key1", "key2"],
       })
-      expect(String(fallbackWarn?.[1])).toMatch(/rotation\/skew alerts will not fire/i)
+      expect(String(fallbackWarn?.[1])).toMatch(/mismatch alert will not fire/i)
+      // The skew alert is HMAC-gated and fires under any key id, so the
+      // message must not claim it is disabled.
+      expect(String(fallbackWarn?.[1])).not.toMatch(/skew/i)
       expect(JSON.stringify(fallbackWarn)).not.toContain("secret-one")
       expect(JSON.stringify(fallbackWarn)).not.toContain("secret-two")
     })
@@ -412,6 +415,25 @@ describe("verifyFygaroSignature", () => {
         const req = makeReq({
           signature: `t=${t},v1=${sign(t, RAW_BODY, "secret-two")}`,
           keyId: "k_9f3a",
+        })
+
+        verifyFygaroSignature(req, res, jest.fn())
+
+        expect(res.status).toHaveBeenCalledWith(401)
+        expect(mockAlertBridge).toHaveBeenCalledTimes(1)
+        // The page carries the raw header key id (not `knownKeyId`) so ops
+        // can also see the mis-keyed config while fixing the clock.
+        expect(mockAlertBridge.mock.calls[0][0]).toMatchObject({
+          dedupKey: "fygaro:clock-skew",
+          context: { key_id: "k_9f3a" },
+        })
+      })
+
+      it("alerts on a stale, correctly signed request with NO key id header and reports key_id undefined", () => {
+        const t = String(Math.floor(Date.now() / 1000) - 3600)
+        const res = makeRes()
+        const req = makeReq({
+          signature: `t=${t},v1=${sign(t, RAW_BODY, "secret-two")}`,
         })
 
         verifyFygaroSignature(req, res, jest.fn())

@@ -216,9 +216,15 @@ export const verifyFygaroSignature = (
         "Fygaro webhook rejected: timestamp outside skew",
       )
       if (signedButStale) {
+        // Report the raw header, not `knownKeyId`: a signed-but-stale request
+        // under a key id missing from our config map is the one case where two
+        // things are wrong at once (mis-keyed config AND clock skew), and the
+        // page should carry the key id ops need to fix the first one. The
+        // HMAC check above already makes this alert unforgeable, so the value
+        // is trustworthy enough to display.
         alertSignatureFailure(
           "timestamp outside skew tolerance on a correctly signed request — check the server clock / NTP",
-          knownKeyId,
+          typeof keyId === "string" ? keyId : undefined,
           {
             dedupKey: generateDedupKey.fygaroClockSkew(),
             title: "Fygaro webhook rejected: timestamp skew — check server clock/NTP",
@@ -259,12 +265,14 @@ export const verifyFygaroSignature = (
       // Verified only via the try-every-secret fallback. Payments still flow,
       // but the config map's key ids don't match what Fygaro sends (or Fygaro
       // sent none). That mismatch is invisible on the happy path and would
-      // silently disable the rotation and skew alerts above — a rotated secret
-      // would then 401 every payment with knownKeyId=false and no page. Surface
-      // it here, while everything still works, so ops can fix the config keys.
+      // silently disable the secret-rotation/mismatch alert above — a rotated
+      // secret would then 401 every payment with knownKeyId=false and no page.
+      // (The skew alert is HMAC-gated and still fires under any key id.)
+      // Surface it here, while everything still works, so ops can fix the
+      // config keys.
       baseLogger.warn(
         { keyId, configuredKeyIds: Object.keys(secretsById) },
-        "Fygaro webhook verified via fallback — key id not in config; rotation/skew alerts will not fire for this key id",
+        "Fygaro webhook verified via fallback — key id not in config; the secret-rotation/mismatch alert will not fire for this key id",
       )
     }
 
