@@ -423,7 +423,7 @@ describe("verifyFygaroSignature", () => {
         expect(res.status).toHaveBeenCalledWith(401)
         expect(mockAlertBridge).toHaveBeenCalledTimes(1)
         // The page carries the raw header key id (not `knownKeyId`) so ops
-        // can also see the mis-keyed config while fixing the clock.
+        // can also see the mismatched key-id config while fixing the clock.
         expect(mockAlertBridge.mock.calls[0][0]).toMatchObject({
           dedupKey: "fygaro:clock-skew",
           context: { key_id: "k_9f3a" },

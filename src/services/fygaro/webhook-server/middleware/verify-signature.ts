@@ -39,7 +39,7 @@ type RawBodyRequest = express.Request & { rawBody?: string }
  * stale timestamp. So on skew we verify the HMAC FIRST and alert only when the
  * request is correctly signed with a secret we hold — a signed-but-stale
  * request is genuine Fygaro traffic (or a replay of it), which is exactly the
- * clock/NTP signal. An unsigned or mis-signed stale request is 401'd silently.
+ * clock/NTP signal. An unsigned or wrongly signed stale request is 401'd silently.
  *
  * Deliberately NOT fired either for a plain missing/malformed signature (random
  * internet noise). The no-secrets-configured alert is the exception: that is
@@ -218,7 +218,7 @@ export const verifyFygaroSignature = (
       if (signedButStale) {
         // Report the raw header, not `knownKeyId`: a signed-but-stale request
         // under a key id missing from our config map is the one case where two
-        // things are wrong at once (mis-keyed config AND clock skew), and the
+        // things are wrong at once (mismatched key-id config AND clock skew), and the
         // page should carry the key id ops need to fix the first one. The
         // HMAC check above already makes this alert unforgeable, so the value
         // is trustworthy enough to display.
