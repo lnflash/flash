@@ -299,7 +299,7 @@ export const GiftCardCatalogCache = () => {
     if (!syncedAt) {
       baseLogger.error(
         { providerId, countryCode: cc, syncedAt: stored.syncedAt },
-        "gift card catalog record has an unparseable syncedAt",
+        "gift card catalog record has an unparsable syncedAt",
       )
       return new GiftCardCatalogUnavailableError()
     }

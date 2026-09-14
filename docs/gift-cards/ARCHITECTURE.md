@@ -42,7 +42,7 @@ the vendor's invoice. Flash orders, pays exactly once, and delivers the claim.
 
 Error names all carry the `GiftCard` prefix because `error-map.ts` switches on
 the constructor name across every error module; a collision would be a silent
-mis-mapping.
+mismatched mapping.
 
 ## The provider port
 

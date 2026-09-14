@@ -165,7 +165,10 @@ export const makeFakeOrdersRepo = () => {
   type Found = GiftCardOrder | GiftCardOrderNotFoundError | RepositoryError
   type Listed = GiftCardOrder[] | RepositoryError
   type Transitioned =
-    GiftCardOrder | GiftCardOrderStateError | GiftCardOrderNotFoundError | RepositoryError
+    | GiftCardOrder
+    | GiftCardOrderStateError
+    | GiftCardOrderNotFoundError
+    | RepositoryError
 
   const repo = {
     store,

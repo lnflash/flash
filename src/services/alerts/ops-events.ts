@@ -23,7 +23,12 @@ import {
  */
 
 export type OpsFlow =
-  "verification" | "upgrade" | "cashout" | "deposit" | "transfer" | "giftcard"
+  | "verification"
+  | "upgrade"
+  | "cashout"
+  | "deposit"
+  | "transfer"
+  | "giftcard"
 
 export type OpsStatus = "success" | "pending" | "failed"
 

@@ -4,7 +4,7 @@ import { DomainError, ErrorLevel } from "@domain/shared"
  * Gift card errors. All names carry the `GiftCard` prefix because
  * `ApplicationErrors` spreads every error module into one namespace and
  * `error-map.ts` switches on the constructor name — a collision there is a
- * silent mis-mapping, not a compile error.
+ * silent mismatched mapping, not a compile error.
  */
 export class GiftCardError extends DomainError {
   readonly level: ErrorLevel = ErrorLevel.Warn
