@@ -103,9 +103,10 @@ describe("verifyFygaroSignature", () => {
 
   describe("fallback-verified requests (key id not in config)", () => {
     // Payments must still flow, but a config map whose key ids don't match
-    // what Fygaro sends silently disables the rotation/skew alerts: the next
-    // secret rotation would 401 every payment under knownKeyId=false with no
-    // page. Surface the mismatch on the SUCCESS path, while everything works.
+    // what Fygaro sends silently disables the secret-rotation/mismatch alert
+    // (skew is HMAC-gated and unaffected): the next secret rotation would 401
+    // every payment under knownKeyId=false with no page. Surface the mismatch
+    // on the SUCCESS path, while everything works.
     it("warns with the configured key ids when verified under an unknown key id", () => {
       const t = nowSeconds()
       const req = makeReq({
