@@ -18,8 +18,11 @@ jest.mock("@config", () => ({
   },
 }))
 
+const mockLogger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() }
 jest.mock("@services/logger", () => ({
-  baseLogger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+  get baseLogger() {
+    return mockLogger
+  },
 }))
 
 const mockAlertBridge = jest.fn()
@@ -96,6 +99,68 @@ describe("verifyFygaroSignature", () => {
     verifyFygaroSignature(req, res, next)
 
     expect(next).toHaveBeenCalled()
+  })
+
+  describe("fallback-verified requests (key id not in config)", () => {
+    // Payments must still flow, but a config map whose key ids don't match
+    // what Fygaro sends silently disables the rotation/skew alerts: the next
+    // secret rotation would 401 every payment under knownKeyId=false with no
+    // page. Surface the mismatch on the SUCCESS path, while everything works.
+    it("warns with the configured key ids when verified under an unknown key id", () => {
+      const t = nowSeconds()
+      const req = makeReq({
+        signature: `t=${t},v1=${sign(t, RAW_BODY, "secret-one")}`,
+        keyId: "k_9f3a",
+      })
+      const next = jest.fn()
+
+      verifyFygaroSignature(req, makeRes(), next)
+
+      expect(next).toHaveBeenCalled()
+      expect(mockAlertBridge).not.toHaveBeenCalled()
+      const fallbackWarn = mockLogger.warn.mock.calls.find(([, msg]) =>
+        /verified via fallback/i.test(String(msg)),
+      )
+      expect(fallbackWarn).toBeDefined()
+      expect(fallbackWarn?.[0]).toEqual({
+        keyId: "k_9f3a",
+        configuredKeyIds: ["key1", "key2"],
+      })
+      expect(String(fallbackWarn?.[1])).toMatch(/rotation\/skew alerts will not fire/i)
+      expect(JSON.stringify(fallbackWarn)).not.toContain("secret-one")
+      expect(JSON.stringify(fallbackWarn)).not.toContain("secret-two")
+    })
+
+    it("warns when verified with NO key id header", () => {
+      const t = nowSeconds()
+      const req = makeReq({
+        signature: `t=${t},v1=${sign(t, RAW_BODY, "secret-two")}`,
+      })
+      const next = jest.fn()
+
+      verifyFygaroSignature(req, makeRes(), next)
+
+      expect(next).toHaveBeenCalled()
+      expect(
+        mockLogger.warn.mock.calls.some(([, msg]) =>
+          /verified via fallback/i.test(String(msg)),
+        ),
+      ).toBe(true)
+    })
+
+    it("does NOT warn when verified under a known key id", () => {
+      const t = nowSeconds()
+      const req = makeReq({
+        signature: `t=${t},v1=${sign(t, RAW_BODY, "secret-one")}`,
+        keyId: "key1",
+      })
+      const next = jest.fn()
+
+      verifyFygaroSignature(req, makeRes(), next)
+
+      expect(next).toHaveBeenCalled()
+      expect(mockLogger.warn).not.toHaveBeenCalled()
+    })
   })
 
   it("accepts when one of multiple v1 hashes matches (secret rotation)", () => {
@@ -306,6 +371,75 @@ describe("verifyFygaroSignature", () => {
       expect(alert.context).toEqual({ key_id: "key1" })
     })
 
+    describe("clock-skew alert is unforgeable", () => {
+      // The key id is customer-visible by design (JWT `kid` in every checkout
+      // URL), so gating the skew page on it alone lets anyone with a checkout
+      // link page ops with a fake `t=`. The alert must require the stale
+      // request to be correctly signed with a secret we hold.
+      it("does NOT alert on a stale timestamp under a KNOWN key id when the HMAC does not verify", () => {
+        const t = "1789000000"
+        const res = makeRes()
+        const next = jest.fn()
+        const req = makeReq({
+          signature: `t=${t},v1=${sign(t, RAW_BODY, "wrong-secret")}`,
+          keyId: "key1",
+        })
+
+        verifyFygaroSignature(req, res, next)
+
+        expect(res.status).toHaveBeenCalledWith(401)
+        expect(next).not.toHaveBeenCalled()
+        expect(mockAlertBridge).not.toHaveBeenCalled()
+      })
+
+      it("does NOT alert on a stale timestamp under a KNOWN key id with a malformed hash", () => {
+        const t = String(Math.floor(Date.now() / 1000) - 3600)
+        const res = makeRes()
+        const req = makeReq({ signature: `t=${t},v1=deadbeef`, keyId: "key1" })
+
+        verifyFygaroSignature(req, res, jest.fn())
+
+        expect(res.status).toHaveBeenCalledWith(401)
+        expect(mockAlertBridge).not.toHaveBeenCalled()
+      })
+
+      it("alerts on a stale timestamp that IS correctly signed, even under an unknown key id", () => {
+        // Signed with a secret we hold = genuine Fygaro traffic (or a replay of
+        // it) that our clock rejected. That is the NTP signal regardless of
+        // whether the key id matched our config map.
+        const t = String(Math.floor(Date.now() / 1000) - 3600)
+        const res = makeRes()
+        const req = makeReq({
+          signature: `t=${t},v1=${sign(t, RAW_BODY, "secret-two")}`,
+          keyId: "k_9f3a",
+        })
+
+        verifyFygaroSignature(req, res, jest.fn())
+
+        expect(res.status).toHaveBeenCalledWith(401)
+        expect(mockAlertBridge).toHaveBeenCalledTimes(1)
+        expect(mockAlertBridge.mock.calls[0][0]).toMatchObject({
+          dedupKey: "fygaro:clock-skew",
+          context: { key_id: undefined },
+        })
+      })
+
+      it("checks the body before the skew window, so a stale request with no body is a 400 and never alerts", () => {
+        const t = String(Math.floor(Date.now() / 1000) - 3600)
+        const res = makeRes()
+        const req = makeReq({
+          signature: `t=${t},v1=${sign(t, RAW_BODY, "secret-one")}`,
+          keyId: "key1",
+          rawBody: "",
+        })
+
+        verifyFygaroSignature(req, res, jest.fn())
+
+        expect(res.status).toHaveBeenCalledWith(400)
+        expect(mockAlertBridge).not.toHaveBeenCalled()
+      })
+    })
+
     describe("unknown key id (probe / scanner / stale credential)", () => {
       // A genuine Fygaro webhook always names the credential it was signed
       // with. A well-formed header under a key id we hold no secret for can
@@ -329,11 +463,13 @@ describe("verifyFygaroSignature", () => {
       })
 
       it("401s a stale timestamp under an unknown key id WITHOUT alerting", () => {
+        // The 2026-09-12 probe: key id "x", t=1789000000, a hash computed
+        // with whatever the prober had — never a secret we hold.
         const t = "1789000000"
         const res = makeRes()
         const next = jest.fn()
         const req = makeReq({
-          signature: `t=${t},v1=${sign(t, RAW_BODY, "secret-one")}`,
+          signature: `t=${t},v1=${sign(t, RAW_BODY, "wrong-secret")}`,
           keyId: "x",
         })
 
@@ -363,7 +499,7 @@ describe("verifyFygaroSignature", () => {
         const t = String(Math.floor(Date.now() / 1000) - 3600)
         const res = makeRes()
         const req = makeReq({
-          signature: `t=${t},v1=${sign(t, RAW_BODY, "secret-one")}`,
+          signature: `t=${t},v1=${sign(t, RAW_BODY, "wrong-secret")}`,
         })
 
         verifyFygaroSignature(req, res, jest.fn())
