@@ -15,9 +15,11 @@ make start
 
 The setup script will check your prerequisites, prompt for Ibex sandbox credentials, install dependencies, and start Docker containers. After that, `make start` launches all four backend services.
 
+> **Skipping the Ibex prompt (Enter at "Ibex client ID (or press Enter to skip)", or `--skip-ibex` once [PR #511](https://github.com/lnflash/flash/pull/511) lands) gets the services up, but does not give you a working new-account flow.** Registering a new phone number on a stack without Ibex credentials can fail after the identity and account have been saved, leaving an account with no wallets. A later login attempt that returns a token is not evidence that onboarding worked: the account may still have no wallets. Do not use registration or the test login as a readiness check for the stack. Tracked as defect [8c8eb0c6](buzz://issue?id=8c8eb0c6d5825bc8dd34ab330804a7a8ce4f5e09a98bdd90dbb5d2790fe48da2&owner=155ba7b8b35642e7e16c0e413246d21948fa7c3bec18cda3cf6127051578ba5a&d=flash), reproduced by Backend at `7bde38707` on a warm stack. Whether valid sandbox credentials make registration succeed has not been separately verified.
+
 **GraphQL playground:** http://localhost:4002/graphql
 **Admin API:** http://localhost:4002/admin/graphql
-**Test login:** phone `+16505554328`, code `000000`
+**Test login:** phone `+16505554328`, code `000000` (first use registers this account, so the skip-Ibex caveat above applies)
 
 ---
 
