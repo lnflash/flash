@@ -80,6 +80,7 @@ import ApiKeyCreateMutation from "./root/mutation/api-key-create"
 import ApiKeyRevokeMutation from "./root/mutation/api-key-revoke"
 import ApiKeyRotateMutation from "./root/mutation/api-key-rotate"
 import BankAccountUpdateRequestMutation from "./root/mutation/bank-account-update-request"
+import GiftCardPurchaseMutation from "./root/mutation/gift-card-purchase"
 
 // TODO: // const fields: { [key: string]: GraphQLFieldConfig<any, GraphQLPublicContext> }
 export const mutationFields = {
@@ -185,6 +186,11 @@ export const mutationFields = {
 
       requestCashout: RequestCashoutMutation,
       initiateCashout: InitiateCashoutMutation,
+
+      // Pays a vendor invoice from input.walletId; wallet-level so the walletId
+      // middleware proves ownership before the resolver runs (the app layer
+      // checks again).
+      giftCardPurchase: GiftCardPurchaseMutation,
     },
   },
 }

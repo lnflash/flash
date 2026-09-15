@@ -277,3 +277,50 @@ type WalletOnChainPendingReceiveRecord = {
   displayPriceCurrency: string
   createdAt: Date
 }
+
+// Gift card orders (ENG-579). Money is in minor units of `currency`; sats are
+// plain numbers on the wire and branded as `Satoshis` by the mapper.
+interface GiftCardOrderStatusHistoryRecord {
+  status: string
+  at: Date
+  reason?: string | null
+}
+
+interface GiftCardProductSnapshotRecord {
+  name: string
+  brand: string
+  countryCode: string
+  currency: string
+  isOpenLoop: boolean
+  logoUrl?: string | null
+}
+
+interface GiftCardOrderRecord {
+  id: string
+  accountId: string
+  walletId: string
+  walletCurrency: string
+  providerId: string
+  providerProductId: string
+  providerOrderId?: string | null
+  productSnapshot: GiftCardProductSnapshotRecord
+  valueMinor: number
+  currency: string
+  quantity: number
+  quoteSats: number
+  invoiceSats?: number | null
+  paidSats?: number | null
+  paymentRequest?: string | null
+  paymentHash?: string | null
+  providerPaymentRef?: string | null
+  idempotencyKey: string
+  status: string
+  statusHistory: GiftCardOrderStatusHistoryRecord[]
+  claimCiphertext?: string | null
+  claimKeyId?: string | null
+  fulfilledAt?: Date | null
+  failureReason?: string | null
+  expiresAt: Date
+  createdAt: Date
+  updatedAt: Date
+}

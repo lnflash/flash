@@ -1090,6 +1090,348 @@ type FygaroTopupStatus {
   state: FygaroTopupState!
 }
 
+"""A scannable representation of the claim, when the vendor supplies one."""
+type GiftCardBarcode {
+  """The characters to encode into the barcode."""
+  chars: String!
+
+  """
+  The barcode symbology, e.g. 'CODE128', 'QR'. Vendor-supplied; render accordingly.
+  """
+  type: String!
+}
+
+"""
+The redemption data for a FULFILLED order. Bearer data: anyone holding it can spend the card. Returned only to the owning account, only once fulfilled, and never in a list — fetch it with giftCardOrder(id:).
+"""
+type GiftCardClaim {
+  """
+  Scannable form of the claim for in-store use, when the vendor supplies one.
+  """
+  barcode: GiftCardBarcode
+
+  """
+  A vendor page where the card can be viewed or redeemed, when one exists.
+  """
+  claimLink: String
+
+  """
+  The code(s) to redeem. Usually one; some cards carry a number and a PIN.
+  """
+  codes: [GiftCardClaimCode!]!
+}
+
+"""One redeemable code on a fulfilled card."""
+type GiftCardClaimCode {
+  """
+  What the vendor calls this code, e.g. 'Card number', 'PIN'. Null when the card has a single unlabelled code.
+  """
+  label: String
+
+  """
+  The code itself. Bearer data: show it, let the customer copy it, never log it.
+  """
+  value: String!
+}
+
+enum GiftCardDenominationType {
+  """
+  The card is sold only at the amounts listed in `denominations`; `minValue` and `maxValue` are null. A purchase at any other value is refused.
+  """
+  FIXED
+
+  """
+  Any whole amount from `minValue` to `maxValue` inclusive; `denominations` is empty.
+  """
+  VARIABLE
+}
+
+"""
+A gift card purchase, from creation through fulfilment. Poll giftCardOrder(id:) while `status` is transient; the claim appears once it is FULFILLED.
+"""
+type GiftCardOrder {
+  """
+  The redemption data. Present ONLY when status is FULFILLED and ONLY via giftCardOrder(id:) or the purchase payload — never in giftCardOrders.
+  """
+  claim: GiftCardClaim
+
+  """When the order was placed."""
+  createdAt: Timestamp!
+
+  """ISO 4217 currency of `value`."""
+  currency: String!
+
+  """
+  Short machine-oriented reason for a FAILED / PAYMENT_FAILED / REFUND_REQUIRED order, for support and diagnostics. Not customer wording; choose the copy from `status`.
+  """
+  failureReason: String
+
+  """When the card was issued. Null until FULFILLED."""
+  fulfilledAt: Timestamp
+
+  """Pass to giftCardOrder(id:) to poll. Stable for the life of the order."""
+  id: ID!
+
+  """
+  The vendor invoice amount in sats — what was paid for the card, excluding the Lightning routing fee. Null until the payment settles (and forever null for an order that never paid).
+  """
+  paidSats: SatAmount
+
+  """The card that was bought, as it was at purchase time."""
+  product: GiftCardProductSnapshot!
+
+  """How many cards the order is for."""
+  quantity: Int!
+
+  """Where the order is in its lifecycle. See each value for what to show."""
+  status: GiftCardOrderStatus!
+
+  """Face value of ONE card, minor units of `currency`."""
+  value: CentAmount!
+}
+
+"""A connection to a list of items."""
+type GiftCardOrderConnection {
+  """A list of edges."""
+  edges: [GiftCardOrderEdge!]
+
+  """Information to aid in pagination."""
+  pageInfo: PageInfo!
+}
+
+"""An edge in a connection."""
+type GiftCardOrderEdge {
+  """A cursor for use in pagination"""
+  cursor: String!
+
+  """The item at the end of the edge"""
+  node: GiftCardOrder!
+}
+
+enum GiftCardOrderStatus {
+  """
+  The order exists and the vendor has not yet been asked for an invoice. Transient; nothing has left the wallet. Keep polling.
+  """
+  CREATED
+
+  """
+  Terminal. The invoice was not paid before it expired; nothing left the wallet.
+  """
+  EXPIRED
+
+  """
+  Terminal. Refused BEFORE any payment left the wallet: the vendor rejected the order, the price moved past tolerance, or the invoice could not be read. `failureReason` says which. Nothing to refund; safe to try again.
+  """
+  FAILED
+
+  """
+  Terminal. The card is issued; `claim` carries the redemption data and `fulfilledAt` says when.
+  """
+  FULFILLED
+
+  """
+  The vendor's invoice is in hand and is about to be paid from the wallet. Transient. Keep polling.
+  """
+  INVOICE_ISSUED
+
+  """
+  The wallet has paid the vendor and the card is being issued. Transient. Keep polling.
+  """
+  PAID
+
+  """
+  Terminal. Only proven refusals land here (insufficient balance, a rejected send, a bad idempotency key): nothing left the wallet and it is safe to try again with a new idempotencyKey. An indeterminate send error goes to PAYMENT_PENDING instead, never here.
+  """
+  PAYMENT_FAILED
+
+  """
+  The Lightning payment is in flight and has neither settled nor failed. Transient, and can take minutes on a slow route. Keep polling; do not purchase again.
+  """
+  PAYMENT_PENDING
+
+  """
+  Terminal. The wallet paid but the vendor did not deliver a card. Flash has been alerted and will make it right; there is nothing for the customer to do and they must NOT be told to buy again.
+  """
+  REFUND_REQUIRED
+}
+
+"""
+One purchasable gift card in the catalog for a country. Money fields are minor units of `currency` (cents for USD); they are face values, not what the customer pays in sats — ask giftCardQuote for that.
+"""
+type GiftCardProduct {
+  """The merchant whose card this is. Catalog order is by brand, then name."""
+  brand: String!
+
+  """
+  Vendor-supplied grouping labels, e.g. 'Shopping'. Any one of them can be passed back as giftCardCatalog(category:) to filter.
+  """
+  categories: [String!]!
+
+  """The country the card is redeemable in."""
+  countryCode: CountryCode!
+
+  """ISO 4217 currency of every money field on this product."""
+  currency: String!
+
+  """Whether the card is sold at fixed amounts or any amount in a range."""
+  denominationType: GiftCardDenominationType!
+
+  """
+  The purchasable face values for a FIXED card, minor units, ascending. Empty for a VARIABLE card.
+  """
+  denominations: [CentAmount!]!
+
+  """
+  Pass to giftCardQuote and giftCardPurchase. Opaque; stable across catalog refreshes for the same card.
+  """
+  id: ID!
+
+  """
+  True for a network-branded prepaid card (Visa/Mastercard-style) spendable anywhere, as opposed to a single-merchant card. Only listed when the operator allows them.
+  """
+  isOpenLoop: Boolean!
+
+  """Brand artwork, when the vendor supplies one."""
+  logoUrl: String
+
+  """
+  Largest quantity a single order may carry for this product. Vendor-specific; 1 while a vendor's multi-card fulfilment response has not been verified.
+  """
+  maxQuantity: Int!
+
+  """Largest face value for a VARIABLE card, minor units. Null for FIXED."""
+  maxValue: CentAmount
+
+  """Smallest face value for a VARIABLE card, minor units. Null for FIXED."""
+  minValue: CentAmount
+
+  """Display name of the card, e.g. 'Amazon.com Gift Card'."""
+  name: String!
+
+  """
+  Vendor reward on face value, in basis points (100 = 1%). Informational; the sats actually rebated for a given purchase are on the quote as rewardSats.
+  """
+  rewardBps: Int!
+
+  """The card's terms and conditions, when the vendor supplies a link."""
+  termsUrl: String
+
+  """
+  True when the vendor only accepts whole currency units for a variable-value card (no cents). Values that are not a multiple of 100 minor units are refused.
+  """
+  wholeUnitsOnly: Boolean!
+}
+
+"""A connection to a list of items."""
+type GiftCardProductConnection {
+  """A list of edges."""
+  edges: [GiftCardProductEdge!]
+
+  """Information to aid in pagination."""
+  pageInfo: PageInfo!
+}
+
+"""An edge in a connection."""
+type GiftCardProductEdge {
+  """A cursor for use in pagination"""
+  cursor: String!
+
+  """The item at the end of the edge"""
+  node: GiftCardProduct!
+}
+
+"""
+The product as it was when the order was placed. Frozen on the order so a catalog refresh (rename, delisting) never changes what a past order says it bought.
+"""
+type GiftCardProductSnapshot {
+  """Merchant at purchase time."""
+  brand: String!
+
+  """Country the card is redeemable in."""
+  countryCode: CountryCode!
+
+  """ISO 4217 currency of the order's `value`."""
+  currency: String!
+
+  """True for a network-branded prepaid card spendable anywhere."""
+  isOpenLoop: Boolean!
+
+  """Brand artwork at purchase time, if any."""
+  logoUrl: String
+
+  """Display name at purchase time."""
+  name: String!
+}
+
+input GiftCardPurchaseInput {
+  """
+  Client-generated, 8 to 64 characters, unique per purchase attempt (a UUID is ideal). Retrying with the SAME key and the same product/value/quantity returns the existing order instead of buying again; the same key with different parameters is refused. Generate a new key for a genuinely new purchase.
+  """
+  idempotencyKey: String!
+
+  """A GiftCardProduct.id from giftCardCatalog."""
+  productId: ID!
+
+  """How many cards, 1 to 10. Defaults to 1."""
+  quantity: Int = 1
+
+  """
+  Face value of ONE card, minor units of the product's currency. Must be one of the product's denominations (FIXED) or within minValue..maxValue (VARIABLE).
+  """
+  value: CentAmount!
+
+  """
+  The wallet that pays. Must belong to the calling account; the sats cost from giftCardQuote is what leaves it.
+  """
+  walletId: WalletId!
+}
+
+type GiftCardPurchasePayload {
+  errors: [Error!]!
+
+  """
+  The order, in whatever state the purchase reached before returning — often already FULFILLED with the claim attached, sometimes still PAID or PAYMENT_PENDING. Poll giftCardOrder(id:) while the status is transient. Absent when the purchase was refused before an order existed; may be present ALONGSIDE an error when the card was issued but its claim could not be read.
+  """
+  order: GiftCardOrder
+}
+
+"""
+What a gift card purchase would cost right now. Not a reservation: nothing is held and no limit is consumed. giftCardPurchase re-prices at order time and refuses to pay if the vendor's invoice drifted past tolerance from this, so a stale quote costs a retry, never money.
+"""
+type GiftCardQuote {
+  """ISO 4217 currency of `value` and `fiatCost`."""
+  currency: String!
+
+  """
+  After this the vendor no longer honours the price. Ask again before purchasing; the purchase itself re-quotes regardless.
+  """
+  expiresAt: Timestamp!
+
+  """
+  What the vendor charges for the whole order, minor units of `currency`. Can differ from value x quantity when the vendor prices below face.
+  """
+  fiatCost: CentAmount!
+
+  """The product this quote is for, echoed back."""
+  productId: ID!
+
+  """How many cards the quote covers, echoed back."""
+  quantity: Int!
+
+  """
+  Sats the vendor rebates on this order once fulfilled. Zero when the card carries no reward.
+  """
+  rewardSats: SatAmount!
+
+  """
+  What leaves the wallet for the whole order, in sats, at the vendor's current price. This is the number to show as the price.
+  """
+  satsCost: SatAmount!
+
+  """Face value of ONE card, minor units of `currency`, echoed back."""
+  value: CentAmount!
+}
+
 """
 Provides global settings for the application which might have an impact for the user.
 """
@@ -1114,6 +1456,15 @@ type Globals {
   are unavailable — the app should hide the estimate and fall back gracefully.
   """
   fygaroTopup: FygaroTopupInfo
+
+  """
+  Whether gift card entry points (the storefront tab, "buy a
+  gift card" actions) should be shown to the user. True only when the
+  instance-wide giftCards feature flag is on AND at least one gift card
+  provider is enabled; when false the catalog, quote, and purchase fields
+  refuse. Order history and delivered codes stay readable regardless.
+  """
+  giftCardsEnabled: Boolean!
 
   """
   The domain name for lightning addresses accepted by this Galoy instance
@@ -1627,6 +1978,11 @@ type Mutation {
   deviceNotificationTokenCreate(input: DeviceNotificationTokenCreateInput!): SuccessPayload!
   feedbackSubmit(input: FeedbackSubmitInput!): SuccessPayload!
   fygaroCheckoutCreate(input: FygaroCheckoutCreateInput!): FygaroCheckoutCreatePayload!
+
+  """
+  Buy a gift card: pays the vendor from `walletId` over Lightning and returns the order. Re-prices at order time and refuses to pay if the price drifted past tolerance from the quote — no money moves on a refusal. Money moves at most once per idempotencyKey, so retry a timed-out call with the SAME key.
+  """
+  giftCardPurchase(input: GiftCardPurchaseInput!): GiftCardPurchasePayload!
   idDocumentUploadUrlGenerate(input: IdDocumentUploadUrlGenerateInput!): IdDocumentUploadUrlPayload!
 
   """
@@ -2040,6 +2396,67 @@ type Query {
   The outcome of a card top-up, by the checkout id returned from fygaroCheckoutCreate. Null when the checkout is unknown, expired, or not this account's — never as a way of saying 'not yet': a checkout we simply cannot read right now comes back as UNCONFIRMED so a transient fault is not reported to the customer as a payment that never existed.
   """
   fygaroTopupStatus(checkoutId: String!): FygaroTopupStatus
+
+  """
+  The gift cards on sale for a country, in stock only, ordered by brand then name. Served from a cached catalog: a card can be listed and then refused by giftCardQuote if it sold out in between. Paginate forwards with `first`/`after`.
+  """
+  giftCardCatalog(
+    """
+    The `endCursor` (or any edge cursor) from the previous page. An unknown cursor restarts from the beginning rather than guessing; the client may see a repeat, never a gap.
+    """
+    after: String
+
+    """Keep only cards carrying this category label (case-insensitive)."""
+    category: String
+
+    """
+    Which country's catalog. Defaults to the calling account's country, which is also the country the purchase will be routed by — browse another country's catalog and the purchase of a card from it is refused as not available.
+    """
+    countryCode: CountryCode
+
+    """Page size, 1 to 200. Defaults to 50."""
+    first: Int
+
+    """
+    Keep only cards whose name or brand contains this text (case-insensitive).
+    """
+    search: String
+  ): GiftCardProductConnection!
+
+  """
+  One of the calling account's gift card orders, by id — the endpoint to poll after giftCardPurchase, and the ONLY place the claim is returned. Null when the id is unknown or belongs to another account; the two are deliberately indistinguishable. A FULFILLED order whose claim cannot currently be read is still returned, with `claim` null.
+  """
+  giftCardOrder(
+    """A GiftCardOrder.id from giftCardPurchase or giftCardOrders."""
+    id: ID!
+  ): GiftCardOrder
+
+  """
+  The calling account's gift card orders, newest first. Claims are never part of a listing — fetch one order with giftCardOrder(id:) for that.
+  """
+  giftCardOrders(
+    """The `endCursor` (or any edge cursor) from the previous page."""
+    after: String
+
+    """Page size, 1 to 100. Defaults to 20."""
+    first: Int
+  ): GiftCardOrderConnection!
+
+  """
+  What a purchase would cost right now, in sats, for a product at a face value. Refuses exactly what giftCardPurchase would refuse — a value off the card's denominations, a card not sold in the account's country, a sold-out card — so the client can surface that before asking the customer to confirm.
+  """
+  giftCardQuote(
+    """A GiftCardProduct.id from giftCardCatalog."""
+    productId: ID!
+
+    """How many cards, 1 to 10. Defaults to 1."""
+    quantity: Int = 1
+
+    """
+    Face value of ONE card, minor units of the product's currency. Must be one of the product's denominations (FIXED) or within minValue..maxValue (VARIABLE).
+    """
+    value: CentAmount!
+  ): GiftCardQuote!
   globals: Globals
   invitePreview(token: String!): InvitePreview
   isFlashNpub(input: IsFlashNpubInput!): IsFlashNpubPayload

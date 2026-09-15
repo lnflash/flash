@@ -11,8 +11,10 @@ import {
 } from "@config"
 
 import { getSupportedCountries } from "@app/authentication/get-supported-countries"
+import { GIFT_CARD_PROVIDER_IDS } from "@domain/gift-cards"
 
 import { getFygaroSettings } from "@services/fygaro/webhook-server/fygaro-settings"
+import { isGiftCardProviderEnabled } from "@services/gift-cards/registry"
 
 import { GT } from "@graphql/index"
 import Globals from "@graphql/public/types/object/globals"
@@ -47,6 +49,13 @@ const GlobalsQuery = GT.Field({
       cashoutEnabled: Cashout.Enabled,
       bridgeEnabled: BridgeConfig.enabled,
       referralRewardEnabled: getReferralRewardConfig().enabled,
+      // The rail flag alone is not enough: with every provider off, every
+      // gift-card field answers GIFT_CARD_PROVIDER_UNAVAILABLE, so the entry
+      // point must stay hidden. `isGiftCardProviderEnabled` folds in the
+      // master `giftCards.enabled` switch.
+      giftCardsEnabled: GIFT_CARD_PROVIDER_IDS.some((id) =>
+        isGiftCardProviderEnabled(id),
+      ),
       fygaroTopup: fygaroSettings
         ? {
             minimumAmount: fygaroSettings.minimumTopup,

@@ -38,6 +38,10 @@ export type OutcomeNotificationArgs = {
   // Merged into the FCM `data` payload alongside `type`. Keys are conventional
   // across flows: `amount` is MAJOR units ("56.52"), `currency` an ISO code.
   extraData?: Record<string, string>
+  // Extra i18n interpolations applied to BOTH `${phraseBase}.title` and
+  // `${phraseBase}.body` (e.g. `{{brand}}` in "Your {{brand}} gift card is
+  // ready"). `amount` stays a body-only argument via `amountArg`.
+  replacements?: Record<string, string>
 }
 
 /**
@@ -53,6 +57,7 @@ const sendOutcomeNotification = async ({
   dataType,
   amountArg,
   extraData,
+  replacements,
 }: OutcomeNotificationArgs): Promise<true | ApplicationError> => {
   const accountId = checkedToAccountId(accountIdRaw)
   if (accountId instanceof Error) return accountId
@@ -65,8 +70,11 @@ const sendOutcomeNotification = async ({
 
   const locale = getLanguageOrDefault(user.language)
 
-  const title = i18n.__({ phrase: `${phraseBase}.title`, locale })
-  const body = i18n.__({ phrase: `${phraseBase}.body`, locale }, { amount: amountArg })
+  const title = i18n.__({ phrase: `${phraseBase}.title`, locale }, { ...replacements })
+  const body = i18n.__(
+    { phrase: `${phraseBase}.body`, locale },
+    { ...replacements, amount: amountArg },
+  )
 
   const result = await PushNotificationsService().sendFilteredNotification({
     deviceTokens: user.deviceTokens,

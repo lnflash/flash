@@ -102,6 +102,61 @@ type FygaroWebhookConfig = {
   timestampSkewMs: number
 }
 
+type GiftCardsLevelLimit = {
+  perCardCents: number
+  dailyCents: number
+}
+
+type GiftCardsConfig = {
+  enabled: boolean
+  allowOpenLoop: boolean
+  feeBps: number
+  claimDataEncryptionKey: string
+  quoteToleranceBps: number
+  routing: {
+    default: GiftCardProviderId
+    byCountry: Record<string, GiftCardProviderId>
+  }
+  providers: {
+    bitcoinCompany: {
+      enabled: boolean
+      baseUrl: string
+      email: string
+      password: string
+      referralCode: string
+      timeoutMs: number
+    }
+    bitrefill: {
+      enabled: boolean
+      baseUrl: string
+      apiId: string
+      apiSecret: string
+      webhookSecret: string
+      timeoutMs: number
+    }
+  }
+  catalog: {
+    syncIntervalSeconds: number
+    ttlSeconds: number
+    staleAfterSeconds: number
+  }
+  limits: {
+    mode: GiftCardLimitsMode
+    minAccountLevel: number
+    minAccountAgeHours: number
+    maxOrdersPerHour: number
+    vendorDailyCapCents: number
+    vendorOpenLoopCardCapCents: number
+    vendorClosedLoopCardCapCents: number
+    perLevel: {
+      level0: GiftCardsLevelLimit
+      level1: GiftCardsLevelLimit
+      level2: GiftCardsLevelLimit
+      level3: GiftCardsLevelLimit
+    }
+  }
+}
+
 type FygaroConfig = {
   enabled: boolean
   webhook: FygaroWebhookConfig
@@ -299,6 +354,7 @@ type YamlSchema = {
     enabled: boolean
   }
   fygaro: FygaroConfig
+  giftCards: GiftCardsConfig
   sendgrid: SendGridConfig
   frappe: FrappeConfig
   fcmTopics: {

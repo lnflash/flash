@@ -7,6 +7,7 @@ import {
   Levels,
 } from "@config"
 import { AccountStatus, UsernameRegex } from "@domain/accounts"
+import { GiftCardOrderStatus } from "@domain/gift-cards"
 import { WalletIdRegex, WalletType } from "@domain/wallets"
 import { WalletCurrency } from "@domain/shared"
 import mongoose from "mongoose"
@@ -929,4 +930,94 @@ export const BridgeExternalAccount = mongoose.model<IBridgeExternalAccountRecord
 export const BridgeWithdrawal = mongoose.model<IBridgeWithdrawalRecord>(
   "BridgeWithdrawal",
   BridgeWithdrawalSchema,
+)
+
+// ── Gift card orders (ENG-579) ──────────────────────────────────────────────
+// One document per purchase attempt. `status` only ever moves through
+// `GIFT_CARD_TRANSITIONS`, and every move is a conditional findOneAndUpdate on
+// the current status (see gift-card-orders.ts), so two workers racing on the
+// same order cannot both win. `claimCiphertext` is the AES-GCM-sealed bearer
+// data; the toJSON transform below drops it so a stray log line or GraphQL
+// spread cannot leak it.
+
+const GiftCardOrderStatusHistorySchema = new Schema<GiftCardOrderStatusHistoryRecord>(
+  {
+    status: { type: String, enum: Object.values(GiftCardOrderStatus), required: true },
+    at: { type: Date, required: true },
+    reason: { type: String, default: null },
+  },
+  { _id: false },
+)
+
+const GiftCardProductSnapshotSchema = new Schema<GiftCardProductSnapshotRecord>(
+  {
+    name: { type: String, required: true },
+    brand: { type: String, required: true },
+    countryCode: { type: String, required: true },
+    currency: { type: String, required: true },
+    isOpenLoop: { type: Boolean, required: true },
+    logoUrl: { type: String, default: null },
+  },
+  { _id: false },
+)
+
+export const GiftCardOrderSchema = new Schema<GiftCardOrderRecord>(
+  {
+    id: { type: String, required: true },
+    accountId: { type: String, required: true },
+    walletId: { type: String, required: true },
+    walletCurrency: { type: String, required: true },
+    providerId: { type: String, required: true },
+    providerProductId: { type: String, required: true },
+    providerOrderId: { type: String, default: null },
+    productSnapshot: { type: GiftCardProductSnapshotSchema, required: true },
+    valueMinor: { type: Number, required: true },
+    currency: { type: String, required: true },
+    quantity: { type: Number, required: true },
+    quoteSats: { type: Number, required: true },
+    invoiceSats: { type: Number, default: null },
+    paidSats: { type: Number, default: null },
+    paymentRequest: { type: String, default: null },
+    paymentHash: { type: String, default: null },
+    providerPaymentRef: { type: String, default: null },
+    idempotencyKey: { type: String, required: true },
+    status: { type: String, enum: Object.values(GiftCardOrderStatus), required: true },
+    statusHistory: {
+      type: [GiftCardOrderStatusHistorySchema],
+      required: true,
+      default: [],
+    },
+    claimCiphertext: { type: String, default: null },
+    claimKeyId: { type: String, default: null },
+    fulfilledAt: { type: Date, default: null },
+    failureReason: { type: String, default: null },
+    expiresAt: { type: Date, required: true },
+    createdAt: { type: Date, required: true, default: Date.now },
+    updatedAt: { type: Date, required: true, default: Date.now },
+  },
+  {
+    toJSON: {
+      transform: (_doc, ret) => {
+        delete ret.claimCiphertext
+        return ret
+      },
+    },
+  },
+)
+
+GiftCardOrderSchema.index({ id: 1 }, { unique: true })
+GiftCardOrderSchema.index({ accountId: 1, createdAt: -1 })
+// `partialFilterExpression`, not `sparse`: a sparse compound index still indexes
+// a document when ANY of its keys is present, and `providerId` always is — so
+// the second order awaiting a vendor id (`providerOrderId: null`) would collide.
+GiftCardOrderSchema.index(
+  { providerId: 1, providerOrderId: 1 },
+  { unique: true, partialFilterExpression: { providerOrderId: { $type: "string" } } },
+)
+GiftCardOrderSchema.index({ status: 1, updatedAt: 1 })
+GiftCardOrderSchema.index({ walletId: 1, idempotencyKey: 1 }, { unique: true })
+
+export const GiftCardOrders = mongoose.model<GiftCardOrderRecord>(
+  "GiftCardOrder",
+  GiftCardOrderSchema,
 )

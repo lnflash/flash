@@ -130,6 +130,12 @@
         "title": "Tu recarga está en camino",
         "body": "Estamos acreditando {{amount}} a tu billetera. Debería aparecer en breve."
       }
+    },
+    "giftCard": {
+      "fulfilled": {
+        "title": "Tu tarjeta de regalo {{brand}} está lista",
+        "body": "Tu tarjeta de regalo {{brand}} de {{amount}} está lista. Abre Flash para ver tu código."
+      }
     }
   }
 }
