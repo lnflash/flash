@@ -134,7 +134,7 @@ type BTCWallet implements Wallet {
   accountId: ID!
 
   """
-  Not denominated in sats. Always null for external BTC wallets; see Wallet.balance.
+  Not denominated in sats. Null for external BTC wallets; no value shape is guaranteed for other BTC wallets.
   """
   balance: FractionalCentAmount
   id: ID!
@@ -855,7 +855,7 @@ interface Wallet {
   accountId: ID!
 
   """
-  Balance in US cents as a float, not sats, for every wallet type. Null for external wallets.
+  For USD and USDT wallets, the balance in US cents as a float. See the concrete wallet type for units, nullability and exceptions.
   """
   balance: FractionalCentAmount
   id: ID!

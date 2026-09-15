@@ -52,7 +52,7 @@ const BtcWallet = GT.Object<Wallet>({
     balance: {
       type: FractionalCentAmount,
       description:
-        "Not denominated in sats. Always null for external BTC wallets; see Wallet.balance.",
+        "Not denominated in sats. Null for external BTC wallets; no value shape is guaranteed for other BTC wallets.",
       resolve: async (source) => {
         if (source.type === WalletType.External) return null
         const balanceSats = await Wallets.getBalanceForWallet({
