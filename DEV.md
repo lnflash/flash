@@ -42,9 +42,18 @@ Flash uses YAML config files. Ibex OAuth2 credentials go in local config overrid
 
 ### 2. App Config Overrides
 
-The base config is at `dev/config/base-config.yaml`. Secrets and local overrides go in `$CONFIG_PATH/dev-overrides.yaml` (default: `~/.config/flash/dev-overrides.yaml`).
+The base config is at `dev/config/base-config.yaml`. Secrets and local overrides go in `$CONFIG_PATH/dev-overrides.yaml`.
 
-**Option A — Run the interactive script:**
+`CONFIG_PATH` has no default in the `Makefile` or in `dev/config/set-overrides.sh`; only `dev/setup.sh` falls back to `~/.config/flash`. With it unset, `make start` looks for `/dev-overrides.yaml`, logs `ENOENT` for each service, and runs on the base config alone. Set it in the shell you run `make` from, before anything below:
+
+```bash
+export CONFIG_PATH="$HOME/.config/flash"
+mkdir -p "$CONFIG_PATH"
+```
+
+Add the same line to your shell profile or `.envrc` so it survives a new terminal.
+
+**Option A — Run the interactive script** (writes `$CONFIG_PATH/dev-overrides.yaml`):
 
 ```bash
 ./dev/config/set-overrides.sh

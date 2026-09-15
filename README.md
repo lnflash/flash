@@ -3,11 +3,11 @@
 [![Twitter Follow](https://img.shields.io/twitter/follow/LNFlash?style=social)](https://twitter.com/LNFlash)
 [![GitHub Repo stars](https://img.shields.io/github/stars/lnflash/flash?style=social)](https://github.com/lnflash/flash/stargazers)
 ### 💡 Get help
-[Q&A](https://github.com/GaloyMoney/galoy/discussions) or [Mattermost 💬](https://chat.galoy.io)
+Open an [issue](https://github.com/lnflash/flash/issues) or email [support@getflash.io](mailto:support@getflash.io). Developer docs for the public API are at [docs.flashapp.me](https://docs.flashapp.me).
 
 ### TLDR
 
-Flash is an opinionated bitcoin banking platform forked from Galoy.
+Flash is an opinionated Bitcoin banking platform for the Caribbean. It started as a fork of [Galoy](https://github.com/GaloyMoney/blink) (now Blink) and has since diverged; upstream Galoy channels are not Flash support channels.
 
 This repo represents the main api that brings all functionality together.
 Take a look at the [Quickstart](./quickstart) if you want to take it for a spin.
@@ -15,25 +15,26 @@ Take a look at the [Quickstart](./quickstart) if you want to take it for a spin.
 ### Responsible disclosure 
 
 Found critical bugs/vulnerabilities?
-Please email them security@galoy.io Thanks!
+Please email security@getflash.io. See [SECURITY.md](./SECURITY.md).
 
 ### Get Started
 
 Want to try it out and contribute? Checkout the [dev documentation](./DEV.md) to deploy locally with a docker compose script.
 
-If you have questions, you can [join our Workspace](https://chat.galoy.io)
+If you have questions, open an [issue](https://github.com/lnflash/flash/issues).
 
-For an overview of all relevant repository checkout [awesome-galoy](https://github.com/GaloyMoney/awesome-galoy).
-### Galoy-Backend features
+The other Flash repositories (mobile app, POS, docs, deployments) live in the [lnflash](https://github.com/lnflash) organization.
+### Backend features
+
+Inherited from Galoy unless noted. Items marked "in progress" describe the upstream design at fork time and are not Flash roadmap.
 
 - GraphqlAPI:
   - Public API following industry best practices
-  - For [end clients](./src/graphql/public/schema.graphql). [Documentation](https://galoymoney.github.io/galoy/)
+  - For [end clients](./src/graphql/public/schema.graphql). [Documentation](https://docs.flashapp.me)
   - For [admin activities](./src/graphql/admin/schema.graphql)
 - Authentication:
-  - Code is sent via twillio to end users phone number which can be exchanged for jwt auth token
-  - OAuth integration (in progress)
-  - Account scoped API keys (in progress)
+  - Code is sent via Twilio (SMS or WhatsApp) to the end user's phone number and exchanged for an opaque session token
+  - Account-scoped API keys (shipped): `apiKeyCreate`, `apiKeys`, `apiKeyRotate`, `apiKeyRevoke`, sent as `X-API-KEY`. See the [API keys guide](https://docs.flashapp.me/guides/api-keys)
 - Internal ledger:
   - Records all account activity via double entry accounting
   - Support for integrating fiat currencies (in progress)

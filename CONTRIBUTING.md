@@ -1,6 +1,6 @@
 # Contributing
 
-This repo is built and maintained by the Galoy team. We welcome and appreciate new contributions and encourage you to check out the repo and [join our community](https://chat.galoy.io/) to get started.
+This repo is maintained by the Flash team. It began as a fork of Galoy, so much of the layout described here is inherited from upstream. We welcome new contributions: open an [issue](https://github.com/lnflash/flash/issues) or a pull request to get started.
 
 To help get you started, we will explain a bit about how we've laid out the code here and some of the practices we use. Our layout details fall mostly into two categories:
 
