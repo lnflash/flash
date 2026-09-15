@@ -377,10 +377,9 @@ describe("settleOrderFromVendor", () => {
             providerPaymentRef: null,
           }),
         )
-        const res = await settleOrderFromVendor(
-          order,
-          kind === "failed" ? { kind, reason: "x" } : { kind },
-        )
+        const status: GiftCardProviderOrderStatus =
+          kind === "failed" ? { kind, reason: "x" } : { kind: "awaitingPayment" }
+        const res = await settleOrderFromVendor(order, status)
         expect(res).toBe(order)
         expect(repo.transition).not.toHaveBeenCalled()
         expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
