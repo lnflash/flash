@@ -716,7 +716,9 @@ type BTCWallet implements Wallet
 {
   accountId: ID!
 
-  """A balance stored in BTC."""
+  """
+  Not denominated in sats. Always null for external BTC wallets; see Wallet.balance.
+  """
   balance: FractionalCentAmount
   id: ID!
   isExternal: Boolean!
@@ -2937,6 +2939,10 @@ type UsdtWallet implements Wallet
   @join__type(graph: PUBLIC)
 {
   accountId: ID!
+
+  """
+  USDT balance in US cents as a float (1 USDT = 100 cents, up to 4 decimal places).
+  """
   balance: FractionalCentAmount
   id: ID!
   isExternal: Boolean!
@@ -2984,6 +2990,10 @@ type UsdWallet implements Wallet
   @join__type(graph: PUBLIC)
 {
   accountId: ID!
+
+  """
+  Balance in US cents as a float (up to 8 decimal places). Null for external wallets.
+  """
   balance: FractionalCentAmount
   id: ID!
   isExternal: Boolean!
@@ -3317,6 +3327,10 @@ interface Wallet
   @join__type(graph: PUBLIC)
 {
   accountId: ID!
+
+  """
+  Balance in US cents as a float, not sats, for every wallet type. Null for external wallets.
+  """
   balance: FractionalCentAmount
   id: ID!
   isExternal: Boolean!

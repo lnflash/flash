@@ -54,6 +54,8 @@ const UsdWallet = GT.Object<Wallet>({
     },
     balance: {
       type: FractionalCentAmount,
+      description:
+        "Balance in US cents as a float (up to 8 decimal places). Null for external wallets.",
       resolve: async (source, args, ctx) => {
         if (source.type === WalletType.External) return null
         let balanceWallet = source

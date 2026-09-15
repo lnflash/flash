@@ -29,6 +29,8 @@ const IWallet = GT.Interface({
     },
     balance: {
       type: FractionalCentAmount,
+      description:
+        "Balance in US cents as a float, not sats, for every wallet type. Null for external wallets.",
     },
     isExternal: {
       type: GT.NonNull(GT.Boolean),
