@@ -114,7 +114,8 @@ UC                     Repo                 IBEX                  Worker (30s)  
                                                           |            [ops: order-failed]
                                                           | pending -> leave while young (IBEX's word);
                                                           |            past the 60-min warn horizon the vendor is polled too:
-                                                          |              vouch (fulfilled / paidPendingFulfillment on a no-ref row)
+                                                          |              vouch (fulfilled only; a paidPendingFulfillment
+                                                          |                answer is left for the re-read)
                                                           |                -> PAID (vendor-reported-payment) -> normal PAID path
                                                           |              not paid AND now > expiresAt + 24h
                                                           |                -> PAYMENT_FAILED (payment-unresolved-expired,
