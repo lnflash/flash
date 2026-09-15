@@ -112,9 +112,18 @@ UC                     Repo                 IBEX                  Worker (30s)  
                                                           |   PAID->FULFILLED, push       |
                                                           | failed  -> PAYMENT_PENDING->PAYMENT_FAILED
                                                           |            [ops: order-failed]
-                                                          | pending -> leave (IBEX's word beats a vendor poll)
+                                                          | pending -> leave while young (IBEX's word);
+                                                          |            past the 60-min warn horizon the vendor is polled too:
+                                                          |              vouch (fulfilled / paidPendingFulfillment on a no-ref row)
+                                                          |                -> PAID (vendor-reported-payment) -> normal PAID path
+                                                          |              not paid AND now > expiresAt + 24h
+                                                          |                -> PAYMENT_FAILED (payment-unresolved-expired,
+                                                          |                   meta carries ibex: in-flight)
+                                                          |            else leave; warn after 60 min
                                                           | unknown / no ref -> fetchAndSettle ------------->|
                                                           |            fulfilled -> PAID -> FULFILLED
+                                                          |            paidPendingFulfillment (no ref) -> PAID
+                                                          |              (vendor-reported-payment); the PAID path finishes
                                                           |            not paid AND now > expiresAt + 24h
                                                           |              -> PAYMENT_FAILED (payment-unresolved-expired)
                                                           |            else leave; warn after 60 min
@@ -123,11 +132,19 @@ UC                     Repo                 IBEX                  Worker (30s)  
 An order with **no** `providerPaymentRef` (the send errored before IBEX handed
 back an id, or a crash between the IBEX call and the transition that writes
 it) answers "unknown" every run: there is no hash-based fallback on the IBEX
-rail, so the worker asks the vendor; a vendor `fulfilled` is proof of payment
-(below). While the vendor reports the invoice unpaid the order stays pending
-(RUNBOOK c after 60 min) until 24 h past `expiresAt`, when it is closed as
-`PAYMENT_FAILED` (`payment-unresolved-expired`). A vendor error leaves it
-pending for the next run.
+rail, so the worker asks the vendor, and the vendor is the only arbiter this
+row will ever have. A vendor `fulfilled` is proof of payment, and so is a
+vendor `paidPendingFulfillment` — the payment re-read it would normally defer
+to is hardwired to "unknown" without a ref, so `settleOrderFromVendor` takes
+the vouch and records `PAID` (reason `vendor-reported-payment`); the normal
+PAID poll path finishes fulfilment, and if the vouch proves wrong the PAID
+path's 24 h `REFUND_REQUIRED` timeout is the safety net. A vendor `refunded`
+likewise proves money moved: `PAID` then `REFUND_REQUIRED` (which pages).
+While the vendor reports the invoice unpaid (`awaitingPayment`, or a plain
+`failed`) the order stays pending (RUNBOOK c after 60 min) until 24 h past
+`expiresAt`, when it is closed as `PAYMENT_FAILED`
+(`payment-unresolved-expired`). A vendor error leaves it pending for the next
+run.
 
 ### 4a. A send error without a verdict
 
@@ -155,7 +172,10 @@ A Success for a row the worker expired while the send was in flight is written
 
 If the vendor reports `fulfilled` while Flash still shows `INVOICE_ISSUED` or
 `PAYMENT_PENDING`, `settleOrderFromVendor` takes the vendor's word as proof of
-payment: `PAID` (reason `vendor-reported-fulfilled`), then `FULFILLED`.
+payment: `PAID` (reason `vendor-reported-fulfilled`), then `FULFILLED`. A
+`paidPendingFulfillment` does the same for an `INVOICE_ISSUED`, `EXPIRED`, or
+ref-less `PAYMENT_PENDING` row (`vendor-reported-payment`); a `PAYMENT_PENDING`
+row **with** an IBEX ref keeps its re-read as the authority.
 
 ## 5. Paid, then the vendor cancels (REFUND_REQUIRED)
 
@@ -191,7 +211,13 @@ Worker                              Repo                      Vendor
  | processExpiry:                     |                        |
  |   INVOICE_ISSUED? fetchAndSettle (vendor) --------------------------------->|
  |     fulfilled -> PAID (vendor-reported-fulfilled) -> FULFILLED
- |     anything else (not paid, vendor error) -> fall through  |
+ |     paidPendingFulfillment -> PAID (vendor-reported-payment);
+ |       the normal PAID poll path finishes fulfilment
+ |     vendor error -> fall through NOT taken: expiry is deferred
+ |       to the next run (a non-answer must not write off a
+ |       maybe-paid row EXPIRED never revisits)
+ |     anything else (a vendor answer that does not vouch
+ |       payment, e.g. awaitingPayment) -> fall through       |
  |   transition CREATED|INVOICE_ISSUED->EXPIRED (reason expired)
  |   [ops: order-failed, reason expired]                       |
 ```
@@ -203,10 +229,13 @@ never carries a `providerPaymentRef` (the ref is written with the transition
 out of it), so IBEX could only answer "unknown". A row that crashed before the
 IBEX call has no payment and is correctly expired; one that crashed *after* the
 call but before the ref was written looks the same, so the worker asks the
-vendor first: a card that shipped is proof of payment. Two safety nets remain
-for a payment that surfaces later: a same-key replay before expiry resumes it
-(flow 7), and a late IBEX Success on an `EXPIRED` row is written `EXPIRED ->
-PAID` (flow 4a). The worker never polls `EXPIRED`.
+vendor first: a card that shipped, or a payment the vendor reports settled and
+is fulfilling, is proof of payment. A vendor error is not an answer: it defers
+expiry, since EXPIRED is never revisited and one outage must not bury a
+possibly-paid order. Two safety nets remain for a payment that surfaces later:
+a same-key replay before expiry resumes it (flow 7), and a late IBEX Success on
+an `EXPIRED` row is written `EXPIRED -> PAID` (flow 4a). The worker never polls
+`EXPIRED`.
 
 ## 7. Idempotent replay / double tap
 

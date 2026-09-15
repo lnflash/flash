@@ -161,10 +161,15 @@ const vendorFulfils = () =>
  * (`paidPendingFulfillment`): the real `settleOrderFromVendor` records it as
  * `vendor-reported-payment` and lets the PAID poll path finish. Mirrors that
  * behaviour for the unaccounted-payment path, the way `vendorFulfils` mirrors
- * the fulfilled arm.
+ * the fulfilled arm — including the no-ref PAYMENT_PENDING case, whose IBEX
+ * re-read is hardwired to "unknown" so the vendor is its only arbiter.
  */
 const vendorVouchesPaymentImpl = (o: GiftCardOrder): GiftCardOrder => {
-  if (o.status !== "INVOICE_ISSUED" && o.status !== "EXPIRED") return o
+  const vouched =
+    o.status === "INVOICE_ISSUED" ||
+    o.status === "EXPIRED" ||
+    (o.status === "PAYMENT_PENDING" && !o.providerPaymentRef)
+  if (!vouched) return o
   const paid: GiftCardOrder = {
     ...o,
     status: "PAID",
@@ -673,13 +678,14 @@ describe("reconcileGiftCardOrders", () => {
         expect(mockLogger.error).not.toHaveBeenCalled()
       })
 
-      it.each(["failed", "refunded"] as const)(
-        "vendor says %s: left for the payment re-read, never PAYMENT_FAILED on the vendor's word",
+      it.each(["failed"] as const)(
+        "vendor says %s: left pending, never PAYMENT_FAILED on the vendor's word",
         async (kind) => {
-          // `settleOrderFromVendor` leaves a PAYMENT_PENDING order alone on
-          // failed/refunded (our send may still be in flight); the unresolved
-          // exit below needs the vendor's positive "awaiting payment", which
-          // this is not — even long past the grace period.
+          // `settleOrderFromVendor` leaves a no-ref PAYMENT_PENDING order alone
+          // on a plain "failed" — it says nothing about money that may have
+          // left; the unresolved exit below needs the vendor's positive
+          // "awaiting payment", which this is not — even long past the grace
+          // period.
           mockFetchVendorStatus.mockResolvedValue({ kind, reason: "cancelled" })
           mockSettleFromVendor.mockImplementation(async (o: GiftCardOrder) => o)
           const order = noRef()
@@ -693,6 +699,43 @@ describe("reconcileGiftCardOrders", () => {
           expect(repo.transition).not.toHaveBeenCalled()
         },
       )
+
+      it("vendor says refunded: settles PAID then REFUND_REQUIRED (a refund proves money moved)", async () => {
+        // A no-ref row has no IBEX re-read to defer to; "we refunded your
+        // payment" is the vendor positively confirming it received one. The
+        // worker's unresolved escalation must not close the row as
+        // PAYMENT_FAILED ("money never left") over an answer that says it did.
+        mockFetchVendorStatus.mockResolvedValue({ kind: "refunded", reason: "cancelled" })
+        mockSettleFromVendor.mockImplementation(async (o: GiftCardOrder) => {
+          // Mirror the real two-step: PAID (vendor-reported-payment), then the
+          // same vendor failure carried onto the PAID row.
+          const paid = vendorVouchesPaymentImpl(o)
+          const refunded: GiftCardOrder = {
+            ...paid,
+            status: "REFUND_REQUIRED",
+            failureReason: "vendor-refunded: cancelled",
+            statusHistory: [
+              ...paid.statusHistory,
+              {
+                status: "REFUND_REQUIRED",
+                at: new Date(clock),
+                reason: "vendor-refunded: cancelled",
+              },
+            ],
+          }
+          repo.store.set(o.id, refunded)
+          return refunded
+        })
+        noRef()
+        const res = await runAt(GIFT_CARD_PAYMENT_UNRESOLVED_GRACE_MS + 2 * HOUR)
+        if (res instanceof Error) throw res
+        const after = repo.store.get("noref")
+        expect(after?.status).toBe("REFUND_REQUIRED")
+        expect(after?.paidSats).toBe(40_100)
+        expect(
+          after?.statusHistory.map((h) => `${h.status}:${h.reason ?? ""}`),
+        ).toContain("PAID:vendor-reported-payment")
+      })
 
       describe("unresolved: vendor never saw a payment and the invoice is long expired", () => {
         // No ref means IBEX never handed back an id, so only the vendor can
@@ -738,13 +781,19 @@ describe("reconcileGiftCardOrders", () => {
           expect(repo.transition).not.toHaveBeenCalled()
         })
 
-        it("not when the vendor says paid-pending-fulfillment: a card may still come", async () => {
+        it("not when the vendor says paid-pending-fulfillment: the vouch settles it instead", async () => {
+          // A no-ref row's re-read is hardwired to "unknown", so the vendor's
+          // "the payment settled" vouch acts before any escalation could: the
+          // row goes PAID and the normal PAID path finishes fulfilment.
           mockFetchVendorStatus.mockResolvedValue({ kind: "paidPendingFulfillment" })
+          vendorVouchesPayment()
           noRef()
           const res = await runAt(pastGrace)
           if (res instanceof Error) throw res
-          expect(repo.store.get("noref")?.status).toBe("PAYMENT_PENDING")
-          expect(repo.transition).not.toHaveBeenCalled()
+          const after = repo.store.get("noref")
+          expect(after?.status).toBe("PAID")
+          expect(after?.statusHistory.at(-1)?.reason).toBe("vendor-reported-payment")
+          expect(res.paymentSettled).toBe(1)
         })
 
         it("not when the order HAS an IBEX ref: IBEX, not the vendor, owns that answer", async () => {

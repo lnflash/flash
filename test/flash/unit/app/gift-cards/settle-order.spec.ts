@@ -340,12 +340,17 @@ describe("settleOrderFromVendor", () => {
     })
 
     it.each(["failed", "refunded"] as const)(
-      "%s on PAYMENT_PENDING is left for the payment re-read",
+      "%s on PAYMENT_PENDING with an IBEX ref is left for the payment re-read",
       async (kind) => {
         // Our payment may still be in flight. Whether it settled decides
         // PAID→REFUND_REQUIRED or PAYMENT_FAILED; that is the worker's IBEX
         // re-read, not the vendor's word.
-        const order = repo.seed(makeOrder({ status: "PAYMENT_PENDING" }))
+        const order = repo.seed(
+          makeOrder({
+            status: "PAYMENT_PENDING",
+            providerPaymentRef: "ibex-tx" as IbexTransactionId,
+          }),
+        )
         const res = await settleOrderFromVendor(order, { kind, reason: "x" })
         expect(res).toBe(order)
         expect(repo.transition).not.toHaveBeenCalled()
@@ -356,6 +361,61 @@ describe("settleOrderFromVendor", () => {
         )
       },
     )
+
+    it.each(["failed", "awaitingPayment" as const])(
+      "vendor %s on a no-ref PAYMENT_PENDING order is left alone (only the vouch arms act)",
+      async (kind) => {
+        // A no-ref row's re-read is hardwired to "unknown", so the vendor is
+        // the only arbiter — but only its positive answers act. A plain
+        // "failed" says nothing about money that may have left; the row stays
+        // pending and the worker's payment-unresolved escalation (which needs
+        // the vendor's "awaitingPayment") remains its terminal exit.
+        const order = repo.seed(
+          makeOrder({
+            status: "PAYMENT_PENDING",
+            providerOrderId: "tbc-123" as GiftCardProviderOrderId,
+            providerPaymentRef: null,
+          }),
+        )
+        const res = await settleOrderFromVendor(
+          order,
+          kind === "failed" ? { kind, reason: "x" } : { kind },
+        )
+        expect(res).toBe(order)
+        expect(repo.transition).not.toHaveBeenCalled()
+        expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+      },
+    )
+
+    it("refunded on a no-ref PAYMENT_PENDING order records the payment and escalates to REFUND_REQUIRED", async () => {
+      // No ref means the payment re-read can never answer ("unknown"), so the
+      // vendor's "we received and returned the payment" is terminal: land on
+      // PAID (money left Flash) and let the normal PAID path carry the vendor's
+      // failure to REFUND_REQUIRED, which pages.
+      const order = repo.seed(
+        makeOrder({
+          status: "PAYMENT_PENDING",
+          providerOrderId: "tbc-123" as GiftCardProviderOrderId,
+          providerPaymentRef: null,
+          invoiceSats: 40_100 as Satoshis,
+        }),
+      )
+      const res = await settleOrderFromVendor(order, {
+        kind: "refunded",
+        reason: "Vendor cancelled",
+      })
+      if (res instanceof Error) throw res
+      expect(res.status).toBe("REFUND_REQUIRED")
+      expect(res.paidSats).toBe(40_100)
+      expect(res.failureReason).toBe("vendor-refunded: Vendor cancelled")
+      expect(res.statusHistory.map((h) => h.status)).toEqual([
+        "PAYMENT_PENDING",
+        "PAID",
+        "REFUND_REQUIRED",
+      ])
+      expect(res.statusHistory[1].reason).toBe("vendor-reported-payment")
+      expect(opsPhases()).toEqual(["order-paid", "refund-required"])
+    })
 
     it("refunded on CREATED -> FAILED (nothing was paid)", async () => {
       const order = repo.seed(makeOrder({ status: "CREATED" }))
@@ -401,7 +461,7 @@ describe("settleOrderFromVendor", () => {
       expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
     })
 
-    it("paidPendingFulfillment on a PAYMENT_PENDING order returns the order untouched: the payment re-read owns that answer", async () => {
+    it("paidPendingFulfillment on a PAYMENT_PENDING order with an IBEX ref returns the order untouched: the payment re-read owns that answer", async () => {
       // The reconcile worker's IBEX re-read decides PAID vs PAYMENT_FAILED for
       // a row with a live send; the vendor's vouch must not race it.
       const order = repo.seed(
@@ -417,6 +477,35 @@ describe("settleOrderFromVendor", () => {
       expect(res).toBe(order)
       expect(repo.transition).not.toHaveBeenCalled()
       expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+    })
+
+    it("paidPendingFulfillment on a no-ref PAYMENT_PENDING order vouches the payment", async () => {
+      // The send errored without a verdict (socket reset / 5xx after IBEX may
+      // have accepted). With no ref the re-read is hardwired to "unknown" — it
+      // never asks IBEX — so there is no re-read authority for the vouch to
+      // contradict and the vendor is the only possible arbiter. Without this
+      // the row polls the vendor every run, gets paidPendingFulfillment back,
+      // records nothing and pends forever: never PAID, never the 24 h
+      // payment-unresolved escalation.
+      const order = repo.seed(
+        makeOrder({
+          status: "PAYMENT_PENDING",
+          providerOrderId: "tbc-123" as GiftCardProviderOrderId,
+          providerPaymentRef: null,
+          invoiceSats: 40_100 as Satoshis,
+        }),
+      )
+      const res = await settleOrderFromVendor(order, {
+        kind: "paidPendingFulfillment",
+      })
+      if (res instanceof Error) throw res
+      expect(res.status).toBe("PAID")
+      expect(res.paidSats).toBe(40_100)
+      expect(res.statusHistory.at(-1)).toMatchObject({
+        status: "PAID",
+        reason: "vendor-reported-payment",
+      })
+      expect(opsPhases()).toEqual(["order-paid"])
     })
 
     describe("paidPendingFulfillment as vendor-reported payment", () => {

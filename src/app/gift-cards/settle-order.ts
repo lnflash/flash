@@ -25,8 +25,11 @@ import { sendGiftCardFulfilledNotificationBestEffort } from "./send-fulfilled-no
  * The vendor is the arbiter of last resort on PAYMENT, not only fulfilment: a
  * `fulfilled` (card shipped) or `paidPendingFulfillment` (payment settled,
  * fulfilment under way) on an INVOICE_ISSUED or EXPIRED order records the
- * payment we never did. Both are handled here, so every caller — purchase
- * poll, reconcile worker, future webhook — gets the same answer.
+ * payment we never did, and `paidPendingFulfillment` does the same for a
+ * PAYMENT_PENDING order with no `providerPaymentRef` — its payment re-read is
+ * hardwired to "unknown", so the vendor is the only arbiter there is. All are
+ * handled here, so every caller — purchase poll, reconcile worker, future
+ * webhook — gets the same answer.
  *
  * Claim data enters here as plaintext from the adapter and leaves only as
  * ciphertext on the order. It is never logged, traced, or put in an ops event.
@@ -61,22 +64,36 @@ export const settleOrderFromVendor = async (
  * pending / senttofulfillment — and any unrecognised or dispute-held — status
  * there). For an order whose payment we never recorded, that vouch is proof of
  * payment just as much as a shipped card is: record it and let the normal PAID
- * poll path finish fulfilment. A PAYMENT_PENDING row keeps its payment re-read
- * as the authority; a PAID row is already past this.
+ * poll path finish fulfilment. A PAYMENT_PENDING row **with** an IBEX ref keeps
+ * its payment re-read as the authority and is left alone; a PAID row is already
+ * past this. A PAYMENT_PENDING row with NO ref is accepted: its re-read is
+ * hardwired to "unknown" (`lookupSentPaymentStatus` never asks IBEX without a
+ * ref), so the vendor is the only possible arbiter — the exclusion's usual
+ * rationale (the re-read owns the answer) has nothing to stand on. If the vouch
+ * proves wrong, the PAID path's 24 h fulfilment timeout and the vendor-positive
+ * REFUND_REQUIRED escalation are the safety net. A PAID row is already past
+ * this.
  */
 const vendorVouchedPayment = async (
   order: GiftCardOrder,
 ): Promise<GiftCardOrder | ApplicationError> => {
   if (
     order.status !== GiftCardOrderStatus.InvoiceIssued &&
-    order.status !== GiftCardOrderStatus.Expired
+    order.status !== GiftCardOrderStatus.Expired &&
+    !(order.status === GiftCardOrderStatus.PaymentPending && !order.providerPaymentRef)
   ) {
     return order
   }
 
   const paid = await GiftCardOrdersRepository().transition({
     id: order.id,
-    from: [GiftCardOrderStatus.InvoiceIssued, GiftCardOrderStatus.Expired],
+    from: [
+      GiftCardOrderStatus.InvoiceIssued,
+      GiftCardOrderStatus.Expired,
+      ...(order.status === GiftCardOrderStatus.PaymentPending
+        ? [GiftCardOrderStatus.PaymentPending]
+        : []),
+    ],
     to: GiftCardOrderStatus.Paid,
     reason: "vendor-reported-payment",
     patch: { paidSats: order.invoiceSats ?? order.quoteSats },
@@ -238,15 +255,42 @@ const vendorFailed = async (
       })
       return failed
     }
-    case GiftCardOrderStatus.PaymentPending:
-      // Our payment may still be in flight. Whether it settled decides
-      // PAID→REFUND_REQUIRED or PAYMENT_FAILED; that is the reconcile worker's
-      // payment re-read, not the vendor's word.
-      baseLogger.warn(
-        { orderId: order.id, vendorStatus: status.kind },
-        "Vendor reports failed/refunded while our payment is pending; leaving for payment re-read",
-      )
-      return order
+    case GiftCardOrderStatus.PaymentPending: {
+      // With an IBEX ref our payment may still be in flight; whether it settled
+      // decides PAID→REFUND_REQUIRED or PAYMENT_FAILED, and that is the
+      // reconcile worker's payment re-read, not the vendor's word.
+      if (order.providerPaymentRef) {
+        baseLogger.warn(
+          { orderId: order.id, vendorStatus: status.kind },
+          "Vendor reports failed/refunded while our payment is pending; leaving for payment re-read",
+        )
+        return order
+      }
+      // No ref: the re-read is hardwired to "unknown", so the vendor is the
+      // only arbiter — but a plain "failed" still says nothing about money
+      // that may have left, so only a refund acts. "The vendor refunded it"
+      // positively means they received AND returned the payment: a terminal
+      // answer. Land on PAID (the only state that means money left Flash) and
+      // let the normal PAID path carry the vendor's failure to
+      // REFUND_REQUIRED, which pages.
+      if (status.kind !== "refunded") {
+        baseLogger.warn(
+          { orderId: order.id, vendorStatus: status.kind },
+          "Vendor reports failed while our payment has no IBEX ref; leaving for the unresolved escalation",
+        )
+        return order
+      }
+      const paid = await repo.transition({
+        id: order.id,
+        from: [GiftCardOrderStatus.PaymentPending],
+        to: GiftCardOrderStatus.Paid,
+        reason: "vendor-reported-payment",
+        patch: { paidSats: order.invoiceSats ?? order.quoteSats },
+      })
+      if (paid instanceof Error) return paid
+      notifyGiftCardOpsEvent({ phase: "order-paid", status: "success", order: paid })
+      return vendorFailed(paid, status)
+    }
     default:
       return order
   }
