@@ -22,6 +22,12 @@ import { sendGiftCardFulfilledNotificationBestEffort } from "./send-fulfilled-no
  * are decided by the repository's conditional transition — the loser gets a
  * `GiftCardOrderStateError`, re-reads, and returns whatever won.
  *
+ * The vendor is the arbiter of last resort on PAYMENT, not only fulfilment: a
+ * `fulfilled` (card shipped) or `paidPendingFulfillment` (payment settled,
+ * fulfilment under way) on an INVOICE_ISSUED or EXPIRED order records the
+ * payment we never did. Both are handled here, so every caller — purchase
+ * poll, reconcile worker, future webhook — gets the same answer.
+ *
  * Claim data enters here as plaintext from the adapter and leaves only as
  * ciphertext on the order. It is never logged, traced, or put in an ops event.
  */
@@ -38,14 +44,46 @@ export const settleOrderFromVendor = async (
 
   switch (status.kind) {
     case "awaitingPayment":
-    case "paidPendingFulfillment":
       return order
+    case "paidPendingFulfillment":
+      return vendorVouchedPayment(order)
     case "fulfilled":
       return fulfil(order, status.claim)
     case "failed":
     case "refunded":
       return vendorFailed(order, status)
   }
+}
+
+/**
+ * `paidPendingFulfillment` is the vendor positively vouching that the payment
+ * has SETTLED and fulfilment is under way (the adapter buckets its
+ * pending / senttofulfillment — and any unrecognised or dispute-held — status
+ * there). For an order whose payment we never recorded, that vouch is proof of
+ * payment just as much as a shipped card is: record it and let the normal PAID
+ * poll path finish fulfilment. A PAYMENT_PENDING row keeps its payment re-read
+ * as the authority; a PAID row is already past this.
+ */
+const vendorVouchedPayment = async (
+  order: GiftCardOrder,
+): Promise<GiftCardOrder | ApplicationError> => {
+  if (
+    order.status !== GiftCardOrderStatus.InvoiceIssued &&
+    order.status !== GiftCardOrderStatus.Expired
+  ) {
+    return order
+  }
+
+  const paid = await GiftCardOrdersRepository().transition({
+    id: order.id,
+    from: [GiftCardOrderStatus.InvoiceIssued, GiftCardOrderStatus.Expired],
+    to: GiftCardOrderStatus.Paid,
+    reason: "vendor-reported-payment",
+    patch: { paidSats: order.invoiceSats ?? order.quoteSats },
+  })
+  if (paid instanceof Error) return paid
+  notifyGiftCardOpsEvent({ phase: "order-paid", status: "success", order: paid })
+  return paid
 }
 
 const fulfil = async (

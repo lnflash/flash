@@ -39,11 +39,16 @@ const logger = baseLogger.child({ module: "gift-cards.reconcile" })
  *                                               INVOICE_ISSUED row never carries an
  *                                               IBEX ref — every path that writes one
  *                                               leaves the state — so the vendor is
- *                                               the only one who can vouch for it)
+ *                                               the only one who can vouch for it;
+ *                                               `fulfilled` and `paidPendingFulfillment`
+ *                                               both count as that vouch, and an
+ *                                               unreachable vendor defers expiry)
  *   PAYMENT_PENDING                           → PAID | PAYMENT_FAILED (payment re-read);
  *                                               IBEX unknown / no ref → vendor poll;
- *                                               no ref + vendor "awaiting payment" +
- *                                               24h past `expiresAt` → PAYMENT_FAILED
+ *                                               IBEX in flight past the warn horizon
+ *                                               → vendor poll too;
+ *                                               vendor "awaiting payment" + 24h past
+ *                                               `expiresAt` → PAYMENT_FAILED
  *   PAID                                      → poll vendor with backoff → FULFILLED
  *                                               | REFUND_REQUIRED; 24h → final vendor
  *                                               poll, then REFUND_REQUIRED only if the
@@ -54,10 +59,11 @@ const logger = baseLogger.child({ module: "gift-cards.reconcile" })
  *                                               expiry comes back settled.
  *
  * The vendor is the arbiter of last resort: `settleOrderFromVendor` accepts a
- * vendor `fulfilled` on an INVOICE_ISSUED, PAYMENT_PENDING or EXPIRED order as
- * proof of payment, so an order whose send IBEX cannot account for (no
- * transaction id, IBEX unreachable, an error after IBEX accepted the request)
- * is never written off while the vendor says a card shipped. Conversely the
+ * vendor `fulfilled` or `paidPendingFulfillment` on an INVOICE_ISSUED or EXPIRED
+ * order as proof of payment (and `fulfilled` on a PAYMENT_PENDING one), so an
+ * order whose send IBEX cannot account for (no transaction id, IBEX
+ * unreachable, an error after IBEX accepted the request) is never written off
+ * while the vendor says the payment settled. Conversely the
  * 24h escalation to REFUND_REQUIRED needs the vendor's positive "not
  * fulfilled": a 5xx, a claim-key fault or a repository error says nothing about
  * the card, so the order stays PAID and the next run asks again.
@@ -294,6 +300,10 @@ type VendorPoll = {
   moved: GiftCardOrder | null
 }
 
+/** Vendor statuses that positively vouch the payment settled. */
+const isVendorPaymentVouch = (kind: GiftCardProviderOrderStatus["kind"]): boolean =>
+  kind === "fulfilled" || kind === "paidPendingFulfillment"
+
 /**
  * Ask the vendor about an order IBEX could not account for, and settle on the
  * answer. `moved` is null when the order stayed put (still awaiting payment,
@@ -371,13 +381,30 @@ const processExpiry = async (
   // errored before recording it. It never carries an IBEX transaction id
   // (every path that captures one leaves INVOICE_ISSUED in the same write), so
   // there is nothing to re-read at IBEX; the vendor gets the last word: a card
-  // that shipped is proof of payment, and `settleOrderFromVendor` records it
-  // as such. Only an invoice the vendor does not know as paid is expired — and
-  // if a send was still in flight at IBEX, a late Success revives it
+  // that shipped — or a payment the vendor reports settled and is fulfilling —
+  // is proof of payment, and `settleOrderFromVendor` records it as such. Only
+  // an invoice the vendor has answered and does not know as paid is expired —
+  // and if a send was still in flight at IBEX, a late Success revives it
   // (EXPIRED → PAID) from the purchase path.
-  if (order.status === GiftCardOrderStatus.InvoiceIssued) {
-    const { moved } = await pollVendor(order, summary)
+  //
+  // A vendor poll that could not be asked (unreachable, 5xx) is NOT an answer:
+  // EXPIRED is never revisited by this worker, so expiring on one transient
+  // outage would bury a possibly-paid order with no later chance for the
+  // vendor to vouch for it. Leave the row INVOICE_ISSUED for the next run —
+  // the invoice's own TTL bounds how long a payment could still land, and the
+  // vendor outage ends.
+  if (order.status === GiftCardOrderStatus.InvoiceIssued && order.providerOrderId) {
+    const { vendorStatus, moved } = await pollVendor(order, summary)
     if (moved) return
+    // Expire only on a vendor ANSWER that does not report payment. An
+    // unreachable vendor says nothing, and a payment vouch whose settlement
+    // did not record (a repository fault on the transition) is the opposite of
+    // a write-off — both leave the row INVOICE_ISSUED for the next run,
+    // touched so the batch keeps rotating.
+    if (vendorStatus === null || isVendorPaymentVouch(vendorStatus)) {
+      await touch(order)
+      return
+    }
   }
 
   const expired = await GiftCardOrdersRepository().transition({
@@ -458,7 +485,53 @@ const processPendingPayment = async (
       break
     }
     case "pending":
-      // IBEX still reports the send in flight; its word beats a vendor poll.
+      // IBEX still reports the send in flight; its word beats a vendor poll —
+      // while the send is young. An IN_FLIGHT transaction record that never
+      // resolves (stuck routing, a payment record IBEX never closes) would
+      // otherwise pend forever: the escalation below requires a vendor answer,
+      // and this arm never asks for one. Past the warn horizon, ask the vendor
+      // too — it costs one poll per run on a state that is already abnormal —
+      // so a send the vendor has actually settled or shipped is not held
+      // hostage to IBEX's in-flight record. The vendor's word only ever moves
+      // the row forward (PAID via its vouch, or fulfilment); the terminal
+      // PAYMENT_FAILED exit still needs the vendor's positive "never paid",
+      // which an in-flight IBEX status contradicts only until the vendor
+      // itself says so.
+      if (order.providerPaymentRef) {
+        const pendingSinceIbex = lastTransitionAt(
+          order,
+          GiftCardOrderStatus.PaymentPending,
+        )
+        if (now.getTime() - pendingSinceIbex.getTime() > PAYMENT_PENDING_WARN_MS) {
+          const { vendorStatus, moved } = await pollVendor(order, summary)
+          if (moved) return
+          if (
+            vendorStatus === "awaitingPayment" &&
+            now.getTime() >
+              order.expiresAt.getTime() + GIFT_CARD_PAYMENT_UNRESOLVED_GRACE_MS
+          ) {
+            const failed = await GiftCardOrdersRepository().transition({
+              id: order.id,
+              from: [GiftCardOrderStatus.PaymentPending],
+              to: GiftCardOrderStatus.PaymentFailed,
+              reason: "payment-unresolved-expired",
+              patch: { failureReason: "payment-unresolved-expired" },
+            })
+            if (failed instanceof Error) throw failed
+            notifyGiftCardOpsEvent({
+              phase: "order-failed",
+              status: "failed",
+              order: failed,
+              meta: {
+                reason: "payment-unresolved-expired",
+                vendorStatus,
+                ibex: "in-flight",
+              },
+            })
+            return
+          }
+        }
+      }
       break
   }
 

@@ -156,6 +156,33 @@ const vendorFulfils = () =>
     return fulfilled
   })
 
+/**
+ * The vendor reports the payment SETTLED but not yet fulfilled
+ * (`paidPendingFulfillment`): the real `settleOrderFromVendor` records it as
+ * `vendor-reported-payment` and lets the PAID poll path finish. Mirrors that
+ * behaviour for the unaccounted-payment path, the way `vendorFulfils` mirrors
+ * the fulfilled arm.
+ */
+const vendorVouchesPaymentImpl = (o: GiftCardOrder): GiftCardOrder => {
+  if (o.status !== "INVOICE_ISSUED" && o.status !== "EXPIRED") return o
+  const paid: GiftCardOrder = {
+    ...o,
+    status: "PAID",
+    paidSats: o.paidSats ?? o.invoiceSats ?? o.quoteSats,
+    statusHistory: [
+      ...o.statusHistory,
+      { status: "PAID", at: new Date(clock), reason: "vendor-reported-payment" },
+    ],
+  }
+  repo.store.set(o.id, paid)
+  return paid
+}
+
+const vendorVouchesPayment = () =>
+  mockSettleFromVendor.mockImplementation(async (o: GiftCardOrder) =>
+    vendorVouchesPaymentImpl(o),
+  )
+
 beforeEach(() => {
   jest.clearAllMocks()
   jest.useFakeTimers({ now: NOW_MS })
@@ -171,7 +198,8 @@ beforeEach(() => {
   // The unaccounted-payment path asks the vendor in two halves (it needs the
   // vendor's own answer, not just its effect on the order). By default the
   // vendor says "still working" and settling delegates to `mockFetchAndSettle`,
-  // so `vendorFulfils()` drives both paths the same way.
+  // so `vendorFulfils()` drives both paths the same way; `vendorVouchesPayment()`
+  // swaps in the payment-vouch settlement for the tests that need it.
   mockFetchVendorStatus.mockResolvedValue({ kind: "paidPendingFulfillment" })
   mockSettleFromVendor.mockImplementation(async (order: GiftCardOrder) =>
     mockFetchAndSettle(order),
@@ -267,16 +295,21 @@ describe("reconcileGiftCardOrders", () => {
       )
     })
 
-    it("INVOICE_ISSUED past expiresAt never consults IBEX: no path writes a ref without leaving the state", async () => {
+    it("INVOICE_ISSUED past expiresAt never consults IBEX: the vendor's payment vouch settles it, and the PAID path finishes", async () => {
       // Every transition that captures an IBEX transaction id also leaves
       // INVOICE_ISSUED in the same write, so an INVOICE_ISSUED row has nothing
-      // to re-read. The vendor is the only party who can vouch for it.
+      // to re-read. The vendor is the only party who can vouch for it — and
+      // `paidPendingFulfillment` (the vendor reporting the payment SETTLED, card
+      // in fulfilment) is that vouch: it is recorded as vendor-reported-payment
+      // and the normal PAID poll path finishes fulfilment, never EXPIRED.
+      vendorVouchesPayment()
       repo.seed(
         makeOrder({
           id: "i" as GiftCardOrderId,
           status: "INVOICE_ISSUED",
           providerOrderId: "tbc-i" as GiftCardProviderOrderId,
           paymentHash: PAYMENT_HASH,
+          invoiceSats: 40_100 as Satoshis,
           expiresAt: at(-1),
         }),
       )
@@ -284,8 +317,15 @@ describe("reconcileGiftCardOrders", () => {
       if (res instanceof Error) throw res
       expect(mockGetTransactionDetails).not.toHaveBeenCalled()
       expect(mockFetchVendorStatus).toHaveBeenCalledTimes(1)
-      expect(res.expired).toBe(1)
-      expect(repo.store.get("i")?.status).toBe("EXPIRED")
+      expect(res.expired).toBe(0)
+      expect(res.paymentSettled).toBe(1)
+      const after = repo.store.get("i")
+      expect(after?.status).toBe("PAID")
+      expect(after?.paidSats).toBe(40_100)
+      expect(after?.statusHistory.at(-1)).toMatchObject({
+        status: "PAID",
+        reason: "vendor-reported-payment",
+      })
     })
 
     it("INVOICE_ISSUED past expiresAt with no vendor order id -> EXPIRED without a vendor call", async () => {
@@ -329,7 +369,11 @@ describe("reconcileGiftCardOrders", () => {
       expect(repo.store.get("i")?.status).toBe("FULFILLED")
     })
 
-    it("INVOICE_ISSUED past expiresAt with no ref and nothing at the vendor -> EXPIRED", async () => {
+    it("INVOICE_ISSUED past expiresAt with the vendor reporting awaitingPayment -> EXPIRED (no payment vouch, nothing was paid)", async () => {
+      // The write-off is safe only against a vendor ANSWER that does not
+      // vouch for payment: "we never saw the money" is that answer.
+      mockFetchVendorStatus.mockResolvedValue({ kind: "awaitingPayment" })
+      mockSettleFromVendor.mockImplementation(async (o: GiftCardOrder) => o)
       repo.seed(
         makeOrder({
           id: "i" as GiftCardOrderId,
@@ -342,7 +386,7 @@ describe("reconcileGiftCardOrders", () => {
       )
       const res = await runAt(0)
       if (res instanceof Error) throw res
-      expect(mockFetchAndSettle).toHaveBeenCalledTimes(1)
+      expect(mockSettleFromVendor).toHaveBeenCalledTimes(1)
       expect(res.expired).toBe(1)
       expect(repo.store.get("i")?.status).toBe("EXPIRED")
     })
@@ -382,7 +426,12 @@ describe("reconcileGiftCardOrders", () => {
       },
     )
 
-    it("INVOICE_ISSUED past expiresAt with the vendor unreachable is expired (the vendor could not vouch for it)", async () => {
+    it("INVOICE_ISSUED past expiresAt with the vendor unreachable stays INVOICE_ISSUED (a non-answer cannot write off a maybe-paid order)", async () => {
+      // EXPIRED is never revisited by the worker, so a single transient vendor
+      // outage at the expiry poll must not bury a possibly-paid order with no
+      // later chance for the vendor to vouch for it. The row defers expiry —
+      // touched, so the batch keeps rotating — and expires on the next run the
+      // vendor answers.
       mockFetchVendorStatus.mockResolvedValue(new GiftCardVendorUnavailableError())
       repo.seed(
         makeOrder({
@@ -395,7 +444,17 @@ describe("reconcileGiftCardOrders", () => {
       const res = await runAt(0)
       if (res instanceof Error) throw res
       expect(mockSettleFromVendor).not.toHaveBeenCalled()
-      expect(res.expired).toBe(1)
+      expect(res.expired).toBe(0)
+      expect(repo.store.get("i")?.status).toBe("INVOICE_ISSUED")
+      expect(repo.touch).toHaveBeenCalledWith("i")
+      // ...and once the vendor answers "never paid", the expiry fires.
+      mockFetchVendorStatus.mockResolvedValue({ kind: "awaitingPayment" })
+      mockSettleFromVendor.mockImplementation(async (o: GiftCardOrder) => o)
+      // Second run, 30s later — the vendor now answers, so the expiry fires.
+      const second = await runAt(30 * SECOND)
+      if (second instanceof Error) throw second
+      expect(second.expired).toBe(1)
+      expect(repo.store.get("i")?.status).toBe("EXPIRED")
     })
 
     it("EXPIRED orders are never listed or polled: their one exit is the purchase path's", async () => {
@@ -471,6 +530,95 @@ describe("reconcileGiftCardOrders", () => {
       expect(repo.store.get("p")?.status).toBe("PAYMENT_PENDING")
       expect(repo.transition).not.toHaveBeenCalled()
       expect(mockFetchAndSettle).not.toHaveBeenCalled()
+    })
+
+    describe("in flight at IBEX past the warn horizon (a transaction record that never resolves)", () => {
+      // An IN_FLIGHT IBEX send with no terminal exit otherwise pends forever:
+      // the escalation needs a vendor answer, and the in-flight arm never
+      // asked for one. Past the warn horizon the vendor is polled too, so a
+      // payment the vendor actually settled is not held hostage to IBEX's
+      // stuck record.
+      const inFlight = () => {
+        mockGetTransactionDetails.mockResolvedValue(ibexTransaction(1))
+        return repo.seed(
+          makeOrder({
+            id: "stuck" as GiftCardOrderId,
+            status: "PAYMENT_PENDING",
+            paymentHash: PAYMENT_HASH,
+            providerPaymentRef: "ibex-tx",
+            invoiceSats: 40_100 as Satoshis,
+            providerOrderId: "tbc-stuck" as GiftCardProviderOrderId,
+            statusHistory: [
+              { status: "CREATED", at: at(-2 * HOUR), reason: null },
+              { status: "INVOICE_ISSUED", at: at(-1.5 * HOUR), reason: null },
+              { status: "PAYMENT_PENDING", at: at(-2 * MINUTE), reason: null },
+            ],
+          }),
+        )
+      }
+
+      it("inside the warn horizon the vendor is not asked", async () => {
+        inFlight()
+        const res = await runAt(30 * MINUTE)
+        if (res instanceof Error) throw res
+        expect(mockFetchVendorStatus).not.toHaveBeenCalled()
+        expect(repo.store.get("stuck")?.status).toBe("PAYMENT_PENDING")
+      })
+
+      it("past the warn horizon the vendor is asked; a vouch without fulfilment still defers to the payment re-read", async () => {
+        // `paidPendingFulfillment` does not settle a PAYMENT_PENDING row — the
+        // IBEX re-read owns that answer — but the poll happened, and the row
+        // was touched for rotation.
+        inFlight()
+        const res = await runAt(61 * MINUTE)
+        if (res instanceof Error) throw res
+        expect(mockFetchVendorStatus).toHaveBeenCalledTimes(1)
+        expect(mockSettleFromVendor).toHaveBeenCalledTimes(1)
+        expect(res.paymentSettled).toBe(0)
+        expect(repo.store.get("stuck")?.status).toBe("PAYMENT_PENDING")
+        expect(repo.touch).toHaveBeenCalledWith("stuck")
+      })
+
+      it("past the warn horizon a vendor fulfilled settles and fulfils", async () => {
+        inFlight()
+        vendorFulfils()
+        const res = await runAt(61 * MINUTE)
+        if (res instanceof Error) throw res
+        expect(repo.store.get("stuck")?.status).toBe("FULFILLED")
+        expect(res.fulfilled).toBe(1)
+      })
+
+      it("past the warn horizon and past the grace, a vendor not-paid escalates to PAYMENT_FAILED with the in-flight status in the event", async () => {
+        inFlight()
+        mockFetchVendorStatus.mockResolvedValue({ kind: "awaitingPayment" })
+        mockSettleFromVendor.mockImplementation(async (o: GiftCardOrder) => o)
+        const res = await runAt(GIFT_CARD_PAYMENT_UNRESOLVED_GRACE_MS + 2 * HOUR)
+        if (res instanceof Error) throw res
+        const after = repo.store.get("stuck")
+        expect(after?.status).toBe("PAYMENT_FAILED")
+        expect(after?.failureReason).toBe("payment-unresolved-expired")
+        expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            phase: "order-failed",
+            status: "failed",
+            meta: expect.objectContaining({
+              orderId: "stuck",
+              reason: "payment-unresolved-expired",
+              vendorStatus: "awaitingPayment",
+              ibex: "in-flight",
+            }),
+          }),
+        )
+      })
+
+      it("past the warn horizon a vendor error leaves the order pending", async () => {
+        inFlight()
+        mockFetchVendorStatus.mockResolvedValue(new GiftCardVendorUnavailableError())
+        const res = await runAt(61 * MINUTE)
+        if (res instanceof Error) throw res
+        expect(repo.store.get("stuck")?.status).toBe("PAYMENT_PENDING")
+        expect(mockSettleFromVendor).not.toHaveBeenCalled()
+      })
     })
 
     it("unknown at IBEX asks the vendor and stays PAYMENT_PENDING when it has nothing new", async () => {

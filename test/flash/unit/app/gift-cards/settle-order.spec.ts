@@ -381,15 +381,130 @@ describe("settleOrderFromVendor", () => {
   })
 
   describe("non-terminal vendor statuses", () => {
-    for (const kind of ["awaitingPayment", "paidPendingFulfillment"] as const) {
-      it(`${kind} returns the order untouched`, async () => {
-        const order = paidOrder()
-        const res = await settleOrderFromVendor(order, { kind })
-        expect(res).toBe(order)
-        expect(repo.transition).not.toHaveBeenCalled()
+    it("awaitingPayment returns the order untouched", async () => {
+      const order = paidOrder()
+      const res = await settleOrderFromVendor(order, { kind: "awaitingPayment" })
+      expect(res).toBe(order)
+      expect(repo.transition).not.toHaveBeenCalled()
+      expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+    })
+
+    it("paidPendingFulfillment on a PAID order returns the order untouched", async () => {
+      // Already past the vouch: the payment is recorded and the PAID poll path
+      // owns fulfilment.
+      const order = paidOrder()
+      const res = await settleOrderFromVendor(order, {
+        kind: "paidPendingFulfillment",
+      })
+      expect(res).toBe(order)
+      expect(repo.transition).not.toHaveBeenCalled()
+      expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+    })
+
+    it("paidPendingFulfillment on a PAYMENT_PENDING order returns the order untouched: the payment re-read owns that answer", async () => {
+      // The reconcile worker's IBEX re-read decides PAID vs PAYMENT_FAILED for
+      // a row with a live send; the vendor's vouch must not race it.
+      const order = repo.seed(
+        makeOrder({
+          status: "PAYMENT_PENDING",
+          providerOrderId: "tbc-123" as GiftCardProviderOrderId,
+          providerPaymentRef: "ibex-tx" as IbexTransactionId,
+        }),
+      )
+      const res = await settleOrderFromVendor(order, {
+        kind: "paidPendingFulfillment",
+      })
+      expect(res).toBe(order)
+      expect(repo.transition).not.toHaveBeenCalled()
+      expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+    })
+
+    describe("paidPendingFulfillment as vendor-reported payment", () => {
+      // `pending` / `senttofulfillment` at the vendor mean the payment has
+      // SETTLED and fulfilment is under way. For a row whose payment we never
+      // recorded, that is proof of payment — the same class of vouch as a
+      // shipped card — and EXPIRED (never polled again by the worker) must not
+      // be its resting state.
+      const invoiceIssued = () =>
+        repo.seed(
+          makeOrder({
+            status: "INVOICE_ISSUED",
+            providerOrderId: "tbc-123" as GiftCardProviderOrderId,
+            invoiceSats: 40_100 as Satoshis,
+            statusHistory: [
+              { status: "CREATED", at: new Date(NOW_MS - 2000), reason: null },
+              { status: "INVOICE_ISSUED", at: new Date(NOW_MS - 1000), reason: null },
+            ],
+          }),
+        )
+
+      it("INVOICE_ISSUED -> PAID (reason vendor-reported-payment, paidSats from the invoice) and an order-paid ops event", async () => {
+        const order = invoiceIssued()
+        const res = await settleOrderFromVendor(order, {
+          kind: "paidPendingFulfillment",
+        })
+        if (res instanceof Error) throw res
+        expect(res.status).toBe("PAID")
+        expect(res.paidSats).toBe(40_100)
+        expect(res.statusHistory.at(-1)).toMatchObject({
+          status: "PAID",
+          reason: "vendor-reported-payment",
+        })
+        expect(opsPhases()).toEqual(["order-paid"])
+        expect(mockNotifyOpsEvent.mock.calls[0][0]).toMatchObject({
+          flow: "giftcard",
+          status: "success",
+        })
+        // No claim was involved; nothing fulfilment-shaped may have happened.
+        expect(mockEncrypt).not.toHaveBeenCalled()
+        expect(mockSendFulfilledPush).not.toHaveBeenCalled()
+      })
+
+      it("falls back to quoteSats when no invoice was recorded", async () => {
+        const order = repo.seed(
+          makeOrder({
+            status: "INVOICE_ISSUED",
+            providerOrderId: "tbc-123" as GiftCardProviderOrderId,
+          }),
+        )
+        const res = await settleOrderFromVendor(order, {
+          kind: "paidPendingFulfillment",
+        })
+        if (res instanceof Error) throw res
+        expect(res.paidSats).toBe(40_000)
+      })
+
+      it("EXPIRED -> PAID: the vouch revives the write-off the same way a fulfilled vouch does", async () => {
+        const order = repo.seed(
+          makeOrder({
+            status: "EXPIRED",
+            failureReason: "expired",
+            providerOrderId: "tbc-123" as GiftCardProviderOrderId,
+            invoiceSats: 40_100 as Satoshis,
+            expiresAt: new Date(NOW_MS - 60_000),
+          }),
+        )
+        const res = await settleOrderFromVendor(order, {
+          kind: "paidPendingFulfillment",
+        })
+        if (res instanceof Error) throw res
+        expect(res.status).toBe("PAID")
+        expect(res.statusHistory.at(-1)?.reason).toBe("vendor-reported-payment")
+        expect(opsPhases()).toEqual(["order-paid"])
+      })
+
+      it("a transition fault (lost race) returns the error", async () => {
+        const order = invoiceIssued()
+        repo.transition.mockResolvedValueOnce(
+          new GiftCardOrderStateError("raced into PAID"),
+        )
+        const res = await settleOrderFromVendor(order, {
+          kind: "paidPendingFulfillment",
+        })
+        expect(res).toBeInstanceOf(GiftCardOrderStateError)
         expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
       })
-    }
+    })
   })
 })
 

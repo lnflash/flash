@@ -134,10 +134,10 @@ Who moves what:
 | `CREATED -> INVOICE_ISSUED` | `purchaseGiftCard`, after `provider.createOrder` and the tolerance check |
 | `CREATED/INVOICE_ISSUED -> FAILED` | `purchaseGiftCard` (`failUnpaidOrder`), `settleOrderFromVendor` on vendor `failed`/`refunded` before payment |
 | `INVOICE_ISSUED -> PAID / PAYMENT_PENDING / PAYMENT_FAILED` | `purchaseGiftCard` from the `PaymentSendStatus`, or from the send error's class: a proven refusal is `PAYMENT_FAILED`, anything else `PAYMENT_PENDING` (FLOWS 4a). Also entered by a same-key replay of an unpaid `INVOICE_ISSUED` order |
-| `PAYMENT_PENDING -> PAID / PAYMENT_FAILED` | `reconcileGiftCardOrders` (`processPendingPayment`) after re-reading IBEX; also `PAYMENT_FAILED` (`payment-unresolved-expired`) when there is no IBEX ref, the vendor positively reports not paid, and now is past `expiresAt` + 24 h |
-| `INVOICE_ISSUED/PAYMENT_PENDING -> PAID` | `settleOrderFromVendor` when the vendor reports fulfilled before we recorded payment — including the reconcile worker's vendor fallback when IBEX cannot account for the send |
+| `PAYMENT_PENDING -> PAID / PAYMENT_FAILED` | `reconcileGiftCardOrders` (`processPendingPayment`) after re-reading IBEX; also `PAYMENT_FAILED` (`payment-unresolved-expired`) when the vendor positively reports not paid and now is past `expiresAt` + 24 h (asked every run when there is no IBEX ref; past the 60-min warn horizon when IBEX still reports the send in flight) |
+| `INVOICE_ISSUED/PAYMENT_PENDING -> PAID` | `settleOrderFromVendor` when the vendor reports fulfilled before we recorded payment — including the reconcile worker's vendor fallback when IBEX cannot account for the send. For an INVOICE_ISSUED (or expired) row a vendor `paidPendingFulfillment` records payment the same way (`vendor-reported-payment`): it is the vendor vouching the payment settled |
 | `EXPIRED -> PAID` | `purchaseGiftCard` (`markPaidAndSettle`) on a late IBEX Success for an already-expired row, reason `payment-settled-after-expiry` |
-| `CREATED/INVOICE_ISSUED -> EXPIRED` | reconcile (`processExpiry`) past `expiresAt`; an INVOICE_ISSUED row gets one vendor poll first (it never has an IBEX ref, so there is nothing to re-read at IBEX) |
+| `CREATED/INVOICE_ISSUED -> EXPIRED` | reconcile (`processExpiry`) past `expiresAt`; an INVOICE_ISSUED row gets one vendor poll first (it never has an IBEX ref, so there is nothing to re-read at IBEX) — a vendor error defers expiry to the next run, since EXPIRED is never revisited |
 | `PAID -> FULFILLED` | `settleOrderFromVendor` (`fulfil`) with the encrypted claim |
 | `PAID -> REFUND_REQUIRED` | `settleOrderFromVendor` on vendor `failed`/`refunded`; reconcile after 24 h in PAID **only** when the final vendor poll positively reports not fulfilled (`fulfillment-timeout`) — a vendor error keeps PAID and retries |
 
@@ -249,6 +249,8 @@ transition; attempt timing is process memory, so the cron (a fresh process)
 polls each PAID order once per run and the trigger interval carries the real
 schedule. Horizons: PAID for 24 h becomes `REFUND_REQUIRED` only when the final
 vendor poll positively reports not fulfilled; PAYMENT_PENDING with no
-resolvable IBEX status warns after 60 min and, with no ref, a vendor not-paid
-and `expiresAt` + 24 h passed, becomes `PAYMENT_FAILED`
-(`payment-unresolved-expired`).
+resolvable IBEX status warns after 60 min and, with the vendor answering
+not-paid and `expiresAt` + 24 h passed, becomes `PAYMENT_FAILED`
+(`payment-unresolved-expired`) — with no ref the vendor is asked every run, and
+with a ref still reported in flight by IBEX it is asked past that same 60-min
+horizon so a send IBEX never closes out cannot pend forever.
