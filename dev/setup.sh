@@ -1,6 +1,6 @@
 #!/bin/bash
 # Flash Dev Environment Setup
-# Usage: ./dev/setup.sh [--dev|--webhook]
+# Usage: ./dev/setup.sh [--dev|--webhook] [--skip-ibex]
 #
 # This script validates your environment, installs dependencies,
 # configures credentials, and starts the development server.
@@ -18,15 +18,17 @@ fail()  { echo -e "${RED}✗${NC} $1"; exit 1; }
 
 RUN_WEBHOOK_SETUP=false
 WEBHOOK_ONLY=false
+SKIP_IBEX=false
 
 usage() {
   cat << EOF
-Usage: ./dev/setup.sh [--dev|--webhook]
+Usage: ./dev/setup.sh [--dev|--webhook] [--skip-ibex]
 
 Options:
-  --dev      Run normal dev setup, then configure Bridge sandbox webhooks.
-  --webhook  Only configure Bridge sandbox webhooks and local dev overrides.
-  --help     Show this help message.
+  --dev        Run normal dev setup, then configure Bridge sandbox webhooks.
+  --webhook    Only configure Bridge sandbox webhooks and local dev overrides.
+  --skip-ibex  Do not prompt for Ibex credentials (for non-interactive runs).
+  --help       Show this help message.
 EOF
 }
 
@@ -39,6 +41,10 @@ while [[ $# -gt 0 ]]; do
     --webhook)
       RUN_WEBHOOK_SETUP=true
       WEBHOOK_ONLY=true
+      shift
+      ;;
+    --skip-ibex)
+      SKIP_IBEX=true
       shift
       ;;
     --help|-h)
@@ -121,14 +127,19 @@ echo "Checking Ibex credentials..."
 
 if [ -f .env.local ] && grep -q "IBEX_CLIENT_ID" .env.local 2>/dev/null; then
   info "Ibex credentials found in .env.local"
+elif [ "$SKIP_IBEX" = true ]; then
+  warn "Skipped (--skip-ibex) — you'll need to create .env.local with IBEX_CLIENT_ID and IBEX_CLIENT_SECRET before starting"
 else
   echo ""
   echo "Flash requires Ibex sandbox credentials (OAuth2 client credentials) to connect to the payment backend."
   echo "If you don't have credentials, ask your team lead."
   echo ""
-  read -rp "Ibex client ID (or press Enter to skip): " IBEX_CLIENT_ID
+  # read returns non-zero on EOF (closed or non-TTY stdin); under set -e that
+  # would exit silently, so fail with instructions instead.
+  NO_INPUT_HINT="No input available for the Ibex prompt (stdin closed or not a terminal). Re-run interactively, create .env.local with IBEX_CLIENT_ID and IBEX_CLIENT_SECRET, or pass --skip-ibex."
+  read -rp "Ibex client ID (or press Enter to skip): " IBEX_CLIENT_ID || { echo ""; fail "$NO_INPUT_HINT"; }
   if [ -n "$IBEX_CLIENT_ID" ]; then
-    read -rsp "Ibex client secret: " IBEX_CLIENT_SECRET
+    read -rsp "Ibex client secret: " IBEX_CLIENT_SECRET || { echo ""; fail "$NO_INPUT_HINT"; }
     echo ""
     cat > .env.local << EOF
 export IBEX_CLIENT_ID='${IBEX_CLIENT_ID}'
