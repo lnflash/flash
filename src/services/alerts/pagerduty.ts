@@ -4,6 +4,7 @@ import { recordExceptionInCurrentSpan } from "@services/tracing"
 import axios from "axios"
 
 import { BridgeAlert } from "./index.types"
+import { envSummary, envTagPrefix } from "./env-label"
 
 const PAGERDUTY_EVENTS_URL = "https://events.pagerduty.com/v2/enqueue"
 
@@ -20,10 +21,10 @@ export const sendPagerDuty = async (alert: BridgeAlert): Promise<void> => {
         event_action: "trigger",
         dedup_key: alert.dedupKey,
         payload: {
-          summary: `[bridge:${alert.source}] ${alert.title}`,
+          summary: `${envTagPrefix()} [bridge:${alert.source}] ${alert.title}`,
           severity: alert.severity,
           source: "flash-bridge",
-          custom_details: { ...alert.context, detail: alert.detail },
+          custom_details: { ...alert.context, detail: alert.detail, env: envSummary() },
         },
       },
       { timeout: 5000, headers: { "Content-Type": "application/json" } },

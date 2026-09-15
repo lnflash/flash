@@ -9,9 +9,18 @@ jest.mock("axios", () => ({
 const mockAlertDiscordUrl = {
   value: "https://discord.test/webhook" as string | undefined,
 }
+// Both clusters run NETWORK=mainnet; only the IBEX environment differs. The
+// mock exposes both so the tests can pin that NETWORK is ignored.
+const mockEnv = { ibex: "sandbox" as string | undefined, network: "mainnet" }
 jest.mock("@config", () => ({
   get ALERT_DISCORD_WEBHOOK_URL() {
     return mockAlertDiscordUrl.value
+  },
+  get IbexConfig() {
+    return { environment: mockEnv.ibex }
+  },
+  get NETWORK() {
+    return mockEnv.network
   },
 }))
 
@@ -38,6 +47,8 @@ const lastEmbed = () => mockPost.mock.calls.at(-1)?.[1]?.embeds?.[0]
 beforeEach(() => {
   jest.clearAllMocks()
   mockAlertDiscordUrl.value = "https://discord.test/webhook"
+  mockEnv.ibex = "sandbox"
+  mockEnv.network = "mainnet"
 })
 
 describe("sendDiscord", () => {
@@ -53,10 +64,81 @@ describe("sendDiscord", () => {
 
   it("uses a friendly author label per source, not a hardcoded 'Bridge alert'", async () => {
     await sendDiscord(baseAlert)
-    expect(lastEmbed().author.name).toBe("Fygaro")
+    expect(lastEmbed().author.name).toBe("Fygaro · TEST")
 
     await sendDiscord({ ...baseAlert, source: "bridge-webhook" })
-    expect(lastEmbed().author.name).toBe("Bridge")
+    expect(lastEmbed().author.name).toBe("Bridge · TEST")
+  })
+
+  describe("environment stamp", () => {
+    // A test-cluster probe and a prod outage used to render identically; the
+    // env must be visible in the author line, the title, AND a field so it
+    // survives whichever part of the embed the reader (or Discord) trims.
+    // Regression: the TEST cluster is NETWORK=mainnet + ibex sandbox (chart
+    // default, not overridden). A NETWORK-derived tag rendered every TEST
+    // alert as PROD — the exact curl probe this PR was opened for.
+    it("stamps TEST on ibex sandbox even though NETWORK is mainnet (the real TEST cluster)", async () => {
+      mockEnv.network = "mainnet"
+      mockEnv.ibex = "sandbox"
+      await sendDiscord(baseAlert)
+      const embed = lastEmbed()
+      expect(embed.author.name).toBe("Fygaro · TEST")
+      expect(embed.title).toBe(`[TEST] ${baseAlert.title}`)
+      expect(embed.fields[0]).toEqual({
+        name: "Env",
+        value: "TEST (ibex:sandbox)",
+        inline: true,
+      })
+      expect(JSON.stringify(embed)).not.toContain("PROD")
+    })
+
+    it("stamps PROD only on ibex production", async () => {
+      mockEnv.ibex = "production"
+      await sendDiscord(baseAlert)
+      const embed = lastEmbed()
+      expect(embed.author.name).toBe("Fygaro · PROD")
+      expect(embed.title).toBe(`[PROD] ${baseAlert.title}`)
+      expect(embed.fields[0]).toEqual({
+        name: "Env",
+        value: "PROD (ibex:production)",
+        inline: true,
+      })
+    })
+
+    it.each(["mainnet", "signet", "testnet", "regtest"])(
+      "ignores NETWORK=%s — the tag follows the ibex environment only",
+      async (network) => {
+        mockEnv.network = network
+        mockEnv.ibex = "sandbox"
+        await sendDiscord(baseAlert)
+        expect(lastEmbed().author.name).toBe("Fygaro · TEST")
+        mockEnv.ibex = "production"
+        await sendDiscord(baseAlert)
+        expect(lastEmbed().author.name).toBe("Fygaro · PROD")
+      },
+    )
+
+    it("never claims PROD or TEST when the ibex environment is unset", async () => {
+      mockEnv.ibex = undefined
+      await sendDiscord(baseAlert)
+      const embed = lastEmbed()
+      expect(embed.author.name).toBe("Fygaro · UNKNOWN")
+      expect(embed.title.startsWith("[UNKNOWN] ")).toBe(true)
+      expect(embed.fields[0].value).toBe("UNKNOWN (ibex:unset)")
+    })
+
+    it("keeps the env field ahead of Source/Severity/context so budget trimming drops it last", async () => {
+      await sendDiscord(baseAlert)
+      const names = lastEmbed().fields.map((f: { name: string }) => f.name)
+      expect(names.slice(0, 3)).toEqual(["Env", "Source", "Severity"])
+    })
+
+    it("still caps the prefixed title at Discord's limit", async () => {
+      await sendDiscord({ ...baseAlert, title: "x".repeat(300) })
+      const title = lastEmbed().title
+      expect(title.length).toBeLessThanOrEqual(256)
+      expect(title.startsWith("[TEST] ")).toBe(true)
+    })
   })
 
   it("colors critical red and warning amber", async () => {
@@ -132,7 +214,7 @@ describe("sendDiscord", () => {
   it("falls back to the raw source string for an unmapped author label", async () => {
     const alert = { ...baseAlert, source: "unmapped-source" } as unknown as BridgeAlert
     await sendDiscord(alert)
-    expect(lastEmbed().author.name).toBe("unmapped-source")
+    expect(lastEmbed().author.name).toBe("unmapped-source · TEST")
   })
 
   it("keeps the embed under Discord's 6000-char aggregate limit, dropping trailing fields", async () => {

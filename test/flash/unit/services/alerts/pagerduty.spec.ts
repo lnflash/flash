@@ -1,5 +1,9 @@
 jest.mock("@config", () => ({
   ALERT_PAGERDUTY_ROUTING_KEY: "test-routing-key",
+  // Both clusters run NETWORK=mainnet; the tag must follow the IBEX
+  // environment, so a mainnet + sandbox process is TEST.
+  IbexConfig: { environment: "sandbox" },
+  NETWORK: "mainnet",
 }))
 
 jest.mock("@services/tracing", () => ({
@@ -34,8 +38,9 @@ describe("sendPagerDuty", () => {
         event_action: "trigger",
         dedup_key: "bridge-api:5xx",
         payload: expect.objectContaining({
-          summary: "[bridge:bridge-api] Bridge API 502 on GET /transfers",
+          summary: "[TEST] [bridge:bridge-api] Bridge API 502 on GET /transfers",
           severity: "critical",
+          custom_details: expect.objectContaining({ env: "TEST (ibex:sandbox)" }),
         }),
       }),
       expect.any(Object),
