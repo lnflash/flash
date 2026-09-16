@@ -762,6 +762,43 @@ describe("purchaseGiftCard", () => {
         expect(opsEvent("paid-not-recorded")).toBeUndefined()
       })
 
+      it("a late Pending on a row the worker already EXPIRED re-opens it: EXPIRED -> PAYMENT_PENDING with the ref", async () => {
+        // Same race, but IBEX says the send is still in flight rather than
+        // settled. The row must not stay EXPIRED: the client would read that
+        // as "never paid, buy again" while the HTLC settles, and the worker
+        // never polls EXPIRED, so the ref it needs to re-query IBEX would be
+        // lost with it.
+        const existing = issued()
+        mockPayInvoice.mockImplementation(
+          async (args: { onResponse?: (r: unknown) => void }) => {
+            const expired = await repo.transition({
+              id: existing.id,
+              from: ["INVOICE_ISSUED"],
+              to: "EXPIRED",
+              reason: "expired",
+              patch: { failureReason: "expired" },
+            })
+            if (expired instanceof Error) throw expired
+            args.onResponse?.({ transaction: { id: "ibex-tx-1" } })
+            return PaymentSendStatus.Pending
+          },
+        )
+        const res = await purchase()
+        if (res instanceof Error) throw res
+        expect(res.status).toBe("PAYMENT_PENDING")
+        expect(res.providerPaymentRef).toBe("ibex-tx-1")
+        expect(res.statusHistory.map((h) => h.status)).toEqual([
+          "CREATED",
+          "INVOICE_ISSUED",
+          "EXPIRED",
+          "PAYMENT_PENDING",
+        ])
+        expect(res.statusHistory[3].reason).toBe("payment-pending-after-expiry")
+        expect(opsPhases()).toEqual(["payment-pending"])
+        expect(opsEvent("paid-not-recorded")).toBeUndefined()
+        expect(mockGetOrder).not.toHaveBeenCalled()
+      })
+
       it("does not resume while the kill switch is off: that is new money leaving", async () => {
         mockConfig = makeGiftCardsConfig({ enabled: false })
         const existing = issued()

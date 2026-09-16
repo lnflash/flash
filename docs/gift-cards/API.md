@@ -199,7 +199,7 @@ Behaviour:
 | `FULFILLED` | Terminal. `claim` and `fulfilledAt` are set |
 | `FAILED` | Terminal, nothing paid: vendor rejected, price moved past tolerance, or unreadable invoice. Safe to retry with a new key |
 | `PAYMENT_FAILED` | Terminal, nothing paid: IBEX **provably** refused or failed the Lightning payment (insufficient balance, a corroborated payment failure, a send-guard rejection), or a pending send with no IBEX ref that the vendor reports unpaid 24 h past expiry (`payment-unresolved-expired`). Safe to retry with a new key |
-| `EXPIRED` | Terminal, nothing paid: invoice not paid in time. (A late IBEX Success can still move it to `PAID`; keep showing the latest `status`) |
+| `EXPIRED` | Terminal, nothing paid: invoice not paid in time. (A late IBEX answer for a send that was in flight can still move it to `PAID` or back to `PAYMENT_PENDING`; keep showing the latest `status`, and never treat `EXPIRED` as a reason to purchase again while a `giftCardPurchase` for it is still in flight) |
 | `REFUND_REQUIRED` | Terminal. The wallet paid, no card arrived; Flash has been paged. Do **not** tell the customer to buy again |
 
 ## Error codes

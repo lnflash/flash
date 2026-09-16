@@ -118,19 +118,25 @@ code (`{ JM: bitrefill }` once that adapter lands).
 
 `limits.mode` mirrors `sendGuard.mode` (`docs/send-guard.md`):
 
-| Mode | Checks run | On failure | `reservationId` |
-| --- | --- | --- | --- |
-| `off` | none | n/a | `null` (nothing held) |
-| `log-only` | all | `giftcard / would-reject` ops event (status pending) + span attributes, then **allowed** | set, or `null` if the hold write failed (logged, allowed) |
-| `enforce` | all | `giftcard / rejected` ops event (status failed), purchase refused with the check's error | set; a hold write failure refuses with `GIFT_CARD_UNKNOWN` |
+The mode governs **limits** (how much an account may buy). **Eligibility**
+(who may buy at all) is outside it and enforced in every mode, `off` included:
 
-Checks, in order (`evaluate` in `authorize-purchase.ts`): level, account age,
-open-loop switch and level >= 2, per-card cap = `min(perLevel, vendor card cap)`,
-velocity, daily cap = `min(perLevel.dailyCents, vendorDailyCapCents)` over
-non-failed orders in the trailing 24 h plus live Redis holds. `REFUND_REQUIRED`
-orders count toward the daily sum (money left); `FAILED`, `PAYMENT_FAILED`,
-`EXPIRED` do not. A Mongo or Redis fault is `limits-unavailable`: allowed in
-`log-only`, refused (`GIFT_CARD_UNKNOWN`, level Critical) in `enforce`.
+| Check | `off` | `log-only` | `enforce` |
+| --- | --- | --- | --- |
+| Eligibility: level 0 / `minAccountLevel`, account age, open-loop switch and level >= 2 (`checkEligibility`) | refused | refused | refused |
+| Limits: per-card cap, velocity, daily cap (`evaluateLimits`) | not run | `giftcard / would-reject` ops event (status pending) + span attributes, then **allowed** | `giftcard / rejected` ops event (status failed), purchase refused with the check's error |
+
+An eligibility refusal emits `giftcard / rejected` (status failed) whatever
+the mode. `reservationId`: `null` in `off` (nothing held); in `log-only` set,
+or `null` if the hold write failed (logged, allowed); in `enforce` set, and a
+hold write failure refuses with `GIFT_CARD_UNKNOWN`.
+
+Limits, in order: per-card cap = `min(perLevel, vendor card cap)`, velocity,
+daily cap = `min(perLevel.dailyCents, vendorDailyCapCents)` over non-failed
+orders in the trailing 24 h plus live Redis holds. `REFUND_REQUIRED` orders
+count toward the daily sum (money left); `FAILED`, `PAYMENT_FAILED`, `EXPIRED`
+do not. A Mongo or Redis fault is `limits-unavailable`: allowed in `log-only`,
+refused (`GIFT_CARD_UNKNOWN`, level Critical) in `enforce`.
 
 Independent of mode: the 10/min purchase attempt limiter (5 min block; not
 charged on a same-key replay), the 30/min `giftCardQuote` attempt limiter

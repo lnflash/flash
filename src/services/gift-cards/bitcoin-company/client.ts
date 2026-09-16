@@ -244,9 +244,21 @@ type CallArgs<T> = RequestSpec & {
 type ParseArgs<T> = {
   op: string
   schema: z.ZodType<T, z.ZodTypeDef, unknown>
-  /** Auth responses are never previewed in logs, redaction or not. */
+  /**
+   * Whether a response that fails validation may be previewed (redacted) in
+   * the warn log. Off for anything that can carry a token or a claim code:
+   * the branch that logs is precisely the one taken when the vendor renames a
+   * field, and key-name redaction cannot know the new name.
+   */
   logBody: boolean
 }
+
+/**
+ * The only ops whose responses are safe to preview on a shape failure. Catalog
+ * rows and quotes are prices and product copy. `createOrder` and `getOrder`
+ * (invoice-status) carry claim data once fulfilled; auth ops carry tokens.
+ */
+const PREVIEWABLE_OPS: ReadonlySet<string> = new Set(["listProducts", "quote"])
 
 export type BitcoinCompanyClientDeps = {
   getConfig?: () => BitcoinCompanyConfig
@@ -451,7 +463,10 @@ export class BitcoinCompanyClient {
     addAttributesToCurrentSpan({ "giftcard.provider": PROVIDER, "giftcard.op": args.op })
     try {
       const data = await this.sendWithAuth(args)
-      return this.parseEnvelope({ op: args.op, schema: args.schema, logBody: true }, data)
+      return this.parseEnvelope(
+        { op: args.op, schema: args.schema, logBody: PREVIEWABLE_OPS.has(args.op) },
+        data,
+      )
     } catch (err) {
       return this.toGiftCardError(args.op, err)
     }

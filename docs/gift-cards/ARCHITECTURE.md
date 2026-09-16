@@ -107,7 +107,7 @@ CREATED         -> INVOICE_ISSUED | FAILED | EXPIRED
 INVOICE_ISSUED  -> PAYMENT_PENDING | PAID | PAYMENT_FAILED | EXPIRED | FAILED
 PAYMENT_PENDING -> PAID | PAYMENT_FAILED
 PAID            -> FULFILLED | REFUND_REQUIRED
-EXPIRED         -> PAID            (late settlement only; see below)
+EXPIRED         -> PAID | PAYMENT_PENDING   (a send in flight at expiry, resolved; see below)
 FULFILLED       -> (terminal)
 FAILED          -> (terminal)
 PAYMENT_FAILED  -> (terminal)
@@ -137,9 +137,10 @@ Who moves what:
 | `PAYMENT_PENDING -> PAID / PAYMENT_FAILED` | `reconcileGiftCardOrders` (`processPendingPayment`) after re-reading IBEX; also `PAYMENT_FAILED` (`payment-unresolved-expired`) when the vendor positively reports not paid and now is past `expiresAt` + 24 h (asked every run when there is no IBEX ref; past the 60-min warn horizon when IBEX still reports the send in flight) |
 | `INVOICE_ISSUED/PAYMENT_PENDING -> PAID` | `settleOrderFromVendor` when the vendor reports fulfilled before we recorded payment — including the reconcile worker's vendor fallback when IBEX cannot account for the send. For an INVOICE_ISSUED (or expired) row a vendor `paidPendingFulfillment` records payment the same way (`vendor-reported-payment`): it is the vendor vouching the payment settled |
 | `EXPIRED -> PAID` | `purchaseGiftCard` (`markPaidAndSettle`) on a late IBEX Success for an already-expired row, reason `payment-settled-after-expiry` |
+| `EXPIRED -> PAYMENT_PENDING` | `purchaseGiftCard` (`markPaymentPending`) when IBEX reports the send still in flight for a row the worker expired meanwhile, reason `payment-pending-after-expiry`; the IBEX ref is written so the worker can re-query it, and the row is open work again |
 | `CREATED/INVOICE_ISSUED -> EXPIRED` | reconcile (`processExpiry`) past `expiresAt`; an INVOICE_ISSUED row gets one vendor poll first (it never has an IBEX ref, so there is nothing to re-read at IBEX) — a vendor error defers expiry to the next run, since EXPIRED is never revisited |
 | `PAID -> FULFILLED` | `settleOrderFromVendor` (`fulfil`) with the encrypted claim |
-| `PAID -> REFUND_REQUIRED` | `settleOrderFromVendor` on vendor `failed`/`refunded`; reconcile after 24 h in PAID **only** when the final vendor poll positively reports not fulfilled (`fulfillment-timeout`) — a vendor error keeps PAID and retries |
+| `PAID -> REFUND_REQUIRED` | `settleOrderFromVendor` on vendor `failed`/`refunded`; reconcile after 24 h in PAID **only** when the final vendor poll answers `awaitingPayment` (the vendor never saw the payment our rail settled: `fulfillment-timeout`). A vendor error keeps PAID and retries; a vendor still-in-progress answer (`paidPendingFulfillment`: `held`, `senttofulfillment`, unknown status, `fulfilled` without claim data) keeps PAID, keeps polling and pages `fulfillment-stalled` once — refunding there would credit a card the vendor may still ship |
 
 ## Decisive facts
 

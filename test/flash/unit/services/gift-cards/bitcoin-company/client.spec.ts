@@ -944,6 +944,8 @@ describe("BitcoinCompanyClient response validation", () => {
   })
 })
 
+const QUOTE_TOKEN = "QUOTE-TOKEN-SHOULD-BE-REDACTED-71c2"
+
 describe("BitcoinCompanyClient log hygiene", () => {
   it("never hands a token, credential, or claim value to the logger or the span", async () => {
     // Login + a status response that fails validation WITH claim data in it,
@@ -960,15 +962,20 @@ describe("BitcoinCompanyClient log hygiene", () => {
             status: 123,
             claimData: { codes: [{ value: CLAIM_CODE }], claimLink: CLAIM_LINK },
           }),
+        // A quote that fails validation WITH a token-named key: quote is a
+        // previewable op, so this is what proves the redaction path ran.
+        "/svs/quote-card": () => httpOk({ satsCost: "nope", token: QUOTE_TOKEN }),
       }),
     )
     const client = makeClient()
 
     const status = await client.invoiceStatus(INVOICE)
+    const quote = await client.quoteCard(QUOTE_ARGS)
     mockRedisStore.clear()
     const relogin = await client.invoiceStatus(INVOICE)
 
     expect(status).toBeInstanceOf(GiftCardVendorUnavailableError)
+    expect(quote).toBeInstanceOf(GiftCardVendorUnavailableError)
     expect(relogin).toBeInstanceOf(GiftCardVendorUnavailableError)
 
     const logCalls = Object.values(mockedLogger).flatMap((mock) => mock.mock.calls)
@@ -976,7 +983,7 @@ describe("BitcoinCompanyClient log hygiene", () => {
     const loggedText = JSON.stringify(logCalls)
     // Prove the redaction path ran, not that the body was merely dropped.
     expect(loggedText).toContain("[REDACTED]")
-    for (const secret of SECRET_STRINGS) {
+    for (const secret of [...SECRET_STRINGS, QUOTE_TOKEN]) {
       expect(loggedText).not.toContain(secret)
     }
 
@@ -993,6 +1000,61 @@ describe("BitcoinCompanyClient log hygiene", () => {
     for (const secret of SECRET_STRINGS) {
       expect(spanText).not.toContain(secret)
     }
+  })
+
+  it("never previews an invoice-status body that fails validation, even under a key name redaction does not know", async () => {
+    // Key-name redaction only helps for names we predicted. A vendor rename
+    // (`claimData` → `claim`, `codes` → `code`) is exactly what makes the
+    // response fail validation, and this warn is the branch that then runs.
+    // So for anything that can carry a claim code, the body is never
+    // previewed at all; only the zod issue paths are logged.
+    const RENAMED_CODE = "RENAMED-CLAIM-CODE-9f3a"
+    mockedAxios.post.mockImplementation(
+      routePost({
+        "/auth/login": () => httpOk(LOGIN_RESULT),
+        // `status: 123` is what fails validation; the renamed claim key is
+        // what must not reach the log because of it.
+        "/giftcards/invoice-status": () =>
+          httpOk({
+            status: 123,
+            claim: { code: RENAMED_CODE, link: "https://redeem.example/x" },
+          }),
+      }),
+    )
+    const client = makeClient()
+
+    const status = await client.invoiceStatus(INVOICE)
+    expect(status).toBeInstanceOf(GiftCardVendorUnavailableError)
+
+    const shapeWarn = mockedLogger.warn.mock.calls.find(
+      ([, msg]) => msg === "Bitcoin Company response failed validation",
+    )
+    expect(shapeWarn).toBeDefined()
+    expect(shapeWarn?.[0]).toEqual(expect.objectContaining({ op: "getOrder" }))
+    expect(shapeWarn?.[0]).not.toHaveProperty("body")
+
+    const loggedText = JSON.stringify(
+      Object.values(mockedLogger).flatMap((mock) => mock.mock.calls),
+    )
+    expect(loggedText).not.toContain(RENAMED_CODE)
+    expect(loggedText).not.toContain("redeem.example")
+  })
+
+  it("still previews a catalog body that fails validation: no claim data can be in it", async () => {
+    mockedAxios.get.mockImplementation(
+      routeGet({ "/giftcards": () => httpOk({ products: "not-an-array" }) }),
+    )
+    const client = makeClient()
+
+    await client.listProducts()
+
+    const shapeWarn = mockedLogger.warn.mock.calls.find(
+      ([, msg]) => msg === "Bitcoin Company response failed validation",
+    )
+    expect(shapeWarn).toBeDefined()
+    expect(shapeWarn?.[0]).toEqual(
+      expect.objectContaining({ op: "listProducts", body: expect.any(String) }),
+    )
   })
 
   it("redactForLog masks sensitive keys at any depth and leaves the rest intact", () => {

@@ -30,10 +30,17 @@ export { releaseGiftCardReservation }
  * reseller. Flash layers its own per-level caps underneath (perLevel.*), so
  * the effective cap is always `min(flash, vendor)`.
  *
- * Modes (`giftCards.limits.mode`), same rollout discipline as the ENG-573 send
- * guard: `off` skips every check; `log-only` runs them all, emits a
- * `giftcard / would-reject` ops event on failure and AUTHORISES anyway;
- * `enforce` refuses. A week of would-reject data is reviewed before the flip.
+ * Two kinds of check, deliberately not under the same switch:
+ *
+ *  - Eligibility (level, account age, open-loop floor) is identity, not a
+ *    limit. It is enforced in every mode, `off` included: a device-only
+ *    level-0 account has no allowance to spend against, and no rollout
+ *    setting makes it one.
+ *  - Limits (per-card and daily caps, velocity) follow `giftCards.limits.mode`
+ *    with the ENG-573 send-guard rollout discipline: `off` skips them;
+ *    `log-only` runs them, emits a `giftcard / would-reject` ops event on
+ *    failure and AUTHORISES anyway; `enforce` refuses. A week of would-reject
+ *    data is reviewed before the flip.
  *
  * Rejection reasons have exactly one source — this const — so the specs and
  * the would-reject census reference the same strings.
@@ -114,21 +121,16 @@ const limitsUnavailable = (cause: Error): Rejection => ({
 })
 
 /**
- * Every check, in order, against the account's history and live holds.
- * Returns the first failure, or `true`. A repository/Redis fault is a
- * `limits-unavailable` rejection: what that means is decided by the mode.
+ * Who may buy at all. Pure: no store reads. Enforced in every limits mode.
+ * Returns the first failure, or `true`.
  */
-const evaluate = async ({
+const checkEligibility = ({
   account,
   product,
-  valueMinor,
-  quantity,
   nowMs,
-}: Required<AuthorizeGiftCardPurchaseArgs>): Promise<true | Rejection> => {
+}: Required<AuthorizeGiftCardPurchaseArgs>): true | Rejection => {
   const limits = GiftCardsConfig.limits
   const level = effectiveAccountLevel(account.level)
-  const totalMinor = valueMinor * quantity
-  const currency = product.currency
 
   // 1. Level. Level 0 is refused regardless of config: a device-only account
   //    has no identity and no allowance to spend against.
@@ -166,6 +168,26 @@ const evaluate = async ({
       }
     }
   }
+
+  return true
+}
+
+/**
+ * How much an eligible account may buy, against its history and live holds.
+ * Returns the first failure, or `true`. A repository/Redis fault is a
+ * `limits-unavailable` rejection: what that means is decided by the mode.
+ */
+const evaluateLimits = async ({
+  account,
+  product,
+  valueMinor,
+  quantity,
+  nowMs,
+}: Required<AuthorizeGiftCardPurchaseArgs>): Promise<true | Rejection> => {
+  const limits = GiftCardsConfig.limits
+  const level = effectiveAccountLevel(account.level)
+  const totalMinor = valueMinor * quantity
+  const currency = product.currency
 
   // 4. Per-card cap: min(Flash per-level, vendor open/closed-loop).
   const perLevel = levelLimits(level)
@@ -240,12 +262,15 @@ const reportWouldReject = ({
   totalMinor,
   rejection,
   mode,
+  enforced = mode === "enforce",
 }: {
   account: Pick<Account, "id" | "level">
   product: Pick<GiftCardProduct, "id" | "currency">
   totalMinor: number
   rejection: Rejection
   mode: GiftCardLimitsMode
+  /** Whether the purchase was actually refused. Eligibility refusals are, whatever the mode. */
+  enforced?: boolean
 }) => {
   const level = String(effectiveAccountLevel(account.level))
   addAttributesToCurrentSpan({
@@ -255,8 +280,8 @@ const reportWouldReject = ({
   })
   notifyOpsEvent({
     flow: "giftcard",
-    phase: mode === "enforce" ? "rejected" : "would-reject",
-    status: mode === "enforce" ? "failed" : "pending",
+    phase: enforced ? "rejected" : "would-reject",
+    status: enforced ? "failed" : "pending",
     accountId: account.id,
     amount: { value: (totalMinor / 100).toFixed(2), currency: product.currency },
     error: rejection.error.constructor.name,
@@ -275,12 +300,28 @@ export const authorizeGiftCardPurchase = async (
   args: AuthorizeGiftCardPurchaseArgs,
 ): Promise<GiftCardAuthorization> => {
   const mode = GiftCardsConfig.limits.mode
-  if (mode === "off") return { authorized: true, reservationId: null }
-
   const nowMs = args.nowMs ?? Date.now()
   const totalMinor = args.valueMinor * args.quantity
 
-  const outcome = await evaluate({ ...args, nowMs })
+  // Eligibility first, and outside the mode switch: `log-only` exists to
+  // measure caps against real traffic, not to let a level-0 account through
+  // while the caps are being tuned.
+  const eligibility = checkEligibility({ ...args, nowMs })
+  if (eligibility !== true) {
+    reportWouldReject({
+      account: args.account,
+      product: args.product,
+      totalMinor,
+      rejection: eligibility,
+      mode,
+      enforced: true,
+    })
+    return { authorized: false, ...eligibility }
+  }
+
+  if (mode === "off") return { authorized: true, reservationId: null }
+
+  const outcome = await evaluateLimits({ ...args, nowMs })
 
   if (outcome !== true) {
     reportWouldReject({

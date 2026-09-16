@@ -65,8 +65,13 @@ The only state meaning money left Flash and no card came. It pages
 
 Normal fulfilment is seconds. The worker polls at 5s/15s/60s/5m then every
 15m, and escalates to `REFUND_REQUIRED` only at 24 h and only when the vendor
-positively reports not fulfilled (a vendor error keeps PAID and retries). A
-PAID order older than 15 min is a vendor delay or a worker problem.
+answers `awaitingPayment` (it never saw the payment our rail settled). A vendor
+error keeps PAID and retries. A vendor that still reports the order in
+progress at 24 h (`held`, `senttofulfillment`, an unknown status, `completed`
+without `claimData`) also keeps PAID, keeps polling, and pages
+`fulfillment-stalled` once: the card may still ship, so it is never refunded
+automatically — that is step 3 below, with TBC. A PAID order older than 15 min
+is a vendor delay or a worker problem.
 
 1. `Q='{"status":"PAID","updatedAt":{"$lt":{"$date":"<ISO 15 min ago>"}}}'`.
    Note the JSON date form; adjust the timestamp.
@@ -84,8 +89,10 @@ PAID order older than 15 min is a vendor delay or a worker problem.
    `completed` without `claimData`, and `disputed`, are held as pending by
    design (a dispute may still fulfil or refund); ask TBC.
 4. Do not move the order by hand. If the vendor confirms the card will not
-   come, the 24 h timeout writes `REFUND_REQUIRED`; to bring that forward,
-   engineering runs `settleOrderFromVendor(order, { kind: "failed", reason })`.
+   come, engineering runs `settleOrderFromVendor(order, { kind: "failed", reason })`,
+   which writes `REFUND_REQUIRED` and pages (a). The 24 h timeout does this on
+   its own only when the vendor answers `awaitingPayment`; a stalled order the
+   vendor still calls in-progress waits for that confirmation.
 
 ## (c) Order stuck in `PAYMENT_PENDING` with no `providerPaymentRef`
 

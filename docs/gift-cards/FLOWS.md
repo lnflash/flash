@@ -169,7 +169,10 @@ write fails after a Success (lost race, store fault) the order is re-read and
 returned as it stands and a Critical `paid-not-recorded` event fires (RUNBOOK
 i): an error payload would read as "nothing happened" for money already gone.
 A Success for a row the worker expired while the send was in flight is written
-`EXPIRED -> PAID` (`payment-settled-after-expiry`).
+`EXPIRED -> PAID` (`payment-settled-after-expiry`); a Pending for such a row is
+written `EXPIRED -> PAYMENT_PENDING` (`payment-pending-after-expiry`) with the
+IBEX ref, so the worker re-queries the send and the client never reads a
+possibly-paid order as "expired, buy again".
 
 If the vendor reports `fulfilled` while Flash still shows `INVOICE_ISSUED` or
 `PAYMENT_PENDING`, `settleOrderFromVendor` takes the vendor's word as proof of
@@ -193,12 +196,17 @@ Worker                        Repo                   Vendor
 ```
 
 After `GIFT_CARD_PAID_TIMEOUT_MS` (24 h) in `PAID`, `processPaid` makes one
-final `fetchAndSettle` before escalating: a vendor `fulfilled` ends `FULFILLED`
-(a worker gap over 24 h must not refund cards that shipped), `failed` /
-`refunded` takes the path above, and **only** a positive not-fulfilled answer
-(`awaitingPayment` / `paidPendingFulfillment`) writes `REFUND_REQUIRED` with
-reason `fulfillment-timeout`. A vendor error keeps the order `PAID` (warned)
-and the next run polls again; a page never rests on an unreachable vendor.
+final vendor poll (`fetchVendorOrderStatus`, then `settleOrderFromVendor`)
+before escalating: a vendor `fulfilled` ends `FULFILLED` (a worker gap over
+24 h must not refund cards that shipped), `failed` / `refunded` takes the path
+above, and **only** `awaitingPayment` — the vendor never saw the payment our
+rail settled — writes `REFUND_REQUIRED` with reason `fulfillment-timeout`. A
+`paidPendingFulfillment` (`held`, `senttofulfillment`, an unknown status,
+`fulfilled` without claim data) is the vendor still working: the order stays
+`PAID`, keeps polling on the normal schedule, and pages `fulfillment-stalled`
+once — refunding there would have ops credit an order the vendor then ships. A
+vendor error keeps the order `PAID` (warned) and the next run polls again; a
+page never rests on an unreachable vendor.
 TBC's `disputed` is held as pending, not refunded, so it reaches this point
 only via the timeout. From here the order is an operator's problem: RUNBOOK (a).
 The customer must not be told to buy again.
@@ -234,9 +242,11 @@ vendor first: a card that shipped, or a payment the vendor reports settled and
 is fulfilling, is proof of payment. A vendor error is not an answer: it defers
 expiry, since EXPIRED is never revisited and one outage must not bury a
 possibly-paid order. Two safety nets remain for a payment that surfaces later:
-a same-key replay before expiry resumes it (flow 7), and a late IBEX Success on
-an `EXPIRED` row is written `EXPIRED -> PAID` (flow 4a). The worker never polls
-`EXPIRED`.
+a same-key replay before expiry resumes it (flow 7), and a late IBEX answer on
+an `EXPIRED` row re-opens it — Success as `EXPIRED -> PAID`, Pending as
+`EXPIRED -> PAYMENT_PENDING` with the ref (flow 4a). The worker never polls
+`EXPIRED`; a row it expired that IBEX then reports in flight comes back to it
+as `PAYMENT_PENDING`.
 
 ## 7. Idempotent replay / double tap
 

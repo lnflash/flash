@@ -32,9 +32,11 @@ export const GiftCardOrderStatus = {
 
 /**
  * "Nothing left for the worker to do." EXPIRED is included even though it has
- * a legal exit (→ PAID): that exit is only ever taken by the purchase path
- * (see the lifecycle doc above), never by the worker, so an EXPIRED order is
- * not open work.
+ * legal exits (→ PAID, → PAYMENT_PENDING): both are only ever taken by the
+ * purchase path when a send that was in flight at IBEX resolves after the
+ * worker expired the row (see the lifecycle doc above), never by the worker,
+ * so an EXPIRED order is not open work. Once it re-enters PAYMENT_PENDING it
+ * is open again and the worker owns it.
  */
 export const GIFT_CARD_TERMINAL_STATUSES: readonly GiftCardOrderStatus[] = [
   GiftCardOrderStatus.Fulfilled,
@@ -55,8 +57,10 @@ export const GIFT_CARD_TRANSITIONS: Readonly<
   FULFILLED: [],
   FAILED: [],
   PAYMENT_FAILED: [],
-  // A pay still in flight when the worker expired the row, then settled.
-  EXPIRED: ["PAID"],
+  // A pay still in flight when the worker expired the row: settled (PAID), or
+  // reported by IBEX as still in flight (PAYMENT_PENDING, with the ref the
+  // worker needs to re-query it). Both exits belong to the purchase path.
+  EXPIRED: ["PAID", "PAYMENT_PENDING"],
   REFUND_REQUIRED: [],
 }
 

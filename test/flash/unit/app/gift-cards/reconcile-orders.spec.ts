@@ -253,6 +253,7 @@ describe("reconcileGiftCardOrders", () => {
         expired: 0,
         paymentSettled: 0,
         finalPollFailed: 0,
+        fulfillmentStalled: 0,
         skipped: "lock-held",
       })
       expect(repo.listByStatus).not.toHaveBeenCalled()
@@ -968,17 +969,20 @@ describe("reconcileGiftCardOrders", () => {
   })
 
   describe("24h escalation", () => {
-    it("PAID for 24h with the vendor positively reporting no card -> REFUND_REQUIRED with reason fulfillment-timeout, and pages", async () => {
+    it("PAID for 24h with the vendor positively reporting no card (awaitingPayment) -> REFUND_REQUIRED with reason fulfillment-timeout, and pages", async () => {
+      mockFetchVendorStatus.mockResolvedValue({ kind: "awaitingPayment" })
       const order = paidOrder("old", -GIFT_CARD_PAID_TIMEOUT_MS)
       const res = await runAt(0)
       if (res instanceof Error) throw res
       expect(res.refundRequired).toBe(1)
+      expect(res.fulfillmentStalled).toBe(0)
       const after = repo.store.get("old")
       expect(after?.status).toBe("REFUND_REQUIRED")
       expect(after?.failureReason).toBe("fulfillment-timeout")
-      // One final vendor poll precedes the escalation.
-      expect(mockFetchAndSettle).toHaveBeenCalledTimes(1)
-      expect(mockFetchAndSettle).toHaveBeenCalledWith(order)
+      // One final vendor poll precedes the escalation, and it is settled first.
+      expect(mockFetchVendorStatus).toHaveBeenCalledTimes(1)
+      expect(mockFetchVendorStatus).toHaveBeenCalledWith(order)
+      expect(mockSettleFromVendor).toHaveBeenCalledWith(order, { kind: "awaitingPayment" })
       expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
         expect.objectContaining({
           flow: "giftcard",
@@ -987,10 +991,82 @@ describe("reconcileGiftCardOrders", () => {
           error: "fulfillment-timeout",
           meta: expect.objectContaining({
             orderId: "old",
-            lastVendorPoll: "not-fulfilled",
+            lastVendorPoll: "awaiting-payment",
           }),
         }),
       )
+    })
+
+    describe("the vendor still reporting the order in progress is not 'no card is coming'", () => {
+      // `held`, `senttofulfillment`, an unknown status string, `fulfilled`
+      // without claim data all reach the worker as `paidPendingFulfillment`.
+      // Refunding on any of them has ops credit an order the vendor then
+      // ships: the customer keeps both. Stay PAID, page once, keep polling.
+      it("PAID for 24h with paidPendingFulfillment stays PAID and pages fulfillment-stalled once", async () => {
+        mockFetchVendorStatus.mockResolvedValue({ kind: "paidPendingFulfillment" })
+        paidOrder("old", -GIFT_CARD_PAID_TIMEOUT_MS)
+
+        const first = await runAt(0)
+        if (first instanceof Error) throw first
+        expect(first.refundRequired).toBe(0)
+        expect(first.fulfillmentStalled).toBe(1)
+        expect(repo.store.get("old")?.status).toBe("PAID")
+        expect(repo.transition).not.toHaveBeenCalled()
+        expect(repo.touch).toHaveBeenCalledWith("old")
+        expect(mockNotifyOpsEvent).not.toHaveBeenCalledWith(
+          expect.objectContaining({ phase: "refund-required" }),
+        )
+        expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            flow: "giftcard",
+            phase: "fulfillment-stalled",
+            status: "pending",
+            meta: expect.objectContaining({
+              orderId: "old",
+              vendorStatus: "paidPendingFulfillment",
+            }),
+          }),
+        )
+
+        // Next run: still stalled, still PAID, no second page.
+        const second = await runAt(15 * MINUTE)
+        if (second instanceof Error) throw second
+        expect(second.fulfillmentStalled).toBe(1)
+        expect(repo.store.get("old")?.status).toBe("PAID")
+        expect(
+          mockNotifyOpsEvent.mock.calls.filter(
+            ([e]) => e.phase === "fulfillment-stalled",
+          ),
+        ).toHaveLength(1)
+      })
+
+      it("a stalled order the vendor later fulfils ends FULFILLED", async () => {
+        mockFetchVendorStatus.mockResolvedValue({ kind: "paidPendingFulfillment" })
+        paidOrder("old", -GIFT_CARD_PAID_TIMEOUT_MS)
+        const first = await runAt(0)
+        if (first instanceof Error) throw first
+        expect(repo.store.get("old")?.status).toBe("PAID")
+
+        vendorFulfils()
+        const second = await runAt(15 * MINUTE)
+        if (second instanceof Error) throw second
+        expect(second.fulfilled).toBe(1)
+        expect(repo.store.get("old")?.status).toBe("FULFILLED")
+      })
+
+      it("a stalled order the vendor later reports unpaid is refunded then", async () => {
+        mockFetchVendorStatus.mockResolvedValue({ kind: "paidPendingFulfillment" })
+        paidOrder("old", -GIFT_CARD_PAID_TIMEOUT_MS)
+        const first = await runAt(0)
+        if (first instanceof Error) throw first
+        expect(repo.store.get("old")?.status).toBe("PAID")
+
+        mockFetchVendorStatus.mockResolvedValue({ kind: "awaitingPayment" })
+        const second = await runAt(15 * MINUTE)
+        if (second instanceof Error) throw second
+        expect(second.refundRequired).toBe(1)
+        expect(repo.store.get("old")?.status).toBe("REFUND_REQUIRED")
+      })
     })
 
     it("PAID for 25h with the vendor returning fulfilled ends FULFILLED, not REFUND_REQUIRED", async () => {
@@ -1064,8 +1140,9 @@ describe("reconcileGiftCardOrders", () => {
         },
       )
 
-      it("retries on the next run and escalates once the vendor answers 'still PAID'", async () => {
+      it("retries on the next run and escalates once the vendor answers 'never paid'", async () => {
         mockFetchAndSettle.mockResolvedValueOnce(new GiftCardVendorUnavailableError())
+        mockFetchVendorStatus.mockResolvedValue({ kind: "awaitingPayment" })
         paidOrder("old", -GIFT_CARD_PAID_TIMEOUT_MS)
         const first = await runAt(0)
         if (first instanceof Error) throw first
@@ -1083,6 +1160,7 @@ describe("reconcileGiftCardOrders", () => {
       const res = await runAt(0)
       if (res instanceof Error) throw res
       expect(res.refundRequired).toBe(0)
+      expect(res.fulfillmentStalled).toBe(0)
       expect(mockFetchAndSettle).toHaveBeenCalledTimes(1)
     })
   })
@@ -1180,6 +1258,7 @@ describe("reconcileGiftCardOrdersJob", () => {
 
   it("still escalates the 24h timeout while gift cards are disabled", async () => {
     mockConfig = makeGiftCardsConfig({ enabled: false })
+    mockFetchVendorStatus.mockResolvedValue({ kind: "awaitingPayment" })
     paidOrder("old", -GIFT_CARD_PAID_TIMEOUT_MS)
     await reconcileGiftCardOrdersJob()
     expect(repo.store.get("old")?.status).toBe("REFUND_REQUIRED")

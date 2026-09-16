@@ -744,7 +744,7 @@ const markPaymentPending = async (
   }: { reason: string; providerPaymentRef: string | null; error?: ApplicationError },
 ): Promise<GiftCardOrder> => {
   const repo = GiftCardOrdersRepository()
-  const pending = await repo.transition({
+  let pending = await repo.transition({
     id: order.id,
     from: [GiftCardOrderStatus.InvoiceIssued],
     to: GiftCardOrderStatus.PaymentPending,
@@ -752,10 +752,12 @@ const markPaymentPending = async (
     patch: refPatch(providerPaymentRef),
   })
   if (pending instanceof GiftCardOrderStateError) {
-    // A concurrent same-key attempt already moved the order on — to its own
-    // PAYMENT_PENDING, or to the PAID / FULFILLED its send resolved to.
-    // Whatever it wrote is the truth. A row in any other state contradicts an
-    // IBEX that says the send is in flight: page it.
+    // The row is no longer INVOICE_ISSUED. Either a concurrent same-key attempt
+    // already moved the order on — to its own PAYMENT_PENDING, or to the
+    // PAID / FULFILLED its send resolved to — and whatever it wrote is the
+    // truth; or the reconcile worker expired the row while this send was in
+    // flight at IBEX. A row in any other state contradicts an IBEX that says
+    // the send is in flight: page it.
     const latest = await repo.findById(order.id)
     if (latest instanceof Error) {
       return paidNotRecorded({
@@ -765,14 +767,48 @@ const markPaymentPending = async (
         cause: latest,
       })
     }
-    if (MONEY_MOVED_STATUSES.includes(latest.status)) return latest
-    return paidNotRecorded({
-      order,
-      providerPaymentRef,
-      intended: GiftCardOrderStatus.PaymentPending,
-      cause: pending,
-      rowStatus: latest.status,
-    })
+    if (latest.status === GiftCardOrderStatus.Expired) {
+      // Expired on our books, not at IBEX: the send is still in flight and the
+      // money may yet leave. Re-open the row as PAYMENT_PENDING, with the ref,
+      // so the worker re-queries IBEX and the client stops reading "expired,
+      // buy again". EXPIRED → PAYMENT_PENDING exists for exactly this.
+      pending = await repo.transition({
+        id: order.id,
+        from: [GiftCardOrderStatus.Expired],
+        to: GiftCardOrderStatus.PaymentPending,
+        reason: `${reason}-after-expiry`,
+        patch: refPatch(providerPaymentRef),
+      })
+      if (pending instanceof GiftCardOrderStateError) {
+        const again = await repo.findById(order.id)
+        if (again instanceof Error) {
+          return paidNotRecorded({
+            order,
+            providerPaymentRef,
+            intended: GiftCardOrderStatus.PaymentPending,
+            cause: again,
+          })
+        }
+        if (MONEY_MOVED_STATUSES.includes(again.status)) return again
+        return paidNotRecorded({
+          order,
+          providerPaymentRef,
+          intended: GiftCardOrderStatus.PaymentPending,
+          cause: pending,
+          rowStatus: again.status,
+        })
+      }
+    } else if (MONEY_MOVED_STATUSES.includes(latest.status)) {
+      return latest
+    } else {
+      return paidNotRecorded({
+        order,
+        providerPaymentRef,
+        intended: GiftCardOrderStatus.PaymentPending,
+        cause: pending,
+        rowStatus: latest.status,
+      })
+    }
   }
   if (pending instanceof Error) {
     return paidNotRecorded({

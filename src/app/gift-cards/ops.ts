@@ -16,6 +16,8 @@ export type GiftCardOpsPhase =
   | "order-fulfilled"
   | "order-failed"
   | "refund-required"
+  /** PAID past the fulfilment horizon with the vendor still saying "working on it". Not a refund. */
+  | "fulfillment-stalled"
   | "claim-encrypt-failed"
   | "vendor-fulfilled-unexpected"
   /** IBEX answered Success/Pending but the order row could not record it. Money moved; the row lies. */

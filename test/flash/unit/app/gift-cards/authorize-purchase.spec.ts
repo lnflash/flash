@@ -161,7 +161,10 @@ describe("authorizeGiftCardPurchase", () => {
           })
 
           const wouldReject = c.expected !== "ok"
-          const rejected = wouldReject && mode === "enforce"
+          // Eligibility (who may buy) is refused in every mode; only the caps
+          // (how much) are let through in log-only.
+          const eligibility = c.expected === GiftCardRejectionReasons.levelNotEligible
+          const rejected = wouldReject && (mode === "enforce" || eligibility)
 
           expect(res.authorized).toBe(!rejected)
           expect(res.authorized ? null : res.reason).toBe(rejected ? c.expected : null)
@@ -172,23 +175,89 @@ describe("authorizeGiftCardPurchase", () => {
           const reported = mockNotifyOpsEvent.mock.calls[0]?.[0]
           expect(reported?.flow ?? null).toBe(wouldReject ? "giftcard" : null)
           expect(reported?.phase ?? null).toBe(
-            wouldReject ? (mode === "enforce" ? "rejected" : "would-reject") : null,
+            wouldReject ? (rejected ? "rejected" : "would-reject") : null,
           )
           expect(reported?.meta?.reason ?? null).toBe(wouldReject ? c.expected : null)
         })
       }
     }
 
-    it("off: authorises without evaluating anything", async () => {
+    it("off: authorises an eligible account without evaluating any limit", async () => {
       withMode("off")
       const res = await authorize({
-        account: makeAccount({ level: 0 }),
+        account: makeAccount({ level: 1 }),
         valueMinor: 9_999_999,
       })
       expect(res).toEqual({ authorized: true, reservationId: null })
       expect(mockListByAccount).not.toHaveBeenCalled()
       expect(mockZadd).not.toHaveBeenCalled()
       expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+    })
+
+    describe("eligibility is not a limit: refused in every mode, off included", () => {
+      // The shipped default is log-only. A rollout switch for cap tuning must
+      // never let a device-only account (no identity, no allowance) buy bearer
+      // codes, and the event it emits is a rejection, not a would-reject.
+      for (const mode of ["off", "log-only", "enforce"] as const) {
+        it(`${mode}: level 0 is refused`, async () => {
+          withMode(mode)
+          const res = await authorize({ account: makeAccount({ level: 0 }) })
+          expectRejected(
+            res,
+            GiftCardRejectionReasons.levelNotEligible,
+            GiftCardLevelNotEligibleError,
+          )
+          expect(mockZadd).not.toHaveBeenCalled()
+          expect(mockNotifyOpsEvent.mock.calls[0][0]).toMatchObject({
+            phase: "rejected",
+            status: "failed",
+            meta: expect.objectContaining({
+              reason: GiftCardRejectionReasons.levelNotEligible,
+            }),
+          })
+        })
+
+        it(`${mode}: an account younger than minAccountAgeHours is refused`, async () => {
+          withMode(mode)
+          const res = await authorize({
+            account: makeAccount({ createdAt: new Date(NOW_MS - 1 * HOUR_MS) }),
+          })
+          expectRejected(
+            res,
+            GiftCardRejectionReasons.accountTooNew,
+            GiftCardLimitExceededError,
+          )
+          expect(mockZadd).not.toHaveBeenCalled()
+        })
+
+        it(`${mode}: an open-loop card below the level floor is refused`, async () => {
+          withMode(mode)
+          const res = await authorize({
+            account: makeAccount({ level: 1 }),
+            product: makeProduct({ isOpenLoop: true }),
+          })
+          expectRejected(
+            res,
+            GiftCardRejectionReasons.openLoopNotAllowed,
+            GiftCardLevelNotEligibleError,
+          )
+          expect(mockZadd).not.toHaveBeenCalled()
+        })
+      }
+
+      it("log-only: a cap breach is still let through (the thing log-only is for)", async () => {
+        withMode("log-only")
+        const res = await authorize({
+          account: makeAccount({ level: 1 }),
+          product: makeProduct({ maxValue: null }),
+          valueMinor: 20_001,
+        })
+        expect(res.authorized).toBe(true)
+        expect(mockNotifyOpsEvent.mock.calls[0][0]).toMatchObject({
+          phase: "would-reject",
+          status: "pending",
+        })
+      })
     })
 
     it("level 0 is rejected with the level error even when minAccountLevel is 0", async () => {
