@@ -1040,6 +1040,23 @@ describe("reconcileGiftCardOrders", () => {
         ).toHaveLength(1)
       })
 
+      it("a stalled order keeps the 15-minute poll cadence, not one call per tick", async () => {
+        // Past the horizon the order is a steady state. Without the cadence
+        // gate every 30s trigger tick would ask the vendor again: thousands
+        // of calls per stalled order per day.
+        mockFetchVendorStatus.mockResolvedValue({ kind: "paidPendingFulfillment" })
+        paidOrder("old", -GIFT_CARD_PAID_TIMEOUT_MS)
+
+        await runAt(0)
+        expect(mockFetchVendorStatus).toHaveBeenCalledTimes(1)
+        await runAt(30 * SECOND)
+        await runAt(5 * MINUTE)
+        expect(mockFetchVendorStatus).toHaveBeenCalledTimes(1)
+        await runAt(15 * MINUTE)
+        expect(mockFetchVendorStatus).toHaveBeenCalledTimes(2)
+        expect(repo.store.get("old")?.status).toBe("PAID")
+      })
+
       it("a stalled order the vendor later fulfils ends FULFILLED", async () => {
         mockFetchVendorStatus.mockResolvedValue({ kind: "paidPendingFulfillment" })
         paidOrder("old", -GIFT_CARD_PAID_TIMEOUT_MS)

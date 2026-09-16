@@ -776,7 +776,7 @@ const markPaymentPending = async (
         id: order.id,
         from: [GiftCardOrderStatus.Expired],
         to: GiftCardOrderStatus.PaymentPending,
-        reason: `${reason}-after-expiry`,
+        reason: "payment-pending-after-expiry",
         patch: refPatch(providerPaymentRef),
       })
       if (pending instanceof GiftCardOrderStateError) {

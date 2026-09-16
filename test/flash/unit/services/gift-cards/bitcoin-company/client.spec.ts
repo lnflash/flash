@@ -1003,11 +1003,11 @@ describe("BitcoinCompanyClient log hygiene", () => {
   })
 
   it("never previews an invoice-status body that fails validation, even under a key name redaction does not know", async () => {
-    // Key-name redaction only helps for names we predicted. A vendor rename
-    // (`claimData` → `claim`, `codes` → `code`) is exactly what makes the
-    // response fail validation, and this warn is the branch that then runs.
-    // So for anything that can carry a claim code, the body is never
-    // previewed at all; only the zod issue paths are logged.
+    // Key-name redaction only helps for names we predicted. A response shape
+    // the schema does not accept is exactly when this warn runs, and such a
+    // response can carry claim data under keys we did not predict. So for
+    // anything that can carry a claim code, the body is never previewed at
+    // all; only the zod issue paths are logged.
     const RENAMED_CODE = "RENAMED-CLAIM-CODE-9f3a"
     mockedAxios.post.mockImplementation(
       routePost({

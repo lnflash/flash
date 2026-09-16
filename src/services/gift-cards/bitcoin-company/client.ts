@@ -247,8 +247,9 @@ type ParseArgs<T> = {
   /**
    * Whether a response that fails validation may be previewed (redacted) in
    * the warn log. Off for anything that can carry a token or a claim code:
-   * the branch that logs is precisely the one taken when the vendor renames a
-   * field, and key-name redaction cannot know the new name.
+   * the branch that logs is precisely the one taken for a response shape the
+   * schema did not predict, and key-name redaction only covers the names we
+   * did predict.
    */
   logBody: boolean
 }

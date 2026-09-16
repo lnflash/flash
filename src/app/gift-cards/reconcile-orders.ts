@@ -285,6 +285,7 @@ const countVendorOutcome = (
       if (!wasPaid) summary.paymentSettled += 1
       summary.fulfilled += 1
       lastAttemptAt.delete(after.id)
+      stalledReported.delete(after.id)
       return
     case GiftCardOrderStatus.Paid:
       // Vendor vouched for the payment but the claim could not be stored yet;
@@ -295,6 +296,7 @@ const countVendorOutcome = (
     case GiftCardOrderStatus.RefundRequired:
       summary.refundRequired += 1
       lastAttemptAt.delete(after.id)
+      stalledReported.delete(after.id)
       return
     default:
       return
@@ -566,31 +568,36 @@ const processPaid = async (
   const paidAtMs = lastTransitionAt(order, GiftCardOrderStatus.Paid).getTime()
   const nowMs = now.getTime()
 
+  // The poll cadence (5s/15s/60s/5m, then 15m) applies on both sides of the
+  // 24h horizon. Past it, an order the vendor still calls in-progress is a
+  // steady state, and without this gate every 30s trigger tick would ask the
+  // vendor about it again: thousands of calls a day per stalled order.
+  if (nowMs < nextGiftCardPollAt(paidAtMs, lastAttemptAt.get(order.id))) return
+  lastAttemptAt.set(order.id, nowMs)
+
   if (nowMs - paidAtMs >= GIFT_CARD_PAID_TIMEOUT_MS) {
     // One final vendor poll before escalating. A worker gap longer than 24h
     // (outage, kill switch, stuck lock) must not turn every order the vendor
     // fulfilled in the meantime into a refund. The two halves are used
     // separately here because the decision below needs the vendor's own
     // answer, not just its effect on the order.
-    lastAttemptAt.set(order.id, nowMs)
-    const vendorStatus = await fetchVendorOrderStatus(order)
-    const settled =
-      vendorStatus instanceof Error
-        ? vendorStatus
-        : await settleOrderFromVendor(order, vendorStatus)
-    if (settled instanceof Error) {
-      // A vendor 5xx, a claim-key fault (the card IS issued; only our storage
-      // failed), a repository error — none of these say the card is not
-      // coming. REFUND_REQUIRED on such an answer would refund a delivered
-      // card. Stay PAID; log the class; ask again next run.
+    //
+    // A vendor 5xx, a claim-key fault (the card IS issued; only our storage
+    // failed), a repository error — none of these say the card is not coming.
+    // REFUND_REQUIRED on such an answer would refund a delivered card. Stay
+    // PAID; log the class; ask again next run.
+    const keepPaidAfterFailedPoll = async (error: Error): Promise<void> => {
       summary.finalPollFailed += 1
       logger.warn(
-        { orderId: order.id, error: settled.constructor.name },
+        { orderId: order.id, error: error.constructor.name },
         "Final vendor poll before fulfilment timeout errored; keeping PAID for the next run",
       )
       await touch(order)
-      return
     }
+    const vendorStatus = await fetchVendorOrderStatus(order)
+    if (vendorStatus instanceof Error) return keepPaidAfterFailedPoll(vendorStatus)
+    const settled = await settleOrderFromVendor(order, vendorStatus)
+    if (settled instanceof Error) return keepPaidAfterFailedPoll(settled)
     if (settled.status !== GiftCardOrderStatus.Paid) {
       countVendorOutcome(order, settled, summary)
       return
@@ -607,7 +614,7 @@ const processPaid = async (
     // may still ship. REFUND_REQUIRED on that would have ops refund an order
     // the vendor then delivers: customer keeps both. Those stay PAID, keep
     // polling on the normal schedule, and page a human once.
-    if (vendorStatus instanceof Error || vendorStatus.kind !== "awaitingPayment") {
+    if (vendorStatus.kind !== "awaitingPayment") {
       summary.fulfillmentStalled += 1
       if (!stalledReported.has(order.id)) {
         stalledReported.add(order.id)
@@ -617,7 +624,7 @@ const processPaid = async (
           order,
           meta: {
             reason: "fulfillment-stalled",
-            vendorStatus: vendorStatus instanceof Error ? "unknown" : vendorStatus.kind,
+            vendorStatus: vendorStatus.kind,
             paidSince: new Date(paidAtMs).toISOString(),
           },
         })
@@ -646,9 +653,6 @@ const processPaid = async (
     })
     return
   }
-
-  if (nowMs < nextGiftCardPollAt(paidAtMs, lastAttemptAt.get(order.id))) return
-  lastAttemptAt.set(order.id, nowMs)
 
   const settled = await fetchAndSettle(order)
   if (settled instanceof Error) throw settled
@@ -757,6 +761,7 @@ export const reconcileGiftCardOrders = async (
       "giftcard.reconcile.expired": summary.expired,
       "giftcard.reconcile.paymentSettled": summary.paymentSettled,
       "giftcard.reconcile.finalPollFailed": summary.finalPollFailed,
+      "giftcard.reconcile.fulfillmentStalled": summary.fulfillmentStalled,
     })
     return summary
   } finally {
