@@ -982,7 +982,9 @@ describe("reconcileGiftCardOrders", () => {
       // One final vendor poll precedes the escalation, and it is settled first.
       expect(mockFetchVendorStatus).toHaveBeenCalledTimes(1)
       expect(mockFetchVendorStatus).toHaveBeenCalledWith(order)
-      expect(mockSettleFromVendor).toHaveBeenCalledWith(order, { kind: "awaitingPayment" })
+      expect(mockSettleFromVendor).toHaveBeenCalledWith(order, {
+        kind: "awaitingPayment",
+      })
       expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
         expect.objectContaining({
           flow: "giftcard",
