@@ -21,6 +21,8 @@ export class OnChainAddressCreateRateLimiterExceededError extends RateLimiterExc
 export class InviteCreateRateLimiterExceededError extends RateLimiterExceededError {}
 export class InviteTargetRateLimiterExceededError extends RateLimiterExceededError {}
 export class FygaroCheckoutCreateRateLimiterExceededError extends RateLimiterExceededError {}
+export class GiftCardPurchaseRateLimiterExceededError extends RateLimiterExceededError {}
+export class GiftCardQuoteRateLimiterExceededError extends RateLimiterExceededError {}
 export class FygaroTopupAllowanceRateLimiterExceededError extends RateLimiterExceededError {}
 // ENG-573: per-account budget on payment-send *attempts* (every call to a send
 // mutation, including ones the send guard rejects), so a probe that walks the

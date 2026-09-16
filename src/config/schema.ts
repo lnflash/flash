@@ -1006,6 +1006,154 @@ export const configSchema = {
       // stay hidden unless explicitly enabled per the v0.6.0 flag ramp.
       default: { enabled: false },
     },
+    giftCards: {
+      type: "object",
+      properties: {
+        enabled: { type: "boolean", default: false },
+        // Open-loop (Visa/Mastercard) products are hidden and unpurchasable unless this is on.
+        allowOpenLoop: { type: "boolean", default: false },
+        // Flash markup on face value, basis points. 0 = revenue is vendor reward/commission only.
+        feeBps: { type: "integer", default: 0 },
+        // 32-byte key (hex or base64) for AES-256-GCM encryption of claim codes at rest.
+        // Real key injected via config overrides; never commit a real key.
+        claimDataEncryptionKey: { type: "string", default: "" },
+        // Vendor invoice may exceed our quote by at most this many bps before we refuse to pay.
+        quoteToleranceBps: { type: "integer", default: 100 },
+        routing: {
+          type: "object",
+          properties: {
+            default: {
+              type: "string",
+              enum: ["bitcoinCompany", "bitrefill"],
+              default: "bitcoinCompany",
+            },
+            // ISO alpha-2 country → provider id. Unlisted countries use `default`.
+            byCountry: {
+              type: "object",
+              additionalProperties: {
+                type: "string",
+                enum: ["bitcoinCompany", "bitrefill"],
+              },
+              default: {},
+            },
+          },
+          additionalProperties: false,
+          default: {},
+        },
+        providers: {
+          type: "object",
+          properties: {
+            bitcoinCompany: {
+              type: "object",
+              properties: {
+                enabled: { type: "boolean", default: false },
+                baseUrl: {
+                  type: "string",
+                  default: "https://api.dev.thebitcoincompany.com",
+                },
+                email: { type: "string", default: "" },
+                password: { type: "string", default: "" },
+                referralCode: { type: "string", default: "" },
+                timeoutMs: { type: "integer", default: 10000 },
+              },
+              additionalProperties: false,
+              default: {},
+            },
+            bitrefill: {
+              type: "object",
+              properties: {
+                enabled: { type: "boolean", default: false },
+                baseUrl: { type: "string", default: "" },
+                apiId: { type: "string", default: "" },
+                apiSecret: { type: "string", default: "" },
+                webhookSecret: { type: "string", default: "" },
+                timeoutMs: { type: "integer", default: 10000 },
+              },
+              additionalProperties: false,
+              default: {},
+            },
+          },
+          additionalProperties: false,
+          default: {},
+        },
+        catalog: {
+          type: "object",
+          properties: {
+            syncIntervalSeconds: { type: "integer", default: 21600 },
+            ttlSeconds: { type: "integer", default: 21600 },
+            // Serve a stale catalog up to this age; beyond it the catalog is "unavailable".
+            staleAfterSeconds: { type: "integer", default: 86400 },
+          },
+          additionalProperties: false,
+          default: {},
+        },
+        limits: {
+          type: "object",
+          properties: {
+            // Same rollout discipline as the ENG-573 send guard.
+            mode: {
+              type: "string",
+              enum: ["off", "log-only", "enforce"],
+              default: "log-only",
+            },
+            minAccountLevel: { type: "integer", default: 1 },
+            minAccountAgeHours: { type: "integer", default: 24 },
+            maxOrdersPerHour: { type: "integer", default: 5 },
+            // Vendor-imposed caps (TBC, FinCEN prepaid-access exemption). Always enforced.
+            vendorDailyCapCents: { type: "integer", default: 1000000 },
+            vendorOpenLoopCardCapCents: { type: "integer", default: 100000 },
+            vendorClosedLoopCardCapCents: { type: "integer", default: 200000 },
+            perLevel: {
+              type: "object",
+              properties: {
+                level0: {
+                  type: "object",
+                  properties: {
+                    perCardCents: { type: "integer", default: 0 },
+                    dailyCents: { type: "integer", default: 0 },
+                  },
+                  additionalProperties: false,
+                  default: {},
+                },
+                level1: {
+                  type: "object",
+                  properties: {
+                    perCardCents: { type: "integer", default: 20000 },
+                    dailyCents: { type: "integer", default: 50000 },
+                  },
+                  additionalProperties: false,
+                  default: {},
+                },
+                level2: {
+                  type: "object",
+                  properties: {
+                    perCardCents: { type: "integer", default: 50000 },
+                    dailyCents: { type: "integer", default: 200000 },
+                  },
+                  additionalProperties: false,
+                  default: {},
+                },
+                level3: {
+                  type: "object",
+                  properties: {
+                    perCardCents: { type: "integer", default: 100000 },
+                    dailyCents: { type: "integer", default: 500000 },
+                  },
+                  additionalProperties: false,
+                  default: {},
+                },
+              },
+              additionalProperties: false,
+              default: {},
+            },
+          },
+          additionalProperties: false,
+          default: {},
+        },
+      },
+      additionalProperties: false,
+      default: {},
+    },
     fygaro: {
       type: "object",
       properties: {

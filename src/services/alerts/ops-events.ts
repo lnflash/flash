@@ -23,7 +23,13 @@ import { envSummary } from "./env-label"
  * summary embed is emitted.
  */
 
-export type OpsFlow = "verification" | "upgrade" | "cashout" | "deposit" | "transfer"
+export type OpsFlow =
+  | "verification"
+  | "upgrade"
+  | "cashout"
+  | "deposit"
+  | "transfer"
+  | "giftcard"
 
 export type OpsStatus = "success" | "pending" | "failed"
 
@@ -54,6 +60,7 @@ const FLOW_EMOJI: Record<OpsFlow, string> = {
   cashout: "💸",
   deposit: "💰",
   transfer: "🔁",
+  giftcard: "🎁",
 }
 
 const MAX_QUEUE = 50

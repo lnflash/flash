@@ -318,6 +318,35 @@ export const getFygaroCheckoutCreateAttemptLimits = () => ({
   blockDuration: toSeconds(300), // 5 minutes
 })
 
+export const getGiftCardPurchaseAttemptLimits = () => ({
+  points: 10,
+  duration: toSeconds(60), // 1 minute
+  blockDuration: toSeconds(300), // 5 minutes
+})
+
+/**
+ * The gift card QUOTE, per account.
+ *
+ * Every call is a live POST to the vendor's quote endpoint through the ONE
+ * shared reseller login — the login every purchase this provider serves goes
+ * through. Cheaper to abuse than the purchase next door: no idempotency key, no
+ * wallet, nothing written, so nothing short-circuits before the vendor
+ * round-trip. A vendor that throttles or locks that login turns one client's
+ * loop (a mobile re-render bug is enough) into GiftCardVendorUnavailableError
+ * on every customer's purchase — Critical, pages.
+ *
+ * Looser than the purchase because the honest client behaviour is different: a
+ * confirm screen renders this, and a customer adjusting a value or quantity can
+ * legitimately ask several times a minute. Buying that often is not. Same block
+ * as the purchase: a quote is good until `expiresAt`, so a client told to back
+ * off loses nothing by reusing the last one.
+ */
+export const getGiftCardQuoteAttemptLimits = () => ({
+  points: 30,
+  duration: toSeconds(60), // 1 minute
+  blockDuration: toSeconds(300), // 5 minutes
+})
+
 /**
  * The card top-up allowance READ, per account.
  *
@@ -629,5 +658,7 @@ export const IbexConfig = yamlConfig.ibex as IbexConfig
 export const BridgeConfig = yamlConfig.bridge as BridgeConfig
 
 export const FygaroConfig = yamlConfig.fygaro as FygaroConfig
+
+export const GiftCardsConfig = yamlConfig.giftCards as GiftCardsConfig
 
 export const FrappeConfig = yamlConfig.frappe as FrappeConfig

@@ -28,6 +28,13 @@ export const apiKeyScopeForField: Readonly<Record<string, ApiKeyFieldAccess>> =
     bridgeWithdrawalRequest: "BLOCKED",
     bridgeWithdrawals: "BLOCKED",
     apiKeys: "BLOCKED",
+    // Gift cards: the order reads return bearer redemption codes, and the
+    // catalog/quote are only useful as a prelude to a purchase an API key
+    // cannot make. Session-only, the whole family.
+    giftCardCatalog: "BLOCKED",
+    giftCardQuote: "BLOCKED",
+    giftCardOrder: "BLOCKED",
+    giftCardOrders: "BLOCKED",
     onChainTxFee: "read:wallet",
     onChainUsdTxFee: "read:wallet",
     onChainUsdTxFeeAsBtcDenominated: "read:wallet",
@@ -68,6 +75,8 @@ export const apiKeyScopeForField: Readonly<Record<string, ApiKeyFieldAccess>> =
     // Mints a payment link that charges a card. Interactive-session only, in
     // the same family as the cashout and Bridge money-movement mutations.
     fygaroCheckoutCreate: "BLOCKED",
+    // Pays a vendor from the wallet AND hands back bearer codes. Same family.
+    giftCardPurchase: "BLOCKED",
     requestCashout: "BLOCKED",
     initiateCashout: "BLOCKED",
     apiKeyCreate: "BLOCKED",
