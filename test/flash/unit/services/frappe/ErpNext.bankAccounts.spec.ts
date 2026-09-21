@@ -468,3 +468,18 @@ describe("ErpNext bank accounts", () => {
     })
   })
 })
+
+describe("ErpNext.listBanks", () => {
+  beforeEach(() => jest.clearAllMocks())
+
+  it("asks for every bank, not Frappe's default first page of 20", async () => {
+    mockedAxios.get.mockResolvedValue({ data: { data: [{ name: "NCB" }] } })
+
+    const result = await client.listBanks()
+
+    expect(result).toEqual([{ name: "NCB" }])
+    const [url, config] = mockedAxios.get.mock.calls[0]
+    expect(url).toBe("https://erp.example/api/resource/Bank")
+    expect(config.params).toEqual({ limit_page_length: 0 })
+  })
+})

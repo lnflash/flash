@@ -1205,6 +1205,7 @@ export class ErpNext {
   async listBanks(): Promise<Bank[] | BanksQueryError> {
     try {
       const resp = await axios.get(`${this.url}/api/resource/Bank`, {
+        params: { limit_page_length: 0 },
         headers: this.headers,
       })
 
