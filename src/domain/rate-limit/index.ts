@@ -1,4 +1,5 @@
 import {
+  getBankAccountManageAttemptLimits,
   getConsentLogAttemptLimits,
   getFailedLoginAttemptPerIpLimits,
   getFailedLoginAttemptPerLoginIdentifierLimits,
@@ -17,6 +18,7 @@ import {
 } from "@config"
 
 import {
+  BankAccountManageRateLimiterExceededError,
   ConsentLogIpRateLimiterExceededError,
   FygaroCheckoutCreateRateLimiterExceededError,
   FygaroTopupAllowanceRateLimiterExceededError,
@@ -47,6 +49,7 @@ export const RateLimitPrefix = {
   fygaroCheckoutCreate: "fygaro_checkout_create",
   consentLog: "consent_log_ip",
   fygaroTopupAllowance: "fygaro_topup_allowance",
+  bankAccountManage: "bank_account_manage",
   paymentSend: "payment_send",
   paymentSendDaily: "payment_send_daily",
 } as const
@@ -122,6 +125,13 @@ export const RateLimitConfig: { [key: string]: RateLimitConfig } = {
     key: RateLimitPrefix.fygaroTopupAllowance,
     limits: getFygaroTopupAllowanceAttemptLimits(),
     error: FygaroTopupAllowanceRateLimiterExceededError,
+  },
+  // Self-serve ERPNext bank account writes: instant (no review) and several
+  // ERPNext round trips each. One shared per-account budget across all four.
+  bankAccountManage: {
+    key: RateLimitPrefix.bankAccountManage,
+    limits: getBankAccountManageAttemptLimits(),
+    error: BankAccountManageRateLimiterExceededError,
   },
   // ENG-573 send guard: two buckets on the same per-account key — a burst
   // bucket and a daily bucket. Both count *attempts*, rejected ones included,

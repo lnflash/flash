@@ -59,6 +59,10 @@ const bridgeGqlError = ({
     logger: baseLogger,
   })
 
+// Same shape as the Bridge errors: a stable machine-readable code the app can
+// branch on, plus a message that is safe to show as-is.
+const bankAccountGqlError = bridgeGqlError
+
 export const mapError = (error: ApplicationError): CustomApolloError => {
   const errorName = error.name as ApplicationErrorKey
   let message = ""
@@ -305,6 +309,10 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "OnChainAddressCreateRateLimiterExceededError":
       message =
         "Too many onchain addresses creation, please wait for a while and try again."
+      return new TooManyRequestError({ message, logger: baseLogger })
+
+    case "BankAccountManageRateLimiterExceededError":
+      message = "Too many bank account changes, please wait for a while and try again."
       return new TooManyRequestError({ message, logger: baseLogger })
 
     case "FygaroCheckoutCreateRateLimiterExceededError":
@@ -1093,6 +1101,59 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "UpgradeRequestQueryError":
       message = "No upgrade request found for this account"
       return new NotFoundError({ message, logger: baseLogger })
+
+    case "BankAccountUpgradeRequiredError":
+      return bankAccountGqlError({
+        code: "BANK_ACCOUNT_UPGRADE_REQUIRED",
+        message: "Complete your account upgrade before managing bank accounts.",
+      })
+
+    case "BankAccountNotOwnedError":
+      return bankAccountGqlError({
+        code: "BANK_ACCOUNT_NOT_FOUND",
+        message: "Bank account not found.",
+      })
+
+    case "BankAccountDuplicateNumberError":
+      return bankAccountGqlError({
+        code: "BANK_ACCOUNT_DUPLICATE_NUMBER",
+        message: "A bank account with this account number already exists.",
+      })
+
+    case "BankAccountValidationError":
+      return bankAccountGqlError({
+        code: "BANK_ACCOUNT_INVALID",
+        message: error.message || "The bank account details are not valid.",
+      })
+
+    case "BankAccountCreateError":
+      message = "We could not add this bank account. Please try again."
+      return new UnexpectedClientError({ message, logger: baseLogger })
+
+    case "BankAccountUpdateError":
+      message = "We could not update this bank account. Please try again."
+      return new UnexpectedClientError({ message, logger: baseLogger })
+
+    case "BankAccountDeleteError":
+      message = "We could not delete this bank account. Please try again."
+      return new UnexpectedClientError({ message, logger: baseLogger })
+
+    case "BankAccountSetDefaultError":
+      message = "We could not change your default bank account. Please try again."
+      return new UnexpectedClientError({ message, logger: baseLogger })
+
+    case "BankAccountQueryError":
+    case "BanksQueryError":
+      message = "We could not load your bank details. Please try again."
+      return new UnexpectedClientError({ message, logger: baseLogger })
+
+    case "BankAccountUpdateRequestCreateError":
+      message = "We could not submit your bank account update. Please try again."
+      return new UnexpectedClientError({ message, logger: baseLogger })
+
+    case "BankAccountUpdateRequestQueryError":
+      message = "We could not load your bank account update request. Please try again."
+      return new UnexpectedClientError({ message, logger: baseLogger })
 
     case "ExchangeRateQueryError":
       message =

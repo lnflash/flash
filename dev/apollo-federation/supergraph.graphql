@@ -450,6 +450,36 @@ type BankAccount
   pendingUpdate: BankAccountUpdateRequest
 }
 
+input BankAccountAddInput
+  @join__type(graph: PUBLIC)
+{
+  """Name of the account holder"""
+  accountName: String
+  accountNumber: AccountNumber!
+
+  """Chequing or Savings"""
+  accountType: String!
+  bankBranch: String!
+
+  """Must be one of supportedBanks"""
+  bankName: String!
+
+  """JMD or USD. Cannot be changed afterwards."""
+  currency: String!
+
+  """
+  Make this the default account. The customer's first account is always the default.
+  """
+  setDefault: Boolean
+}
+
+input BankAccountDeleteInput
+  @join__type(graph: PUBLIC)
+{
+  """ERPNext identifier of the account to delete"""
+  bankAccountId: ID!
+}
+
 input BankAccountInput
   @join__type(graph: PUBLIC)
 {
@@ -458,6 +488,44 @@ input BankAccountInput
   bankBranch: String!
   bankName: String!
   currency: String!
+}
+
+type BankAccountPayload
+  @join__type(graph: PUBLIC)
+{
+  """
+  The bank account as stored after the change. Null when errors occurred.
+  """
+  bankAccount: BankAccount
+  errors: [Error!]!
+}
+
+input BankAccountSetDefaultInput
+  @join__type(graph: PUBLIC)
+{
+  """ERPNext identifier of the account to make the default"""
+  bankAccountId: ID!
+}
+
+"""
+New details for an existing bank account. Currency is locked: to change it, add a new account.
+"""
+input BankAccountUpdateInput
+  @join__type(graph: PUBLIC)
+{
+  """Name of the account holder. Unchanged when omitted."""
+  accountName: String
+  accountNumber: AccountNumber!
+
+  """Chequing or Savings"""
+  accountType: String!
+
+  """ERPNext identifier of the account to update"""
+  bankAccountId: ID!
+  bankBranch: String!
+
+  """Must be one of supportedBanks"""
+  bankName: String!
 }
 
 """
@@ -1975,7 +2043,25 @@ type Mutation
   Rotate an API key: a replacement with a new secret (and keyId) is created with the same name, scopes, and expiry, and the old key is revoked. The new raw key is only shown once.
   """
   apiKeyRotate(input: ApiKeyRotateInput!): ApiKeyRotatePayload!
-  bankAccountUpdateRequest(input: BankAccountUpdateRequestInput!): BankAccountUpdateRequestPayload!
+
+  """
+  Adds a bank account for cashouts. Takes effect immediately (no review).
+  """
+  bankAccountAdd(input: BankAccountAddInput!): BankAccountPayload!
+
+  """
+  Deletes a bank account. It can no longer be cashed out to. If it was the default, another account becomes the default.
+  """
+  bankAccountDelete(input: BankAccountDeleteInput!): SuccessPayload!
+
+  """Makes one of the customer's bank accounts the default cashout account."""
+  bankAccountSetDefault(input: BankAccountSetDefaultInput!): BankAccountPayload!
+
+  """
+  Updates a bank account's details. Takes effect immediately (no review) and closes any pending update request for the account.
+  """
+  bankAccountUpdate(input: BankAccountUpdateInput!): BankAccountPayload!
+  bankAccountUpdateRequest(input: BankAccountUpdateRequestInput!): BankAccountUpdateRequestPayload! @deprecated(reason: "Use bankAccountUpdate, which applies the change immediately instead of queueing it for review.")
   bridgeAddExternalAccount: BridgeAddExternalAccountPayload!
   bridgeCancelWithdrawalRequest(input: BridgeCancelWithdrawalRequestInput!): BridgeCancelWithdrawalRequestPayload!
   bridgeCreateExternalAccount(input: BridgeCreateExternalAccountInput!): BridgeCreateExternalAccountPayload!

@@ -48,6 +48,8 @@ const BankAccountUpdateRequestMutation = GT.Field({
   extensions: {
     complexity: 120,
   },
+  deprecationReason:
+    "Use bankAccountUpdate, which applies the change immediately instead of queueing it for review.",
   type: GT.NonNull(Response),
   args: {
     input: { type: GT.NonNull(BankAccountUpdateRequestInput) },

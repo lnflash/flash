@@ -11,6 +11,20 @@ export class BanksQueryError extends ErpNextError {}
 export class BankAccountQueryError extends ErpNextError {}
 export class BankAccountUpdateRequestCreateError extends ErpNextError {}
 export class BankAccountUpdateRequestQueryError extends ErpNextError {}
+export class BankAccountCreateError extends ErpNextError {}
+export class BankAccountUpdateError extends ErpNextError {}
+export class BankAccountDeleteError extends ErpNextError {}
+export class BankAccountSetDefaultError extends ErpNextError {}
+// ERPNext refused the write on purpose (frappe.throw): the account number is
+// already on another Bank Account.
+export class BankAccountDuplicateNumberError extends ErpNextError {}
+// ERPNext refused the write on purpose: the Bank Account does not exist or does
+// not belong to the customer.
+export class BankAccountNotOwnedError extends ErpNextError {}
+// Any other deliberate ERPNext refusal (bad account type, currency, ...).
+export class BankAccountValidationError extends ErpNextError {}
+// The account has no ERPNext customer yet, i.e. the upgrade is not complete.
+export class BankAccountUpgradeRequiredError extends ErpNextError {}
 export class ExchangeRateQueryError extends ErpNextError {}
 export class BridgeTransferRequestUpsertError extends ErpNextError {}
 export class FygaroSettingsQueryError extends ErpNextError {}

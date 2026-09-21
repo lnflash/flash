@@ -80,6 +80,10 @@ import ApiKeyCreateMutation from "./root/mutation/api-key-create"
 import ApiKeyRevokeMutation from "./root/mutation/api-key-revoke"
 import ApiKeyRotateMutation from "./root/mutation/api-key-rotate"
 import BankAccountUpdateRequestMutation from "./root/mutation/bank-account-update-request"
+import BankAccountAddMutation from "./root/mutation/bank-account-add"
+import BankAccountUpdateMutation from "./root/mutation/bank-account-update"
+import BankAccountSetDefaultMutation from "./root/mutation/bank-account-set-default"
+import BankAccountDeleteMutation from "./root/mutation/bank-account-delete"
 
 // TODO: // const fields: { [key: string]: GraphQLFieldConfig<any, GraphQLPublicContext> }
 export const mutationFields = {
@@ -123,6 +127,10 @@ export const mutationFields = {
       businessAccountUpgradeRequest: BusinessAccountUpgradeRequestMutation,
       accountCapabilityUpgradeRequest: AccountCapabilityUpgradeRequestMutation,
       bankAccountUpdateRequest: BankAccountUpdateRequestMutation,
+      bankAccountAdd: BankAccountAddMutation,
+      bankAccountUpdate: BankAccountUpdateMutation,
+      bankAccountSetDefault: BankAccountSetDefaultMutation,
+      bankAccountDelete: BankAccountDeleteMutation,
       accountEnableNotificationCategory: AccountEnableNotificationCategoryMutation,
       accountDisableNotificationCategory: AccountDisableNotificationCategoryMutation,
       accountEnableNotificationChannel: AccountEnableNotificationChannelMutation,
