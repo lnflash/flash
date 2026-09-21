@@ -29,7 +29,9 @@ import {
   BankAccountQueryError,
   BankAccountSetDefaultError,
   BankAccountUpdateError,
+  BankAccountUpgradeRequiredError,
   BankAccountValidationError,
+  BankAccountValidationReason,
 } from "@services/frappe/errors"
 
 const mockedAxios = axios as unknown as {
@@ -129,6 +131,15 @@ describe("ErpNext bank accounts", () => {
       expect(url).toContain('["party","=","CUST-1"]')
     })
 
+    it("asks for every account, not Frappe's default first page of 20", async () => {
+      mockedAxios.get.mockResolvedValue({ data: { data: [] } })
+
+      await client.getBankAccountsByCustomer("CUST-1")
+
+      const url: string = mockedAxios.get.mock.calls[0][0]
+      expect(new URL(url).searchParams.get("limit_page_length")).toBe("0")
+    })
+
     it("returns an empty list when ERPNext has no rows", async () => {
       mockedAxios.get.mockResolvedValue({ data: {} })
 
@@ -209,16 +220,71 @@ describe("ErpNext bank accounts", () => {
       expect(result).toBeInstanceOf(BankAccountDuplicateNumberError)
     })
 
-    it("maps any other frappe.throw to a validation error carrying its text", async () => {
+    it.each([
+      [
+        "currency must be JMD or USD — cashout accepts nothing else",
+        BankAccountValidationReason.Currency,
+      ],
+      [
+        "account_type must be one of: Chequing, Savings",
+        BankAccountValidationReason.AccountType,
+      ],
+      ["bank_name is required", BankAccountValidationReason.BankName],
+      ["account_number is required", BankAccountValidationReason.AccountNumber],
+    ])(
+      "maps the banking.py refusal %p to a validation error with OUR text",
+      async (thrown, expected) => {
+        mockedAxios.post.mockRejectedValue(frappeThrow(thrown))
+
+        const result = await client.createBankAccount(createArgs)
+
+        expect(result).toBeInstanceOf(BankAccountValidationError)
+        expect((result as Error).message).toBe(expected)
+      },
+    )
+
+    it("maps the unknown-ERP-customer refusal to upgrade-required", async () => {
       mockedAxios.post.mockRejectedValue(
-        frappeThrow("currency must be JMD or USD — cashout accepts nothing else"),
+        frappeThrow("Unknown ERP customer — the account needs an ERP party first."),
       )
 
-      const result = await client.createBankAccount(createArgs)
-
-      expect(result).toBeInstanceOf(BankAccountValidationError)
-      expect((result as Error).message).toContain("currency must be JMD or USD")
+      expect(await client.createBankAccount(createArgs)).toBeInstanceOf(
+        BankAccountUpgradeRequiredError,
+      )
     })
+
+    it.each([
+      [
+        "a missing endpoint",
+        "Failed to get method for command admin_panel.api.banking.add_bank_account with module 'admin_panel.api.banking' has no attribute 'add_bank_account'",
+        "ValidationError",
+      ],
+      [
+        "a Frappe length check",
+        "Bank Account: <b>Branch Code</b> will get truncated, as max characters allowed is 140",
+        "CharacterLengthExceededError",
+      ],
+      [
+        "a Frappe mandatory check",
+        "Value missing for Bank Account: Bank",
+        "MandatoryError",
+      ],
+      [
+        "a Frappe link check",
+        "Could not find Bank: <a href='/app/bank/x'>x</a>",
+        "LinkValidationError",
+      ],
+    ])(
+      "treats %s (417) as a generic failure, never a customer-facing validation error",
+      async (_label, thrown, excType) => {
+        mockedAxios.post.mockRejectedValue(frappeThrow(thrown, excType))
+
+        const result = await client.createBankAccount(createArgs)
+
+        expect(result).toBeInstanceOf(BankAccountCreateError)
+        expect(result).not.toBeInstanceOf(BankAccountValidationError)
+      },
+    )
 
     it("falls back to the exception line when _server_messages is not valid JSON", async () => {
       const err = frappeThrow("bank_name is required")
@@ -228,7 +294,7 @@ describe("ErpNext bank accounts", () => {
       const result = await client.createBankAccount(createArgs)
 
       expect(result).toBeInstanceOf(BankAccountValidationError)
-      expect((result as Error).message).toBe("bank_name is required")
+      expect((result as Error).message).toBe(BankAccountValidationReason.BankName)
     })
 
     it("returns a generic create error on a server failure", async () => {
@@ -310,6 +376,29 @@ describe("ErpNext bank accounts", () => {
       expect(await client.updateBankAccount(updateArgs)).toBeInstanceOf(
         BankAccountDuplicateNumberError,
       )
+    })
+
+    it("maps the other duplicate wording (number moved onto an existing account)", async () => {
+      mockedAxios.post.mockRejectedValue(
+        frappeThrow("Another bank account already uses this account number."),
+      )
+
+      expect(await client.updateBankAccount(updateArgs)).toBeInstanceOf(
+        BankAccountDuplicateNumberError,
+      )
+    })
+
+    it("maps the own-removed-number refusal to a validation error with OUR text", async () => {
+      mockedAxios.post.mockRejectedValue(
+        frappeThrow(
+          "This account number belongs to a bank account that was removed. Add it again instead of editing another account.",
+        ),
+      )
+
+      const result = await client.updateBankAccount(updateArgs)
+
+      expect(result).toBeInstanceOf(BankAccountValidationError)
+      expect((result as Error).message).toBe(BankAccountValidationReason.OwnRemovedNumber)
     })
 
     it("maps the ownership refusal", async () => {

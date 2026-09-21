@@ -40,6 +40,7 @@ import {
   CustomApolloError,
 } from "@graphql/error"
 import { baseLogger } from "@services/logger"
+import { isBankAccountValidationReason } from "@services/frappe/errors"
 
 const assertUnreachable = (x: unknown): never => {
   throw new Error(`This should never compile with ${x}`)
@@ -1123,7 +1124,10 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "BankAccountValidationError":
       return bankAccountGqlError({
         code: "BANK_ACCOUNT_INVALID",
-        message: error.message || "The bank account details are not valid.",
+        // Allowlisted text only — never whatever ERPNext happened to throw.
+        message: isBankAccountValidationReason(error.message)
+          ? error.message
+          : "The bank account details are not valid.",
       })
 
     case "BankAccountCreateError":

@@ -12,6 +12,7 @@ import {
   BankAccountUpdateRequestQueryError,
   BankAccountUpgradeRequiredError,
   BankAccountValidationError,
+  BankAccountValidationReason,
   BanksQueryError,
 } from "@services/frappe/errors"
 
@@ -52,11 +53,20 @@ describe("error-map: bank account errors", () => {
     )
   })
 
-  it("forwards ERPNext's own validation text, with a fallback", () => {
-    expect(
-      mapError(new BankAccountValidationError("account_type must be one of: x")).message,
-    ).toBe("account_type must be one of: x")
-    expect(mapError(new BankAccountValidationError("")).message).toBe(
+  it.each(Object.values(BankAccountValidationReason))(
+    "shows the allowlisted validation reason %p",
+    (reason) => {
+      expect(mapError(new BankAccountValidationError(reason)).message).toBe(reason)
+    },
+  )
+
+  it.each([
+    "account_type must be one of: x",
+    "Failed to get method for command admin_panel.api.banking.delete_bank_account",
+    "Bank Account: <b>Branch Code</b> will get truncated, as max characters allowed is 140",
+    "",
+  ])("never forwards non-allowlisted text %p to the customer", (text) => {
+    expect(mapError(new BankAccountValidationError(text)).message).toBe(
       "The bank account details are not valid.",
     )
   })

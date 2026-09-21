@@ -34,6 +34,7 @@ import ErpNext from "@services/frappe/ErpNext"
 import { consumeLimiter } from "@services/rate-limit"
 import { baseLogger } from "@services/logger"
 import {
+  MAX_BANK_ACCOUNTS,
   addBankAccount,
   deleteBankAccount,
   setDefaultBankAccount,
@@ -52,6 +53,8 @@ import {
   BankAccountUpdateError,
   BankAccountUpdateRequestQueryError,
   BankAccountUpgradeRequiredError,
+  BankAccountValidationError,
+  BankAccountValidationReason,
   BanksQueryError,
   SetDocTypeValueError,
 } from "@services/frappe/errors"
@@ -255,6 +258,56 @@ describe("addBankAccount", () => {
       { accountNumber: " 123 " },
       "A valid account number is required.",
     ],
+    [
+      "markup in the account number",
+      { accountNumber: "12<b>34 xyz" },
+      "Bank account details contain invalid characters.",
+    ],
+    [
+      "punctuation in the account number",
+      { accountNumber: "1234;5678" },
+      "A valid account number is required.",
+    ],
+    [
+      "an account number that starts with a separator",
+      { accountNumber: "-1234567" },
+      "A valid account number is required.",
+    ],
+    [
+      "an account number longer than 34 characters",
+      { accountNumber: "1".repeat(35) },
+      "A valid account number is required.",
+    ],
+    [
+      "a branch longer than 100 characters",
+      { bankBranch: "b".repeat(101) },
+      "Bank branch must be 100 characters or fewer.",
+    ],
+    [
+      "an account name longer than 80 characters",
+      { accountName: "n".repeat(81) },
+      "Account name must be 80 characters or fewer.",
+    ],
+    [
+      "angle brackets in the branch",
+      { bankBranch: "Half <i>Way</i> Tree" },
+      "Bank account details contain invalid characters.",
+    ],
+    [
+      "angle brackets in the account name",
+      { accountName: "Jane <script>" },
+      "Bank account details contain invalid characters.",
+    ],
+    [
+      "a control character in the branch",
+      { bankBranch: "Half Way\u0000Tree" },
+      "Bank account details contain invalid characters.",
+    ],
+    [
+      "a trailing newline in the account name",
+      { accountName: "Jane Doe\n" },
+      "Bank account details contain invalid characters.",
+    ],
     ["an unsupported bank", { bankName: "Bank of Nowhere" }, "Bank is not supported."],
     ["an unsupported currency", { currency: "CAD" }, "Currency must be JMD or USD."],
     ["a blank currency", { currency: "" }, "Currency must be JMD or USD."],
@@ -282,14 +335,137 @@ describe("addBankAccount", () => {
     expect(erp.createBankAccount).not.toHaveBeenCalled()
   })
 
-  it.each([
-    new BankAccountCreateError("boom"),
-    new BankAccountDuplicateNumberError("dup"),
-  ])("propagates %p from ERPNext without re-reading", async (err) => {
+  it("accepts the longest values and a formatted account number", async () => {
+    erp.createBankAccount.mockResolvedValue({ bankAccountId: "BANK-ACC-1" })
+
+    const result = await addBankAccount(ACCOUNT_ID, {
+      ...addInput,
+      accountNumber: "GB82 WEST-1234 5698 7654 32",
+      bankBranch: "b".repeat(100),
+      accountName: "n".repeat(80),
+    })
+
+    expect(result).toBe(storedBank)
+    expect(erp.createBankAccount.mock.calls[0][0].accountNumber).toBe(
+      "GB82 WEST-1234 5698 7654 32",
+    )
+  })
+
+  it("propagates a create failure from ERPNext without re-reading", async () => {
+    const err = new BankAccountCreateError("boom")
     erp.createBankAccount.mockResolvedValue(err)
 
     expect(await addBankAccount(ACCOUNT_ID, addInput)).toBe(err)
-    expect(erp.getBankAccountsByCustomer).not.toHaveBeenCalled()
+    // Only the pre-write read (cap + own-duplicate check), no re-read.
+    expect(erp.getBankAccountsByCustomer).toHaveBeenCalledTimes(1)
+  })
+
+  it(`rejects the add once the customer has ${MAX_BANK_ACCOUNTS} accounts`, async () => {
+    erp.getBankAccountsByCustomer.mockResolvedValue(
+      Array.from({ length: MAX_BANK_ACCOUNTS }, (_, i) => ({
+        ...storedBank,
+        name: `BANK-ACC-${i}`,
+        bank_account_no: `90000${i}`,
+      })),
+    )
+
+    const result = await addBankAccount(ACCOUNT_ID, addInput)
+
+    expect(result).toBeInstanceOf(ValidationError)
+    expect((result as Error).message).toBe(
+      "You can have at most 10 bank accounts. Delete one before adding another.",
+    )
+    expect(erp.createBankAccount).not.toHaveBeenCalled()
+  })
+
+  it("still allows the add one below the cap", async () => {
+    erp.createBankAccount.mockResolvedValue({ bankAccountId: "BANK-ACC-0" })
+    erp.getBankAccountsByCustomer.mockResolvedValue(
+      Array.from({ length: MAX_BANK_ACCOUNTS - 1 }, (_, i) => ({
+        ...storedBank,
+        name: `BANK-ACC-${i}`,
+        bank_account_no: `90000${i}`,
+      })),
+    )
+
+    expect(await addBankAccount(ACCOUNT_ID, addInput)).not.toBeInstanceOf(Error)
+    expect(erp.createBankAccount).toHaveBeenCalledTimes(1)
+  })
+
+  it("propagates a bank account query failure before writing", async () => {
+    erp.getBankAccountsByCustomer.mockResolvedValue(new BankAccountQueryError("boom"))
+
+    expect(await addBankAccount(ACCOUNT_ID, addInput)).toBeInstanceOf(
+      BankAccountQueryError,
+    )
+    expect(erp.createBankAccount).not.toHaveBeenCalled()
+  })
+
+  it("reports a duplicate for a number on the customer's OWN account, without asking ERPNext", async () => {
+    erp.getBankAccountsByCustomer.mockResolvedValue([
+      { ...storedBank, bank_account_no: "123456" },
+    ])
+
+    expect(await addBankAccount(ACCOUNT_ID, addInput)).toBeInstanceOf(
+      BankAccountDuplicateNumberError,
+    )
+    expect(erp.createBankAccount).not.toHaveBeenCalled()
+  })
+
+  it("does not confirm that a number is on file for someone else", async () => {
+    erp.createBankAccount.mockResolvedValue(new BankAccountDuplicateNumberError("dup"))
+
+    const result = await addBankAccount(ACCOUNT_ID, addInput)
+
+    expect(result).toBeInstanceOf(BankAccountValidationError)
+    expect(result).not.toBeInstanceOf(BankAccountDuplicateNumberError)
+    expect((result as Error).message).toBe(BankAccountValidationReason.NumberNotAccepted)
+  })
+
+  describe("when the create commits but the re-read fails", () => {
+    beforeEach(() => {
+      erp.createBankAccount.mockResolvedValue({ bankAccountId: "Jane Doe - NCB" })
+    })
+
+    it("returns the account built from the validated input, and logs", async () => {
+      erp.getBankAccountsByCustomer
+        .mockResolvedValueOnce([storedBank])
+        .mockResolvedValueOnce(new BankAccountQueryError("boom"))
+
+      const result = await addBankAccount(ACCOUNT_ID, addInput)
+
+      expect(result).toEqual({
+        name: "Jane Doe - NCB",
+        account_name: "Jane Doe",
+        bank: "NCB",
+        bank_account_no: "123456",
+        branch_code: "Half Way Tree",
+        account_type: "Savings",
+        currency: "JMD",
+        is_default: 1,
+      })
+      expect(baseLogger.error).toHaveBeenCalledTimes(1)
+    })
+
+    it("reports a non-default account when setDefault was not asked for", async () => {
+      erp.getBankAccountsByCustomer
+        .mockResolvedValueOnce([storedBank])
+        .mockResolvedValueOnce(new BankAccountQueryError("boom"))
+
+      const result = await addBankAccount(ACCOUNT_ID, { ...addInput, setDefault: false })
+
+      expect(result).toMatchObject({ name: "Jane Doe - NCB", is_default: 0 })
+    })
+
+    it("reports the first account as default, as ERPNext makes it", async () => {
+      erp.getBankAccountsByCustomer
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce(new BankAccountQueryError("boom"))
+
+      const result = await addBankAccount(ACCOUNT_ID, { ...addInput, setDefault: false })
+
+      expect(result).toMatchObject({ is_default: 1 })
+    })
   })
 
   it("errors rather than returning a partial account when the re-read misses it", async () => {
@@ -409,6 +585,67 @@ describe("updateBankAccount", () => {
     expect(erp.updateBankAccount).not.toHaveBeenCalled()
   })
 
+  it("rejects an oversized branch before writing", async () => {
+    const result = await updateBankAccount(ACCOUNT_ID, {
+      ...updateInput,
+      bankBranch: "b".repeat(101),
+    })
+
+    expect(result).toBeInstanceOf(ValidationError)
+    expect(erp.updateBankAccount).not.toHaveBeenCalled()
+  })
+
+  it("reports a duplicate for a number on ANOTHER of the customer's own accounts", async () => {
+    erp.getBankAccountsByCustomer.mockReset()
+    erp.getBankAccountsByCustomer.mockResolvedValue([
+      storedBank,
+      { ...storedBank, name: "BANK-ACC-2", bank_account_no: "222222" },
+    ])
+
+    expect(await updateBankAccount(ACCOUNT_ID, updateInput)).toBeInstanceOf(
+      BankAccountDuplicateNumberError,
+    )
+    expect(erp.updateBankAccount).not.toHaveBeenCalled()
+  })
+
+  it("lets an update keep the account's own number", async () => {
+    const result = await updateBankAccount(ACCOUNT_ID, {
+      ...updateInput,
+      accountNumber: storedBank.bank_account_no,
+    })
+
+    expect(result).toBe(fresh)
+  })
+
+  it("does not confirm that a number is on file for someone else", async () => {
+    erp.updateBankAccount.mockResolvedValue(new BankAccountDuplicateNumberError("dup"))
+
+    const result = await updateBankAccount(ACCOUNT_ID, updateInput)
+
+    expect(result).toBeInstanceOf(BankAccountValidationError)
+    expect((result as Error).message).toBe(BankAccountValidationReason.NumberNotAccepted)
+    expect(erp.closeBankAccountUpdateRequests).not.toHaveBeenCalled()
+  })
+
+  it("returns the written values when the update commits but the re-read fails", async () => {
+    erp.getBankAccountsByCustomer.mockReset()
+    erp.getBankAccountsByCustomer
+      .mockResolvedValueOnce([{ ...storedBank, account_name: "Jane Doe" }])
+      .mockResolvedValueOnce(new BankAccountQueryError("boom"))
+
+    const result = await updateBankAccount(ACCOUNT_ID, updateInput)
+
+    expect(result).toEqual({
+      ...storedBank,
+      account_name: "Jane Doe",
+      bank: "Scotiabank",
+      branch_code: "New Kingston",
+      account_type: "Chequing",
+      bank_account_no: "222222",
+    })
+    expect(baseLogger.error).toHaveBeenCalledTimes(1)
+  })
+
   it("leaves pending requests alone when the ERPNext update fails", async () => {
     const err = new BankAccountUpdateError("boom")
     erp.updateBankAccount.mockResolvedValue(err)
@@ -436,6 +673,20 @@ describe("setDefaultBankAccount", () => {
       bankAccountId: "BANK-ACC-1",
       erpParty: "CUST-1",
     })
+  })
+
+  it("returns the account as default when the write commits but the re-read fails", async () => {
+    erp.setDefaultBankAccount.mockResolvedValue(true)
+    erp.getBankAccountsByCustomer
+      .mockResolvedValueOnce([storedBank])
+      .mockResolvedValueOnce(new BankAccountQueryError("boom"))
+
+    const result = await setDefaultBankAccount(ACCOUNT_ID, {
+      bankAccountId: "BANK-ACC-1",
+    })
+
+    expect(result).toEqual({ ...storedBank, is_default: 1 })
+    expect(baseLogger.error).toHaveBeenCalledTimes(1)
   })
 
   it("propagates the ERPNext error", async () => {

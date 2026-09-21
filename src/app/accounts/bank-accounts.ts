@@ -6,9 +6,12 @@ import { RateLimitConfig } from "@domain/rate-limit"
 import { consumeLimiter } from "@services/rate-limit"
 import { baseLogger } from "@services/logger"
 import {
+  BankAccountDuplicateNumberError,
   BankAccountNotOwnedError,
   BankAccountQueryError,
   BankAccountUpgradeRequiredError,
+  BankAccountValidationError,
+  BankAccountValidationReason,
 } from "@services/frappe/errors"
 
 // Self-serve management of the customer's ERPNext (Jamaican) bank accounts.
@@ -17,11 +20,38 @@ import {
 //   - `erpParty` only ever comes from the authenticated account record;
 //   - the target account is checked against the customer's own list before
 //     ERPNext is asked to touch it (ERPNext re-checks — defense in depth);
-//   - values are validated here, not trusted from the client.
+//   - values are validated here, not trusted from the client — format and
+//     length included, because nobody reviews what ops later keys in as the
+//     payout destination;
+//   - a customer holds at most MAX_BANK_ACCOUNTS enabled accounts.
+//
+// Account-number uniqueness. ERPNext (admin_panel/api/banking.py) refuses a
+// number that is already on another Bank Account. With no reviewer in front of
+// that check, a distinct "duplicate" answer would let any upgraded customer
+// probe whether a number is on file with Flash. Decision: the customer only
+// gets BANK_ACCOUNT_DUPLICATE_NUMBER for a number on one of THEIR OWN visible
+// accounts (checked here, against their own list). When ERPNext refuses a
+// number this customer cannot see, the answer is the generic
+// BANK_ACCOUNT_INVALID (BankAccountValidationReason.NumberNotAccepted), which
+// points the real owner at support.
 
 const ALLOWED_ACCOUNT_TYPES = ["Chequing", "Savings"]
 // Cashout only settles JMD or USD.
 const ALLOWED_CURRENCIES = ["JMD", "USD"]
+export const MAX_BANK_ACCOUNTS = 10
+
+// 4-34 characters (IBAN length is the ceiling), alphanumeric first, then
+// alphanumerics, spaces and hyphens only.
+const ACCOUNT_NUMBER_REGEX = /^[0-9A-Za-z][0-9A-Za-z -]{3,33}$/
+// ERPNext Data fields and doc names stop at 140 characters. accountName becomes
+// part of the Bank Account doc name ("{accountName} - {bank}", plus a
+// disambiguating suffix), so it gets the tighter limit.
+const MAX_BRANCH_LENGTH = 100
+const MAX_ACCOUNT_NAME_LENGTH = 80
+// Control characters and angle brackets: no markup or invisible characters in
+// text that ops reads off a Cashout.
+// eslint-disable-next-line no-control-regex
+const UNSAFE_TEXT_REGEX = /[\u0000-\u001f\u007f<>]/
 
 export type BankAccountDetailsInput = {
   bankName: string
@@ -75,6 +105,14 @@ const resolveErpParty = async (
 const validateDetails = async (
   input: BankAccountDetailsInput,
 ): Promise<BankAccountDetails | ApplicationError> => {
+  // Checked before trimming: trim() would silently drop a leading or trailing
+  // control character instead of rejecting it.
+  for (const raw of [input.bankBranch, input.accountName, input.accountNumber]) {
+    if (UNSAFE_TEXT_REGEX.test(raw ?? "")) {
+      return new ValidationError("Bank account details contain invalid characters.")
+    }
+  }
+
   const bankName = (input.bankName ?? "").trim()
   const bankBranch = (input.bankBranch ?? "").trim()
   const accountType = (input.accountType ?? "").trim()
@@ -83,10 +121,20 @@ const validateDetails = async (
 
   if (bankName.length < 2) return new ValidationError("Bank name is required.")
   if (bankBranch.length < 2) return new ValidationError("Bank branch is required.")
+  if (bankBranch.length > MAX_BRANCH_LENGTH) {
+    return new ValidationError(
+      `Bank branch must be ${MAX_BRANCH_LENGTH} characters or fewer.`,
+    )
+  }
+  if (accountName.length > MAX_ACCOUNT_NAME_LENGTH) {
+    return new ValidationError(
+      `Account name must be ${MAX_ACCOUNT_NAME_LENGTH} characters or fewer.`,
+    )
+  }
   if (!ALLOWED_ACCOUNT_TYPES.includes(accountType)) {
     return new ValidationError("Account type must be Chequing or Savings.")
   }
-  if (accountNumber.length < 4) {
+  if (!ACCOUNT_NUMBER_REGEX.test(accountNumber)) {
     return new ValidationError("A valid account number is required.")
   }
 
@@ -103,6 +151,40 @@ const validateDetails = async (
     accountNumber,
     accountName: accountName || undefined,
   }
+}
+
+// ERPNext answers "duplicate" for a number on ANY Bank Account. By the time it
+// is asked, the customer's own visible accounts have been ruled out, so this is
+// a number they cannot see — see the uniqueness note in the header.
+const hideForeignDuplicate = <T>(result: T): T | BankAccountValidationError =>
+  result instanceof BankAccountDuplicateNumberError
+    ? new BankAccountValidationError(BankAccountValidationReason.NumberNotAccepted)
+    : result
+
+const sameNumber = (bankAccount: BankAccount, accountNumber: string): boolean =>
+  (bankAccount.bank_account_no ?? "").trim() === accountNumber
+
+// The write is committed; only reading it back failed. Failing the mutation
+// would tell the customer that nothing happened — and a retried add then hits
+// the duplicate check for an account they believe they never added.
+const afterCommittedWrite = async ({
+  erpParty,
+  bankAccountId,
+  fallback,
+}: {
+  erpParty: string
+  bankAccountId: string
+  fallback: BankAccount
+}): Promise<BankAccount | ApplicationError> => {
+  const fresh = await findOwned(erpParty, bankAccountId)
+  if (fresh instanceof BankAccountQueryError) {
+    baseLogger.error(
+      { bankAccountId, erpParty, error: fresh.name },
+      "Bank account write committed but the re-read failed; returning the written values",
+    )
+    return fallback
+  }
+  return fresh
 }
 
 const findOwned = async (
@@ -132,16 +214,39 @@ export const addBankAccount = async (
     return new ValidationError("Currency must be JMD or USD.")
   }
 
-  const created = await ErpNext.createBankAccount({
-    erpParty,
-    ...details,
-    currency,
-    setDefault: Boolean(input.setDefault),
-  })
+  const existing = await ErpNext.getBankAccountsByCustomer(erpParty)
+  if (existing instanceof BankAccountQueryError) return existing
+  if (existing.length >= MAX_BANK_ACCOUNTS) {
+    return new ValidationError(
+      `You can have at most ${MAX_BANK_ACCOUNTS} bank accounts. Delete one before adding another.`,
+    )
+  }
+  if (existing.some((b) => sameNumber(b, details.accountNumber))) {
+    return new BankAccountDuplicateNumberError("Number is on the customer's own account")
+  }
+
+  const setDefault = Boolean(input.setDefault)
+  const created = hideForeignDuplicate(
+    await ErpNext.createBankAccount({ erpParty, ...details, currency, setDefault }),
+  )
   if (created instanceof Error) return created
 
   // Re-read so the GraphQL NonNull fields come from what ERPNext stored.
-  return findOwned(erpParty, created.bankAccountId)
+  return afterCommittedWrite({
+    erpParty,
+    bankAccountId: created.bankAccountId,
+    fallback: {
+      name: created.bankAccountId,
+      account_name: details.accountName,
+      bank: details.bankName,
+      bank_account_no: details.accountNumber,
+      branch_code: details.bankBranch,
+      account_type: details.accountType,
+      currency,
+      // ERPNext makes a customer's first account the default on its own.
+      is_default: setDefault || existing.length === 0 ? 1 : 0,
+    },
+  })
 }
 
 export const updateBankAccount = async (
@@ -151,20 +256,30 @@ export const updateBankAccount = async (
   const erpParty = await resolveErpParty(accountId)
   if (erpParty instanceof Error) return erpParty
 
-  const current = await findOwned(erpParty, input.bankAccountId)
-  if (current instanceof Error) return current
+  const owned = await ErpNext.getBankAccountsByCustomer(erpParty)
+  if (owned instanceof BankAccountQueryError) return owned
+  const current = owned.find((b) => b.name === input.bankAccountId)
+  if (!current)
+    return new BankAccountNotOwnedError("Bank account not found for this user.")
 
   const details = await validateDetails(input)
   if (details instanceof Error) return details
 
+  const others = owned.filter((b) => b.name !== input.bankAccountId)
+  if (others.some((b) => sameNumber(b, details.accountNumber))) {
+    return new BankAccountDuplicateNumberError("Number is on the customer's own account")
+  }
+
   // The ERPNext endpoint requires a currency on every save; pin it to the
   // stored one so an update can never change it.
-  const updated = await ErpNext.updateBankAccount({
-    bankAccountId: input.bankAccountId,
-    erpParty,
-    ...details,
-    currency: current.currency,
-  })
+  const updated = hideForeignDuplicate(
+    await ErpNext.updateBankAccount({
+      bankAccountId: input.bankAccountId,
+      erpParty,
+      ...details,
+      currency: current.currency,
+    }),
+  )
   if (updated instanceof Error) return updated
 
   // Close any still-open review requests for this account: approving a stale
@@ -184,7 +299,19 @@ export const updateBankAccount = async (
     )
   }
 
-  return findOwned(erpParty, input.bankAccountId)
+  return afterCommittedWrite({
+    erpParty,
+    bankAccountId: input.bankAccountId,
+    fallback: {
+      ...current,
+      // ERPNext keeps the stored account_name when none is sent.
+      account_name: details.accountName ?? current.account_name,
+      bank: details.bankName,
+      bank_account_no: details.accountNumber,
+      branch_code: details.bankBranch,
+      account_type: details.accountType,
+    },
+  })
 }
 
 export const setDefaultBankAccount = async (
@@ -200,7 +327,11 @@ export const setDefaultBankAccount = async (
   const result = await ErpNext.setDefaultBankAccount({ bankAccountId, erpParty })
   if (result instanceof Error) return result
 
-  return findOwned(erpParty, bankAccountId)
+  return afterCommittedWrite({
+    erpParty,
+    bankAccountId,
+    fallback: { ...current, is_default: 1 },
+  })
 }
 
 export const deleteBankAccount = async (

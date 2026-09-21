@@ -15,7 +15,9 @@ import {
   BankAccountUpdateError,
   BankAccountUpdateRequestCreateError,
   BankAccountUpdateRequestQueryError,
+  BankAccountUpgradeRequiredError,
   BankAccountValidationError,
+  BankAccountValidationReason,
   BanksQueryError,
   BridgeTransferRequestUpsertError,
   CashoutDraftError,
@@ -109,6 +111,7 @@ export type BankAccountWriteError =
   | BankAccountDuplicateNumberError
   | BankAccountNotOwnedError
   | BankAccountValidationError
+  | BankAccountUpgradeRequiredError
 
 const last4 = (accountNumber: string): string => accountNumber.slice(-4)
 
@@ -639,8 +642,10 @@ export class ErpNext {
       // which all read through this method.
       const filters = `[["party_type","=","Customer"],["party","=","${customerName}"],["disabled","=",0]]`
       const fields = `["name","account_name","bank","bank_account_no","branch_code","account_type","currency","is_default"]`
+      // limit_page_length=0: Frappe pages at 20 by default, and every ownership
+      // check reads through here — an account past row 20 would be invisible.
       const resp = await axios.get(
-        `${this.url}/api/resource/Bank%20Account?filters=${filters}&fields=${fields}`,
+        `${this.url}/api/resource/Bank%20Account?filters=${filters}&fields=${fields}&limit_page_length=0`,
         { headers: this.headers },
       )
       return resp.data?.data ?? []
@@ -817,6 +822,12 @@ export class ErpNext {
   // a 417 whose `_server_messages` carries the human-readable reason (a missing
   // doc is a 404 DoesNotExistError). Tell those deliberate refusals apart from a
   // genuine failure so the app can show something better than "unknown error".
+  //
+  // Only the refusals banking.py is known to raise are recognised, and the
+  // customer-facing text is ours (BankAccountValidationReason), never ERPNext's:
+  // any other 417 — a Frappe-internal MandatoryError / LinkValidationError /
+  // CharacterLengthExceededError, or "Failed to get method for command ..." when
+  // flash ships ahead of the endpoint — is a generic failure.
   private handleBankAccountWriteError(
     err: unknown,
     GenericError: new (message?: string | unknown) => BankAccountWriteError,
@@ -847,8 +858,23 @@ export class ErpNext {
     ) {
       return new BankAccountNotOwnedError(reason)
     }
-    if (excType === "ValidationError" || (status === 417 && reason)) {
-      return new BankAccountValidationError(reason)
+    if (haystack.includes("unknown erp customer")) {
+      return new BankAccountUpgradeRequiredError(reason)
+    }
+    if (haystack.includes("bank account that was removed")) {
+      return new BankAccountValidationError(BankAccountValidationReason.OwnRemovedNumber)
+    }
+    if (haystack.includes("account_type must be")) {
+      return new BankAccountValidationError(BankAccountValidationReason.AccountType)
+    }
+    if (haystack.includes("currency must be")) {
+      return new BankAccountValidationError(BankAccountValidationReason.Currency)
+    }
+    if (haystack.includes("bank_name is required")) {
+      return new BankAccountValidationError(BankAccountValidationReason.BankName)
+    }
+    if (haystack.includes("account_number is required")) {
+      return new BankAccountValidationError(BankAccountValidationReason.AccountNumber)
     }
     return new GenericError(reason || errMessage)
   }
