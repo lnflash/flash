@@ -48,10 +48,14 @@ const ACCOUNT_NUMBER_REGEX = /^[0-9A-Za-z][0-9A-Za-z -]{3,33}$/
 // disambiguating suffix), so it gets the tighter limit.
 const MAX_BRANCH_LENGTH = 100
 const MAX_ACCOUNT_NAME_LENGTH = 80
-// Control characters and angle brackets: no markup or invisible characters in
-// text that ops reads off a Cashout.
-// eslint-disable-next-line no-control-regex
-const UNSAFE_TEXT_REGEX = /[\u0000-\u001f\u007f<>]/
+// No markup or invisible characters in text that ops reads off a Cashout: C0 and
+// C1 controls, zero-width characters (U+200B-U+200F, U+2060-U+2069, U+FEFF),
+// line/paragraph separators and bidi overrides (U+2028-U+202E), and angle
+// brackets. A bidi override would let a holder name display reordered in the
+// ERPNext desk, where ops compares it against KYC.
+const UNSAFE_TEXT_REGEX =
+  // eslint-disable-next-line no-control-regex
+  /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff<>]/
 
 export type BankAccountDetailsInput = {
   bankName: string

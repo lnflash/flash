@@ -308,6 +308,26 @@ describe("addBankAccount", () => {
       { accountName: "Jane Doe\n" },
       "Bank account details contain invalid characters.",
     ],
+    [
+      "a zero-width space in the branch",
+      { bankBranch: "Half Way\u200bTree" },
+      "Bank account details contain invalid characters.",
+    ],
+    [
+      "a bidi override in the account name",
+      { accountName: "Jane \u202eeoD" },
+      "Bank account details contain invalid characters.",
+    ],
+    [
+      "a C1 control character in the account name",
+      { accountName: "Jane\u0085Doe" },
+      "Bank account details contain invalid characters.",
+    ],
+    [
+      "a byte order mark in the branch",
+      { bankBranch: "\ufeffHalf Way Tree" },
+      "Bank account details contain invalid characters.",
+    ],
     ["an unsupported bank", { bankName: "Bank of Nowhere" }, "Bank is not supported."],
     ["an unsupported currency", { currency: "CAD" }, "Currency must be JMD or USD."],
     ["a blank currency", { currency: "" }, "Currency must be JMD or USD."],
