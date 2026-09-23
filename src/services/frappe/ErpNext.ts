@@ -6,9 +6,18 @@ import { recordExceptionInCurrentSpan } from "@services/tracing"
 import axios, { isAxiosError } from "axios"
 
 import {
+  BankAccountCreateError,
+  BankAccountDeleteError,
+  BankAccountDuplicateNumberError,
+  BankAccountNotOwnedError,
   BankAccountQueryError,
+  BankAccountSetDefaultError,
+  BankAccountUpdateError,
   BankAccountUpdateRequestCreateError,
   BankAccountUpdateRequestQueryError,
+  BankAccountUpgradeRequiredError,
+  BankAccountValidationError,
+  BankAccountValidationReason,
   BanksQueryError,
   BridgeTransferRequestUpsertError,
   CashoutDraftError,
@@ -68,6 +77,68 @@ export const toJson = (filters: AccountUpgradeRequestFilters): string => {
 }
 
 export type CashoutId = string & { readonly brand: unique symbol }
+
+export type CreateBankAccountArgs = {
+  erpParty: string
+  bankName: string
+  accountNumber: string
+  accountType: string
+  currency: string
+  bankBranch?: string
+  accountName?: string
+  setDefault?: boolean
+}
+
+export type UpdateBankAccountArgs = Omit<CreateBankAccountArgs, "setDefault"> & {
+  bankAccountId: string
+}
+
+export type DeleteBankAccountResult = {
+  bankAccountId: string
+  // Exactly one of these is true: hard-deleted, or soft-deleted (disabled=1)
+  // because ERPNext still has documents linked to the account.
+  deleted: boolean
+  disabled: boolean
+  // The account ERPNext promoted to default when the deleted one was default.
+  newDefault: string | null
+}
+
+export type BankAccountWriteError =
+  | BankAccountCreateError
+  | BankAccountUpdateError
+  | BankAccountDeleteError
+  | BankAccountSetDefaultError
+  | BankAccountDuplicateNumberError
+  | BankAccountNotOwnedError
+  | BankAccountValidationError
+  | BankAccountUpgradeRequiredError
+
+const last4 = (accountNumber: string): string => accountNumber.slice(-4)
+
+// frappe.throw() reports its text in `_server_messages`: a JSON array of JSON
+// strings, each `{ message, ... }`. Falls back to the `exception` line
+// ("frappe.exceptions.ValidationError: <text>").
+const frappeServerMessage = (responseData: unknown): string => {
+  if (!responseData || typeof responseData !== "object") return ""
+  const data = responseData as { _server_messages?: unknown; exception?: unknown }
+  if (typeof data._server_messages === "string") {
+    try {
+      const messages = (JSON.parse(data._server_messages) as string[])
+        .map((raw) => {
+          const parsed = JSON.parse(raw)
+          return typeof parsed?.message === "string" ? parsed.message : ""
+        })
+        .filter(Boolean)
+      if (messages.length) return messages.join(" ")
+    } catch {
+      // Not the documented shape — fall through to the exception line.
+    }
+  }
+  if (typeof data.exception === "string") {
+    return data.exception.replace(/^[\w.]+:\s*/, "")
+  }
+  return ""
+}
 
 // Decision state of an Account Upgrade Request, as the retention job needs
 // it. `decidedAt` is the doc's `reviewed_at` when the ERPNext side records
@@ -566,10 +637,15 @@ export class ErpNext {
     customerName: string,
   ): Promise<BankAccount[] | BankAccountQueryError> {
     try {
-      const filters = `[["party_type","=","Customer"],["party","=","${customerName}"]]`
+      // disabled=0: a Bank Account that ERPNext soft-deleted (it still has linked
+      // docs) must vanish from the app AND from the cashout ownership checks,
+      // which all read through this method.
+      const filters = `[["party_type","=","Customer"],["party","=","${customerName}"],["disabled","=",0]]`
       const fields = `["name","account_name","bank","bank_account_no","branch_code","account_type","currency","is_default"]`
+      // limit_page_length=0: Frappe pages at 20 by default, and every ownership
+      // check reads through here — an account past row 20 would be invisible.
       const resp = await axios.get(
-        `${this.url}/api/resource/Bank%20Account?filters=${filters}&fields=${fields}`,
+        `${this.url}/api/resource/Bank%20Account?filters=${filters}&fields=${fields}&limit_page_length=0`,
         { headers: this.headers },
       )
       return resp.data?.data ?? []
@@ -585,6 +661,222 @@ export class ErpNext {
       })
       return new BankAccountQueryError(err)
     }
+  }
+
+  // ---- Self-serve Bank Account writes --------------------------------------
+  //
+  // These go through the admin_panel banking endpoints rather than the raw
+  // `/api/resource` doctype API: the endpoints re-check ownership against
+  // `erp_party`, enforce the JMD/USD + Chequing/Savings rules and keep exactly
+  // one default per customer. Account numbers are never logged in full.
+
+  async createBankAccount(
+    args: CreateBankAccountArgs,
+  ): Promise<{ bankAccountId: string } | BankAccountWriteError> {
+    const { erpParty, bankName, accountType, currency } = args
+    try {
+      const resp = await axios.post(
+        `${this.url}/api/method/admin_panel.api.banking.add_bank_account`,
+        {
+          erp_party: erpParty,
+          bank_name: bankName,
+          account_number: args.accountNumber,
+          account_type: accountType,
+          currency,
+          bank_branch: args.bankBranch,
+          account_name: args.accountName,
+          set_default: args.setDefault ? 1 : 0,
+        },
+        { headers: this.headers },
+      )
+
+      const message = resp.data?.message
+      const bankAccountId = message?.bank_account
+      if (!message?.success || typeof bankAccountId !== "string" || !bankAccountId) {
+        return new BankAccountCreateError(message?.error ?? "No bank_account in response")
+      }
+      return { bankAccountId }
+    } catch (err) {
+      return this.handleBankAccountWriteError(err, BankAccountCreateError, {
+        logMessage: "Error creating Bank Account in ERPNext",
+        context: {
+          erpParty,
+          bankName,
+          accountType,
+          currency,
+          accountNumberLast4: last4(args.accountNumber),
+        },
+      })
+    }
+  }
+
+  async updateBankAccount(
+    args: UpdateBankAccountArgs,
+  ): Promise<true | BankAccountWriteError> {
+    const { bankAccountId, erpParty, bankName, accountType, currency } = args
+    try {
+      const resp = await axios.post(
+        `${this.url}/api/method/admin_panel.api.banking.update_bank_account`,
+        {
+          bank_account_id: bankAccountId,
+          erp_party: erpParty,
+          bank_name: bankName,
+          account_number: args.accountNumber,
+          account_type: accountType,
+          currency,
+          bank_branch: args.bankBranch,
+          account_name: args.accountName,
+        },
+        { headers: this.headers },
+      )
+
+      const message = resp.data?.message
+      if (!message?.success) {
+        return new BankAccountUpdateError(message?.error ?? "No success in response")
+      }
+      return true
+    } catch (err) {
+      return this.handleBankAccountWriteError(err, BankAccountUpdateError, {
+        logMessage: "Error updating Bank Account in ERPNext",
+        context: {
+          bankAccountId,
+          erpParty,
+          bankName,
+          accountType,
+          currency,
+          accountNumberLast4: last4(args.accountNumber),
+        },
+      })
+    }
+  }
+
+  // Hard-deletes, or soft-deletes (disabled=1) when ERPNext still has documents
+  // linked to the Bank Account. Either way it drops out of
+  // getBankAccountsByCustomer.
+  async deleteBankAccount({
+    bankAccountId,
+    erpParty,
+  }: {
+    bankAccountId: string
+    erpParty: string
+  }): Promise<DeleteBankAccountResult | BankAccountWriteError> {
+    try {
+      const resp = await axios.post(
+        `${this.url}/api/method/admin_panel.api.banking.delete_bank_account`,
+        { bank_account_id: bankAccountId, erp_party: erpParty },
+        { headers: this.headers },
+      )
+
+      const message = resp.data?.message
+      if (
+        !message ||
+        message.success === false ||
+        (!message.deleted && !message.disabled)
+      ) {
+        return new BankAccountDeleteError(
+          message?.error ?? "Bank Account was not deleted",
+        )
+      }
+      return {
+        bankAccountId: message.bank_account_id ?? bankAccountId,
+        deleted: Boolean(message.deleted),
+        disabled: Boolean(message.disabled),
+        newDefault: message.new_default ?? null,
+      }
+    } catch (err) {
+      return this.handleBankAccountWriteError(err, BankAccountDeleteError, {
+        logMessage: "Error deleting Bank Account in ERPNext",
+        context: { bankAccountId, erpParty },
+      })
+    }
+  }
+
+  async setDefaultBankAccount({
+    bankAccountId,
+    erpParty,
+  }: {
+    bankAccountId: string
+    erpParty: string
+  }): Promise<true | BankAccountWriteError> {
+    try {
+      const resp = await axios.post(
+        `${this.url}/api/method/admin_panel.api.banking.set_default_bank_account`,
+        { bank_account_id: bankAccountId, erp_party: erpParty },
+        { headers: this.headers },
+      )
+
+      const message = resp.data?.message
+      if (!message?.success) {
+        return new BankAccountSetDefaultError(message?.error ?? "No success in response")
+      }
+      return true
+    } catch (err) {
+      return this.handleBankAccountWriteError(err, BankAccountSetDefaultError, {
+        logMessage: "Error setting default Bank Account in ERPNext",
+        context: { bankAccountId, erpParty },
+      })
+    }
+  }
+
+  // The banking endpoints refuse bad input with frappe.throw, which surfaces as
+  // a 417 whose `_server_messages` carries the human-readable reason (a missing
+  // doc is a 404 DoesNotExistError). Tell those deliberate refusals apart from a
+  // genuine failure so the app can show something better than "unknown error".
+  //
+  // Only the refusals banking.py is known to raise are recognised, and the
+  // customer-facing text is ours (BankAccountValidationReason), never ERPNext's:
+  // any other 417 — a Frappe-internal MandatoryError / LinkValidationError /
+  // CharacterLengthExceededError, or "Failed to get method for command ..." when
+  // flash ships ahead of the endpoint — is a generic failure.
+  private handleBankAccountWriteError(
+    err: unknown,
+    GenericError: new (message?: string | unknown) => BankAccountWriteError,
+    { logMessage, context }: { logMessage: string; context: Record<string, unknown> },
+  ): BankAccountWriteError {
+    const responseData = isAxiosError(err) ? err.response?.data : undefined
+    const status = isAxiosError(err) ? err.response?.status : undefined
+    // NOT the raw axios error: its `config.data` is the request body, which
+    // carries the full account number.
+    const errMessage = err instanceof Error ? err.message : "Unknown error"
+    baseLogger.error({ err: errMessage, status, responseData, ...context }, logMessage)
+    recordExceptionInCurrentSpan({
+      error: new Error(errMessage),
+      attributes: { "erpnext.exception": responseData?.exception },
+    })
+
+    const reason = frappeServerMessage(responseData)
+    const excType: string = responseData?.exc_type ?? ""
+    const haystack = `${reason} ${responseData?.exception ?? ""}`.toLowerCase()
+
+    if (haystack.includes("account number") && haystack.includes("already")) {
+      return new BankAccountDuplicateNumberError(reason)
+    }
+    if (
+      status === 404 ||
+      excType === "DoesNotExistError" ||
+      haystack.includes("does not belong to this customer")
+    ) {
+      return new BankAccountNotOwnedError(reason)
+    }
+    if (haystack.includes("unknown erp customer")) {
+      return new BankAccountUpgradeRequiredError(reason)
+    }
+    if (haystack.includes("bank account that was removed")) {
+      return new BankAccountValidationError(BankAccountValidationReason.OwnRemovedNumber)
+    }
+    if (haystack.includes("account_type must be")) {
+      return new BankAccountValidationError(BankAccountValidationReason.AccountType)
+    }
+    if (haystack.includes("currency must be")) {
+      return new BankAccountValidationError(BankAccountValidationReason.Currency)
+    }
+    if (haystack.includes("bank_name is required")) {
+      return new BankAccountValidationError(BankAccountValidationReason.BankName)
+    }
+    if (haystack.includes("account_number is required")) {
+      return new BankAccountValidationError(BankAccountValidationReason.AccountNumber)
+    }
+    return new GenericError(reason || errMessage)
   }
 
   async getCashoutExchangeRate(): Promise<JMDAmount | ExchangeRateQueryError> {
@@ -939,6 +1231,7 @@ export class ErpNext {
   async listBanks(): Promise<Bank[] | BanksQueryError> {
     try {
       const resp = await axios.get(`${this.url}/api/resource/Bank`, {
+        params: { limit_page_length: 0 },
         headers: this.headers,
       })
 

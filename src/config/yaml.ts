@@ -319,6 +319,21 @@ export const getFygaroCheckoutCreateAttemptLimits = () => ({
 })
 
 /**
+ * Self-serve bank account writes (add / update / delete / set-default), per
+ * account, one shared budget.
+ *
+ * Each call is several ERPNext round trips (ownership read, the write, the
+ * re-read) and the writes take effect instantly with no human review, so an
+ * unbounded loop is both ERPNext load and a way to churn Bank Account docs.
+ * Generous against real use: nobody edits their bank details 20 times an hour.
+ */
+export const getBankAccountManageAttemptLimits = () => ({
+  points: 20,
+  duration: toSeconds(3600), // 1 hour
+  blockDuration: toSeconds(3600), // 1 hour
+})
+
+/**
  * The card top-up allowance READ, per account.
  *
  * Cheaper to abuse than the mutation it sits next to, not dearer: it takes no
