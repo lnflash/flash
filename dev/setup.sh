@@ -135,11 +135,15 @@ else
   echo "If you don't have credentials, ask your team lead."
   echo ""
   # read returns non-zero on EOF (closed or non-TTY stdin); under set -e that
-  # would exit silently, so fail with instructions instead.
+  # would exit silently, so fail with instructions instead. read also returns
+  # non-zero when it hits EOF on a final line with no trailing newline, even
+  # though it populated the variable — treat a populated variable as success.
   NO_INPUT_HINT="No input available for the Ibex prompt (stdin closed or not a terminal). Re-run interactively, create .env.local with IBEX_CLIENT_ID and IBEX_CLIENT_SECRET, or pass --skip-ibex."
-  read -rp "Ibex client ID (or press Enter to skip): " IBEX_CLIENT_ID || { echo ""; fail "$NO_INPUT_HINT"; }
+  IBEX_CLIENT_ID=""
+  IBEX_CLIENT_SECRET=""
+  read -rp "Ibex client ID (or press Enter to skip): " IBEX_CLIENT_ID || [ -n "$IBEX_CLIENT_ID" ] || { echo ""; fail "$NO_INPUT_HINT"; }
   if [ -n "$IBEX_CLIENT_ID" ]; then
-    read -rsp "Ibex client secret: " IBEX_CLIENT_SECRET || { echo ""; fail "$NO_INPUT_HINT"; }
+    read -rsp "Ibex client secret: " IBEX_CLIENT_SECRET || [ -n "$IBEX_CLIENT_SECRET" ] || { echo ""; fail "$NO_INPUT_HINT"; }
     echo ""
     cat > .env.local << EOF
 export IBEX_CLIENT_ID='${IBEX_CLIENT_ID}'
