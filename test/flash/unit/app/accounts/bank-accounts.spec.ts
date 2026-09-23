@@ -34,13 +34,15 @@ import ErpNext from "@services/frappe/ErpNext"
 import { consumeLimiter } from "@services/rate-limit"
 import { baseLogger } from "@services/logger"
 import {
+  MAX_ACCOUNT_NAME_LENGTH,
   MAX_BANK_ACCOUNTS,
+  MAX_BRANCH_LENGTH,
   addBankAccount,
   deleteBankAccount,
   setDefaultBankAccount,
   updateBankAccount,
 } from "@app/accounts/bank-accounts"
-import { ValidationError } from "@domain/shared"
+import { mapError } from "@graphql/error-map"
 import { CouldNotFindAccountError } from "@domain/errors"
 import { BankAccountManageRateLimiterExceededError } from "@domain/rate-limit/errors"
 import {
@@ -334,7 +336,7 @@ describe("addBankAccount", () => {
   ])("rejects %s", async (_label, override, message) => {
     const result = await addBankAccount(ACCOUNT_ID, { ...addInput, ...override })
 
-    expect(result).toBeInstanceOf(ValidationError)
+    expect(result).toBeInstanceOf(BankAccountValidationError)
     expect((result as Error).message).toBe(message)
     expect(erp.createBankAccount).not.toHaveBeenCalled()
   })
@@ -391,7 +393,7 @@ describe("addBankAccount", () => {
 
     const result = await addBankAccount(ACCOUNT_ID, addInput)
 
-    expect(result).toBeInstanceOf(ValidationError)
+    expect(result).toBeInstanceOf(BankAccountValidationError)
     expect((result as Error).message).toBe(
       "You can have at most 10 bank accounts. Delete one before adding another.",
     )
@@ -590,7 +592,7 @@ describe("updateBankAccount", () => {
       accountType: "Current",
     })
 
-    expect(result).toBeInstanceOf(ValidationError)
+    expect(result).toBeInstanceOf(BankAccountValidationError)
     expect(erp.updateBankAccount).not.toHaveBeenCalled()
     expect(erp.closeBankAccountUpdateRequests).not.toHaveBeenCalled()
   })
@@ -601,7 +603,7 @@ describe("updateBankAccount", () => {
       bankName: "Bank of Nowhere",
     })
 
-    expect(result).toBeInstanceOf(ValidationError)
+    expect(result).toBeInstanceOf(BankAccountValidationError)
     expect(erp.updateBankAccount).not.toHaveBeenCalled()
   })
 
@@ -611,7 +613,7 @@ describe("updateBankAccount", () => {
       bankBranch: "b".repeat(101),
     })
 
-    expect(result).toBeInstanceOf(ValidationError)
+    expect(result).toBeInstanceOf(BankAccountValidationError)
     expect(erp.updateBankAccount).not.toHaveBeenCalled()
   })
 
@@ -743,5 +745,33 @@ describe("deleteBankAccount", () => {
     erp.deleteBankAccount.mockResolvedValue(err)
 
     expect(await deleteBankAccount(ACCOUNT_ID, { bankAccountId: "BANK-ACC-1" })).toBe(err)
+  })
+})
+
+// Regression: these used to be the generic domain ValidationError, which the
+// error map treats as internal, so a customer typing an unsupported bank saw
+// "Unexpected error occurred" (seen live on TEST, chart 3.2.83).
+describe("validation failures reach the customer as BANK_ACCOUNT_INVALID", () => {
+  it("maps an unsupported bank to its own message", async () => {
+    const result = await addBankAccount(ACCOUNT_ID, {
+      ...addInput,
+      bankName: "Bank of Nowhere",
+    })
+
+    const mapped = mapError(result as ApplicationError)
+    expect(mapped.extensions.code).toBe("BANK_ACCOUNT_INVALID")
+    expect(mapped.message).toBe("Bank is not supported.")
+  })
+
+  it("keeps the allowlisted limit text in step with the enforced limits", () => {
+    expect(BankAccountValidationReason.TooManyAccounts).toContain(
+      `${MAX_BANK_ACCOUNTS} bank accounts`,
+    )
+    expect(BankAccountValidationReason.BankBranchTooLong).toContain(
+      `${MAX_BRANCH_LENGTH} characters`,
+    )
+    expect(BankAccountValidationReason.AccountNameTooLong).toContain(
+      `${MAX_ACCOUNT_NAME_LENGTH} characters`,
+    )
   })
 })

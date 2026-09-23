@@ -35,14 +35,31 @@ export const BankAccountValidationReason = {
     "This account number cannot be used. Please contact support if it is yours.",
   OwnRemovedNumber:
     "This account number belongs to a bank account you removed. Add it again instead of editing another account.",
+  // App-layer checks (src/app/accounts/bank-accounts.ts). Same allowlist so
+  // they reach the customer as BANK_ACCOUNT_INVALID with their own text.
+  BankBranch: "Bank branch is required.",
+  BankBranchTooLong: "Bank branch must be 100 characters or fewer.",
+  AccountNameTooLong: "Account name must be 80 characters or fewer.",
+  BankNotSupported: "Bank is not supported.",
+  InvalidCharacters: "Bank account details contain invalid characters.",
+  TooManyAccounts:
+    "You can have at most 10 bank accounts. Delete one before adding another.",
 } as const
+
+export type BankAccountValidationReasonText =
+  (typeof BankAccountValidationReason)[keyof typeof BankAccountValidationReason]
 
 export const isBankAccountValidationReason = (message: string): boolean =>
   (Object.values(BankAccountValidationReason) as string[]).includes(message)
 
-// A deliberate ERPNext refusal that banking.py is known to raise (bad account
-// type, currency, ...). Build it from a BankAccountValidationReason only.
-export class BankAccountValidationError extends ErpNextError {}
+// A deliberate validation refusal, from the app layer or from banking.py.
+// Build it from a BankAccountValidationReason only: the constructor accepts
+// allowlisted text alone, so free text does not compile.
+export class BankAccountValidationError extends ErpNextError {
+  constructor(reason: BankAccountValidationReasonText) {
+    super(reason)
+  }
+}
 // The account has no ERPNext customer yet, i.e. the upgrade is not complete.
 export class BankAccountUpgradeRequiredError extends ErpNextError {}
 export class ExchangeRateQueryError extends ErpNextError {}
