@@ -13,15 +13,21 @@ import {
   BankAccountUpgradeRequiredError,
   BankAccountValidationError,
   BankAccountValidationReason,
+  BankAccountValidationReasonText,
   BanksQueryError,
 } from "@services/frappe/errors"
+
+// Deliberately bypasses the constructor's compile-time allowlist so the tests
+// below can prove the runtime fallback still holds if text sneaks in anyway.
+const validationErrorWithFreeText = (text: string) =>
+  new BankAccountValidationError(text as BankAccountValidationReasonText)
 
 describe("error-map: bank account errors", () => {
   const cases: Array<[Error, string]> = [
     [new BankAccountUpgradeRequiredError(), "BANK_ACCOUNT_UPGRADE_REQUIRED"],
     [new BankAccountNotOwnedError("nope"), "BANK_ACCOUNT_NOT_FOUND"],
     [new BankAccountDuplicateNumberError("dup"), "BANK_ACCOUNT_DUPLICATE_NUMBER"],
-    [new BankAccountValidationError("bad type"), "BANK_ACCOUNT_INVALID"],
+    [validationErrorWithFreeText("bad type"), "BANK_ACCOUNT_INVALID"],
     [new BankAccountCreateError("boom"), "UNEXPECTED_CLIENT_ERROR"],
     [new BankAccountUpdateError("boom"), "UNEXPECTED_CLIENT_ERROR"],
     [new BankAccountDeleteError("boom"), "UNEXPECTED_CLIENT_ERROR"],
@@ -66,9 +72,16 @@ describe("error-map: bank account errors", () => {
     "Bank Account: <b>Branch Code</b> will get truncated, as max characters allowed is 140",
     "",
   ])("never forwards non-allowlisted text %p to the customer", (text) => {
-    expect(mapError(new BankAccountValidationError(text)).message).toBe(
+    expect(mapError(validationErrorWithFreeText(text)).message).toBe(
       "The bank account details are not valid.",
     )
+  })
+
+  it("rejects free text at compile time", () => {
+    // @ts-expect-error free text is not a BankAccountValidationReason
+    const err = new BankAccountValidationError("account_type must be one of: x")
+
+    expect(err).toBeInstanceOf(BankAccountValidationError)
   })
 
   it("does not leak internal failure detail for generic write errors", () => {
