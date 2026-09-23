@@ -15,6 +15,8 @@ make start
 
 The setup script will check your prerequisites, prompt for Ibex sandbox credentials, install dependencies, and start Docker containers. After that, `make start` launches all four backend services.
 
+For non-interactive runs (CI, piped or closed stdin), either create `.env.local` with `IBEX_CLIENT_ID` and `IBEX_CLIENT_SECRET` first or pass `--skip-ibex`. Without one of those, the script stops at the Ibex prompt with exit 1 and prints these options.
+
 **GraphQL playground:** http://localhost:4002/graphql
 **Admin API:** http://localhost:4002/admin/graphql
 **Test login:** phone `+16505554328`, code `000000`
