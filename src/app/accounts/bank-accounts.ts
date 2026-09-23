@@ -1,7 +1,6 @@
 import { AccountsRepository } from "@services/mongoose"
 import ErpNext from "@services/frappe/ErpNext"
 import { BankAccount } from "@services/frappe/models/BankAccount"
-import { ValidationError } from "@domain/shared"
 import { RateLimitConfig } from "@domain/rate-limit"
 import { consumeLimiter } from "@services/rate-limit"
 import { baseLogger } from "@services/logger"
@@ -46,8 +45,8 @@ const ACCOUNT_NUMBER_REGEX = /^[0-9A-Za-z][0-9A-Za-z -]{3,33}$/
 // ERPNext Data fields and doc names stop at 140 characters. accountName becomes
 // part of the Bank Account doc name ("{accountName} - {bank}", plus a
 // disambiguating suffix), so it gets the tighter limit.
-const MAX_BRANCH_LENGTH = 100
-const MAX_ACCOUNT_NAME_LENGTH = 80
+export const MAX_BRANCH_LENGTH = 100
+export const MAX_ACCOUNT_NAME_LENGTH = 80
 // No markup or invisible characters in text that ops reads off a Cashout: C0 and
 // C1 controls, zero-width characters (U+200B-U+200F, U+2060-U+2069, U+FEFF),
 // line/paragraph separators and bidi overrides (U+2028-U+202E), and angle
@@ -113,7 +112,7 @@ const validateDetails = async (
   // control character instead of rejecting it.
   for (const raw of [input.bankBranch, input.accountName, input.accountNumber]) {
     if (UNSAFE_TEXT_REGEX.test(raw ?? "")) {
-      return new ValidationError("Bank account details contain invalid characters.")
+      return new BankAccountValidationError(BankAccountValidationReason.InvalidCharacters)
     }
   }
 
@@ -123,29 +122,27 @@ const validateDetails = async (
   const accountNumber = (input.accountNumber ?? "").trim()
   const accountName = (input.accountName ?? "").trim()
 
-  if (bankName.length < 2) return new ValidationError("Bank name is required.")
-  if (bankBranch.length < 2) return new ValidationError("Bank branch is required.")
+  if (bankName.length < 2)
+    return new BankAccountValidationError(BankAccountValidationReason.BankName)
+  if (bankBranch.length < 2)
+    return new BankAccountValidationError(BankAccountValidationReason.BankBranch)
   if (bankBranch.length > MAX_BRANCH_LENGTH) {
-    return new ValidationError(
-      `Bank branch must be ${MAX_BRANCH_LENGTH} characters or fewer.`,
-    )
+    return new BankAccountValidationError(BankAccountValidationReason.BankBranchTooLong)
   }
   if (accountName.length > MAX_ACCOUNT_NAME_LENGTH) {
-    return new ValidationError(
-      `Account name must be ${MAX_ACCOUNT_NAME_LENGTH} characters or fewer.`,
-    )
+    return new BankAccountValidationError(BankAccountValidationReason.AccountNameTooLong)
   }
   if (!ALLOWED_ACCOUNT_TYPES.includes(accountType)) {
-    return new ValidationError("Account type must be Chequing or Savings.")
+    return new BankAccountValidationError(BankAccountValidationReason.AccountType)
   }
   if (!ACCOUNT_NUMBER_REGEX.test(accountNumber)) {
-    return new ValidationError("A valid account number is required.")
+    return new BankAccountValidationError(BankAccountValidationReason.AccountNumber)
   }
 
   const banks = await ErpNext.listBanks()
   if (banks instanceof Error) return banks
   if (!banks.some((bank) => bank.name === bankName)) {
-    return new ValidationError("Bank is not supported.")
+    return new BankAccountValidationError(BankAccountValidationReason.BankNotSupported)
   }
 
   return {
@@ -215,15 +212,13 @@ export const addBankAccount = async (
 
   const currency = (input.currency ?? "").trim().toUpperCase()
   if (!ALLOWED_CURRENCIES.includes(currency)) {
-    return new ValidationError("Currency must be JMD or USD.")
+    return new BankAccountValidationError(BankAccountValidationReason.Currency)
   }
 
   const existing = await ErpNext.getBankAccountsByCustomer(erpParty)
   if (existing instanceof BankAccountQueryError) return existing
   if (existing.length >= MAX_BANK_ACCOUNTS) {
-    return new ValidationError(
-      `You can have at most ${MAX_BANK_ACCOUNTS} bank accounts. Delete one before adding another.`,
-    )
+    return new BankAccountValidationError(BankAccountValidationReason.TooManyAccounts)
   }
   if (existing.some((b) => sameNumber(b, details.accountNumber))) {
     return new BankAccountDuplicateNumberError("Number is on the customer's own account")

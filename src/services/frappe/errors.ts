@@ -35,6 +35,15 @@ export const BankAccountValidationReason = {
     "This account number cannot be used. Please contact support if it is yours.",
   OwnRemovedNumber:
     "This account number belongs to a bank account you removed. Add it again instead of editing another account.",
+  // App-layer checks (src/app/accounts/bank-accounts.ts). Same allowlist so
+  // they reach the customer as BANK_ACCOUNT_INVALID with their own text.
+  BankBranch: "Bank branch is required.",
+  BankBranchTooLong: "Bank branch must be 100 characters or fewer.",
+  AccountNameTooLong: "Account name must be 80 characters or fewer.",
+  BankNotSupported: "Bank is not supported.",
+  InvalidCharacters: "Bank account details contain invalid characters.",
+  TooManyAccounts:
+    "You can have at most 10 bank accounts. Delete one before adding another.",
 } as const
 
 export const isBankAccountValidationReason = (message: string): boolean =>
