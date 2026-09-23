@@ -59,6 +59,8 @@ const UsdtWallet = GT.Object<Wallet>({
 
     balance: {
       type: FractionalCentAmount,
+      description:
+        "USDT balance in US cents as a float (1 USDT = 100 cents). Up to 4 decimal places when backed by USDT; up to 8 if the balance is reported in USD.",
       resolve: async (source) => {
         const balance = await Wallets.getBalanceForWallet({
           walletId: source.id,
