@@ -601,13 +601,7 @@ export class ErpNext {
   ): Promise<IdVerificationSummary | null | IdVerificationQueryError> {
     try {
       const filters = JSON.stringify([["upgrade_request", "=", upgradeRequestName]])
-      const fields = JSON.stringify([
-        "name",
-        "status",
-        "decision_reason",
-        "reviewer_note",
-        "reviewed_at",
-      ])
+      const fields = JSON.stringify(["name", "status", "decision_reason", "reviewed_at"])
       const resp = await axios.get(
         `${this.url}/api/resource/${encodeURIComponent(IdVerification.doctype)}`,
         {
@@ -622,7 +616,6 @@ export class ErpNext {
         name: row.name,
         status: row.status,
         decision_reason: row.decision_reason || undefined,
-        reviewer_note: row.reviewer_note || undefined,
         reviewed_at: row.reviewed_at || undefined,
       }
     } catch (err) {

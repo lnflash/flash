@@ -190,6 +190,57 @@ describe("evidence link mapping (document_type / issuing_country)", () => {
     )
     expect(baseLogger.warn).not.toHaveBeenCalled()
   })
+
+  it("passes read-back registry values through verbatim even when absent from the local mirror", () => {
+    // An operator added DO_CEDULA + Dominican Republic to the ERPNext registry
+    // after this file's seed mirror was written. The retention job must not
+    // strip them on its next full-table PUT.
+    const [row] = IdVerification.fromErpnext({
+      upgrade_request: "AUR-0001",
+      status: "Checks pending",
+      identity_source: "capture",
+      evidence: [
+        {
+          name: "row-1",
+          evidence_type: "id_front",
+          document_type: "DO_CEDULA",
+          issuing_country: "Dominican Republic",
+          file_key: "id_documents/a/f.jpg",
+        },
+      ],
+    }).evidence
+    expect(toIdentityDocumentTypeCode("DO_CEDULA", "Dominican Republic")).toBeUndefined()
+    expect(toFrappeCountry("Dominican Republic")).toBeUndefined()
+
+    expect(IdVerification.evidenceRowToErpnext(row)).toEqual(
+      expect.objectContaining({
+        name: "row-1",
+        document_type: "DO_CEDULA",
+        issuing_country: "Dominican Republic",
+      }),
+    )
+    expect(
+      IdVerification.evidenceRowToErpnext({
+        ...row,
+        deletedAt: new Date("2033-01-01T00:00:00Z"),
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        document_type: "DO_CEDULA",
+        issuing_country: "Dominican Republic",
+        deleted_at: "2033-01-01 00:00:00",
+      }),
+    )
+    expect(baseLogger.warn).not.toHaveBeenCalled()
+  })
+
+  it("still maps a fresh row (no child name) through the mirror", () => {
+    const row = toErpnextRow({ documentType: "passport", issuingCountry: "DO" })
+    expect(row.name).toBeUndefined()
+    expect(row.document_type).toBeUndefined()
+    expect(row.issuing_country).toBeUndefined()
+    expect(baseLogger.warn).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe("IdVerification.fromEvidence().toErpnext()", () => {

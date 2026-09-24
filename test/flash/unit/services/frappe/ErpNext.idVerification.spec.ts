@@ -188,7 +188,6 @@ describe("ErpNext.getIdVerificationByUpgradeRequest", () => {
             name: "IDV-2",
             status: "Resubmit requested",
             decision_reason: "RESUBMIT_BLURRY",
-            reviewer_note: "left edge unreadable",
             reviewed_at: "2026-09-02 10:00:00",
           },
         ],
@@ -201,7 +200,6 @@ describe("ErpNext.getIdVerificationByUpgradeRequest", () => {
       name: "IDV-2",
       status: "Resubmit requested",
       decision_reason: "RESUBMIT_BLURRY",
-      reviewer_note: "left edge unreadable",
       reviewed_at: "2026-09-02 10:00:00",
     })
     expect(mockedAxios.get).toHaveBeenCalledWith(
@@ -209,13 +207,7 @@ describe("ErpNext.getIdVerificationByUpgradeRequest", () => {
       {
         params: {
           filters: JSON.stringify([["upgrade_request", "=", "AUR-0001"]]),
-          fields: JSON.stringify([
-            "name",
-            "status",
-            "decision_reason",
-            "reviewer_note",
-            "reviewed_at",
-          ]),
+          fields: JSON.stringify(["name", "status", "decision_reason", "reviewed_at"]),
           order_by: "modified desc",
           limit_page_length: 1,
         },
@@ -232,7 +224,7 @@ describe("ErpNext.getIdVerificationByUpgradeRequest", () => {
             name: "IDV-1",
             status: "Checks pending",
             decision_reason: null,
-            reviewer_note: "",
+            reviewer_note: "internal note that must never be copied",
             reviewed_at: null,
           },
         ],
@@ -242,7 +234,6 @@ describe("ErpNext.getIdVerificationByUpgradeRequest", () => {
       name: "IDV-1",
       status: "Checks pending",
       decision_reason: undefined,
-      reviewer_note: undefined,
       reviewed_at: undefined,
     })
   })

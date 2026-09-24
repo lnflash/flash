@@ -51,8 +51,6 @@ export const deriveUpgradeVerificationStatus = ({
     case IdVerificationStatus.Rejected:
       return UpgradeVerificationStatus.UnderReview
     case IdVerificationStatus.ChecksPending:
-    case undefined:
-    case null:
     default:
       return UpgradeVerificationStatus.Submitted
   }

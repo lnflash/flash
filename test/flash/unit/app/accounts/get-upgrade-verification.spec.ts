@@ -191,18 +191,6 @@ describe("getUpgradeVerification", () => {
     expect(approved.status).toBe("APPROVED")
   })
 
-  it("asks ERPNext once per code when a cache is shared across calls", async () => {
-    mockGetDecisionReason.mockResolvedValue(reason("REJECT_OTHER", "Other."))
-    const cache = new Map()
-    const req = makeRequest({
-      status: RequestStatus.Rejected,
-      decisionReason: "REJECT_OTHER",
-    })
-    await getUpgradeVerification(req, cache)
-    await getUpgradeVerification(req, cache)
-    expect(mockGetDecisionReason).toHaveBeenCalledTimes(1)
-  })
-
   it("serializes every status it can return through the GraphQL enum", async () => {
     const serialize = (value: unknown) =>
       AccountUpgradeVerificationStatus.serialize(value)

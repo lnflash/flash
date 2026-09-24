@@ -26,12 +26,12 @@ export type IdVerificationStatus =
   (typeof IdVerificationStatus)[keyof typeof IdVerificationStatus]
 
 // The review-state slice of an ID Verification, as read by the status query.
-// `reviewer_note` is internal and must never reach a customer.
+// `reviewer_note` is internal and must never reach a customer, so it is not
+// requested from ERPNext at all: this object feeds the public resolver.
 export type IdVerificationSummary = {
   name: string
   status: string
   decision_reason?: string
-  reviewer_note?: string
   reviewed_at?: string
 }
 
@@ -305,11 +305,17 @@ export class IdVerification {
   static evidenceRowToErpnext(
     row: IdVerificationEvidenceRow,
   ): ErpNextIdVerificationEvidenceRow {
-    const documentTypeCode = toIdentityDocumentTypeCode(
-      row.documentType,
-      row.issuingCountry,
-    )
-    const country = toFrappeCountry(row.issuingCountry)
+    // A row read back from ERPNext (`rowName` set, via fromErpnext) already
+    // carries registry values ERPNext accepted. The registry is operator-owned
+    // and the table below is only a mirror of the seed, so re-translating a
+    // read-back row would silently drop any entry added since (the retention
+    // job PUTs the full evidence table). Only fresh rows from fromEvidence
+    // carry (kind, ISO-2) and need mapping.
+    const readBack = Boolean(row.rowName)
+    const documentTypeCode = readBack
+      ? row.documentType
+      : toIdentityDocumentTypeCode(row.documentType, row.issuingCountry)
+    const country = readBack ? row.issuingCountry : toFrappeCountry(row.issuingCountry)
     if ((row.documentType && !documentTypeCode) || (row.issuingCountry && !country)) {
       // Kind and country are not PII; the file key and hash are left out.
       baseLogger.warn(
