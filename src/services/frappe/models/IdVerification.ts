@@ -188,8 +188,10 @@ const normalizeKind = (value: string): string =>
     .replace(/^_+|_+$/g, "")
 
 // ISO-2 or an already-mapped Frappe country name → Frappe country name.
-// Accepting the Frappe name lets rows read back from ERPNext (retention job)
-// round-trip through evidenceRowToErpnext unchanged.
+// A fresh GraphQL row may already carry the Frappe country name (see
+// docs/id-verification.md §3); it is accepted verbatim. Rows read back from
+// ERPNext never enter this function — evidenceRowToErpnext passes them
+// through untouched.
 export const toFrappeCountry = (issuingCountry?: string): string | undefined => {
   if (!issuingCountry) return undefined
   const trimmed = issuingCountry.trim()
@@ -198,8 +200,11 @@ export const toFrappeCountry = (issuingCountry?: string): string | undefined => 
 }
 
 // (kind, ISO-2) or an already-mapped registry code → `Identity Document
-// Type.code`. Without a mappable country the kind alone is ambiguous, so
-// only a verbatim registry code maps.
+// Type.code`. A fresh GraphQL row may already carry a registry code (see
+// docs/id-verification.md §3); it is accepted verbatim. Rows read back from
+// ERPNext never enter this function — evidenceRowToErpnext passes them
+// through untouched. Without a mappable country the kind alone is
+// ambiguous, so only a verbatim registry code maps.
 export const toIdentityDocumentTypeCode = (
   documentType?: string,
   issuingCountry?: string,
