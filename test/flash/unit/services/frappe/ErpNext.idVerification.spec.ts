@@ -22,6 +22,7 @@ import axios from "axios"
 import { IdentitySource, UpgradeEvidenceType } from "@domain/accounts"
 import { ErpNext } from "@services/frappe/ErpNext"
 import {
+  DecisionReasonQueryError,
   IdVerificationCreateError,
   IdVerificationQueryError,
   IdVerificationUpdateError,
@@ -170,6 +171,168 @@ describe("ErpNext ID Verification reads", () => {
     mockedAxios.get.mockResolvedValue({ data: {} })
     expect(await client.getIdVerificationById("IDV-1")).toBeInstanceOf(
       IdVerificationQueryError,
+    )
+  })
+})
+
+describe("ErpNext.getIdVerificationByUpgradeRequest", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+  })
+
+  it("filters by upgrade_request, newest by modified, one row", async () => {
+    mockedAxios.get.mockResolvedValue({
+      data: {
+        data: [
+          {
+            name: "IDV-2",
+            status: "Resubmit requested",
+            decision_reason: "RESUBMIT_BLURRY",
+            reviewer_note: "left edge unreadable",
+            reviewed_at: "2026-09-02 10:00:00",
+          },
+        ],
+      },
+    })
+
+    const result = await client.getIdVerificationByUpgradeRequest("AUR-0001")
+
+    expect(result).toEqual({
+      name: "IDV-2",
+      status: "Resubmit requested",
+      decision_reason: "RESUBMIT_BLURRY",
+      reviewer_note: "left edge unreadable",
+      reviewed_at: "2026-09-02 10:00:00",
+    })
+    expect(mockedAxios.get).toHaveBeenCalledWith(
+      "https://erp.example/api/resource/ID%20Verification",
+      {
+        params: {
+          filters: JSON.stringify([["upgrade_request", "=", "AUR-0001"]]),
+          fields: JSON.stringify([
+            "name",
+            "status",
+            "decision_reason",
+            "reviewer_note",
+            "reviewed_at",
+          ]),
+          order_by: "modified desc",
+          limit_page_length: 1,
+        },
+        headers: expectedHeaders,
+      },
+    )
+  })
+
+  it("normalizes empty Frappe values to undefined", async () => {
+    mockedAxios.get.mockResolvedValue({
+      data: {
+        data: [
+          {
+            name: "IDV-1",
+            status: "Checks pending",
+            decision_reason: null,
+            reviewer_note: "",
+            reviewed_at: null,
+          },
+        ],
+      },
+    })
+    expect(await client.getIdVerificationByUpgradeRequest("AUR-0001")).toEqual({
+      name: "IDV-1",
+      status: "Checks pending",
+      decision_reason: undefined,
+      reviewer_note: undefined,
+      reviewed_at: undefined,
+    })
+  })
+
+  it("returns null when the request has no ID Verification", async () => {
+    mockedAxios.get.mockResolvedValue({ data: { data: [] } })
+    expect(await client.getIdVerificationByUpgradeRequest("AUR-0001")).toBeNull()
+  })
+
+  it("wraps failures", async () => {
+    mockedAxios.get.mockRejectedValue(new Error("down"))
+    expect(await client.getIdVerificationByUpgradeRequest("AUR-0001")).toBeInstanceOf(
+      IdVerificationQueryError,
+    )
+    expect(baseLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ upgradeRequest: "AUR-0001" }),
+      "Error querying ID Verification by upgrade request from ERPNext",
+    )
+  })
+})
+
+describe("ErpNext.getDecisionReason", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+  })
+
+  it("GETs the Decision Reason by code and returns the customer-facing fields", async () => {
+    mockedAxios.get.mockResolvedValue({
+      data: {
+        data: {
+          name: "RESUBMIT_BLURRY",
+          code: "RESUBMIT_BLURRY",
+          outcome: "resubmit",
+          label: "Photo too blurry",
+          active: 1,
+          user_facing_message: "Your ID photo is too blurry to read.",
+        },
+      },
+    })
+
+    const result = await client.getDecisionReason("RESUBMIT_BLURRY")
+
+    expect(result).toEqual({
+      code: "RESUBMIT_BLURRY",
+      outcome: "resubmit",
+      label: "Photo too blurry",
+      user_facing_message: "Your ID photo is too blurry to read.",
+    })
+    expect(mockedAxios.get).toHaveBeenCalledWith(
+      "https://erp.example/api/resource/Decision%20Reason/RESUBMIT_BLURRY",
+      { headers: expectedHeaders },
+    )
+  })
+
+  it("URL-encodes the code", async () => {
+    mockedAxios.get.mockResolvedValue({ data: { data: { code: "A B" } } })
+    await client.getDecisionReason("A B")
+    expect(mockedAxios.get).toHaveBeenCalledWith(
+      "https://erp.example/api/resource/Decision%20Reason/A%20B",
+      { headers: expectedHeaders },
+    )
+  })
+
+  it("returns null on 404 without logging an error", async () => {
+    mockedAxios.get.mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 404, data: { exception: "DoesNotExistError" } },
+    })
+    expect(await client.getDecisionReason("GONE")).toBeNull()
+    expect(baseLogger.error).not.toHaveBeenCalled()
+  })
+
+  it("wraps other failures", async () => {
+    mockedAxios.get.mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 500, data: { exception: "boom" } },
+    })
+    expect(await client.getDecisionReason("RESUBMIT_BLURRY")).toBeInstanceOf(
+      DecisionReasonQueryError,
+    )
+    expect(baseLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "RESUBMIT_BLURRY" }),
+      "Error querying Decision Reason from ERPNext",
+    )
+  })
+
+  it("treats an empty detail response as a failure", async () => {
+    mockedAxios.get.mockResolvedValue({ data: {} })
+    expect(await client.getDecisionReason("RESUBMIT_BLURRY")).toBeInstanceOf(
+      DecisionReasonQueryError,
     )
   })
 })

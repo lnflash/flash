@@ -1096,6 +1096,8 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "UnknownBriaEventError":
     case "CouldNotFindAccountError":
     case "UpgradeRequestCreateError":
+    case "IdVerificationQueryError":
+    case "DecisionReasonQueryError":
       message = `Unknown error occurred (code: ${error.name})`
       return new UnknownClientError({ message, logger: baseLogger })
 

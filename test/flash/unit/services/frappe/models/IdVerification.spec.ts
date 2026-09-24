@@ -4,14 +4,193 @@ jest.mock("@services/logger", () => ({
 
 import { IdentitySource, UpgradeEvidenceType } from "@domain/accounts"
 import {
+  FRAPPE_COUNTRY_BY_ISO2,
+  IDENTITY_DOCUMENT_TYPE_CODES,
   IdVerification,
   IdVerificationStatus,
   contentTypeFromFileKey,
   fromFrappeDatetime,
+  toFrappeCountry,
+  toIdentityDocumentTypeCode,
 } from "@services/frappe/models/IdVerification"
 import { baseLogger } from "@services/logger"
 
 const capturedAt = new Date("2026-09-01T12:00:00.000Z")
+
+const toErpnextRow = (row: {
+  documentType?: string
+  issuingCountry?: string
+  rowName?: string
+}) =>
+  IdVerification.evidenceRowToErpnext({
+    type: UpgradeEvidenceType.IdFront,
+    fileKey: "id_documents/alice/front.jpg",
+    sha256: "ab".repeat(32),
+    ...row,
+  })
+
+describe("evidence link mapping (document_type / issuing_country)", () => {
+  beforeEach(() => {
+    ;(baseLogger.warn as jest.Mock).mockClear()
+  })
+
+  // Exactly the rows admin_panel/setup.py IDENTITY_DOCUMENT_TYPES seeds.
+  it("mirrors the seeded registry codes per country", () => {
+    expect(IDENTITY_DOCUMENT_TYPE_CODES).toEqual({
+      JM: {
+        passport: "JM_PASSPORT",
+        drivers_licence: "JM_DRIVERS_LICENCE",
+        voter_id: "JM_VOTER_ID",
+        national_id: "JM_NIDS",
+      },
+      KY: { passport: "KY_PASSPORT", drivers_licence: "KY_DRIVERS_LICENCE" },
+      TT: {
+        passport: "TT_PASSPORT",
+        national_id: "TT_NATIONAL_ID",
+        drivers_licence: "TT_DRIVERS_PERMIT",
+      },
+      BB: {
+        passport: "BB_PASSPORT",
+        national_id: "BB_NATIONAL_ID",
+        drivers_licence: "BB_DRIVERS_LICENCE",
+      },
+      BS: {
+        passport: "BS_PASSPORT",
+        drivers_licence: "BS_DRIVERS_LICENCE",
+        voter_id: "BS_VOTERS_CARD",
+      },
+      SV: { passport: "SV_PASSPORT", national_id: "SV_DUI" },
+    })
+    expect(FRAPPE_COUNTRY_BY_ISO2).toEqual({
+      JM: "Jamaica",
+      KY: "Cayman Islands",
+      TT: "Trinidad and Tobago",
+      BB: "Barbados",
+      BS: "Bahamas",
+      SV: "El Salvador",
+    })
+  })
+
+  it.each([
+    ["passport", "JM", "JM_PASSPORT"],
+    ["Passport", "jm", "JM_PASSPORT"],
+    ["drivers_licence", "JM", "JM_DRIVERS_LICENCE"],
+    ["drivers_license", "JM", "JM_DRIVERS_LICENCE"],
+    ["Driver's Licence", "JM", "JM_DRIVERS_LICENCE"],
+    ["driving-licence", "KY", "KY_DRIVERS_LICENCE"],
+    ["drivers_permit", "TT", "TT_DRIVERS_PERMIT"],
+    ["drivers_licence", "TT", "TT_DRIVERS_PERMIT"],
+    ["national_id", "JM", "JM_NIDS"],
+    ["nids", "JM", "JM_NIDS"],
+    ["national id card", "TT", "TT_NATIONAL_ID"],
+    ["id_card", "BB", "BB_NATIONAL_ID"],
+    ["dui", "SV", "SV_DUI"],
+    ["national_id", "SV", "SV_DUI"],
+    ["voter_id", "JM", "JM_VOTER_ID"],
+    ["voters_card", "BS", "BS_VOTERS_CARD"],
+    ["voter_id", "BS", "BS_VOTERS_CARD"],
+    ["passport", "SV", "SV_PASSPORT"],
+  ])("maps (%s, %s) → %s", (kind, country, code) => {
+    expect(toIdentityDocumentTypeCode(kind, country)).toBe(code)
+  })
+
+  it.each([
+    ["voter_id", "TT"], // kind not seeded for that country
+    ["passport", "US"], // country not seeded
+    ["passport", undefined], // kind alone is ambiguous
+    ["birth_certificate", "JM"], // unknown kind
+    [undefined, "JM"],
+  ])("leaves (%s, %s) unmapped", (kind, country) => {
+    expect(toIdentityDocumentTypeCode(kind, country)).toBeUndefined()
+  })
+
+  it("passes a registry code or Frappe country name through verbatim", () => {
+    expect(toIdentityDocumentTypeCode("JM_PASSPORT", "Jamaica")).toBe("JM_PASSPORT")
+    expect(toIdentityDocumentTypeCode("jm_passport")).toBe("JM_PASSPORT")
+    expect(toFrappeCountry("Jamaica")).toBe("Jamaica")
+    expect(toFrappeCountry("Trinidad and Tobago")).toBe("Trinidad and Tobago")
+  })
+
+  it("maps ISO-2 to the Frappe country name", () => {
+    expect(toFrappeCountry("JM")).toBe("Jamaica")
+    expect(toFrappeCountry(" sv ")).toBe("El Salvador")
+    expect(toFrappeCountry("US")).toBeUndefined()
+    expect(toFrappeCountry(undefined)).toBeUndefined()
+  })
+
+  it("writes the registry code and country name on the wire row", () => {
+    const row = toErpnextRow({ documentType: "drivers_licence", issuingCountry: "JM" })
+    expect(row.document_type).toBe("JM_DRIVERS_LICENCE")
+    expect(row.issuing_country).toBe("Jamaica")
+    expect(baseLogger.warn).not.toHaveBeenCalled()
+  })
+
+  it("omits an unmapped document_type but keeps the mapped country, and warns without PII", () => {
+    const row = toErpnextRow({ documentType: "birth_certificate", issuingCountry: "JM" })
+    expect(row.document_type).toBeUndefined()
+    expect(row.issuing_country).toBe("Jamaica")
+    expect(row.file_key).toBe("id_documents/alice/front.jpg")
+    expect(baseLogger.warn).toHaveBeenCalledTimes(1)
+    const [payload, message] = (baseLogger.warn as jest.Mock).mock.calls[0]
+    expect(payload).toEqual({
+      evidenceRow: undefined,
+      evidenceType: "id_front",
+      documentType: "birth_certificate",
+      issuingCountry: "JM",
+      mappedDocumentType: undefined,
+      mappedCountry: "Jamaica",
+    })
+    expect(JSON.stringify(payload)).not.toContain("id_documents/alice")
+    expect(JSON.stringify(payload)).not.toContain("ab".repeat(32))
+    expect(message).toContain("omitting the unmapped Link field")
+  })
+
+  it("omits both Link fields for an unseeded country", () => {
+    const row = toErpnextRow({ documentType: "passport", issuingCountry: "US" })
+    expect(row.document_type).toBeUndefined()
+    expect(row.issuing_country).toBeUndefined()
+    expect(baseLogger.warn).toHaveBeenCalledTimes(1)
+  })
+
+  it("omits document_type when the kind arrives without a country", () => {
+    const row = toErpnextRow({ documentType: "passport" })
+    expect(row.document_type).toBeUndefined()
+    expect(row.issuing_country).toBeUndefined()
+    expect(baseLogger.warn).toHaveBeenCalledTimes(1)
+  })
+
+  it("stays silent when neither field is set", () => {
+    const row = toErpnextRow({})
+    expect(row.document_type).toBeUndefined()
+    expect(row.issuing_country).toBeUndefined()
+    expect(baseLogger.warn).not.toHaveBeenCalled()
+  })
+
+  it("round-trips a row read back from ERPNext unchanged", () => {
+    const [row] = IdVerification.fromErpnext({
+      upgrade_request: "AUR-0001",
+      status: "Checks pending",
+      identity_source: "capture",
+      evidence: [
+        {
+          name: "row-1",
+          evidence_type: "id_front",
+          document_type: "JM_PASSPORT",
+          issuing_country: "Jamaica",
+          file_key: "id_documents/a/f.jpg",
+        },
+      ],
+    }).evidence
+    expect(IdVerification.evidenceRowToErpnext(row)).toEqual(
+      expect.objectContaining({
+        name: "row-1",
+        document_type: "JM_PASSPORT",
+        issuing_country: "Jamaica",
+      }),
+    )
+    expect(baseLogger.warn).not.toHaveBeenCalled()
+  })
+})
 
 describe("IdVerification.fromEvidence().toErpnext()", () => {
   it("maps capture evidence to the ERPNext wire format", () => {
@@ -42,8 +221,10 @@ describe("IdVerification.fromEvidence().toErpnext()", () => {
         {
           name: undefined,
           evidence_type: "id_front",
-          document_type: "passport",
-          issuing_country: "JM",
+          // Link fields carry the registry code / Frappe country name, never
+          // the raw input (see "evidence link mapping" below).
+          document_type: "JM_PASSPORT",
+          issuing_country: "Jamaica",
           file_key: "id_documents/alice_front.JPG",
           sha256: "ab".repeat(32),
           content_type: "image/jpeg",

@@ -135,11 +135,94 @@ POST /api/resource/ID Verification
 
 Model: `src/services/frappe/models/IdVerification.ts`.
 
+### Link fields: `document_type` and `issuing_country`
+
+On the ERPNext side both are **Link** fields: `document_type` → `Identity
+Document Type` (the registry seeded by `admin_panel/setup.py`) and
+`issuing_country` → `Country`. Frappe validates a Link on insert, so sending
+the raw input (`"passport"`, `"JM"`) fails the whole ID Verification POST.
+Phase 0 shipped the raw values; it never bit in production only because no
+client sent typed evidence yet (the legacy `idDocument` row carries neither
+field). `evidenceRowToErpnext` now maps:
+
+| Input `documentType` (any of) | + `issuingCountry` | → `document_type` |
+|---|---|---|
+| `passport` | `JM` / `KY` / `TT` / `BB` / `BS` / `SV` | `<CC>_PASSPORT` |
+| `drivers_licence`, `drivers_license`, `driving_licence`, `driver's licence`, `drivers_permit` | `JM` | `JM_DRIVERS_LICENCE` |
+| same | `KY` | `KY_DRIVERS_LICENCE` |
+| same | `TT` | `TT_DRIVERS_PERMIT` |
+| same | `BB` | `BB_DRIVERS_LICENCE` |
+| same | `BS` | `BS_DRIVERS_LICENCE` |
+| `national_id`, `national_id_card`, `id_card`, `nids` | `JM` | `JM_NIDS` |
+| same | `TT` | `TT_NATIONAL_ID` |
+| same | `BB` | `BB_NATIONAL_ID` |
+| same, or `dui` | `SV` | `SV_DUI` |
+| `voter_id`, `voters_card`, `voter_card` | `JM` | `JM_VOTER_ID` |
+| same | `BS` | `BS_VOTERS_CARD` |
+| a registry code verbatim (`JM_PASSPORT`) | any | passed through |
+
+| Input `issuingCountry` | → `issuing_country` |
+|---|---|
+| `JM` | `Jamaica` |
+| `KY` | `Cayman Islands` |
+| `TT` | `Trinidad and Tobago` |
+| `BB` | `Barbados` |
+| `BS` | `Bahamas` |
+| `SV` | `El Salvador` |
+| a Frappe country name verbatim | passed through |
+
+Kinds are matched case-insensitively with punctuation collapsed. Anything
+unmapped **omits that Link field** (the rest of the row is still written) and
+logs a warning carrying the kind and country only. Rows read back from
+ERPNext already hold the code and country name, so the retention job's
+rewrite round-trips unchanged.
+
 **Non-fatal by design.** If the POST fails — an older ERPNext without the
 doctype, a validation error on the ERPNext side, a network blip — the error
 is logged at **warn** (with identifiers only) and the user's upgrade request
 succeeds anyway. The Account Upgrade Request already carries the first
 `ID_FRONT` key in `id_document`, so reviewers lose nothing they have today.
+
+## 3b. Customer-facing status (`AccountUpgradeRequest.verification`)
+
+The public `accountUpgradeRequest` query exposes `verification`, derived
+per request from the Account Upgrade Request (the decision of record) and
+its latest ID Verification (the review pipeline):
+
+```graphql
+type AccountUpgradeVerification {
+  status: AccountUpgradeVerificationStatus!
+  reasonCode: String
+  reasonMessage: String
+  reviewedAt: Timestamp
+}
+enum AccountUpgradeVerificationStatus {
+  SUBMITTED UNDER_REVIEW MORE_INFO_NEEDED APPROVED REJECTED
+}
+```
+
+| AUR `status` | IDV `status` | `verification.status` |
+|---|---|---|
+| `Approved` | any | `APPROVED` |
+| `Rejected` | any | `REJECTED` |
+| `Pending` | `Resubmit requested` | `MORE_INFO_NEEDED` |
+| `Pending` | `Ready for review` | `UNDER_REVIEW` |
+| `Pending` | `Checks unavailable` | `UNDER_REVIEW` |
+| `Pending` | `Approved` / `Rejected` (reviewer mid-flight) | `UNDER_REVIEW` |
+| `Pending` | `Checks pending`, or no IDV | `SUBMITTED` |
+
+`reasonCode` prefers `ID Verification.decision_reason`, then `Account Upgrade
+Request.decision_reason`. `reasonMessage` is that Decision Reason's
+`user_facing_message` (`ErpNext.getDecisionReason`, one lookup per code per
+request); `reviewer_note` is never exposed. `reviewedAt` prefers the IDV's
+`reviewed_at`, then the AUR's.
+
+The field never fails the query: an ID Verification read error derives the
+status from the AUR alone, and a Decision Reason read error (or unknown
+code) returns the code with a null message; both log at warn.
+
+Pure derivation: `src/app/accounts/upgrade-verification-status.ts`.
+Lookups: `src/app/accounts/get-upgrade-verification.ts`.
 
 ## 4. Roles: who can complete an approval
 

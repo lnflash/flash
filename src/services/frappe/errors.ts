@@ -72,3 +72,4 @@ export class FygaroTopupHistoryQueryError extends ErpNextError {}
 export class IdVerificationCreateError extends ErpNextError {}
 export class IdVerificationQueryError extends ErpNextError {}
 export class IdVerificationUpdateError extends ErpNextError {}
+export class DecisionReasonQueryError extends ErpNextError {}

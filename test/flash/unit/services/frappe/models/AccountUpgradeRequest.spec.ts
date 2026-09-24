@@ -111,6 +111,33 @@ describe("AccountUpgradeRequest", () => {
       expect(result.idDocument).toBe("picture.jpg")
     })
 
+    it("leaves the decision fields undefined when ERPNext has not decided", () => {
+      const result = AccountUpgradeRequest.fromErpnext(erpNextResponse)
+      expect(result.decisionReason).toBeUndefined()
+      expect(result.reviewedAt).toBeUndefined()
+    })
+
+    it("hydrates decision_reason and reviewed_at (UTC) once decided", () => {
+      const result = AccountUpgradeRequest.fromErpnext({
+        ...erpNextResponse,
+        status: "Rejected",
+        decision_reason: "REJECT_EXPIRED_DOCUMENT",
+        reviewed_at: "2026-09-02 10:00:00.000000",
+      })
+      expect(result.decisionReason).toBe("REJECT_EXPIRED_DOCUMENT")
+      expect(result.reviewedAt).toEqual(new Date("2026-09-02T10:00:00.000Z"))
+    })
+
+    it("treats an empty decision_reason as undefined", () => {
+      const result = AccountUpgradeRequest.fromErpnext({
+        ...erpNextResponse,
+        decision_reason: "",
+        reviewed_at: null,
+      })
+      expect(result.decisionReason).toBeUndefined()
+      expect(result.reviewedAt).toBeUndefined()
+    })
+
     it("should deserialize address fields", () => {
       const result = AccountUpgradeRequest.fromErpnext(erpNextResponse)
 
