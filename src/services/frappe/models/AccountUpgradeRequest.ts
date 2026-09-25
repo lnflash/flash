@@ -4,6 +4,7 @@ import { Address } from "@app/accounts"
 
 import { erpStringToLevel, levelToErpString } from "./AccountLevel"
 import { BankAccount } from "./BankAccount"
+import { fromFrappeDatetime } from "./IdVerification"
 
 export enum RequestStatus {
   Pending = "Pending",
@@ -68,6 +69,9 @@ type ErpNextAccountUpgradeRequest = {
   account_type?: string
   currency?: string
   account_number?: string
+  // Review outcome, set by the admin panel when the request is decided.
+  decision_reason?: string | null
+  reviewed_at?: string | null
 }
 
 // Core model representing an account upgrade request
@@ -87,6 +91,10 @@ export class AccountUpgradeRequest {
   readonly address: Address
   readonly terminalsRequested: number
   readonly bankAccount?: BankAccount
+  // Decision Reason code + when the request was decided (read-only: written
+  // by reviewers in the admin panel, never sent from here).
+  readonly decisionReason?: string
+  readonly reviewedAt?: Date
 
   constructor(
     name: string,
@@ -101,6 +109,8 @@ export class AccountUpgradeRequest {
     address: Address,
     terminalsRequested: number,
     bankAccount?: BankAccount,
+    decisionReason?: string,
+    reviewedAt?: Date,
   ) {
     this.name = name
     this.username = username
@@ -114,6 +124,8 @@ export class AccountUpgradeRequest {
     this.address = address
     this.terminalsRequested = terminalsRequested
     this.bankAccount = bankAccount
+    this.decisionReason = decisionReason
+    this.reviewedAt = reviewedAt
   }
 
   async validate(
@@ -181,6 +193,8 @@ export class AccountUpgradeRequest {
             bank_account_no: data.account_number || "",
           }
         : undefined,
+      data.decision_reason || undefined,
+      fromFrappeDatetime(data.reviewed_at),
     )
   }
 }

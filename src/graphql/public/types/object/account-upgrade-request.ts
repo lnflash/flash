@@ -1,6 +1,8 @@
+import { Accounts } from "@app"
 import { GT } from "@graphql/index"
 import AccountLevel from "@graphql/shared/types/scalar/account-level"
 
+import AccountUpgradeVerification from "./account-upgrade-verification"
 import Address from "./address"
 import BankAccount from "./bank-account"
 
@@ -45,6 +47,13 @@ const AccountUpgradeRequest = GT.Object({
     },
     bankAccount: {
       type: BankAccount,
+    },
+    verification: {
+      type: GT.NonNull(AccountUpgradeVerification),
+      description:
+        "Identity verification state of this request. `status` above is the raw " +
+        "ERPNext value; prefer this for anything shown to the customer.",
+      resolve: (source) => Accounts.getUpgradeVerification(source),
     },
   }),
 })

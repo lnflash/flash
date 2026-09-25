@@ -31,6 +31,7 @@ import {
   IdVerificationCreateError,
   IdVerificationQueryError,
   IdVerificationUpdateError,
+  DecisionReasonQueryError,
   JournalEntryDeleteError,
   SetDocTypeValueError,
   UpgradeRequestCreateError,
@@ -38,9 +39,11 @@ import {
 } from "./errors"
 import { AccountUpgradeRequest, RequestStatus } from "./models/AccountUpgradeRequest"
 import {
+  DecisionReasonDoc,
   ErpNextIdVerificationDoc,
   ErpNextIdVerificationEvidenceRow,
   IdVerification,
+  IdVerificationSummary,
   fromFrappeDatetime,
 } from "./models/IdVerification"
 import { Bank } from "./models/Bank"
@@ -586,6 +589,80 @@ export class ErpNext {
         attributes: { "erpnext.exception": responseData?.exception },
       })
       return new IdVerificationUpdateError(err)
+    }
+  }
+
+  // Review state of the ID Verification behind one upgrade request, for the
+  // customer-facing status query. Latest by `modified` in case a request ever
+  // grows a second document (a resubmission). `null` when none exists yet:
+  // the Phase 0 insert is non-fatal, so an upgrade request may have no IDV.
+  async getIdVerificationByUpgradeRequest(
+    upgradeRequestName: string,
+  ): Promise<IdVerificationSummary | null | IdVerificationQueryError> {
+    try {
+      const filters = JSON.stringify([["upgrade_request", "=", upgradeRequestName]])
+      const fields = JSON.stringify(["name", "status", "decision_reason", "reviewed_at"])
+      const resp = await axios.get(
+        `${this.url}/api/resource/${encodeURIComponent(IdVerification.doctype)}`,
+        {
+          params: { filters, fields, order_by: "modified desc", limit_page_length: 1 },
+          headers: this.headers,
+        },
+      )
+      const rows: IdVerificationSummary[] = resp.data?.data ?? []
+      if (!rows.length) return null
+      const row = rows[0]
+      return {
+        name: row.name,
+        status: row.status,
+        decision_reason: row.decision_reason || undefined,
+        reviewed_at: row.reviewed_at || undefined,
+      }
+    } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error(
+        { err, responseData, upgradeRequest: upgradeRequestName },
+        "Error querying ID Verification by upgrade request from ERPNext",
+      )
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
+      return new IdVerificationQueryError(err)
+    }
+  }
+
+  // One Decision Reason from the registry seeded by admin_panel/setup.py.
+  // `null` when the code is unknown (404): a reviewer can retire a code, and
+  // the status query then shows the code without a message rather than fail.
+  async getDecisionReason(
+    code: string,
+  ): Promise<DecisionReasonDoc | null | DecisionReasonQueryError> {
+    try {
+      const resp = await axios.get(
+        `${this.url}/api/resource/${encodeURIComponent("Decision Reason")}/${encodeURIComponent(code)}`,
+        { headers: this.headers },
+      )
+      const doc = resp.data?.data
+      if (!doc) return new DecisionReasonQueryError("No data in detail response")
+      return {
+        code: doc.code ?? doc.name ?? code,
+        outcome: doc.outcome ?? "",
+        label: doc.label ?? "",
+        user_facing_message: doc.user_facing_message ?? "",
+      }
+    } catch (err) {
+      if (isAxiosError(err) && err.response?.status === 404) return null
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error(
+        { err, responseData, code },
+        "Error querying Decision Reason from ERPNext",
+      )
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
+      return new DecisionReasonQueryError(err)
     }
   }
 
