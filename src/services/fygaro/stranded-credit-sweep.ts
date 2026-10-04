@@ -17,7 +17,11 @@ import { sendFygaroTopupNotificationBestEffort } from "@app/fygaro/send-topup-no
 
 import { parseCustomReference } from "./checkout"
 import { recordIntentOutcome } from "./checkout-intent-store"
-import { markFygaroCredited, readFygaroCreditedMarker } from "./credited-marker"
+import {
+  MIN_CREDITED_MARKER_TTL_DAYS,
+  markFygaroCredited,
+  readFygaroCreditedMarker,
+} from "./credited-marker"
 import {
   creditFygaroTopup,
   FygaroCreditError,
@@ -171,11 +175,37 @@ type AgedOutClassification = {
   unverified: string[]
 }
 
-const classifyAgedOut = async (requestIds: string[]): Promise<AgedOutClassification> => {
+type AgedOutRow = { requestId: string; lastSeenAt?: string }
+
+// `last_seen_at` is written by us in UTC (ErpNext.toFrappeDatetime); append Z
+// so the parse never leans on the runtime's local zone.
+const lastSeenMs = (lastSeenAt?: string): number =>
+  lastSeenAt ? Date.parse(`${lastSeenAt.replace(" ", "T")}Z`) : NaN
+
+const classifyAgedOut = async (
+  rows: AgedOutRow[],
+  nowMs = Date.now(),
+): Promise<AgedOutClassification> => {
   const out: AgedOutClassification = { uncredited: [], credited: [], unverified: [] }
-  for (const requestId of requestIds) {
+  const markerHorizonMs = nowMs - MIN_CREDITED_MARKER_TTL_DAYS * 24 * 60 * 60 * 1000
+  for (const { requestId, lastSeenAt } of rows) {
     const transactionId = transactionIdOf(requestId)
     if (!transactionId) {
+      out.unverified.push(requestId)
+      continue
+    }
+    // Past the marker TTL the absence of a marker proves nothing: a row
+    // credited on day 1 whose promotion failed and that nobody promoted
+    // would flip from "promote by hand" to "credit by hand" on day 31 — the
+    // double-pay this classification exists to prevent. Don't read Redis;
+    // report it unverified. A present-but-unparsable last_seen_at is treated
+    // the same way, since we cannot place it inside the TTL either. A row with
+    // NO timestamp (an id-only reader) keeps the marker as authoritative.
+    const seenMs = lastSeenMs(lastSeenAt)
+    if (
+      lastSeenAt !== undefined &&
+      (!Number.isFinite(seenMs) || seenMs < markerHorizonMs)
+    ) {
       out.unverified.push(requestId)
       continue
     }
@@ -218,7 +248,11 @@ const pageAgedOutStrandedTopups = async ({
   if (aged.count === 0) return
 
   const requestIds = aged.requestIds ?? []
-  const classified = await classifyAgedOut(requestIds)
+  // Older readers return only ids; treat those as inside the TTL (the marker
+  // read is then authoritative), matching the pre-`agedOutRows` behaviour.
+  const rows: AgedOutRow[] =
+    aged.agedOutRows ?? requestIds.map((requestId) => ({ requestId }))
+  const classified = await classifyAgedOut(rows)
   const beyondIdCap = Math.max(0, aged.count - requestIds.length)
   const uncredited = classified.uncredited.length
   const credited = classified.credited.length

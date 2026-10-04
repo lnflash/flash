@@ -243,6 +243,10 @@ export type AgedOutUncreditedFygaroTopups = {
   // credited marker per id). `count` is the full number; when it exceeds
   // `requestIds.length` the remainder is unverified.
   requestIds: string[]
+  // The same capped rows with their `last_seen_at` (UTC, as stored), so the
+  // sweep can tell a row older than the credited marker's TTL — where a
+  // missing marker proves nothing — from one whose marker is authoritative.
+  agedOutRows: { requestId: string; lastSeenAt?: string }[]
 }
 
 // How many aged-out request_ids the count returns for the sweep to verify
@@ -1865,11 +1869,16 @@ export class ErpNext {
     const rows = await this.queryUncreditedFygaroTopups("<", before)
     if (rows instanceof Error) return rows
     const oldest = rows[0]
+    const capped = rows.slice(0, AGED_OUT_REQUEST_IDS_LIMIT)
     return {
       count: rows.length,
       oldestRequestId: oldest?.request_id,
       oldestLastSeenAt: oldest?.last_seen_at ?? undefined,
-      requestIds: rows.slice(0, AGED_OUT_REQUEST_IDS_LIMIT).map((r) => r.request_id),
+      requestIds: capped.map((r) => r.request_id),
+      agedOutRows: capped.map((r) => ({
+        requestId: r.request_id,
+        lastSeenAt: r.last_seen_at ?? undefined,
+      })),
     }
   }
 

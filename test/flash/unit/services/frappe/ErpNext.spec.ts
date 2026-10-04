@@ -1240,6 +1240,10 @@ describe("ErpNext.countAgedOutUncreditedFygaroTopups", () => {
       oldestRequestId: "fygaro:oldest",
       oldestLastSeenAt: "2026-09-18 08:00:00",
       requestIds: ["fygaro:oldest", "fygaro:newer"],
+      agedOutRows: [
+        { requestId: "fygaro:oldest", lastSeenAt: "2026-09-18 08:00:00" },
+        { requestId: "fygaro:newer", lastSeenAt: "2026-09-20 09:00:00" },
+      ],
     })
   })
 
@@ -1279,6 +1283,7 @@ describe("ErpNext.countAgedOutUncreditedFygaroTopups", () => {
       oldestRequestId: "fygaro:ok",
       oldestLastSeenAt: "2026-09-20 09:00:00",
       requestIds: ["fygaro:ok"],
+      agedOutRows: [{ requestId: "fygaro:ok", lastSeenAt: "2026-09-20 09:00:00" }],
     })
   })
 
@@ -1290,6 +1295,7 @@ describe("ErpNext.countAgedOutUncreditedFygaroTopups", () => {
       oldestRequestId: undefined,
       oldestLastSeenAt: undefined,
       requestIds: [],
+      agedOutRows: [],
     })
   })
 

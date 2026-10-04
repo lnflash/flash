@@ -888,6 +888,52 @@ describe("retryStrandedFygaroCredits", () => {
       })
     })
 
+    it("reports a row older than the credited-marker TTL as UNVERIFIED without reading Redis — a missing marker proves nothing there", async () => {
+      // Credited on day 1, promotion failed, nobody promoted it. On day 31 the
+      // marker has lapsed; "no marker" must not become "credit by hand".
+      const thirtyOneDaysAgo = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000)
+      const stale = thirtyOneDaysAgo.toISOString().slice(0, 19).replace("T", " ")
+      mockCountAgedOut.mockResolvedValue({
+        count: 1,
+        oldestRequestId: "fygaro:tx-stale",
+        oldestLastSeenAt: stale,
+        requestIds: ["fygaro:tx-stale"],
+        agedOutRows: [{ requestId: "fygaro:tx-stale", lastSeenAt: stale }],
+      })
+      mockRedisGet.mockResolvedValue(null)
+
+      await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      expect(mockRedisGet).not.toHaveBeenCalledWith(expect.stringContaining("tx-stale"))
+      const alert = mockAlertBridge.mock.calls[0][0]
+      expect(alert.title).toBe(
+        "Fygaro stranded-credit sweep aged out 1 stranded top-up — 1 unverified: check the credited marker / wallet history before crediting",
+      )
+      expect(alert.context).toMatchObject({
+        uncredited_count: 0,
+        unverified_count: 1,
+        unverified_request_ids: "fygaro:tx-stale",
+      })
+    })
+
+    it("still trusts the marker for an aged-out row inside the TTL", async () => {
+      const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000)
+      const recent = tenDaysAgo.toISOString().slice(0, 19).replace("T", " ")
+      mockCountAgedOut.mockResolvedValue({
+        count: 1,
+        oldestRequestId: "fygaro:tx-recent",
+        oldestLastSeenAt: recent,
+        requestIds: ["fygaro:tx-recent"],
+        agedOutRows: [{ requestId: "fygaro:tx-recent", lastSeenAt: recent }],
+      })
+      mockRedisGet.mockResolvedValue(null)
+
+      await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      const alert = mockAlertBridge.mock.calls[0][0]
+      expect(alert.context).toMatchObject({ uncredited_count: 1, unverified_count: 0 })
+    })
+
     it("counts rows beyond the returned id cap as unverified rather than 'credit by hand'", async () => {
       mockCountAgedOut.mockResolvedValue({
         count: 52,
