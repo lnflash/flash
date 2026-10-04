@@ -57,6 +57,12 @@ jest.mock("@services/fygaro/webhook-server/middleware/verify-signature", () => (
 jest.mock("@services/fygaro/webhook-server/middleware/enabled-guard", () => ({
   fygaroEnabledGuard: jest.fn(),
 }))
+// The treasury loop pulls in Redis + the float monitor; this spec only checks
+// that boot starts it.
+const mockStartTreasuryLoop = jest.fn()
+jest.mock("@services/fygaro/treasury-loop", () => ({
+  startFygaroTreasuryLoop: (...args: unknown[]) => mockStartTreasuryLoop(...args),
+}))
 
 jest.mock("express", () => {
   const express = jest.fn(() => mockApp)
@@ -97,6 +103,14 @@ describe("startFygaroWebhookServer", () => {
         dedupKey: "fygaro:push-unavailable",
       }),
     )
+  })
+
+  it("starts the treasury loop (float check + stranded-credit sweep) at boot", () => {
+    // The cron Job's schedule is owned by the chart (daily in prod), so the
+    // cadence that actually catches an emptying float lives in this workload.
+    startFygaroWebhookServer()
+
+    expect(mockStartTreasuryLoop).toHaveBeenCalledTimes(1)
   })
 
   it("stays quiet when Firebase messaging loaded", () => {

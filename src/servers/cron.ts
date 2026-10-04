@@ -90,8 +90,10 @@ const reconcileBridgeWithdrawalsJob = async () => {
 }
 
 // Bankowner treasury float check for Fygaro auto-credit. Runs every cron
-// invocation (~15 min via the k8s CronJob schedule, matching the reconcile
-// cadence above); self-guards on FygaroConfig.enabled and never throws.
+// invocation on whatever schedule the chart gives this Job; the fygaro-webhook
+// workload ALSO runs it every fygaro.float.checkIntervalMs (treasury-loop.ts)
+// because that schedule is not this repo's to promise. Both dedup through the
+// same Redis markers. Self-guards on FygaroConfig.enabled and never throws.
 const checkFygaroFloatJob = async () => {
   await checkFygaroTreasuryFloat()
 }

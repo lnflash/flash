@@ -14,6 +14,7 @@ import { FygaroConfig } from "@config"
 import { alertBridge, generateDedupKey } from "@services/alerts"
 import { baseLogger } from "@services/logger"
 import { messaging } from "@services/notifications/firebase"
+import { startFygaroTreasuryLoop } from "@services/fygaro/treasury-loop"
 
 import { verifyFygaroSignature } from "./middleware/verify-signature"
 import { fygaroEnabledGuard } from "./middleware/enabled-guard"
@@ -104,4 +105,9 @@ export const startFygaroWebhookServer = () => {
   app.listen(port, () => {
     baseLogger.info({ port }, "Fygaro webhook server started")
   })
+
+  // Float check + stranded-credit sweep on a fixed cadence. Lives in this
+  // workload (not only the cron Job) because the cron's schedule is owned by
+  // the chart — see treasury-loop.ts.
+  startFygaroTreasuryLoop()
 }
