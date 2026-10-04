@@ -2,6 +2,7 @@ import { FygaroConfig } from "@config"
 import { USDAmount, USDTAmount } from "@domain/shared"
 import { getBalanceForWallet } from "@app/wallets/get-balance-for-wallet"
 import { alertBridge, generateDedupKey } from "@services/alerts"
+import { sumFygaroCreditedNetCentsLastDays } from "@services/frappe/BridgeTransferRequestWriter"
 import { baseLogger } from "@services/logger"
 import { redis } from "@services/redis"
 
@@ -11,111 +12,178 @@ import {
 } from "./webhook-server/credit-topup"
 
 /**
- * Proactive bankowner treasury float check (the main value of the float-
- * monitoring work). Auto-credit sends card top-ups from the bankowner treasury;
- * if that float quietly drains, every subsequent credit fails one-at-a-time. A
- * periodic check that pages BEFORE the well runs dry turns that into a single
- * "top up soon" heads-up instead of a stream of exhausted-credit incidents.
+ * Proactive bankowner-treasury float check for Fygaro auto-credit.
  *
- * Contract: this is registered as a cron task and MUST NOT throw — a thrown
- * task fails the whole cron run (exit 99 -> CrashLoopBackOff). Every failure
- * path here logs and returns. Only runs when the fygaro feature is enabled AND
- * auto-credit is on: during the record-only phase (fygaro.enabled=true,
- * credit.enabled=false) nothing ever spends from the treasury, so paging "top
- * up bankowner" would be premature noise that contradicts its own instruction.
+ * Auto-credit spends USDT out of the bankowner treasury; when it runs dry
+ * every card top-up is captured but not credited (payment.ts raises a
+ * per-event CRITICAL at that point, after the customer has already been
+ * charged). This check reads the SAME wallet the credit path spends from
+ * (shared resolver) and alerts before the well runs dry.
+ *
+ * Two tiers. Below `floorUsd` is a WARNING. Below `criticalFloorUsd` (the
+ * largest single payment the gate will auto-credit — the point where the very
+ * next top-up may fail) or under `criticalRunwayDays` of runway at the
+ * trailing-7-day burn is a CRITICAL on its own dedup key and its own Redis
+ * marker, so it pages even while the warning's window is open. Runway is
+ * computed from ERPNext Completed rows; if that read fails the floor alerts
+ * still fire with runway "unknown" — the ERP is never allowed to silence the
+ * balance check.
+ *
+ * Runs from two places, both idempotent via the Redis NX markers below: the
+ * one-shot k8s cron Job (whatever schedule the chart gives it) and the
+ * long-running fygaro-webhook workload every `checkIntervalMs`
+ * (treasury-loop.ts). The webhook loop exists because the cron schedule is
+ * owned by the chart, not this repo, and in production it ran daily — a daily
+ * $2000 warning was the only signal for seven weeks before the 2026-10-03
+ * exhaustion, and nobody acted on it.
  */
 const DEFAULT_FLOOR_USD = 2000
+const DEFAULT_CRITICAL_FLOOR_USD = 500
+const DEFAULT_CRITICAL_RUNWAY_DAYS = 3
+const DEFAULT_FUND_URL = "https://erp.flashapp.me/app/system-accounts"
+const BURN_WINDOW_DAYS = 7
 
-// Cross-run rate limit for the float-low warning. alertBridge's own TTL dedup
-// is a process-local Map, but this monitor runs as a one-shot cron Job (a fresh
-// process every ~15-min run), so that dedup resets each run and cannot suppress
-// anything across runs. Without this a treasury sitting below the floor would
-// page every run (~4/hr) instead of the ~1/hr the alert layer implies. A Redis
-// NX marker with a 1h TTL gives real cross-run suppression that survives the
-// process restarts. A Redis error falls through to alerting: over-notifying is
-// the safe failure mode for a draining float, never staying silent.
 const FLOAT_LOW_ALERT_WINDOW_SECONDS = 3600
 const FLOAT_LOW_ALERT_MARKER = "fygaro:float-low:alerted"
+const FLOAT_CRITICAL_ALERT_WINDOW_SECONDS = 3600
+const FLOAT_CRITICAL_ALERT_MARKER = "fygaro:float-critical:alerted"
 
-const claimFloatLowAlertSlot = async (): Promise<boolean> => {
+export type FygaroFloatSeverity = "ok" | "warning" | "critical"
+
+export type FygaroFloatReading = {
+  balanceUsd: number
+  floorUsd: number
+  criticalFloorUsd: number
+  // Average net credited per day over the trailing window, or undefined when
+  // the ERPNext read failed.
+  dailyBurnUsd: number | undefined
+  // balance / dailyBurn. undefined when burn is unknown; null when burn is 0
+  // (nothing credited in the window, so the float is not shrinking).
+  runwayDays: number | undefined | null
+  severity: FygaroFloatSeverity
+}
+
+// Cross-run rate limit. The cron is a one-shot Job and the webhook loop may
+// run on several replicas, so the dedup has to live in Redis, not in memory.
+// Fail-open: if Redis is down the alert still fires — a missed page is worse
+// than a duplicate one.
+const claimAlertSlot = async (
+  marker: string,
+  windowSeconds: number,
+): Promise<boolean> => {
   try {
-    const set = await redis.set(
-      FLOAT_LOW_ALERT_MARKER,
-      "1",
-      "EX",
-      FLOAT_LOW_ALERT_WINDOW_SECONDS,
-      "NX",
-    )
+    const set = await redis.set(marker, "1", "EX", windowSeconds, "NX")
     return set === "OK"
   } catch (err) {
     baseLogger.warn(
-      { err },
+      { err, marker },
       "Fygaro float check: dedup marker unavailable, alerting anyway",
     )
     return true
   }
 }
 
-export const checkFygaroTreasuryFloat = async (): Promise<void> => {
-  // Gate on both the feature flag and the auto-credit master gate. With
-  // credit.enabled=false the webhook only records payments and the treasury ->
-  // user transfer stays manual, so there is nothing for this monitor to fund
-  // yet — running it would page every window over a float no credit touches.
-  if (!FygaroConfig.enabled || !FygaroConfig.credit?.enabled) return
+// Fail-open to "unknown": the ERP is an input to the runway figure, never a
+// gate on the balance alert. Catches as well as checks, so a throwing client
+// cannot take the whole check down with it.
+const readDailyBurnUsd = async (): Promise<number | undefined> => {
+  try {
+    const netCents = await sumFygaroCreditedNetCentsLastDays({ days: BURN_WINDOW_DAYS })
+    if (netCents instanceof Error) {
+      baseLogger.warn(
+        { err: netCents },
+        "Fygaro float check: could not read trailing burn from ERPNext; runway unknown",
+      )
+      return undefined
+    }
+    return netCents / 100 / BURN_WINDOW_DAYS
+  } catch (err) {
+    baseLogger.warn(
+      { err },
+      "Fygaro float check: trailing burn read threw; runway unknown",
+    )
+    return undefined
+  }
+}
+
+export const computeRunwayDays = (
+  balanceUsd: number,
+  dailyBurnUsd: number | undefined,
+): number | undefined | null => {
+  if (dailyBurnUsd === undefined) return undefined
+  if (dailyBurnUsd <= 0) return null
+  return balanceUsd / dailyBurnUsd
+}
+
+export const classifyFloat = ({
+  balanceUsd,
+  floorUsd,
+  criticalFloorUsd,
+  criticalRunwayDays,
+  runwayDays,
+}: {
+  balanceUsd: number
+  floorUsd: number
+  criticalFloorUsd: number
+  criticalRunwayDays: number
+  runwayDays: number | undefined | null
+}): FygaroFloatSeverity => {
+  if (balanceUsd < criticalFloorUsd) return "critical"
+  if (typeof runwayDays === "number" && runwayDays < criticalRunwayDays) return "critical"
+  if (balanceUsd < floorUsd) return "warning"
+  return "ok"
+}
+
+const fmtUsd = (n: number): string => `$${n.toFixed(2)}`
+const fmtRunway = (runwayDays: number | undefined | null): string =>
+  runwayDays === undefined
+    ? "unknown"
+    : runwayDays === null
+      ? "n/a (no credits in 7d)"
+      : `${runwayDays.toFixed(1)} days`
+
+/**
+ * Reads the treasury float, alerts by tier, and returns the reading so a
+ * caller (the treasury loop) can decide whether to sweep stranded credits.
+ * Returns undefined when the check could not run (feature off, wallet
+ * unresolvable, balance unreadable). Never throws.
+ */
+export const checkFygaroTreasuryFloat = async (): Promise<
+  FygaroFloatReading | undefined
+> => {
+  if (!FygaroConfig.enabled || !FygaroConfig.credit?.enabled) return undefined
 
   const floorUsd = FygaroConfig.float?.floorUsd ?? DEFAULT_FLOOR_USD
+  const criticalFloorUsd =
+    FygaroConfig.float?.criticalFloorUsd ?? DEFAULT_CRITICAL_FLOOR_USD
+  const criticalRunwayDays =
+    FygaroConfig.float?.criticalRunwayDays ?? DEFAULT_CRITICAL_RUNWAY_DAYS
+  const fundUrl = FygaroConfig.float?.fundUrl ?? DEFAULT_FUND_URL
 
   try {
-    // Read the balance of the SAME wallet auto-credit actually spends from —
-    // resolved through the shared resolver credit-topup uses — so the monitored
-    // account is provably the funding source. In flash's IBEX-custodial model
-    // each walletId is its own IBEX account, so reading the bankowner account's
-    // default wallet would read a DIFFERENT account's balance (typically the USD
-    // wallet) and misread it as the USDT float: a drained USDT float would
-    // hide behind a funded USD wallet (no page ever fires) and a low USD wallet
-    // would false-alarm as "USDT float low".
     const funding = await resolveFygaroTreasuryFundingWallet()
     if (funding instanceof FygaroCreditError) {
-      // Could not resolve the treasury or its funding wallet. Log and bail; the
-      // next run re-reads. Never alert here (a distinct alert would fight the
-      // float-low dedup) and never crash the cron.
       baseLogger.error(
         { step: funding.step, detail: funding.message },
         "Fygaro float check: could not resolve the bankowner treasury funding wallet",
       )
-      return
+      return undefined
     }
 
     const fundingWallet = funding.fundingWallet
-    // Read through the SAME helper the rest of the app uses so this monitor
-    // inherits IBEX's documented drain semantics instead of re-deriving them.
-    // Crucially, IBEX returns HTTP 404 for a drained / never-funded account and
-    // getBalanceForWallet maps that 404 -> ZERO (get-balance-for-wallet.ts). The
-    // old direct Ibex.getAccountDetails read surfaced that 404 as an IbexError,
-    // hit the `instanceof Error` bail, and returned WITHOUT alerting — silently
-    // missing the very empty-float condition this monitor exists to catch. Via
-    // the helper both drain signals (404 and an absent `balance` field) collapse
-    // to ZERO, so a dry treasury correctly trips the floor.
     const balance = await getBalanceForWallet({
       walletId: fundingWallet.id,
       currency: fundingWallet.currency,
     })
 
     if (balance instanceof Error) {
-      // A genuine read blip (a non-404 IBEX error, or an unexpected throw the
-      // helper wraps) must never crash the cron and must never be mistaken for a
-      // low balance. Log and bail; the next run re-reads. (A distinct alert here
-      // would fight the float-low dedup.)
       baseLogger.error(
         { err: balance },
         "Fygaro float check: could not read bankowner treasury balance",
       )
-      return
+      return undefined
     }
 
-    // Score in the funding wallet's own currency so the USD fallback is not
-    // read as an empty USDT float (or vice versa). A ZERO from either drain
-    // signal above lands here as 0 and correctly trips the floor.
     const balanceUsd =
       balance instanceof USDTAmount
         ? Number(balance.asNumber())
@@ -123,24 +191,87 @@ export const checkFygaroTreasuryFloat = async (): Promise<void> => {
           ? Number(balance.asDollars())
           : 0
 
-    if (balanceUsd < floorUsd) {
-      baseLogger.warn({ balanceUsd, floorUsd }, "Fygaro treasury float below floor")
-      // Rate-limit across cron runs via the Redis marker (see above); without
-      // it a persistent low float would page every ~15-min run.
-      if (await claimFloatLowAlertSlot()) {
+    // Burn is only worth a round trip when the balance is anywhere near a
+    // threshold: a float at 10x the floor does not need its runway computed
+    // every 15 minutes. "Near" = under 2x the floor, so the first warning
+    // already carries a runway figure.
+    const nearFloor = balanceUsd < floorUsd * 2
+    const dailyBurnUsd = nearFloor ? await readDailyBurnUsd() : undefined
+    const runwayDays = computeRunwayDays(balanceUsd, dailyBurnUsd)
+    const severity = classifyFloat({
+      balanceUsd,
+      floorUsd,
+      criticalFloorUsd,
+      criticalRunwayDays,
+      runwayDays,
+    })
+
+    const reading: FygaroFloatReading = {
+      balanceUsd,
+      floorUsd,
+      criticalFloorUsd,
+      dailyBurnUsd,
+      runwayDays,
+      severity,
+    }
+
+    if (severity === "ok") return reading
+
+    baseLogger.warn(
+      { balanceUsd, floorUsd, criticalFloorUsd, dailyBurnUsd, runwayDays, severity },
+      "Fygaro treasury float below threshold",
+    )
+
+    const detail = [
+      `balance=${fmtUsd(balanceUsd)}`,
+      `floor=${fmtUsd(floorUsd)}`,
+      `critical_floor=${fmtUsd(criticalFloorUsd)}`,
+      `daily_burn=${dailyBurnUsd === undefined ? "unknown" : fmtUsd(dailyBurnUsd)}`,
+      `runway=${fmtRunway(runwayDays)}`,
+      `fund: ${fundUrl}`,
+    ].join(" ")
+    const context = {
+      balance_usd: balanceUsd,
+      floor_usd: floorUsd,
+      critical_floor_usd: criticalFloorUsd,
+      daily_burn_usd: dailyBurnUsd ?? null,
+      runway_days: runwayDays ?? null,
+      fund_url: fundUrl,
+    }
+
+    if (severity === "critical") {
+      if (
+        await claimAlertSlot(
+          FLOAT_CRITICAL_ALERT_MARKER,
+          FLOAT_CRITICAL_ALERT_WINDOW_SECONDS,
+        )
+      ) {
         alertBridge({
-          dedupKey: generateDedupKey.fygaroFloatLow(),
+          dedupKey: generateDedupKey.fygaroFloatCritical(),
           source: "fygaro-webhook",
-          severity: "warning",
-          title: "Fygaro treasury float low — top up bankowner",
-          detail: `balance=$${balanceUsd.toFixed(2)} floor=$${floorUsd.toFixed(2)}`,
-          context: { balance_usd: balanceUsd, floor_usd: floorUsd },
+          severity: "critical",
+          title:
+            "Fygaro treasury float CRITICAL — next card top-up may fail, fund bankowner now",
+          detail,
+          context,
         })
       }
+      return reading
     }
+
+    if (await claimAlertSlot(FLOAT_LOW_ALERT_MARKER, FLOAT_LOW_ALERT_WINDOW_SECONDS)) {
+      alertBridge({
+        dedupKey: generateDedupKey.fygaroFloatLow(),
+        source: "fygaro-webhook",
+        severity: "warning",
+        title: "Fygaro treasury float low — top up bankowner",
+        detail,
+        context,
+      })
+    }
+    return reading
   } catch (err) {
-    // Belt-and-suspenders: a resolver throw or any unexpected error is
-    // swallowed so the cron run still succeeds.
     baseLogger.error({ err }, "Fygaro float check errored")
+    return undefined
   }
 }
