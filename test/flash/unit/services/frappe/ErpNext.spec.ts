@@ -19,7 +19,11 @@ jest.mock("@config", () => ({
 
 import axios from "axios"
 import { recordExceptionInCurrentSpan } from "@services/tracing"
-import { ErpNext } from "@services/frappe/ErpNext"
+import {
+  AGED_OUT_REQUEST_IDS_LIMIT,
+  AgedOutUncreditedFygaroTopups,
+  ErpNext,
+} from "@services/frappe/ErpNext"
 import {
   AllowedCountryQueryError,
   FeeDiscountQueryError,
@@ -1203,6 +1207,24 @@ describe("ErpNext.countAgedOutUncreditedFygaroTopups", () => {
     expect(config.params.limit_page_length).toBe(0)
   })
 
+  it("asks for only the five small columns the exclusions and the page read — never the payloads", async () => {
+    // The `<` set is the entire historical refusal backlog (refused and
+    // email-attributed rows stay Fiat Received forever), re-read every tick.
+    // Pulling raw_payload_json for all of it to discard JS-side is the bug.
+    mockedAxios.get.mockResolvedValue({ data: { data: [] } })
+
+    await client.countAgedOutUncreditedFygaroTopups(params)
+
+    const [, config] = mockedAxios.get.mock.calls[0]
+    expect(JSON.parse(config.params.fields)).toEqual([
+      "request_id",
+      "account_id",
+      "failure_reason",
+      "source_systems_seen",
+      "last_seen_at",
+    ])
+  })
+
   it("returns the count and the oldest row's request_id / last_seen_at", async () => {
     mockedAxios.get.mockResolvedValue({
       data: {
@@ -1217,7 +1239,25 @@ describe("ErpNext.countAgedOutUncreditedFygaroTopups", () => {
       count: 2,
       oldestRequestId: "fygaro:oldest",
       oldestLastSeenAt: "2026-09-18 08:00:00",
+      requestIds: ["fygaro:oldest", "fygaro:newer"],
     })
+  })
+
+  it("caps the returned request_ids at AGED_OUT_REQUEST_IDS_LIMIT while reporting the full count", async () => {
+    const rows = Array.from({ length: AGED_OUT_REQUEST_IDS_LIMIT + 3 }, (_, i) =>
+      row(`r${i}`, {
+        last_seen_at: `2026-09-${String(1 + (i % 20)).padStart(2, "0")} 08:00:00`,
+      }),
+    )
+    mockedAxios.get.mockResolvedValue({ data: { data: rows } })
+
+    const result = await client.countAgedOutUncreditedFygaroTopups(params)
+
+    expect(result).not.toBeInstanceOf(Error)
+    const aged = result as AgedOutUncreditedFygaroTopups
+    expect(aged.count).toBe(AGED_OUT_REQUEST_IDS_LIMIT + 3)
+    expect(aged.requestIds).toHaveLength(AGED_OUT_REQUEST_IDS_LIMIT)
+    expect(aged.requestIds[0]).toBe("fygaro:r0")
   })
 
   it("applies the same exclusions as the candidate list: refused, email-attributed and unattributed rows are not 'aged out'", async () => {
@@ -1238,6 +1278,7 @@ describe("ErpNext.countAgedOutUncreditedFygaroTopups", () => {
       count: 1,
       oldestRequestId: "fygaro:ok",
       oldestLastSeenAt: "2026-09-20 09:00:00",
+      requestIds: ["fygaro:ok"],
     })
   })
 
@@ -1248,6 +1289,7 @@ describe("ErpNext.countAgedOutUncreditedFygaroTopups", () => {
       count: 0,
       oldestRequestId: undefined,
       oldestLastSeenAt: undefined,
+      requestIds: [],
     })
   })
 

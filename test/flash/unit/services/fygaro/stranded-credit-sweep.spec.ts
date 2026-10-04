@@ -153,7 +153,7 @@ beforeEach(() => {
   mockGetDiscount.mockResolvedValue(0)
   mockSumGross.mockResolvedValue(0)
   mockMarkNotCredited.mockResolvedValue(true)
-  mockCountAgedOut.mockResolvedValue({ count: 0 })
+  mockCountAgedOut.mockResolvedValue({ count: 0, requestIds: [] })
   mockRedisSet.mockResolvedValue("OK")
   mockRedisGet.mockResolvedValue(null)
   mockRecordIntentOutcome.mockResolvedValue(undefined)
@@ -774,34 +774,148 @@ describe("retryStrandedFygaroCredits", () => {
         count: 3,
         oldestRequestId: "fygaro:tx-old",
         oldestLastSeenAt: "2026-09-20 09:00:00",
+        requestIds: ["fygaro:tx-old", "fygaro:tx-mid", "fygaro:tx-new"],
       })
 
       const summary = await retryStrandedFygaroCredits({ availableUsd: 3000 })
 
       expect(mockCountAgedOut).toHaveBeenCalledWith({ days: 7 })
       expect(summary).toMatchObject({ candidates: 0, agedOut: 3 })
+      // Every aged-out id was checked against the credited marker before the
+      // page told anyone what to do with it.
+      expect(mockRedisGet).toHaveBeenCalledWith("fygaro:sweep-credited:tx-old")
+      expect(mockRedisGet).toHaveBeenCalledWith("fygaro:sweep-credited:tx-mid")
+      expect(mockRedisGet).toHaveBeenCalledWith("fygaro:sweep-credited:tx-new")
       expect(mockAlertBridge).toHaveBeenCalledTimes(1)
       expect(mockAlertBridge).toHaveBeenCalledWith(
         expect.objectContaining({
           dedupKey: "fygaro:retry-aged-out",
           severity: "critical",
           title:
-            "Fygaro stranded-credit sweep aged out 3 stranded top-ups — credit by hand",
+            "Fygaro stranded-credit sweep aged out 3 stranded top-ups — 3 uncredited: credit by hand",
           detail: expect.stringContaining("oldest=fygaro:tx-old"),
           context: expect.objectContaining({
             aged_out: 3,
             lookback_days: 7,
             oldest_request_id: "fygaro:tx-old",
             oldest_last_seen_at: "2026-09-20 09:00:00",
+            uncredited_count: 3,
+            credited_not_completed_count: 0,
+            unverified_count: 0,
+            uncredited_request_ids: "fygaro:tx-old,fygaro:tx-mid,fygaro:tx-new",
           }),
         }),
       )
     })
 
+    it("an aged-out row with a credited marker is paged as PROMOTE by hand, never credit — the day-8 double-pay trap", async () => {
+      // Day 1: the sweep credited tx-paid, wrote the marker, and the ERPNext
+      // promotion failed. The row still reads Fiat Received / no
+      // failure_reason. Day 8: it leaves the window, the per-row "promote by
+      // hand" critical stops firing, and the aged-out page is the only thing
+      // naming it. If that page says "credit by hand", ops pays twice.
+      mockListUncredited.mockResolvedValue([])
+      mockCountAgedOut.mockResolvedValue({
+        count: 2,
+        oldestRequestId: "fygaro:tx-paid",
+        oldestLastSeenAt: "2026-09-20 09:00:00",
+        requestIds: ["fygaro:tx-paid", "fygaro:tx-unpaid"],
+      })
+      mockRedisGet.mockImplementation(async (key: string) =>
+        key === "fygaro:sweep-credited:tx-paid" ? "6602" : null,
+      )
+
+      await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      expect(mockCredit).not.toHaveBeenCalled()
+      expect(mockAlertBridge).toHaveBeenCalledTimes(1)
+      const alert = mockAlertBridge.mock.calls[0][0]
+      expect(alert.dedupKey).toBe("fygaro:retry-aged-out")
+      expect(alert.severity).toBe("critical")
+      expect(alert.title).toBe(
+        "Fygaro stranded-credit sweep aged out 2 stranded top-ups — 1 uncredited: credit by hand; 1 already credited but not Completed: promote by hand, do NOT re-credit",
+      )
+      expect(alert.detail).toContain("do NOT re-credit")
+      expect(alert.context).toMatchObject({
+        uncredited_count: 1,
+        credited_not_completed_count: 1,
+        unverified_count: 0,
+        uncredited_request_ids: "fygaro:tx-unpaid",
+        credited_request_ids: "fygaro:tx-paid",
+      })
+    })
+
+    it("pages ONLY promote-by-hand (no 'credit by hand' anywhere) when every aged-out row carries a credited marker", async () => {
+      mockCountAgedOut.mockResolvedValue({
+        count: 1,
+        oldestRequestId: "fygaro:tx-paid",
+        requestIds: ["fygaro:tx-paid"],
+      })
+      mockRedisGet.mockResolvedValue("6602")
+
+      await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      const alert = mockAlertBridge.mock.calls[0][0]
+      expect(alert.title).toBe(
+        "Fygaro stranded-credit sweep aged out 1 stranded top-up — 1 already credited but not Completed: promote by hand, do NOT re-credit",
+      )
+      expect(alert.title).not.toContain("credit by hand")
+      expect(alert.context).toMatchObject({
+        uncredited_count: 0,
+        credited_not_completed_count: 1,
+        credited_request_ids: "fygaro:tx-paid",
+      })
+    })
+
+    it("reports an id whose marker cannot be read as UNVERIFIED (check before crediting), not as uncredited", async () => {
+      mockCountAgedOut.mockResolvedValue({
+        count: 1,
+        oldestRequestId: "fygaro:tx-x",
+        requestIds: ["fygaro:tx-x"],
+      })
+      mockRedisGet.mockRejectedValue(new Error("redis down"))
+
+      await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      const alert = mockAlertBridge.mock.calls[0][0]
+      expect(alert.title).toBe(
+        "Fygaro stranded-credit sweep aged out 1 stranded top-up — 1 unverified: check the credited marker / wallet history before crediting",
+      )
+      expect(alert.context).toMatchObject({
+        uncredited_count: 0,
+        unverified_count: 1,
+        unverified_request_ids: "fygaro:tx-x",
+      })
+    })
+
+    it("counts rows beyond the returned id cap as unverified rather than 'credit by hand'", async () => {
+      mockCountAgedOut.mockResolvedValue({
+        count: 52,
+        oldestRequestId: "fygaro:tx-0",
+        requestIds: ["fygaro:tx-0", "fygaro:tx-1"],
+      })
+
+      await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      const alert = mockAlertBridge.mock.calls[0][0]
+      expect(alert.title).toBe(
+        "Fygaro stranded-credit sweep aged out 52 stranded top-ups — 2 uncredited: credit by hand; 50 unverified: check the credited marker / wallet history before crediting",
+      )
+      expect(alert.context).toMatchObject({
+        aged_out: 52,
+        uncredited_count: 2,
+        unverified_count: 50,
+      })
+    })
+
     it("counts aged-out rows AFTER a sweep with candidates too, using the configured lookback", async () => {
       mockFygaroConfig.retry = { enabled: true, lookbackDays: 14, maxPerSweep: 20 }
       mockListUncredited.mockResolvedValue([row("tx-70", "70.00")])
-      mockCountAgedOut.mockResolvedValue({ count: 1, oldestRequestId: "fygaro:tx-old" })
+      mockCountAgedOut.mockResolvedValue({
+        count: 1,
+        oldestRequestId: "fygaro:tx-old",
+        requestIds: ["fygaro:tx-old"],
+      })
 
       const summary = await retryStrandedFygaroCredits({ availableUsd: 3000 })
 
@@ -811,7 +925,7 @@ describe("retryStrandedFygaroCredits", () => {
         expect.objectContaining({
           dedupKey: "fygaro:retry-aged-out",
           title:
-            "Fygaro stranded-credit sweep aged out 1 stranded top-up — credit by hand",
+            "Fygaro stranded-credit sweep aged out 1 stranded top-up — 1 uncredited: credit by hand",
           detail: expect.stringContaining("14-day lookback"),
         }),
       )
@@ -833,7 +947,11 @@ describe("retryStrandedFygaroCredits", () => {
       mockCredit.mockResolvedValue(
         new FygaroCreditError("insufficient-treasury-float", "IBEX insufficient balance"),
       )
-      mockCountAgedOut.mockResolvedValue({ count: 2, oldestRequestId: "fygaro:tx-old" })
+      mockCountAgedOut.mockResolvedValue({
+        count: 2,
+        oldestRequestId: "fygaro:tx-old",
+        requestIds: ["fygaro:tx-old", "fygaro:tx-old2"],
+      })
 
       const summary = await retryStrandedFygaroCredits({ availableUsd: 3000 })
 

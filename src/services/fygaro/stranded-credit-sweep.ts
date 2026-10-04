@@ -85,7 +85,18 @@ import { getFygaroSettings } from "./webhook-server/fygaro-settings"
  * list on day lookback+1 — and with it the per-row warning. The money is still
  * captured and undelivered, so every sweep also counts the rows OLDER than the
  * window with the same shape and pages CRITICAL once per dedup window with the
- * count and the oldest request_id: "credit by hand".
+ * count and the oldest request_id.
+ *
+ * That page is NOT a blanket "credit by hand". An aged-out row can be one the
+ * sweep (or the webhook) already paid whose promotion failed: it still reads
+ * Fiat Received with no failure_reason, and once it leaves the window the
+ * per-row "promote by hand" critical above stops being re-raised for it. The
+ * Redis credited marker outlives the window (30 days) precisely so this row
+ * can still be told apart, so the page reads the marker for every aged-out id
+ * it is given and splits them: uncredited → credit by hand; marker-credited →
+ * promote by hand, do NOT re-credit; marker unreadable (or beyond the id cap)
+ * → verify against wallet history before crediting. An operator who follows
+ * the page never pays a customer twice.
  */
 
 export type StrandedCreditSweepSummary = {
@@ -148,11 +159,46 @@ const emptySummary = (): StrandedCreditSweepSummary => ({
   agedOut: 0,
 })
 
+// Aged-out ids split by what the credited marker says about them.
+type AgedOutClassification = {
+  // No marker: the money never reached the customer. Credit by hand.
+  uncredited: string[]
+  // Marker says a credit landed; only the promotion failed. Promote by hand,
+  // never re-credit.
+  credited: string[]
+  // Marker unreadable this tick, or beyond the ids the count returned. The
+  // money MAY already be in the wallet: check before crediting.
+  unverified: string[]
+}
+
+const classifyAgedOut = async (requestIds: string[]): Promise<AgedOutClassification> => {
+  const out: AgedOutClassification = { uncredited: [], credited: [], unverified: [] }
+  for (const requestId of requestIds) {
+    const transactionId = transactionIdOf(requestId)
+    if (!transactionId) {
+      out.unverified.push(requestId)
+      continue
+    }
+    const marker = await readFygaroCreditedMarker(transactionId)
+    if (!marker.known) out.unverified.push(requestId)
+    else if (marker.credited) out.credited.push(requestId)
+    else out.uncredited.push(requestId)
+  }
+  return out
+}
+
+const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`
+
 // Rows that fell out of the window uncredited and unrefused. Runs after every
 // sweep — including one with no candidates, which is exactly what a fully
 // aged-out backlog looks like. A failed count is a warning, not a page: the
 // list read that just succeeded makes a transient blip the likely cause, and
 // the next tick re-counts.
+//
+// Every id the count returns is checked against the credited marker before
+// the page says what to do with it (see the module comment). The ids are
+// capped at the ERPNext side; any remainder is reported unverified rather than
+// lumped in with "credit by hand".
 const pageAgedOutStrandedTopups = async ({
   lookbackDays,
   summary,
@@ -170,26 +216,57 @@ const pageAgedOutStrandedTopups = async ({
   }
   summary.agedOut = aged.count
   if (aged.count === 0) return
+
+  const requestIds = aged.requestIds ?? []
+  const classified = await classifyAgedOut(requestIds)
+  const beyondIdCap = Math.max(0, aged.count - requestIds.length)
+  const uncredited = classified.uncredited.length
+  const credited = classified.credited.length
+  const unverified = classified.unverified.length + beyondIdCap
+
+  const actions: string[] = []
+  if (uncredited > 0) actions.push(`${uncredited} uncredited: credit by hand`)
+  if (credited > 0) {
+    actions.push(
+      `${credited} already credited but not Completed: promote by hand, do NOT re-credit`,
+    )
+  }
+  if (unverified > 0) {
+    actions.push(
+      `${unverified} unverified: check the credited marker / wallet history before crediting`,
+    )
+  }
+
   baseLogger.error(
     {
       agedOut: aged.count,
       lookbackDays,
       oldestRequestId: aged.oldestRequestId,
       oldestLastSeenAt: aged.oldestLastSeenAt,
+      uncreditedRequestIds: classified.uncredited,
+      creditedRequestIds: classified.credited,
+      unverifiedRequestIds: classified.unverified,
+      beyondIdCap,
     },
-    "Fygaro stranded-credit sweep: stranded top-ups older than the lookback will never be retried — credit by hand",
+    "Fygaro stranded-credit sweep: stranded top-ups older than the lookback will never be retried — see per-id action",
   )
   alertBridge({
     dedupKey: generateDedupKey.fygaroRetryAgedOut(),
     source: "fygaro-webhook",
     severity: "critical",
-    title: `Fygaro stranded-credit sweep aged out ${aged.count} stranded top-up${aged.count === 1 ? "" : "s"} — credit by hand`,
-    detail: `${aged.count} Fiat Received Fygaro top-up${aged.count === 1 ? "" : "s"} with no failure_reason ${aged.count === 1 ? "is" : "are"} older than the ${lookbackDays}-day lookback and will not be retried; oldest=${aged.oldestRequestId ?? "unknown"} last_seen_at=${aged.oldestLastSeenAt ?? "unknown"}`,
+    title: `Fygaro stranded-credit sweep aged out ${plural(aged.count, "stranded top-up")} — ${actions.join("; ")}`,
+    detail: `${plural(aged.count, "Fiat Received Fygaro top-up")} with no failure_reason ${aged.count === 1 ? "is" : "are"} older than the ${lookbackDays}-day lookback and will not be retried; oldest=${aged.oldestRequestId ?? "unknown"} last_seen_at=${aged.oldestLastSeenAt ?? "unknown"}. Verify each id against the credited marker / wallet history before crediting: ${actions.join("; ")}`,
     context: {
       aged_out: aged.count,
       lookback_days: lookbackDays,
       oldest_request_id: aged.oldestRequestId ?? "",
       oldest_last_seen_at: aged.oldestLastSeenAt ?? "",
+      uncredited_count: uncredited,
+      credited_not_completed_count: credited,
+      unverified_count: unverified,
+      uncredited_request_ids: classified.uncredited.join(","),
+      credited_request_ids: classified.credited.join(","),
+      unverified_request_ids: classified.unverified.join(","),
     },
   })
 }

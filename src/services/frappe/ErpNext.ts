@@ -237,7 +237,18 @@ export type AgedOutUncreditedFygaroTopups = {
   // The longest-waiting aged-out row, for the page. Absent when count is 0.
   oldestRequestId?: string
   oldestLastSeenAt?: string
+  // The aged-out request_ids, oldest first, capped at
+  // AGED_OUT_REQUEST_IDS_LIMIT so the page can tell "credit by hand" rows from
+  // "already credited, promote by hand" rows (the sweep reads the Redis
+  // credited marker per id). `count` is the full number; when it exceeds
+  // `requestIds.length` the remainder is unverified.
+  requestIds: string[]
 }
+
+// How many aged-out request_ids the count returns for the sweep to verify
+// against the credited marker. Bounded so a runaway backlog cannot turn one
+// page into hundreds of Redis reads.
+export const AGED_OUT_REQUEST_IDS_LIMIT = 50
 
 // Raw "Fygaro Settings" Single doctype as ERPNext returns it. Numeric fields
 // may arrive as numbers or numeric strings depending on the Frappe field type;
@@ -1725,6 +1736,15 @@ export class ErpNext {
   // `countAgedOutUncreditedFygaroTopups` the rows that fell OUT of it
   // (last_seen_at < before). They must agree on every other filter or a row
   // could leave one set without entering the other.
+  //
+  // The two paths want different columns. The candidate path (`>=`) re-runs
+  // the credit, so it needs `amount`, `currency` and `raw_payload_json`. The
+  // count path (`<`) only classifies and counts — and its result set is the
+  // ENTIRE historical refusal backlog (every refused and every email-attributed
+  // row stays Fiat Received forever, and the JS-side exclusions below can only
+  // drop them after they arrive), re-read every tick and growing. So it asks
+  // for the five small columns the exclusions and the page read, never the
+  // payloads.
   private async queryUncreditedFygaroTopups(
     lastSeenAtOp: ">=" | "<",
     cutoff: Date,
@@ -1752,17 +1772,27 @@ export class ErpNext {
           toFrappeDatetime(cutoff.toISOString()),
         ],
       ])
-      const fields = JSON.stringify([
-        "name",
-        "request_id",
-        "account_id",
-        "amount",
-        "currency",
-        "failure_reason",
-        "source_systems_seen",
-        "raw_payload_json",
-        "last_seen_at",
-      ])
+      const fields = JSON.stringify(
+        lastSeenAtOp === ">="
+          ? [
+              "name",
+              "request_id",
+              "account_id",
+              "amount",
+              "currency",
+              "failure_reason",
+              "source_systems_seen",
+              "raw_payload_json",
+              "last_seen_at",
+            ]
+          : [
+              "request_id",
+              "account_id",
+              "failure_reason",
+              "source_systems_seen",
+              "last_seen_at",
+            ],
+      )
       const resp = await axios.get(
         `${this.url}/api/resource/${encodeURIComponent(BridgeTransferRequest.doctype)}`,
         {
@@ -1839,6 +1869,7 @@ export class ErpNext {
       count: rows.length,
       oldestRequestId: oldest?.request_id,
       oldestLastSeenAt: oldest?.last_seen_at ?? undefined,
+      requestIds: rows.slice(0, AGED_OUT_REQUEST_IDS_LIMIT).map((r) => r.request_id),
     }
   }
 
