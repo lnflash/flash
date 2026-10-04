@@ -64,6 +64,7 @@ import {
 import { getFygaroSettings, type FygaroSettings } from "../fygaro-settings"
 import { fygaroCreatedAtToIso } from "../created-at"
 import { parseCustomReference } from "../../checkout"
+import { markFygaroCredited, readFygaroCreditedMarker } from "../../credited-marker"
 import {
   consumeIntent,
   readIntent,
@@ -849,7 +850,15 @@ export const paymentHandler = async (req: Request, res: Response) => {
       // row, and overwrites the customer's CREDITED status with "held for
       // review — more than your remaining daily limit" for $60 they already have.
       const priorCompletion = await readFygaroTopupCompletion(transactionId)
-      // TWO markers, because the first one can lag the money. Promoting the
+      // The durable credited marker is written at credit time, before the
+      // promotion, so it is the one record that survives a failed promotion
+      // for a legacy bare-username payment (no intent to carry an outcome).
+      // Unknown (Redis unreadable) falls through to the record-only path: an
+      // extra ops alert, never a silently-swallowed capture.
+      const creditedMarker = await readFygaroCreditedMarker(transactionId)
+      const markerCredited = creditedMarker.known && creditedMarker.credited
+      const markerNetCents = markerCredited ? creditedMarker.netCents : undefined
+      // THREE markers, because the first one can lag the money. Promoting the
       // ERPNext row is itself a write this handler alerts on when it fails
       // ("Fygaro credit succeeded but ERPNext promotion failed", below): after
       // that the money IS in the wallet and the row still reads Fiat Received.
@@ -883,7 +892,7 @@ export const paymentHandler = async (req: Request, res: Response) => {
         authorizedIntent.outcome.transactionId === transactionId
           ? authorizedIntent.outcome
           : undefined
-      if (priorCompletion.completed || creditedOutcome) {
+      if (priorCompletion.completed || creditedOutcome || markerCredited) {
         baseLogger.info(
           { transactionId, reason: gate.reason },
           "Fygaro payment already credited — ignoring a late record-only refusal",
@@ -897,7 +906,9 @@ export const paymentHandler = async (req: Request, res: Response) => {
         await recordOutcome({
           state: "credited",
           netAmountCents:
-            priorCompletion.netAmountCents ?? creditedOutcome?.netAmountCents,
+            priorCompletion.netAmountCents ??
+            creditedOutcome?.netAmountCents ??
+            markerNetCents,
         })
         return res.status(200).json({ status: "already_processed" })
       }
@@ -1118,6 +1129,45 @@ export const paymentHandler = async (req: Request, res: Response) => {
           return { code: 200, body: { status: "already_processed" } }
         }
 
+        // Second processed marker, independent of ERPNext. The Completed row
+        // is the write that can fail AFTER the money moved (the promotion
+        // below), and when it does the row reads Fiat Received for good:
+        // Fygaro never retries a 200, and the sweep refuses to re-send a
+        // marked row. The realistic re-delivery is ops resending from the
+        // Fygaro dashboard to "unstick" that row — more than 24h later, past
+        // withPaymentIdempotency's cache — which would run creditFygaroTopup
+        // for real. The marker this handler writes at credit time is read
+        // here for exactly that case. Unknown (Redis unreadable) falls through
+        // to the send: the 24h cache still covers the common retry, and a
+        // Redis blip must not turn into a 500 storm on every webhook.
+        const marker = await readFygaroCreditedMarker(transactionId)
+        if (marker.known && marker.credited) {
+          baseLogger.warn(
+            { transactionId, netCents: marker.netCents },
+            "Duplicate Fygaro payment webhook: already credited (marker) but row not Completed — not re-sending",
+          )
+          await recordOutcome({
+            state: "credited",
+            netAmountCents: marker.netCents ?? fees.netCents,
+          })
+          alertBridge({
+            dedupKey: generateDedupKey.erpnextFygaroAudit(transactionId),
+            source: "erpnext-audit",
+            severity: "critical",
+            title:
+              "Fygaro top-up credited but row not Completed — promote the row by hand",
+            detail: `re-delivery of a credited payment; net=${
+              marker.netCents != null ? `$${centsToDollars(marker.netCents)}` : "unknown"
+            } already in wallet ${creditAccountId}; row still Fiat Received, nothing re-promotes it`,
+            context: {
+              transaction_id: transactionId,
+              account_id: creditAccountId,
+              net_usd: marker.netCents != null ? marker.netCents / 100 : undefined,
+            },
+          })
+          return { code: 200, body: { status: "already_processed" } }
+        }
+
         const creditResult = await creditFygaroTopup({
           recipientAccountId: creditAccountId,
           amountCents: fees.netCents,
@@ -1203,6 +1253,14 @@ export const paymentHandler = async (req: Request, res: Response) => {
           return { code: 200, body: { status: "recorded", credited: false } }
         }
 
+        // Money moved. Record that durably, independent of ERPNext, BEFORE the
+        // promotion below (which can fail) and before any announcement: the
+        // stranded-credit sweep lists Fiat Received rows with no
+        // failure_reason for days, and the send's idempotency cache lasts 24h.
+        // Without this marker a row whose promotion failed is re-paid for real
+        // once that cache expires.
+        await markFygaroCredited({ transactionId, netCents: fees.netCents })
+
         // Contract with the admin fee-breakdown view: on a credited (Completed)
         // row every fee MUST be an explicit string, including "0.00" for a
         // zero-rate promo — `centsToDollars` never returns undefined. The admin
@@ -1222,15 +1280,23 @@ export const paymentHandler = async (req: Request, res: Response) => {
         })
         if (completeResult instanceof Error) {
           // The money moved; only the audit promotion failed. Alert, don't
-          // fail: the row stays Fiat Received, so a provider retry replays
-          // the cached send result and re-attempts this promotion.
+          // fail — but nothing retries this: Fygaro does not re-deliver a
+          // 200, and the stranded-credit sweep sees the credited marker and
+          // refuses to re-send or re-promote (it escalates to critical on its
+          // next tick instead). The row stays Fiat Received until a human
+          // promotes it by hand. Critical, not warning: the sweep's own
+          // critical for this state only fires while retry + auto-credit are
+          // enabled and the row is inside lookbackDays — none of which hold
+          // during the ERPNext incident that typically breaks the promotion.
+          // Same dedup key as the sweep's, so the two fold into one incident.
           alertBridge({
             dedupKey: generateDedupKey.erpnextFygaroAudit(transactionId),
             source: "erpnext-audit",
-            severity: "warning",
-            title: "Fygaro credit succeeded but ERPNext promotion failed",
+            severity: "critical",
+            title:
+              "Fygaro credit succeeded but ERPNext promotion failed — nothing re-promotes it, promote the row by hand",
             detail: completeResult.message,
-            context: { transaction_id: transactionId },
+            context: { transaction_id: transactionId, account_id: creditAccountId },
           })
         }
 

@@ -3,6 +3,9 @@ jest.mock("@services/frappe/ErpNext", () => ({
   findBridgeTransferRequest: jest.fn(),
   completeBridgeTopupByTxHash: jest.fn(),
   sumFygaroTopupGrossCentsSince: jest.fn(),
+  sumFygaroCompletedNetCentsSince: jest.fn(),
+  listUncreditedFygaroTopups: jest.fn(),
+  countAgedOutUncreditedFygaroTopups: jest.fn(),
 }))
 
 jest.mock("@services/logger", () => ({
@@ -12,7 +15,10 @@ jest.mock("@services/logger", () => ({
 import ErpNext from "@services/frappe/ErpNext"
 import { baseLogger } from "@services/logger"
 import {
+  countAgedOutUncreditedFygaroTopups,
+  listUncreditedFygaroTopupsLastDays,
   markFygaroTopupNotCredited,
+  sumFygaroCreditedNetCentsLastDays,
   promoteBridgeDepositForCryptoReceive,
   readFygaroTopupCompletion,
   sumFygaroTopupGrossCentsLast24h,
@@ -30,6 +36,9 @@ const upsert = ErpNext.upsertBridgeTransferRequest as jest.Mock
 const findRow = ErpNext.findBridgeTransferRequest as jest.Mock
 const completeByTxHash = ErpNext.completeBridgeTopupByTxHash as jest.Mock
 const sumSince = ErpNext.sumFygaroTopupGrossCentsSince as jest.Mock
+const sumNetSince = ErpNext.sumFygaroCompletedNetCentsSince as jest.Mock
+const listUncredited = ErpNext.listUncreditedFygaroTopups as jest.Mock
+const countAgedOut = ErpNext.countAgedOutUncreditedFygaroTopups as jest.Mock
 const lastRequestInput = () => upsert.mock.calls[0][0].input
 
 describe("BridgeTransferRequestWriter", () => {
@@ -518,6 +527,73 @@ describe("BridgeTransferRequestWriter", () => {
 
       expect(await readFygaroTopupCompletion("ftx-1")).toEqual({ completed: false })
       expect(baseLogger.warn).toHaveBeenCalled()
+    })
+  })
+
+  describe("sumFygaroCreditedNetCentsLastDays", () => {
+    it("asks ErpNext for Completed net since `days` ago", async () => {
+      jest.useFakeTimers().setSystemTime(new Date("2026-10-03T17:00:00Z"))
+      sumNetSince.mockResolvedValue(70000)
+
+      const result = await sumFygaroCreditedNetCentsLastDays({ days: 7 })
+
+      expect(result).toBe(70000)
+      expect(sumNetSince).toHaveBeenCalledWith({
+        since: new Date("2026-09-26T17:00:00Z"),
+      })
+      jest.useRealTimers()
+    })
+
+    it("passes through an ErpNext error (never zero)", async () => {
+      sumNetSince.mockResolvedValue(new FygaroTopupHistoryQueryError("down"))
+      expect(await sumFygaroCreditedNetCentsLastDays({ days: 7 })).toBeInstanceOf(
+        FygaroTopupHistoryQueryError,
+      )
+    })
+  })
+
+  describe("listUncreditedFygaroTopupsLastDays", () => {
+    it("asks ErpNext for uncredited rows since `days` ago with the cap", async () => {
+      jest.useFakeTimers().setSystemTime(new Date("2026-10-03T17:00:00Z"))
+      listUncredited.mockResolvedValue([{ name: "r1" }])
+
+      const result = await listUncreditedFygaroTopupsLastDays({ days: 7, limit: 20 })
+
+      expect(result).toEqual([{ name: "r1" }])
+      expect(listUncredited).toHaveBeenCalledWith({
+        since: new Date("2026-09-26T17:00:00Z"),
+        limit: 20,
+      })
+      jest.useRealTimers()
+    })
+
+    it("passes through an ErpNext error", async () => {
+      listUncredited.mockResolvedValue(new FygaroTopupHistoryQueryError("down"))
+      expect(
+        await listUncreditedFygaroTopupsLastDays({ days: 7, limit: 20 }),
+      ).toBeInstanceOf(FygaroTopupHistoryQueryError)
+    })
+  })
+
+  describe("countAgedOutUncreditedFygaroTopups", () => {
+    it("asks ErpNext for stranded rows OLDER than `days` ago", async () => {
+      jest.useFakeTimers().setSystemTime(new Date("2026-10-03T17:00:00Z"))
+      countAgedOut.mockResolvedValue({ count: 2, oldestRequestId: "fygaro:x" })
+
+      const result = await countAgedOutUncreditedFygaroTopups({ days: 7 })
+
+      expect(result).toEqual({ count: 2, oldestRequestId: "fygaro:x" })
+      expect(countAgedOut).toHaveBeenCalledWith({
+        before: new Date("2026-09-26T17:00:00Z"),
+      })
+      jest.useRealTimers()
+    })
+
+    it("passes through an ErpNext error", async () => {
+      countAgedOut.mockResolvedValue(new FygaroTopupHistoryQueryError("down"))
+      expect(await countAgedOutUncreditedFygaroTopups({ days: 7 })).toBeInstanceOf(
+        FygaroTopupHistoryQueryError,
+      )
     })
   })
 

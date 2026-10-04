@@ -215,6 +215,45 @@ export type BridgeTransferRequestDoc = {
   final_amount?: number | string
 }
 
+// A captured-but-uncredited Fygaro top-up row as the stranded-credit sweep
+// reads it. `account_id` is the Mongo account id the webhook attributed from
+// customReference; `amount` is the GROSS the card was charged (dollars, as
+// Frappe returns it); `raw_payload_json` is the original webhook body so a
+// retry can promote the row with the same payload the first delivery wrote.
+export type UncreditedFygaroTopupRow = {
+  name: string
+  request_id: string
+  account_id?: string | null
+  amount?: number | string | null
+  currency?: string | null
+  failure_reason?: string | null
+  source_systems_seen?: string | null
+  raw_payload_json?: string | null
+  last_seen_at?: string | null
+}
+
+export type AgedOutUncreditedFygaroTopups = {
+  count: number
+  // The longest-waiting aged-out row, for the page. Absent when count is 0.
+  oldestRequestId?: string
+  oldestLastSeenAt?: string
+  // The aged-out request_ids, oldest first, capped at
+  // AGED_OUT_REQUEST_IDS_LIMIT so the page can tell "credit by hand" rows from
+  // "already credited, promote by hand" rows (the sweep reads the Redis
+  // credited marker per id). `count` is the full number; when it exceeds
+  // `requestIds.length` the remainder is unverified.
+  requestIds: string[]
+  // The same capped rows with their `last_seen_at` (UTC, as stored), so the
+  // sweep can tell a row older than the credited marker's TTL — where a
+  // missing marker proves nothing — from one whose marker is authoritative.
+  agedOutRows: { requestId: string; lastSeenAt?: string }[]
+}
+
+// How many aged-out request_ids the count returns for the sweep to verify
+// against the credited marker. Bounded so a runaway backlog cannot turn one
+// page into hundreds of Redis reads.
+export const AGED_OUT_REQUEST_IDS_LIMIT = 50
+
 // Raw "Fygaro Settings" Single doctype as ERPNext returns it. Numeric fields
 // may arrive as numbers or numeric strings depending on the Frappe field type;
 // the caller (fygaro-settings.ts) coerces and validates before use.
@@ -1601,6 +1640,246 @@ export class ErpNext {
     }
 
     return guarded
+  }
+
+  // Net USD actually credited to customers from Fygaro card top-ups since
+  // `since`: the treasury's burn. Completed rows only (money moved), summed on
+  // final_amount — the NET that left the bankowner wallet, not the gross the
+  // card was charged. Rows with no final_amount (older hand-completed rows,
+  // ENG-549) cannot be counted and are skipped with a log line; the result is
+  // a lower bound, which under-states burn and so OVER-states runway — the
+  // caller's floor check stays the hard backstop. An unconfigured client or
+  // a failed read is an error, never zero: "no burn" would read as infinite
+  // runway.
+  async sumFygaroCompletedNetCentsSince({
+    since,
+  }: {
+    since: Date
+  }): Promise<number | FygaroTopupHistoryQueryError> {
+    try {
+      const filters = JSON.stringify([
+        [BridgeTransferRequest.doctype, "provider", "=", "Fygaro"],
+        [
+          BridgeTransferRequest.doctype,
+          "transaction_type",
+          "=",
+          BridgeTransferRequestTransactionType.Topup,
+        ],
+        [
+          BridgeTransferRequest.doctype,
+          "status",
+          "=",
+          BridgeTransferRequestStatus.Completed,
+        ],
+        [
+          BridgeTransferRequest.doctype,
+          "last_seen_at",
+          ">=",
+          toFrappeDatetime(since.toISOString()),
+        ],
+      ])
+      const fields = JSON.stringify(["request_id", "final_amount"])
+      const resp = await axios.get(
+        `${this.url}/api/resource/${encodeURIComponent(BridgeTransferRequest.doctype)}`,
+        {
+          params: { filters, fields, limit_page_length: 0 },
+          headers: this.headers,
+        },
+      )
+      const rows = resp.data?.data
+      if (!Array.isArray(rows)) {
+        return new FygaroTopupHistoryQueryError("No data in completed top-up response")
+      }
+      let sumCents = 0
+      for (const row of rows as {
+        request_id?: string
+        final_amount?: number | string | null
+      }[]) {
+        if (row.final_amount == null || String(row.final_amount).trim() === "") {
+          baseLogger.info(
+            { requestId: row.request_id },
+            "Fygaro burn: Completed row without final_amount skipped",
+          )
+          continue
+        }
+        const cents = Math.round(Number(row.final_amount) * 100)
+        if (!Number.isFinite(cents)) {
+          return new FygaroTopupHistoryQueryError(
+            `Non-numeric final_amount on ${row.request_id ?? "<unknown row>"}`,
+          )
+        }
+        sumCents += cents
+      }
+      return sumCents
+    } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error(
+        { err, responseData },
+        "Error summing completed Fygaro top-ups from ERPNext",
+      )
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
+      return new FygaroTopupHistoryQueryError(err)
+    }
+  }
+
+  // Fygaro card payments that were captured but never credited AND were never
+  // refused: status Fiat Received with no failure_reason. That is exactly the
+  // shape a failed credit leaves behind (payment.ts deliberately does not stamp
+  // a reason on a failed send, so the row keeps counting against the daily
+  // cap while a retry is pending) — and the shape the stranded-credit sweep
+  // exists to clear. Refusals (over-limit, under-minimum, ...) carry a
+  // failure_reason and are excluded; email-attributed rows are excluded because
+  // auto-credit never keys off a payer-typed email. Oldest first, so a
+  // per-sweep cap drains the backlog in arrival order.
+  //
+  // One query shape, two cutoffs: `listUncreditedFygaroTopups` takes the rows
+  // INSIDE the sweep's window (last_seen_at >= since) and
+  // `countAgedOutUncreditedFygaroTopups` the rows that fell OUT of it
+  // (last_seen_at < before). They must agree on every other filter or a row
+  // could leave one set without entering the other.
+  //
+  // The two paths want different columns. The candidate path (`>=`) re-runs
+  // the credit, so it needs `amount`, `currency` and `raw_payload_json`. The
+  // count path (`<`) only classifies and counts — and its result set is the
+  // ENTIRE historical refusal backlog (every refused and every email-attributed
+  // row stays Fiat Received forever, and the JS-side exclusions below can only
+  // drop them after they arrive), re-read every tick and growing. So it asks
+  // for the five small columns the exclusions and the page read, never the
+  // payloads.
+  private async queryUncreditedFygaroTopups(
+    lastSeenAtOp: ">=" | "<",
+    cutoff: Date,
+  ): Promise<UncreditedFygaroTopupRow[] | FygaroTopupHistoryQueryError> {
+    try {
+      const filters = JSON.stringify([
+        [BridgeTransferRequest.doctype, "provider", "=", "Fygaro"],
+        [
+          BridgeTransferRequest.doctype,
+          "transaction_type",
+          "=",
+          BridgeTransferRequestTransactionType.Topup,
+        ],
+        [
+          BridgeTransferRequest.doctype,
+          "status",
+          "=",
+          BridgeTransferRequestStatus.FiatReceived,
+        ],
+        [BridgeTransferRequest.doctype, "currency", "=", "USD"],
+        [
+          BridgeTransferRequest.doctype,
+          "last_seen_at",
+          lastSeenAtOp,
+          toFrappeDatetime(cutoff.toISOString()),
+        ],
+      ])
+      const fields = JSON.stringify(
+        lastSeenAtOp === ">="
+          ? [
+              "name",
+              "request_id",
+              "account_id",
+              "amount",
+              "currency",
+              "failure_reason",
+              "source_systems_seen",
+              "raw_payload_json",
+              "last_seen_at",
+            ]
+          : [
+              "request_id",
+              "account_id",
+              "failure_reason",
+              "source_systems_seen",
+              "last_seen_at",
+            ],
+      )
+      const resp = await axios.get(
+        `${this.url}/api/resource/${encodeURIComponent(BridgeTransferRequest.doctype)}`,
+        {
+          params: {
+            filters,
+            fields,
+            order_by: "last_seen_at asc",
+            // Over-fetch: the failure_reason / email-attribution exclusions
+            // below are JS-side (a Frappe "is not set" filter inverts around
+            // NULL), so a SQL limit could return only refused rows and starve
+            // the ones that need crediting.
+            limit_page_length: 0,
+          },
+          headers: this.headers,
+        },
+      )
+      const rows = resp.data?.data
+      if (!Array.isArray(rows)) {
+        return new FygaroTopupHistoryQueryError("No data in uncredited top-up response")
+      }
+      const out: UncreditedFygaroTopupRow[] = []
+      for (const row of rows as UncreditedFygaroTopupRow[]) {
+        const failureReasonSet =
+          row.failure_reason != null && String(row.failure_reason).trim() !== ""
+        if (failureReasonSet) continue
+        if (isEmailAttributedRow(row.source_systems_seen)) continue
+        if (!row.account_id || !row.request_id) continue
+        out.push(row)
+      }
+      return out
+    } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error(
+        { err, responseData, lastSeenAtOp },
+        "Error listing uncredited Fygaro top-ups from ERPNext",
+      )
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
+      return new FygaroTopupHistoryQueryError(err)
+    }
+  }
+
+  async listUncreditedFygaroTopups({
+    since,
+    limit,
+  }: {
+    since: Date
+    limit: number
+  }): Promise<UncreditedFygaroTopupRow[] | FygaroTopupHistoryQueryError> {
+    const rows = await this.queryUncreditedFygaroTopups(">=", since)
+    if (rows instanceof Error) return rows
+    // Cap AFTER the exclusions, so refused rows cannot starve credit-able ones.
+    return rows.slice(0, limit)
+  }
+
+  // The stranded rows the sweep can no longer see: same shape as above, but
+  // last_seen_at is OLDER than the window. A retry that keeps failing (or a row
+  // that sat uncovered through a slow refill) never touches last_seen_at, so
+  // on day lookback+1 it silently leaves the candidate list while the money is
+  // still captured and undelivered. The sweep pages on this count so "gave up"
+  // is never silent. Oldest first, so `oldest` is the row that has waited
+  // longest.
+  async countAgedOutUncreditedFygaroTopups({
+    before,
+  }: {
+    before: Date
+  }): Promise<AgedOutUncreditedFygaroTopups | FygaroTopupHistoryQueryError> {
+    const rows = await this.queryUncreditedFygaroTopups("<", before)
+    if (rows instanceof Error) return rows
+    const oldest = rows[0]
+    const capped = rows.slice(0, AGED_OUT_REQUEST_IDS_LIMIT)
+    return {
+      count: rows.length,
+      oldestRequestId: oldest?.request_id,
+      oldestLastSeenAt: oldest?.last_seen_at ?? undefined,
+      requestIds: capped.map((r) => r.request_id),
+      agedOutRows: capped.map((r) => ({
+        requestId: r.request_id,
+        lastSeenAt: r.last_seen_at ?? undefined,
+      })),
+    }
   }
 
   async findBridgeTransferRequest(

@@ -1,4 +1,7 @@
-import ErpNext from "@services/frappe/ErpNext"
+import ErpNext, {
+  type AgedOutUncreditedFygaroTopups,
+  type UncreditedFygaroTopupRow,
+} from "@services/frappe/ErpNext"
 import { baseLogger } from "@services/logger"
 import {
   BridgeTransferRequestUpsertError,
@@ -294,6 +297,57 @@ export const sumFygaroTopupGrossCentsLast24h = async (args: {
 }): Promise<number | FygaroTopupHistoryQueryError> => {
   const window = await readFygaroTopupWindowLast24h(args)
   return window instanceof Error ? window : window.grossCents
+}
+
+// Net USD credited from the treasury over the trailing `days`: the burn the
+// float monitor divides the balance by to report runway. Error (not zero) when
+// ERPNext is unreachable or unconfigured — the monitor degrades to "runway
+// unknown" rather than "infinite".
+export const sumFygaroCreditedNetCentsLastDays = async ({
+  days,
+}: {
+  days: number
+}): Promise<number | FygaroTopupHistoryQueryError> => {
+  if (!ErpNext?.sumFygaroCompletedNetCentsSince) {
+    return new FygaroTopupHistoryQueryError("ERPNext client is not configured")
+  }
+  return ErpNext.sumFygaroCompletedNetCentsSince({
+    since: new Date(Date.now() - days * 24 * 60 * 60 * 1000),
+  })
+}
+
+// Captured, attributed, never refused, never credited: the rows the
+// stranded-credit sweep re-attempts. See ErpNext.listUncreditedFygaroTopups
+// for the exclusions.
+export const listUncreditedFygaroTopupsLastDays = async ({
+  days,
+  limit,
+}: {
+  days: number
+  limit: number
+}): Promise<UncreditedFygaroTopupRow[] | FygaroTopupHistoryQueryError> => {
+  if (!ErpNext?.listUncreditedFygaroTopups) {
+    return new FygaroTopupHistoryQueryError("ERPNext client is not configured")
+  }
+  return ErpNext.listUncreditedFygaroTopups({
+    since: new Date(Date.now() - days * 24 * 60 * 60 * 1000),
+    limit,
+  })
+}
+
+// The stranded rows that fell OUT of the sweep's `days` window without being
+// credited or refused. See ErpNext.countAgedOutUncreditedFygaroTopups.
+export const countAgedOutUncreditedFygaroTopups = async ({
+  days,
+}: {
+  days: number
+}): Promise<AgedOutUncreditedFygaroTopups | FygaroTopupHistoryQueryError> => {
+  if (!ErpNext?.countAgedOutUncreditedFygaroTopups) {
+    return new FygaroTopupHistoryQueryError("ERPNext client is not configured")
+  }
+  return ErpNext.countAgedOutUncreditedFygaroTopups({
+    before: new Date(Date.now() - days * 24 * 60 * 60 * 1000),
+  })
 }
 
 export type FygaroTopupCompletion = {

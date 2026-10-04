@@ -57,7 +57,23 @@ export const generateDedupKey = {
   // replayed old webhooks collapse to one warning per window.
   fygaroClockSkew: () => "fygaro:clock-skew",
   fygaroFloatLow: () => "fygaro:float-low",
+  // Own key, never shared with fygaroFloatLow: the warning fires first and
+  // holds its dedup window, so a critical sharing the key would be folded
+  // into the open warning incident and page nobody — the exact failure of
+  // the 10/03 exhaustion, where a daily warning ran for weeks unactioned.
+  fygaroFloatCritical: () => "fygaro:float-critical",
   fygaroFloatExhausted: () => "fygaro:float-exhausted",
+  // Stranded-credit sweep outcomes, per payment: it could not be covered by
+  // the current float, or the re-attempted credit failed for another reason.
+  fygaroRetryUncovered: (transactionId: string) =>
+    `fygaro:retry-uncovered:${transactionId}`,
+  fygaroRetryFailed: (transactionId: string) => `fygaro:retry-failed:${transactionId}`,
+  // Stranded rows that fell out of the sweep's lookback window uncredited and
+  // unrefused: the sweep will never see them again, so it pages once per
+  // window with the count. Static key — this is "the sweep gave up on N rows",
+  // one incident, not one per row (each row already had its per-payment
+  // fygaroRetryFailed / fygaroRetryUncovered alerts while it was in window).
+  fygaroRetryAgedOut: () => "fygaro:retry-aged-out",
   // The account repository faulted while resolving a customReference. Static
   // (no transaction suffix) because this is an infrastructure outage, not a
   // per-payment anomaly: every in-flight delivery hits it at once and should

@@ -35,10 +35,26 @@ fygaro:
     # notifies ops; the treasury -> user transfer stays manual.
     enabled: false
   float:
-    # Alert (cron) when the bankowner treasury USDT balance — the auto-credit
-    # funding source — drops below this floor, in USD. Default ~4x the $500
-    # auto-credit limit so ops has runway to top up before the well runs dry.
+    # Warn when the bankowner treasury USDT balance — the auto-credit funding
+    # source — drops below this floor, in USD. Default ~4x the $500 auto-credit
+    # limit so ops has runway to top up before the well runs dry.
     floorUsd: 2000
+    # Page (critical) below this balance, or when balance / trailing-7-day
+    # daily burn is under criticalRunwayDays.
+    criticalFloorUsd: 500
+    criticalRunwayDays: 3
+    # Re-check cadence inside the long-running fygaro-webhook workload (the
+    # one-shot cron also runs the check on its own k8s schedule).
+    checkIntervalMs: 900000
+    # Where the alert sends ops: the ERPNext System Accounts page (Fund button).
+    fundUrl: "https://erp.flashapp.me/app/system-accounts"
+  retry:
+    # Re-run the idempotent credit for payments stranded by an empty treasury
+    # once the float is back. Rows refused by a gate (failure_reason set) are
+    # never retried.
+    enabled: true
+    lookbackDays: 7
+    maxPerSweep: 20
 
 bridge:
   enabled: false # flags-off baseline; enable per environment via config overrides
