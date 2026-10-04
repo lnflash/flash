@@ -850,7 +850,15 @@ export const paymentHandler = async (req: Request, res: Response) => {
       // row, and overwrites the customer's CREDITED status with "held for
       // review — more than your remaining daily limit" for $60 they already have.
       const priorCompletion = await readFygaroTopupCompletion(transactionId)
-      // TWO markers, because the first one can lag the money. Promoting the
+      // The durable credited marker is written at credit time, before the
+      // promotion, so it is the one record that survives a failed promotion
+      // for a legacy bare-username payment (no intent to carry an outcome).
+      // Unknown (Redis unreadable) falls through to the record-only path: an
+      // extra ops alert, never a silently-swallowed capture.
+      const creditedMarker = await readFygaroCreditedMarker(transactionId)
+      const markerCredited = creditedMarker.known && creditedMarker.credited
+      const markerNetCents = markerCredited ? creditedMarker.netCents : undefined
+      // THREE markers, because the first one can lag the money. Promoting the
       // ERPNext row is itself a write this handler alerts on when it fails
       // ("Fygaro credit succeeded but ERPNext promotion failed", below): after
       // that the money IS in the wallet and the row still reads Fiat Received.
@@ -884,7 +892,7 @@ export const paymentHandler = async (req: Request, res: Response) => {
         authorizedIntent.outcome.transactionId === transactionId
           ? authorizedIntent.outcome
           : undefined
-      if (priorCompletion.completed || creditedOutcome) {
+      if (priorCompletion.completed || creditedOutcome || markerCredited) {
         baseLogger.info(
           { transactionId, reason: gate.reason },
           "Fygaro payment already credited — ignoring a late record-only refusal",
@@ -898,7 +906,9 @@ export const paymentHandler = async (req: Request, res: Response) => {
         await recordOutcome({
           state: "credited",
           netAmountCents:
-            priorCompletion.netAmountCents ?? creditedOutcome?.netAmountCents,
+            priorCompletion.netAmountCents ??
+            creditedOutcome?.netAmountCents ??
+            markerNetCents,
         })
         return res.status(200).json({ status: "already_processed" })
       }
@@ -1274,11 +1284,15 @@ export const paymentHandler = async (req: Request, res: Response) => {
           // 200, and the stranded-credit sweep sees the credited marker and
           // refuses to re-send or re-promote (it escalates to critical on its
           // next tick instead). The row stays Fiat Received until a human
-          // promotes it by hand.
+          // promotes it by hand. Critical, not warning: the sweep's own
+          // critical for this state only fires while retry + auto-credit are
+          // enabled and the row is inside lookbackDays — none of which hold
+          // during the ERPNext incident that typically breaks the promotion.
+          // Same dedup key as the sweep's, so the two fold into one incident.
           alertBridge({
             dedupKey: generateDedupKey.erpnextFygaroAudit(transactionId),
             source: "erpnext-audit",
-            severity: "warning",
+            severity: "critical",
             title:
               "Fygaro credit succeeded but ERPNext promotion failed — nothing re-promotes it, promote the row by hand",
             detail: completeResult.message,

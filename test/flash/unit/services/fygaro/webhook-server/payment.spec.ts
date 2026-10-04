@@ -1281,6 +1281,41 @@ describe("fygaro paymentHandler", () => {
       )
     })
 
+    it("ignores a gate refusal for a legacy payment the credited marker says was paid, even with no intent and no Completed row", async () => {
+      // Legacy bare-username payment (no intent → no recorded outcome): the
+      // credit landed, the promotion failed, the marker is the ONLY record.
+      // Ops flip auto-credit off while cleaning up ERPNext and resend the
+      // webhook from the Fygaro dashboard. Without the marker read this path
+      // stamps `auto-credit-disabled` over a row the customer was already paid
+      // for and pages ops to hand-credit money that is in the wallet.
+      mockGetFygaroSettings.mockResolvedValue({
+        ...DEFAULT_SETTINGS,
+        autoCreditEnabled: false,
+      })
+      mockReadCompletion.mockResolvedValue({ completed: false })
+      mockReadCreditedMarker.mockResolvedValue({
+        known: true,
+        credited: true,
+        netCents: 9452,
+      })
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockReadCreditedMarker).toHaveBeenCalledWith(VALID_BODY.transactionId)
+      expect(res.json).toHaveBeenCalledWith({ status: "already_processed" })
+      expect(mockMarkNotCredited).not.toHaveBeenCalled()
+      expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+      expect(mockSendTopupNotification).not.toHaveBeenCalled()
+      expect(mockAlertBridge).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          dedupKey: expect.stringContaining("fygaro:not-credited:"),
+        }),
+      )
+      // No intent on a legacy payment → nothing to stamp.
+      expect(mockRecordIntentOutcome).not.toHaveBeenCalled()
+    })
+
     it("still refuses nothing when the credit landed but ERPNext never promoted it", async () => {
       // The ERPNext row is the marker the guard used to trust ALONE, and it is
       // the very write this handler alerts on when it fails ("credit succeeded
@@ -1961,14 +1996,21 @@ describe("fygaro paymentHandler", () => {
       expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
     })
 
-    it("still reports success when only the ERPNext promotion fails after a credit", async () => {
+    it("still reports success when only the ERPNext promotion fails after a credit, and pages CRITICAL", async () => {
       mockCompleteFygaroTopup.mockResolvedValue(new Error("erpnext down"))
       const res = makeRes()
 
       await paymentHandler(makeReq(VALID_BODY), res)
 
+      // Money moved, row not promoted, nothing re-promotes it. The sweep's
+      // critical for this state is gated on retry + auto-credit being enabled,
+      // so this alert must page on its own.
       expect(mockAlertBridge).toHaveBeenCalledWith(
-        expect.objectContaining({ severity: "warning" }),
+        expect.objectContaining({
+          dedupKey: `erpnext-audit:fygaro:${VALID_BODY.transactionId}`,
+          severity: "critical",
+          title: expect.stringContaining("promotion failed"),
+        }),
       )
       expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
     })
