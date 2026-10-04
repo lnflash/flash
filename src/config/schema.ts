@@ -1063,13 +1063,51 @@ export const configSchema = {
         float: {
           type: "object",
           properties: {
-            // Alert when the bankowner treasury USDT balance (the auto-credit
-            // funding source) drops below this floor, in USD. Default ~4x the
-            // $500 auto-credit limit so ops has runway to top up.
+            // Alert (warning) when the bankowner treasury USDT balance (the
+            // auto-credit funding source) drops below this floor, in USD.
+            // Default ~4x the $500 auto-credit limit so ops has runway to top
+            // up.
             floorUsd: { type: "number", default: 2000 },
+            // Escalate to CRITICAL below this balance, in USD. Default = the
+            // largest single payment the gate will auto-credit, i.e. the point
+            // where the very next top-up may fail.
+            criticalFloorUsd: { type: "number", default: 500 },
+            // Escalate to CRITICAL when balance / trailing-7-day daily burn is
+            // under this many days, regardless of the absolute balance.
+            criticalRunwayDays: { type: "number", default: 3 },
+            // How often the long-running fygaro-webhook workload re-checks the
+            // float (and sweeps stranded credits). The one-shot cron also runs
+            // the check on its own k8s schedule; both are idempotent.
+            checkIntervalMs: { type: "integer", default: 900000 },
+            // Where the alert sends ops to top up: the ERPNext System Accounts
+            // page with the Fund button. Per-environment override for TEST.
+            fundUrl: {
+              type: "string",
+              default: "https://erp.flashapp.me/app/system-accounts",
+            },
           },
           additionalProperties: false,
-          default: { floorUsd: 2000 },
+          default: {
+            floorUsd: 2000,
+            criticalFloorUsd: 500,
+            criticalRunwayDays: 3,
+            checkIntervalMs: 900000,
+            fundUrl: "https://erp.flashapp.me/app/system-accounts",
+          },
+        },
+        // Stranded-credit retry: a payment whose auto-credit failed because the
+        // treasury was empty stays Fiat Received with no failure_reason. Once
+        // the float is refilled this sweep re-runs the SAME idempotent credit
+        // path, so nobody has to hand-credit and Mark Completed.
+        retry: {
+          type: "object",
+          properties: {
+            enabled: { type: "boolean", default: true },
+            lookbackDays: { type: "integer", default: 7 },
+            maxPerSweep: { type: "integer", default: 20 },
+          },
+          additionalProperties: false,
+          default: { enabled: true, lookbackDays: 7, maxPerSweep: 20 },
         },
       },
       additionalProperties: false,

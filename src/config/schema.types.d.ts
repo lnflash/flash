@@ -116,6 +116,15 @@ type FygaroConfig = {
   }
   float: {
     floorUsd: number
+    criticalFloorUsd: number
+    criticalRunwayDays: number
+    checkIntervalMs: number
+    fundUrl: string
+  }
+  retry: {
+    enabled: boolean
+    lookbackDays: number
+    maxPerSweep: number
   }
 }
 
