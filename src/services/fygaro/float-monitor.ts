@@ -191,12 +191,12 @@ export const checkFygaroTreasuryFloat = async (): Promise<
           ? Number(balance.asDollars())
           : 0
 
-    // Burn is only worth a round trip when the balance is anywhere near a
-    // threshold: a float at 10x the floor does not need its runway computed
-    // every 15 minutes. "Near" = under 2x the floor, so the first warning
-    // already carries a runway figure.
-    const nearFloor = balanceUsd < floorUsd * 2
-    const dailyBurnUsd = nearFloor ? await readDailyBurnUsd() : undefined
+    // Burn is read on EVERY tick. The runway tier exists for the case where
+    // the balance looks healthy against the floor but is being drained fast
+    // (schema.ts promises critical on short runway "regardless of the absolute
+    // balance"); gating this read on nearness to the floor made that tier dead
+    // exactly when burn was high. One ERPNext list query per interval.
+    const dailyBurnUsd = await readDailyBurnUsd()
     const runwayDays = computeRunwayDays(balanceUsd, dailyBurnUsd)
     const severity = classifyFloat({
       balanceUsd,

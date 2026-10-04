@@ -64,6 +64,7 @@ import {
 import { getFygaroSettings, type FygaroSettings } from "../fygaro-settings"
 import { fygaroCreatedAtToIso } from "../created-at"
 import { parseCustomReference } from "../../checkout"
+import { markFygaroCredited } from "../../credited-marker"
 import {
   consumeIntent,
   readIntent,
@@ -1202,6 +1203,14 @@ export const paymentHandler = async (req: Request, res: Response) => {
           })
           return { code: 200, body: { status: "recorded", credited: false } }
         }
+
+        // Money moved. Record that durably, independent of ERPNext, BEFORE the
+        // promotion below (which can fail) and before any announcement: the
+        // stranded-credit sweep lists Fiat Received rows with no
+        // failure_reason for days, and the send's idempotency cache lasts 24h.
+        // Without this marker a row whose promotion failed is re-paid for real
+        // once that cache expires.
+        await markFygaroCredited({ transactionId, netCents: fees.netCents })
 
         // Contract with the admin fee-breakdown view: on a credited (Completed)
         // row every fee MUST be an explicit string, including "0.00" for a

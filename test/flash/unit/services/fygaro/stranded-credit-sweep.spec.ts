@@ -4,6 +4,7 @@ const mockFygaroConfig = {
   retry: { enabled: true, lookbackDays: 7, maxPerSweep: 20 } as
     | { enabled?: boolean; lookbackDays?: number; maxPerSweep?: number }
     | undefined,
+  checkout: { ttlSeconds: 900 } as { ttlSeconds?: number } | undefined,
 }
 
 jest.mock("@config", () => ({
@@ -30,10 +31,31 @@ jest.mock("@services/alerts/ops-events", () => ({
 const mockListUncredited = jest.fn()
 const mockReadCompletion = jest.fn()
 const mockComplete = jest.fn()
+const mockSumGross = jest.fn()
+const mockMarkNotCredited = jest.fn()
 jest.mock("@services/frappe/BridgeTransferRequestWriter", () => ({
   listUncreditedFygaroTopupsLastDays: (...args: unknown[]) => mockListUncredited(...args),
   readFygaroTopupCompletion: (...args: unknown[]) => mockReadCompletion(...args),
   completeFygaroTopup: (...args: unknown[]) => mockComplete(...args),
+  sumFygaroTopupGrossCentsLast24h: (...args: unknown[]) => mockSumGross(...args),
+  markFygaroTopupNotCredited: (...args: unknown[]) => mockMarkNotCredited(...args),
+}))
+
+// The durable credited marker lives in Redis, independent of ERPNext. Mocked
+// at the client so the tests drive both the write after a credit and the read
+// before a send; the marker module itself runs for real.
+const mockRedisSet = jest.fn()
+const mockRedisGet = jest.fn()
+jest.mock("@services/redis", () => ({
+  redis: {
+    set: (...args: unknown[]) => mockRedisSet(...args),
+    get: (...args: unknown[]) => mockRedisGet(...args),
+  },
+}))
+
+const mockRecordIntentOutcome = jest.fn()
+jest.mock("@services/fygaro/checkout-intent-store", () => ({
+  recordIntentOutcome: (...args: unknown[]) => mockRecordIntentOutcome(...args),
 }))
 
 const mockGetDiscount = jest.fn()
@@ -127,11 +149,19 @@ beforeEach(() => {
   mockReadCompletion.mockResolvedValue({ completed: false })
   mockComplete.mockResolvedValue(true)
   mockGetDiscount.mockResolvedValue(0)
+  mockSumGross.mockResolvedValue(0)
+  mockMarkNotCredited.mockResolvedValue(true)
+  mockRedisSet.mockResolvedValue("OK")
+  mockRedisGet.mockResolvedValue(null)
+  mockRecordIntentOutcome.mockResolvedValue(undefined)
   mockLockIdempotencyKey.mockResolvedValue(undefined)
+  // Level 2 ($1000/day cap) so the $400 and $500 fixtures below exercise the
+  // float-coverage and auto-credit-limit branches, not the daily cap. The cap
+  // has its own tests under "credit gate".
   mockFindById.mockImplementation(async (id: string) => ({
     id,
     username: `user-${id}`,
-    level: 1,
+    level: 2,
   }))
   mockCredit.mockResolvedValue({ walletId: "recipient-wallet", status: "success" })
 })
@@ -202,6 +232,12 @@ describe("retryStrandedFygaroCredits", () => {
       expect(mockGetDiscount).toHaveBeenCalledWith({
         username: "user-acct-tx-70",
         flow: "topup",
+      })
+      // The daily-cap read excludes the row's own Fiat Received entry, exactly
+      // as payment.ts does — without it every payment double-counts itself.
+      expect(mockSumGross).toHaveBeenCalledWith({
+        accountId: "acct-tx-70",
+        excludeTransactionId: "tx-70",
       })
       // $70 - (2.09 + 0.49) - 1.40 = $66.02
       expect(mockCredit).toHaveBeenCalledWith({
@@ -299,7 +335,31 @@ describe("retryStrandedFygaroCredits", () => {
       })
     })
 
-    it("alerts but still counts the credit when the ERPNext promotion fails (money moved)", async () => {
+    it("records the durable credited marker (lookback + 1 day) BEFORE promoting the row", async () => {
+      mockFygaroConfig.retry = { enabled: true, lookbackDays: 7, maxPerSweep: 20 }
+      mockListUncredited.mockResolvedValue([row("tx-70", "70.00")])
+      const order: string[] = []
+      mockRedisSet.mockImplementation(async () => {
+        order.push("marker")
+        return "OK"
+      })
+      mockComplete.mockImplementation(async () => {
+        order.push("promote")
+        return true
+      })
+
+      await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      expect(mockRedisSet).toHaveBeenCalledWith(
+        "fygaro:sweep-credited:tx-70",
+        "6602",
+        "EX",
+        8 * 24 * 60 * 60,
+      )
+      expect(order).toEqual(["marker", "promote"])
+    })
+
+    it("escalates to CRITICAL (money moved, promote by hand) when the ERPNext promotion fails, and still counts the credit", async () => {
       mockListUncredited.mockResolvedValue([row("tx-70", "70.00")])
       mockComplete.mockResolvedValue(new Error("erp write failed"))
 
@@ -309,8 +369,208 @@ describe("retryStrandedFygaroCredits", () => {
       expect(mockAlertBridge).toHaveBeenCalledWith(
         expect.objectContaining({
           dedupKey: "erpnext-audit:fygaro:tx-70",
-          severity: "warning",
+          severity: "critical",
+          title: expect.stringContaining("promote the row by hand"),
         }),
+      )
+      // The marker was written before the promotion, so the next tick skips.
+      expect(mockRedisSet).toHaveBeenCalledWith(
+        "fygaro:sweep-credited:tx-70",
+        "6602",
+        "EX",
+        expect.any(Number),
+      )
+    })
+
+    it("promotion fails on tick 1 → tick 2 does NOT re-send, re-post to ops, or re-push the customer", async () => {
+      mockListUncredited.mockResolvedValue([row("tx-70", "70.00")])
+      mockComplete.mockResolvedValue(new Error("erp write failed"))
+      // Real Redis semantics for the marker: tick 1 writes it, tick 2 reads it.
+      const store = new Map<string, string>()
+      mockRedisSet.mockImplementation(async (key: string, value: string) => {
+        store.set(key, value)
+        return "OK"
+      })
+      mockRedisGet.mockImplementation(async (key: string) => store.get(key) ?? null)
+
+      const tick1 = await retryStrandedFygaroCredits({ availableUsd: 3000 })
+      expect(tick1).toMatchObject({ credited: 1 })
+      expect(mockCredit).toHaveBeenCalledTimes(1)
+      expect(mockNotifyOpsEvent).toHaveBeenCalledTimes(1)
+      expect(mockSendNotification).toHaveBeenCalledTimes(1)
+
+      // Row still lists as stranded (Fiat Received, no failure_reason), and the
+      // webhook's push timelock has long expired.
+      mockLockIdempotencyKey.mockResolvedValue(undefined)
+      const tick2 = await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      expect(tick2).toMatchObject({ candidates: 1, credited: 0, skippedCompleted: 1 })
+      expect(mockCredit).toHaveBeenCalledTimes(1)
+      expect(mockComplete).toHaveBeenCalledTimes(1)
+      expect(mockNotifyOpsEvent).toHaveBeenCalledTimes(1)
+      expect(mockSendNotification).toHaveBeenCalledTimes(1)
+    })
+
+    it("does not send when the credited marker cannot be read (unknown is a stop, not a clean slate)", async () => {
+      mockListUncredited.mockResolvedValue([row("tx-70", "70.00")])
+      mockRedisGet.mockRejectedValue(new Error("redis down"))
+
+      const summary = await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      expect(mockCredit).not.toHaveBeenCalled()
+      expect(summary).toMatchObject({ credited: 0, failed: 1 })
+    })
+
+    it("stamps the checkout intent credited when the stored payload carries an intent id", async () => {
+      mockListUncredited.mockResolvedValue([
+        row("tx-70", "70.00", {
+          raw_payload_json: JSON.stringify({
+            transactionId: "tx-70",
+            amount: "70.00",
+            customReference: "user-acct-tx-70|intent-abc",
+          }),
+        }),
+      ])
+
+      await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      expect(mockRecordIntentOutcome).toHaveBeenCalledWith({
+        intentId: "intent-abc",
+        outcome: expect.objectContaining({
+          state: "credited",
+          netAmountCents: 6602,
+          transactionId: "tx-70",
+        }),
+        ttlSeconds: 900,
+      })
+    })
+
+    it("does not touch the intent store when the payload is a legacy bare-username reference or unparsable", async () => {
+      mockListUncredited.mockResolvedValue([
+        row("tx-a", "20.00", {
+          raw_payload_json: JSON.stringify({ customReference: "user-acct-tx-a" }),
+        }),
+        row("tx-b", "20.00", { raw_payload_json: "{not json" }),
+        row("tx-c", "20.00", { raw_payload_json: null }),
+      ])
+
+      const summary = await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      expect(summary.credited).toBe(3)
+      expect(mockRecordIntentOutcome).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("credit gate (re-run exactly as the webhook runs it)", () => {
+    it("refuses a row that now exceeds the daily cap: stamps the reason, alerts, does not credit, counts leftForManual", async () => {
+      // Level 1, $125/day. $100 already charged in the window, this row is $100.
+      mockFindById.mockImplementation(async (id: string) => ({
+        id,
+        username: `user-${id}`,
+        level: 1,
+      }))
+      mockSumGross.mockResolvedValue(10000)
+      mockListUncredited.mockResolvedValue([row("tx-cap", "100.00")])
+
+      const summary = await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      expect(mockCredit).not.toHaveBeenCalled()
+      expect(mockComplete).not.toHaveBeenCalled()
+      expect(mockSendNotification).not.toHaveBeenCalled()
+      expect(mockMarkNotCredited).toHaveBeenCalledWith({
+        transactionId: "tx-cap",
+        accountId: "acct-tx-cap",
+        amount: "100.00",
+        currency: "USD",
+        reason: "daily-limit-exceeded",
+        rawPayload: { transactionId: "tx-cap", amount: "100.00" },
+      })
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dedupKey: "fygaro:not-credited:tx-cap",
+          severity: "warning",
+          context: expect.objectContaining({ reason: "daily-limit-exceeded" }),
+        }),
+      )
+      expect(summary).toMatchObject({
+        candidates: 1,
+        credited: 0,
+        failed: 0,
+        leftForManual: 1,
+      })
+    })
+
+    it("credits a row landing exactly ON the daily cap (inclusive, like the webhook)", async () => {
+      mockFindById.mockImplementation(async (id: string) => ({
+        id,
+        username: `user-${id}`,
+        level: 1,
+      }))
+      mockSumGross.mockResolvedValue(2500) // $25 prior + $100 = $125 cap
+      mockListUncredited.mockResolvedValue([row("tx-edge", "100.00")])
+
+      const summary = await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      expect(mockCredit).toHaveBeenCalledTimes(1)
+      expect(summary.credited).toBe(1)
+    })
+
+    it("defers (does not stamp) when the trailing-24h history read fails — transient, retried next sweep", async () => {
+      mockSumGross.mockResolvedValue(new Error("erp blip"))
+      mockListUncredited.mockResolvedValue([row("tx-70", "70.00")])
+
+      const summary = await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      expect(mockCredit).not.toHaveBeenCalled()
+      expect(mockMarkNotCredited).not.toHaveBeenCalled()
+      expect(mockAlertBridge).not.toHaveBeenCalled()
+      expect(summary).toMatchObject({ credited: 0, failed: 1, leftForManual: 0 })
+    })
+
+    it("refuses a level with no configured daily limit (fail closed to manual)", async () => {
+      mockFindById.mockImplementation(async (id: string) => ({
+        id,
+        username: `user-${id}`,
+        level: 0,
+      }))
+      mockListUncredited.mockResolvedValue([row("tx-l0", "70.00")])
+
+      const summary = await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      expect(mockCredit).not.toHaveBeenCalled()
+      expect(mockMarkNotCredited).toHaveBeenCalledWith(
+        expect.objectContaining({ reason: "no-daily-limit-for-level" }),
+      )
+      expect(summary.leftForManual).toBe(1)
+    })
+
+    it("pages CRITICAL when a refusal cannot be stamped on the audit row", async () => {
+      mockSumGross.mockResolvedValue(100000)
+      mockMarkNotCredited.mockResolvedValue(new Error("erp write failed"))
+      mockListUncredited.mockResolvedValue([row("tx-cap", "100.00")])
+
+      await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dedupKey: "fygaro:refusal-not-stamped:tx-cap",
+          severity: "critical",
+        }),
+      )
+    })
+
+    it("sends the gate's own fee figure, so the fee math has one owner", async () => {
+      mockListUncredited.mockResolvedValue([row("tx-70", "70.00")])
+      mockGetDiscount.mockResolvedValue(50)
+
+      await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      // $70 - 2.58 processor - (1.40 * 0.5 = 0.70) flash = $66.72
+      expect(mockCredit).toHaveBeenCalledWith(
+        expect.objectContaining({ amountCents: 6672 }),
+      )
+      expect(mockComplete).toHaveBeenCalledWith(
+        expect.objectContaining({ flashFee: "0.70", finalAmount: "66.72" }),
       )
     })
   })
@@ -438,13 +698,21 @@ describe("retryStrandedFygaroCredits", () => {
       expect(summary.failed).toBe(3)
     })
 
-    it("leaves a row above the auto-credit limit for manual handling", async () => {
+    it("leaves a row above the auto-credit limit for manual handling: stamped over-limit, counted leftForManual", async () => {
       mockListUncredited.mockResolvedValue([row("tx-big", "500.01")])
 
       const summary = await retryStrandedFygaroCredits({ availableUsd: 5000 })
 
       expect(mockCredit).not.toHaveBeenCalled()
-      expect(summary).toMatchObject({ credited: 0, failed: 0, uncovered: 0 })
+      expect(mockMarkNotCredited).toHaveBeenCalledWith(
+        expect.objectContaining({ transactionId: "tx-big", reason: "over-limit" }),
+      )
+      expect(summary).toMatchObject({
+        credited: 0,
+        failed: 0,
+        uncovered: 0,
+        leftForManual: 1,
+      })
     })
 
     it("credits a row exactly at the auto-credit limit (inclusive, like the webhook gate)", async () => {
@@ -464,7 +732,8 @@ describe("retryStrandedFygaroCredits", () => {
       const summary = await retryStrandedFygaroCredits({ availableUsd: 3000 })
 
       expect(mockCredit).not.toHaveBeenCalled()
-      expect(summary.candidates).toBe(2)
+      expect(mockMarkNotCredited).not.toHaveBeenCalled()
+      expect(summary).toMatchObject({ candidates: 2, leftForManual: 2 })
     })
 
     it("never throws: an unexpected error mid-sweep returns the partial summary", async () => {

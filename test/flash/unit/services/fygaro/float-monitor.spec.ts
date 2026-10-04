@@ -398,14 +398,38 @@ describe("checkFygaroTreasuryFloat", () => {
       expect(alert.detail).toContain("https://erp.example/app/system-accounts")
     })
 
-    it("does not read ERPNext burn when the float is comfortably above the floor", async () => {
+    it("reads ERPNext burn on every tick, even when the float is comfortably above the floor", async () => {
       mockGetAccountDetails.mockResolvedValue(detailsWithBalance(usdt("5000")))
+      mockSumNet.mockResolvedValue(70000) // $100/day → 50 days
 
       const reading = await checkFygaroTreasuryFloat()
 
-      expect(mockSumNet).not.toHaveBeenCalled()
-      expect(reading).toMatchObject({ severity: "ok", dailyBurnUsd: undefined })
+      expect(mockSumNet).toHaveBeenCalledWith({ days: 7 })
+      expect(reading).toMatchObject({ severity: "ok", dailyBurnUsd: 100, runwayDays: 50 })
       expect(mockAlertBridge).not.toHaveBeenCalled()
+    })
+
+    it("escalates to CRITICAL on short runway at a balance well above 2x the floor (burn is never gated on nearness)", async () => {
+      // floor=2000, balance=5000, $2000/day burn → 2.5 days < 3. The old
+      // nearFloor optimisation skipped the burn read above 2x floor, so this
+      // exact case read "ok".
+      mockGetAccountDetails.mockResolvedValue(detailsWithBalance(usdt("5000")))
+      mockSumNet.mockResolvedValue(1_400_000)
+
+      const reading = await checkFygaroTreasuryFloat()
+
+      expect(reading).toMatchObject({
+        balanceUsd: 5000,
+        dailyBurnUsd: 2000,
+        runwayDays: 2.5,
+        severity: "critical",
+      })
+      expect(mockAlertBridge).toHaveBeenCalledTimes(1)
+      expect(mockAlertBridge.mock.calls[0][0]).toMatchObject({
+        dedupKey: "fygaro:float-critical",
+        severity: "critical",
+      })
+      expect(mockAlertBridge.mock.calls[0][0].detail).toContain("runway=2.5 days")
     })
 
     it("escalates to CRITICAL on short runway even when the balance is above the critical floor", async () => {

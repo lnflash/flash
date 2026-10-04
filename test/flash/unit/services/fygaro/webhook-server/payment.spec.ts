@@ -87,6 +87,13 @@ jest.mock("@services/fygaro/webhook-server/credit-topup", () => {
 
 // The fee math (fees.ts) runs for real; only the ERPNext-backed settings read
 // is mocked, so the gating matrix exercises the actual formula end to end.
+// Durable credited marker (Redis). Mocked so the handler suite stays off the
+// real Redis client; the marker module has its own coverage via the sweep spec.
+const mockMarkFygaroCredited = jest.fn()
+jest.mock("@services/fygaro/credited-marker", () => ({
+  markFygaroCredited: (...args: unknown[]) => mockMarkFygaroCredited(...args),
+}))
+
 jest.mock("@services/fygaro/webhook-server/fygaro-settings", () => ({
   getFygaroSettings: (...args: unknown[]) => mockGetFygaroSettings(...args),
 }))
@@ -1873,6 +1880,26 @@ describe("fygaro paymentHandler", () => {
         expect.objectContaining({ severity: "warning" }),
       )
       expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
+    })
+
+    it("records the durable credited marker BEFORE the promotion, so a failed promotion is never re-paid by the sweep", async () => {
+      const order: string[] = []
+      mockMarkFygaroCredited.mockImplementation(async () => {
+        order.push("marker")
+      })
+      mockCompleteFygaroTopup.mockImplementation(async () => {
+        order.push("promote")
+        return new Error("erpnext down")
+      })
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockMarkFygaroCredited).toHaveBeenCalledWith({
+        transactionId: VALID_BODY.transactionId,
+        netCents: expect.any(Number),
+      })
+      expect(order).toEqual(["marker", "promote"])
     })
   })
 

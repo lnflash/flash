@@ -4,7 +4,9 @@ import { notifyOpsEvent } from "@services/alerts/ops-events"
 import {
   completeFygaroTopup,
   listUncreditedFygaroTopupsLastDays,
+  markFygaroTopupNotCredited,
   readFygaroTopupCompletion,
+  sumFygaroTopupGrossCentsLast24h,
 } from "@services/frappe/BridgeTransferRequestWriter"
 import { getFlashFeeDiscountPercent } from "@services/frappe/fee-discounts"
 import { LockService } from "@services/lock"
@@ -12,12 +14,15 @@ import { baseLogger } from "@services/logger"
 import { AccountsRepository } from "@services/mongoose"
 import { sendFygaroTopupNotificationBestEffort } from "@app/fygaro/send-topup-notification"
 
+import { parseCustomReference } from "./checkout"
+import { recordIntentOutcome } from "./checkout-intent-store"
+import { markFygaroCredited, readFygaroCreditedMarker } from "./credited-marker"
 import {
   creditFygaroTopup,
   FygaroCreditError,
   INSUFFICIENT_TREASURY_FLOAT_STEP,
 } from "./webhook-server/credit-topup"
-import { computeFygaroFees } from "./webhook-server/fees"
+import { evaluateCreditGate } from "./webhook-server/fees"
 import { getFygaroSettings } from "./webhook-server/fygaro-settings"
 
 /**
@@ -35,35 +40,55 @@ import { getFygaroSettings } from "./webhook-server/fygaro-settings"
  * This sweep re-runs the SAME credit path once the float is back:
  *   - candidates come from ERPNext (listUncreditedFygaroTopups: Fiat Received,
  *     USD, attributed, no failure_reason, not email-attributed, oldest first),
- *   - fees are recomputed with the same engine the webhook uses
- *     (computeFygaroFees + the operator fee-discount whitelist),
- *   - the status is re-read right before the send so a row ops hand-completed
- *     in the meantime is skipped,
+ *   - the FULL webhook gate is re-run (evaluateCreditGate over the live
+ *     settings, the account level, the trailing-24h gross and the operator
+ *     fee-discount whitelist), so the fee math and every limit have exactly
+ *     one owner,
+ *   - the credited markers are re-read right before the send — the ERPNext
+ *     row (ops may have hand-completed it) AND the Redis credited marker (a
+ *     prior credit whose promotion failed) — so a credited payment is never
+ *     sent twice,
  *   - the send is creditFygaroTopup, idempotent on `fygaro:<transactionId>`,
  *     so even a lost race with a concurrent webhook retry cannot double-pay,
  *   - on success the row is promoted exactly as the webhook promotes it (full
- *     fee split, so the admin never shows "Pending" fees on a credited row).
+ *     fee split, so the admin never shows "Pending" fees on a credited row),
+ *     the checkout intent (when the payload carries one) is stamped credited
+ *     so `fygaroTopupStatus` agrees with the push, and the customer is told
+ *     once.
  *
- * The daily-cap gate is NOT re-applied. The payment passed it when it was
- * captured (a refusal would have stamped a failure_reason); refusing it now
- * because the customer topped up again since would strand it forever. The
- * gates that ARE re-applied are the ones that could have changed in a way
- * that must still hold at send time: auto-credit still on, gross still at or
- * under the auto-credit limit, net still positive.
+ * Why the daily cap IS re-applied. The candidate shape is not only "credit
+ * failed on float": payment.ts answers 500 with no stamp for the transient
+ * `settings-unavailable` / `history-unavailable` refusals, so a row can reach
+ * this list having never passed the cap at all. Crediting it blind could put a
+ * customer over a compliance cap with no refusal row and no alert. A refusal
+ * here does what the webhook's refusal does — stamps a failure_reason and
+ * pages ops — which is handing the payment to a human, not stranding it.
  *
  * Never retried: rows with a failure_reason (every gate refusal), rows with no
  * account_id (unattributed), email-attributed rows. Non-float failures
  * (`intraledger-send`, unresolvable recipient wallet) alert per payment and
  * are left for the next sweep; a float failure stops the sweep — the balance
  * the caller read is stale and nothing else will fit either.
+ *
+ * A credit whose ERPNext promotion fails is NOT retried by re-sending. The
+ * money moved; the Redis marker records that, the alert is CRITICAL and names
+ * the manual step (promote the row by hand), and the next sweep skips the row.
+ * The idempotency cache the send relies on lives 24h; the lookback is 7 days.
  */
 
 export type StrandedCreditSweepSummary = {
   candidates: number
   credited: number
+  // Already credited by someone else: the ERPNext row is Completed, or the
+  // Redis credited marker says a prior credit landed and only the promotion
+  // failed.
   skippedCompleted: number
   uncovered: number
   failed: number
+  // Rows this sweep will never credit and that a human now owns: no usable
+  // transaction id / account, or refused by the credit gate (stamped with the
+  // reason and alerted, exactly as the webhook refuses).
+  leftForManual: number
   stoppedOnFloat: boolean
 }
 
@@ -81,6 +106,18 @@ const parseRawPayload = (raw: string | null | undefined): unknown => {
   }
 }
 
+// The checkout intent id the webhook stamped outcomes on, when the payment was
+// authorised through signed checkout. Read back off the audit row's stored
+// payload: `customReference` is `<username>|<intentId>` in that case (see
+// checkout.ts buildCustomReference). Absent for every legacy bare-username
+// payment, and for a payload the sweep could not parse.
+const intentIdOf = (rawPayload: unknown): string | undefined => {
+  if (!rawPayload || typeof rawPayload !== "object") return undefined
+  const customReference = (rawPayload as { customReference?: unknown }).customReference
+  if (typeof customReference !== "string") return undefined
+  return parseCustomReference(customReference)?.intentId
+}
+
 const transactionIdOf = (requestId: string): string | undefined =>
   requestId.startsWith("fygaro:") ? requestId.slice("fygaro:".length) : undefined
 
@@ -90,6 +127,7 @@ const emptySummary = (): StrandedCreditSweepSummary => ({
   skippedCompleted: 0,
   uncovered: 0,
   failed: 0,
+  leftForManual: 0,
   stoppedOnFloat: false,
 })
 
@@ -135,12 +173,19 @@ export const retryStrandedFygaroCredits = async ({
     if (rows.length === 0) return summary
 
     let remainingUsd = availableUsd
-    const autoCreditLimitCents = Math.round(settings.autoCreditLimit * 100)
 
     for (const row of rows) {
       const transactionId = transactionIdOf(row.request_id)
-      if (!transactionId || !row.account_id) continue
+      if (!transactionId || !row.account_id) {
+        summary.leftForManual += 1
+        baseLogger.warn(
+          { requestId: row.request_id, accountId: row.account_id },
+          "Fygaro stranded-credit sweep: row has no fygaro transaction id or no account, leaving for manual",
+        )
+        continue
+      }
       const accountId = row.account_id as AccountId
+      const currency = row.currency ?? "USD"
 
       const grossDollars = row.amount == null ? NaN : Number(row.amount)
       const grossCents = Math.round(grossDollars * 100)
@@ -150,16 +195,6 @@ export const retryStrandedFygaroCredits = async ({
           "Fygaro stranded-credit sweep: unparsable gross amount, skipping",
         )
         summary.failed += 1
-        continue
-      }
-      if (grossCents > autoCreditLimitCents) {
-        // Above the auto-credit limit this was always a manual credit; the
-        // webhook would have refused it with `over-limit` and stamped the
-        // row, so reaching here means the limit was lowered since. Leave it.
-        baseLogger.info(
-          { transactionId, grossCents, autoCreditLimitCents },
-          "Fygaro stranded-credit sweep: gross over auto-credit limit, leaving for manual",
-        )
         continue
       }
 
@@ -173,19 +208,95 @@ export const retryStrandedFygaroCredits = async ({
         continue
       }
 
+      // The real gate, with the real inputs, exactly as payment.ts runs it.
+      // Trailing-24h gross EXCLUDING this row (it is already in the sum as a
+      // Fiat Received row). A failed history read stays undefined so the gate
+      // reports `history-unavailable` rather than treating an outage as a
+      // clean slate.
+      const priorSum = await sumFygaroTopupGrossCentsLast24h({
+        accountId,
+        excludeTransactionId: transactionId,
+      })
+      const priorDayGrossCents = priorSum instanceof Error ? undefined : priorSum
       const flashFeeDiscountPercent = await getFlashFeeDiscountPercent({
         username: account.username,
         flow: "topup",
       })
-      const fees = computeFygaroFees({ grossCents, settings, flashFeeDiscountPercent })
-      if (fees.netCents <= 0) {
-        baseLogger.warn(
-          { transactionId, fees },
-          "Fygaro stranded-credit sweep: non-positive net, leaving for manual",
+      const gate = evaluateCreditGate({
+        creditEnabled: true,
+        currency,
+        settings,
+        grossCents,
+        level: account.level,
+        priorDayGrossCents,
+        flashFeeDiscountPercent,
+      })
+
+      if (!gate.credit) {
+        if (
+          gate.reason === "settings-unavailable" ||
+          gate.reason === "history-unavailable"
+        ) {
+          // Transient (an ERPNext blip). Same stance as the webhook: no stamp,
+          // retry next tick once the read self-heals.
+          summary.failed += 1
+          baseLogger.warn(
+            { transactionId, reason: gate.reason },
+            "Fygaro stranded-credit sweep: ERPNext read unavailable, retrying next sweep",
+          )
+          continue
+        }
+
+        // Deterministic refusal: hand it to a human the way the webhook does.
+        // Stamping the reason takes the row out of the daily-allowance sum (an
+        // uncredited payment delivered no value) and out of this list.
+        summary.leftForManual += 1
+        baseLogger.info(
+          { transactionId, reason: gate.reason, grossCents, level: account.level },
+          "Fygaro stranded-credit sweep: refused by the credit gate, leaving for manual",
         )
+        alertBridge({
+          dedupKey: generateDedupKey.fygaroNotCredited(transactionId),
+          source: "fygaro-webhook",
+          severity: "warning",
+          title: `Fygaro stranded top-up refused on retry (${gate.reason}) — not auto-credited`,
+          detail: `reason=${gate.reason} currency=${currency} gross=${centsToDollars(grossCents)} level=${account.level} retry=stranded-credit-sweep`,
+          context: {
+            transaction_id: transactionId,
+            account_id: accountId,
+            amount: centsToDollars(grossCents),
+            reason: gate.reason,
+            username: account.username ?? "",
+            account_level: account.level,
+          },
+        })
+        const marked = await markFygaroTopupNotCredited({
+          transactionId,
+          accountId,
+          amount: centsToDollars(grossCents),
+          currency,
+          reason: gate.reason,
+          rawPayload: parseRawPayload(row.raw_payload_json),
+        })
+        if (marked instanceof Error) {
+          baseLogger.error(
+            { transactionId, reason: gate.reason, err: marked },
+            "Fygaro stranded-credit sweep: could not stamp the refusal on the audit row",
+          )
+          alertBridge({
+            dedupKey: generateDedupKey.fygaroRefusalNotStamped(transactionId),
+            source: "erpnext-audit",
+            severity: "critical",
+            title:
+              "Fygaro stranded top-up refused but ERPNext could not be stamped — stamp failure_reason by hand",
+            detail: `reason=${gate.reason}: ${marked.message}`,
+            context: { transaction_id: transactionId, reason: gate.reason },
+          })
+        }
         continue
       }
 
+      const { fees } = gate
       const netUsd = fees.netCents / 100
       if (netUsd > remainingUsd) {
         summary.uncovered += 1
@@ -217,6 +328,28 @@ export const retryStrandedFygaroCredits = async ({
         baseLogger.info(
           { transactionId },
           "Fygaro stranded-credit sweep: row already Completed, skipping",
+        )
+        continue
+      }
+
+      // Second marker, independent of ERPNext: a prior credit (this sweep's or
+      // the webhook's) whose promotion failed. The row still reads Fiat
+      // Received, the send cache is only 24h — re-sending would be a second
+      // payment. Unknown (Redis unreadable) is also a stop: wait a tick.
+      const marker = await readFygaroCreditedMarker(transactionId)
+      if (!marker.known) {
+        summary.failed += 1
+        baseLogger.warn(
+          { transactionId },
+          "Fygaro stranded-credit sweep: credited marker unreadable, not sending this tick",
+        )
+        continue
+      }
+      if (marker.credited) {
+        summary.skippedCompleted += 1
+        baseLogger.warn(
+          { transactionId, netCents: marker.netCents },
+          "Fygaro stranded-credit sweep: already credited (marker) but row not Completed — promote by hand, not re-sending",
         )
         continue
       }
@@ -258,32 +391,65 @@ export const retryStrandedFygaroCredits = async ({
         continue
       }
 
+      // Money moved. Record that durably BEFORE anything that can fail or
+      // announce, so no later sweep can mistake this row for stranded.
+      await markFygaroCredited({ transactionId, netCents: fees.netCents })
+
       remainingUsd -= netUsd
       summary.credited += 1
 
+      const rawPayload = parseRawPayload(row.raw_payload_json)
       const completeResult = await completeFygaroTopup({
         transactionId,
         accountId,
         walletId: creditResult.walletId,
         amount: centsToDollars(grossCents),
-        currency: row.currency ?? "USD",
+        currency,
         initialAmount: centsToDollars(fees.grossCents),
         processorFee: centsToDollars(fees.processorFeeCents),
         flashFee: centsToDollars(fees.flashFeeCents),
         finalAmount: centsToDollars(fees.netCents),
-        rawPayload: parseRawPayload(row.raw_payload_json),
+        rawPayload,
       })
       if (completeResult instanceof Error) {
-        // Money moved; only the promotion failed. Same stance as the webhook:
-        // alert, keep going, the next sweep re-reads the row as uncredited and
-        // the idempotent send replays for free before promoting again.
+        // Money moved; only the promotion failed. The credited marker above
+        // keeps every later sweep off this row, so nothing re-sends — which
+        // also means nothing self-heals. Only a human can finish it.
+        baseLogger.error(
+          { transactionId, accountId, err: completeResult },
+          "Fygaro stranded-credit sweep: credit succeeded but ERPNext promotion failed",
+        )
         alertBridge({
           dedupKey: generateDedupKey.erpnextFygaroAudit(transactionId),
           source: "erpnext-audit",
-          severity: "warning",
-          title: "Fygaro retry credit succeeded but ERPNext promotion failed",
-          detail: completeResult.message,
-          context: { transaction_id: transactionId },
+          severity: "critical",
+          title:
+            "Fygaro retry credit succeeded but ERPNext promotion failed — money moved, promote the row by hand",
+          detail: `net=$${centsToDollars(fees.netCents)} credited to ${accountId}; row still Fiat Received: ${completeResult.message}`,
+          context: {
+            transaction_id: transactionId,
+            account_id: accountId,
+            net_usd: netUsd,
+          },
+        })
+      }
+
+      // The webhook stamps the checkout intent so `fygaroTopupStatus` tells
+      // the app the money landed; a swept payment must say the same thing or
+      // the app keeps polling FAILED while the push says credited. Only for
+      // payments that carried an intent (signed checkout); legacy payloads
+      // have nothing to stamp.
+      const intentId = intentIdOf(rawPayload)
+      if (intentId) {
+        await recordIntentOutcome({
+          intentId,
+          outcome: {
+            state: "credited",
+            netAmountCents: fees.netCents,
+            transactionId,
+            atMs: Date.now(),
+          },
+          ttlSeconds: FygaroConfig.checkout?.ttlSeconds ?? 900,
         })
       }
 
@@ -292,7 +458,7 @@ export const retryStrandedFygaroCredits = async ({
         phase: "succeeded",
         status: "success",
         accountId,
-        amount: { value: centsToDollars(grossCents), currency: row.currency ?? "USD" },
+        amount: { value: centsToDollars(grossCents), currency },
         meta: {
           provider: "Fygaro",
           transactionId,
@@ -313,7 +479,7 @@ export const retryStrandedFygaroCredits = async ({
           accountId,
           outcome: creditResult.status === "pending" ? "crediting" : "credited",
           amountCents: fees.netCents,
-          currency: row.currency ?? "USD",
+          currency,
         })
       }
     }
