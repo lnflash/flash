@@ -576,7 +576,7 @@ describe("retryStrandedFygaroCredits", () => {
   })
 
   describe("never double-credit", () => {
-    it("re-reads the row right before sending and skips one that is already Completed", async () => {
+    it("re-reads the row before any gate or send and skips one that is already Completed", async () => {
       mockListUncredited.mockResolvedValue([row("tx-manual", "70.00")])
       mockReadCompletion.mockResolvedValue({ completed: true, netAmountCents: 6602 })
 
@@ -589,13 +589,118 @@ describe("retryStrandedFygaroCredits", () => {
       expect(summary).toMatchObject({ candidates: 1, credited: 0, skippedCompleted: 1 })
     })
 
-    it("checks completion AFTER the balance check, so an uncovered row is not even read", async () => {
+    it("checks completion BEFORE the balance check, so an uncovered row is still read", async () => {
       mockListUncredited.mockResolvedValue([row("tx-big", "400.00")])
 
       await retryStrandedFygaroCredits({ availableUsd: 100 })
 
-      expect(mockReadCompletion).not.toHaveBeenCalled()
+      expect(mockReadCompletion).toHaveBeenCalledWith("tx-big")
+      expect(mockRedisGet).toHaveBeenCalledWith("fygaro:sweep-credited:tx-big")
       expect(mockCredit).not.toHaveBeenCalled()
+    })
+
+    it("does not report a Completed row as uncovered, however low the float", async () => {
+      mockListUncredited.mockResolvedValue([row("tx-big", "400.00")])
+      mockReadCompletion.mockResolvedValue({ completed: true, netAmountCents: 38654 })
+
+      const summary = await retryStrandedFygaroCredits({ availableUsd: 100 })
+
+      expect(summary).toMatchObject({ skippedCompleted: 1, uncovered: 0 })
+      expect(mockAlertBridge).not.toHaveBeenCalledWith(
+        expect.objectContaining({ dedupKey: "fygaro:retry-uncovered:tx-big" }),
+      )
+    })
+
+    it("does not re-raise 'uncovered' every tick for a marker-credited row", async () => {
+      mockListUncredited.mockResolvedValue([row("tx-big", "400.00")])
+      mockRedisGet.mockResolvedValue("38654")
+
+      const summary = await retryStrandedFygaroCredits({ availableUsd: 100 })
+
+      expect(summary).toMatchObject({ skippedCompleted: 1, uncovered: 0, credited: 0 })
+      expect(mockCredit).not.toHaveBeenCalled()
+      expect(mockAlertBridge).not.toHaveBeenCalledWith(
+        expect.objectContaining({ dedupKey: "fygaro:retry-uncovered:tx-big" }),
+      )
+    })
+
+    it("never re-gates a marker-credited row: a gate that would now refuse does NOT stamp or alert not-credited", async () => {
+      // Level 1 ($125/day) with $100 already in the window: the gate would
+      // refuse this $100 row with daily-limit-exceeded. But the customer was
+      // already paid — stamping would drop the row out of the allowance sum
+      // and tell ops the wallet is wrong.
+      mockFindById.mockImplementation(async (id: string) => ({
+        id,
+        username: `user-${id}`,
+        level: 1,
+      }))
+      mockSumGross.mockResolvedValue(10000)
+      mockListUncredited.mockResolvedValue([row("tx-paid", "100.00")])
+      mockRedisGet.mockResolvedValue("9452")
+
+      const summary = await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      expect(mockMarkNotCredited).not.toHaveBeenCalled()
+      expect(mockCredit).not.toHaveBeenCalled()
+      expect(mockSumGross).not.toHaveBeenCalled()
+      expect(mockAlertBridge).not.toHaveBeenCalledWith(
+        expect.objectContaining({ dedupKey: "fygaro:not-credited:tx-paid" }),
+      )
+      expect(summary).toMatchObject({
+        skippedCompleted: 1,
+        leftForManual: 0,
+        credited: 0,
+      })
+    })
+
+    it("never re-gates a Completed row either: no stamp, no not-credited alert", async () => {
+      mockFindById.mockImplementation(async (id: string) => ({
+        id,
+        username: `user-${id}`,
+        level: 1,
+      }))
+      mockSumGross.mockResolvedValue(10000)
+      mockListUncredited.mockResolvedValue([row("tx-done", "100.00")])
+      mockReadCompletion.mockResolvedValue({ completed: true, netAmountCents: 9452 })
+
+      const summary = await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      expect(mockMarkNotCredited).not.toHaveBeenCalled()
+      expect(mockCredit).not.toHaveBeenCalled()
+      expect(mockAlertBridge).not.toHaveBeenCalledWith(
+        expect.objectContaining({ dedupKey: "fygaro:not-credited:tx-done" }),
+      )
+      expect(summary).toMatchObject({ skippedCompleted: 1, leftForManual: 0 })
+    })
+
+    it("pages CRITICAL (promote by hand) for a marker-credited row that is still not Completed, without sending", async () => {
+      // The webhook's shape: it credited, wrote the marker, and the promotion
+      // failed. Fygaro never retries a 200 and this sweep refuses to re-send,
+      // so the sweep is the only thing left that can page a human.
+      mockListUncredited.mockResolvedValue([row("tx-70", "70.00")])
+      mockReadCompletion.mockResolvedValue({ completed: false })
+      mockRedisGet.mockResolvedValue("6602")
+
+      const summary = await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      expect(mockCredit).not.toHaveBeenCalled()
+      expect(mockComplete).not.toHaveBeenCalled()
+      expect(mockSendNotification).not.toHaveBeenCalled()
+      expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dedupKey: "erpnext-audit:fygaro:tx-70",
+          source: "erpnext-audit",
+          severity: "critical",
+          title: expect.stringContaining("promote the row by hand"),
+          context: {
+            transaction_id: "tx-70",
+            account_id: "acct-tx-70",
+            net_usd: 66.02,
+          },
+        }),
+      )
+      expect(summary).toMatchObject({ candidates: 1, credited: 0, skippedCompleted: 1 })
     })
   })
 

@@ -90,8 +90,10 @@ jest.mock("@services/fygaro/webhook-server/credit-topup", () => {
 // Durable credited marker (Redis). Mocked so the handler suite stays off the
 // real Redis client; the marker module has its own coverage via the sweep spec.
 const mockMarkFygaroCredited = jest.fn()
+const mockReadCreditedMarker = jest.fn()
 jest.mock("@services/fygaro/credited-marker", () => ({
   markFygaroCredited: (...args: unknown[]) => mockMarkFygaroCredited(...args),
+  readFygaroCreditedMarker: (...args: unknown[]) => mockReadCreditedMarker(...args),
 }))
 
 jest.mock("@services/fygaro/webhook-server/fygaro-settings", () => ({
@@ -240,6 +242,7 @@ beforeEach(() => {
     async (_key: unknown, fn: () => Promise<unknown>) => fn(),
   )
   mockReadCompletion.mockResolvedValue({ completed: false })
+  mockReadCreditedMarker.mockResolvedValue({ known: true, credited: false })
   mockFindByUsername.mockResolvedValue({
     id: ACCOUNT_ID,
     level: 1,
@@ -1002,6 +1005,94 @@ describe("fygaro paymentHandler", () => {
       expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
       expect(mockCompleteFygaroTopup).not.toHaveBeenCalled()
       expect(res.json).toHaveBeenCalledWith({ status: "already_processed" })
+    })
+
+    it("never re-credits a payment the marker says was credited, even though the row is not Completed", async () => {
+      // The promotion failed after the money moved; ops resend the webhook
+      // from the Fygaro dashboard a day later to "unstick" the Fiat Received
+      // row. The send cache has expired. Without the marker this is the
+      // double-pay the marker exists to prevent.
+      mockReadCompletion.mockResolvedValue({ completed: false })
+      mockReadCreditedMarker.mockResolvedValue({
+        known: true,
+        credited: true,
+        netCents: 9452,
+      })
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockReadCreditedMarker).toHaveBeenCalledWith(VALID_BODY.transactionId)
+      expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+      expect(mockMarkFygaroCredited).not.toHaveBeenCalled()
+      expect(mockCompleteFygaroTopup).not.toHaveBeenCalled()
+      expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+      expect(res.json).toHaveBeenCalledWith({ status: "already_processed" })
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dedupKey: `erpnext-audit:fygaro:${VALID_BODY.transactionId}`,
+          severity: "critical",
+          title: expect.stringContaining("promote the row by hand"),
+          context: expect.objectContaining({
+            transaction_id: VALID_BODY.transactionId,
+            account_id: ACCOUNT_ID,
+            net_usd: 94.52,
+          }),
+        }),
+      )
+    })
+
+    it("stamps the intent credited with the marker's net on a marker-guarded re-delivery", async () => {
+      const intentId = "7d2c1b9e-4f30-4a8b-9c6e-2b1f0d5e8a47"
+      mockReadCompletion.mockResolvedValue({ completed: false })
+      mockReadCreditedMarker.mockResolvedValue({
+        known: true,
+        credited: true,
+        netCents: 2852,
+      })
+      mockReadIntent.mockResolvedValue({
+        found: true,
+        intent: {
+          intentId,
+          accountId: ACCOUNT_ID,
+          username: VALID_BODY.customReference,
+          amountCents: 3000,
+          currency: "USD",
+          createdAtMs: 1,
+        },
+      })
+      const res = makeRes()
+
+      await paymentHandler(
+        makeReq({
+          ...VALID_BODY,
+          amount: "30.00",
+          customReference: `${VALID_BODY.customReference}|${intentId}`,
+        }),
+        res,
+      )
+
+      expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+      expect(res.json).toHaveBeenCalledWith({ status: "already_processed" })
+      expect(mockRecordIntentOutcome).toHaveBeenCalledWith(
+        expect.objectContaining({
+          intentId,
+          outcome: expect.objectContaining({ state: "credited", netAmountCents: 2852 }),
+        }),
+      )
+    })
+
+    it("falls through to the (idempotent) send when the marker is unreadable", async () => {
+      // A Redis blip must not 500 every webhook; the 24h send cache still
+      // covers the ordinary retry window.
+      mockReadCompletion.mockResolvedValue({ completed: false })
+      mockReadCreditedMarker.mockResolvedValue({ known: false })
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      expect(mockCreditFygaroTopup).toHaveBeenCalledTimes(1)
+      expect(res.json).toHaveBeenCalledWith({ status: "success", credited: true })
     })
 
     it("re-runs the credit when a retry arrives after an incomplete first attempt", async () => {

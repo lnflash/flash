@@ -64,7 +64,7 @@ import {
 import { getFygaroSettings, type FygaroSettings } from "../fygaro-settings"
 import { fygaroCreatedAtToIso } from "../created-at"
 import { parseCustomReference } from "../../checkout"
-import { markFygaroCredited } from "../../credited-marker"
+import { markFygaroCredited, readFygaroCreditedMarker } from "../../credited-marker"
 import {
   consumeIntent,
   readIntent,
@@ -1119,6 +1119,45 @@ export const paymentHandler = async (req: Request, res: Response) => {
           return { code: 200, body: { status: "already_processed" } }
         }
 
+        // Second processed marker, independent of ERPNext. The Completed row
+        // is the write that can fail AFTER the money moved (the promotion
+        // below), and when it does the row reads Fiat Received for good:
+        // Fygaro never retries a 200, and the sweep refuses to re-send a
+        // marked row. The realistic re-delivery is ops resending from the
+        // Fygaro dashboard to "unstick" that row — more than 24h later, past
+        // withPaymentIdempotency's cache — which would run creditFygaroTopup
+        // for real. The marker this handler writes at credit time is read
+        // here for exactly that case. Unknown (Redis unreadable) falls through
+        // to the send: the 24h cache still covers the common retry, and a
+        // Redis blip must not turn into a 500 storm on every webhook.
+        const marker = await readFygaroCreditedMarker(transactionId)
+        if (marker.known && marker.credited) {
+          baseLogger.warn(
+            { transactionId, netCents: marker.netCents },
+            "Duplicate Fygaro payment webhook: already credited (marker) but row not Completed — not re-sending",
+          )
+          await recordOutcome({
+            state: "credited",
+            netAmountCents: marker.netCents ?? fees.netCents,
+          })
+          alertBridge({
+            dedupKey: generateDedupKey.erpnextFygaroAudit(transactionId),
+            source: "erpnext-audit",
+            severity: "critical",
+            title:
+              "Fygaro top-up credited but row not Completed — promote the row by hand",
+            detail: `re-delivery of a credited payment; net=${
+              marker.netCents != null ? `$${centsToDollars(marker.netCents)}` : "unknown"
+            } already in wallet ${creditAccountId}; row still Fiat Received, nothing re-promotes it`,
+            context: {
+              transaction_id: transactionId,
+              account_id: creditAccountId,
+              net_usd: marker.netCents != null ? marker.netCents / 100 : undefined,
+            },
+          })
+          return { code: 200, body: { status: "already_processed" } }
+        }
+
         const creditResult = await creditFygaroTopup({
           recipientAccountId: creditAccountId,
           amountCents: fees.netCents,
@@ -1231,15 +1270,19 @@ export const paymentHandler = async (req: Request, res: Response) => {
         })
         if (completeResult instanceof Error) {
           // The money moved; only the audit promotion failed. Alert, don't
-          // fail: the row stays Fiat Received, so a provider retry replays
-          // the cached send result and re-attempts this promotion.
+          // fail — but nothing retries this: Fygaro does not re-deliver a
+          // 200, and the stranded-credit sweep sees the credited marker and
+          // refuses to re-send or re-promote (it escalates to critical on its
+          // next tick instead). The row stays Fiat Received until a human
+          // promotes it by hand.
           alertBridge({
             dedupKey: generateDedupKey.erpnextFygaroAudit(transactionId),
             source: "erpnext-audit",
             severity: "warning",
-            title: "Fygaro credit succeeded but ERPNext promotion failed",
+            title:
+              "Fygaro credit succeeded but ERPNext promotion failed — nothing re-promotes it, promote the row by hand",
             detail: completeResult.message,
-            context: { transaction_id: transactionId },
+            context: { transaction_id: transactionId, account_id: creditAccountId },
           })
         }
 

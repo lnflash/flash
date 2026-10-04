@@ -40,14 +40,16 @@ import { getFygaroSettings } from "./webhook-server/fygaro-settings"
  * This sweep re-runs the SAME credit path once the float is back:
  *   - candidates come from ERPNext (listUncreditedFygaroTopups: Fiat Received,
  *     USD, attributed, no failure_reason, not email-attributed, oldest first),
+ *   - the processed markers are read FIRST — the ERPNext row (ops may have
+ *     hand-completed it) AND the Redis credited marker (a prior credit whose
+ *     promotion failed) — before the gate or the coverage check, so a paid
+ *     row is never re-judged with today's inputs, never stamped as refused,
+ *     never reported uncovered, and never sent twice; a marked-but-not-
+ *     Completed row pages critical ("promote by hand"),
  *   - the FULL webhook gate is re-run (evaluateCreditGate over the live
  *     settings, the account level, the trailing-24h gross and the operator
  *     fee-discount whitelist), so the fee math and every limit have exactly
  *     one owner,
- *   - the credited markers are re-read right before the send — the ERPNext
- *     row (ops may have hand-completed it) AND the Redis credited marker (a
- *     prior credit whose promotion failed) — so a credited payment is never
- *     sent twice,
  *   - the send is creditFygaroTopup, idempotent on `fygaro:<transactionId>`,
  *     so even a lost race with a concurrent webhook retry cannot double-pay,
  *   - on success the row is promoted exactly as the webhook promotes it (full
@@ -187,6 +189,67 @@ export const retryStrandedFygaroCredits = async ({
       const accountId = row.account_id as AccountId
       const currency = row.currency ?? "USD"
 
+      // Processed markers FIRST, before any gate or coverage check. The row
+      // we are about to re-judge may already have been paid: ops may have hand-
+      // credited and marked it Completed since the list was fetched, or an
+      // earlier credit (this sweep's or the webhook's) landed and only the
+      // promotion failed. Re-running the gate on a paid row with today's
+      // inputs (a lowered cap, a raised minimum, a downgraded level) would
+      // stamp `daily-limit-exceeded` on money the customer already has, drop
+      // it out of the allowance sum and announce a contradiction; re-running
+      // the coverage check would re-raise "uncovered" every tick for a payment
+      // that needs no float at all. So neither runs until both markers say
+      // this row is genuinely unpaid.
+      const completion = await readFygaroTopupCompletion(transactionId)
+      if (completion.completed) {
+        summary.skippedCompleted += 1
+        baseLogger.info(
+          { transactionId },
+          "Fygaro stranded-credit sweep: row already Completed, skipping",
+        )
+        continue
+      }
+
+      // Second marker, independent of ERPNext: a prior credit whose promotion
+      // failed. The row still reads Fiat Received, the send cache is only 24h
+      // — re-sending would be a second payment. Unknown (Redis unreadable) is
+      // also a stop: wait a tick.
+      const marker = await readFygaroCreditedMarker(transactionId)
+      if (!marker.known) {
+        summary.failed += 1
+        baseLogger.warn(
+          { transactionId },
+          "Fygaro stranded-credit sweep: credited marker unreadable, not sending this tick",
+        )
+        continue
+      }
+      if (marker.credited) {
+        // Money is in the wallet; the audit row never got promoted. Nothing
+        // here re-sends (that would be a double-pay) and Fygaro never retries
+        // a 200, so nothing self-heals: this is a page, not a log line. Same
+        // dedup key as the promotion-failure alerts, so it joins that incident
+        // rather than opening a second one every 15 minutes.
+        summary.skippedCompleted += 1
+        const markerNetUsd = marker.netCents != null ? marker.netCents / 100 : undefined
+        baseLogger.warn(
+          { transactionId, netCents: marker.netCents },
+          "Fygaro stranded-credit sweep: already credited (marker) but row not Completed — promote by hand, not re-sending",
+        )
+        alertBridge({
+          dedupKey: generateDedupKey.erpnextFygaroAudit(transactionId),
+          source: "erpnext-audit",
+          severity: "critical",
+          title: "Fygaro top-up credited but row not Completed — promote the row by hand",
+          detail: `net=${markerNetUsd != null ? `$${markerNetUsd.toFixed(2)}` : "unknown"} already credited to ${accountId}; row still Fiat Received, sweep will not re-send or re-promote`,
+          context: {
+            transaction_id: transactionId,
+            account_id: accountId,
+            net_usd: markerNetUsd,
+          },
+        })
+        continue
+      }
+
       const grossDollars = row.amount == null ? NaN : Number(row.amount)
       const grossCents = Math.round(grossDollars * 100)
       if (!Number.isFinite(grossCents) || grossCents <= 0) {
@@ -314,43 +377,6 @@ export const retryStrandedFygaroCredits = async ({
             available_usd: remainingUsd,
           },
         })
-        continue
-      }
-
-      // Re-read right before the send: ops may have hand-credited and marked
-      // this row Completed since the list was fetched. The idempotent send
-      // would still not double-pay (different idempotency key from a manual
-      // app send, but the row is the processed marker ops relies on), so
-      // honour the row.
-      const completion = await readFygaroTopupCompletion(transactionId)
-      if (completion.completed) {
-        summary.skippedCompleted += 1
-        baseLogger.info(
-          { transactionId },
-          "Fygaro stranded-credit sweep: row already Completed, skipping",
-        )
-        continue
-      }
-
-      // Second marker, independent of ERPNext: a prior credit (this sweep's or
-      // the webhook's) whose promotion failed. The row still reads Fiat
-      // Received, the send cache is only 24h — re-sending would be a second
-      // payment. Unknown (Redis unreadable) is also a stop: wait a tick.
-      const marker = await readFygaroCreditedMarker(transactionId)
-      if (!marker.known) {
-        summary.failed += 1
-        baseLogger.warn(
-          { transactionId },
-          "Fygaro stranded-credit sweep: credited marker unreadable, not sending this tick",
-        )
-        continue
-      }
-      if (marker.credited) {
-        summary.skippedCompleted += 1
-        baseLogger.warn(
-          { transactionId, netCents: marker.netCents },
-          "Fygaro stranded-credit sweep: already credited (marker) but row not Completed — promote by hand, not re-sending",
-        )
         continue
       }
 
