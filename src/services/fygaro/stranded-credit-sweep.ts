@@ -3,6 +3,7 @@ import { alertBridge, generateDedupKey } from "@services/alerts"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
 import {
   completeFygaroTopup,
+  countAgedOutUncreditedFygaroTopups,
   listUncreditedFygaroTopupsLastDays,
   markFygaroTopupNotCredited,
   readFygaroTopupCompletion,
@@ -75,7 +76,16 @@ import { getFygaroSettings } from "./webhook-server/fygaro-settings"
  * A credit whose ERPNext promotion fails is NOT retried by re-sending. The
  * money moved; the Redis marker records that, the alert is CRITICAL and names
  * the manual step (promote the row by hand), and the next sweep skips the row.
- * The idempotency cache the send relies on lives 24h; the lookback is 7 days.
+ * The idempotency cache the send relies on lives 24h; the lookback is 7 days
+ * and the marker outlives both (credited-marker.ts).
+ *
+ * Aging out is never silent. Candidates are windowed on `last_seen_at`, which
+ * a skipped or failed retry never touches, so a row that fails every tick for
+ * `lookbackDays` (or sits uncovered through a slow refill) drops out of the
+ * list on day lookback+1 — and with it the per-row warning. The money is still
+ * captured and undelivered, so every sweep also counts the rows OLDER than the
+ * window with the same shape and pages CRITICAL once per dedup window with the
+ * count and the oldest request_id: "credit by hand".
  */
 
 export type StrandedCreditSweepSummary = {
@@ -92,6 +102,10 @@ export type StrandedCreditSweepSummary = {
   // reason and alerted, exactly as the webhook refuses).
   leftForManual: number
   stoppedOnFloat: boolean
+  // Stranded rows older than the lookback window: the sweep can no longer see
+  // them as candidates and will never retry them. Paged critical, never
+  // silently dropped.
+  agedOut: number
 }
 
 const DEFAULT_LOOKBACK_DAYS = 7
@@ -131,12 +145,61 @@ const emptySummary = (): StrandedCreditSweepSummary => ({
   failed: 0,
   leftForManual: 0,
   stoppedOnFloat: false,
+  agedOut: 0,
 })
 
+// Rows that fell out of the window uncredited and unrefused. Runs after every
+// sweep — including one with no candidates, which is exactly what a fully
+// aged-out backlog looks like. A failed count is a warning, not a page: the
+// list read that just succeeded makes a transient blip the likely cause, and
+// the next tick re-counts.
+const pageAgedOutStrandedTopups = async ({
+  lookbackDays,
+  summary,
+}: {
+  lookbackDays: number
+  summary: StrandedCreditSweepSummary
+}): Promise<void> => {
+  const aged = await countAgedOutUncreditedFygaroTopups({ days: lookbackDays })
+  if (aged instanceof Error) {
+    baseLogger.warn(
+      { err: aged, lookbackDays },
+      "Fygaro stranded-credit sweep: could not count aged-out stranded top-ups",
+    )
+    return
+  }
+  summary.agedOut = aged.count
+  if (aged.count === 0) return
+  baseLogger.error(
+    {
+      agedOut: aged.count,
+      lookbackDays,
+      oldestRequestId: aged.oldestRequestId,
+      oldestLastSeenAt: aged.oldestLastSeenAt,
+    },
+    "Fygaro stranded-credit sweep: stranded top-ups older than the lookback will never be retried — credit by hand",
+  )
+  alertBridge({
+    dedupKey: generateDedupKey.fygaroRetryAgedOut(),
+    source: "fygaro-webhook",
+    severity: "critical",
+    title: `Fygaro stranded-credit sweep aged out ${aged.count} stranded top-up${aged.count === 1 ? "" : "s"} — credit by hand`,
+    detail: `${aged.count} Fiat Received Fygaro top-up${aged.count === 1 ? "" : "s"} with no failure_reason ${aged.count === 1 ? "is" : "are"} older than the ${lookbackDays}-day lookback and will not be retried; oldest=${aged.oldestRequestId ?? "unknown"} last_seen_at=${aged.oldestLastSeenAt ?? "unknown"}`,
+    context: {
+      aged_out: aged.count,
+      lookback_days: lookbackDays,
+      oldest_request_id: aged.oldestRequestId ?? "",
+      oldest_last_seen_at: aged.oldestLastSeenAt ?? "",
+    },
+  })
+}
+
 /**
- * @param availableUsd the treasury balance the caller just read. Candidates
- *   whose net exceeds what is left are reported `uncovered` (warning) and
- *   skipped, so a $400 payment never blocks a $20 one behind it.
+ * @param availableUsd what the caller will let this sweep spend: the treasury
+ *   balance it just read MINUS the critical-floor reserve kept for live card
+ *   traffic (treasury-loop.ts). Candidates whose net exceeds what is left are
+ *   reported `uncovered` (warning) and skipped, so a $400 payment never blocks
+ *   a $20 one behind it.
  */
 export const retryStrandedFygaroCredits = async ({
   availableUsd,
@@ -172,7 +235,10 @@ export const retryStrandedFygaroCredits = async ({
       return summary
     }
     summary.candidates = rows.length
-    if (rows.length === 0) return summary
+    if (rows.length === 0) {
+      await pageAgedOutStrandedTopups({ lookbackDays, summary })
+      return summary
+    }
 
     let remainingUsd = availableUsd
 
@@ -369,7 +435,7 @@ export const retryStrandedFygaroCredits = async ({
           severity: "warning",
           title:
             "Fygaro stranded top-up still uncovered — treasury float too low to retry",
-          detail: `net=$${centsToDollars(fees.netCents)} available=$${remainingUsd.toFixed(2)}`,
+          detail: `net=$${centsToDollars(fees.netCents)} available above reserve=$${remainingUsd.toFixed(2)}`,
           context: {
             transaction_id: transactionId,
             account_id: accountId,
@@ -510,6 +576,7 @@ export const retryStrandedFygaroCredits = async ({
       }
     }
 
+    await pageAgedOutStrandedTopups({ lookbackDays, summary })
     baseLogger.info({ summary }, "Fygaro stranded-credit sweep finished")
     return summary
   } catch (err) {

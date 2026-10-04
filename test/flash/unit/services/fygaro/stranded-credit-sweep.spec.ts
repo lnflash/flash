@@ -33,8 +33,10 @@ const mockReadCompletion = jest.fn()
 const mockComplete = jest.fn()
 const mockSumGross = jest.fn()
 const mockMarkNotCredited = jest.fn()
+const mockCountAgedOut = jest.fn()
 jest.mock("@services/frappe/BridgeTransferRequestWriter", () => ({
   listUncreditedFygaroTopupsLastDays: (...args: unknown[]) => mockListUncredited(...args),
+  countAgedOutUncreditedFygaroTopups: (...args: unknown[]) => mockCountAgedOut(...args),
   readFygaroTopupCompletion: (...args: unknown[]) => mockReadCompletion(...args),
   completeFygaroTopup: (...args: unknown[]) => mockComplete(...args),
   sumFygaroTopupGrossCentsLast24h: (...args: unknown[]) => mockSumGross(...args),
@@ -151,6 +153,7 @@ beforeEach(() => {
   mockGetDiscount.mockResolvedValue(0)
   mockSumGross.mockResolvedValue(0)
   mockMarkNotCredited.mockResolvedValue(true)
+  mockCountAgedOut.mockResolvedValue({ count: 0 })
   mockRedisSet.mockResolvedValue("OK")
   mockRedisGet.mockResolvedValue(null)
   mockRecordIntentOutcome.mockResolvedValue(undefined)
@@ -335,7 +338,7 @@ describe("retryStrandedFygaroCredits", () => {
       })
     })
 
-    it("records the durable credited marker (lookback + 1 day) BEFORE promoting the row", async () => {
+    it("records the durable credited marker (30-day floor, decoupled from the lookback) BEFORE promoting the row", async () => {
       mockFygaroConfig.retry = { enabled: true, lookbackDays: 7, maxPerSweep: 20 }
       mockListUncredited.mockResolvedValue([row("tx-70", "70.00")])
       const order: string[] = []
@@ -354,7 +357,7 @@ describe("retryStrandedFygaroCredits", () => {
         "fygaro:sweep-credited:tx-70",
         "6602",
         "EX",
-        8 * 24 * 60 * 60,
+        30 * 24 * 60 * 60,
       )
       expect(order).toEqual(["marker", "promote"])
     })
@@ -722,10 +725,31 @@ describe("retryStrandedFygaroCredits", () => {
         expect.objectContaining({
           dedupKey: "fygaro:retry-uncovered:tx-big",
           severity: "warning",
+          detail: expect.stringContaining("available above reserve=$100.00"),
           context: expect.objectContaining({
             transaction_id: "tx-big",
             available_usd: 100,
           }),
+        }),
+      )
+    })
+
+    it("float $600 with a $500 critical floor leaves $100 to spend: one $280 row is uncovered, NOT credited", async () => {
+      // The treasury loop hands the sweep balance - criticalFloor (100), not
+      // the balance (600). Crediting this row would take the float to $331,
+      // under the floor the loop just gated on, and the next live top-up
+      // would fail with insufficient-treasury-float.
+      mockListUncredited.mockResolvedValue([row("tx-280", "280.00")]) // net ≈ 265.6
+
+      const summary = await retryStrandedFygaroCredits({ availableUsd: 600 - 500 })
+
+      expect(summary).toMatchObject({ candidates: 1, credited: 0, uncovered: 1 })
+      expect(mockCredit).not.toHaveBeenCalled()
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dedupKey: "fygaro:retry-uncovered:tx-280",
+          severity: "warning",
+          context: expect.objectContaining({ available_usd: 100 }),
         }),
       )
     })
@@ -740,6 +764,102 @@ describe("retryStrandedFygaroCredits", () => {
 
       expect(summary).toMatchObject({ credited: 1, uncovered: 1 })
       expect(mockCredit).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe("aged-out stranded rows (never silent)", () => {
+    it("pages CRITICAL once with the count and oldest request_id when stranded rows have fallen out of the lookback — even with no candidates in window", async () => {
+      mockListUncredited.mockResolvedValue([])
+      mockCountAgedOut.mockResolvedValue({
+        count: 3,
+        oldestRequestId: "fygaro:tx-old",
+        oldestLastSeenAt: "2026-09-20 09:00:00",
+      })
+
+      const summary = await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      expect(mockCountAgedOut).toHaveBeenCalledWith({ days: 7 })
+      expect(summary).toMatchObject({ candidates: 0, agedOut: 3 })
+      expect(mockAlertBridge).toHaveBeenCalledTimes(1)
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dedupKey: "fygaro:retry-aged-out",
+          severity: "critical",
+          title:
+            "Fygaro stranded-credit sweep aged out 3 stranded top-ups — credit by hand",
+          detail: expect.stringContaining("oldest=fygaro:tx-old"),
+          context: expect.objectContaining({
+            aged_out: 3,
+            lookback_days: 7,
+            oldest_request_id: "fygaro:tx-old",
+            oldest_last_seen_at: "2026-09-20 09:00:00",
+          }),
+        }),
+      )
+    })
+
+    it("counts aged-out rows AFTER a sweep with candidates too, using the configured lookback", async () => {
+      mockFygaroConfig.retry = { enabled: true, lookbackDays: 14, maxPerSweep: 20 }
+      mockListUncredited.mockResolvedValue([row("tx-70", "70.00")])
+      mockCountAgedOut.mockResolvedValue({ count: 1, oldestRequestId: "fygaro:tx-old" })
+
+      const summary = await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      expect(mockCountAgedOut).toHaveBeenCalledWith({ days: 14 })
+      expect(summary).toMatchObject({ credited: 1, agedOut: 1 })
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dedupKey: "fygaro:retry-aged-out",
+          title:
+            "Fygaro stranded-credit sweep aged out 1 stranded top-up — credit by hand",
+          detail: expect.stringContaining("14-day lookback"),
+        }),
+      )
+    })
+
+    it("does not page when nothing has aged out", async () => {
+      mockCountAgedOut.mockResolvedValue({ count: 0 })
+
+      const summary = await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      expect(summary.agedOut).toBe(0)
+      expect(mockAlertBridge).not.toHaveBeenCalledWith(
+        expect.objectContaining({ dedupKey: "fygaro:retry-aged-out" }),
+      )
+    })
+
+    it("still pages aged-out rows when the in-window sweep stopped on an exhausted float", async () => {
+      mockListUncredited.mockResolvedValue([row("tx-1", "70.00")])
+      mockCredit.mockResolvedValue(
+        new FygaroCreditError("insufficient-treasury-float", "IBEX insufficient balance"),
+      )
+      mockCountAgedOut.mockResolvedValue({ count: 2, oldestRequestId: "fygaro:tx-old" })
+
+      const summary = await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      expect(summary).toMatchObject({ stoppedOnFloat: true, agedOut: 2 })
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({ dedupKey: "fygaro:retry-aged-out" }),
+      )
+    })
+
+    it("warns (does not page, does not throw) when the aged-out count read fails", async () => {
+      mockCountAgedOut.mockResolvedValue(new Error("erp down"))
+
+      const summary = await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      expect(summary.agedOut).toBe(0)
+      expect(mockAlertBridge).not.toHaveBeenCalledWith(
+        expect.objectContaining({ dedupKey: "fygaro:retry-aged-out" }),
+      )
+    })
+
+    it("does not count aged-out rows when the sweep itself is gated off (kill-switch)", async () => {
+      mockGetSettings.mockResolvedValue({ ...settings, autoCreditEnabled: false })
+
+      await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      expect(mockCountAgedOut).not.toHaveBeenCalled()
     })
   })
 

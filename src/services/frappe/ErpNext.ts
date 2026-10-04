@@ -232,6 +232,13 @@ export type UncreditedFygaroTopupRow = {
   last_seen_at?: string | null
 }
 
+export type AgedOutUncreditedFygaroTopups = {
+  count: number
+  // The longest-waiting aged-out row, for the page. Absent when count is 0.
+  oldestRequestId?: string
+  oldestLastSeenAt?: string
+}
+
 // Raw "Fygaro Settings" Single doctype as ERPNext returns it. Numeric fields
 // may arrive as numbers or numeric strings depending on the Frappe field type;
 // the caller (fygaro-settings.ts) coerces and validates before use.
@@ -1712,13 +1719,16 @@ export class ErpNext {
   // failure_reason and are excluded; email-attributed rows are excluded because
   // auto-credit never keys off a payer-typed email. Oldest first, so a
   // per-sweep cap drains the backlog in arrival order.
-  async listUncreditedFygaroTopups({
-    since,
-    limit,
-  }: {
-    since: Date
-    limit: number
-  }): Promise<UncreditedFygaroTopupRow[] | FygaroTopupHistoryQueryError> {
+  //
+  // One query shape, two cutoffs: `listUncreditedFygaroTopups` takes the rows
+  // INSIDE the sweep's window (last_seen_at >= since) and
+  // `countAgedOutUncreditedFygaroTopups` the rows that fell OUT of it
+  // (last_seen_at < before). They must agree on every other filter or a row
+  // could leave one set without entering the other.
+  private async queryUncreditedFygaroTopups(
+    lastSeenAtOp: ">=" | "<",
+    cutoff: Date,
+  ): Promise<UncreditedFygaroTopupRow[] | FygaroTopupHistoryQueryError> {
     try {
       const filters = JSON.stringify([
         [BridgeTransferRequest.doctype, "provider", "=", "Fygaro"],
@@ -1738,8 +1748,8 @@ export class ErpNext {
         [
           BridgeTransferRequest.doctype,
           "last_seen_at",
-          ">=",
-          toFrappeDatetime(since.toISOString()),
+          lastSeenAtOp,
+          toFrappeDatetime(cutoff.toISOString()),
         ],
       ])
       const fields = JSON.stringify([
@@ -1762,8 +1772,8 @@ export class ErpNext {
             order_by: "last_seen_at asc",
             // Over-fetch: the failure_reason / email-attribution exclusions
             // below are JS-side (a Frappe "is not set" filter inverts around
-            // NULL), so the SQL limit alone could return `limit` refused rows
-            // and starve the ones that need crediting.
+            // NULL), so a SQL limit could return only refused rows and starve
+            // the ones that need crediting.
             limit_page_length: 0,
           },
           headers: this.headers,
@@ -1781,13 +1791,12 @@ export class ErpNext {
         if (isEmailAttributedRow(row.source_systems_seen)) continue
         if (!row.account_id || !row.request_id) continue
         out.push(row)
-        if (out.length >= limit) break
       }
       return out
     } catch (err) {
       const responseData = isAxiosError(err) ? err.response?.data : undefined
       baseLogger.error(
-        { err, responseData },
+        { err, responseData, lastSeenAtOp },
         "Error listing uncredited Fygaro top-ups from ERPNext",
       )
       recordExceptionInCurrentSpan({
@@ -1795,6 +1804,41 @@ export class ErpNext {
         attributes: { "erpnext.exception": responseData?.exception },
       })
       return new FygaroTopupHistoryQueryError(err)
+    }
+  }
+
+  async listUncreditedFygaroTopups({
+    since,
+    limit,
+  }: {
+    since: Date
+    limit: number
+  }): Promise<UncreditedFygaroTopupRow[] | FygaroTopupHistoryQueryError> {
+    const rows = await this.queryUncreditedFygaroTopups(">=", since)
+    if (rows instanceof Error) return rows
+    // Cap AFTER the exclusions, so refused rows cannot starve credit-able ones.
+    return rows.slice(0, limit)
+  }
+
+  // The stranded rows the sweep can no longer see: same shape as above, but
+  // last_seen_at is OLDER than the window. A retry that keeps failing (or a row
+  // that sat uncovered through a slow refill) never touches last_seen_at, so
+  // on day lookback+1 it silently leaves the candidate list while the money is
+  // still captured and undelivered. The sweep pages on this count so "gave up"
+  // is never silent. Oldest first, so `oldest` is the row that has waited
+  // longest.
+  async countAgedOutUncreditedFygaroTopups({
+    before,
+  }: {
+    before: Date
+  }): Promise<AgedOutUncreditedFygaroTopups | FygaroTopupHistoryQueryError> {
+    const rows = await this.queryUncreditedFygaroTopups("<", before)
+    if (rows instanceof Error) return rows
+    const oldest = rows[0]
+    return {
+      count: rows.length,
+      oldestRequestId: oldest?.request_id,
+      oldestLastSeenAt: oldest?.last_seen_at ?? undefined,
     }
   }
 

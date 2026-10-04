@@ -1,4 +1,7 @@
-import ErpNext, { type UncreditedFygaroTopupRow } from "@services/frappe/ErpNext"
+import ErpNext, {
+  type AgedOutUncreditedFygaroTopups,
+  type UncreditedFygaroTopupRow,
+} from "@services/frappe/ErpNext"
 import { baseLogger } from "@services/logger"
 import {
   BridgeTransferRequestUpsertError,
@@ -329,6 +332,21 @@ export const listUncreditedFygaroTopupsLastDays = async ({
   return ErpNext.listUncreditedFygaroTopups({
     since: new Date(Date.now() - days * 24 * 60 * 60 * 1000),
     limit,
+  })
+}
+
+// The stranded rows that fell OUT of the sweep's `days` window without being
+// credited or refused. See ErpNext.countAgedOutUncreditedFygaroTopups.
+export const countAgedOutUncreditedFygaroTopups = async ({
+  days,
+}: {
+  days: number
+}): Promise<AgedOutUncreditedFygaroTopups | FygaroTopupHistoryQueryError> => {
+  if (!ErpNext?.countAgedOutUncreditedFygaroTopups) {
+    return new FygaroTopupHistoryQueryError("ERPNext client is not configured")
+  }
+  return ErpNext.countAgedOutUncreditedFygaroTopups({
+    before: new Date(Date.now() - days * 24 * 60 * 60 * 1000),
   })
 }
 

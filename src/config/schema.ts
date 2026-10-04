@@ -1103,6 +1103,13 @@ export const configSchema = {
           type: "object",
           properties: {
             enabled: { type: "boolean", default: true },
+            // How far back the stranded-credit sweep looks for Fiat Received /
+            // no-failure_reason Fygaro rows. MUST stay below
+            // MIN_CREDITED_MARKER_TTL_DAYS (30, src/services/fygaro/credited-marker.ts):
+            // the Redis "already credited" marker is what stops a row whose
+            // ERPNext promotion failed from being re-paid once the 24h send
+            // cache is gone. Raising this past the marker TTL re-exposes rows
+            // whose markers have already expired.
             lookbackDays: { type: "integer", default: 7 },
             maxPerSweep: { type: "integer", default: 20 },
           },

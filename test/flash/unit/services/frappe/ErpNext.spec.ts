@@ -1166,6 +1166,104 @@ describe("ErpNext.listUncreditedFygaroTopups", () => {
   })
 })
 
+describe("ErpNext.countAgedOutUncreditedFygaroTopups", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+  })
+
+  const params = { before: new Date("2026-09-26T17:00:00Z") }
+  const row = (id: string, extra: Record<string, unknown> = {}) => ({
+    name: `row-${id}`,
+    request_id: `fygaro:${id}`,
+    account_id: `acct-${id}`,
+    amount: "70.00",
+    currency: "USD",
+    failure_reason: null,
+    source_systems_seen: "fygaro_webhook",
+    raw_payload_json: "{}",
+    last_seen_at: "2026-09-20 09:00:00",
+    ...extra,
+  })
+
+  it("queries the SAME shape as the candidate list, with the cutoff inverted (last_seen_at < before), oldest first", async () => {
+    mockedAxios.get.mockResolvedValue({ data: { data: [] } })
+
+    await client.countAgedOutUncreditedFygaroTopups(params)
+
+    const [url, config] = mockedAxios.get.mock.calls[0]
+    expect(url).toBe("https://erp.example/api/resource/Bridge%20Transfer%20Request")
+    expect(JSON.parse(config.params.filters)).toEqual([
+      ["Bridge Transfer Request", "provider", "=", "Fygaro"],
+      ["Bridge Transfer Request", "transaction_type", "=", "Topup"],
+      ["Bridge Transfer Request", "status", "=", "Fiat Received"],
+      ["Bridge Transfer Request", "currency", "=", "USD"],
+      ["Bridge Transfer Request", "last_seen_at", "<", "2026-09-26 17:00:00"],
+    ])
+    expect(config.params.order_by).toBe("last_seen_at asc")
+    expect(config.params.limit_page_length).toBe(0)
+  })
+
+  it("returns the count and the oldest row's request_id / last_seen_at", async () => {
+    mockedAxios.get.mockResolvedValue({
+      data: {
+        data: [
+          row("oldest", { last_seen_at: "2026-09-18 08:00:00" }),
+          row("newer", { last_seen_at: "2026-09-20 09:00:00" }),
+        ],
+      },
+    })
+
+    expect(await client.countAgedOutUncreditedFygaroTopups(params)).toEqual({
+      count: 2,
+      oldestRequestId: "fygaro:oldest",
+      oldestLastSeenAt: "2026-09-18 08:00:00",
+    })
+  })
+
+  it("applies the same exclusions as the candidate list: refused, email-attributed and unattributed rows are not 'aged out'", async () => {
+    mockedAxios.get.mockResolvedValue({
+      data: {
+        data: [
+          row("refused", { failure_reason: "daily-limit-exceeded" }),
+          row("email", {
+            source_systems_seen: `fygaro_webhook,${EMAIL_ATTRIBUTION_SOURCE_SYSTEM}`,
+          }),
+          row("noacct", { account_id: null }),
+          row("ok"),
+        ],
+      },
+    })
+
+    expect(await client.countAgedOutUncreditedFygaroTopups(params)).toEqual({
+      count: 1,
+      oldestRequestId: "fygaro:ok",
+      oldestLastSeenAt: "2026-09-20 09:00:00",
+    })
+  })
+
+  it("reports zero with no oldest row when nothing has aged out", async () => {
+    mockedAxios.get.mockResolvedValue({ data: { data: [] } })
+
+    expect(await client.countAgedOutUncreditedFygaroTopups(params)).toEqual({
+      count: 0,
+      oldestRequestId: undefined,
+      oldestLastSeenAt: undefined,
+    })
+  })
+
+  it("returns an error (never a silent zero) when the response has no data array", async () => {
+    mockedAxios.get.mockResolvedValue({ data: {} })
+    expect(await client.countAgedOutUncreditedFygaroTopups(params)).toBeInstanceOf(Error)
+  })
+
+  it("returns an error when the read fails", async () => {
+    mockedAxios.get.mockRejectedValue(
+      Object.assign(new Error("boom"), { isAxiosError: true }),
+    )
+    expect(await client.countAgedOutUncreditedFygaroTopups(params)).toBeInstanceOf(Error)
+  })
+})
+
 describe("ErpNext.getFeeDiscounts", () => {
   beforeEach(() => {
     jest.clearAllMocks()

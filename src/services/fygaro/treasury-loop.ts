@@ -52,7 +52,16 @@ export const runFygaroTreasuryTick = async (): Promise<void> => {
     )
     return
   }
-  await retryStrandedFygaroCredits({ availableUsd: reading.balanceUsd })
+  // The critical floor is a RESERVE for live card traffic, not a one-shot
+  // gate: the sweep may spend only what sits above it. Handing it the full
+  // balance would let two stranded rows drain a $600 float to $40 straight
+  // through the $500 floor it just checked, and the next live top-up would
+  // fail with insufficient-treasury-float — the incident this loop exists to
+  // prevent. The per-row coverage check inside the sweep only stops it going
+  // negative; the reserve is enforced here.
+  await retryStrandedFygaroCredits({
+    availableUsd: reading.balanceUsd - reading.criticalFloorUsd,
+  })
 }
 
 export const startFygaroTreasuryLoop = (): NodeJS.Timeout | undefined => {

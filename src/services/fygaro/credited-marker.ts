@@ -32,11 +32,20 @@ const SECONDS_PER_DAY = 24 * 60 * 60
 export const creditedMarkerKey = (transactionId: string): string =>
   `fygaro:sweep-credited:${transactionId}`
 
-// Lookback + 1 day, so a row still inside the sweep's window can never find
-// its marker expired.
+// The marker must outlive the sweep's window under ANY lookback ops might set
+// later, not just the one in force when it was written. If the TTL tracked
+// `lookbackDays + 1` alone, raising lookbackDays from 7 to 14 after an incident
+// would make a row credited 9 days ago (promotion failed, marker expired on
+// day 8, 24h send cache long gone) re-listable as stranded — and re-paid in
+// full. A config knob must never turn into a double-pay path, so the TTL has a
+// fixed generous floor and `lookbackDays` must stay below it (see the schema
+// comment on fygaro.retry.lookbackDays). The `lookbackDays + 1` term only
+// matters if someone ignores that and configures a lookback past the floor.
+export const MIN_CREDITED_MARKER_TTL_DAYS = 30
+
 export const creditedMarkerTtlSeconds = (): number => {
   const lookbackDays = FygaroConfig.retry?.lookbackDays ?? DEFAULT_LOOKBACK_DAYS
-  return (lookbackDays + 1) * SECONDS_PER_DAY
+  return Math.max(MIN_CREDITED_MARKER_TTL_DAYS, lookbackDays + 1) * SECONDS_PER_DAY
 }
 
 export const markFygaroCredited = async ({

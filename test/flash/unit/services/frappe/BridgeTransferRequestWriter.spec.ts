@@ -5,6 +5,7 @@ jest.mock("@services/frappe/ErpNext", () => ({
   sumFygaroTopupGrossCentsSince: jest.fn(),
   sumFygaroCompletedNetCentsSince: jest.fn(),
   listUncreditedFygaroTopups: jest.fn(),
+  countAgedOutUncreditedFygaroTopups: jest.fn(),
 }))
 
 jest.mock("@services/logger", () => ({
@@ -14,6 +15,7 @@ jest.mock("@services/logger", () => ({
 import ErpNext from "@services/frappe/ErpNext"
 import { baseLogger } from "@services/logger"
 import {
+  countAgedOutUncreditedFygaroTopups,
   listUncreditedFygaroTopupsLastDays,
   markFygaroTopupNotCredited,
   sumFygaroCreditedNetCentsLastDays,
@@ -36,6 +38,7 @@ const completeByTxHash = ErpNext.completeBridgeTopupByTxHash as jest.Mock
 const sumSince = ErpNext.sumFygaroTopupGrossCentsSince as jest.Mock
 const sumNetSince = ErpNext.sumFygaroCompletedNetCentsSince as jest.Mock
 const listUncredited = ErpNext.listUncreditedFygaroTopups as jest.Mock
+const countAgedOut = ErpNext.countAgedOutUncreditedFygaroTopups as jest.Mock
 const lastRequestInput = () => upsert.mock.calls[0][0].input
 
 describe("BridgeTransferRequestWriter", () => {
@@ -569,6 +572,28 @@ describe("BridgeTransferRequestWriter", () => {
       expect(
         await listUncreditedFygaroTopupsLastDays({ days: 7, limit: 20 }),
       ).toBeInstanceOf(FygaroTopupHistoryQueryError)
+    })
+  })
+
+  describe("countAgedOutUncreditedFygaroTopups", () => {
+    it("asks ErpNext for stranded rows OLDER than `days` ago", async () => {
+      jest.useFakeTimers().setSystemTime(new Date("2026-10-03T17:00:00Z"))
+      countAgedOut.mockResolvedValue({ count: 2, oldestRequestId: "fygaro:x" })
+
+      const result = await countAgedOutUncreditedFygaroTopups({ days: 7 })
+
+      expect(result).toEqual({ count: 2, oldestRequestId: "fygaro:x" })
+      expect(countAgedOut).toHaveBeenCalledWith({
+        before: new Date("2026-09-26T17:00:00Z"),
+      })
+      jest.useRealTimers()
+    })
+
+    it("passes through an ErpNext error", async () => {
+      countAgedOut.mockResolvedValue(new FygaroTopupHistoryQueryError("down"))
+      expect(await countAgedOutUncreditedFygaroTopups({ days: 7 })).toBeInstanceOf(
+        FygaroTopupHistoryQueryError,
+      )
     })
   })
 

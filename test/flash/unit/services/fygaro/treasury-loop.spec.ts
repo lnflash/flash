@@ -55,11 +55,21 @@ beforeEach(() => {
 })
 
 describe("runFygaroTreasuryTick", () => {
-  it("checks the float then sweeps stranded credits with the balance it just read", async () => {
+  it("checks the float then sweeps with the balance ABOVE the critical-floor reserve, never the full balance", async () => {
     await runFygaroTreasuryTick()
 
     expect(mockCheckFloat).toHaveBeenCalledTimes(1)
-    expect(mockSweep).toHaveBeenCalledWith({ availableUsd: 3000 })
+    expect(mockSweep).toHaveBeenCalledWith({ availableUsd: 2500 })
+  })
+
+  it("keeps the critical floor as a reserve: balance $600, floor $500 → the sweep may spend $100, so a $280 row stays uncovered", async () => {
+    mockCheckFloat.mockResolvedValue(reading(600))
+
+    await runFygaroTreasuryTick()
+
+    // Full-balance hand-off would be { availableUsd: 600 } and two $280 rows
+    // would drain the float to $40 — through the floor the tick just gated on.
+    expect(mockSweep).toHaveBeenCalledWith({ availableUsd: 100 })
   })
 
   it("does not sweep when the float check could not run", async () => {
@@ -83,15 +93,16 @@ describe("runFygaroTreasuryTick", () => {
 
     await runFygaroTreasuryTick()
 
-    expect(mockSweep).toHaveBeenCalledWith({ availableUsd: 1500 })
+    expect(mockSweep).toHaveBeenCalledWith({ availableUsd: 1000 })
   })
 
-  it("sweeps exactly at the critical floor (not below it)", async () => {
+  it("sweeps exactly at the critical floor (not below it) — with nothing to spend, so only the processed-marker and aged-out checks run", async () => {
     mockCheckFloat.mockResolvedValue(reading(500))
 
     await runFygaroTreasuryTick()
 
     expect(mockSweep).toHaveBeenCalledTimes(1)
+    expect(mockSweep).toHaveBeenCalledWith({ availableUsd: 0 })
   })
 })
 
