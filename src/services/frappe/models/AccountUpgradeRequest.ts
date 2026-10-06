@@ -37,11 +37,26 @@ const hasUsername = async (input: AccountUpgradeRequest) => {
   return true
 }
 
+// ERPNext no longer requires the address on the request itself: Bridge KYC
+// auto-upgrades (frappe-flash-admin bridge_kyc_upgrade) file Level 2 requests
+// without one. A request a customer submits is held to a complete address here.
+const hasCompleteAddress = async (input: AccountUpgradeRequest) => {
+  const { title, line1, city, state, country } = input.address ?? {}
+  const missing = Object.entries({ title, line1, city, state, country })
+    .filter(([, value]) => !value?.trim())
+    .map(([field]) => field)
+  if (missing.length > 0) {
+    return new ValidationError(`Address is incomplete: missing ${missing.join(", ")}`)
+  }
+  return true
+}
+
 const AccountUpgradeRequestValidator = validator<AccountUpgradeRequest & Context>([
   isActiveAccount,
   isRequestedLevelGreater,
   checkMaxTerminals,
   hasUsername,
+  hasCompleteAddress,
 ])
 
 type Context = { account: Account; user: User; kratos: AnyIdentity }
