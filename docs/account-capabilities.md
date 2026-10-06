@@ -31,7 +31,7 @@ Account = { verified, bankPayout, business, usdAccount }
 | Capability | Meaning | Source of truth today |
 |---|---|---|
 | `verified` | phone + ID verified | stored level ≥ 1 (grandfathered) |
-| `bankPayout` | approved bank account on file (JM bank) | ERPNext Bank Account records for the account's `erpParty`; stored level ≥ 2 stands in when ERPNext is unavailable |
+| `bankPayout` | approved bank account on file (JM bank) | ERPNext Bank Account records for the account's `erpParty`; stored level ≥ 2 stands in when ERPNext can't answer (no `erpParty`, or the lookup fails). Stored level 3 always implies it; stored level 2 does not (Bridge KYC upgrades reach L2 without a bank account) |
 | `business` | business name + address on file | stored level ≥ 3 (grandfathered) |
 | `usdAccount` | USD account + routing number (Bridge) | `bridgeKycStatus === "approved"` |
 
@@ -55,6 +55,10 @@ through the state machine.
 > account on file resolves `bankPayout: true`, which derives to L2. Both the
 > stored `level` and the derived `capabilities`/`statusHeadline` are exposed
 > over GraphQL, so a client may observe `level: 1` alongside `bankPayout: true`.
+> The reverse also happens: an account at stored L2 with no bank account on
+> file (a Bridge KYC upgrade) resolves `bankPayout: false`. It cannot request
+> bank payout as an upgrade (it is already at that level); it adds the bank
+> account with `bankAccountAdd`.
 > Treat `capabilities` as the source of truth for what the account can do;
 > `level` is internal and retained for backward compatibility.
 

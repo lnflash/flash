@@ -113,6 +113,35 @@ describe("requestCapabilityUpgrade", () => {
     )
   })
 
+  it("points a Level 2 account without a bank account at adding one", async () => {
+    // e.g. upgraded on Bridge KYC: L2 already is the bank payout level.
+    findById.mockResolvedValue({ ...account, level: AccountLevel.Two })
+
+    const result = await requestCapabilityUpgrade(ACCOUNT_ID, {
+      ...baseInput,
+      capability: RequestableCapability.BankPayout,
+      bankAccount,
+    })
+
+    expect(result).toBeInstanceOf(ValidationError)
+    expect((result as ValidationError).message).toBe(
+      "Account is already at the bank payout level: add a bank account instead",
+    )
+    expect(createReq).not.toHaveBeenCalled()
+  })
+
+  it("requires bank details for a business request when no bank account is on file", async () => {
+    findById.mockResolvedValue({ ...account, level: AccountLevel.Two })
+
+    const result = await requestCapabilityUpgrade(ACCOUNT_ID, {
+      ...baseInput,
+      capability: RequestableCapability.Business,
+    })
+
+    expect(result).toBeInstanceOf(ValidationError)
+    expect(createReq).not.toHaveBeenCalled()
+  })
+
   it("creates an L3 business request reusing a bank account already on file", async () => {
     getCaps.mockResolvedValue({ capabilities: caps({ bankPayout: true }) })
 

@@ -65,8 +65,12 @@ export const deriveStatusHeadline = (
 // accounts are grandfathered:
 //   verified  — stored level ≥ 1
 //   business  — stored level ≥ 3
-//   bankPayout — an approved bank account on file (ERPNext); legacy L2/L3
-//                accounts imply one even if the lookup is unavailable
+//   bankPayout — an approved bank account on file (ERPNext). Legacy L3
+//                accounts imply one (it is part of the L3 requirements).
+//                Level 2 does not: Bridge KYC upgrades reach L2 without a
+//                bank account. (When ERPNext can't answer, i.e. no ERP
+//                party or a failed lookup, the caller stands the stored
+//                level in for it.)
 //   usdAccount — Bridge KYC approved
 export const deriveCapabilitiesForAccount = ({
   level,
@@ -78,7 +82,7 @@ export const deriveCapabilitiesForAccount = ({
   bridgeKycStatus?: Account["bridgeKycStatus"]
 }): AccountCapabilities => ({
   verified: level >= AccountLevel.One,
-  bankPayout: hasBankAccountOnFile || level >= AccountLevel.Two,
+  bankPayout: hasBankAccountOnFile || level >= AccountLevel.Three,
   business: level >= AccountLevel.Three,
   usdAccount: bridgeKycStatus === BRIDGE_KYC_APPROVED,
 })

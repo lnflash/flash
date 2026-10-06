@@ -47,6 +47,17 @@ describe("getAccountCapabilities", () => {
     expect(l1.capabilities.bankPayout).toBe(false)
   })
 
+  it("a Level 2 account with no bank account in ERPNext has no bank payout", async () => {
+    // A Bridge KYC upgrade: Level 2, an ERP party, no bank account yet.
+    const { capabilities, statusHeadline } = await getAccountCapabilities(
+      account({ level: AccountLevel.Two }),
+    )
+
+    expect(getBankAccounts).toHaveBeenCalledWith("CUST-1")
+    expect(capabilities.bankPayout).toBe(false)
+    expect(statusHeadline).toBe("VERIFIED")
+  })
+
   it("skips the ERPNext lookup for accounts without an ERP party", async () => {
     const { capabilities } = await getAccountCapabilities(
       account({ erpParty: undefined, level: AccountLevel.Two }),
