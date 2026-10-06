@@ -51,6 +51,18 @@ export const requestCapabilityUpgrade = async (
     return new ValidationError(`Account already has the ${input.capability} capability`)
   }
 
+  // Level 2 is the bank payout level. An account already there without a bank
+  // account (e.g. upgraded on Bridge KYC) has no level left to request; it
+  // needs the bank account itself, which bankAccountAdd adds.
+  if (
+    input.capability === RequestableCapability.BankPayout &&
+    account.level >= AccountLevel.Two
+  ) {
+    return new ValidationError(
+      "Account is already at the bank payout level: add a bank account instead",
+    )
+  }
+
   // Per-capability requirements. Business also needs a bank account on file
   // (it is part of the L3 requirements) but not re-submitted if one exists.
   if (input.capability === RequestableCapability.BankPayout && !input.bankAccount) {

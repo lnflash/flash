@@ -37,7 +37,11 @@ export const getAccountCapabilities = (
 const deriveAccountCapabilities = async (
   account: Account,
 ): Promise<AccountCapabilityPresentation> => {
-  let hasBankAccountOnFile = false
+  // The stored level stands in whenever ERPNext can't answer: no ERP party to
+  // look up (pre-ERPNext legacy accounts) or a failed lookup. When ERPNext does
+  // answer, its bank accounts decide, so a Level 2 account with none (a Bridge
+  // KYC upgrade) has no bank payout.
+  let hasBankAccountOnFile = account.level >= AccountLevel.Two
   if (account.erpParty && ErpNext) {
     const bankAccounts = await ErpNext.getBankAccountsByCustomer(account.erpParty)
     if (bankAccounts instanceof Error) {
@@ -45,7 +49,6 @@ const deriveAccountCapabilities = async (
         { err: bankAccounts, accountId: account.id },
         "getAccountCapabilities: bank account lookup failed, falling back to stored level",
       )
-      hasBankAccountOnFile = account.level >= AccountLevel.Two
     } else {
       hasBankAccountOnFile = bankAccounts.length > 0
     }

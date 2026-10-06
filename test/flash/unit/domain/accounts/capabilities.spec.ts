@@ -108,10 +108,19 @@ describe("deriveCapabilitiesForAccount (read model)", () => {
       }),
     ).toEqual(caps({ verified: true }))
 
+    // Level 2 does not imply a bank account: Bridge KYC upgrades reach L2
+    // without one. Level 3 still does (it is part of the L3 requirements).
     expect(
       deriveCapabilitiesForAccount({
         level: AccountLevel.Two,
         hasBankAccountOnFile: false,
+      }),
+    ).toEqual(caps({ verified: true }))
+
+    expect(
+      deriveCapabilitiesForAccount({
+        level: AccountLevel.Two,
+        hasBankAccountOnFile: true,
       }),
     ).toEqual(caps({ verified: true, bankPayout: true }))
 

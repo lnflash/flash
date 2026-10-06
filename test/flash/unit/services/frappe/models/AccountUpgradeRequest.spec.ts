@@ -222,6 +222,28 @@ describe("AccountUpgradeRequest", () => {
   })
 
   describe("validate", () => {
+    it("requires a complete address on a customer-submitted request", async () => {
+      const req = makeRequest({
+        address: { ...mockAddress, title: "", city: "   ", country: "" },
+      })
+
+      const result = await req.validate(makeContext())
+
+      expect(Array.isArray(result)).toBe(true)
+      const messages = (result as ValidationError[]).map((e) => e.message)
+      expect(messages).toContain("Address is incomplete: missing title, city, country")
+    })
+
+    it("does not require the optional address lines", async () => {
+      const req = makeRequest({
+        address: { ...mockAddress, line2: undefined, postalCode: undefined },
+      })
+
+      const result = await req.validate(makeContext())
+
+      expect(Array.isArray(result)).toBe(false)
+    })
+
     it("should validate account is active", async () => {
       const req = makeRequest()
       const context = makeContext({ status: AccountStatus.Locked })

@@ -41,6 +41,19 @@ const AccountUpgradeRequest = GT.Object({
     },
     address: {
       type: GT.NonNull(Address),
+      // A Level 2 request filed by the Bridge KYC auto-upgrade
+      // (frappe-flash-admin bridge_kyc_upgrade) carries no address. Address's
+      // non-null fields resolve to "" so the request still resolves: a null
+      // there nulls the whole request, which the app's
+      // LatestAccountUpgradeRequest query surfaces as an error.
+      resolve: (source) => ({
+        ...source.address,
+        title: source.address?.title ?? "",
+        line1: source.address?.line1 ?? "",
+        city: source.address?.city ?? "",
+        state: source.address?.state ?? "",
+        country: source.address?.country ?? "",
+      }),
     },
     terminalsRequested: {
       type: GT.NonNull(GT.Int),
