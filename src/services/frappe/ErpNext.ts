@@ -27,6 +27,7 @@ import {
   AllowedCountryQueryError,
   FygaroSettingsQueryError,
   ReferralSettingsQueryError,
+  ReferralPayoutAllowlistQueryError,
   FygaroTopupHistoryQueryError,
   IdVerificationCreateError,
   IdVerificationQueryError,
@@ -275,6 +276,15 @@ export type FygaroSettingsDoc = {
 // switch for referral reward payouts. One Check field by design.
 export type ReferralSettingsDoc = {
   rewards_enabled?: unknown
+}
+
+// Raw "Referral Payout Allowlist" doctype row: accounts whose referral reward
+// may pay while the global referral program (helm referralReward.enabled) is
+// paused. frappe resolves the operator's input to the flash account id at save
+// time; flash reads only `account_id` (Mongo _id string) and `enabled`.
+export type ReferralPayoutAllowlistDoc = {
+  account_id?: string
+  enabled?: number | boolean | string
 }
 
 // Raw "Fee Discount" doctype row as ERPNext returns it (one row per username,
@@ -1123,6 +1133,45 @@ export class ErpNext {
         attributes: { "erpnext.exception": responseData?.exception },
       })
       return new ReferralSettingsQueryError(err)
+    }
+  }
+
+  // Reads every ENABLED "Referral Payout Allowlist" row. Consumed through a
+  // 60s FAIL-CLOSED cache in @app/invite/referral-payout-allowlist: an error
+  // here means "nobody is allowlisted", so it must return the error rather
+  // than a default list.
+  async getReferralPayoutAllowlist(): Promise<
+    ReferralPayoutAllowlistDoc[] | ReferralPayoutAllowlistQueryError
+  > {
+    try {
+      // `enabled` is fetched as well as filtered on: the reader re-checks it,
+      // so a disabled row is dropped even if this filter is ever lost.
+      const fields = JSON.stringify(["account_id", "enabled"])
+      const filters = JSON.stringify([["enabled", "=", 1]])
+      const resp = await axios.get(
+        `${this.url}/api/resource/${encodeURIComponent("Referral Payout Allowlist")}`,
+        {
+          params: { filters, fields, limit_page_length: 0 },
+          headers: this.headers,
+        },
+      )
+      const data = resp.data?.data
+      if (!Array.isArray(data))
+        return new ReferralPayoutAllowlistQueryError(
+          "No data in Referral Payout Allowlist response",
+        )
+      return data as ReferralPayoutAllowlistDoc[]
+    } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error(
+        { err, responseData },
+        "Error querying Referral Payout Allowlist from ERPNext",
+      )
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
+      return new ReferralPayoutAllowlistQueryError(err)
     }
   }
 

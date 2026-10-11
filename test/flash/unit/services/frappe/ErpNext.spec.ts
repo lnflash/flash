@@ -27,6 +27,7 @@ import {
 import {
   AllowedCountryQueryError,
   FeeDiscountQueryError,
+  ReferralPayoutAllowlistQueryError,
   ReferralSettingsQueryError,
 } from "@services/frappe/errors"
 import {
@@ -1378,6 +1379,65 @@ describe("ErpNext.getFeeDiscounts", () => {
     mockedAxios.get.mockRejectedValue(new Error("erpnext down"))
 
     expect(await client.getFeeDiscounts()).toBeInstanceOf(FeeDiscountQueryError)
+  })
+})
+
+describe("ErpNext.getReferralPayoutAllowlist", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+  })
+
+  it("requests only ENABLED rows, fetching account_id and enabled", async () => {
+    mockedAxios.get.mockResolvedValue({ data: { data: [] } })
+
+    await client.getReferralPayoutAllowlist()
+
+    const [url, config] = mockedAxios.get.mock.calls[0]
+    expect(url).toBe("https://erp.example/api/resource/Referral%20Payout%20Allowlist")
+    expect(JSON.parse(config.params.filters)).toEqual([["enabled", "=", 1]])
+    // `enabled` is fetched as well as filtered on so the reader can re-check it.
+    expect(JSON.parse(config.params.fields)).toEqual(["account_id", "enabled"])
+    // No pagination cap: a truncated page would silently drop allowlisted accounts.
+    expect(config.params.limit_page_length).toBe(0)
+  })
+
+  it("returns the rows as-is for the reader to validate", async () => {
+    const rows = [{ account_id: "64b7f0c2a1b2c3d4e5f60718", enabled: 1 }]
+    mockedAxios.get.mockResolvedValue({ data: { data: rows } })
+
+    expect(await client.getReferralPayoutAllowlist()).toEqual(rows)
+  })
+
+  it("returns an error (not a silent empty list) when the response is not an array", async () => {
+    mockedAxios.get.mockResolvedValue({ data: { data: { account_id: "x" } } })
+
+    expect(await client.getReferralPayoutAllowlist()).toBeInstanceOf(
+      ReferralPayoutAllowlistQueryError,
+    )
+  })
+
+  it("returns an error when the response has no data", async () => {
+    mockedAxios.get.mockResolvedValue({ data: {} })
+
+    expect(await client.getReferralPayoutAllowlist()).toBeInstanceOf(
+      ReferralPayoutAllowlistQueryError,
+    )
+  })
+
+  it("returns the error rather than throwing, and records it in the span", async () => {
+    const err = {
+      isAxiosError: true,
+      response: { status: 404, data: { exception: "DoesNotExistError" } },
+    }
+    mockedAxios.get.mockRejectedValue(err)
+
+    expect(await client.getReferralPayoutAllowlist()).toBeInstanceOf(
+      ReferralPayoutAllowlistQueryError,
+    )
+    expect(mockedRecordExceptionInCurrentSpan).toHaveBeenCalledWith({
+      error: err,
+      attributes: { "erpnext.exception": "DoesNotExistError" },
+    })
   })
 })
 
