@@ -604,6 +604,17 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
     case "UnexpectedIbexResponse":
     case "FailedIbexPayment":
       return new IbexError(baseLogger)
+    // The rail never answered (as opposed to answering "no"), so the honest
+    // client-facing state is "temporarily unavailable" with a retry hint —
+    // not the generic contact-support wording, which tells a user with a
+    // funded BTC wallet to open a ticket for a blip. Must stay listed: the
+    // switch ends in assertUnreachable, so an unlisted name throws.
+    case "IbexUnavailableError":
+      message = error.message || "Cash Wallet is temporarily unavailable."
+      return bridgeGqlError({
+        code: "IBEX_UNAVAILABLE",
+        message,
+      })
     case "OfferNotFound":
       return new NotFoundError({
         message: "Offer not available. Try again.",

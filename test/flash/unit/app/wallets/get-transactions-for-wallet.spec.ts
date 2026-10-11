@@ -11,9 +11,55 @@ import {
 } from "@app/wallets/get-transactions-for-wallet"
 import { WalletCurrency } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
+import { LedgerTransactionType } from "@domain/ledger"
 import Ibex from "@services/ibex/client"
+import { IbexError } from "@services/ibex/errors"
 import { baseLogger } from "@services/logger"
 import { GResponse200 } from "ibex-client"
+
+const mockGetTransactionsByWalletIds = jest.fn()
+
+// The degraded path reads confirmed rows straight from the mongo ledger, so
+// the harness needs the two pieces `ledgerHistoryForWallets` touches.
+jest.mock("@services/ledger", () => ({
+  LedgerService: () => ({
+    getTransactionsByWalletIds: (
+      ...args: Parameters<typeof mockGetTransactionsByWalletIds>
+    ) => mockGetTransactionsByWalletIds(...args),
+  }),
+  getNonEndUserWalletIds: async () => ({ dealerBtc: "dealer-btc" }),
+}))
+
+import {
+  markIbexUnavailable,
+  resetIbexAvailability,
+} from "@services/ibex/availability"
+
+// A confirmed ledger row, already in the shape LedgerService returns (the real
+// service maps its mongo documents through translateToLedgerTx).
+const ledgerTxn = (id: string): LedgerTransaction<WalletCurrency> =>
+  ({
+    id,
+    walletId: "33333333-3333-4333-8333-333333333333",
+    type: LedgerTransactionType.Payment,
+    credit: 1000,
+    debit: 0,
+    currency: WalletCurrency.Btc,
+    timestamp: new Date("2026-06-01T00:00:00.000Z"),
+    pendingConfirmation: false,
+    journalId: "journal-id",
+    lnMemo: "memo",
+    feeKnownInAdvance: true,
+    paymentHash: "payment-hash",
+    pubkey: "pubkey",
+    satsAmount: 1000,
+    centsAmount: 20,
+    satsFee: 0,
+    centsFee: 0,
+    displayAmount: 20,
+    displayFee: 0,
+    displayCurrency: "USD",
+  }) as unknown as LedgerTransaction<WalletCurrency>
 
 const accountId = "account-id" as AccountId
 
@@ -316,6 +362,8 @@ describe("toWalletTransactions", () => {
 describe("getTransactionsForWallets", () => {
   beforeEach(() => {
     jest.mocked(Ibex.getAccountTransactions).mockReset()
+    jest.mocked(mockGetTransactionsByWalletIds).mockReset()
+    resetIbexAvailability()
   })
 
   it("concatenates active wallet history before the legacy archive wallet history", async () => {
@@ -377,5 +425,103 @@ describe("getTransactionsForWallets", () => {
       "active-newer",
       "legacy-archive-older",
     ])
+  })
+
+  // Circuit already open (see @services/ibex/availability): the whole page
+  // comes from the ledger in one read, so a BTC history still renders while
+  // the cash rail is down — and nothing pays the IBEX timeout at all.
+  it("serves confirmed ledger rows while IBEX is unavailable", async () => {
+    markIbexUnavailable()
+    mockGetTransactionsByWalletIds.mockResolvedValue({
+      slice: [ledgerTxn("ledger-txn-1")],
+      total: 7,
+    })
+
+    const btcWallet = wallet({
+      id: "33333333-3333-4333-8333-333333333333",
+      currency: WalletCurrency.Btc,
+    })
+    const result = await getTransactionsForWallets({
+      wallets: [btcWallet],
+      paginationArgs: { first: 20 },
+    })
+
+    expect(Ibex.getAccountTransactions).not.toHaveBeenCalled()
+    expect(mockGetTransactionsByWalletIds).toHaveBeenCalledWith({
+      walletIds: [btcWallet.id],
+      paginationArgs: { first: 20 },
+    })
+    expect(result.error).toBeUndefined()
+    expect(result.result?.total).toBe(7)
+    expect(result.result?.slice.map((transaction) => transaction.id)).toEqual([
+      "ledger-txn-1",
+    ])
+    // Rows are translated into wallet transactions, not handed over raw.
+    expect(result.result?.slice[0].settlementAmount).toBe(1000)
+    expect(result.result?.slice[0].settlementCurrency).toBe(WalletCurrency.Btc)
+  })
+
+  it("reports a failure when neither IBEX nor the ledger has rows", async () => {
+    markIbexUnavailable()
+    mockGetTransactionsByWalletIds.mockResolvedValue(new Error("mongo down"))
+
+    const result = await getTransactionsForWallets({
+      wallets: [
+        wallet({
+          id: "33333333-3333-4333-8333-333333333333",
+          currency: WalletCurrency.Btc,
+        }),
+      ],
+    })
+
+    expect(result.result).toBeNull()
+    expect(result.error).toBeInstanceOf(Error)
+  })
+
+  // One cash wallet refusing to answer must not hide the rows that did come
+  // back: the page is rebuilt from the ledger (one consistent source rather
+  // than a half-filled mix) and still renders.
+  it("keeps a page intact when one wallet's IBEX call fails", async () => {
+    const btcWallet = wallet({
+      id: "11111111-1111-4111-8111-111111111111",
+      currency: WalletCurrency.Btc,
+    })
+    const cashWallet = wallet({
+      id: "22222222-2222-4222-8222-222222222222",
+      currency: WalletCurrency.Usd,
+    })
+    jest
+      .mocked(Ibex.getAccountTransactions)
+      .mockImplementation(async ({ account_id }) => {
+        if (account_id === cashWallet.id) return new IbexError(new Error("boom"))
+        return [
+          {
+            id: "ibex-row",
+            accountId: btcWallet.id,
+            amount: 1,
+            currencyId: 3,
+            transactionTypeId: 1,
+            createdAt: "2026-06-01T00:00:00.000Z",
+          },
+        ] as GResponse200
+      })
+    mockGetTransactionsByWalletIds.mockResolvedValue({
+      slice: [ledgerTxn("ledger-txn-1")],
+      total: 1,
+    })
+
+    const result = await getTransactionsForWallets({
+      wallets: [btcWallet, cashWallet],
+      paginationArgs: { first: 20 },
+    })
+
+    expect(result.error).toBeUndefined()
+    expect(result.result?.slice.map((transaction) => transaction.id)).toEqual([
+      "ledger-txn-1",
+    ])
+    expect(mockGetTransactionsByWalletIds).toHaveBeenCalledWith({
+      walletIds: [btcWallet.id, cashWallet.id],
+      paginationArgs: { first: 20 },
+    })
   })
 })

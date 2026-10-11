@@ -1,5 +1,10 @@
 import { PartialResult } from "@app/partial-result"
-import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
+import { memoSharingConfig } from "@config"
+import { ErrorLevel, USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
+import { WalletTransactionHistory } from "@domain/wallets"
+import { getNonEndUserWalletIds, LedgerService } from "@services/ledger"
+import { recordExceptionInCurrentSpan } from "@services/tracing"
+import { isIbexAvailable } from "@services/ibex/availability"
 import Ibex from "@services/ibex/client"
 import { IbexError } from "@services/ibex/errors"
 import { baseLogger } from "@services/logger"
@@ -15,6 +20,13 @@ export const getTransactionsForWallets = async ({
 }): Promise<PartialResult<PaginatedArray<IbexTransaction>>> => {
   const walletIds = wallets.map((wallet) => wallet.id)
 
+  // Circuit already open: go straight to the mongo ledger, which holds every
+  // wallet's confirmed rows and needs no IBEX round trip. Same shape as the
+  // ledger fallback in ./get-transactions-by-addresses.
+  if (!isIbexAvailable()) {
+    return ledgerHistoryForWallets({ walletIds, paginationArgs })
+  }
+
   const ibexCalls = await Promise.all(
     walletIds.map((id) =>
       Ibex.getAccountTransactions({
@@ -24,6 +36,23 @@ export const getTransactionsForWallets = async ({
     ),
   )
 
+  const ibexFailed = ibexCalls.some((resp) => resp instanceof IbexError)
+  if (ibexFailed) {
+    const error = ibexCalls.find((resp) => resp instanceof IbexError) as IbexError
+    const ledgerHistory = await ledgerHistoryForWallets({ walletIds, paginationArgs })
+    // Rows that did come back are never discarded for the sake of the ones
+    // that did not: a caller with both a BTC and a cash wallet still sees the
+    // BTC history. Only when the ledger has nothing either is the read a
+    // failure. The IBEX error is recorded on the span rather than returned,
+    // because the resolvers throw on any `error` in the partial result — and
+    // throwing here would hide the rows that did render.
+    if (ledgerHistory.result) {
+      recordExceptionInCurrentSpan({ error, level: ErrorLevel.Warn })
+      return ledgerHistory
+    }
+    return PartialResult.err(error)
+  }
+
   const transactions = ibexCalls.flatMap((resp) => {
     if (resp instanceof IbexError) return []
     else return toWalletTransactions(resp)
@@ -32,6 +61,31 @@ export const getTransactionsForWallets = async ({
   return PartialResult.ok({
     slice: transactions,
     total: transactions.length,
+  })
+}
+
+const ledgerHistoryForWallets = async ({
+  walletIds,
+  paginationArgs,
+}: {
+  walletIds: WalletId[]
+  paginationArgs?: PaginationArgs
+}): Promise<PartialResult<PaginatedArray<IbexTransaction>>> => {
+  const confirmed = await LedgerService().getTransactionsByWalletIds({
+    walletIds,
+    paginationArgs: paginationArgs || ({} as PaginationArgs),
+  })
+  if (confirmed instanceof Error) return PartialResult.err(confirmed)
+
+  const history = WalletTransactionHistory.fromLedger({
+    ledgerTransactions: confirmed.slice,
+    nonEndUserWalletIds: Object.values(await getNonEndUserWalletIds()),
+    memoSharingConfig,
+  })
+
+  return PartialResult.ok({
+    slice: history.transactions as IbexTransaction[],
+    total: confirmed.total,
   })
 }
 

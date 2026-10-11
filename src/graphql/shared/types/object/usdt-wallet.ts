@@ -17,6 +17,8 @@ import {
 } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
 
+import { IbexUnavailableError } from "@services/ibex/errors"
+
 import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 
 import IWallet from "../abstract/wallet"
@@ -66,6 +68,9 @@ const UsdtWallet = GT.Object<Wallet>({
           walletId: source.id,
           currency: source.currency,
         })
+        // See the USD wallet: a nullable balance IS the unavailable state, so
+        // the rest of the account still renders while IBEX is not answering.
+        if (balance instanceof IbexUnavailableError) return null
         if (balance instanceof Error) {
           throw mapError(balance)
         }

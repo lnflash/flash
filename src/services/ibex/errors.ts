@@ -6,6 +6,8 @@ import {
   UnexpectedResponseError,
 } from "ibex-client"
 
+import { markIbexUnavailable } from "./availability"
+
 export class IbexError extends DomainError {
   readonly type: string
   readonly level: ErrorLevel
@@ -26,6 +28,22 @@ export class UnexpectedIbexResponse extends IbexError {
 }
 
 export class ParseError extends IbexError {}
+
+/**
+ * IBEX never answered: no HTTP status, no response body — a socket-level
+ * failure rather than a refusal. Distinct from the generic `IbexError` ("the
+ * rail said no") because the correct response differs: the rail is treated as
+ * unavailable for a short window and callers degrade to their IBEX-independent
+ * reads instead of every request paying its own timeout.
+ *
+ * Warn by default, like `UnconfirmedIbexPayment`: an unreachable rail is
+ * already visible as failed wallet reads, and a Critical per request is noise.
+ */
+export class IbexUnavailableError extends IbexError {
+  constructor(err: Error, level: ErrorLevel = ErrorLevel.Warn) {
+    super(err, level)
+  }
+}
 
 export class InsufficientIbexBalance extends IbexError {
   // Full vendor detail, preserved verbatim for logs/spans (pino's error
@@ -165,6 +183,15 @@ export const errorHandler = <T>(
       if (!generic.message.includes(detail))
         generic.message = `${detail}\n${generic.message}`
       return generic
+    }
+    // No body and no HTTP status at all: nothing in the stack reached an
+    // application layer, so this is a socket-level failure — the rail did not
+    // answer, it did not refuse. Trip the breaker (see ./availability) so the
+    // rest of this request's reads degrade immediately instead of each paying
+    // its own fetch timeout, and return the typed unavailable error.
+    if (e.httpCode === undefined) {
+      markIbexUnavailable()
+      return new IbexUnavailableError(e)
     }
   }
   if (e instanceof IbexClientError) return new IbexError(e, ErrorLevel.Warn)

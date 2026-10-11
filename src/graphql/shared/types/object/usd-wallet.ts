@@ -16,6 +16,7 @@ import {
 
 import { WalletCurrency as WalletCurrencyDomain, USDTAmount } from "@domain/shared"
 import { WalletType } from "@domain/wallets"
+import { IbexUnavailableError } from "@services/ibex/errors"
 
 import IWallet from "../abstract/wallet"
 
@@ -79,6 +80,11 @@ const UsdWallet = GT.Object<Wallet>({
           walletId: balanceWallet.id,
           currency: balanceWallet.currency,
         })
+        // IBEX not answering is not the caller's problem to interpret: the
+        // nullable balance field IS the unavailable state, so the wallet
+        // screen still renders (and the BTC wallet on the same account keeps
+        // its numbers) instead of the whole query coming back as errors.
+        if (balance instanceof IbexUnavailableError) return null
         if (balance instanceof Error) {
           throw mapError(balance)
         }
