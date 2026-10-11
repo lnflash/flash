@@ -1,9 +1,12 @@
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 
+import { ensureCashWallets } from "./ensure-account-wallets"
+
 export * from "./account-limit"
 export * from "./add-new-contact"
 export * from "./add-wallet"
 export * from "./create-account"
+export * from "./ensure-account-wallets"
 export * from "./get-account-transactions-for-contact"
 export * from "./get-contact-by-username"
 export * from "./get-csv-for-account"
@@ -52,8 +55,17 @@ export const getAccount = async (
 
 export const getAccountFromUserId = async (
   kratosUserId: UserId,
-): Promise<Account | RepositoryError> => {
-  return accounts.findByUserId(kratosUserId)
+): Promise<Account | ApplicationError> => {
+  const account = await accounts.findByUserId(kratosUserId)
+  if (account instanceof Error) return account
+
+  // Registration commits the account row before the IBEX cash wallets exist,
+  // so a rail that was briefly down leaves the account with no
+  // `defaultWalletId` forever: every later login finds the row and stops
+  // there. The missing default is the whole signal needed to finish the job.
+  if (account.defaultWalletId) return account
+
+  return ensureCashWallets(account)
 }
 
 export const hasPermissions = async (

@@ -1,22 +1,13 @@
 import { ConfigError, getAdminAccounts, getDefaultAccountsConfig } from "@config"
 
-import { WalletType } from "@domain/wallets"
 import { AccountLevel } from "@domain/accounts"
 
+import { AccountsRepository, UsersRepository } from "@services/mongoose"
+
 import {
-  AccountsRepository,
-  UsersRepository,
-  WalletsRepository,
-} from "@services/mongoose"
-
-import { recordExceptionInCurrentSpan } from "@services/tracing"
-import { ErrorLevel, WalletCurrency } from "@domain/shared"
-
-const requiredCashWalletCurrencies: WalletCurrency[] = [
-  WalletCurrency.Usd,
-  WalletCurrency.Usdt,
-]
-const defaultCashWalletCurrency = WalletCurrency.Usdt
+  createMissingCashWallets,
+  defaultCashWalletCurrency,
+} from "./ensure-account-wallets"
 
 const initializeCreatedAccount = async ({
   account,
@@ -27,33 +18,15 @@ const initializeCreatedAccount = async ({
   config: AccountsConfig
   phone?: PhoneNumber
 }): Promise<Account | ApplicationError> => {
-  const newWallet = (currency: WalletCurrency) =>
-    WalletsRepository().persistNew({
-      accountId: account.id,
-      type: WalletType.Checking,
-      currency,
-    })
-
-  const walletsEnabledConfig = Array.from(
-    new Set([...config.initialWallets, ...requiredCashWalletCurrencies]),
-  )
-
-  // Create all wallets
-  const enabledWallets: Partial<Record<WalletCurrency, Wallet>> = {}
-  for (const currency of walletsEnabledConfig) {
-    const wallet = await newWallet(currency)
-    if (wallet instanceof Error) {
-      recordExceptionInCurrentSpan({
-        error: wallet,
-        level: ErrorLevel.Critical,
-        attributes: { accountId: account.id, currency },
-      })
-      if (requiredCashWalletCurrencies.includes(currency)) return wallet
-      continue
-    }
-
-    enabledWallets[currency] = wallet
-  }
+  // A fresh account has no wallets yet, so every configured currency is
+  // created. The same helper runs on the read path for accounts left half-made
+  // by an earlier IBEX failure, where it only fills the gaps (#90).
+  const enabledWallets = await createMissingCashWallets({
+    accountId: account.id,
+    currencies: config.initialWallets,
+    existingWallets: [],
+  })
+  if (enabledWallets instanceof Error) return enabledWallets
 
   // Set ETH-USDT as the active Cash Wallet while preserving USD for migration.
   const defaultWalletId = enabledWallets[defaultCashWalletCurrency]?.id
