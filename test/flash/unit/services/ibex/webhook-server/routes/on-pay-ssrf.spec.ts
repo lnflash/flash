@@ -116,7 +116,11 @@ describe("GET /pay/lnurl/:username — SSRF guard wiring", () => {
     clearDevUnsafeModeFlags()
     lookup.mockResolvedValue(PUBLIC_ADDR)
     ;(AccountsRepository as jest.Mock).mockReturnValue({
-      findByUsername: jest.fn().mockResolvedValue({ defaultWalletId: "w1" }),
+      findByUsername: jest.fn().mockResolvedValue({
+        id: "a1",
+        status: "active",
+        defaultWalletId: "w1",
+      }),
     })
     ;(WalletsRepository as jest.Mock).mockReturnValue({
       findById: jest.fn().mockResolvedValue({ lnurlp: "lnurl1usercontrolled" }),

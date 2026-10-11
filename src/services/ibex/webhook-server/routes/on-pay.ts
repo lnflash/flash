@@ -14,6 +14,8 @@ import { ErrorLevel } from "@domain/shared"
 import { extractPaymentHashFromBolt11 } from "@utils"
 import { isSsrfBlockedError, ssrfFetch, validatePublicHttpUrl } from "@utils/ssrf-guard"
 
+import { AccountValidator } from "@domain/accounts"
+
 import { authenticate, logRequest, validateIbexIp } from "../middleware"
 
 const lnurlCorsOptions: CorsOptions = {
@@ -193,6 +195,15 @@ router.get(
       const account = await AccountsRepository().findByUsername(username as Username)
       if (account instanceof Error) {
         return resp.status(404).json({ error: "User not found" })
+      }
+      // An inactive account (new / pending / locked / closed) must not be able to
+      // mint invoices against its IBEX LNURL: the payee cannot receive, and every
+      // hop of a Lightning Address payment otherwise runs IBEX calls for an
+      // account that is not usable. Answered in the LNURL error shape (LUD-01) so
+      // sending wallets render the reason instead of a bare failure.
+      const activeCheck = AccountValidator(account).isActive()
+      if (activeCheck instanceof Error) {
+        return resp.status(200).json({ status: "ERROR", reason: "Account is inactive" })
       }
       const wallet = await WalletsRepository().findById(account.defaultWalletId)
       if (!wallet || wallet instanceof Error) {
