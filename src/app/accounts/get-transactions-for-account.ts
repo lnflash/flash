@@ -30,5 +30,9 @@ export const getTransactionsForAccountByWalletIds = async ({
     wallets.push(wallet)
   }
 
-  return getTransactionsForWallets({ wallets, paginationArgs })
+  return getTransactionsForWallets({
+    wallets,
+    paginationArgs,
+    displayCurrency: account.displayCurrency,
+  })
 }

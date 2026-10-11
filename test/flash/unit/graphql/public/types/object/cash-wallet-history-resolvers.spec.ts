@@ -183,6 +183,7 @@ describe("wallet object Cash Wallet transaction resolvers", () => {
     expect(mockGetTransactionsForWallets).toHaveBeenCalledWith({
       wallets: [usdtWallet, legacyUsdWallet],
       paginationArgs: { first: 20 },
+      displayCurrency: account.displayCurrency,
     })
   })
 
@@ -197,6 +198,7 @@ describe("wallet object Cash Wallet transaction resolvers", () => {
     expect(mockGetTransactionsForWallets).toHaveBeenCalledWith({
       wallets: [usdtWallet, legacyUsdWallet],
       paginationArgs: { first: 20 },
+      displayCurrency: account.displayCurrency,
     })
   })
 
@@ -241,6 +243,7 @@ describe("wallet object Cash Wallet transaction resolvers", () => {
         },
       ],
       paginationArgs: { first: 20 },
+      displayCurrency: account.displayCurrency,
     })
   })
 })

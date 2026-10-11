@@ -311,6 +311,134 @@ describe("toWalletTransactions", () => {
 
     errorSpy.mockRestore()
   })
+
+  it("labels and converts history with the account display currency", () => {
+    const [transaction] = toWalletTransactions(
+      [
+        {
+          id: "trx-id",
+          accountId: "wallet-id",
+          amount: 1.5,
+          currencyId: 3,
+          transactionTypeId: 1,
+          exchangeRateCurrencySats: 156.25,
+          createdAt: "2026-05-13T00:00:00.000Z",
+        },
+      ] as GResponse200,
+      "JMD" as DisplayCurrency,
+    )
+
+    expect(transaction.settlementDisplayPrice.displayCurrency).toBe("JMD")
+    // 1.5 USD at the rate Ibex settled this row at.
+    expect(transaction.settlementDisplayAmount).toBe("234.38")
+    expect(transaction.settlementDisplayPrice.base).toBe(15625n)
+    expect(transaction.settlementDisplayPrice.offset).toBe(2n)
+  })
+
+  it("pairs each transaction with its own settlement rate", () => {
+    const [first, second] = toWalletTransactions(
+      [
+        {
+          id: "trx-a",
+          accountId: "wallet-id",
+          amount: 1,
+          currencyId: 3,
+          transactionTypeId: 1,
+          exchangeRateCurrencySats: 150,
+          createdAt: "2026-05-13T00:00:00.000Z",
+        },
+        {
+          id: "trx-b",
+          accountId: "wallet-id",
+          amount: 1,
+          currencyId: 3,
+          transactionTypeId: 1,
+          exchangeRateCurrencySats: 160,
+          createdAt: "2026-05-14T00:00:00.000Z",
+        },
+      ] as GResponse200,
+      "JMD" as DisplayCurrency,
+    )
+
+    expect(first.settlementDisplayAmount).toBe("150")
+    expect(second.settlementDisplayAmount).toBe("160")
+    expect(first.settlementDisplayPrice.base).toBe(15000n)
+    expect(second.settlementDisplayPrice.base).toBe(16000n)
+  })
+
+  it("keeps a sub-cent receipt non-zero instead of truncating it away", () => {
+    const [transaction] = toWalletTransactions(
+      [
+        {
+          id: "trx-id",
+          accountId: "wallet-id",
+          amount: 0.004,
+          currencyId: 3,
+          transactionTypeId: 1,
+          exchangeRateCurrencySats: 150,
+          createdAt: "2026-05-13T00:00:00.000Z",
+        },
+      ] as GResponse200,
+      "JMD" as DisplayCurrency,
+    )
+
+    // 0.004 * 150 = 0.6; Math.floor would have rendered "0".
+    expect(transaction.settlementDisplayAmount).toBe("0.6")
+  })
+
+  it("renders sends negative after conversion", () => {
+    const [transaction] = toWalletTransactions(
+      [
+        {
+          id: "trx-id",
+          accountId: "wallet-id",
+          amount: 2,
+          currencyId: 3,
+          transactionTypeId: 2,
+          exchangeRateCurrencySats: 150,
+          createdAt: "2026-05-13T00:00:00.000Z",
+        },
+      ] as GResponse200,
+      "JMD" as DisplayCurrency,
+    )
+
+    expect(transaction.settlementAmount).toBe(-2)
+    expect(transaction.settlementDisplayAmount).toBe("-300")
+  })
+
+  it("falls back to USD when the caller has no display currency", () => {
+    const [withoutCurrency] = toWalletTransactions([
+      {
+        id: "trx-id",
+        accountId: "wallet-id",
+        amount: 3,
+        currencyId: 3,
+        transactionTypeId: 1,
+        exchangeRateCurrencySats: 150,
+        createdAt: "2026-05-13T00:00:00.000Z",
+      },
+    ] as GResponse200)
+
+    expect(withoutCurrency.settlementDisplayPrice.displayCurrency).toBe("USD")
+    // No rate context beyond the settled rate: the amount is still converted.
+    expect(withoutCurrency.settlementDisplayAmount).toBe("450")
+
+    const [tooLong] = toWalletTransactions(
+      [
+        {
+          id: "trx-id",
+          accountId: "wallet-id",
+          amount: 3,
+          currencyId: 3,
+          transactionTypeId: 1,
+          createdAt: "2026-05-13T00:00:00.000Z",
+        },
+      ] as GResponse200,
+      "NOT_A_CURRENCY" as DisplayCurrency,
+    )
+
+    expect(tooLong.settlementDisplayPrice.displayCurrency).toBe("USD")
+  })
 })
 
 describe("getTransactionsForWallets", () => {

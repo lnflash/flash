@@ -1,4 +1,9 @@
 import { PartialResult } from "@app/partial-result"
+import {
+  checkedToDisplayCurrency,
+  getCurrencyMajorExponent,
+  UsdDisplayCurrency,
+} from "@domain/fiat"
 import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
 import Ibex from "@services/ibex/client"
 import { IbexError } from "@services/ibex/errors"
@@ -9,9 +14,14 @@ import { ConnectionArguments } from "graphql-relay"
 export const getTransactionsForWallets = async ({
   wallets,
   paginationArgs,
+  displayCurrency,
 }: {
   wallets: Wallet[]
   paginationArgs?: PaginationArgs
+  // The account's configured display currency (e.g. "JMD"). Callers that have
+  // an account in hand pass it so history renders in the currency the user
+  // picked; it is optional because the CSV export path has no account context.
+  displayCurrency?: DisplayCurrency
 }): Promise<PartialResult<PaginatedArray<IbexTransaction>>> => {
   const walletIds = wallets.map((wallet) => wallet.id)
 
@@ -26,7 +36,7 @@ export const getTransactionsForWallets = async ({
 
   const transactions = ibexCalls.flatMap((resp) => {
     if (resp instanceof IbexError) return []
-    else return toWalletTransactions(resp)
+    else return toWalletTransactions(resp, displayCurrency)
   })
 
   return PartialResult.ok({
@@ -43,7 +53,12 @@ const currencyFromIbexCurrencyId = (
   return undefined
 }
 
-export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] => {
+export const toWalletTransactions = (
+  ibexResp: GResponse200,
+  rawDisplayCurrency?: DisplayCurrency,
+): IbexTransaction[] => {
+  const displayCurrency = resolveDisplayCurrency(rawDisplayCurrency)
+
   return ibexResp.flatMap((trx) => {
     const currency = currencyFromIbexCurrencyId(trx.currencyId)
 
@@ -58,15 +73,18 @@ export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] 
       return []
     }
 
+    const exchangeRate = toExchangeRate(trx.exchangeRateCurrencySats)
+
     const settlementDisplayPrice: WalletMinorUnitDisplayPrice<
       WalletCurrency,
       DisplayCurrency
     > = {
-      base: trx.exchangeRateCurrencySats
-        ? BigInt(Math.floor(trx.exchangeRateCurrencySats))
-        : 0n,
-      offset: 0n, // what is this?
-      displayCurrency: "USD" as DisplayCurrency,
+      // Ibex sends the rate that settled this one transaction, so the price is
+      // read per row: that keeps each transaction paired with the rate it
+      // actually settled at instead of a rate from elsewhere on the page.
+      base: BigInt(Math.round(exchangeRate * 10 ** exponentFor(displayCurrency))),
+      offset: BigInt(exponentFor(displayCurrency)),
+      displayCurrency,
       walletCurrency: currency,
     }
 
@@ -78,6 +96,8 @@ export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] 
       settlementDisplayAmount: toSettlementDisplayAmount(
         trx.amount,
         trx.transactionTypeId,
+        exchangeRate,
+        displayCurrency,
       ),
       settlementDisplayFee: `${trx.networkFee}`,
       settlementDisplayPrice: settlementDisplayPrice,
@@ -145,6 +165,31 @@ export const toWalletTransactions = (ibexResp: GResponse200): IbexTransaction[] 
 
 type SettlementMinorUnitAmount = Satoshis | UsdCents | UsdtCents
 
+// The account's configured display currency, or USD when the caller has none
+// (the CSV export path) or passes something the scalar would reject.
+const resolveDisplayCurrency = (raw?: DisplayCurrency): DisplayCurrency => {
+  const checked = checkedToDisplayCurrency(raw)
+  if (checked instanceof Error) {
+    if (raw !== undefined) {
+      baseLogger.error(
+        { err: checked, displayCurrency: raw },
+        "Failed to parse display currency. Falling back to USD.",
+      )
+    }
+    return UsdDisplayCurrency
+  }
+  return checked
+}
+
+const exponentFor = (displayCurrency: DisplayCurrency): number =>
+  getCurrencyMajorExponent(displayCurrency)
+
+// Display-currency major units per USD, as reported by Ibex for one
+// transaction. A missing or unusable rate means "no conversion" (1:1) rather
+// than the zero that used to wipe every display amount.
+const toExchangeRate = (rate: number | undefined): number =>
+  typeof rate === "number" && Number.isFinite(rate) && rate > 0 ? rate : 1
+
 const toUsdtCents = (amount: number): UsdtCents => {
   const usdtAmount = USDTAmount.fromNumber(amount.toString())
   if (usdtAmount instanceof Error) {
@@ -193,10 +238,16 @@ const toSettlementAmount = (
 const toSettlementDisplayAmount = (
   ibexAmount: number | undefined,
   transactionTypeId: number | undefined,
+  exchangeRate: number,
+  displayCurrency: DisplayCurrency,
 ): string => {
   if (ibexAmount === undefined) return `${ibexAmount}`
   const amount = isIbexSendType(transactionTypeId) ? -1 * ibexAmount : ibexAmount
-  return `${amount}`
+  const converted = amount * exchangeRate
+  if (!Number.isFinite(converted)) return `${amount}`
+  // Round, never floor: flooring a sub-cent receipt truncates the display
+  // amount to 0 and the loss repeats on every page load of that history.
+  return `${Number(converted.toFixed(exponentFor(displayCurrency)))}`
 }
 
 enum SortOrder {

@@ -120,6 +120,7 @@ const UsdWallet = GT.Object<Wallet>({
         const { result, error } = await Wallets.getTransactionsForWallets({
           wallets,
           paginationArgs,
+          displayCurrency: ctx?.domainAccount?.displayCurrency,
         })
         if (error instanceof Error) {
           throw mapError(error)

@@ -79,7 +79,7 @@ const BtcWallet = GT.Object<Wallet>({
     transactions: {
       type: TransactionConnection,
       args: connectionArgs,
-      resolve: async (source, args) => {
+      resolve: async (source, args, ctx) => {
         const paginationArgs = checkedConnectionArgs(args)
         if (paginationArgs instanceof Error) {
           throw paginationArgs
@@ -88,6 +88,7 @@ const BtcWallet = GT.Object<Wallet>({
         const { result, error } = await Wallets.getTransactionsForWallets({
           wallets: [source],
           paginationArgs,
+          displayCurrency: ctx?.domainAccount?.displayCurrency,
         })
         if (error instanceof Error) {
           throw mapError(error)
