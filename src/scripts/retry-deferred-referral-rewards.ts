@@ -18,8 +18,9 @@
  * --account / --username replay only that invitee's deferred reward;
  * --inviter replays only invites sent by that account. Use them for the
  * Referral Payout Allowlist (src/app/invite/referral-payout-allowlist.ts):
- *   1. fund the rewards wallet FIRST (an underfunded payout is recorded as
- *      "partial" and needs manual reconciliation);
+ *   1. fund the rewards wallet FIRST, before adding the allowlist row (an
+ *      underfunded payout is recorded as "partial" or "failed" and needs
+ *      manual reconciliation);
  *   2. dry-run with --username <name> --dry-run and check the logged
  *      backlogCount and allowlisted=true;
  *   3. execute the same command without --dry-run.
