@@ -20,6 +20,8 @@ jest.mock("@app", () => ({
   },
   Wallets: {
     payOnChainByWalletId: (args: unknown) => mockPayOnChainByWalletId(args),
+    getSendAllOnChainAmount: (args: { amount: unknown }) =>
+      Promise.resolve(args.amount),
   },
 }))
 

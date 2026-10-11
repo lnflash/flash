@@ -109,10 +109,18 @@ const OnChainPaymentSendAllMutation = GT.Field<
       }
     }
 
+    // #270: IBEX charges its on-chain fee on top of the amount it forwards, so
+    // handing it the whole balance either fails at the rail or leaves dust
+    // behind. Estimate the fee for this payout and sweep `balance - fee`.
+    const sendAmount = await Wallets.getSendAllOnChainAmount({
+      amount,
+      address,
+    })
+
     const result = await Wallets.payOnChainByWalletId({
       senderAccount: domainAccount,
       senderWalletId: walletId,
-      amount,
+      amount: sendAmount,
       address,
       speed,
       memo,
