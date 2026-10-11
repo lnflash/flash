@@ -12,6 +12,10 @@ import { nextReferralRewardSeq } from "@services/mongoose/models/referral-reward
 import { baseLogger } from "@services/logger"
 
 import { referralRewardsEnabledInErp } from "./referral-settings"
+import {
+  accountAllowlistedForReferralPayout,
+  referralPayoutAllowlistIsEmpty,
+} from "./referral-payout-allowlist"
 
 import { sendReferralRewardNotificationBestEffort } from "./send-referral-notifications"
 
@@ -45,6 +49,10 @@ const markReward = async (
 //    an ops sweep can find rows stuck in "processing" (e.g. pod killed
 //    mid-payout before any terminal mark landed).
 //  - Never throws into the KYC path: all errors are caught and logged.
+//  - Paused program (config.enabled=false): only a referral where the inviter
+//    OR the invitee is on the ERPNext Referral Payout Allowlist proceeds (both
+//    parties are then paid per the tier); the ERPNext switch still gates it.
+//    An empty allowlist (the default) returns before any Mongo query.
 export const awardReferralRewardOnKycApproval = async ({
   accountId,
 }: {
@@ -52,7 +60,17 @@ export const awardReferralRewardOnKycApproval = async ({
 }): Promise<void> => {
   try {
     const config = getReferralRewardConfig()
-    if (!config.enabled) return
+
+    // While the program is paused, only allowlisted referrals may pay. The
+    // empty check comes first so the default (nobody listed) does zero Mongo
+    // work, exactly as before the allowlist existed. An allowlisted invitee
+    // proceeds as normal; otherwise the inviter must be allowlisted, which
+    // is only knowable after the pending-invite lookup below.
+    let requireAllowlistedInviter = false
+    if (!config.enabled) {
+      if (await referralPayoutAllowlistIsEmpty()) return
+      requireAllowlistedInviter = !(await accountAllowlistedForReferralPayout(accountId))
+    }
 
     // One reward per invitee, ever. Bridge KYC can flap back to "approved"
     // (approved -> under_review -> approved re-fires this hook), and redemption
@@ -71,6 +89,20 @@ export const awardReferralRewardOnKycApproval = async ({
       rewardStatus: { $exists: false },
     })
     if (!pending) return // not a referred user, or already claimed
+
+    if (requireAllowlistedInviter) {
+      const inviterId = pending.inviterId?.toString() as AccountId | undefined
+      if (!inviterId || !(await accountAllowlistedForReferralPayout(inviterId))) {
+        // Same deferral semantics as the ERPNext switch below: the invite is
+        // left ACCEPTED + unrewarded and pays on a later trigger once either
+        // party is allowlisted or the program is re-enabled.
+        baseLogger.info(
+          { accountId, inviterId },
+          "referral reward deferred: not allowlisted (program paused, neither party on the Referral Payout Allowlist)",
+        )
+        return
+      }
+    }
 
     // Operator kill switch (ERPNext "Referral Settings" single). Checked
     // AFTER the invite lookups (so non-referred KYC approvals never touch the
