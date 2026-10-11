@@ -11,12 +11,26 @@
  * Usage:
  *   node lib/scripts/retry-deferred-referral-rewards.js \
  *     --configPath dev/config/base-config.yaml \
- *     [--dry-run]
+ *     [--dry-run] \
+ *     [--account <accountId> | --username <username>] \
+ *     [--inviter <accountId>]
+ *
+ * --account / --username replay only that invitee's deferred reward;
+ * --inviter replays only invites sent by that account. Use them for the
+ * Referral Payout Allowlist (src/app/invite/referral-payout-allowlist.ts):
+ *   1. fund the rewards wallet FIRST, before adding the allowlist row (an
+ *      underfunded payout is recorded as "partial" or "failed" and needs
+ *      manual reconciliation);
+ *   2. dry-run with --username <name> --dry-run and check the logged
+ *      backlogCount and allowlisted=true;
+ *   3. execute the same command without --dry-run.
  */
 
 import yargs from "yargs"
 import { hideBin } from "yargs/helpers"
+import { checkedToAccountId } from "@domain/accounts"
 import { setupMongoConnection } from "@services/mongodb"
+import { AccountsRepository } from "@services/mongoose"
 import { baseLogger } from "@services/logger"
 import { retryDeferredReferralRewards } from "@app/invite/retry-deferred-rewards"
 
@@ -28,12 +42,52 @@ export const buildArgs = (argv: string[]) =>
       describe: "Report the backlog size without paying anyone (default: false)",
     })
     .option("configPath", { type: "string" as const, demandOption: true })
+    .option("account", {
+      type: "string" as const,
+      describe: "Only retry this invitee account id",
+    })
+    .option("username", {
+      type: "string" as const,
+      describe: "Only retry this invitee username (resolved to its account id)",
+    })
+    .option("inviter", {
+      type: "string" as const,
+      describe: "Only retry invites sent by this inviter account id",
+    })
+    .conflicts("account", "username")
     .parseSync()
+
+const toAccountIdOrThrow = (raw: string, flag: string): AccountId => {
+  const accountId = checkedToAccountId(raw.trim())
+  if (accountId instanceof Error) throw new Error(`--${flag} is not a valid account id`)
+  return accountId
+}
+
+export const resolveFilters = async (args: {
+  account?: string
+  username?: string
+  inviter?: string
+}): Promise<{ account?: AccountId; inviter?: AccountId }> => {
+  let account: AccountId | undefined
+  if (args.account !== undefined) account = toAccountIdOrThrow(args.account, "account")
+  if (args.username !== undefined) {
+    const found = await AccountsRepository().findByUsername(
+      args.username.trim() as Username,
+    )
+    if (found instanceof Error)
+      throw new Error(`--username ${args.username} not found: ${found.name}`)
+    account = found.id
+  }
+  const inviter =
+    args.inviter !== undefined ? toAccountIdOrThrow(args.inviter, "inviter") : undefined
+  return { account, inviter }
+}
 
 const main = async () => {
   const args = buildArgs(hideBin(process.argv))
   const dryRun = args["dry-run"]
-  const result = await retryDeferredReferralRewards({ dryRun })
+  const { account, inviter } = await resolveFilters(args)
+  const result = await retryDeferredReferralRewards({ dryRun, account, inviter })
   baseLogger.info(
     { ...result, dryRun },
     dryRun

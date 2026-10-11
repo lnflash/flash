@@ -48,6 +48,13 @@ jest.mock("@app/invite/referral-settings", () => ({
   referralRewardsEnabledInErp: (...a: unknown[]) => mockErpEnabled(...a),
 }))
 
+const mockAllowlistEmpty = jest.fn()
+const mockAllowlisted = jest.fn()
+jest.mock("@app/invite/referral-payout-allowlist", () => ({
+  referralPayoutAllowlistIsEmpty: (...a: unknown[]) => mockAllowlistEmpty(...a),
+  accountAllowlistedForReferralPayout: (...a: unknown[]) => mockAllowlisted(...a),
+}))
+
 const mockRewardPush = jest.fn()
 jest.mock("@app/invite/send-referral-notifications", () => ({
   sendReferralRewardNotificationBestEffort: (...a: unknown[]) => mockRewardPush(...a),
@@ -96,6 +103,9 @@ describe("awardReferralRewardOnKycApproval", () => {
   beforeEach(() => {
     mockErpEnabled.mockResolvedValue(true)
     jest.clearAllMocks()
+    // Allowlist defaults: nobody listed (the prod default).
+    mockAllowlistEmpty.mockResolvedValue(true)
+    mockAllowlisted.mockResolvedValue(false)
     mockGetConfig.mockReturnValue({ enabled: true, tiers: DEFAULT_TIERS })
     mockExists.mockResolvedValue(null) // no prior processed invite for the account
     mockFindOne.mockResolvedValue(pendingInvite())
@@ -116,6 +126,10 @@ describe("awardReferralRewardOnKycApproval", () => {
     await awardReferralRewardOnKycApproval({ accountId: INVITEE })
     expect(mockFindOne).not.toHaveBeenCalled()
     expect(mockPay).not.toHaveBeenCalled()
+    // Paused + empty allowlist: one in-memory size check, zero Mongo.
+    expect(mockAllowlistEmpty).toHaveBeenCalledTimes(1)
+    expect(mockAllowlisted).not.toHaveBeenCalled()
+    expect(mockExists).not.toHaveBeenCalled()
   })
 
   it("defers (no claim, no failure mark) when the ERPNext kill switch is off", async () => {
@@ -405,5 +419,255 @@ describe("awardReferralRewardOnKycApproval", () => {
       awardReferralRewardOnKycApproval({ accountId: INVITEE }),
     ).resolves.toBeUndefined()
     expect(baseLogger.error).toHaveBeenCalled()
+  })
+})
+
+describe("awardReferralRewardOnKycApproval: Referral Payout Allowlist gate", () => {
+  type Listed = "invitee" | "inviter" | "neither"
+
+  const listedIds = (listed: Listed): string[] =>
+    listed === "invitee" ? [INVITEE] : listed === "inviter" ? [INVITER] : []
+
+  const setup = ({
+    configEnabled,
+    erpEnabled,
+    allowlistEmpty,
+    listed,
+  }: {
+    configEnabled: boolean
+    erpEnabled: boolean
+    allowlistEmpty: boolean
+    listed: Listed
+  }) => {
+    mockGetConfig.mockReturnValue({ enabled: configEnabled, tiers: DEFAULT_TIERS })
+    mockErpEnabled.mockResolvedValue(erpEnabled)
+    mockAllowlistEmpty.mockResolvedValue(allowlistEmpty)
+    const ids = allowlistEmpty ? [] : listedIds(listed)
+    mockAllowlisted.mockImplementation((id: string) => Promise.resolve(ids.includes(id)))
+  }
+
+  const expectPaidBoth = () => {
+    expect(mockFindOneAndUpdate).toHaveBeenCalledTimes(1)
+    expect(mockPay).toHaveBeenCalledTimes(2)
+    expect(mockPay).toHaveBeenCalledWith(
+      expect.objectContaining({ recipientWalletId: "inviter-usdt", amount: 500 }),
+    )
+    expect(mockPay).toHaveBeenCalledWith(
+      expect.objectContaining({ recipientWalletId: "invitee-usdt", amount: 500 }),
+    )
+    expect(lastSet().rewardStatus).toBe("paid")
+  }
+
+  const expectDeferred = (reason: string) => {
+    expect(mockFindOne).toHaveBeenCalled()
+    expect(mockFindOneAndUpdate).not.toHaveBeenCalled()
+    expect(mockPay).not.toHaveBeenCalled()
+    expect(mockUpdateOne).not.toHaveBeenCalled()
+    expect(mockNextSeq).not.toHaveBeenCalled()
+    expect(baseLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: INVITEE }),
+      expect.stringContaining(reason),
+    )
+  }
+
+  const expectNoMongo = () => {
+    expect(mockExists).not.toHaveBeenCalled()
+    expect(mockFindOne).not.toHaveBeenCalled()
+    expect(mockFindOneAndUpdate).not.toHaveBeenCalled()
+    expect(mockErpEnabled).not.toHaveBeenCalled()
+    expect(mockPay).not.toHaveBeenCalled()
+    expect(mockUpdateOne).not.toHaveBeenCalled()
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockExists.mockResolvedValue(null)
+    mockFindOne.mockResolvedValue(pendingInvite())
+    mockFindOneAndUpdate.mockResolvedValue(pendingInvite())
+    mockNextSeq.mockResolvedValue(50)
+    mockFindByRole.mockResolvedValue({ id: REWARDS_ACCT })
+    useWallets({
+      [REWARDS_ACCT]: [usd("rewards-usd"), usdt("rewards-usdt")],
+      [INVITER]: [usd("inviter-usd"), usdt("inviter-usdt")],
+      [INVITEE]: [usd("invitee-usd"), usdt("invitee-usdt")],
+    })
+    mockPay.mockResolvedValue(PaymentSendStatus.Success)
+  })
+
+  describe("program paused (config.enabled=false), allowlist non-empty", () => {
+    it.each<Listed>(["invitee", "inviter"])(
+      "%s allowlisted + ERP switch ON: pays BOTH parties per the tier",
+      async (listed) => {
+        setup({ configEnabled: false, erpEnabled: true, allowlistEmpty: false, listed })
+
+        await awardReferralRewardOnKycApproval({ accountId: INVITEE })
+
+        expect(mockErpEnabled).toHaveBeenCalled()
+        expectPaidBoth()
+      },
+    )
+
+    it.each<Listed>(["invitee", "inviter"])(
+      "%s allowlisted + ERP switch OFF: deferred by the master switch",
+      async (listed) => {
+        setup({ configEnabled: false, erpEnabled: false, allowlistEmpty: false, listed })
+
+        await awardReferralRewardOnKycApproval({ accountId: INVITEE })
+
+        expect(mockErpEnabled).toHaveBeenCalled()
+        expectDeferred("ERPNext kill switch")
+      },
+    )
+
+    it.each([true, false])(
+      "neither party allowlisted (ERP switch %s): deferred as not allowlisted, ERP never read",
+      async (erpEnabled) => {
+        setup({
+          configEnabled: false,
+          erpEnabled,
+          allowlistEmpty: false,
+          listed: "neither",
+        })
+
+        await awardReferralRewardOnKycApproval({ accountId: INVITEE })
+
+        expect(mockAllowlisted).toHaveBeenCalledWith(INVITEE)
+        expect(mockAllowlisted).toHaveBeenCalledWith(INVITER)
+        expect(mockErpEnabled).not.toHaveBeenCalled()
+        expectDeferred("not allowlisted")
+      },
+    )
+
+    it("allowlisted invitee proceeds without consulting the inviter", async () => {
+      setup({
+        configEnabled: false,
+        erpEnabled: true,
+        allowlistEmpty: false,
+        listed: "invitee",
+      })
+
+      await awardReferralRewardOnKycApproval({ accountId: INVITEE })
+
+      expect(mockAllowlisted).toHaveBeenCalledTimes(1)
+      expect(mockAllowlisted).toHaveBeenCalledWith(INVITEE)
+    })
+
+    it("allowlisted party whose account was already rewarded is never re-paid", async () => {
+      setup({
+        configEnabled: false,
+        erpEnabled: true,
+        allowlistEmpty: false,
+        listed: "invitee",
+      })
+      mockExists.mockResolvedValue({ _id: "earlier-invite" })
+
+      await awardReferralRewardOnKycApproval({ accountId: INVITEE })
+
+      expect(mockFindOne).not.toHaveBeenCalled()
+      expect(mockFindOneAndUpdate).not.toHaveBeenCalled()
+      expect(mockPay).not.toHaveBeenCalled()
+    })
+
+    it("allowlisted inviter + non-referred KYC approval: no log, no ERP read", async () => {
+      setup({
+        configEnabled: false,
+        erpEnabled: true,
+        allowlistEmpty: false,
+        listed: "inviter",
+      })
+      mockFindOne.mockResolvedValue(null)
+
+      await awardReferralRewardOnKycApproval({ accountId: INVITEE })
+
+      expect(mockErpEnabled).not.toHaveBeenCalled()
+      expect(baseLogger.info).not.toHaveBeenCalled()
+      expect(mockPay).not.toHaveBeenCalled()
+    })
+
+    it("invite with no inviterId is deferred, never paid", async () => {
+      setup({
+        configEnabled: false,
+        erpEnabled: true,
+        allowlistEmpty: false,
+        listed: "inviter",
+      })
+      mockFindOne.mockResolvedValue({ ...pendingInvite(), inviterId: undefined })
+
+      await awardReferralRewardOnKycApproval({ accountId: INVITEE })
+
+      expect(mockErpEnabled).not.toHaveBeenCalled()
+      expectDeferred("not allowlisted")
+    })
+
+    it("allowlisted payouts advance the global tier counter", async () => {
+      setup({
+        configEnabled: false,
+        erpEnabled: true,
+        allowlistEmpty: false,
+        listed: "inviter",
+      })
+
+      await awardReferralRewardOnKycApproval({ accountId: INVITEE })
+
+      expect(mockNextSeq).toHaveBeenCalledTimes(1)
+      expect(lastSet().rewardSeq).toBe(50)
+    })
+  })
+
+  describe("program paused, allowlist EMPTY (prod default)", () => {
+    it.each([
+      [true, "invitee"],
+      [false, "invitee"],
+      [true, "neither"],
+      [false, "neither"],
+    ] as const)(
+      "ERP switch %s, %s: zero Mongo, zero ERP, no pay",
+      async (erpEnabled, listed) => {
+        setup({ configEnabled: false, erpEnabled, allowlistEmpty: true, listed })
+
+        await awardReferralRewardOnKycApproval({ accountId: INVITEE })
+
+        expectNoMongo()
+        expect(mockAllowlisted).not.toHaveBeenCalled()
+      },
+    )
+  })
+
+  describe("program enabled (config.enabled=true): allowlist is never consulted", () => {
+    it.each<[boolean, Listed]>([
+      [false, "neither"],
+      [true, "invitee"],
+      [true, "inviter"],
+      [true, "neither"],
+    ])(
+      "allowlist non-empty=%s, listed=%s, ERP ON: pays as today",
+      async (nonEmpty, listed) => {
+        setup({
+          configEnabled: true,
+          erpEnabled: true,
+          allowlistEmpty: !nonEmpty,
+          listed,
+        })
+
+        await awardReferralRewardOnKycApproval({ accountId: INVITEE })
+
+        expect(mockAllowlistEmpty).not.toHaveBeenCalled()
+        expect(mockAllowlisted).not.toHaveBeenCalled()
+        expectPaidBoth()
+      },
+    )
+
+    it.each<Listed>(["invitee", "inviter", "neither"])(
+      "listed=%s, ERP OFF: deferred by the master switch as today",
+      async (listed) => {
+        setup({ configEnabled: true, erpEnabled: false, allowlistEmpty: false, listed })
+
+        await awardReferralRewardOnKycApproval({ accountId: INVITEE })
+
+        expect(mockAllowlistEmpty).not.toHaveBeenCalled()
+        expect(mockAllowlisted).not.toHaveBeenCalled()
+        expectDeferred("ERPNext kill switch")
+      },
+    )
   })
 })
