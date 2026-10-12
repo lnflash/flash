@@ -17,6 +17,7 @@ import {
 } from "@domain/notifications"
 import { getCurrentPriceAsDisplayPriceRatio } from "@app/prices"
 import { removeDeviceTokens } from "@app/users/remove-device-tokens"
+import { recordSplitExecutions } from "@app/payment-splits/record-split-executions"
 import { ZapRequestModel } from "@services/mongoose/zap-request"
 import { ZapPublisher } from "@services/nostr/zapPublisher"
 import { ibexWebhookPaths } from "@services/ibex/webhook-config"
@@ -67,6 +68,47 @@ const fetchPaymentContext = async (
     return resp.sendStatus(500)
   }
   req.paymentContext = { receiverWallet, recipientAccount, recipientUser }
+  next()
+}
+
+// ENG-653: record (never send) the payment splits a Lightning/LNURL receive
+// triggers. Failure here must not fail the webhook: IBEX would retry it and
+// re-run the receive notification, and the reconcile cron records any receive
+// this step missed. Duplicate deliveries are duplicate-key no-ops.
+const recordPaymentSplits = async (
+  req: PaymentRequest,
+  _resp: Response,
+  next: NextFunction,
+) => {
+  if (!req.paymentContext) return next()
+
+  try {
+    const { transaction } = req.body
+    const paymentHash = parsePaymentHash(transaction?.invoice?.hash)
+    const amount = Number(transaction?.amount)
+    if (paymentHash && Number.isFinite(amount)) {
+      const { receiverWallet } = req.paymentContext
+      const result = await recordSplitExecutions({
+        walletId: receiverWallet.id,
+        triggerKey: paymentHash,
+        paymentHash,
+        amount,
+        currency: receiverWallet.currency,
+      })
+      if (result instanceof Error) {
+        logger.error(
+          { err: result, walletId: receiverWallet.id, paymentHash },
+          "Failed to record payment splits; the reconcile cron will retry",
+        )
+      }
+    }
+  } catch (err) {
+    logger.error(
+      { err },
+      "Failed to record payment splits; the reconcile cron will retry",
+    )
+  }
+
   next()
 }
 
@@ -211,6 +253,7 @@ router.post(
   authenticate,
   logRequest,
   fetchPaymentContext,
+  recordPaymentSplits,
   sendLightningNotification,
   sendZapReceipt,
   (_req: Request, resp: Response) => resp.status(200).end(),
@@ -223,6 +266,7 @@ router.post(
   authenticate,
   logRequest,
   fetchPaymentContext,
+  recordPaymentSplits,
   sendLightningNotification,
   sendZapReceipt,
   (_req: Request, resp: Response) => resp.status(200).end(),
