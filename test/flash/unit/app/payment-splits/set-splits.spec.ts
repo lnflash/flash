@@ -1,6 +1,7 @@
 const mockFindWalletById = jest.fn()
 const mockListByAccountId = jest.fn()
 const mockFindByUsername = jest.fn()
+const mockFindAccountById = jest.fn()
 const mockReplaceForWallet = jest.fn()
 const mockFindRuleById = jest.fn()
 const mockDeleteRuleById = jest.fn()
@@ -9,6 +10,7 @@ const mockLockWalletId = jest.fn()
 jest.mock("@services/mongoose", () => ({
   AccountsRepository: jest.fn(() => ({
     findByUsername: (...args: unknown[]) => mockFindByUsername(...args),
+    findById: (...args: unknown[]) => mockFindAccountById(...args),
   })),
   WalletsRepository: jest.fn(() => ({
     findById: (...args: unknown[]) => mockFindWalletById(...args),
@@ -33,6 +35,7 @@ jest.mock("@services/lock", () => ({
 import { PaymentSplitsConfig } from "@config"
 import { deletePaymentSplit } from "@app/payment-splits/delete-split"
 import { setPaymentSplits } from "@app/payment-splits/set-splits"
+import { AccountStatus } from "@domain/accounts"
 import { InvalidWalletForAccountError } from "@domain/accounts/errors"
 import {
   CouldNotFindAccountFromUsernameError,
@@ -41,6 +44,7 @@ import {
 import {
   PaymentSplitsDisabledError,
   SplitCurrencyMismatchError,
+  SplitDestinationInactiveError,
   SplitDestinationNotFoundError,
   SplitPercentExceededError,
   SplitRuleNotFoundError,
@@ -68,6 +72,10 @@ const aliceWallets = [
   { id: ALICE_USDT, accountId: "alice", currency: WalletCurrency.Usdt },
 ]
 
+// Latest account status per account id; anything not listed is active.
+const accountStatuses: Record<string, AccountStatus> = {}
+const statusOf = (id: string) => accountStatuses[id] ?? AccountStatus.Active
+
 const originalEnabled = PaymentSplitsConfig.enabled
 
 beforeEach(() => {
@@ -76,9 +84,14 @@ beforeEach(() => {
   mockFindWalletById.mockImplementation(
     async (id: string) => wallets[id] ?? new CouldNotFindWalletFromIdError(),
   )
+  for (const id of Object.keys(accountStatuses)) delete accountStatuses[id]
+  mockFindAccountById.mockImplementation(async (id: string) => ({
+    id,
+    status: statusOf(id),
+  }))
   mockFindByUsername.mockImplementation(async (username: string) =>
     username.toLowerCase() === "alice"
-      ? { id: "alice", defaultWalletId: ALICE_BTC }
+      ? { id: "alice", defaultWalletId: ALICE_BTC, status: statusOf("alice") }
       : new CouldNotFindAccountFromUsernameError(username),
   )
   mockListByAccountId.mockResolvedValue(aliceWallets)
@@ -241,6 +254,88 @@ describe("setPaymentSplits", () => {
 
     expect(result).toBeInstanceOf(SplitPercentExceededError)
     expect(mockReplaceForWallet).not.toHaveBeenCalled()
+  })
+
+  describe("destination account status (ENG-660)", () => {
+    it.each([AccountStatus.Closed, AccountStatus.Locked, AccountStatus.Pending])(
+      "rejects a walletId destination whose account is %s and saves nothing",
+      async (status) => {
+        accountStatuses["dest-account"] = status
+
+        const result = await setPaymentSplits({
+          account: OWNER,
+          walletId: SOURCE_ID,
+          splits: [{ destination: DEST_ID, percent: 25 }],
+        })
+
+        expect(result).toBeInstanceOf(SplitDestinationInactiveError)
+        expect(mockFindAccountById).toHaveBeenCalledWith("dest-account")
+        expect(mockLockWalletId).not.toHaveBeenCalled()
+        expect(mockReplaceForWallet).not.toHaveBeenCalled()
+      },
+    )
+
+    it.each([AccountStatus.Closed, AccountStatus.Locked, AccountStatus.Pending])(
+      "rejects a username destination whose account is %s and saves nothing",
+      async (status) => {
+        accountStatuses["alice"] = status
+
+        const result = await setPaymentSplits({
+          account: OWNER,
+          walletId: SOURCE_ID,
+          splits: [{ destination: "@alice", percent: 10 }],
+        })
+
+        expect(result).toBeInstanceOf(SplitDestinationInactiveError)
+        expect(mockReplaceForWallet).not.toHaveBeenCalled()
+      },
+    )
+
+    it("still saves an active destination", async () => {
+      accountStatuses["dest-account"] = AccountStatus.Active
+
+      const result = await setPaymentSplits({
+        account: OWNER,
+        walletId: SOURCE_ID,
+        splits: [{ destination: DEST_ID, percent: 25 }],
+      })
+
+      expect(result).toEqual([
+        expect.objectContaining({ destinationWalletId: DEST_ID, percent: 25 }),
+      ])
+      expect(mockReplaceForWallet).toHaveBeenCalledTimes(1)
+    })
+
+    it("saves nothing when one destination of a mixed set is inactive", async () => {
+      accountStatuses["other-account"] = AccountStatus.Closed
+
+      const result = await setPaymentSplits({
+        account: OWNER,
+        walletId: SOURCE_ID,
+        splits: [
+          { destination: DEST_ID, percent: 20 },
+          { destination: "alice", percent: 10 },
+          { destination: OTHER_ID, percent: 30 },
+        ],
+      })
+
+      expect(result).toBeInstanceOf(SplitDestinationInactiveError)
+      expect(mockLockWalletId).not.toHaveBeenCalled()
+      expect(mockReplaceForWallet).not.toHaveBeenCalled()
+    })
+
+    it("treats a destination wallet whose account cannot be found as not found", async () => {
+      mockFindAccountById.mockResolvedValue(new CouldNotFindWalletFromIdError())
+
+      const result = await setPaymentSplits({
+        account: OWNER,
+        walletId: SOURCE_ID,
+        splits: [{ destination: DEST_ID, percent: 25 }],
+      })
+
+      expect(result).toBeInstanceOf(SplitDestinationNotFoundError)
+      expect(mockReplaceForWallet).not.toHaveBeenCalled()
+    })
   })
 
   it("rejects everything while the feature flag is off", async () => {
