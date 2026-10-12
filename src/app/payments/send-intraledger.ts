@@ -65,6 +65,7 @@ const intraledgerPaymentSendWalletId = async ({
   amount: uncheckedAmount,
   memo,
   senderWalletId: uncheckedSenderWalletId,
+  beforePay,
 }: IntraLedgerPaymentSendWalletIdArgs): Promise<PaymentSendStatus | ApplicationError> => {
   const validatedPaymentInputs = await validateIntraledgerPaymentInputs({
     uncheckedSenderWalletId,
@@ -108,6 +109,9 @@ const intraledgerPaymentSendWalletId = async ({
   })
   if (marked instanceof Error) return marked
 
+  // Everything above moved no money: an error from addInvoice or the marker
+  // write is a pre-payment error. From here on IBEX may debit the sender.
+  beforePay?.()
   const payResp = await Ibex.payInvoice({
     accountId: uncheckedSenderWalletId,
     invoice: invoiceResp.invoice.bolt11 as Bolt11,

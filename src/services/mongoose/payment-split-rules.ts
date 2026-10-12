@@ -66,21 +66,39 @@ export const PaymentSplitRulesRepository = () => {
 
   // Replace semantics: the new set becomes the wallet's whole rule set. Callers
   // hold the wallet lock so two concurrent replaces cannot interleave.
+  //
+  // createdAt is carried forward for every destination that survives the
+  // replace; only a destination new to the set gets createdAt = now. The
+  // recorder skips receives that settled before a rule's createdAt, so
+  // re-stamping an unchanged destination on every save would drop a receive
+  // that settled before the save but was not yet recorded (a webhook whose
+  // record failed, waiting for the reconcile).
   const replaceForWallet = async (
     walletId: string,
     rules: { destinationWalletId: string; percent: number }[],
+    { now = new Date() }: { now?: Date } = {},
   ): Promise<PaymentSplitRuleRecord[] | RepositoryError> => {
     try {
+      const existing = await PaymentSplitRuleModel.find({ walletId: { $eq: walletId } })
+        .lean<RawRule[]>()
+        .exec()
+      const createdAtByDestination = new Map<string, Date>()
+      for (const rule of existing) {
+        const known = createdAtByDestination.get(rule.destinationWalletId)
+        if (!known || rule.createdAt.getTime() < known.getTime()) {
+          createdAtByDestination.set(rule.destinationWalletId, rule.createdAt)
+        }
+      }
+
       await PaymentSplitRuleModel.deleteMany({ walletId: { $eq: walletId } })
       if (rules.length === 0) return []
-      const now = new Date()
       const docs = await PaymentSplitRuleModel.insertMany(
         rules.map(({ destinationWalletId, percent }) => ({
           walletId,
           destinationWalletId,
           percent,
           enabled: true,
-          createdAt: now,
+          createdAt: createdAtByDestination.get(destinationWalletId) ?? now,
           updatedAt: now,
         })),
       )

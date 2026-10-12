@@ -938,3 +938,72 @@ describe("internal-transfer marker (ENG-653)", () => {
     expect(mockPayInvoice).not.toHaveBeenCalled()
   })
 })
+
+describe("intraledger beforePay hook (ENG-653)", () => {
+  // The payment-split executor uses this hook to tell an error from minting the
+  // recipient invoice (nothing moved, safe to retry) from one from payInvoice.
+  beforeEach(() => {
+    jest.clearAllMocks()
+
+    mockFindAccountById.mockImplementation(async (accountId: AccountId) =>
+      activeAccount(accountId as string),
+    )
+    mockAddInvoice.mockResolvedValue(ibexAddInvoiceResponse)
+    mockPayInvoice.mockResolvedValue(ibexPayResponse(2))
+    mockRecordInternalTransferInvoice.mockResolvedValue(true)
+    mockFindWalletById.mockImplementation(async (walletId: WalletId) =>
+      wallet({
+        id: walletId,
+        accountId:
+          walletId === senderUsdWalletId ? "sender-account" : "recipient-account",
+        currency: WalletCurrency.Usd,
+      }),
+    )
+  })
+
+  const sendArgs = {
+    senderWalletId: senderUsdWalletId,
+    recipientWalletId: recipientUsdWalletId,
+    amount: 100,
+    memo: "before pay",
+    authorize: allowSend,
+  }
+
+  it("runs right before payInvoice, after the invoice was minted and marked", async () => {
+    const order: string[] = []
+    mockAddInvoice.mockImplementation(async () => {
+      order.push("addInvoice")
+      return ibexAddInvoiceResponse
+    })
+    mockRecordInternalTransferInvoice.mockImplementation(async () => {
+      order.push("marker")
+      return true
+    })
+    mockPayInvoice.mockImplementation(async () => {
+      order.push("payInvoice")
+      return ibexPayResponse(2)
+    })
+
+    const result = await intraledgerPaymentSendWalletIdForUsdWallet({
+      ...sendArgs,
+      beforePay: () => order.push("beforePay"),
+    })
+
+    expect(result).toEqual({ value: "success" })
+    expect(order).toEqual(["addInvoice", "marker", "beforePay", "payInvoice"])
+  })
+
+  it("does not run when addInvoice fails", async () => {
+    const beforePay = jest.fn()
+    mockAddInvoice.mockResolvedValue(new Error("IBEX 500"))
+
+    const result = await intraledgerPaymentSendWalletIdForUsdWallet({
+      ...sendArgs,
+      beforePay,
+    })
+
+    expect(result).toBeInstanceOf(Error)
+    expect(beforePay).not.toHaveBeenCalled()
+    expect(mockPayInvoice).not.toHaveBeenCalled()
+  })
+})

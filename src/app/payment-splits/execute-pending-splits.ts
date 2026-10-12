@@ -29,14 +29,29 @@ export const PAYMENT_SPLIT_MEMO = "Payment split"
 export const splitIdempotencyKey = (executionId: string): IdempotencyKey =>
   `split:${executionId}` as IdempotencyKey
 
+type SendProgress = {
+  // The ENG-573 guard (the `authorize` hook) passed. withPaymentIdempotency
+  // runs it inside the idempotency lock just before `execute`.
+  paymentAttempted: boolean
+  // The send reached IBEX payInvoice (the `beforePay` hook ran). Before this,
+  // only IBEX addInvoice (minting the recipient invoice) and the
+  // internal-transfer marker write ran, and neither moves money.
+  payInvoiceReached?: boolean
+}
+
 /**
  * Errors worth another attempt: raised before IBEX paid anything and expected
  * to clear on their own (rate limits, a send guard that could not reach Redis
- * or a price, the internal-transfer marker write, an IBEX 429, and a busy
- * idempotency lock that was never acquired). Everything else — limits, KYC
- * level, insufficient balance, an inactive account, an unknown IBEX error — is
- * terminal on the first attempt, so an error whose payment outcome is unknown
- * is never re-sent.
+ * or a price, the internal-transfer marker write, an IBEX 429, a busy
+ * idempotency lock that was never acquired, and any IBEX error from minting
+ * the recipient invoice that is not a definitive 4xx). Everything else
+ * (limits, KYC level, insufficient balance, an inactive account, an IBEX error
+ * from payInvoice) is terminal on the first attempt, so an error whose payment
+ * outcome is unknown is never re-sent.
+ *
+ * An addInvoice failure is safe to retry: no payment was attempted and the
+ * error return is left uncached by withPaymentIdempotency, so the same key
+ * re-runs the whole send.
  *
  * Lock errors are the subtle case. redlock also returns a LockServiceError when
  * the locked routine throws or when releasing the lock fails, and both can
@@ -47,16 +62,19 @@ export const splitIdempotencyKey = (executionId: string): IdempotencyKey =>
  */
 export const isRetryableSplitError = (
   error: Error,
-  { paymentAttempted }: { paymentAttempted: boolean },
+  { paymentAttempted, payInvoiceReached = false }: SendProgress,
 ): boolean => {
   if (error instanceof LockServiceError) {
     return error instanceof ResourceAttemptsLockServiceError && !paymentAttempted
   }
+  if (error instanceof IbexError) {
+    if (error.httpCode === 429) return true
+    return paymentAttempted && !payInvoiceReached && !isDefinitivePaymentRejection(error)
+  }
   return (
     error instanceof RateLimitServiceError ||
     error instanceof SendLimitsUnavailableError ||
-    error instanceof InternalTransferMarkerError ||
-    (error instanceof IbexError && error.httpCode === 429)
+    error instanceof InternalTransferMarkerError
   )
 }
 
@@ -67,21 +85,25 @@ export const isRetryableSplitError = (
  *
  * - A lock error that is not a retryable pre-payment one (see
  *   isRetryableSplitError).
- * - Once the ENG-573 guard passed (`paymentAttempted`), any IBEX error that is
- *   not a definitive rejection: a transport error, a timeout or a 5xx from
- *   payInvoice, where IBEX may already have debited (the KNOWN GAP in
+ * - Once the send reached IBEX payInvoice (`payInvoiceReached`), any IBEX error
+ *   that is not a definitive rejection: a transport error, a timeout or a 5xx
+ *   from payInvoice, where IBEX may already have debited (the KNOWN GAP in
  *   idempotency.ts). A definitive rejection (insufficient balance, a 4xx such
- *   as no route or a 429) moved no money and stays `failed` / retryable.
+ *   as no route or a 429) moved no money and stays `failed` / retryable. An
+ *   IBEX error from addInvoice (before payInvoice) moved nothing either and is
+ *   retried.
  */
 export const isAmbiguousSplitSendError = (
   error: Error,
-  { paymentAttempted }: { paymentAttempted: boolean },
+  { paymentAttempted, payInvoiceReached = false }: SendProgress,
 ): boolean => {
   if (error instanceof LockServiceError) {
-    return !isRetryableSplitError(error, { paymentAttempted })
+    return !isRetryableSplitError(error, { paymentAttempted, payInvoiceReached })
   }
   return (
-    paymentAttempted && error instanceof IbexError && !isDefinitivePaymentRejection(error)
+    payInvoiceReached &&
+    error instanceof IbexError &&
+    !isDefinitivePaymentRejection(error)
   )
 }
 
@@ -204,6 +226,9 @@ const executeOne = async (
   // inside the idempotency lock immediately before the payment, so this is the
   // last point at which no money can have moved yet.
   let paymentAttempted = false
+  // Set right before IBEX payInvoice. Between the two only IBEX addInvoice and
+  // the marker write run, and neither moves money.
+  let payInvoiceReached = false
 
   const result = await intraledgerPaymentSendWalletIdForUsdWallet({
     senderWalletId: wallet.id,
@@ -227,10 +252,13 @@ const executeOne = async (
       if (!(authorized instanceof Error)) paymentAttempted = true
       return authorized
     },
+    beforePay: () => {
+      payInvoiceReached = true
+    },
   })
 
   if (result instanceof Error) {
-    if (isAmbiguousSplitSendError(result, { paymentAttempted })) {
+    if (isAmbiguousSplitSendError(result, { paymentAttempted, payInvoiceReached })) {
       await finish({ status: "unknown", attempts, lastError: result.name })
       logger.error(
         { executionId: execution.id, walletId: execution.walletId, error: result },
@@ -251,7 +279,7 @@ const executeOne = async (
       return "unknown"
     }
     if (
-      isRetryableSplitError(result, { paymentAttempted }) &&
+      isRetryableSplitError(result, { paymentAttempted, payInvoiceReached }) &&
       attempts < PaymentSplitsConfig.maxAttempts
     ) {
       return retry(result)

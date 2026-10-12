@@ -73,7 +73,11 @@ import { InternalTransferMarkerError, splitRetryBackoffMs } from "@domain/paymen
 import { SendLimitsUnavailableError } from "@domain/payments/errors"
 import { PaymentSendRateLimiterExceededError } from "@domain/rate-limit/errors"
 import { WalletCurrency } from "@domain/shared"
-import { IbexError, InsufficientIbexBalance } from "@services/ibex/errors"
+import {
+  IbexError,
+  InsufficientIbexBalance,
+  UnexpectedIbexResponse,
+} from "@services/ibex/errors"
 
 import { createFakeExecutionsStore } from "./fake-executions-store"
 
@@ -422,13 +426,18 @@ describe("executePendingSplits", () => {
     })
   })
 
-  describe("IBEX errors after the send guard passed", () => {
-    // authorize passed, so Ibex.payInvoice was called: anything but a definite
-    // rejection may have debited (the KNOWN GAP in idempotency.ts).
+  describe("IBEX errors from payInvoice", () => {
+    // authorize passed and the beforePay hook ran, so Ibex.payInvoice was
+    // called: anything but a definite rejection may have debited (the KNOWN
+    // GAP in idempotency.ts).
     const afterAuthorize =
       (error: Error) =>
-      async (args: { authorize: () => Promise<unknown> }): Promise<Error> => {
+      async (args: {
+        authorize: () => Promise<unknown>
+        beforePay?: () => void
+      }): Promise<Error> => {
         await args.authorize()
+        args.beforePay?.()
         return error
       }
 
@@ -486,6 +495,84 @@ describe("executePendingSplits", () => {
       await executePendingSplits({ now: T0 })
 
       expect(onlyRow()).toMatchObject({ status: "pending", attempts: 1 })
+      expect(mockNotifyOps).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("IBEX errors from addInvoice (after the guard, before payInvoice)", () => {
+    // authorize passed but the send never reached Ibex.payInvoice: only the
+    // recipient invoice was being minted, so nothing moved.
+    const beforePayInvoice =
+      (error: Error) =>
+      async (args: { authorize: () => Promise<unknown> }): Promise<Error> => {
+        await args.authorize()
+        return error
+      }
+
+    const httpError = (httpCode?: number) => {
+      const err = new IbexError(new Error(`IBEX ${httpCode ?? "ECONNRESET"}`))
+      if (httpCode !== undefined) {
+        Object.defineProperty(err, "httpCode", { value: httpCode })
+      }
+      return err
+    }
+
+    it("passes a beforePay hook to the send", async () => {
+      await seed()
+      mockSend.mockResolvedValue(PaymentSendStatus.Success)
+
+      await executePendingSplits({ now: T0 })
+
+      expect(mockSend.mock.calls[0][0]).toEqual(
+        expect.objectContaining({ beforePay: expect.any(Function) }),
+      )
+    })
+
+    it.each([
+      ["a 500", httpError(500)],
+      ["a transport error with no status", httpError()],
+      ["a missing bolt11", new UnexpectedIbexResponse("Bolt11 field not found.")],
+    ])(
+      "retries %s as pending with no ops alert and no owner push",
+      async (_label, error) => {
+        await seed()
+        mockSend.mockImplementationOnce(beforePayInvoice(error))
+
+        const summary = await executePendingSplits({ now: T0 })
+
+        expect(summary).toMatchObject({ claimed: 1, retried: 1, unknown: 0, failed: 0 })
+        expect(onlyRow()).toMatchObject({ status: "pending", attempts: 1 })
+        expect(mockNotifyOps).not.toHaveBeenCalled()
+        expect(mockNotify).not.toHaveBeenCalled()
+
+        // The retry re-runs the send and pays.
+        mockSend.mockResolvedValue(PaymentSendStatus.Success)
+        await executePendingSplits({ now: minutes(1) })
+        expect(onlyRow()).toMatchObject({ status: "sent", attempts: 2 })
+      },
+    )
+
+    it("fails once the attempt budget is spent", async () => {
+      await seed()
+      mockSend.mockImplementation(beforePayInvoice(httpError(500)))
+
+      let now = T0
+      for (const backoff of [1, 2, 4, 8]) {
+        await executePendingSplits({ now })
+        now = new Date(now.getTime() + backoff * 60_000)
+      }
+      await executePendingSplits({ now })
+
+      expect(onlyRow()).toMatchObject({ status: "failed", attempts: 5 })
+      expect(mockNotifyOps).not.toHaveBeenCalled()
+    })
+
+    it("fails a definitive 400 from addInvoice at once", async () => {
+      await seed()
+      mockSend.mockImplementation(beforePayInvoice(httpError(400)))
+
+      expect(await executePendingSplits({ now: T0 })).toMatchObject({ failed: 1 })
+      expect(onlyRow()).toMatchObject({ status: "failed", attempts: 1 })
       expect(mockNotifyOps).not.toHaveBeenCalled()
     })
   })
