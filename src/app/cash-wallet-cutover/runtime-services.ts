@@ -7,6 +7,8 @@ import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import Ibex from "@services/ibex/client"
 import { UnexpectedIbexResponse } from "@services/ibex/errors"
 import { getFunderWalletId } from "@services/ledger/caching"
+import { recordInternalTransferInvoice } from "@services/mongoose/internal-transfer-invoices"
+import { InternalTransferMarkerError } from "@domain/payment-splits/errors"
 
 import {
   CashWalletMigrationFailedError,
@@ -33,6 +35,7 @@ type RuntimeServiceDependencies = {
   walletsRepo?: Pick<ReturnType<typeof WalletsRepository>, "findById" | "listByAccountId">
   getFunderWalletId?: typeof getFunderWalletId
   getTreasuryWalletId?: () => Promise<WalletId | ApplicationError>
+  recordInternalTransferInvoice?: typeof recordInternalTransferInvoice
   maxRateLimitAttempts?: number
   rateLimitRetryDelayMs?: number
   sleep?: SleepFn
@@ -181,6 +184,25 @@ export const createCashWalletMigrationRuntimeServices = (
   const invoiceForRecipient = deps.createInvoice ?? Ibex.addInvoice
   const noAmountInvoiceForRecipient = deps.createNoAmountInvoice ?? Ibex.addInvoice
   const payInvoice = deps.payInvoice ?? Ibex.payInvoice
+  const recordMarker = deps.recordInternalTransferInvoice ?? recordInternalTransferInvoice
+  // ENG-653: every invoice the cutover mints is paid by Flash itself, so its
+  // receive must never trigger the recipient's payment splits. The marker is
+  // written before the invoice is handed back to be paid; if it cannot be
+  // written the invoice is not returned and nothing is paid.
+  const markCutoverInvoice =
+    (recipientWalletId: WalletId) =>
+    async (
+      invoice: LnInvoice | ApplicationError,
+    ): Promise<LnInvoice | ApplicationError> => {
+      if (invoice instanceof Error) return invoice
+      const recorded = await recordMarker({
+        paymentHash: invoice.paymentHash,
+        recipientWalletId,
+        origin: "cutover",
+      })
+      if (recorded instanceof Error) return new InternalTransferMarkerError(recorded)
+      return invoice
+    }
   const accountsRepo = deps.accountsRepo ?? AccountsRepository()
   const walletsRepo = deps.walletsRepo ?? WalletsRepository()
   const funderWalletId = deps.getFunderWalletId ?? getFunderWalletId
@@ -292,7 +314,9 @@ export const createCashWalletMigrationRuntimeServices = (
               memo,
               expiration: CUTOVER_IBEX_INVOICE_EXPIRATION_SECONDS as Seconds,
             }),
-        }).then(ibexInvoiceToDomainInvoice)
+        })
+          .then(ibexInvoiceToDomainInvoice)
+          .then(markCutoverInvoice(recipientWalletId))
       },
       createNoAmountInvoice: ({
         recipientWalletId,
@@ -310,7 +334,9 @@ export const createCashWalletMigrationRuntimeServices = (
               memo,
               expiration: CUTOVER_IBEX_INVOICE_EXPIRATION_SECONDS as Seconds,
             }),
-        }).then(ibexInvoiceToDomainInvoice),
+        })
+          .then(ibexInvoiceToDomainInvoice)
+          .then(markCutoverInvoice(recipientWalletId)),
     },
     paymentService: {
       payInvoice: async ({

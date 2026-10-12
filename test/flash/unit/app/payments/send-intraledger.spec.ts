@@ -2,6 +2,7 @@ const mockAddInvoice = jest.fn()
 const mockPayInvoice = jest.fn()
 const mockFindWalletById = jest.fn()
 const mockFindAccountById = jest.fn()
+const mockRecordInternalTransferInvoice = jest.fn()
 
 // In-memory backing stores for the ENG-530 idempotency helper (see the
 // "intraledger idempotency" describe block below). Keyed on the scoped cache/lock
@@ -70,6 +71,12 @@ jest.mock("@services/mongoose", () => ({
   UsersRepository: jest.fn(),
 }))
 
+// ENG-653: the internal-transfer marker written before every intraledger pay.
+jest.mock("@services/mongoose/internal-transfer-invoices", () => ({
+  recordInternalTransferInvoice: (...args: unknown[]) =>
+    mockRecordInternalTransferInvoice(...args),
+}))
+
 jest.mock("@services/dealer-price", () => ({
   DealerPriceService: jest.fn(() => ({})),
 }))
@@ -135,6 +142,7 @@ import {
   IntraledgerLimitsExceededError,
   MismatchedCurrencyForWalletError,
 } from "@domain/errors"
+import { InternalTransferMarkerError } from "@domain/payment-splits/errors"
 import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
 import { addEventToCurrentSpan, recordExceptionInCurrentSpan } from "@services/tracing"
@@ -149,6 +157,17 @@ const senderUsdWalletId = "11111111-1111-4111-8111-111111111111" as WalletId
 const senderUsdtWalletId = "22222222-2222-4222-8222-222222222222" as WalletId
 const recipientUsdWalletId = "33333333-3333-4333-8333-333333333333" as WalletId
 const recipientUsdtWalletId = "44444444-4444-4444-8444-444444444444" as WalletId
+
+// IBEX returns the recipient invoice's payment hash alongside the bolt11. The
+// fixture bolt11 is not decodable, so the marker falls back to this hash.
+const RECIPIENT_HASH = "ab".repeat(32)
+const ibexAddInvoiceResponse = {
+  invoice: { bolt11: "lnbc1recipient", hash: RECIPIENT_HASH },
+}
+
+beforeEach(() => {
+  mockRecordInternalTransferInvoice.mockResolvedValue(true)
+})
 
 const activeAccount = (id: string) =>
   ({
@@ -196,7 +215,7 @@ describe("intraledgerPaymentSendWalletIdForUsdWallet", () => {
     mockFindAccountById.mockImplementation(async (accountId: AccountId) =>
       activeAccount(accountId as string),
     )
-    mockAddInvoice.mockResolvedValue({ invoice: { bolt11: "lnbc1recipient" } })
+    mockAddInvoice.mockResolvedValue(ibexAddInvoiceResponse)
     mockPayInvoice.mockResolvedValue(ibexPayResponse(2))
   })
 
@@ -345,7 +364,7 @@ describe("intraledger IBEX status reading", () => {
     mockFindAccountById.mockImplementation(async (accountId: AccountId) =>
       activeAccount(accountId as string),
     )
-    mockAddInvoice.mockResolvedValue({ invoice: { bolt11: "lnbc1recipient" } })
+    mockAddInvoice.mockResolvedValue(ibexAddInvoiceResponse)
     mockFindWalletById.mockImplementation(async (walletId: WalletId) =>
       wallet({
         id: walletId,
@@ -480,7 +499,7 @@ describe("intraledger send ops events", () => {
     mockFindAccountById.mockImplementation(async (accountId: AccountId) =>
       activeAccount(accountId as string),
     )
-    mockAddInvoice.mockResolvedValue({ invoice: { bolt11: "lnbc1recipient" } })
+    mockAddInvoice.mockResolvedValue(ibexAddInvoiceResponse)
     mockPayInvoice.mockResolvedValue(ibexPayResponse(2))
     mockFindWalletById.mockImplementation(async (walletId: WalletId) =>
       wallet({
@@ -620,7 +639,7 @@ describe("intraledger idempotency (ENG-530)", () => {
     mockFindAccountById.mockImplementation(async (accountId: AccountId) =>
       activeAccount(accountId as string),
     )
-    mockAddInvoice.mockResolvedValue({ invoice: { bolt11: "lnbc1recipient" } })
+    mockAddInvoice.mockResolvedValue(ibexAddInvoiceResponse)
     mockPayInvoice.mockResolvedValue(ibexPayResponse(2))
     mockFindWalletById.mockImplementation(async (walletId: WalletId) => {
       const isUsdt = walletId === senderUsdtWalletId || walletId === recipientUsdtWalletId
@@ -808,5 +827,114 @@ describe("intraledger idempotency (ENG-530)", () => {
     // And the conflicting request did NOT send.
     expect(mockAddInvoice).toHaveBeenCalledTimes(1)
     expect(mockPayInvoice).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("internal-transfer marker (ENG-653)", () => {
+  // IBEX binds every addInvoice to the on-receive webhook, so the recipient of
+  // a system credit (Fygaro top-up, referral payout) or of a split payout would
+  // otherwise trigger their own payment splits. The marker is what tells the
+  // split pipeline the receive is internal.
+  const sendArgs = {
+    senderWalletId: senderUsdWalletId,
+    recipientWalletId: recipientUsdWalletId,
+    amount: 250,
+    memo: "marker test",
+    authorize: allowSend,
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockCacheStore.clear()
+    mockHeldLocks.clear()
+    mockRecordInternalTransferInvoice.mockResolvedValue(true)
+    mockFindAccountById.mockImplementation(async (accountId: AccountId) =>
+      activeAccount(accountId as string),
+    )
+    mockAddInvoice.mockResolvedValue(ibexAddInvoiceResponse)
+    mockPayInvoice.mockResolvedValue(ibexPayResponse(2))
+    mockFindWalletById.mockImplementation(async (walletId: WalletId) =>
+      wallet({
+        id: walletId,
+        accountId:
+          walletId === senderUsdWalletId ? "sender-account" : "recipient-account",
+        currency: WalletCurrency.Usd,
+      }),
+    )
+  })
+
+  it("writes the marker for the recipient invoice before paying it", async () => {
+    const order: string[] = []
+    mockRecordInternalTransferInvoice.mockImplementation(async () => {
+      order.push("marker")
+      return true
+    })
+    mockPayInvoice.mockImplementation(async () => {
+      order.push("pay")
+      return ibexPayResponse(2)
+    })
+
+    const result = await intraledgerPaymentSendWalletIdForUsdWallet(sendArgs)
+
+    expect(result).toEqual({ value: "success" })
+    expect(order).toEqual(["marker", "pay"])
+    expect(mockRecordInternalTransferInvoice).toHaveBeenCalledWith({
+      paymentHash: RECIPIENT_HASH,
+      senderWalletId: senderUsdWalletId,
+      recipientWalletId: recipientUsdWalletId,
+      origin: "intraledger",
+    })
+  })
+
+  it("returns an error and never pays when the marker write fails", async () => {
+    mockRecordInternalTransferInvoice.mockResolvedValue(new Error("mongo down"))
+
+    const result = await intraledgerPaymentSendWalletIdForUsdWallet(sendArgs)
+
+    expect(result).toBeInstanceOf(InternalTransferMarkerError)
+    expect(mockPayInvoice).not.toHaveBeenCalled()
+  })
+
+  it("leaves the idempotency key retryable after a marker failure", async () => {
+    mockRecordInternalTransferInvoice
+      .mockResolvedValueOnce(new Error("mongo down"))
+      .mockResolvedValue(true)
+
+    const first = await intraledgerPaymentSendWalletIdForUsdWallet({
+      ...sendArgs,
+      idempotencyKey: "marker-retry",
+    })
+    const second = await intraledgerPaymentSendWalletIdForUsdWallet({
+      ...sendArgs,
+      idempotencyKey: "marker-retry",
+    })
+
+    expect(first).toBeInstanceOf(InternalTransferMarkerError)
+    expect(second).toEqual({ value: "success" })
+    expect(mockPayInvoice).toHaveBeenCalledTimes(1)
+  })
+
+  it("marks the hash decoded from the bolt11 it pays, over IBEX's reported hash", async () => {
+    const bolt11 =
+      "lnbc140n1p3k6yzupp53p305l6de6s9xw2j0qaa59pl7lahys4f2uavwncll9z2vq0syvvsdqqcqzpgxqzuysp5mdgsaa734eg7srwx92rsn3hyc4xzt5tphfpadl5c6fanhppwaz4s9qyyssqm6yhnnhl8jltwjtclzk4g7nxr99ycsp4sqd6vksevqh06h8l3gm5fdhtl59t6g3fsalv26sj5zvwhxwlghc9wcfgkrjrtuh4873ejnspc5xksy"
+    mockAddInvoice.mockResolvedValue({ invoice: { bolt11, hash: RECIPIENT_HASH } })
+
+    await intraledgerPaymentSendWalletIdForUsdWallet(sendArgs)
+
+    expect(mockRecordInternalTransferInvoice).toHaveBeenCalledWith(
+      expect.objectContaining({
+        paymentHash: "8862fa7f4dcea0533952783bda143ff7fb7242a9573ac74f1ff944a601f02319",
+      }),
+    )
+  })
+
+  it("refuses to pay when no payment hash can be read for the invoice", async () => {
+    mockAddInvoice.mockResolvedValue({ invoice: { bolt11: "lnbc1recipient" } })
+
+    const result = await intraledgerPaymentSendWalletIdForUsdWallet(sendArgs)
+
+    expect(result).toBeInstanceOf(InternalTransferMarkerError)
+    expect(mockRecordInternalTransferInvoice).not.toHaveBeenCalled()
+    expect(mockPayInvoice).not.toHaveBeenCalled()
   })
 })
