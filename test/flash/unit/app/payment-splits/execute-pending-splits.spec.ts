@@ -303,7 +303,10 @@ describe("executePendingSplits", () => {
 
       await executePendingSplits({ now: T0 })
 
-      expect(onlyRow()).toMatchObject({ status: "failed", lastError: "InactiveAccountError" })
+      expect(onlyRow()).toMatchObject({
+        status: "failed",
+        lastError: "InactiveAccountError",
+      })
       expect(mockDisableRule).not.toHaveBeenCalled()
       expect(mockNotify).toHaveBeenCalledTimes(1)
       expect(mockNotify).toHaveBeenCalledWith(
