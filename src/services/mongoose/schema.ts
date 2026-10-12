@@ -911,9 +911,14 @@ PaymentSplitRuleSchema.index({ walletId: 1, enabled: 1 })
 
 export const PaymentSplitRule = mongoose.model("PaymentSplitRule", PaymentSplitRuleSchema)
 
-// One row per (receive, rule). The unique (triggerKey, ruleId) index is the
-// dedupe between the webhook and the reconcile cron, and between webhook
-// replays: a second insert for the same receive is a duplicate-key no-op.
+// One row per (receive, payout target). The unique (triggerKey, walletId,
+// destinationWalletId) index is the dedupe between the webhook and the
+// reconcile cron, and between webhook replays: a second insert for the same
+// receive is a duplicate-key no-op. It is keyed on the payout target, not the
+// rule id, because walletSplitsSet replaces every rule with a fresh _id: a
+// replay after the merchant re-saves (or deletes and re-adds) the same split
+// must still be a duplicate, not a second payout. A wallet's rules never
+// repeat a destination (SplitDuplicateDestinationError).
 const PaymentSplitExecutionSchema = new Schema({
   triggerKey: { type: String, required: true },
   ruleId: { type: String, required: true },
@@ -944,7 +949,10 @@ const PaymentSplitExecutionSchema = new Schema({
   updatedAt: { type: Date, required: true, default: Date.now },
 })
 
-PaymentSplitExecutionSchema.index({ triggerKey: 1, ruleId: 1 }, { unique: true })
+PaymentSplitExecutionSchema.index(
+  { triggerKey: 1, walletId: 1, destinationWalletId: 1 },
+  { unique: true },
+)
 PaymentSplitExecutionSchema.index({ status: 1, nextAttemptAt: 1 })
 
 export const PaymentSplitExecution = mongoose.model(

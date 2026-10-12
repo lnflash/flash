@@ -1,6 +1,6 @@
 // In-memory stand-in for PaymentSplitExecutionsRepository that models the two
-// properties the split pipeline relies on: the unique (triggerKey, ruleId)
-// index and the atomic pending -> sending claim.
+// properties the split pipeline relies on: the unique (triggerKey, walletId,
+// destinationWalletId) index and the atomic pending -> sending claim.
 type Row = {
   id: string
   triggerKey: string
@@ -37,7 +37,10 @@ export const createFakeExecutionsStore = () => {
     }) => {
       const { now = new Date(), nextAttemptAt = now, ...fields } = data
       const dup = [...rows.values()].find(
-        (r) => r.triggerKey === fields.triggerKey && r.ruleId === fields.ruleId,
+        (r) =>
+          r.triggerKey === fields.triggerKey &&
+          r.walletId === fields.walletId &&
+          r.destinationWalletId === fields.destinationWalletId,
       )
       if (dup) return { inserted: false as const }
       const id = `exec-${++seq}`
@@ -51,13 +54,13 @@ export const createFakeExecutionsStore = () => {
       })
       return { inserted: true as const, id }
     },
-    claimNextDue: async (now: Date) => {
+    claimNextDue: async (now: Date, claimedAt: Date = new Date()) => {
       const due = [...rows.values()]
         .filter((r) => r.status === "pending" && r.nextAttemptAt <= now)
         .sort((a, b) => a.nextAttemptAt.getTime() - b.nextAttemptAt.getTime())[0]
       if (!due) return null
       due.status = "sending"
-      due.updatedAt = now
+      due.updatedAt = claimedAt
       return { ...due }
     },
     finishClaimed: async (

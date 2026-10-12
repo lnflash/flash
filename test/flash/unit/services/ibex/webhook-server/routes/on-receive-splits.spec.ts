@@ -194,6 +194,65 @@ describe("on-receive webhook payment splits (ENG-653)", () => {
     expect(mockStore.rows.size).toBe(1)
   })
 
+  it("a replay after the split was re-saved records nothing new", async () => {
+    await post(paths.invoice, lightningBody())
+    // walletSplitsSet gave the same destination a fresh rule id.
+    mockListRules.mockResolvedValue([
+      {
+        id: "rule-1-resaved",
+        walletId: WALLET,
+        destinationWalletId: "dest",
+        percent: 20,
+        enabled: true,
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+      },
+    ])
+    await post(paths.invoice, lightningBody())
+
+    expect(mockStore.rows.size).toBe(1)
+  })
+
+  it("does not fire a rule created after the receive in the webhook body", async () => {
+    mockListRules.mockResolvedValue([
+      {
+        id: "rule-new",
+        walletId: WALLET,
+        destinationWalletId: "dest",
+        percent: 20,
+        enabled: true,
+        createdAt: new Date("2026-10-11T12:01:00Z"),
+      },
+    ])
+
+    const res = await post(paths.invoice, {
+      transaction: {
+        accountId: WALLET,
+        amount: 10,
+        invoice: { hash: HASH },
+        createdAt: "2026-10-11T12:00:00Z",
+      },
+      receivedMsat: 1000,
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(mockStore.rows.size).toBe(0)
+  })
+
+  it("fires a rule created before the receive in the webhook body", async () => {
+    const res = await post(paths.invoice, {
+      transaction: {
+        accountId: WALLET,
+        amount: 10,
+        invoice: { hash: HASH },
+        settledAt: "2026-10-11T12:00:00Z",
+      },
+      receivedMsat: 1000,
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(mockStore.rows.size).toBe(1)
+  })
+
   it.each([
     ["onchain", paths.onchain],
     ["zap", paths.zap],

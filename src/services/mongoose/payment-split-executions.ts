@@ -57,9 +57,10 @@ const toExecution = (raw: RawExecution): PaymentSplitExecutionRecord => ({
 
 export const PaymentSplitExecutionsRepository = () => {
   /**
-   * Inserts one execution. A duplicate (triggerKey, ruleId) — a webhook replay,
-   * or the reconcile cron finding a receive the webhook already recorded — is a
-   * typed no-op: `{ inserted: false }`.
+   * Inserts one execution. A duplicate (triggerKey, walletId,
+   * destinationWalletId) — a webhook replay, or the reconcile cron finding a
+   * receive the webhook already recorded, even under a rule rewritten since —
+   * is a typed no-op: `{ inserted: false }`.
    */
   const insert = async (data: {
     triggerKey: string
@@ -90,17 +91,22 @@ export const PaymentSplitExecutionsRepository = () => {
   }
 
   /**
-   * Atomically moves one due `pending` row to `sending`. Two concurrent
-   * claimers can never both get the same row: findOneAndUpdate matches on the
-   * status it is changing.
+   * Atomically moves one due (nextAttemptAt <= `now`) `pending` row to
+   * `sending`. Two concurrent claimers can never both get the same row:
+   * findOneAndUpdate matches on the status it is changing.
+   *
+   * The claim is stamped with `claimedAt` (wall-clock time by default), not
+   * `now`: the stale sweep reads updatedAt as "claimed at", and a stale `now`
+   * would let another replica's sweep take a row that is still being paid.
    */
   const claimNextDue = async (
     now: Date,
+    claimedAt: Date = new Date(),
   ): Promise<PaymentSplitExecutionRecord | null | RepositoryError> => {
     try {
       const doc = await PaymentSplitExecutionModel.findOneAndUpdate(
         { status: "pending", nextAttemptAt: { $lte: now } },
-        { $set: { status: "sending", updatedAt: now } },
+        { $set: { status: "sending", updatedAt: claimedAt } },
         { sort: { nextAttemptAt: 1 }, new: true },
       )
         .lean<RawExecution>()

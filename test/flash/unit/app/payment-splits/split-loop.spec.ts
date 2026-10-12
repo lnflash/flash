@@ -88,6 +88,29 @@ describe("runPaymentSplitsTick", () => {
     expect(mockExecute).toHaveBeenCalledTimes(1)
   })
 
+  it("hands the executor and the sweep a clock read after a slow reconcile", async () => {
+    // A reconcile has no time bound. With a `now` captured at the start of the
+    // tick, the executor would stamp claims 11 minutes in the past and another
+    // replica's stale sweep would take a row that is still being paid.
+    const after = new Date(NOW.getTime() + 11 * 60_000)
+    jest.useFakeTimers({ now: NOW })
+    mockReconcile.mockImplementation(async ({ now }: { now: Date }) => {
+      expect(now).toEqual(NOW)
+      jest.setSystemTime(after)
+      return { recorded: 0, errors: 0 }
+    })
+
+    try {
+      await runPaymentSplitsTick()
+    } finally {
+      jest.useRealTimers()
+    }
+
+    expect(mockReconcile).toHaveBeenCalledTimes(1)
+    expect(mockExecute.mock.calls[0][0].now).toEqual(after)
+    expect(mockSweep.mock.calls[0][0].now).toEqual(after)
+  })
+
   it("does nothing while the feature flag is off", async () => {
     PaymentSplitsConfig.enabled = false
 

@@ -2,9 +2,11 @@ import { PaymentSplitsConfig } from "@config"
 
 import { sendOutcomeNotificationBestEffort } from "@app/notifications/send-outcome-notification"
 import { authorizeSend } from "@app/payments/authorize-send"
+import { isDefinitivePaymentRejection } from "@app/payments/mark-outgoing-invoice"
 import { intraledgerPaymentSendWalletIdForUsdWallet } from "@app/payments/send-intraledger"
 
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
+import { CouldNotFindError } from "@domain/errors"
 import { LockServiceError, ResourceAttemptsLockServiceError } from "@domain/lock"
 import { InternalTransferMarkerError, splitRetryBackoffMs } from "@domain/payment-splits"
 import { SendLimitsUnavailableError } from "@domain/payments/errors"
@@ -59,15 +61,29 @@ export const isRetryableSplitError = (
 }
 
 /**
- * A lock error the send may have paid through (see isRetryableSplitError).
- * Treated like a row the stale sweep finds stuck in `sending`: `unknown` plus
- * an ops alert, never resent.
+ * An error the send may have paid through. Treated like a row the stale sweep
+ * finds stuck in `sending`: `unknown` plus an ops alert, never resent, and no
+ * "split failed" push to the owner (who would then pay the partner by hand).
+ *
+ * - A lock error that is not a retryable pre-payment one (see
+ *   isRetryableSplitError).
+ * - Once the ENG-573 guard passed (`paymentAttempted`), any IBEX error that is
+ *   not a definitive rejection: a transport error, a timeout or a 5xx from
+ *   payInvoice, where IBEX may already have debited (the KNOWN GAP in
+ *   idempotency.ts). A definitive rejection (insufficient balance, a 4xx such
+ *   as no route or a 429) moved no money and stays `failed` / retryable.
  */
-const isAmbiguousLockError = (
+export const isAmbiguousSplitSendError = (
   error: Error,
   { paymentAttempted }: { paymentAttempted: boolean },
-): boolean =>
-  error instanceof LockServiceError && !isRetryableSplitError(error, { paymentAttempted })
+): boolean => {
+  if (error instanceof LockServiceError) {
+    return !isRetryableSplitError(error, { paymentAttempted })
+  }
+  return (
+    paymentAttempted && error instanceof IbexError && !isDefinitivePaymentRejection(error)
+  )
+}
 
 const formatCents = (cents: number): string => `US$${(cents / 100).toFixed(2)}`
 
@@ -101,31 +117,69 @@ type ExecuteOutcome =
 const executeOne = async (
   execution: PaymentSplitExecutionRecord,
   now: Date,
+  stamp: () => Date,
 ): Promise<ExecuteOutcome> => {
   const executions = PaymentSplitExecutionsRepository()
   const attempts = execution.attempts + 1
 
+  // Records the outcome stamped with wall-clock time (not the pass's `now`),
+  // so updatedAt reflects when the row actually finished. A false result means
+  // the row was no longer `sending`: the stale sweep took it (marked it
+  // `unknown` and alerted ops) while this send ran, so the outcome below is
+  // the only record of what really happened.
+  const finish = async (
+    update: Omit<Parameters<typeof executions.finishClaimed>[1], "now">,
+  ): Promise<void> => {
+    const finished = await executions.finishClaimed(execution.id, {
+      ...update,
+      now: stamp(),
+    })
+    if (finished === true) return
+    logger.error(
+      {
+        executionId: execution.id,
+        walletId: execution.walletId,
+        destinationWalletId: execution.destinationWalletId,
+        outcome: update.status,
+        lastError: update.lastError,
+        error: finished instanceof Error ? finished : undefined,
+      },
+      finished instanceof Error
+        ? "payment split outcome could not be recorded; the row stays in sending and the stale sweep will mark it unknown — resolve by hand with this outcome"
+        : "payment split outcome lost: the row was no longer sending (the stale sweep took it); resolve the unknown row by hand with this outcome",
+    )
+  }
+
   const fail = async (error: Error | string, accountId?: string) => {
     const lastError = typeof error === "string" ? error : error.name || error.message
-    await executions.finishClaimed(execution.id, {
-      status: "failed",
-      attempts,
-      lastError,
-      now,
-    })
+    await finish({ status: "failed", attempts, lastError })
     if (accountId) await notifyOwner(accountId, "failed", execution)
     return "failed" as const
   }
 
   const retry = async (error: Error) => {
-    await executions.finishClaimed(execution.id, {
+    await finish({
       status: "pending",
       attempts,
+      // From the pass's `now`, so a row retried in this pass is due in a
+      // later pass (see executePendingSplits).
       nextAttemptAt: new Date(now.getTime() + splitRetryBackoffMs(attempts)),
       lastError: error.name,
-      now,
     })
     return "retry" as const
+  }
+
+  // Nothing has been sent yet: a transient error (a Mongo stepdown, a network
+  // blip) gets the same retry budget as any pre-payment error. Only a definite
+  // not-found (the wallet or account is gone) fails at once.
+  const failBeforeSend = async (error: Error) => {
+    if (
+      !(error instanceof CouldNotFindError) &&
+      attempts < PaymentSplitsConfig.maxAttempts
+    ) {
+      return retry(error)
+    }
+    return fail(error)
   }
 
   // Re-check the internal-transfer marker at pay time. An LNURL send from
@@ -134,22 +188,17 @@ const executeOne = async (
   const internal = await isInternalTransferInvoice(execution.triggerKey)
   if (internal instanceof Error) {
     // Nothing was sent: the same retry budget as any pre-payment error.
-    if (attempts < PaymentSplitsConfig.maxAttempts) return retry(internal)
-    return fail(internal)
+    return failBeforeSend(internal)
   }
   if (internal) {
-    await executions.finishClaimed(execution.id, {
-      status: "skipped_internal",
-      attempts: execution.attempts,
-      now,
-    })
+    await finish({ status: "skipped_internal", attempts: execution.attempts })
     return "skipped_internal"
   }
 
   const wallet = await WalletsRepository().findById(execution.walletId as WalletId)
-  if (wallet instanceof Error) return fail(wallet)
+  if (wallet instanceof Error) return failBeforeSend(wallet)
   const account = await AccountsRepository().findById(wallet.accountId)
-  if (account instanceof Error) return fail(account)
+  if (account instanceof Error) return failBeforeSend(account)
 
   // Set once the ENG-573 guard passes. withPaymentIdempotency runs `authorize`
   // inside the idempotency lock immediately before the payment, so this is the
@@ -181,16 +230,11 @@ const executeOne = async (
   })
 
   if (result instanceof Error) {
-    if (isAmbiguousLockError(result, { paymentAttempted })) {
-      await executions.finishClaimed(execution.id, {
-        status: "unknown",
-        attempts,
-        lastError: result.name,
-        now,
-      })
+    if (isAmbiguousSplitSendError(result, { paymentAttempted })) {
+      await finish({ status: "unknown", attempts, lastError: result.name })
       logger.error(
         { executionId: execution.id, walletId: execution.walletId, error: result },
-        "payment split lock error after the send may have paid; marked unknown",
+        "payment split send may have paid despite the error; marked unknown",
       )
       notifyOpsEvent({
         flow: "transfer",
@@ -220,7 +264,7 @@ const executeOne = async (
   }
 
   if (result === PaymentSendStatus.Success) {
-    await executions.finishClaimed(execution.id, { status: "sent", attempts, now })
+    await finish({ status: "sent", attempts })
     await notifyOwner(account.id, "sent", execution)
     return "sent"
   }
@@ -228,11 +272,7 @@ const executeOne = async (
   if (result === PaymentSendStatus.Pending) {
     // Money has probably left the wallet: never re-pay (same stance as the
     // Fygaro credit). Ops resolves the final state from IBEX.
-    await executions.finishClaimed(execution.id, {
-      status: "ibex_pending",
-      attempts,
-      now,
-    })
+    await finish({ status: "ibex_pending", attempts })
     return "ibex_pending"
   }
 
@@ -256,9 +296,12 @@ export type ExecutePendingSplitsSummary = {
  *
  * Runs every PaymentSplitsConfig.loopIntervalMs from the split loop and keeps
  * claiming until nothing is due or executorTimeBudgetMs is spent, so the
- * throughput is not capped by a fixed batch per run. `now` is fixed per pass:
- * a row retried in this pass is due at now + backoff and is picked up by a
- * later pass, which is what makes the 1/2/4/8 minute backoff real.
+ * throughput is not capped by a fixed batch per run. `now` is fixed per pass
+ * and decides what is due: a row retried in this pass is due at now + backoff
+ * and is picked up by a later pass, which is what makes the 1/2/4/8 minute
+ * backoff real. Claims and outcomes are stamped with `clock()` (wall-clock
+ * time), never the pass's `now`, so a row's updatedAt never looks older to the
+ * stale sweep on another replica than it really is.
  *
  * `shouldStop` lets the loop drain on SIGTERM (see startPaymentSplitsLoop).
  */
@@ -281,17 +324,18 @@ export const executePendingSplits = async ({
   if (!PaymentSplitsConfig.enabled) return summary
 
   const executions = PaymentSplitExecutionsRepository()
+  const stamp = () => new Date(clock())
   const deadline = clock() + PaymentSplitsConfig.executorTimeBudgetMs
   // `shouldStop` is checked before every claim, so on shutdown the row in
   // flight finishes and no new row moves to `sending` (where a kill would
   // strand it for the stale sweep to mark `unknown`).
   while (clock() < deadline && !shouldStop()) {
-    const execution = await executions.claimNextDue(now)
+    const execution = await executions.claimNextDue(now, stamp())
     if (execution instanceof Error) return execution
     if (execution === null) break
 
     summary.claimed += 1
-    const outcome = await executeOne(execution, now)
+    const outcome = await executeOne(execution, now, stamp)
     if (outcome === "sent") summary.sent += 1
     else if (outcome === "ibex_pending") summary.ibexPending += 1
     else if (outcome === "failed") summary.failed += 1

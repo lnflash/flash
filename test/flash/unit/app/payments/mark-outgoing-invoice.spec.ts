@@ -124,6 +124,7 @@ describe("isDefinitivePaymentRejection", () => {
     ["a FAILED status", PaymentSendStatus.Failure],
     ["an IBEX 400 (no route, expired)", httpError(400)],
     ["an IBEX 429", httpError(429)],
+    ["an already-paid invoice", new CompletedInvoice(new Error("400"))],
   ])("is true for %s", (_label, result) => {
     expect(isDefinitivePaymentRejection(result)).toBe(true)
   })
@@ -132,7 +133,6 @@ describe("isDefinitivePaymentRejection", () => {
     ["success", PaymentSendStatus.Success],
     ["pending", PaymentSendStatus.Pending],
     ["an unreadable response", new UnconfirmedIbexPayment("unreadable")],
-    ["an already-paid invoice", new CompletedInvoice(new Error("400"))],
     ["an IBEX 5xx", httpError(502)],
     ["a request timeout", httpError(408)],
     ["a transport error with no status", new IbexError(new Error("ECONNRESET"))],
@@ -180,6 +180,20 @@ describe("payMarkedBolt11", () => {
     const rejected = new InsufficientIbexBalance(new Error("400"), ErrorLevel.Info)
 
     expect(await run(rejected)).toBe(rejected)
+    expect(mockDeleteInternalTransferInvoice).toHaveBeenCalledWith({
+      paymentHash: HASH,
+      senderWalletId: SENDER,
+      origin: "ln-send",
+    })
+  })
+
+  it("withdraws its own marker when the invoice was already paid by someone else", async () => {
+    // Otherwise any Flash user could suppress a merchant's splits by trying to
+    // pay a bolt11 an external customer already paid: the 30-day marker would
+    // turn the pending split into skipped_internal.
+    const completed = new CompletedInvoice(new Error("400"))
+
+    expect(await run(completed)).toBe(completed)
     expect(mockDeleteInternalTransferInvoice).toHaveBeenCalledWith({
       paymentHash: HASH,
       senderWalletId: SENDER,

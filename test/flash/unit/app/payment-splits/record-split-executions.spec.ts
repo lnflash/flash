@@ -117,6 +117,34 @@ describe("recordSplitExecutions", () => {
     expect(await record()).toEqual({ recorded: 0, duplicates: 2, skippedMin: 0 })
   })
 
+  it("treats a replay after the rules were rewritten as a duplicate, not a second payout", async () => {
+    // walletSplitsSet replaces every rule with a fresh id. A webhook replay
+    // landing after the merchant re-saved the same split must not pay the
+    // same destination again under the new rule id.
+    expect(await record()).toEqual({ recorded: 2, duplicates: 0, skippedMin: 0 })
+
+    mockListRules.mockResolvedValue(
+      rules.map((rule) => ({
+        ...rule,
+        id: `${rule.id}-resaved`,
+        createdAt: new Date("2026-10-02T00:00:00Z"),
+      })),
+    )
+
+    expect(await record()).toEqual({ recorded: 0, duplicates: 2, skippedMin: 0 })
+    expect(mockStore.rows.size).toBe(2)
+  })
+
+  it("records a destination added by the rewrite for a receive it has not paid yet", async () => {
+    await record()
+    mockListRules.mockResolvedValue([
+      rules[0],
+      { ...rules[1], id: "rule-3", destinationWalletId: "dest-3" },
+    ])
+
+    expect(await record()).toEqual({ recorded: 1, duplicates: 1, skippedMin: 0 })
+  })
+
   it("records nothing for a hash Flash minted for its own transfer", async () => {
     mockIsInternal.mockResolvedValue(true)
 

@@ -34,7 +34,7 @@ const seedSending = async (claimedAt: Date) => {
     status: "pending",
     now: claimedAt,
   })
-  await mockStore.repo.claimNextDue(claimedAt)
+  await mockStore.repo.claimNextDue(claimedAt, claimedAt)
 }
 
 const originalEnabled = PaymentSplitsConfig.enabled

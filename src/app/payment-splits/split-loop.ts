@@ -36,12 +36,18 @@ const claimReconcileLease = async (intervalMs: number): Promise<boolean> => {
  * due row within the executor's time budget, then sweep rows stuck in
  * `sending`. Executor claims and sweep moves are atomic per row, so ticks on
  * several replicas never pay the same row twice.
+ *
+ * Each phase reads the clock when it starts (unless a test pins `now`): the
+ * reconcile has no time bound, and an executor handed a `now` from before it
+ * would treat rows as due by a stale time while another replica's sweep, on
+ * a fresh clock, judges what is stuck.
  */
 export const runPaymentSplitsTick = async ({
-  now = new Date(),
+  now: pinnedNow,
   shouldStop = () => false,
 }: { now?: Date; shouldStop?: () => boolean } = {}): Promise<void> => {
   if (!PaymentSplitsConfig.enabled) return
+  const currentTime = () => pinnedNow ?? new Date()
 
   if (
     !shouldStop() &&
@@ -49,7 +55,7 @@ export const runPaymentSplitsTick = async ({
   ) {
     const reconciled = await reconcileSplits({
       cadenceMs: PaymentSplitsConfig.reconcileIntervalMs,
-      now,
+      now: currentTime(),
     })
     if (reconciled instanceof Error) {
       logger.error({ err: reconciled }, "payment splits loop: reconcile failed")
@@ -60,7 +66,7 @@ export const runPaymentSplitsTick = async ({
 
   if (shouldStop()) return
 
-  const executed = await executePendingSplits({ now, shouldStop })
+  const executed = await executePendingSplits({ now: currentTime(), shouldStop })
   if (executed instanceof Error) {
     logger.error({ err: executed }, "payment splits loop: executor failed")
   } else if (executed.claimed > 0) {
@@ -69,7 +75,7 @@ export const runPaymentSplitsTick = async ({
 
   if (shouldStop()) return
 
-  const swept = await sweepStaleSplits({ now })
+  const swept = await sweepStaleSplits({ now: currentTime() })
   if (swept instanceof Error) {
     logger.error({ err: swept }, "payment splits loop: stale sweep failed")
   }

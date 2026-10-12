@@ -5,6 +5,17 @@ const mockFindWalletById = jest.fn()
 const mockFindAccountById = jest.fn()
 const mockIsInternal = jest.fn()
 const mockNotifyOps = jest.fn()
+jest.mock("@services/logger", () => {
+  const logger = {
+    trace: jest.fn(),
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    fatal: jest.fn(),
+  }
+  return { baseLogger: { ...logger, child: () => logger } }
+})
 
 jest.mock("@app/payments/send-intraledger", () => ({
   intraledgerPaymentSendWalletIdForUsdWallet: (...args: unknown[]) => mockSend(...args),
@@ -46,9 +57,12 @@ import {
 } from "@app/payment-splits/execute-pending-splits"
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import {
+  CouldNotFindAccountFromIdError,
+  CouldNotFindWalletFromIdError,
   InactiveAccountError,
   IntraledgerLimitsExceededError,
   RepositoryError,
+  UnknownRepositoryError,
 } from "@domain/errors"
 import {
   ResourceAttemptsLockServiceError,
@@ -59,13 +73,17 @@ import { InternalTransferMarkerError, splitRetryBackoffMs } from "@domain/paymen
 import { SendLimitsUnavailableError } from "@domain/payments/errors"
 import { PaymentSendRateLimiterExceededError } from "@domain/rate-limit/errors"
 import { WalletCurrency } from "@domain/shared"
-import { InsufficientIbexBalance } from "@services/ibex/errors"
+import { IbexError, InsufficientIbexBalance } from "@services/ibex/errors"
 
 import { createFakeExecutionsStore } from "./fake-executions-store"
 
 // Read lazily by the repository mock above, so defining it after the imports
 // is safe: the mock factory only captures the reference.
 const mockStore = createFakeExecutionsStore()
+
+const mockLogger = (
+  jest.requireMock("@services/logger") as { baseLogger: { error: jest.Mock } }
+).baseLogger
 
 const SOURCE = "source-wallet"
 const DEST = "dest-wallet"
@@ -401,6 +419,164 @@ describe("executePendingSplits", () => {
       expect(onlyRow()).toMatchObject({ status: "unknown" })
       await executePendingSplits({ now: minutes(60) })
       expect(mockSend).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe("IBEX errors after the send guard passed", () => {
+    // authorize passed, so Ibex.payInvoice was called: anything but a definite
+    // rejection may have debited (the KNOWN GAP in idempotency.ts).
+    const afterAuthorize =
+      (error: Error) =>
+      async (args: { authorize: () => Promise<unknown> }): Promise<Error> => {
+        await args.authorize()
+        return error
+      }
+
+    const httpError = (httpCode?: number) => {
+      const err = new IbexError(new Error(`IBEX ${httpCode ?? "ECONNRESET"}`))
+      if (httpCode !== undefined) {
+        Object.defineProperty(err, "httpCode", { value: httpCode })
+      }
+      return err
+    }
+
+    it.each([
+      ["a 500", httpError(500)],
+      ["a 502", httpError(502)],
+      ["a 408 timeout", httpError(408)],
+      ["a transport error / timeout with no status", httpError()],
+    ])(
+      "marks %s unknown, alerts ops, never pushes the owner a failure, never re-sends",
+      async (_label, error) => {
+        await seed()
+        mockSend.mockImplementation(afterAuthorize(error))
+
+        const summary = await executePendingSplits({ now: T0 })
+
+        expect(summary).toMatchObject({ claimed: 1, unknown: 1, failed: 0, retried: 0 })
+        expect(onlyRow()).toMatchObject({ status: "unknown", attempts: 1 })
+        expect(mockNotifyOps).toHaveBeenCalledWith(
+          expect.objectContaining({ phase: "split-unknown", status: "failed" }),
+        )
+        expect(mockNotify).not.toHaveBeenCalled()
+
+        await executePendingSplits({ now: minutes(60) })
+        expect(mockSend).toHaveBeenCalledTimes(1)
+      },
+    )
+
+    it("fails a definitive 400 rejection and pushes the owner", async () => {
+      await seed()
+      mockSend.mockImplementation(afterAuthorize(httpError(400)))
+
+      const summary = await executePendingSplits({ now: T0 })
+
+      expect(summary).toMatchObject({ claimed: 1, failed: 1, unknown: 0 })
+      expect(onlyRow()).toMatchObject({ status: "failed", attempts: 1 })
+      expect(mockNotifyOps).not.toHaveBeenCalled()
+      expect(mockNotify).toHaveBeenCalledWith(
+        expect.objectContaining({ phraseBase: "notification.paymentSplit.failed" }),
+      )
+    })
+
+    it("still retries an IBEX 429 (rejected before anything moved)", async () => {
+      await seed()
+      mockSend.mockImplementation(afterAuthorize(httpError(429)))
+
+      await executePendingSplits({ now: T0 })
+
+      expect(onlyRow()).toMatchObject({ status: "pending", attempts: 1 })
+      expect(mockNotifyOps).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("repository errors before the send", () => {
+    it.each([
+      ["the wallet lookup", "wallet"],
+      ["the account lookup", "account"],
+    ])(
+      "retries a transient error from %s instead of failing the split",
+      async (_label, which) => {
+        await seed()
+        const blip = new UnknownRepositoryError("primary stepdown")
+        if (which === "wallet") mockFindWalletById.mockResolvedValueOnce(blip)
+        else mockFindAccountById.mockResolvedValueOnce(blip)
+        mockSend.mockResolvedValue(PaymentSendStatus.Success)
+
+        expect(await executePendingSplits({ now: T0 })).toMatchObject({ retried: 1 })
+        expect(onlyRow()).toMatchObject({ status: "pending", attempts: 1 })
+        expect(mockSend).not.toHaveBeenCalled()
+        expect(mockNotify).not.toHaveBeenCalled()
+
+        await executePendingSplits({ now: minutes(1) })
+        expect(onlyRow()).toMatchObject({ status: "sent", attempts: 2 })
+      },
+    )
+
+    it("fails a transient error once the attempt budget is spent", async () => {
+      await seed()
+      mockFindWalletById.mockResolvedValue(new UnknownRepositoryError("mongo down"))
+
+      let now = T0
+      for (const backoff of [1, 2, 4, 8]) {
+        await executePendingSplits({ now })
+        now = new Date(now.getTime() + backoff * 60_000)
+      }
+      await executePendingSplits({ now })
+
+      expect(onlyRow()).toMatchObject({ status: "failed", attempts: 5 })
+      expect(mockSend).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ["the wallet is gone", "wallet", new CouldNotFindWalletFromIdError()],
+      ["the account is gone", "account", new CouldNotFindAccountFromIdError()],
+    ])("fails at once when %s", async (_label, which, error) => {
+      await seed()
+      if (which === "wallet") mockFindWalletById.mockResolvedValue(error)
+      else mockFindAccountById.mockResolvedValue(error)
+
+      expect(await executePendingSplits({ now: T0 })).toMatchObject({ failed: 1 })
+      expect(onlyRow()).toMatchObject({ status: "failed", attempts: 1 })
+      expect(mockSend).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("wall-clock stamps", () => {
+    it("stamps the claim and the outcome with the clock, not the pass's now", async () => {
+      await seed()
+      // The pass's `now` is 11 minutes old by the time the row is claimed
+      // (a slow reconcile ran first).
+      const wallClock = minutes(11).getTime()
+      let updatedAtWhileSending: Date | undefined
+      mockSend.mockImplementation(async () => {
+        updatedAtWhileSending = onlyRow().updatedAt
+        return PaymentSendStatus.Success
+      })
+
+      await executePendingSplits({ now: T0, clock: () => wallClock })
+
+      expect(updatedAtWhileSending).toEqual(new Date(wallClock))
+      expect(onlyRow()).toMatchObject({ status: "sent", updatedAt: new Date(wallClock) })
+    })
+
+    it("logs an error when the stale sweep took the row while it was being paid", async () => {
+      await seed()
+      mockSend.mockImplementation(async () => {
+        // Another replica's sweep marks the row unknown mid-send.
+        await mockStore.repo.markNextStaleUnknown(new Date(8.64e15), new Date())
+        return PaymentSendStatus.Success
+      })
+
+      await executePendingSplits({ now: T0 })
+
+      // The sweep's `unknown` is never overwritten, but the real outcome is
+      // logged for the human resolving it.
+      expect(onlyRow()).toMatchObject({ status: "unknown" })
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ executionId: onlyRow().id, outcome: "sent" }),
+        expect.stringContaining("outcome lost"),
+      )
     })
   })
 

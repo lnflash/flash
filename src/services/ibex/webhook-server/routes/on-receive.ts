@@ -78,6 +78,19 @@ const fetchPaymentContext = async (
 // split loop (lookback = interval plus margin) and once a day from the galoy
 // cron (lookback = a day plus margin). Duplicate deliveries are duplicate-key
 // no-ops.
+// The receive time from the webhook body, so a rule created after the receive
+// (a replay that lands after the merchant set or re-saved a split) never fires
+// on it. Undefined when IBEX sent no parseable time.
+const parseReceivedAt = (transaction: unknown): Date | undefined => {
+  const tx = transaction as { settledAt?: unknown; createdAt?: unknown } | undefined
+  for (const value of [tx?.settledAt, tx?.createdAt]) {
+    if (typeof value !== "string" && typeof value !== "number") continue
+    const date = new Date(value)
+    if (!Number.isNaN(date.getTime())) return date
+  }
+  return undefined
+}
+
 const recordPaymentSplits = async (
   req: PaymentRequest,
   _resp: Response,
@@ -97,6 +110,7 @@ const recordPaymentSplits = async (
         paymentHash,
         amount,
         currency: receiverWallet.currency,
+        receivedAt: parseReceivedAt(transaction),
       })
       if (result instanceof Error) {
         logger.error(

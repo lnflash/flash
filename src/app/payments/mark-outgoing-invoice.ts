@@ -66,17 +66,23 @@ export const markOutgoingBolt11 = async (args: {
 
 /**
  * True only when IBEX refused the payment before any money moved: an
- * insufficient balance, a corroborated FAILED status, or any other 4xx the
- * request was rejected with (no route, expired invoice, rate limit). Never true
- * for a pending or unreadable outcome, a transport error or a 5xx (the payment
- * may still settle), nor for an already-paid invoice (someone else's payment of
- * it settled, and that payer may be another Flash wallet whose marker this is).
+ * insufficient balance, a corroborated FAILED status, an already-paid (or
+ * already-prepared) invoice, or any other 4xx the request was rejected with
+ * (no route, expired invoice, rate limit). Never true for a pending or
+ * unreadable outcome, a transport error or a 5xx (the payment may still
+ * settle).
+ *
+ * An already-paid invoice is a rejection of THIS caller: it paid nothing.
+ * Markers are one row per (hash, sender, origin), so a Flash wallet that did
+ * pay the invoice has its own row, and withdrawing this caller's row protects
+ * nobody. Keeping it would let any Flash user suppress a merchant's splits by
+ * attempting to pay a bolt11 an external customer already paid.
  */
 export const isDefinitivePaymentRejection = (result: unknown): boolean => {
   if (result === PaymentSendStatus.Failure) return true
   if (result instanceof InsufficientIbexBalance) return true
   if (result instanceof FailedIbexPayment) return true
-  if (result instanceof CompletedInvoice) return false
+  if (result instanceof CompletedInvoice) return true
   if (result instanceof IbexError) {
     const code = result.httpCode
     return code !== undefined && code >= 400 && code < 500 && code !== 408

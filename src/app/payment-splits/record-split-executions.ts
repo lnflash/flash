@@ -17,13 +17,16 @@ const NOTHING: RecordSplitExecutionsResult = { recorded: 0, duplicates: 0, skipp
 /**
  * Records one pending split execution per enabled rule on `walletId` for one
  * receive. Shared by the on-receive webhook and the reconcile cron, which both
- * key the receive by its payment hash so the unique (triggerKey, ruleId) index
- * dedupes them against each other and against webhook replays.
+ * key the receive by its payment hash so the unique (triggerKey, walletId,
+ * destinationWalletId) index dedupes them against each other and against
+ * webhook replays, including a replay after the rules were rewritten (new
+ * rule ids for the same destinations).
  *
  * Never sends: payouts happen only in the cron executor.
  *
- * `receivedAt`, when known (the cron reads it from IBEX), keeps a rule from
- * firing on a receive that settled before the rule was created.
+ * `receivedAt`, when known (the cron reads it from IBEX, the webhook from its
+ * body), keeps a rule from firing on a receive that settled before the rule
+ * was created.
  */
 export const recordSplitExecutions = async ({
   walletId,
