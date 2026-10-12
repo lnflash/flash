@@ -273,10 +273,17 @@ describe("payment split repositories (ENG-653)", () => {
     expect(second[0].id).not.toEqual(first[0].id)
     expect(await rules.findById(first[0].id)).toBeNull()
 
+    // Another owner has an enabled rule to the same destination.
+    const other = await rules.replaceForWallet("wallet-g", [
+      { destinationWalletId: "closed-partner", percent: 5 },
+    ])
+    if (other instanceof Error) throw other
+
     expect(await rules.disableForDestination("wallet-f", "closed-partner")).toBe(true)
     expect(await rules.findById(second[0].id)).toMatchObject({ enabled: false })
-    // Another wallet's rule to the same destination is untouched.
-    expect(await rules.disableForDestination("wallet-g", "closed-partner")).toBe(false)
+    // Disabling wallet-f's rule must not touch wallet-g's rule.
+    expect(await rules.findById(other[0].id)).toMatchObject({ enabled: true })
+    expect(await rules.disableForDestination("wallet-g", "closed-partner")).toBe(true)
   })
 
   it("lets exactly one of several concurrent claimers claim a pending row", async () => {
