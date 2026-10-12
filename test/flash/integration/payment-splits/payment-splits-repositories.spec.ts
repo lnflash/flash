@@ -216,13 +216,20 @@ describe("payment split repositories (ENG-653)", () => {
 
       const disabledAt = new Date("2026-10-12T12:00:00Z")
       // Only the first call flips the flag, so only it notifies the owner.
-      expect(await rules.disableById(closed.id, { now: disabledAt })).toBe(true)
-      expect(await rules.disableById(closed.id)).toBe(false)
-      expect(await rules.disableById("not-an-object-id")).toBe(false)
+      expect(
+        await rules.disableForDestination("wallet-d", "closed-partner", {
+          now: disabledAt,
+        }),
+      ).toBe(true)
+      expect(await rules.disableForDestination("wallet-d", "closed-partner")).toBe(false)
+      expect(await rules.disableForDestination("wallet-d", "no-such-partner")).toBe(false)
       expect(await rules.findById(closed.id)).toMatchObject({
         enabled: false,
         updatedAt: disabledAt,
       })
+      // The disabled rule still exists; a destination never configured does not.
+      expect(await rules.existsForDestination("wallet-d", "closed-partner")).toBe(true)
+      expect(await rules.existsForDestination("wallet-d", "no-such-partner")).toBe(false)
 
       // Webhook and reconcile both record through recordSplitExecutions.
       const triggerKey = "d".repeat(64)
@@ -244,11 +251,32 @@ describe("payment split repositories (ENG-653)", () => {
         { destinationWalletId: "closed-partner", percent: 10 },
       ])
       if (only instanceof Error) throw only
-      expect(await rules.disableById(only[0].id)).toBe(true)
+      expect(await rules.disableForDestination("wallet-e", "closed-partner")).toBe(true)
       expect(await rules.listWalletIdsWithEnabledRules()).toEqual(["wallet-d"])
     } finally {
       PaymentSplitsConfig.enabled = enabled
     }
+  })
+
+  it("disables a destination's rule after a re-save gave it a new id (ENG-660)", async () => {
+    const rules = PaymentSplitRulesRepository()
+    const first = await rules.replaceForWallet("wallet-f", [
+      { destinationWalletId: "closed-partner", percent: 10 },
+    ])
+    if (first instanceof Error) throw first
+    // The owner edits the percentage: the rule is re-inserted with a new id,
+    // so an execution recorded under the first id no longer names a rule.
+    const second = await rules.replaceForWallet("wallet-f", [
+      { destinationWalletId: "closed-partner", percent: 15 },
+    ])
+    if (second instanceof Error) throw second
+    expect(second[0].id).not.toEqual(first[0].id)
+    expect(await rules.findById(first[0].id)).toBeNull()
+
+    expect(await rules.disableForDestination("wallet-f", "closed-partner")).toBe(true)
+    expect(await rules.findById(second[0].id)).toMatchObject({ enabled: false })
+    // Another wallet's rule to the same destination is untouched.
+    expect(await rules.disableForDestination("wallet-g", "closed-partner")).toBe(false)
   })
 
   it("lets exactly one of several concurrent claimers claim a pending row", async () => {

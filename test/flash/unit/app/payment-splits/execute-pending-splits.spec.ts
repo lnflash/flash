@@ -6,6 +6,7 @@ const mockFindAccountById = jest.fn()
 const mockIsInternal = jest.fn()
 const mockNotifyOps = jest.fn()
 const mockDisableRule = jest.fn()
+const mockRuleExists = jest.fn()
 jest.mock("@services/logger", () => {
   const logger = {
     trace: jest.fn(),
@@ -49,7 +50,8 @@ jest.mock("@services/alerts/ops-events", () => ({
 
 jest.mock("@services/mongoose/payment-split-rules", () => ({
   PaymentSplitRulesRepository: jest.fn(() => ({
-    disableById: (...args: unknown[]) => mockDisableRule(...args),
+    disableForDestination: (...args: unknown[]) => mockDisableRule(...args),
+    existsForDestination: (...args: unknown[]) => mockRuleExists(...args),
   })),
 }))
 
@@ -144,6 +146,7 @@ beforeEach(() => {
   mockAuthorizeSend.mockResolvedValue(true)
   mockNotify.mockResolvedValue(undefined)
   mockDisableRule.mockResolvedValue(true)
+  mockRuleExists.mockResolvedValue(true)
 })
 
 afterAll(() => {
@@ -261,7 +264,7 @@ describe("executePendingSplits", () => {
           lastError: "InactiveAccountError",
         })
         expect(mockDisableRule).toHaveBeenCalledTimes(1)
-        expect(mockDisableRule).toHaveBeenCalledWith("rule-1", expect.anything())
+        expect(mockDisableRule).toHaveBeenCalledWith(SOURCE, DEST, expect.anything())
         expect(mockNotify).toHaveBeenCalledTimes(1)
         expect(mockNotify).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -294,6 +297,49 @@ describe("executePendingSplits", () => {
       expect(mockNotify).toHaveBeenCalledWith(
         expect.objectContaining({ phraseBase: "notification.paymentSplit.disabled" }),
       )
+    })
+
+    it("still pushes a failure when the recorded rule no longer exists", async () => {
+      // The row was recorded under a rule the owner since edited away (a save
+      // gives every rule a new id) or deleted, so nothing is left to disable.
+      destinationStatus("closed")
+      await seed()
+      mockSend.mockResolvedValue(new InactiveAccountError(DEST_ACCOUNT))
+      mockDisableRule.mockResolvedValue(false)
+      mockRuleExists.mockResolvedValue(false)
+
+      const summary = await executePendingSplits({ now: T0 })
+
+      expect(summary).toMatchObject({ claimed: 1, failed: 1 })
+      expect(onlyRow()).toMatchObject({
+        status: "failed",
+        lastError: "InactiveAccountError",
+      })
+      expect(mockRuleExists).toHaveBeenCalledWith(SOURCE, DEST)
+      expect(mockNotify).toHaveBeenCalledTimes(1)
+      expect(mockNotify).toHaveBeenCalledWith(
+        expect.objectContaining({
+          accountId: OWNER.id,
+          phraseBase: "notification.paymentSplit.failed",
+        }),
+      )
+    })
+
+    it("pushes a failure when nothing was disabled and the rule lookup fails", async () => {
+      destinationStatus("closed")
+      await seed()
+      mockSend.mockResolvedValue(new InactiveAccountError(DEST_ACCOUNT))
+      mockDisableRule.mockResolvedValue(false)
+      mockRuleExists.mockResolvedValue(new UnknownRepositoryError("mongo down"))
+
+      await executePendingSplits({ now: T0 })
+
+      expect(onlyRow()).toMatchObject({ status: "failed" })
+      expect(mockNotify).toHaveBeenCalledTimes(1)
+      expect(mockNotify).toHaveBeenCalledWith(
+        expect.objectContaining({ phraseBase: "notification.paymentSplit.failed" }),
+      )
+      expect(mockLogger.error).toHaveBeenCalled()
     })
 
     it("keeps the rule enabled when the SOURCE account is the inactive one", async () => {
