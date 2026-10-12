@@ -30,11 +30,7 @@ import {
   reconcileBridgeAndIbexWithdrawals,
 } from "@services/bridge/reconciliation"
 import { checkFygaroTreasuryFloat } from "@services/fygaro/float-monitor"
-import {
-  executePendingSplits,
-  reconcileSplits,
-  sweepStaleSplits,
-} from "@app/payment-splits"
+import { reconcileSplits } from "@app/payment-splits"
 
 import { elapsedSinceTimestamp, sleep } from "@utils"
 import { rebalancingInternalChannels } from "@services/lnd/rebalancing"
@@ -99,30 +95,18 @@ const reconcileBridgeWithdrawalsJob = async () => {
   if (result instanceof Error) throw result
 }
 
-// ENG-653 payment splits. Reconcile first so a receive whose webhook was
-// missed is recorded before the executor runs; the sweep then flags any row a
-// crashed run left in `sending`. All three self-guard on the config flag.
+// ENG-653 payment splits. Execution, retries and the stale sweep run every
+// minute in the ibex-webhook workload (startPaymentSplitsLoop); this daily Job
+// is far too slow for them. It keeps only a long-lookback reconcile as the
+// backstop for that loop being down: the lookback is derived from
+// paymentSplits.cronIntervalMs (the chart's schedule) plus a margin, so it
+// always reaches back past the previous run. Self-guards on the config flag.
 const reconcileSplitPaymentsJob = async () => {
   if (!PaymentSplitsConfig.enabled) return
 
-  const result = await reconcileSplits({ windowMs: RECONCILE_WINDOW_MS })
+  const result = await reconcileSplits({ cadenceMs: PaymentSplitsConfig.cronIntervalMs })
   if (result instanceof Error) throw result
   logger.info({ result }, "payment split reconcile finished")
-}
-
-const executeSplitPaymentsJob = async () => {
-  if (!PaymentSplitsConfig.enabled) return
-
-  const result = await executePendingSplits()
-  if (result instanceof Error) throw result
-  logger.info({ result }, "payment split executor finished")
-}
-
-const sweepStaleSplitsJob = async () => {
-  if (!PaymentSplitsConfig.enabled) return
-
-  const result = await sweepStaleSplits()
-  if (result instanceof Error) throw result
 }
 
 // Bankowner treasury float check for Fygaro auto-credit. Runs every cron
@@ -183,8 +167,6 @@ const main = async () => {
     reconcileBridgeDepositsJob,
     reconcileBridgeWithdrawalsJob,
     reconcileSplitPaymentsJob,
-    executeSplitPaymentsJob,
-    sweepStaleSplitsJob,
     checkFygaroFloatJob,
     evidenceRetentionJob,
     deleteExpiredPaymentFlows,

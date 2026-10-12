@@ -66,6 +66,16 @@ export const decodeInvoice = (
   }
 }
 
+/**
+ * Just the payment hash of a bolt11, with none of decodeInvoice's policy
+ * (payment secret, amount). Undefined when the library cannot parse it.
+ */
+export const paymentHashFromBolt11 = (bolt11: string): PaymentHash | undefined => {
+  const decoded = safeDecode(bolt11.toLowerCase() as EncodedPaymentRequest)
+  if (decoded instanceof Error) return undefined
+  return typeof decoded.id === "string" ? (decoded.id as PaymentHash) : undefined
+}
+
 const safeDecode = (bolt11EncodedInvoice: EncodedPaymentRequest) => {
   try {
     return parsePaymentRequest({ request: bolt11EncodedInvoice })

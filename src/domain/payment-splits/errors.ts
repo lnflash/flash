@@ -3,8 +3,8 @@ import { DomainError, ErrorLevel, ValidationError } from "@domain/shared"
 // ENG-653 payment splits. Every class exported here is an ApplicationError key
 // and therefore needs a case in src/graphql/error-map.ts.
 
-// The percentages of a wallet's split set must sum to more than 0 and at most
-// 100 (an empty set sums to 0).
+// The percentages of a non-empty split set must sum to more than 0 and at most
+// 100. An empty set is allowed: it clears the wallet's splits.
 export class SplitPercentExceededError extends ValidationError {}
 // A single percent is not an integer in [1, 100].
 export class InvalidSplitPercentError extends ValidationError {}

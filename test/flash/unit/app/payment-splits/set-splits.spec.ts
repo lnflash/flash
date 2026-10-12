@@ -212,6 +212,18 @@ describe("setPaymentSplits", () => {
     expect(mockReplaceForWallet).not.toHaveBeenCalled()
   })
 
+  it("clears every split when given an empty set", async () => {
+    const result = await setPaymentSplits({
+      account: OWNER,
+      walletId: SOURCE_ID,
+      splits: [],
+    })
+
+    expect(result).toEqual([])
+    expect(mockLockWalletId).toHaveBeenCalledWith(SOURCE_ID, expect.any(Function))
+    expect(mockReplaceForWallet).toHaveBeenCalledWith(SOURCE_ID, [])
+  })
+
   it("rejects a set over 100% without writing", async () => {
     mockFindWalletById.mockImplementation(async (id: string) =>
       id === SOURCE_ID

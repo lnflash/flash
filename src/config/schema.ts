@@ -1128,21 +1128,45 @@ export const configSchema = {
       type: "object",
       properties: {
         enabled: { type: "boolean", default: false },
-        // Split executions the cron executor claims and pays per run.
-        executorBatchSize: { type: "integer", minimum: 1, default: 50 },
         // Sends attempted per execution before a retryable error becomes a
-        // terminal `failed`. Backoff between attempts is 1, 2, 4, 8... minutes.
+        // terminal `failed`. Backoff between attempts is 1, 2, 4, 8... minutes,
+        // so loopIntervalMs must stay at or below one minute for those steps
+        // to be real.
         maxAttempts: { type: "integer", minimum: 1, default: 5 },
         // A share below this many US cents is recorded as `skipped_min` and
         // never sent.
         minShareCents: { type: "integer", minimum: 1, default: 1 },
+        // Cadence of the split loop (executor + stale sweep) that runs inside
+        // the long-running ibex-webhook workload. The galoy cron is a daily
+        // k8s Job, too slow to execute or retry splits.
+        loopIntervalMs: {
+          type: "integer",
+          minimum: 10000,
+          maximum: 60000,
+          default: 60000,
+        },
+        // Wall-clock budget for one executor pass. The pass keeps claiming due
+        // rows until none are left or the budget is spent, so throughput is
+        // not capped by a fixed batch size.
+        executorTimeBudgetMs: { type: "integer", minimum: 1000, default: 45000 },
+        // How often the loop re-reads recent IBEX receives to record splits
+        // a missed or failed webhook did not. The lookback is derived from
+        // this (see splitReconcileWindowMs).
+        reconcileIntervalMs: { type: "integer", minimum: 60000, default: 900000 },
+        // Schedule of the galoy cronjob (owned by the chart; daily at 02:00).
+        // The cron reconcile is the backstop for loop downtime and looks back
+        // this long plus a margin.
+        cronIntervalMs: { type: "integer", minimum: 60000, default: 86400000 },
       },
       additionalProperties: false,
       default: {
         enabled: false,
-        executorBatchSize: 50,
         maxAttempts: 5,
         minShareCents: 1,
+        loopIntervalMs: 60000,
+        executorTimeBudgetMs: 45000,
+        reconcileIntervalMs: 900000,
+        cronIntervalMs: 86400000,
       },
     },
     frappe: {

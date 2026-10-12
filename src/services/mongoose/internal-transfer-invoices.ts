@@ -1,3 +1,5 @@
+import type { InternalTransferOrigin } from "@domain/payment-splits"
+
 import { parseRepositoryError } from "./utils"
 import { InternalTransferInvoice } from "./schema"
 
@@ -20,8 +22,8 @@ export const recordInternalTransferInvoice = async ({
 }: {
   paymentHash: string
   senderWalletId?: string
-  recipientWalletId: string
-  origin: "intraledger" | "cutover"
+  recipientWalletId?: string
+  origin: InternalTransferOrigin
 }): Promise<true | RepositoryError> => {
   try {
     await InternalTransferInvoice.create({

@@ -17,6 +17,7 @@ import Ibex from "@services/ibex/client"
 
 import { IbexError } from "@services/ibex/errors"
 import { withPaymentIdempotency } from "@app/payments/idempotency"
+import { markOutgoingBolt11 } from "@app/payments/mark-outgoing-invoice"
 import { authorizeSend } from "@app/payments/authorize-send"
 import { paymentSendStatusOrPending } from "@services/ibex/payment-status"
 
@@ -141,6 +142,14 @@ const LnNoAmountUsdInvoicePaymentSendMutation = GT.Field<
           amount: amount.toString(),
         })
         if (usCents instanceof Error) return usCents
+
+        // ENG-653: the payee may be another Flash wallet, whose splits must
+        // not fire on a Flash-to-Flash payment. Fails closed.
+        const marked = await markOutgoingBolt11({
+          paymentRequest,
+          senderWalletId: routedWalletId,
+        })
+        if (marked instanceof Error) return marked
 
         const PayLightningInvoice = await Ibex.payInvoice({
           invoice: paymentRequest as Bolt11,

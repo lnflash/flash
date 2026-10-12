@@ -30,7 +30,8 @@ const WalletSplitsSetInput = GT.Input({
     },
     splits: {
       type: GT.NonNullList(WalletSplitInput),
-      description: "The complete split set. Replaces every existing split.",
+      description:
+        "The complete split set. Replaces every existing split; an empty list clears them all.",
     },
   }),
 })

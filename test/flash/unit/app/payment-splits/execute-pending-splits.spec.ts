@@ -3,6 +3,8 @@ const mockAuthorizeSend = jest.fn()
 const mockNotify = jest.fn()
 const mockFindWalletById = jest.fn()
 const mockFindAccountById = jest.fn()
+const mockIsInternal = jest.fn()
+const mockNotifyOps = jest.fn()
 
 jest.mock("@app/payments/send-intraledger", () => ({
   intraledgerPaymentSendWalletIdForUsdWallet: (...args: unknown[]) => mockSend(...args),
@@ -25,6 +27,14 @@ jest.mock("@services/mongoose", () => ({
   })),
 }))
 
+jest.mock("@services/mongoose/internal-transfer-invoices", () => ({
+  isInternalTransferInvoice: (...args: unknown[]) => mockIsInternal(...args),
+}))
+
+jest.mock("@services/alerts/ops-events", () => ({
+  notifyOpsEvent: (...args: unknown[]) => mockNotifyOps(...args),
+}))
+
 jest.mock("@services/mongoose/payment-split-executions", () => ({
   PaymentSplitExecutionsRepository: jest.fn(() => mockStore.repo),
 }))
@@ -35,8 +45,17 @@ import {
   splitIdempotencyKey,
 } from "@app/payment-splits/execute-pending-splits"
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
-import { InactiveAccountError, IntraledgerLimitsExceededError } from "@domain/errors"
-import { InternalTransferMarkerError } from "@domain/payment-splits"
+import {
+  InactiveAccountError,
+  IntraledgerLimitsExceededError,
+  RepositoryError,
+} from "@domain/errors"
+import {
+  ResourceAttemptsLockServiceError,
+  ResourceExpiredLockServiceError,
+  UnknownLockServiceError,
+} from "@domain/lock"
+import { InternalTransferMarkerError, splitRetryBackoffMs } from "@domain/payment-splits"
 import { SendLimitsUnavailableError } from "@domain/payments/errors"
 import { PaymentSendRateLimiterExceededError } from "@domain/rate-limit/errors"
 import { WalletCurrency } from "@domain/shared"
@@ -80,8 +99,9 @@ beforeEach(() => {
   Object.assign(PaymentSplitsConfig, {
     enabled: true,
     maxAttempts: 5,
-    executorBatchSize: 50,
+    executorTimeBudgetMs: 45_000,
   })
+  mockIsInternal.mockResolvedValue(false)
   mockFindWalletById.mockResolvedValue({
     id: SOURCE,
     accountId: OWNER.id,
@@ -109,6 +129,8 @@ describe("executePendingSplits", () => {
       ibexPending: 0,
       failed: 0,
       retried: 0,
+      unknown: 0,
+      skippedInternal: 0,
     })
     expect(mockSend).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -211,9 +233,14 @@ describe("executePendingSplits", () => {
     expect(mockNotify).toHaveBeenCalledTimes(1)
   })
 
+  it("runs every minute in production, so the 1-minute backoff step is real", () => {
+    expect(PaymentSplitsConfig.loopIntervalMs).toBeLessThanOrEqual(splitRetryBackoffMs(1))
+  })
+
   it.each([
     ["send guard unavailable", new SendLimitsUnavailableError("redis")],
     ["marker write failure", new InternalTransferMarkerError("mongo")],
+    ["a busy idempotency lock", new ResourceAttemptsLockServiceError()],
   ])("treats %s as retryable", async (_label, error) => {
     await seed()
     mockSend.mockResolvedValue(error)
@@ -264,11 +291,10 @@ describe("executePendingSplits", () => {
     ).toEqual([1, 0])
   })
 
-  it("claims at most executorBatchSize rows per run", async () => {
-    PaymentSplitsConfig.executorBatchSize = 2
-    for (let i = 0; i < 3; i++) {
+  const seedMany = async (count: number) => {
+    for (let i = 0; i < count; i++) {
       await mockStore.repo.insert({
-        triggerKey: `${i}`.repeat(64),
+        triggerKey: `${i}`.padStart(64, "c"),
         ruleId: "rule-1",
         walletId: SOURCE,
         destinationWalletId: DEST,
@@ -279,10 +305,110 @@ describe("executePendingSplits", () => {
         now: T0,
       })
     }
+  }
+
+  it("drains every due row in one pass, with no fixed batch cap", async () => {
+    await seedMany(120)
     mockSend.mockResolvedValue(PaymentSendStatus.Success)
 
+    expect(await executePendingSplits({ now: T0 })).toMatchObject({
+      claimed: 120,
+      sent: 120,
+    })
+    expect([...mockStore.rows.values()].every((r) => r.status === "sent")).toBe(true)
+  })
+
+  it("stops claiming once the time budget is spent", async () => {
+    PaymentSplitsConfig.executorTimeBudgetMs = 1000
+    await seedMany(3)
+    mockSend.mockResolvedValue(PaymentSendStatus.Success)
+    // Each clock read advances 600ms: the deadline is set at 600 + 1000, the
+    // first check (1200) claims one row, the second (1800) is past it.
+    let t = 0
+    const clock = () => (t += 600)
+
+    expect(await executePendingSplits({ now: T0, clock })).toMatchObject({ claimed: 1 })
     expect(await executePendingSplits({ now: T0 })).toMatchObject({ claimed: 2 })
-    expect(await executePendingSplits({ now: T0 })).toMatchObject({ claimed: 1 })
+  })
+
+  describe("lock errors", () => {
+    // The send reached the payment: the authorize hook (which runs
+    // immediately before Ibex.payInvoice) passed, then the lock layer erred.
+    const afterAuthorize =
+      (error: Error) =>
+      async (args: { authorize: () => Promise<unknown> }): Promise<Error> => {
+        await args.authorize()
+        return error
+      }
+
+    it.each([
+      [
+        "UnknownLockServiceError (routine threw / release failed)",
+        new UnknownLockServiceError("release"),
+      ],
+      ["ResourceExpiredLockServiceError", new ResourceExpiredLockServiceError("expired")],
+      [
+        "ResourceAttemptsLockServiceError from the release",
+        new ResourceAttemptsLockServiceError(),
+      ],
+    ])(
+      "never retries %s after the payment was reached; marks unknown and alerts ops",
+      async (_label, error) => {
+        await seed()
+        mockSend.mockImplementation(afterAuthorize(error))
+
+        const summary = await executePendingSplits({ now: T0 })
+
+        expect(summary).toMatchObject({ claimed: 1, unknown: 1, retried: 0, failed: 0 })
+        expect(onlyRow()).toMatchObject({ status: "unknown", attempts: 1 })
+        expect(mockNotifyOps).toHaveBeenCalledWith(
+          expect.objectContaining({ phase: "split-unknown", status: "failed" }),
+        )
+
+        // Never re-sent, however long the executor keeps running.
+        await executePendingSplits({ now: minutes(60) })
+        expect(mockSend).toHaveBeenCalledTimes(1)
+      },
+    )
+
+    it.each([
+      ["UnknownLockServiceError", new UnknownLockServiceError("boom")],
+      ["ResourceExpiredLockServiceError", new ResourceExpiredLockServiceError("expired")],
+    ])("never retries %s even before the payment was reached", async (_label, error) => {
+      await seed()
+      mockSend.mockResolvedValue(error)
+
+      await executePendingSplits({ now: T0 })
+
+      expect(onlyRow()).toMatchObject({ status: "unknown" })
+      await executePendingSplits({ now: minutes(60) })
+      expect(mockSend).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe("internal-transfer re-check", () => {
+    it("skips a row whose hash was marked internal after it was recorded", async () => {
+      await seed()
+      mockIsInternal.mockResolvedValue(true)
+
+      const summary = await executePendingSplits({ now: T0 })
+
+      expect(summary).toMatchObject({ claimed: 1, skippedInternal: 1 })
+      expect(mockIsInternal).toHaveBeenCalledWith("a".repeat(64))
+      expect(onlyRow()).toMatchObject({ status: "skipped_internal" })
+      expect(mockSend).not.toHaveBeenCalled()
+      expect(mockNotify).not.toHaveBeenCalled()
+    })
+
+    it("retries when the marker cannot be read, without sending", async () => {
+      await seed()
+      mockIsInternal.mockResolvedValue(new RepositoryError("mongo"))
+
+      await executePendingSplits({ now: T0 })
+
+      expect(onlyRow()).toMatchObject({ status: "pending", attempts: 1 })
+      expect(mockSend).not.toHaveBeenCalled()
+    })
   })
 
   it("never sends a skipped_min row", async () => {

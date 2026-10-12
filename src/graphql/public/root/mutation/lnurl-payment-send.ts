@@ -1,5 +1,6 @@
 import { withPaymentIdempotency } from "@app/payments/idempotency"
 import { authorizeSend } from "@app/payments/authorize-send"
+import { markPaidLnurlHash } from "@app/payments/mark-outgoing-invoice"
 import dedent from "dedent"
 
 import { resolveCashWalletMutationWalletIdForAccount } from "@app/cash-wallet-cutover"
@@ -279,6 +280,13 @@ const LnurlPaymentSendMutation = GT.Field<
           params: paramsFromMetadata(metadata),
         })
         if (payment instanceof IbexError) return payment
+        // ENG-653: the payee may be a Flash wallet (a Flash Lightning
+        // address). IBEX fetched the invoice itself, so its hash is only known
+        // now; the split executor re-checks this marker before paying.
+        await markPaidLnurlHash({
+          paymentHash: payment.hash ?? payment.transaction?.payment?.hash,
+          senderWalletId: routedWalletId,
+        })
         return lnurlPaymentSendStatusOrPending(payment)
       },
     })

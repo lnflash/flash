@@ -73,8 +73,11 @@ const fetchPaymentContext = async (
 
 // ENG-653: record (never send) the payment splits a Lightning/LNURL receive
 // triggers. Failure here must not fail the webhook: IBEX would retry it and
-// re-run the receive notification, and the reconcile cron records any receive
-// this step missed. Duplicate deliveries are duplicate-key no-ops.
+// re-run the receive notification. The split reconcile records any receive
+// this step missed: every paymentSplits.reconcileIntervalMs from this pod's
+// split loop (lookback = interval plus margin) and once a day from the galoy
+// cron (lookback = a day plus margin). Duplicate deliveries are duplicate-key
+// no-ops.
 const recordPaymentSplits = async (
   req: PaymentRequest,
   _resp: Response,
@@ -98,14 +101,14 @@ const recordPaymentSplits = async (
       if (result instanceof Error) {
         logger.error(
           { err: result, walletId: receiverWallet.id, paymentHash },
-          "Failed to record payment splits; the reconcile cron will retry",
+          "Failed to record payment splits; the split reconcile will pick it up",
         )
       }
     }
   } catch (err) {
     logger.error(
       { err },
-      "Failed to record payment splits; the reconcile cron will retry",
+      "Failed to record payment splits; the split reconcile will pick it up",
     )
   }
 

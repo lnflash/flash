@@ -932,6 +932,7 @@ const PaymentSplitExecutionSchema = new Schema({
       "ibex_pending",
       "failed",
       "skipped_min",
+      "skipped_internal",
       "unknown",
     ],
     required: true,
@@ -953,15 +954,22 @@ export const PaymentSplitExecution = mongoose.model(
 
 // Payment hashes of invoices Flash minted for itself: the recipient side of an
 // intraledger send (P2P, Fygaro top-up credits, referral payouts, split
-// payouts) and of cash-wallet cutover moves. A receive whose hash is here never
-// triggers payment splits. TTL must stay above the split reconcile lookback.
+// payouts) and of cash-wallet cutover moves, plus every bolt11 / LNURL a Flash
+// user pays (the payee may be another Flash wallet). A receive whose hash is
+// here never triggers payment splits. TTL must stay above the split reconcile
+// lookback (cronIntervalMs plus margin).
 export const INTERNAL_TRANSFER_INVOICE_TTL_SECONDS = 30 * 24 * 60 * 60
 
 const InternalTransferInvoiceSchema = new Schema({
   paymentHash: { type: String, required: true, unique: true },
   senderWalletId: { type: String },
-  recipientWalletId: { type: String, required: true },
-  origin: { type: String, enum: ["intraledger", "cutover"], required: true },
+  // Unknown for ln-send / lnurl-send: Flash only knows the payer.
+  recipientWalletId: { type: String },
+  origin: {
+    type: String,
+    enum: ["intraledger", "cutover", "ln-send", "lnurl-send"],
+    required: true,
+  },
   createdAt: { type: Date, required: true, default: Date.now },
 })
 

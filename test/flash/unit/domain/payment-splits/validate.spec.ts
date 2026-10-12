@@ -36,8 +36,12 @@ describe("validateSplitSet", () => {
     )
   })
 
-  it("rejects a 0 sum (the empty set)", () => {
-    expect(validate([])).toBeInstanceOf(SplitPercentExceededError)
+  it("accepts the empty set: it clears the wallet's splits", () => {
+    expect(validate([])).toBe(true)
+  })
+
+  it("still rejects an empty set on a non-split currency", () => {
+    expect(validate([], WalletCurrency.Btc)).toBeInstanceOf(SplitCurrencyMismatchError)
   })
 
   it("rejects non-integer and out-of-range percents", () => {

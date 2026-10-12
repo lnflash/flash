@@ -8,6 +8,7 @@ export type PaymentSplitExecutionStatusValue =
   | "ibex_pending"
   | "failed"
   | "skipped_min"
+  | "skipped_internal"
   | "unknown"
 
 export type PaymentSplitExecutionRecord = {
@@ -114,7 +115,13 @@ export const PaymentSplitExecutionsRepository = () => {
   const finishClaimed = async (
     id: string,
     update: {
-      status: "pending" | "sent" | "ibex_pending" | "failed"
+      status:
+        | "pending"
+        | "sent"
+        | "ibex_pending"
+        | "failed"
+        | "skipped_internal"
+        | "unknown"
       attempts: number
       nextAttemptAt?: Date
       lastError?: string

@@ -130,9 +130,12 @@ type FygaroConfig = {
 
 type PaymentSplitsConfig = {
   enabled: boolean
-  executorBatchSize: number
   maxAttempts: number
   minShareCents: number
+  loopIntervalMs: number
+  executorTimeBudgetMs: number
+  reconcileIntervalMs: number
+  cronIntervalMs: number
 }
 
 type CashoutEmail = {

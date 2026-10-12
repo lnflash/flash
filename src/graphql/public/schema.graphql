@@ -2942,7 +2942,9 @@ input WalletSplitInput {
 }
 
 input WalletSplitsSetInput {
-  """The complete split set. Replaces every existing split."""
+  """
+  The complete split set. Replaces every existing split; an empty list clears them all.
+  """
   splits: [WalletSplitInput!]!
 
   """The wallet whose incoming payments are split."""

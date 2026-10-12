@@ -14,6 +14,7 @@ import Ibex from "@services/ibex/client"
 import { IbexError, InsufficientIbexBalance } from "@services/ibex/errors"
 import { paymentSendStatusOrPending } from "@services/ibex/payment-status"
 import { withPaymentIdempotency } from "@app/payments/idempotency"
+import { markOutgoingBolt11 } from "@app/payments/mark-outgoing-invoice"
 import {
   authorizeSend,
   gateSend,
@@ -149,6 +150,14 @@ const LnInvoicePaymentSendMutation = GT.Field<
         })
       },
       execute: async (): Promise<PaymentSendStatus | ApplicationError> => {
+        // ENG-653: the payee may be another Flash wallet, whose splits must
+        // not fire on a Flash-to-Flash payment. Fails closed.
+        const marked = await markOutgoingBolt11({
+          paymentRequest,
+          senderWalletId: walletId,
+        })
+        if (marked instanceof Error) return marked
+
         const PayLightningInvoice = await Ibex.payInvoice({
           invoice: paymentRequest as Bolt11,
           accountId: walletId,

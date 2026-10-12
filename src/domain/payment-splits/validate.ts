@@ -20,7 +20,8 @@ export type SplitSetEntry = {
 
 /**
  * Validates a complete split set for one source wallet. The set replaces any
- * existing rules, so the percent sum is checked over this set alone.
+ * existing rules, so the percent sum is checked over this set alone. An empty
+ * set is valid and clears the wallet's splits.
  */
 export const validateSplitSet = ({
   sourceWalletId,
@@ -51,8 +52,10 @@ export const validateSplitSet = ({
     }
   }
 
+  // An empty set is "clear all splits" (walletSplitsSet replaces every rule).
+  // Only a non-empty set must allocate more than 0 and at most 100 percent.
   const sum = entries.reduce((total, { percent }) => total + percent, 0)
-  if (sum <= 0 || sum > 100) {
+  if (entries.length > 0 && (sum <= 0 || sum > 100)) {
     return new SplitPercentExceededError(
       "Split percentages must add up to more than 0 and at most 100",
     )
