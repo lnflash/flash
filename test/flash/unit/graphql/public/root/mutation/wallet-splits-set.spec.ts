@@ -2,9 +2,13 @@ const mockFindWalletById = jest.fn()
 const mockReplaceForWallet = jest.fn()
 const mockFindRuleById = jest.fn()
 const mockDeleteRuleById = jest.fn()
+const mockFindAccountById = jest.fn()
 
 jest.mock("@services/mongoose", () => ({
-  AccountsRepository: jest.fn(() => ({ findByUsername: jest.fn() })),
+  AccountsRepository: jest.fn(() => ({
+    findByUsername: jest.fn(),
+    findById: (...args: unknown[]) => mockFindAccountById(...args),
+  })),
   WalletsRepository: jest.fn(() => ({
     findById: (...args: unknown[]) => mockFindWalletById(...args),
     listByAccountId: jest.fn(),
@@ -85,6 +89,10 @@ beforeEach(() => {
   mockFindWalletById.mockImplementation(
     async (id: string) => walletsById[id] ?? new CouldNotFindWalletFromIdError(),
   )
+  mockFindAccountById.mockImplementation(async (id: string) => ({
+    id,
+    status: "active",
+  }))
   mockReplaceForWallet.mockImplementation(
     async (walletId: string, rules: { destinationWalletId: string; percent: number }[]) =>
       rules.map((r, i) => ({
@@ -162,6 +170,24 @@ describe("walletSplitsSet", () => {
     })
 
     expect(result.errors[0].message).toMatch(/^No wallet found for/)
+  })
+
+  it("maps an inactive destination account (ENG-660)", async () => {
+    mockFindAccountById.mockImplementation(async (id: string) => ({
+      id,
+      status: id === "dest-account" ? "closed" : "active",
+    }))
+
+    const result = await resolveSet({
+      walletId: SOURCE_ID,
+      splits: [{ destination: DEST_ID, percent: 10 }],
+    })
+
+    expect(result.splits).toBeUndefined()
+    expect(result.errors).toEqual([
+      expect.objectContaining({ message: "Split destination account is not active" }),
+    ])
+    expect(mockReplaceForWallet).not.toHaveBeenCalled()
   })
 
   it("maps the disabled flag", async () => {
