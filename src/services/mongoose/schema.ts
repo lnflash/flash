@@ -896,6 +896,85 @@ export const BridgeReconciliationOrphan = mongoose.model(
   BridgeReconciliationOrphanSchema,
 )
 
+// ENG-653: Flash-native payment splits. One rule = "pay `percent` of every
+// trigger-eligible receive on `walletId` to `destinationWalletId`".
+const PaymentSplitRuleSchema = new Schema({
+  walletId: { type: String, required: true },
+  destinationWalletId: { type: String, required: true },
+  percent: { type: Number, required: true, min: 1, max: 100 },
+  enabled: { type: Boolean, required: true, default: true },
+  createdAt: { type: Date, required: true, default: Date.now },
+  updatedAt: { type: Date, required: true, default: Date.now },
+})
+
+PaymentSplitRuleSchema.index({ walletId: 1, enabled: 1 })
+
+export const PaymentSplitRule = mongoose.model("PaymentSplitRule", PaymentSplitRuleSchema)
+
+// One row per (receive, rule). The unique (triggerKey, ruleId) index is the
+// dedupe between the webhook and the reconcile cron, and between webhook
+// replays: a second insert for the same receive is a duplicate-key no-op.
+const PaymentSplitExecutionSchema = new Schema({
+  triggerKey: { type: String, required: true },
+  ruleId: { type: String, required: true },
+  walletId: { type: String, required: true },
+  destinationWalletId: { type: String, required: true },
+  currency: { type: String, required: true },
+  // The receive amount in the source wallet's minor units (cents / micros).
+  triggerAmountMinor: { type: String, required: true },
+  shareCents: { type: Number, required: true },
+  status: {
+    type: String,
+    enum: [
+      "pending",
+      "sending",
+      "sent",
+      "ibex_pending",
+      "failed",
+      "skipped_min",
+      "unknown",
+    ],
+    required: true,
+  },
+  attempts: { type: Number, required: true, default: 0 },
+  nextAttemptAt: { type: Date, required: true, default: Date.now },
+  lastError: { type: String },
+  createdAt: { type: Date, required: true, default: Date.now },
+  updatedAt: { type: Date, required: true, default: Date.now },
+})
+
+PaymentSplitExecutionSchema.index({ triggerKey: 1, ruleId: 1 }, { unique: true })
+PaymentSplitExecutionSchema.index({ status: 1, nextAttemptAt: 1 })
+
+export const PaymentSplitExecution = mongoose.model(
+  "PaymentSplitExecution",
+  PaymentSplitExecutionSchema,
+)
+
+// Payment hashes of invoices Flash minted for itself: the recipient side of an
+// intraledger send (P2P, Fygaro top-up credits, referral payouts, split
+// payouts) and of cash-wallet cutover moves. A receive whose hash is here never
+// triggers payment splits. TTL must stay above the split reconcile lookback.
+export const INTERNAL_TRANSFER_INVOICE_TTL_SECONDS = 30 * 24 * 60 * 60
+
+const InternalTransferInvoiceSchema = new Schema({
+  paymentHash: { type: String, required: true, unique: true },
+  senderWalletId: { type: String },
+  recipientWalletId: { type: String, required: true },
+  origin: { type: String, enum: ["intraledger", "cutover"], required: true },
+  createdAt: { type: Date, required: true, default: Date.now },
+})
+
+InternalTransferInvoiceSchema.index(
+  { createdAt: 1 },
+  { expireAfterSeconds: INTERNAL_TRANSFER_INVOICE_TTL_SECONDS },
+)
+
+export const InternalTransferInvoice = mongoose.model(
+  "InternalTransferInvoice",
+  InternalTransferInvoiceSchema,
+)
+
 const BridgeReplaySchema = new Schema({
   eventId: { type: String, required: true },
   eventType: { type: String, required: true },
