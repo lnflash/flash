@@ -88,6 +88,29 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = "Sending is temporarily unavailable, please try again later."
       return new TransactionRestrictedError({ message, logger: baseLogger })
 
+    // ENG-653 payment splits: validation messages are written for the user.
+    case "SplitPercentExceededError":
+    case "InvalidSplitPercentError":
+    case "SplitRuleLimitExceededError":
+    case "SplitDestinationNotFoundError":
+    case "SelfSplitNotAllowedError":
+    case "SplitCurrencyMismatchError":
+    case "SplitDuplicateDestinationError":
+      message = error.message
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "SplitRuleNotFoundError":
+      message = "Payment split not found"
+      return new NotFoundError({ message, logger: baseLogger })
+
+    case "PaymentSplitsDisabledError":
+      message = "Payment splits are not available"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
+    case "InternalTransferMarkerError":
+      message = "Sending is temporarily unavailable, please try again later."
+      return new UnexpectedClientError({ message, logger: baseLogger })
+
     case "CompletedInvoice":
     case "AlreadyPaidError":
       message = "Invoice is already paid"

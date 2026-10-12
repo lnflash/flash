@@ -32,6 +32,7 @@ import * as ErpNextErrors from "@services/frappe/errors"
 import * as BridgeErrors from "@services/bridge/errors"
 import * as FygaroErrors from "@services/fygaro/errors"
 import * as ApiKeyErrors from "@domain/api-keys/errors"
+import * as PaymentSplitErrors from "@domain/payment-splits/errors"
 
 export const ApplicationErrors = {
   ...SharedErrors,
@@ -69,4 +70,5 @@ export const ApplicationErrors = {
   ...BridgeErrors,
   ...FygaroErrors,
   ...ApiKeyErrors,
+  ...PaymentSplitErrors,
 } as const
