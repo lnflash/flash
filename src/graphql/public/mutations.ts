@@ -38,6 +38,8 @@ import CaptchaRequestAuthCodeMutation from "@graphql/shared/root/mutation/captch
 import CaptchaCreateChallengeMutation from "@graphql/shared/root/mutation/captcha-create-challenge"
 import QuizCompletedMutation from "@graphql/public/root/mutation/quiz-completed"
 import AccountDeleteMutation from "@graphql/public/root/mutation/account-delete"
+import WalletSplitsSetMutation from "@graphql/public/root/mutation/wallet-splits-set"
+import WalletSplitDeleteMutation from "@graphql/public/root/mutation/wallet-split-delete"
 import UserLoginUpgradeMutation from "@graphql/public/root/mutation/user-login-upgrade"
 import UserEmailRegistrationInitiateMutation from "@graphql/public/root/mutation/user-email-registration-initiate"
 import UserEmailRegistrationValidateMutation from "@graphql/public/root/mutation/user-email-registration-validate"
@@ -193,6 +195,9 @@ export const mutationFields = {
 
       requestCashout: RequestCashoutMutation,
       initiateCashout: InitiateCashoutMutation,
+
+      walletSplitsSet: WalletSplitsSetMutation,
+      walletSplitDelete: WalletSplitDeleteMutation,
     },
   },
 }

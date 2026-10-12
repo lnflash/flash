@@ -26,6 +26,7 @@ import Lnurl from "../scalar/lnurl"
 
 import { resolveCashWalletHistoryWalletsForWalletObject } from "./cash-wallet-history"
 import { TransactionConnection } from "./transaction"
+import WalletSplit, { resolveWalletSplits } from "./wallet-split"
 
 const UsdWallet = GT.Object<Wallet>({
   name: "UsdWallet",
@@ -176,6 +177,12 @@ const UsdWallet = GT.Object<Wallet>({
           paginationArgs,
         )
       },
+    },
+    splits: {
+      type: GT.NonNullList(WalletSplit),
+      description:
+        "Payment split rules on this wallet. Visible only to the wallet's owner.",
+      resolve: resolveWalletSplits,
     },
   }),
 })

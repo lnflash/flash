@@ -182,6 +182,8 @@ describe("apiKeyNestedFieldScopes completeness (nested escalation net)", () => {
     "transactionsCount",
     "csvTransactions",
     "wallets",
+    // ENG-653: payment split rules reveal who a wallet pays and how much.
+    "splits",
   ]
 
   it("gates every sensitive field on each guarded type", () => {
