@@ -139,6 +139,10 @@
       "failed": {
         "title": "La división de pago falló",
         "body": "No pudimos enviar una división de pago de {{amount}}. El dinero sigue en tu billetera."
+      },
+      "disabled": {
+        "title": "División de pago desactivada",
+        "body": "No pudimos enviar una división de pago de {{amount}} porque la cuenta del destinatario ya no está activa. Desactivamos esta división. El dinero sigue en tu billetera."
       }
     }
   }

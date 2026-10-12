@@ -5,6 +5,7 @@ const mockFindWalletById = jest.fn()
 const mockFindAccountById = jest.fn()
 const mockIsInternal = jest.fn()
 const mockNotifyOps = jest.fn()
+const mockDisableRule = jest.fn()
 jest.mock("@services/logger", () => {
   const logger = {
     trace: jest.fn(),
@@ -44,6 +45,12 @@ jest.mock("@services/mongoose/internal-transfer-invoices", () => ({
 
 jest.mock("@services/alerts/ops-events", () => ({
   notifyOpsEvent: (...args: unknown[]) => mockNotifyOps(...args),
+}))
+
+jest.mock("@services/mongoose/payment-split-rules", () => ({
+  PaymentSplitRulesRepository: jest.fn(() => ({
+    disableById: (...args: unknown[]) => mockDisableRule(...args),
+  })),
 }))
 
 jest.mock("@services/mongoose/payment-split-executions", () => ({
@@ -91,13 +98,17 @@ const mockLogger = (
 
 const SOURCE = "source-wallet"
 const DEST = "dest-wallet"
-const OWNER = { id: "owner-account", level: 1 }
+const OWNER = { id: "owner-account", level: 1, status: "active" }
+const DEST_ACCOUNT = "dest-account"
 const T0 = new Date("2026-10-11T12:00:00Z")
 const minutes = (m: number) => new Date(T0.getTime() + m * 60_000)
 
-const seed = async (shareCents = 250): Promise<{ id: string }> => {
+const seed = async (
+  shareCents = 250,
+  triggerKey = "a".repeat(64),
+): Promise<{ id: string }> => {
   const inserted = await mockStore.repo.insert({
-    triggerKey: "a".repeat(64),
+    triggerKey,
     ruleId: "rule-1",
     walletId: SOURCE,
     destinationWalletId: DEST,
@@ -132,6 +143,7 @@ beforeEach(() => {
   mockFindAccountById.mockResolvedValue(OWNER)
   mockAuthorizeSend.mockResolvedValue(true)
   mockNotify.mockResolvedValue(undefined)
+  mockDisableRule.mockResolvedValue(true)
 })
 
 afterAll(() => {
@@ -219,6 +231,131 @@ describe("executePendingSplits", () => {
         phraseBase: "notification.paymentSplit.failed",
       }),
     )
+  })
+
+  describe("inactive destination account (ENG-660)", () => {
+    const destinationStatus = (status: string) => {
+      mockFindWalletById.mockImplementation(async (id: string) =>
+        id === DEST
+          ? { id: DEST, accountId: DEST_ACCOUNT, currency: WalletCurrency.Usdt }
+          : { id: SOURCE, accountId: OWNER.id, currency: WalletCurrency.Usdt },
+      )
+      mockFindAccountById.mockImplementation(async (id: string) =>
+        id === DEST_ACCOUNT ? { id: DEST_ACCOUNT, level: 1, status } : OWNER,
+      )
+    }
+
+    it.each(["closed", "locked", "pending"])(
+      "disables the rule, fails the row and pushes the owner once when the destination is %s",
+      async (status) => {
+        destinationStatus(status)
+        await seed()
+        mockSend.mockResolvedValue(new InactiveAccountError(DEST_ACCOUNT))
+
+        const summary = await executePendingSplits({ now: T0 })
+
+        expect(summary).toMatchObject({ claimed: 1, failed: 1, retried: 0 })
+        expect(onlyRow()).toMatchObject({
+          status: "failed",
+          attempts: 1,
+          lastError: "InactiveAccountError",
+        })
+        expect(mockDisableRule).toHaveBeenCalledTimes(1)
+        expect(mockDisableRule).toHaveBeenCalledWith("rule-1", expect.anything())
+        expect(mockNotify).toHaveBeenCalledTimes(1)
+        expect(mockNotify).toHaveBeenCalledWith(
+          expect.objectContaining({
+            accountId: OWNER.id,
+            phraseBase: "notification.paymentSplit.disabled",
+            dataType: "payment_split_disabled",
+            amountArg: "US$2.50",
+          }),
+        )
+      },
+    )
+
+    it("pushes once across several rows of the same rule", async () => {
+      destinationStatus("closed")
+      await seed(250, "a".repeat(64))
+      await seed(300, "b".repeat(64))
+      mockSend.mockResolvedValue(new InactiveAccountError(DEST_ACCOUNT))
+      // Only the first disable flips `enabled`; the rule is already off after.
+      mockDisableRule.mockResolvedValueOnce(true).mockResolvedValue(false)
+
+      const summary = await executePendingSplits({ now: T0 })
+
+      expect(summary).toMatchObject({ claimed: 2, failed: 2 })
+      expect([...mockStore.rows.values()].map((row) => row.status)).toEqual([
+        "failed",
+        "failed",
+      ])
+      expect(mockDisableRule).toHaveBeenCalledTimes(2)
+      expect(mockNotify).toHaveBeenCalledTimes(1)
+      expect(mockNotify).toHaveBeenCalledWith(
+        expect.objectContaining({ phraseBase: "notification.paymentSplit.disabled" }),
+      )
+    })
+
+    it("keeps the rule enabled when the SOURCE account is the inactive one", async () => {
+      destinationStatus("active")
+      await seed()
+      mockSend.mockResolvedValue(new InactiveAccountError(OWNER.id))
+
+      await executePendingSplits({ now: T0 })
+
+      expect(onlyRow()).toMatchObject({ status: "failed", lastError: "InactiveAccountError" })
+      expect(mockDisableRule).not.toHaveBeenCalled()
+      expect(mockNotify).toHaveBeenCalledTimes(1)
+      expect(mockNotify).toHaveBeenCalledWith(
+        expect.objectContaining({ phraseBase: "notification.paymentSplit.failed" }),
+      )
+    })
+
+    it("keeps the rule enabled when the destination account cannot be read", async () => {
+      destinationStatus("closed")
+      mockFindAccountById.mockImplementation(async (id: string) =>
+        id === DEST_ACCOUNT ? new UnknownRepositoryError("mongo down") : OWNER,
+      )
+      await seed()
+      mockSend.mockResolvedValue(new InactiveAccountError(DEST_ACCOUNT))
+
+      await executePendingSplits({ now: T0 })
+
+      expect(onlyRow()).toMatchObject({ status: "failed" })
+      expect(mockDisableRule).not.toHaveBeenCalled()
+      expect(mockNotify).toHaveBeenCalledWith(
+        expect.objectContaining({ phraseBase: "notification.paymentSplit.failed" }),
+      )
+    })
+
+    it("never disables a rule for a destination that is inactive but failed another way", async () => {
+      destinationStatus("closed")
+      await seed()
+      mockSend.mockResolvedValue(new IntraledgerLimitsExceededError("over limit"))
+
+      await executePendingSplits({ now: T0 })
+
+      expect(mockDisableRule).not.toHaveBeenCalled()
+      expect(mockNotify).toHaveBeenCalledWith(
+        expect.objectContaining({ phraseBase: "notification.paymentSplit.failed" }),
+      )
+    })
+
+    it("still fails the row and pushes a failure when the rule cannot be disabled", async () => {
+      destinationStatus("closed")
+      await seed()
+      mockSend.mockResolvedValue(new InactiveAccountError(DEST_ACCOUNT))
+      mockDisableRule.mockResolvedValue(new UnknownRepositoryError("mongo down"))
+
+      await executePendingSplits({ now: T0 })
+
+      expect(onlyRow()).toMatchObject({ status: "failed" })
+      expect(mockNotify).toHaveBeenCalledTimes(1)
+      expect(mockNotify).toHaveBeenCalledWith(
+        expect.objectContaining({ phraseBase: "notification.paymentSplit.failed" }),
+      )
+      expect(mockLogger.error).toHaveBeenCalled()
+    })
   })
 
   it("fails an IBEX Failure status and pushes the owner", async () => {

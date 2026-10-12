@@ -117,6 +117,25 @@ export const PaymentSplitRulesRepository = () => {
     }
   }
 
+  // ENG-660: turns off a rule whose destination account went inactive. Only an
+  // enabled rule is updated, so of several executions failing on the same rule
+  // exactly one sees `true` and notifies the owner.
+  const disableById = async (
+    id: string,
+    { now = new Date() }: { now?: Date } = {},
+  ): Promise<boolean | RepositoryError> => {
+    try {
+      if (!/^[0-9a-f]{24}$/i.test(id)) return false
+      const result = await PaymentSplitRuleModel.updateOne(
+        { _id: id, enabled: true },
+        { $set: { enabled: false, updatedAt: now } },
+      )
+      return result.modifiedCount > 0
+    } catch (error) {
+      return toError(error)
+    }
+  }
+
   const listWalletIdsWithEnabledRules = async (): Promise<string[] | RepositoryError> => {
     try {
       const ids = await PaymentSplitRuleModel.distinct("walletId", { enabled: true })
@@ -131,6 +150,7 @@ export const PaymentSplitRulesRepository = () => {
     findById,
     replaceForWallet,
     deleteById,
+    disableById,
     listWalletIdsWithEnabledRules,
   }
 }
