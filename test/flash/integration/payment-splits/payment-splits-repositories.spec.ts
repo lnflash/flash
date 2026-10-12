@@ -201,6 +201,91 @@ describe("payment split repositories (ENG-653)", () => {
     }
   })
 
+  it("disables a rule once, and a disabled rule records nothing (ENG-660)", async () => {
+    const enabled = PaymentSplitsConfig.enabled
+    PaymentSplitsConfig.enabled = true
+    try {
+      const rules = PaymentSplitRulesRepository()
+      const saved = await rules.replaceForWallet("wallet-d", [
+        { destinationWalletId: "closed-partner", percent: 10 },
+        { destinationWalletId: "open-partner", percent: 20 },
+      ])
+      if (saved instanceof Error) throw saved
+      const closed = saved.find((r) => r.destinationWalletId === "closed-partner")
+      if (!closed) throw new Error("rule not saved")
+
+      const disabledAt = new Date("2026-10-12T12:00:00Z")
+      // Only the first call flips the flag, so only it notifies the owner.
+      expect(
+        await rules.disableForDestination("wallet-d", "closed-partner", {
+          now: disabledAt,
+        }),
+      ).toBe(true)
+      expect(await rules.disableForDestination("wallet-d", "closed-partner")).toBe(false)
+      expect(await rules.disableForDestination("wallet-d", "no-such-partner")).toBe(false)
+      expect(await rules.findById(closed.id)).toMatchObject({
+        enabled: false,
+        updatedAt: disabledAt,
+      })
+      // The disabled rule still exists; a destination never configured does not.
+      expect(await rules.existsForDestination("wallet-d", "closed-partner")).toBe(true)
+      expect(await rules.existsForDestination("wallet-d", "no-such-partner")).toBe(false)
+
+      // Webhook and reconcile both record through recordSplitExecutions.
+      const triggerKey = "d".repeat(64)
+      const result = await recordSplitExecutions({
+        walletId: "wallet-d",
+        triggerKey,
+        paymentHash: triggerKey,
+        amount: 100,
+        currency: "USDT",
+      })
+      if (result instanceof Error) throw result
+
+      expect(result).toMatchObject({ recorded: 1 })
+      const rows = await PaymentSplitExecution.find({ triggerKey }).lean()
+      expect(rows.map((row) => row.destinationWalletId)).toEqual(["open-partner"])
+
+      // A wallet whose only rule is disabled is not reconciled at all.
+      const only = await rules.replaceForWallet("wallet-e", [
+        { destinationWalletId: "closed-partner", percent: 10 },
+      ])
+      if (only instanceof Error) throw only
+      expect(await rules.disableForDestination("wallet-e", "closed-partner")).toBe(true)
+      expect(await rules.listWalletIdsWithEnabledRules()).toEqual(["wallet-d"])
+    } finally {
+      PaymentSplitsConfig.enabled = enabled
+    }
+  })
+
+  it("disables a destination's rule after a re-save gave it a new id (ENG-660)", async () => {
+    const rules = PaymentSplitRulesRepository()
+    const first = await rules.replaceForWallet("wallet-f", [
+      { destinationWalletId: "closed-partner", percent: 10 },
+    ])
+    if (first instanceof Error) throw first
+    // The owner edits the percentage: the rule is re-inserted with a new id,
+    // so an execution recorded under the first id no longer names a rule.
+    const second = await rules.replaceForWallet("wallet-f", [
+      { destinationWalletId: "closed-partner", percent: 15 },
+    ])
+    if (second instanceof Error) throw second
+    expect(second[0].id).not.toEqual(first[0].id)
+    expect(await rules.findById(first[0].id)).toBeNull()
+
+    // Another owner has an enabled rule to the same destination.
+    const other = await rules.replaceForWallet("wallet-g", [
+      { destinationWalletId: "closed-partner", percent: 5 },
+    ])
+    if (other instanceof Error) throw other
+
+    expect(await rules.disableForDestination("wallet-f", "closed-partner")).toBe(true)
+    expect(await rules.findById(second[0].id)).toMatchObject({ enabled: false })
+    // Disabling wallet-f's rule must not touch wallet-g's rule.
+    expect(await rules.findById(other[0].id)).toMatchObject({ enabled: true })
+    expect(await rules.disableForDestination("wallet-g", "closed-partner")).toBe(true)
+  })
+
   it("lets exactly one of several concurrent claimers claim a pending row", async () => {
     const repo = PaymentSplitExecutionsRepository()
     await repo.insert(executionFields("e".repeat(64), "rule-1"))

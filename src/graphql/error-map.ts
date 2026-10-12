@@ -99,6 +99,10 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = error.message
       return new ValidationInternalError({ message, logger: baseLogger })
 
+    case "SplitDestinationInactiveError":
+      message = "Split destination account is not active"
+      return new ValidationInternalError({ message, logger: baseLogger })
+
     case "SplitRuleNotFoundError":
       message = "Payment split not found"
       return new NotFoundError({ message, logger: baseLogger })

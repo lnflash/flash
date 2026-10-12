@@ -5,8 +5,9 @@ import { authorizeSend } from "@app/payments/authorize-send"
 import { isDefinitivePaymentRejection } from "@app/payments/mark-outgoing-invoice"
 import { intraledgerPaymentSendWalletIdForUsdWallet } from "@app/payments/send-intraledger"
 
+import { AccountValidator } from "@domain/accounts"
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
-import { CouldNotFindError } from "@domain/errors"
+import { CouldNotFindError, InactiveAccountError } from "@domain/errors"
 import { LockServiceError, ResourceAttemptsLockServiceError } from "@domain/lock"
 import { InternalTransferMarkerError, splitRetryBackoffMs } from "@domain/payment-splits"
 import { SendLimitsUnavailableError } from "@domain/payments/errors"
@@ -21,6 +22,7 @@ import {
   PaymentSplitExecutionsRepository,
   type PaymentSplitExecutionRecord,
 } from "@services/mongoose/payment-split-executions"
+import { PaymentSplitRulesRepository } from "@services/mongoose/payment-split-rules"
 
 const logger = baseLogger.child({ module: "payment-splits" })
 
@@ -111,7 +113,7 @@ const formatCents = (cents: number): string => `US$${(cents / 100).toFixed(2)}`
 
 const notifyOwner = async (
   accountId: string,
-  outcome: "sent" | "failed",
+  outcome: "sent" | "failed" | "disabled",
   execution: PaymentSplitExecutionRecord,
 ): Promise<void> =>
   sendOutcomeNotificationBestEffort({
@@ -127,6 +129,21 @@ const notifyOwner = async (
     logMessage: `Failed to send payment split ${outcome} push notification`,
     logContext: { executionId: execution.id, walletId: execution.walletId },
   })
+
+/**
+ * ENG-660: whether the split's DESTINATION account is inactive right now.
+ * InactiveAccountError from the send does not say which side was inactive
+ * (the sender is checked first), so the destination is looked up directly.
+ * A lookup failure answers false: the row then fails as before and the rule
+ * stays enabled.
+ */
+const isDestinationInactive = async (destinationWalletId: string): Promise<boolean> => {
+  const wallet = await WalletsRepository().findById(destinationWalletId as WalletId)
+  if (wallet instanceof Error) return false
+  const account = await AccountsRepository().findById(wallet.accountId)
+  if (account instanceof Error) return false
+  return AccountValidator(account).isActive() instanceof Error
+}
 
 type ExecuteOutcome =
   | "sent"
@@ -176,6 +193,62 @@ const executeOne = async (
     const lastError = typeof error === "string" ? error : error.name || error.message
     await finish({ status: "failed", attempts, lastError })
     if (accountId) await notifyOwner(accountId, "failed", execution)
+    return "failed" as const
+  }
+
+  // ENG-660: the destination account is no longer active, so every later
+  // payout to it would fail the same way. Turn off the wallet's rules to that
+  // destination and tell the owner once (only the call that flipped `enabled`
+  // notifies); further rows for the same destination fail without another
+  // push. The rules are matched by destination, not by execution.ruleId: a
+  // save replaces every rule with a new id, and a delete removes it, so the
+  // recorded ruleId may no longer exist. When nothing was disabled AND no rule
+  // to the destination exists any more, the owner still gets the ordinary
+  // "failed" push, so a failed payout is never silent.
+  const failAndDisableRule = async (error: Error, accountId: string) => {
+    await finish({ status: "failed", attempts, lastError: error.name })
+    const rules = PaymentSplitRulesRepository()
+    const logContext = {
+      executionId: execution.id,
+      ruleId: execution.ruleId,
+      walletId: execution.walletId,
+      destinationWalletId: execution.destinationWalletId,
+    }
+    const disabled = await rules.disableForDestination(
+      execution.walletId,
+      execution.destinationWalletId,
+      { now: stamp() },
+    )
+    if (disabled instanceof Error) {
+      logger.error(
+        { ...logContext, error: disabled },
+        "could not disable payment split rule with an inactive destination",
+      )
+      await notifyOwner(accountId, "failed", execution)
+      return "failed" as const
+    }
+    if (disabled) {
+      logger.warn(
+        logContext,
+        "payment split rule disabled: destination account is not active",
+      )
+      await notifyOwner(accountId, "disabled", execution)
+      return "failed" as const
+    }
+    // Nothing flipped: either an earlier row already disabled the rule (it
+    // still exists, its owner was told) or the rule is gone (edited away or
+    // deleted), in which case nobody has told the owner about this payout.
+    const exists = await rules.existsForDestination(
+      execution.walletId,
+      execution.destinationWalletId,
+    )
+    if (exists instanceof Error) {
+      logger.error(
+        { ...logContext, error: exists },
+        "could not check payment split rule for an inactive destination",
+      )
+    }
+    if (exists !== true) await notifyOwner(accountId, "failed", execution)
     return "failed" as const
   }
 
@@ -288,6 +361,12 @@ const executeOne = async (
       { executionId: execution.id, walletId: execution.walletId, error: result },
       "payment split failed",
     )
+    if (
+      result instanceof InactiveAccountError &&
+      (await isDestinationInactive(execution.destinationWalletId))
+    ) {
+      return failAndDisableRule(result, account.id)
+    }
     return fail(result, account.id)
   }
 

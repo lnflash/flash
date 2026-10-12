@@ -13,6 +13,9 @@ export class SplitRuleLimitExceededError extends ValidationError {}
 // The destination username or walletId does not resolve to a wallet in the
 // source wallet's currency.
 export class SplitDestinationNotFoundError extends ValidationError {}
+// ENG-660: the destination account's current status is not active (closed,
+// locked, pending). Every payout to it would fail with InactiveAccountError.
+export class SplitDestinationInactiveError extends ValidationError {}
 export class SelfSplitNotAllowedError extends ValidationError {}
 // The destination wallet's currency differs from the source wallet's, or the
 // source wallet is not a USD/USDT wallet. send-intraledger rejects

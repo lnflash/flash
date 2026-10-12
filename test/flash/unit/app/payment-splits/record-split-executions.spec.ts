@@ -73,6 +73,36 @@ afterAll(() => {
 })
 
 describe("recordSplitExecutions", () => {
+  it("records nothing for a rule disabled after its destination went inactive (ENG-660)", async () => {
+    // The repository honours enabledOnly the way the Mongo filter does.
+    const withDisabled = [{ ...rules[0], enabled: false }, rules[1]]
+    mockListRules.mockImplementation(
+      async (_walletId: string, { enabledOnly = false } = {}) =>
+        enabledOnly ? withDisabled.filter((rule) => rule.enabled) : withDisabled,
+    )
+
+    const result = await record({ amount: 100 })
+
+    expect(result).toMatchObject({ recorded: 1 })
+    expect([...mockStore.rows.values()].map((row) => row.destinationWalletId)).toEqual([
+      "dest-2",
+    ])
+  })
+
+  it("records nothing at all when the wallet's only rule is disabled (ENG-660)", async () => {
+    mockListRules.mockImplementation(
+      async (_walletId: string, { enabledOnly = false } = {}) =>
+        enabledOnly ? [] : [{ ...rules[0], enabled: false }],
+    )
+
+    expect(await record({ amount: 100 })).toEqual({
+      recorded: 0,
+      duplicates: 0,
+      skippedMin: 0,
+    })
+    expect(mockStore.rows.size).toBe(0)
+  })
+
   it("records one pending execution per enabled rule with the floored share", async () => {
     const result = await record()
 

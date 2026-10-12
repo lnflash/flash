@@ -117,6 +117,50 @@ export const PaymentSplitRulesRepository = () => {
     }
   }
 
+  // ENG-660: turns off every enabled rule from `walletId` to a destination
+  // whose account went inactive. Matched by (wallet, destination), not by rule
+  // id: replaceForWallet re-inserts every rule with a new _id on each save, so
+  // an execution's ruleId may name a rule that no longer exists while a
+  // replacement to the same dead destination is still enabled. Only enabled
+  // rules are updated, so of several executions failing on the same
+  // destination exactly one sees `true` and notifies the owner.
+  const disableForDestination = async (
+    walletId: string,
+    destinationWalletId: string,
+    { now = new Date() }: { now?: Date } = {},
+  ): Promise<boolean | RepositoryError> => {
+    try {
+      const result = await PaymentSplitRuleModel.updateMany(
+        {
+          walletId: { $eq: walletId },
+          destinationWalletId: { $eq: destinationWalletId },
+          enabled: true,
+        },
+        { $set: { enabled: false, updatedAt: now } },
+      )
+      return result.modifiedCount > 0
+    } catch (error) {
+      return toError(error)
+    }
+  }
+
+  // Whether any rule (enabled or not) from `walletId` to `destinationWalletId`
+  // exists.
+  const existsForDestination = async (
+    walletId: string,
+    destinationWalletId: string,
+  ): Promise<boolean | RepositoryError> => {
+    try {
+      const doc = await PaymentSplitRuleModel.exists({
+        walletId: { $eq: walletId },
+        destinationWalletId: { $eq: destinationWalletId },
+      })
+      return doc !== null
+    } catch (error) {
+      return toError(error)
+    }
+  }
+
   const listWalletIdsWithEnabledRules = async (): Promise<string[] | RepositoryError> => {
     try {
       const ids = await PaymentSplitRuleModel.distinct("walletId", { enabled: true })
@@ -131,6 +175,8 @@ export const PaymentSplitRulesRepository = () => {
     findById,
     replaceForWallet,
     deleteById,
+    disableForDestination,
+    existsForDestination,
     listWalletIdsWithEnabledRules,
   }
 }

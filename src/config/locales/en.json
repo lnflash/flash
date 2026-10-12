@@ -143,6 +143,10 @@
       "failed": {
         "title": "Payment split failed",
         "body": "We could not send a {{amount}} payment split. The money is still in your wallet."
+      },
+      "disabled": {
+        "title": "Payment split turned off",
+        "body": "We could not send a {{amount}} payment split because the recipient's account is no longer active. We turned this split off. The money is still in your wallet."
       }
     }
   }

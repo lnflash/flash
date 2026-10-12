@@ -1,9 +1,10 @@
 import { PaymentSplitsConfig } from "@config"
 
-import { checkedToUsername } from "@domain/accounts"
+import { AccountValidator, checkedToUsername } from "@domain/accounts"
 import { InvalidWalletForAccountError } from "@domain/accounts/errors"
 import {
   PaymentSplitsDisabledError,
+  SplitDestinationInactiveError,
   SplitDestinationNotFoundError,
   validateSplitSet,
   type SplitSetEntry,
@@ -41,6 +42,24 @@ export const resolveOwnedWallet = async ({
 }
 
 /**
+ * ENG-660: a destination whose account is not active (closed, locked, pending)
+ * would fail every payout with InactiveAccountError, so it is refused at save
+ * time. Uses the same AccountValidator check the intraledger send applies to
+ * the recipient.
+ */
+const checkDestinationActive = (
+  account: Account,
+  destination: string,
+): true | SplitDestinationInactiveError => {
+  if (AccountValidator(account).isActive() instanceof Error) {
+    return new SplitDestinationInactiveError(
+      `Split destination account is not active: ${destination}`,
+    )
+  }
+  return true
+}
+
+/**
  * A destination is either a walletId or a Flash username. A username resolves
  * to that account's wallet in the SOURCE wallet's currency — not to its
  * default wallet, which may be BTC or the other cash currency.
@@ -60,6 +79,12 @@ const resolveDestination = async ({
     if (wallet instanceof Error) {
       return new SplitDestinationNotFoundError(`No wallet found for ${trimmed}`)
     }
+    const owner = await AccountsRepository().findById(wallet.accountId)
+    if (owner instanceof Error) {
+      return new SplitDestinationNotFoundError(`No wallet found for ${trimmed}`)
+    }
+    const active = checkDestinationActive(owner, trimmed)
+    if (active instanceof Error) return active
     return wallet
   }
 
@@ -72,6 +97,8 @@ const resolveDestination = async ({
   if (account instanceof Error) {
     return new SplitDestinationNotFoundError(`No Flash user found for ${trimmed}`)
   }
+  const active = checkDestinationActive(account, trimmed)
+  if (active instanceof Error) return active
 
   const wallets = await WalletsRepository().listByAccountId(account.id)
   if (wallets instanceof Error) return wallets
