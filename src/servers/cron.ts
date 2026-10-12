@@ -1,6 +1,11 @@
 import { OnChain, Lightning, Wallets, Payments, Swap, Accounts } from "@app"
 
-import { BridgeConfig, getCronConfig, TWO_MONTHS_IN_MS } from "@config"
+import {
+  BridgeConfig,
+  getCronConfig,
+  PaymentSplitsConfig,
+  TWO_MONTHS_IN_MS,
+} from "@config"
 
 import { ErrorLevel } from "@domain/shared"
 import { OperationInterruptedError } from "@domain/errors"
@@ -25,6 +30,11 @@ import {
   reconcileBridgeAndIbexWithdrawals,
 } from "@services/bridge/reconciliation"
 import { checkFygaroTreasuryFloat } from "@services/fygaro/float-monitor"
+import {
+  executePendingSplits,
+  reconcileSplits,
+  sweepStaleSplits,
+} from "@app/payment-splits"
 
 import { elapsedSinceTimestamp, sleep } from "@utils"
 import { rebalancingInternalChannels } from "@services/lnd/rebalancing"
@@ -89,6 +99,32 @@ const reconcileBridgeWithdrawalsJob = async () => {
   if (result instanceof Error) throw result
 }
 
+// ENG-653 payment splits. Reconcile first so a receive whose webhook was
+// missed is recorded before the executor runs; the sweep then flags any row a
+// crashed run left in `sending`. All three self-guard on the config flag.
+const reconcileSplitPaymentsJob = async () => {
+  if (!PaymentSplitsConfig.enabled) return
+
+  const result = await reconcileSplits({ windowMs: RECONCILE_WINDOW_MS })
+  if (result instanceof Error) throw result
+  logger.info({ result }, "payment split reconcile finished")
+}
+
+const executeSplitPaymentsJob = async () => {
+  if (!PaymentSplitsConfig.enabled) return
+
+  const result = await executePendingSplits()
+  if (result instanceof Error) throw result
+  logger.info({ result }, "payment split executor finished")
+}
+
+const sweepStaleSplitsJob = async () => {
+  if (!PaymentSplitsConfig.enabled) return
+
+  const result = await sweepStaleSplits()
+  if (result instanceof Error) throw result
+}
+
 // Bankowner treasury float check for Fygaro auto-credit. Runs every cron
 // invocation on whatever schedule the chart gives this Job; the fygaro-webhook
 // workload ALSO runs it every fygaro.float.checkIntervalMs (treasury-loop.ts)
@@ -146,6 +182,9 @@ const main = async () => {
     ...(cronConfig.swapEnabled ? [swapOutJob] : []),
     reconcileBridgeDepositsJob,
     reconcileBridgeWithdrawalsJob,
+    reconcileSplitPaymentsJob,
+    executeSplitPaymentsJob,
+    sweepStaleSplitsJob,
     checkFygaroFloatJob,
     evidenceRetentionJob,
     deleteExpiredPaymentFlows,
