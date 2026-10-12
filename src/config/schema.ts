@@ -1121,6 +1121,30 @@ export const configSchema = {
       // Default OFF baseline (mirrors topup); enable per environment via overrides.
       default: { enabled: false },
     },
+    // ENG-653: Flash-native payment splits for incoming payments. With this OFF
+    // the webhook middleware records nothing, the cron tasks no-op and the
+    // walletSplitsSet / walletSplitDelete mutations reject.
+    paymentSplits: {
+      type: "object",
+      properties: {
+        enabled: { type: "boolean", default: false },
+        // Split executions the cron executor claims and pays per run.
+        executorBatchSize: { type: "integer", minimum: 1, default: 50 },
+        // Sends attempted per execution before a retryable error becomes a
+        // terminal `failed`. Backoff between attempts is 1, 2, 4, 8... minutes.
+        maxAttempts: { type: "integer", minimum: 1, default: 5 },
+        // A share below this many US cents is recorded as `skipped_min` and
+        // never sent.
+        minShareCents: { type: "integer", minimum: 1, default: 1 },
+      },
+      additionalProperties: false,
+      default: {
+        enabled: false,
+        executorBatchSize: 50,
+        maxAttempts: 5,
+        minShareCents: 1,
+      },
+    },
     frappe: {
       type: "object",
       properties: {

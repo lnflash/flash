@@ -128,6 +128,13 @@ type FygaroConfig = {
   }
 }
 
+type PaymentSplitsConfig = {
+  enabled: boolean
+  executorBatchSize: number
+  maxAttempts: number
+  minShareCents: number
+}
+
 type CashoutEmail = {
   to: string
   from: string
@@ -308,6 +315,7 @@ type YamlSchema = {
     enabled: boolean
   }
   fygaro: FygaroConfig
+  paymentSplits?: PaymentSplitsConfig
   sendgrid: SendGridConfig
   frappe: FrappeConfig
   fcmTopics: {

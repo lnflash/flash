@@ -56,6 +56,13 @@ fygaro:
     lookbackDays: 7
     maxPerSweep: 20
 
+# ENG-653: Flash-native payment splits for incoming payments.
+paymentSplits:
+  enabled: false # flags-off baseline; enable per environment via config overrides
+  executorBatchSize: 50
+  maxAttempts: 5
+  minShareCents: 1
+
 bridge:
   enabled: false # flags-off baseline; enable per environment via config overrides
   apiKey: "" # real key injected via config overrides; never commit a real key
