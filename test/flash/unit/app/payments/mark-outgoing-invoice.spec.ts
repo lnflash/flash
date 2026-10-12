@@ -1,6 +1,7 @@
 const mockRecordInternalTransferInvoice = jest.fn()
 const mockInsertInternalTransferInvoice = jest.fn()
 const mockDeleteInternalTransferInvoice = jest.fn()
+const mockIsInternalTransferInvoice = jest.fn()
 jest.mock("@services/mongoose/internal-transfer-invoices", () => ({
   recordInternalTransferInvoice: (...args: unknown[]) =>
     mockRecordInternalTransferInvoice(...args),
@@ -8,12 +9,15 @@ jest.mock("@services/mongoose/internal-transfer-invoices", () => ({
     mockInsertInternalTransferInvoice(...args),
   deleteInternalTransferInvoice: (...args: unknown[]) =>
     mockDeleteInternalTransferInvoice(...args),
+  isInternalTransferInvoice: (...args: unknown[]) =>
+    mockIsInternalTransferInvoice(...args),
 }))
 
 jest.mock("@services/tracing", () => ({
   recordExceptionInCurrentSpan: jest.fn(),
 }))
 
+import { isInternalTransferInvoice } from "@services/mongoose/internal-transfer-invoices"
 import {
   isDefinitivePaymentRejection,
   markOutgoingBolt11,
@@ -209,5 +213,67 @@ describe("payMarkedBolt11", () => {
     mockDeleteInternalTransferInvoice.mockResolvedValue(new RepositoryError("mongo"))
 
     expect(await run(PaymentSendStatus.Failure)).toBe(PaymentSendStatus.Failure)
+  })
+})
+
+describe("payMarkedBolt11 with two Flash payers of the same bolt11", () => {
+  // In-memory stand-in for the marker collection with its real uniqueness:
+  // one row per (hash, sender, origin); a hash is internal while any row exists.
+  const rows = new Set<string>()
+  const key = (a: { paymentHash: string; senderWalletId?: string; origin: string }) =>
+    [a.paymentHash.toLowerCase(), a.senderWalletId ?? "", a.origin].join("|")
+
+  beforeEach(() => {
+    rows.clear()
+    mockInsertInternalTransferInvoice.mockImplementation(async (a) => {
+      if (rows.has(key(a))) return { created: false }
+      rows.add(key(a))
+      return { created: true }
+    })
+    mockDeleteInternalTransferInvoice.mockImplementation(async (a) => rows.delete(key(a)))
+    mockIsInternalTransferInvoice.mockImplementation(async (hash: string) =>
+      [...rows].some((r) => r.startsWith(`${hash.toLowerCase()}|`)),
+    )
+  })
+
+  it("keeps the hash internal when A is rejected with a 400 after B marked it too", async () => {
+    const SENDER_A = "sender-a" as WalletId
+    const SENDER_B = "sender-b" as WalletId
+    const rejected = new IbexError(new Error("Bad Request"))
+    Object.defineProperty(rejected, "httpCode", { value: 400 })
+
+    // Both mark before either payment returns; A's is then rejected, B's settles.
+    let releaseA: () => void = () => undefined
+    const aPaid = new Promise<void>((resolve) => {
+      releaseA = resolve
+    })
+    const payA = payMarkedBolt11({
+      paymentRequest: BOLT11,
+      senderWalletId: SENDER_A,
+      pay: async () => {
+        await aPaid
+        return rejected
+      },
+    })
+    const payB = payMarkedBolt11({
+      paymentRequest: BOLT11,
+      senderWalletId: SENDER_B,
+      pay: async () => {
+        releaseA()
+        return PaymentSendStatus.Success
+      },
+    })
+
+    expect(await payB).toBe(PaymentSendStatus.Success)
+    expect(await payA).toBe(rejected)
+
+    expect(mockDeleteInternalTransferInvoice).toHaveBeenCalledTimes(1)
+    expect(mockDeleteInternalTransferInvoice).toHaveBeenCalledWith({
+      paymentHash: HASH,
+      senderWalletId: SENDER_A,
+      origin: "ln-send",
+    })
+    expect(rows).toEqual(new Set([`${HASH}|${SENDER_B}|ln-send`]))
+    expect(await isInternalTransferInvoice(HASH)).toBe(true)
   })
 })

@@ -5,16 +5,24 @@
 // marker helper and the real split recorder, with the marker collection and
 // the split stores held in memory.
 
-const markers = new Map<string, { senderWalletId?: string; origin: string }>()
+// Mirrors the real collection: one row per (hash, sender, origin), unique.
+const markers = new Set<string>()
+const markerKey = (args: {
+  paymentHash: string
+  senderWalletId?: string
+  origin: string
+}) => [args.paymentHash.toLowerCase(), args.senderWalletId ?? "", args.origin].join("|")
+const hashMarked = (paymentHash: string) =>
+  [...markers].some((key) => key.startsWith(`${paymentHash.toLowerCase()}|`))
 jest.mock("@services/mongoose/internal-transfer-invoices", () => ({
   insertInternalTransferInvoice: async (args: {
     paymentHash: string
     senderWalletId?: string
     origin: string
   }) => {
-    const key = args.paymentHash.toLowerCase()
+    const key = markerKey(args)
     if (markers.has(key)) return { created: false }
-    markers.set(key, { senderWalletId: args.senderWalletId, origin: args.origin })
+    markers.add(key)
     return { created: true }
   },
   recordInternalTransferInvoice: async () => true,
@@ -22,17 +30,8 @@ jest.mock("@services/mongoose/internal-transfer-invoices", () => ({
     paymentHash: string
     senderWalletId: string
     origin: string
-  }) => {
-    const key = args.paymentHash.toLowerCase()
-    const found = markers.get(key)
-    if (!found) return false
-    if (found.senderWalletId !== args.senderWalletId || found.origin !== args.origin) {
-      return false
-    }
-    return markers.delete(key)
-  },
-  isInternalTransferInvoice: async (paymentHash: string) =>
-    markers.has(paymentHash.toLowerCase()),
+  }) => markers.delete(markerKey(args)),
+  isInternalTransferInvoice: async (paymentHash: string) => hashMarked(paymentHash),
 }))
 
 const mockListRules = jest.fn()
@@ -177,7 +176,7 @@ describe.each(resolvers)("%s ln-send marker (ENG-653)", (_name, pay) => {
     const result = await pay()
 
     expect(result.status).toBe("failed")
-    expect(markers.has(HASH)).toBe(false)
+    expect(hashMarked(HASH)).toBe(false)
     expect(await merchantReceives()).toEqual({
       recorded: 1,
       duplicates: 0,
@@ -192,14 +191,14 @@ describe.each(resolvers)("%s ln-send marker (ENG-653)", (_name, pay) => {
 
     await pay()
 
-    expect(markers.has(HASH)).toBe(false)
+    expect(hashMarked(HASH)).toBe(false)
   })
 
   it("keeps the marker when the payment settles, so the payee's splits do not fire", async () => {
     mockPayInvoice.mockResolvedValue({ transaction: { payment: { status: { id: 2 } } } })
 
     expect((await pay()).status).toBe("success")
-    expect(markers.has(HASH)).toBe(true)
+    expect(hashMarked(HASH)).toBe(true)
     expect(await merchantReceives()).toEqual({
       recorded: 0,
       duplicates: 0,
@@ -212,13 +211,13 @@ describe.each(resolvers)("%s ln-send marker (ENG-653)", (_name, pay) => {
 
     await pay()
 
-    expect(markers.has(HASH)).toBe(true)
+    expect(hashMarked(HASH)).toBe(true)
   })
 
   it("keeps the marker while the payment is in flight", async () => {
     mockPayInvoice.mockResolvedValue({ transaction: { payment: { status: { id: 1 } } } })
 
     expect((await pay()).status).toBe("pending")
-    expect(markers.has(HASH)).toBe(true)
+    expect(hashMarked(HASH)).toBe(true)
   })
 })

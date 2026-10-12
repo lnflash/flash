@@ -17,8 +17,10 @@ type InternalTransferInvoiceFields = {
 }
 
 /**
- * Writes the marker and says whether this call created it (`created: false`
- * when the hash was already marked). A caller that may later withdraw its
+ * Writes this sender's marker for the hash and says whether this call created
+ * it (`created: false` when the same hash, sender and origin was already
+ * marked). Markers are one row per (hash, sender, origin): another wallet
+ * paying the same hash gets its own row. A caller that may later withdraw its
  * marker (deleteInternalTransferInvoice) must only do so when it created it.
  */
 export const insertInternalTransferInvoice = async ({
@@ -45,7 +47,7 @@ export const insertInternalTransferInvoice = async ({
 /**
  * Marks a payment hash as an invoice Flash minted for one of its own transfers
  * (ENG-653), so a receive on it never triggers the recipient's payment splits.
- * Recording the same hash twice is a no-op.
+ * Recording the same hash, sender and origin twice is a no-op.
  */
 export const recordInternalTransferInvoice = async (
   fields: InternalTransferInvoiceFields,
@@ -56,8 +58,9 @@ export const recordInternalTransferInvoice = async (
 
 /**
  * Withdraws a marker this process wrote for a payment that was then rejected
- * outright. Matches on origin and sender as well as the hash, so it can never
- * remove a marker some other transfer wrote. Returns whether a row was removed.
+ * outright. Matches on origin and sender as well as the hash, so it only ever
+ * removes the caller's own row: another wallet's marker for the same hash
+ * stays, and the hash stays internal. Returns whether a row was removed.
  */
 export const deleteInternalTransferInvoice = async ({
   paymentHash,
@@ -80,6 +83,10 @@ export const deleteInternalTransferInvoice = async ({
   }
 }
 
+/**
+ * True while ANY marker exists for the hash, whoever wrote it and whatever its
+ * origin: one Flash payer is enough to make the receive Flash-to-Flash.
+ */
 export const isInternalTransferInvoice = async (
   paymentHash: string,
 ): Promise<boolean | RepositoryError> => {

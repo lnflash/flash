@@ -5,6 +5,8 @@ import {
   PaymentSplitRule,
 } from "@services/mongoose/schema"
 import {
+  deleteInternalTransferInvoice,
+  insertInternalTransferInvoice,
   isInternalTransferInvoice,
   recordInternalTransferInvoice,
 } from "@services/mongoose/internal-transfer-invoices"
@@ -133,5 +135,61 @@ describe("payment split repositories (ENG-653)", () => {
     expect(await isInternalTransferInvoice(hash.toLowerCase())).toBe(true)
     expect(await isInternalTransferInvoice("cd".repeat(32))).toBe(false)
     expect(await InternalTransferInvoice.countDocuments({})).toBe(1)
+  })
+
+  it("keeps one marker per (hash, sender, origin), not one per hash", async () => {
+    const hash = "ef".repeat(32)
+    const lnSend = (senderWalletId: string) => ({
+      paymentHash: hash,
+      senderWalletId,
+      origin: "ln-send" as const,
+    })
+
+    // Same sender and origin twice: one row, the second insert is a no-op.
+    expect(await insertInternalTransferInvoice(lnSend("sender-a"))).toEqual({
+      created: true,
+    })
+    expect(await insertInternalTransferInvoice(lnSend("sender-a"))).toEqual({
+      created: false,
+    })
+    expect(await InternalTransferInvoice.countDocuments({ paymentHash: hash })).toBe(1)
+
+    // A second sender of the same hash owns a row of its own.
+    expect(await insertInternalTransferInvoice(lnSend("sender-b"))).toEqual({
+      created: true,
+    })
+    expect(await InternalTransferInvoice.countDocuments({ paymentHash: hash })).toBe(2)
+
+    // The same sender under another origin is a distinct row too.
+    expect(
+      await insertInternalTransferInvoice({
+        ...lnSend("sender-a"),
+        origin: "lnurl-send",
+      }),
+    ).toEqual({ created: true })
+    expect(await InternalTransferInvoice.countDocuments({ paymentHash: hash })).toBe(3)
+
+    // Withdrawing A's ln-send row leaves B's, so the hash stays internal.
+    expect(await deleteInternalTransferInvoice(lnSend("sender-a"))).toBe(true)
+    expect(await deleteInternalTransferInvoice(lnSend("sender-a"))).toBe(false)
+    expect(await isInternalTransferInvoice(hash)).toBe(true)
+    expect(await InternalTransferInvoice.countDocuments({ paymentHash: hash })).toBe(2)
+
+    const indexes = await InternalTransferInvoice.collection.indexes()
+    expect(indexes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: { paymentHash: 1, senderWalletId: 1, origin: 1 },
+          unique: true,
+        }),
+      ]),
+    )
+    expect(
+      indexes.find(
+        (index) =>
+          index.unique &&
+          JSON.stringify(index.key) === JSON.stringify({ paymentHash: 1 }),
+      ),
+    ).toBeUndefined()
   })
 })

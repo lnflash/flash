@@ -91,8 +91,10 @@ export const isDefinitivePaymentRejection = (result: unknown): boolean => {
  * merchant's splits would not fire when a wallet outside Flash paid the same
  * invoice afterwards.
  *
- * The marker is withdrawn only when this call created it, so a marker written
- * by an earlier or concurrent payment of the same hash is left alone.
+ * The marker is withdrawn only when this call created it, and only this
+ * sender's row is removed: markers are one row per (hash, sender, origin), so
+ * a concurrent payment of the same bolt11 by another Flash wallet keeps its
+ * own row and the hash stays internal.
  */
 export const payMarkedBolt11 = async <T>({
   paymentRequest,

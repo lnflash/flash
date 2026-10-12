@@ -961,7 +961,7 @@ export const PaymentSplitExecution = mongoose.model(
 export const INTERNAL_TRANSFER_INVOICE_TTL_SECONDS = 30 * 24 * 60 * 60
 
 const InternalTransferInvoiceSchema = new Schema({
-  paymentHash: { type: String, required: true, unique: true },
+  paymentHash: { type: String, required: true },
   senderWalletId: { type: String },
   // Unknown for ln-send / lnurl-send: Flash only knows the payer.
   recipientWalletId: { type: String },
@@ -972,6 +972,17 @@ const InternalTransferInvoiceSchema = new Schema({
   },
   createdAt: { type: Date, required: true, default: Date.now },
 })
+
+// One marker per (hash, sender, origin), not per hash: two Flash wallets may
+// pay the same bolt11, and each must own a row it alone can withdraw when its
+// own payment is rejected. A hash is internal while ANY row for it exists
+// (isInternalTransferInvoice), served by this index's paymentHash prefix.
+// Rows without a sender (cutover) index senderWalletId as null, so a repeat
+// of the same hash and origin still collapses to one row.
+InternalTransferInvoiceSchema.index(
+  { paymentHash: 1, senderWalletId: 1, origin: 1 },
+  { unique: true },
+)
 
 InternalTransferInvoiceSchema.index(
   { createdAt: 1 },
