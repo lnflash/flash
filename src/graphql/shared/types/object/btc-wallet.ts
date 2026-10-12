@@ -23,6 +23,7 @@ import OnChainAddress from "../scalar/on-chain-address"
 import Lnurl from "../scalar/lnurl"
 
 import { TransactionConnection } from "./transaction"
+import WalletSplit from "./wallet-split"
 
 const BtcWallet = GT.Object<Wallet>({
   name: "BTCWallet",
@@ -140,6 +141,11 @@ const BtcWallet = GT.Object<Wallet>({
           paginationArgs,
         )
       },
+    },
+    splits: {
+      type: GT.NonNullList(WalletSplit),
+      description: "Payment splits are not supported on BTC wallets; always empty.",
+      resolve: () => [],
     },
   }),
 })

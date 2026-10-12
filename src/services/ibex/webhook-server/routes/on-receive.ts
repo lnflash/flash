@@ -17,6 +17,7 @@ import {
 } from "@domain/notifications"
 import { getCurrentPriceAsDisplayPriceRatio } from "@app/prices"
 import { removeDeviceTokens } from "@app/users/remove-device-tokens"
+import { recordSplitExecutions } from "@app/payment-splits/record-split-executions"
 import { ZapRequestModel } from "@services/mongoose/zap-request"
 import { ZapPublisher } from "@services/nostr/zapPublisher"
 import { ibexWebhookPaths } from "@services/ibex/webhook-config"
@@ -67,6 +68,64 @@ const fetchPaymentContext = async (
     return resp.sendStatus(500)
   }
   req.paymentContext = { receiverWallet, recipientAccount, recipientUser }
+  next()
+}
+
+// ENG-653: record (never send) the payment splits a Lightning/LNURL receive
+// triggers. Failure here must not fail the webhook: IBEX would retry it and
+// re-run the receive notification. The split reconcile records any receive
+// this step missed: every paymentSplits.reconcileIntervalMs from this pod's
+// split loop (lookback = interval plus margin) and once a day from the galoy
+// cron (lookback = a day plus margin). Duplicate deliveries are duplicate-key
+// no-ops.
+// The receive time from the webhook body, so a rule created after the receive
+// (a replay that lands after the merchant set or re-saved a split) never fires
+// on it. Undefined when IBEX sent no parseable time.
+const parseReceivedAt = (transaction: unknown): Date | undefined => {
+  const tx = transaction as { settledAt?: unknown; createdAt?: unknown } | undefined
+  for (const value of [tx?.settledAt, tx?.createdAt]) {
+    if (typeof value !== "string" && typeof value !== "number") continue
+    const date = new Date(value)
+    if (!Number.isNaN(date.getTime())) return date
+  }
+  return undefined
+}
+
+const recordPaymentSplits = async (
+  req: PaymentRequest,
+  _resp: Response,
+  next: NextFunction,
+) => {
+  if (!req.paymentContext) return next()
+
+  try {
+    const { transaction } = req.body
+    const paymentHash = parsePaymentHash(transaction?.invoice?.hash)
+    const amount = Number(transaction?.amount)
+    if (paymentHash && Number.isFinite(amount)) {
+      const { receiverWallet } = req.paymentContext
+      const result = await recordSplitExecutions({
+        walletId: receiverWallet.id,
+        triggerKey: paymentHash,
+        paymentHash,
+        amount,
+        currency: receiverWallet.currency,
+        receivedAt: parseReceivedAt(transaction),
+      })
+      if (result instanceof Error) {
+        logger.error(
+          { err: result, walletId: receiverWallet.id, paymentHash },
+          "Failed to record payment splits; the split reconcile will pick it up",
+        )
+      }
+    }
+  } catch (err) {
+    logger.error(
+      { err },
+      "Failed to record payment splits; the split reconcile will pick it up",
+    )
+  }
+
   next()
 }
 
@@ -211,6 +270,7 @@ router.post(
   authenticate,
   logRequest,
   fetchPaymentContext,
+  recordPaymentSplits,
   sendLightningNotification,
   sendZapReceipt,
   (_req: Request, resp: Response) => resp.status(200).end(),
@@ -223,6 +283,7 @@ router.post(
   authenticate,
   logRequest,
   fetchPaymentContext,
+  recordPaymentSplits,
   sendLightningNotification,
   sendZapReceipt,
   (_req: Request, resp: Response) => resp.status(200).end(),

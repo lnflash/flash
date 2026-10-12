@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "crypto"
 
 import { InvalidPubKeyError } from "@domain/errors"
 
-export { decodeInvoice } from "./ln-invoice"
+export { decodeInvoice, paymentHashFromBolt11 } from "./ln-invoice"
 export {
   invoiceExpirationForCurrency,
   defaultTimeToExpiryInSeconds,

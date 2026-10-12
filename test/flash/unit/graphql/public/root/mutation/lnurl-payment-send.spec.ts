@@ -59,6 +59,13 @@ jest.mock("axios", () => ({
   get: (...args: Parameters<typeof mockAxiosGet>) => mockAxiosGet(...args),
 }))
 
+// ENG-653: IBEX fetches the LNURL invoice itself, so the hash is marked after
+// the payment returns. Recorded here so the wiring can be asserted.
+const mockMarkPaidLnurlHash = jest.fn()
+jest.mock("@app/payments/mark-outgoing-invoice", () => ({
+  markPaidLnurlHash: (...args: unknown[]) => mockMarkPaidLnurlHash(...args),
+}))
+
 import LnurlPaymentSendMutation from "@graphql/public/root/mutation/lnurl-payment-send"
 import { IdempotencyKeyReuseError, WithdrawalLimitsExceededError } from "@domain/errors"
 import { paymentAmountFromNumber, USDTAmount, WalletCurrency } from "@domain/shared"
@@ -178,6 +185,38 @@ describe("LnurlPaymentSendMutation", () => {
       }),
     })
     expect(result).toEqual({ errors: [], status: "success" })
+  })
+
+  it("marks the paid hash for the routed wallet after IBEX pays (ENG-653)", async () => {
+    const hash = "ab".repeat(32)
+    mockPayToLnurl.mockResolvedValue({
+      hash,
+      transaction: { payment: { status: { id: 2 } } },
+    })
+
+    await resolveMutation()
+
+    expect(mockMarkPaidLnurlHash).toHaveBeenCalledWith({
+      paymentHash: hash,
+      senderWalletId: routedWalletId,
+    })
+  })
+
+  it("falls back to the payment-level hash and never marks a failed IBEX call (ENG-653)", async () => {
+    const hash = "cd".repeat(32)
+    mockPayToLnurl.mockResolvedValueOnce({
+      transaction: { payment: { hash, status: { id: 2 } } },
+    })
+    await resolveMutation()
+    expect(mockMarkPaidLnurlHash).toHaveBeenLastCalledWith({
+      paymentHash: hash,
+      senderWalletId: routedWalletId,
+    })
+
+    mockMarkPaidLnurlHash.mockClear()
+    mockPayToLnurl.mockResolvedValueOnce(new IbexError(new Error("boom")))
+    await resolveMutation()
+    expect(mockMarkPaidLnurlHash).not.toHaveBeenCalled()
   })
 
   it("rejects converted msats below LNURL minSendable before calling IBEX pay", async () => {

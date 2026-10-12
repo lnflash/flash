@@ -82,9 +82,30 @@ jest.mock("@app/payments/idempotency", () => ({
     mockWithPaymentIdempotency(...args),
 }))
 
+// ENG-653: the payee may be another Flash wallet; the resolver marks the
+// bolt11's hash before paying so the payee's splits never fire. Default-allow.
+const mockMarkOutgoingBolt11 = jest.fn()
+jest.mock("@app/payments/mark-outgoing-invoice", () => ({
+  // Mark (via the mock), then pay. Marker withdrawal on a rejected payment is
+  // covered against the real helper in ln-send-marker-withdrawal.spec.ts.
+  payMarkedBolt11: async ({
+    pay,
+    ...args
+  }: {
+    paymentRequest: string
+    senderWalletId: string
+    pay: () => Promise<unknown>
+  }) => {
+    const result = await mockMarkOutgoingBolt11(args)
+    if (result instanceof Error) return result
+    return pay()
+  },
+}))
+
 import { ErrorLevel } from "@domain/shared"
 import { WithdrawalLimitsExceededError } from "@domain/errors"
 import { LnInvoiceDecodeError } from "@domain/bitcoin/lightning/errors"
+import { InternalTransferMarkerError } from "@domain/payment-splits"
 import LnInvoicePaymentSendMutation from "@graphql/public/root/mutation/ln-invoice-payment-send"
 import {
   IbexError,
@@ -445,5 +466,45 @@ describe("ENG-573 decode gate against a real bolt11", () => {
       invoice: realInvoice,
       accountId: "wallet-1",
     })
+  })
+})
+
+describe("lnInvoicePaymentSend Flash-to-Flash split marker (ENG-653)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockSendGuardMode.mockReturnValue("log-only")
+    mockPayInvoice.mockResolvedValue({
+      transaction: { payment: { status: { id: 2 } } },
+    })
+  })
+
+  it("marks the bolt11 for the paying wallet before paying it", async () => {
+    const order: string[] = []
+    mockMarkOutgoingBolt11.mockImplementationOnce(async () => {
+      order.push("mark")
+      return true
+    })
+    mockPayInvoice.mockImplementation(async () => {
+      order.push("pay")
+      return { transaction: { payment: { status: { id: 2 } } } }
+    })
+
+    const result = await resolvePayment()
+
+    expect(mockMarkOutgoingBolt11).toHaveBeenCalledWith({
+      paymentRequest: "lnbc1",
+      senderWalletId: "wallet-1",
+    })
+    expect(order).toEqual(["mark", "pay"])
+    expect(result.status).toBe("success")
+  })
+
+  it("pays nothing when the marker cannot be written", async () => {
+    mockMarkOutgoingBolt11.mockResolvedValueOnce(new InternalTransferMarkerError("mongo"))
+
+    const result = await resolvePayment()
+
+    expect(mockPayInvoice).not.toHaveBeenCalled()
+    expect(result.status).toBe("failed")
   })
 })

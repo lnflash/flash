@@ -116,6 +116,8 @@ export const apiKeyScopeForField: Readonly<Record<string, ApiKeyFieldAccess>> =
     onChainUsdPaymentSend: "write:wallet",
     onChainUsdPaymentSendAsBtcDenominated: "write:wallet",
     onChainPaymentSendAll: "write:wallet",
+    walletSplitsSet: "write:wallet",
+    walletSplitDelete: "write:wallet",
   })
 
 // Nested-field guards: a root field like `me` only requires read:user, but the
@@ -141,18 +143,21 @@ export const apiKeyNestedFieldScopes: Record<
     pendingIncomingBalance: "read:wallet",
     transactions: "read:transactions",
     transactionsByAddress: "read:transactions",
+    splits: "read:wallet",
   },
   UsdWallet: {
     balance: "read:wallet",
     pendingIncomingBalance: "read:wallet",
     transactions: "read:transactions",
     transactionsByAddress: "read:transactions",
+    splits: "read:wallet",
   },
   UsdtWallet: {
     balance: "read:wallet",
     pendingIncomingBalance: "read:wallet",
     transactions: "read:transactions",
     transactionsByAddress: "read:transactions",
+    splits: "read:wallet",
   },
 })
 

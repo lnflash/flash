@@ -1,4 +1,5 @@
 import { createCashWalletMigrationRuntimeServices } from "@app/cash-wallet-cutover/runtime-services"
+import { InternalTransferMarkerError } from "@domain/payment-splits/errors"
 
 const migration = {
   legacyUsdWalletId: "legacy-wallet-id" as WalletId,
@@ -213,5 +214,53 @@ describe("cutover runtime services — IBEX rate-limit retry (ENG-483)", () => {
       }),
     ).rejects.toThrow("Not Found")
     expect(getRawAccountDetails).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("cutover runtime services — internal-transfer marker (ENG-653)", () => {
+  // Every cutover invoice is paid by Flash itself; its receive must never
+  // trigger the recipient's payment splits.
+  const bolt11 =
+    "lnbc140n1p3k6yzupp53p305l6de6s9xw2j0qaa59pl7lahys4f2uavwncll9z2vq0syvvsdqqcqzpgxqzuysp5mdgsaa734eg7srwx92rsn3hyc4xzt5tphfpadl5c6fanhppwaz4s9qyyssqm6yhnnhl8jltwjtclzk4g7nxr99ycsp4sqd6vksevqh06h8l3gm5fdhtl59t6g3fsalv26sj5zvwhxwlghc9wcfgkrjrtuh4873ejnspc5xksy"
+  const paymentHash = "8862fa7f4dcea0533952783bda143ff7fb7242a9573ac74f1ff944a601f02319"
+  const recipientWalletId = "destination-wallet-id" as WalletId
+
+  it.each([
+    ["createInvoice", { recipientWalletId, amount: "1000000", memo: "cutover" }],
+    ["createNoAmountInvoice", { recipientWalletId, memo: "cutover" }],
+  ] as const)("%s records the invoice hash with origin cutover", async (method, args) => {
+    const recordInternalTransferInvoice = jest.fn().mockResolvedValue(true)
+    const addInvoice = jest.fn().mockResolvedValue({ invoice: { bolt11 } })
+    const services = createCashWalletMigrationRuntimeServices({
+      createInvoice: addInvoice,
+      createNoAmountInvoice: addInvoice,
+      recordInternalTransferInvoice,
+    })
+
+    const invoice = await (
+      services.invoiceService[method] as (a: typeof args) => Promise<unknown>
+    )(args)
+
+    expect(invoice).not.toBeInstanceOf(Error)
+    expect((invoice as LnInvoice).paymentHash).toBe(paymentHash)
+    expect(recordInternalTransferInvoice).toHaveBeenCalledWith({
+      paymentHash,
+      recipientWalletId,
+      origin: "cutover",
+    })
+  })
+
+  it("does not hand back an invoice to pay when the marker write fails", async () => {
+    const services = createCashWalletMigrationRuntimeServices({
+      createNoAmountInvoice: jest.fn().mockResolvedValue({ invoice: { bolt11 } }),
+      recordInternalTransferInvoice: jest.fn().mockResolvedValue(new Error("mongo down")),
+    })
+
+    const invoice = await services.invoiceService.createNoAmountInvoice({
+      recipientWalletId,
+      memo: "cutover",
+    })
+
+    expect(invoice).toBeInstanceOf(InternalTransferMarkerError)
   })
 })

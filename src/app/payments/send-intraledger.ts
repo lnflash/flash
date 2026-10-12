@@ -2,13 +2,15 @@ import { validateIsBtcWallet, validateIsUsdWallet } from "@app/wallets"
 import { usdWalletAmountFromInput } from "@app/wallets/usd-wallet-amount"
 
 import { AccountValidator } from "@domain/accounts"
-import { PaymentSendStatus } from "@domain/bitcoin/lightning"
+import { decodeInvoice, PaymentSendStatus } from "@domain/bitcoin/lightning"
+import { InternalTransferMarkerError } from "@domain/payment-splits/errors"
 import { checkedToWalletId } from "@domain/wallets"
 import { MismatchedCurrencyForWalletError } from "@domain/errors"
 
 import { notifyOpsEvent } from "@services/alerts/ops-events"
 import { addAttributesToCurrentSpan } from "@services/tracing"
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
+import { recordInternalTransferInvoice } from "@services/mongoose/internal-transfer-invoices"
 
 import Ibex from "@services/ibex/client"
 import { UnexpectedIbexResponse } from "@services/ibex/errors"
@@ -63,6 +65,7 @@ const intraledgerPaymentSendWalletId = async ({
   amount: uncheckedAmount,
   memo,
   senderWalletId: uncheckedSenderWalletId,
+  beforePay,
 }: IntraLedgerPaymentSendWalletIdArgs): Promise<PaymentSendStatus | ApplicationError> => {
   const validatedPaymentInputs = await validateIntraledgerPaymentInputs({
     uncheckedSenderWalletId,
@@ -92,6 +95,23 @@ const intraledgerPaymentSendWalletId = async ({
   if (invoiceResp.invoice?.bolt11 === undefined)
     return new UnexpectedIbexResponse("Bolt11 field not found.")
 
+  // ENG-653: mark the recipient invoice as internal BEFORE paying it. IBEX
+  // binds every addInvoice to the on-receive webhook, so without this marker a
+  // system credit (Fygaro top-up, referral payout) or a split payout itself
+  // would trigger the recipient's payment splits. Fails closed: if the marker
+  // cannot be written nothing is paid, and the error return is left uncached
+  // by withPaymentIdempotency, so the same key can be retried.
+  const marked = await markInternalTransferInvoice({
+    bolt11: invoiceResp.invoice.bolt11,
+    ibexHash: invoiceResp.invoice.hash,
+    senderWalletId: senderWallet.id,
+    recipientWalletId,
+  })
+  if (marked instanceof Error) return marked
+
+  // Everything above moved no money: an error from addInvoice or the marker
+  // write is a pre-payment error. From here on IBEX may debit the sender.
+  beforePay?.()
   const payResp = await Ibex.payInvoice({
     accountId: uncheckedSenderWalletId,
     invoice: invoiceResp.invoice.bolt11 as Bolt11,
@@ -126,6 +146,37 @@ const intraledgerPaymentSendWalletId = async ({
   // }
 
   return paymentSendStatus
+}
+
+const PaymentHashRegex = /^[0-9a-f]{64}$/i
+
+const markInternalTransferInvoice = async ({
+  bolt11,
+  ibexHash,
+  senderWalletId,
+  recipientWalletId,
+}: {
+  bolt11: string
+  ibexHash: string | undefined
+  senderWalletId: WalletId
+  recipientWalletId: WalletId
+}): Promise<true | ApplicationError> => {
+  // The hash of the bolt11 we are about to pay is authoritative; IBEX's own
+  // `invoice.hash` is the fallback when the bolt11 cannot be decoded locally.
+  const decoded = decodeInvoice(bolt11)
+  const paymentHash = decoded instanceof Error ? ibexHash : decoded.paymentHash
+  if (typeof paymentHash !== "string" || !PaymentHashRegex.test(paymentHash)) {
+    return new InternalTransferMarkerError("Could not read recipient invoice hash")
+  }
+
+  const recorded = await recordInternalTransferInvoice({
+    paymentHash,
+    senderWalletId,
+    recipientWalletId,
+    origin: "intraledger",
+  })
+  if (recorded instanceof Error) return new InternalTransferMarkerError(recorded)
+  return true
 }
 
 export const intraledgerPaymentSendWalletIdForBtcWallet = async (

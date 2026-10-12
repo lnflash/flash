@@ -1,6 +1,11 @@
 import { OnChain, Lightning, Wallets, Payments, Swap, Accounts } from "@app"
 
-import { BridgeConfig, getCronConfig, TWO_MONTHS_IN_MS } from "@config"
+import {
+  BridgeConfig,
+  getCronConfig,
+  PaymentSplitsConfig,
+  TWO_MONTHS_IN_MS,
+} from "@config"
 
 import { ErrorLevel } from "@domain/shared"
 import { OperationInterruptedError } from "@domain/errors"
@@ -25,6 +30,7 @@ import {
   reconcileBridgeAndIbexWithdrawals,
 } from "@services/bridge/reconciliation"
 import { checkFygaroTreasuryFloat } from "@services/fygaro/float-monitor"
+import { reconcileSplits } from "@app/payment-splits"
 
 import { elapsedSinceTimestamp, sleep } from "@utils"
 import { rebalancingInternalChannels } from "@services/lnd/rebalancing"
@@ -89,6 +95,20 @@ const reconcileBridgeWithdrawalsJob = async () => {
   if (result instanceof Error) throw result
 }
 
+// ENG-653 payment splits. Execution, retries and the stale sweep run every
+// minute in the ibex-webhook workload (startPaymentSplitsLoop); this daily Job
+// is far too slow for them. It keeps only a long-lookback reconcile as the
+// backstop for that loop being down: the lookback is derived from
+// paymentSplits.cronIntervalMs (the chart's schedule) plus a margin, so it
+// always reaches back past the previous run. Self-guards on the config flag.
+const reconcileSplitPaymentsJob = async () => {
+  if (!PaymentSplitsConfig.enabled) return
+
+  const result = await reconcileSplits({ cadenceMs: PaymentSplitsConfig.cronIntervalMs })
+  if (result instanceof Error) throw result
+  logger.info({ result }, "payment split reconcile finished")
+}
+
 // Bankowner treasury float check for Fygaro auto-credit. Runs every cron
 // invocation on whatever schedule the chart gives this Job; the fygaro-webhook
 // workload ALSO runs it every fygaro.float.checkIntervalMs (treasury-loop.ts)
@@ -146,6 +166,7 @@ const main = async () => {
     ...(cronConfig.swapEnabled ? [swapOutJob] : []),
     reconcileBridgeDepositsJob,
     reconcileBridgeWithdrawalsJob,
+    reconcileSplitPaymentsJob,
     checkFygaroFloatJob,
     evidenceRetentionJob,
     deleteExpiredPaymentFlows,

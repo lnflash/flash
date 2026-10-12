@@ -6,6 +6,7 @@ import { connectionArgs } from "@graphql/connections"
 import FractionalCentAmount from "@graphql/public/types/scalar/cent-amount-fraction"
 
 import { TransactionConnection } from "../object/transaction"
+import WalletSplit from "../object/wallet-split"
 import WalletCurrency from "../scalar/wallet-currency"
 import SignedAmount from "../scalar/signed-amount"
 import OnChainAddress from "../scalar/on-chain-address"
@@ -55,6 +56,10 @@ const IWallet = GT.Interface({
           description: "Returns the items that include this address.",
         },
       },
+    },
+    splits: {
+      type: GT.NonNullList(WalletSplit),
+      description: "Payment split rules on this wallet. Always empty for BTC wallets.",
     },
   }),
 })

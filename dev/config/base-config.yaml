@@ -56,6 +56,17 @@ fygaro:
     lookbackDays: 7
     maxPerSweep: 20
 
+# ENG-653: Flash-native payment splits for incoming payments.
+paymentSplits:
+  enabled: false # flags-off baseline; enable per environment via config overrides
+  maxAttempts: 5
+  minShareCents: 1
+  loopIntervalMs: 60000 # executor + stale-sweep cadence inside the ibex-webhook pod
+  executorTimeBudgetMs: 45000 # one executor pass drains due rows for at most this long
+  claimGraceMs: 120000 # a new pending split is not claimable for this long (lets a post-payment LNURL internal marker land)
+  reconcileIntervalMs: 900000 # webhook-safety-net reconcile cadence inside the same loop
+  cronIntervalMs: 86400000 # galoy cronjob schedule (chart: 0 2 * * *); sizes the cron reconcile lookback
+
 bridge:
   enabled: false # flags-off baseline; enable per environment via config overrides
   apiKey: "" # real key injected via config overrides; never commit a real key

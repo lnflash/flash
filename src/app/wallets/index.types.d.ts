@@ -148,6 +148,11 @@ type IntraLedgerPaymentSendWalletIdArgs = PaymentSendArgs & {
   // `SendGuardHook` above. Required — pass `SEND_GUARD_NOT_APPLICABLE` to opt a
   // system credit out explicitly.
   authorize: SendGuardHook
+  // Called synchronously right before IBEX payInvoice, after the recipient
+  // invoice was minted and marked internal. Lets a caller tell an error that
+  // came before the payment (nothing moved, safe to retry) from one that came
+  // from the payment itself (outcome unknown). Optional; no other effect.
+  beforePay?: () => void
 }
 
 type PayOnChainByWalletIdResult = {

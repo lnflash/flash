@@ -645,4 +645,15 @@ export const BridgeConfig = yamlConfig.bridge as BridgeConfig
 
 export const FygaroConfig = yamlConfig.fygaro as FygaroConfig
 
+export const PaymentSplitsConfig = (yamlConfig.paymentSplits ?? {
+  enabled: false,
+  maxAttempts: 5,
+  minShareCents: 1,
+  loopIntervalMs: 60000,
+  executorTimeBudgetMs: 45000,
+  claimGraceMs: 120000,
+  reconcileIntervalMs: 900000,
+  cronIntervalMs: 86400000,
+}) as PaymentSplitsConfig
+
 export const FrappeConfig = yamlConfig.frappe as FrappeConfig

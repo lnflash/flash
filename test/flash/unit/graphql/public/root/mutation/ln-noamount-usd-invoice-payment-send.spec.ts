@@ -51,7 +51,28 @@ jest.mock("@app/wallets", () => ({
   ) => mockUsdWalletAmountFromWalletId(...args),
 }))
 
+// ENG-653: the payee may be another Flash wallet; the resolver marks the
+// bolt11's hash before paying so the payee's splits never fire. Default-allow.
+const mockMarkOutgoingBolt11 = jest.fn()
+jest.mock("@app/payments/mark-outgoing-invoice", () => ({
+  // Mark (via the mock), then pay. Marker withdrawal on a rejected payment is
+  // covered against the real helper in ln-send-marker-withdrawal.spec.ts.
+  payMarkedBolt11: async ({
+    pay,
+    ...args
+  }: {
+    paymentRequest: string
+    senderWalletId: string
+    pay: () => Promise<unknown>
+  }) => {
+    const result = await mockMarkOutgoingBolt11(args)
+    if (result instanceof Error) return result
+    return pay()
+  },
+}))
+
 import { IdempotencyKeyReuseError, WithdrawalLimitsExceededError } from "@domain/errors"
+import { InternalTransferMarkerError } from "@domain/payment-splits"
 import { ErrorLevel, USDTAmount } from "@domain/shared"
 import LnNoAmountUsdInvoicePaymentSendMutation from "@graphql/public/root/mutation/ln-noamount-usd-invoice-payment-send"
 import { IbexError, UnconfirmedIbexPayment } from "@services/ibex/errors"
@@ -113,6 +134,36 @@ describe("LnNoAmountUsdInvoicePaymentSendMutation", () => {
         return execute()
       },
     )
+  })
+
+  it("marks the bolt11 for the routed wallet before paying it (ENG-653)", async () => {
+    const order: string[] = []
+    mockMarkOutgoingBolt11.mockImplementationOnce(async () => {
+      order.push("mark")
+      return true
+    })
+    mockPayInvoice.mockImplementation(async () => {
+      order.push("pay")
+      return { status: 0, transaction: { payment: { status: { id: 2 } } } }
+    })
+
+    const result = await resolveMutation()
+
+    expect(mockMarkOutgoingBolt11).toHaveBeenCalledWith({
+      paymentRequest: "lnbc1noamount",
+      senderWalletId: routedWalletId,
+    })
+    expect(order).toEqual(["mark", "pay"])
+    expect(result).toEqual({ errors: [], status: "success" })
+  })
+
+  it("pays nothing when the split marker cannot be written (ENG-653)", async () => {
+    mockMarkOutgoingBolt11.mockResolvedValueOnce(new InternalTransferMarkerError("mongo"))
+
+    const result = await resolveMutation()
+
+    expect(mockPayInvoice).not.toHaveBeenCalled()
+    expect(result.status).toBe("failed")
   })
 
   it("pays the routed wallet with the resolved cent amount", async () => {

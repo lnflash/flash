@@ -130,6 +130,16 @@
         "title": "Tu recarga está en camino",
         "body": "Estamos acreditando {{amount}} a tu billetera. Debería aparecer en breve."
       }
+    },
+    "paymentSplit": {
+      "sent": {
+        "title": "División de pago enviada",
+        "body": "Se enviaron {{amount}} de un pago que recibiste al destinatario de tu división."
+      },
+      "failed": {
+        "title": "La división de pago falló",
+        "body": "No pudimos enviar una división de pago de {{amount}}. El dinero sigue en tu billetera."
+      }
     }
   }
 }
