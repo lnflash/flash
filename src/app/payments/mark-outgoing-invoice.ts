@@ -1,11 +1,21 @@
-import { paymentHashFromBolt11 } from "@domain/bitcoin/lightning"
+import { PaymentSendStatus, paymentHashFromBolt11 } from "@domain/bitcoin/lightning"
 import {
   InternalTransferMarkerError,
   InternalTransferOrigin,
 } from "@domain/payment-splits"
 import { ErrorLevel } from "@domain/shared"
 
-import { recordInternalTransferInvoice } from "@services/mongoose/internal-transfer-invoices"
+import {
+  CompletedInvoice,
+  FailedIbexPayment,
+  IbexError,
+  InsufficientIbexBalance,
+} from "@services/ibex/errors"
+import {
+  deleteInternalTransferInvoice,
+  insertInternalTransferInvoice,
+  recordInternalTransferInvoice,
+} from "@services/mongoose/internal-transfer-invoices"
 import { baseLogger } from "@services/logger"
 import { recordExceptionInCurrentSpan } from "@services/tracing"
 
@@ -25,23 +35,101 @@ const PaymentHashRegex = /^[0-9a-f]{64}$/i
  * is paid unmarked: every invoice IBEX mints for a Flash wallet decodes (the
  * intraledger marker depends on that), so an undecodable one is external.
  */
-export const markOutgoingBolt11 = async ({
+type OutgoingBolt11Marker = { paymentHash: string; created: boolean } | null
+
+const markOutgoing = async ({
   paymentRequest,
   senderWalletId,
 }: {
   paymentRequest: string
   senderWalletId: WalletId
-}): Promise<true | InternalTransferMarkerError> => {
+}): Promise<OutgoingBolt11Marker | InternalTransferMarkerError> => {
   const paymentHash = paymentHashFromBolt11(paymentRequest)
-  if (!paymentHash || !PaymentHashRegex.test(paymentHash)) return true
+  if (!paymentHash || !PaymentHashRegex.test(paymentHash)) return null
 
-  const recorded = await recordInternalTransferInvoice({
+  const inserted = await insertInternalTransferInvoice({
     paymentHash,
     senderWalletId,
     origin: InternalTransferOrigin.LnSend,
   })
-  if (recorded instanceof Error) return new InternalTransferMarkerError(recorded)
-  return true
+  if (inserted instanceof Error) return new InternalTransferMarkerError(inserted)
+  return { paymentHash, created: inserted.created }
+}
+
+export const markOutgoingBolt11 = async (args: {
+  paymentRequest: string
+  senderWalletId: WalletId
+}): Promise<true | InternalTransferMarkerError> => {
+  const marked = await markOutgoing(args)
+  return marked instanceof Error ? marked : true
+}
+
+/**
+ * True only when IBEX refused the payment before any money moved: an
+ * insufficient balance, a corroborated FAILED status, or any other 4xx the
+ * request was rejected with (no route, expired invoice, rate limit). Never true
+ * for a pending or unreadable outcome, a transport error or a 5xx (the payment
+ * may still settle), nor for an already-paid invoice (someone else's payment of
+ * it settled, and that payer may be another Flash wallet whose marker this is).
+ */
+export const isDefinitivePaymentRejection = (result: unknown): boolean => {
+  if (result === PaymentSendStatus.Failure) return true
+  if (result instanceof InsufficientIbexBalance) return true
+  if (result instanceof FailedIbexPayment) return true
+  if (result instanceof CompletedInvoice) return false
+  if (result instanceof IbexError) {
+    const code = result.httpCode
+    return code !== undefined && code >= 400 && code < 500 && code !== 408
+  }
+  return false
+}
+
+/**
+ * Marks the bolt11 (markOutgoingBolt11), runs `pay`, and withdraws the marker
+ * again when IBEX rejected the payment outright. Without that, a Flash user's
+ * failed attempt on a merchant's QR would leave a 30-day marker behind and the
+ * merchant's splits would not fire when a wallet outside Flash paid the same
+ * invoice afterwards.
+ *
+ * The marker is withdrawn only when this call created it, so a marker written
+ * by an earlier or concurrent payment of the same hash is left alone.
+ */
+export const payMarkedBolt11 = async <T>({
+  paymentRequest,
+  senderWalletId,
+  pay,
+}: {
+  paymentRequest: string
+  senderWalletId: WalletId
+  pay: () => Promise<T>
+}): Promise<T | InternalTransferMarkerError> => {
+  const marker = await markOutgoing({ paymentRequest, senderWalletId })
+  if (marker instanceof Error) return marker
+
+  const result = await pay()
+
+  if (marker?.created && isDefinitivePaymentRejection(result)) {
+    const removed = await deleteInternalTransferInvoice({
+      paymentHash: marker.paymentHash,
+      senderWalletId,
+      origin: InternalTransferOrigin.LnSend,
+    })
+    if (removed instanceof Error) {
+      baseLogger.error(
+        { err: removed, paymentHash: marker.paymentHash, senderWalletId },
+        "Payment splits: could not withdraw the marker of a rejected ln-send",
+      )
+      recordExceptionInCurrentSpan({
+        error: removed,
+        level: ErrorLevel.Critical,
+        fallbackMsg:
+          "Payment splits: a rejected ln-send left its marker; the payee's splits will not fire if another wallet pays this invoice",
+        attributes: { "paymentSplits.paymentHash": marker.paymentHash },
+      })
+    }
+  }
+
+  return result
 }
 
 /**

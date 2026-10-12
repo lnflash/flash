@@ -1,7 +1,13 @@
 const mockRecordInternalTransferInvoice = jest.fn()
+const mockInsertInternalTransferInvoice = jest.fn()
+const mockDeleteInternalTransferInvoice = jest.fn()
 jest.mock("@services/mongoose/internal-transfer-invoices", () => ({
   recordInternalTransferInvoice: (...args: unknown[]) =>
     mockRecordInternalTransferInvoice(...args),
+  insertInternalTransferInvoice: (...args: unknown[]) =>
+    mockInsertInternalTransferInvoice(...args),
+  deleteInternalTransferInvoice: (...args: unknown[]) =>
+    mockDeleteInternalTransferInvoice(...args),
 }))
 
 jest.mock("@services/tracing", () => ({
@@ -9,11 +15,22 @@ jest.mock("@services/tracing", () => ({
 }))
 
 import {
+  isDefinitivePaymentRejection,
   markOutgoingBolt11,
   markPaidLnurlHash,
+  payMarkedBolt11,
 } from "@app/payments/mark-outgoing-invoice"
+import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { RepositoryError } from "@domain/errors"
 import { InternalTransferMarkerError } from "@domain/payment-splits"
+import { ErrorLevel } from "@domain/shared"
+import {
+  CompletedInvoice,
+  FailedIbexPayment,
+  IbexError,
+  InsufficientIbexBalance,
+  UnconfirmedIbexPayment,
+} from "@services/ibex/errors"
 
 // BOLT11 spec test vector; its payment hash is 0001…0102.
 const BOLT11 =
@@ -24,6 +41,8 @@ const SENDER = "sender-wallet" as WalletId
 beforeEach(() => {
   jest.clearAllMocks()
   mockRecordInternalTransferInvoice.mockResolvedValue(true)
+  mockInsertInternalTransferInvoice.mockResolvedValue({ created: true })
+  mockDeleteInternalTransferInvoice.mockResolvedValue(true)
 })
 
 describe("markOutgoingBolt11", () => {
@@ -31,7 +50,7 @@ describe("markOutgoingBolt11", () => {
     expect(
       await markOutgoingBolt11({ paymentRequest: BOLT11, senderWalletId: SENDER }),
     ).toBe(true)
-    expect(mockRecordInternalTransferInvoice).toHaveBeenCalledWith({
+    expect(mockInsertInternalTransferInvoice).toHaveBeenCalledWith({
       paymentHash: HASH,
       senderWalletId: SENDER,
       origin: "ln-send",
@@ -39,7 +58,7 @@ describe("markOutgoingBolt11", () => {
   })
 
   it("fails closed when the marker cannot be written", async () => {
-    mockRecordInternalTransferInvoice.mockResolvedValue(new RepositoryError("mongo"))
+    mockInsertInternalTransferInvoice.mockResolvedValue(new RepositoryError("mongo"))
 
     expect(
       await markOutgoingBolt11({ paymentRequest: BOLT11, senderWalletId: SENDER }),
@@ -53,7 +72,7 @@ describe("markOutgoingBolt11", () => {
         senderWalletId: SENDER,
       }),
     ).toBe(true)
-    expect(mockRecordInternalTransferInvoice).not.toHaveBeenCalled()
+    expect(mockInsertInternalTransferInvoice).not.toHaveBeenCalled()
   })
 })
 
@@ -82,5 +101,113 @@ describe("markPaidLnurlHash", () => {
     await expect(
       markPaidLnurlHash({ paymentHash: HASH, senderWalletId: SENDER }),
     ).resolves.toBeUndefined()
+  })
+})
+
+const httpError = (httpCode: number) => {
+  const err = new IbexError(new Error(`IBEX ${httpCode}`))
+  Object.defineProperty(err, "httpCode", { value: httpCode })
+  return err
+}
+
+describe("isDefinitivePaymentRejection", () => {
+  it.each([
+    [
+      "insufficient balance",
+      new InsufficientIbexBalance(new Error("400"), ErrorLevel.Info),
+    ],
+    ["a corroborated FAILED response", new FailedIbexPayment("failed")],
+    ["a FAILED status", PaymentSendStatus.Failure],
+    ["an IBEX 400 (no route, expired)", httpError(400)],
+    ["an IBEX 429", httpError(429)],
+  ])("is true for %s", (_label, result) => {
+    expect(isDefinitivePaymentRejection(result)).toBe(true)
+  })
+
+  it.each([
+    ["success", PaymentSendStatus.Success],
+    ["pending", PaymentSendStatus.Pending],
+    ["an unreadable response", new UnconfirmedIbexPayment("unreadable")],
+    ["an already-paid invoice", new CompletedInvoice(new Error("400"))],
+    ["an IBEX 5xx", httpError(502)],
+    ["a request timeout", httpError(408)],
+    ["a transport error with no status", new IbexError(new Error("ECONNRESET"))],
+    ["a non-IBEX error", new Error("lock")],
+  ])("is false for %s", (_label, result) => {
+    expect(isDefinitivePaymentRejection(result)).toBe(false)
+  })
+})
+
+describe("payMarkedBolt11", () => {
+  const run = (result: unknown) =>
+    payMarkedBolt11({
+      paymentRequest: BOLT11,
+      senderWalletId: SENDER,
+      pay: async () => result,
+    })
+
+  it("marks before paying and keeps the marker when the payment succeeds", async () => {
+    const order: string[] = []
+    mockInsertInternalTransferInvoice.mockImplementation(async () => {
+      order.push("mark")
+      return { created: true }
+    })
+
+    const result = await payMarkedBolt11({
+      paymentRequest: BOLT11,
+      senderWalletId: SENDER,
+      pay: async () => {
+        order.push("pay")
+        return PaymentSendStatus.Success
+      },
+    })
+
+    expect(result).toBe(PaymentSendStatus.Success)
+    expect(order).toEqual(["mark", "pay"])
+    expect(mockDeleteInternalTransferInvoice).not.toHaveBeenCalled()
+  })
+
+  it("keeps the marker while the payment is pending", async () => {
+    expect(await run(PaymentSendStatus.Pending)).toBe(PaymentSendStatus.Pending)
+    expect(mockDeleteInternalTransferInvoice).not.toHaveBeenCalled()
+  })
+
+  it("withdraws its own marker when IBEX rejects the payment outright", async () => {
+    const rejected = new InsufficientIbexBalance(new Error("400"), ErrorLevel.Info)
+
+    expect(await run(rejected)).toBe(rejected)
+    expect(mockDeleteInternalTransferInvoice).toHaveBeenCalledWith({
+      paymentHash: HASH,
+      senderWalletId: SENDER,
+      origin: "ln-send",
+    })
+  })
+
+  it("leaves a marker it did not create, even on a rejection", async () => {
+    mockInsertInternalTransferInvoice.mockResolvedValue({ created: false })
+
+    await run(PaymentSendStatus.Failure)
+
+    expect(mockDeleteInternalTransferInvoice).not.toHaveBeenCalled()
+  })
+
+  it("pays nothing when the marker cannot be written", async () => {
+    mockInsertInternalTransferInvoice.mockResolvedValue(new RepositoryError("mongo"))
+    const pay = jest.fn()
+
+    const result = await payMarkedBolt11({
+      paymentRequest: BOLT11,
+      senderWalletId: SENDER,
+      pay,
+    })
+
+    expect(result).toBeInstanceOf(InternalTransferMarkerError)
+    expect(pay).not.toHaveBeenCalled()
+  })
+
+  it("still returns the payment result when the withdrawal fails", async () => {
+    mockDeleteInternalTransferInvoice.mockResolvedValue(new RepositoryError("mongo"))
+
+    expect(await run(PaymentSendStatus.Failure)).toBe(PaymentSendStatus.Failure)
   })
 })

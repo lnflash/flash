@@ -59,6 +59,12 @@ export const recordSplitExecutions = async ({
     if (internal) return NOTHING
   }
 
+  // ENG-653 decision 1: an LNURL send from another Flash user is marked
+  // internal only after payToLnurl returns, so this receive can be recorded
+  // before the marker exists. The executor re-checks the marker at pay time;
+  // holding the row back for claimGraceMs lets that marker land first.
+  const firstClaimableAt = new Date(now.getTime() + PaymentSplitsConfig.claimGraceMs)
+
   const executions = PaymentSplitExecutionsRepository()
   const result = { ...NOTHING }
   for (const rule of rules) {
@@ -81,6 +87,7 @@ export const recordSplitExecutions = async ({
       triggerAmountMinor: share.triggerAmountMinor,
       shareCents: share.shareCents,
       status: share.status === "ok" ? "pending" : "skipped_min",
+      nextAttemptAt: firstClaimableAt,
       now,
     })
     if (inserted instanceof Error) return inserted

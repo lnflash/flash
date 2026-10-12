@@ -20,6 +20,7 @@ import { PaymentSplitsConfig } from "@config"
 import {
   runPaymentSplitsTick,
   startPaymentSplitsLoop,
+  stopPaymentSplitsLoopOnShutdown,
 } from "@app/payment-splits/split-loop"
 import { splitRetryBackoffMs } from "@domain/payment-splits"
 
@@ -54,7 +55,10 @@ describe("runPaymentSplitsTick", () => {
       Math.floor((PaymentSplitsConfig.reconcileIntervalMs * 0.9) / 1000),
       "NX",
     )
-    expect(mockExecute).toHaveBeenCalledWith({ now: NOW })
+    expect(mockExecute).toHaveBeenCalledWith({
+      now: NOW,
+      shouldStop: expect.any(Function),
+    })
     expect(mockSweep).toHaveBeenCalledWith({ now: NOW })
   })
 
@@ -107,15 +111,122 @@ describe("startPaymentSplitsLoop", () => {
     )
   })
 
-  it("starts a timer when enabled", () => {
+  it("starts a timer when enabled", async () => {
     jest.useFakeTimers()
     try {
-      const timer = startPaymentSplitsLoop()
-      expect(timer).toBeDefined()
-      clearInterval(timer)
+      const loop = startPaymentSplitsLoop()
+      expect(loop).toBeDefined()
+      await loop?.stop()
     } finally {
       jest.clearAllTimers()
       jest.useRealTimers()
+    }
+  })
+})
+
+describe("startPaymentSplitsLoop stop()", () => {
+  // Lets the tick's awaits (reconcile lease, reconcile) run under fake timers.
+  const flushMicrotasks = async () => {
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+  }
+  const deferred = () => {
+    let resolve!: (value: unknown) => void
+    const promise = new Promise((r) => {
+      resolve = r
+    })
+    return { promise, resolve }
+  }
+
+  afterEach(() => {
+    jest.clearAllTimers()
+    jest.useRealTimers()
+  })
+
+  it("waits for the tick in flight, which claims no new row once stopping", async () => {
+    jest.useFakeTimers()
+    const send = deferred()
+    const claimsAfterStop: boolean[] = []
+    // Stands in for the executor: one send in flight, then a claim check of the
+    // kind executePendingSplits makes before every claimNextDue.
+    mockExecute.mockImplementation(
+      async ({ shouldStop }: { shouldStop: () => boolean }) => {
+        await send.promise
+        claimsAfterStop.push(!shouldStop())
+        return { claimed: 1 }
+      },
+    )
+
+    const loop = startPaymentSplitsLoop()!
+    jest.advanceTimersByTime(30_000)
+    await flushMicrotasks()
+    expect(mockExecute).toHaveBeenCalledTimes(1)
+
+    let stopped = false
+    const stopping = loop.stop().then(() => {
+      stopped = true
+    })
+    await flushMicrotasks()
+    expect(stopped).toBe(false)
+
+    send.resolve(undefined)
+    await stopping
+
+    expect(stopped).toBe(true)
+    // The executor saw the stop flag after its send, so it claims nothing more.
+    expect(claimsAfterStop).toEqual([false])
+    // The sweep is skipped once stopping.
+    expect(mockSweep).not.toHaveBeenCalled()
+  })
+
+  it("starts no tick after stop()", async () => {
+    jest.useFakeTimers()
+    const loop = startPaymentSplitsLoop()!
+
+    await loop.stop()
+    jest.advanceTimersByTime(30_000 + PaymentSplitsConfig.loopIntervalMs * 3)
+    await flushMicrotasks()
+
+    expect(mockExecute).not.toHaveBeenCalled()
+    expect(mockReconcile).not.toHaveBeenCalled()
+  })
+})
+
+describe("runPaymentSplitsTick shouldStop", () => {
+  it("does nothing once stopping", async () => {
+    await runPaymentSplitsTick({ now: NOW, shouldStop: () => true })
+
+    expect(mockReconcile).not.toHaveBeenCalled()
+    expect(mockExecute).not.toHaveBeenCalled()
+    expect(mockSweep).not.toHaveBeenCalled()
+  })
+})
+
+describe("stopPaymentSplitsLoopOnShutdown", () => {
+  it("stops the loop on SIGTERM, then re-raises the signal with its listeners gone", async () => {
+    const before = process.listenerCount("SIGTERM")
+    let finishStop!: () => void
+    const stop = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishStop = resolve
+        }),
+    )
+    const kill = jest.spyOn(process, "kill").mockImplementation(() => true)
+    try {
+      stopPaymentSplitsLoopOnShutdown({ stop })
+      expect(process.listenerCount("SIGTERM")).toBe(before + 1)
+
+      process.emit("SIGTERM", "SIGTERM")
+      expect(stop).toHaveBeenCalledTimes(1)
+      expect(process.listenerCount("SIGTERM")).toBe(before)
+      await Promise.resolve()
+      expect(kill).not.toHaveBeenCalled()
+
+      finishStop()
+      await new Promise((r) => setImmediate(r))
+      expect(kill).toHaveBeenCalledWith(process.pid, "SIGTERM")
+    } finally {
+      kill.mockRestore()
     }
   })
 })

@@ -86,9 +86,19 @@ jest.mock("@app/payments/idempotency", () => ({
 // bolt11's hash before paying so the payee's splits never fire. Default-allow.
 const mockMarkOutgoingBolt11 = jest.fn()
 jest.mock("@app/payments/mark-outgoing-invoice", () => ({
-  markOutgoingBolt11: async (args: unknown) => {
+  // Mark (via the mock), then pay. Marker withdrawal on a rejected payment is
+  // covered against the real helper in ln-send-marker-withdrawal.spec.ts.
+  payMarkedBolt11: async ({
+    pay,
+    ...args
+  }: {
+    paymentRequest: string
+    senderWalletId: string
+    pay: () => Promise<unknown>
+  }) => {
     const result = await mockMarkOutgoingBolt11(args)
-    return result === undefined ? true : result
+    if (result instanceof Error) return result
+    return pay()
   },
 }))
 

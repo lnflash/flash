@@ -331,6 +331,24 @@ describe("executePendingSplits", () => {
     expect(await executePendingSplits({ now: T0 })).toMatchObject({ claimed: 2 })
   })
 
+  it("finishes the row in flight but claims no new one once stopping", async () => {
+    await seedMany(3)
+    let stopping = false
+    mockSend.mockImplementation(async () => {
+      // SIGTERM lands while the first split is being sent.
+      stopping = true
+      return PaymentSendStatus.Success
+    })
+
+    expect(
+      await executePendingSplits({ now: T0, shouldStop: () => stopping }),
+    ).toMatchObject({ claimed: 1, sent: 1 })
+    const statuses = [...mockStore.rows.values()].map((r) => r.status)
+    expect(statuses.filter((s) => s === "sent")).toHaveLength(1)
+    expect(statuses.filter((s) => s === "pending")).toHaveLength(2)
+    expect(statuses).not.toContain("sending")
+  })
+
   describe("lock errors", () => {
     // The send reached the payment: the authorize hook (which runs
     // immediately before Ibex.payInvoice) passed, then the lock layer erred.

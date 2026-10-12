@@ -32,9 +32,10 @@ export const createFakeExecutionsStore = () => {
       triggerAmountMinor: string
       shareCents: number
       status: string
+      nextAttemptAt?: Date
       now?: Date
     }) => {
-      const { now = new Date(), ...fields } = data
+      const { now = new Date(), nextAttemptAt = now, ...fields } = data
       const dup = [...rows.values()].find(
         (r) => r.triggerKey === fields.triggerKey && r.ruleId === fields.ruleId,
       )
@@ -44,7 +45,7 @@ export const createFakeExecutionsStore = () => {
         ...fields,
         id,
         attempts: 0,
-        nextAttemptAt: now,
+        nextAttemptAt,
         createdAt: now,
         updatedAt: now,
       })

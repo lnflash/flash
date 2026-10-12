@@ -70,14 +70,15 @@ export const PaymentSplitExecutionsRepository = () => {
     triggerAmountMinor: string
     shareCents: number
     status: "pending" | "skipped_min"
+    nextAttemptAt?: Date
     now?: Date
   }): Promise<{ inserted: true; id: string } | { inserted: false } | RepositoryError> => {
-    const { now = new Date(), ...fields } = data
+    const { now = new Date(), nextAttemptAt = now, ...fields } = data
     try {
       const doc = await PaymentSplitExecutionModel.create({
         ...fields,
         attempts: 0,
-        nextAttemptAt: now,
+        nextAttemptAt,
         createdAt: now,
         updatedAt: now,
       })

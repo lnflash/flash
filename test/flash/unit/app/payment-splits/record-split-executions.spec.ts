@@ -92,6 +92,24 @@ describe("recordSplitExecutions", () => {
     ])
   })
 
+  it("holds a freshly recorded row back from the executor for claimGraceMs", async () => {
+    // An LNURL send from another Flash user is marked internal only after
+    // payToLnurl returns. A row claimable at once could be paid by a loop tick
+    // landing before that marker is written (ENG-653 decision 1).
+    const now = new Date("2026-10-11T12:00:00Z")
+    const grace = PaymentSplitsConfig.claimGraceMs
+    expect(grace).toBeGreaterThanOrEqual(60_000)
+
+    await record({ now })
+
+    expect(await mockStore.repo.claimNextDue(now)).toBeNull()
+    expect(
+      await mockStore.repo.claimNextDue(new Date(now.getTime() + grace - 1)),
+    ).toBeNull()
+    const claimed = await mockStore.repo.claimNextDue(new Date(now.getTime() + grace))
+    expect(claimed).toMatchObject({ status: "sending", triggerKey: HASH })
+  })
+
   it("records one row per rule however many times the same trigger is replayed", async () => {
     for (let i = 0; i < 5; i++) await record()
 

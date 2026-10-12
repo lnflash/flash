@@ -1149,6 +1149,12 @@ export const configSchema = {
         // rows until none are left or the budget is spent, so throughput is
         // not capped by a fixed batch size.
         executorTimeBudgetMs: { type: "integer", minimum: 1000, default: 45000 },
+        // A newly recorded pending execution is not claimable until this long
+        // after it was recorded. An LNURL send from another Flash user is
+        // marked internal only after payToLnurl returns, so the payee's receive
+        // can be recorded first; the grace lets that marker land before the
+        // executor's pay-time re-check (ENG-653 decision 1).
+        claimGraceMs: { type: "integer", minimum: 0, default: 120000 },
         // How often the loop re-reads recent IBEX receives to record splits
         // a missed or failed webhook did not. The lookback is derived from
         // this (see splitReconcileWindowMs).
@@ -1165,6 +1171,7 @@ export const configSchema = {
         minShareCents: 1,
         loopIntervalMs: 60000,
         executorTimeBudgetMs: 45000,
+        claimGraceMs: 120000,
         reconcileIntervalMs: 900000,
         cronIntervalMs: 86400000,
       },

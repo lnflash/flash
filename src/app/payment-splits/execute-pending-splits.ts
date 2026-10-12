@@ -259,11 +259,14 @@ export type ExecutePendingSplitsSummary = {
  * throughput is not capped by a fixed batch per run. `now` is fixed per pass:
  * a row retried in this pass is due at now + backoff and is picked up by a
  * later pass, which is what makes the 1/2/4/8 minute backoff real.
+ *
+ * `shouldStop` lets the loop drain on SIGTERM (see startPaymentSplitsLoop).
  */
 export const executePendingSplits = async ({
   now = new Date(),
   clock = () => Date.now(),
-}: { now?: Date; clock?: () => number } = {}): Promise<
+  shouldStop = () => false,
+}: { now?: Date; clock?: () => number; shouldStop?: () => boolean } = {}): Promise<
   ExecutePendingSplitsSummary | Error
 > => {
   const summary: ExecutePendingSplitsSummary = {
@@ -279,7 +282,10 @@ export const executePendingSplits = async ({
 
   const executions = PaymentSplitExecutionsRepository()
   const deadline = clock() + PaymentSplitsConfig.executorTimeBudgetMs
-  while (clock() < deadline) {
+  // `shouldStop` is checked before every claim, so on shutdown the row in
+  // flight finishes and no new row moves to `sending` (where a kill would
+  // strand it for the stale sweep to mark `unknown`).
+  while (clock() < deadline && !shouldStop()) {
     const execution = await executions.claimNextDue(now)
     if (execution instanceof Error) return execution
     if (execution === null) break

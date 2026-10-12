@@ -134,6 +134,7 @@ type PaymentSplitsConfig = {
   minShareCents: number
   loopIntervalMs: number
   executorTimeBudgetMs: number
+  claimGraceMs: number
   reconcileIntervalMs: number
   cronIntervalMs: number
 }

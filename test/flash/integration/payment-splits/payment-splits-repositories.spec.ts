@@ -94,6 +94,20 @@ describe("payment split repositories (ENG-653)", () => {
     expect(claimed[0]).toMatchObject({ status: "sending" })
   })
 
+  it("does not claim a row before its first nextAttemptAt", async () => {
+    const repo = PaymentSplitExecutionsRepository()
+    const now = new Date()
+    const claimableAt = new Date(now.getTime() + 120_000)
+    await repo.insert({
+      ...executionFields("f".repeat(64), "rule-1"),
+      nextAttemptAt: claimableAt,
+      now,
+    })
+
+    expect(await repo.claimNextDue(now)).toBeNull()
+    expect(await repo.claimNextDue(claimableAt)).toMatchObject({ status: "sending" })
+  })
+
   it("has a TTL index on internal-transfer markers that outlives the reconcile lookback", async () => {
     const indexes = await InternalTransferInvoice.collection.indexes()
     const ttl = indexes.find((index) => index.expireAfterSeconds !== undefined)
