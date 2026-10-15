@@ -35,9 +35,10 @@ import {
 } from "@domain/cache"
 import { USDAmount } from "@domain/shared"
 
-const offerId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" as OfferId
+// A v4 UUID, the shape Storage.add mints with randomUUID().
+const offerId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" as OfferId
 const offerKey = `offers:${offerId}`
-const executedKey = `offers:executed:${offerId}`
+const executedKey = `offer-executed:${offerId}`
 
 const usd = (cents: string) => {
   const amount = USDAmount.cents(cents)
@@ -69,9 +70,31 @@ const stubRedis = (entries: Record<string, unknown>) =>
     key in entries ? entries[key] : new CacheUndefinedError(),
   )
 
+// An in-memory Redis behind all three cache mocks. Values are JSON encoded the
+// way ioredis-cache encodes them, so a tombstone reads back exactly as it would
+// in production, and a DEL removes a key for one caller only.
+const useInMemoryRedis = (): Map<string, string> => {
+  const store = new Map<string, string>()
+  mockCacheSet.mockImplementation(
+    async ({ key, value }: { key: string; value: unknown }) => {
+      store.set(key, JSON.stringify(value))
+      return value
+    },
+  )
+  mockCacheGet.mockImplementation(async ({ key }: { key: string }) => {
+    const data = store.get(key)
+    return data === undefined ? new CacheUndefinedError() : JSON.parse(data)
+  })
+  mockConsumeCacheKey.mockImplementation(async ({ key }: { key: string }) =>
+    store.delete(key),
+  )
+  return store
+}
+
 describe("offer storage: single-use consume", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    stubRedis({})
     mockCacheSet.mockImplementation(async ({ value }: { value: unknown }) => value)
     mockConsumeCacheKey.mockResolvedValue(true)
   })
@@ -188,6 +211,56 @@ describe("offer storage: single-use consume", () => {
         value: OffersSerde.serialize(details),
         ttlSecs: 3600,
       })
+    })
+  })
+
+  // initiateCashout hands the client's offerId straight to get. When the
+  // tombstone lived at offers:executed:<id>, the id "executed:<id>" named it,
+  // and get returned it as an offer whose details were the number 1.
+  describe("offer ids are client input", () => {
+    const addOffer = async (): Promise<OfferId> => {
+      const added = await Storage.add({ details } as Parameters<typeof Storage.add>[0])
+      if (added instanceof Error) throw added
+      return added.id
+    }
+
+    it("does not return a consumed offer's tombstone as an offer", async () => {
+      useInMemoryRedis()
+      const id = await addOffer()
+      expect(await Storage.consume(id)).toBe(true)
+
+      const forged = await Storage.get(`executed:${id}` as OfferId)
+
+      expect(forged).toBeInstanceOf(OfferNotFound)
+      expect(forged).not.toBeInstanceOf(PersistedOffer)
+      expect(await Storage.get(id)).toBeInstanceOf(OfferAlreadyExecuted)
+    })
+
+    it("keeps nothing but offer records under offers:", async () => {
+      const store = useInMemoryRedis()
+      const id = await addOffer()
+
+      await Storage.consume(id)
+
+      // the offer record is gone and only its tombstone is left, elsewhere
+      expect(store.size).toBe(1)
+      expect([...store.keys()].filter((key) => key.startsWith("offers:"))).toEqual([])
+    })
+
+    it.each([
+      ["a tombstone name", `executed:${offerId}`],
+      ["a UUID with a suffix", `${offerId}:x`],
+      ["a key pattern", "*"],
+      ["an empty id", ""],
+    ])("refuses %s before it reaches a Redis key", async (_label, id) => {
+      const fetched = await Storage.get(id as OfferId)
+      const consumed = await Storage.consume(id as OfferId)
+
+      expect(fetched).toBeInstanceOf(OfferNotFound)
+      expect(consumed).toBeInstanceOf(OfferNotFound)
+      expect(mockCacheGet).not.toHaveBeenCalled()
+      expect(mockCacheSet).not.toHaveBeenCalled()
+      expect(mockConsumeCacheKey).not.toHaveBeenCalled()
     })
   })
 })

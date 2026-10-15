@@ -6,6 +6,7 @@ import {
   OfferAlreadyExecuted,
   OfferNotFound,
 } from "@domain/cache"
+import { UuidRegex } from "@domain/shared"
 import { RedisCacheService, consumeCacheKey } from "@services/cache"
 import { baseLogger } from "@services/logger"
 
@@ -21,8 +22,14 @@ const OFFER_TTL_SECS = 3600 as Seconds
 const offerKey = (id: OfferId): string => `offers:${id}`
 // Left behind when an offer is consumed, so a later attempt to execute it is
 // told the offer was already used rather than that it never existed. It is for
-// error specificity only: the DEL in `consume` alone decides who executes.
-const executedKey = (id: OfferId): string => `offers:executed:${id}`
+// error specificity only: the DEL in `consume` alone decides who executes. It
+// sits outside the offers: prefix, so no offer id can make offerKey name it.
+const executedKey = (id: OfferId): string => `offer-executed:${id}`
+
+// `add` mints every offer id with randomUUID(). The id `get` and `consume`
+// receive is client input (initiateCashout's offerId), so anything that is not
+// a UUID is refused before it becomes part of a Redis key.
+const isOfferId = (id: OfferId): boolean => UuidRegex.test(id)
 
 // The offer record is gone: it expired, never existed, or an execution consumed
 // it. Only the last leaves a tombstone.
@@ -54,6 +61,7 @@ const Redis = {
   },
 
   get: async (id: OfferId): Promise<PersistedOffer | CacheServiceError> => {
+    if (!isOfferId(id)) return new OfferNotFound()
     try {
       const result: string | CacheServiceError = await RedisCacheService().get({
         key: offerKey(id),
@@ -71,10 +79,13 @@ const Redis = {
    * one DEL, so exactly one caller per offer gets `true`. A concurrent
    * duplicate gets OfferAlreadyExecuted. A Redis error is returned as is, and
    * the caller must not execute an offer it could not consume (fail closed).
+   * An id that is not a UUID names no offer: OfferNotFound, and no Redis call.
    */
   consume: async (
     id: OfferId,
   ): Promise<true | OfferAlreadyExecuted | CacheServiceError> => {
+    if (!isOfferId(id)) return new OfferNotFound()
+
     // The tombstone goes first, so no retry can land between a won DEL and the
     // tombstone write. It is best effort. If it fails, a later retry sees
     // OfferNotFound instead of OfferAlreadyExecuted, and nothing is paid twice

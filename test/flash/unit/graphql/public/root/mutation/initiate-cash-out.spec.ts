@@ -77,7 +77,8 @@ describe("initiateCashout resolver", () => {
       errors: [
         expect.objectContaining({
           code: "OFFER_ALREADY_EXECUTED",
-          message: "This offer has already been used. Request a new cashout offer.",
+          message:
+            "This cashout offer was already submitted and can't be reused. Check your transactions before starting a new cashout.",
         }),
       ],
       id: null,

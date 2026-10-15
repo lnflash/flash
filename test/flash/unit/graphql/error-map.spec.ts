@@ -254,13 +254,15 @@ describe("error-map", () => {
 
   // ENG-695: a cashout offer executes at most once. The client branches on the
   // code to ask for a new offer, so it must be stable, forwarded, and distinct
-  // from the expired/unknown-offer case.
+  // from the expired/unknown-offer case. The app shows the message as is, and
+  // the first execution may have paid, so the copy sends the user to their
+  // transactions before a new cashout.
   it("maps OfferAlreadyExecuted to OFFER_ALREADY_EXECUTED with client-safe copy", () => {
     const result = mapError(new OfferAlreadyExecuted())
 
     expect(result.extensions.code).toBe("OFFER_ALREADY_EXECUTED")
     expect(result.message).toBe(
-      "This offer has already been used. Request a new cashout offer.",
+      "This cashout offer was already submitted and can't be reused. Check your transactions before starting a new cashout.",
     )
     expect(result.forwardToClient).toBe(true)
     expect(mapError(new OfferNotFound()).extensions.code).toBe("NOT_FOUND")

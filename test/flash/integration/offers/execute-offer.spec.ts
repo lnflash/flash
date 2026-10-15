@@ -1,11 +1,12 @@
 import CashoutManager from "@app/offers/CashoutManager"
 
 import { Cashout } from "@config"
-import { OfferAlreadyExecuted } from "@domain/cache"
+import { OfferAlreadyExecuted, OfferNotFound } from "@domain/cache"
 import { JMDAmount, USDAmount, ValidationError } from "@domain/shared"
 import ErpNext, { CashoutId } from "@services/frappe/ErpNext"
 import { BankAccountQueryError } from "@services/frappe/errors"
 import Ibex from "@services/ibex/client"
+import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
 
 import { alice } from "../jest.setup"
 
@@ -196,6 +197,37 @@ describe("Offers", () => {
 
       expect(failed).toBeInstanceOf(ValidationError)
       expect(retried).not.toBeInstanceOf(Error)
+      expect(mockedErpNext.draftCashout).toHaveBeenCalledTimes(1)
+      expect(mockedIbex.payInvoice).toHaveBeenCalledTimes(1)
+    })
+
+    // The offer stays consumed when execute() fails. After an IBEX timeout the
+    // payment may still have gone through, so handing the offer back for a
+    // retry could pay the same cashout twice.
+    it("never executes an offer again after its execution fails at IBEX", async () => {
+      const { id } = await createOffer()
+      mockedIbex.payInvoice.mockResolvedValueOnce(new UnexpectedIbexResponse("timeout"))
+
+      const failed = await executeOffer(id)
+      const retried = await executeOffer(id)
+
+      expect(failed).toBeInstanceOf(IbexError)
+      expect(retried).toBeInstanceOf(OfferAlreadyExecuted)
+      expect(mockedErpNext.draftCashout).toHaveBeenCalledTimes(1)
+      expect(mockedIbex.payInvoice).toHaveBeenCalledTimes(1)
+    })
+
+    // offerId is client input. A consumed offer's tombstone must not come back
+    // as an offer when the client names it, and the call must return a typed
+    // error rather than throw.
+    it("answers an offerId that names a tombstone with OfferNotFound", async () => {
+      const { id } = await createOffer()
+      const executed = await executeOffer(id)
+
+      const forged = await executeOffer(`executed:${id}` as OfferId)
+
+      expect(executed).not.toBeInstanceOf(Error)
+      expect(forged).toBeInstanceOf(OfferNotFound)
       expect(mockedErpNext.draftCashout).toHaveBeenCalledTimes(1)
       expect(mockedIbex.payInvoice).toHaveBeenCalledTimes(1)
     })
