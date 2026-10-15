@@ -1,8 +1,10 @@
 import CashoutManager from "@app/offers/CashoutManager"
 import { Cashout } from "@config"
+import { OfferAlreadyExecuted } from "@domain/cache"
 import { NotImplementedError } from "@domain/errors"
 import { ErrorLevel } from "@domain/shared"
 import { InternalServerError } from "@graphql/error"
+import { mapToGqlErrorList } from "@graphql/error-map"
 import { GT } from "@graphql/index"
 import IError from "@graphql/shared/types/abstract/error"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
@@ -54,6 +56,11 @@ const InitiateCashoutMutation = GT.Field({
     }
 
     const offer = await CashoutManager.executeCashout(offerId, walletId, domainAccount.id)
+    // Expected, not a fault: this offer was already executed, by an earlier
+    // call or a concurrent duplicate. Return the typed code so the client can
+    // ask for a new offer, and keep it out of the Critical exception stream.
+    if (offer instanceof OfferAlreadyExecuted)
+      return { errors: mapToGqlErrorList(offer), id: null }
     if (offer instanceof Error) {
       recordExceptionInCurrentSpan({
         error: offer,
