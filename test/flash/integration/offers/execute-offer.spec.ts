@@ -158,11 +158,15 @@ describe("Offers", () => {
       // Hold both executions inside offer validation, after Storage.get and
       // before the consume gate, until both have arrived. Both callers have
       // then read the offer, so only the atomic consume can stop the second.
+      // If a regression stops one execution before validation, the timer lets
+      // the other through, so the arrived count fails the test rather than the
+      // jest timeout.
       let arrived = 0
       let releaseBoth: () => void = () => undefined
       const bothArrived = new Promise<void>((resolve) => {
         releaseBoth = resolve
       })
+      const safetyRelease = setTimeout(() => releaseBoth(), 5_000)
       mockedErpNext.getBankAccountsByCustomer.mockImplementation(async () => {
         arrived += 1
         if (arrived === 2) releaseBoth()
@@ -170,7 +174,9 @@ describe("Offers", () => {
         return [bankAccount]
       })
 
-      const results = await Promise.all([executeOffer(id), executeOffer(id)])
+      const results = await Promise.all([executeOffer(id), executeOffer(id)]).finally(
+        () => clearTimeout(safetyRelease),
+      )
 
       expect(arrived).toBe(2)
       expect(mockedErpNext.draftCashout).toHaveBeenCalledTimes(1)
