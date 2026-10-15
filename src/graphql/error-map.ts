@@ -636,6 +636,16 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         message: "Offer not available. Try again.",
         logger: baseLogger,
       })
+    case "OfferAlreadyExecuted":
+      // Mostly a retry after a lost response, so the first execution may have
+      // paid, and the client has no cashout id to check (ENG-716). The copy
+      // sends the user to their transactions before a new cashout, and stays
+      // true when that first execution failed before any money moved.
+      return bridgeGqlError({
+        code: "OFFER_ALREADY_EXECUTED",
+        message:
+          "This cashout offer was already submitted and can't be reused. Check your transactions before starting a new cashout.",
+      })
 
     case "BridgeInvalidAmountError":
       message =

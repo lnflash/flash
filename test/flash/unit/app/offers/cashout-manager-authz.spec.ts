@@ -1,5 +1,6 @@
 const mockStorageGet = jest.fn()
 const mockStorageAdd = jest.fn()
+const mockStorageConsume = jest.fn()
 const mockFindWalletById = jest.fn()
 const mockFindAccountById = jest.fn()
 const mockValidOfferFrom = jest.fn()
@@ -59,6 +60,7 @@ jest.mock("@app/offers/storage/Redis", () => ({
   default: {
     get: (...args: unknown[]) => mockStorageGet(...args),
     add: (...args: unknown[]) => mockStorageAdd(...args),
+    consume: (...args: unknown[]) => mockStorageConsume(...args),
   },
 }))
 
@@ -91,6 +93,7 @@ jest.mock("@domain/bitcoin/lightning", () => {
 })
 
 import CashoutManager from "@app/offers/CashoutManager"
+import { OfferAlreadyExecuted, UnknownCacheServiceError } from "@domain/cache"
 import { USDAmount, ValidationError } from "@domain/shared"
 
 const offerId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" as OfferId
@@ -126,6 +129,7 @@ describe("CashoutManager authorization", () => {
       },
     })
     mockStorageAdd.mockResolvedValue({ id: offerId, details: {} })
+    mockStorageConsume.mockResolvedValue(true)
   })
 
   describe("createOffer", () => {
@@ -196,6 +200,121 @@ describe("CashoutManager authorization", () => {
       // Then execution proceeds
       expect(result).not.toBeInstanceOf(Error)
       expect(mockValidOfferFrom).toHaveBeenCalled()
+    })
+  })
+
+  describe("executeCashout single-use gate", () => {
+    const mockExecute = jest.fn()
+
+    beforeEach(() => {
+      mockExecute.mockResolvedValue({ erpSubmitted: true, cashoutId: "c-1" })
+      mockValidOfferFrom.mockResolvedValue({ details: {}, execute: mockExecute })
+    })
+
+    it("consumes the offer, then executes it", async () => {
+      // Given the default fixtures (consume wins)
+
+      // When the caller executes their offer
+      const result = await CashoutManager.executeCashout(
+        offerId,
+        walletId,
+        callerAccountId,
+      )
+
+      // Then the offer is consumed before it is executed
+      expect(result).not.toBeInstanceOf(Error)
+      expect(mockStorageConsume).toHaveBeenCalledTimes(1)
+      expect(mockStorageConsume).toHaveBeenCalledWith(offerId)
+      expect(mockExecute).toHaveBeenCalledTimes(1)
+      expect(mockStorageConsume.mock.invocationCallOrder[0]).toBeLessThan(
+        mockExecute.mock.invocationCallOrder[0],
+      )
+    })
+
+    it("returns OfferAlreadyExecuted without executing when the consume is lost", async () => {
+      // Given a concurrent execution of the same offer consumed it first
+      const alreadyExecuted = new OfferAlreadyExecuted()
+      mockStorageConsume.mockResolvedValue(alreadyExecuted)
+
+      // When the caller executes the offer
+      const result = await CashoutManager.executeCashout(
+        offerId,
+        walletId,
+        callerAccountId,
+      )
+
+      // Then nothing is drafted or paid and the typed error comes back
+      expect(result).toBe(alreadyExecuted)
+      expect(mockExecute).not.toHaveBeenCalled()
+    })
+
+    it("does not execute when the consume fails on a Redis error", async () => {
+      // Given Redis fails the DEL
+      const redisDown = new UnknownCacheServiceError("connection reset")
+      mockStorageConsume.mockResolvedValue(redisDown)
+
+      // When the caller executes the offer
+      const result = await CashoutManager.executeCashout(
+        offerId,
+        walletId,
+        callerAccountId,
+      )
+
+      // Then the payout is refused (fail closed)
+      expect(result).toBe(redisDown)
+      expect(mockExecute).not.toHaveBeenCalled()
+    })
+
+    it("does not consume an offer that fails validation", async () => {
+      // Given the offer no longer validates (e.g. ERPNext bank lookup failed)
+      mockValidOfferFrom.mockResolvedValue(new ValidationError("bank lookup failed"))
+
+      // When the caller executes the offer
+      const result = await CashoutManager.executeCashout(
+        offerId,
+        walletId,
+        callerAccountId,
+      )
+
+      // Then the offer stays available for a retry
+      expect(result).toBeInstanceOf(ValidationError)
+      expect(mockStorageConsume).not.toHaveBeenCalled()
+    })
+
+    it("does not consume when the presented wallet belongs to another account", async () => {
+      // Given a caller presenting someone else's wallet
+      mockFindWalletById.mockResolvedValue({ id: walletId, accountId: otherAccountId })
+
+      // When the caller executes the offer
+      const result = await CashoutManager.executeCashout(
+        offerId,
+        walletId,
+        callerAccountId,
+      )
+
+      // Then it is rejected and the owner's offer is left intact
+      expect(result).toBeInstanceOf(ValidationError)
+      expect(mockStorageConsume).not.toHaveBeenCalled()
+    })
+
+    it("does not consume another account's offer presented with the caller's own wallet", async () => {
+      // Given the caller's own wallet, but an offer that settles from a wallet
+      // on another account
+      mockFindWalletById
+        .mockResolvedValueOnce({ id: walletId, accountId: callerAccountId })
+        .mockResolvedValueOnce({ id: walletId, accountId: otherAccountId })
+
+      // When the caller executes that offer
+      const result = await CashoutManager.executeCashout(
+        offerId,
+        walletId,
+        callerAccountId,
+      )
+
+      // Then it is rejected, so the caller cannot burn the owner's offer
+      expect(result).toBeInstanceOf(ValidationError)
+      expect(mockStorageConsume).not.toHaveBeenCalled()
+      expect(mockExecute).not.toHaveBeenCalled()
     })
   })
 })

@@ -179,6 +179,28 @@ const CashoutManager = {
       return validOffer
     }
 
+    // Single-use gate (ENG-695): exactly one execution per offer gets past it.
+    // It sits after validation, so an offer that fails a transient check (an
+    // ERPNext bank-account lookup, say) is not burned and can be retried. It
+    // sits before execute(), the only step that drafts the ERPNext cashout and
+    // pays IBEX. A Redis error here refuses the payout (fail closed). Once
+    // consumed, an offer is never executed again, even if execute() fails: the
+    // user needs a new offer, and a partial failure is reconciled by ops.
+    const consumed = await Storage.consume(id)
+    if (consumed instanceof Error) {
+      notifyOpsEvent({
+        flow: "cashout",
+        phase: "failed",
+        status: "failed",
+        accountId: providedWallet.accountId,
+        amount: displayAmount,
+        step: "consumeOffer",
+        error: consumed.constructor.name,
+        meta: { offerId: id },
+      })
+      return consumed
+    }
+
     const executedOffer = await validOffer.execute()
     if (executedOffer instanceof Error) return executedOffer
     else {
