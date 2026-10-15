@@ -636,6 +636,11 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         message: "Offer not available. Try again.",
         logger: baseLogger,
       })
+    case "OfferAlreadyExecuted":
+      return bridgeGqlError({
+        code: "OFFER_ALREADY_EXECUTED",
+        message: "This offer has already been used. Request a new cashout offer.",
+      })
 
     case "BridgeInvalidAmountError":
       message =

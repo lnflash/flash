@@ -10,3 +10,4 @@ export class UnknownCacheServiceError extends CacheServiceError {
 }
 
 export class OfferNotFound extends CacheServiceError {}
+export class OfferAlreadyExecuted extends CacheServiceError {}

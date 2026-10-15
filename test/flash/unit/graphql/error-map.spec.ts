@@ -23,6 +23,7 @@ import {
   SendLimitsUnavailableError,
 } from "@domain/payments/errors"
 import { PaymentSendRateLimiterExceededError } from "@domain/rate-limit/errors"
+import { OfferAlreadyExecuted, OfferNotFound } from "@domain/cache"
 
 describe("error-map", () => {
   it("maps PhoneNotAllowedForRegistrationError to a user-readable validation error, not the catch-all", () => {
@@ -249,5 +250,19 @@ describe("error-map", () => {
         "Too many payment attempts, please wait for a while and try again.",
       )
     })
+  })
+
+  // ENG-695: a cashout offer executes at most once. The client branches on the
+  // code to ask for a new offer, so it must be stable, forwarded, and distinct
+  // from the expired/unknown-offer case.
+  it("maps OfferAlreadyExecuted to OFFER_ALREADY_EXECUTED with client-safe copy", () => {
+    const result = mapError(new OfferAlreadyExecuted())
+
+    expect(result.extensions.code).toBe("OFFER_ALREADY_EXECUTED")
+    expect(result.message).toBe(
+      "This offer has already been used. Request a new cashout offer.",
+    )
+    expect(result.forwardToClient).toBe(true)
+    expect(mapError(new OfferNotFound()).extensions.code).toBe("NOT_FOUND")
   })
 })
