@@ -1,7 +1,10 @@
 import CashoutManager from "@app/offers/CashoutManager"
 
-import { JMDAmount, USDAmount } from "@domain/shared"
+import { Cashout } from "@config"
+import { OfferAlreadyExecuted } from "@domain/cache"
+import { JMDAmount, USDAmount, ValidationError } from "@domain/shared"
 import ErpNext, { CashoutId } from "@services/frappe/ErpNext"
+import { BankAccountQueryError } from "@services/frappe/errors"
 import Ibex from "@services/ibex/client"
 
 import { alice } from "../jest.setup"
@@ -108,5 +111,87 @@ describe("Offers", () => {
 
     // make assertions against ledger
     expect(status).toBeDefined()
+  })
+
+  describe("single use per offerId", () => {
+    // dev/config/base-config.yaml sets cashout.skipPayment, which skips the
+    // IBEX leg of ValidOffer.execute entirely. Put it back on the path so the
+    // payInvoice call count below is evidence of what a duplicate would pay.
+    let skipPayment: jest.ReplaceProperty<boolean>
+    beforeEach(() => {
+      skipPayment = jest.replaceProperty(Cashout, "SkipPayment", false)
+    })
+    afterEach(() => {
+      skipPayment.restore()
+    })
+
+    const createOffer = async () => {
+      const offer = await CashoutManager.createOffer(
+        alice.usdWalletD.id,
+        send,
+        "",
+        alice.account.id,
+      )
+      if (offer instanceof Error) throw offer
+      return offer
+    }
+
+    const executeOffer = (id: OfferId) =>
+      CashoutManager.executeCashout(id, alice.usdWalletD.id, alice.account.id)
+
+    it("rejects a second execution of the same offer before ERPNext or IBEX", async () => {
+      const { id } = await createOffer()
+
+      const first = await executeOffer(id)
+      const second = await executeOffer(id)
+
+      // the money-moving side effects ran for the first call only
+      expect(mockedErpNext.draftCashout).toHaveBeenCalledTimes(1)
+      expect(mockedIbex.payInvoice).toHaveBeenCalledTimes(1)
+      expect(first).not.toBeInstanceOf(Error)
+      expect(second).toBeInstanceOf(OfferAlreadyExecuted)
+    })
+
+    it("lets exactly one of two concurrent executions through", async () => {
+      const { id } = await createOffer()
+
+      // Hold both executions inside offer validation, after Storage.get and
+      // before the consume gate, until both have arrived. Both callers have
+      // then read the offer, so only the atomic consume can stop the second.
+      let arrived = 0
+      let releaseBoth: () => void = () => undefined
+      const bothArrived = new Promise<void>((resolve) => {
+        releaseBoth = resolve
+      })
+      mockedErpNext.getBankAccountsByCustomer.mockImplementation(async () => {
+        arrived += 1
+        if (arrived === 2) releaseBoth()
+        await bothArrived
+        return [bankAccount]
+      })
+
+      const results = await Promise.all([executeOffer(id), executeOffer(id)])
+
+      expect(arrived).toBe(2)
+      expect(mockedErpNext.draftCashout).toHaveBeenCalledTimes(1)
+      expect(mockedIbex.payInvoice).toHaveBeenCalledTimes(1)
+      expect(results.filter((r) => !(r instanceof Error))).toHaveLength(1)
+      expect(results.filter((r) => r instanceof OfferAlreadyExecuted)).toHaveLength(1)
+    })
+
+    it("keeps an offer whose execution fails validation, so a retry can run it", async () => {
+      const { id } = await createOffer()
+      mockedErpNext.getBankAccountsByCustomer.mockResolvedValueOnce(
+        new BankAccountQueryError("ERPNext unavailable"),
+      )
+
+      const failed = await executeOffer(id)
+      const retried = await executeOffer(id)
+
+      expect(failed).toBeInstanceOf(ValidationError)
+      expect(retried).not.toBeInstanceOf(Error)
+      expect(mockedErpNext.draftCashout).toHaveBeenCalledTimes(1)
+      expect(mockedIbex.payInvoice).toHaveBeenCalledTimes(1)
+    })
   })
 })

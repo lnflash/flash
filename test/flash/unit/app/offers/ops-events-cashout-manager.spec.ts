@@ -1,4 +1,5 @@
 const mockStorageGet = jest.fn()
+const mockStorageConsume = jest.fn()
 const mockFindWalletById = jest.fn()
 const mockValidOfferFrom = jest.fn()
 
@@ -43,7 +44,10 @@ jest.mock("@services/mongoose", () => ({
 
 jest.mock("@app/offers/storage/Redis", () => ({
   __esModule: true,
-  default: { get: (...args: unknown[]) => mockStorageGet(...args) },
+  default: {
+    get: (...args: unknown[]) => mockStorageGet(...args),
+    consume: (...args: unknown[]) => mockStorageConsume(...args),
+  },
 }))
 
 jest.mock("@app/offers/ValidOffer", () => ({
@@ -53,6 +57,7 @@ jest.mock("@app/offers/ValidOffer", () => ({
 
 import CashoutManager from "@app/offers/CashoutManager"
 import { EmailService } from "@services/email"
+import { OfferAlreadyExecuted, UnknownCacheServiceError } from "@domain/cache"
 import { USDAmount } from "@domain/shared"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
 
@@ -74,6 +79,7 @@ describe("ops events — CashoutManager.executeCashout", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     mockStorageGet.mockResolvedValue(makeOffer())
+    mockStorageConsume.mockResolvedValue(true)
     mockFindWalletById.mockResolvedValue({ id: walletId, accountId })
   })
 
@@ -169,6 +175,62 @@ describe("ops events — CashoutManager.executeCashout", () => {
     expect(notifyOpsEvent).toHaveBeenCalledTimes(1)
     expect(notifyOpsEvent).toHaveBeenCalledWith(
       expect.objectContaining({ flow: "cashout", phase: "initiated", status: "pending" }),
+    )
+  })
+
+  it("notifies a terminal failed event when a concurrent execution consumed the offer", async () => {
+    const execute = jest.fn()
+    mockValidOfferFrom.mockResolvedValue({ execute })
+    mockStorageConsume.mockResolvedValue(new OfferAlreadyExecuted())
+
+    const result = await CashoutManager.executeCashout(offerId, walletId, accountId)
+
+    expect(result).toBeInstanceOf(OfferAlreadyExecuted)
+    expect(execute).not.toHaveBeenCalled()
+    expect(EmailService.sendCashoutInitiatedEmail).not.toHaveBeenCalled()
+    expect(notifyOpsEvent).toHaveBeenCalledTimes(2)
+    expect(notifyOpsEvent).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ flow: "cashout", phase: "initiated" }),
+    )
+    expect(notifyOpsEvent).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        flow: "cashout",
+        phase: "failed",
+        status: "failed",
+        accountId,
+        amount: { value: "500.00", currency: "USD" },
+        step: "consumeOffer",
+        error: "OfferAlreadyExecuted",
+        meta: { offerId },
+      }),
+    )
+    expect(notifyOpsEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ phase: "succeeded" }),
+    )
+  })
+
+  it("notifies a terminal failed event when Redis refuses the payout", async () => {
+    const execute = jest.fn()
+    mockValidOfferFrom.mockResolvedValue({ execute })
+    mockStorageConsume.mockResolvedValue(new UnknownCacheServiceError("connection reset"))
+
+    const result = await CashoutManager.executeCashout(offerId, walletId, accountId)
+
+    expect(result).toBeInstanceOf(UnknownCacheServiceError)
+    expect(execute).not.toHaveBeenCalled()
+    expect(notifyOpsEvent).toHaveBeenCalledTimes(2)
+    expect(notifyOpsEvent).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        flow: "cashout",
+        phase: "failed",
+        status: "failed",
+        step: "consumeOffer",
+        error: "UnknownCacheServiceError",
+        meta: { offerId },
+      }),
     )
   })
 
