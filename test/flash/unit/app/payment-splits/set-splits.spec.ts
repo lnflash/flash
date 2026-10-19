@@ -32,6 +32,19 @@ jest.mock("@services/lock", () => ({
   })),
 }))
 
+const mockEnsureReceiveAccount = jest.fn(async ({ walletId }) => ({
+  walletId,
+  ibexAccountId: `shadow-${walletId}`,
+  currency: "USDT",
+  lnurlp: "lnurl1shadow",
+  createdAt: new Date(),
+  updatedAt: new Date(),
+}))
+
+jest.mock("@app/payment-splits/receive-account", () => ({
+  ensureReceiveAccount: (args: { walletId: string }) => mockEnsureReceiveAccount(args),
+}))
+
 import { PaymentSplitsConfig } from "@config"
 import { deletePaymentSplit } from "@app/payment-splits/delete-split"
 import { setPaymentSplits } from "@app/payment-splits/set-splits"

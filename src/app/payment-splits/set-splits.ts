@@ -18,6 +18,8 @@ import {
   type PaymentSplitRuleRecord,
 } from "@services/mongoose/payment-split-rules"
 
+import { ensureReceiveAccount } from "./receive-account"
+
 export type SplitInput = { destination: string; percent: number }
 
 /**
@@ -152,13 +154,26 @@ export const setPaymentSplits = async ({
   })
   if (valid instanceof Error) return valid
 
-  return LockService().lockWalletId(sourceWallet.id, async () =>
-    PaymentSplitRulesRepository().replaceForWallet(
+  return LockService().lockWalletId(sourceWallet.id, async () => {
+    // ENG-717: the shadow receive account must exist before rules go live, or
+    // routing (receiveAccountFor) would fall back to the real account and
+    // split nothing. A non-empty set creates it; clearing the rules keeps the
+    // existing shadow (decision 4: permanent). Creation failure fails the
+    // mutation, so a wallet is never left with enabled rules and no shadow.
+    if (entries.length > 0) {
+      const shadow = await ensureReceiveAccount({
+        walletId: sourceWallet.id,
+        currency: sourceWallet.currency,
+      })
+      if (shadow instanceof Error) return shadow
+    }
+
+    return PaymentSplitRulesRepository().replaceForWallet(
       sourceWallet.id,
       entries.map(({ destinationWalletId, percent }) => ({
         destinationWalletId,
         percent,
       })),
-    ),
-  )
+    )
+  })
 }

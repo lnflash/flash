@@ -1,16 +1,22 @@
 import { readdirSync, readFileSync, statSync } from "fs"
 import { join, relative } from "path"
 
-// ENG-653 risk guard. The internal-transfer marker is a denylist: IBEX binds
+// ENG-717 risk guard. The internal-transfer marker is a denylist: IBEX binds
 // EVERY addInvoice to the on-receive webhook, so a new code path that mints an
 // invoice Flash pays itself — without writing the marker — would fire the
 // recipient's payment splits on a system credit. Adding a call site makes this
 // test fail until it is classified below.
+//
+// ENG-717 adds a second, allowlist-shaped guard on top: every USER-FACING
+// receive mint site must route through receiveAccountFor (the shadow). See
+// add-invoice-for-wallet.spec.ts's ROUTED_MINT_SITES check.
 const CLASSIFIED_CALL_SITES: Record<string, string> = {
   // Marked internal (origin "intraledger") before paying.
   "src/app/payments/send-intraledger.ts": "marked",
   // Marked internal (origin "cutover") before the invoice is handed back.
   "src/app/cash-wallet-cutover/runtime-services.ts": "marked",
+  // ENG-717 payout legs: marked internal (origin "split") before paying.
+  "src/app/payment-splits/internal-transfer.ts": "marked",
   // User-facing receive invoices: an external payer's payment SHOULD trigger
   // splits. A Flash user paying one (QR scan, Lightning address) does not:
   // the pay paths below mark the hash before / right after paying.
@@ -36,6 +42,8 @@ const CLASSIFIED_PAY_CALL_SITES: Record<string, string> = {
   "src/app/payments/send-intraledger.ts": "marked",
   // Pays the cutover invoice it minted and marked (origin cutover).
   "src/app/cash-wallet-cutover/runtime-services.ts": "marked",
+  // ENG-717 payout legs: pays the invoice it minted and marked (origin split).
+  "src/app/payment-splits/internal-transfer.ts": "marked",
   // Bolt11 pays: marked (origin ln-send) before paying, fail-closed.
   "src/graphql/public/root/mutation/ln-invoice-payment-send.ts": "marked",
   "src/graphql/public/root/mutation/ln-noamount-usd-invoice-payment-send.ts": "marked",

@@ -56,16 +56,18 @@ fygaro:
     lookbackDays: 7
     maxPerSweep: 20
 
-# ENG-653: Flash-native payment splits for incoming payments.
+# ENG-653, v2 (ENG-717): Flash-native payment splits, settled through a shadow
+# receive account.
 paymentSplits:
   enabled: false # flags-off baseline; enable per environment via config overrides
   maxAttempts: 5
-  minShareCents: 1
+  minShareCents: 1 # a share below this folds into the merchant's net leg
   loopIntervalMs: 60000 # executor + stale-sweep cadence inside the ibex-webhook pod
-  executorTimeBudgetMs: 45000 # one executor pass drains due rows for at most this long
-  claimGraceMs: 120000 # a new pending split is not claimable for this long (lets a post-payment LNURL internal marker land)
+  executorTimeBudgetMs: 45000 # one executor pass drains due legs for at most this long
+  claimGraceMs: 120000 # a new pending leg is not claimable for this long (lets a post-payment LNURL internal marker land)
   reconcileIntervalMs: 900000 # webhook-safety-net reconcile cadence inside the same loop
   cronIntervalMs: 86400000 # galoy cronjob schedule (chart: 0 2 * * *); sizes the cron reconcile lookback
+  shadowAlertAfterMs: 600000 # residual balance on a shadow with no open leg: ops alert (customer funds in custody)
 
 bridge:
   enabled: false # flags-off baseline; enable per environment via config overrides

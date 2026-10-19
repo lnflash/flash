@@ -89,7 +89,7 @@ jest.mock("@services/tracing", () => ({
 }))
 
 import { PaymentSplitsConfig } from "@config"
-import { recordSplitExecutions } from "@app/payment-splits/record-split-executions"
+import { buildLegs } from "@app/payment-splits/build-legs"
 import { ErrorLevel, WalletCurrency } from "@domain/shared"
 import LnInvoicePaymentSendMutation from "@graphql/public/root/mutation/ln-invoice-payment-send"
 import LnNoAmountUsdInvoicePaymentSendMutation from "@graphql/public/root/mutation/ln-noamount-usd-invoice-payment-send"
@@ -136,11 +136,12 @@ const resolvers: [string, () => ReturnType<Resolve>][] = [
 // The merchant's wallet receives the invoice later, from a wallet outside
 // Flash (the IBEX on-receive webhook calls the recorder with the hash).
 const merchantReceives = () =>
-  recordSplitExecutions({
+  buildLegs({
     walletId: MERCHANT_WALLET,
+    sourceIbexAccountId: "shadow-account",
     triggerKey: HASH,
     paymentHash: HASH,
-    amount: 50,
+    grossAmount: 50,
     currency: WalletCurrency.Usdt,
   })
 
@@ -178,9 +179,8 @@ describe.each(resolvers)("%s ln-send marker (ENG-653)", (_name, pay) => {
     expect(result.status).toBe("failed")
     expect(hashMarked(HASH)).toBe(false)
     expect(await merchantReceives()).toEqual({
-      recorded: 1,
+      recorded: 2,
       duplicates: 0,
-      skippedMin: 0,
     })
   })
 
@@ -202,7 +202,6 @@ describe.each(resolvers)("%s ln-send marker (ENG-653)", (_name, pay) => {
     expect(await merchantReceives()).toEqual({
       recorded: 0,
       duplicates: 0,
-      skippedMin: 0,
     })
   })
 

@@ -137,6 +137,7 @@ type PaymentSplitsConfig = {
   claimGraceMs: number
   reconcileIntervalMs: number
   cronIntervalMs: number
+  shadowAlertAfterMs: number
 }
 
 type CashoutEmail = {

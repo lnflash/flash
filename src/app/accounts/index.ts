@@ -1,4 +1,8 @@
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
+import {
+  ensureReceiveAccount,
+  hasEnabledSplits,
+} from "@app/payment-splits/receive-account"
 
 export * from "./account-limit"
 export * from "./add-new-contact"
@@ -86,5 +90,22 @@ export const getLnurlpFromWalletId = async (
 ): Promise<Lnurl | ApplicationError> => {
   const wallet = await WalletsRepository().findById(walletId)
   if (wallet instanceof Error) return wallet
+
+  // ENG-717: while the wallet has enabled split rules its Lightning address
+  // serves the SHADOW's LNURL-pay, so external pays settle on the shadow and
+  // fan out. (flash-pay must not cache this answer — see its no-cache PR.)
+  const shadow = await hasEnabledSplits(walletId)
+  if (shadow === true) {
+    const receiveAccount = await ensureReceiveAccount({
+      walletId,
+      currency: wallet.currency,
+    })
+    if (!(receiveAccount instanceof Error) && receiveAccount.lnurlp) {
+      return receiveAccount.lnurlp as Lnurl
+    }
+    // No shadow (or no LNURL on it): fall through to the wallet's own
+    // LNURL — an unsplit receive, the fail-safe everywhere else too.
+  }
+
   return wallet.lnurlp
 }

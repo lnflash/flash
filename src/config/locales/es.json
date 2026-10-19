@@ -132,9 +132,9 @@
       }
     },
     "paymentSplit": {
-      "sent": {
-        "title": "División de pago enviada",
-        "body": "Se enviaron {{amount}} de un pago que recibiste al destinatario de tu división."
+      "received": {
+        "title": "Pago recibido",
+        "body": "Recibiste ${{amount}} · división a {{splits}} — tu parte está en camino."
       },
       "failed": {
         "title": "La división de pago falló",

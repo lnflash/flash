@@ -29,6 +29,19 @@ jest.mock("@services/lock", () => ({
   })),
 }))
 
+const mockEnsureReceiveAccount = jest.fn(async (args: { walletId: string }) => ({
+  walletId: args.walletId,
+  ibexAccountId: `shadow-${args.walletId}`,
+  currency: "USDT",
+  lnurlp: "lnurl1shadow",
+  createdAt: new Date(),
+  updatedAt: new Date(),
+}))
+
+jest.mock("@app/payment-splits/receive-account", () => ({
+  ensureReceiveAccount: (args: { walletId: string }) => mockEnsureReceiveAccount(args),
+}))
+
 jest.mock("@services/logger", () => ({
   baseLogger: {
     info: jest.fn(),

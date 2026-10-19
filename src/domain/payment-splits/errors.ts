@@ -25,6 +25,13 @@ export class SplitDuplicateDestinationError extends ValidationError {}
 export class SplitRuleNotFoundError extends ValidationError {}
 export class PaymentSplitsDisabledError extends ValidationError {}
 
+// ENG-717: the shadow receive account (IBEX account + LNURL-pay backing a
+// split-enabled wallet) could not be created or read. walletSplitsSet fails
+// with this, so a wallet is never left with enabled rules and no shadow.
+export class SplitReceiveAccountError extends DomainError {
+  level = ErrorLevel.Critical
+}
+
 // The internal-transfer marker could not be persisted before paying an
 // intraledger invoice. The send is refused (no money moved) so that the
 // recipient's split rules can never fire on a system credit.

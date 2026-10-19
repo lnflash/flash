@@ -911,35 +911,69 @@ PaymentSplitRuleSchema.index({ walletId: 1, enabled: 1 })
 
 export const PaymentSplitRule = mongoose.model("PaymentSplitRule", PaymentSplitRuleSchema)
 
-// One row per (receive, payout target). The unique (triggerKey, walletId,
+// ENG-717: one row per wallet with (or previously with) split rules — the
+// Flash-owned IBEX account external receives are minted on so no user wallet
+// ever holds the gross. Permanent per wallet (decision 4): created lazily by
+// walletSplitsSet, never deleted. After the last rule is deleted the shadow
+// keeps its residue, which the split reconcile drains to the merchant.
+const SplitReceiveAccountSchema = new Schema({
+  // The Flash wallet the shadow backs (Wallet.id == the merchant's own IBEX
+  // account id).
+  walletId: { type: String, required: true },
+  // The shadow IBEX account id.
+  ibexAccountId: { type: String, required: true },
+  currency: { type: String, required: true },
+  // The IBEX LNURL-pay created on the shadow account, served for the wallet's
+  // Lightning address while it has enabled rules.
+  lnurlp: { type: String },
+  createdAt: { type: Date, required: true, default: Date.now },
+  updatedAt: { type: Date, required: true, default: Date.now },
+})
+
+SplitReceiveAccountSchema.index({ walletId: 1 }, { unique: true })
+SplitReceiveAccountSchema.index({ ibexAccountId: 1 }, { unique: true })
+
+export const SplitReceiveAccount = mongoose.model(
+  "SplitReceiveAccount",
+  SplitReceiveAccountSchema,
+)
+
+// One row per (receive, payout target). The unique (triggerKey, legKind,
 // destinationWalletId) index is the dedupe between the webhook and the
 // reconcile cron, and between webhook replays: a second insert for the same
 // receive is a duplicate-key no-op. It is keyed on the payout target, not the
 // rule id, because walletSplitsSet replaces every rule with a fresh _id: a
 // replay after the merchant re-saves (or deletes and re-adds) the same split
 // must still be a duplicate, not a second payout. A wallet's rules never
-// repeat a destination (SplitDuplicateDestinationError).
+// repeat a destination (SplitDuplicateDestinationError), and a receive has
+// exactly one net leg, so the legKind in the key keeps the net leg from
+// colliding with a share leg to the same wallet.
+//
+// v1 rows carried no legKind and a (triggerKey, walletId, destinationWalletId)
+// unique index; every v1 row is terminal in prod, so the 2026-10 migration
+// drops the old index and this schema declares the replacement.
 const PaymentSplitExecutionSchema = new Schema({
   triggerKey: { type: String, required: true },
   ruleId: { type: String, required: true },
+  // Which leg of the settle this row pays.
+  legKind: {
+    type: String,
+    enum: ["share", "net"],
+    required: true,
+  },
   walletId: { type: String, required: true },
+  // The shadow receive account the leg is paid FROM (the IBEX account the
+  // receive settled on).
+  sourceIbexAccountId: { type: String, required: true },
   destinationWalletId: { type: String, required: true },
   currency: { type: String, required: true },
-  // The receive amount in the source wallet's minor units (cents / micros).
-  triggerAmountMinor: { type: String, required: true },
+  // The gross receive amount in the source wallet's minor units
+  // (cents / micros).
+  grossMinor: { type: String, required: true },
   shareCents: { type: Number, required: true },
   status: {
     type: String,
-    enum: [
-      "pending",
-      "sending",
-      "sent",
-      "ibex_pending",
-      "failed",
-      "skipped_min",
-      "skipped_internal",
-      "unknown",
-    ],
+    enum: ["pending", "sending", "sent", "ibex_pending", "failed", "unknown"],
     required: true,
   },
   attempts: { type: Number, required: true, default: 0 },
@@ -950,7 +984,7 @@ const PaymentSplitExecutionSchema = new Schema({
 })
 
 PaymentSplitExecutionSchema.index(
-  { triggerKey: 1, walletId: 1, destinationWalletId: 1 },
+  { triggerKey: 1, legKind: 1, destinationWalletId: 1 },
   { unique: true },
 )
 PaymentSplitExecutionSchema.index({ status: 1, nextAttemptAt: 1 })
@@ -975,7 +1009,7 @@ const InternalTransferInvoiceSchema = new Schema({
   recipientWalletId: { type: String },
   origin: {
     type: String,
-    enum: ["intraledger", "cutover", "ln-send", "lnurl-send"],
+    enum: ["intraledger", "cutover", "ln-send", "lnurl-send", "split"],
     required: true,
   },
   createdAt: { type: Date, required: true, default: Date.now },

@@ -2,21 +2,10 @@ export * from "./errors"
 export * from "./compute-share"
 export * from "./validate"
 
-export const PaymentSplitExecutionStatus = {
-  Pending: "pending",
-  Sending: "sending",
-  Sent: "sent",
-  IbexPending: "ibex_pending",
-  Failed: "failed",
-  SkippedMin: "skipped_min",
-  // The trigger turned out to be a Flash-to-Flash payment (its hash was marked
-  // after the receive was recorded, e.g. an LNURL send): never paid.
-  SkippedInternal: "skipped_internal",
-  Unknown: "unknown",
-} as const
-
-export type PaymentSplitExecutionStatus =
-  (typeof PaymentSplitExecutionStatus)[keyof typeof PaymentSplitExecutionStatus]
+// ENG-717: one payout leg of a settled receive. A share leg pays an enabled
+// rule's percentage; the net leg pays the merchant the remainder (rounding
+// dust, and any share folded for being below minShareCents, go to the net).
+export type SplitLegKind = "share" | "net"
 
 export const InternalTransferOrigin = {
   Intraledger: "intraledger",
@@ -27,6 +16,10 @@ export const InternalTransferOrigin = {
   // A Flash user paid a Lightning address / LNURL. IBEX fetches the invoice
   // itself, so the hash is only known (and marked) after the payment returns.
   LnurlSend: "lnurl-send",
+  // A split payout leg: the shadow receive account pays a destination (or the
+  // merchant's net). Marked before paying, like any Flash-minted invoice, so
+  // the destination's own splits never fire on it.
+  Split: "split",
 } as const
 
 export type InternalTransferOrigin =

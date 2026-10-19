@@ -7,18 +7,18 @@ export type PaymentSplitExecutionStatusValue =
   | "sent"
   | "ibex_pending"
   | "failed"
-  | "skipped_min"
-  | "skipped_internal"
   | "unknown"
 
 export type PaymentSplitExecutionRecord = {
   id: string
   triggerKey: string
   ruleId: string
+  legKind: "share" | "net"
   walletId: string
+  sourceIbexAccountId: string
   destinationWalletId: string
   currency: string
-  triggerAmountMinor: string
+  grossMinor: string
   shareCents: number
   status: PaymentSplitExecutionStatusValue
   attempts: number
@@ -42,10 +42,12 @@ const toExecution = (raw: RawExecution): PaymentSplitExecutionRecord => ({
   id: raw._id.toString(),
   triggerKey: raw.triggerKey,
   ruleId: raw.ruleId,
+  legKind: raw.legKind,
   walletId: raw.walletId,
+  sourceIbexAccountId: raw.sourceIbexAccountId,
   destinationWalletId: raw.destinationWalletId,
   currency: raw.currency,
-  triggerAmountMinor: raw.triggerAmountMinor,
+  grossMinor: raw.grossMinor,
   shareCents: raw.shareCents,
   status: raw.status,
   attempts: raw.attempts,
@@ -57,20 +59,22 @@ const toExecution = (raw: RawExecution): PaymentSplitExecutionRecord => ({
 
 export const PaymentSplitExecutionsRepository = () => {
   /**
-   * Inserts one execution. A duplicate (triggerKey, walletId,
-   * destinationWalletId) — a webhook replay, or the reconcile cron finding a
-   * receive the webhook already recorded, even under a rule rewritten since —
-   * is a typed no-op: `{ inserted: false }`.
+   * Inserts one leg. A duplicate (triggerKey, legKind, destinationWalletId) —
+   * a webhook replay, or the reconcile cron finding a receive the webhook
+   * already built, even under a rule rewritten since — is a typed no-op:
+   * `{ inserted: false }`.
    */
   const insert = async (data: {
     triggerKey: string
+    legKind: "share" | "net"
     ruleId: string
     walletId: string
+    sourceIbexAccountId: string
     destinationWalletId: string
     currency: string
-    triggerAmountMinor: string
+    grossMinor: string
     shareCents: number
-    status: "pending" | "skipped_min"
+    status: "pending"
     nextAttemptAt?: Date
     now?: Date
   }): Promise<{ inserted: true; id: string } | { inserted: false } | RepositoryError> => {
@@ -86,6 +90,55 @@ export const PaymentSplitExecutionsRepository = () => {
       return { inserted: true, id: doc._id.toString() }
     } catch (error) {
       if (isDuplicateKeyError(error)) return { inserted: false }
+      return toError(error)
+    }
+  }
+
+  /**
+   * ENG-717 decision 2 (fold, never fail): tops the merchant up for a share
+   * leg that failed terminally. Inserts one `share`-kind row keyed on the
+   * MERCHANT as destination for the same trigger: unique against the
+   * settle-time net row (different legKind) and against the original share
+   * row (different destination). One fold per (trigger, destination): a
+   * replayed fold is a duplicate-key no-op. The fold row is claimable at
+   * `now` — no claimGraceMs, the trigger receive already settled.
+   */
+  const insertFold = async (
+    execution: {
+      triggerKey: string
+      ruleId: string
+      walletId: string
+      sourceIbexAccountId: string
+      currency: string
+      grossMinor: string
+      shareCents: number
+    },
+    reason: string,
+    now: Date = new Date(),
+  ): Promise<boolean | RepositoryError> => {
+    try {
+      await PaymentSplitExecutionModel.create({
+        triggerKey: execution.triggerKey,
+        legKind: "share",
+        ruleId: execution.ruleId,
+        walletId: execution.walletId,
+        sourceIbexAccountId: execution.sourceIbexAccountId,
+        destinationWalletId: execution.walletId,
+        currency: execution.currency,
+        grossMinor: execution.grossMinor,
+        shareCents: execution.shareCents,
+        status: "pending",
+        attempts: 0,
+        lastError: `fold: ${reason}`,
+        nextAttemptAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+      return true
+    } catch (error) {
+      // The share was already folded (an earlier attempt folded it, or the
+      // settle-time net leg covers it): nothing more to pay.
+      if (isDuplicateKeyError(error)) return false
       return toError(error)
     }
   }
@@ -122,13 +175,7 @@ export const PaymentSplitExecutionsRepository = () => {
   const finishClaimed = async (
     id: string,
     update: {
-      status:
-        | "pending"
-        | "sent"
-        | "ibex_pending"
-        | "failed"
-        | "skipped_internal"
-        | "unknown"
+      status: "pending" | "sent" | "ibex_pending" | "failed" | "unknown"
       attempts: number
       nextAttemptAt?: Date
       lastError?: string
@@ -166,5 +213,5 @@ export const PaymentSplitExecutionsRepository = () => {
     }
   }
 
-  return { insert, claimNextDue, finishClaimed, markNextStaleUnknown }
+  return { insert, insertFold, claimNextDue, finishClaimed, markNextStaleUnknown }
 }

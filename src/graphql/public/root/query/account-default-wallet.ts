@@ -1,4 +1,8 @@
 import { resolveCashWalletPresentationForAccount } from "@app/cash-wallet-cutover"
+import {
+  ensureReceiveAccount,
+  hasEnabledSplits,
+} from "@app/payment-splits/receive-account"
 import { CouldNotFindWalletFromUsernameAndCurrencyError } from "@domain/errors"
 import { mapError } from "@graphql/error-map"
 import { GT } from "@graphql/index"
@@ -34,8 +38,8 @@ const AccountDefaultWalletQuery = GT.Field<null, GraphQLPublicContext>({
     if (presentation instanceof Error) throw mapError(presentation)
 
     if (!walletCurrency) {
-      return presentation.wallets.find(
-        (wallet) => wallet.id === presentation.defaultWalletId,
+      return withShadowLnurlp(
+        presentation.wallets.find((wallet) => wallet.id === presentation.defaultWalletId),
       )
     }
 
@@ -46,8 +50,33 @@ const AccountDefaultWalletQuery = GT.Field<null, GraphQLPublicContext>({
       throw mapError(new CouldNotFindWalletFromUsernameAndCurrencyError(username))
     }
 
-    return wallet
+    return withShadowLnurlp(wallet)
   },
 })
+
+/**
+ * ENG-717: while a wallet has enabled split rules, its Lightning address
+ * serves the SHADOW receive account's LNURL-pay, so external pays settle on
+ * the shadow and fan out (flash-pay reads THIS field; it must not cache the
+ * answer — see its no-cache change). Fail-safe: any error resolving the
+ * shadow leaves the wallet's own lnurlp — an unsplit receive, never a failed
+ * lookup.
+ */
+const withShadowLnurlp = async (
+  wallet: Wallet | undefined,
+): Promise<Wallet | undefined> => {
+  if (!wallet) return wallet
+
+  const enabled = await hasEnabledSplits(wallet.id)
+  if (enabled !== true) return wallet
+
+  const shadow = await ensureReceiveAccount({
+    walletId: wallet.id,
+    currency: wallet.currency,
+  })
+  if (shadow instanceof Error || !shadow.lnurlp) return wallet
+
+  return { ...wallet, lnurlp: shadow.lnurlp as Lnurl }
+}
 
 export default AccountDefaultWalletQuery

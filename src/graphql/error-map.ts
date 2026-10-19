@@ -111,6 +111,10 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = "Payment splits are not available"
       return new ValidationInternalError({ message, logger: baseLogger })
 
+    case "SplitReceiveAccountError":
+      message = "Payment splits are temporarily unavailable, please try again later."
+      return new UnexpectedClientError({ message, logger: baseLogger })
+
     case "InternalTransferMarkerError":
       message = "Sending is temporarily unavailable, please try again later."
       return new UnexpectedClientError({ message, logger: baseLogger })
