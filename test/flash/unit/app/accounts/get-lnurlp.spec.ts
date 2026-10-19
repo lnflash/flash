@@ -1,6 +1,6 @@
 const mockFindAccountByUsername = jest.fn()
 const mockHasEnabledSplits = jest.fn()
-const mockEnsureReceiveAccount = jest.fn()
+const mockShadowFindByWalletId = jest.fn()
 
 jest.mock("@services/mongoose", () => ({
   AccountsRepository: jest.fn(() => ({
@@ -25,7 +25,12 @@ jest.mock("@app/cash-wallet-cutover", () => ({
 
 jest.mock("@app/payment-splits/receive-account", () => ({
   hasEnabledSplits: (...args: unknown[]) => mockHasEnabledSplits(...args),
-  ensureReceiveAccount: (...args: unknown[]) => mockEnsureReceiveAccount(...args),
+}))
+
+jest.mock("@services/mongoose/split-receive-accounts", () => ({
+  SplitReceiveAccountsRepository: jest.fn(() => ({
+    findByWalletId: (...args: unknown[]) => mockShadowFindByWalletId(...args),
+  })),
 }))
 
 jest.mock("@services/notifications", () => ({
@@ -68,12 +73,12 @@ describe("accountDefaultWallet.lnurlp shadow routing (ENG-717)", () => {
     const wallet = (await resolve("USDT")) as { lnurlp: string }
 
     expect(wallet.lnurlp).toBe(OWN_LNURL)
-    expect(mockEnsureReceiveAccount).not.toHaveBeenCalled()
+    expect(mockShadowFindByWalletId).not.toHaveBeenCalled()
   })
 
   it("serves the shadow's lnurlp when the wallet has enabled splits", async () => {
     mockHasEnabledSplits.mockResolvedValue(true)
-    mockEnsureReceiveAccount.mockResolvedValue({
+    mockShadowFindByWalletId.mockResolvedValue({
       walletId: WALLET,
       ibexAccountId: "shadow-account",
       currency: "USDT",
@@ -85,15 +90,12 @@ describe("accountDefaultWallet.lnurlp shadow routing (ENG-717)", () => {
     const wallet = (await resolve("USDT")) as { lnurlp: string }
 
     expect(wallet.lnurlp).toBe(SHADOW_LNURL)
-    expect(mockEnsureReceiveAccount).toHaveBeenCalledWith({
-      walletId: WALLET,
-      currency: WalletCurrency.Usdt,
-    })
+    expect(mockShadowFindByWalletId).toHaveBeenCalledWith(WALLET)
   })
 
   it("falls back to the wallet's own lnurlp when the shadow has no lnurlp", async () => {
     mockHasEnabledSplits.mockResolvedValue(true)
-    mockEnsureReceiveAccount.mockResolvedValue({
+    mockShadowFindByWalletId.mockResolvedValue({
       walletId: WALLET,
       ibexAccountId: "shadow-account",
       currency: "USDT",
@@ -106,9 +108,9 @@ describe("accountDefaultWallet.lnurlp shadow routing (ENG-717)", () => {
     expect(wallet.lnurlp).toBe(OWN_LNURL)
   })
 
-  it("falls back to the wallet's own lnurlp when the ensure errors (fail-safe: unsplit receive)", async () => {
+  it("falls back to the wallet's own lnurlp when the shadow read errors (fail-safe: unsplit receive)", async () => {
     mockHasEnabledSplits.mockResolvedValue(true)
-    mockEnsureReceiveAccount.mockResolvedValue(new Error("ibex down"))
+    mockShadowFindByWalletId.mockResolvedValue(new Error("mongo down"))
 
     const wallet = (await resolve("USDT")) as { lnurlp: string }
 
@@ -117,7 +119,7 @@ describe("accountDefaultWallet.lnurlp shadow routing (ENG-717)", () => {
 
   it("routes the default-wallet shape (no walletCurrency) too", async () => {
     mockHasEnabledSplits.mockResolvedValue(true)
-    mockEnsureReceiveAccount.mockResolvedValue({
+    mockShadowFindByWalletId.mockResolvedValue({
       walletId: WALLET,
       ibexAccountId: "shadow-account",
       currency: "USDT",

@@ -354,12 +354,17 @@ describe("on-receive webhook payment splits (ENG-717)", () => {
     expect(res.statusCode).toBe(200)
   })
 
-  it("still returns 200 when resolving the shadow errors", async () => {
+  it("fails OPEN when resolving the shadow errors: 200, plain receive path, no legs", async () => {
     mockResolveShadow.mockResolvedValue(new Error("mongo down"))
 
-    const res = await post(paths.invoice, lightningBody())
+    const res = await post(paths.invoice, lightningBody(HASH, WALLET))
 
-    expect(res.statusCode).toBe(500)
+    // A 500 would make IBEX redeliver and re-run notifications; the reconcile
+    // rebuilds any missed shadow legs, so the webhook treats it as a plain
+    // receive instead.
+    expect(res.statusCode).toBe(200)
+    expect(mockStore.rows.size).toBe(0)
+    expect(mockLightningTxReceived).toHaveBeenCalledTimes(1)
   })
 
   it("skips a body with no valid payment hash (no legs; the push still fires)", async () => {

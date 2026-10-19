@@ -22,6 +22,7 @@ import { removeDeviceTokens } from "@app/users/remove-device-tokens"
 import { buildLegs } from "@app/payment-splits/build-legs"
 import { executePendingSplits } from "@app/payment-splits/execute-pending-splits"
 import { resolveShadow } from "@app/payment-splits/receive-account"
+import type { SplitReceiveAccountRecord } from "@services/mongoose/split-receive-accounts"
 import { PaymentSplitRulesRepository } from "@services/mongoose/payment-split-rules"
 import { ZapRequestModel } from "@services/mongoose/zap-request"
 import { ZapPublisher } from "@services/nostr/zapPublisher"
@@ -57,13 +58,27 @@ const fetchPaymentContext = async (
   // account/user: the merchant must be notified, and the settle middleware
   // needs the shadow → wallet mapping. Looked up BEFORE WalletsRepository —
   // a shadow id is never a wallet id.
-  const shadow = await resolveShadow(recipientWalletId)
-  if (shadow instanceof Error) {
+  //
+  // Fail-OPEN on a resolve error (a Mongo blip): treat the receive as a plain
+  // wallet receive. A 500 here makes IBEX redeliver and re-run notifications;
+  // the reconcile rebuilds any missed shadow legs instead, so failing open
+  // loses nothing but time.
+  let shadow: SplitReceiveAccountRecord | null = null
+  try {
+    const resolved = await resolveShadow(recipientWalletId)
+    if (resolved instanceof Error) {
+      logger.error(
+        resolved,
+        `Failed to resolve split receive account with id ${recipientWalletId}; treating as a plain receive — the split reconcile will cover it`,
+      )
+    } else {
+      shadow = resolved
+    }
+  } catch (err) {
     logger.error(
-      shadow,
-      `Failed to resolve split receive account with id ${recipientWalletId}`,
+      { err, accountId: recipientWalletId },
+      "split receive resolution threw; treating as a plain receive",
     )
-    return resp.sendStatus(500)
   }
 
   const receiverWallet = await WalletsRepository().findById(

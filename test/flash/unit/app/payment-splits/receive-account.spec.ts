@@ -131,7 +131,7 @@ describe("receiveAccountFor", () => {
     expect(await receiveAccountFor(WALLET as WalletId)).toBe(WALLET)
   })
 
-  it("fails safe to the real account when the shadow does not exist and its ensure errors", async () => {
+  it("fails safe to the real account when the shadow read errors or is missing (read-only hot path)", async () => {
     mockListRules.mockResolvedValue([
       {
         id: "rule-1",
@@ -142,9 +142,14 @@ describe("receiveAccountFor", () => {
         createdAt: new Date(),
       },
     ])
-    mockCreateAccount.mockResolvedValue(new Error("ibex down"))
-
+    // No shadow row: falls back (creation is walletSplitsSet's job).
     expect(await receiveAccountFor(WALLET as WalletId)).toBe(WALLET)
+    expect(mockCreateAccount).not.toHaveBeenCalled()
+
+    // A shadow read error also falls back.
+    mockShadowFindByWalletId.mockResolvedValue(new Error("mongo down"))
+    expect(await receiveAccountFor(WALLET as WalletId)).toBe(WALLET)
+    expect(mockCreateAccount).not.toHaveBeenCalled()
   })
 })
 

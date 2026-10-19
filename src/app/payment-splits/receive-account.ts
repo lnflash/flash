@@ -4,7 +4,6 @@ import { SplitReceiveAccountError } from "@domain/payment-splits/errors"
 import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
 
 import Ibex from "@services/ibex/client"
-import { WalletsRepository } from "@services/mongoose"
 import { PaymentSplitRulesRepository } from "@services/mongoose/payment-split-rules"
 import {
   SplitReceiveAccountsRepository,
@@ -127,6 +126,11 @@ export const hasEnabledSplits = async (walletId: WalletId): Promise<boolean | Er
  * the wallet's shadow when splits are on and the wallet has at least one
  * enabled rule, else the wallet's own account (the pre-v2 behavior).
  *
+ * READ-ONLY on the invoice-creation hot path: it never creates the shadow.
+ * Creation belongs to walletSplitsSet (which fails the mutation if it can't),
+ * so a wallet here either has its shadow or falls back to the real account
+ * for this invoice — the next walletSplitsSet retries the ensure.
+ *
  * The fail-safe is deliberate: any error here returns `walletId`, so a new
  * mint site or a transient repo error lands the receive unsplit on the real
  * account rather than failing an invoice the user asked for.
@@ -140,19 +144,8 @@ export const receiveAccountFor = async (walletId: WalletId): Promise<IbexAccount
   const enabled = await hasEnabledSplits(walletId)
   if (enabled !== true) return walletId
 
-  const wallet = await WalletsRepository().findById(walletId)
-  if (wallet instanceof Error) return walletId
-
-  const shadow = await ensureReceiveAccount({
-    walletId,
-    currency: wallet.currency,
-  })
-  if (shadow instanceof Error) {
-    // A wallet with rules but no shadow yet (rules created before v2, or a
-    // previous ensure failed). Minting on the real account is the fail-safe;
-    // the next walletSplitsSet retries the ensure.
-    return walletId
-  }
+  const shadow = await SplitReceiveAccountsRepository().findByWalletId(walletId)
+  if (shadow instanceof Error || !shadow) return walletId
   return shadow.ibexAccountId as IbexAccountId
 }
 

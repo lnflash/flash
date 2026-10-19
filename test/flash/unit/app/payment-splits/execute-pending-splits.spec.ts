@@ -692,19 +692,25 @@ describe("executePendingSplits", () => {
   })
 
   describe("internal-transfer re-check", () => {
-    it("drops a share leg whose trigger hash was marked internal after it was built", async () => {
+    it("folds a share leg whose trigger hash was marked internal after it was built (never dropped silently)", async () => {
       await seed()
       mockIsInternal.mockResolvedValue(true)
 
       const summary = await executePendingSplits({ now: T0 })
 
-      expect(summary).toMatchObject({ claimed: 1, failed: 1 })
+      expect(summary).toMatchObject({ claimed: 1, folded: 1 })
       expect(mockIsInternal).toHaveBeenCalledWith("a".repeat(64))
       expect(onlyRow()).toMatchObject({
         status: "failed",
         lastError: "internal_transfer",
       })
       expect(mockPayLeg).not.toHaveBeenCalled()
+      // The fold row to the merchant exists and is payable.
+      expect(
+        [...mockStore.rows.values()].some(
+          (r) => r.destinationWalletId === SOURCE && r.status === "pending",
+        ),
+      ).toBe(true)
     })
 
     it("still pays the NET leg when the trigger hash is internal — the money is in the shadow and belongs to the merchant", async () => {

@@ -160,23 +160,41 @@ const executeOne = async (
   // the share back into the net leg. The fold is a second payout from the
   // shadow to the merchant for shareCents more — the net row was inserted at
   // settle with gross − Σ shares, so the fold row tops the merchant up to the
-  // full gross. `pushOwner`, when set, tells the owner why the share was
-  // folded (disabled vs failed); the fold itself is silent — one push per
-  // event, not two.
+  // full gross. Insert FIRST, notify after: the push promises the money is
+  // accounted for, and it is only true once the fold row exists.
   const foldShareToNet = async (
     reason: string,
     pushOwner?: "disabled" | "failed",
   ): Promise<ExecuteOutcome> => {
-    if (pushOwner) await notifyOwner(ownerAccountId as string, pushOwner, execution)
+    if (!ownerAccountId) {
+      // Unreachable per the control flow below (every fold call site follows
+      // the account lookup); type-narrow, never cast.
+      return fail(new Error("fold requested before account resolution"))
+    }
     const folded = await executions.insertFold(execution, reason, stamp())
     if (folded instanceof Error) {
       logger.error(
         { executionId: execution.id, error: folded },
         "could not fold a failed share into the net leg; the share stays failed for ops",
       )
-      // The share row is already terminal `failed` and the money stays in the
-      // shadow; the reconcile's residual alert catches it.
+      // The share row is already terminal `failed`; the money stays in the
+      // shadow and the reconcile's residual alert catches it. Page, not just
+      // log: nobody was folding when v1's settle-and-forward had this case.
+      notifyOpsEvent({
+        flow: "transfer",
+        phase: "split-fold-failed",
+        status: "failed",
+        amount: { value: (execution.shareCents / 100).toFixed(2), currency: "USD" },
+        meta: {
+          executionId: execution.id,
+          walletId: execution.walletId,
+          destinationWalletId: execution.destinationWalletId,
+          reason,
+        },
+      })
+      return "failed"
     }
+    if (pushOwner) await notifyOwner(ownerAccountId, pushOwner, execution)
     return "folded"
   }
 
@@ -264,6 +282,14 @@ const executeOne = async (
     return fail(error)
   }
 
+  // The merchant's account: needed for owner notifications and (for the net
+  // leg) the destination-active check.
+  const wallet = await WalletsRepository().findById(execution.walletId as WalletId)
+  if (wallet instanceof Error) return failBeforeSend(wallet)
+  const account = await AccountsRepository().findById(wallet.accountId)
+  if (account instanceof Error) return failBeforeSend(account)
+  ownerAccountId = account.id
+
   // Re-check the internal-transfer marker at pay time. An LNURL send from
   // another Flash user is marked only after payToLnurl returns, so a receive
   // can be built before the marker exists (ENG-653 decision 1, kept).
@@ -272,23 +298,13 @@ const executeOne = async (
     // Nothing was sent: the same retry budget as any pre-payment error.
     return failBeforeSend(internal)
   }
-  if (internal) {
+  if (internal && execution.legKind === "share") {
     // The trigger receive turned out to be Flash-to-Flash: it should never
-    // have built legs. A share leg is dropped as failed; the net leg PAYS —
-    // the money really is in the shadow and belongs to the merchant.
-    if (execution.legKind === "share") {
-      await finish({ status: "failed", attempts, lastError: "internal_transfer" })
-      return "failed"
-    }
+    // have built legs. The share folds to the merchant like any other
+    // terminal share failure — never dropped silently (the net leg below
+    // pays; the money really is in the shadow and belongs to the merchant).
+    return fail("internal_transfer", account.id)
   }
-
-  // The merchant's account: needed for owner notifications and (for the net
-  // leg) the destination-active check.
-  const wallet = await WalletsRepository().findById(execution.walletId as WalletId)
-  if (wallet instanceof Error) return failBeforeSend(wallet)
-  const account = await AccountsRepository().findById(wallet.accountId)
-  if (account instanceof Error) return failBeforeSend(account)
-  ownerAccountId = account.id
 
   // Set right before IBEX payInvoice. Between the marker write and this only
   // addInvoice runs, and it moves no money.

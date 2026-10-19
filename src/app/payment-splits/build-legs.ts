@@ -1,6 +1,11 @@
 import { PaymentSplitsConfig } from "@config"
 
-import { computeShare, isSplitCurrency, type SplitLegKind } from "@domain/payment-splits"
+import {
+  computeShare,
+  isSplitCurrency,
+  minorUnitsPerMajor,
+  type SplitLegKind,
+} from "@domain/payment-splits"
 
 import { isInternalTransferInvoice } from "@services/mongoose/internal-transfer-invoices"
 import { PaymentSplitExecutionsRepository } from "@services/mongoose/payment-split-executions"
@@ -121,9 +126,10 @@ export const buildLegs = async ({
     })
   }
 
-  // Gross in minor units, matching computeShare's conversion (the same round
-  // of the same float), so net = gross − Σ shares is exact in minor units.
-  const perMajor = currency === "USDT" ? 1_000_000n : 100n
+  // Gross in minor units via computeShare's own map, so net = gross − Σ
+  // shares can never diverge from the share conversion.
+  const perMajor = minorUnitsPerMajor(currency)
+  if (perMajor === undefined) return NOTHING // isSplitCurrency gate above
   const grossMinor = BigInt(Math.round(grossAmount * Number(perMajor)))
   const netCents = Number(grossMinor / (perMajor / 100n)) - sharesCents
   if (netCents < 0) {

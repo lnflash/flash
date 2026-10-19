@@ -18,6 +18,12 @@ export type SplitShare =
 export const isSplitCurrency = (currency: string): boolean =>
   currency === WalletCurrency.Usd || currency === WalletCurrency.Usdt
 
+// Minor units per major unit per currency (cents per dollar / micros per
+// USDT). Also the conversion buildLegs uses for the net leg — ONE map, so a
+// future currency cannot diverge between share and net math.
+export const minorUnitsPerMajor = (currency: string): bigint | undefined =>
+  MINOR_UNITS_PER_MAJOR[currency]
+
 /**
  * The share of an incoming payment one split rule pays out, in whole US cents.
  *

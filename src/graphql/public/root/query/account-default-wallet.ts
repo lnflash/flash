@@ -1,8 +1,6 @@
 import { resolveCashWalletPresentationForAccount } from "@app/cash-wallet-cutover"
-import {
-  ensureReceiveAccount,
-  hasEnabledSplits,
-} from "@app/payment-splits/receive-account"
+import { hasEnabledSplits } from "@app/payment-splits/receive-account"
+import { SplitReceiveAccountsRepository } from "@services/mongoose/split-receive-accounts"
 import { CouldNotFindWalletFromUsernameAndCurrencyError } from "@domain/errors"
 import { mapError } from "@graphql/error-map"
 import { GT } from "@graphql/index"
@@ -58,9 +56,9 @@ const AccountDefaultWalletQuery = GT.Field<null, GraphQLPublicContext>({
  * ENG-717: while a wallet has enabled split rules, its Lightning address
  * serves the SHADOW receive account's LNURL-pay, so external pays settle on
  * the shadow and fan out (flash-pay reads THIS field; it must not cache the
- * answer — see its no-cache change). Fail-safe: any error resolving the
- * shadow leaves the wallet's own lnurlp — an unsplit receive, never a failed
- * lookup.
+ * answer — see its no-cache change). READ-ONLY: the shadow is created by
+ * walletSplitsSet; a wallet whose ensure failed at save time falls back to
+ * its own lnurlp — an unsplit receive, the fail-safe everywhere else too.
  */
 const withShadowLnurlp = async (
   wallet: Wallet | undefined,
@@ -70,11 +68,8 @@ const withShadowLnurlp = async (
   const enabled = await hasEnabledSplits(wallet.id)
   if (enabled !== true) return wallet
 
-  const shadow = await ensureReceiveAccount({
-    walletId: wallet.id,
-    currency: wallet.currency,
-  })
-  if (shadow instanceof Error || !shadow.lnurlp) return wallet
+  const shadow = await SplitReceiveAccountsRepository().findByWalletId(wallet.id)
+  if (shadow instanceof Error || !shadow?.lnurlp) return wallet
 
   return { ...wallet, lnurlp: shadow.lnurlp as Lnurl }
 }
