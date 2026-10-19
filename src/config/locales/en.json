@@ -136,9 +136,9 @@
       }
     },
     "paymentSplit": {
-      "sent": {
-        "title": "Payment split sent",
-        "body": "{{amount}} from a payment you received was sent to your split recipient."
+      "received": {
+        "title": "Payment received",
+        "body": "Received ${{amount}} · split to {{splits}} — your share is on its way."
       },
       "failed": {
         "title": "Payment split failed",

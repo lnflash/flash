@@ -1,14 +1,16 @@
 // In-memory stand-in for PaymentSplitExecutionsRepository that models the two
-// properties the split pipeline relies on: the unique (triggerKey, walletId,
+// properties the split pipeline relies on: the unique (triggerKey, legKind,
 // destinationWalletId) index and the atomic pending -> sending claim.
 type Row = {
   id: string
   triggerKey: string
+  legKind: string
   ruleId: string
   walletId: string
+  sourceIbexAccountId: string
   destinationWalletId: string
   currency: string
-  triggerAmountMinor: string
+  grossMinor: string
   shareCents: number
   status: string
   attempts: number
@@ -22,27 +24,35 @@ export const createFakeExecutionsStore = () => {
   const rows = new Map<string, Row>()
   let seq = 0
 
+  const dupOf = (fields: {
+    triggerKey: string
+    legKind: string
+    destinationWalletId: string
+  }) =>
+    [...rows.values()].find(
+      (r) =>
+        r.triggerKey === fields.triggerKey &&
+        r.legKind === fields.legKind &&
+        r.destinationWalletId === fields.destinationWalletId,
+    )
+
   const repo = {
     insert: async (data: {
       triggerKey: string
+      legKind: string
       ruleId: string
       walletId: string
+      sourceIbexAccountId: string
       destinationWalletId: string
       currency: string
-      triggerAmountMinor: string
+      grossMinor: string
       shareCents: number
       status: string
       nextAttemptAt?: Date
       now?: Date
     }) => {
       const { now = new Date(), nextAttemptAt = now, ...fields } = data
-      const dup = [...rows.values()].find(
-        (r) =>
-          r.triggerKey === fields.triggerKey &&
-          r.walletId === fields.walletId &&
-          r.destinationWalletId === fields.destinationWalletId,
-      )
-      if (dup) return { inserted: false as const }
+      if (dupOf(fields)) return { inserted: false as const }
       const id = `exec-${++seq}`
       rows.set(id, {
         ...fields,
@@ -53,6 +63,44 @@ export const createFakeExecutionsStore = () => {
         updatedAt: now,
       })
       return { inserted: true as const, id }
+    },
+    insertFold: async (
+      execution: {
+        triggerKey: string
+        ruleId: string
+        walletId: string
+        sourceIbexAccountId: string
+        currency: string
+        grossMinor: string
+        shareCents: number
+      },
+      reason: string,
+      now: Date = new Date(),
+    ) => {
+      const fields = {
+        triggerKey: execution.triggerKey,
+        legKind: "share",
+        ruleId: execution.ruleId,
+        walletId: execution.walletId,
+        sourceIbexAccountId: execution.sourceIbexAccountId,
+        destinationWalletId: execution.walletId,
+        currency: execution.currency,
+        grossMinor: execution.grossMinor,
+        shareCents: execution.shareCents,
+      }
+      if (dupOf(fields)) return false
+      const id = `exec-${++seq}`
+      rows.set(id, {
+        ...fields,
+        id,
+        status: "pending",
+        attempts: 0,
+        lastError: `fold: ${reason}`,
+        nextAttemptAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+      return true
     },
     claimNextDue: async (now: Date, claimedAt: Date = new Date()) => {
       const due = [...rows.values()]

@@ -1,17 +1,13 @@
 import { PaymentSplitsConfig } from "@config"
 
 import { sendOutcomeNotificationBestEffort } from "@app/notifications/send-outcome-notification"
-import { authorizeSend } from "@app/payments/authorize-send"
-import { isDefinitivePaymentRejection } from "@app/payments/mark-outgoing-invoice"
-import { intraledgerPaymentSendWalletIdForUsdWallet } from "@app/payments/send-intraledger"
+import { isDefinitivePaymentRejection as isDefinitivePaymentRejectionIbex } from "@app/payments/mark-outgoing-invoice"
 
 import { AccountValidator } from "@domain/accounts"
 import { PaymentSendStatus } from "@domain/bitcoin/lightning"
 import { CouldNotFindError, InactiveAccountError } from "@domain/errors"
-import { LockServiceError, ResourceAttemptsLockServiceError } from "@domain/lock"
-import { InternalTransferMarkerError, splitRetryBackoffMs } from "@domain/payment-splits"
-import { SendLimitsUnavailableError } from "@domain/payments/errors"
-import { RateLimitServiceError } from "@domain/rate-limit/errors"
+import { splitRetryBackoffMs } from "@domain/payment-splits"
+import { WalletCurrency } from "@domain/shared"
 
 import { notifyOpsEvent } from "@services/alerts/ops-events"
 import { IbexError } from "@services/ibex/errors"
@@ -24,96 +20,69 @@ import {
 } from "@services/mongoose/payment-split-executions"
 import { PaymentSplitRulesRepository } from "@services/mongoose/payment-split-rules"
 
-const logger = baseLogger.child({ module: "payment-splits" })
+import { paySplitLeg } from "./internal-transfer"
 
+const logger = baseLogger.child({ module: "payment-splits" })
 export const PAYMENT_SPLIT_MEMO = "Payment split"
 
-export const splitIdempotencyKey = (executionId: string): IdempotencyKey =>
-  `split:${executionId}` as IdempotencyKey
+// The NET leg memo carries the gross and the payer's context: the merchant's
+// IBEX history shows one +net from the shadow, and this line is what makes it
+// auditable (ENG-717 decision 3 — history = net + memo in v2).
+const NET_MEMO_PREFIX = "Payment received"
 
 type SendProgress = {
-  // The ENG-573 guard (the `authorize` hook) passed. withPaymentIdempotency
-  // runs it inside the idempotency lock just before `execute`.
-  paymentAttempted: boolean
-  // The send reached IBEX payInvoice (the `beforePay` hook ran). Before this,
-  // only IBEX addInvoice (minting the recipient invoice) and the
-  // internal-transfer marker write ran, and neither moves money.
+  // Set once paySplitLeg reached IBEX payInvoice. Before that only addInvoice
+  // and the marker write ran, and neither moves money.
   payInvoiceReached?: boolean
 }
 
 /**
  * Errors worth another attempt: raised before IBEX paid anything and expected
- * to clear on their own (rate limits, a send guard that could not reach Redis
- * or a price, the internal-transfer marker write, an IBEX 429, a busy
- * idempotency lock that was never acquired, and any IBEX error from minting
- * the recipient invoice that is not a definitive 4xx). Everything else
- * (limits, KYC level, insufficient balance, an inactive account, an IBEX error
- * from payInvoice) is terminal on the first attempt, so an error whose payment
- * outcome is unknown is never re-sent.
+ * to clear on their own (an IBEX 429, the internal-transfer marker write, or
+ * any IBEX error from minting the recipient invoice that is not a definitive
+ * 4xx). Everything else is terminal on the first attempt, so an error whose
+ * payment outcome is unknown is never re-sent.
  *
- * An addInvoice failure is safe to retry: no payment was attempted and the
- * error return is left uncached by withPaymentIdempotency, so the same key
- * re-runs the whole send.
- *
- * Lock errors are the subtle case. redlock also returns a LockServiceError when
- * the locked routine throws or when releasing the lock fails, and both can
- * happen AFTER the IBEX payment succeeded, replacing the Success result. So a
- * lock error is retryable only when it is ResourceAttemptsLockServiceError AND
- * the send never reached the payment (`paymentAttempted` false: the authorize
- * hook, which runs immediately before the payment, never passed).
+ * Unlike v1 there is no send-guard/authorize stage: split legs are exempt
+ * from the merchant's send limits and KYC (ENG-717 decision 1), and the
+ * sender is the shadow (no Flash account, no rate-limit key). That removes
+ * the lock-error cases v1 had to reason about: withPaymentIdempotency is not
+ * used on this path (its 24 h cache cannot replay a mid-send crash anyway —
+ * see the stale sweep), so there is no idempotency lock to fail.
  */
-export const isRetryableSplitError = (
-  error: Error,
-  { paymentAttempted, payInvoiceReached = false }: SendProgress,
-): boolean => {
-  if (error instanceof LockServiceError) {
-    return error instanceof ResourceAttemptsLockServiceError && !paymentAttempted
-  }
+export const isRetryableSplitError = (error: Error): boolean => {
   if (error instanceof IbexError) {
     if (error.httpCode === 429) return true
-    return paymentAttempted && !payInvoiceReached && !isDefinitivePaymentRejection(error)
+    // Non-definitive IBEX errors are retryable wherever they came from: an
+    // addInvoice error moved nothing, and a payInvoice one is caught earlier
+    // by isAmbiguousSplitSendError (which takes precedence in executeOne).
+    return !isDefinitivePaymentRejectionIbex(error)
   }
-  return (
-    error instanceof RateLimitServiceError ||
-    error instanceof SendLimitsUnavailableError ||
-    error instanceof InternalTransferMarkerError
-  )
+  // Only meaningful pre-pay (the marker is written before payInvoice): a
+  // marker error after the pay reached is ambiguous first.
+  return error.name === "InternalTransferMarkerError"
 }
 
 /**
- * An error the send may have paid through. Treated like a row the stale sweep
- * finds stuck in `sending`: `unknown` plus an ops alert, never resent, and no
- * "split failed" push to the owner (who would then pay the partner by hand).
- *
- * - A lock error that is not a retryable pre-payment one (see
- *   isRetryableSplitError).
- * - Once the send reached IBEX payInvoice (`payInvoiceReached`), any IBEX error
- *   that is not a definitive rejection: a transport error, a timeout or a 5xx
- *   from payInvoice, where IBEX may already have debited (the KNOWN GAP in
- *   idempotency.ts). A definitive rejection (insufficient balance, a 4xx such
- *   as no route or a 429) moved no money and stays `failed` / retryable. An
- *   IBEX error from addInvoice (before payInvoice) moved nothing either and is
- *   retried.
+ * An error the send may have paid through: once the send reached IBEX
+ * payInvoice, any IBEX error that is not a definitive rejection (a transport
+ * error, a timeout, a 5xx — IBEX may already have debited the shadow).
+ * Treated like a row the stale sweep finds stuck in `sending`: `unknown` plus
+ * an ops alert, never resent.
  */
 export const isAmbiguousSplitSendError = (
   error: Error,
-  { paymentAttempted, payInvoiceReached = false }: SendProgress,
-): boolean => {
-  if (error instanceof LockServiceError) {
-    return !isRetryableSplitError(error, { paymentAttempted, payInvoiceReached })
-  }
-  return (
-    payInvoiceReached &&
-    error instanceof IbexError &&
-    !isDefinitivePaymentRejection(error)
-  )
-}
+  { payInvoiceReached = false }: SendProgress,
+): boolean =>
+  payInvoiceReached &&
+  error instanceof IbexError &&
+  !isDefinitivePaymentRejectionIbex(error)
 
 const formatCents = (cents: number): string => `US$${(cents / 100).toFixed(2)}`
 
 const notifyOwner = async (
   accountId: string,
-  outcome: "sent" | "failed" | "disabled",
+  outcome: "failed" | "disabled",
   execution: PaymentSplitExecutionRecord,
 ): Promise<void> =>
   sendOutcomeNotificationBestEffort({
@@ -131,11 +100,11 @@ const notifyOwner = async (
   })
 
 /**
- * ENG-660: whether the split's DESTINATION account is inactive right now.
- * InactiveAccountError from the send does not say which side was inactive
- * (the sender is checked first), so the destination is looked up directly.
- * A lookup failure answers false: the row then fails as before and the rule
- * stays enabled.
+ * ENG-660 carry-over: whether the split's DESTINATION account is inactive
+ * right now. InactiveAccountError from the send does not say which side was
+ * inactive (the shadow is checked first by IBEX), so the destination is
+ * looked up directly. A lookup failure answers false: the row then fails as
+ * before and the rule stays enabled.
  */
 const isDestinationInactive = async (destinationWalletId: string): Promise<boolean> => {
   const wallet = await WalletsRepository().findById(destinationWalletId as WalletId)
@@ -145,13 +114,7 @@ const isDestinationInactive = async (destinationWalletId: string): Promise<boole
   return AccountValidator(account).isActive() instanceof Error
 }
 
-type ExecuteOutcome =
-  | "sent"
-  | "ibex_pending"
-  | "failed"
-  | "retry"
-  | "unknown"
-  | "skipped_internal"
+type ExecuteOutcome = "sent" | "ibex_pending" | "failed" | "retry" | "unknown" | "folded"
 
 const executeOne = async (
   execution: PaymentSplitExecutionRecord,
@@ -160,6 +123,10 @@ const executeOne = async (
 ): Promise<ExecuteOutcome> => {
   const executions = PaymentSplitExecutionsRepository()
   const attempts = execution.attempts + 1
+  // The merchant's account id, resolved below and used by the fold/notify
+  // paths. Undefined only while the lookups are still pending — the fold is
+  // never reachable before them.
+  let ownerAccountId: string | undefined = undefined
 
   // Records the outcome stamped with wall-clock time (not the pass's `now`),
   // so updatedAt reflects when the row actually finished. A false result means
@@ -189,23 +156,64 @@ const executeOne = async (
     )
   }
 
+  // Decision 2 (fold, never fail): a terminal failure on a SHARE leg moves
+  // the share back into the net leg. The fold is a second payout from the
+  // shadow to the merchant for shareCents more — the net row was inserted at
+  // settle with gross − Σ shares, so the fold row tops the merchant up to the
+  // full gross. Insert FIRST, notify after: the push promises the money is
+  // accounted for, and it is only true once the fold row exists.
+  const foldShareToNet = async (
+    reason: string,
+    pushOwner?: "disabled" | "failed",
+  ): Promise<ExecuteOutcome> => {
+    if (!ownerAccountId) {
+      // Unreachable per the control flow below (every fold call site follows
+      // the account lookup); type-narrow, never cast.
+      return fail(new Error("fold requested before account resolution"))
+    }
+    const folded = await executions.insertFold(execution, reason, stamp())
+    if (folded instanceof Error) {
+      logger.error(
+        { executionId: execution.id, error: folded },
+        "could not fold a failed share into the net leg; the share stays failed for ops",
+      )
+      // The share row is already terminal `failed`; the money stays in the
+      // shadow and the reconcile's residual alert catches it. Page, not just
+      // log: nobody was folding when v1's settle-and-forward had this case.
+      notifyOpsEvent({
+        flow: "transfer",
+        phase: "split-fold-failed",
+        status: "failed",
+        amount: { value: (execution.shareCents / 100).toFixed(2), currency: "USD" },
+        meta: {
+          executionId: execution.id,
+          walletId: execution.walletId,
+          destinationWalletId: execution.destinationWalletId,
+          reason,
+        },
+      })
+      return "failed"
+    }
+    if (pushOwner) await notifyOwner(ownerAccountId, pushOwner, execution)
+    return "folded"
+  }
+
   const fail = async (error: Error | string, accountId?: string) => {
     const lastError = typeof error === "string" ? error : error.name || error.message
     await finish({ status: "failed", attempts, lastError })
-    if (accountId) await notifyOwner(accountId, "failed", execution)
+    if (!accountId) return "failed" as const
+    if (execution.legKind === "share") {
+      return foldShareToNet(lastError, "failed")
+    }
+    await notifyOwner(accountId, "failed", execution)
     return "failed" as const
   }
 
-  // ENG-660: the destination account is no longer active, so every later
-  // payout to it would fail the same way. Turn off the wallet's rules to that
-  // destination and tell the owner once (only the call that flipped `enabled`
-  // notifies); further rows for the same destination fail without another
-  // push. The rules are matched by destination, not by execution.ruleId: a
-  // save replaces every rule with a new id, and a delete removes it, so the
-  // recorded ruleId may no longer exist. When nothing was disabled AND no rule
-  // to the destination exists any more, the owner still gets the ordinary
-  // "failed" push, so a failed payout is never silent.
-  const failAndDisableRule = async (error: Error, accountId: string) => {
+  // ENG-660 carry-over: the destination account is no longer active, so every
+  // later payout to it would fail the same way. Turn off the wallet's rules to
+  // that destination and tell the owner once (only the call that flipped
+  // `enabled` notifies). The share itself folds to the merchant.
+  const failAndDisableRule = async (error: Error) => {
     await finish({ status: "failed", attempts, lastError: error.name })
     const rules = PaymentSplitRulesRepository()
     const logContext = {
@@ -224,16 +232,14 @@ const executeOne = async (
         { ...logContext, error: disabled },
         "could not disable payment split rule with an inactive destination",
       )
-      await notifyOwner(accountId, "failed", execution)
-      return "failed" as const
+      return foldShareToNet(error.name, "failed")
     }
     if (disabled) {
       logger.warn(
         logContext,
         "payment split rule disabled: destination account is not active",
       )
-      await notifyOwner(accountId, "disabled", execution)
-      return "failed" as const
+      return foldShareToNet(error.name, "disabled")
     }
     // Nothing flipped: either an earlier row already disabled the rule (it
     // still exists, its owner was told) or the rule is gone (edited away or
@@ -248,8 +254,7 @@ const executeOne = async (
         "could not check payment split rule for an inactive destination",
       )
     }
-    if (exists !== true) await notifyOwner(accountId, "failed", execution)
-    return "failed" as const
+    return foldShareToNet(error.name, exists !== true ? "failed" : undefined)
   }
 
   const retry = async (error: Error) => {
@@ -277,61 +282,59 @@ const executeOne = async (
     return fail(error)
   }
 
+  // The merchant's account: needed for owner notifications and (for the net
+  // leg) the destination-active check.
+  const wallet = await WalletsRepository().findById(execution.walletId as WalletId)
+  if (wallet instanceof Error) return failBeforeSend(wallet)
+  const account = await AccountsRepository().findById(wallet.accountId)
+  if (account instanceof Error) return failBeforeSend(account)
+  ownerAccountId = account.id
+
   // Re-check the internal-transfer marker at pay time. An LNURL send from
-  // another Flash user is marked only after IBEX returns, so its receive can be
-  // recorded before the marker exists (ENG-653 decision 1).
+  // another Flash user is marked only after payToLnurl returns, so a receive
+  // can be built before the marker exists (ENG-653 decision 1, kept).
   const internal = await isInternalTransferInvoice(execution.triggerKey)
   if (internal instanceof Error) {
     // Nothing was sent: the same retry budget as any pre-payment error.
     return failBeforeSend(internal)
   }
-  if (internal) {
-    await finish({ status: "skipped_internal", attempts: execution.attempts })
-    return "skipped_internal"
+  if (internal && execution.legKind === "share") {
+    // The trigger receive turned out to be Flash-to-Flash: it should never
+    // have built legs. The share folds to the merchant like any other
+    // terminal share failure — never dropped silently (the net leg below
+    // pays; the money really is in the shadow and belongs to the merchant).
+    return fail("internal_transfer", account.id)
   }
 
-  const wallet = await WalletsRepository().findById(execution.walletId as WalletId)
-  if (wallet instanceof Error) return failBeforeSend(wallet)
-  const account = await AccountsRepository().findById(wallet.accountId)
-  if (account instanceof Error) return failBeforeSend(account)
-
-  // Set once the ENG-573 guard passes. withPaymentIdempotency runs `authorize`
-  // inside the idempotency lock immediately before the payment, so this is the
-  // last point at which no money can have moved yet.
-  let paymentAttempted = false
-  // Set right before IBEX payInvoice. Between the two only IBEX addInvoice and
-  // the marker write run, and neither moves money.
+  // Set right before IBEX payInvoice. Between the marker write and this only
+  // addInvoice runs, and it moves no money.
   let payInvoiceReached = false
 
-  const result = await intraledgerPaymentSendWalletIdForUsdWallet({
-    senderWalletId: wallet.id,
-    recipientWalletId: execution.destinationWalletId as WalletId,
-    amount: execution.shareCents,
-    memo: PAYMENT_SPLIT_MEMO,
-    senderAccount: account,
-    // Stable across retries of the same execution, so a retry after an
-    // ambiguous failure replays the cached outcome instead of paying again.
-    idempotencyKey: splitIdempotencyKey(execution.id),
-    // A split is a send out of the user's own wallet: it goes through the same
-    // ENG-573 guard (attempt budget, amount sanity, daily limit) as a manual
-    // intraledger send.
-    authorize: async () => {
-      const authorized = await authorizeSend({
-        senderAccount: account,
-        senderWalletId: wallet.id,
-        amount: { currency: "USD", cents: execution.shareCents },
-        kind: "intraledger",
-      })
-      if (!(authorized instanceof Error)) paymentAttempted = true
-      return authorized
-    },
-    beforePay: () => {
-      payInvoiceReached = true
+  // The net leg's memo carries the gross in major units. grossMinor is minor
+  // units: cents for USD, micros for USDT (10 000 micros per US cent — the
+  // same conversion computeShare uses).
+  const grossMajor =
+    execution.currency === WalletCurrency.Usdt
+      ? Number(execution.grossMinor) / 1_000_000
+      : Number(execution.grossMinor) / 100
+  const memo =
+    execution.legKind === "net"
+      ? `${NET_MEMO_PREFIX} $${grossMajor.toFixed(2)}`
+      : PAYMENT_SPLIT_MEMO
+
+  const result = await paySplitLeg({
+    sourceIbexAccountId: execution.sourceIbexAccountId,
+    destinationWalletId: execution.destinationWalletId,
+    cents: execution.shareCents,
+    currency: execution.currency,
+    memo,
+    onProgress: (progress) => {
+      payInvoiceReached = progress.payInvoiceReached ?? false
     },
   })
 
   if (result instanceof Error) {
-    if (isAmbiguousSplitSendError(result, { paymentAttempted, payInvoiceReached })) {
+    if (isAmbiguousSplitSendError(result, { payInvoiceReached })) {
       await finish({ status: "unknown", attempts, lastError: result.name })
       logger.error(
         { executionId: execution.id, walletId: execution.walletId, error: result },
@@ -344,17 +347,14 @@ const executeOne = async (
         amount: { value: (execution.shareCents / 100).toFixed(2), currency: "USD" },
         meta: {
           executionId: execution.id,
-          senderWalletId: execution.walletId,
+          sourceIbexAccountId: execution.sourceIbexAccountId,
           recipientWalletId: execution.destinationWalletId,
           reason: result.name,
         },
       })
       return "unknown"
     }
-    if (
-      isRetryableSplitError(result, { paymentAttempted, payInvoiceReached }) &&
-      attempts < PaymentSplitsConfig.maxAttempts
-    ) {
+    if (isRetryableSplitError(result) && attempts < PaymentSplitsConfig.maxAttempts) {
       return retry(result)
     }
     logger.warn(
@@ -363,22 +363,22 @@ const executeOne = async (
     )
     if (
       result instanceof InactiveAccountError &&
+      execution.legKind === "share" &&
       (await isDestinationInactive(execution.destinationWalletId))
     ) {
-      return failAndDisableRule(result, account.id)
+      return failAndDisableRule(result)
     }
     return fail(result, account.id)
   }
 
   if (result === PaymentSendStatus.Success) {
     await finish({ status: "sent", attempts })
-    await notifyOwner(account.id, "sent", execution)
     return "sent"
   }
 
   if (result === PaymentSendStatus.Pending) {
-    // Money has probably left the wallet: never re-pay (same stance as the
-    // Fygaro credit). Ops resolves the final state from IBEX.
+    // Money has probably left the shadow: never re-pay (same stance as v1 and
+    // the Fygaro credit). Ops resolves the final state from IBEX.
     await finish({ status: "ibex_pending", attempts })
     return "ibex_pending"
   }
@@ -391,24 +391,23 @@ export type ExecutePendingSplitsSummary = {
   sent: number
   ibexPending: number
   failed: number
+  folded: number
   retried: number
   unknown: number
-  skippedInternal: number
 }
 
 /**
- * Executor: claims due `pending` executions one at a time (atomically, so
- * concurrent runs never claim the same row) and pays each share as an
- * intraledger send from the receiving wallet to the split destination.
+ * Executor: claims due `pending` legs one at a time (atomically, so
+ * concurrent runs never claim the same row) and pays each from the shadow
+ * receive account named on the row.
  *
- * Runs every PaymentSplitsConfig.loopIntervalMs from the split loop and keeps
- * claiming until nothing is due or executorTimeBudgetMs is spent, so the
- * throughput is not capped by a fixed batch per run. `now` is fixed per pass
- * and decides what is due: a row retried in this pass is due at now + backoff
- * and is picked up by a later pass, which is what makes the 1/2/4/8 minute
- * backoff real. Claims and outcomes are stamped with `clock()` (wall-clock
- * time), never the pass's `now`, so a row's updatedAt never looks older to the
- * stale sweep on another replica than it really is.
+ * Runs every PaymentSplitsConfig.loopIntervalMs from the split loop AND once
+ * inline after the webhook builds legs (§2.3: settle → execute immediately;
+ * the loop is the retry/safety net). Keeps claiming until nothing is due or
+ * executorTimeBudgetMs is spent. `now` is fixed per pass and decides what is
+ * due; claims and outcomes are stamped with `clock()` (wall-clock time), so a
+ * row's updatedAt never looks older to the stale sweep on another replica
+ * than it really is.
  *
  * `shouldStop` lets the loop drain on SIGTERM (see startPaymentSplitsLoop).
  */
@@ -424,9 +423,9 @@ export const executePendingSplits = async ({
     sent: 0,
     ibexPending: 0,
     failed: 0,
+    folded: 0,
     retried: 0,
     unknown: 0,
-    skippedInternal: 0,
   }
   if (!PaymentSplitsConfig.enabled) return summary
 
@@ -447,7 +446,7 @@ export const executePendingSplits = async ({
     else if (outcome === "ibex_pending") summary.ibexPending += 1
     else if (outcome === "failed") summary.failed += 1
     else if (outcome === "unknown") summary.unknown += 1
-    else if (outcome === "skipped_internal") summary.skippedInternal += 1
+    else if (outcome === "folded") summary.folded += 1
     else summary.retried += 1
   }
 

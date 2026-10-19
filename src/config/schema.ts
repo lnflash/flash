@@ -1121,20 +1121,22 @@ export const configSchema = {
       // Default OFF baseline (mirrors topup); enable per environment via overrides.
       default: { enabled: false },
     },
-    // ENG-653: Flash-native payment splits for incoming payments. With this OFF
-    // the webhook middleware records nothing, the cron tasks no-op and the
+    // ENG-653, v2 (ENG-717): Flash-native payment splits for incoming
+    // payments, settled through a shadow receive account. With this OFF the
+    // webhook settle middleware builds nothing, the loop no-ops, receive
+    // routing falls back to the wallet's own account and the
     // walletSplitsSet / walletSplitDelete mutations reject.
     paymentSplits: {
       type: "object",
       properties: {
         enabled: { type: "boolean", default: false },
-        // Sends attempted per execution before a retryable error becomes a
-        // terminal `failed`. Backoff between attempts is 1, 2, 4, 8... minutes,
+        // Attempts per leg before a retryable error becomes a terminal
+        // `failed`. Backoff between attempts is 1, 2, 4, 8... minutes,
         // so loopIntervalMs must stay at or below one minute for those steps
         // to be real.
         maxAttempts: { type: "integer", minimum: 1, default: 5 },
-        // A share below this many US cents is recorded as `skipped_min` and
-        // never sent.
+        // A share below this many US cents folds into the merchant's net leg
+        // instead of being paid on its own.
         minShareCents: { type: "integer", minimum: 1, default: 1 },
         // Cadence of the split loop (executor + stale sweep) that runs inside
         // the long-running ibex-webhook workload. The galoy cron is a daily
@@ -1149,13 +1151,13 @@ export const configSchema = {
         // rows until none are left or the budget is spent, so throughput is
         // not capped by a fixed batch size.
         executorTimeBudgetMs: { type: "integer", minimum: 1000, default: 45000 },
-        // A newly recorded pending execution is not claimable until this long
-        // after it was recorded. An LNURL send from another Flash user is
-        // marked internal only after payToLnurl returns, so the payee's receive
-        // can be recorded first; the grace lets that marker land before the
-        // executor's pay-time re-check (ENG-653 decision 1).
+        // A newly built pending leg is not claimable until this long after it
+        // was built. An LNURL send from another Flash user is marked internal
+        // only after payToLnurl returns, so the payee's receive can be built
+        // first; the grace lets that marker land before the executor's
+        // pay-time re-check (ENG-653 decision 1).
         claimGraceMs: { type: "integer", minimum: 0, default: 120000 },
-        // How often the loop re-reads recent IBEX receives to record splits
+        // How often the loop re-reads recent shadow receives to build splits
         // a missed or failed webhook did not. The lookback is derived from
         // this (see splitReconcileWindowMs).
         reconcileIntervalMs: { type: "integer", minimum: 60000, default: 900000 },
@@ -1163,6 +1165,10 @@ export const configSchema = {
         // The cron reconcile is the backstop for loop downtime and looks back
         // this long plus a margin.
         cronIntervalMs: { type: "integer", minimum: 60000, default: 86400000 },
+        // A shadow holding a balance with no open leg for longer than this
+        // means the fanout did not complete (stuck net leg, missed webhook):
+        // customer funds in a Flash-owned account. Ops alert.
+        shadowAlertAfterMs: { type: "integer", minimum: 60000, default: 600000 },
       },
       additionalProperties: false,
       default: {
@@ -1174,6 +1180,7 @@ export const configSchema = {
         claimGraceMs: 120000,
         reconcileIntervalMs: 900000,
         cronIntervalMs: 86400000,
+        shadowAlertAfterMs: 600000,
       },
     },
     frappe: {

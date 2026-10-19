@@ -26,6 +26,8 @@ import { decodeInvoice } from "@domain/bitcoin/lightning/ln-invoice"
 
 import { AddInvoiceResponse201 } from "ibex-client"
 
+import { receiveAccountFor } from "@app/payment-splits/receive-account"
+
 import { usdWalletAmountFromInput } from "./usd-wallet-amount"
 
 import { validateIsBtcWallet, validateIsUsdWallet } from "./validate"
@@ -55,9 +57,13 @@ const addInvoiceForSelf = async ({
     ? usdWalletAmountFromInput(amount.toString(), wallet.currency)
     : undefined
   if (checkedAmount instanceof Error) return checkedAmount
+  // ENG-717: an external payer's invoice mints on the wallet's shadow receive
+  // account when the wallet has enabled split rules; receives then settle
+  // there and fan out. receiveAccountFor fails safe to the wallet's own id.
+  const mintAccountId = await receiveAccountFor(walletId)
   const resp = await Ibex.addInvoice({
     amount: checkedAmount,
-    accountId: walletId,
+    accountId: mintAccountId,
     memo,
     expiration: (expiresIn * 60) as Seconds,
   })
@@ -144,9 +150,13 @@ const addInvoiceForRecipient = async ({
 
   const checkedAmount = usdWalletAmountFromInput(amount.toString(), wallet.currency)
   if (checkedAmount instanceof Error) return checkedAmount
+  // ENG-717: same shadow routing as the self path — an invoice created on
+  // behalf of a split-enabled recipient is external from the recipient's
+  // point of view and must settle on the shadow.
+  const mintAccountId = await receiveAccountFor(recipientWalletId)
   const resp = await Ibex.addInvoice({
     amount: checkedAmount,
-    accountId: recipientWalletId,
+    accountId: mintAccountId,
     memo,
     expiration: expiresIn ? ((expiresIn * 60) as Seconds) : undefined,
   })

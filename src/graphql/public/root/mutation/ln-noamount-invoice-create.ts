@@ -9,6 +9,7 @@ import LnNoAmountInvoicePayload from "@graphql/public/types/payload/ln-noamount-
 // FLASH FORK: import ibex dependencies
 import { decodeInvoice } from "@domain/bitcoin/lightning"
 import Ibex from "@services/ibex/client"
+import { receiveAccountFor } from "@app/payment-splits/receive-account"
 
 import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
 
@@ -51,8 +52,11 @@ const LnNoAmountInvoiceCreateMutation = GT.Field({
     // FLASH FORK: create IBEX invoice instead of Galoy invoice
 
     // TODO: move this into Wallets.addInvoiceNoAmountForSelf
+    // ENG-717: mint on the shadow receive account when the wallet has enabled
+    // split rules (fails safe to the wallet's own id).
+    const mintAccountId = await receiveAccountFor(walletId)
     const resp = await Ibex.addInvoice({
-      accountId: walletId,
+      accountId: mintAccountId,
       memo,
       expiration: (expiresIn * 60) as Seconds,
     })

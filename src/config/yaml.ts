@@ -654,6 +654,7 @@ export const PaymentSplitsConfig = (yamlConfig.paymentSplits ?? {
   claimGraceMs: 120000,
   reconcileIntervalMs: 900000,
   cronIntervalMs: 86400000,
+  shadowAlertAfterMs: 600000,
 }) as PaymentSplitsConfig
 
 export const FrappeConfig = yamlConfig.frappe as FrappeConfig

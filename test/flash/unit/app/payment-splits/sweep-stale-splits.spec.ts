@@ -25,11 +25,13 @@ const T0 = new Date("2026-10-11T12:00:00Z")
 const seedSending = async (claimedAt: Date) => {
   await mockStore.repo.insert({
     triggerKey: "a".repeat(64),
+    legKind: "share",
     ruleId: `rule-${mockStore.rows.size}`,
     walletId: "source",
+    sourceIbexAccountId: "shadow-account",
     destinationWalletId: "dest",
     currency: "USDT",
-    triggerAmountMinor: "1000000",
+    grossMinor: "1000000",
     shareCents: 100,
     status: "pending",
     now: claimedAt,
