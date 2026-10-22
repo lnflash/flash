@@ -34,6 +34,7 @@ import ApiKeysQuery from "./root/query/api-keys"
 import InvitePreviewQuery from "./root/query/invite-preview"
 import CashoutRateQuery from "./root/query/cashout-rate"
 import MyReferralsQuery from "./root/query/my-referrals"
+import SearchUsernamesQuery from "./root/query/search-usernames"
 
 export const queryFields = {
   unauthed: {
@@ -70,6 +71,7 @@ export const queryFields = {
       apiKeys: ApiKeysQuery,
       cashoutRate: CashoutRateQuery,
       myReferrals: MyReferralsQuery,
+      searchUsernames: SearchUsernamesQuery,
     },
     atWalletLevel: {
       onChainTxFee: OnChainTxFeeQuery,

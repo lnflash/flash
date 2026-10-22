@@ -8,6 +8,7 @@ export class UnknownRateLimitServiceError extends RateLimitServiceError {
 }
 
 export class RateLimiterExceededError extends RateLimitServiceError {}
+export class UsernameSearchRateLimiterExceededError extends RateLimiterExceededError {}
 export class UserCodeAttemptIdentifierRateLimiterExceededError extends RateLimiterExceededError {}
 export class UserCodeAttemptIpRateLimiterExceededError extends RateLimiterExceededError {}
 export class UserCodeAttemptBlockedCountryIpRateLimiterExceededError extends RateLimiterExceededError {}

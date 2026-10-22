@@ -19,3 +19,23 @@ jobs:
       - run: yarn install --frozen-lockfile
       - name: Run unit tests
         run: make unit-in-ci
+
+  username-search:
+    name: Username search database checks
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:6.0.5
+        ports:
+          - 27017:27017
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 24
+          cache: "yarn"
+      - run: yarn install --frozen-lockfile
+      - name: Verify bounded directory searches against MongoDB
+        env:
+          USERNAME_SEARCH_TEST_URI: mongodb://127.0.0.1:27017/username_search_test
+        run: . ./.env && yarn jest --config test/flash/username-search.config.cjs --runInBand

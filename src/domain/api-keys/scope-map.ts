@@ -23,6 +23,7 @@ export const apiKeyScopeForField: Readonly<Record<string, ApiKeyFieldAccess>> =
     fygaroTopupStatus: "BLOCKED",
     cashoutRate: "BLOCKED",
     myReferrals: "BLOCKED",
+    searchUsernames: "BLOCKED",
     bridgeVirtualAccount: "BLOCKED",
     bridgeExternalAccounts: "BLOCKED",
     bridgeWithdrawalRequest: "BLOCKED",
