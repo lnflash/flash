@@ -46,8 +46,21 @@ jest.mock("@config", () => ({
 }))
 
 const mockPayInvoice = jest.fn()
+const mockFindWalletById = jest.fn()
+const mockResolveCashWalletMutationWalletIdForAccount = jest.fn()
 const mockRecordExceptionInCurrentSpan = jest.fn()
 const mockAddEventToCurrentSpan = jest.fn()
+
+jest.mock("@services/mongoose", () => ({
+  WalletsRepository: () => ({
+    findById: (...args: unknown[]) => mockFindWalletById(...args),
+  }),
+}))
+
+jest.mock("@app/cash-wallet-cutover", () => ({
+  resolveCashWalletMutationWalletIdForAccount: (...args: unknown[]) =>
+    mockResolveCashWalletMutationWalletIdForAccount(...args),
+}))
 
 jest.mock("@services/tracing", () => ({
   addAttributesToCurrentSpan: jest.fn(),
@@ -106,6 +119,7 @@ import { ErrorLevel } from "@domain/shared"
 import { WithdrawalLimitsExceededError } from "@domain/errors"
 import { LnInvoiceDecodeError } from "@domain/bitcoin/lightning/errors"
 import { InternalTransferMarkerError } from "@domain/payment-splits"
+import { CashWalletCutoverPreflightError } from "@app/cash-wallet-cutover/errors"
 import LnInvoicePaymentSendMutation from "@graphql/public/root/mutation/ln-invoice-payment-send"
 import {
   IbexError,
@@ -124,19 +138,188 @@ type PaymentSendResult = {
   errors: { message: string; code?: string }[]
 }
 
-const resolvePayment = async (): Promise<PaymentSendResult> => {
+const resolvePayment = async (
+  input: Record<string, unknown> = {},
+): Promise<PaymentSendResult> => {
   const resolve = LnInvoicePaymentSendMutation.resolve as unknown as (
     source: null,
     args: { input: Record<string, unknown> },
-    ctx: { domainAccount: Record<string, unknown> },
+    ctx: {
+      domainAccount: Record<string, unknown>
+      cashWalletClientCapabilities: Record<string, unknown>
+    },
   ) => Promise<PaymentSendResult>
 
   return resolve(
     null,
-    { input: { walletId: "wallet-1", paymentRequest: "lnbc1" } },
-    { domainAccount: { id: "account-1" } },
+    { input: { walletId: "wallet-1", paymentRequest: "lnbc1", ...input } },
+    {
+      domainAccount: { id: "account-1" },
+      cashWalletClientCapabilities: { cashWalletPresentation: "usdt" },
+    },
   )
 }
+
+beforeEach(() => {
+  mockFindWalletById.mockImplementation(async (walletId: string) => ({
+    id: walletId,
+    accountId: "account-1",
+    currency: walletId === "btc-wallet" ? "BTC" : "USD",
+  }))
+  mockResolveCashWalletMutationWalletIdForAccount.mockImplementation(
+    async ({ walletId }: { walletId: string }) => walletId,
+  )
+})
+
+describe("fixed-invoice cash source routing", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockSendGuardMode.mockReturnValue("log-only")
+    mockDecodeInvoice.mockReturnValue({
+      paymentAmount: { amount: 21_000n, currency: "BTC" },
+    })
+    mockPayInvoice.mockResolvedValue({
+      transaction: { payment: { status: { id: 2 } } },
+    })
+  })
+
+  it("uses the settlement wallet for a presented legacy USD alias at every money boundary", async () => {
+    mockResolveCashWalletMutationWalletIdForAccount.mockResolvedValue("usdt-wallet")
+
+    const result = await resolvePayment({ idempotencyKey: "attempt-1" })
+
+    expect(result).toEqual({ errors: [], status: "success" })
+    expect(mockResolveCashWalletMutationWalletIdForAccount).toHaveBeenCalledWith({
+      account: { id: "account-1" },
+      walletId: "wallet-1",
+      client: { cashWalletPresentation: "usdt" },
+    })
+    expect(mockFindWalletById).toHaveBeenNthCalledWith(1, "wallet-1")
+    expect(mockFindWalletById).toHaveBeenNthCalledWith(2, "usdt-wallet")
+    expect(mockWithPaymentIdempotency).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: "attempt-1",
+        senderWalletId: "usdt-wallet",
+        requestFingerprint: "ln|lnbc1",
+      }),
+    )
+    expect(mockAuthorizeSend).toHaveBeenCalledWith(
+      expect.objectContaining({ senderWalletId: "usdt-wallet" }),
+    )
+    expect(mockMarkOutgoingBolt11).toHaveBeenCalledWith({
+      paymentRequest: "lnbc1",
+      senderWalletId: "usdt-wallet",
+    })
+    expect(mockPayInvoice).toHaveBeenCalledWith({
+      invoice: "lnbc1",
+      accountId: "usdt-wallet",
+    })
+  })
+
+  it("keeps a directly selected USDT wallet as the payment source", async () => {
+    mockFindWalletById.mockResolvedValue({
+      id: "usdt-wallet",
+      accountId: "account-1",
+      currency: "USDT",
+    })
+
+    const result = await resolvePayment({ walletId: "usdt-wallet" })
+
+    expect(result).toEqual({ errors: [], status: "success" })
+    expect(mockFindWalletById).toHaveBeenCalledTimes(1)
+    expect(mockWithPaymentIdempotency).toHaveBeenCalledWith(
+      expect.objectContaining({ senderWalletId: "usdt-wallet" }),
+    )
+    expect(mockPayInvoice).toHaveBeenCalledWith({
+      invoice: "lnbc1",
+      accountId: "usdt-wallet",
+    })
+  })
+
+  it("leaves an owned BTC source on the existing BTC path", async () => {
+    const result = await resolvePayment({ walletId: "btc-wallet" })
+
+    expect(result).toEqual({ errors: [], status: "success" })
+    expect(mockResolveCashWalletMutationWalletIdForAccount).not.toHaveBeenCalled()
+    expect(mockWithPaymentIdempotency).toHaveBeenCalledWith(
+      expect.objectContaining({ senderWalletId: "btc-wallet" }),
+    )
+    expect(mockPayInvoice).toHaveBeenCalledWith({
+      invoice: "lnbc1",
+      accountId: "btc-wallet",
+    })
+  })
+
+  it("fails before opening an attempt if cash source routing fails", async () => {
+    mockResolveCashWalletMutationWalletIdForAccount.mockResolvedValue(
+      new CashWalletCutoverPreflightError("cash routing unavailable"),
+    )
+
+    const result = await resolvePayment()
+
+    expect(result.status).toBe("failed")
+    expect(mockWithPaymentIdempotency).not.toHaveBeenCalled()
+    expect(mockPayInvoice).not.toHaveBeenCalled()
+  })
+
+  it("rejects a foreign supplied wallet before routing, idempotency or IBEX", async () => {
+    mockFindWalletById.mockResolvedValue({
+      id: "wallet-1",
+      accountId: "foreign-account",
+      currency: "USD",
+    })
+
+    const result = await resolvePayment()
+
+    expect(result.status).toBe("failed")
+    expect(result.errors).toHaveLength(1)
+    expect(mockResolveCashWalletMutationWalletIdForAccount).not.toHaveBeenCalled()
+    expect(mockWithPaymentIdempotency).not.toHaveBeenCalled()
+    expect(mockPayInvoice).not.toHaveBeenCalled()
+  })
+
+  it("rejects a routed settlement wallet that is not owned by the caller", async () => {
+    mockResolveCashWalletMutationWalletIdForAccount.mockResolvedValue("foreign-wallet")
+    mockFindWalletById.mockImplementation(async (walletId: string) => ({
+      id: walletId,
+      accountId: walletId === "foreign-wallet" ? "foreign-account" : "account-1",
+      currency: "USD",
+    }))
+
+    const result = await resolvePayment()
+
+    expect(result.status).toBe("failed")
+    expect(mockWithPaymentIdempotency).not.toHaveBeenCalled()
+    expect(mockPayInvoice).not.toHaveBeenCalled()
+  })
+
+  it("gives alias and direct settlement-wallet replays the same key scope", async () => {
+    mockResolveCashWalletMutationWalletIdForAccount.mockResolvedValue("usdt-wallet")
+    const first = await resolvePayment({ idempotencyKey: "same-attempt" })
+    expect(first).toEqual({ errors: [], status: "success" })
+
+    // Model a cache hit: the wrapper returns the original result without
+    // authorizing, marking or calling IBEX again.
+    mockWithPaymentIdempotency.mockResolvedValueOnce({ value: "success" })
+    const replay = await resolvePayment({
+      walletId: "usdt-wallet",
+      idempotencyKey: "same-attempt",
+    })
+
+    expect(replay).toEqual({ errors: [], status: "success" })
+    expect(mockWithPaymentIdempotency.mock.calls[0][0]).toMatchObject({
+      senderWalletId: "usdt-wallet",
+      idempotencyKey: "same-attempt",
+    })
+    expect(mockWithPaymentIdempotency.mock.calls[1][0]).toMatchObject({
+      senderWalletId: "usdt-wallet",
+      idempotencyKey: "same-attempt",
+    })
+    expect(mockAuthorizeSend).toHaveBeenCalledTimes(1)
+    expect(mockMarkOutgoingBolt11).toHaveBeenCalledTimes(1)
+    expect(mockPayInvoice).toHaveBeenCalledTimes(1)
+  })
+})
 
 describe("lnInvoicePaymentSend IBEX error surfacing (issue #93)", () => {
   beforeEach(() => {
