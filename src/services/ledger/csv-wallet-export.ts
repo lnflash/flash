@@ -19,8 +19,32 @@ const header = [
   { id: "memo", title: " Memo" },
 ]
 
+const numericColumns = new Set(["amount", "displayAmount", "fee", "displayFee"])
+const exactNumber = /^[+-]?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/
+// Ignore leading whitespace, controls and invisible formatting/combining
+// marks when deciding whether a spreadsheet may interpret a cell as a formula.
+// NFKC also detects fullwidth =, +, - and @ without altering the source text.
+const formulaPrefix = /^[\p{White_Space}\p{Cc}\p{Cf}\p{M}]*(?:[=+@-]|\u2212)/u
+
+const safeCsvCell = (column: string, value: unknown): unknown => {
+  if (typeof value !== "string") return value
+  if (numericColumns.has(column) && exactNumber.test(value)) return value
+  return formulaPrefix.test(value.normalize("NFKC")) ? `'${value}` : value
+}
+
 export class CsvWalletsExport {
   entries: LedgerTransaction<WalletCurrency>[] = []
+
+  private safeRecords(): Record<string, unknown>[] {
+    return this.entries.map((entry) =>
+      Object.fromEntries(
+        Object.entries(entry).map(([column, value]) => [
+          column,
+          safeCsvCell(column, value),
+        ]),
+      ),
+    )
+  }
 
   getBase64(): string {
     const csvWriter = createObjectCsvStringifier({
@@ -28,7 +52,7 @@ export class CsvWalletsExport {
     })
 
     const header_stringify = csvWriter.getHeaderString()
-    const records = csvWriter.stringifyRecords(this.entries)
+    const records = csvWriter.stringifyRecords(this.safeRecords())
 
     const str = header_stringify + records
 
@@ -47,7 +71,7 @@ export class CsvWalletsExport {
       header,
     })
 
-    await csvWriter.writeRecords(this.entries)
+    await csvWriter.writeRecords(this.safeRecords())
     baseLogger.info("saving complete")
   }
 
