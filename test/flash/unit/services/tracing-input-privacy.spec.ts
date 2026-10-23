@@ -21,8 +21,18 @@ jest.mock("@opentelemetry/sdk-trace-base", () => {
       onStart() {
         return undefined
       }
-      onEnd(span: { attributes: Record<string, unknown> }) {
-        exported.push({ ...span.attributes })
+      onEnd(span: {
+        attributes: Record<string, unknown>
+        events: unknown[]
+        status: unknown
+        name: string
+      }) {
+        exported.push({
+          ...span.attributes,
+          spanName: span.name,
+          events: span.events,
+          status: span.status,
+        })
       }
     },
   }
@@ -48,10 +58,24 @@ jest.mock("@opentelemetry/api", () => {
   }
 })
 
+import { readFileSync } from "node:fs"
+
+import { resolve } from "node:path"
+
 import { GraphQLInstrumentation } from "@opentelemetry/instrumentation-graphql"
 import { IORedisInstrumentation } from "@opentelemetry/instrumentation-ioredis"
 import { registerInstrumentations } from "@opentelemetry/instrumentation"
-import { parse } from "graphql"
+import {
+  parse,
+  buildSchema,
+  execute,
+  validate,
+  defaultFieldResolver,
+  GraphQLError,
+  GraphQLSchema,
+  DocumentNode,
+} from "graphql"
+
 import { TracerProvider, Span, trace } from "@opentelemetry/api"
 import {
   wrapToRunInSpan,
@@ -63,8 +87,16 @@ const mockStartActiveSpan = jest.fn()
 let span: ReturnType<typeof fakeSpan>
 function fakeSpan() {
   const result = {
+    name: "fixture.generic",
+    instrumentationLibrary: { name: "fixture.generic" },
+    startTime: [0, 0] as [number, number],
+    status: { code: 0 } as { code: number; message?: string },
     attributes: {} as Record<string, unknown>,
-    events: [] as unknown[],
+    events: [] as {
+      name: string
+      time: [number, number]
+      attributes?: Record<string, unknown>
+    }[],
     setAttribute: jest.fn((key: string, value: unknown) => {
       result.attributes[key] = value
       return result
@@ -74,11 +106,31 @@ function fakeSpan() {
       return result
     }),
     recordException: jest.fn((error: unknown) => {
-      result.events.push(error)
+      result.events.push({
+        name: "exception",
+        time: [0, 0],
+        attributes: {
+          "exception.message":
+            error instanceof Error
+              ? error.message
+              : Reflect.get(Object(error), "message"),
+          "exception.stacktrace": error instanceof Error ? error.stack : undefined,
+        },
+      })
     }),
-    setStatus: jest.fn(),
+    addEvent: jest.fn((name: string, attributes?: Record<string, unknown>) => {
+      result.events.push({ name, time: [0, 0], attributes })
+      return result
+    }),
+    setStatus: jest.fn((status: { code: number; message?: string }) => {
+      result.status = status
+      return result
+    }),
     end: jest.fn(),
-    updateName: jest.fn(),
+    updateName: jest.fn((name: string) => {
+      result.name = name
+      return result
+    }),
   }
   return result
 }
@@ -270,7 +322,13 @@ function configuredGraphQL() {
   if (!(instrumentation instanceof GraphQLInstrumentation))
     throw new Error("GraphQL instrumentation not registered")
   instrumentation.setTracerProvider({
-    getTracer: () => ({ startSpan: () => span }),
+    getTracer: () => ({
+      startSpan: (name: string) => {
+        span.name = name
+        span.instrumentationLibrary = { name: "@opentelemetry/instrumentation-graphql" }
+        return span
+      },
+    }),
   } as unknown as TracerProvider)
   return instrumentation
 }
@@ -313,7 +371,8 @@ it("drops source at the export boundary, including comment and enum literals not
   const exported = jest.requireMock("@opentelemetry/sdk-trace-base").exported.at(-1)
   expect(exported["graphql.source"]).toBeUndefined()
   expect(JSON.stringify(exported)).not.toContain("PRIVATE_")
-  expect(exported["graphql.operation.name"]).toBe("Privacy")
+  expect(exported["graphql.operation.name"]).toBeUndefined()
+  expect(exported.spanName).toBe("graphql.execution")
   expect(exported["graphql.operation.type"]).toBe("query")
 })
 
@@ -388,3 +447,227 @@ it.each([
     }
   },
 )
+
+function exportedGraphQL() {
+  const processor = jest.requireMock("@opentelemetry/sdk-trace-node").processors[0]
+  processor.onEnd(span)
+  return jest.requireMock("@opentelemetry/sdk-trace-base").exported.at(-1)
+}
+
+it("keeps real malformed TOTP input errors unchanged for callers while excluding echoed bearer/input from exported spans", async () => {
+  const instrumentation = configuredGraphQL()
+  const schema = buildSchema(
+    readFileSync(
+      resolve(__dirname, "../../../../src/graphql/public/schema.graphql"),
+      "utf8",
+    ),
+  )
+  const document = parse(
+    "mutation PRIVATE_OPERATION_NAME($input: UserTotpRegistrationValidateInput!) { PRIVATE_ALIAS: userTotpRegistrationValidate(input: $input) { errors { message } } }",
+  )
+  let originalResult: unknown
+  const original = (args: Parameters<typeof execute>[0]) => {
+    originalResult = execute(args)
+    return originalResult
+  }
+  const wrapped = Reflect.get(instrumentation, "_patchExecute").call(
+    instrumentation,
+    defaultFieldResolver,
+  )(original)
+  const result = await wrapped({
+    schema,
+    document,
+    variableValues: {
+      input: { authToken: "PRIVATE_BEARER_TOKEN", totpCode: "PRIVATE_OTP_CODE" },
+    },
+  })
+  expect(result).toBe(await originalResult)
+  expect(JSON.stringify(result.errors)).toContain("PRIVATE_BEARER_TOKEN")
+  expect(JSON.stringify(result.errors)).toContain("PRIVATE_OTP_CODE")
+  const exported = exportedGraphQL()
+  expect(JSON.stringify(exported)).not.toContain("PRIVATE_")
+  expect(exported["graphql.operation.type"]).toBe("mutation")
+  expect(exported["graphql.error.kind"]).toBe("execution")
+  expect(exported["graphql.error.count"]).toBeGreaterThan(0)
+  expect(exported.status.code).toBe(2)
+  expect(exported.spanName).toBe("graphql.execution")
+})
+
+it("sanitizes real parser exception events and status text that bypass the execution response hook", () => {
+  const instrumentation = configuredGraphQL()
+  const source =
+    'query PRIVATE_OPERATION { field(input: "PRIVATE_BANK_NUMBER" "PRIVATE_NAME") }'
+  let originalError: unknown
+  try {
+    parse(source)
+  } catch (error) {
+    originalError = error
+  }
+  expect(originalError).toBeInstanceOf(GraphQLError)
+  expect((originalError as Error).message).toContain("PRIVATE_NAME")
+  let caught: unknown
+  try {
+    Reflect.get(instrumentation, "_parse").call(
+      instrumentation,
+      undefined,
+      () => {
+        throw originalError
+      },
+      source,
+      undefined,
+    )
+  } catch (error) {
+    caught = error
+  }
+  expect(caught).toBe(originalError)
+  expect(JSON.stringify(span.events)).toContain("PRIVATE_NAME")
+  span.status = { code: 2, message: "PRIVATE_STATUS_DESCRIPTION" }
+  span.attributes["custom.private"] = "PRIVATE_BANK_NUMBER"
+  const exported = exportedGraphQL()
+  expect(JSON.stringify(exported)).not.toContain("PRIVATE_")
+  expect(exported["graphql.error.kind"]).toBe("parse")
+  expect(exported.status).toEqual({ code: 2 })
+  expect(exported.events[0].name).toBe("graphql.error")
+})
+
+it("sanitizes real validation errors including private field/name values without changing validation results", () => {
+  const instrumentation = configuredGraphQL()
+  const schema = buildSchema("type Query { visible: String }")
+  const document = parse("query PRIVATE_OPERATION { PRIVATE_ALIAS: PRIVATE_BANK_NAME }")
+  let originalResult: unknown
+  const original = (schema: GraphQLSchema, document: DocumentNode) => {
+    originalResult = validate(schema, document)
+    return originalResult
+  }
+  const result = Reflect.get(instrumentation, "_validate").call(
+    instrumentation,
+    undefined,
+    original,
+    schema,
+    document,
+  )
+  expect(result).toBe(originalResult)
+  expect(result[0].message).toContain("PRIVATE_BANK_NAME")
+  expect(JSON.stringify(span.events)).toContain("PRIVATE_BANK_NAME")
+  const exported = exportedGraphQL()
+  expect(JSON.stringify(exported)).not.toContain("PRIVATE_")
+  expect(exported["graphql.error.kind"]).toBe("validation")
+  expect(exported.status.code).toBe(2)
+})
+
+it("records only known error codes and fixed summaries for aliased payload errors without changing returned application errors", () => {
+  const instrumentation = configuredGraphQL()
+  Reflect.get(instrumentation, "_createExecuteSpan").call(instrumentation, undefined, {})
+  const first = new GraphQLError("PRIVATE_PROVIDER_MESSAGE", {
+    extensions: { code: "BAD_USER_INPUT", detail: "PRIVATE_BANK_NUMBER" },
+    originalError: new Error("PRIVATE_ORIGINAL_ERROR"),
+  })
+  const result = {
+    data: {
+      PRIVATE_ALIAS: {
+        errors: [
+          {
+            message: "PRIVATE_NAME",
+            code: "PRIVATE_MACHINE_CODE",
+            path: ["PRIVATE_BANK_NAME"],
+          },
+        ],
+      },
+    },
+    errors: [first],
+  }
+  Reflect.get(instrumentation, "_executeResponseHook").call(instrumentation, span, result)
+  expect(result.errors[0]).toBe(first)
+  expect(result.errors[0].message).toBe("PRIVATE_PROVIDER_MESSAGE")
+  expect(JSON.stringify(span.attributes)).not.toContain("PRIVATE_")
+  expect(JSON.stringify(span.events)).not.toContain("PRIVATE_")
+  const exported = exportedGraphQL()
+  expect(JSON.stringify(exported)).not.toContain("PRIVATE_")
+  expect(exported["graphql.error.code"]).toBe("BAD_USER_INPUT")
+  expect(exported["graphql.error.codes"]).toEqual(["BAD_USER_INPUT", "UNKNOWN"])
+  expect(exported["graphql.error.kind"]).toBe("mixed")
+  expect(exported["graphql.error.count"]).toBe(2)
+})
+
+it("preserves a known machine code, bounds failure counts and drops arbitrary event names and attributes", () => {
+  const instrumentation = configuredGraphQL()
+  Reflect.get(instrumentation, "_createExecuteSpan").call(instrumentation, undefined, {})
+  const result = {
+    errors: Array.from(
+      { length: 200 },
+      () =>
+        new GraphQLError("PRIVATE_MESSAGE", { extensions: { code: "BAD_USER_INPUT" } }),
+    ),
+  }
+  Reflect.get(instrumentation, "_executeResponseHook").call(instrumentation, span, result)
+  span.addEvent("PRIVATE_EVENT_NAME", { PRIVATE_ATTRIBUTE: "PRIVATE_BANK_NUMBER" })
+  const exported = exportedGraphQL()
+  expect(JSON.stringify(exported)).not.toContain("PRIVATE_")
+  expect(exported["graphql.error.count"]).toBe(128)
+  expect(exported["graphql.error.code"]).toBe("BAD_USER_INPUT")
+  expect(exported.events).toHaveLength(1)
+  expect(exported.events[0].name).toBe("graphql.error")
+  expect(result.errors).toHaveLength(200)
+})
+
+it.each([
+  "BANK_ACCOUNT_DUPLICATE_NUMBER",
+  "BANK_ACCOUNT_INVALID",
+  "BANK_ACCOUNT_NOT_FOUND",
+  "BRIDGE_KYC_PENDING",
+  "BRIDGE_INSUFFICIENT_FUNDS",
+  "BRIDGE_INVALID_PLAID_TOKEN",
+])(
+  "preserves the closed %s banking code from a real GraphQL error without retaining its private text",
+  (code) => {
+    const instrumentation = configuredGraphQL()
+    Reflect.get(instrumentation, "_createExecuteSpan").call(
+      instrumentation,
+      undefined,
+      {},
+    )
+    const error = new GraphQLError("PRIVATE_BANK_NUMBER PRIVATE_NAME", {
+      extensions: { code },
+    })
+    Reflect.get(instrumentation, "_executeResponseHook").call(instrumentation, span, {
+      errors: [error],
+    })
+    const exported = exportedGraphQL()
+    expect(exported["graphql.error.code"]).toBe(code)
+    expect(JSON.stringify(exported)).not.toContain("PRIVATE_")
+    expect(error.message).toBe("PRIVATE_BANK_NUMBER PRIVATE_NAME")
+  },
+)
+
+it("aggregates bounded top-level and multiple payload error counts and keeps both machine categories", () => {
+  const instrumentation = configuredGraphQL()
+  Reflect.get(instrumentation, "_createExecuteSpan").call(instrumentation, undefined, {})
+  const errors = [
+    new GraphQLError("PRIVATE_NAME", { extensions: { code: "BAD_USER_INPUT" } }),
+    new GraphQLError("PRIVATE_BANK_NUMBER"),
+  ]
+  const data = {
+    PRIVATE_ALIAS: {
+      errors: [
+        { message: "PRIVATE_PHONE", code: "BANK_ACCOUNT_INVALID" },
+        { message: "PRIVATE_ADDRESS", code: "BANK_ACCOUNT_INVALID" },
+      ],
+    },
+    OTHER_PRIVATE_ALIAS: {
+      errors: [{ message: "PRIVATE_BEARER", code: "PRIVATE_CODE" }],
+    },
+  }
+  Reflect.get(instrumentation, "_executeResponseHook").call(instrumentation, span, {
+    errors,
+    data,
+  })
+  const exported = exportedGraphQL()
+  expect(exported["graphql.error.count"]).toBe(5)
+  expect(exported["graphql.error.kind"]).toBe("mixed")
+  expect(exported["graphql.error.codes"]).toEqual([
+    "BAD_USER_INPUT",
+    "UNKNOWN",
+    "BANK_ACCOUNT_INVALID",
+  ])
+  expect(JSON.stringify(exported)).not.toContain("PRIVATE_")
+})
