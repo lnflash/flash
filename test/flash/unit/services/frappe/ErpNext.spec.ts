@@ -1435,8 +1435,12 @@ describe("ErpNext.getReferralPayoutAllowlist", () => {
       ReferralPayoutAllowlistQueryError,
     )
     expect(mockedRecordExceptionInCurrentSpan).toHaveBeenCalledWith({
-      error: err,
-      attributes: { "erpnext.exception": "DoesNotExistError" },
+      error: expect.objectContaining({ message: "ERPNext request failed" }),
+      attributes: {
+        "erpnext.operation": "getReferralPayoutAllowlist",
+        "erpnext.error_code": "UNKNOWN",
+        "erpnext.http_status": 404,
+      },
     })
   })
 })
@@ -1478,8 +1482,12 @@ describe("ErpNext.getReferralSettings", () => {
     await client.getReferralSettings()
 
     expect(mockedRecordExceptionInCurrentSpan).toHaveBeenCalledWith({
-      error: err,
-      attributes: { "erpnext.exception": "InternalServerError" },
+      error: expect.objectContaining({ message: "ERPNext request failed" }),
+      attributes: {
+        "erpnext.operation": "getReferralSettings",
+        "erpnext.error_code": "UNKNOWN",
+        "erpnext.http_status": 500,
+      },
     })
   })
 })

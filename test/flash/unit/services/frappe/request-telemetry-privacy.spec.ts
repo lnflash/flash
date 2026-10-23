@@ -5,15 +5,16 @@ jest.mock("axios", () => ({
   isAxiosError: jest.fn((err) => Boolean(err?.isAxiosError)),
 }))
 jest.mock("@services/logger", () => ({
-  baseLogger: { error: jest.fn(), warn: jest.fn() },
+  baseLogger: { error: jest.fn(), warn: jest.fn(), info: jest.fn() },
 }))
 jest.mock("@services/tracing", () => ({ recordExceptionInCurrentSpan: jest.fn() }))
 jest.mock("@config", () => ({ FrappeConfig: undefined }))
 
 import axios from "axios"
 import { IdentitySource, UpgradeEvidenceType } from "@domain/accounts"
-import { Validated } from "@domain/shared"
-import { ErpNext } from "@services/frappe/ErpNext"
+import { Validated, USDAmount } from "@domain/shared"
+import ValidOffer from "@app/offers/ValidOffer"
+import { ErpNext, CashoutId } from "@services/frappe/ErpNext"
 import { recordErpRequestFailure } from "@services/frappe/telemetry"
 import {
   AccountUpgradeRequest,
@@ -21,6 +22,11 @@ import {
 } from "@services/frappe/models/AccountUpgradeRequest"
 import { BankAccountUpdateRequest } from "@services/frappe/models/BankAccountUpdateRequest"
 import { IdVerification } from "@services/frappe/models/IdVerification"
+import {
+  BridgeTransferRequest,
+  BridgeTransferRequestStatus,
+  BridgeTransferRequestTransactionType,
+} from "@services/frappe/models/BridgeTransferRequest"
 import { baseLogger } from "@services/logger"
 import { recordExceptionInCurrentSpan } from "@services/tracing"
 
@@ -76,6 +82,27 @@ const bankRequest = new BankAccountUpdateRequest(
   },
   "PRIVATE_SUPPORT_NOTE",
 )
+const money = USDAmount.cents(125n) as USDAmount
+const cashout = {
+  account: { erpParty: "PRIVATE_CUSTOMER" },
+  details: {
+    payment: {
+      invoice: { paymentHash: "PRIVATE_PAYMENT_HASH" },
+      userAcct: "PRIVATE_WALLET",
+      flashAcct: "PRIVATE_FLASH_WALLET",
+      amount: money,
+    },
+    payout: { bankAccountId: "PRIVATE_BANK_ID", amount: money, serviceFee: money },
+  },
+} as unknown as ValidOffer
+const transfer = new BridgeTransferRequest({
+  requestId: "PRIVATE_REQUEST",
+  transactionType: BridgeTransferRequestTransactionType.Topup,
+  status: BridgeTransferRequestStatus.Pending,
+  amount: "1.25",
+  currency: "USD",
+  rawPayload: privateBody,
+})
 
 function privateError() {
   return Object.assign(new Error("PRIVATE_ERROR_MESSAGE"), {
@@ -109,6 +136,7 @@ function expectPrivateDataAbsent(result?: unknown) {
     logs: [
       jest.mocked(baseLogger.error).mock.calls,
       jest.mocked(baseLogger.warn).mock.calls,
+      jest.mocked(baseLogger.info).mock.calls,
     ],
     spans: jest.mocked(recordExceptionInCurrentSpan).mock.calls,
     result,
@@ -123,6 +151,49 @@ beforeEach(() => {
 })
 
 const requests: [string, () => Promise<unknown>][] = [
+  ["draftCashout", () => client.draftCashout(cashout)],
+  ["submitCashout", () => client.submitCashout("PRIVATE_CASHOUT_ID" as CashoutId)],
+  ["deleteJournalEntry", () => client.delete("PRIVATE_JOURNAL_ID")],
+  ["getCashoutExchangeRate", () => client.getCashoutExchangeRate()],
+  ["getFygaroSettings", () => client.getFygaroSettings()],
+  ["getFeeDiscounts", () => client.getFeeDiscounts()],
+  ["getReferralSettings", () => client.getReferralSettings()],
+  ["getReferralPayoutAllowlist", () => client.getReferralPayoutAllowlist()],
+  ["getAllowedCountries", () => client.getAllowedCountries()],
+  [
+    "sumFygaroTopupGrossCentsSince",
+    () =>
+      client.sumFygaroTopupGrossCentsSince({
+        accountId: "PRIVATE_ACCOUNT",
+        since: new Date(),
+      }),
+  ],
+  ["upsertBridgeTransferRequest", () => client.upsertBridgeTransferRequest(transfer)],
+  [
+    "completeBridgeTopupByTxHash",
+    () =>
+      client.completeBridgeTopupByTxHash({
+        txHash: "PRIVATE_TX_HASH",
+        accountId: "PRIVATE_ACCOUNT",
+        walletId: "PRIVATE_WALLET",
+      }),
+  ],
+  [
+    "sumFygaroCompletedNetCentsSince",
+    () => client.sumFygaroCompletedNetCentsSince({ since: new Date() }),
+  ],
+  [
+    "listUncreditedFygaroTopups",
+    () => client.listUncreditedFygaroTopups({ since: new Date(), limit: 10 }),
+  ],
+  [
+    "countAgedOutUncreditedFygaroTopups",
+    () => client.countAgedOutUncreditedFygaroTopups({ before: new Date() }),
+  ],
+  [
+    "findBridgeTransferRequest",
+    () => client.findBridgeTransferRequest("PRIVATE_REQUEST_ID"),
+  ],
   ["postUpgradeRequest", () => client.postUpgradeRequest(upgrade)],
   ["getAccountUpgradeRequestList", () => client.getAccountUpgradeRequestList({})],
   [
@@ -276,6 +347,104 @@ it("retains only allowlisted transport codes and integer HTTP status, not arbitr
   expect(baseLogger.error).toHaveBeenLastCalledWith(
     { operation: "createBankAccount", code: "UNKNOWN" },
     "ERPNext request failed",
+  )
+  expectPrivateDataAbsent()
+})
+
+it("preserves cashout provider body and auth after a failed request without logging customer/bank/payment data", async () => {
+  const result = await client.draftCashout(cashout)
+  expect(result).toBeInstanceOf(Error)
+  expect(http.post).toHaveBeenCalledWith(
+    "https://erp.invalid/api/resource/Cashout",
+    {
+      customer: "PRIVATE_CUSTOMER",
+      bank_account: "PRIVATE_BANK_ID",
+      transaction_id: "PRIVATE_PAYMENT_HASH",
+      wallet_id: "PRIVATE_WALLET",
+      flash_wallet: "PRIVATE_FLASH_WALLET",
+      user_receives: 1.25,
+      user_pays: 1.25,
+      currency: "USD",
+      exchange_rate: undefined,
+      flash_fee: 1.25,
+    },
+    {
+      headers: expect.objectContaining({
+        Authorization: "token PRIVATE_API_KEY:PRIVATE_API_SECRET",
+      }),
+    },
+  )
+  expectPrivateDataAbsent(result)
+})
+
+it("keeps duplicate-transfer recovery local and still updates the single raced row with original body/auth", async () => {
+  http.get.mockResolvedValueOnce({ data: { data: [] } }).mockResolvedValueOnce({
+    data: { data: [{ name: "PRIVATE_RACED_ROW", status: "Pending" }] },
+  })
+  const duplicate = privateError()
+  duplicate.response.status = 409
+  duplicate.response.data.exception =
+    "PRIVATE_NAME DuplicateEntryError PRIVATE_BANK_NUMBER"
+  http.post.mockRejectedValue(duplicate)
+  http.put.mockResolvedValue({ data: {} })
+  expect(await client.upsertBridgeTransferRequest(transfer)).toBe(true)
+  expect(http.post).toHaveBeenCalledTimes(1)
+  expect(http.put).toHaveBeenCalledTimes(1)
+  expect(http.put).toHaveBeenCalledWith(
+    "https://erp.invalid/api/resource/Bridge%20Transfer%20Request/PRIVATE_RACED_ROW",
+    expect.objectContaining({
+      request_id: "PRIVATE_REQUEST",
+      raw_payload_json: JSON.stringify(privateBody),
+    }),
+    {
+      headers: expect.objectContaining({
+        Authorization: "token PRIVATE_API_KEY:PRIVATE_API_SECRET",
+      }),
+    },
+  )
+  expectPrivateDataAbsent()
+})
+
+it("sanitizes transfer mutation errors after successful ownership/status reads without claiming completion", async () => {
+  http.get.mockResolvedValue({
+    data: { data: [{ name: "PRIVATE_LEDGER_ROW", status: "Pending" }] },
+  })
+  const result = await client.completeBridgeTopupByTxHash({ txHash: "PRIVATE_TX_HASH" })
+  expect(result).toBeInstanceOf(Error)
+  expect(http.put).toHaveBeenCalledTimes(1)
+  expectPrivateDataAbsent(result)
+})
+
+it("keeps malformed financial history fail-closed without copying row IDs into errors", async () => {
+  http.get.mockResolvedValue({
+    data: {
+      data: [
+        {
+          request_id: "PRIVATE_ROW_ID",
+          amount: "PRIVATE_BANK_NUMBER",
+          final_amount: "PRIVATE_NAME",
+        },
+      ],
+    },
+  })
+  const gross = await client.sumFygaroTopupGrossCentsSince({
+    accountId: "PRIVATE_ACCOUNT",
+    since: new Date(),
+  })
+  const net = await client.sumFygaroCompletedNetCentsSince({ since: new Date() })
+  expect(gross).toBeInstanceOf(Error)
+  expect(net).toBeInstanceOf(Error)
+  expectPrivateDataAbsent([gross, net])
+})
+
+it("preserves the legacy lower-bound burn result without logging the skipped row identifier", async () => {
+  http.get.mockResolvedValue({
+    data: { data: [{ request_id: "PRIVATE_ROW_ID", final_amount: null }] },
+  })
+  expect(await client.sumFygaroCompletedNetCentsSince({ since: new Date() })).toBe(0)
+  expect(baseLogger.info).toHaveBeenCalledWith(
+    { operation: "sumFygaroCompletedNetCentsSince", outcome: "missing_final_amount" },
+    "Fygaro burn: Completed row without final_amount skipped",
   )
   expectPrivateDataAbsent()
 })

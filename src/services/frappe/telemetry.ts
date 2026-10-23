@@ -17,6 +17,21 @@ const transportCodes = new Set([
 ])
 
 type ErpTelemetryOperation =
+  | "draftCashout"
+  | "submitCashout"
+  | "delete"
+  | "getCashoutExchangeRate"
+  | "getFygaroSettings"
+  | "getFeeDiscounts"
+  | "getReferralSettings"
+  | "getReferralPayoutAllowlist"
+  | "getAllowedCountries"
+  | "sumFygaroTopupGrossCentsSince"
+  | "upsertBridgeTransferRequest"
+  | "completeBridgeTopupByTxHash"
+  | "sumFygaroCompletedNetCentsSince"
+  | "queryUncreditedFygaroTopups"
+  | "findBridgeTransferRequest"
   | "postUpgradeRequest"
   | "getAccountUpgradeRequestList"
   | "getAccountUpgradeRequestById"
