@@ -1,7 +1,7 @@
 import { PartialResult } from "@app/partial-result"
 import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
 import Ibex from "@services/ibex/client"
-import { IbexError } from "@services/ibex/errors"
+import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
 import { baseLogger } from "@services/logger"
 import { GResponse200 } from "ibex-client"
 import { ConnectionArguments } from "graphql-relay"
@@ -9,9 +9,11 @@ import { ConnectionArguments } from "graphql-relay"
 export const getTransactionsForWallets = async ({
   wallets,
   paginationArgs,
+  requireComplete = false,
 }: {
   wallets: Wallet[]
   paginationArgs?: PaginationArgs
+  requireComplete?: boolean
 }): Promise<PartialResult<PaginatedArray<IbexTransaction>>> => {
   const walletIds = wallets.map((wallet) => wallet.id)
 
@@ -24,10 +26,33 @@ export const getTransactionsForWallets = async ({
     ),
   )
 
-  const transactions = ibexCalls.flatMap((resp) => {
+  // A download must not present a partial set of transactions as a complete
+  // financial record. Ordinary history retains its existing partial behavior.
+  if (requireComplete) {
+    const failed = ibexCalls.find((resp): resp is IbexError => resp instanceof IbexError)
+    if (failed) return PartialResult.err(failed)
+  }
+
+  const converted = ibexCalls.map((resp) => {
     if (resp instanceof IbexError) return []
     else return toWalletTransactions(resp)
   })
+
+  // The usual history view may omit an unrepresentable vendor row. A CSV
+  // download cannot silently label that same omission a complete export.
+  if (
+    requireComplete &&
+    ibexCalls.some(
+      (resp, index) =>
+        !(resp instanceof IbexError) && converted[index].length !== resp.length,
+    )
+  ) {
+    return PartialResult.err(
+      new UnexpectedIbexResponse("CSV export has unrepresentable transactions"),
+    )
+  }
+
+  const transactions = converted.flat()
 
   return PartialResult.ok({
     slice: transactions,

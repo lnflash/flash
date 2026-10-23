@@ -11,10 +11,14 @@ import {
 } from "@domain/api-keys"
 import { UnknownRepositoryError } from "@domain/errors"
 import { ApiKeysRepository } from "@services/mongoose/api-keys"
+import { auditApiKeyCreated } from "@services/api-keys-audit"
+import { addAttributesToCurrentSpan } from "@services/tracing"
 
 jest.mock("@config", () => ({
   getApiKeyConfig: jest.fn(() => ({ maxKeysPerAccount: 3 })),
 }))
+
+jest.mock("@services/api-keys-audit", () => ({ auditApiKeyCreated: jest.fn() }))
 
 jest.mock("@services/tracing", () => ({
   addAttributesToCurrentSpan: jest.fn(),
@@ -41,6 +45,7 @@ describe("createApiKey", () => {
   let findByAccountId: jest.Mock
 
   beforeEach(() => {
+    jest.clearAllMocks()
     create = jest.fn().mockImplementation(async (newKey: NewApiKey) => ({
       id: toApiKeyId("record-id"),
       keyId: newKey.keyId,
@@ -203,5 +208,90 @@ describe("createApiKey", () => {
 
     expect(result).toBeInstanceOf(UnknownRepositoryError)
     expect(create).not.toHaveBeenCalled()
+  })
+
+  it("keeps caller metadata and generated credentials out of spans while preserving the explicit creation audit", async () => {
+    const owner = "PRIVATE_ACCOUNT_OWNER" as AccountId
+    const result = await createApiKey({
+      accountId: owner,
+      name: "PRIVATE CUSTOMER NAME",
+      scopes: ["read:wallet", "write:wallet"],
+      ipConstraints: ["203.0.113.92"],
+      metadata: { note: "PRIVATE_BANK_DATA" },
+      rateLimitPerMinute: 75,
+      expiresIn: 3600,
+    })
+    if (result instanceof Error) throw result
+    const persisted = create.mock.calls[0][0]
+    expect(persisted).toMatchObject({
+      accountId: owner,
+      name: "PRIVATE CUSTOMER NAME",
+      scopes: ["read:wallet", "write:wallet"],
+      ipConstraints: ["203.0.113.92"],
+      metadata: { note: "PRIVATE_BANK_DATA" },
+      rateLimitPerMinute: 75,
+    })
+    const spans = JSON.stringify(jest.mocked(addAttributesToCurrentSpan).mock.calls)
+    for (const privateValue of [
+      owner,
+      result.name,
+      result.keyId,
+      result.apiKey,
+      persisted.hashedKey,
+      "read:wallet",
+      "write:wallet",
+      "203.0.113.92",
+      "PRIVATE_BANK_DATA",
+    ])
+      expect(spans).not.toContain(privateValue)
+    expect(jest.mocked(addAttributesToCurrentSpan).mock.calls).toEqual([
+      [{ "app.apiKeys.create.started": true }],
+      [{ "app.apiKeys.create.success": true }],
+    ])
+    expect(auditApiKeyCreated).toHaveBeenCalledTimes(1)
+    expect(auditApiKeyCreated).toHaveBeenCalledWith({
+      accountId: owner,
+      keyId: result.keyId,
+      scopes: result.scopes,
+      expiresAt: result.expiresAt,
+      rateLimitPerMinute: 75,
+    })
+    expect(JSON.stringify(jest.mocked(auditApiKeyCreated).mock.calls)).not.toContain(
+      result.apiKey,
+    )
+    expect(JSON.stringify(jest.mocked(auditApiKeyCreated).mock.calls)).not.toContain(
+      persisted.hashedKey,
+    )
+  })
+
+  it("does not serialize rejected caller-controlled scopes before validation", async () => {
+    const invalidScopes = ["PRIVATE_SCOPE_WITH_OTP_482916" as ApiKeyScope]
+    Object.defineProperty(invalidScopes, "join", {
+      value: () => {
+        throw new Error("Scope serialization must not run")
+      },
+    })
+    const result = await createApiKey({
+      accountId,
+      name: "valid name",
+      scopes: invalidScopes,
+    })
+    expect(result).toBeInstanceOf(InvalidApiKeyScopeError)
+    expect(create).not.toHaveBeenCalled()
+    expect(auditApiKeyCreated).not.toHaveBeenCalled()
+    expect(
+      JSON.stringify(jest.mocked(addAttributesToCurrentSpan).mock.calls),
+    ).not.toContain(invalidScopes[0])
+  })
+
+  it("returns the original persistence error without copying private diagnostics to spans or auditing creation", async () => {
+    const error = new UnknownRepositoryError("PRIVATE_PROVIDER_BANK_BODY")
+    create.mockResolvedValue(error)
+    expect(await createApiKey({ accountId, name: "private failed create" })).toBe(error)
+    expect(jest.mocked(addAttributesToCurrentSpan).mock.calls).toEqual([
+      [{ "app.apiKeys.create.started": true }],
+      [{ "app.apiKeys.create.error": true }],
+    ])
+    expect(auditApiKeyCreated).not.toHaveBeenCalled()
   })
 })

@@ -2,7 +2,6 @@ import ValidOffer from "@app/offers/ValidOffer"
 import { FrappeConfig } from "@config"
 import { JMDAmount, USDTAmount, Validated } from "@domain/shared"
 import { baseLogger } from "@services/logger"
-import { recordExceptionInCurrentSpan } from "@services/tracing"
 import axios, { isAxiosError } from "axios"
 
 import {
@@ -62,6 +61,7 @@ import {
   type FygaroTopupWindow,
 } from "./models/BridgeTransferRequest"
 import { Filter } from "./SearchFilters"
+import { recordErpRequestFailure } from "./telemetry"
 
 export type AccountUpgradeRequestFilters = { username?: Filter; status?: Filter }
 type ErpNextFilter = [string, string, string, string[]]
@@ -116,8 +116,6 @@ export type BankAccountWriteError =
   | BankAccountNotOwnedError
   | BankAccountValidationError
   | BankAccountUpgradeRequiredError
-
-const last4 = (accountNumber: string): string => accountNumber.slice(-4)
 
 // frappe.throw() reports its text in `_server_messages`: a JSON array of JSON
 // strings, each `{ message, ... }`. Falls back to the `exception` line
@@ -350,13 +348,8 @@ export class ErpNext {
       )
       return response.data.data.name as CashoutId
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error({ err, responseData }, "Error drafting Cashout in ERPNext")
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new CashoutDraftError(err)
+      recordErpRequestFailure(err, "draftCashout")
+      return new CashoutDraftError("ERPNext request failed")
     }
   }
 
@@ -369,13 +362,8 @@ export class ErpNext {
       )
       return true
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error({ err, responseData }, "Error submitting Cashout in ERPNext")
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new CashoutSubmitError(err)
+      recordErpRequestFailure(err, "submitCashout")
+      return new CashoutSubmitError("ERPNext request failed")
     }
   }
 
@@ -385,13 +373,8 @@ export class ErpNext {
         headers: this.headers,
       })
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error({ err, responseData, jeName }, "Error deleting JE in ERPNext")
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new JournalEntryDeleteError(err)
+      recordErpRequestFailure(err, "delete")
+      return new JournalEntryDeleteError("ERPNext request failed")
     }
   }
 
@@ -406,23 +389,8 @@ export class ErpNext {
       )
       return { name: resp.data.data.name }
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      // Only identifiers — the request body carries the applicant's name,
-      // phone, email and address, which must not land in logs.
-      baseLogger.error(
-        {
-          err,
-          responseData,
-          username: req.username,
-          requestedLevel: req.requestedLevel,
-        },
-        "Error creating Account Upgrade Request in ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new UpgradeRequestCreateError(err)
+      recordErpRequestFailure(err, "postUpgradeRequest")
+      return new UpgradeRequestCreateError("ERPNext request failed")
     }
   }
 
@@ -443,16 +411,8 @@ export class ErpNext {
 
       return resp.data?.data.map((r: { name: string }) => r.name)
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error(
-        { err, responseData, filters },
-        "Error querying Account Upgrade Request from ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new UpgradeRequestQueryError(err)
+      recordErpRequestFailure(err, "getAccountUpgradeRequestList")
+      return new UpgradeRequestQueryError("ERPNext request failed")
     }
   }
 
@@ -469,16 +429,8 @@ export class ErpNext {
       if (!request) return new UpgradeRequestQueryError("No data in detail response")
       return AccountUpgradeRequest.fromErpnext(request)
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error(
-        { err, responseData, id },
-        "Error querying Account Upgrade Request from ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new UpgradeRequestQueryError(err)
+      recordErpRequestFailure(err, "getAccountUpgradeRequestById")
+      return new UpgradeRequestQueryError("ERPNext request failed")
     }
   }
 
@@ -501,16 +453,8 @@ export class ErpNext {
         decidedAt: fromFrappeDatetime(request.reviewed_at || request.modified),
       }
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error(
-        { err, responseData, id },
-        "Error querying Account Upgrade Request decision from ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new UpgradeRequestQueryError(err)
+      recordErpRequestFailure(err, "getUpgradeRequestDecision")
+      return new UpgradeRequestQueryError("ERPNext request failed")
     }
   }
 
@@ -534,24 +478,8 @@ export class ErpNext {
       if (!name) return new IdVerificationCreateError("No name in create response")
       return { name }
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      const status = isAxiosError(err) ? err.response?.status : undefined
-      baseLogger.warn(
-        {
-          err,
-          status,
-          responseData,
-          upgradeRequest: doc.upgradeRequest,
-          identitySource: doc.identitySource,
-          evidenceCount: doc.evidence.length,
-        },
-        "Error creating ID Verification in ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new IdVerificationCreateError(err)
+      recordErpRequestFailure(err, "postIdVerification", "warn")
+      return new IdVerificationCreateError("ERPNext request failed")
     }
   }
 
@@ -575,16 +503,8 @@ export class ErpNext {
       const rows: { name: string }[] = resp.data?.data ?? []
       return rows.map((r) => r.name)
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error(
-        { err, responseData, limitStart, pageLength },
-        "Error listing ID Verification from ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new IdVerificationQueryError(err)
+      recordErpRequestFailure(err, "getIdVerificationList")
+      return new IdVerificationQueryError("ERPNext request failed")
     }
   }
 
@@ -600,16 +520,8 @@ export class ErpNext {
       if (!doc) return new IdVerificationQueryError("No data in detail response")
       return IdVerification.fromErpnext(doc)
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error(
-        { err, responseData, id },
-        "Error querying ID Verification from ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new IdVerificationQueryError(err)
+      recordErpRequestFailure(err, "getIdVerificationById")
+      return new IdVerificationQueryError("ERPNext request failed")
     }
   }
 
@@ -628,16 +540,8 @@ export class ErpNext {
         { headers: this.headers },
       )
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error(
-        { err, responseData, id, rows: evidence.length },
-        "Error updating ID Verification evidence in ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new IdVerificationUpdateError(err)
+      recordErpRequestFailure(err, "updateIdVerificationEvidence")
+      return new IdVerificationUpdateError("ERPNext request failed")
     }
   }
 
@@ -668,16 +572,8 @@ export class ErpNext {
         reviewed_at: row.reviewed_at || undefined,
       }
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error(
-        { err, responseData, upgradeRequest: upgradeRequestName },
-        "Error querying ID Verification by upgrade request from ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new IdVerificationQueryError(err)
+      recordErpRequestFailure(err, "getIdVerificationByUpgradeRequest")
+      return new IdVerificationQueryError("ERPNext request failed")
     }
   }
 
@@ -702,16 +598,8 @@ export class ErpNext {
       }
     } catch (err) {
       if (isAxiosError(err) && err.response?.status === 404) return null
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error(
-        { err, responseData, code },
-        "Error querying Decision Reason from ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new DecisionReasonQueryError(err)
+      recordErpRequestFailure(err, "getDecisionReason")
+      return new DecisionReasonQueryError("ERPNext request failed")
     }
   }
 
@@ -738,23 +626,12 @@ export class ErpNext {
 
         const failedDocs = resp.data?.message?.failed_docs
         if (failedDocs?.length) {
-          baseLogger.error(
-            { failedDocs, names, status },
-            "Bulk update failed for some docs",
-          )
-          return new SetDocTypeValueError(failedDocs)
+          recordErpRequestFailure(undefined, "setStatusForRequests")
+          return new SetDocTypeValueError("ERPNext bulk update failed")
         }
       } catch (err) {
-        const responseData = isAxiosError(err) ? err.response?.data : undefined
-        baseLogger.error(
-          { err, responseData, names, status },
-          "Error bulk updating upgrade request status",
-        )
-        recordExceptionInCurrentSpan({
-          error: err,
-          attributes: { "erpnext.exception": responseData?.exception },
-        })
-        return new SetDocTypeValueError(err)
+        recordErpRequestFailure(err, "setStatusForRequests")
+        return new SetDocTypeValueError("ERPNext request failed")
       }
     }
   }
@@ -776,16 +653,8 @@ export class ErpNext {
       )
       return resp.data?.data ?? []
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error(
-        { err, responseData, customerName },
-        "Error querying Bank Account from ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new BankAccountQueryError(err)
+      recordErpRequestFailure(err, "getBankAccountsByCustomer")
+      return new BankAccountQueryError("ERPNext request failed")
     }
   }
 
@@ -819,20 +688,15 @@ export class ErpNext {
       const message = resp.data?.message
       const bankAccountId = message?.bank_account
       if (!message?.success || typeof bankAccountId !== "string" || !bankAccountId) {
-        return new BankAccountCreateError(message?.error ?? "No bank_account in response")
+        return new BankAccountCreateError("Invalid ERPNext bank account response")
       }
       return { bankAccountId }
     } catch (err) {
-      return this.handleBankAccountWriteError(err, BankAccountCreateError, {
-        logMessage: "Error creating Bank Account in ERPNext",
-        context: {
-          erpParty,
-          bankName,
-          accountType,
-          currency,
-          accountNumberLast4: last4(args.accountNumber),
-        },
-      })
+      return this.handleBankAccountWriteError(
+        err,
+        BankAccountCreateError,
+        "createBankAccount",
+      )
     }
   }
 
@@ -858,21 +722,15 @@ export class ErpNext {
 
       const message = resp.data?.message
       if (!message?.success) {
-        return new BankAccountUpdateError(message?.error ?? "No success in response")
+        return new BankAccountUpdateError("Invalid ERPNext bank account response")
       }
       return true
     } catch (err) {
-      return this.handleBankAccountWriteError(err, BankAccountUpdateError, {
-        logMessage: "Error updating Bank Account in ERPNext",
-        context: {
-          bankAccountId,
-          erpParty,
-          bankName,
-          accountType,
-          currency,
-          accountNumberLast4: last4(args.accountNumber),
-        },
-      })
+      return this.handleBankAccountWriteError(
+        err,
+        BankAccountUpdateError,
+        "updateBankAccount",
+      )
     }
   }
 
@@ -899,9 +757,7 @@ export class ErpNext {
         message.success === false ||
         (!message.deleted && !message.disabled)
       ) {
-        return new BankAccountDeleteError(
-          message?.error ?? "Bank Account was not deleted",
-        )
+        return new BankAccountDeleteError("Invalid ERPNext bank account response")
       }
       return {
         bankAccountId: message.bank_account_id ?? bankAccountId,
@@ -910,10 +766,11 @@ export class ErpNext {
         newDefault: message.new_default ?? null,
       }
     } catch (err) {
-      return this.handleBankAccountWriteError(err, BankAccountDeleteError, {
-        logMessage: "Error deleting Bank Account in ERPNext",
-        context: { bankAccountId, erpParty },
-      })
+      return this.handleBankAccountWriteError(
+        err,
+        BankAccountDeleteError,
+        "deleteBankAccount",
+      )
     }
   }
 
@@ -933,14 +790,15 @@ export class ErpNext {
 
       const message = resp.data?.message
       if (!message?.success) {
-        return new BankAccountSetDefaultError(message?.error ?? "No success in response")
+        return new BankAccountSetDefaultError("Invalid ERPNext bank account response")
       }
       return true
     } catch (err) {
-      return this.handleBankAccountWriteError(err, BankAccountSetDefaultError, {
-        logMessage: "Error setting default Bank Account in ERPNext",
-        context: { bankAccountId, erpParty },
-      })
+      return this.handleBankAccountWriteError(
+        err,
+        BankAccountSetDefaultError,
+        "setDefaultBankAccount",
+      )
     }
   }
 
@@ -957,35 +815,32 @@ export class ErpNext {
   private handleBankAccountWriteError(
     err: unknown,
     GenericError: new (message?: string | unknown) => BankAccountWriteError,
-    { logMessage, context }: { logMessage: string; context: Record<string, unknown> },
+    operation:
+      | "createBankAccount"
+      | "updateBankAccount"
+      | "deleteBankAccount"
+      | "setDefaultBankAccount",
   ): BankAccountWriteError {
     const responseData = isAxiosError(err) ? err.response?.data : undefined
     const status = isAxiosError(err) ? err.response?.status : undefined
-    // NOT the raw axios error: its `config.data` is the request body, which
-    // carries the full account number.
-    const errMessage = err instanceof Error ? err.message : "Unknown error"
-    baseLogger.error({ err: errMessage, status, responseData, ...context }, logMessage)
-    recordExceptionInCurrentSpan({
-      error: new Error(errMessage),
-      attributes: { "erpnext.exception": responseData?.exception },
-    })
+    recordErpRequestFailure(err, operation)
 
     const reason = frappeServerMessage(responseData)
     const excType: string = responseData?.exc_type ?? ""
     const haystack = `${reason} ${responseData?.exception ?? ""}`.toLowerCase()
 
     if (haystack.includes("account number") && haystack.includes("already")) {
-      return new BankAccountDuplicateNumberError(reason)
+      return new BankAccountDuplicateNumberError("ERPNext bank account refusal")
     }
     if (
       status === 404 ||
       excType === "DoesNotExistError" ||
       haystack.includes("does not belong to this customer")
     ) {
-      return new BankAccountNotOwnedError(reason)
+      return new BankAccountNotOwnedError("ERPNext bank account refusal")
     }
     if (haystack.includes("unknown erp customer")) {
-      return new BankAccountUpgradeRequiredError(reason)
+      return new BankAccountUpgradeRequiredError("ERPNext bank account refusal")
     }
     if (haystack.includes("bank account that was removed")) {
       return new BankAccountValidationError(BankAccountValidationReason.OwnRemovedNumber)
@@ -1002,7 +857,7 @@ export class ErpNext {
     if (haystack.includes("account_number is required")) {
       return new BankAccountValidationError(BankAccountValidationReason.AccountNumber)
     }
-    return new GenericError(reason || errMessage)
+    return new GenericError("ERPNext request failed")
   }
 
   async getCashoutExchangeRate(): Promise<JMDAmount | ExchangeRateQueryError> {
@@ -1023,19 +878,12 @@ export class ErpNext {
       }
 
       const jmdRate = JMDAmount.dollars(rate)
-      if (jmdRate instanceof Error) return new ExchangeRateQueryError(jmdRate)
+      if (jmdRate instanceof Error)
+        return new ExchangeRateQueryError("Invalid exchange rate in ERPNext response")
       return jmdRate
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error(
-        { err, responseData },
-        "Error querying Currency Exchange from ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new ExchangeRateQueryError(err)
+      recordErpRequestFailure(err, "getCashoutExchangeRate")
+      return new ExchangeRateQueryError("ERPNext request failed")
     }
   }
 
@@ -1054,16 +902,8 @@ export class ErpNext {
         return new FygaroSettingsQueryError("No data in Fygaro Settings response")
       return data as FygaroSettingsDoc
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error(
-        { err, responseData },
-        "Error querying Fygaro Settings from ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new FygaroSettingsQueryError(err)
+      recordErpRequestFailure(err, "getFygaroSettings")
+      return new FygaroSettingsQueryError("ERPNext request failed")
     }
   }
 
@@ -1098,13 +938,8 @@ export class ErpNext {
         return new FeeDiscountQueryError("No data in Fee Discount response")
       return data as FeeDiscountDoc[]
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error({ err, responseData }, "Error querying Fee Discount from ERPNext")
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new FeeDiscountQueryError(err)
+      recordErpRequestFailure(err, "getFeeDiscounts")
+      return new FeeDiscountQueryError("ERPNext request failed")
     }
   }
 
@@ -1123,16 +958,8 @@ export class ErpNext {
         return new ReferralSettingsQueryError("No data in Referral Settings response")
       return data as ReferralSettingsDoc
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error(
-        { err, responseData },
-        "Error querying Referral Settings from ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new ReferralSettingsQueryError(err)
+      recordErpRequestFailure(err, "getReferralSettings")
+      return new ReferralSettingsQueryError("ERPNext request failed")
     }
   }
 
@@ -1162,16 +989,8 @@ export class ErpNext {
         )
       return data as ReferralPayoutAllowlistDoc[]
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error(
-        { err, responseData },
-        "Error querying Referral Payout Allowlist from ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new ReferralPayoutAllowlistQueryError(err)
+      recordErpRequestFailure(err, "getReferralPayoutAllowlist")
+      return new ReferralPayoutAllowlistQueryError("ERPNext request failed")
     }
   }
 
@@ -1197,16 +1016,8 @@ export class ErpNext {
         return new AllowedCountryQueryError("No data in Allowed Country response")
       return data as AllowedCountryDoc[]
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error(
-        { err, responseData },
-        "Error querying Allowed Country from ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new AllowedCountryQueryError(err)
+      recordErpRequestFailure(err, "getAllowedCountries")
+      return new AllowedCountryQueryError("ERPNext request failed")
     }
   }
 
@@ -1355,13 +1166,13 @@ export class ErpNext {
         // row, not silently contribute nothing to the sum.
         if (row.amount == null) {
           return new FygaroTopupHistoryQueryError(
-            `Missing amount on ${row.request_id ?? "<unknown row>"}`,
+            "Missing amount in ERPNext top-up history",
           )
         }
         const cents = Math.round(Number(row.amount) * 100)
         if (!Number.isFinite(cents)) {
           return new FygaroTopupHistoryQueryError(
-            `Non-numeric amount on ${row.request_id ?? "<unknown row>"}`,
+            "Non-numeric amount in ERPNext top-up history",
           )
         }
         sumCents += cents
@@ -1380,16 +1191,8 @@ export class ErpNext {
       }
       return { grossCents: sumCents, oldestCountedMs }
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error(
-        { err, responseData, accountId },
-        "Error summing Fygaro top-up history from ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new FygaroTopupHistoryQueryError(err)
+      recordErpRequestFailure(err, "sumFygaroTopupGrossCentsSince")
+      return new FygaroTopupHistoryQueryError("ERPNext request failed")
     }
   }
 
@@ -1405,13 +1208,8 @@ export class ErpNext {
 
       return data
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error({ err, responseData }, "Error querying Banks from ERPNext")
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new BanksQueryError(err)
+      recordErpRequestFailure(err, "listBanks")
+      return new BanksQueryError("ERPNext request failed")
     }
   }
 
@@ -1426,16 +1224,8 @@ export class ErpNext {
       )
       return { name: resp.data.data.name }
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error(
-        { err, responseData, ...req.toErpnext() },
-        "Error creating Bank Account Update Request in ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new BankAccountUpdateRequestCreateError(err)
+      recordErpRequestFailure(err, "postBankAccountUpdateRequest")
+      return new BankAccountUpdateRequestCreateError("ERPNext request failed")
     }
   }
 
@@ -1469,16 +1259,8 @@ export class ErpNext {
       const rows: ErpNextBankAccountUpdateRequestData[] = resp.data?.data ?? []
       return rows.map((r) => BankAccountUpdateRequest.fromErpnext(r))
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error(
-        { err, responseData, bankAccountId },
-        "Error querying Bank Account Update Request from ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new BankAccountUpdateRequestQueryError(err)
+      recordErpRequestFailure(err, "getOpenBankAccountUpdateRequestsForAccount")
+      return new BankAccountUpdateRequestQueryError("ERPNext request failed")
     }
   }
 
@@ -1512,16 +1294,8 @@ export class ErpNext {
       const rows: ErpNextBankAccountUpdateRequestData[] = resp.data?.data ?? []
       return rows.length ? BankAccountUpdateRequest.fromErpnext(rows[0]) : undefined
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error(
-        { err, responseData, bankAccountId },
-        "Error querying latest Bank Account Update Request from ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new BankAccountUpdateRequestQueryError(err)
+      recordErpRequestFailure(err, "getLatestBankAccountUpdateRequestForAccount")
+      return new BankAccountUpdateRequestQueryError("ERPNext request failed")
     }
   }
 
@@ -1566,16 +1340,8 @@ export class ErpNext {
         return true
       }
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error(
-        { err, responseData, requestId },
-        "Error upserting Bridge Transfer Request in ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new BridgeTransferRequestUpsertError(err)
+      recordErpRequestFailure(err, "upsertBridgeTransferRequest")
+      return new BridgeTransferRequestUpsertError("ERPNext request failed")
     }
   }
 
@@ -1638,16 +1404,8 @@ export class ErpNext {
       )
       return "completed"
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error(
-        { err, responseData, txHash },
-        "Error promoting Bridge Transfer Request to Completed in ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new BridgeTransferRequestUpsertError(err)
+      recordErpRequestFailure(err, "completeBridgeTopupByTxHash")
+      return new BridgeTransferRequestUpsertError("ERPNext request failed")
     }
   }
 
@@ -1746,7 +1504,10 @@ export class ErpNext {
       }[]) {
         if (row.final_amount == null || String(row.final_amount).trim() === "") {
           baseLogger.info(
-            { requestId: row.request_id },
+            {
+              operation: "sumFygaroCompletedNetCentsSince",
+              outcome: "missing_final_amount",
+            },
             "Fygaro burn: Completed row without final_amount skipped",
           )
           continue
@@ -1754,23 +1515,15 @@ export class ErpNext {
         const cents = Math.round(Number(row.final_amount) * 100)
         if (!Number.isFinite(cents)) {
           return new FygaroTopupHistoryQueryError(
-            `Non-numeric final_amount on ${row.request_id ?? "<unknown row>"}`,
+            "Non-numeric final amount in ERPNext top-up history",
           )
         }
         sumCents += cents
       }
       return sumCents
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error(
-        { err, responseData },
-        "Error summing completed Fygaro top-ups from ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new FygaroTopupHistoryQueryError(err)
+      recordErpRequestFailure(err, "sumFygaroCompletedNetCentsSince")
+      return new FygaroTopupHistoryQueryError("ERPNext request failed")
     }
   }
 
@@ -1877,16 +1630,8 @@ export class ErpNext {
       }
       return out
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error(
-        { err, responseData, lastSeenAtOp },
-        "Error listing uncredited Fygaro top-ups from ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new FygaroTopupHistoryQueryError(err)
+      recordErpRequestFailure(err, "queryUncreditedFygaroTopups")
+      return new FygaroTopupHistoryQueryError("ERPNext request failed")
     }
   }
 
@@ -1961,16 +1706,8 @@ export class ErpNext {
       const doc = resp.data?.data?.[0]
       return doc?.name ? doc : undefined
     } catch (err) {
-      const responseData = isAxiosError(err) ? err.response?.data : undefined
-      baseLogger.error(
-        { err, responseData, requestId },
-        "Error querying Bridge Transfer Request from ERPNext",
-      )
-      recordExceptionInCurrentSpan({
-        error: err,
-        attributes: { "erpnext.exception": responseData?.exception },
-      })
-      return new BridgeTransferRequestUpsertError(err)
+      recordErpRequestFailure(err, "findBridgeTransferRequest")
+      return new BridgeTransferRequestUpsertError("ERPNext request failed")
     }
   }
 

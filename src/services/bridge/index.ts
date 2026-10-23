@@ -6,6 +6,8 @@
 
 import crypto from "crypto"
 
+import getUuidByString from "uuid-by-string"
+
 import { BridgeConfig } from "@config"
 
 import * as BridgeAccountsRepo from "@services/mongoose/bridge-accounts"
@@ -36,7 +38,6 @@ import { WalletsRepository } from "@services/mongoose/wallets"
 
 import { IdentityRepository } from "@services/kratos"
 import IbexClient from "@services/ibex/client"
-import { writeBridgeCashoutPending } from "@services/frappe/BridgeTransferRequestWriter"
 import { IbexError } from "@services/ibex/errors"
 
 import {
@@ -55,18 +56,24 @@ import {
   BridgeInvalidPlaidTokenError,
   BridgeDepositInstructionsMissingError,
   BridgeWithdrawalNetAmountTooLowError,
+  BridgeWithdrawalSendOutcomeUnknownError,
 } from "./errors"
 import BridgeApiClient, {
   type CreateExternalAccountRequest,
   type ExternalAccount,
+  type Transfer,
 } from "./client"
 import { PlaidLinkTokenStore } from "./plaid-link-token-store"
+import { checkedOwnedKycCustomerId } from "./owned-kyc-customer"
 import {
   presentBridgeWithdrawal,
   receiptFeesFromTransfer,
   resolveWithdrawalCustomerFeeEstimate,
+  type BridgeWithdrawalLike,
   type PresentedBridgeWithdrawal,
 } from "./withdrawal-fees"
+
+import { reportWithdrawalSendUncertainty } from "./withdrawal-send-uncertainty"
 
 const asBridgeRequestWithdrawalError = (error: unknown): BridgeError => {
   if (error instanceof BridgeError) return error
@@ -156,9 +163,82 @@ type ExternalAccountResult = {
 export const deriveWithdrawalIdempotencyKey = (rowId: string): string =>
   crypto.createHash("sha256").update(`withdrawal:${rowId}`).digest("hex")
 
-const bridgeDepositAddressFromTransfer = (transfer: {
-  source_deposit_instructions?: { to_address?: string }
-}) => transfer.source_deposit_instructions?.to_address
+// The provider rail uses six decimal USDT units. Keep arithmetic within a
+// deliberately generous bound whose integer microunits are exact in JS.
+const MAX_WITHDRAWAL_MICROS = 1_000_000_000_000_000n
+const decimalMicros = (value: string): bigint | undefined => {
+  const parts = /^(\d{1,10})(?:\.(\d{1,6}))?$/.exec(value)
+  if (!parts) return undefined
+  const micros = BigInt(parts[1]) * 1_000_000n + BigInt((parts[2] ?? "").padEnd(6, "0"))
+  return micros <= MAX_WITHDRAWAL_MICROS ? micros : undefined
+}
+
+const validWithdrawalAmount = (amount: string): boolean => {
+  const micros = decimalMicros(amount)
+  return micros !== undefined && micros > 0n
+}
+
+const hasFrozenWithdrawalFeeEstimate = (
+  withdrawal: Pick<
+    BridgeWithdrawalLike,
+    | "flashFeePercent"
+    | "flashFee"
+    | "estimatedBridgeFeePercent"
+    | "estimatedBridgeFee"
+    | "estimatedGasBuffer"
+    | "estimatedCustomerFee"
+  >,
+): boolean => {
+  const percentages = [withdrawal.flashFeePercent, withdrawal.estimatedBridgeFeePercent]
+  if (
+    !percentages.every(
+      (value) =>
+        typeof value === "string" &&
+        /^\d+(?:\.\d{1,6})?$/.test(value) &&
+        Number.isFinite(Number(value)),
+    )
+  )
+    return false
+  const parts = [
+    withdrawal.flashFee,
+    withdrawal.estimatedBridgeFee,
+    withdrawal.estimatedGasBuffer,
+    withdrawal.estimatedCustomerFee,
+  ].map((value) => (typeof value === "string" ? decimalMicros(value) : undefined))
+  return (
+    parts.every((value) => value !== undefined) &&
+    parts[0]! + parts[1]! + parts[2]! === parts[3]
+  )
+}
+
+const checkedWithdrawalDepositAddress = (
+  transfer: Transfer,
+  customerId: string,
+  externalAccountId: string,
+): string | BridgeError => {
+  const instructions = transfer.source_deposit_instructions
+  if (!instructions?.to_address) return new BridgeDepositInstructionsMissingError()
+  if (
+    typeof transfer.id !== "string" ||
+    !/^[A-Za-z0-9_-]{1,256}$/.test(transfer.id) ||
+    transfer.on_behalf_of !== customerId ||
+    transfer.source?.payment_rail !== "ethereum" ||
+    transfer.source.currency !== "usdt" ||
+    transfer.destination?.payment_rail !== "ach" ||
+    transfer.destination.currency !== "usd" ||
+    transfer.destination.external_account_id !== externalAccountId ||
+    instructions?.payment_rail !== "ethereum" ||
+    instructions.currency !== "usdt" ||
+    typeof instructions.to_address !== "string" ||
+    !/^0x[0-9a-fA-F]{40}$/.test(instructions.to_address)
+  ) {
+    // A Bridge transfer was created, but its returned payment instructions
+    // have not been bound to the reviewed owner, source rail and destination.
+    // Never send an IBEX debit using these instructions.
+    return new BridgeError("Bridge transfer instructions did not match the withdrawal")
+  }
+  return instructions.to_address
+}
 
 const ibexPayoutIdFromSendResponse = (response: unknown): string | undefined => {
   if (typeof response !== "object" || response === null) return undefined
@@ -350,6 +430,77 @@ const requireApprovedBridgeCustomer = async ({
  * - Creates Bridge customer if not exists
  * - Returns KYC and TOS links
  */
+const sanitizedKycError = (error: unknown, accountId: AccountId): Error => {
+  // Provider bodies can contain a foreign existing_kyc_link or identity PII.
+  // Preserve safe API classification/status while dropping the entire payload.
+  baseLogger.error(
+    { accountId, operation: "initiateKyc" },
+    "Bridge verification request failed",
+  )
+  if (error instanceof BridgeApiError) {
+    return new BridgeApiError("Unable to obtain verification links", error.statusCode)
+  }
+  return new BridgeError("Verification request failed")
+}
+
+const guardedKycWork = async <T>(
+  accountId: AccountId,
+  work: () => Promise<T>,
+): Promise<T | Error> => {
+  // redlock converts thrown callback errors. Sanitize inside its callback so
+  // provider bodies never reach that converter or its caller.
+  try {
+    return await work()
+  } catch (error) {
+    return sanitizedKycError(error, accountId)
+  }
+}
+
+const requireSoleKycCustomerOwner = async (
+  accountId: AccountId,
+  customerId: BridgeCustomerId,
+): Promise<true | Error> => {
+  const owners = await AccountsRepository().findBridgeCustomerOwners(customerId)
+  if (owners instanceof Error) return owners
+  if (owners.length !== 1 || owners[0] !== accountId) {
+    return new BridgeError("Bridge customer ownership requires review")
+  }
+  return true
+}
+
+const hostedKycURL = (value: unknown, kind: "identity" | "terms"): string => {
+  if (
+    typeof value !== "string" ||
+    value.length > 8192 ||
+    /[^\x21-\x7e]/.test(value) ||
+    value.includes("\\")
+  ) {
+    throw new BridgeError("Invalid hosted verification link")
+  }
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    throw new BridgeError("Invalid hosted verification link")
+  }
+  const hosts =
+    kind === "identity"
+      ? ["bridge.withpersona.com"]
+      : ["dashboard.bridge.xyz", "compliance.bridge.xyz"]
+  if (
+    url.protocol !== "https:" ||
+    !hosts.includes(url.hostname) ||
+    url.username ||
+    url.password ||
+    url.port ||
+    url.hash ||
+    !value.startsWith(`https://${url.hostname}/`)
+  ) {
+    throw new BridgeError("Invalid hosted verification link")
+  }
+  return value
+}
+
 const initiateKyc = async ({
   accountId,
   email,
@@ -361,87 +512,121 @@ const initiateKyc = async ({
   type?: "individual" | "business"
   full_name: string
 }): Promise<InitiateKycResult | Error> => {
-  baseLogger.info({ accountId, operation: "initiateKyc" }, "Bridge operation started")
-
   const enabledCheck = checkBridgeEnabled()
   if (enabledCheck instanceof Error) return enabledCheck
-
-  const account = await checkAccountLevel(accountId)
-  if (account instanceof Error) return account
-
-  if (account.bridgeKycStatus === "approved") {
-    return new BridgeError("KYC already approved for this account")
-  }
-
-  const identity = await IdentityRepository().getIdentity(account.kratosUserId)
-
-  if (identity instanceof Error) return identity
-
-  const useremail = identity.email
-
-  try {
-    // Create KYC link
-    const kycLink = await BridgeApiClient.createKycLink({
-      email: useremail || email,
-      type: type || "individual",
-      full_name: full_name || account.username,
-    })
-
-    const result: InitiateKycResult = {
-      kycLink: kycLink.kyc_link,
-      customerId: kycLink.customer_id,
-      tosLink: kycLink.tos_link,
+  // Loading this adapter on demand avoids opening a Redis connection merely
+  // from importing the Bridge service (for tooling and isolated unit tests).
+  const { LockService, redlock } = await import("@services/lock")
+  return LockService().lockAccountId(accountId, async (signal) => {
+    const account = await checkAccountLevel(accountId)
+    if (account instanceof Error) return account
+    if (account.bridgeKycStatus === "approved") {
+      return new BridgeError("KYC already approved for this account")
     }
-
-    // link the customer Id to the bridge account
-    const customerId = toBridgeCustomerId(kycLink.customer_id)
-
-    const updateResult = await AccountsRepository().updateBridgeFields(accountId, {
-      bridgeCustomerId: customerId,
-      bridgeKycStatus: "open",
-    })
-
-    if (updateResult instanceof Error) {
-      return updateResult
-    }
-
-    baseLogger.info(
-      { accountId, operation: "initiateKyc", kycLink },
-      "Bridge operation completed",
-    )
-
-    return result
-  } catch (error) {
-    const bridgeError = error as {
-      statusCode?: number
-      response?: {
-        existing_kyc_link?: { kyc_link: string; customer_id: string; tos_link: string }
+    try {
+      if (signal.aborted) return new BridgeError("Verification request lock expired")
+      if (account.bridgeCustomerId !== undefined && account.bridgeCustomerId !== null) {
+        const customerId = checkedOwnedKycCustomerId(account.bridgeCustomerId)
+        // Lock order is always account -> provider customer. The namespace is
+        // distinct from wallet/payment locks and contains a validated ID only.
+        return redlock({
+          path: `locks:bridge-kyc-customer:${customerId}`,
+          asyncFn: async (customerSignal) =>
+            guardedKycWork(accountId, async () => {
+              if (signal.aborted || customerSignal.aborted)
+                return new BridgeError("Verification request lock expired")
+              const soleOwner = await requireSoleKycCustomerOwner(accountId, customerId)
+              if (soleOwner instanceof Error) return soleOwner
+              if (signal.aborted || customerSignal.aborted)
+                return new BridgeError("Verification request lock expired")
+              // Existing account ownership comes only from the stored association.
+              // Never POST by email or reset review status to obtain a continuation.
+              const identity = await BridgeApiClient.getHostedKycLink(customerId)
+              if (signal.aborted || customerSignal.aborted)
+                return new BridgeError("Verification request lock expired")
+              const terms = await BridgeApiClient.getHostedTosLink(customerId)
+              const current = await checkAccountLevel(accountId)
+              if (current instanceof Error) return current
+              if (
+                signal.aborted ||
+                customerSignal.aborted ||
+                current.bridgeCustomerId !== customerId
+              ) {
+                return new BridgeError("Bridge customer association changed")
+              }
+              const stillSoleOwner = await requireSoleKycCustomerOwner(
+                accountId,
+                customerId,
+              )
+              if (stillSoleOwner instanceof Error) return stillSoleOwner
+              if (signal.aborted || customerSignal.aborted)
+                return new BridgeError("Verification request lock expired")
+              return {
+                kycLink: hostedKycURL(identity?.url, "identity"),
+                customerId,
+                tosLink: hostedKycURL(terms?.url, "terms"),
+              }
+            }),
+        })
       }
-    }
 
-    if (bridgeError?.statusCode === 400 && bridgeError.response?.existing_kyc_link) {
-      // store the customer id and the kyc status
-      const customerId = toBridgeCustomerId(
-        bridgeError.response.existing_kyc_link.customer_id,
+      const identity = await IdentityRepository().getIdentity(account.kratosUserId)
+      if (identity instanceof Error) return identity
+      if (signal.aborted) return new BridgeError("Verification request lock expired")
+      // Stable per-account UUID: a lost response or local persistence failure
+      // cannot be bypassed by changing caller email/name within provider's
+      // idempotency retention. This is not an unlimited exactly-once guarantee.
+      const idempotencyKey = getUuidByString(`bridge-kyc-create:v1:${accountId}`)
+      const link = await BridgeApiClient.createKycLink(
+        {
+          email: identity.email || email,
+          type: type || "individual",
+          full_name: full_name || account.username,
+        },
+        idempotencyKey,
       )
-      await AccountsRepository().updateBridgeFields(accountId, {
-        bridgeCustomerId: customerId,
-        bridgeKycStatus: "not_started",
+      const kycLink = hostedKycURL(link?.kyc_link, "identity")
+      const tosLink = hostedKycURL(link?.tos_link, "terms")
+      const customerId = checkedOwnedKycCustomerId(link?.customer_id)
+      if (signal.aborted) return new BridgeError("Verification request lock expired")
+      return redlock({
+        path: `locks:bridge-kyc-customer:${customerId}`,
+        asyncFn: async (customerSignal) =>
+          guardedKycWork(accountId, async () => {
+            if (signal.aborted || customerSignal.aborted)
+              return new BridgeError("Verification request lock expired")
+            const owners = await AccountsRepository().findBridgeCustomerOwners(customerId)
+            if (owners instanceof Error) return owners
+            if (owners.length !== 0)
+              return new BridgeError("Bridge customer ownership requires review")
+            if (signal.aborted || customerSignal.aborted)
+              return new BridgeError("Verification request lock expired")
+            const bound = await AccountsRepository().bindBridgeCustomerIfUnbound(
+              accountId,
+              customerId,
+            )
+            if (bound instanceof Error) return bound
+            if (bound.bridgeCustomerId !== customerId)
+              return new BridgeError("Bridge customer association changed")
+            const current = await checkAccountLevel(accountId)
+            if (current instanceof Error) return current
+            if (
+              signal.aborted ||
+              customerSignal.aborted ||
+              current.bridgeCustomerId !== customerId
+            )
+              return new BridgeError("Bridge customer association changed")
+            const soleOwner = await requireSoleKycCustomerOwner(accountId, customerId)
+            if (soleOwner instanceof Error) return soleOwner
+            if (signal.aborted || customerSignal.aborted)
+              return new BridgeError("Verification request lock expired")
+            return { kycLink, customerId, tosLink }
+          }),
       })
-
-      return {
-        kycLink: bridgeError.response.existing_kyc_link.kyc_link,
-        customerId: bridgeError.response.existing_kyc_link.customer_id,
-        tosLink: bridgeError.response.existing_kyc_link.tos_link,
-      }
+    } catch (error) {
+      return sanitizedKycError(error, accountId)
     }
-
-    baseLogger.error(
-      { accountId, operation: "initiateKyc", error },
-      "Bridge operation failed",
-    )
-    return error instanceof Error ? error : new Error(String(error))
-  }
+  })
 }
 
 /**
@@ -1062,6 +1247,20 @@ const deleteExternalAccount = async (
   }
 }
 
+const rejectUnresolvedWithdrawalSend = async (
+  accountId: string,
+): Promise<Error | undefined> => {
+  const unresolved =
+    await BridgeAccountsRepo.findUnresolvedWithdrawalSendByAccountId(accountId)
+  if (unresolved instanceof Error) return unresolved
+  if (!unresolved) return undefined
+  reportWithdrawalSendUncertainty(
+    BridgeAccountsRepo.bridgeWithdrawalRecordId(unresolved),
+    "unresolved_prior_send",
+  )
+  return new BridgeWithdrawalSendOutcomeUnknownError()
+}
+
 /**
  * Requests a withdrawal — validates everything and stores a pending record in MongoDB.
  * Does NOT call the Bridge API. Returns the pending withdrawal so the frontend can
@@ -1079,6 +1278,9 @@ const requestWithdrawal = async (
 
   const enabledCheck = checkBridgeEnabled()
   if (enabledCheck instanceof Error) return enabledCheck
+  if (!validWithdrawalAmount(amount)) {
+    return new BridgeInsufficientFundsError("Invalid withdrawal amount")
+  }
 
   const account = await checkAccountLevel(accountId)
   if (account instanceof Error) return account
@@ -1089,6 +1291,8 @@ const requestWithdrawal = async (
       operation: "requestWithdrawal",
     })
     if (customerId instanceof Error) return customerId
+    const unresolvedSend = await rejectUnresolvedWithdrawalSend(accountId as string)
+    if (unresolvedSend) return unresolvedSend
 
     const ethereumAddress = account.bridgeEthereumAddress
     if (!ethereumAddress) {
@@ -1123,10 +1327,7 @@ const requestWithdrawal = async (
     if (!(balance instanceof USDTAmount)) {
       return new BridgeInsufficientFundsError("Invalid balance type")
     }
-    const withdrawalAmount = parseFloat(amount)
-    if (isNaN(withdrawalAmount) || withdrawalAmount <= 0) {
-      return new BridgeInsufficientFundsError("Invalid withdrawal amount")
-    }
+    const withdrawalAmount = Number(amount)
 
     const availableBalance = balance.toIbex()
     if (availableBalance < withdrawalAmount) {
@@ -1157,13 +1358,6 @@ const requestWithdrawal = async (
       return new BridgeError("External account is not verified")
     }
 
-    const feeEstimate = await resolveWithdrawalCustomerFeeEstimate(amount)
-    if (withdrawalAmount <= parseFloat(feeEstimate.estimatedCustomerFee)) {
-      return new BridgeWithdrawalNetAmountTooLowError(
-        `Withdrawal amount ${amount} must exceed estimated customer fees ${feeEstimate.estimatedCustomerFee}`,
-      )
-    }
-
     const existingWithdrawal =
       await BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer(
         accountId as string,
@@ -1171,39 +1365,62 @@ const requestWithdrawal = async (
         amount,
       )
     if (existingWithdrawal instanceof Error) return existingWithdrawal
-
-    let pendingWithdrawal
     if (existingWithdrawal) {
-      pendingWithdrawal = await BridgeAccountsRepo.updateWithdrawalFeeEstimates(
-        BridgeAccountsRepo.bridgeWithdrawalRecordId(existingWithdrawal),
-        feeEstimate,
-      )
-    } else {
-      pendingWithdrawal = await BridgeAccountsRepo.createWithdrawal({
-        accountId: accountId as string,
-        amount,
-        currency: "usdt",
-        externalAccountId,
-        flashFeePercent: feeEstimate.flashFeePercent,
-        flashFee: feeEstimate.flashFee,
-        estimatedBridgeFeePercent: feeEstimate.estimatedBridgeFeePercent,
-        estimatedBridgeFee: feeEstimate.estimatedBridgeFee,
-        estimatedGasBuffer: feeEstimate.estimatedGasBuffer,
-        estimatedCustomerFee: feeEstimate.estimatedCustomerFee,
-        status: "pending",
-      })
+      // Reusing a pending request reads its original quote. No changing gas
+      // probe can overwrite or mask what another confirmation screen saw.
+      const storedFeeMicros = decimalMicros(existingWithdrawal.estimatedCustomerFee)
+      const requestedMicros = decimalMicros(amount)
       if (
-        !(pendingWithdrawal instanceof Error) &&
-        !pendingWithdrawal.estimatedCustomerFee
+        !hasFrozenWithdrawalFeeEstimate(existingWithdrawal) ||
+        storedFeeMicros === undefined ||
+        requestedMicros === undefined ||
+        storedFeeMicros >= requestedMicros
       ) {
-        pendingWithdrawal = await BridgeAccountsRepo.updateWithdrawalFeeEstimates(
-          BridgeAccountsRepo.bridgeWithdrawalRecordId(pendingWithdrawal),
-          feeEstimate,
+        return new BridgeError(
+          "Withdrawal fee estimate is unavailable; cancel and request again",
         )
       }
+      return presentBridgeWithdrawal(existingWithdrawal)
     }
+
+    const feeEstimate = await resolveWithdrawalCustomerFeeEstimate(amount)
+    if (!hasFrozenWithdrawalFeeEstimate(feeEstimate)) {
+      return new BridgeError("Withdrawal fee estimate is unavailable")
+    }
+    const feeMicros = decimalMicros(feeEstimate.estimatedCustomerFee)
+    const requestedMicros = decimalMicros(amount)
+    if (feeMicros === undefined || requestedMicros === undefined) {
+      return new BridgeError("Withdrawal fee estimate is unavailable")
+    }
+    if (requestedMicros <= feeMicros) {
+      return new BridgeWithdrawalNetAmountTooLowError(
+        `Withdrawal amount ${amount} must exceed estimated customer fees ${feeEstimate.estimatedCustomerFee}`,
+      )
+    }
+
+    const pendingWithdrawal = await BridgeAccountsRepo.createWithdrawal({
+      accountId: accountId as string,
+      amount,
+      currency: "usdt",
+      externalAccountId,
+      flashFeePercent: feeEstimate.flashFeePercent,
+      flashFee: feeEstimate.flashFee,
+      estimatedBridgeFeePercent: feeEstimate.estimatedBridgeFeePercent,
+      estimatedBridgeFee: feeEstimate.estimatedBridgeFee,
+      estimatedGasBuffer: feeEstimate.estimatedGasBuffer,
+      estimatedCustomerFee: feeEstimate.estimatedCustomerFee,
+      status: "pending",
+    })
     if (pendingWithdrawal instanceof Error) {
       return asBridgeRequestWithdrawalError(pendingWithdrawal)
+    }
+    // A retry or racing request must show the same persisted fee estimate.
+    // Never refresh a pending row underneath a confirmation screen. Legacy
+    // rows without a complete estimate require cancellation and a new request.
+    if (!hasFrozenWithdrawalFeeEstimate(pendingWithdrawal)) {
+      return new BridgeError(
+        "Withdrawal fee estimate is unavailable; cancel and request again",
+      )
     }
 
     baseLogger.info(
@@ -1215,7 +1432,7 @@ const requestWithdrawal = async (
       "Bridge operation completed",
     )
 
-    return presentBridgeWithdrawal(pendingWithdrawal, feeEstimate)
+    return presentBridgeWithdrawal(pendingWithdrawal)
   } catch (error) {
     baseLogger.error(
       { accountId, operation: "requestWithdrawal", error },
@@ -1281,12 +1498,15 @@ const initiateWithdrawal = async (
   const account = await checkAccountLevel(accountId)
   if (account instanceof Error) return account
 
+  let dispatchFenceId: string | undefined
   try {
     const customerId = await requireApprovedBridgeCustomer({
       account,
       operation: "initiateWithdrawal",
     })
     if (customerId instanceof Error) return customerId
+    const unresolvedSend = await rejectUnresolvedWithdrawalSend(accountId as string)
+    if (unresolvedSend) return unresolvedSend
 
     const pendingWithdrawal = await BridgeAccountsRepo.findWithdrawalById(withdrawalId)
     if (pendingWithdrawal instanceof Error) {
@@ -1304,6 +1524,18 @@ const initiateWithdrawal = async (
     }
 
     const { amount, externalAccountId } = pendingWithdrawal
+    const amountMicros = decimalMicros(amount)
+    const feeMicros = decimalMicros(pendingWithdrawal.estimatedCustomerFee)
+    if (
+      pendingWithdrawal.currency !== "usdt" ||
+      amountMicros === undefined ||
+      amountMicros === 0n ||
+      !hasFrozenWithdrawalFeeEstimate(pendingWithdrawal) ||
+      feeMicros === undefined ||
+      feeMicros >= amountMicros
+    ) {
+      return new BridgeError("Withdrawal quote is unavailable; cancel and request again")
+    }
 
     const externalAccounts = await syncExternalAccountsFromBridge(
       accountId as string,
@@ -1315,6 +1547,9 @@ const initiateWithdrawal = async (
     )
     if (!targetAccount) {
       return new Error("External account not found")
+    }
+    if (targetAccount.status !== "verified") {
+      return new BridgeError("External account is not verified")
     }
 
     // Re-check balance at execution time — funds may have changed since the request
@@ -1369,10 +1604,12 @@ const initiateWithdrawal = async (
       idempotencyKey,
     )
 
-    const bridgeDepositAddress = bridgeDepositAddressFromTransfer(transfer)
-    if (!bridgeDepositAddress) {
-      return new BridgeDepositInstructionsMissingError()
-    }
+    const bridgeDepositAddress = checkedWithdrawalDepositAddress(
+      transfer,
+      customerId,
+      externalAccountId,
+    )
+    if (bridgeDepositAddress instanceof Error) return bridgeDepositAddress
 
     const submitted = await BridgeAccountsRepo.updateWithdrawalTransferId(
       pendingWithdrawal.id,
@@ -1403,7 +1640,7 @@ const initiateWithdrawal = async (
         amount: transfer.amount,
         currency: transfer.currency,
         bridgeDepositAddress,
-        failureReason: sendRequirements.message,
+        failureReason: "IBEX crypto send requirements unavailable before dispatch",
       })
       return sendRequirements
     }
@@ -1421,7 +1658,7 @@ const initiateWithdrawal = async (
         amount: transfer.amount,
         currency: transfer.currency,
         bridgeDepositAddress,
-        failureReason: cryptoSendInfo.message,
+        failureReason: "IBEX crypto send information unavailable before dispatch",
       })
       return cryptoSendInfo
     }
@@ -1439,89 +1676,84 @@ const initiateWithdrawal = async (
       return error
     }
 
+    const attemptId = crypto.randomUUID()
+    const reserved = await BridgeAccountsRepo.reserveWithdrawalCryptoSendAttempt({
+      id: pendingWithdrawal.id,
+      accountId: accountId as string,
+      bridgeTransferId: transfer.id,
+      attemptId,
+      sourceWalletId: usdtWallet.id,
+      cryptoSendInfoId: cryptoSendInfo.id,
+      amount,
+    })
+    if (
+      reserved instanceof Error ||
+      reserved.cryptoSendAttemptId !== attemptId ||
+      reserved.status !== "send_unknown"
+    ) {
+      reportWithdrawalSendUncertainty(
+        pendingWithdrawal.id,
+        "attempt_reservation_unconfirmed",
+      )
+      return new BridgeWithdrawalSendOutcomeUnknownError()
+    }
+    // No provider call is permitted until the majority-journaled CAS fence
+    // exists. Every failure after this point keeps it; never roll it back.
+    dispatchFenceId = pendingWithdrawal.id
     const sendResult = await IbexClient.sendCrypto({
       accountId: usdtWallet.id as IbexAccountId,
       cryptoSendInfosId: cryptoSendInfo.id,
       amount: sendAmount.toIbex(),
     })
-    if (sendResult instanceof Error) {
-      await markWithdrawalSendFailed({
-        accountId: accountId as string,
-        withdrawalId: pendingWithdrawal.id,
-        transferId: transfer.id,
-        amount: transfer.amount,
-        currency: transfer.currency,
-        bridgeDepositAddress,
-        failureReason: sendResult.message,
-      })
-      return sendResult
-    }
-
-    const ibexPayoutId = ibexPayoutIdFromSendResponse(sendResult)
-    if (!ibexPayoutId) {
-      baseLogger.error(
-        {
-          accountId,
-          withdrawalId: pendingWithdrawal.id,
-          transferId: transfer.id,
-          sendResult,
-        },
-        "IBEX crypto send succeeded without transaction id; manual payout linking required",
+    const ibexPayoutId =
+      sendResult instanceof Error ? undefined : ibexPayoutIdFromSendResponse(sendResult)
+    const responseStatus =
+      typeof sendResult === "object" && sendResult !== null
+        ? ((sendResult as { status?: unknown; transaction?: { status?: unknown } })
+            .transaction?.status ?? (sendResult as { status?: unknown }).status)
+        : undefined
+    const explicitFailure =
+      responseStatus !== undefined &&
+      (typeof responseStatus !== "string" ||
+        ["FAILED", "FAILURE", "REJECTED", "ERROR", "CANCELLED", "CANCELED"].includes(
+          responseStatus.toUpperCase(),
+        ))
+    if (
+      explicitFailure ||
+      typeof ibexPayoutId !== "string" ||
+      !/^[A-Za-z0-9_-]{1,256}$/.test(ibexPayoutId)
+    ) {
+      reportWithdrawalSendUncertainty(
+        pendingWithdrawal.id,
+        "provider_outcome_unconfirmed",
       )
+      return new BridgeWithdrawalSendOutcomeUnknownError()
     }
 
-    const updated = await BridgeAccountsRepo.updateWithdrawalOnchainSend(
+    const updated = await BridgeAccountsRepo.recordWithdrawalCryptoSendReceipt(
       pendingWithdrawal.id,
       ibexPayoutId,
       ibexTxHashFromSendResponse(sendResult),
+      attemptId,
     )
-    if (updated instanceof Error) return updated
-
-    await sendBridgeWithdrawalNotificationBestEffort({
-      accountId: accountId as string,
-      amount: updated.amount,
-      currency: updated.currency,
-      outcome: "usdt_sent",
-    })
-
-    const auditResult = await writeBridgeCashoutPending({
-      transferId: transfer.id,
-      amount: transfer.amount,
-      currency: transfer.currency,
-      accountId: accountId as string,
-      sourceEventId: updated.id,
-      sourceEventType: "bridge.withdrawal.usdt_sent",
-      rawPayload: {
-        withdrawalId: updated.id,
-        bridgeTransferId: transfer.id,
-        ibexPayoutId,
-        ibexTxHash: updated.ibexTxHash,
-      },
-    })
-    if (auditResult instanceof Error) {
-      baseLogger.warn(
-        { accountId, withdrawalId, transferId: transfer.id, error: auditResult },
-        "Failed to write pending Bridge cashout transfer request",
-      )
+    if (updated instanceof Error) {
+      reportWithdrawalSendUncertainty(pendingWithdrawal.id, "send_receipt_unconfirmed")
+      return new BridgeWithdrawalSendOutcomeUnknownError()
     }
-
-    baseLogger.info(
-      {
-        accountId,
-        operation: "initiateWithdrawal",
-        transferId: transfer.id,
-        ibexPayoutId,
-      },
-      "Bridge operation completed",
-    )
-
-    return presentBridgeWithdrawal(updated)
+    reportWithdrawalSendUncertainty(pendingWithdrawal.id, "provider_pending_confirmation")
+    // RN currently treats any error-free initiate result as final success.
+    // Keep this an explicit pending-review error until Bridge confirms payout.
+    return new BridgeWithdrawalSendOutcomeUnknownError()
   } catch (error) {
+    if (dispatchFenceId) {
+      reportWithdrawalSendUncertainty(dispatchFenceId, "provider_outcome_unconfirmed")
+      return new BridgeWithdrawalSendOutcomeUnknownError()
+    }
     baseLogger.error(
-      { accountId, operation: "initiateWithdrawal", error },
+      { operation: "initiateWithdrawal", outcome: "failed_before_dispatch" },
       "Bridge operation failed",
     )
-    return error instanceof Error ? error : new Error(String(error))
+    return error instanceof Error ? error : new Error("Withdrawal failed before dispatch")
   }
 }
 

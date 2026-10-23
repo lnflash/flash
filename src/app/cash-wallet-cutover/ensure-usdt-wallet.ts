@@ -2,6 +2,7 @@
 // repositories at module load, which drags the entire accounts module (and
 // its side effects) into every consumer of the presentation path.
 import { updateDefaultWalletId } from "@app/accounts/update-default-walletid"
+import { DeviceBootstrapError } from "@domain/authentication/device-bootstrap-error"
 import { WalletType } from "@domain/wallets"
 import { ErrorLevel, WalletCurrency } from "@domain/shared"
 import { LockService } from "@services/lock"
@@ -61,16 +62,40 @@ export const ensureUsdtWalletForAccount = async ({
   walletsRepo?: EnsureWalletsRepository
   updateDefaultWallet?: typeof updateDefaultWalletId
 }): Promise<Wallet | null> => {
-  const created = await LockService().lockAccountId(account.id, async () => {
+  const created = await LockService().lockAccountId(account.id, async (signal) => {
     // Re-check INSIDE the lock: the concurrent resolution that beat us to the
     // lock has already created the wallet, and finding it here is the whole
     // point of locking before creating.
     const wallets = await walletsRepo.listByAccountId(account.id)
     if (wallets instanceof Error) return wallets
-
-    const persistNew = walletsRepo.persistNew ?? WalletsRepository().persistNew
+    if (signal?.aborted)
+      return new DeviceBootstrapError("DEVICE_BOOTSTRAP_RETRY_REQUIRED")
 
     const existing = wallets.find((wallet) => wallet.currency === WalletCurrency.Usdt)
+    const legacyUsdWallet = wallets.find(
+      (wallet) => wallet.currency === WalletCurrency.Usd,
+    )
+    if (
+      !existing ||
+      (legacyUsdWallet && account.defaultWalletId === legacyUsdWallet.id)
+    ) {
+      // Controlled device bootstrap owns any missing-resource repair. This
+      // public presentation read must not re-dispatch an uncertain provider
+      // create, even after the same account upgrades to phone login.
+      try {
+        const { hasControlledDeviceBootstrap } = await import(
+          "@services/mongoose/device-bootstrap"
+        )
+        const controlled = await hasControlledDeviceBootstrap(account.id)
+        if (signal?.aborted)
+          return new DeviceBootstrapError("DEVICE_BOOTSTRAP_RETRY_REQUIRED")
+        if (controlled)
+          return existing ?? new DeviceBootstrapError("DEVICE_BOOTSTRAP_SUPPORT_REQUIRED")
+      } catch {
+        return new DeviceBootstrapError("DEVICE_BOOTSTRAP_RETRY_REQUIRED")
+      }
+    }
+    const persistNew = walletsRepo.persistNew ?? WalletsRepository().persistNew
     const usdtWallet =
       existing ??
       (await persistNew({
@@ -80,9 +105,6 @@ export const ensureUsdtWalletForAccount = async ({
       }))
     if (usdtWallet instanceof Error) return usdtWallet
 
-    const legacyUsdWallet = wallets.find(
-      (wallet) => wallet.currency === WalletCurrency.Usd,
-    )
     if (legacyUsdWallet && account.defaultWalletId === legacyUsdWallet.id) {
       const updated = await updateDefaultWallet({
         accountId: account.id,

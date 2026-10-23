@@ -95,8 +95,8 @@ describe("ErpNext.postIdVerification", () => {
 
     expect(result).toBeInstanceOf(IdVerificationCreateError)
     expect(baseLogger.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 404, upgradeRequest: "AUR-0001" }),
-      "Error creating ID Verification in ERPNext",
+      { status: 404, operation: "postIdVerification", code: "UNKNOWN" },
+      "ERPNext request failed",
     )
     expect(baseLogger.error).not.toHaveBeenCalled()
   })
@@ -249,8 +249,8 @@ describe("ErpNext.getIdVerificationByUpgradeRequest", () => {
       IdVerificationQueryError,
     )
     expect(baseLogger.error).toHaveBeenCalledWith(
-      expect.objectContaining({ upgradeRequest: "AUR-0001" }),
-      "Error querying ID Verification by upgrade request from ERPNext",
+      { operation: "getIdVerificationByUpgradeRequest", code: "UNKNOWN" },
+      "ERPNext request failed",
     )
   })
 })
@@ -315,8 +315,8 @@ describe("ErpNext.getDecisionReason", () => {
       DecisionReasonQueryError,
     )
     expect(baseLogger.error).toHaveBeenCalledWith(
-      expect.objectContaining({ code: "RESUBMIT_BLURRY" }),
-      "Error querying Decision Reason from ERPNext",
+      { operation: "getDecisionReason", code: "UNKNOWN", status: 500 },
+      "ERPNext request failed",
     )
   })
 
@@ -428,9 +428,7 @@ describe("ErpNext.postUpgradeRequest error log", () => {
 
     const [payload] = (baseLogger.error as jest.Mock).mock.calls[0]
     const serialized = JSON.stringify(payload)
-    expect(payload).toEqual(
-      expect.objectContaining({ username: "alice", requestedLevel: 2 }),
-    )
+    expect(payload).toEqual({ operation: "postUpgradeRequest", code: "UNKNOWN" })
     for (const pii of [
       "Alice Applicant",
       "+18765550100",

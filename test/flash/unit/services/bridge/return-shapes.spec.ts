@@ -62,7 +62,9 @@ jest.mock("@services/mongoose/bridge-accounts", () => ({
   findWithdrawalsByAccountId: jest.fn(),
   findWithdrawalById: jest.fn(),
   updateWithdrawalTransferId: jest.fn(),
-  updateWithdrawalOnchainSend: jest.fn(),
+  findUnresolvedWithdrawalSendByAccountId: jest.fn(),
+  reserveWithdrawalCryptoSendAttempt: jest.fn(),
+  recordWithdrawalCryptoSendReceipt: jest.fn(),
 }))
 
 jest.mock("@services/bridge/client", () => ({
@@ -88,6 +90,13 @@ jest.mock("@app/wallets/get-balance-for-wallet", () => ({
 
 jest.mock("@services/kratos", () => ({
   IdentityRepository: jest.fn(),
+}))
+
+// Plaid token storage is outside withdrawal return-shape coverage. Importing
+// its real cache dependency opens Redis connections even without a Plaid call.
+jest.mock("@services/cache", () => ({
+  RedisCacheService: jest.fn(),
+  consumeCacheKey: jest.fn(),
 }))
 
 jest.mock("@domain/primitives/bridge", () => ({
@@ -130,7 +139,7 @@ const CUSTOMER_ID = "cust-001"
 const ETHEREUM_ADDRESS = "ETH_ADDR_001"
 const TRANSFER_ID = "transfer-bridge-001"
 const WITHDRAWAL_ID = "withdrawal-mongo-001"
-const BRIDGE_DEPOSIT_ADDRESS = "0xbridgeDepositAddress"
+const BRIDGE_DEPOSIT_ADDRESS = "0x1111111111111111111111111111111111111111"
 const IBEX_PAYOUT_ID = "ibex-payout-001"
 const IBEX_CRYPTO_SEND_INFO_ID = "send-info-001"
 const CREATED_AT = new Date("2026-06-05T00:00:00.000Z")
@@ -149,6 +158,13 @@ const mockTransfer = {
   amount: AMOUNT,
   currency: "usd",
   state: "pending",
+  on_behalf_of: CUSTOMER_ID,
+  source: { payment_rail: "ethereum", currency: "usdt" },
+  destination: {
+    payment_rail: "ach",
+    currency: "usd",
+    external_account_id: EXTERNAL_ACCOUNT_ID,
+  },
   source_deposit_instructions: {
     payment_rail: "ethereum",
     currency: "usdt",
@@ -170,6 +186,12 @@ const makeRow = (overrides: Record<string, unknown> = {}) => ({
   currency: "usdt",
   externalAccountId: EXTERNAL_ACCOUNT_ID,
   status: "pending" as const,
+  flashFeePercent: "2",
+  flashFee: "1.00",
+  estimatedBridgeFeePercent: "0.6",
+  estimatedBridgeFee: "0.30",
+  estimatedGasBuffer: "1.00",
+  estimatedCustomerFee: "2.30",
   bridgeTransferId: undefined,
   failureReason: undefined,
   createdAt: CREATED_AT,
@@ -230,6 +252,15 @@ const setupGuards = () => {
     ],
     has_more: false,
   })
+  ;(
+    BridgeAccountsRepo.findUnresolvedWithdrawalSendByAccountId as jest.Mock
+  ).mockResolvedValue(null)
+  ;(
+    BridgeAccountsRepo.reserveWithdrawalCryptoSendAttempt as jest.Mock
+  ).mockImplementation(async (args) => ({
+    status: "send_unknown",
+    cryptoSendAttemptId: args.attemptId,
+  }))
   ;(BridgeAccountsRepo.findWithdrawalById as jest.Mock).mockResolvedValue(makeRow())
   ;(BridgeAccountsRepo.updateWithdrawalTransferId as jest.Mock).mockResolvedValue({
     ...makeRow(),
@@ -240,7 +271,7 @@ const setupGuards = () => {
     finalAmount: "48.90",
     status: "submitted" as const,
   })
-  ;(BridgeAccountsRepo.updateWithdrawalOnchainSend as jest.Mock).mockResolvedValue({
+  ;(BridgeAccountsRepo.recordWithdrawalCryptoSendReceipt as jest.Mock).mockResolvedValue({
     ...makeRow(),
     bridgeTransferId: TRANSFER_ID,
     bridgeDeveloperFee: "1.00",
@@ -276,20 +307,10 @@ describe("initiateWithdrawal — BridgeWithdrawal GraphQL contract shape", () =>
     setupGuards()
   })
 
-  it("returns every NonNull field required by the BridgeWithdrawal GraphQL type", async () => {
+  it("returns an explicit pending-review error instead of an error-free success for a PENDING send", async () => {
     const result = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
-
-    expect(result).not.toBeInstanceOf(Error)
-    if (result instanceof Error) return
-
-    expect(result.id).toBe(WITHDRAWAL_ID)
-    expect(result.amount).toBe(AMOUNT)
-    expect(result.currency).toBe("usdt")
-    expect(result.status).toBe("usdt_sent")
-    expect(result.createdAt).toBe(CREATED_AT.toISOString())
-    expect(result.bridgeTransferId).toBe(TRANSFER_ID)
-    expect((result as Record<string, unknown>).transferId).toBeUndefined()
-    expect((result as Record<string, unknown>).state).toBeUndefined()
+    expect((result as Error).name).toBe("BridgeWithdrawalSendOutcomeUnknownError")
+    expect((result as Error).message).toMatch(/pending confirmation/)
   })
 })
 

@@ -131,6 +131,7 @@ export const apiKeyNestedFieldScopes: Record<
   Record<string, ApiKeyScope>
 > = Object.freeze({
   ConsumerAccount: {
+    ownedWalletSnapshot: "read:wallet",
     wallets: "read:wallet",
     transactions: "read:transactions",
     csvTransactions: "read:transactions",
@@ -138,6 +139,9 @@ export const apiKeyNestedFieldScopes: Record<
   UserContact: {
     transactions: "read:transactions",
     transactionsCount: "read:transactions",
+  },
+  OwnedWalletSnapshot: {
+    wallets: "read:wallet",
   },
   BTCWallet: {
     balance: "read:wallet",

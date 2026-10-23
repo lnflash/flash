@@ -21,6 +21,7 @@ jest.mock("@services/frappe/BridgeTransferRequestWriter", () => ({
 }))
 
 import { Request, Response } from "express"
+import { BridgeWithdrawalCompletionProofRequiredError } from "@domain/bridge/withdrawal-outcome"
 import { LockService } from "@services/lock"
 import * as BridgeAccountsRepo from "@services/mongoose/bridge-accounts"
 import { sendBridgeWithdrawalNotificationBestEffort } from "@app/bridge/send-withdrawal-notification"
@@ -105,6 +106,41 @@ describe("transferHandler", () => {
       "bridge-transfer:tr-abc:transfer.completed:payment_processed",
     )
     expect(res.status as jest.Mock).toHaveBeenCalledWith(200)
+  })
+
+  it("acknowledges an event-name-only completion as pending review without clearing an unknown send", async () => {
+    updateFn.mockResolvedValue(new BridgeWithdrawalCompletionProofRequiredError())
+    const res = makeRes()
+    await transferHandler(
+      makeReq({
+        event_type: "transfer.completed",
+        event_object: { id: "tr-abc", state: "pending" },
+      }),
+      res,
+    )
+    expect(updateFn).toHaveBeenCalledWith("tr-abc", "completed", undefined, undefined)
+    expect(writeBridgeCashoutCompleted).not.toHaveBeenCalled()
+    expect(sendBridgeWithdrawalNotificationBestEffort).not.toHaveBeenCalled()
+    expect(lockFn).not.toHaveBeenCalled()
+    expect(res.status as jest.Mock).toHaveBeenCalledWith(200)
+    expect(res.json as jest.Mock).toHaveBeenCalledWith({ status: "pending_review" })
+  })
+
+  it("passes explicit provider state proof for a payment_processed completion", async () => {
+    const res = makeRes()
+    await transferHandler(
+      makeReq({
+        event_type: "transfer.completed",
+        event_object: { id: "tr-abc", state: "payment_processed" },
+      }),
+      res,
+    )
+    expect(updateFn).toHaveBeenCalledWith(
+      "tr-abc",
+      "completed",
+      undefined,
+      "payment_processed",
+    )
   })
 
   it("does not acquire lock when status update fails", async () => {

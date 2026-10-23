@@ -1,5 +1,6 @@
 import { DomainError, ErrorLevel } from "@domain/shared"
-import { FirebaseError } from "firebase-admin"
+
+import { safeFirebaseMessagingCode } from "./firebase-error-code"
 
 export class NotificationsError extends DomainError {}
 
@@ -67,12 +68,9 @@ export class InvalidPushNotificationSettingError extends NotificationsError {}
 
 export class FirebaseNotAvailable extends NotificationsServiceError {}
 export class FirebaseMessageError extends NotificationsServiceError {
-  constructor(error: FirebaseError, token: DeviceToken) {
-    super(
-      JSON.stringify({
-        ...error,
-        token,
-      }),
-    )
+  readonly failureCode: string
+  constructor(error: unknown) {
+    super("Firebase messaging request failed")
+    this.failureCode = safeFirebaseMessagingCode(error)
   }
 }

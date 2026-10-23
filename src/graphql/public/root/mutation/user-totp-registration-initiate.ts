@@ -30,7 +30,7 @@ const UserTotpRegistrationInitiateMutation = GT.Field<
   args: {
     input: { type: GT.NonNull(UserTotpRegistrationInitiateInput) },
   },
-  resolve: async (_, args) => {
+  resolve: async (_, args, { user }) => {
     const { authToken } = args.input
 
     if (authToken instanceof Error) {
@@ -39,6 +39,7 @@ const UserTotpRegistrationInitiateMutation = GT.Field<
 
     const res = await Authentication.initiateTotpRegistration({
       authToken,
+      userId: user.id,
     })
 
     if (res instanceof Error) {

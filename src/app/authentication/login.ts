@@ -1,9 +1,13 @@
+import { createHash } from "crypto"
+
 import { upgradeAccountFromDeviceToPhone } from "@app/accounts"
-import { createAccountForDeviceAccount } from "@app/accounts/create-account"
+import { resumeDeviceAccountBootstrap } from "@app/accounts/device-account-bootstrap"
+import { DeviceBootstrapError } from "@domain/authentication/device-bootstrap-error"
 import { getBalanceForWallet } from "@app/wallets"
 
 import {
   EmailUnverifiedError,
+  AuthenticationError,
   IdentifierNotFoundError,
 } from "@domain/authentication/errors"
 
@@ -372,11 +376,13 @@ export const loginWithDevice = async ({
   password: passwordRaw,
   ip,
   deviceId: deviceIdRaw,
+  signal,
 }: {
   ip: IpAddress
   username: string
   password: string
   deviceId: string
+  signal?: { readonly aborted: boolean }
 }): Promise<AuthToken | ApplicationError> => {
   {
     const limitOk = await checkFailedLoginAttemptPerIpLimits(ip)
@@ -386,13 +392,18 @@ export const loginWithDevice = async ({
   // add check on property from jwt, like expiry
 
   const deviceId = checkedToDeviceId(deviceIdRaw)
-  if (deviceId instanceof Error) return deviceId
+  if (deviceId instanceof Error)
+    return new AuthenticationError("Invalid device credentials")
 
   const username = checkedToIdentityUsername(usernameRaw)
-  if (username instanceof Error) return username
+  if (username instanceof Error)
+    return new AuthenticationError("Invalid device credentials")
 
   const password = checkedToIdentityPassword(passwordRaw)
-  if (password instanceof Error) return password
+  if (password instanceof Error)
+    return new AuthenticationError("Invalid device credentials")
+  if (username.toString() !== deviceId.toString())
+    return new DeviceBootstrapError("DEVICE_BOOTSTRAP_OWNER_MISMATCH")
 
   const { ipMetadataValidationSettings } = getAccountsOnboardConfig()
 
@@ -401,9 +412,8 @@ export const loginWithDevice = async ({
 
     if (ipFetcherInfo instanceof IpFetcherServiceError) {
       recordExceptionInCurrentSpan({
-        error: ipFetcherInfo,
+        error: new IpFetcherServiceError("IP metadata lookup failed"),
         level: ErrorLevel.Critical,
-        attributes: { ip },
       })
       return ipFetcherInfo
     }
@@ -420,22 +430,44 @@ export const loginWithDevice = async ({
     }
   }
 
-  const authService = AuthWithUsernamePasswordDeviceIdService()
-  const res = await authService.createIdentityWithSession({
-    username,
-    password,
+  // Consistent order: authenticated device-identity namespace, then the
+  // journal's exact local account lock. No credential appears in a Redis key.
+  const { redlock } = await import("@services/lock")
+  const key = createHash("sha256").update(username).digest("hex")
+  return redlock({
+    path: `locks:device-bootstrap-identity:${key}`,
+    asyncFn: async (identitySignal) => {
+      if (signal?.aborted || identitySignal.aborted)
+        return new DeviceBootstrapError("DEVICE_BOOTSTRAP_RETRY_REQUIRED")
+      let res: Awaited<
+        ReturnType<
+          ReturnType<
+            typeof AuthWithUsernamePasswordDeviceIdService
+          >["createIdentityWithSession"]
+        >
+      >
+      try {
+        res = await AuthWithUsernamePasswordDeviceIdService().createIdentityWithSession({
+          username,
+          password,
+        })
+      } catch {
+        return new DeviceBootstrapError("DEVICE_BOOTSTRAP_RETRY_REQUIRED")
+      }
+      if (res instanceof Error) return res
+      // This always executes after successful password authentication, including
+      // repeat logins. A fresh bearer alone never authorizes wallet repair.
+      const ready = await resumeDeviceAccountBootstrap({
+        userId: res.kratosUserId,
+        deviceId,
+        isCancelled: () => !!signal?.aborted || identitySignal.aborted,
+      })
+      if (ready instanceof Error) return ready
+      if (signal?.aborted || identitySignal.aborted)
+        return new DeviceBootstrapError("DEVICE_BOOTSTRAP_RETRY_REQUIRED")
+      return res.authToken
+    },
   })
-  if (res instanceof Error) return res
-
-  if (res.newEntity) {
-    const account = await createAccountForDeviceAccount({
-      userId: res.kratosUserId,
-      deviceId,
-    })
-    if (account instanceof Error) return account
-  }
-
-  return res.authToken
 }
 
 const isAllowedToOnboard = async ({
@@ -460,15 +492,14 @@ const isAllowedToOnboard = async ({
 
     if (ipFetcherInfo instanceof IpFetcherServiceError) {
       recordExceptionInCurrentSpan({
-        error: ipFetcherInfo,
+        error: new IpFetcherServiceError("IP metadata lookup failed"),
         level: ErrorLevel.Critical,
-        attributes: { ip },
       })
       return ipFetcherInfo
     }
 
     addAttributesToCurrentSpan({
-      "login.ipFetcherInfo": JSON.stringify(ipFetcherInfo),
+      "login.ipMetadataFetched": true,
     })
 
     const authorizedIPMetadata = IPMetadataAuthorizer(
@@ -500,7 +531,7 @@ const isAllowedToOnboard = async ({
     ).authorize(phoneMetadata)
 
     addAttributesToCurrentSpan({
-      "login.phoneMetadata": JSON.stringify(phoneMetadata),
+      "login.phoneMetadataFetched": true,
     })
 
     if (authorizedPhoneMetadata instanceof Error) {

@@ -16,6 +16,9 @@ import { PubSubDefaultTriggers } from "@domain/pubsub"
 import { toBridgeTransferId } from "@domain/primitives/bridge"
 
 import BridgeApiClient from "./client"
+import { reportWithdrawalSendUncertainty } from "./withdrawal-send-uncertainty"
+
+export const WITHDRAWAL_REVIEW_BATCH_LIMIT = 100
 
 const FIFTEEN_MIN_MS = 15 * 60 * 1000
 
@@ -59,7 +62,9 @@ type BridgeWithdrawalLike = {
   ibexPayoutId?: string
   amount: string
   currency: string
-  status: "usdt_sent" | "send_failed"
+  status: "usdt_sent" | "send_failed" | "send_unknown" | "submitted"
+  cryptoSendState?: string
+  cryptoSendAttemptId?: string
   failureReason?: string
   updatedAt: Date
   createdAt: Date
@@ -242,6 +247,7 @@ export const reconcileBridgeAndIbexWithdrawals = async ({
       finalizedCompletedTransfers: number
       ibexSendWithoutBridgeSettlement: number
       bridgeTransferWithoutIbexSend: number
+      unresolvedSendOutcomes: number
     }
   | Error
 > => {
@@ -250,10 +256,14 @@ export const reconcileBridgeAndIbexWithdrawals = async ({
     const since = new Date(now.getTime() - windowMs)
 
     const withdrawals = (await BridgeWithdrawal.find({
-      updatedAt: { $gte: since, $lte: now },
-      status: { $in: ["usdt_sent", "send_failed"] },
-      bridgeTransferId: { $exists: true },
+      $or: [
+        { status: { $in: ["send_unknown", "send_failed", "usdt_sent"] } },
+        { status: "submitted", updatedAt: { $lte: since } },
+      ],
     })
+      .sort({ cryptoSendReviewedAt: 1, _id: 1 })
+      .limit(WITHDRAWAL_REVIEW_BATCH_LIMIT)
+      .maxTimeMS(5_000)
       .lean()
       .exec()) as BridgeWithdrawalLike[]
 
@@ -261,91 +271,141 @@ export const reconcileBridgeAndIbexWithdrawals = async ({
     let finalizedCompletedTransfers = 0
     let ibexSendWithoutBridgeSettlement = 0
     let bridgeTransferWithoutIbexSend = 0
+    let unresolvedSendOutcomes = 0
 
     for (const withdrawal of withdrawals) {
-      const transferId = withdrawal.bridgeTransferId
-      if (!transferId) continue
-      const bridgeTransferId = toBridgeTransferId(transferId)
+      const recordId = String(withdrawal.id ?? withdrawal._id ?? "")
+      try {
+        if (
+          withdrawal.status === "send_unknown" ||
+          withdrawal.status === "submitted" ||
+          (withdrawal.status === "usdt_sent" && !withdrawal.ibexPayoutId) ||
+          (withdrawal.status === "send_failed" &&
+            (withdrawal.cryptoSendState !== "not_dispatched" ||
+              withdrawal.cryptoSendAttemptId !== undefined))
+        ) {
+          // A pending receipt is not settlement. Only the exact Bridge transfer's
+          // authoritative processed state can resolve this durable uncertainty.
+          if (withdrawal.bridgeTransferId) {
+            try {
+              const transfer = await BridgeApiClient.getTransfer(
+                toBridgeTransferId(withdrawal.bridgeTransferId),
+              )
+              if (
+                transfer.id === withdrawal.bridgeTransferId &&
+                transfer.state === "payment_processed"
+              ) {
+                const finalized = await BridgeAccountsRepo.updateWithdrawalStatus(
+                  toBridgeTransferId(withdrawal.bridgeTransferId),
+                  "completed",
+                  undefined,
+                  "payment_processed",
+                )
+                if (!(finalized instanceof Error)) {
+                  finalizedCompletedTransfers++
+                  continue
+                }
+              }
+            } catch {
+              // Lookup errors never prove absence of debit and must not cancel.
+            }
+          }
+          reportWithdrawalSendUncertainty(recordId, "legacy_send_outcome_unconfirmed")
+          unresolvedSendOutcomes++
+          continue
+        }
 
-      if (withdrawal.status === "send_failed") {
-        try {
-          await BridgeApiClient.deleteTransfer(bridgeTransferId)
-          cancelledSendFailedTransfers++
-        } catch (error) {
-          bridgeTransferWithoutIbexSend++
-          const reason = "Bridge transfer exists but IBEX crypto send failed"
-          await upsertBridgeReconciliationOrphan({
-            orphanKey: toOrphanKey("withdrawal-send-failed", transferId),
-            orphanType: "bridge_transfer_without_ibex_send",
-            transferId,
-            amount: withdrawal.amount,
-            currency: withdrawal.currency,
-            triageContext: {
-              reason,
-              windowStart: since.toISOString(),
-              windowEnd: now.toISOString(),
-              accountId: withdrawal.accountId,
-              bridgeDepositAddress: withdrawal.bridgeDepositAddress,
-              failureReason: withdrawal.failureReason,
-              deleteTransferError: error instanceof Error ? error.message : String(error),
-            },
-          })
-          alertIbexReconciliationOrphan({
-            orphanType: "bridge_transfer_without_ibex_send",
-            transferId,
-            reason,
-            context: {
-              account_id: withdrawal.accountId,
+        const transferId = withdrawal.bridgeTransferId
+        if (!transferId) continue
+        const bridgeTransferId = toBridgeTransferId(transferId)
+
+        if (withdrawal.status === "send_failed") {
+          try {
+            await BridgeApiClient.deleteTransfer(bridgeTransferId)
+            cancelledSendFailedTransfers++
+          } catch (error) {
+            bridgeTransferWithoutIbexSend++
+            const reason = "Bridge transfer exists but IBEX crypto send failed"
+            await upsertBridgeReconciliationOrphan({
+              orphanKey: toOrphanKey("withdrawal-send-failed", transferId),
+              orphanType: "bridge_transfer_without_ibex_send",
+              transferId,
               amount: withdrawal.amount,
               currency: withdrawal.currency,
-            },
-          })
+              triageContext: {
+                reason,
+                windowStart: since.toISOString(),
+                windowEnd: now.toISOString(),
+                operation: "cancel_proven_not_dispatched",
+                outcome: "cancel_unconfirmed",
+              },
+            })
+            alertIbexReconciliationOrphan({
+              orphanType: "bridge_transfer_without_ibex_send",
+              transferId,
+              reason,
+              context: {
+                account_id: withdrawal.accountId,
+                amount: withdrawal.amount,
+                currency: withdrawal.currency,
+              },
+            })
+          }
+          continue
         }
-        continue
-      }
 
-      const transfer = await BridgeApiClient.getTransfer(bridgeTransferId)
-      if (transfer.state === "payment_processed") {
-        const finalized = await BridgeAccountsRepo.updateWithdrawalStatus(
-          bridgeTransferId,
-          "completed",
-        )
-        if (!(finalized instanceof Error)) finalizedCompletedTransfers++
-        continue
-      }
+        const transfer = await BridgeApiClient.getTransfer(bridgeTransferId)
+        if (transfer.state === "payment_processed") {
+          const finalized = await BridgeAccountsRepo.updateWithdrawalStatus(
+            bridgeTransferId,
+            "completed",
+          )
+          if (!(finalized instanceof Error)) finalizedCompletedTransfers++
+          continue
+        }
 
-      if (!WITHDRAWAL_TERMINAL_FAILURE_STATES.has(transfer.state)) continue
+        if (!WITHDRAWAL_TERMINAL_FAILURE_STATES.has(transfer.state)) continue
 
-      ibexSendWithoutBridgeSettlement++
-      const reason = `IBEX crypto send succeeded but Bridge transfer is ${transfer.state}`
-      await upsertBridgeReconciliationOrphan({
-        orphanKey: toOrphanKey("withdrawal-ibex-sent", transferId),
-        orphanType: "ibex_send_without_bridge_settlement",
-        transferId,
-        customerId: transfer.on_behalf_of,
-        amount: withdrawal.amount,
-        currency: withdrawal.currency,
-        triageContext: {
-          reason,
-          windowStart: since.toISOString(),
-          windowEnd: now.toISOString(),
-          accountId: withdrawal.accountId,
-          ibexPayoutId: withdrawal.ibexPayoutId,
-          bridgeState: transfer.state,
-        },
-      })
-      alertIbexReconciliationOrphan({
-        orphanType: "ibex_send_without_bridge_settlement",
-        transferId,
-        reason,
-        context: {
-          account_id: withdrawal.accountId,
-          ibex_payout_id: withdrawal.ibexPayoutId,
-          bridge_state: transfer.state,
+        ibexSendWithoutBridgeSettlement++
+        const reason = `IBEX crypto send succeeded but Bridge transfer is ${transfer.state}`
+        await upsertBridgeReconciliationOrphan({
+          orphanKey: toOrphanKey("withdrawal-ibex-sent", transferId),
+          orphanType: "ibex_send_without_bridge_settlement",
+          transferId,
+          customerId: transfer.on_behalf_of,
           amount: withdrawal.amount,
           currency: withdrawal.currency,
-        },
-      })
+          triageContext: {
+            reason,
+            windowStart: since.toISOString(),
+            windowEnd: now.toISOString(),
+            accountId: withdrawal.accountId,
+            ibexPayoutId: withdrawal.ibexPayoutId,
+            bridgeState: transfer.state,
+          },
+        })
+        alertIbexReconciliationOrphan({
+          orphanType: "ibex_send_without_bridge_settlement",
+          transferId,
+          reason,
+          context: {
+            account_id: withdrawal.accountId,
+            ibex_payout_id: withdrawal.ibexPayoutId,
+            bridge_state: transfer.state,
+            amount: withdrawal.amount,
+            currency: withdrawal.currency,
+          },
+        })
+      } finally {
+        // Separate review progress provides a fair bounded cross-age scan;
+        // never change status/updatedAt or authorize a retry as bookkeeping.
+        if (recordId) {
+          const reviewed =
+            await BridgeAccountsRepo.noteWithdrawalCryptoSendReviewed(recordId)
+          if (reviewed instanceof Error)
+            reportWithdrawalSendUncertainty(recordId, "review_progress_unconfirmed")
+        }
+      }
     }
 
     const summary = {
@@ -354,6 +414,7 @@ export const reconcileBridgeAndIbexWithdrawals = async ({
       finalizedCompletedTransfers,
       ibexSendWithoutBridgeSettlement,
       bridgeTransferWithoutIbexSend,
+      unresolvedSendOutcomes,
     }
 
     baseLogger.info(summary, "Bridge withdrawal reconciliation completed")

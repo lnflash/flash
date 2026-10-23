@@ -1,5 +1,7 @@
 import crypto from "crypto"
 
+import type { DeviceBootstrapJournalRecord } from "@domain/accounts/device-bootstrap"
+
 import {
   getDefaultAccountsConfig,
   getFeesConfig,
@@ -50,6 +52,13 @@ interface IBridgeWithdrawalRecord {
   bridgeDepositAddress?: string
   ibexPayoutId?: string
   ibexTxHash?: string
+  cryptoSendState?: "not_dispatched" | "attempted"
+  cryptoSendAttemptId?: string
+  cryptoSendAttemptedAt?: Date
+  cryptoSendReviewedAt?: Date
+  cryptoSendSourceWalletId?: string
+  cryptoSendInfoId?: string
+  cryptoSendAmount?: string
   amount: string
   currency: string
   status:
@@ -57,6 +66,7 @@ interface IBridgeWithdrawalRecord {
     | "submitted"
     | "usdt_sent"
     | "send_failed"
+    | "send_unknown"
     | "completed"
     | "failed"
     | "cancelled"
@@ -776,6 +786,13 @@ const BridgeWithdrawalSchema = new Schema<IBridgeWithdrawalRecord>({
   bridgeDepositAddress: { type: String },
   ibexPayoutId: { type: String, unique: true, sparse: true },
   ibexTxHash: { type: String },
+  cryptoSendState: { type: String, enum: ["not_dispatched", "attempted"] },
+  cryptoSendAttemptId: { type: String },
+  cryptoSendAttemptedAt: { type: Date },
+  cryptoSendReviewedAt: { type: Date },
+  cryptoSendSourceWalletId: { type: String },
+  cryptoSendInfoId: { type: String },
+  cryptoSendAmount: { type: String },
   amount: { type: String, required: true },
   currency: { type: String, required: true },
   status: {
@@ -785,6 +802,7 @@ const BridgeWithdrawalSchema = new Schema<IBridgeWithdrawalRecord>({
       "submitted",
       "usdt_sent",
       "send_failed",
+      "send_unknown",
       "completed",
       "failed",
       "cancelled",
@@ -818,6 +836,19 @@ BridgeWithdrawalSchema.index(
     partialFilterExpression: { status: "pending" },
   },
 )
+
+// One unresolved dispatch per account, including concurrent distinct requests.
+// The repository also creates/verifies this exact index before any dispatch.
+BridgeWithdrawalSchema.index(
+  { accountId: 1 },
+  {
+    unique: true,
+    name: "bridge_withdrawal_unresolved_send",
+    partialFilterExpression: { status: "send_unknown" },
+  },
+)
+
+BridgeWithdrawalSchema.index({ status: 1, cryptoSendReviewedAt: 1, _id: 1 })
 
 const BridgeDepositsSchema = new Schema({
   eventId: { type: String, required: true, unique: true },
@@ -1069,4 +1100,43 @@ export const BridgeExternalAccount = mongoose.model<IBridgeExternalAccountRecord
 export const BridgeWithdrawal = mongoose.model<IBridgeWithdrawalRecord>(
   "BridgeWithdrawal",
   BridgeWithdrawalSchema,
+)
+
+const DeviceBootstrapSlotSchema = new Schema(
+  {
+    state: {
+      type: String,
+      required: true,
+      enum: ["planned", "dispatching", "known", "attached", "blocked"],
+    },
+    attemptId: String,
+    providerId: String,
+    origin: { type: String, enum: ["created", "local"] },
+  },
+  { _id: false },
+)
+
+const DeviceAccountBootstrapSchema = new Schema<DeviceBootstrapJournalRecord>(
+  {
+    _id: { type: String, required: true },
+    version: { type: Number, required: true, enum: [1] },
+    userId: { type: String, required: true },
+    accountId: { type: String, required: true, index: true },
+    mode: { type: String, required: true, enum: ["new", "legacy-local"] },
+    phase: { type: String, required: true, enum: ["initializing", "ready"] },
+    wallets: {
+      USD: { type: DeviceBootstrapSlotSchema, required: true },
+      USDT: { type: DeviceBootstrapSlotSchema, required: true },
+    },
+    createdAt: { type: Date, required: true },
+    updatedAt: { type: Date, required: true },
+  },
+  { versionKey: false },
+)
+
+// The immutable hash primary key is the only uniqueness dependency. No legacy
+// User/device index is created and no credential/token is stored here.
+export const DeviceAccountBootstrap = mongoose.model<DeviceBootstrapJournalRecord>(
+  "DeviceAccountBootstrap",
+  DeviceAccountBootstrapSchema,
 )

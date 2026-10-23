@@ -207,7 +207,7 @@ describe("ErpNext bank accounts", () => {
       const result = await client.createBankAccount(createArgs)
 
       expect(result).toBeInstanceOf(BankAccountCreateError)
-      expect((result as Error).message).toBe("An internal error occurred")
+      expect((result as Error).message).toBe("Invalid ERPNext bank account response")
     })
 
     it("maps the duplicate-number refusal", async () => {
@@ -321,7 +321,7 @@ describe("ErpNext bank accounts", () => {
       const result = await client.createBankAccount(createArgs)
 
       expect(result).toBeInstanceOf(BankAccountCreateError)
-      expect((result as Error).message).toBe("ECONNREFUSED")
+      expect((result as Error).message).toBe("ERPNext request failed")
     })
 
     it("never logs the full account number", async () => {
@@ -331,9 +331,11 @@ describe("ErpNext bank accounts", () => {
 
       expect(JSON.stringify((result as Error).message)).not.toContain(ACCOUNT_NUMBER)
       expectNoFullAccountNumberLogged()
-      expect(loggedError.mock.calls[0][0]).toEqual(
-        expect.objectContaining({ erpParty: "CUST-1", accountNumberLast4: "6655" }),
-      )
+      expect(loggedError.mock.calls[0][0]).toEqual({
+        operation: "createBankAccount",
+        code: "UNKNOWN",
+        status: 500,
+      })
     })
   })
 

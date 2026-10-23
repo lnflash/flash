@@ -41,6 +41,8 @@ jest.mock("@services/logger", () => {
 })
 
 import { sendBridgeDepositNotificationBestEffort } from "@app/bridge/send-deposit-notification"
+import { NotificationsServiceError } from "@domain/notifications"
+import { baseLogger } from "@services/logger"
 
 const ACCOUNT_ID = "507f1f77bcf86cd799439011"
 
@@ -134,4 +136,32 @@ describe("sendBridgeDepositNotificationBestEffort — payload content", () => {
       currency: "USD",
     })
   })
+})
+
+describe("outcome push telemetry", () => {
+  afterEach(() => jest.clearAllMocks())
+
+  it.each(["returned", "thrown"])(
+    "keeps private notification and provider data out of logs for %s failures",
+    async (mode) => {
+      const privateValue = "PRIVATE_DEVICE_TOKEN_AND_NOTIFICATION"
+      findUserById.mockResolvedValue({ deviceTokens: [privateValue], language: "en" })
+      const failure = new NotificationsServiceError(privateValue)
+      if (mode === "returned") mockSendFiltered.mockResolvedValue(failure)
+      else mockSendFiltered.mockRejectedValue(failure)
+      await sendBridgeDepositNotificationBestEffort({
+        accountId: ACCOUNT_ID,
+        amount: "10",
+        currency: "USD",
+      })
+      expect(mockSendFiltered).toHaveBeenCalledTimes(1)
+      expect(baseLogger.warn).toHaveBeenCalledWith(
+        { operation: "send_outcome_push", outcome: "failed" },
+        "Unable to send outcome push",
+      )
+      expect(JSON.stringify(jest.mocked(baseLogger.warn).mock.calls)).not.toContain(
+        privateValue,
+      )
+    },
+  )
 })

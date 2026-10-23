@@ -23,6 +23,12 @@ jest.mock("@app", () => ({
     createAccountFromRegistrationPayload: jest.fn(),
   },
 }))
+jest.mock("@services/tracing", () => ({
+  wrapAsyncToRunInSpan: ({ fn }: { fn: unknown }) => fn,
+}))
+jest.mock("@services/logger", () => ({
+  baseLogger: { error: jest.fn(), warn: jest.fn() },
+}))
 
 const mockValidate = Authentication.validatePreRegistrationPayload as jest.MockedFunction<
   typeof Authentication.validatePreRegistrationPayload
@@ -76,7 +82,10 @@ const rejection = (id: number, text: string) => ({
 describe("POST /kratos/preregistration", () => {
   const handler = handlerFor("/preregistration")
 
-  beforeEach(() => mockValidate.mockReset())
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockValidate.mockReset()
+  })
 
   it("answers 200 with an empty JSON object when validation passes", async () => {
     mockValidate.mockResolvedValue(true)
@@ -160,10 +169,10 @@ describe("POST /kratos/preregistration", () => {
 
       expect(errorSpy).toHaveBeenCalledWith(
         expect.objectContaining({
-          rejection: "UnsupportedSchemaTypeError",
-          schemaId: "email_no_password_v0",
+          outcome: "invalid_payload",
+          expectedSchema: "phone_no_password_v0",
         }),
-        expect.stringContaining("Kratos config and api disagree"),
+        "Kratos callback failed",
       )
       expect(warnSpy).not.toHaveBeenCalled()
     } finally {
@@ -181,8 +190,8 @@ describe("POST /kratos/preregistration", () => {
       await handler(makeReq(), makeRes())
 
       expect(warnSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ rejection: "InvalidCarrierTypeForPhoneMetadataError" }),
-        "preregistration rejected",
+        expect.objectContaining({ outcome: "phone_not_allowed" }),
+        "Kratos callback failed",
       )
       expect(errorSpy).not.toHaveBeenCalled()
     } finally {
@@ -232,4 +241,124 @@ describe("POST /kratos/registration is unchanged", () => {
   it("is still registered after the pre-registration route", () => {
     expect(() => handlerFor("/registration")).not.toThrow()
   })
+})
+
+describe("Kratos callback telemetry privacy", () => {
+  beforeEach(() => jest.clearAllMocks())
+  const cases = [
+    {
+      path: "/registration",
+      label: "bad secret",
+      error: new InvalidSecretForAuthNCallbackError("PRIVATE_ERROR"),
+      status: 401,
+    },
+    {
+      path: "/registration",
+      label: "invalid payload",
+      error: new MissingRegistrationPayloadPropertiesError("PRIVATE_ERROR"),
+      status: 400,
+    },
+    {
+      path: "/registration",
+      label: "creation failure",
+      error: new UnknownRepositoryError("PRIVATE_ERROR"),
+      status: 500,
+    },
+    {
+      path: "/preregistration",
+      label: "bad secret",
+      error: new InvalidSecretForAuthNCallbackError("PRIVATE_ERROR"),
+      status: 401,
+    },
+    {
+      path: "/preregistration",
+      label: "existing phone",
+      error: new PhoneAlreadyRegisteredError("PRIVATE_ERROR"),
+      status: 400,
+    },
+    {
+      path: "/preregistration",
+      label: "invalid phone",
+      error: new InvalidPhoneNumber("PRIVATE_PHONE"),
+      status: 400,
+    },
+    {
+      path: "/preregistration",
+      label: "metadata refusal",
+      error: new InvalidCarrierTypeForPhoneMetadataError("PRIVATE_ERROR"),
+      status: 400,
+    },
+    {
+      path: "/preregistration",
+      label: "invalid payload",
+      error: new UnsupportedSchemaTypeError("PRIVATE_SCHEMA"),
+      status: 400,
+    },
+    {
+      path: "/preregistration",
+      label: "unexpected failure",
+      error: new UnknownRepositoryError("PRIVATE_ERROR"),
+      status: 500,
+    },
+  ]
+  const noPrivateTelemetry = () => {
+    const logged = JSON.stringify(
+      [jest.mocked(baseLogger.error).mock.calls, jest.mocked(baseLogger.warn).mock.calls],
+      (_key, value) =>
+        value instanceof Error
+          ? { ...value, message: value.message, stack: value.stack }
+          : value,
+    )
+    expect(logged).not.toContain("PRIVATE_")
+  }
+  it.each(cases)(
+    "preserves $path $label refusal without logging inputs/errors",
+    async ({ path, error, status }) => {
+      const req = makeReq({
+        phone: "PRIVATE_PHONE",
+        schema_id: "PRIVATE_SCHEMA",
+        password: "PRIVATE_PASSWORD",
+        identity_id: "PRIVATE_ID",
+      })
+      req.headers.authorization = "PRIVATE_CALLBACK_SECRET"
+      // Both functions are module mocks; avoid expanding the complete
+      // ApplicationError union through Jest's deep-mocked conditional type.
+      const service: jest.Mock =
+        path === "/registration"
+          ? (Authentication.createAccountFromRegistrationPayload as jest.Mock)
+          : (mockValidate as jest.Mock)
+      service.mockResolvedValue(error)
+      const res = makeRes()
+      await handlerFor(path)(req, res)
+      expect(res.status).toHaveBeenCalledWith(status)
+      expect(service).toHaveBeenCalledWith({
+        secret: "PRIVATE_CALLBACK_SECRET",
+        body: req.body,
+      })
+      noPrivateTelemetry()
+      expect(JSON.stringify([res.json.mock.calls, res.send.mock.calls])).not.toContain(
+        "PRIVATE_",
+      )
+    },
+  )
+
+  it.each(["/registration", "/preregistration"])(
+    "contains rejected %s work inside a safe callback failure boundary",
+    async (path) => {
+      const service: jest.Mock =
+        path === "/registration"
+          ? (Authentication.createAccountFromRegistrationPayload as jest.Mock)
+          : (mockValidate as jest.Mock)
+      service.mockRejectedValue(new Error("PRIVATE_AXIOS_BODY PRIVATE_API_KEY"))
+      const res = makeRes()
+      await expect(
+        Promise.resolve(handlerFor(path)(makeReq({ phone: "PRIVATE_PHONE" }), res)),
+      ).resolves.toBeUndefined()
+      expect(res.status).toHaveBeenCalledWith(500)
+      noPrivateTelemetry()
+      expect(JSON.stringify([res.json.mock.calls, res.send.mock.calls])).not.toContain(
+        "PRIVATE_",
+      )
+    },
+  )
 })

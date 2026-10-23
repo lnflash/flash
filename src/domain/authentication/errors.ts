@@ -1,6 +1,8 @@
 import { DomainError, ValidationError, ErrorLevel } from "@domain/shared"
 
 export class AuthenticationError extends DomainError {}
+export class DeviceTotpRequiresPhoneUpgradeError extends AuthenticationError {}
+export class TotpEnrollmentUnavailableError extends AuthenticationError {}
 export class LikelyNoUserWithThisPhoneExistError extends AuthenticationError {}
 export class LikelyUserAlreadyExistError extends AuthenticationError {}
 
