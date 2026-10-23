@@ -322,7 +322,7 @@ const resolveFunctionSpanOptions = ({
     [SemanticAttributes.CODE_NAMESPACE]: namespace,
     ...spanAttributes,
   }
-  // Arguments can be long-lived passwords, bearer tokens, OTPs or banking PII.
+  // Arguments can be long-lived passwords, bearer tokens, verification codes or banking PII.
   // Never inspect or enumerate them for telemetry; call sites must supply
   // deliberate, nonsecret spanAttributes independently of invocation inputs.
   return { attributes, root }
