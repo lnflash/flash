@@ -84,6 +84,8 @@ const suites = Object.freeze({
   ownership: [
     "app/accounts/owned-wallet-snapshot-adapters.spec.ts",
     "app/accounts/owned-wallet-snapshot.spec.ts",
+    "graphql/ln-invoice-payment-send.spec.ts",
+    "graphql/ln-send-marker-withdrawal.spec.ts",
     "graphql/owned-wallet-snapshot.spec.ts",
   ],
 })
