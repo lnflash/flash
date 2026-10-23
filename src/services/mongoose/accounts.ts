@@ -315,6 +315,43 @@ export const AccountsRepository = (): IAccountsRepository => {
     }
   }
 
+  // At most two IDs are needed to distinguish sole ownership from ambiguity.
+  // A historical duplicate is not resolved by choosing the first matching row.
+  const findBridgeCustomerOwners = async (
+    customerId: BridgeCustomerId,
+  ): Promise<AccountId[] | RepositoryError> => {
+    try {
+      const owners = await Account.find(
+        { bridgeCustomerId: { $eq: customerId } },
+        { _id: 1 },
+      )
+        .limit(2)
+        .lean()
+      return owners.map((owner) => fromObjectId<AccountId>(owner._id))
+    } catch (error) {
+      return parseRepositoryError(error)
+    }
+  }
+
+  // Compare-and-set prevents an in-flight KYC response from replacing a
+  // customer association established by another request or an older server.
+  const bindBridgeCustomerIfUnbound = async (
+    id: AccountId,
+    customerId: BridgeCustomerId,
+  ): Promise<Account | RepositoryError> => {
+    try {
+      const result = await Account.findOneAndUpdate(
+        { _id: toObjectId<AccountId>(id), bridgeCustomerId: null },
+        { $set: { bridgeCustomerId: customerId, bridgeKycStatus: "open" } },
+        { new: true },
+      )
+      if (!result) return new RepositoryError("Bridge customer association changed")
+      return translateToAccount(result)
+    } catch (error) {
+      return parseRepositoryError(error)
+    }
+  }
+
   const updateBridgeFields = async (
     id: AccountId,
     fields: {
@@ -394,6 +431,8 @@ export const AccountsRepository = (): IAccountsRepository => {
     claimNpub,
     update,
     transitionBridgeKycStatus,
+    bindBridgeCustomerIfUnbound,
+    findBridgeCustomerOwners,
     updateBridgeFields,
     findByBridgeEthereumAddress,
     findByBridgeCustomerId,

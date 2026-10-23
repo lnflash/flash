@@ -6,6 +6,8 @@
 
 import crypto from "crypto"
 
+import getUuidByString from "uuid-by-string"
+
 import { BridgeConfig } from "@config"
 
 import * as BridgeAccountsRepo from "@services/mongoose/bridge-accounts"
@@ -61,6 +63,7 @@ import BridgeApiClient, {
   type ExternalAccount,
 } from "./client"
 import { PlaidLinkTokenStore } from "./plaid-link-token-store"
+import { checkedOwnedKycCustomerId } from "./owned-kyc-customer"
 import {
   presentBridgeWithdrawal,
   receiptFeesFromTransfer,
@@ -350,6 +353,77 @@ const requireApprovedBridgeCustomer = async ({
  * - Creates Bridge customer if not exists
  * - Returns KYC and TOS links
  */
+const sanitizedKycError = (error: unknown, accountId: AccountId): Error => {
+  // Provider bodies can contain a foreign existing_kyc_link or identity PII.
+  // Preserve safe API classification/status while dropping the entire payload.
+  baseLogger.error(
+    { accountId, operation: "initiateKyc" },
+    "Bridge verification request failed",
+  )
+  if (error instanceof BridgeApiError) {
+    return new BridgeApiError("Unable to obtain verification links", error.statusCode)
+  }
+  return new BridgeError("Verification request failed")
+}
+
+const guardedKycWork = async <T>(
+  accountId: AccountId,
+  work: () => Promise<T>,
+): Promise<T | Error> => {
+  // redlock converts thrown callback errors. Sanitize inside its callback so
+  // provider bodies never reach that converter or its caller.
+  try {
+    return await work()
+  } catch (error) {
+    return sanitizedKycError(error, accountId)
+  }
+}
+
+const requireSoleKycCustomerOwner = async (
+  accountId: AccountId,
+  customerId: BridgeCustomerId,
+): Promise<true | Error> => {
+  const owners = await AccountsRepository().findBridgeCustomerOwners(customerId)
+  if (owners instanceof Error) return owners
+  if (owners.length !== 1 || owners[0] !== accountId) {
+    return new BridgeError("Bridge customer ownership requires review")
+  }
+  return true
+}
+
+const hostedKycURL = (value: unknown, kind: "identity" | "terms"): string => {
+  if (
+    typeof value !== "string" ||
+    value.length > 8192 ||
+    /[^\x21-\x7e]/.test(value) ||
+    value.includes("\\")
+  ) {
+    throw new BridgeError("Invalid hosted verification link")
+  }
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    throw new BridgeError("Invalid hosted verification link")
+  }
+  const hosts =
+    kind === "identity"
+      ? ["bridge.withpersona.com"]
+      : ["dashboard.bridge.xyz", "compliance.bridge.xyz"]
+  if (
+    url.protocol !== "https:" ||
+    !hosts.includes(url.hostname) ||
+    url.username ||
+    url.password ||
+    url.port ||
+    url.hash ||
+    !value.startsWith(`https://${url.hostname}/`)
+  ) {
+    throw new BridgeError("Invalid hosted verification link")
+  }
+  return value
+}
+
 const initiateKyc = async ({
   accountId,
   email,
@@ -361,87 +435,121 @@ const initiateKyc = async ({
   type?: "individual" | "business"
   full_name: string
 }): Promise<InitiateKycResult | Error> => {
-  baseLogger.info({ accountId, operation: "initiateKyc" }, "Bridge operation started")
-
   const enabledCheck = checkBridgeEnabled()
   if (enabledCheck instanceof Error) return enabledCheck
-
-  const account = await checkAccountLevel(accountId)
-  if (account instanceof Error) return account
-
-  if (account.bridgeKycStatus === "approved") {
-    return new BridgeError("KYC already approved for this account")
-  }
-
-  const identity = await IdentityRepository().getIdentity(account.kratosUserId)
-
-  if (identity instanceof Error) return identity
-
-  const useremail = identity.email
-
-  try {
-    // Create KYC link
-    const kycLink = await BridgeApiClient.createKycLink({
-      email: useremail || email,
-      type: type || "individual",
-      full_name: full_name || account.username,
-    })
-
-    const result: InitiateKycResult = {
-      kycLink: kycLink.kyc_link,
-      customerId: kycLink.customer_id,
-      tosLink: kycLink.tos_link,
+  // Loading this adapter on demand avoids opening a Redis connection merely
+  // from importing the Bridge service (for tooling and isolated unit tests).
+  const { LockService, redlock } = await import("@services/lock")
+  return LockService().lockAccountId(accountId, async (signal) => {
+    const account = await checkAccountLevel(accountId)
+    if (account instanceof Error) return account
+    if (account.bridgeKycStatus === "approved") {
+      return new BridgeError("KYC already approved for this account")
     }
-
-    // link the customer Id to the bridge account
-    const customerId = toBridgeCustomerId(kycLink.customer_id)
-
-    const updateResult = await AccountsRepository().updateBridgeFields(accountId, {
-      bridgeCustomerId: customerId,
-      bridgeKycStatus: "open",
-    })
-
-    if (updateResult instanceof Error) {
-      return updateResult
-    }
-
-    baseLogger.info(
-      { accountId, operation: "initiateKyc", kycLink },
-      "Bridge operation completed",
-    )
-
-    return result
-  } catch (error) {
-    const bridgeError = error as {
-      statusCode?: number
-      response?: {
-        existing_kyc_link?: { kyc_link: string; customer_id: string; tos_link: string }
+    try {
+      if (signal.aborted) return new BridgeError("Verification request lock expired")
+      if (account.bridgeCustomerId !== undefined && account.bridgeCustomerId !== null) {
+        const customerId = checkedOwnedKycCustomerId(account.bridgeCustomerId)
+        // Lock order is always account -> provider customer. The namespace is
+        // distinct from wallet/payment locks and contains a validated ID only.
+        return redlock({
+          path: `locks:bridge-kyc-customer:${customerId}`,
+          asyncFn: async (customerSignal) =>
+            guardedKycWork(accountId, async () => {
+              if (signal.aborted || customerSignal.aborted)
+                return new BridgeError("Verification request lock expired")
+              const soleOwner = await requireSoleKycCustomerOwner(accountId, customerId)
+              if (soleOwner instanceof Error) return soleOwner
+              if (signal.aborted || customerSignal.aborted)
+                return new BridgeError("Verification request lock expired")
+              // Existing account ownership comes only from the stored association.
+              // Never POST by email or reset review status to obtain a continuation.
+              const identity = await BridgeApiClient.getHostedKycLink(customerId)
+              if (signal.aborted || customerSignal.aborted)
+                return new BridgeError("Verification request lock expired")
+              const terms = await BridgeApiClient.getHostedTosLink(customerId)
+              const current = await checkAccountLevel(accountId)
+              if (current instanceof Error) return current
+              if (
+                signal.aborted ||
+                customerSignal.aborted ||
+                current.bridgeCustomerId !== customerId
+              ) {
+                return new BridgeError("Bridge customer association changed")
+              }
+              const stillSoleOwner = await requireSoleKycCustomerOwner(
+                accountId,
+                customerId,
+              )
+              if (stillSoleOwner instanceof Error) return stillSoleOwner
+              if (signal.aborted || customerSignal.aborted)
+                return new BridgeError("Verification request lock expired")
+              return {
+                kycLink: hostedKycURL(identity?.url, "identity"),
+                customerId,
+                tosLink: hostedKycURL(terms?.url, "terms"),
+              }
+            }),
+        })
       }
-    }
 
-    if (bridgeError?.statusCode === 400 && bridgeError.response?.existing_kyc_link) {
-      // store the customer id and the kyc status
-      const customerId = toBridgeCustomerId(
-        bridgeError.response.existing_kyc_link.customer_id,
+      const identity = await IdentityRepository().getIdentity(account.kratosUserId)
+      if (identity instanceof Error) return identity
+      if (signal.aborted) return new BridgeError("Verification request lock expired")
+      // Stable per-account UUID: a lost response or local persistence failure
+      // cannot be bypassed by changing caller email/name within provider's
+      // idempotency retention. This is not an unlimited exactly-once guarantee.
+      const idempotencyKey = getUuidByString(`bridge-kyc-create:v1:${accountId}`)
+      const link = await BridgeApiClient.createKycLink(
+        {
+          email: identity.email || email,
+          type: type || "individual",
+          full_name: full_name || account.username,
+        },
+        idempotencyKey,
       )
-      await AccountsRepository().updateBridgeFields(accountId, {
-        bridgeCustomerId: customerId,
-        bridgeKycStatus: "not_started",
+      const kycLink = hostedKycURL(link?.kyc_link, "identity")
+      const tosLink = hostedKycURL(link?.tos_link, "terms")
+      const customerId = checkedOwnedKycCustomerId(link?.customer_id)
+      if (signal.aborted) return new BridgeError("Verification request lock expired")
+      return redlock({
+        path: `locks:bridge-kyc-customer:${customerId}`,
+        asyncFn: async (customerSignal) =>
+          guardedKycWork(accountId, async () => {
+            if (signal.aborted || customerSignal.aborted)
+              return new BridgeError("Verification request lock expired")
+            const owners = await AccountsRepository().findBridgeCustomerOwners(customerId)
+            if (owners instanceof Error) return owners
+            if (owners.length !== 0)
+              return new BridgeError("Bridge customer ownership requires review")
+            if (signal.aborted || customerSignal.aborted)
+              return new BridgeError("Verification request lock expired")
+            const bound = await AccountsRepository().bindBridgeCustomerIfUnbound(
+              accountId,
+              customerId,
+            )
+            if (bound instanceof Error) return bound
+            if (bound.bridgeCustomerId !== customerId)
+              return new BridgeError("Bridge customer association changed")
+            const current = await checkAccountLevel(accountId)
+            if (current instanceof Error) return current
+            if (
+              signal.aborted ||
+              customerSignal.aborted ||
+              current.bridgeCustomerId !== customerId
+            )
+              return new BridgeError("Bridge customer association changed")
+            const soleOwner = await requireSoleKycCustomerOwner(accountId, customerId)
+            if (soleOwner instanceof Error) return soleOwner
+            if (signal.aborted || customerSignal.aborted)
+              return new BridgeError("Verification request lock expired")
+            return { kycLink, customerId, tosLink }
+          }),
       })
-
-      return {
-        kycLink: bridgeError.response.existing_kyc_link.kyc_link,
-        customerId: bridgeError.response.existing_kyc_link.customer_id,
-        tosLink: bridgeError.response.existing_kyc_link.tos_link,
-      }
+    } catch (error) {
+      return sanitizedKycError(error, accountId)
     }
-
-    baseLogger.error(
-      { accountId, operation: "initiateKyc", error },
-      "Bridge operation failed",
-    )
-    return error instanceof Error ? error : new Error(String(error))
-  }
+  })
 }
 
 /**
