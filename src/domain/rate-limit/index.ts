@@ -17,7 +17,10 @@ import {
   getRequestCodePerLoginIdentifierLimits,
 } from "@config"
 
+import { toSeconds } from "@domain/primitives"
+
 import {
+  UsernameSearchRateLimiterExceededError,
   BankAccountManageRateLimiterExceededError,
   ConsentLogIpRateLimiterExceededError,
   FygaroCheckoutCreateRateLimiterExceededError,
@@ -52,9 +55,15 @@ export const RateLimitPrefix = {
   bankAccountManage: "bank_account_manage",
   paymentSend: "payment_send",
   paymentSendDaily: "payment_send_daily",
+  usernameSearch: "username_search",
 } as const
 
 export const RateLimitConfig: { [key: string]: RateLimitConfig } = {
+  usernameSearch: {
+    key: RateLimitPrefix.usernameSearch,
+    limits: { points: 30, duration: toSeconds(60), blockDuration: toSeconds(60) },
+    error: UsernameSearchRateLimiterExceededError,
+  },
   requestCodeAttemptPerLoginIdentifier: {
     key: RateLimitPrefix.requestCodeAttemptPerLoginIdentifier,
     limits: getRequestCodePerLoginIdentifierLimits(),

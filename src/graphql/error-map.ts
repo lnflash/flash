@@ -329,6 +329,12 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = "ContactAlias has incorrect characters or length"
       return new ValidationInternalError({ message, logger: baseLogger })
 
+    case "UsernameSearchRateLimiterExceededError":
+      return new TooManyRequestError({
+        message: "Too many username searches. Please wait a minute and try again.",
+        logger: baseLogger,
+      })
+
     case "PaymentSendRateLimiterExceededError":
       message = "Too many payment attempts, please wait for a while and try again."
       return new TooManyRequestError({ message, logger: baseLogger })

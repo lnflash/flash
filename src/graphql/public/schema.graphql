@@ -2190,6 +2190,11 @@ type Query {
 
   """Returns 1 Sat and 1 Usd Cent price for the given currency"""
   realtimePrice(currency: DisplayCurrency = "USD"): RealtimePrice!
+
+  """
+  Up to five similar public Flash usernames, including people outside your contacts. Requires 3–50 letters, digits or underscores after removing spaces. Uses bounded prefix and spelling searches; results require recipient verification and selection.
+  """
+  searchUsernames(query: String!): [Username!]!
   supportedBanks: [Bank!]!
   transactionDetails(input: TransactionDetailsInput!): TransactionDetailsPayload!
   userDefaultWalletId(username: Username!): WalletId! @deprecated(reason: "will be migrated to AccountDefaultWalletId")
