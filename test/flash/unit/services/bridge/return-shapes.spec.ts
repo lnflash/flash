@@ -139,7 +139,7 @@ const CUSTOMER_ID = "cust-001"
 const ETHEREUM_ADDRESS = "ETH_ADDR_001"
 const TRANSFER_ID = "transfer-bridge-001"
 const WITHDRAWAL_ID = "withdrawal-mongo-001"
-const BRIDGE_DEPOSIT_ADDRESS = "0xbridgeDepositAddress"
+const BRIDGE_DEPOSIT_ADDRESS = "0x1111111111111111111111111111111111111111"
 const IBEX_PAYOUT_ID = "ibex-payout-001"
 const IBEX_CRYPTO_SEND_INFO_ID = "send-info-001"
 const CREATED_AT = new Date("2026-06-05T00:00:00.000Z")
@@ -158,6 +158,13 @@ const mockTransfer = {
   amount: AMOUNT,
   currency: "usd",
   state: "pending",
+  on_behalf_of: CUSTOMER_ID,
+  source: { payment_rail: "ethereum", currency: "usdt" },
+  destination: {
+    payment_rail: "ach",
+    currency: "usd",
+    external_account_id: EXTERNAL_ACCOUNT_ID,
+  },
   source_deposit_instructions: {
     payment_rail: "ethereum",
     currency: "usdt",

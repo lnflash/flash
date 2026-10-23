@@ -178,7 +178,7 @@ const ETHEREUM_ADDRESS = "ETH_ADDR_001"
 const TRANSFER_ID = "transfer-bridge-001"
 const WITHDRAWAL_ID = "withdrawal-mongo-001"
 const USDT_WALLET_ID = "ibex-eth-usdt-wallet-001"
-const BRIDGE_DEPOSIT_ADDRESS = "0xbridgeDepositAddress"
+const BRIDGE_DEPOSIT_ADDRESS = "0x1111111111111111111111111111111111111111"
 const IBEX_PAYOUT_ID = "ibex-payout-001"
 const IBEX_CRYPTO_SEND_REQUIREMENTS_ID = "send-requirements-001"
 const IBEX_CRYPTO_SEND_INFO_ID = "send-info-001"
@@ -220,6 +220,13 @@ const mockTransfer = {
   amount: AMOUNT,
   currency: "usd",
   state: "pending",
+  on_behalf_of: CUSTOMER_ID,
+  source: { payment_rail: "ethereum", currency: "usdt" },
+  destination: {
+    payment_rail: "ach",
+    currency: "usd",
+    external_account_id: EXTERNAL_ACCOUNT_ID,
+  },
   source_deposit_instructions: {
     payment_rail: "ethereum",
     currency: "usdt",
@@ -1170,6 +1177,85 @@ describe("initiateWithdrawal — takes withdrawalId (step 2A)", () => {
     expect(BridgeAccountsRepo.updateWithdrawalTransferId).not.toHaveBeenCalled()
     expect(IbexClient.sendCrypto).not.toHaveBeenCalled()
     expect(IbexClient.sendOnchain).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["customer", { on_behalf_of: "different-customer" }],
+    ["missing customer", { on_behalf_of: undefined }],
+    ["transfer ID", { id: "../other-transfer" }],
+    ["source rail", { source: { payment_rail: "base", currency: "usdt" } }],
+    ["source currency", { source: { payment_rail: "ethereum", currency: "usdc" } }],
+    [
+      "destination rail",
+      {
+        destination: {
+          payment_rail: "wire",
+          currency: "usd",
+          external_account_id: EXTERNAL_ACCOUNT_ID,
+        },
+      },
+    ],
+    [
+      "destination currency",
+      {
+        destination: {
+          payment_rail: "ach",
+          currency: "eur",
+          external_account_id: EXTERNAL_ACCOUNT_ID,
+        },
+      },
+    ],
+    [
+      "destination bank",
+      {
+        destination: {
+          payment_rail: "ach",
+          currency: "usd",
+          external_account_id: "different-bank",
+        },
+      },
+    ],
+    [
+      "deposit rail",
+      {
+        source_deposit_instructions: {
+          payment_rail: "base",
+          currency: "usdt",
+          to_address: BRIDGE_DEPOSIT_ADDRESS,
+        },
+      },
+    ],
+    [
+      "deposit currency",
+      {
+        source_deposit_instructions: {
+          payment_rail: "ethereum",
+          currency: "usdc",
+          to_address: BRIDGE_DEPOSIT_ADDRESS,
+        },
+      },
+    ],
+    [
+      "deposit address",
+      {
+        source_deposit_instructions: {
+          payment_rail: "ethereum",
+          currency: "usdt",
+          to_address: "0xnot-an-address",
+        },
+      },
+    ],
+  ])("does not debit IBEX for mismatched Bridge %s", async (_label, override) => {
+    ;(BridgeClient.createTransfer as jest.Mock).mockResolvedValue({
+      ...mockTransfer,
+      ...override,
+    })
+
+    const result = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
+
+    expect(result).toBeInstanceOf(Error)
+    expect(BridgeAccountsRepo.updateWithdrawalTransferId).not.toHaveBeenCalled()
+    expect(IbexClient.sendCrypto).not.toHaveBeenCalled()
   })
 
   it("creates an IBEX crypto send info for Bridge's deposit address before sending", async () => {

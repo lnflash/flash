@@ -61,6 +61,7 @@ import {
 import BridgeApiClient, {
   type CreateExternalAccountRequest,
   type ExternalAccount,
+  type Transfer,
 } from "./client"
 import { PlaidLinkTokenStore } from "./plaid-link-token-store"
 import { checkedOwnedKycCustomerId } from "./owned-kyc-customer"
@@ -161,9 +162,34 @@ type ExternalAccountResult = {
 export const deriveWithdrawalIdempotencyKey = (rowId: string): string =>
   crypto.createHash("sha256").update(`withdrawal:${rowId}`).digest("hex")
 
-const bridgeDepositAddressFromTransfer = (transfer: {
-  source_deposit_instructions?: { to_address?: string }
-}) => transfer.source_deposit_instructions?.to_address
+const checkedWithdrawalDepositAddress = (
+  transfer: Transfer,
+  customerId: string,
+  externalAccountId: string,
+): string | BridgeError => {
+  const instructions = transfer.source_deposit_instructions
+  if (!instructions?.to_address) return new BridgeDepositInstructionsMissingError()
+  if (
+    typeof transfer.id !== "string" ||
+    !/^[A-Za-z0-9_-]{1,256}$/.test(transfer.id) ||
+    transfer.on_behalf_of !== customerId ||
+    transfer.source?.payment_rail !== "ethereum" ||
+    transfer.source.currency !== "usdt" ||
+    transfer.destination?.payment_rail !== "ach" ||
+    transfer.destination.currency !== "usd" ||
+    transfer.destination.external_account_id !== externalAccountId ||
+    instructions?.payment_rail !== "ethereum" ||
+    instructions.currency !== "usdt" ||
+    typeof instructions.to_address !== "string" ||
+    !/^0x[0-9a-fA-F]{40}$/.test(instructions.to_address)
+  ) {
+    // A Bridge transfer was created, but its returned payment instructions
+    // have not been bound to the reviewed owner, source rail and destination.
+    // Never send an IBEX debit using these instructions.
+    return new BridgeError("Bridge transfer instructions did not match the withdrawal")
+  }
+  return instructions.to_address
+}
 
 const ibexPayoutIdFromSendResponse = (response: unknown): string | undefined => {
   if (typeof response !== "object" || response === null) return undefined
@@ -1498,10 +1524,12 @@ const initiateWithdrawal = async (
       idempotencyKey,
     )
 
-    const bridgeDepositAddress = bridgeDepositAddressFromTransfer(transfer)
-    if (!bridgeDepositAddress) {
-      return new BridgeDepositInstructionsMissingError()
-    }
+    const bridgeDepositAddress = checkedWithdrawalDepositAddress(
+      transfer,
+      customerId,
+      externalAccountId,
+    )
+    if (bridgeDepositAddress instanceof Error) return bridgeDepositAddress
 
     const submitted = await BridgeAccountsRepo.updateWithdrawalTransferId(
       pendingWithdrawal.id,

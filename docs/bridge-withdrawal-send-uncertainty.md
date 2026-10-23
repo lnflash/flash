@@ -18,6 +18,16 @@ New uncertainty logs and operator alerts contain a closed reason and `SHA256("br
 
 ## Release and recovery
 
+Before any IBEX debit, the Bridge create-transfer response must also match the
+reviewed customer, Ethereum/USDT source, ACH/USD destination external account,
+and Ethereum/USDT deposit instructions. The returned transfer ID must be a
+single safe identifier and its deposit address a 20-byte hex address. Missing
+or mismatched receipt fields now refuse dispatch and leave the Bridge transfer
+for operator review; no inferred destination or automatic retry is permitted.
+Verify these returned fields with a sandbox transfer before enabling the
+withdrawal flow. The response amount is not treated as a USDT debit quote;
+immutable fee/source/expiry consent remains a separate release gate.
+
 Quiesce all old withdrawal writers and reconcilers before activation; old processes do not honor the new fence/proof marker. Build and verify the named unique partial index and the review-queue index before accepting traffic. MongoDB must support majority index commit quorum (4.4+ replica set), and the application must be able to verify/create the index and perform majority journaled writes. Unsupported topology, permissions, duplicate existing unknown rows, conflicting index options or unknown acknowledgments block dispatch rather than falling back to weaker writes. Runtime creation verifies the required uniqueness; no index or historical record was changed during this development work.
 
 Operators should list protected unresolved records, derive the alert reference from the record ID, and correlate the immutable source/send-info/attempt and any receipt ID with authoritative IBEX debit records and the owned Bridge transfer. A missing lookup result, timeout, pending response or absence of a webhook is not proof of no debit. Confirmed Bridge `payment_processed` can complete through the guarded repository path. Other outcomes require reviewed provider evidence and a separately authorized repair; this leaf adds no force-reset, blind retry, cancellation or refund endpoint. Never reset a fenced record to pending to unblock an account. Historical submitted/failed rows and a concurrent losing row may remain conservatively blocked for operator review. Ambiguity is deliberately retained when safe recovery cannot be established.
