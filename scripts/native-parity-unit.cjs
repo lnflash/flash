@@ -49,6 +49,7 @@ const suites = Object.freeze({
   telemetry: [
     "app/admin/send-user-notification.spec.ts",
     "app/authentication/registration-trace-privacy.spec.ts",
+    "app/authentication/validate-preregistration-payload.spec.ts",
     "app/invite/send-referral-notifications.spec.ts",
     "servers/request-log.spec.ts",
     "services/frappe/ErpNext.bankAccountUpdate.spec.ts",
@@ -60,6 +61,7 @@ const suites = Object.freeze({
     "services/ibex/request-trace-privacy.spec.ts",
     "services/notifications/firebase-telemetry-privacy.spec.ts",
     "services/notifications/push-notifications.spec.ts",
+    "services/notification/telemetry-privacy.spec.ts",
     "services/tracing-input-privacy.spec.ts",
     "services/tracing.spec.ts",
   ],
