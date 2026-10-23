@@ -13,7 +13,7 @@ import express from "express"
 import { ApolloServerPluginDrainHttpServer } from "apollo-server-core"
 import { ApolloError, ApolloServer, ExpressContext } from "apollo-server-express"
 import { GraphQLError, GraphQLSchema } from "graphql"
-import PinoHttp from "pino-http"
+import { createRequestLogger } from "./request-log"
 import { mapError } from "@graphql/error-map"
 import { fieldExtensionsEstimator, simpleEstimator } from "graphql-query-complexity"
 
@@ -164,47 +164,7 @@ export const startAdminServer = async ({
     }),
   )
 
-  app.use(
-    PinoHttp({
-      logger: graphqlLogger,
-      wrapSerializers: true,
-      customProps: (req) => {
-        /* eslint @typescript-eslint/ban-ts-comment: "off" */
-        // @ts-ignore-next-line no-implicit-any error
-        const account = req["gqlContext"]?.domainAccount
-        return {
-          // @ts-ignore-next-line no-implicit-any error
-          "body": req["body"],
-          // @ts-ignore-next-line no-implicit-any error
-          "token.sub": req["token"]?.sub,
-          // @ts-ignore-next-line no-implicit-any error
-          "gqlContext.user": req["gqlContext"]?.user,
-          // @ts-ignore-next-line no-implicit-any error
-          "gqlContext.domainAccount:": {
-            id: account?.id,
-            createdAt: account?.createdAt,
-            defaultWalletId: account?.defaultWalletId,
-            level: account?.level,
-            status: account?.status,
-            displayCurrency: account?.displayCurrency,
-          },
-        }
-      },
-      autoLogging: {
-        ignore: (req) => req.url === "/healthz",
-      },
-      serializers: {
-        res: (res) => ({ statusCode: res.statusCode }),
-        req: (req) => ({
-          id: req.id,
-          method: req.method,
-          url: req.url,
-          remoteAddress: req.remoteAddress,
-          // headers: req.headers,
-        }),
-      },
-    }),
-  )
+  app.use(createRequestLogger(graphqlLogger))
 
   app.use(idempotencyMiddleware) // TODO: only needed for public endpoint
 

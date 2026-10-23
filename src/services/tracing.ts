@@ -32,6 +32,7 @@ import {
   graphQLErrorSummary,
   sanitizeGraphQLSpanForExport,
 } from "./graphql-trace-privacy"
+import { sanitizeHTTPSpanForExport } from "./http-trace-privacy"
 type ExtendedException = Exclude<Exception, string> & {
   level?: ErrorLevel
 }
@@ -169,6 +170,7 @@ class SpanProcessorWrapper extends SimpleSpanProcessor {
     // Do not export partially redacted query bodies from any GraphQL span.
     delete span.attributes["graphql.source"]
     sanitizeGraphQLSpanForExport(span)
+    sanitizeHTTPSpanForExport(span)
     super.onEnd(span)
   }
 }
