@@ -37,6 +37,7 @@ import AccountLimits from "./account-limits"
 import Quiz from "./quiz"
 import CallbackEndpoint from "./callback-endpoint"
 import { NotificationSettings } from "./notification-settings"
+import { ownedWalletSnapshotField } from "./owned-wallet-snapshot"
 
 const ConsumerAccount = GT.Object<Account, GraphQLPublicContextAuth>({
   name: "ConsumerAccount",
@@ -44,6 +45,7 @@ const ConsumerAccount = GT.Object<Account, GraphQLPublicContextAuth>({
   isTypeOf: () => true, // TODO: improve
 
   fields: () => ({
+    ownedWalletSnapshot: ownedWalletSnapshotField,
     id: {
       type: GT.NonNullID,
       resolve: (source) => source.uuid,

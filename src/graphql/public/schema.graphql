@@ -856,6 +856,11 @@ type ConsumerAccount implements Account {
   limits: AccountLimits!
   notificationSettings: NotificationSettings!
 
+  """
+  Raw metadata for this authenticated owner's wallets, without presentation filtering or repair.
+  """
+  ownedWalletSnapshot: OwnedWalletSnapshot
+
   """List the quiz questions of the consumer account"""
   quiz: [Quiz!]!
   realtimePrice: RealtimePrice!
@@ -2024,6 +2029,32 @@ type OneDayAccountLimit implements AccountLimit {
 
 """An authentication code valid for a single use"""
 scalar OneTimeAuthCode
+
+"""
+Actual owned wallet metadata without balances, payment authority or cash presentation aliases.
+"""
+type OwnedWalletMetadata {
+  """Internal wallet-owner ID, distinct from the public account UUID."""
+  accountId: ID!
+  id: WalletId!
+  isExternal: Boolean!
+  walletCurrency: WalletCurrency!
+}
+
+"""
+Authenticated raw owner metadata; never performs cash cutover, provisioning or balance reads.
+"""
+type OwnedWalletSnapshot {
+  """Actual stored owned default; null means no stored default."""
+  defaultWalletId: WalletId
+
+  """Public account UUID, matching the enclosing ConsumerAccount.id."""
+  publicAccountId: ID!
+
+  """Internal owner ID shared by these wallet rows."""
+  walletAccountId: ID!
+  wallets: [OwnedWalletMetadata!]!
+}
 
 """Information about pagination in a connection."""
 type PageInfo {
