@@ -1,3 +1,5 @@
+import { createHash } from "crypto"
+
 import { CreateIdentityBody } from "@ory/client"
 
 import { wrapAsyncFunctionsToRunInSpan } from "@services/tracing"
@@ -32,16 +34,20 @@ export const AuthWithUsernamePasswordDeviceIdService =
           state: "active",
           traits,
           schema_id: "username_password_deviceid_v0",
+          metadata_admin: {
+            deviceBootstrap: {
+              version: 1,
+              deviceIdHash: createHash("sha256").update(username).digest("hex"),
+            },
+          },
         }
 
         await kratosAdmin.createIdentity({ createIdentityBody })
       } catch (err) {
         // we continue if there is 409/Conflit,
         // because it means the identity already exists
-        if (isAxiosError(err) && err.response?.status !== 409) {
-          return new UnknownKratosError(
-            `Impossible to create identity: ${err.message || err}`,
-          )
+        if (!isAxiosError(err) || err.response?.status !== 409) {
+          return new UnknownKratosError("Unable to create a device identity")
         }
 
         newEntity = false
@@ -59,19 +65,28 @@ export const AuthWithUsernamePasswordDeviceIdService =
         })
         const authToken = result.data.session_token as AuthToken
 
-        if (!result.data.session.identity) return new InvalidIdentitySessionKratosError()
+        const identity = result.data.session.identity
+        if (
+          !identity ||
+          result.data.session.active !== true ||
+          identity.state !== "active" ||
+          identity.schema_id !== "username_password_deviceid_v0" ||
+          identity.traits?.username !== username ||
+          typeof identity.id !== "string" ||
+          !identity.id ||
+          typeof authToken !== "string" ||
+          !authToken ||
+          authToken.length > 16_384
+        ) {
+          return new InvalidIdentitySessionKratosError()
+        }
 
         // note: this only works when whoami: required_aal = aal1
-        const kratosUserId = result.data.session.identity.id as UserId
+        const kratosUserId = identity.id as UserId
 
         return { authToken, kratosUserId, newEntity }
-      } catch (err) {
-        if (err instanceof Error) {
-          return new UnknownKratosError(
-            `Impossible to get authToken: ${err.message || err}`,
-          )
-        }
-        return new UnknownKratosError(err)
+      } catch {
+        return new UnknownKratosError("Unable to authenticate the device identity")
       }
     }
 

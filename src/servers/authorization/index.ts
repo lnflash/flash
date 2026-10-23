@@ -1,3 +1,4 @@
+import { DeviceBootstrapError } from "@domain/authentication/device-bootstrap-error"
 import cors from "cors"
 import express, { NextFunction, Request, Response } from "express"
 
@@ -204,27 +205,47 @@ authRouter.post("/create/device-account", async (req: Request, res: Response) =>
 
   const deviceId = checkedToDeviceId(deviceIdRaw)
   if (deviceId instanceof Error) {
-    return res.status(422).send({ error: `Device ID error, ${deviceId.message}` })
+    return res.status(422).send({ error: "Invalid device credentials" })
   }
 
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  const closed = () => {
+    if (!res.writableEnded) abort()
+  }
+  req.once("aborted", abort)
+  res.once("close", closed)
   try {
     const authToken = await Authentication.loginWithDevice({
       username,
       password,
       ip,
       deviceId,
+      signal: controller.signal,
     })
+    if (controller.signal.aborted || res.destroyed) return
     if (authToken instanceof Error) {
       recordExceptionInCurrentSpan({ error: authToken })
-      return res.status(500).send({ error: authToken.message })
+      return res.status(500).send({
+        error: authToken.message,
+        ...(authToken instanceof DeviceBootstrapError ? { code: authToken.code } : {}),
+      })
     }
-    addAttributesToCurrentSpan({ "login.deviceAccount": deviceId })
+    addAttributesToCurrentSpan({
+      "login.method": "device",
+      "login.deviceBootstrapReady": true,
+    })
     return res.status(200).send({
       result: authToken,
     })
-  } catch (err) {
-    recordExceptionInCurrentSpan({ error: err })
-    return res.status(500).send({ error: parseErrorMessageFromUnknown(err) })
+  } catch {
+    const error = new DeviceBootstrapError("DEVICE_BOOTSTRAP_RETRY_REQUIRED")
+    recordExceptionInCurrentSpan({ error })
+    if (!controller.signal.aborted && !res.destroyed)
+      return res.status(500).send({ error: error.message, code: error.code })
+  } finally {
+    req.off("aborted", abort)
+    res.off("close", closed)
   }
 })
 

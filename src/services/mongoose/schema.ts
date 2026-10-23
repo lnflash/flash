@@ -1,5 +1,7 @@
 import crypto from "crypto"
 
+import type { DeviceBootstrapJournalRecord } from "@domain/accounts/device-bootstrap"
+
 import {
   getDefaultAccountsConfig,
   getFeesConfig,
@@ -1069,4 +1071,43 @@ export const BridgeExternalAccount = mongoose.model<IBridgeExternalAccountRecord
 export const BridgeWithdrawal = mongoose.model<IBridgeWithdrawalRecord>(
   "BridgeWithdrawal",
   BridgeWithdrawalSchema,
+)
+
+const DeviceBootstrapSlotSchema = new Schema(
+  {
+    state: {
+      type: String,
+      required: true,
+      enum: ["planned", "dispatching", "known", "attached", "blocked"],
+    },
+    attemptId: String,
+    providerId: String,
+    origin: { type: String, enum: ["created", "local"] },
+  },
+  { _id: false },
+)
+
+const DeviceAccountBootstrapSchema = new Schema<DeviceBootstrapJournalRecord>(
+  {
+    _id: { type: String, required: true },
+    version: { type: Number, required: true, enum: [1] },
+    userId: { type: String, required: true },
+    accountId: { type: String, required: true, index: true },
+    mode: { type: String, required: true, enum: ["new", "legacy-local"] },
+    phase: { type: String, required: true, enum: ["initializing", "ready"] },
+    wallets: {
+      USD: { type: DeviceBootstrapSlotSchema, required: true },
+      USDT: { type: DeviceBootstrapSlotSchema, required: true },
+    },
+    createdAt: { type: Date, required: true },
+    updatedAt: { type: Date, required: true },
+  },
+  { versionKey: false },
+)
+
+// The immutable hash primary key is the only uniqueness dependency. No legacy
+// User/device index is created and no credential/token is stored here.
+export const DeviceAccountBootstrap = mongoose.model<DeviceBootstrapJournalRecord>(
+  "DeviceAccountBootstrap",
+  DeviceAccountBootstrapSchema,
 )
