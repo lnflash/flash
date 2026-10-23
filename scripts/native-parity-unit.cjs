@@ -48,7 +48,9 @@ const suites = Object.freeze({
   ],
   telemetry: [
     "app/admin/send-user-notification.spec.ts",
+    "app/api-keys/create-api-key.spec.ts",
     "app/authentication/registration-trace-privacy.spec.ts",
+    "app/authentication/telemetry-privacy.spec.ts",
     "app/authentication/validate-preregistration-payload.spec.ts",
     "app/invite/send-referral-notifications.spec.ts",
     "servers/request-log.spec.ts",
