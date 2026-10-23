@@ -43,6 +43,8 @@ jest.mock("ibex-client", () => {
 })
 
 import Ibex from "@services/ibex/client"
+import { IbexError } from "@services/ibex/errors"
+import { baseLogger } from "@services/logger"
 import { USDAmount, USDTAmount } from "@domain/shared"
 import {
   addAttributesToCurrentSpan,
@@ -213,5 +215,58 @@ it("preserves crypto destination name/address metadata for IBEX without recordin
     },
     body: JSON.stringify(input),
   })
+  expectNoInputTelemetry()
+})
+
+it("keeps failed crypto-send path and provider response out of logs and returned errors", async () => {
+  const privateAccount = "fixture-private-account-in-path"
+  const privateBody = "fixture-private-provider-response-with-credentials"
+  const privateDestination = "fixture-private-destination-handle"
+  const failedResponse = new Response(JSON.stringify({ error: privateBody }), {
+    status: 422,
+  })
+  const readBody = jest.spyOn(failedResponse, "text")
+  fetch.mockResolvedValue(failedResponse)
+
+  const result = await Ibex.sendCrypto({
+    accountId: privateAccount,
+    cryptoSendInfosId: privateDestination,
+    amount: 1.25,
+  })
+
+  expect(result).toBeInstanceOf(IbexError)
+  expect((result as IbexError).message).toBe("IBEX request failed: 422")
+  expect(readBody).not.toHaveBeenCalled()
+  expect(baseLogger.error).toHaveBeenCalledWith(
+    { operation: "ibex_api_request", outcome: "failed", httpStatus: 422 },
+    "IBEX request failed",
+  )
+  const diagnostics = JSON.stringify({
+    error: result,
+    logCalls: jest.mocked(baseLogger.error).mock.calls,
+  })
+  for (const privateValue of [privateAccount, privateBody, privateDestination]) {
+    expect(diagnostics).not.toContain(privateValue)
+  }
+  expectNoInputTelemetry()
+})
+
+it("keeps a failed token request's response body out of returned errors", async () => {
+  const privateBody = "fixture-private-oauth-provider-response-with-secret"
+  sdk.authentication.storage.getAccessToken.mockResolvedValue(null)
+  const failedResponse = new Response(privateBody, { status: 401 })
+  const readBody = jest.spyOn(failedResponse, "text")
+  fetch.mockResolvedValue(failedResponse)
+
+  const result = await Ibex.getCryptoSendRequirements({
+    network: "ethereum",
+    currencyId: 29 as IbexCurrencyId,
+  })
+
+  expect(result).toBeInstanceOf(IbexError)
+  expect((result as IbexError).message).toBe("IBEX token request failed: 401")
+  expect(readBody).not.toHaveBeenCalled()
+  expect(JSON.stringify(result)).not.toContain(privateBody)
+  expect(baseLogger.error).not.toHaveBeenCalled()
   expectNoInputTelemetry()
 })
