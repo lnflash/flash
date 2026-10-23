@@ -90,6 +90,13 @@ jest.mock("@services/kratos", () => ({
   IdentityRepository: jest.fn(),
 }))
 
+// Plaid token storage is outside withdrawal return-shape coverage. Importing
+// its real cache dependency opens Redis connections even without a Plaid call.
+jest.mock("@services/cache", () => ({
+  RedisCacheService: jest.fn(),
+  consumeCacheKey: jest.fn(),
+}))
+
 jest.mock("@domain/primitives/bridge", () => ({
   toBridgeCustomerId: (id: string) => id,
   toBridgeExternalAccountId: (id: string) => id,
