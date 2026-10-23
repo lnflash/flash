@@ -39,6 +39,7 @@ const suites = Object.freeze({
     "services/bridge/webhook-server/verify-signature.spec.ts",
     "services/bridge/withdrawal-fees.spec.ts",
     "services/mongoose/accounts-bind-bridge-customer.spec.ts",
+    "services/mongoose/bridge-withdrawal-send-fence.spec.ts",
     "services/notification/wa-bridge.spec.ts",
   ],
   earn: ["app/payments/add-earn.spec.ts", "services/mongoose/rewards.spec.ts"],
