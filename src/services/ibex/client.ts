@@ -23,10 +23,7 @@ import IbexClient, {
 } from "ibex-client"
 
 import { IbexConfig } from "@config"
-import {
-  addAttributesToCurrentSpan,
-  wrapAsyncFunctionsToRunInSpan,
-} from "@services/tracing"
+import { wrapAsyncFunctionsToRunInSpan } from "@services/tracing"
 
 import { USDAmount, USDTAmount, WalletCurrency } from "@domain/shared"
 
@@ -159,7 +156,6 @@ const getRawAccountDetails = async (
 const getAccountTransactions = async (
   params: GMetadataParam,
 ): Promise<GResponse200 | IbexError> => {
-  addAttributesToCurrentSpan({ "request.params": JSON.stringify(params) })
   return Ibex.getAccountTransactions(params).then(errorHandler)
 }
 
@@ -175,7 +171,6 @@ const addInvoice = async (
     webhookUrl: ibexWebhookEndpoints.onReceive.invoice,
     webhookSecret: ibexWebhookSecret,
   } as AddInvoiceBodyParam
-  addAttributesToCurrentSpan({ "request.params": JSON.stringify(body) })
   return Ibex.addInvoice(body).then(errorHandler)
 }
 
@@ -240,7 +235,6 @@ const payInvoice = async (
     webhookUrl: ibexWebhookEndpoints.onPay.invoice,
     webhookSecret: ibexWebhookSecret,
   } as PayInvoiceV2BodyParam
-  addAttributesToCurrentSpan({ "request.params": JSON.stringify(bodyWithHooks) })
   // Standard SDK path. A raw-fetch seam lived here while ibex-client 3.2.0's
   // ApiError discarded the response body (lnflash/ibex-client#6); 3.3.0's
   // ApiError carries the body itself (`ibexMessage`/`ibexResponse`/`httpCode`)
@@ -248,8 +242,6 @@ const payInvoice = async (
   return Ibex.payInvoiceV2(bodyWithHooks).then(errorHandler)
 }
 
-// onchain transactions are typically high-value
-// logging all Ibex responses until we have higher confidence & higher volume
 const sendOnchain = async (
   body: SendToAddressCopyBodyParam,
 ): Promise<SendToAddressCopyResponse200 | IbexError> => {
@@ -258,14 +250,12 @@ const sendOnchain = async (
     webhookUrl: ibexWebhookEndpoints.onPay.onchain,
     webhookSecret: ibexWebhookSecret,
   } as SendToAddressCopyBodyParam
-  addAttributesToCurrentSpan({ "request.params": JSON.stringify(bodyWithHooks) })
   return Ibex.sendToAddressV2(bodyWithHooks).then(errorHandler)
 }
 
 const sendCrypto = async (
   body: CryptoSendBodyParam,
 ): Promise<CryptoSendResponse | IbexError> => {
-  addAttributesToCurrentSpan({ "request.params": JSON.stringify(body) })
   const token = await getIbexToken()
   if (token instanceof IbexError) return token
 
@@ -281,7 +271,6 @@ const getCryptoSendRequirements = async (args: {
   network: string
   currencyId: IbexCurrencyId
 }): Promise<CryptoSendRequirements | IbexError> => {
-  addAttributesToCurrentSpan({ "request.params": JSON.stringify(args) })
   const token = await getIbexToken()
   if (token instanceof IbexError) return token
 
@@ -298,7 +287,6 @@ const getCryptoSendRequirements = async (args: {
 const createCryptoSendInfo = async (
   body: CreateCryptoSendInfoBodyParam,
 ): Promise<CryptoSendInfo | IbexError> => {
-  addAttributesToCurrentSpan({ "request.params": JSON.stringify(body) })
   const token = await getIbexToken()
   if (token instanceof IbexError) return token
 
@@ -328,7 +316,6 @@ const createLnurlPay = async (
     webhookUrl: ibexWebhookEndpoints.onReceive.lnurl,
     webhookSecret: ibexWebhookSecret,
   } as CreateLnurlPayBodyParam
-  addAttributesToCurrentSpan({ "request.params": JSON.stringify(bodyWithHooks) })
   return Ibex.createLnurlPay(bodyWithHooks).then(errorHandler)
 }
 
