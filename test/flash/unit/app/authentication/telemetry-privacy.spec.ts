@@ -71,7 +71,7 @@ import {
   InvalidIpMetadataError,
   CouldNotFindUserFromPhoneError,
 } from "@domain/errors"
-import { IpFetcherServiceError } from "@domain/ipfetcher"
+import { UnknownIpFetcherServiceError } from "@domain/ipfetcher"
 import { PhoneCodeInvalidError } from "@domain/phone-provider"
 import { RateLimitConfig } from "@domain/rate-limit"
 import { RateLimiterExceededError } from "@domain/rate-limit/errors"
@@ -264,7 +264,7 @@ describe("explicit onboarding telemetry boundary", () => {
     "returns the original %s IP-provider error while recording only a fixed diagnostic",
     async (kind) => {
       const error = Object.assign(
-        new IpFetcherServiceError(Object.values(privateValues).join(" ")),
+        new UnknownIpFetcherServiceError(Object.values(privateValues).join(" ")),
         { request: privateValues },
       )
       mockIP.mockResolvedValue(error)
