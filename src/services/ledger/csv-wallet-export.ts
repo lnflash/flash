@@ -1,5 +1,6 @@
-import { getTransactionsForWallets } from "@app/wallets"
+import { getTransactionsForWallets } from "@app/wallets/get-transactions-for-wallet"
 import { txDirectionValues } from "@graphql/shared/types/scalar/tx-direction"
+import { UnexpectedIbexResponse } from "@services/ibex/errors"
 import { baseLogger } from "@services/logger"
 import { createObjectCsvStringifier, createObjectCsvWriter } from "csv-writer"
 
@@ -54,16 +55,21 @@ export class CsvWalletsExport {
     // TODO: interface could be improved by returning self, so that it's
     // possible to run csv.addWallet(wallet).getBase64()
 
-    const response = await getTransactionsForWallets({
-      wallets,
-    })
-
-    const txs = await this.formatTxs(response.result?.slice)
-
-    if (!(txs instanceof Error)) {
-      // @ts-expect-error no-implicit-any error
-      this.entries.push(...txs)
+    let response: Awaited<ReturnType<typeof getTransactionsForWallets>>
+    try {
+      response = await getTransactionsForWallets({ wallets, requireComplete: true })
+    } catch {
+      return new UnexpectedIbexResponse("CSV export history unavailable")
     }
+    if (response.error) return response.error
+    if (!response.result?.slice)
+      return new UnexpectedIbexResponse("CSV export history unavailable")
+
+    const txs = await this.formatTxs(response.result.slice)
+
+    if (txs instanceof Error) return txs
+    // @ts-expect-error no-implicit-any error
+    this.entries.push(...txs)
   }
 
   async formatTxs(txs?: IbexTransaction[]) {
