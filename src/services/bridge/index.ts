@@ -38,7 +38,6 @@ import { WalletsRepository } from "@services/mongoose/wallets"
 
 import { IdentityRepository } from "@services/kratos"
 import IbexClient from "@services/ibex/client"
-import { writeBridgeCashoutPending } from "@services/frappe/BridgeTransferRequestWriter"
 import { IbexError } from "@services/ibex/errors"
 
 import {
@@ -57,6 +56,7 @@ import {
   BridgeInvalidPlaidTokenError,
   BridgeDepositInstructionsMissingError,
   BridgeWithdrawalNetAmountTooLowError,
+  BridgeWithdrawalSendOutcomeUnknownError,
 } from "./errors"
 import BridgeApiClient, {
   type CreateExternalAccountRequest,
@@ -70,6 +70,8 @@ import {
   resolveWithdrawalCustomerFeeEstimate,
   type PresentedBridgeWithdrawal,
 } from "./withdrawal-fees"
+
+import { reportWithdrawalSendUncertainty } from "./withdrawal-send-uncertainty"
 
 const asBridgeRequestWithdrawalError = (error: unknown): BridgeError => {
   if (error instanceof BridgeError) return error
@@ -1170,6 +1172,20 @@ const deleteExternalAccount = async (
   }
 }
 
+const rejectUnresolvedWithdrawalSend = async (
+  accountId: string,
+): Promise<Error | undefined> => {
+  const unresolved =
+    await BridgeAccountsRepo.findUnresolvedWithdrawalSendByAccountId(accountId)
+  if (unresolved instanceof Error) return unresolved
+  if (!unresolved) return undefined
+  reportWithdrawalSendUncertainty(
+    BridgeAccountsRepo.bridgeWithdrawalRecordId(unresolved),
+    "unresolved_prior_send",
+  )
+  return new BridgeWithdrawalSendOutcomeUnknownError()
+}
+
 /**
  * Requests a withdrawal — validates everything and stores a pending record in MongoDB.
  * Does NOT call the Bridge API. Returns the pending withdrawal so the frontend can
@@ -1197,6 +1213,8 @@ const requestWithdrawal = async (
       operation: "requestWithdrawal",
     })
     if (customerId instanceof Error) return customerId
+    const unresolvedSend = await rejectUnresolvedWithdrawalSend(accountId as string)
+    if (unresolvedSend) return unresolvedSend
 
     const ethereumAddress = account.bridgeEthereumAddress
     if (!ethereumAddress) {
@@ -1389,12 +1407,15 @@ const initiateWithdrawal = async (
   const account = await checkAccountLevel(accountId)
   if (account instanceof Error) return account
 
+  let dispatchFenceId: string | undefined
   try {
     const customerId = await requireApprovedBridgeCustomer({
       account,
       operation: "initiateWithdrawal",
     })
     if (customerId instanceof Error) return customerId
+    const unresolvedSend = await rejectUnresolvedWithdrawalSend(accountId as string)
+    if (unresolvedSend) return unresolvedSend
 
     const pendingWithdrawal = await BridgeAccountsRepo.findWithdrawalById(withdrawalId)
     if (pendingWithdrawal instanceof Error) {
@@ -1511,7 +1532,7 @@ const initiateWithdrawal = async (
         amount: transfer.amount,
         currency: transfer.currency,
         bridgeDepositAddress,
-        failureReason: sendRequirements.message,
+        failureReason: "IBEX crypto send requirements unavailable before dispatch",
       })
       return sendRequirements
     }
@@ -1529,7 +1550,7 @@ const initiateWithdrawal = async (
         amount: transfer.amount,
         currency: transfer.currency,
         bridgeDepositAddress,
-        failureReason: cryptoSendInfo.message,
+        failureReason: "IBEX crypto send information unavailable before dispatch",
       })
       return cryptoSendInfo
     }
@@ -1547,89 +1568,84 @@ const initiateWithdrawal = async (
       return error
     }
 
+    const attemptId = crypto.randomUUID()
+    const reserved = await BridgeAccountsRepo.reserveWithdrawalCryptoSendAttempt({
+      id: pendingWithdrawal.id,
+      accountId: accountId as string,
+      bridgeTransferId: transfer.id,
+      attemptId,
+      sourceWalletId: usdtWallet.id,
+      cryptoSendInfoId: cryptoSendInfo.id,
+      amount,
+    })
+    if (
+      reserved instanceof Error ||
+      reserved.cryptoSendAttemptId !== attemptId ||
+      reserved.status !== "send_unknown"
+    ) {
+      reportWithdrawalSendUncertainty(
+        pendingWithdrawal.id,
+        "attempt_reservation_unconfirmed",
+      )
+      return new BridgeWithdrawalSendOutcomeUnknownError()
+    }
+    // No provider call is permitted until the majority-journaled CAS fence
+    // exists. Every failure after this point keeps it; never roll it back.
+    dispatchFenceId = pendingWithdrawal.id
     const sendResult = await IbexClient.sendCrypto({
       accountId: usdtWallet.id as IbexAccountId,
       cryptoSendInfosId: cryptoSendInfo.id,
       amount: sendAmount.toIbex(),
     })
-    if (sendResult instanceof Error) {
-      await markWithdrawalSendFailed({
-        accountId: accountId as string,
-        withdrawalId: pendingWithdrawal.id,
-        transferId: transfer.id,
-        amount: transfer.amount,
-        currency: transfer.currency,
-        bridgeDepositAddress,
-        failureReason: sendResult.message,
-      })
-      return sendResult
-    }
-
-    const ibexPayoutId = ibexPayoutIdFromSendResponse(sendResult)
-    if (!ibexPayoutId) {
-      baseLogger.error(
-        {
-          accountId,
-          withdrawalId: pendingWithdrawal.id,
-          transferId: transfer.id,
-          sendResult,
-        },
-        "IBEX crypto send succeeded without transaction id; manual payout linking required",
+    const ibexPayoutId =
+      sendResult instanceof Error ? undefined : ibexPayoutIdFromSendResponse(sendResult)
+    const responseStatus =
+      typeof sendResult === "object" && sendResult !== null
+        ? ((sendResult as { status?: unknown; transaction?: { status?: unknown } })
+            .transaction?.status ?? (sendResult as { status?: unknown }).status)
+        : undefined
+    const explicitFailure =
+      responseStatus !== undefined &&
+      (typeof responseStatus !== "string" ||
+        ["FAILED", "FAILURE", "REJECTED", "ERROR", "CANCELLED", "CANCELED"].includes(
+          responseStatus.toUpperCase(),
+        ))
+    if (
+      explicitFailure ||
+      typeof ibexPayoutId !== "string" ||
+      !/^[A-Za-z0-9_-]{1,256}$/.test(ibexPayoutId)
+    ) {
+      reportWithdrawalSendUncertainty(
+        pendingWithdrawal.id,
+        "provider_outcome_unconfirmed",
       )
+      return new BridgeWithdrawalSendOutcomeUnknownError()
     }
 
-    const updated = await BridgeAccountsRepo.updateWithdrawalOnchainSend(
+    const updated = await BridgeAccountsRepo.recordWithdrawalCryptoSendReceipt(
       pendingWithdrawal.id,
       ibexPayoutId,
       ibexTxHashFromSendResponse(sendResult),
+      attemptId,
     )
-    if (updated instanceof Error) return updated
-
-    await sendBridgeWithdrawalNotificationBestEffort({
-      accountId: accountId as string,
-      amount: updated.amount,
-      currency: updated.currency,
-      outcome: "usdt_sent",
-    })
-
-    const auditResult = await writeBridgeCashoutPending({
-      transferId: transfer.id,
-      amount: transfer.amount,
-      currency: transfer.currency,
-      accountId: accountId as string,
-      sourceEventId: updated.id,
-      sourceEventType: "bridge.withdrawal.usdt_sent",
-      rawPayload: {
-        withdrawalId: updated.id,
-        bridgeTransferId: transfer.id,
-        ibexPayoutId,
-        ibexTxHash: updated.ibexTxHash,
-      },
-    })
-    if (auditResult instanceof Error) {
-      baseLogger.warn(
-        { accountId, withdrawalId, transferId: transfer.id, error: auditResult },
-        "Failed to write pending Bridge cashout transfer request",
-      )
+    if (updated instanceof Error) {
+      reportWithdrawalSendUncertainty(pendingWithdrawal.id, "send_receipt_unconfirmed")
+      return new BridgeWithdrawalSendOutcomeUnknownError()
     }
-
-    baseLogger.info(
-      {
-        accountId,
-        operation: "initiateWithdrawal",
-        transferId: transfer.id,
-        ibexPayoutId,
-      },
-      "Bridge operation completed",
-    )
-
-    return presentBridgeWithdrawal(updated)
+    reportWithdrawalSendUncertainty(pendingWithdrawal.id, "provider_pending_confirmation")
+    // RN currently treats any error-free initiate result as final success.
+    // Keep this an explicit pending-review error until Bridge confirms payout.
+    return new BridgeWithdrawalSendOutcomeUnknownError()
   } catch (error) {
+    if (dispatchFenceId) {
+      reportWithdrawalSendUncertainty(dispatchFenceId, "provider_outcome_unconfirmed")
+      return new BridgeWithdrawalSendOutcomeUnknownError()
+    }
     baseLogger.error(
-      { accountId, operation: "initiateWithdrawal", error },
+      { operation: "initiateWithdrawal", outcome: "failed_before_dispatch" },
       "Bridge operation failed",
     )
-    return error instanceof Error ? error : new Error(String(error))
+    return error instanceof Error ? error : new Error("Withdrawal failed before dispatch")
   }
 }
 

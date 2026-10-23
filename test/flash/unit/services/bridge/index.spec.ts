@@ -1,3 +1,5 @@
+jest.mock("@services/alerts", () => ({ alertBridge: jest.fn() }))
+
 import crypto from "crypto"
 
 jest.mock("@services/tracing", () => ({
@@ -62,10 +64,12 @@ jest.mock("@services/mongoose/bridge-accounts", () => ({
   bridgeWithdrawalRecordId: jest.requireActual("@services/mongoose/bridge-accounts")
     .bridgeWithdrawalRecordId,
   updateWithdrawalTransferId: jest.fn(),
+  findUnresolvedWithdrawalSendByAccountId: jest.fn(),
+  reserveWithdrawalCryptoSendAttempt: jest.fn(),
   findWithdrawalById: jest.fn(),
   findWithdrawalsByAccountId: jest.fn(),
   cancelWithdrawal: jest.fn(),
-  updateWithdrawalOnchainSend: jest.fn(),
+  recordWithdrawalCryptoSendReceipt: jest.fn(),
   updateWithdrawalSendFailed: jest.fn(),
 }))
 
@@ -150,6 +154,9 @@ jest.mock("@services/cache", () => ({
     clear: jest.fn().mockResolvedValue(true),
   }),
 }))
+
+import { alertBridge } from "@services/alerts"
+import { baseLogger } from "@services/logger"
 
 import BridgeService, { deriveWithdrawalIdempotencyKey } from "@services/bridge"
 import * as BridgeAccountsRepo from "@services/mongoose/bridge-accounts"
@@ -272,6 +279,16 @@ const expectSuccess = <T>(result: T | Error): T => {
 
 /** Sets up the guards common to requestWithdrawal and initiateWithdrawal. */
 const setupGuards = () => {
+  ;(
+    BridgeAccountsRepo.findUnresolvedWithdrawalSendByAccountId as jest.Mock
+  ).mockResolvedValue(null)
+  ;(
+    BridgeAccountsRepo.reserveWithdrawalCryptoSendAttempt as jest.Mock
+  ).mockImplementation(async (args) => ({
+    ...makeRow(args.id),
+    status: "send_unknown",
+    cryptoSendAttemptId: args.attemptId,
+  }))
   ;(AccountsRepository as jest.Mock).mockReturnValue({
     findById: jest.fn().mockResolvedValue(mockAccount),
     update: jest.fn(),
@@ -324,7 +341,7 @@ const setupGuards = () => {
     subtotalAmount: "48.90",
     finalAmount: "48.90",
   })
-  ;(BridgeAccountsRepo.updateWithdrawalOnchainSend as jest.Mock).mockResolvedValue({
+  ;(BridgeAccountsRepo.recordWithdrawalCryptoSendReceipt as jest.Mock).mockResolvedValue({
     ...makeRow(WITHDRAWAL_ID),
     bridgeTransferId: TRANSFER_ID,
     bridgeDepositAddress: BRIDGE_DEPOSIT_ADDRESS,
@@ -333,7 +350,7 @@ const setupGuards = () => {
     subtotalAmount: "48.90",
     finalAmount: "48.90",
     ibexPayoutId: IBEX_PAYOUT_ID,
-    status: "usdt_sent" as const,
+    status: "send_unknown" as const,
   })
   ;(BridgeClient.createTransfer as jest.Mock).mockResolvedValue(mockTransfer)
   ;(IbexClient.sendOnchain as jest.Mock).mockResolvedValue({
@@ -1196,68 +1213,35 @@ describe("initiateWithdrawal — takes withdrawalId (step 2A)", () => {
         finalAmount: "48.90",
       },
     )
-    expect(BridgeAccountsRepo.updateWithdrawalOnchainSend).toHaveBeenCalledWith(
+    expect(BridgeAccountsRepo.recordWithdrawalCryptoSendReceipt).toHaveBeenCalledWith(
       WITHDRAWAL_ID,
       IBEX_PAYOUT_ID,
       undefined,
+      expect.any(String),
     )
-    expect(expectSuccess(result)).toMatchObject({
-      status: "usdt_sent",
-      bridgeTransferId: TRANSFER_ID,
-      flashFeeIsEstimate: false,
-      bridgeDeveloperFee: "1.00",
-      bridgeExchangeFee: "0.10",
-    })
+    expect((result as Error).name).toBe("BridgeWithdrawalSendOutcomeUnknownError")
   })
 
-  it("preserves successful IBEX sends that do not expose a transaction id", async () => {
+  it("quarantines an acknowledgment without a usable payout id", async () => {
     ;(IbexClient.sendCrypto as jest.Mock).mockResolvedValue({
       status: "PENDING",
       accepted: true,
     })
-    ;(BridgeAccountsRepo.updateWithdrawalOnchainSend as jest.Mock).mockResolvedValue({
-      ...makeRow(WITHDRAWAL_ID),
-      bridgeTransferId: TRANSFER_ID,
-      bridgeDepositAddress: BRIDGE_DEPOSIT_ADDRESS,
-      ibexPayoutId: undefined,
-      status: "usdt_sent" as const,
-    })
-
     const result = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
-
+    expect((result as Error).name).toBe("BridgeWithdrawalSendOutcomeUnknownError")
     expect(BridgeAccountsRepo.updateWithdrawalSendFailed).not.toHaveBeenCalled()
-    expect(BridgeAccountsRepo.updateWithdrawalOnchainSend).toHaveBeenCalledWith(
-      WITHDRAWAL_ID,
-      undefined,
-      undefined,
-    )
-    expect(expectSuccess(result)).toMatchObject({
-      status: "usdt_sent",
-      bridgeTransferId: TRANSFER_ID,
-    })
+    expect(BridgeAccountsRepo.recordWithdrawalCryptoSendReceipt).not.toHaveBeenCalled()
   })
 
-  it("marks the withdrawal send_failed when IBEX send fails after Bridge transfer creation", async () => {
-    const ibexError = new Error("ibex unavailable")
-    ;(IbexClient.sendCrypto as jest.Mock).mockResolvedValue(ibexError)
-    ;(BridgeAccountsRepo.updateWithdrawalSendFailed as jest.Mock).mockResolvedValue({
-      ...makeRow(WITHDRAWAL_ID),
-      bridgeTransferId: TRANSFER_ID,
-      status: "send_failed" as const,
-      failureReason: ibexError.message,
-    })
-
-    const result = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
-
-    expect(result).toBe(ibexError)
-    expect(BridgeAccountsRepo.updateWithdrawalSendFailed).toHaveBeenCalledWith(
-      WITHDRAWAL_ID,
-      TRANSFER_ID,
-      AMOUNT,
-      "usd",
-      BRIDGE_DEPOSIT_ADDRESS,
-      ibexError.message,
+  it("keeps a returned send error uncertain after the durable fence", async () => {
+    ;(IbexClient.sendCrypto as jest.Mock).mockResolvedValue(
+      new Error("PRIVATE_PROVIDER_ERROR"),
     )
+    const result = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
+    expect((result as Error).name).toBe("BridgeWithdrawalSendOutcomeUnknownError")
+    expect((result as Error).message).not.toContain("PRIVATE_PROVIDER_ERROR")
+    expect(BridgeAccountsRepo.reserveWithdrawalCryptoSendAttempt).toHaveBeenCalledTimes(1)
+    expect(BridgeAccountsRepo.updateWithdrawalSendFailed).not.toHaveBeenCalled()
   })
 
   it("marks the withdrawal send_failed when IBEX send info creation fails", async () => {
@@ -1281,8 +1265,151 @@ describe("initiateWithdrawal — takes withdrawalId (step 2A)", () => {
       AMOUNT,
       "usd",
       BRIDGE_DEPOSIT_ADDRESS,
-      ibexError.message,
+      "IBEX crypto send requirements unavailable before dispatch",
     )
+  })
+
+  it("retains the durable fence after a thrown send, without marking failed or exposing provider text", async () => {
+    ;(IbexClient.sendCrypto as jest.Mock).mockRejectedValue(
+      new Error("PRIVATE_SEND_TIMEOUT_BODY"),
+    )
+    const result = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
+    expect((result as Error).name).toBe("BridgeWithdrawalSendOutcomeUnknownError")
+    expect(BridgeAccountsRepo.updateWithdrawalSendFailed).not.toHaveBeenCalled()
+    expect(BridgeAccountsRepo.recordWithdrawalCryptoSendReceipt).not.toHaveBeenCalled()
+    expect(BridgeAccountsRepo.reserveWithdrawalCryptoSendAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: ACCOUNT_ID,
+        sourceWalletId: USDT_WALLET_ID,
+        cryptoSendInfoId: IBEX_CRYPTO_SEND_INFO_ID,
+        amount: AMOUNT,
+      }),
+    )
+    expect(
+      jest.mocked(BridgeAccountsRepo.reserveWithdrawalCryptoSendAttempt).mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(jest.mocked(IbexClient.sendCrypto).mock.invocationCallOrder[0])
+    const diagnostics = JSON.stringify({
+      alerts: jest.mocked(alertBridge).mock.calls,
+      errors: jest.mocked(baseLogger.error).mock.calls,
+    })
+    for (const value of [
+      "PRIVATE_SEND_TIMEOUT_BODY",
+      ACCOUNT_ID,
+      BRIDGE_DEPOSIT_ADDRESS,
+      USDT_WALLET_ID,
+    ])
+      expect(diagnostics).not.toContain(value)
+    expect(alertBridge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: {
+          reason: "provider_outcome_unconfirmed",
+          reference: expect.stringMatching(/^[a-f0-9]{64}$/),
+        },
+      }),
+    )
+  })
+
+  it("does not dispatch if the attempt CAS/write acknowledgment fails", async () => {
+    ;(
+      BridgeAccountsRepo.reserveWithdrawalCryptoSendAttempt as jest.Mock
+    ).mockResolvedValue(new RepositoryError("PRIVATE_DATABASE_BODY"))
+    const result = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
+    expect((result as Error).name).toBe("BridgeWithdrawalSendOutcomeUnknownError")
+    expect(IbexClient.sendCrypto).not.toHaveBeenCalled()
+    expect(BridgeAccountsRepo.updateWithdrawalSendFailed).not.toHaveBeenCalled()
+  })
+
+  it.each(["returned", "thrown"])(
+    "keeps acknowledged sends fenced after %s receipt persistence failure",
+    async (mode) => {
+      const update = BridgeAccountsRepo.recordWithdrawalCryptoSendReceipt as jest.Mock
+      if (mode === "returned")
+        update.mockResolvedValue(new RepositoryError("PRIVATE_DATABASE_BODY"))
+      else update.mockRejectedValue(new Error("PRIVATE_DATABASE_BODY"))
+      const result = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
+      expect((result as Error).name).toBe("BridgeWithdrawalSendOutcomeUnknownError")
+      expect(IbexClient.sendCrypto).toHaveBeenCalledTimes(1)
+      expect(BridgeAccountsRepo.updateWithdrawalSendFailed).not.toHaveBeenCalled()
+      ;(
+        BridgeAccountsRepo.findUnresolvedWithdrawalSendByAccountId as jest.Mock
+      ).mockResolvedValue({ ...makeRow(WITHDRAWAL_ID), status: "send_unknown" })
+      expect(
+        ((await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)) as Error)
+          .name,
+      ).toBe("BridgeWithdrawalSendOutcomeUnknownError")
+      expect(IbexClient.sendCrypto).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it.each(["submitted", "send_unknown", "send_failed"])(
+    "blocks new-row requests and initiation when an older %s send has no definitive outcome",
+    async (status) => {
+      ;(
+        BridgeAccountsRepo.findUnresolvedWithdrawalSendByAccountId as jest.Mock
+      ).mockResolvedValue({ ...makeRow("older-withdrawal"), status })
+      const requested = await BridgeService.requestWithdrawal(
+        ACCOUNT_ID,
+        AMOUNT,
+        EXTERNAL_ACCOUNT_ID,
+      )
+      const initiated = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
+      expect((requested as Error).name).toBe("BridgeWithdrawalSendOutcomeUnknownError")
+      expect((initiated as Error).name).toBe("BridgeWithdrawalSendOutcomeUnknownError")
+      expect(BridgeClient.createTransfer).not.toHaveBeenCalled()
+      expect(BridgeAccountsRepo.createWithdrawal).not.toHaveBeenCalled()
+      expect(IbexClient.sendCrypto).not.toHaveBeenCalled()
+    },
+  )
+
+  it("dispatches at most once for concurrent distinct rows on one account", async () => {
+    const heldAccounts = new Set<string>()
+    ;(BridgeAccountsRepo.findWithdrawalById as jest.Mock).mockImplementation(
+      async (id: string) => makeRow(id),
+    )
+    ;(
+      BridgeAccountsRepo.reserveWithdrawalCryptoSendAttempt as jest.Mock
+    ).mockImplementation(async (args) => {
+      if (heldAccounts.has(args.accountId))
+        return new RepositoryError("Withdrawal send attempt is already reserved")
+      heldAccounts.add(args.accountId)
+      return { status: "send_unknown", cryptoSendAttemptId: args.attemptId }
+    })
+    const results = await Promise.all([
+      BridgeService.initiateWithdrawal(ACCOUNT_ID, "distinct-one"),
+      BridgeService.initiateWithdrawal(ACCOUNT_ID, "distinct-two"),
+    ])
+    expect(IbexClient.sendCrypto).toHaveBeenCalledTimes(1)
+    expect(heldAccounts.size).toBe(1)
+    expect(BridgeAccountsRepo.reserveWithdrawalCryptoSendAttempt).toHaveBeenCalledTimes(2)
+    expect(results.map((result) => (result as Error).name)).toEqual([
+      "BridgeWithdrawalSendOutcomeUnknownError",
+      "BridgeWithdrawalSendOutcomeUnknownError",
+    ])
+  })
+
+  it("fails closed before transfer/send when unresolved-send read fails", async () => {
+    ;(
+      BridgeAccountsRepo.findUnresolvedWithdrawalSendByAccountId as jest.Mock
+    ).mockResolvedValue(
+      new RepositoryError("Unable to verify unresolved withdrawal sends"),
+    )
+    expect(
+      await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID),
+    ).toBeInstanceOf(RepositoryError)
+    expect(BridgeClient.createTransfer).not.toHaveBeenCalled()
+    expect(IbexClient.sendCrypto).not.toHaveBeenCalled()
+  })
+
+  it("quarantines explicit provider failure acknowledgments even when they contain an ID", async () => {
+    ;(IbexClient.sendCrypto as jest.Mock).mockResolvedValue({
+      transaction: { id: IBEX_PAYOUT_ID, status: "FAILED" },
+    })
+    expect(
+      ((await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)) as Error).name,
+    ).toBe("BridgeWithdrawalSendOutcomeUnknownError")
+    expect(BridgeAccountsRepo.recordWithdrawalCryptoSendReceipt).not.toHaveBeenCalled()
+    expect(BridgeAccountsRepo.updateWithdrawalSendFailed).not.toHaveBeenCalled()
   })
 
   it("returns BridgeWithdrawalNotFoundError when the withdrawal ID does not exist", async () => {
@@ -1511,13 +1638,8 @@ describe("withdrawal request → confirm/cancel flow", () => {
     const pending = expectSuccess(requested)
     expect(pending).toMatchObject({ status: "pending", id: WITHDRAWAL_ID })
 
-    const initiated = expectSuccess(
-      await BridgeService.initiateWithdrawal(ACCOUNT_ID, pending.id),
-    )
-    expect(initiated).toMatchObject({
-      status: "usdt_sent",
-      bridgeTransferId: TRANSFER_ID,
-    })
+    const initiated = await BridgeService.initiateWithdrawal(ACCOUNT_ID, pending.id)
+    expect((initiated as Error).name).toBe("BridgeWithdrawalSendOutcomeUnknownError")
     expect(BridgeClient.createTransfer).toHaveBeenCalledTimes(1)
     expect(BridgeAccountsRepo.updateWithdrawalTransferId).toHaveBeenCalledWith(
       WITHDRAWAL_ID,
@@ -1570,10 +1692,8 @@ describe("withdrawal request → confirm/cancel flow", () => {
     expect(firstPending).toMatchObject({ id: "deduped-withdrawal-001" })
     expect(secondPending).toMatchObject({ id: "deduped-withdrawal-001" })
 
-    const initiated = expectSuccess(
-      await BridgeService.initiateWithdrawal(ACCOUNT_ID, firstPending.id),
-    )
-    expect(initiated.bridgeTransferId).toBe(TRANSFER_ID)
+    const initiated = await BridgeService.initiateWithdrawal(ACCOUNT_ID, firstPending.id)
+    expect((initiated as Error).name).toBe("BridgeWithdrawalSendOutcomeUnknownError")
     expect(BridgeAccountsRepo.updateWithdrawalTransferId).toHaveBeenCalledWith(
       "deduped-withdrawal-001",
       TRANSFER_ID,

@@ -52,6 +52,13 @@ interface IBridgeWithdrawalRecord {
   bridgeDepositAddress?: string
   ibexPayoutId?: string
   ibexTxHash?: string
+  cryptoSendState?: "not_dispatched" | "attempted"
+  cryptoSendAttemptId?: string
+  cryptoSendAttemptedAt?: Date
+  cryptoSendReviewedAt?: Date
+  cryptoSendSourceWalletId?: string
+  cryptoSendInfoId?: string
+  cryptoSendAmount?: string
   amount: string
   currency: string
   status:
@@ -59,6 +66,7 @@ interface IBridgeWithdrawalRecord {
     | "submitted"
     | "usdt_sent"
     | "send_failed"
+    | "send_unknown"
     | "completed"
     | "failed"
     | "cancelled"
@@ -778,6 +786,13 @@ const BridgeWithdrawalSchema = new Schema<IBridgeWithdrawalRecord>({
   bridgeDepositAddress: { type: String },
   ibexPayoutId: { type: String, unique: true, sparse: true },
   ibexTxHash: { type: String },
+  cryptoSendState: { type: String, enum: ["not_dispatched", "attempted"] },
+  cryptoSendAttemptId: { type: String },
+  cryptoSendAttemptedAt: { type: Date },
+  cryptoSendReviewedAt: { type: Date },
+  cryptoSendSourceWalletId: { type: String },
+  cryptoSendInfoId: { type: String },
+  cryptoSendAmount: { type: String },
   amount: { type: String, required: true },
   currency: { type: String, required: true },
   status: {
@@ -787,6 +802,7 @@ const BridgeWithdrawalSchema = new Schema<IBridgeWithdrawalRecord>({
       "submitted",
       "usdt_sent",
       "send_failed",
+      "send_unknown",
       "completed",
       "failed",
       "cancelled",
@@ -820,6 +836,19 @@ BridgeWithdrawalSchema.index(
     partialFilterExpression: { status: "pending" },
   },
 )
+
+// One unresolved dispatch per account, including concurrent distinct requests.
+// The repository also creates/verifies this exact index before any dispatch.
+BridgeWithdrawalSchema.index(
+  { accountId: 1 },
+  {
+    unique: true,
+    name: "bridge_withdrawal_unresolved_send",
+    partialFilterExpression: { status: "send_unknown" },
+  },
+)
+
+BridgeWithdrawalSchema.index({ status: 1, cryptoSendReviewedAt: 1, _id: 1 })
 
 const BridgeDepositsSchema = new Schema({
   eventId: { type: String, required: true, unique: true },

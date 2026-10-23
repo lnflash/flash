@@ -780,6 +780,13 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         message,
       })
 
+    case "BridgeWithdrawalSendOutcomeUnknownError":
+      return bridgeGqlError({
+        code: "BRIDGE_WITHDRAWAL_SEND_OUTCOME_UNKNOWN",
+        message:
+          "Withdrawal is pending confirmation. Do not submit it again; check its status or contact support.",
+      })
+
     case "BridgeWithdrawalAlreadyInitiatedError":
       message =
         error.message ||

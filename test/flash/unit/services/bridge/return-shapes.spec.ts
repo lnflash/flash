@@ -62,7 +62,9 @@ jest.mock("@services/mongoose/bridge-accounts", () => ({
   findWithdrawalsByAccountId: jest.fn(),
   findWithdrawalById: jest.fn(),
   updateWithdrawalTransferId: jest.fn(),
-  updateWithdrawalOnchainSend: jest.fn(),
+  findUnresolvedWithdrawalSendByAccountId: jest.fn(),
+  reserveWithdrawalCryptoSendAttempt: jest.fn(),
+  recordWithdrawalCryptoSendReceipt: jest.fn(),
 }))
 
 jest.mock("@services/bridge/client", () => ({
@@ -237,6 +239,15 @@ const setupGuards = () => {
     ],
     has_more: false,
   })
+  ;(
+    BridgeAccountsRepo.findUnresolvedWithdrawalSendByAccountId as jest.Mock
+  ).mockResolvedValue(null)
+  ;(
+    BridgeAccountsRepo.reserveWithdrawalCryptoSendAttempt as jest.Mock
+  ).mockImplementation(async (args) => ({
+    status: "send_unknown",
+    cryptoSendAttemptId: args.attemptId,
+  }))
   ;(BridgeAccountsRepo.findWithdrawalById as jest.Mock).mockResolvedValue(makeRow())
   ;(BridgeAccountsRepo.updateWithdrawalTransferId as jest.Mock).mockResolvedValue({
     ...makeRow(),
@@ -247,7 +258,7 @@ const setupGuards = () => {
     finalAmount: "48.90",
     status: "submitted" as const,
   })
-  ;(BridgeAccountsRepo.updateWithdrawalOnchainSend as jest.Mock).mockResolvedValue({
+  ;(BridgeAccountsRepo.recordWithdrawalCryptoSendReceipt as jest.Mock).mockResolvedValue({
     ...makeRow(),
     bridgeTransferId: TRANSFER_ID,
     bridgeDeveloperFee: "1.00",
@@ -283,20 +294,10 @@ describe("initiateWithdrawal — BridgeWithdrawal GraphQL contract shape", () =>
     setupGuards()
   })
 
-  it("returns every NonNull field required by the BridgeWithdrawal GraphQL type", async () => {
+  it("returns an explicit pending-review error instead of an error-free success for a PENDING send", async () => {
     const result = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
-
-    expect(result).not.toBeInstanceOf(Error)
-    if (result instanceof Error) return
-
-    expect(result.id).toBe(WITHDRAWAL_ID)
-    expect(result.amount).toBe(AMOUNT)
-    expect(result.currency).toBe("usdt")
-    expect(result.status).toBe("usdt_sent")
-    expect(result.createdAt).toBe(CREATED_AT.toISOString())
-    expect(result.bridgeTransferId).toBe(TRANSFER_ID)
-    expect((result as Record<string, unknown>).transferId).toBeUndefined()
-    expect((result as Record<string, unknown>).state).toBeUndefined()
+    expect((result as Error).name).toBe("BridgeWithdrawalSendOutcomeUnknownError")
+    expect((result as Error).message).toMatch(/pending confirmation/)
   })
 })
 
