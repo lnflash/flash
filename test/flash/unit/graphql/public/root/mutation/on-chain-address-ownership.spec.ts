@@ -98,7 +98,6 @@ describe.each(mutations)("on-chain receive resolver %#", (mutation) => {
     expect(mockFindWallet).not.toHaveBeenCalled()
     expect(mockRouteCashWallet).not.toHaveBeenCalled()
     expect(mockGenerateAddress).not.toHaveBeenCalled()
-    expect(mockRouteCashWallet).not.toHaveBeenCalled()
   })
 
   it("refuses a foreign wallet without creating a provider address", async () => {
