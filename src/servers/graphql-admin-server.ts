@@ -13,7 +13,7 @@ import express from "express"
 import { ApolloServerPluginDrainHttpServer } from "apollo-server-core"
 import { ApolloError, ApolloServer, ExpressContext } from "apollo-server-express"
 import { GraphQLError, GraphQLSchema } from "graphql"
-import { createRequestLogger } from "./request-log"
+
 import { mapError } from "@graphql/error-map"
 import { fieldExtensionsEstimator, simpleEstimator } from "graphql-query-complexity"
 
@@ -24,6 +24,8 @@ import { warnIfDevContext } from "@utils/dev-context"
 import requestIp from "request-ip"
 
 import jwt from "jsonwebtoken"
+
+import { createRequestLogger } from "./request-log"
 
 import { exitOnBootFailure } from "./boot"
 

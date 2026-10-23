@@ -10,7 +10,6 @@ import { GetVerificationKey, expressjwt } from "express-jwt"
 import { GraphQLError, GraphQLSchema } from "graphql"
 import { rule } from "graphql-shield"
 import jsonwebtoken from "jsonwebtoken"
-import { createRequestLogger } from "./request-log"
 
 import { mapError } from "@graphql/error-map"
 
@@ -25,6 +24,8 @@ import {
   isApiKeySessionId,
 } from "@domain/api-keys"
 import { parseUnknownDomainErrorFromUnknown } from "@domain/shared"
+
+import { createRequestLogger } from "./request-log"
 
 import { MAXIMUM_QUERY_COMPLEXITY, createComplexityPlugin } from "./plugins/complexity"
 
