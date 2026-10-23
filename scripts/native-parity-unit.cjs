@@ -62,11 +62,13 @@ const suites = Object.freeze({
     "services/fygaro/webhook-server/payment.spec.ts",
     "services/http-trace-privacy.spec.ts",
     "services/ibex/request-trace-privacy.spec.ts",
+    "services/ipfetcher-privacy.spec.ts",
     "services/notifications/firebase-telemetry-privacy.spec.ts",
     "services/notifications/push-notifications.spec.ts",
     "services/notification/telemetry-privacy.spec.ts",
     "services/tracing-input-privacy.spec.ts",
     "services/tracing.spec.ts",
+    "services/twilio.spec.ts",
   ],
   device: [
     "app/accounts/device-account-bootstrap.spec.ts",
