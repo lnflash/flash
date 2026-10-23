@@ -217,7 +217,11 @@ registerInstrumentations({
     }),
     new MongoDBInstrumentation(),
     new GrpcInstrumentation(),
-    new IORedisInstrumentation(),
+    new IORedisInstrumentation({
+      // Redis keys include one-use Plaid capabilities; Lua and other command
+      // arguments can carry credentials or personal data. Record no arguments.
+      dbStatementSerializer: (commandName) => commandName,
+    }),
   ],
 })
 

@@ -49,9 +49,10 @@ jest.mock("@opentelemetry/api", () => {
 })
 
 import { GraphQLInstrumentation } from "@opentelemetry/instrumentation-graphql"
+import { IORedisInstrumentation } from "@opentelemetry/instrumentation-ioredis"
 import { registerInstrumentations } from "@opentelemetry/instrumentation"
 import { parse } from "graphql"
-import { TracerProvider } from "@opentelemetry/api"
+import { TracerProvider, Span, trace } from "@opentelemetry/api"
 import {
   wrapToRunInSpan,
   wrapAsyncToRunInSpan,
@@ -66,6 +67,10 @@ function fakeSpan() {
     events: [] as unknown[],
     setAttribute: jest.fn((key: string, value: unknown) => {
       result.attributes[key] = value
+      return result
+    }),
+    setAttributes: jest.fn((attributes: Record<string, unknown>) => {
+      Object.assign(result.attributes, attributes)
       return result
     }),
     recordException: jest.fn((error: unknown) => {
@@ -330,3 +335,56 @@ it("also drops GraphQL parser source before export rather than protecting only e
   expect(exported["graphql.source"]).toBeUndefined()
   expect(JSON.stringify(exported)).not.toContain("PRIVATE_")
 })
+
+it.each([
+  ["set", ["plaid:link:PRIVATE_TOKEN", "PRIVATE_BANK_BINDING"]],
+  ["get", ["plaid:link:PRIVATE_TOKEN"]],
+  ["del", ["plaid:link:PRIVATE_TOKEN"]],
+  ["eval", ["return 'PRIVATE_LUA_SECRET'", "1", "PRIVATE_KEY", "PRIVATE_ARGUMENT"]],
+  ["auth", ["PRIVATE_REDIS_PASSWORD"]],
+])(
+  "records only the %s command name through the exact Redis plugin while preserving execution",
+  (name, args) => {
+    const options = jest.mocked(registerInstrumentations).mock.calls[0][0]
+    const instrumentation = options.instrumentations
+      ?.flat()
+      .find((item) => item instanceof IORedisInstrumentation)
+    if (!(instrumentation instanceof IORedisInstrumentation))
+      throw new Error("Redis instrumentation not registered")
+    instrumentation.setTracerProvider({
+      getTracer: () => ({
+        startSpan: (_name: string, options: { attributes: Record<string, unknown> }) => {
+          Object.assign(span.attributes, options.attributes)
+          return span
+        },
+      }),
+    } as unknown as TracerProvider)
+    const resolve = jest.fn(),
+      reject = jest.fn()
+    const command = { name, args, resolve, reject }
+    const providerResult = { fixture: true }
+    const original = jest.fn(() => providerResult)
+    const wrapped = Reflect.get(instrumentation, "_traceSendCommand").call(
+      instrumentation,
+      original,
+      "fixture-version",
+    )
+    // The production plugin requires a parent span. Simulate that authority
+    // without registering an SDK or exporting any span.
+    const parent = jest.spyOn(trace, "getSpan").mockReturnValue(span as unknown as Span)
+    try {
+      expect(
+        wrapped.call({ options: { host: "fixture.invalid", port: 6379 } }, command),
+      ).toBe(providerResult)
+      expect(original).toHaveBeenCalledWith(command)
+      expect(command.args).toBe(args)
+      expect(span.attributes["db.statement"]).toBe(name)
+      expect(JSON.stringify(span.attributes)).not.toContain("PRIVATE_")
+      command.resolve("fixture-result")
+      expect(resolve).toHaveBeenCalledWith("fixture-result")
+      expect(span.end).toHaveBeenCalledTimes(1)
+    } finally {
+      parent.mockRestore()
+    }
+  },
+)
