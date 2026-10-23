@@ -68,6 +68,18 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
   const errorName = error.name as ApplicationErrorKey
   let message = ""
   switch (errorName) {
+    case "DeviceTotpRequiresPhoneUpgradeError":
+      return bridgeGqlError({
+        code: "DEVICE_TOTP_REQUIRES_PHONE_UPGRADE",
+        message: "Verify your phone before setting up an authenticator.",
+      })
+
+    case "TotpEnrollmentUnavailableError":
+      return bridgeGqlError({
+        code: "TOTP_ENROLLMENT_UNAVAILABLE",
+        message: "Authenticator setup is unavailable. Check your account and try again.",
+      })
+
     case "WithdrawalLimitsExceededError":
       message = error.message
       return new TransactionRestrictedError({ message, logger: baseLogger })
