@@ -412,9 +412,8 @@ export const loginWithDevice = async ({
 
     if (ipFetcherInfo instanceof IpFetcherServiceError) {
       recordExceptionInCurrentSpan({
-        error: ipFetcherInfo,
+        error: new IpFetcherServiceError("IP metadata lookup failed"),
         level: ErrorLevel.Critical,
-        attributes: { ip },
       })
       return ipFetcherInfo
     }
@@ -493,15 +492,14 @@ const isAllowedToOnboard = async ({
 
     if (ipFetcherInfo instanceof IpFetcherServiceError) {
       recordExceptionInCurrentSpan({
-        error: ipFetcherInfo,
+        error: new IpFetcherServiceError("IP metadata lookup failed"),
         level: ErrorLevel.Critical,
-        attributes: { ip },
       })
       return ipFetcherInfo
     }
 
     addAttributesToCurrentSpan({
-      "login.ipFetcherInfo": JSON.stringify(ipFetcherInfo),
+      "login.ipMetadataFetched": true,
     })
 
     const authorizedIPMetadata = IPMetadataAuthorizer(
@@ -533,7 +531,7 @@ const isAllowedToOnboard = async ({
     ).authorize(phoneMetadata)
 
     addAttributesToCurrentSpan({
-      "login.phoneMetadata": JSON.stringify(phoneMetadata),
+      "login.phoneMetadataFetched": true,
     })
 
     if (authorizedPhoneMetadata instanceof Error) {

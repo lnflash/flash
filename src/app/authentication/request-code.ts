@@ -154,7 +154,7 @@ export const requestEmailCode = async ({
   email: EmailAddress
   ip: IpAddress
 }): Promise<EmailLoginId | EmailRegistrationId | KratosError> => {
-  baseLogger.info({ email, ip }, "RequestEmailCode called")
+  baseLogger.info({ operation: "request_email_code" }, "RequestEmailCode called")
 
   {
     const limitOk = await checkRequestCodeAttemptPerIpLimits(ip)
