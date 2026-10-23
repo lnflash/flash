@@ -389,7 +389,7 @@ describe("sendUserNotification", () => {
 
   it("logs a warning when pruning the stale tokens fails", async () => {
     const warn = jest.spyOn(baseLogger, "warn").mockImplementation(jest.fn() as never)
-    const pruneError = new Error("mongo write failed")
+    const pruneError = new Error("PRIVATE_STALE_DEVICE_TOKEN_AND_PROVIDER_BODY")
     ;(removeDeviceTokens as jest.Mock).mockResolvedValue(pruneError)
     sendFilteredNotification.mockResolvedValue(
       new DeviceTokensNotRegisteredNotificationsServiceError(
@@ -402,9 +402,10 @@ describe("sendUserNotification", () => {
 
     expect(result).toBeInstanceOf(AllDeviceTokensStaleNotificationsServiceError)
     expect(warn).toHaveBeenCalledWith(
-      expect.objectContaining({ accountId, err: pruneError }),
+      { operation: "prune_push_tokens", outcome: "failed" },
       expect.stringMatching(/failed to prune stale device tokens/i),
     )
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(pruneError.message)
 
     warn.mockRestore()
   })

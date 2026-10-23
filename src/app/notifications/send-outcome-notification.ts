@@ -93,35 +93,28 @@ const sendOutcomeNotification = async ({
  * delivered is a worse experience, not a worse outcome, and turning it into an
  * error would put a delivered credit back into the provider's retry loop.
  */
-export const sendOutcomeNotificationBestEffort = async ({
-  logMessage,
-  logContext,
-  ...args
-}: OutcomeNotificationArgs & {
-  logMessage: string
-  logContext: Record<string, unknown>
-}): Promise<void> => {
+export const sendOutcomeNotificationBestEffort = async (
+  args: OutcomeNotificationArgs,
+): Promise<void> => {
   try {
-    await sendOutcomeNotificationOrPrune({ logMessage, logContext, ...args })
-  } catch (error) {
+    await sendOutcomeNotificationOrPrune(args)
+  } catch {
     // "Best effort" has to be a property of THIS function, not of today's
     // callees. Its caller awaits it on the money path and relies on it never
     // throwing — a guarantee that otherwise holds only because every repository
     // in the chain currently returns errors rather than raising them. One
     // future `throw` anywhere below would turn a delivered credit into a 500
     // and hand it back to the provider's retry loop.
-    baseLogger.warn({ ...logContext, error }, logMessage)
+    baseLogger.warn(
+      { operation: "send_outcome_push", outcome: "failed" },
+      "Unable to send outcome push",
+    )
   }
 }
 
-const sendOutcomeNotificationOrPrune = async ({
-  logMessage,
-  logContext,
-  ...args
-}: OutcomeNotificationArgs & {
-  logMessage: string
-  logContext: Record<string, unknown>
-}): Promise<void> => {
+const sendOutcomeNotificationOrPrune = async (
+  args: OutcomeNotificationArgs,
+): Promise<void> => {
   const result = await sendOutcomeNotification(args)
 
   if (result instanceof DeviceTokensNotRegisteredNotificationsServiceError) {
@@ -141,6 +134,9 @@ const sendOutcomeNotificationOrPrune = async ({
   }
 
   if (result instanceof Error) {
-    baseLogger.warn({ ...logContext, error: result }, logMessage)
+    baseLogger.warn(
+      { operation: "send_outcome_push", outcome: "failed" },
+      "Unable to send outcome push",
+    )
   }
 }

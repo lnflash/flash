@@ -617,8 +617,10 @@ it.each([
   "BRIDGE_KYC_PENDING",
   "BRIDGE_INSUFFICIENT_FUNDS",
   "BRIDGE_INVALID_PLAID_TOKEN",
+  "DEVICE_TOTP_REQUIRES_PHONE_UPGRADE",
+  "TOTP_ENROLLMENT_UNAVAILABLE",
 ])(
-  "preserves the closed %s banking code from a real GraphQL error without retaining its private text",
+  "preserves the closed %s code from a real GraphQL error without retaining its private text",
   (code) => {
     const instrumentation = configuredGraphQL()
     Reflect.get(instrumentation, "_createExecuteSpan").call(
