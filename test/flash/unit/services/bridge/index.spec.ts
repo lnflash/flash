@@ -744,24 +744,38 @@ describe("requestWithdrawal", () => {
     expect(BridgeAccountsRepo.createWithdrawal).not.toHaveBeenCalled()
   })
 
+  it.each(["50.00extra", "1e309", "1000000000.000001", "0", "-10.00"])(
+    "refuses invalid direct-service withdrawal amount %s before persistence",
+    async (invalidAmount) => {
+      const result = await BridgeService.requestWithdrawal(
+        ACCOUNT_ID,
+        invalidAmount,
+        EXTERNAL_ACCOUNT_ID,
+      )
+      expect(result).toBeInstanceOf(Error)
+      expect(BridgeAccountsRepo.createWithdrawal).not.toHaveBeenCalled()
+      expect(BridgeClient.createTransfer).not.toHaveBeenCalled()
+    },
+  )
+
   it("never creates a Bridge transfer", async () => {
     await BridgeService.requestWithdrawal(ACCOUNT_ID, AMOUNT, EXTERNAL_ACCOUNT_ID)
     expect(BridgeClient.createTransfer).not.toHaveBeenCalled()
   })
 
-  it("reuses an existing pending withdrawal for the same account, amount, and external account", async () => {
+  it("reuses the persisted fee snapshot without changing a pending confirmation", async () => {
+    const { resolveWithdrawalCustomerFeeEstimate } = jest.requireMock(
+      "@services/bridge/withdrawal-fees",
+    )
     const existingRow = makeRow("withdrawal-existing-001", {
-      estimatedBridgeFeePercent: undefined,
-      estimatedBridgeFee: undefined,
-      estimatedGasBuffer: undefined,
-      estimatedCustomerFee: undefined,
+      flashFee: "0.75",
+      estimatedBridgeFee: "0.20",
+      estimatedGasBuffer: "0.55",
+      estimatedCustomerFee: "1.50",
     })
     ;(
       BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock
     ).mockResolvedValue(existingRow)
-    ;(BridgeAccountsRepo.updateWithdrawalFeeEstimates as jest.Mock).mockResolvedValue(
-      makeRow("withdrawal-existing-001"),
-    )
 
     const result = await BridgeService.requestWithdrawal(
       ACCOUNT_ID,
@@ -770,20 +784,58 @@ describe("requestWithdrawal", () => {
     )
 
     expect(BridgeAccountsRepo.createWithdrawal).not.toHaveBeenCalled()
-    expect(BridgeAccountsRepo.updateWithdrawalFeeEstimates).toHaveBeenCalledWith(
-      "withdrawal-existing-001",
-      MOCK_WITHDRAWAL_FEE_ESTIMATE,
-    )
+    expect(BridgeAccountsRepo.updateWithdrawalFeeEstimates).not.toHaveBeenCalled()
+    expect(resolveWithdrawalCustomerFeeEstimate).not.toHaveBeenCalled()
     expect(expectSuccess(result)).toMatchObject({
       id: "withdrawal-existing-001",
       status: "pending",
+      flashFee: "0.75",
       estimatedBridgeFeePercent: "0.6",
-      estimatedBridgeFee: "0.30",
-      estimatedGasBuffer: "1.00",
-      estimatedCustomerFee: "2.30",
-      subtotalAmount: "47.70",
-      finalAmount: "47.70",
+      estimatedBridgeFee: "0.20",
+      estimatedGasBuffer: "0.55",
+      estimatedCustomerFee: "1.50",
+      subtotalAmount: "48.50",
+      finalAmount: "48.50",
     })
+  })
+
+  it("refuses a legacy pending row with no complete fee snapshot", async () => {
+    ;(
+      BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer as jest.Mock
+    ).mockResolvedValue(
+      makeRow("withdrawal-legacy-001", { estimatedCustomerFee: undefined }),
+    )
+    const result = await BridgeService.requestWithdrawal(
+      ACCOUNT_ID,
+      AMOUNT,
+      EXTERNAL_ACCOUNT_ID,
+    )
+    expect(result).toBeInstanceOf(Error)
+    expect(BridgeAccountsRepo.updateWithdrawalFeeEstimates).not.toHaveBeenCalled()
+    expect(BridgeAccountsRepo.createWithdrawal).not.toHaveBeenCalled()
+  })
+
+  it("presents the persisted winner's fees after a concurrent create", async () => {
+    ;(BridgeAccountsRepo.createWithdrawal as jest.Mock).mockResolvedValue(
+      makeRow("withdrawal-race-001", {
+        flashFee: "0.75",
+        estimatedBridgeFee: "0.20",
+        estimatedGasBuffer: "0.55",
+        estimatedCustomerFee: "1.50",
+      }),
+    )
+    const result = await BridgeService.requestWithdrawal(
+      ACCOUNT_ID,
+      AMOUNT,
+      EXTERNAL_ACCOUNT_ID,
+    )
+    expect(expectSuccess(result)).toMatchObject({
+      id: "withdrawal-race-001",
+      flashFee: "0.75",
+      estimatedCustomerFee: "1.50",
+      finalAmount: "48.50",
+    })
+    expect(BridgeAccountsRepo.updateWithdrawalFeeEstimates).not.toHaveBeenCalled()
   })
 
   it("returns an error when the external account does not belong to the caller (CRIT-2)", async () => {
@@ -840,6 +892,7 @@ describe("requestWithdrawal", () => {
     )
     resolveWithdrawalCustomerFeeEstimate.mockResolvedValue({
       ...MOCK_WITHDRAWAL_FEE_ESTIMATE,
+      flashFee: "48.70",
       estimatedCustomerFee: AMOUNT,
     })
 
@@ -853,7 +906,7 @@ describe("requestWithdrawal", () => {
       "@services/bridge/errors",
     )
     expect(result).toBeInstanceOf(BridgeWithdrawalNetAmountTooLowError)
-    expect(BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer).not.toHaveBeenCalled()
+    expect(BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer).toHaveBeenCalled()
     expect(BridgeAccountsRepo.createWithdrawal).not.toHaveBeenCalled()
   })
 
@@ -1089,6 +1142,41 @@ describe("initiateWithdrawal — takes withdrawalId (step 2A)", () => {
     expect(BridgeClient.createTransfer).not.toHaveBeenCalled()
     expect(IbexClient.sendCrypto).not.toHaveBeenCalled()
     expect(IbexClient.sendOnchain).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { amount: "50.00extra" },
+    { amount: "1e309" },
+    { amount: "1000000000.000001" },
+    { currency: "usd" },
+    { estimatedCustomerFee: undefined },
+    { estimatedCustomerFee: AMOUNT },
+  ])(
+    "refuses a pending row without a valid frozen debit and fee snapshot",
+    async (change) => {
+      ;(BridgeAccountsRepo.findWithdrawalById as jest.Mock).mockResolvedValue(
+        makeRow(WITHDRAWAL_ID, change),
+      )
+      const result = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
+      expect(result).toBeInstanceOf(Error)
+      expect(BridgeClient.createTransfer).not.toHaveBeenCalled()
+      expect(IbexClient.sendCrypto).not.toHaveBeenCalled()
+    },
+  )
+
+  it("refuses a bank account that lost verified status before initiation", async () => {
+    ;(BridgeAccountsRepo.findExternalAccountsByAccountId as jest.Mock).mockResolvedValue([
+      {
+        bridgeExternalAccountId: EXTERNAL_ACCOUNT_ID,
+        bankName: "Test Bank",
+        accountNumberLast4: "1111",
+        status: "pending",
+      },
+    ])
+    const result = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
+    expect(result).toBeInstanceOf(Error)
+    expect(BridgeClient.createTransfer).not.toHaveBeenCalled()
+    expect(IbexClient.sendCrypto).not.toHaveBeenCalled()
   })
 
   it("creates a Bridge transfer that asks Bridge for source deposit instructions", async () => {

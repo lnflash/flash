@@ -69,6 +69,7 @@ import {
   presentBridgeWithdrawal,
   receiptFeesFromTransfer,
   resolveWithdrawalCustomerFeeEstimate,
+  type BridgeWithdrawalLike,
   type PresentedBridgeWithdrawal,
 } from "./withdrawal-fees"
 
@@ -161,6 +162,54 @@ type ExternalAccountResult = {
 
 export const deriveWithdrawalIdempotencyKey = (rowId: string): string =>
   crypto.createHash("sha256").update(`withdrawal:${rowId}`).digest("hex")
+
+// The provider rail uses six decimal USDT units. Keep arithmetic within a
+// deliberately generous bound whose integer microunits are exact in JS.
+const MAX_WITHDRAWAL_MICROS = 1_000_000_000_000_000n
+const decimalMicros = (value: string): bigint | undefined => {
+  const parts = /^(\d{1,10})(?:\.(\d{1,6}))?$/.exec(value)
+  if (!parts) return undefined
+  const micros = BigInt(parts[1]) * 1_000_000n + BigInt((parts[2] ?? "").padEnd(6, "0"))
+  return micros <= MAX_WITHDRAWAL_MICROS ? micros : undefined
+}
+
+const validWithdrawalAmount = (amount: string): boolean => {
+  const micros = decimalMicros(amount)
+  return micros !== undefined && micros > 0n
+}
+
+const hasFrozenWithdrawalFeeEstimate = (
+  withdrawal: Pick<
+    BridgeWithdrawalLike,
+    | "flashFeePercent"
+    | "flashFee"
+    | "estimatedBridgeFeePercent"
+    | "estimatedBridgeFee"
+    | "estimatedGasBuffer"
+    | "estimatedCustomerFee"
+  >,
+): boolean => {
+  const percentages = [withdrawal.flashFeePercent, withdrawal.estimatedBridgeFeePercent]
+  if (
+    !percentages.every(
+      (value) =>
+        typeof value === "string" &&
+        /^\d+(?:\.\d{1,6})?$/.test(value) &&
+        Number.isFinite(Number(value)),
+    )
+  )
+    return false
+  const parts = [
+    withdrawal.flashFee,
+    withdrawal.estimatedBridgeFee,
+    withdrawal.estimatedGasBuffer,
+    withdrawal.estimatedCustomerFee,
+  ].map((value) => (typeof value === "string" ? decimalMicros(value) : undefined))
+  return (
+    parts.every((value) => value !== undefined) &&
+    parts[0]! + parts[1]! + parts[2]! === parts[3]
+  )
+}
 
 const checkedWithdrawalDepositAddress = (
   transfer: Transfer,
@@ -1229,6 +1278,9 @@ const requestWithdrawal = async (
 
   const enabledCheck = checkBridgeEnabled()
   if (enabledCheck instanceof Error) return enabledCheck
+  if (!validWithdrawalAmount(amount)) {
+    return new BridgeInsufficientFundsError("Invalid withdrawal amount")
+  }
 
   const account = await checkAccountLevel(accountId)
   if (account instanceof Error) return account
@@ -1275,10 +1327,7 @@ const requestWithdrawal = async (
     if (!(balance instanceof USDTAmount)) {
       return new BridgeInsufficientFundsError("Invalid balance type")
     }
-    const withdrawalAmount = parseFloat(amount)
-    if (isNaN(withdrawalAmount) || withdrawalAmount <= 0) {
-      return new BridgeInsufficientFundsError("Invalid withdrawal amount")
-    }
+    const withdrawalAmount = Number(amount)
 
     const availableBalance = balance.toIbex()
     if (availableBalance < withdrawalAmount) {
@@ -1309,13 +1358,6 @@ const requestWithdrawal = async (
       return new BridgeError("External account is not verified")
     }
 
-    const feeEstimate = await resolveWithdrawalCustomerFeeEstimate(amount)
-    if (withdrawalAmount <= parseFloat(feeEstimate.estimatedCustomerFee)) {
-      return new BridgeWithdrawalNetAmountTooLowError(
-        `Withdrawal amount ${amount} must exceed estimated customer fees ${feeEstimate.estimatedCustomerFee}`,
-      )
-    }
-
     const existingWithdrawal =
       await BridgeAccountsRepo.findPendingWithdrawalWithoutTransfer(
         accountId as string,
@@ -1323,39 +1365,62 @@ const requestWithdrawal = async (
         amount,
       )
     if (existingWithdrawal instanceof Error) return existingWithdrawal
-
-    let pendingWithdrawal
     if (existingWithdrawal) {
-      pendingWithdrawal = await BridgeAccountsRepo.updateWithdrawalFeeEstimates(
-        BridgeAccountsRepo.bridgeWithdrawalRecordId(existingWithdrawal),
-        feeEstimate,
-      )
-    } else {
-      pendingWithdrawal = await BridgeAccountsRepo.createWithdrawal({
-        accountId: accountId as string,
-        amount,
-        currency: "usdt",
-        externalAccountId,
-        flashFeePercent: feeEstimate.flashFeePercent,
-        flashFee: feeEstimate.flashFee,
-        estimatedBridgeFeePercent: feeEstimate.estimatedBridgeFeePercent,
-        estimatedBridgeFee: feeEstimate.estimatedBridgeFee,
-        estimatedGasBuffer: feeEstimate.estimatedGasBuffer,
-        estimatedCustomerFee: feeEstimate.estimatedCustomerFee,
-        status: "pending",
-      })
+      // Reusing a pending request reads its original quote. No changing gas
+      // probe can overwrite or mask what another confirmation screen saw.
+      const storedFeeMicros = decimalMicros(existingWithdrawal.estimatedCustomerFee)
+      const requestedMicros = decimalMicros(amount)
       if (
-        !(pendingWithdrawal instanceof Error) &&
-        !pendingWithdrawal.estimatedCustomerFee
+        !hasFrozenWithdrawalFeeEstimate(existingWithdrawal) ||
+        storedFeeMicros === undefined ||
+        requestedMicros === undefined ||
+        storedFeeMicros >= requestedMicros
       ) {
-        pendingWithdrawal = await BridgeAccountsRepo.updateWithdrawalFeeEstimates(
-          BridgeAccountsRepo.bridgeWithdrawalRecordId(pendingWithdrawal),
-          feeEstimate,
+        return new BridgeError(
+          "Withdrawal fee estimate is unavailable; cancel and request again",
         )
       }
+      return presentBridgeWithdrawal(existingWithdrawal)
     }
+
+    const feeEstimate = await resolveWithdrawalCustomerFeeEstimate(amount)
+    if (!hasFrozenWithdrawalFeeEstimate(feeEstimate)) {
+      return new BridgeError("Withdrawal fee estimate is unavailable")
+    }
+    const feeMicros = decimalMicros(feeEstimate.estimatedCustomerFee)
+    const requestedMicros = decimalMicros(amount)
+    if (feeMicros === undefined || requestedMicros === undefined) {
+      return new BridgeError("Withdrawal fee estimate is unavailable")
+    }
+    if (requestedMicros <= feeMicros) {
+      return new BridgeWithdrawalNetAmountTooLowError(
+        `Withdrawal amount ${amount} must exceed estimated customer fees ${feeEstimate.estimatedCustomerFee}`,
+      )
+    }
+
+    const pendingWithdrawal = await BridgeAccountsRepo.createWithdrawal({
+      accountId: accountId as string,
+      amount,
+      currency: "usdt",
+      externalAccountId,
+      flashFeePercent: feeEstimate.flashFeePercent,
+      flashFee: feeEstimate.flashFee,
+      estimatedBridgeFeePercent: feeEstimate.estimatedBridgeFeePercent,
+      estimatedBridgeFee: feeEstimate.estimatedBridgeFee,
+      estimatedGasBuffer: feeEstimate.estimatedGasBuffer,
+      estimatedCustomerFee: feeEstimate.estimatedCustomerFee,
+      status: "pending",
+    })
     if (pendingWithdrawal instanceof Error) {
       return asBridgeRequestWithdrawalError(pendingWithdrawal)
+    }
+    // A retry or racing request must show the same persisted fee estimate.
+    // Never refresh a pending row underneath a confirmation screen. Legacy
+    // rows without a complete estimate require cancellation and a new request.
+    if (!hasFrozenWithdrawalFeeEstimate(pendingWithdrawal)) {
+      return new BridgeError(
+        "Withdrawal fee estimate is unavailable; cancel and request again",
+      )
     }
 
     baseLogger.info(
@@ -1367,7 +1432,7 @@ const requestWithdrawal = async (
       "Bridge operation completed",
     )
 
-    return presentBridgeWithdrawal(pendingWithdrawal, feeEstimate)
+    return presentBridgeWithdrawal(pendingWithdrawal)
   } catch (error) {
     baseLogger.error(
       { accountId, operation: "requestWithdrawal", error },
@@ -1459,6 +1524,18 @@ const initiateWithdrawal = async (
     }
 
     const { amount, externalAccountId } = pendingWithdrawal
+    const amountMicros = decimalMicros(amount)
+    const feeMicros = decimalMicros(pendingWithdrawal.estimatedCustomerFee)
+    if (
+      pendingWithdrawal.currency !== "usdt" ||
+      amountMicros === undefined ||
+      amountMicros === 0n ||
+      !hasFrozenWithdrawalFeeEstimate(pendingWithdrawal) ||
+      feeMicros === undefined ||
+      feeMicros >= amountMicros
+    ) {
+      return new BridgeError("Withdrawal quote is unavailable; cancel and request again")
+    }
 
     const externalAccounts = await syncExternalAccountsFromBridge(
       accountId as string,
@@ -1470,6 +1547,9 @@ const initiateWithdrawal = async (
     )
     if (!targetAccount) {
       return new Error("External account not found")
+    }
+    if (targetAccount.status !== "verified") {
+      return new BridgeError("External account is not verified")
     }
 
     // Re-check balance at execution time — funds may have changed since the request
