@@ -20,7 +20,7 @@ const OnChainAddressCreateMutation = GT.Field<null, GraphQLPublicContextAuth>({
   args: {
     input: { type: GT.NonNull(OnChainAddressCreateInput) },
   },
-  resolve: async (_, args, { domainAccount }) => {
+  resolve: async (_, args, { domainAccount, cashWalletClientCapabilities }) => {
     const { walletId } = args.input
     if (walletId instanceof Error) {
       return { errors: [{ message: walletId.message }] }
@@ -34,6 +34,7 @@ const OnChainAddressCreateMutation = GT.Field<null, GraphQLPublicContextAuth>({
     const address = await createOwnedOnChainAddress({
       accountId: domainAccount.id,
       walletId,
+      client: cashWalletClientCapabilities,
     })
     if (address instanceof Error) {
       return { errors: [mapAndParseErrorForGqlResponse(address)] }

@@ -1,5 +1,9 @@
 import { address, networks } from "bitcoinjs-lib"
 
+import {
+  CashWalletClientCapabilities,
+  resolveCashWalletMutationWalletIdForAccount,
+} from "@app/cash-wallet-cutover"
 import { NETWORK } from "@config"
 import { AccountValidator, InvalidWalletForAccountError } from "@domain/accounts"
 import { WalletCurrency } from "@domain/shared"
@@ -12,9 +16,11 @@ import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 export const createOwnedOnChainAddress = async ({
   accountId,
   walletId,
+  client,
 }: {
   accountId: AccountId
   walletId: WalletId
+  client: CashWalletClientCapabilities
 }): Promise<OnChainAddress | ApplicationError | IbexError> => {
   const wallet = await WalletsRepository().findById(walletId)
   // Use one refusal for absent, foreign, external, and wrong-currency wallets.
@@ -33,7 +39,29 @@ export const createOwnedOnChainAddress = async ({
   const active = AccountValidator(account).isActive()
   if (active instanceof Error) return active
 
-  const response = await Ibex.generateBitcoinAddress(walletId)
+  // The presented USD wallet can be an alias for the active USDT settlement
+  // wallet after cutover. Prove ownership and active account status before
+  // resolving that alias, because resolution may self-heal a missing wallet.
+  const routedWalletId = await resolveCashWalletMutationWalletIdForAccount({
+    account,
+    walletId,
+    client,
+  })
+  if (routedWalletId instanceof Error) return routedWalletId
+
+  if (routedWalletId !== walletId) {
+    const routedWallet = await WalletsRepository().findById(routedWalletId)
+    if (
+      routedWallet instanceof Error ||
+      routedWallet.accountId !== accountId ||
+      routedWallet.type !== WalletType.Checking ||
+      routedWallet.currency !== WalletCurrency.Usdt
+    ) {
+      return new InvalidWalletForAccountError()
+    }
+  }
+
+  const response = await Ibex.generateBitcoinAddress(routedWalletId)
   if (response instanceof IbexError) return response
   const value = response.address
   if (typeof value !== "string")
