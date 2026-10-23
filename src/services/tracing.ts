@@ -212,7 +212,7 @@ registerInstrumentations({
     }),
     new GraphQLInstrumentation({
       mergeItems: true,
-      allowValues: true,
+      allowValues: false,
       responseHook: gqlResponseHook,
     }),
     new MongoDBInstrumentation(),
@@ -243,6 +243,14 @@ class SpanProcessorWrapper extends SimpleSpanProcessor {
       }
     }
     super.onStart(span, parentContext)
+  }
+
+  onEnd(span: SdkSpan) {
+    // instrumentation-graphql 0.35.2 masks strings/numbers with allowValues
+    // false, but keeps comments and enum/name tokens in graphql.source.
+    // Do not export partially redacted query bodies from any GraphQL span.
+    delete span.attributes["graphql.source"]
+    super.onEnd(span)
   }
 }
 
@@ -380,13 +388,11 @@ export const asyncRunInSpan = <F extends () => ReturnType<F>>(
 const resolveFunctionSpanOptions = ({
   namespace,
   functionName,
-  functionArgs,
   spanAttributes,
   root,
 }: {
   namespace: string
   functionName: string
-  functionArgs: Array<unknown>
   spanAttributes?: Attributes
   root?: boolean
 }): SpanOptions => {
@@ -395,20 +401,9 @@ const resolveFunctionSpanOptions = ({
     [SemanticAttributes.CODE_NAMESPACE]: namespace,
     ...spanAttributes,
   }
-  if (functionArgs && functionArgs.length > 0) {
-    const params =
-      typeof functionArgs[0] === "object" ? functionArgs[0] : { "0": functionArgs[0] }
-    for (const key in params) {
-      // @ts-ignore no-implicit-any error
-      const value = params[key]
-      attributes[`${SemanticAttributes.CODE_FUNCTION}.params.${key}`] =
-        value as AttributeValue
-      attributes[`${SemanticAttributes.CODE_FUNCTION}.params.${key}.null`] =
-        value === null
-      attributes[`${SemanticAttributes.CODE_FUNCTION}.params.${key}.undefined`] =
-        value === undefined
-    }
-  }
+  // Arguments can be long-lived passwords, bearer tokens, OTPs or banking PII.
+  // Never inspect or enumerate them for telemetry; call sites must supply
+  // deliberate, nonsecret spanAttributes independently of invocation inputs.
   return { attributes, root }
 }
 
@@ -435,7 +430,6 @@ export const wrapToRunInSpan = <
     const spanOptions = resolveFunctionSpanOptions({
       namespace,
       functionName,
-      functionArgs: args,
       spanAttributes,
       root,
     })
@@ -492,7 +486,6 @@ export const wrapAsyncToRunInSpan = <
     const spanOptions = resolveFunctionSpanOptions({
       namespace,
       functionName,
-      functionArgs: args,
       spanAttributes,
       root,
     })
