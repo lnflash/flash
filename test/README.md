@@ -13,5 +13,6 @@ USERNAME_SEARCH_TEST_URI=mongodb://127.0.0.1:27017/username_search_test \
   yarn jest --config test/flash/username-search.config.cjs --runInBand
 ```
 
-The database name must be `username_search_test`. The suite drops that database
+The URI must use a loopback host and name `username_search_test`; setup also checks
+the driver's actual database name. The suite drops that database
 before and after its checks; never point it at an application database.
