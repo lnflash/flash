@@ -91,6 +91,7 @@ const suites = Object.freeze({
     "graphql/csv-wallet-scope.spec.ts",
     "graphql/ln-invoice-payment-send.spec.ts",
     "graphql/ln-send-marker-withdrawal.spec.ts",
+    "graphql/public/root/mutation/on-chain-address-ownership.spec.ts",
     "graphql/owned-wallet-snapshot.spec.ts",
     "services/ledger/csv-wallet-export-completeness.spec.ts",
     "services/ledger/csv-formula-safety.spec.ts",
