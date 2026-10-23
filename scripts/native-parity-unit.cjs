@@ -46,6 +46,34 @@ const suites = Object.freeze({
     "services/storage/id-document-presigned-put.spec.ts",
     "services/storage/id-documents.spec.ts",
   ],
+  telemetry: [
+    "app/authentication/registration-trace-privacy.spec.ts",
+    "servers/request-log.spec.ts",
+    "services/frappe/ErpNext.bankAccountUpdate.spec.ts",
+    "services/frappe/ErpNext.bankAccounts.spec.ts",
+    "services/frappe/ErpNext.idVerification.spec.ts",
+    "services/frappe/ErpNext.spec.ts",
+    "services/frappe/request-telemetry-privacy.spec.ts",
+    "services/http-trace-privacy.spec.ts",
+    "services/ibex/request-trace-privacy.spec.ts",
+    "services/tracing-input-privacy.spec.ts",
+    "services/tracing.spec.ts",
+  ],
+  device: [
+    "app/accounts/device-account-bootstrap.spec.ts",
+    "app/accounts/device-bootstrap-adapters.spec.ts",
+    "app/authentication/login-device-bootstrap.spec.ts",
+    "app/authentication/login-device-upgrade.spec.ts",
+    "app/cash-wallet-cutover/device-bootstrap-presentation.spec.ts",
+    "servers/authorization/device-bootstrap-route.spec.ts",
+    "services/kratos/device-bootstrap-identity.spec.ts",
+    "services/mongoose/device-bootstrap.spec.ts",
+  ],
+  ownership: [
+    "app/accounts/owned-wallet-snapshot-adapters.spec.ts",
+    "app/accounts/owned-wallet-snapshot.spec.ts",
+    "graphql/owned-wallet-snapshot.spec.ts",
+  ],
 })
 
 function safeEnvironment(inherited) {
@@ -85,7 +113,7 @@ function safeEnvironment(inherited) {
 
 function selection(args) {
   if (args.some((group) => !Object.hasOwn(suites, group))) {
-    throw new Error("Select only bridge, earn, storage; no other Jest arguments allowed")
+    throw new Error("Select only bridge, earn, storage, telemetry, device, ownership; no other Jest arguments allowed")
   }
   return [...new Set(args.length ? args : Object.keys(suites))].flatMap((group) =>
     suites[group].map((file) => unit + file),

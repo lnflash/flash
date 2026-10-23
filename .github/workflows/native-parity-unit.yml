@@ -1,0 +1,36 @@
+name: Isolated native parity contracts
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - name: Install pinned package manager and locked dependencies
+        run: |
+          npm install --global --ignore-scripts yarn@1.22.22
+          yarn install --frozen-lockfile --ignore-scripts --non-interactive
+      - name: Check isolated runner boundaries
+        run: node --test scripts/native-parity-unit.test.cjs
+      - name: Check TypeScript contracts
+        run: |
+          yarn tsc-check
+          yarn tsc-check-noimplicitany
+      - name: Compile production package
+        run: yarn build
+      - name: Run isolated contracts and privacy regressions
+        run: node scripts/native-parity-unit.cjs
