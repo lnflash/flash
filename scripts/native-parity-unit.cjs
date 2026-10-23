@@ -85,11 +85,14 @@ const suites = Object.freeze({
     "services/mongoose/device-bootstrap.spec.ts",
   ],
   ownership: [
+    "app/accounts/csv-wallet-scope.spec.ts",
     "app/accounts/owned-wallet-snapshot-adapters.spec.ts",
     "app/accounts/owned-wallet-snapshot.spec.ts",
+    "graphql/csv-wallet-scope.spec.ts",
     "graphql/ln-invoice-payment-send.spec.ts",
     "graphql/ln-send-marker-withdrawal.spec.ts",
     "graphql/owned-wallet-snapshot.spec.ts",
+    "services/ledger/csv-wallet-export-completeness.spec.ts",
   ],
 })
 
