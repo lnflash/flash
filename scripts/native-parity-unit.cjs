@@ -57,6 +57,7 @@ const suites = Object.freeze({
     "services/frappe/ErpNext.idVerification.spec.ts",
     "services/frappe/ErpNext.spec.ts",
     "services/frappe/request-telemetry-privacy.spec.ts",
+    "services/fygaro/webhook-server/payment.spec.ts",
     "services/http-trace-privacy.spec.ts",
     "services/ibex/request-trace-privacy.spec.ts",
     "services/notifications/firebase-telemetry-privacy.spec.ts",

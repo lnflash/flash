@@ -160,6 +160,7 @@ import {
   UnknownRepositoryError,
 } from "@domain/errors"
 import { ResourceAttemptsLockServiceError } from "@domain/lock"
+import { baseLogger } from "@services/logger"
 
 import { paymentHandler } from "@services/fygaro/webhook-server/routes/payment"
 import { FygaroCreditError } from "@services/fygaro/webhook-server/credit-topup"
@@ -639,7 +640,9 @@ describe("fygaro paymentHandler", () => {
     })
 
     it("records unattributed when the kratos lookup throws (best-effort, never breaks the webhook)", async () => {
-      mockGetUserIdFromIdentifier.mockRejectedValue(new Error("kratos down"))
+      mockGetUserIdFromIdentifier.mockRejectedValue(
+        new Error("private-payer@example.com kratos down"),
+      )
       const res = makeRes()
 
       await paymentHandler(makeReq({ ...VALID_BODY, customReference: "" }), res)
@@ -648,6 +651,13 @@ describe("fygaro paymentHandler", () => {
         expect.objectContaining({ accountId: undefined }),
       )
       expect(res.json).toHaveBeenCalledWith({ status: "recorded", attributed: false })
+      expect(baseLogger.warn).toHaveBeenCalledWith(
+        { operation: "fygaro_payer_email_attribution", outcome: "failed" },
+        "Fygaro payer-email attribution failed",
+      )
+      expect(JSON.stringify(jest.mocked(baseLogger.warn).mock.calls)).not.toContain(
+        "private-payer@example.com",
+      )
     })
 
     it("skips the lookup entirely for a payload without a client email", async () => {

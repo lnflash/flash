@@ -119,8 +119,11 @@ const resolveAccountByPayerEmail = async (
     const account = await AccountsRepository().findByUserId(userId)
     if (account instanceof Error) return undefined
     return account
-  } catch (error) {
-    baseLogger.warn({ error, email: trimmed }, "Fygaro payer-email attribution failed")
+  } catch {
+    baseLogger.warn(
+      { operation: "fygaro_payer_email_attribution", outcome: "failed" },
+      "Fygaro payer-email attribution failed",
+    )
     return undefined
   }
 }
