@@ -12,14 +12,14 @@ builds on the state machine defined here.
 | L1 | Personal | **Verified** |
 | L2 | Pro | **Verified** + *Bank payout* badge |
 | L3 | Merchant | **Business** |
-| — | International | *USD account* badge (capability, not a tier) |
+| none | International | *USD account* badge (capability, not a tier) |
 
 - "Pro" is retired (vague). "International" is retired (it's just a USD
   account). "Merchant" is renamed **Business**.
-- Levels (L1/L2/L3) are internal-only — derived from capabilities, never
+- Levels (L1/L2/L3) are internal-only; derived from capabilities, never
   shown as a tier the user picks.
 - Product decision (2026-07-14): **light headline status**. The account leads
-  with one word — Trial → Verified → Business — with capability badges as
+  with one word, Trial → Verified → Business, with capability badges as
   supporting detail (not the pure capability-badge approach).
 
 ## Capability model
@@ -50,7 +50,7 @@ Implementation: `src/domain/accounts/capabilities.ts`
 operational value used by limits and permissions; transitions recompute it
 through the state machine.
 
-> **Note — derived level vs stored `level`.** The read model can imply a
+> **Note:** derived level vs stored `level`. The read model can imply a
 > level higher than the stored one: an L1 account with an approved bank
 > account on file resolves `bankPayout: true`, which derives to L2. Both the
 > stored `level` and the derived `capabilities`/`statusHeadline` are exposed
@@ -120,7 +120,7 @@ mutation {
 
 The server derives the target level from current capabilities plus the
 requested one and posts the existing ERPNext **Account Upgrade Request**
-doctype — the human review flow in frappe-flash-admin is unchanged.
+doctype; the human review flow in frappe-flash-admin is unchanged.
 `businessAccountUpgradeRequest` (whole-tier, takes a `level`) remains for
 existing clients but is superseded by this mutation.
 

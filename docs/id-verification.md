@@ -1,4 +1,4 @@
-# ID verification — Phase 0 (backend)
+# ID verification: Phase 0 (backend)
 
 The backend half of Flash's ID-verification tool. Phase 0 adds structured
 identity evidence to the account-upgrade request, records a companion
@@ -13,8 +13,8 @@ only `idDocument`, keeps working with no behaviour change.
 
 ## 1. Evidence input contract
 
-Both upgrade mutations — `businessAccountUpgradeRequest` and
-`accountCapabilityUpgradeRequest` — accept an optional `evidence` list next
+Both upgrade mutations, `businessAccountUpgradeRequest` and
+`accountCapabilityUpgradeRequest`, accept an optional `evidence` list next
 to the existing `idDocument` key:
 
 ```graphql
@@ -46,7 +46,7 @@ input BusinessAccountUpgradeRequestInput {
 
 Files are uploaded exactly as today: `idDocumentUploadUrlGenerate` returns a
 15-minute presigned PUT and the object key `id_documents/<username>/<file>`
-(the `/` separator is deliberate — usernames may contain `_`, so only a
+(the `/` separator is deliberate; usernames may contain `_`, so only a
 character `UsernameRegex` forbids can unambiguously mark the boundary);
 the client then references that key from an evidence row.
 
@@ -95,7 +95,7 @@ minimum supported app version.
 ## 2. Bridge KYC rule
 
 When the account's Bridge KYC is approved and the evidence contains a
-`BRIDGE_KYC` row — including the fallback row above — the backend snapshots
+`BRIDGE_KYC` row, including the fallback row above, the backend snapshots
 the Bridge customer via `BridgeApiClient.getCustomer` and stores
 **only** `id`, `status`, `updated_at` and `endorsements`
 (`src/services/bridge/customer-snapshot.ts`). Names, emails and addresses
@@ -177,8 +177,8 @@ logs a warning carrying the kind and country only. Rows read back from
 ERPNext already hold the code and country name, so the retention job's
 rewrite round-trips unchanged.
 
-**Non-fatal by design.** If the POST fails — an older ERPNext without the
-doctype, a validation error on the ERPNext side, a network blip — the error
+**Non-fatal by design.** If the POST fails (an older ERPNext without the
+doctype, a validation error on the ERPNext side, a network blip), the error
 is logged at **warn** (with identifiers only) and the user's upgrade request
 succeeds anyway. The Account Upgrade Request already carries the first
 `ID_FRONT` key in `id_document`, so reviewers lose nothing they have today.
@@ -232,7 +232,7 @@ hold only `Flash Admin` could open the request but not finish the approval,
 because the approval flow calls three admin fields.
 
 `Flash Admin` is now a recognised role (`src/services/frappe/Roles.ts`) and
-is added — via an explicit allowlist, never a blanket widening — on exactly
+is added, via an explicit allowlist, never a blanket widening, on exactly
 those fields (`src/servers/authorization/admin-permissions.ts`):
 
 | Field | Kind | Why the reviewer needs it |
@@ -281,7 +281,7 @@ entries carry `updatedAt` (Mongoose default `Date.now`, required), so the
 closure timestamp *is* derivable without a schema change:
 `getAccountClosedAt(account)` returns the `updatedAt` of the latest
 `closed` entry, but only while the account's current status is still
-`closed` — a reopened account restarts the clock. `locked` is not closure
+`closed`; a reopened account restarts the clock. `locked` is not closure
 (an admin lock is reversible and the relationship continues). No new field
 was added to the account schema.
 
@@ -300,7 +300,7 @@ Runs as a task in the existing cron server (`src/servers/cron.ts`,
    (`deleteIdDocument`, which refuses any key outside `id_documents/`) and
    stamp `deleted_at` on the row. Frappe has no PATCH for a child row; the
    job PUTs the parent's full `evidence` table with the stamped rows
-   (`ErpNext.updateIdVerificationEvidence`) — rows missing from that PUT
+   (`ErpNext.updateIdVerificationEvidence`); rows missing from that PUT
    would be dropped, so the whole table is always sent.
 
 Per-record failures are counted and logged, never fatal; only a listing

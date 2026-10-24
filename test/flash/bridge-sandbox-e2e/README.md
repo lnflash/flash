@@ -104,14 +104,14 @@ IBEX_ENVIRONMENT=sandbox yarn test:bridge-sandbox-e2e
 | External account | Skipped by default; with `BRIDGE_SANDBOX_EXTERNAL_ACCOUNT_LINK_CONFIRMED=true`, `bridgeAddExternalAccount` returns `{linkToken, expiresAt}` | Requires Bridge sandbox API key/customer entitlement for Plaid link-token generation |
 | Deposit webhook | Injected webhook processes and persists deposit | Verify webhook secret in config.yaml |
 | Withdrawal error paths | Validation errors returned for invalid inputs | Check withdrawal schema deployed (ENG-348) |
-| Withdrawal **success** path | ⚠️ **Not expected to pass first run** — requires real KYC-approved sandbox customer, funded wallet, and verified external account. | The full withdrawal flow only runs with `BRIDGE_SANDBOX_WITHDRAWAL_CONFIRMED=true`; error-path tests run without it |
+| Withdrawal **success** path | ⚠️ **Not expected to pass first run**, requires real KYC-approved sandbox customer, funded wallet, and verified external account. | The full withdrawal flow only runs with `BRIDGE_SANDBOX_WITHDRAWAL_CONFIRMED=true`; error-path tests run without it |
 
 ### If something fails
 
 1. Check `IBEX_ENVIRONMENT` is `sandbox` (not `production`)
 2. Confirm MongoDB is running: `mongosh --eval "db.adminCommand('ping')"`
 3. Run `./dev/setup.sh --webhook` again to refresh ngrok, Bridge webhook endpoints, and local public keys
-4. Preflight failure → `src/services/bridge/index.ts` still has `level < 2` — apply the Task 0 fix
+4. Preflight failure → `src/services/bridge/index.ts` still has `level < 2`; apply the Task 0 fix
 5. KYC/VA failures → confirm the corresponding ENG issue is deployed to sandbox
 
 ## Commands

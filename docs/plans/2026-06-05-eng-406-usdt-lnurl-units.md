@@ -1,21 +1,21 @@
 # Fix USDT LNURL-pay Amount Units
 
-> **ENG-406** — Fix USDT LNURL-pay amount units for Flash Lightning Address edge case
+> **ENG-406**: Fix USDT LNURL-pay amount units for Flash Lightning Address edge case
 
 ## Overview
 
-The IBEX LNURL-pay API (`POST /v2/lnurl/pay/send`) expects the `amount` field in **millisatoshis**, but the `payToLnurl` wrapper was passing `args.send.amount` directly — the wallet currency's base unit (USDT micros, USD cents, or BTC sats).
+The IBEX LNURL-pay API (`POST /v2/lnurl/pay/send`) expects the `amount` field in **millisatoshis**, but the `payToLnurl` wrapper was passing `args.send.amount` directly; the wallet currency's base unit (USDT micros, USD cents, or BTC sats).
 
 ## Root Cause
 
-`src/services/ibex/client.ts:255` — `payToLnurl` passed `args.send.amount` directly to `Ibex.payToLnurl()`. The `args.send` was of type `IbexCurrency` (`{ amount: number, currencyId: IbexCurrencyId }`), and for USDT wallets `amount` is USDT micros (~10,000 per USD cent), not millisatoshis.
+`src/services/ibex/client.ts:255`: `payToLnurl` passed `args.send.amount` directly to `Ibex.payToLnurl()`. The `args.send` was of type `IbexCurrency` (`{ amount: number, currencyId: IbexCurrencyId }`), and for USDT wallets `amount` is USDT micros (~10,000 per USD cent), not millisatoshis.
 
 ## Fix
 
-**Interface change** — `src/services/ibex/index.types.d.ts`:
+**Interface change**: `src/services/ibex/index.types.d.ts`:
 - Replaced `send: IbexCurrency` with `amountMsat: number` on `PayLnurlArgs`
 
-**Call-site change** — `src/services/ibex/client.ts`:
+**Call-site change**: `src/services/ibex/client.ts`:
 - Changed `amount: args.send.amount` → `amount: args.amountMsat`
 
 ## Rationale
@@ -23,11 +23,11 @@ The IBEX LNURL-pay API (`POST /v2/lnurl/pay/send`) expects the `amount` field in
 - The field name `amountMsat` makes the expected unit unambiguous
 - Conversion from wallet currency → msats requires the DealerPriceService (app layer), not available in the services layer
 - Callers are forced to perform explicit conversion, preventing silent unit bugs
-- `PayLnurlArgs` is only used by `payToLnurl` — no other callers to break
+- `PayLnurlArgs` is only used by `payToLnurl`; no other callers to break
 
 ## Remaining Work
 
-- Wire up a GraphQL mutation that calls `payToLnurl` with proper MSAT conversion (ENG-406 follow-up) — completed in the follow-up implementation described below
+- Wire up a GraphQL mutation that calls `payToLnurl` with proper MSAT conversion (ENG-406 follow-up); completed in the follow-up implementation described below
 - Authored by: Vandana
 
 ## Implementation Status
@@ -44,11 +44,11 @@ Implemented locally on `eng-274/sandbox-e2e-plan`:
 
 Verification:
 
-- `yarn test:unit --testPathPattern=app/payments/lnurl-pay.spec.ts` — passed.
-- `yarn test:unit --testPathPattern=graphql/public/root/mutation/lnurl-payment-send.spec.ts` — passed.
-- `npx prettier --check ...` on touched files — passed.
-- `npx tsc --noEmit --skipLibCheck` — no ENG-406 source/test errors after fixes; still fails on pre-existing unrelated test type errors in offers, cash-wallet history resolver specs, and Bridge webhook/reconciliation specs.
-- `yarn check:sdl` — wrote schemas and composed the supergraph, then failed because `src/graphql/public/schema.graphql` had expected generated changes to commit.
+- `yarn test:unit --testPathPattern=app/payments/lnurl-pay.spec.ts`: passed.
+- `yarn test:unit --testPathPattern=graphql/public/root/mutation/lnurl-payment-send.spec.ts`: passed.
+- `npx prettier --check ...` on touched files; passed.
+- `npx tsc --noEmit --skipLibCheck`: no ENG-406 source/test errors after fixes; still fails on pre-existing unrelated test type errors in offers, cash-wallet history resolver specs, and Bridge webhook/reconciliation specs.
+- `yarn check:sdl`: wrote schemas and composed the supergraph, then failed because `src/graphql/public/schema.graphql` had expected generated changes to commit.
 
 ---
 

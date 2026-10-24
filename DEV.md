@@ -46,13 +46,13 @@ Flash uses YAML config files. Ibex OAuth2 credentials go in local config overrid
 
 The base config is at `dev/config/base-config.yaml`. Secrets and local overrides go in `$CONFIG_PATH/dev-overrides.yaml` (default: `~/.config/flash/dev-overrides.yaml`).
 
-**Option A — Run the interactive script:**
+**Option A. Run the interactive script:**
 
 ```bash
 ./dev/config/set-overrides.sh
 ```
 
-**Option B — Create manually:**
+**Option B. Create manually:**
 
 ```yaml
 # ~/.config/flash/dev-overrides.yaml
@@ -151,7 +151,7 @@ This runs four processes in parallel:
 | Process | Port | Description |
 |---------|------|-------------|
 | `start-main` | 4012 (direct), 4002 (via oathkeeper) | Main GraphQL API |
-| `start-trigger` | — | Event trigger processor |
+| `start-trigger` | none | Event trigger processor |
 | `start-ws` | 4000 | WebSocket server for subscriptions |
 | `start-ibex-wh` | 4008 | Ibex webhook receiver |
 
@@ -234,7 +234,7 @@ TEST=01-connection make integration  # runs 01-connection.spec.ts
 ```
 
 **Known issues:**
-- Integration tests are not fully idempotent — use `make reset-integration` between runs
+- Integration tests are not fully idempotent; use `make reset-integration` between runs
 - If tests timeout, increase: `JEST_TIMEOUT=120000 yarn test:integration`
 - Use an SSD for Docker volumes (tests are disk-intensive)
 
@@ -287,11 +287,11 @@ Flash requires Node 24.x. Switch with `nvm use 24` or run `yarn install --ignore
 
 ### Docker warnings about unset variables
 
-`IBEX_URL`, `HONEYCOMB_DATASET`, `HONEYCOMB_API_KEY` warnings in docker compose output are harmless in dev — these are only needed for the Docker-based server (not used by `make start`).
+`IBEX_URL`, `HONEYCOMB_DATASET`, `HONEYCOMB_API_KEY` warnings in docker compose output are harmless in dev; these are only needed for the Docker-based server (not used by `make start`).
 
 ### `API key does not start with "SG."`
 
-SendGrid isn't configured — email notifications won't work. Safe to ignore in dev unless you're testing email features. Add a real key to your `dev-overrides.yaml` if needed.
+SendGrid isn't configured; email notifications won't work. Safe to ignore in dev unless you're testing email features. Add a real key to your `dev-overrides.yaml` if needed.
 
 ### Price service platform warning (Apple Silicon)
 
@@ -299,7 +299,7 @@ SendGrid isn't configured — email notifications won't work. Safe to ignore in 
 The requested image's platform (linux/amd64) does not match the detected host platform (linux/arm64/v8)
 ```
 
-The `lnflash/price:edge` image is amd64-only. On Apple Silicon Macs it runs under Rosetta emulation — this is harmless but slow. The warning is safe to ignore.
+The `lnflash/price:edge` image is amd64-only. On Apple Silicon Macs it runs under Rosetta emulation; this is harmless but slow. The warning is safe to ignore.
 
 ### Server starts but crashes immediately
 
