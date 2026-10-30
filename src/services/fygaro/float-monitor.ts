@@ -43,7 +43,9 @@ const DEFAULT_CRITICAL_RUNWAY_DAYS = 3
 const DEFAULT_FUND_URL = "https://erp.flashapp.me/app/system-accounts"
 const BURN_WINDOW_DAYS = 7
 
-const FLOAT_LOW_ALERT_WINDOW_SECONDS = 3600
+// A warning is a reminder, not a page: once a day is enough. The critical tier
+// keeps its own hourly window, so a float that keeps falling still pages.
+const FLOAT_LOW_ALERT_WINDOW_SECONDS = 24 * 3600
 const FLOAT_LOW_ALERT_MARKER = "fygaro:float-low:alerted"
 const FLOAT_CRITICAL_ALERT_WINDOW_SECONDS = 3600
 const FLOAT_CRITICAL_ALERT_MARKER = "fygaro:float-critical:alerted"

@@ -201,7 +201,7 @@ describe("checkFygaroTreasuryFloat", () => {
       "fygaro:float-low:alerted",
       "1",
       "EX",
-      3600,
+      24 * 3600,
       "NX",
     )
     expect(mockAlertBridge).not.toHaveBeenCalled()
