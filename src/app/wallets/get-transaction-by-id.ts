@@ -1,8 +1,12 @@
 import { memoSharingConfig } from "@config"
 import { WalletTransactionHistory } from "@domain/wallets"
-import { checkedToLedgerTransactionId } from "@domain/ledger"
+import {
+  checkedToLedgerTransactionId,
+  CouldNotFindTransactionError,
+} from "@domain/ledger"
 
 import { getNonEndUserWalletIds, LedgerService } from "@services/ledger"
+import { WalletsRepository } from "@services/mongoose"
 import IbexClient from "@services/ibex/client"
 import { BlockchainService } from "@services/blockchain"
 import { baseLogger } from "@services/logger"
@@ -313,4 +317,38 @@ export const getTransactionDetailsById = async (
 
     return new Error(errorMessage)
   }
+}
+
+/**
+ * End-user variant of getTransactionDetailsById: returns the transaction only
+ * when it belongs to one of the caller's wallets. IBEX resolves any transaction
+ * in Flash's tenant, so without this check any account can read another
+ * account's invoice, preimage, memo and address by id.
+ *
+ * A failed fetch and a transaction owned by someone else return the same
+ * error, so the response does not reveal whether an id exists.
+ */
+export const getTransactionDetailsForAccount = async ({
+  accountId,
+  transactionId,
+}: {
+  accountId: AccountId
+  transactionId: IbexTransactionId
+}): Promise<TransactionDetailsResult | ApplicationError> => {
+  const wallets = await WalletsRepository().listByAccountId(accountId)
+  if (wallets instanceof Error) return wallets
+
+  const details = await getTransactionDetailsById(transactionId)
+  if (details instanceof Error) return new CouldNotFindTransactionError()
+
+  const ownWalletIds = new Set<string>(wallets.map((wallet) => wallet.id))
+  if (!ownWalletIds.has(details.accountId)) {
+    baseLogger.warn(
+      { accountId, transactionId },
+      "transactionDetails requested for a transaction outside the caller's wallets",
+    )
+    return new CouldNotFindTransactionError()
+  }
+
+  return details
 }
