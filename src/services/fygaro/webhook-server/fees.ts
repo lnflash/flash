@@ -61,12 +61,6 @@ export const computeFygaroFees = ({
   return { grossCents, processorFeeCents, flashFeeCents, netCents }
 }
 
-// Why a payment was NOT auto-credited. `credit-disabled` is the deploy-level
-// master gate (FygaroConfig.credit.enabled) and is handled silently; the rest
-// are runtime conditions worth an ops alert because credit IS supposed to be on.
-// `settings-unavailable` and `history-unavailable` are TRANSIENT (an ERPNext
-// blip) — the route answers 500 so the provider retries and the read
-// self-heals; every other reason is deterministic and acks 200.
 // Title for every ops alert about a payment for a locked/closed account, from
 // the webhook and from the stranded-credit sweep alike. Deliberately does NOT
 // say "manual credit needed" or "not auto-credited": the account is locked or
@@ -76,6 +70,12 @@ export const computeFygaroFees = ({
 export const ACCOUNT_INACTIVE_ALERT_TITLE =
   "Fygaro payment captured from a LOCKED/inactive account — not credited; refund or hold, do not credit"
 
+// Why a payment was NOT auto-credited. `credit-disabled` is the deploy-level
+// master gate (FygaroConfig.credit.enabled) and is handled silently; the rest
+// are runtime conditions worth an ops alert because credit IS supposed to be on.
+// `settings-unavailable` and `history-unavailable` are TRANSIENT (an ERPNext
+// blip) — the route answers 500 so the provider retries and the read
+// self-heals; every other reason is deterministic and acks 200.
 export type RecordOnlyReason =
   | "credit-disabled"
   // The recipient account is not `active` (locked, closed, new, pending).
