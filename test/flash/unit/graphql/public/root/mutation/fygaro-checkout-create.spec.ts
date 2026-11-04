@@ -49,6 +49,7 @@ const ctx = (overrides: Record<string, unknown> = {}) =>
     domainAccount: {
       id: ACCOUNT_ID,
       level: AccountLevel.One,
+      status: "active",
       username: "jaceth2009",
       ...overrides,
     },
@@ -87,6 +88,7 @@ describe("fygaroCheckoutCreate resolver", () => {
       accountId: ACCOUNT_ID,
       username: "jaceth2009",
       level: AccountLevel.One,
+      accountStatus: "active",
       amountCents: 8000,
     })
     expect(result.errors).toEqual([])
@@ -228,6 +230,24 @@ describe("fygaroCheckoutCreate resolver", () => {
     expect(result.errors[0].code).toBe("FYGARO_LEVEL_NOT_ELIGIBLE")
     expect(result.errors[0].code).not.toBe("FYGARO_ALLOWANCE_UNAVAILABLE")
     expect(result.errors[0].message).toContain("account level")
+  })
+
+  it("refuses a locked account with its own code and hands the status to the authorisation", async () => {
+    // 2026-11-03: a chargeback-locked account was handed a signed link and
+    // charged $20, because nothing on this path looked at account status.
+    mockAuthorizeFygaroTopup.mockResolvedValue({
+      authorized: false,
+      reason: "account-inactive",
+    })
+
+    const result = await resolve(8000, ctx({ status: "locked" }))
+
+    expect(result.errors[0].code).toBe("FYGARO_ACCOUNT_INACTIVE")
+    expect(result.errors[0].message).toContain("contact support")
+    expect(result.checkout).toBeUndefined()
+    expect(mockAuthorizeFygaroTopup).toHaveBeenCalledWith(
+      expect.objectContaining({ accountStatus: "locked" }),
+    )
   })
 
   it.each([["settings-unavailable"], ["history-unavailable"]])(

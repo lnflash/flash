@@ -74,7 +74,11 @@ import {
   type FygaroTopupOutcomeState,
   type IntentLookup,
 } from "../../checkout-intent-store"
-import { evaluateCreditGate, RecordOnlyReason } from "../fees"
+import {
+  ACCOUNT_INACTIVE_ALERT_TITLE,
+  evaluateCreditGate,
+  RecordOnlyReason,
+} from "../fees"
 
 type FygaroPaymentPayload = {
   transactionId?: string
@@ -132,6 +136,8 @@ const RECORD_ONLY_ALERT_TITLE: Record<
   Exclude<RecordOnlyReason, "credit-disabled">,
   string
 > = {
+  // Shared with the stranded-credit sweep; see the constant for why.
+  "account-inactive": ACCOUNT_INACTIVE_ALERT_TITLE,
   "settings-unavailable":
     "Fygaro Settings unavailable — payment recorded, not auto-credited",
   "auto-credit-disabled":
@@ -209,6 +215,10 @@ const REFUSAL_NOTIFIES_CUSTOMER: Record<RecordOnlyReason, boolean> = {
   // The deploy-level master gate. Records without crediting BY DESIGN, so
   // pushing here would notify every paying customer during a rollout.
   "credit-disabled": false,
+  // Nobody is going to hand-credit a locked account, so the "we're completing
+  // it manually" promise would be false. Ops decide between refund and hold;
+  // the customer hears from support, not from a push.
+  "account-inactive": false,
   // The operator's ERPNext runtime kill switch — the one ops actually flips
   // during an incident. Same mass-push problem as the master gate.
   "auto-credit-disabled": false,
@@ -273,6 +283,7 @@ const REFUSAL_NEEDS_VERIFIED_REFERENCE: Record<RecordOnlyReason, boolean> = {
   // unreachable. Listed so the record stays exhaustive and a reason promoted to
   // notifying cannot arrive here without an answer.
   "credit-disabled": true,
+  "account-inactive": true,
   "auto-credit-disabled": true,
   "settings-unavailable": true,
   "history-unavailable": true,
@@ -784,6 +795,7 @@ export const paymentHandler = async (req: Request, res: Response) => {
       ? ({ credit: false, reason: "intent-mismatch" } as const)
       : evaluateCreditGate({
           creditEnabled,
+          accountStatus: account.status,
           currency,
           settings,
           grossCents,
@@ -913,7 +925,7 @@ export const paymentHandler = async (req: Request, res: Response) => {
         return res.status(200).json({ status: "already_processed" })
       }
 
-      // Deterministic record-only path (non-usd, over-limit,
+      // Deterministic record-only path (account-inactive, non-usd, over-limit,
       // no-daily-limit-for-level, daily-limit-exceeded, under-minimum,
       // non-positive-net, auto-credit-disabled, and the silent credit-disabled
       // master gate): these will never change on retry, so ack 200 and dedupe

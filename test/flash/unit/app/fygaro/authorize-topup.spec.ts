@@ -1,4 +1,4 @@
-import { AccountLevel } from "@domain/accounts"
+import { AccountLevel, AccountStatus } from "@domain/accounts"
 import { parseCustomReference } from "@services/fygaro/checkout"
 import { FygaroReservationWriteError } from "@services/fygaro/errors"
 
@@ -84,6 +84,7 @@ const authorize = (overrides: Record<string, unknown> = {}) =>
     accountId: "acct-1",
     username: "jaceth2009",
     level: AccountLevel.One,
+    accountStatus: AccountStatus.Active,
     amountCents: 8000,
     nowMs: NOW_MS,
     ...overrides,
@@ -237,6 +238,23 @@ describe("authorizeFygaroTopup", () => {
     expect(res.authorized).toBe(false)
     expect(res.reason).toBe("no-daily-limit-for-level")
   })
+
+  it.each([[AccountStatus.Locked], [AccountStatus.Closed], [AccountStatus.Pending]])(
+    "refuses a %s account before any read — no settings, no reservations, no history, no link",
+    async (accountStatus) => {
+      const res = await authorize({ accountStatus })
+
+      expect(res.authorized).toBe(false)
+      expect(res.reason).toBe("account-inactive")
+      // Nothing can change the answer, so nothing is read — and a locked
+      // account holding an abandoned link hears "not on this account", not
+      // "you already have a link open".
+      expect(mockGetFygaroSettings).not.toHaveBeenCalled()
+      expect(mockReadReservations).not.toHaveBeenCalled()
+      expect(mockSumPrior).not.toHaveBeenCalled()
+      expect(mockSaveIntent).not.toHaveBeenCalled()
+    },
+  )
 
   it("stays disabled until it is switched on", async () => {
     mockCheckoutConfig = { ...CHECKOUT, enabled: false }

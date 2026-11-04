@@ -245,6 +245,7 @@ beforeEach(() => {
   mockReadCreditedMarker.mockResolvedValue({ known: true, credited: false })
   mockFindByUsername.mockResolvedValue({
     id: ACCOUNT_ID,
+    status: "active",
     level: 1,
     username: VALID_BODY.customReference,
   })
@@ -1197,7 +1198,26 @@ describe("fygaro paymentHandler", () => {
         "no-daily-limit-for-level",
         // A level-0 account has no configured daily allowance — fail closed.
         (body: Record<string, unknown>) => body,
-        () => mockFindByUsername.mockResolvedValue({ id: ACCOUNT_ID, level: 0 }),
+        () =>
+          mockFindByUsername.mockResolvedValue({
+            id: ACCOUNT_ID,
+            status: "active",
+            level: 0,
+          }),
+      ],
+      [
+        "account-inactive",
+        // Locked three days before the card was captured (2026-11-03). The
+        // send would refuse it anyway; refusing at the gate hands it to a
+        // human once instead of failing the credit on every retry.
+        (body: Record<string, unknown>) => body,
+        () =>
+          mockFindByUsername.mockResolvedValue({
+            id: ACCOUNT_ID,
+            status: "locked",
+            level: 2,
+            username: VALID_BODY.customReference,
+          }),
       ],
     ])(
       "records-only and alerts %s without crediting",
@@ -1226,6 +1246,37 @@ describe("fygaro paymentHandler", () => {
         expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
       },
     )
+
+    it("account-inactive: stamps the row, says refund-or-hold (never 'manual credit'), and pushes the customer nothing", async () => {
+      mockFindByUsername.mockResolvedValue({
+        id: ACCOUNT_ID,
+        status: "locked",
+        level: 2,
+        username: VALID_BODY.customReference,
+      })
+      const res = makeRes()
+
+      await paymentHandler(makeReq(VALID_BODY), res)
+
+      // Never reaches the send, so there is no InactiveAccountError to page on
+      // and no "credit failed" critical — the refusal is the whole story.
+      expect(mockCreditFygaroTopup).not.toHaveBeenCalled()
+      expect(mockMarkNotCredited).toHaveBeenCalledWith(
+        expect.objectContaining({ reason: "account-inactive" }),
+      )
+      expect(mockAlertBridge).toHaveBeenCalledTimes(1)
+      const alert = mockAlertBridge.mock.calls[0][0]
+      expect(alert.severity).toBe("warning")
+      expect(alert.dedupKey).toBe(`fygaro:not-credited:${VALID_BODY.transactionId}`)
+      // The instruction is the point: a locked account is refunded or held,
+      // and the generic wording sent ops to credit one by hand.
+      expect(alert.title).toMatch(/LOCKED/)
+      expect(alert.title).not.toMatch(/manual credit/i)
+      // No "we're completing it manually" promise to someone we locked.
+      expect(mockSendTopupNotification).not.toHaveBeenCalled()
+      expect(res.status).toHaveBeenCalledWith(200)
+      expect(res.json).toHaveBeenCalledWith({ status: "recorded", credited: false })
+    })
 
     it("pages CRITICAL when the not-credited stamp fails, instead of failing silently", async () => {
       // The write that carries the whole point of the record-only path. The
@@ -1643,6 +1694,7 @@ describe("fygaro paymentHandler", () => {
           () =>
             mockFindByUsername.mockResolvedValue({
               id: ACCOUNT_ID,
+              status: "active",
               level: 0,
               username: VALID_BODY.customReference,
             }),
@@ -1769,6 +1821,7 @@ describe("fygaro paymentHandler", () => {
           () =>
             mockFindByUsername.mockResolvedValue({
               id: ACCOUNT_ID,
+              status: "active",
               level: 0,
               username: VALID_BODY.customReference,
             }),
@@ -1984,7 +2037,7 @@ describe("fygaro paymentHandler", () => {
     it("credits a payment sitting exactly at the auto-credit limit", async () => {
       // Level 2 so the $1000 daily cap does not shadow the $500 auto-credit
       // limit this test is pinning.
-      mockFindByUsername.mockResolvedValue({ id: ACCOUNT_ID, level: 2 })
+      mockFindByUsername.mockResolvedValue({ id: ACCOUNT_ID, status: "active", level: 2 })
       const res = makeRes()
 
       await paymentHandler(makeReq({ ...VALID_BODY, amount: "500.00" }), res)
@@ -2424,7 +2477,11 @@ describe("fygaro paymentHandler", () => {
       })
 
       it("stamps the single-payment ceiling for over-limit", async () => {
-        mockFindByUsername.mockResolvedValue({ id: ACCOUNT_ID, level: 2 })
+        mockFindByUsername.mockResolvedValue({
+          id: ACCOUNT_ID,
+          status: "active",
+          level: 2,
+        })
         mockReadIntent.mockResolvedValue(intent({ amountCents: 50001 }))
         const res = makeRes()
 

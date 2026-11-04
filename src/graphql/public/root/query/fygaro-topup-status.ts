@@ -48,6 +48,12 @@ const CUSTOMER_REASON: Record<
     "Card top-ups aren't available on your account level yet.",
   "intent-mismatch": () =>
     "We couldn't match this payment to your checkout, so we're completing it by hand.",
+  // Not OURS: the customer's account is locked or closed, and telling them we
+  // are "completing it" promises a credit that is not going to happen. Neutral
+  // wording that routes them to a human — the lock reason is support's to
+  // explain, not this field's.
+  "account-inactive": () =>
+    "This payment can't be completed on your account. Please contact support.",
   "credit-disabled": () => OURS,
   "auto-credit-disabled": () => OURS,
   "settings-unavailable": () => OURS,

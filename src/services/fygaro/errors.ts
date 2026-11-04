@@ -57,6 +57,21 @@ export class FygaroLevelNotEligibleError extends FygaroError {
 }
 
 /**
+ * The account is not `active` — locked, closed, or not yet activated — so no
+ * checkout is signed and no card is charged. Same test as
+ * `AccountValidator.isActive` at the send, applied before the money leaves the
+ * customer's card instead of after. Permanent until an operator changes the
+ * account; "try again" would be a lie and "upgrade" would be the wrong door.
+ */
+export class FygaroAccountInactiveError extends FygaroError {
+  constructor(
+    message: string = "Card top-up isn't available on this account. Please contact support.",
+  ) {
+    super(message)
+  }
+}
+
+/**
  * The reservation index could not be written.
  *
  * Distinct from a failed cross-check record: without the reservation the

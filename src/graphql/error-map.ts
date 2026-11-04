@@ -877,6 +877,15 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         message,
       })
 
+    case "FygaroAccountInactiveError":
+      message =
+        error.message ||
+        "Card top-up isn't available on this account. Please contact support."
+      return bridgeGqlError({
+        code: "FYGARO_ACCOUNT_INACTIVE",
+        message,
+      })
+
     case "BridgeInvalidPlaidTokenError":
       message = error.message || "linkToken and publicToken are required"
       return bridgeGqlError({
