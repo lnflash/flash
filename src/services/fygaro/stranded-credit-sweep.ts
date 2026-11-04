@@ -27,7 +27,7 @@ import {
   FygaroCreditError,
   INSUFFICIENT_TREASURY_FLOAT_STEP,
 } from "./webhook-server/credit-topup"
-import { evaluateCreditGate } from "./webhook-server/fees"
+import { ACCOUNT_INACTIVE_ALERT_TITLE, evaluateCreditGate } from "./webhook-server/fees"
 import { getFygaroSettings } from "./webhook-server/fygaro-settings"
 
 /**
@@ -503,7 +503,12 @@ export const retryStrandedFygaroCredits = async ({
           dedupKey: generateDedupKey.fygaroNotCredited(transactionId),
           source: "fygaro-webhook",
           severity: "warning",
-          title: `Fygaro stranded top-up refused on retry (${gate.reason}) — not auto-credited`,
+          // A locked/closed account gets the same refund-or-hold title as the
+          // webhook: "not auto-credited" reads as "credit it by hand".
+          title:
+            gate.reason === "account-inactive"
+              ? ACCOUNT_INACTIVE_ALERT_TITLE
+              : `Fygaro stranded top-up refused on retry (${gate.reason}) — not auto-credited`,
           detail: `reason=${gate.reason} currency=${currency} gross=${centsToDollars(grossCents)} level=${account.level} retry=stranded-credit-sweep`,
           context: {
             transaction_id: transactionId,

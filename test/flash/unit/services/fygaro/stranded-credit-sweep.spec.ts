@@ -582,6 +582,10 @@ describe("retryStrandedFygaroCredits", () => {
       expect(mockAlertBridge).not.toHaveBeenCalledWith(
         expect.objectContaining({ dedupKey: "fygaro:retry-failed:tx-locked" }),
       )
+      // The title must steer ops to refund-or-hold, never to a hand credit.
+      const alert = mockAlertBridge.mock.calls[0][0]
+      expect(alert.title).toMatch(/LOCKED/)
+      expect(alert.title).not.toMatch(/auto-credited|manual credit/i)
       expect(summary).toMatchObject({ credited: 0, failed: 0, leftForManual: 1 })
     })
 

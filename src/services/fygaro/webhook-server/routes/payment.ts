@@ -74,7 +74,11 @@ import {
   type FygaroTopupOutcomeState,
   type IntentLookup,
 } from "../../checkout-intent-store"
-import { evaluateCreditGate, RecordOnlyReason } from "../fees"
+import {
+  ACCOUNT_INACTIVE_ALERT_TITLE,
+  evaluateCreditGate,
+  RecordOnlyReason,
+} from "../fees"
 
 type FygaroPaymentPayload = {
   transactionId?: string
@@ -132,12 +136,8 @@ const RECORD_ONLY_ALERT_TITLE: Record<
   Exclude<RecordOnlyReason, "credit-disabled">,
   string
 > = {
-  // Deliberately does NOT say "manual credit needed": the account is locked or
-  // closed for a reason, so the operator's options are refund or hold. The
-  // generic credit-failed wording sent ops to credit a chargeback-locked
-  // account by hand (2026-11-03).
-  "account-inactive":
-    "Fygaro payment captured from a LOCKED/inactive account — not credited; refund or hold, do not credit",
+  // Shared with the stranded-credit sweep; see the constant for why.
+  "account-inactive": ACCOUNT_INACTIVE_ALERT_TITLE,
   "settings-unavailable":
     "Fygaro Settings unavailable — payment recorded, not auto-credited",
   "auto-credit-disabled":
