@@ -9,13 +9,13 @@ untouched.
 It is **not** the only user-initiated path that moves a user's money. Cashout
 pays a bolt11 out of the user's own wallet, and `bridgeInitiateWithdrawal` sends
 the user's own USDT out through IBEX, without either one ever touching the
-guard — read [Not covered by the guard at
+guard; read [Not covered by the guard at
 all](#not-covered-by-the-guard-at-all) before concluding from this page that a
 rail is guarded.
 
 Every send mutation runs it before anything reaches IBEX. On every rail that
 accepts an `idempotencyKey`, it runs as `withPaymentIdempotency`'s `authorize`
-hook — inside the lock, after the cache re-check, immediately before the send —
+hook, inside the lock, after the cache re-check, immediately before the send,
 so a replayed key returns the cached result without spending attempt budget or
 being re-judged against a moved mid price. Ahead of the wrapper, a client
 retrying a timed-out send burned a burst point per retry and, past 10/min, got
@@ -23,13 +23,13 @@ retrying a timed-out send burned a burst point per retry and, past 10/min, got
 
 The checks:
 
-1. **attempt budget** — two Redis buckets keyed on the account, a burst bucket
+1. **attempt budget**: two Redis buckets keyed on the account, a burst bucket
    (10/min) and a daily bucket (200/day). Every attempt costs a point, rejected
    ones included, so probing the amount space is bounded by the caller's own
    budget.
-2. **amount sanity** — positive and finite. USD/USDT cents may be fractional
+2. **amount sanity**: positive and finite. USD/USDT cents may be fractional
    (USDT settles in micros); sats must be whole.
-3. **daily limit as per-transaction cap** — `amount <= dailyLimit(level)`. The
+3. **daily limit as per-transaction cap**: `amount <= dailyLimit(level)`. The
    `intraledger` rails use the intraLedger limit; every lightning, lnurl and
    on-chain rail uses the withdrawal limit. Phase 1 replaces this with the
    remaining allowance.
@@ -37,12 +37,12 @@ The checks:
    **"Withdrawal" here means the rail, not the destination.** A bolt11 or
    LN-address payment to another Flash user never leaves Flash, but every
    lightning and lnurl rail passes `kind: "lightning"` / `"lnurl"` and is judged
-   against `withdrawalLimit` — the destination is not knowable at the guard,
+   against `withdrawalLimit`; the destination is not knowable at the guard,
    which runs before the payment flow that resolves it. That is a deliberate
    approximation for Phase 0, and **as the ladder stands it cannot change any
    outcome**: every level carries equal withdrawal and intraLedger limits.
-   Level 1 was the one exception — Galoy shipped $1,000 external against
-   $2,000 internal — and it was settled on 2026-09-08 to a single $1,000 rather
+   Level 1 was the one exception, Galoy shipped $1,000 external against
+   $2,000 internal, and it was settled on 2026-09-08 to a single $1,000 rather
    than by raising the external cap. So an L1 user paying another Flash user
    $1,500 is refused either way, by their lightning invoice and by their
    username alike, and the rail/destination distinction is invisible.
@@ -60,8 +60,8 @@ The checks:
 
 | mode       | behaviour                                                                                              |
 | ---------- | ------------------------------------------------------------------------------------------------------ |
-| `off`      | Returns immediately. No Redis, no price lookup, no ops event, no span attribute. Pre-ENG-573 behaviour **for the guard** — but not for the level-0 default: an account with no `level` field is still capped at the level-0 limits, unconditionally, by Galoy's own checker. See [What `off` does not cover](#what-off-does-not-cover). |
-| `log-only` | All checks run, every would-be rejection posts a `transfer / would-reject` ops event — the send proceeds. Includes `lnInvoicePaymentSend`'s bolt11 decode gate: an undecodable or no-amount invoice is reported and still handed to IBEX, exactly as before ENG-573. |
+| `off`      | Returns immediately. No Redis, no price lookup, no ops event, no span attribute. Pre-ENG-573 behaviour **for the guard**, but not for the level-0 default: an account with no `level` field is still capped at the level-0 limits, unconditionally, by Galoy's own checker. See [What `off` does not cover](#what-off-does-not-cover). |
+| `log-only` | All checks run, every would-be rejection posts a `transfer / would-reject` ops event, the send proceeds. Includes `lnInvoicePaymentSend`'s bolt11 decode gate: an undecodable or no-amount invoice is reported and still handed to IBEX, exactly as before ENG-573. |
 | `enforce`  | Rejections are real.                                                                                     |
 
 Anything unrecognised degrades to `log-only`. The failure mode of this switch
@@ -70,7 +70,7 @@ must be "the guard does not block", never "every send is refused".
 `off` covers every check the guard itself runs, not just the three above (see
 [What `off` does not cover](#what-off-does-not-cover) for the one thing ENG-573
 changed that it does not). `lnInvoicePaymentSend` also gained a bolt11 decode
-gate — the guard needs the amount and the amount is inside the invoice, so the
+gate; the guard needs the amount and the amount is inside the invoice, so the
 resolver decodes it where it previously handed the raw bolt11 straight to IBEX.
 `decodeInvoice` refuses anything `invoices.parsePaymentRequest` cannot parse and
 any invoice with no payment secret, which is a rejection class that rail never
@@ -78,7 +78,7 @@ had. That gate lives inside the same `authorize` hook and answers to the same
 switch: on `off` the resolver does not decode at all, so an invoice IBEX would
 have paid is restored by the flag rather than by a deploy.
 
-The decode gate charges the attempt budget too, exactly once per request — a
+The decode gate charges the attempt budget too, exactly once per request; a
 request the gate handles never reaches `authorizeSend`, and vice versa. It has
 to: the `LnPaymentRequest` scalar is `/^ln[a-z0-9]+$/i`, so `paymentRequest:
 "lnx"` is a well-formed request that fails the decode, and without a charge it
@@ -89,11 +89,11 @@ limit.
 
 One thing ENG-573 changed is **not** behind the switch: reading an account with
 no `level` field as level 0. That default lives in `effectiveAccountLevel`,
-applied inside `getAccountLimits` (`src/config/yaml.ts:186`) — the config layer,
+applied inside `getAccountLimits` (`src/config/yaml.ts:186`); the config layer,
 deliberately, so the guard, `Account.limits` and `remainingLimit` cannot
 disagree about those ~300 accounts. Galoy's own `AccountLimitsChecker` reads the
 same function (`src/app/payments/helpers.ts:185`), so it caps an unleveled
-account at the level-0 limits **on every mode, `off` included** — and because
+account at the level-0 limits **on every mode, `off` included**; and because
 the guard is not involved, there is no ops event, no `would-reject` embed and no
 `sendGuard.*` span attribute to explain it.
 
@@ -102,18 +102,18 @@ still routed through `@app/payments` (the USD and amount-bearing resolvers are
 FLASH FORK bodies that pay IBEX directly and never reach the checker, so on
 those `off` really is pre-ENG-573 behaviour):
 
-- `lnNoAmountInvoicePaymentSend` — `checkIntraledgerLimits` /
+- `lnNoAmountInvoicePaymentSend`: `checkIntraledgerLimits` /
   `checkTradeIntraAccountLimits` at `src/app/payments/send-lightning.ts:484`
   when the invoice settles inside Flash, `checkWithdrawalLimits` at `:682` when
   it leaves. Over the cap, the caller gets Galoy's own
   `Cannot transfer more than $125.00 in 24 hours`.
-- `lnNoAmountInvoiceFeeProbe` — the same three checks at
+- `lnNoAmountInvoiceFeeProbe`: the same three checks at
   `src/app/payments/get-protocol-fee.ts:178`, `:187` and `:196`, so the probe
   refuses before the send is ever attempted.
 
 This is not a regression. Before ENG-573 that cohort indexed the level map with
 `undefined`, got `NaN` limits, and `paymentAmountFromNumber(NaN)` returned a
-`BigIntConversionError` out of `checkLimit` — the send failed anyway, with a
+`BigIntConversionError` out of `checkLimit`; the send failed anyway, with a
 type error instead of a limit message. But it is not switchable either: if an
 unleveled account has to send above the level-0 cap during an incident,
 `sendGuard.mode: off` will not do it. Raise that account's `level`, or raise
@@ -122,17 +122,17 @@ unleveled account has to send above the level-0 cap during an incident,
 ## Not covered by the guard at all
 
 `off` / `log-only` / `enforce` describe the rails that *call* the guard. The
-following move money without it, on every mode — no attempt budget, no
+following move money without it, on every mode; no attempt budget, no
 per-transaction cap, and nothing in the `would-reject` sample or the
 `sendGuard.*` census to count:
 
-- **Cashout / offers — a gap, not a decision.** `ValidOffer.execute()` pays a
+- **Cashout / offers: an open gap.** `ValidOffer.execute()` pays a
   bolt11 out of the user's own wallet via `Ibex.payInvoice`
   (`src/app/offers/ValidOffer.ts:68`), reached from the `initiateCashout`
   mutation through `CashoutManager.executeCashout`. Its compensating controls
-  are `CashoutValidator`'s configured min/max — `cashout.minimum.amount` /
+  are `CashoutValidator`'s configured min/max, `cashout.minimum.amount` /
   `cashout.maximum.amount` in the values file, checked at
-  `src/app/offers/Validator.ts:29` and `:44` — plus a balance check
+  `src/app/offers/Validator.ts:29` and `:44`, plus a balance check
   (`hasSufficientBalance`, `:75`), an account-level floor
   (`cashout.accountLevel`), and the bank-account / ERP-party checks. So the
   per-transaction ceiling on this rail is one number for every level, not
@@ -141,7 +141,7 @@ per-transaction cap, and nothing in the `would-reject` sample or the
   limits`. Raising or lowering `accountLimits` does nothing here, and
   `sendGuard.mode: enforce` does not cap a cashout. Phase 1 should wire this
   rail in next.
-- **Bridge USDT withdrawal — a gap, not a decision.** `bridgeInitiateWithdrawal`
+- **Bridge USDT withdrawal: an open gap.** `bridgeInitiateWithdrawal`
   (`src/graphql/public/root/mutation/bridge-initiate-withdrawal.ts`) →
   `BridgeService.initiateWithdrawal` (`src/services/bridge/index.ts:1269`) moves
   the user's own USDT out through `IbexClient.sendCrypto` (`:1442`). Its only
@@ -154,7 +154,7 @@ per-transaction cap, and nothing in the `would-reject` sample or the
   min/max the way cashout has one, and `accountLimits` is never consulted. These
   are the largest per-transaction amounts on the platform. Phase 1 should wire
   this rail in alongside cashout.
-- **System credits — deliberate.** Quiz rewards, referral payouts, card top-up
+- **System credits: deliberate.** Quiz rewards, referral payouts, card top-up
   credits, operator reimbursements. They move money out of a Flash-owned funding
   wallet on our own instruction, so an account-scoped attempt budget and a
   per-account daily cap describe nothing about them (a 30-payment referral batch
@@ -177,8 +177,8 @@ users), and on `enforce` they are capped at $125 per transaction. "An unleveled
 account is an unverified one" is an assumption, not a verified fact about those
 accounts.
 
-That assumption lives in exactly one place — `effectiveAccountLevel`, applied
-inside `getAccountLimits` — so the guard, `Account.limits` and `remainingLimit`
+That assumption lives in exactly one place, `effectiveAccountLevel`, applied
+inside `getAccountLimits`, so the guard, `Account.limits` and `remainingLimit`
 all read the same numbers for those accounts. Revising it is a one-line change
 there, not a hunt through the call sites. The price of putting it there is that
 `sendGuard.mode` does not reach it: see
@@ -188,31 +188,31 @@ there, not a hunt through the call sites. The price of putting it there is that
 
 ## Flipping to enforce
 
-1. Deploy with `sendGuard.mode: log-only` (the default — nothing to set).
+1. Deploy with `sendGuard.mode: log-only` (the default; nothing to set).
 2. Watch the ops feed for `🔁 Transfer — Would Reject` embeds for at least a full
    day, ideally a week (weekly payout and settlement patterns are the ones that
    sit near a cap). Each embed carries the account, the level, the amount and the
    reason in `step`.
 3. Count them by `step`:
-   - `over-daily-limit` — real traffic the cap would have refused. If any of it
+   - `over-daily-limit`; real traffic the cap would have refused. If any of it
      is legitimate, raise the level's limit or the account's level *before*
      enforcing; do not enforce and then triage support tickets. A `sendGuard.kind`
      of `lightning` or `lnurl` says which rail was used, not where the money
      went, so an inside-Flash payment is counted here as though it were external
      (see check 3 above). With every level's two limits equal that costs nothing
-     — the same amount is refused either way — but it becomes a real ambiguity
+, the same amount is refused either way, but it becomes a real ambiguity
      in this bucket the moment any level's intraLedger limit exceeds its
      withdrawal limit.
-   - `invalid-amount` — malformed client input. Should be near zero. A
+   - `invalid-amount`; malformed client input. Should be near zero. A
      send-all on an empty wallet is deliberately **not** in this bucket:
      `getBalanceForWallet` reads a drained or never-funded wallet as
-     `USDAmount.ZERO` — post-cutover the default for every migrated account's
-     legacy USD wallet — so `onchain-payment-send-all.ts` skips the guard when
+     `USDAmount.ZERO`, post-cutover the default for every migrated account's
+     legacy USD wallet, so `onchain-payment-send-all.ts` skips the guard when
      the balance rounds to zero cents and leaves the refusal to the rail, one
      layer down. Be clear about what that refusal is: `payOnChainByWalletId`
      reaches `OnchainUsdPaymentValidator`'s `checkOnchainMin`, which returns a
      bare `ValidationError("Amount must be greater than 0")`, and `mapError`
-     has no case for it beyond the catch-all — the client gets `Unexpected error
+     has no case for it beyond the catch-all; the client gets `Unexpected error
      occurred, please try again or contact support if it persists (code:
      ValidationError: Amount must be greater than 0)`. That is unchanged by
      ENG-573 and not a good message, but it is not the guard's to fix here. The
@@ -220,20 +220,20 @@ there, not a hunt through the call sites. The price of putting it there is that
      tap would read as malformed client input, in the one bucket the runbook
      says should be near zero, in the sample the enforce decision is made
      from.
-   - `limits-unavailable` — Redis or the price feed failing, i.e. the guard
+   - `limits-unavailable`; Redis or the price feed failing, i.e. the guard
      itself unable to decide. Must be zero before enforcing: on `enforce` these
      block the send. They are also recorded as span exceptions
-     (`ErrorLevel.Critical` when enforcing, `Warn` in log-only) — alert on that
+     (`ErrorLevel.Critical` when enforcing, `Warn` in log-only); alert on that
      signal, because a price-pod outage past the 10-minute price cache rejects
      every amount-bearing lightning send and every BTC intraledger send.
    - `rate-limited` is **coalesced**, not silent. Silencing it would leave one
-     of the three checks with no observable output at all — unreadable during
+     of the three checks with no observable output at all; unreadable during
      the very rollout this mode exists for, so an operator would count a week of
      would-reject embeds, see no rate-limit signal by construction, flip to
      enforce, and hand a 30-payment payout batch twenty `TooManyRequestError`s.
    - `undecodable-invoice` is `lnInvoicePaymentSend` only: the bolt11 could not
      be decoded, or carried no amount. The guard introduced that decode, so this
-     is a rejection class the rail never had — count it before enforcing. Also
+     is a rejection class the rail never had; count it before enforcing. Also
      **coalesced**; count it from the span attributes below, not by tallying
      embeds.
 
@@ -249,8 +249,8 @@ there, not a hunt through the call sites. The price of putting it there is that
    attempt budget has been charged, so the budget bounds them.
 
    **What the embed tells you.** The one that does post carries `muted: N` in
-   its meta — how many events of that reason were coalesced away since the last
-   one that posted — plus `mutedAgeS`, how many seconds ago the window that
+   its meta, how many events of that reason were coalesced away since the last
+   one that posted, plus `mutedAgeS`, how many seconds ago the window that
    accumulated them opened. A count is only ever cleared by being delivered: a
    40-second blip that mutes 499 rejections and then goes quiet reports all 499
    on the next embed of that reason, however much later, and `mutedAgeS` is what
@@ -263,17 +263,17 @@ there, not a hunt through the call sites. The price of putting it there is that
    `sendGuard.level`, `sendGuard.error` and (when the guard got as far as an
    amount) `sendGuard.cents`. The guard opens that span itself rather than
    writing to whatever span happens to be active, and that is load-bearing for
-   this step: the ambient span differs by call path — on the six rails that take
+   this step: the ambient span differs by call path, on the six rails that take
    an `idempotencyKey` the guard runs inside
    `services.lock.lockPaymentIdempotencyKey`, and without a key, or on either
-   on-chain rail, inside the GraphQL resolver span — so a query scoped to one of
+   on-chain rail, inside the GraphQL resolver span, so a query scoped to one of
    those names would have counted a fraction of the traffic, and the fraction
    that went missing is the newer mobile clients that send idempotency keys.
    Both entry points share the name; `code.function` on the span says whether it
    was `authorizeSend` or the `gateSend` decode gate.
 
    Every attribute is a **string** except `sendGuard.cents`, which is a number
-   so it can be aggregated — so query `sendGuard.level = "0"`, not `= 0`, and
+   so it can be aggregated; so query `sendGuard.level = "0"`, not `= 0`, and
    read a level-0 or level-less account as the literal `"0"` rather than as an
    absent attribute. Range and percentile filters on `sendGuard.cents` are
    numeric. Count from tracing, not from Discord: the ops feed is
@@ -282,16 +282,16 @@ there, not a hunt through the call sites. The price of putting it there is that
    dropped" summary. Read the feed, count the spans.
 
    **What to alert on.** `limits-unavailable` additionally records a span
-   *exception* on every occurrence, unthrottled — `ErrorLevel.Critical` when
+   *exception* on every occurrence, unthrottled; `ErrorLevel.Critical` when
    enforcing, `Warn` in log-only. That is the page-worthy signal: it means the
    guard cannot decide, and on `enforce` that blocks the send.
 4. Set `sendGuard.mode: enforce`, `helm upgrade`, and **restart the api pods**
-   (see below) — the mode is read once at process start.
+   (see below); the mode is read once at process start.
 
 ## Rolling back
 
 Same flag: `log-only`, or `off` if the guard itself is the outage. Neither
-restores sends for an account with **no `level` field** — that cap is enforced a
+restores sends for an account with **no `level` field**; that cap is enforced a
 layer below the flag, silently, and no amount of mode-flipping lifts it. Read
 [What `off` does not cover](#what-off-does-not-cover) before concluding the
 rollback failed.
@@ -311,24 +311,23 @@ kubectl rollout status  deploy/<api>
 ```
 
 Budget for a pod roll, not for an instant flag flip. If you need the guard to
-stop blocking *now* and the roll is too slow, `off` costs the same restart —
-there is no faster switch, which is worth knowing before the incident rather
+stop blocking *now* and the roll is too slow, `off` costs the same restart; there is no faster switch, which is worth knowing before the incident rather
 than during it.
 
 ## Related config
 
-- `accountLimits.*.level` — the caps. **Every level 0-3 is `required`**: a
+- `accountLimits.*.level`: the caps. **Every level 0-3 is `required`**: a
   deployment that overrides `accountLimits` partially fails at boot rather than
   resolving a missing level to `NaN` and silently blocking that level's sends.
   An *account* with no level is separate: `getAccountLimits` resolves that to
   level 0 via `effectiveAccountLevel` before indexing. That resolution is in the
-  config layer, not the guard, so it is **unconditional** — `sendGuard.mode`,
+  config layer, not the guard, so it is **unconditional**; `sendGuard.mode`,
   `off` included, does not lift it, and Galoy's `AccountLimitsChecker` goes on
   enforcing the level-0 cap on `lnNoAmountInvoicePaymentSend` and
   `lnNoAmountInvoiceFeeProbe` regardless of mode, with none of the guard's
   ops-event or span output to show for it. See
   [What `off` does not cover](#what-off-does-not-cover).
-- `rateLimits.paymentSendAttempt` / `paymentSendDailyAttempt` — the two buckets.
+- `rateLimits.paymentSendAttempt` / `paymentSendDailyAttempt`; the two buckets.
   `blockDuration` must be **>= `duration`**: rate-limiter-flexible rewrites the
   key's TTL to `blockDuration` on the first breach, so a shorter block throws the
   counter away early and grants a fresh budget (a 3600s block on an 86400s window

@@ -86,7 +86,7 @@ mutation BridgeAddExternalAccount {
 
 ### `bridgeExchangePlaidPublicToken`
 
-Exchanges the Plaid `publicToken` (from Link `onSuccess`) with Bridge. Call from the app backend path only — Flash keeps the Bridge Api-Key server-side. External accounts are created asynchronously and arrive via webhook.
+Exchanges the Plaid `publicToken` (from Link `onSuccess`) with Bridge. Call from the app backend path only; Flash keeps the Bridge Api-Key server-side. External accounts are created asynchronously and arrive via webhook.
 
 **Request:**
 ```graphql
@@ -136,7 +136,7 @@ mutation BridgeRequestWithdrawal($input: BridgeRequestWithdrawalInput!) {
 - `externalAccountId`: The ID of the linked bank account.
 
 **Response:**
-- `id`: MongoDB withdrawal record ID — pass this to `bridgeInitiateWithdrawal` or `bridgeCancelWithdrawalRequest`.
+- `id`: MongoDB withdrawal record ID; pass this to `bridgeInitiateWithdrawal` or `bridgeCancelWithdrawalRequest`.
 - `status`: Always `"pending"` on success.
 - `externalAccountId`: Linked bank account used for the withdrawal.
 

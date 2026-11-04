@@ -1,4 +1,4 @@
-# API Keys — Developer Guide
+# API Keys: Developer Guide
 
 How to create and use a Flash API key against the public GraphQL API.
 
@@ -6,7 +6,7 @@ How to create and use a Flash API key against the public GraphQL API.
 
 ## 1. Create a key
 
-Key management requires a **logged-in user session** (a Kratos session — see the login flow in [`spectaql/TUTORIAL.md`](../../spectaql/TUTORIAL.md)). You cannot create a key with another API key.
+Key management requires a **logged-in user session** (a Kratos session; see the login flow in [`spectaql/TUTORIAL.md`](../../spectaql/TUTORIAL.md)). You cannot create a key with another API key.
 
 ```graphql
 mutation ApiKeyCreate {
@@ -37,7 +37,7 @@ mutation ApiKeyCreate {
 
 > **GraphQL enum names use underscores.** The `ApiKeyScope` enum values in a query are `read_wallet`, `write_wallet`, `read_transactions`, `write_transactions`, `read_user`, `write_user`, `admin`. Their canonical FIP-07 form (`read:wallet`, …) is what appears in scope error messages and on the wire to the gateway.
 
-**Response** — the `apiKey.apiKey` field holds the full `fk_{keyId}_{secret}` string. It is returned only here. Store it in your secret manager immediately; Flash cannot show it again. `warning` restates this.
+**Response**: the `apiKey.apiKey` field holds the full `fk_{keyId}_{secret}` string. It is returned only here. Store it in your secret manager immediately; Flash cannot show it again. `warning` restates this.
 
 Defaults and limits:
 - `scopes` defaults to `[read_user]` if omitted.
@@ -55,7 +55,7 @@ curl -X POST http://localhost:4002/graphql \
   -d '{"query":"{ me { defaultAccount { wallets { walletCurrency balance } } } }"}'
 ```
 
-A valid key resolves to its owning account, exactly as a session would — subject to the key's scopes.
+A valid key resolves to its owning account, exactly as a session would; subject to the key's scopes.
 
 ## 3. Scopes
 
@@ -64,21 +64,21 @@ Scopes are enforced **deny-by-default**: an API key may only reach operations ex
 | Scope | Grants (representative operations) |
 |---|---|
 | `read:user` | `me` and profile/account reads |
-| `write:user` | profile mutations — `userUpdateUsername`, `userUpdateLanguage`, `accountUpdateDefaultWalletId`, `accountUpdateDisplayCurrency`, notification settings |
-| `read:wallet` | wallet balances and fee estimates — wallet `balance`/`pendingIncomingBalance`, `onChainTxFee`, `ln*InvoiceFeeProbe`, on-chain address reads |
-| `write:wallet` | money movement and invoicing — `lnInvoiceCreate`, `lnInvoicePaymentSend`, `intraLedgerPaymentSend`, `onChainPaymentSend`, `lnurlPaymentSend`, etc. |
-| `read:transactions` | transaction history — `transactionDetails`, wallet `transactions`/`transactionsByAddress`, contact `transactions`/`transactionsCount`, CSV export |
+| `write:user` | profile mutations, `userUpdateUsername`, `userUpdateLanguage`, `accountUpdateDefaultWalletId`, `accountUpdateDisplayCurrency`, notification settings |
+| `read:wallet` | wallet balances and fee estimates, wallet `balance`/`pendingIncomingBalance`, `onChainTxFee`, `ln*InvoiceFeeProbe`, on-chain address reads |
+| `write:wallet` | money movement and invoicing, `lnInvoiceCreate`, `lnInvoicePaymentSend`, `intraLedgerPaymentSend`, `onChainPaymentSend`, `lnurlPaymentSend`, etc. |
+| `read:transactions` | transaction history, `transactionDetails`, wallet `transactions`/`transactionsByAddress`, contact `transactions`/`transactionsCount`, CSV export |
 | `write:transactions` | reserved for transaction-creating operations |
 | `admin` | all of the above |
 
 Two implication rules apply:
 
-- **`write:X` implies `read:X`** — a key with `write:wallet` can also perform `read:wallet` operations.
+- **`write:X` implies `read:X`**: a key with `write:wallet` can also perform `read:wallet` operations.
 - **`admin` implies every scope.**
 
 **Never available to API keys**, regardless of scope: login/identity (`userLogin*`, email/phone/TOTP registration and deletion), device notification tokens, KYC and Bridge fiat rails, cashout, account deletion, feedback, and **API-key management itself**. These require a user session.
 
-Nested data is guarded too: `me` only needs `read:user`, but reaching wallet balances or transactions through it additionally requires `read:wallet` / `read:transactions` respectively — a `read:user`-only key cannot escalate to financial data.
+Nested data is guarded too: `me` only needs `read:user`, but reaching wallet balances or transactions through it additionally requires `read:wallet` / `read:transactions` respectively; a `read:user`-only key cannot escalate to financial data.
 
 ## 4. Rate limiting
 
@@ -100,7 +100,7 @@ Every key has a requests-per-minute budget (its `rateLimitPerMinute`, or the pla
 }
 ```
 
-Clients should branch on `errors[].extensions.code === "TOO_MANY_REQUESTS"` and back off for `retryAfterSeconds`. The public API is served through the Apollo federation router, which forwards subgraph GraphQL errors but not subgraph HTTP status codes or response headers — so the machine-readable signal lives in the error `extensions`, not in a `429` status or `X-RateLimit-*` / `Retry-After` headers. (Those headers are still set best-effort on the backend response and are visible only to callers that reach the API service directly, bypassing the router.)
+Clients should branch on `errors[].extensions.code === "TOO_MANY_REQUESTS"` and back off for `retryAfterSeconds`. The public API is served through the Apollo federation router, which forwards subgraph GraphQL errors but not subgraph HTTP status codes or response headers; so the machine-readable signal lives in the error `extensions`, not in a `429` status or `X-RateLimit-*` / `Retry-After` headers. (Those headers are still set best-effort on the backend response and are visible only to callers that reach the API service directly, bypassing the router.)
 
 ## 5. IP constraints
 
@@ -114,7 +114,7 @@ If `expiresIn` was set, the key stops authenticating once past its expiry and re
 
 All three require a **user session** (not an API key).
 
-**List** — never returns secret material:
+**List**: never returns secret material:
 
 ```graphql
 query ApiKeys {
@@ -132,7 +132,7 @@ query ApiKeys {
 }
 ```
 
-**Rotate** — issues a replacement (new `keyId` + secret) carrying the **same** name, scopes, IP constraints, rate limit, and expiry, and revokes the old key. The new raw key is returned once:
+**Rotate**: issues a replacement (new `keyId` + secret) carrying the **same** name, scopes, IP constraints, rate limit, and expiry, and revokes the old key. The new raw key is returned once:
 
 ```graphql
 mutation ApiKeyRotate {
@@ -143,7 +143,7 @@ mutation ApiKeyRotate {
 }
 ```
 
-**Revoke** — irreversibly disables the key; verification stops honoring it on the next request:
+**Revoke**: irreversibly disables the key; verification stops honoring it on the next request:
 
 ```graphql
 mutation ApiKeyRevoke {
@@ -154,7 +154,7 @@ mutation ApiKeyRevoke {
 }
 ```
 
-Both rotate and revoke are scoped to the caller's own account — a key id belonging to another account reads as not-found.
+Both rotate and revoke are scoped to the caller's own account; a key id belonging to another account reads as not-found.
 
 ## Error reference
 
@@ -178,4 +178,4 @@ API keys surface two error channels.
 |---|---|
 | Missing / malformed / unknown / revoked / expired / IP-rejected key | `401` `{ "error": "invalid_api_key" }` |
 
-A malformed, unknown, revoked, expired, or IP-rejected key produces a gateway `401` — indistinguishable to the caller (by design, to avoid leaking which keys exist). Once a key authenticates, everything else (scope denials, rate limiting, validation) comes back as a GraphQL error with an `extensions.code`, not an HTTP status — the rate-limit case is `TOO_MANY_REQUESTS` (see §4).
+A malformed, unknown, revoked, expired, or IP-rejected key produces a gateway `401`; indistinguishable to the caller (by design, to avoid leaking which keys exist). Once a key authenticates, everything else (scope denials, rate limiting, validation) comes back as a GraphQL error with an `extensions.code`, not an HTTP status; the rate-limit case is `TOO_MANY_REQUESTS` (see §4).
