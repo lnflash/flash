@@ -21,10 +21,13 @@ const TransactionDetailsQuery = GT.Field({
   args: {
     input: { type: GT.NonNull(TransactionDetailsInput) },
   },
-  resolve: async (_, args) => {
+  resolve: async (_, args, { domainAccount }: GraphQLPublicContextAuth) => {
     const { transactionId } = args.input
 
-    const transactionDetails = await Wallets.getTransactionDetailsById(transactionId)
+    const transactionDetails = await Wallets.getTransactionDetailsForAccount({
+      accountId: domainAccount.id,
+      transactionId,
+    })
 
     if (transactionDetails instanceof Error) {
       return {

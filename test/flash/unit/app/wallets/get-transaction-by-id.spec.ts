@@ -17,7 +17,12 @@
  * - Edge cases and fallback behaviors
  */
 
-import { getTransactionDetailsById } from "@app/wallets/get-transaction-by-id"
+import {
+  getTransactionDetailsById,
+  getTransactionDetailsForAccount,
+} from "@app/wallets/get-transaction-by-id"
+import { CouldNotFindTransactionError } from "@domain/ledger"
+import { RepositoryError } from "@domain/errors"
 
 // Mock all external dependencies to isolate the function under test
 // This ensures tests are deterministic and don't depend on external services
@@ -29,6 +34,13 @@ jest.mock("@services/ibex/client", () => ({
   default: {
     getTransactionDetails: (...args: any[]) => mockGetTransactionDetails(...args),
   },
+}))
+
+const mockListByAccountId = jest.fn()
+jest.mock("@services/mongoose", () => ({
+  WalletsRepository: () => ({
+    listByAccountId: (...args: any[]) => mockListByAccountId(...args),
+  }),
 }))
 
 jest.mock("@services/blockchain", () => ({
@@ -555,5 +567,77 @@ describe("getTransactionDetailsById - Parsing Logic", () => {
 
     // Should calculate: currentHeight - blockheight = 850000 - 0 = 850000
     expect(result).toMatchObject({ confirmations: 850000 })
+  })
+})
+
+describe("getTransactionDetailsForAccount - ownership", () => {
+  const accountId = "caller-account" as AccountId
+  const transactionId = "tx-id" as IbexTransactionId
+
+  const ibexTx = (walletId: string): any => ({
+    id: transactionId,
+    accountId: walletId,
+    amount: 1000,
+    currency: "USDT",
+    status: "COMPLETED",
+    type: "LIGHTNING",
+    createdAt: "2026-10-29T00:00:00Z",
+    updatedAt: "2026-10-29T00:00:00Z",
+    invoice: { bolt11: "lnbc...", hash: "h1", preImage: "secret-preimage", memo: "rent" },
+  })
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockListByAccountId.mockResolvedValue([{ id: "own-usd" }, { id: "own-usdt" }])
+  })
+
+  it("returns details for a transaction on one of the caller's wallets", async () => {
+    mockGetTransactionDetails.mockResolvedValue(ibexTx("own-usdt"))
+
+    const result = await getTransactionDetailsForAccount({ accountId, transactionId })
+
+    expect(mockListByAccountId).toHaveBeenCalledWith(accountId)
+    expect(result).toMatchObject({
+      accountId: "own-usdt",
+      paymentPreimage: "secret-preimage",
+    })
+  })
+
+  it("refuses a transaction on another account's wallet without leaking its fields", async () => {
+    mockGetTransactionDetails.mockResolvedValue(ibexTx("someone-elses-wallet"))
+
+    const result = await getTransactionDetailsForAccount({ accountId, transactionId })
+
+    expect(result).toBeInstanceOf(CouldNotFindTransactionError)
+    expect(JSON.stringify(result)).not.toContain("secret-preimage")
+  })
+
+  it("returns the same error for an unknown id as for someone else's, so ids can't be probed", async () => {
+    mockGetTransactionDetails.mockResolvedValue(new Error("Forbidden"))
+    const unknown = await getTransactionDetailsForAccount({ accountId, transactionId })
+
+    mockGetTransactionDetails.mockResolvedValue(ibexTx("someone-elses-wallet"))
+    const foreign = await getTransactionDetailsForAccount({ accountId, transactionId })
+
+    expect(unknown).toBeInstanceOf(CouldNotFindTransactionError)
+    expect(foreign).toBeInstanceOf(CouldNotFindTransactionError)
+    expect((unknown as Error).message).toEqual((foreign as Error).message)
+  })
+
+  it("refuses a transaction IBEX returns without an accountId", async () => {
+    mockGetTransactionDetails.mockResolvedValue({ ...ibexTx(""), accountId: undefined })
+
+    const result = await getTransactionDetailsForAccount({ accountId, transactionId })
+
+    expect(result).toBeInstanceOf(CouldNotFindTransactionError)
+  })
+
+  it("fails closed without calling IBEX when the caller's wallets can't be loaded", async () => {
+    mockListByAccountId.mockResolvedValue(new RepositoryError("db down"))
+
+    const result = await getTransactionDetailsForAccount({ accountId, transactionId })
+
+    expect(result).toBeInstanceOf(Error)
+    expect(mockGetTransactionDetails).not.toHaveBeenCalled()
   })
 })
