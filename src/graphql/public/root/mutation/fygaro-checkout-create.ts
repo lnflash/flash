@@ -13,6 +13,7 @@ import { baseLogger } from "@services/logger"
 import { consumeLimiter } from "@services/rate-limit"
 import {
   FygaroAboveSinglePaymentLimitError,
+  FygaroAccountInactiveError,
   FygaroAllowanceUnavailableError,
   FygaroBelowMinimumError,
   FygaroCheckoutAlreadyOpenError,
@@ -111,6 +112,11 @@ const failureError = (result: AuthorizeTopupResult & { authorized: false }): Err
       return new FygaroBelowMinimumError(
         "That amount is too small to cover the payment fees",
       )
+    case "account-inactive":
+      // Locked, closed or not yet active. Permanent until an operator changes
+      // the account, so neither "try again later" nor "upgrade" is the right
+      // thing to say — and no card is charged, which is the whole point.
+      return new FygaroAccountInactiveError()
     case "no-daily-limit-for-level":
       // Deterministic and permanent until the account upgrades — NOT one of the
       // three transient failures below. Telling a level-0 account to try again
@@ -197,6 +203,7 @@ const fygaroCheckoutCreate = GT.Field<
       accountId: domainAccount.id,
       username: domainAccount.username,
       level: domainAccount.level,
+      accountStatus: domainAccount.status,
       amountCents: amount,
     })
 

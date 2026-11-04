@@ -164,6 +164,7 @@ beforeEach(() => {
   mockFindById.mockImplementation(async (id: string) => ({
     id,
     username: `user-${id}`,
+    status: "active",
     level: 2,
   }))
   mockCredit.mockResolvedValue({ walletId: "recipient-wallet", status: "success" })
@@ -470,6 +471,7 @@ describe("retryStrandedFygaroCredits", () => {
       mockFindById.mockImplementation(async (id: string) => ({
         id,
         username: `user-${id}`,
+        status: "active",
         level: 1,
       }))
       mockSumGross.mockResolvedValue(10000)
@@ -507,6 +509,7 @@ describe("retryStrandedFygaroCredits", () => {
       mockFindById.mockImplementation(async (id: string) => ({
         id,
         username: `user-${id}`,
+        status: "active",
         level: 1,
       }))
       mockSumGross.mockResolvedValue(2500) // $25 prior + $100 = $125 cap
@@ -534,6 +537,7 @@ describe("retryStrandedFygaroCredits", () => {
       mockFindById.mockImplementation(async (id: string) => ({
         id,
         username: `user-${id}`,
+        status: "active",
         level: 0,
       }))
       mockListUncredited.mockResolvedValue([row("tx-l0", "70.00")])
@@ -545,6 +549,40 @@ describe("retryStrandedFygaroCredits", () => {
         expect.objectContaining({ reason: "no-daily-limit-for-level" }),
       )
       expect(summary.leftForManual).toBe(1)
+    })
+
+    it("refuses a row whose recipient has since been locked: stamps, alerts, never re-sends", async () => {
+      // 2026-11-03: a $20 row for a chargeback-locked account failed the send
+      // every 15 minutes and re-paged "manual credit may be needed" every
+      // hour. The gate now refuses it like any other deterministic reason —
+      // stamped out of the candidate list, one warning, left for a human.
+      mockFindById.mockImplementation(async (id: string) => ({
+        id,
+        username: `user-${id}`,
+        status: "locked",
+        level: 2,
+      }))
+      mockListUncredited.mockResolvedValue([row("tx-locked", "20.00")])
+
+      const summary = await retryStrandedFygaroCredits({ availableUsd: 3000 })
+
+      expect(mockCredit).not.toHaveBeenCalled()
+      expect(mockMarkNotCredited).toHaveBeenCalledWith(
+        expect.objectContaining({
+          transactionId: "tx-locked",
+          reason: "account-inactive",
+        }),
+      )
+      expect(mockAlertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({
+          severity: "warning",
+          context: expect.objectContaining({ reason: "account-inactive" }),
+        }),
+      )
+      expect(mockAlertBridge).not.toHaveBeenCalledWith(
+        expect.objectContaining({ dedupKey: "fygaro:retry-failed:tx-locked" }),
+      )
+      expect(summary).toMatchObject({ credited: 0, failed: 0, leftForManual: 1 })
     })
 
     it("pages CRITICAL when a refusal cannot be stamped on the audit row", async () => {
@@ -635,6 +673,7 @@ describe("retryStrandedFygaroCredits", () => {
       mockFindById.mockImplementation(async (id: string) => ({
         id,
         username: `user-${id}`,
+        status: "active",
         level: 1,
       }))
       mockSumGross.mockResolvedValue(10000)
@@ -660,6 +699,7 @@ describe("retryStrandedFygaroCredits", () => {
       mockFindById.mockImplementation(async (id: string) => ({
         id,
         username: `user-${id}`,
+        status: "active",
         level: 1,
       }))
       mockSumGross.mockResolvedValue(10000)

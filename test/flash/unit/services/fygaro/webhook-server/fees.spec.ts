@@ -1,3 +1,4 @@
+import { AccountStatus } from "@domain/accounts"
 import {
   computeFygaroFees,
   evaluateCreditGate,
@@ -76,6 +77,7 @@ describe("computeFygaroFees", () => {
 describe("evaluateCreditGate", () => {
   const base = {
     creditEnabled: true,
+    accountStatus: AccountStatus.Active,
     currency: "USD",
     grossCents: 1000,
     level: 1,
@@ -97,6 +99,47 @@ describe("evaluateCreditGate", () => {
       settings: settings(),
     })
     expect(gate).toEqual({ credit: false, reason: "credit-disabled" })
+  })
+
+  it("record-only: account-inactive for any non-active account, ahead of every runtime gate", () => {
+    // Locked beats settings-unavailable: a locked account must never be told
+    // to retry, and the webhook must never answer 500 (retry) for it.
+    expect(
+      evaluateCreditGate({
+        ...base,
+        accountStatus: AccountStatus.Locked,
+        settings: undefined,
+      }),
+    ).toEqual({ credit: false, reason: "account-inactive" })
+    // ...and beats every amount gate: the amount is irrelevant once the
+    // account cannot be credited at all.
+    expect(
+      evaluateCreditGate({
+        ...base,
+        accountStatus: AccountStatus.Closed,
+        grossCents: 50001,
+        settings: settings(),
+      }),
+    ).toEqual({ credit: false, reason: "account-inactive" })
+    // Not-yet-active accounts fail closed the same way.
+    expect(
+      evaluateCreditGate({
+        ...base,
+        accountStatus: AccountStatus.Pending,
+        settings: settings(),
+      }),
+    ).toEqual({ credit: false, reason: "account-inactive" })
+  })
+
+  it("the deploy master gate still precedes account-inactive (records silently)", () => {
+    expect(
+      evaluateCreditGate({
+        ...base,
+        creditEnabled: false,
+        accountStatus: AccountStatus.Locked,
+        settings: settings(),
+      }),
+    ).toEqual({ credit: false, reason: "credit-disabled" })
   })
 
   it("record-only: settings-unavailable when settings are undefined", () => {
@@ -321,6 +364,7 @@ describe("flash-fee discount", () => {
   it("flows through evaluateCreditGate into the credited fees", () => {
     const base = {
       creditEnabled: true,
+      accountStatus: AccountStatus.Active,
       currency: "USD",
       grossCents: 1000,
       level: 1,
@@ -343,6 +387,7 @@ describe("flash-fee discount", () => {
     // 2% + $0.10 fixed on $0.60 = 1¢ + 10¢ = 11¢ flash; net 60-51-11 = -2¢.
     const base = {
       creditEnabled: true,
+      accountStatus: AccountStatus.Active,
       currency: "USD",
       grossCents: 60,
       level: 1,

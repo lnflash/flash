@@ -1,4 +1,4 @@
-import { AccountLevel } from "@domain/accounts"
+import { AccountLevel, AccountStatus } from "@domain/accounts"
 import { alertBridge, generateDedupKey } from "@services/alerts"
 import { baseLogger } from "@services/logger"
 import {
@@ -45,6 +45,11 @@ import { fygaroCheckoutMasterGate } from "./checkout-master-gate"
 
 export type AuthorizeTopupFailure =
   | "checkout-disabled"
+  // The account is not `active` (locked / closed / not yet activated). Its own
+  // reason rather than `checkout-disabled`: that one says card top-ups are off
+  // for everyone and tells the app to hide the option until an operator acts,
+  // which is the wrong message for a problem with THIS account.
+  | "account-inactive"
   | "settings-unavailable"
   | "below-minimum"
   | "non-positive-net"
@@ -100,6 +105,7 @@ export type AuthorizeTopupRefusal = Extract<AuthorizeTopupResult, { authorized: 
  */
 const FAILURE_BY_GATE_REASON: Record<RecordOnlyReason, AuthorizeTopupFailure> = {
   "credit-disabled": "checkout-disabled",
+  "account-inactive": "account-inactive",
   "auto-credit-disabled": "checkout-disabled",
   "non-usd": "checkout-disabled",
   "intent-mismatch": "checkout-disabled",
@@ -116,12 +122,17 @@ export const authorizeFygaroTopup = async ({
   accountId,
   username,
   level,
+  accountStatus,
   amountCents,
   nowMs = Date.now(),
 }: {
   accountId: string
   username: string
   level: AccountLevel
+  // Required for the same reason `evaluateCreditGate` requires it: a caller
+  // that forgets it must not compile, because the alternative is signing a
+  // checkout — and charging a card — for an account the send will refuse.
+  accountStatus: AccountStatus
   amountCents: number
   nowMs?: number
 }): Promise<AuthorizeTopupResult> => {
@@ -144,6 +155,17 @@ export const authorizeFygaroTopup = async ({
   // `evaluateCreditGate` takes it as a parameter and reading `true` at the call
   // site says nothing about why.
   const creditEnabled = true
+
+  // A non-active account is refused HERE, before the settings read, the
+  // reservation read and the history read — none of them can change the
+  // answer, and a locked account holding an abandoned link should hear
+  // "not on this account", not "you already have a link open". The gate
+  // below applies the same test again (it is what the webhook and the sweep
+  // run), so the ordering is stated once in `evaluateCreditGate` and this is
+  // an early exit, not a second rule.
+  if (accountStatus !== AccountStatus.Active) {
+    return { authorized: false, reason: "account-inactive" }
+  }
 
   // Returns undefined (never throws) when the ERPNext row is unreadable or
   // malformed — same "record-only" posture the webhook takes.
@@ -296,6 +318,7 @@ export const authorizeFygaroTopup = async ({
 
   const gateArgs = {
     creditEnabled,
+    accountStatus,
     currency: "USD",
     settings,
     grossCents: amountCents,

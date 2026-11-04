@@ -10,6 +10,8 @@
  * to the nearest cent before subtraction, so the numbers reconcile exactly with
  * what an operator computes by hand from the settings.
  */
+import { AccountStatus } from "@domain/accounts"
+
 import type { FygaroSettings } from "./fygaro-settings"
 
 export type FygaroFees = {
@@ -67,6 +69,14 @@ export const computeFygaroFees = ({
 // self-heals; every other reason is deterministic and acks 200.
 export type RecordOnlyReason =
   | "credit-disabled"
+  // The recipient account is not `active` (locked, closed, new, pending).
+  // Deterministic and permanent until an operator changes the account, and the
+  // one refusal where "credit it by hand" is the WRONG instruction: an account
+  // is locked for a reason (2026-11-03: a chargeback-locked account paid $20
+  // by card and the send refused it, correctly). Checked before every other
+  // runtime gate because nothing after it can change the answer, and ahead of
+  // `settings-unavailable` so a locked account is never told to retry.
+  | "account-inactive"
   | "settings-unavailable"
   | "auto-credit-disabled"
   | "non-usd"
@@ -89,6 +99,10 @@ export type CreditGate =
 /**
  * Auto-credit runs ONLY if every gate holds, evaluated in this order:
  *   1. credit enabled at deploy level (FygaroConfig.credit.enabled)
+ *   1b. the recipient account is `active` — the same test send-intraledger
+ *       applies at the money-moving step, run here so a locked account is
+ *       refused BEFORE a card is captured (checkout) and is handed to a human
+ *       rather than retried (webhook, sweep)
  *   2. Fygaro Settings available AND auto_credit_enabled
  *   3. currency === "USD"
  *   4. gross <= auto_credit_limit (inclusive upper bound on GROSS)
@@ -114,6 +128,7 @@ export type CreditGate =
  */
 export const evaluateCreditGate = ({
   creditEnabled,
+  accountStatus,
   currency,
   settings,
   grossCents,
@@ -122,6 +137,11 @@ export const evaluateCreditGate = ({
   flashFeeDiscountPercent = 0,
 }: {
   creditEnabled: boolean
+  // The recipient account's status. Required, not defaulted: a call site that
+  // forgets it must fail to compile rather than silently credit a locked
+  // account. Anything other than `active` refuses (fail closed) — the same
+  // polarity as AccountValidator.isActive at the send.
+  accountStatus: AccountStatus
   currency: string
   settings: FygaroSettings | undefined
   grossCents: number
@@ -136,6 +156,9 @@ export const evaluateCreditGate = ({
   flashFeeDiscountPercent?: number
 }): CreditGate => {
   if (!creditEnabled) return { credit: false, reason: "credit-disabled" }
+  if (accountStatus !== AccountStatus.Active) {
+    return { credit: false, reason: "account-inactive" }
+  }
   if (!settings) return { credit: false, reason: "settings-unavailable" }
   if (!settings.autoCreditEnabled)
     return { credit: false, reason: "auto-credit-disabled" }

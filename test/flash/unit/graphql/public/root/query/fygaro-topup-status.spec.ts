@@ -192,6 +192,12 @@ describe("fygaroTopupStatus resolver", () => {
         "Card top-ups aren't available on your account level yet.",
       )
     })
+
+    it("routes a locked account to support instead of promising a manual credit", async () => {
+      expect((await askStatus(held("account-inactive")))?.reason).toBe(
+        "This payment can't be completed on your account. Please contact support.",
+      )
+    })
   })
 
   // The ours class. A customer who has already been charged must never be told

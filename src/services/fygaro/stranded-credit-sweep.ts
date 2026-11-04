@@ -464,6 +464,10 @@ export const retryStrandedFygaroCredits = async ({
       })
       const gate = evaluateCreditGate({
         creditEnabled: true,
+        // Re-read every tick: an account locked AFTER its payment stranded is
+        // refused here (stamped, alerted once, left for a human) instead of
+        // failing the send every 15 minutes and paging every hour.
+        accountStatus: account.status,
         currency,
         settings,
         grossCents,
