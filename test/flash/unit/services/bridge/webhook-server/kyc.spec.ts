@@ -24,6 +24,12 @@ jest.mock("@services/bridge", () => ({
   },
 }))
 
+// This handler delegates rewards; exercise that boundary without importing
+// invite's real notification, queue and provider clients into this unit suite.
+jest.mock("@app/invite", () => ({
+  awardReferralRewardOnKycApproval: jest.fn().mockResolvedValue(undefined),
+}))
+
 jest.mock("@app/bridge/send-kyc-notification", () => ({
   isBridgeKycInitiated: (status: Account["bridgeKycStatus"]) =>
     status !== undefined && status !== null,
@@ -52,6 +58,7 @@ import { AccountsRepository } from "@services/mongoose/accounts"
 import { LockService } from "@services/lock"
 import BridgeService from "@services/bridge"
 import { sendBridgeKycNotificationBestEffort } from "@app/bridge/send-kyc-notification"
+import { awardReferralRewardOnKycApproval } from "@app/invite"
 
 const makeRes = () => {
   const res = { status: jest.fn(), json: jest.fn() } as unknown as Response
@@ -97,6 +104,8 @@ describe("kycHandler", () => {
     await kycHandler(req, res)
 
     expect(res.status).toHaveBeenCalledWith(200)
+    expect(awardReferralRewardOnKycApproval).toHaveBeenCalledTimes(1)
+    expect(awardReferralRewardOnKycApproval).toHaveBeenCalledWith({ accountId })
     expect(sendBridgeKycNotificationBestEffort).toHaveBeenCalledWith({
       accountId,
       outcome: "approved",
@@ -248,6 +257,7 @@ describe("kycHandler", () => {
 
     expect(sendBridgeKycNotificationBestEffort).not.toHaveBeenCalled()
     expect(BridgeService.createVirtualAccount).not.toHaveBeenCalled()
+    expect(awardReferralRewardOnKycApproval).not.toHaveBeenCalled()
     expect(res.json).toHaveBeenCalledWith({ status: "already_current" })
   })
 
@@ -270,5 +280,6 @@ describe("kycHandler", () => {
     expect(res.json).toHaveBeenCalledWith({ status: "already_processed" })
     expect(findByBridgeCustomerId).not.toHaveBeenCalled()
     expect(sendBridgeKycNotificationBestEffort).not.toHaveBeenCalled()
+    expect(awardReferralRewardOnKycApproval).not.toHaveBeenCalled()
   })
 })

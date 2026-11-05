@@ -15,7 +15,10 @@ import { ErrorLevel, parseErrorMessageFromUnknown } from "@domain/shared"
 import { baseLogger } from "@services/logger"
 import { recordExceptionInCurrentSpan, wrapAsyncToRunInSpan } from "@services/tracing"
 
-import { FirebaseError } from "firebase-admin"
+import {
+  safeFirebaseCount,
+  safeFirebaseMessagingCode,
+} from "@domain/notifications/firebase-error-code"
 import { Message } from "firebase-admin/lib/messaging/messaging-api"
 
 import { messaging } from "./firebase"
@@ -31,7 +34,10 @@ const sendToDevice = async (
     notification: NotificationMessagePayload
   },
 ) => {
-  logger.info({ tokens, ...message })
+  logger.info(
+    { operation: "send_push", tokenCount: tokens.length },
+    "Sending notification batch",
+  )
   try {
     if (!messaging) {
       baseLogger.error("Firebase messaging module not loaded")
@@ -42,21 +48,19 @@ const sendToDevice = async (
 
     const invalidTokens: DeviceToken[] = []
     // Deduped so a 200-device fleet failing on one bad APNs key reports one
-    // code, not two hundred. Carried on the returned error: the per-token warn
-    // lines below are keyed by token only, with no account or operator on them.
+    // code, not two hundred. Never carry raw tokens or provider error text in
+    // the diagnostic records; stale tokens remain internal pruning data.
     const failureCodes = new Set<string>()
     batchResp.responses.forEach((r, idx) => {
       if (!r.success) {
-        failureCodes.add(r.error?.code ?? "unknown")
+        const code = safeFirebaseMessagingCode(r.error)
+        failureCodes.add(code)
         logger.warn(
-          { error: r.error, token: tokens[idx] },
+          { operation: "send_push", code },
           "Error sending notification to device",
         )
         recordExceptionInCurrentSpan({
-          error: new FirebaseMessageError(
-            r.error as unknown as FirebaseError,
-            tokens[idx],
-          ),
+          error: new FirebaseMessageError(r.error),
           level: ErrorLevel.Warn,
         })
       }
@@ -67,8 +71,8 @@ const sendToDevice = async (
 
     logger.info(
       {
-        successCount: batchResp.successCount,
-        failureCount: batchResp.failureCount,
+        successCount: safeFirebaseCount(batchResp.successCount, tokens.length),
+        failureCount: safeFirebaseCount(batchResp.failureCount, tokens.length),
         failureCodes: [...failureCodes],
       },
       "Notification batch response",
@@ -106,7 +110,10 @@ const sendToDevice = async (
 
     return true
   } catch (err) {
-    logger.error({ err, tokens, message }, "impossible to send notification")
+    logger.error(
+      { operation: "send_push", code: safeFirebaseMessagingCode(err) },
+      "Unable to send notification batch",
+    )
     const error = handleCommonNotificationErrors(err)
     recordExceptionInCurrentSpan({ error, level: ErrorLevel.Warn })
     return error
@@ -140,7 +147,10 @@ export const PushNotificationsService = (): IPushNotificationsService => {
     }
 
     if (deviceTokens.length <= 0) {
-      logger.info({ message, deviceTokens }, "no token. skipping notification")
+      logger.info(
+        { operation: "send_push", tokenCount: 0 },
+        "no token. skipping notification",
+      )
       return new InvalidDeviceNotificationsServiceError()
     }
 
@@ -195,10 +205,12 @@ export const handleCommonNotificationErrors = (err: Error | string | unknown) =>
   switch (true) {
     case match(KnownNotificationErrorMessages.GoogleBadGatewayError):
     case match(KnownNotificationErrorMessages.GoogleInternalServerError):
-      return new NotificationsServiceUnreachableServerError(errMsg)
+      return new NotificationsServiceUnreachableServerError(
+        "Firebase messaging service is unavailable",
+      )
 
     default:
-      return new UnknownNotificationsServiceError(errMsg)
+      return new UnknownNotificationsServiceError("Firebase messaging request failed")
   }
 }
 

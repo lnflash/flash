@@ -1,3 +1,12 @@
+// Keep the documented unconfigured-provider precondition independent of the
+// shell and the backend's required bootstrap Twilio fixture variables.
+jest.mock("@config", () => ({
+  env: {},
+  SendGridConfig: {},
+  TWILIO_FROM: undefined,
+  TWILIO_WHATSAPP_FROM: undefined,
+}))
+
 import {
   notificationService,
   NotificationMethod,

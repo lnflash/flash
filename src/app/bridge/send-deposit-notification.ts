@@ -51,7 +51,5 @@ export const sendBridgeDepositNotificationBestEffort = async (
 
   return sendOutcomeNotificationBestEffort({
     ...toOutcomeArgs(args),
-    logMessage: "Failed to send Bridge deposit push notification",
-    logContext: { accountId: args.accountId, outcome: args.outcome ?? "completed" },
   })
 }

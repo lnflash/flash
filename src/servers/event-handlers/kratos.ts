@@ -3,7 +3,6 @@ import express from "express"
 
 import { wrapAsyncToRunInSpan } from "@services/tracing"
 import { baseLogger } from "@services/logger"
-import { maskPhone } from "@services/alerts/ops-events"
 
 import { Authentication } from "@app"
 
@@ -28,6 +27,23 @@ const errorResponseMessages: { [key: string]: string } = {
   InvalidPhoneNumber: "invalid phone",
 }
 
+const recordCallbackFailure = (
+  operation: "preregistration" | "registration",
+  outcome:
+    | "callback_rejected"
+    | "phone_registered"
+    | "phone_not_allowed"
+    | "invalid_payload"
+    | "validation_failed"
+    | "creation_failed",
+  status: 400 | 401 | 500,
+  level: "error" | "warn" = "error",
+) =>
+  baseLogger[level](
+    { operation, expectedSchema: "phone_no_password_v0", outcome, status },
+    "Kratos callback failed",
+  )
+
 const kratosCallback = express.Router({ caseSensitive: true })
 
 kratosCallback.use(cors({ origin: true, credentials: true }))
@@ -48,22 +64,26 @@ kratosCallback.post(
     fn: async (req: express.Request, res: express.Response) => {
       const secret = req.headers.authorization
       const body = req.body ?? {}
-      const phone = typeof body.phone === "string" ? maskPhone(body.phone) : undefined
-
-      const result = await Authentication.validatePreRegistrationPayload({
-        secret,
-        body,
-      })
+      let result: Awaited<
+        ReturnType<typeof Authentication.validatePreRegistrationPayload>
+      >
+      try {
+        result = await Authentication.validatePreRegistrationPayload({ secret, body })
+      } catch {
+        recordCallbackFailure("preregistration", "validation_failed", 500)
+        res.status(500).json(kratosHookRejection(KratosHookMessageId.InternalError))
+        return
+      }
 
       if (result instanceof Error) {
         switch (true) {
           case result instanceof SecretForAuthNCallbackError:
-            baseLogger.error({ err: result.name }, "preregistration: bad callback secret")
+            recordCallbackFailure("preregistration", "callback_rejected", 401)
             res.status(401).json(kratosHookRejection(KratosHookMessageId.Unauthorized))
             return
 
           case result instanceof PhoneAlreadyRegisteredError:
-            baseLogger.warn({ phone, rejection: result.name }, "preregistration rejected")
+            recordCallbackFailure("preregistration", "phone_registered", 400, "warn")
             res
               .status(400)
               .json(kratosHookRejection(KratosHookMessageId.PhoneAlreadyRegistered))
@@ -72,7 +92,7 @@ kratosCallback.post(
           // Every carrier-metadata failure extends PhoneMetadataValidationError.
           case result instanceof InvalidPhoneNumber:
           case result instanceof PhoneMetadataValidationError:
-            baseLogger.warn({ phone, rejection: result.name }, "preregistration rejected")
+            recordCallbackFailure("preregistration", "phone_not_allowed", 400, "warn")
             res.status(400).json(kratosHookRejection(KratosHookMessageId.PhoneNotAllowed))
             return
 
@@ -80,18 +100,12 @@ kratosCallback.post(
           // what the api expects (missing field, unknown schema_id). Kratos
           // config and the api disagree, so every sign-up is failing.
           case result instanceof RegistrationPayloadValidationError:
-            baseLogger.error(
-              { phone, rejection: result.name, schemaId: body.schema_id },
-              "preregistration: hook payload rejected, Kratos config and api disagree",
-            )
+            recordCallbackFailure("preregistration", "invalid_payload", 400)
             res.status(400).json(kratosHookRejection(KratosHookMessageId.PayloadInvalid))
             return
 
           default:
-            baseLogger.error(
-              { err: result, phone },
-              "preregistration: unexpected error, sign-up aborted",
-            )
+            recordCallbackFailure("preregistration", "validation_failed", 500)
             res.status(500).json(kratosHookRejection(KratosHookMessageId.InternalError))
             return
         }
@@ -112,29 +126,35 @@ kratosCallback.post(
       const secret = req.headers.authorization
       const body = req.body
 
-      const account = await Authentication.createAccountFromRegistrationPayload({
-        secret,
-        body,
-      })
+      let account: Awaited<
+        ReturnType<typeof Authentication.createAccountFromRegistrationPayload>
+      >
+      try {
+        account = await Authentication.createAccountFromRegistrationPayload({
+          secret,
+          body,
+        })
+      } catch {
+        recordCallbackFailure("registration", "creation_failed", 500)
+        res.status(500).send("error createAccountWithPhoneIdentifier")
+        return
+      }
       if (account instanceof Error) {
         const message = errorResponseMessages[account.name] || "unknown error"
         switch (true) {
           case account instanceof SecretForAuthNCallbackError:
-            baseLogger.error(message)
+            recordCallbackFailure("registration", "callback_rejected", 401)
             res.status(401).send(message)
             return
 
           case account instanceof RegistrationPayloadValidationError:
-            baseLogger.error(body, message)
+            recordCallbackFailure("registration", "invalid_payload", 400)
             res.status(400).send(message)
             return
 
           default:
-            baseLogger.error(
-              { account, phone: body.phone },
-              `error createAccountWithPhoneIdentifier`,
-            )
-            res.status(500).send(`error createAccountWithPhoneIdentifier: ${account}`)
+            recordCallbackFailure("registration", "creation_failed", 500)
+            res.status(500).send("error createAccountWithPhoneIdentifier")
             return
         }
       }

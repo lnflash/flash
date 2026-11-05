@@ -47,30 +47,24 @@ class NotificationServiceImpl implements NotificationService {
   private initializeTwilio() {
     try {
       if (env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN) {
-        // Never log credential material (not even a prefix/length).
         baseLogger.info(
-          {
-            accountSid: env.TWILIO_ACCOUNT_SID,
-            verifyServiceId: env.TWILIO_VERIFY_SERVICE_ID,
-            twilioFrom: env.TWILIO_FROM || "NOT SET",
-            twilioWhatsAppFrom: env.TWILIO_WHATSAPP_FROM || "NOT SET",
-          },
-          "Initializing Twilio client with credentials",
+          { operation: "initialize_twilio", outcome: "started" },
+          "Initializing Twilio client",
         )
 
         this.twilioClient = twilio(env.TWILIO_ACCOUNT_SID, env.TWILIO_AUTH_TOKEN)
         baseLogger.info("Twilio client initialized successfully")
       } else {
         baseLogger.warn(
-          {
-            hasAccountSid: !!env.TWILIO_ACCOUNT_SID,
-            hasAuthToken: !!env.TWILIO_AUTH_TOKEN,
-          },
+          { operation: "initialize_twilio", outcome: "unconfigured" },
           "Twilio credentials not fully configured",
         )
       }
-    } catch (error) {
-      baseLogger.error({ error }, "Failed to initialize Twilio client")
+    } catch {
+      baseLogger.error(
+        { operation: "initialize_twilio", outcome: "failed" },
+        "Failed to initialize Twilio client",
+      )
     }
   }
 
@@ -82,8 +76,11 @@ class NotificationServiceImpl implements NotificationService {
       } else {
         baseLogger.warn("SendGrid API key not configured")
       }
-    } catch (error) {
-      baseLogger.error({ error }, "Failed to initialize SendGrid client")
+    } catch {
+      baseLogger.error(
+        { operation: "initialize_sendgrid", outcome: "failed" },
+        "Failed to initialize SendGrid client",
+      )
     }
   }
 
@@ -102,11 +99,17 @@ class NotificationServiceImpl implements NotificationService {
         case NotificationMethod.WHATSAPP:
           return await this.sendWhatsApp(to, subjectOrBody)
         default:
-          baseLogger.error({ method }, "Unknown notification method")
+          baseLogger.error(
+            { operation: "send_notification", outcome: "unsupported_method" },
+            "Unknown notification method",
+          )
           return false
       }
-    } catch (error) {
-      baseLogger.error({ error, method, to }, "Failed to send notification")
+    } catch {
+      baseLogger.error(
+        { operation: "send_notification", outcome: "failed" },
+        "Failed to send notification",
+      )
       return false
     }
   }
@@ -132,10 +135,16 @@ class NotificationServiceImpl implements NotificationService {
         html: htmlBody || subject,
       })
 
-      baseLogger.info({ to }, "Email sent successfully via SendGrid")
+      baseLogger.info(
+        { operation: "send_email", outcome: "sent" },
+        "Email sent successfully via SendGrid",
+      )
       return true
-    } catch (error) {
-      baseLogger.error({ error, to }, "Failed to send email via SendGrid")
+    } catch {
+      baseLogger.error(
+        { operation: "send_email", outcome: "failed" },
+        "Failed to send email via SendGrid",
+      )
       return false
     }
   }
@@ -157,10 +166,13 @@ class NotificationServiceImpl implements NotificationService {
         from: TWILIO_FROM,
         to,
       })
-      baseLogger.info({ to }, "SMS sent successfully via Twilio")
+      baseLogger.info(
+        { operation: "send_sms", outcome: "sent" },
+        "SMS sent successfully via Twilio",
+      )
       return true
-    } catch (error) {
-      baseLogger.error({ error, to }, "Failed to send SMS")
+    } catch {
+      baseLogger.error({ operation: "send_sms", outcome: "failed" }, "Failed to send SMS")
       return false
     }
   }
@@ -191,13 +203,7 @@ class NotificationServiceImpl implements NotificationService {
       : `whatsapp:${TWILIO_WHATSAPP_FROM}`
 
     baseLogger.info(
-      {
-        to: whatsappTo,
-        from: whatsappFrom,
-        bodyLength: body.length,
-        accountSid: env.TWILIO_ACCOUNT_SID,
-        hasAuthToken: !!env.TWILIO_AUTH_TOKEN,
-      },
+      { operation: "send_whatsapp", outcome: "started" },
       "Attempting to send WhatsApp message",
     )
 
@@ -233,45 +239,22 @@ class NotificationServiceImpl implements NotificationService {
       // are stored only as sha256 hashes — they must never reach the logs).
       baseLogger.info(
         {
-          from: messageOptions.from,
-          to: messageOptions.to,
+          operation: "send_whatsapp",
           usesTemplate: Boolean(messageOptions.contentSid),
         },
         "Sending WhatsApp message with options",
       )
 
-      const message = await this.twilioClient.messages.create(messageOptions)
+      await this.twilioClient.messages.create(messageOptions)
 
       baseLogger.info(
-        {
-          to: whatsappTo,
-          messageSid: message.sid,
-          status: message.status,
-        },
+        { operation: "send_whatsapp", outcome: "sent" },
         "WhatsApp message sent successfully via Twilio",
       )
       return true
-    } catch (error) {
-      const err = error as {
-        message?: string
-        code?: string
-        status?: number
-        moreInfo?: string
-        details?: string
-      }
+    } catch {
       baseLogger.error(
-        {
-          error: {
-            message: err.message,
-            code: err.code,
-            status: err.status,
-            moreInfo: err.moreInfo,
-            details: err.details,
-          },
-          to: whatsappTo,
-          from: whatsappFrom,
-          accountSid: env.TWILIO_ACCOUNT_SID,
-        },
+        { operation: "send_whatsapp", outcome: "failed" },
         "Failed to send WhatsApp message",
       )
       return false
@@ -300,15 +283,21 @@ class NotificationServiceImpl implements NotificationService {
       const ok = resp.ok && payload.ok === true
       if (ok) {
         baseLogger.info(
-          { to, bodyLength: body.length },
+          { operation: "send_whatsapp_bridge", outcome: "sent" },
           "WhatsApp message sent via wa-bridge",
         )
       } else {
-        baseLogger.error({ to, status: resp.status }, "wa-bridge send failed")
+        baseLogger.error(
+          { operation: "send_whatsapp_bridge", outcome: "failed" },
+          "wa-bridge send failed",
+        )
       }
       return ok
-    } catch (error) {
-      baseLogger.error({ error: String(error), to }, "wa-bridge send error")
+    } catch {
+      baseLogger.error(
+        { operation: "send_whatsapp_bridge", outcome: "failed" },
+        "wa-bridge send error",
+      )
       return false
     } finally {
       clearTimeout(timeout)

@@ -8,6 +8,7 @@ import { sendBridgeWithdrawalNotificationBestEffort } from "@app/bridge/send-wit
 import * as BridgeAccountsRepo from "@services/mongoose/bridge-accounts"
 import { LockService } from "@services/lock"
 import { baseLogger } from "@services/logger"
+import { BridgeWithdrawalCompletionProofRequiredError } from "@domain/bridge/withdrawal-outcome"
 import { toBridgeTransferId } from "@domain/primitives/bridge"
 import {
   writeBridgeCashoutCompleted,
@@ -102,9 +103,14 @@ export const transferHandler = async (req: Request, res: Response) => {
       const result = await BridgeAccountsRepo.updateWithdrawalStatus(
         bridgeTransferId,
         "completed",
+        undefined,
+        state === "payment_processed" ? "payment_processed" : undefined,
       )
 
       if (result instanceof Error) {
+        if (result instanceof BridgeWithdrawalCompletionProofRequiredError) {
+          return res.status(200).json({ status: "pending_review" })
+        }
         if (result.message === BridgeAccountsRepo.BRIDGE_WITHDRAWAL_NOT_FOUND) {
           baseLogger.warn(
             { transfer_id },

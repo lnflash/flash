@@ -1,5 +1,6 @@
 import { GT } from "@graphql/index"
-import { Wallets } from "@app"
+import { createOwnedOnChainAddress } from "@app/wallets/create-owned-on-chain-address"
+import { InvalidWalletForAccountError } from "@domain/accounts"
 import OnChainAddressPayload from "@graphql/public/types/payload/on-chain-address"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
@@ -11,7 +12,7 @@ const OnChainAddressCreateInput = GT.Input({
   }),
 })
 
-const OnChainAddressCreateMutation = GT.Field({
+const OnChainAddressCreateMutation = GT.Field<null, GraphQLPublicContextAuth>({
   extensions: {
     complexity: 120,
   },
@@ -19,13 +20,22 @@ const OnChainAddressCreateMutation = GT.Field({
   args: {
     input: { type: GT.NonNull(OnChainAddressCreateInput) },
   },
-  resolve: async (_, args) => {
+  resolve: async (_, args, { domainAccount, cashWalletClientCapabilities }) => {
     const { walletId } = args.input
     if (walletId instanceof Error) {
       return { errors: [{ message: walletId.message }] }
     }
 
-    const address = await Wallets.createOnChainAddress({ walletId })
+    if (!domainAccount)
+      return {
+        errors: [mapAndParseErrorForGqlResponse(new InvalidWalletForAccountError())],
+      }
+
+    const address = await createOwnedOnChainAddress({
+      accountId: domainAccount.id,
+      walletId,
+      client: cashWalletClientCapabilities,
+    })
     if (address instanceof Error) {
       return { errors: [mapAndParseErrorForGqlResponse(address)] }
     }

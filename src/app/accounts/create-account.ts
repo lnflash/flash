@@ -1,7 +1,6 @@
-import { ConfigError, getAdminAccounts, getDefaultAccountsConfig } from "@config"
+import { ConfigError, getAdminAccounts } from "@config"
 
 import { WalletType } from "@domain/wallets"
-import { AccountLevel } from "@domain/accounts"
 
 import {
   AccountsRepository,
@@ -79,28 +78,6 @@ const initializeCreatedAccount = async ({
   if (updatedAccount instanceof Error) return updatedAccount
 
   return updatedAccount
-}
-
-export const createAccountForDeviceAccount = async ({
-  userId,
-  deviceId,
-}: {
-  userId: UserId
-  deviceId: DeviceId
-}): Promise<Account | RepositoryError> => {
-  const user = await UsersRepository().update({ id: userId, deviceId })
-  if (user instanceof Error) return user
-
-  const accountNew = await AccountsRepository().persistNew(userId)
-  if (accountNew instanceof Error) return accountNew
-
-  const levelZeroAccountsConfig = getDefaultAccountsConfig()
-  levelZeroAccountsConfig.initialLevel = AccountLevel.Zero
-
-  return initializeCreatedAccount({
-    account: accountNew,
-    config: levelZeroAccountsConfig,
-  })
 }
 
 export const createAccountWithPhoneIdentifier = async ({

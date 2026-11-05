@@ -9,6 +9,7 @@ import { CouldNotFindUserFromPhoneError, UnknownRepositoryError } from "@domain/
 import { InvalidCarrierTypeForPhoneMetadataError } from "@domain/users/errors"
 import { SchemaIdType } from "@services/kratos"
 import { UsersRepository } from "@services/mongoose"
+import { addAttributesToCurrentSpan } from "@services/tracing"
 
 const CALLBACK_KEY = "unit-test-callback-key"
 
@@ -58,6 +59,7 @@ const body = (overrides: Record<string, unknown> = {}) => ({
 
 describe("validatePreRegistrationPayload", () => {
   beforeEach(() => {
+    jest.clearAllMocks()
     mockFindByPhone.mockReset()
     mockFindById.mockReset()
     mockUpdate.mockReset()
@@ -146,5 +148,53 @@ describe("validatePreRegistrationPayload", () => {
     })
 
     expect(result).toBe(repoError)
+  })
+
+  it("never inspects unauthenticated payload fields for span metadata", async () => {
+    const untrustedBody = Object.defineProperties(
+      {},
+      {
+        schema_id: {
+          get() {
+            throw new Error("PRIVATE_SCHEMA_MUST_NOT_BE_READ")
+          },
+        },
+        phone: {
+          get() {
+            throw new Error("PRIVATE_PHONE_MUST_NOT_BE_READ")
+          },
+        },
+      },
+    )
+    expect(
+      await validatePreRegistrationPayload({
+        secret: "PRIVATE_WRONG_SECRET",
+        body: untrustedBody,
+      }),
+    ).toBeInstanceOf(InvalidSecretForAuthNCallbackError)
+    expect(mockFindByPhone).not.toHaveBeenCalled()
+    expect(jest.mocked(addAttributesToCurrentSpan).mock.calls).toEqual([
+      [
+        {
+          "preregistration.schema_id": SchemaIdType.PhoneNoPasswordV0,
+          "preregistration.outcome": "received",
+        },
+      ],
+      [{ "preregistration.outcome": "callback_rejected" }],
+    ])
+  })
+
+  it("omits caller schema, phone and callback key from invalid-payload diagnostics", async () => {
+    const result = await validatePreRegistrationPayload({
+      secret: CALLBACK_KEY,
+      body: body({ schema_id: "PRIVATE_SCHEMA_TEXT", phone: "+18765550999" }),
+    })
+    expect(result).toBeInstanceOf(UnsupportedSchemaTypeError)
+    const attributes = JSON.stringify(jest.mocked(addAttributesToCurrentSpan).mock.calls)
+    expect(attributes).not.toContain("PRIVATE_SCHEMA_TEXT")
+    expect(attributes).not.toContain("+18765550999")
+    expect(attributes).not.toContain(CALLBACK_KEY)
+    expect(attributes).toContain("invalid_payload")
+    expect(mockFindByPhone).not.toHaveBeenCalled()
   })
 })

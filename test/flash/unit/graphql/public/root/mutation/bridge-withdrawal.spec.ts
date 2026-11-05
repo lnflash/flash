@@ -25,6 +25,7 @@ import BridgeCancelWithdrawalRequestMutation from "@graphql/public/root/mutation
 import {
   BridgeWithdrawalNotFoundError,
   BridgeWithdrawalAlreadyInitiatedError,
+  BridgeWithdrawalSendOutcomeUnknownError,
 } from "@services/bridge/errors"
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -148,6 +149,24 @@ describe("bridgeInitiateWithdrawal resolver", () => {
     expect(result?.errors).toEqual([])
     expect(result?.withdrawal?.status).toBe("submitted")
     expect(result?.withdrawal?.bridgeTransferId).toBe(TRANSFER_ID)
+  })
+
+  it("returns a stable pending-review error and no success payload for an uncertain send", async () => {
+    ;(BridgeService.initiateWithdrawal as jest.Mock).mockResolvedValue(
+      new BridgeWithdrawalSendOutcomeUnknownError(),
+    )
+    const result = await resolveBridgeMutation(
+      BridgeInitiateWithdrawalMutation as BridgeWithdrawalMutation,
+      { withdrawalId: WITHDRAWAL_ID },
+    )
+    expect(result.errors).toEqual([
+      {
+        code: "BRIDGE_WITHDRAWAL_SEND_OUTCOME_UNKNOWN",
+        message:
+          "Withdrawal is pending confirmation. Do not submit it again; check its status or contact support.",
+      },
+    ])
+    expect(result.withdrawal).toBeUndefined()
   })
 
   it("maps BridgeWithdrawalNotFoundError to BRIDGE_WITHDRAWAL_NOT_FOUND when ID is missing or wrong-owner", async () => {

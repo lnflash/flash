@@ -25,24 +25,27 @@ export const createAccountFromRegistrationPayload = async ({
   }
 }): Promise<Account | ApplicationError> => {
   addAttributesToCurrentSpan({
-    "registration.body": JSON.stringify(body),
+    "registration.schema": SchemaIdType.PhoneNoPasswordV0,
+    "registration.outcome": "received",
   })
 
   const isValidKey = CallbackSecretValidator(KRATOS_CALLBACK_API_KEY).authorize(secret)
   if (isValidKey instanceof Error) {
+    addAttributesToCurrentSpan({ "registration.outcome": "callback_rejected" })
     return isValidKey
   }
 
   const regPayloadValidator = RegistrationPayloadValidator(SchemaIdType.PhoneNoPasswordV0)
   const regPayload = regPayloadValidator.validate(body)
   if (regPayload instanceof Error) {
+    addAttributesToCurrentSpan({ "registration.outcome": "invalid_payload" })
     if (regPayload instanceof InvalidUserId || regPayload instanceof InvalidPhoneNumber) {
       recordExceptionInCurrentSpan({
-        error: regPayload,
+        error: new Error("Registration payload validation failed"),
         level: ErrorLevel.Critical,
         attributes: {
-          userIdRaw: body.identity_id,
-          phoneRaw: body.phone,
+          "registration.reason":
+            regPayload instanceof InvalidUserId ? "invalid_identity" : "invalid_phone",
         },
       })
     }
@@ -56,14 +59,13 @@ export const createAccountFromRegistrationPayload = async ({
     phoneMetadata,
   })
   if (account instanceof Error) {
+    addAttributesToCurrentSpan({ "registration.outcome": "creation_failed" })
     recordExceptionInCurrentSpan({
-      error: account,
+      error: new Error("Account registration failed"),
       level: ErrorLevel.Critical,
-      attributes: {
-        userId,
-        phone,
-      },
     })
+  } else {
+    addAttributesToCurrentSpan({ "registration.outcome": "created" })
   }
 
   return account

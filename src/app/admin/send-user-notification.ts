@@ -73,7 +73,10 @@ export const sendUserNotification = async ({
       deviceTokens: result.tokens,
     })
     if (pruned instanceof Error) {
-      baseLogger.warn({ accountId, err: pruned }, "failed to prune stale device tokens")
+      baseLogger.warn(
+        { operation: "prune_push_tokens", outcome: "failed" },
+        "Failed to prune stale device tokens",
+      )
     }
 
     if (result.successCount > 0) {

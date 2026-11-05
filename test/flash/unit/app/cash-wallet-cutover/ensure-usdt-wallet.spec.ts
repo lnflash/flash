@@ -23,6 +23,11 @@ jest.mock("@services/tracing", () => ({
   recordExceptionInCurrentSpan: jest.fn(),
 }))
 
+jest.mock("@services/mongoose/device-bootstrap", () => ({
+  hasControlledDeviceBootstrap: jest.fn().mockResolvedValue(false),
+}))
+
+import { hasControlledDeviceBootstrap } from "@services/mongoose/device-bootstrap"
 import { WalletType } from "@domain/wallets"
 import { WalletCurrency } from "@domain/shared"
 import { ensureUsdtWalletForAccount } from "@app/cash-wallet-cutover/ensure-usdt-wallet"
@@ -44,6 +49,7 @@ const lockPassesThrough = () =>
 
 beforeEach(() => {
   jest.clearAllMocks()
+  ;(hasControlledDeviceBootstrap as jest.Mock).mockResolvedValue(false)
   lockPassesThrough()
 })
 
@@ -202,5 +208,39 @@ describe("ensureUsdtWalletForAccount", () => {
       expect(injectedList).toHaveBeenCalledWith("account-1")
       expect(mockPersistNew).toHaveBeenCalled()
     })
+  })
+})
+
+describe("controlled device-bootstrap suppression", () => {
+  it.each([0, 1, 3])(
+    "does not recreate missing USDT for a controlled account after level%s/phone upgrade",
+    async (level) => {
+      ;(hasControlledDeviceBootstrap as jest.Mock).mockResolvedValue(true)
+      mockListByAccountId.mockResolvedValue([usdWallet])
+      const value = await ensureUsdtWalletForAccount({
+        account: { ...account("usd-1"), level } as Account,
+      })
+      expect(value).toBeNull()
+      expect(mockPersistNew).not.toHaveBeenCalled()
+      expect(mockUpdateDefaultWalletId).not.toHaveBeenCalled()
+      expect(mockLockAccountId).toHaveBeenCalledTimes(1)
+    },
+  )
+  it("does not let an ordinary public read flip a controlled user's existing valid default", async () => {
+    ;(hasControlledDeviceBootstrap as jest.Mock).mockResolvedValue(true)
+    mockListByAccountId.mockResolvedValue([usdWallet, usdtWallet("owned-usdt")])
+    expect(await ensureUsdtWalletForAccount({ account: account("usd-1") })).toEqual(
+      usdtWallet("owned-usdt"),
+    )
+    expect(mockPersistNew).not.toHaveBeenCalled()
+    expect(mockUpdateDefaultWalletId).not.toHaveBeenCalled()
+  })
+  it("fails closed on journal storage failure without a provider fallback", async () => {
+    ;(hasControlledDeviceBootstrap as jest.Mock).mockRejectedValue(
+      new Error("Storage unavailable"),
+    )
+    mockListByAccountId.mockResolvedValue([usdWallet])
+    expect(await ensureUsdtWalletForAccount({ account: account("usd-1") })).toBeNull()
+    expect(mockPersistNew).not.toHaveBeenCalled()
   })
 })

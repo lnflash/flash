@@ -104,6 +104,4 @@ export const sendFygaroTopupNotificationBestEffort = async (
 ): Promise<void> =>
   sendOutcomeNotificationBestEffort({
     ...toOutcomeArgs(args),
-    logMessage: "Failed to send Fygaro top-up push notification",
-    logContext: { accountId: args.accountId, outcome: args.outcome },
   })

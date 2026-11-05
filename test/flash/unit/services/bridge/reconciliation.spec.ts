@@ -1,3 +1,5 @@
+jest.mock("@services/alerts", () => ({ alertBridge: jest.fn() }))
+
 /**
  * Unit tests for Bridge↔IBEX reconciliation
  * Covers reconcileByTxHash (real-time) and reconcileBridgeAndIbexDeposits (batch)
@@ -17,6 +19,7 @@ jest.mock("@services/mongoose/schema", () => ({
 
 jest.mock("@services/mongoose/bridge-accounts", () => ({
   updateWithdrawalStatus: jest.fn(),
+  noteWithdrawalCryptoSendReviewed: jest.fn(),
 }))
 
 jest.mock("@services/bridge/client", () => ({
@@ -482,13 +485,21 @@ describe("reconcileBridgeAndIbexDeposits", () => {
 })
 
 describe("reconcileBridgeAndIbexWithdrawals", () => {
-  const makeWithdrawalFind = (withdrawals: unknown[]) => ({
-    lean: () => ({ exec: () => Promise.resolve(withdrawals) }),
-  })
+  const makeWithdrawalFind = (withdrawals: unknown[]) => {
+    const query = {
+      sort: jest.fn(() => query),
+      limit: jest.fn(() => query),
+      maxTimeMS: jest.fn(() => query),
+      lean: () => ({ exec: () => Promise.resolve(withdrawals) }),
+    }
+    return query
+  }
 
-  it("cancels Bridge transfers when IBEX crypto send failed", async () => {
+  it("cancels Bridge transfers only with explicit pre-dispatch failure proof", async () => {
     ;(BridgeWithdrawal.find as jest.Mock).mockReturnValue(
-      makeWithdrawalFind([BRIDGE_WITHDRAWAL_SEND_FAILED]),
+      makeWithdrawalFind([
+        { ...BRIDGE_WITHDRAWAL_SEND_FAILED, cryptoSendState: "not_dispatched" },
+      ]),
     )
 
     const result = await reconcileBridgeAndIbexWithdrawals()
@@ -498,6 +509,98 @@ describe("reconcileBridgeAndIbexWithdrawals", () => {
     expect(BridgeApiClient.deleteTransfer).toHaveBeenCalledWith("tr_withdrawal_002")
     expect(result.cancelledSendFailedTransfers).toBe(1)
     expect(upsertBridgeReconciliationOrphan).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { status: "send_failed" },
+    {
+      status: "send_failed",
+      cryptoSendState: "not_dispatched",
+      cryptoSendAttemptId: "attempt",
+    },
+    { status: "send_unknown", cryptoSendAttemptId: "attempt" },
+    { status: "submitted" },
+  ])("never cancels, retries or marks paid for uncertain row %p", async (fields) => {
+    ;(BridgeWithdrawal.find as jest.Mock).mockReturnValue(
+      makeWithdrawalFind([
+        {
+          ...BRIDGE_WITHDRAWAL_SEND_FAILED,
+          ...fields,
+          updatedAt: new Date("2000-01-01"),
+          failureReason: "PRIVATE_PROVIDER_BODY",
+        },
+      ]),
+    )
+    const result = await reconcileBridgeAndIbexWithdrawals()
+    expect(result).not.toBeInstanceOf(Error)
+    expect(BridgeApiClient.deleteTransfer).not.toHaveBeenCalled()
+    expect(BridgeApiClient.getTransfer).toHaveBeenCalledTimes(1)
+    expect(BridgeAccountsRepo.updateWithdrawalStatus).not.toHaveBeenCalled()
+    expect(upsertBridgeReconciliationOrphan).not.toHaveBeenCalled()
+  })
+
+  it("does not age unresolved rows out of the scanner", async () => {
+    ;(BridgeWithdrawal.find as jest.Mock).mockReturnValue(makeWithdrawalFind([]))
+    await reconcileBridgeAndIbexWithdrawals()
+    const query = (BridgeWithdrawal.find as jest.Mock).mock.calls[0][0]
+    expect(query).toMatchObject({
+      $or: expect.arrayContaining([
+        { status: { $in: ["send_unknown", "send_failed", "usdt_sent"] } },
+      ]),
+    })
+    expect(query).not.toHaveProperty("updatedAt")
+  })
+
+  it("clears uncertainty only for an exact Bridge payment_processed receipt", async () => {
+    ;(BridgeWithdrawal.find as jest.Mock).mockReturnValue(
+      makeWithdrawalFind([{ ...BRIDGE_WITHDRAWAL_SEND_FAILED, status: "send_unknown" }]),
+    )
+    ;(BridgeApiClient.getTransfer as jest.Mock).mockResolvedValue({
+      id: "tr_withdrawal_002",
+      state: "payment_processed",
+    })
+    const result = await reconcileBridgeAndIbexWithdrawals()
+    expect(result).toMatchObject({ finalizedCompletedTransfers: 1 })
+    expect(BridgeAccountsRepo.updateWithdrawalStatus).toHaveBeenCalledWith(
+      "tr_withdrawal_002",
+      "completed",
+      undefined,
+      "payment_processed",
+    )
+    expect(BridgeApiClient.deleteTransfer).not.toHaveBeenCalled()
+  })
+
+  it("never resolves an unknown send from a foreign transfer receipt", async () => {
+    ;(BridgeWithdrawal.find as jest.Mock).mockReturnValue(
+      makeWithdrawalFind([{ ...BRIDGE_WITHDRAWAL_SEND_FAILED, status: "send_unknown" }]),
+    )
+    ;(BridgeApiClient.getTransfer as jest.Mock).mockResolvedValue({
+      id: "foreign-transfer",
+      state: "payment_processed",
+    })
+    expect(await reconcileBridgeAndIbexWithdrawals()).toMatchObject({
+      finalizedCompletedTransfers: 0,
+      unresolvedSendOutcomes: 1,
+    })
+    expect(BridgeAccountsRepo.updateWithdrawalStatus).not.toHaveBeenCalled()
+    expect(BridgeApiClient.deleteTransfer).not.toHaveBeenCalled()
+    expect(BridgeAccountsRepo.noteWithdrawalCryptoSendReviewed).toHaveBeenCalledWith(
+      "withdrawal_002",
+    )
+  })
+
+  it("bounds the review batch and rotates review timestamps without aging uncertainty out", async () => {
+    const query = makeWithdrawalFind([
+      { ...BRIDGE_WITHDRAWAL_SEND_FAILED, status: "send_unknown" },
+    ])
+    ;(BridgeWithdrawal.find as jest.Mock).mockReturnValue(query)
+    await reconcileBridgeAndIbexWithdrawals()
+    expect(query.sort).toHaveBeenCalledWith({ cryptoSendReviewedAt: 1, _id: 1 })
+    expect(query.limit).toHaveBeenCalledWith(100)
+    expect(query.maxTimeMS).toHaveBeenCalledWith(5_000)
+    expect(BridgeAccountsRepo.noteWithdrawalCryptoSendReviewed).toHaveBeenCalledWith(
+      "withdrawal_002",
+    )
   })
 
   it("self-heals a sent withdrawal when Bridge already reports payment_processed", async () => {

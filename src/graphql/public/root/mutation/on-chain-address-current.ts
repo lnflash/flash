@@ -2,12 +2,8 @@ import { GT } from "@graphql/index"
 import { mapAndParseErrorForGqlResponse } from "@graphql/error-map"
 import WalletId from "@graphql/shared/types/scalar/wallet-id"
 import OnChainAddressPayload from "@graphql/public/types/payload/on-chain-address"
-// import { Wallets } from "@app"
-
-// FLASH FORK: import ibex dependencies
-import Ibex from "@services/ibex/client"
-
-import { IbexError } from "@services/ibex/errors"
+import { createOwnedOnChainAddress } from "@app/wallets/create-owned-on-chain-address"
+import { InvalidWalletForAccountError } from "@domain/accounts"
 
 const OnChainAddressCurrentInput = GT.Input({
   name: "OnChainAddressCurrentInput",
@@ -16,7 +12,7 @@ const OnChainAddressCurrentInput = GT.Input({
   }),
 })
 
-const OnChainAddressCurrentMutation = GT.Field({
+const OnChainAddressCurrentMutation = GT.Field<null, GraphQLPublicContextAuth>({
   extensions: {
     complexity: 120,
   },
@@ -24,25 +20,28 @@ const OnChainAddressCurrentMutation = GT.Field({
   args: {
     input: { type: GT.NonNull(OnChainAddressCurrentInput) },
   },
-  resolve: async (_, args) => {
+  resolve: async (_, args, { domainAccount, cashWalletClientCapabilities }) => {
     const { walletId } = args.input
     if (walletId instanceof Error) {
       return { errors: [{ message: walletId.message }] }
     }
 
-    // FLASH FORK: use IBEX to create on-chain address
-    // const address = await Wallets.getLastOnChainAddress(walletId)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (!domainAccount)
+      return {
+        errors: [mapAndParseErrorForGqlResponse(new InvalidWalletForAccountError())],
+      }
 
-    const resp = await Ibex.generateBitcoinAddress(walletId)
-
-    if (resp instanceof IbexError) {
-      return { errors: [mapAndParseErrorForGqlResponse(resp)] }
-    }
+    const address = await createOwnedOnChainAddress({
+      accountId: domainAccount.id,
+      walletId,
+      client: cashWalletClientCapabilities,
+    })
+    if (address instanceof Error)
+      return { errors: [mapAndParseErrorForGqlResponse(address)] }
 
     return {
       errors: [],
-      address: resp.address,
+      address,
     }
   },
 })

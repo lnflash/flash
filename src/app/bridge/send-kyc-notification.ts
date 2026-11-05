@@ -137,8 +137,8 @@ export const sendBridgeKycNotificationBestEffort = async (
 
   if (result instanceof Error) {
     baseLogger.warn(
-      { accountId: args.accountId, outcome: args.outcome, error: result },
-      "Failed to send Bridge KYC push notification",
+      { operation: "send_bridge_kyc_push", outcome: "failed" },
+      "Unable to send Bridge KYC push",
     )
   }
 }

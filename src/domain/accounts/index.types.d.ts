@@ -236,6 +236,13 @@ interface IAccountsRepository {
   ): Promise<
     { changed: boolean; previousStatus?: Account["bridgeKycStatus"] } | RepositoryError
   >
+  findBridgeCustomerOwners(
+    customerId: BridgeCustomerId,
+  ): Promise<AccountId[] | RepositoryError>
+  bindBridgeCustomerIfUnbound(
+    id: AccountId,
+    customerId: BridgeCustomerId,
+  ): Promise<Account | RepositoryError>
   updateBridgeFields(
     id: AccountId,
     fields: {

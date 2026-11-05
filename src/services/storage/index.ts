@@ -44,6 +44,10 @@ const getS3Client = (): S3Client | StorageError => {
   s3Client = new S3Client({
     endpoint: DO_SPACES_ENDPOINT,
     region: DO_SPACES_REGION,
+    // The presigner has no photo body. SDK automatic CRC32 would otherwise
+    // sign the empty-body checksum, rejecting the client's nonempty upload.
+    // Retain required/explicit checksums; never rewrite a signed URL on mobile.
+    requestChecksumCalculation: "WHEN_REQUIRED",
     credentials: {
       accessKeyId: DO_SPACES_ACCESS_KEY,
       secretAccessKey: DO_SPACES_SECRET_KEY,

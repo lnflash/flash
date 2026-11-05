@@ -44,6 +44,16 @@ jest.mock("@services/mongoose/payment-split-executions", () => ({
   PaymentSplitExecutionsRepository: jest.fn(() => mockStore.repo),
 }))
 
+jest.mock("@services/mongoose", () => ({
+  WalletsRepository: () => ({
+    findById: async (walletId: string) => ({
+      id: walletId,
+      accountId: "payer-account",
+      currency: "USD",
+    }),
+  }),
+}))
+
 jest.mock("@app/payments/authorize-send", () => ({
   authorizeSend: async () => true,
   gateSend: async () => true,

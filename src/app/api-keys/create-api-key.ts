@@ -22,10 +22,7 @@ export const createApiKey = async ({
   expiresIn = null,
 }: CreateApiKeyArgs): Promise<CreateApiKeyResult | DomainError> => {
   addAttributesToCurrentSpan({
-    "app.apiKeys.create.accountId": accountId,
-    "app.apiKeys.create.name": name,
-    "app.apiKeys.create.scopes": scopes.join(","),
-    "app.apiKeys.create.expiresIn": expiresIn || undefined,
+    "app.apiKeys.create.started": true,
   })
 
   const checkedName = checkedToApiKeyName(name)
@@ -92,7 +89,6 @@ export const createApiKey = async ({
 
   addAttributesToCurrentSpan({
     "app.apiKeys.create.success": true,
-    "app.apiKeys.create.keyId": apiKey.keyId,
   })
 
   auditApiKeyCreated({

@@ -50,6 +50,23 @@ Files are uploaded exactly as today: `idDocumentUploadUrlGenerate` returns a
 character `UsernameRegex` forbids can unambiguously mark the boundary);
 the client then references that key from an evidence row.
 
+The storage client uses `requestChecksumCalculation: "WHEN_REQUIRED"` when
+presigning. The signer has no image bytes: the SDK's `WHEN_SUPPORTED` default
+otherwise calculates CRC32 for an empty body and signs
+`x-amz-checksum-crc32=AAAAAA==`. Uploading a real photo through that URL fails
+checksum validation. This setting leaves required or explicitly supplied
+checksums intact and retains the same SigV4, private ACL and 15-minute lease;
+clients must never strip checksum/signature parameters from a returned URL.
+The existing API does not accept an expected checksum or content length, so
+this change does not claim to bind an evidence hash to stored bytes.
+See [AWS checksum behavior](https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/s3-checksums.html).
+
+`test/flash/unit/services/storage/id-document-presigned-put.spec.ts` uses the
+real SDK presigner, dummy credentials and a loopback-only checksum fixture to
+reproduce the old nonempty-photo rejection and verify the service's corrected
+PUT contract. The fixture checks body/checksum acceptance, not provider-side
+SigV4 verification; no real storage account is contacted.
+
 ### Normalization (`src/domain/accounts/upgrade-evidence.ts`)
 
 `normalizeEvidence({ evidence, idDocument })`:

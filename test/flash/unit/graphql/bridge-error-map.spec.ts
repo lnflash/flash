@@ -21,6 +21,7 @@ import {
   BridgeTransferFailedError,
   BridgeWebhookValidationError,
   BridgeWithdrawalNetAmountTooLowError,
+  BridgeWithdrawalSendOutcomeUnknownError,
   mapBridgeHttpError,
 } from "@services/bridge/errors"
 
@@ -43,6 +44,10 @@ describe("error-map: Bridge errors", () => {
     [new BridgeCustomerNotFoundError(), "BRIDGE_CUSTOMER_NOT_FOUND"],
     [new BridgeInsufficientFundsError(), "BRIDGE_INSUFFICIENT_FUNDS"],
     [new BridgeWithdrawalNetAmountTooLowError(), "BRIDGE_WITHDRAWAL_NET_AMOUNT_TOO_LOW"],
+    [
+      new BridgeWithdrawalSendOutcomeUnknownError(),
+      "BRIDGE_WITHDRAWAL_SEND_OUTCOME_UNKNOWN",
+    ],
     [new BridgeRateLimitError(), "BRIDGE_RATE_LIMIT"],
     [new BridgeTimeoutError(), "BRIDGE_TIMEOUT"],
     [new BridgeTransferFailedError(), "BRIDGE_TRANSFER_FAILED"],
@@ -66,6 +71,16 @@ describe("error-map: Bridge errors", () => {
     expect(result.code).toBe(expectedCode)
     expect(result.code).not.toBe("INVALID_INPUT")
     expect(result.message).toBeTruthy()
+  })
+
+  it("keeps the pending-review message fixed even when an error carries private diagnostic text", () => {
+    const error = new BridgeWithdrawalSendOutcomeUnknownError()
+    error.message = "PRIVATE_PROVIDER_BANK_BODY"
+    const mapped = mapAndParseErrorForGqlResponse(error)
+    expect(mapped.code).toBe("BRIDGE_WITHDRAWAL_SEND_OUTCOME_UNKNOWN")
+    expect(mapped.message).toMatch(/pending confirmation/)
+    expect(mapped.message).toMatch(/Do not submit it again/)
+    expect(mapped.message).not.toContain("PRIVATE_PROVIDER_BANK_BODY")
   })
 
   it("keeps the KYC gate messages verbatim for the app to show", () => {

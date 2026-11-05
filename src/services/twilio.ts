@@ -20,13 +20,10 @@ import {
   UnknownPhoneProviderServiceError,
   UnsubscribedRecipientPhoneProviderError,
 } from "@domain/phone-provider"
-import { maskPhone } from "@services/alerts/ops-events"
 import { baseLogger } from "@services/logger"
 
 import { TestAccountsChecker } from "@domain/accounts/test-accounts-checker"
 import { NotImplementedError } from "@domain/errors"
-import { parseErrorMessageFromUnknown } from "@domain/shared"
-
 import { isAxiosError } from "axios"
 
 import { wrapAsyncFunctionsToRunInSpan } from "./tracing"
@@ -103,7 +100,6 @@ export const TwilioClient = (): IPhoneProviderService => {
         // of these a probe can produce. Not an ops-feed event on purpose — a
         // per-rejection embed would evict the rest of the feed during exactly
         // the burst this exists for (see the coalescing in request-code.ts).
-        const { status, code } = err as { status?: unknown; code?: unknown }
         // No code Twilio returns (60203 included) distinguishes the
         // global_sends cap from its built-in per-number Verify limit, so
         // never claim the global_sends cause or key here — an on-call
@@ -111,18 +107,16 @@ export const TwilioClient = (): IPhoneProviderService => {
         // throttling would otherwise misdiagnose it as the send cap
         // tripping. See the comment above TWILIO_RATE_LIMIT_HTTP_STATUS.
         baseLogger.warn(
-          {
-            to: maskPhone(to),
-            channel,
-            twilioStatus: status,
-            twilioCode: code,
-          },
+          { operation: "twilio_verify_send", outcome: "rate_limited", channel },
           "verify send rejected with HTTP 429 (rate limit, cause unconfirmed — not necessarily the global send cap)",
         )
-        return new PhoneProviderRateLimitExceededError(parseErrorMessageFromUnknown(err))
+        return new PhoneProviderRateLimitExceededError("Phone verification rate limited")
       }
 
-      baseLogger.error({ err }, "impossible to send text")
+      baseLogger.error(
+        { operation: "twilio_verify_send", outcome: "failed" },
+        "Unable to send verification code",
+      )
       return handleCommonErrors(err)
     }
 
@@ -144,9 +138,14 @@ export const TwilioClient = (): IPhoneProviderService => {
 
       return true
     } catch (err) {
-      baseLogger.error({ err }, "impossible to verify phone and code")
+      baseLogger.error(
+        { operation: "twilio_verify_check", outcome: "failed" },
+        "Unable to check verification code",
+      )
       if (isAxiosError(err) && err.status === 404) {
-        return new ExpiredOrNonExistentPhoneNumberError(err.message)
+        return new ExpiredOrNonExistentPhoneNumberError(
+          "Verification expired or unavailable",
+        )
       }
 
       return handleCommonErrors(err)
@@ -158,7 +157,10 @@ export const TwilioClient = (): IPhoneProviderService => {
       const result = await client.lookups.v1
         .phoneNumbers(phone)
         .fetch({ type: ["carrier"] })
-      baseLogger.info({ result }, "result carrier info")
+      baseLogger.info(
+        { operation: "twilio_carrier_lookup", outcome: "received" },
+        "Carrier lookup completed",
+      )
 
       // TODO: migration to save the converted value to mongoose instead
       // of the one returned from twilio
@@ -185,8 +187,8 @@ export const TwilioClient = (): IPhoneProviderService => {
       }
 
       return phoneMetadata
-    } catch (err) {
-      return new UnknownPhoneProviderServiceError(err)
+    } catch {
+      return new UnknownPhoneProviderServiceError("Carrier lookup failed")
     }
   }
 
@@ -196,8 +198,22 @@ export const TwilioClient = (): IPhoneProviderService => {
   })
 }
 
-const handleCommonErrors = (err: Error | string | unknown) => {
-  const errMsg = parseErrorMessageFromUnknown(err)
+const providerMessageForClassification = (err: unknown): string => {
+  try {
+    if (typeof err === "string") return err.slice(0, 4096)
+    if (err instanceof Error) return err.message.slice(0, 4096)
+    if (err && typeof err === "object" && "message" in err) {
+      const message = err.message
+      return typeof message === "string" ? message.slice(0, 4096) : ""
+    }
+  } catch {
+    // A provider error with hostile getters is still an unknown failure.
+  }
+  return ""
+}
+
+const handleCommonErrors = (err: unknown) => {
+  const errMsg = providerMessageForClassification(err)
 
   const match = (knownErrDetail: RegExp): boolean => knownErrDetail.test(errMsg)
 
@@ -205,37 +221,37 @@ const handleCommonErrors = (err: Error | string | unknown) => {
     case match(KnownTwilioErrorMessages.InvalidPhoneNumber):
     case match(KnownTwilioErrorMessages.InvalidMobileNumber):
     case match(KnownTwilioErrorMessages.InvalidPhoneNumberParameter):
-      return new InvalidPhoneNumberPhoneProviderError(errMsg)
+      return new InvalidPhoneNumberPhoneProviderError("Invalid phone number")
 
     case match(KnownTwilioErrorMessages.InvalidCodeParameter):
-      return new PhoneCodeInvalidError(errMsg)
+      return new PhoneCodeInvalidError("Invalid verification code")
 
     case match(KnownTwilioErrorMessages.RestrictedRegion):
     case match(KnownTwilioErrorMessages.CountryNeedsVetting):
     case match(KnownTwilioErrorMessages.BlockedRegion):
-      return new RestrictedRegionPhoneProviderError(errMsg)
+      return new RestrictedRegionPhoneProviderError("Phone region is restricted")
 
     case match(KnownTwilioErrorMessages.UnsubscribedRecipient):
-      return new UnsubscribedRecipientPhoneProviderError(errMsg)
+      return new UnsubscribedRecipientPhoneProviderError("Phone recipient unsubscribed")
 
     case match(KnownTwilioErrorMessages.BadPhoneProviderConnection):
-      return new PhoneProviderConnectionError(errMsg)
+      return new PhoneProviderConnectionError("Phone provider connection failed")
 
     case match(KnownTwilioErrorMessages.ServiceUnavailable):
-      return new PhoneProviderUnavailableError(errMsg)
+      return new PhoneProviderUnavailableError("Phone provider unavailable")
 
     case match(KnownTwilioErrorMessages.RateLimitsExceeded):
     case match(KnownTwilioErrorMessages.TooManyConcurrentRequests):
-      return new PhoneProviderRateLimitExceededError(errMsg)
+      return new PhoneProviderRateLimitExceededError("Phone verification rate limited")
 
     case match(KnownTwilioErrorMessages.FraudulentActivityBlock):
-      return new RestrictedRecipientPhoneNumberError(errMsg)
+      return new RestrictedRecipientPhoneNumberError("Phone recipient restricted")
 
     case match(KnownTwilioErrorMessages.InvalidOrApprovedVerification):
-      return new InvalidOrApprovedVerificationError(errMsg)
+      return new InvalidOrApprovedVerificationError("Verification unavailable")
 
     default:
-      return new UnknownPhoneProviderServiceError(errMsg)
+      return new UnknownPhoneProviderServiceError("Phone provider failed")
   }
 }
 export const KnownTwilioErrorMessages = {

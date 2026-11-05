@@ -9,9 +9,13 @@ import dedent from "dedent"
 
 // FLASH FORK: import ibex dependencies
 import { PaymentSendStatus, decodeInvoice } from "@domain/bitcoin/lightning"
+import { InvalidWalletForAccountError } from "@domain/accounts"
 import { LnPaymentRequestNonZeroAmountRequiredError } from "@domain/payments/errors"
+import { WalletCurrency } from "@domain/shared"
+import { resolveCashWalletMutationWalletIdForAccount } from "@app/cash-wallet-cutover"
 import Ibex from "@services/ibex/client"
 import { IbexError, InsufficientIbexBalance } from "@services/ibex/errors"
+import { WalletsRepository } from "@services/mongoose"
 import { paymentSendStatusOrPending } from "@services/ibex/payment-status"
 import { withPaymentIdempotency } from "@app/payments/idempotency"
 import { payMarkedBolt11 } from "@app/payments/mark-outgoing-invoice"
@@ -68,7 +72,7 @@ const LnInvoicePaymentSendMutation = GT.Field<
   args: {
     input: { type: GT.NonNull(LnInvoicePaymentInput) },
   },
-  resolve: async (_, args, { domainAccount }) => {
+  resolve: async (_, args, { domainAccount, cashWalletClientCapabilities }) => {
     const { walletId, paymentRequest, memo, idempotencyKey } = args.input
     if (walletId instanceof InputValidationError) {
       return { errors: [{ message: walletId.message }] }
@@ -96,7 +100,56 @@ const LnInvoicePaymentSendMutation = GT.Field<
 
     if (!domainAccount) throw new Error("Authentication required")
 
-    // ENG-530: dedupe on (senderWalletId, idempotencyKey) when a key is supplied.
+    // The wallet middleware checks the supplied ID in production. Repeat the
+    // ownership check here because this is the last boundary before IBEX and
+    // because the cash alias can resolve to a different settlement wallet.
+    const suppliedWallet = await WalletsRepository().findById(walletId)
+    if (suppliedWallet instanceof Error) {
+      return {
+        status: "failed",
+        errors: [mapAndParseErrorForGqlResponse(suppliedWallet)],
+      }
+    }
+    if (suppliedWallet.accountId !== domainAccount.id) {
+      return {
+        status: "failed",
+        errors: [mapAndParseErrorForGqlResponse(new InvalidWalletForAccountError())],
+      }
+    }
+
+    let senderWalletId = walletId
+    if (
+      suppliedWallet.currency === WalletCurrency.Usd ||
+      suppliedWallet.currency === WalletCurrency.Usdt
+    ) {
+      const routed = await resolveCashWalletMutationWalletIdForAccount({
+        account: domainAccount,
+        walletId,
+        client: cashWalletClientCapabilities,
+      })
+      if (routed instanceof Error) {
+        return { status: "failed", errors: [mapAndParseErrorForGqlResponse(routed)] }
+      }
+      senderWalletId = routed
+      if (senderWalletId !== walletId) {
+        const settlementWallet = await WalletsRepository().findById(senderWalletId)
+        if (settlementWallet instanceof Error) {
+          return {
+            status: "failed",
+            errors: [mapAndParseErrorForGqlResponse(settlementWallet)],
+          }
+        }
+        if (settlementWallet.accountId !== domainAccount.id) {
+          return {
+            status: "failed",
+            errors: [mapAndParseErrorForGqlResponse(new InvalidWalletForAccountError())],
+          }
+        }
+      }
+    }
+
+    // ENG-530: dedupe on the wallet IBEX will actually debit. A presented USD
+    // alias and its USDT settlement wallet must share one key scope.
     // This resolver pays IBEX directly (the app-layer path is stubbed above), so the
     // idempotency wrapper goes around the inline call here rather than in @app.
     //
@@ -105,7 +158,7 @@ const LnInvoicePaymentSendMutation = GT.Field<
     // budget or being re-judged against a moved mid price.
     const status = await withPaymentIdempotency({
       idempotencyKey,
-      senderWalletId: walletId,
+      senderWalletId,
       requestFingerprint: `ln|${paymentRequest}`,
       authorize: async () => {
         // The bolt11 decode is PART of the guard, not a precondition of it: the
@@ -132,7 +185,7 @@ const LnInvoicePaymentSendMutation = GT.Field<
             error,
             reason: SendRejectionReasons.undecodableInvoice,
             senderAccount: domainAccount,
-            senderWalletId: walletId,
+            senderWalletId,
             kind: "lightning",
           })
 
@@ -144,7 +197,7 @@ const LnInvoicePaymentSendMutation = GT.Field<
 
         return authorizeSend({
           senderAccount: domainAccount,
-          senderWalletId: walletId,
+          senderWalletId,
           amount: { currency: "BTC", sats: decodedInvoice.paymentAmount.amount },
           kind: "lightning",
         })
@@ -155,11 +208,11 @@ const LnInvoicePaymentSendMutation = GT.Field<
         // withdrawn when IBEX rejects the payment outright.
         return payMarkedBolt11({
           paymentRequest,
-          senderWalletId: walletId,
+          senderWalletId,
           pay: async () => {
             const PayLightningInvoice = await Ibex.payInvoice({
               invoice: paymentRequest as Bolt11,
-              accountId: walletId,
+              accountId: senderWalletId,
             })
 
             if (PayLightningInvoice instanceof IbexError) {

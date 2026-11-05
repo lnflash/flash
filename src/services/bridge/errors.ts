@@ -232,3 +232,11 @@ export const mapBridgeHttpError = (
       return new BridgeApiError("Bridge API error", statusCode, response)
   }
 }
+
+export class BridgeWithdrawalSendOutcomeUnknownError extends BridgeError {
+  constructor() {
+    super(
+      "Withdrawal is pending confirmation. Do not submit it again; check its status or contact support.",
+    )
+  }
+}

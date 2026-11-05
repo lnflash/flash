@@ -108,15 +108,15 @@ const bestEffort = async (
 
     if (result instanceof Error) {
       baseLogger.warn(
-        { accountId: args.accountId, kind: args.kind, error: result },
-        "Failed to send referral push notification",
+        { operation: "send_referral_push", outcome: "failed" },
+        "Unable to send referral push",
       )
     }
-  } catch (err) {
+  } catch {
     // Never let a push failure disturb the redeem or payout path.
     baseLogger.warn(
-      { accountId: args.accountId, kind: args.kind, err },
-      "Unexpected error sending referral push notification",
+      { operation: "send_referral_push", outcome: "failed" },
+      "Unable to send referral push",
     )
   }
 }

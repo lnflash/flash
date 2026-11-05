@@ -16,6 +16,7 @@ import {
 import { alertBridge, generateDedupKey } from "@services/alerts"
 
 import { BridgeApiError, BridgeTimeoutError } from "./errors"
+import { checkedOwnedKycCustomerId } from "./owned-kyc-customer"
 
 // ============ Request/Response Types ============
 
@@ -408,6 +409,8 @@ export class BridgeClient {
         headers,
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,
+        // Never forward the API key or a financial/identity body to redirects.
+        redirect: "error",
       })
 
       const responseData = await response.json().catch(() => null)
@@ -480,6 +483,21 @@ export class BridgeClient {
     idempotencyKey?: string,
   ): Promise<KycLink> {
     return this.request<KycLink>("POST", "/kyc_links", request, idempotencyKey)
+  }
+
+  // Current provider endpoints return capabilities for this exact stored
+  // customer. They do not create a customer or accept caller-controlled email.
+  async getHostedKycLink(customerId: BridgeCustomerId): Promise<{ url: string }> {
+    const checked = checkedOwnedKycCustomerId(customerId)
+    return this.request("GET", `/customers/${encodeURIComponent(checked)}/kyc_link`)
+  }
+
+  async getHostedTosLink(customerId: BridgeCustomerId): Promise<{ url: string }> {
+    const checked = checkedOwnedKycCustomerId(customerId)
+    return this.request(
+      "GET",
+      `/customers/${encodeURIComponent(checked)}/tos_acceptance_link`,
+    )
   }
 
   async getKycLatestLink(customerId: BridgeCustomerId): Promise<KycLink> {

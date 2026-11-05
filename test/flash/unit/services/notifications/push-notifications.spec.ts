@@ -1,3 +1,8 @@
+jest.mock("@services/logger", () => {
+  const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() }
+  return { baseLogger: { ...logger, child: () => logger } }
+})
+
 const mockSendEachForMulticast = jest.fn()
 let mockMessaging: unknown = { sendEachForMulticast: mockSendEachForMulticast }
 
@@ -21,8 +26,18 @@ import {
   InvalidDeviceNotificationsServiceError,
   NoDeviceAcceptedPushNotificationsServiceError,
   NotificationsServiceError,
+  NotificationsServiceUnreachableServerError,
+  UnknownNotificationsServiceError,
 } from "@domain/notifications"
+import { baseLogger } from "@services/logger"
+import { recordExceptionInCurrentSpan } from "@services/tracing"
 import { PushNotificationsService } from "@services/notifications/push-notifications"
+
+const mockLogger = baseLogger.child({}) as unknown as {
+  info: jest.Mock
+  warn: jest.Mock
+  error: jest.Mock
+}
 
 const NOT_REGISTERED = "messaging/registration-token-not-registered"
 
@@ -170,5 +185,119 @@ describe("PushNotificationsService.sendNotification", () => {
 
     expect(result).toBeInstanceOf(InvalidDeviceNotificationsServiceError)
     expect(mockSendEachForMulticast).not.toHaveBeenCalled()
+  })
+})
+
+describe("push telemetry privacy", () => {
+  const privateValues = [
+    "FCM_DEVICE_SECRET",
+    "PRIVATE_RECIPIENT_NAME",
+    "PRIVATE_BANK_AMOUNT",
+    "PRIVATE_INVOICE",
+    "PROVIDER_PRIVATE_BODY",
+  ]
+  const privateArgs = {
+    deviceTokens: [privateValues[0]] as DeviceToken[],
+    title: privateValues[1],
+    body: privateValues[2],
+    data: { invoice: privateValues[3] },
+  }
+  const capturedTelemetry = () =>
+    JSON.stringify({
+      logs: Object.values(mockLogger).flatMap((fn) => fn.mock.calls),
+      spans: jest.mocked(recordExceptionInCurrentSpan).mock.calls.map(([{ error }]) => {
+        if (!(error instanceof Error)) throw new Error("Expected a safe Error diagnostic")
+        return { ...error, message: error.message, stack: error.stack }
+      }),
+    })
+  const expectPrivateTelemetryAbsent = () => {
+    for (const value of privateValues) expect(capturedTelemetry()).not.toContain(value)
+  }
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockMessaging = { sendEachForMulticast: mockSendEachForMulticast }
+  })
+
+  it("keeps exact delivery payload private while retaining safe stale-token pruning", async () => {
+    mockSendEachForMulticast.mockResolvedValue({
+      successCount: 0,
+      failureCount: 1,
+      responses: [
+        {
+          success: false,
+          error: {
+            code: NOT_REGISTERED,
+            message: privateValues.join(" "),
+            token: privateValues[0],
+          },
+        },
+      ],
+    })
+    const result = await PushNotificationsService().sendNotification(privateArgs)
+    expect(mockSendEachForMulticast).toHaveBeenCalledWith(
+      {
+        tokens: privateArgs.deviceTokens,
+        notification: { title: privateArgs.title, body: privateArgs.body },
+        data: privateArgs.data,
+      },
+      false,
+    )
+    expect(result).toBeInstanceOf(DeviceTokensNotRegisteredNotificationsServiceError)
+    expect((result as DeviceTokensNotRegisteredNotificationsServiceError).tokens).toEqual(
+      privateArgs.deviceTokens,
+    )
+    expect(
+      (result as DeviceTokensNotRegisteredNotificationsServiceError).failureCodes,
+    ).toEqual([NOT_REGISTERED])
+    expectPrivateTelemetryAbsent()
+    expect(capturedTelemetry()).toContain(NOT_REGISTERED)
+  })
+
+  it("never promotes arbitrary provider codes, counts or error objects into diagnostics", async () => {
+    mockSendEachForMulticast.mockResolvedValue({
+      successCount: privateValues[2],
+      failureCount: privateValues[1],
+      responses: [
+        { success: false, error: { code: privateValues[0], message: privateValues[4] } },
+      ],
+    })
+    await PushNotificationsService().sendNotification(privateArgs)
+    expectPrivateTelemetryAbsent()
+    expect(capturedTelemetry()).toContain("messaging/unknown-error")
+  })
+
+  it.each([
+    [
+      "Raw server response PRIVATE_BANK_AMOUNT Error 502",
+      NotificationsServiceUnreachableServerError,
+    ],
+    [
+      "Raw server response PRIVATE_BANK_AMOUNT Error 500",
+      NotificationsServiceUnreachableServerError,
+    ],
+    ["PROVIDER_PRIVATE_BODY", UnknownNotificationsServiceError],
+  ])(
+    "preserves failure classification without provider free text: %s",
+    async (message, expectedType) => {
+      const error = Object.assign(new Error(message), {
+        config: { data: privateValues },
+        code: privateValues[0],
+      })
+      mockSendEachForMulticast.mockRejectedValue(error)
+      const result = await PushNotificationsService().sendNotification(privateArgs)
+      expect(result).toBeInstanceOf(expectedType)
+      for (const value of privateValues)
+        expect((result as Error).message).not.toContain(value)
+      expectPrivateTelemetryAbsent()
+    },
+  )
+
+  it("does not log notification content when no token is registered", async () => {
+    await PushNotificationsService().sendNotification({
+      ...privateArgs,
+      deviceTokens: [],
+    })
+    expect(mockSendEachForMulticast).not.toHaveBeenCalled()
+    expectPrivateTelemetryAbsent()
   })
 })

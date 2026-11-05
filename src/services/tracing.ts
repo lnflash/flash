@@ -21,13 +21,18 @@ import {
   TimeInput,
   Exception,
   Context,
-  AttributeValue,
 } from "@opentelemetry/api"
 import { ErrorLevel, RankedErrorLevel, parseErrorFromUnknown } from "@domain/shared"
 import { NetInstrumentation } from "@opentelemetry/instrumentation-net"
 
 import type * as graphqlTypes from "graphql"
 import { Resource } from "@opentelemetry/resources"
+
+import {
+  graphQLErrorSummary,
+  sanitizeGraphQLSpanForExport,
+} from "./graphql-trace-privacy"
+import { sanitizeHTTPSpanForExport } from "./http-trace-privacy"
 type ExtendedException = Exclude<Exception, string> & {
   level?: ErrorLevel
 }
@@ -68,7 +73,7 @@ const gqlResponseHook = (span: ExtendedSpan, data: graphqlTypes.ExecutionResult)
   }
 
   if (data.errors && data.errors.length > 0) {
-    recordGqlErrors({ errors: data.errors, span, subPathName: "" })
+    recordGqlErrors({ errors: data.errors, span, kind: "execution" })
   }
 
   let gqlNestedKeys: string[] = []
@@ -81,7 +86,7 @@ const gqlResponseHook = (span: ExtendedSpan, data: graphqlTypes.ExecutionResult)
     }>
     if (!nestedObjData) continue
     if (nestedObjData.errors && nestedObjData.errors.length > 0) {
-      recordGqlErrors({ errors: nestedObjData.errors, span, subPathName: nestedObj })
+      recordGqlErrors({ errors: nestedObjData.errors, span, kind: "payload" })
     }
   }
 }
@@ -89,108 +94,18 @@ const gqlResponseHook = (span: ExtendedSpan, data: graphqlTypes.ExecutionResult)
 const recordGqlErrors = ({
   errors,
   span,
-  subPathName,
+  kind,
 }: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  errors: any
+  errors: readonly unknown[]
   span: ExtendedSpan
-  subPathName: string
+  kind: "execution" | "payload"
 }) => {
-  const subPath = subPathName ? `${subPathName}.` : ""
-
-  recordException(
-    span,
-    {
-      name: `graphql.${subPath}execution.error`,
-      message: JSON.stringify(errors),
-    },
-    ErrorLevel.Warn,
-  )
-
-  const setErrorAttribute = ({
-    attribute,
-    value,
-  }: {
-    attribute: string
-    value: AttributeValue
-  }) =>
-    span.setAttribute(`graphql.${subPath ? "data." : subPath}error.${attribute}`, value)
-
-  const firstErr = errors[0]
-  if (subPath) {
-    setErrorAttribute({
-      attribute: `operation.name`,
-      value: subPath.split(".").join(""), // remove trailing '.'
-    })
+  const summary = graphQLErrorSummary(errors, kind, span.attributes)
+  for (const [key, value] of Object.entries(summary)) {
+    if (value !== undefined) span.setAttribute(key, value)
   }
-
-  setErrorAttribute({
-    attribute: "message",
-    value: firstErr.message,
-  })
-
-  setErrorAttribute({
-    attribute: "type",
-    value: firstErr.constructor?.name,
-  })
-
-  setErrorAttribute({
-    attribute: "path",
-    value: firstErr.path,
-  })
-
-  setErrorAttribute({
-    attribute: "code",
-    value: firstErr.extensions?.code || firstErr.code,
-  })
-
-  if (firstErr.originalError) {
-    setErrorAttribute({
-      attribute: "original.type",
-      value: firstErr.originalError.constructor?.name,
-    })
-
-    setErrorAttribute({
-      attribute: "original.message",
-      value: firstErr.originalError.message,
-    })
-  }
-
-  /* eslint @typescript-eslint/ban-ts-comment: "off" */
-  // @ts-ignore-next-line no-implicit-any error
-  errors.forEach((err, idx) => {
-    setErrorAttribute({
-      attribute: `${idx}.message`,
-      value: err.message,
-    })
-
-    setErrorAttribute({
-      attribute: `${idx}.type`,
-      value: err.constructor?.name,
-    })
-
-    setErrorAttribute({
-      attribute: `${idx}.path`,
-      value: err.path,
-    })
-
-    setErrorAttribute({
-      attribute: `${idx}.code`,
-      value: err.extensions?.code || err.code,
-    })
-
-    if (err.originalError) {
-      setErrorAttribute({
-        attribute: `${idx}.original.type`,
-        value: err.originalError.constructor?.name,
-      })
-
-      setErrorAttribute({
-        attribute: `${idx}.original.message`,
-        value: err.originalError.message,
-      })
-    }
-  })
+  span.addEvent("graphql.error", summary)
+  span.setStatus({ code: SpanStatusCode.ERROR })
 }
 
 registerInstrumentations({
@@ -212,12 +127,16 @@ registerInstrumentations({
     }),
     new GraphQLInstrumentation({
       mergeItems: true,
-      allowValues: true,
+      allowValues: false,
       responseHook: gqlResponseHook,
     }),
     new MongoDBInstrumentation(),
     new GrpcInstrumentation(),
-    new IORedisInstrumentation(),
+    new IORedisInstrumentation({
+      // Redis keys include one-use Plaid capabilities; Lua and other command
+      // arguments can carry credentials or personal data. Record no arguments.
+      dbStatementSerializer: (commandName) => commandName,
+    }),
   ],
 })
 
@@ -243,6 +162,16 @@ class SpanProcessorWrapper extends SimpleSpanProcessor {
       }
     }
     super.onStart(span, parentContext)
+  }
+
+  onEnd(span: SdkSpan) {
+    // instrumentation-graphql 0.35.2 masks strings/numbers with allowValues
+    // false, but keeps comments and enum/name tokens in graphql.source.
+    // Do not export partially redacted query bodies from any GraphQL span.
+    delete span.attributes["graphql.source"]
+    sanitizeGraphQLSpanForExport(span)
+    sanitizeHTTPSpanForExport(span)
+    super.onEnd(span)
   }
 }
 
@@ -380,13 +309,11 @@ export const asyncRunInSpan = <F extends () => ReturnType<F>>(
 const resolveFunctionSpanOptions = ({
   namespace,
   functionName,
-  functionArgs,
   spanAttributes,
   root,
 }: {
   namespace: string
   functionName: string
-  functionArgs: Array<unknown>
   spanAttributes?: Attributes
   root?: boolean
 }): SpanOptions => {
@@ -395,20 +322,9 @@ const resolveFunctionSpanOptions = ({
     [SemanticAttributes.CODE_NAMESPACE]: namespace,
     ...spanAttributes,
   }
-  if (functionArgs && functionArgs.length > 0) {
-    const params =
-      typeof functionArgs[0] === "object" ? functionArgs[0] : { "0": functionArgs[0] }
-    for (const key in params) {
-      // @ts-ignore no-implicit-any error
-      const value = params[key]
-      attributes[`${SemanticAttributes.CODE_FUNCTION}.params.${key}`] =
-        value as AttributeValue
-      attributes[`${SemanticAttributes.CODE_FUNCTION}.params.${key}.null`] =
-        value === null
-      attributes[`${SemanticAttributes.CODE_FUNCTION}.params.${key}.undefined`] =
-        value === undefined
-    }
-  }
+  // Arguments can be long-lived passwords, bearer tokens, verification codes or banking PII.
+  // Never inspect or enumerate them for telemetry; call sites must supply
+  // deliberate, nonsecret spanAttributes independently of invocation inputs.
   return { attributes, root }
 }
 
@@ -435,7 +351,6 @@ export const wrapToRunInSpan = <
     const spanOptions = resolveFunctionSpanOptions({
       namespace,
       functionName,
-      functionArgs: args,
       spanAttributes,
       root,
     })
@@ -492,7 +407,6 @@ export const wrapAsyncToRunInSpan = <
     const spanOptions = resolveFunctionSpanOptions({
       namespace,
       functionName,
-      functionArgs: args,
       spanAttributes,
       root,
     })

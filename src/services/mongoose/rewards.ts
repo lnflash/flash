@@ -8,11 +8,12 @@ import { toObjectId } from "./utils"
 export const RewardsRepository = (accountId: AccountId) => {
   const add = async (quizQuestionId: QuizQuestionId) => {
     try {
-      // by default, mongodb return the previous state before the update
+      // The update and its preimage are atomic: only the first claimant sees
+      // the lesson absent. Replays must not append another completion marker.
       const oldState = await Account.findOneAndUpdate(
         { _id: toObjectId<AccountId>(accountId) },
-        { $push: { earn: quizQuestionId } },
-        // { upsert: true },
+        { $addToSet: { earn: quizQuestionId } },
+        { new: false },
       )
 
       if (!oldState) {

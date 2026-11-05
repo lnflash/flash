@@ -10,7 +10,6 @@ import { GetVerificationKey, expressjwt } from "express-jwt"
 import { GraphQLError, GraphQLSchema } from "graphql"
 import { rule } from "graphql-shield"
 import jsonwebtoken from "jsonwebtoken"
-import PinoHttp from "pino-http"
 
 import { mapError } from "@graphql/error-map"
 
@@ -26,10 +25,12 @@ import {
 } from "@domain/api-keys"
 import { parseUnknownDomainErrorFromUnknown } from "@domain/shared"
 
+import { createRequestLogger } from "./request-log"
+
 import { MAXIMUM_QUERY_COMPLEXITY, createComplexityPlugin } from "./plugins/complexity"
 
 import authRouter from "./authorization"
-import consentLogRouter, { redactConsentBodyForLog } from "./consent-log"
+import consentLogRouter from "./consent-log"
 import kratosCallback from "./event-handlers/kratos"
 import { apiKeyRateLimitMiddleware } from "./middlewares/api-key-rate-limit"
 import healthzHandler from "./middlewares/healthz"
@@ -153,59 +154,12 @@ export const startApolloServer = async ({
     }),
   )
 
-  app.use(
-    PinoHttp({
-      logger: graphqlLogger,
-      wrapSerializers: true,
-      customProps: (req, res) => {
-        /* eslint @typescript-eslint/ban-ts-comment: "off" */
-        // @ts-ignore-next-line no-implicit-any error
-        const account = req["gqlContext"]?.domainAccount
-        return {
-          // pino-http evaluates customProps again at response finish, after
-          // the consent router's express.json() has populated req.body — so
-          // the raw invite token would land in the access logs without this
-          // redaction. Guarded by tests in
-          // test/flash/unit/servers/consent-log.spec.ts.
-          // @ts-ignore-next-line no-implicit-any error
-          "body": redactConsentBodyForLog(res, req.body),
-          // @ts-ignore-next-line no-implicit-any error
-          "token.sub": req["token"]?.sub,
-          // @ts-ignore-next-line no-implicit-any error
-          "gqlContext.user": req["gqlContext"]?.user,
-          // @ts-ignore-next-line no-implicit-any error
-          "gqlContext.domainAccount:": {
-            id: account?.id,
-            createdAt: account?.createdAt,
-            defaultWalletId: account?.defaultWalletId,
-            level: account?.level,
-            status: account?.status,
-            displayCurrency: account?.displayCurrency,
-          },
-        }
-      },
-      autoLogging: {
-        ignore: (req) => req.url === "/healthz",
-      },
-      serializers: {
-        res: (res) => ({ statusCode: res.statusCode }),
-        req: (req) => ({
-          id: req.id,
-          method: req.method,
-          url: req.url,
-          remoteAddress: req.remoteAddress,
-          // headers: req.headers,
-        }),
-      },
-    }),
-  )
+  app.use(createRequestLogger(graphqlLogger))
 
   // Public consent-evidence intake from the getflash.io/invite page
   // (ENG-568). Anonymous callers, so it mounts only on the public server and
-  // BEFORE the JWT middleware below — but AFTER PinoHttp, so a public
-  // unauthenticated write path shows up in the access logs. The logged body
-  // for /consent requests is redacted (redactConsentBodyForLog above) so the
-  // raw invite token never reaches the logs.
+  // BEFORE the JWT middleware below — but AFTER the access logger, so this
+  // public write path records status/timing with no request body or token.
   if (type === "main") {
     app.use("/consent", consentLogRouter)
   }

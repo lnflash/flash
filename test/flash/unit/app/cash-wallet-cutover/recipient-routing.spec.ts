@@ -1,3 +1,13 @@
+// These fixtures already contain both cash wallets. Importing the real lock
+// adapter would open Redis even though no repair is expected by this contract.
+jest.mock("@services/lock", () => ({
+  LockService: () => ({
+    lockAccountId: jest.fn(() => {
+      throw new Error("Unexpected wallet repair")
+    }),
+  }),
+}))
+
 const mockGetConfig = jest.fn()
 
 jest.mock("@services/mongoose", () => ({

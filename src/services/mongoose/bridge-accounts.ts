@@ -4,6 +4,7 @@ import {
   BridgeTransferId,
 } from "@domain/primitives/bridge"
 import { RepositoryError } from "@domain/errors"
+import { BridgeWithdrawalCompletionProofRequiredError } from "@domain/bridge/withdrawal-outcome"
 
 import { BridgeVirtualAccount, BridgeExternalAccount, BridgeWithdrawal } from "./schema"
 
@@ -384,27 +385,131 @@ export const updateWithdrawalTransferId = async (
   }
 }
 
-export const updateWithdrawalOnchainSend = async (
+// This primary/majority read also quarantines historical rows whose prior
+// adapter error or process crash cannot prove that no debit occurred.
+export const findUnresolvedWithdrawalSendByAccountId = async (accountId: string) => {
+  try {
+    return await BridgeWithdrawal.findOne(
+      {
+        accountId: { $eq: accountId },
+        $or: [
+          { status: { $in: ["submitted", "send_unknown"] } },
+          { status: "send_failed", cryptoSendState: { $ne: "not_dispatched" } },
+          { status: "usdt_sent", $or: [{ ibexPayoutId: null }, { ibexPayoutId: "" }] },
+          {
+            cryptoSendAttemptId: { $exists: true },
+            status: { $nin: ["usdt_sent", "completed"] },
+          },
+        ],
+      },
+      undefined,
+      { readPreference: "primary", readConcern: { level: "majority" } },
+    )
+  } catch {
+    return new RepositoryError("Unable to verify unresolved withdrawal sends")
+  }
+}
+
+export const reserveWithdrawalCryptoSendAttempt = async (args: {
+  id: string
+  accountId: string
+  bridgeTransferId: string
+  attemptId: string
+  sourceWalletId: string
+  cryptoSendInfoId: string
+  amount: string
+}) => {
+  try {
+    // Fail closed if the required unique index cannot be created/verified.
+    const indexName = await BridgeWithdrawal.collection.createIndex(
+      { accountId: 1 },
+      {
+        unique: true,
+        name: "bridge_withdrawal_unresolved_send",
+        partialFilterExpression: { status: "send_unknown" },
+        commitQuorum: "majority",
+      },
+    )
+    if (indexName !== "bridge_withdrawal_unresolved_send")
+      return new RepositoryError("Withdrawal send fence index unavailable")
+    const record = await BridgeWithdrawal.findOneAndUpdate(
+      {
+        _id: { $eq: args.id },
+        accountId: { $eq: args.accountId },
+        bridgeTransferId: { $eq: args.bridgeTransferId },
+        status: "submitted",
+        ibexPayoutId: { $exists: false },
+        cryptoSendAttemptId: { $exists: false },
+        cryptoSendState: { $exists: false },
+      },
+      {
+        $set: {
+          status: "send_unknown",
+          cryptoSendState: "attempted",
+          cryptoSendAttemptId: args.attemptId,
+          cryptoSendAttemptedAt: new Date(),
+          cryptoSendSourceWalletId: args.sourceWalletId,
+          cryptoSendInfoId: args.cryptoSendInfoId,
+          cryptoSendAmount: args.amount,
+          updatedAt: new Date(),
+        },
+      },
+      { new: true, writeConcern: { w: "majority", j: true } },
+    )
+    return record || new RepositoryError("Withdrawal send attempt is already reserved")
+  } catch {
+    return new RepositoryError("Unable to reserve withdrawal send attempt")
+  }
+}
+
+export const recordWithdrawalCryptoSendReceipt = async (
   id: string,
-  ibexPayoutId: string | undefined,
-  ibexTxHash?: string,
+  ibexPayoutId: string,
+  ibexTxHash: string | undefined,
+  attemptId: string,
 ) => {
+  if (!ibexPayoutId || !attemptId)
+    return new RepositoryError("Missing withdrawal send receipt")
   try {
     const update: Record<string, unknown> = {
-      status: "usdt_sent",
+      // Receipt of a provider ID is not proof that the send settled.
+      status: "send_unknown",
       updatedAt: new Date(),
     }
     if (ibexPayoutId) update.ibexPayoutId = ibexPayoutId
     if (ibexTxHash) update.ibexTxHash = ibexTxHash
 
     const record = await BridgeWithdrawal.findOneAndUpdate(
-      { _id: { $eq: id }, status: "submitted", ibexPayoutId: { $exists: false } },
+      {
+        _id: { $eq: id },
+        status: "send_unknown",
+        cryptoSendState: "attempted",
+        cryptoSendAttemptId: { $eq: attemptId },
+        ibexPayoutId: { $exists: false },
+      },
       update,
       { new: true },
     )
-    return record || new RepositoryError("Withdrawal not found or already sent")
-  } catch (error) {
-    return new RepositoryError(String(error))
+    return (
+      record ||
+      new RepositoryError("Withdrawal send receipt unavailable or already recorded")
+    )
+  } catch {
+    return new RepositoryError("Unable to record withdrawal send receipt")
+  }
+}
+
+export const noteWithdrawalCryptoSendReviewed = async (id: string) => {
+  try {
+    await BridgeWithdrawal.updateOne(
+      {
+        _id: { $eq: id },
+        status: { $in: ["submitted", "send_unknown", "send_failed", "usdt_sent"] },
+      },
+      { $set: { cryptoSendReviewedAt: new Date() } },
+    )
+  } catch {
+    return new RepositoryError("Unable to record withdrawal review progress")
   }
 }
 
@@ -418,13 +523,20 @@ export const updateWithdrawalSendFailed = async (
 ) => {
   try {
     const record = await BridgeWithdrawal.findOneAndUpdate(
-      { _id: { $eq: id }, status: "submitted", ibexPayoutId: { $exists: false } },
+      {
+        _id: { $eq: id },
+        status: "submitted",
+        ibexPayoutId: { $exists: false },
+        cryptoSendAttemptId: { $exists: false },
+        cryptoSendState: { $exists: false },
+      },
       {
         bridgeTransferId,
         amount,
         currency,
         bridgeDepositAddress,
         status: "send_failed",
+        cryptoSendState: "not_dispatched",
         failureReason: truncateBridgeFailureReason(failureReason),
         updatedAt: new Date(),
       },
@@ -451,6 +563,7 @@ export const updateWithdrawalStatus = async (
   bridgeTransferId: BridgeTransferId,
   status: "pending" | "completed" | "failed",
   failureReason?: string,
+  completionProof?: "payment_processed",
 ) => {
   try {
     const truncatedReason = truncateBridgeFailureReason(failureReason)
@@ -462,7 +575,12 @@ export const updateWithdrawalStatus = async (
     const record = await BridgeWithdrawal.findOneAndUpdate(
       {
         bridgeTransferId: { $eq: bridgeTransferId },
-        status: { $in: ["submitted", "usdt_sent"] },
+        status: {
+          $in:
+            status === "completed" && completionProof === "payment_processed"
+              ? ["submitted", "usdt_sent", "send_unknown", "send_failed"]
+              : ["submitted", "usdt_sent"],
+        },
       },
       update,
       { new: true },
@@ -476,6 +594,13 @@ export const updateWithdrawalStatus = async (
 
     // Idempotent: duplicate webhook after we already reached this terminal status.
     if (existing.status === status) return existing
+    if (
+      status === "completed" &&
+      completionProof !== "payment_processed" &&
+      (existing.status === "send_unknown" || existing.status === "send_failed")
+    ) {
+      return new BridgeWithdrawalCompletionProofRequiredError()
+    }
 
     return new RepositoryError(
       `Withdrawal already ${existing.status}, cannot transition to ${status}`,

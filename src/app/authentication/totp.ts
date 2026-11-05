@@ -8,12 +8,17 @@ import {
 } from "@services/kratos"
 
 import { UsersRepository } from "@services/mongoose"
+import { authorizeTotpEnrollment } from "@services/kratos/totp-enrollment-policy"
 
 export const initiateTotpRegistration = async ({
   authToken,
+  userId,
 }: {
   authToken: AuthToken
-}): Promise<InitiateTotpRegistrationResult | KratosError> => {
+  userId: UserId
+}): Promise<InitiateTotpRegistrationResult | ApplicationError> => {
+  const allowed = await authorizeTotpEnrollment({ authToken, userId })
+  if (allowed instanceof Error) return allowed
   return kratosInitiateTotp(authToken)
 }
 
@@ -28,6 +33,9 @@ export const validateTotpRegistration = async ({
   totpRegistrationId: TotpRegistrationId
   userId: UserId
 }): Promise<User | ApplicationError> => {
+  // Check before the settings mutation, including for previously issued flows.
+  const allowed = await authorizeTotpEnrollment({ authToken, userId })
+  if (allowed instanceof Error) return allowed
   const validation = await kratosValidateTotp({ authToken, totpCode, totpRegistrationId })
   if (validation instanceof Error) return validation
 

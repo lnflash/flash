@@ -31,26 +31,38 @@ export const validatePreRegistrationPayload = async ({
   }
 }): Promise<true | ApplicationError> => {
   addAttributesToCurrentSpan({
-    "preregistration.schema_id": body.schema_id,
+    "preregistration.schema_id": SchemaIdType.PhoneNoPasswordV0,
+    "preregistration.outcome": "received",
   })
 
   const isValidKey = CallbackSecretValidator(KRATOS_CALLBACK_API_KEY).authorize(secret)
   if (isValidKey instanceof Error) {
+    addAttributesToCurrentSpan({ "preregistration.outcome": "callback_rejected" })
     return isValidKey
   }
 
   const payload = PreRegistrationPayloadValidator(
     SchemaIdType.PhoneNoPasswordV0,
   ).validate(body)
-  if (payload instanceof Error) return payload
+  if (payload instanceof Error) {
+    addAttributesToCurrentSpan({ "preregistration.outcome": "invalid_payload" })
+    return payload
+  }
 
   // The post-persist hook upserts the users document by phone, which has a
   // unique index. A document already holding this phone is exactly the
   // DuplicateKeyForPersistError that used to strand the identity; reject it
   // here while nothing has been committed.
   const existing = await UsersRepository().findByPhone(payload.phone)
-  if (existing instanceof CouldNotFindUserFromPhoneError) return true
-  if (existing instanceof Error) return existing
+  if (existing instanceof CouldNotFindUserFromPhoneError) {
+    addAttributesToCurrentSpan({ "preregistration.outcome": "eligible" })
+    return true
+  }
+  if (existing instanceof Error) {
+    addAttributesToCurrentSpan({ "preregistration.outcome": "lookup_failed" })
+    return existing
+  }
 
+  addAttributesToCurrentSpan({ "preregistration.outcome": "phone_registered" })
   return new PhoneAlreadyRegisteredError()
 }

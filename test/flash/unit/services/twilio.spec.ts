@@ -7,6 +7,8 @@
  */
 const verificationsCreate = jest.fn()
 const verificationChecksCreate = jest.fn()
+const lookupPhoneNumbers = jest.fn()
+const lookupFetch = jest.fn()
 
 jest.mock("twilio", () =>
   jest.fn(() => ({
@@ -18,7 +20,7 @@ jest.mock("twilio", () =>
         })),
       },
     },
-    lookups: { v1: { phoneNumbers: jest.fn() } },
+    lookups: { v1: { phoneNumbers: lookupPhoneNumbers } },
   })),
 )
 
@@ -46,8 +48,10 @@ import {
   VERIFY_GLOBAL_SEND_CAP_VALUE,
 } from "@services/twilio"
 import {
+  PhoneCodeInvalidError,
   PhoneProviderRateLimitExceededError,
   RestrictedRegionPhoneProviderError,
+  UnknownPhoneProviderServiceError,
 } from "@domain/phone-provider"
 
 const phone = "+18765550100" as PhoneNumber
@@ -60,8 +64,13 @@ const rateLimitRejection = () =>
 describe("TwilioClient.initiateVerify", () => {
   beforeEach(() => {
     verificationsCreate.mockReset()
+    verificationChecksCreate.mockReset()
+    lookupPhoneNumbers.mockReset()
+    lookupFetch.mockReset()
+    lookupPhoneNumbers.mockReturnValue({ fetch: lookupFetch })
     mockedLogger.warn.mockReset()
     mockedLogger.error.mockReset()
+    jest.mocked(baseLogger.info).mockReset()
   })
 
   it.each(["sms", "whatsapp"] as ChannelType[])(
@@ -86,19 +95,14 @@ describe("TwilioClient.initiateVerify", () => {
     expect(VERIFY_GLOBAL_SEND_CAP_VALUE).toBe("all")
   })
 
-  it("maps an exhausted bucket (HTTP 429 / 60203) to the rate-limit error and warns with a masked number", async () => {
+  it("maps an exhausted bucket (HTTP 429 / 60203) to the rate-limit error without logging the number", async () => {
     verificationsCreate.mockRejectedValue(rateLimitRejection())
 
     const result = await TwilioClient().initiateVerify({ to: phone, channel: "sms" })
 
     expect(result).toBeInstanceOf(PhoneProviderRateLimitExceededError)
     expect(mockedLogger.warn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        to: "+1876…00",
-        channel: "sms",
-        twilioStatus: 429,
-        twilioCode: 60203,
-      }),
+      { operation: "twilio_verify_send", outcome: "rate_limited", channel: "sms" },
       "verify send rejected with HTTP 429 (rate limit, cause unconfirmed — not necessarily the global send cap)",
     )
     expect(mockedLogger.error).not.toHaveBeenCalled()
@@ -151,14 +155,11 @@ describe("TwilioClient.initiateVerify", () => {
     expect(result).toBeInstanceOf(PhoneProviderRateLimitExceededError)
     expect(mockedLogger.warn).toHaveBeenCalledTimes(1)
     const [fields, message] = mockedLogger.warn.mock.calls[0]
-    expect(fields).toEqual(
-      expect.objectContaining({
-        to: "+1876…00",
-        channel: "sms",
-        twilioStatus: 429,
-        twilioCode: 20429,
-      }),
-    )
+    expect(fields).toEqual({
+      operation: "twilio_verify_send",
+      outcome: "rate_limited",
+      channel: "sms",
+    })
     expect(fields).not.toHaveProperty("rateLimitKey")
     expect(message).not.toBe("verify send rejected by twilio rate limit")
     expect(mockedLogger.error).not.toHaveBeenCalled()
@@ -178,11 +179,78 @@ describe("TwilioClient.initiateVerify", () => {
 
     expect(result).toBeInstanceOf(RestrictedRegionPhoneProviderError)
     expect(mockedLogger.error).toHaveBeenCalledWith(
-      expect.objectContaining({ err: expect.any(Error) }),
-      "impossible to send text",
+      { operation: "twilio_verify_send", outcome: "failed" },
+      "Unable to send verification code",
     )
     expect(
       KnownTwilioErrorMessages.RateLimitsExceeded.test("Max send attempts reached"),
     ).toBe(true)
+  })
+
+  it("classifies a private Verify send error without returning or logging provider text", async () => {
+    const privateError = `The destination phone number has been blocked by Verify Geo-Permissions. SN is blocked for sms channel for all services; ${phone}`
+    verificationsCreate.mockRejectedValue(new Error(privateError))
+
+    const result = await TwilioClient().initiateVerify({ to: phone, channel: "sms" })
+
+    expect(result).toBeInstanceOf(RestrictedRegionPhoneProviderError)
+    expect((result as Error).message).toBe("Phone region is restricted")
+    expect(JSON.stringify(mockedLogger.error.mock.calls)).not.toContain(phone)
+    expect(JSON.stringify(result)).not.toContain(phone)
+  })
+
+  it("classifies a private Verify check error without returning or logging the code", async () => {
+    const privateCode = "private-otp-602123"
+    verificationChecksCreate.mockRejectedValue(
+      new Error(`Invalid parameter: Code ${privateCode} for ${phone}`),
+    )
+
+    const result = await TwilioClient().validateVerify({
+      to: phone,
+      code: privateCode as PhoneCode,
+    })
+
+    expect(verificationChecksCreate).toHaveBeenCalledWith({
+      to: phone,
+      code: privateCode,
+    })
+    expect(result).toBeInstanceOf(PhoneCodeInvalidError)
+    expect((result as Error).message).toBe("Invalid verification code")
+    const diagnostics = JSON.stringify({ result, logs: mockedLogger.error.mock.calls })
+    expect(diagnostics).not.toContain(privateCode)
+    expect(diagnostics).not.toContain(phone)
+  })
+
+  it("returns the exact carrier metadata without logging it or a raw lookup failure", async () => {
+    const privateCarrier = "Private Carrier Account"
+    const metadata = {
+      countryCode: "JM",
+      phoneNumber: phone,
+      nationalFormat: "PRIVATE_NATIONAL_FORMAT",
+      carrier: {
+        error_code: null,
+        mobile_country_code: "338",
+        mobile_network_code: "050",
+        name: privateCarrier,
+        type: "mobile",
+      },
+    }
+    lookupFetch.mockResolvedValueOnce(metadata)
+    expect(await TwilioClient().getCarrier(phone)).toEqual({
+      carrier: metadata.carrier,
+      countryCode: "JM",
+    })
+    expect(lookupPhoneNumbers).toHaveBeenCalledWith(phone)
+    expect(lookupFetch).toHaveBeenCalledWith({ type: ["carrier"] })
+    expect(JSON.stringify(jest.mocked(baseLogger.info).mock.calls)).not.toContain(phone)
+    expect(JSON.stringify(jest.mocked(baseLogger.info).mock.calls)).not.toContain(
+      privateCarrier,
+    )
+
+    lookupFetch.mockRejectedValueOnce(new Error(`PRIVATE_PROVIDER_ERROR ${phone}`))
+    const failure = await TwilioClient().getCarrier(phone)
+    expect(failure).toBeInstanceOf(UnknownPhoneProviderServiceError)
+    expect((failure as Error).message).toBe("Carrier lookup failed")
+    expect(JSON.stringify(failure)).not.toContain(phone)
   })
 })

@@ -31,6 +31,7 @@ import { TransactionConnection } from "../../../shared/types/object/transaction"
 
 import RealtimePrice from "./realtime-price"
 import { NotificationSettings } from "./notification-settings"
+import { exportOwnedAccountCSV } from "./csv-transactions"
 
 const BusinessAccount = GT.Object<Account, GraphQLPublicContextAuth>({
   name: "BusinessAccount",
@@ -131,9 +132,8 @@ const BusinessAccount = GT.Object<Account, GraphQLPublicContextAuth>({
           type: GT.NonNullList(WalletId),
         },
       },
-      resolve: async (source) => {
-        return Accounts.getCSVForAccount(source.id)
-      },
+      resolve: async (source, { walletIds }, context) =>
+        exportOwnedAccountCSV(source, walletIds, context),
     },
     transactions: {
       description:

@@ -95,8 +95,6 @@ const notifyOwner = async (
       currency: "USD",
       walletId: execution.walletId,
     },
-    logMessage: `Failed to send payment split ${outcome} push notification`,
-    logContext: { executionId: execution.id, walletId: execution.walletId },
   })
 
 /**

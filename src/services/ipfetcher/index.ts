@@ -41,11 +41,14 @@ export const IpFetcher = (): IIpFetcherService => {
       const proxy = !!(data[ip] && data[ip].proxy && data[ip].proxy === "yes")
       const isoCode = data[ip] && data[ip].isocode
 
-      addAttributesToCurrentSpan({ proxy, isoCode, keyIsPresent })
+      // Provider metadata is untrusted and may contain the queried IP or
+      // arbitrary text. Only closed booleans belong in an exported span.
+      addAttributesToCurrentSpan({ proxy, keyIsPresent })
       return { ...data[ip], isoCode, proxy, status: data.status }
-    } catch (error) {
-      recordExceptionInCurrentSpan({ error, attributes: { ip, keyIsPresent } })
-      return new UnknownIpFetcherServiceError(error)
+    } catch {
+      const failure = new UnknownIpFetcherServiceError("IP metadata lookup failed")
+      recordExceptionInCurrentSpan({ error: failure, attributes: { keyIsPresent } })
+      return failure
     }
   }
   return {

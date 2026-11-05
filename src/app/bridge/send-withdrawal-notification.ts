@@ -114,8 +114,8 @@ export const sendBridgeWithdrawalNotificationBestEffort = async (
 
   if (result instanceof Error) {
     baseLogger.warn(
-      { accountId: args.accountId, outcome: args.outcome, error: result },
-      "Failed to send Bridge withdrawal push notification",
+      { operation: "send_bridge_withdrawal_push", outcome: "failed" },
+      "Unable to send Bridge withdrawal push",
     )
   }
 }
