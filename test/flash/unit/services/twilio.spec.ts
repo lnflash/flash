@@ -49,6 +49,7 @@ import {
   InvalidOrApprovedVerificationError,
   PhoneCodeInvalidError,
   PhoneProviderRateLimitExceededError,
+  PhoneProviderUnavailableError,
   RestrictedRegionPhoneProviderError,
   UnknownPhoneProviderServiceError,
 } from "@domain/phone-provider"
@@ -268,7 +269,7 @@ describe("TwilioClient.validateVerify", () => {
 
     const result = await TwilioClient().validateVerify({ to: phone, code })
 
-    expect(result).not.toBeInstanceOf(InvalidOrApprovedVerificationError)
+    expect(result).toBeInstanceOf(PhoneProviderUnavailableError)
     expect(mockedLogger.error).toHaveBeenCalledWith(
       expect.objectContaining({ err: expect.any(Error) }),
       "impossible to verify phone and code",

@@ -379,10 +379,6 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = "Invalid or incorrect code entered."
       return new VerificationCodeError({ message, logger: baseLogger })
 
-    case "ExpiredOrNonExistentPhoneNumberError":
-      message = "Invalid or incorrect phone entered."
-      return new VerificationCodeError({ message, logger: baseLogger })
-
     case "CouldNotFindAccountFromPhoneError":
       message = "Invalid or incorrect phone entered."
       return new VerificationCodeError({ message, logger: baseLogger })
