@@ -100,6 +100,9 @@ jest.mock("@domain/bitcoin/lightning", () => {
 })
 
 import CashoutManager from "@app/offers/CashoutManager"
+import { AccountCashoutHeldError } from "@domain/accounts"
+import { UnknownRepositoryError } from "@domain/errors"
+import { notifyOpsEvent } from "@services/alerts/ops-events"
 import { OfferAlreadyExecuted, UnknownCacheServiceError } from "@domain/cache"
 import { USDAmount, ValidationError } from "@domain/shared"
 
@@ -322,6 +325,88 @@ describe("CashoutManager authorization", () => {
       expect(result).toBeInstanceOf(ValidationError)
       expect(mockStorageConsume).not.toHaveBeenCalled()
       expect(mockExecute).not.toHaveBeenCalled()
+    })
+  })
+
+  // ENG-889: a hold placed when Bridge restricts or offboards the customer.
+  describe("cash-out hold", () => {
+    const heldAccount = {
+      id: callerAccountId,
+      erpParty: "party-1",
+      cashoutHold: {
+        reason: "Bridge customer cust_1 went from active to offboarded",
+        source: "bridge-customer-status",
+        setAt: new Date(),
+      },
+    }
+
+    it("refuses to create an offer, before any invoice is made", async () => {
+      mockFindAccountById.mockResolvedValue(heldAccount)
+
+      const result = await CashoutManager.createOffer(
+        walletId,
+        amount,
+        "bank-1",
+        callerAccountId,
+      )
+
+      expect(result).toBeInstanceOf(AccountCashoutHeldError)
+      expect((result as Error).message).toBe(
+        "Cash out is unavailable for this account. Please contact support.",
+      )
+      expect(mockAddInvoice).not.toHaveBeenCalled()
+      expect(mockStorageAdd).not.toHaveBeenCalled()
+    })
+
+    it("refuses to execute an offer made before the hold, without consuming it", async () => {
+      mockFindAccountById.mockResolvedValue(heldAccount)
+
+      const result = await CashoutManager.executeCashout(
+        offerId,
+        walletId,
+        callerAccountId,
+      )
+
+      expect(result).toBeInstanceOf(AccountCashoutHeldError)
+      expect(mockFindAccountById).toHaveBeenCalledWith(callerAccountId)
+      expect(mockValidOfferFrom).not.toHaveBeenCalled()
+      expect(mockStorageConsume).not.toHaveBeenCalled()
+      expect(notifyOpsEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          flow: "cashout",
+          phase: "refused",
+          step: "cashout-hold",
+        }),
+      )
+      expect(notifyOpsEvent).not.toHaveBeenCalledWith(
+        expect.objectContaining({ phase: "initiated" }),
+      )
+    })
+
+    it("refuses to execute when the account cannot be read (fail closed)", async () => {
+      mockFindAccountById.mockResolvedValue(new UnknownRepositoryError("down"))
+
+      const result = await CashoutManager.executeCashout(
+        offerId,
+        walletId,
+        callerAccountId,
+      )
+
+      expect(result).toBeInstanceOf(Error)
+      expect(mockStorageConsume).not.toHaveBeenCalled()
+    })
+
+    it("executes once the hold is released", async () => {
+      mockFindAccountById.mockResolvedValue({ ...heldAccount, cashoutHold: undefined })
+
+      const result = await CashoutManager.executeCashout(
+        offerId,
+        walletId,
+        callerAccountId,
+      )
+
+      expect(result).not.toBeInstanceOf(Error)
+      expect(mockStorageConsume).toHaveBeenCalledTimes(1)
     })
   })
 })

@@ -117,6 +117,31 @@ type Account = {
     | "rejected"
     | "offboarded"
   bridgeEthereumAddress?: string
+  // ENG-889: set while cash-outs are held for this account (see
+  // AccountCashoutHold). Absent means cash-outs are allowed.
+  cashoutHold?: AccountCashoutHold
+}
+
+// A per-account block on cash-outs. The reason and source are for ops only and
+// never reach the account holder.
+type AccountCashoutHold = {
+  reason: string
+  // What placed it, e.g. "bridge-customer-status".
+  source: string
+  setAt: Date
+  // Absent when a system job placed it.
+  setByUserId?: UserId
+}
+
+type CashoutHoldPlaced = {
+  // False when the account already had a hold; the existing one is kept.
+  placed: boolean
+  account: Account
+}
+
+type CashoutHoldReleased = {
+  account: Account
+  previousHold: AccountCashoutHold
 }
 
 // deprecated
@@ -258,6 +283,18 @@ interface IAccountsRepository {
   findByBridgeEthereumAddress(address: string): Promise<Account | RepositoryError>
 
   findByBridgeCustomerId(customerId: BridgeCustomerId): Promise<Account | RepositoryError>
+
+  // Sets a cash-out hold unless one is already there (never overwrites it).
+  placeCashoutHold(
+    id: AccountId,
+    hold: AccountCashoutHold,
+  ): Promise<CashoutHoldPlaced | RepositoryError>
+  // Removes the hold and records who released it. NoCashoutHoldToReleaseError
+  // when the account has none.
+  releaseCashoutHold(
+    id: AccountId,
+    release: { releasedByUserId: UserId; comment?: string },
+  ): Promise<CashoutHoldReleased | RepositoryError>
 
   findByRole(role: string): Promise<Account | RepositoryError>
 }

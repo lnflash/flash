@@ -43,7 +43,10 @@ jest.mock("@services/frappe/ErpNext", () => ({
 }))
 
 jest.mock("@services/mongoose", () => ({
-  AccountsRepository: jest.fn(() => ({})),
+  // executeCashout reads the account for a cash-out hold (ENG-889).
+  AccountsRepository: jest.fn(() => ({
+    findById: (id: string) => Promise.resolve({ id }),
+  })),
   WalletsRepository: jest.fn(() => ({
     findById: (...args: unknown[]) => mockFindWalletById(...args),
   })),

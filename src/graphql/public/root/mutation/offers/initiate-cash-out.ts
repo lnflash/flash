@@ -1,5 +1,6 @@
 import CashoutManager from "@app/offers/CashoutManager"
 import { Cashout } from "@config"
+import { AccountCashoutHeldError } from "@domain/accounts"
 import { OfferAlreadyExecuted } from "@domain/cache"
 import { NotImplementedError } from "@domain/errors"
 import { ErrorLevel } from "@domain/shared"
@@ -59,7 +60,8 @@ const InitiateCashoutMutation = GT.Field({
     // Expected, not a fault: this offer was already executed, by an earlier
     // call or a concurrent duplicate. Return the typed code so the client can
     // ask for a new offer, and keep it out of the Critical exception stream.
-    if (offer instanceof OfferAlreadyExecuted)
+    // Refusals the user can act on come back as errors, not as a server fault.
+    if (offer instanceof OfferAlreadyExecuted || offer instanceof AccountCashoutHeldError)
       return { errors: mapToGqlErrorList(offer), id: null }
     if (offer instanceof Error) {
       recordExceptionInCurrentSpan({

@@ -220,8 +220,10 @@ describe("CashoutManager.executeCashout with risk signals (ENG-889)", () => {
 
   it("pays out when the account lookup for the risk read fails", async () => {
     mockFindAccountById.mockReset()
-    // The risk read's lookup fails; ValidOffer.from's lookup succeeds.
+    // The cash-out hold check reads the account first (ENG-889); then the risk
+    // read's lookup fails; ValidOffer.from's lookup succeeds.
     mockFindAccountById
+      .mockResolvedValueOnce({ id: accountId, erpParty: "Taedo Biggs" })
       .mockRejectedValueOnce(new Error("mongo blip"))
       .mockResolvedValue({ id: accountId, erpParty: "Taedo Biggs" })
 

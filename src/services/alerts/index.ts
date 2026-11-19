@@ -27,7 +27,7 @@ export const flushAlerts = async (): Promise<void> => {
  *
  * Routing:
  *   - critical: page on-call (PagerDuty) + inform (Slack/Mattermost, Discord)
- *   - warning: inform (Slack/Mattermost, Discord) only
+ *   - warning, info: inform (Slack/Mattermost, Discord) only
  *
  * Dedup:
  *   - PagerDuty: Events API v2 dedup_key groups triggers into one incident.

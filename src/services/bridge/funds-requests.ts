@@ -34,6 +34,7 @@ import {
 
 import BridgeApiClient, { FundsRequest } from "./client"
 import { RECALL_NOTE_PREFIX } from "./deposit-states"
+import { isBridgeNotAllowedError } from "./errors"
 
 const logger = baseLogger.child({ module: "bridge-funds-requests" })
 
@@ -65,6 +66,10 @@ export type FundsRequestWatchSummary = {
   erpnextRecorded: number
   failures: number
   pollFailed: boolean
+  // Bridge refused GET /funds_requests for this API key (401 not_allowed), so
+  // recalls were not watched this run. Not a failure: Bridge has declined to
+  // grant the permission. If it ever does, the next run polls as normal.
+  notPermitted: boolean
 }
 
 export const fundsRequestLockComment = (fr: Pick<FundsRequest, "id" | "deposit_id">) =>
@@ -382,13 +387,21 @@ export const watchBridgeFundsRequests = async ({
     erpnextRecorded: 0,
     failures: 0,
     pollFailed: false,
+    notPermitted: false,
   }
 
   const fundsRequests = await fetchRecentFundsRequests(now)
+  if (isBridgeNotAllowedError(fundsRequests)) {
+    logger.warn(
+      { status: fundsRequests.statusCode, code: fundsRequests.code },
+      "Bridge funds requests not permitted for this API key; recall watch skipped",
+    )
+    return { ...summary, notPermitted: true }
+  }
   if (fundsRequests instanceof Error) {
     // Bridge outages (5xx, timeouts) already page from the client. This one is
-    // for the rest, e.g. an API key without access to funds requests: recalls
-    // go unseen until it is fixed.
+    // for the rest (other 4xx, a revoked key): recalls go unseen until it is
+    // fixed. A key that simply lacks the permission is handled above.
     logger.error({ error: fundsRequests }, "Bridge funds request poll failed")
     alertBridge({
       dedupKey: generateDedupKey.bridgeFundsRequestPollFailed(),

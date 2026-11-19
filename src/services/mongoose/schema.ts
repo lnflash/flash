@@ -379,6 +379,39 @@ const AccountSchema = new Schema<AccountRecord>(
       type: String,
       required: false,
     },
+
+    // ENG-889: while set, CashoutManager refuses to create or execute a cash-out
+    // offer for this account. Placed by the Bridge customer status watcher when
+    // Bridge restricts or offboards the customer; only ops release it (admin
+    // accountReleaseCashoutHold). Absent means no hold.
+    cashoutHold: {
+      type: new Schema(
+        {
+          reason: { type: String, required: true },
+          source: { type: String, required: true },
+          setAt: { type: Date, required: true },
+          setByUserId: { type: String, required: false },
+        },
+        { _id: false },
+      ),
+      required: false,
+    },
+    // Every hold placed or released on the account, oldest first, so ops can
+    // see who released one and why after the hold itself is gone.
+    cashoutHoldHistory: {
+      type: [
+        {
+          _id: false,
+          action: { type: String, enum: ["placed", "released"], required: true },
+          at: { type: Date, required: true },
+          reason: { type: String, required: false },
+          source: { type: String, required: false },
+          byUserId: { type: String, required: false },
+          comment: { type: String, required: false },
+        },
+      ],
+      default: undefined,
+    },
   },
   { id: false },
 )
@@ -931,6 +964,27 @@ BridgeFundsRequestSchema.index({ depositId: 1 })
 export const BridgeFundsRequest = mongoose.model(
   "BridgeFundsRequest",
   BridgeFundsRequestSchema,
+)
+
+// ENG-889: the last Bridge customer status the hourly watcher saw, one record
+// per Bridge customer. A change against this record is what the watcher alerts
+// on (and, into deposits_restricted or offboarded, holds cash-outs for). The
+// first run fills it without alerting.
+const BridgeCustomerStatusSchema = new Schema({
+  customerId: { type: String, required: true, unique: true },
+  status: { type: String, required: true },
+  previousStatus: { type: String },
+  accountId: { type: String },
+  firstSeenAt: { type: Date, default: Date.now },
+  statusChangedAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now },
+})
+
+BridgeCustomerStatusSchema.index({ status: 1 })
+
+export const BridgeCustomerStatus = mongoose.model(
+  "BridgeCustomerStatus",
+  BridgeCustomerStatusSchema,
 )
 
 // ENG-653: Flash-native payment splits. One rule = "pay `percent` of every

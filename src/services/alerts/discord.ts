@@ -12,9 +12,11 @@ import {
   truncate,
 } from "./discord-embed"
 
-// Warm red for a page, amber for a warning — the embed's left border colour.
+// Warm red for a page, amber for a warning, blue for info: the embed's left
+// border colour.
 const COLOR_CRITICAL = 0xe01e5a
 const COLOR_WARNING = 0xf2c744
+const COLOR_INFO = 0x3498db
 
 // Friendly label for the embed author line, so a Fygaro alert doesn't read as a
 // "Bridge alert". Falls back to the raw source for anything unmapped.
@@ -70,7 +72,12 @@ export const sendDiscord = async (alert: BridgeAlert): Promise<void> => {
     author: { name: `${SOURCE_LABEL[alert.source] ?? alert.source} · ${envTag()}` },
     title: truncate(`${envTagPrefix()} ${alert.title}`, MAX_TITLE),
     description: alert.detail ? truncate(alert.detail, MAX_DESCRIPTION) : undefined,
-    color: alert.severity === "critical" ? COLOR_CRITICAL : COLOR_WARNING,
+    color:
+      alert.severity === "critical"
+        ? COLOR_CRITICAL
+        : alert.severity === "info"
+          ? COLOR_INFO
+          : COLOR_WARNING,
     // Field count is capped centrally by clampEmbedToBudget (applied in
     // postEmbed), so no per-caller slice is needed here.
     fields,

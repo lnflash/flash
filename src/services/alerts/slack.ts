@@ -10,7 +10,12 @@ import { envSummary, envTagPrefix } from "./env-label"
 export const sendSlack = async (alert: BridgeAlert): Promise<void> => {
   if (!ALERT_SLACK_WEBHOOK_URL) return
 
-  const icon = alert.severity === "critical" ? ":rotating_light:" : ":warning:"
+  const icon =
+    alert.severity === "critical"
+      ? ":rotating_light:"
+      : alert.severity === "info"
+        ? ":information_source:"
+        : ":warning:"
   const lines = [
     `${icon} *${envTagPrefix()} Bridge alert* - ${alert.title}`,
     `*env:* \`${envSummary()}\`  *source:* \`${alert.source}\`  *severity:* \`${alert.severity}\``,

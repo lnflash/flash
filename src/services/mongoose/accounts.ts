@@ -8,6 +8,7 @@ import {
   CouldNotFindAccountFromNpubError,
   CouldNotFindAccountFromUsernameError,
   CouldNotFindAccountFromUuidError,
+  NoCashoutHoldToReleaseError,
   NoNpubToReleaseError,
   RepositoryError,
 } from "@domain/errors"
@@ -372,6 +373,79 @@ export const AccountsRepository = (): IAccountsRepository => {
     }
   }
 
+  // ENG-889. Conditional on there being no hold, so a hold already on the
+  // account (placed by ops or an earlier run) is never overwritten and a
+  // retried run does not stack history entries. `$eq: null` matches both a
+  // missing field and an explicit null.
+  const placeCashoutHold = async (
+    id: AccountId,
+    hold: AccountCashoutHold,
+  ): Promise<CashoutHoldPlaced | RepositoryError> => {
+    try {
+      const result = await Account.findOneAndUpdate(
+        { _id: toObjectId<AccountId>(id), cashoutHold: { $eq: null } },
+        {
+          $set: { cashoutHold: hold },
+          $push: {
+            cashoutHoldHistory: {
+              action: "placed",
+              at: hold.setAt,
+              reason: hold.reason,
+              source: hold.source,
+              byUserId: hold.setByUserId,
+            },
+          },
+        },
+        { new: true },
+      )
+      if (result) return { placed: true, account: translateToAccount(result) }
+
+      const existing = await Account.findOne({ _id: toObjectId<AccountId>(id) })
+      if (!existing) return new CouldNotFindAccountFromIdError(id)
+      return { placed: false, account: translateToAccount(existing) }
+    } catch (err) {
+      return parseRepositoryError(err)
+    }
+  }
+
+  // ENG-889. `new: false` returns the hold that was removed, so the caller
+  // can report what it released. A no-match is "no such account" or "no hold";
+  // one follow-up read tells them apart.
+  const releaseCashoutHold = async (
+    id: AccountId,
+    { releasedByUserId, comment }: { releasedByUserId: UserId; comment?: string },
+  ): Promise<CashoutHoldReleased | RepositoryError> => {
+    try {
+      const before = await Account.findOneAndUpdate(
+        { _id: toObjectId<AccountId>(id), cashoutHold: { $ne: null } },
+        {
+          $unset: { cashoutHold: "" },
+          $push: {
+            cashoutHoldHistory: {
+              action: "released",
+              at: new Date(),
+              byUserId: releasedByUserId,
+              comment,
+            },
+          },
+        },
+        { new: false },
+      )
+      if (!before) {
+        const exists = await Account.exists({ _id: toObjectId<AccountId>(id) })
+        if (!exists) return new CouldNotFindAccountFromIdError(id)
+        return new NoCashoutHoldToReleaseError(id)
+      }
+      const account = translateToAccount(before)
+      return {
+        account: { ...account, cashoutHold: undefined },
+        previousHold: account.cashoutHold as AccountCashoutHold,
+      }
+    } catch (err) {
+      return parseRepositoryError(err)
+    }
+  }
+
   // Resolve a singleton internal account by its role (e.g. "rewards", the
   // funding account for referral reward payouts).
   const findByRole = async (role: string): Promise<Account | RepositoryError> => {
@@ -399,6 +473,8 @@ export const AccountsRepository = (): IAccountsRepository => {
     updateBridgeFields,
     findByBridgeEthereumAddress,
     findByBridgeCustomerId,
+    placeCashoutHold,
+    releaseCashoutHold,
     findByRole,
   }
 }
@@ -466,4 +542,12 @@ const translateToAccount = (result: AccountRecord): Account => ({
     ? "open"
     : result.bridgeKycStatus) as Account["bridgeKycStatus"],
   bridgeEthereumAddress: result.bridgeEthereumAddress,
+  cashoutHold: result.cashoutHold
+    ? {
+        reason: result.cashoutHold.reason,
+        source: result.cashoutHold.source,
+        setAt: new Date(result.cashoutHold.setAt),
+        setByUserId: result.cashoutHold.setByUserId as UserId | undefined,
+      }
+    : undefined,
 })

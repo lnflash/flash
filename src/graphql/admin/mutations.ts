@@ -4,6 +4,7 @@ import AccountUpdateLevelMutation from "@graphql/admin/root/mutation/account-upd
 import AccountUpdateStatusMutation from "@graphql/admin/root/mutation/account-update-status"
 import AccountAssignNpubMutation from "@graphql/admin/root/mutation/account-assign-npub"
 import AccountReleaseNpubMutation from "@graphql/admin/root/mutation/account-release-npub"
+import AccountReleaseCashoutHoldMutation from "@graphql/admin/root/mutation/account-release-cashout-hold"
 import BusinessUpdateMapInfoMutation from "@graphql/admin/root/mutation/business-update-map-info"
 import CashWalletCutoverUpdateMutation from "@graphql/admin/root/mutation/cash-wallet-cutover-update"
 import CashWalletCutoverRollbackMutation from "@graphql/admin/root/mutation/cash-wallet-cutover-rollback"
@@ -25,6 +26,7 @@ export const mutationFields = {
     accountUpdateStatus: AccountUpdateStatusMutation,
     accountReleaseNpub: AccountReleaseNpubMutation,
     accountAssignNpub: AccountAssignNpubMutation,
+    accountReleaseCashoutHold: AccountReleaseCashoutHoldMutation,
     merchantMapValidate: MerchantMapValidateMutation,
     merchantMapDelete: MerchantMapDeleteMutation,
     businessUpdateMapInfo: BusinessUpdateMapInfoMutation,
