@@ -417,6 +417,80 @@ describe("ErpNext.upsertBridgeTransferRequest", () => {
     )
   })
 
+  describe("failure_reason on Topup rows (ENG-889)", () => {
+    const recallNote =
+      "Recalled by sender's bank: Bridge funds request fr_1, fraud, notice 2026-11-18"
+
+    const refundedEvent = new BridgeTransferRequest({
+      requestId: "deposit_1",
+      transactionType: BridgeTransferRequestTransactionType.Topup,
+      status: BridgeTransferRequestStatus.Failed,
+      amount: "5000.0",
+      currency: "usd",
+      failureReason: "Refunded by Bridge: R03 Risk Rejection",
+    })
+
+    const existingRow = (status: string, failureReason: string) => {
+      mockedAxios.get.mockResolvedValue({
+        data: { data: [{ name: "BTR-1", status, failure_reason: failureReason }] },
+      })
+      mockedAxios.put.mockResolvedValue({ data: { data: { name: "BTR-1" } } })
+    }
+
+    it("keeps a recall note when a refund rewrites the reason", async () => {
+      // The daily watcher notes the recall once and never again, so a refund
+      // that replaced the whole reason would erase it for good.
+      existingRow(
+        BridgeTransferRequestStatus.FiatReceived,
+        `Refund in progress at Bridge: R03 Risk Rejection; ${recallNote}`,
+      )
+
+      await client.upsertBridgeTransferRequest(refundedEvent)
+
+      const body = mockedAxios.put.mock.calls[0][1]
+      expect(body.status).toBe(BridgeTransferRequestStatus.Failed)
+      expect(body.failure_reason).toBe(
+        `Refunded by Bridge: R03 Risk Rejection; ${recallNote}`,
+      )
+    })
+
+    it("does not repeat a recall note on a re-delivered refund", async () => {
+      existingRow(
+        BridgeTransferRequestStatus.Failed,
+        `Refunded by Bridge: R03 Risk Rejection; ${recallNote}`,
+      )
+
+      await client.upsertBridgeTransferRequest(refundedEvent)
+
+      expect(mockedAxios.put.mock.calls[0][1].failure_reason).toBe(
+        `Refunded by Bridge: R03 Risk Rejection; ${recallNote}`,
+      )
+    })
+
+    it("sends no reason when an older event lands on a row that is further on", async () => {
+      // refund_in_flight retried by Bridge after refunded already failed the row.
+      existingRow(
+        BridgeTransferRequestStatus.Failed,
+        "Refunded by Bridge: R03 Risk Rejection",
+      )
+
+      await client.upsertBridgeTransferRequest(
+        new BridgeTransferRequest({
+          requestId: "deposit_1",
+          transactionType: BridgeTransferRequestTransactionType.Topup,
+          status: BridgeTransferRequestStatus.FiatReceived,
+          amount: "5000.0",
+          currency: "usd",
+          failureReason: "Refund in progress at Bridge: R03 Risk Rejection",
+        }),
+      )
+
+      const body = JSON.parse(JSON.stringify(mockedAxios.put.mock.calls[0][1]))
+      expect(body.status).toBe(BridgeTransferRequestStatus.Failed)
+      expect(body).not.toHaveProperty("failure_reason")
+    })
+  })
+
   it("keeps last-write-wins semantics for Cashout rows", async () => {
     mockedAxios.get.mockResolvedValue({
       data: {

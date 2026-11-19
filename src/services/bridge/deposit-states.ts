@@ -7,6 +7,12 @@ const asOptionalString = (value: unknown): string | undefined => {
   return String(value)
 }
 
+// Every recall note the funds-request watcher writes on a deposit row's
+// failure_reason starts with this. The ERPNext upsert guard keeps such
+// segments when a later deposit event rewrites the reason, so a refund
+// arriving after a recall never erases the record that a recall was raised.
+export const RECALL_NOTE_PREFIX = "Recalled by sender's bank:"
+
 // The `refund` block on refund_in_flight / refunded / refund_failed
 // virtual-account activity. `risk_rejection_reason` and `refund_reference_id`
 // are not in Bridge's published example but were on the 2026-11-13 production

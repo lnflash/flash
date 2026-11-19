@@ -2,6 +2,7 @@ import ValidOffer from "@app/offers/ValidOffer"
 import { FrappeConfig } from "@config"
 import { JMDAmount, USDTAmount, Validated } from "@domain/shared"
 import { baseLogger } from "@services/logger"
+import { RECALL_NOTE_PREFIX } from "@services/bridge/deposit-states"
 import { recordExceptionInCurrentSpan } from "@services/tracing"
 import axios, { isAxiosError } from "axios"
 
@@ -1757,13 +1758,39 @@ export class ErpNext {
           : merged,
     }
 
+    if (payload.transaction_type !== BridgeTransferRequestTransactionType.Topup) {
+      return guarded
+    }
+
     if (
-      payload.transaction_type === BridgeTransferRequestTransactionType.Topup &&
       existing.status &&
       (BRIDGE_TRANSFER_STATUS_RANK[existing.status] ?? -1) >
         (BRIDGE_TRANSFER_STATUS_RANK[payload.status] ?? -1)
     ) {
+      // An older event (e.g. a refund_in_flight retry landing after refunded)
+      // keeps neither its status nor its reason: the row already says more.
+      // An undefined field is left out of the JSON body, so the stored reason
+      // stays as it is.
       guarded.status = existing.status as BridgeTransferRequestStatus
+      guarded.failure_reason = undefined
+      return guarded
+    }
+
+    // A deposit event that sets a reason replaces the stored one, but never the
+    // recall notes the funds-request watcher appended: the watcher writes each
+    // note once, so a note erased here is gone for good.
+    if (payload.failure_reason && existing.failure_reason) {
+      const kept = existing.failure_reason
+        .split("; ")
+        .map((segment) => segment.trim())
+        .filter(
+          (segment) =>
+            segment.startsWith(RECALL_NOTE_PREFIX) &&
+            !payload.failure_reason?.includes(segment),
+        )
+      if (kept.length > 0) {
+        guarded.failure_reason = [payload.failure_reason, ...kept].join("; ")
+      }
     }
 
     return guarded

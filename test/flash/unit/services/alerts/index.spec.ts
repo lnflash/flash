@@ -10,7 +10,7 @@ jest.mock("@services/alerts/pagerduty", () => ({
   sendPagerDuty: jest.fn().mockResolvedValue(undefined),
 }))
 
-import { alertBridge } from "@services/alerts"
+import { alertBridge, flushAlerts } from "@services/alerts"
 import { resetInformDedup } from "@services/alerts/inform-dedup"
 import { sendDiscord } from "@services/alerts/discord"
 import { sendPagerDuty } from "@services/alerts/pagerduty"
@@ -72,5 +72,37 @@ describe("alertBridge", () => {
     expect(sendSlack).toHaveBeenCalledTimes(1)
     expect(sendDiscord).toHaveBeenCalledTimes(1)
     expect(sendPagerDuty).toHaveBeenCalledTimes(3)
+  })
+
+  it("lets a short-lived process wait for deliveries still in flight", async () => {
+    let releasePage: () => void = () => undefined
+    ;(sendPagerDuty as jest.Mock).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          releasePage = resolve
+        }),
+    )
+
+    alertBridge({
+      dedupKey: "bridge-funds-request:fr_1",
+      source: "bridge-funds-request",
+      severity: "critical",
+      title: "Bridge deposit recalled by sender's bank",
+    })
+
+    let flushed = false
+    const flush = flushAlerts().then(() => {
+      flushed = true
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(flushed).toBe(false)
+
+    releasePage()
+    await flush
+    expect(flushed).toBe(true)
+  })
+
+  it("returns at once when nothing is in flight", async () => {
+    await expect(flushAlerts()).resolves.toBeUndefined()
   })
 })

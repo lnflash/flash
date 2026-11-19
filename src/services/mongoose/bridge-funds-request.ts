@@ -14,14 +14,16 @@ export type BridgeFundsRequestRecord = {
   erpnextRecordedAt?: Date
   lockOutcome?: string
   lockDoneAt?: Date
+  alertedAt?: Date
 }
 
 const toError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error))
 
 // Insert-if-absent. `inserted` is true only for the call that created the
-// record, which is what makes "alert once per funds request" hold across runs
-// and restarts. Returns the stored record either way.
+// record. Paging once is tracked by the record's `alertedAt`, not by
+// `inserted`, so a run that stored the record but died before paging still
+// pages on the next run. Returns the stored record either way.
 export const recordFundsRequestSeen = async (data: {
   fundsRequestId: string
   depositId?: string
@@ -60,7 +62,12 @@ export const updateFundsRequestProgress = async (
   update: Partial<
     Pick<
       BridgeFundsRequestRecord,
-      "accountId" | "erpnextOutcome" | "erpnextRecordedAt" | "lockOutcome" | "lockDoneAt"
+      | "accountId"
+      | "erpnextOutcome"
+      | "erpnextRecordedAt"
+      | "lockOutcome"
+      | "lockDoneAt"
+      | "alertedAt"
     >
   >,
 ): Promise<true | Error> => {

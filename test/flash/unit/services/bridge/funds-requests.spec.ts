@@ -112,7 +112,7 @@ describe("watchBridgeFundsRequests: polling", () => {
       .mockResolvedValueOnce(page([{ ...nonFraudRequest, id: "fr_last" }]))
     mockRecordSeen.mockResolvedValue({
       inserted: false,
-      record: { erpnextRecordedAt: new Date(), fraud: false },
+      record: { alertedAt: new Date(), erpnextRecordedAt: new Date(), fraud: false },
     })
 
     const summary = await watchBridgeFundsRequests({ now: NOW })
@@ -180,6 +180,18 @@ describe("watchBridgeFundsRequests: a new fraud recall", () => {
       depositId: "deposit_wire_5000",
       note: "Recalled by sender's bank: Bridge funds request fr_fraud, fraud, notice 2026-11-18",
     })
+  })
+
+  it("stamps alertedAt in the progress write that follows the page", async () => {
+    await watchBridgeFundsRequests({ now: NOW })
+
+    expect(mockUpdateProgress).toHaveBeenCalledWith(
+      "fr_fraud",
+      expect.objectContaining({ alertedAt: expect.any(Date) }),
+    )
+    const pagedAt = (alertBridge as jest.Mock).mock.invocationCallOrder[0]
+    const storedAt = mockUpdateProgress.mock.invocationCallOrder[0]
+    expect(pagedAt).toBeLessThan(storedAt)
   })
 
   it("pages ops once, critical, with the deposit, account and lock result", async () => {
@@ -350,6 +362,7 @@ describe("watchBridgeFundsRequests: a request already seen", () => {
       record: {
         fundsRequestId: "fr_fraud",
         fraud: true,
+        alertedAt: new Date(),
         erpnextRecordedAt: new Date(),
         lockDoneAt: new Date(),
         lockOutcome: "locked",
@@ -374,6 +387,7 @@ describe("watchBridgeFundsRequests: a request already seen", () => {
         fundsRequestId: "fr_fraud",
         fraud: true,
         accountId: "acct_wire",
+        alertedAt: new Date(),
         erpnextRecordedAt: new Date(),
         erpnextOutcome: "updated",
         lockOutcome: "lookup_failed",
@@ -399,6 +413,67 @@ describe("watchBridgeFundsRequests: a request already seen", () => {
     )
   })
 
+  it("pages a request stored by a run that died before paging, and stamps alertedAt", async () => {
+    // inserted is false (the record exists) but no page was ever recorded.
+    mockListFundsRequests.mockResolvedValue(page([fraudRequest]))
+    mockRecordSeen.mockResolvedValue({
+      inserted: false,
+      record: {
+        fundsRequestId: "fr_fraud",
+        fraud: true,
+        accountId: "acct_wire",
+        erpnextRecordedAt: new Date(),
+        erpnextOutcome: "updated",
+        lockDoneAt: new Date(),
+        lockOutcome: "locked",
+      },
+    })
+
+    const summary = await watchBridgeFundsRequests({ now: NOW })
+
+    expect(mockRecordRecall).not.toHaveBeenCalled()
+    expect(mockUpdateAccountStatus).not.toHaveBeenCalled()
+    expect(alertBridge).toHaveBeenCalledTimes(1)
+    expect(alertBridge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dedupKey: "bridge-funds-request:fr_fraud",
+        severity: "critical",
+        context: expect.objectContaining({
+          account_id: "acct_wire",
+          erpnext_row: "updated",
+          lock: "locked",
+        }),
+      }),
+    )
+    expect(mockUpdateProgress).toHaveBeenCalledWith(
+      "fr_fraud",
+      expect.objectContaining({ alertedAt: expect.any(Date) }),
+    )
+    expect(summary.newRequests).toBe(0)
+  })
+
+  it("does not repeat the locked-on-retry notice for a lock done on an earlier run", async () => {
+    mockListFundsRequests.mockResolvedValue(page([fraudRequest]))
+    mockRecordSeen.mockResolvedValue({
+      inserted: false,
+      record: {
+        fundsRequestId: "fr_fraud",
+        fraud: true,
+        accountId: "acct_wire",
+        alertedAt: new Date(),
+        erpnextOutcome: "row_not_found",
+        lockDoneAt: new Date(),
+        lockOutcome: "locked",
+      },
+    })
+
+    await watchBridgeFundsRequests({ now: NOW })
+
+    expect(mockRecordRecall).toHaveBeenCalledTimes(1)
+    expect(mockUpdateAccountStatus).not.toHaveBeenCalled()
+    expect(alertBridge).not.toHaveBeenCalled()
+  })
+
   it("retries a missing ERPNext note without alerting or touching the account", async () => {
     mockListFundsRequests.mockResolvedValue(page([nonFraudRequest]))
     mockRecordSeen.mockResolvedValue({
@@ -407,6 +482,7 @@ describe("watchBridgeFundsRequests: a request already seen", () => {
         fundsRequestId: "fr_plain",
         fraud: false,
         accountId: "acct_wire",
+        alertedAt: new Date(),
         erpnextOutcome: "row_not_found",
       },
     })

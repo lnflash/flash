@@ -22,6 +22,7 @@ import {
   updateEscrows,
   updateRoutingRevenues,
 } from "@services/lnd/utils"
+import { flushAlerts } from "@services/alerts"
 import { baseLogger } from "@services/logger"
 import { setupMongoConnection } from "@services/mongodb"
 import { activateLndHealthCheck, checkAllLndHealth } from "@services/lnd/health"
@@ -263,6 +264,10 @@ const main = async () => {
       results.push(false)
     }
   }
+
+  // Let pages fired during the run (e.g. a new Bridge recall) finish sending
+  // before process.exit drops them.
+  await flushAlerts()
 
   await mongoose.connection.close()
 

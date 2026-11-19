@@ -919,6 +919,9 @@ const BridgeFundsRequestSchema = new Schema({
   // "account_not_found" end the step; "lookup_failed" / "lock_failed" retry.
   lockOutcome: { type: String },
   lockDoneAt: { type: Date },
+  // When ops were paged for this request. Set after the page is sent, so a run
+  // that dies before paging leaves it empty and the next run pages.
+  alertedAt: { type: Date },
   updatedAt: { type: Date, default: Date.now },
 })
 

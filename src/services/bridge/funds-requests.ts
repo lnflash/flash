@@ -12,7 +12,8 @@
  * Handled ids live in the `bridgefundsrequests` collection so restarts never
  * re-alert. Each step records its own outcome, so a step that failed (ERPNext
  * down, Mongo fault on the account lookup) is retried on the next run without
- * paging again.
+ * paging again. The page itself is a step too (`alertedAt`): a run that dies
+ * after storing the request but before paging pages on the next run.
  *
  * https://apidocs.bridge.xyz/platform/orchestration/more/funds-requests
  */
@@ -31,6 +32,7 @@ import {
 } from "@services/mongoose/bridge-funds-request"
 
 import BridgeApiClient, { FundsRequest } from "./client"
+import { RECALL_NOTE_PREFIX } from "./deposit-states"
 
 const logger = baseLogger.child({ module: "bridge-funds-requests" })
 
@@ -69,7 +71,7 @@ export const fundsRequestLockComment = (fr: Pick<FundsRequest, "id" | "deposit_i
 
 export const fundsRequestRecallNote = (fr: FundsRequest) =>
   [
-    `Recalled by sender's bank: Bridge funds request ${fr.id}`,
+    `${RECALL_NOTE_PREFIX} Bridge funds request ${fr.id}`,
     fr.fraud ? "fraud" : "not fraud",
     fr.notice_date ? `notice ${fr.notice_date}` : undefined,
   ]
@@ -276,13 +278,15 @@ const handleFundsRequest = async (
   }
 
   const { inserted, record } = seen
+  const alertPending = !record.alertedAt
   const erpnextPending = !record.erpnextRecordedAt
   const lockPending = fraud && !record.lockDoneAt
-  if (!inserted && !erpnextPending && !lockPending) return
+  if (!alertPending && !erpnextPending && !lockPending) return
 
   if (inserted) summary.newRequests++
 
-  const lookup = inserted || lockPending ? await findAccount(fr.customer_id) : undefined
+  const lookup =
+    alertPending || lockPending ? await findAccount(fr.customer_id) : undefined
   const accountId =
     lookup?.kind === "found" ? (lookup.account.id as string) : record.accountId
 
@@ -300,31 +304,25 @@ const handleFundsRequest = async (
 
   let lockOutcome = record.lockOutcome
   let lockDoneAt: Date | undefined
+  let lockedThisRun = false
   if (lockPending && lookup) {
     lockOutcome = await lockForFraudRecall(lookup, fr)
     if (FINAL_LOCK_OUTCOMES.has(lockOutcome)) lockDoneAt = new Date()
     else summary.failures++
-    if (lockOutcome === "locked") summary.locked++
+    if (lockOutcome === "locked") {
+      summary.locked++
+      lockedThisRun = true
+    }
   }
 
-  const progress = await updateFundsRequestProgress(fr.id, {
-    accountId,
-    erpnextOutcome,
-    ...(erpnextRecordedAt ? { erpnextRecordedAt } : {}),
-    ...(lockOutcome ? { lockOutcome } : {}),
-    ...(lockDoneAt ? { lockDoneAt } : {}),
-  })
-  if (progress instanceof Error) {
-    logger.error(
-      { error: progress, fundsRequestId: fr.id },
-      "Failed to store Bridge funds request progress; steps will be retried",
-    )
-    summary.failures++
-  }
-
-  if (inserted) {
+  // Page before the progress write that records it, so a crash in between
+  // repeats the page (PagerDuty folds it into the same incident by dedup key)
+  // instead of losing it. cron.ts flushes in-flight alerts before it exits.
+  let alertedAt: Date | undefined
+  if (alertPending) {
     alertNewFundsRequest({ fr, accountId, erpnextOutcome, lockOutcome })
-  } else if (lockOutcome === "locked") {
+    alertedAt = new Date()
+  } else if (lockedThisRun) {
     // The first page said the lock failed; tell ops it has now happened.
     alertBridge({
       dedupKey: `${generateDedupKey.bridgeFundsRequest(fr.id)}:locked-on-retry`,
@@ -340,6 +338,22 @@ const handleFundsRequest = async (
     })
   }
 
+  const progress = await updateFundsRequestProgress(fr.id, {
+    accountId,
+    erpnextOutcome,
+    ...(erpnextRecordedAt ? { erpnextRecordedAt } : {}),
+    ...(lockOutcome ? { lockOutcome } : {}),
+    ...(lockDoneAt ? { lockDoneAt } : {}),
+    ...(alertedAt ? { alertedAt } : {}),
+  })
+  if (progress instanceof Error) {
+    logger.error(
+      { error: progress, fundsRequestId: fr.id },
+      "Failed to store Bridge funds request progress; steps will be retried",
+    )
+    summary.failures++
+  }
+
   logger.info(
     {
       fundsRequestId: fr.id,
@@ -348,6 +362,7 @@ const handleFundsRequest = async (
       accountId,
       fraud,
       inserted,
+      paged: alertPending,
       erpnextOutcome,
       lockOutcome,
     },
