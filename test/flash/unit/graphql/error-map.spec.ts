@@ -24,6 +24,7 @@ import {
 } from "@domain/payments/errors"
 import { PaymentSendRateLimiterExceededError } from "@domain/rate-limit/errors"
 import { OfferAlreadyExecuted, OfferNotFound } from "@domain/cache"
+import { InvalidOrApprovedVerificationError } from "@domain/phone-provider"
 
 describe("error-map", () => {
   it("maps PhoneNotAllowedForRegistrationError to a user-readable validation error, not the catch-all", () => {
@@ -266,5 +267,21 @@ describe("error-map", () => {
     )
     expect(result.forwardToClient).toBe(true)
     expect(mapError(new OfferNotFound()).extensions.code).toBe("NOT_FOUND")
+  })
+
+  // ENG-888: flash-mobile reads only error.code and shows its invalid-code
+  // message for PHONE_CODE_ERROR; any other code lands on "unknown error".
+  it("maps InvalidOrApprovedVerificationError to PHONE_CODE_ERROR so the app shows its invalid-code message", () => {
+    const result = mapError(
+      new InvalidOrApprovedVerificationError(
+        "The requested resource /v2/Services/VAtest/VerificationCheck was not found",
+      ),
+    )
+
+    expect(result.extensions.code).toBe("PHONE_CODE_ERROR")
+    expect(result.message).toBe(
+      "This code has expired or was never requested. Request a new code and try again.",
+    )
+    expect(result.message).not.toContain("VerificationCheck")
   })
 })

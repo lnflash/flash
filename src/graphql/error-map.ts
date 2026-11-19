@@ -318,8 +318,8 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
 
     case "InvalidOrApprovedVerificationError":
       message =
-        "Issue detected with verification. Please try again later or contact support."
-      return new PhoneProviderError({ message, logger: baseLogger })
+        "This code has expired or was never requested. Request a new code and try again."
+      return new VerificationCodeError({ message, logger: baseLogger })
 
     case "UnsubscribedRecipientPhoneProviderError":
       message = "Phone number has opted out of receiving messages"
@@ -377,10 +377,6 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
 
     case "EmailCodeInvalidError":
       message = "Invalid or incorrect code entered."
-      return new VerificationCodeError({ message, logger: baseLogger })
-
-    case "ExpiredOrNonExistentPhoneNumberError":
-      message = "Invalid or incorrect phone entered."
       return new VerificationCodeError({ message, logger: baseLogger })
 
     case "CouldNotFindAccountFromPhoneError":

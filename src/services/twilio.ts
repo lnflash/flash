@@ -8,7 +8,6 @@ import {
   getTestAccounts,
 } from "@config"
 import {
-  ExpiredOrNonExistentPhoneNumberError,
   InvalidOrApprovedVerificationError,
   InvalidPhoneNumberPhoneProviderError,
   PhoneCodeInvalidError,
@@ -26,8 +25,6 @@ import { baseLogger } from "@services/logger"
 import { TestAccountsChecker } from "@domain/accounts/test-accounts-checker"
 import { NotImplementedError } from "@domain/errors"
 import { parseErrorMessageFromUnknown } from "@domain/shared"
-
-import { isAxiosError } from "axios"
 
 import { wrapAsyncFunctionsToRunInSpan } from "./tracing"
 
@@ -74,6 +71,21 @@ const isTwilioRateLimitRejection = (err: unknown): boolean => {
   if (!err || typeof err !== "object") return false
   const { status, code } = err as { status?: unknown; code?: unknown }
   return status === TWILIO_RATE_LIMIT_HTTP_STATUS || code === TWILIO_RATE_LIMIT_ERROR_CODE
+}
+
+// Twilio answers a verification check with HTTP 404 / error 20404 when the
+// number has no pending verification: no code was requested, the code expired,
+// it was already approved, or the attempts ran out. Match on the SDK's
+// `status`/`code` rather than the message, whose resource path has changed
+// before (`/Services/...` became `/v2/Services/...`) and left this case
+// falling through to UnknownPhoneProviderServiceError.
+const TWILIO_NOT_FOUND_HTTP_STATUS = 404
+const TWILIO_NOT_FOUND_ERROR_CODE = 20404
+
+const isTwilioNotFoundRejection = (err: unknown): boolean => {
+  if (!err || typeof err !== "object") return false
+  const { status, code } = err as { status?: unknown; code?: unknown }
+  return status === TWILIO_NOT_FOUND_HTTP_STATUS || code === TWILIO_NOT_FOUND_ERROR_CODE
 }
 
 export const TwilioClient = (): IPhoneProviderService => {
@@ -144,10 +156,18 @@ export const TwilioClient = (): IPhoneProviderService => {
 
       return true
     } catch (err) {
-      baseLogger.error({ err }, "impossible to verify phone and code")
-      if (isAxiosError(err) && err.status === 404) {
-        return new ExpiredOrNonExistentPhoneNumberError(err.message)
+      if (isTwilioNotFoundRejection(err)) {
+        // An ordinary user mistake (wrong, expired or never-requested code),
+        // not a provider failure, so it is not logged at error level.
+        const { status, code: twilioCode } = err as { status?: unknown; code?: unknown }
+        baseLogger.warn(
+          { to: maskPhone(to), twilioStatus: status, twilioCode },
+          "verification check found no pending verification",
+        )
+        return new InvalidOrApprovedVerificationError(parseErrorMessageFromUnknown(err))
       }
+
+      baseLogger.error({ err }, "impossible to verify phone and code")
 
       return handleCommonErrors(err)
     }
@@ -255,7 +275,7 @@ export const KnownTwilioErrorMessages = {
     /The destination phone number has been temporarily blocked by Twilio due to fraudulent activities/,
   ServiceUnavailable: /Service is unavailable. Please try again/,
   InvalidOrApprovedVerification:
-    /The requested resource \/Services\/(.*?)\/VerificationCheck was not found/,
+    /The requested resource (\/v2)?\/Services\/(.*?)\/VerificationCheck was not found/,
 } as const
 
 export const isPhoneCodeValid = async ({

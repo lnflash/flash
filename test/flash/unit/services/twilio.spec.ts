@@ -46,8 +46,12 @@ import {
   VERIFY_GLOBAL_SEND_CAP_VALUE,
 } from "@services/twilio"
 import {
+  InvalidOrApprovedVerificationError,
+  PhoneCodeInvalidError,
   PhoneProviderRateLimitExceededError,
+  PhoneProviderUnavailableError,
   RestrictedRegionPhoneProviderError,
+  UnknownPhoneProviderServiceError,
 } from "@domain/phone-provider"
 
 const phone = "+18765550100" as PhoneNumber
@@ -184,5 +188,91 @@ describe("TwilioClient.initiateVerify", () => {
     expect(
       KnownTwilioErrorMessages.RateLimitsExceeded.test("Max send attempts reached"),
     ).toBe(true)
+  })
+})
+
+describe("TwilioClient.validateVerify", () => {
+  const code = "000000" as PhoneCode
+
+  // Shape of the twilio SDK's RestException when the number has no pending
+  // verification, with the message Twilio returned on 2026-11-15 (ENG-888).
+  const notFoundRejection = (
+    message = "The requested resource /v2/Services/VAtest/VerificationCheck was not found",
+  ) => Object.assign(new Error(message), { status: 404, code: 20404 })
+
+  beforeEach(() => {
+    verificationChecksCreate.mockReset()
+    mockedLogger.warn.mockReset()
+    mockedLogger.error.mockReset()
+  })
+
+  it("approves a correct code", async () => {
+    verificationChecksCreate.mockResolvedValue({ status: "approved" })
+
+    const result = await TwilioClient().validateVerify({ to: phone, code })
+
+    expect(result).toBe(true)
+    expect(verificationChecksCreate).toHaveBeenCalledWith({ to: phone, code })
+  })
+
+  it("maps a wrong code on a pending verification to PhoneCodeInvalidError", async () => {
+    verificationChecksCreate.mockResolvedValue({ status: "pending" })
+
+    const result = await TwilioClient().validateVerify({ to: phone, code })
+
+    expect(result).toBeInstanceOf(PhoneCodeInvalidError)
+  })
+
+  it("maps Twilio 404 / 20404 (no pending verification) to InvalidOrApprovedVerificationError, not the unknown error", async () => {
+    verificationChecksCreate.mockRejectedValue(notFoundRejection())
+
+    const result = await TwilioClient().validateVerify({ to: phone, code })
+
+    expect(result).toBeInstanceOf(InvalidOrApprovedVerificationError)
+    expect(result).not.toBeInstanceOf(UnknownPhoneProviderServiceError)
+    expect(mockedLogger.error).not.toHaveBeenCalled()
+    expect(mockedLogger.warn).toHaveBeenCalledWith(
+      { to: "+1876…00", twilioStatus: 404, twilioCode: 20404 },
+      "verification check found no pending verification",
+    )
+    expect(JSON.stringify(mockedLogger.warn.mock.calls)).not.toContain(phone)
+  })
+
+  it("still maps a 20404 whose text drifts away from the known regex", async () => {
+    verificationChecksCreate.mockRejectedValue(notFoundRejection("Not Found"))
+
+    const result = await TwilioClient().validateVerify({ to: phone, code })
+
+    expect(result).toBeInstanceOf(InvalidOrApprovedVerificationError)
+  })
+
+  it("keeps the regex in step with both resource paths Twilio has used", () => {
+    const { InvalidOrApprovedVerification } = KnownTwilioErrorMessages
+    expect(
+      InvalidOrApprovedVerification.test(
+        "The requested resource /v2/Services/VAtest/VerificationCheck was not found",
+      ),
+    ).toBe(true)
+    expect(
+      InvalidOrApprovedVerification.test(
+        "The requested resource /Services/VAtest/VerificationCheck was not found",
+      ),
+    ).toBe(true)
+  })
+
+  it("logs and maps other failures through the message-based mapping", async () => {
+    verificationChecksCreate.mockRejectedValue(
+      Object.assign(new Error("Service is unavailable. Please try again"), {
+        status: 503,
+      }),
+    )
+
+    const result = await TwilioClient().validateVerify({ to: phone, code })
+
+    expect(result).toBeInstanceOf(PhoneProviderUnavailableError)
+    expect(mockedLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error) }),
+      "impossible to verify phone and code",
+    )
   })
 })
