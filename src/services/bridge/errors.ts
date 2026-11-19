@@ -7,13 +7,32 @@ export class BridgeError extends DomainError {
 export class BridgeApiError extends BridgeError {
   readonly statusCode: number
   readonly response?: unknown
+  // Bridge's machine-readable error code from the response body, e.g.
+  // "not_allowed" on {"code":"not_allowed","message":"Insufficient
+  // permissions for this endpoint"}. Undefined when the body has none.
+  readonly code?: string
 
   constructor(message: string, statusCode: number, response?: unknown) {
     super(message)
     this.statusCode = statusCode
     this.response = response
+    this.code = bridgeErrorCode(response)
   }
 }
+
+const bridgeErrorCode = (response: unknown): string | undefined => {
+  if (typeof response !== "object" || response === null) return undefined
+  const code = (response as Record<string, unknown>).code
+  return typeof code === "string" && code ? code : undefined
+}
+
+// Bridge refuses an endpoint this API key has no permission for with HTTP 401
+// and code "not_allowed" (seen on GET /v0/funds_requests in production,
+// 2026-11). Distinct from a bad or revoked key, which fails every endpoint.
+export const isBridgeNotAllowedError = (error: unknown): error is BridgeApiError =>
+  error instanceof BridgeApiError &&
+  error.statusCode === 401 &&
+  error.code === "not_allowed"
 
 export class BridgeRateLimitError extends BridgeError {
   constructor(message: string = "Rate limit exceeded, please try again later") {

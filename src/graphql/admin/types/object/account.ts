@@ -14,6 +14,7 @@ import Merchant from "@graphql/shared/types/object/merchant"
 
 import AccountStatus from "../scalar/account-status"
 
+import CashoutHold from "./cashout-hold"
 import GraphQLUser from "./user"
 
 const Account: GraphQLObjectType<Account> = GT.Object<Account>({
@@ -92,6 +93,11 @@ const Account: GraphQLObjectType<Account> = GT.Object<Account>({
     },
     erpParty: {
       type: GT.String,
+    },
+    cashoutHold: {
+      type: CashoutHold,
+      description:
+        "Set while cash-outs are held for this account. Place with accountPlaceCashoutHold, release with accountReleaseCashoutHold.",
     },
   }),
 })

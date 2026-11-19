@@ -99,6 +99,21 @@ interface AccountRecord {
   bridgeKycStatus?: "open" | "pending" | "approved" | "rejected" | "offboarded"
   bridgeEthereumAddress?: string
 
+  cashoutHold?: {
+    reason: string
+    source: string
+    setAt: Date
+    setByUserId?: string
+  } | null
+  cashoutHoldHistory?: Array<{
+    action: "placed" | "released"
+    at: Date
+    reason?: string
+    source?: string
+    byUserId?: string
+    comment?: string
+  }>
+
   // mongoose in-built functions
   save: () => Promise<AccountRecord>
 }

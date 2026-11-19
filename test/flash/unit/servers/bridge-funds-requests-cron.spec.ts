@@ -7,11 +7,12 @@ import {
   runBridgeFundsRequestsCron,
 } from "@servers/bridge-funds-requests-cron"
 
-// ENG-889: the Bridge funds request (recall) watcher runs hourly from its own
-// Job instead of once a day inside cron.ts.
+// ENG-889: the hourly Bridge Job runs the funds request (recall) watcher, which
+// used to run once a day inside cron.ts, then the customer status watch.
 
 const mockBridgeConfig = { enabled: true }
 const mockWatch = jest.fn()
+const mockWatchCustomers = jest.fn()
 const mockSetupMongo = jest.fn()
 const mockCloseMongo = jest.fn()
 const mockFlushAlerts = jest.fn()
@@ -25,6 +26,10 @@ jest.mock("@config", () => ({
 
 jest.mock("@services/bridge/funds-requests", () => ({
   watchBridgeFundsRequests: (...args: unknown[]) => mockWatch(...args),
+}))
+
+jest.mock("@services/bridge/customer-status-watch", () => ({
+  watchBridgeCustomerStatuses: (...args: unknown[]) => mockWatchCustomers(...args),
 }))
 
 jest.mock("@services/mongodb", () => ({
@@ -42,6 +47,19 @@ const summary = (overrides: Record<string, unknown> = {}) => ({
   erpnextRecorded: 1,
   failures: 0,
   pollFailed: false,
+  notPermitted: false,
+  ...overrides,
+})
+
+const customerSummary = (overrides: Record<string, unknown> = {}) => ({
+  fetched: 3,
+  seeded: false,
+  baselineRisky: {},
+  changes: 0,
+  alerts: 0,
+  holdsPlaced: 0,
+  failures: 0,
+  pollFailed: false,
   ...overrides,
 })
 
@@ -52,6 +70,7 @@ beforeEach(() => {
   mockCloseMongo.mockResolvedValue(undefined)
   mockFlushAlerts.mockResolvedValue(undefined)
   mockWatch.mockResolvedValue(summary())
+  mockWatchCustomers.mockResolvedValue(customerSummary())
 })
 
 describe("runBridgeFundsRequestsCron", () => {
@@ -65,12 +84,14 @@ describe("runBridgeFundsRequestsCron", () => {
 
     expect(await runBridgeFundsRequestsCron()).toBe(OK_EXIT_CODE)
     expect(mockWatch).not.toHaveBeenCalled()
+    expect(mockWatchCustomers).not.toHaveBeenCalled()
     expect(mockSetupMongo).not.toHaveBeenCalled()
   })
 
-  it("runs the watcher once, flushes alerts, closes mongo and exits 0", async () => {
+  it("runs both watches once, flushes alerts, closes mongo and exits 0", async () => {
     expect(await runBridgeFundsRequestsCron()).toBe(OK_EXIT_CODE)
     expect(mockWatch).toHaveBeenCalledTimes(1)
+    expect(mockWatchCustomers).toHaveBeenCalledTimes(1)
     expect(mockFlushAlerts).toHaveBeenCalledTimes(1)
     expect(mockCloseMongo).toHaveBeenCalledTimes(1)
   })
@@ -81,20 +102,55 @@ describe("runBridgeFundsRequestsCron", () => {
     expect(await runBridgeFundsRequestsCron()).toBe(OK_EXIT_CODE)
   })
 
-  it("exits non-zero when the Bridge poll failed", async () => {
+  it("exits non-zero when the Bridge poll failed, and still runs the customer watch", async () => {
     mockWatch.mockResolvedValue(summary({ fetched: 0, newRequests: 0, pollFailed: true }))
 
     expect(await runBridgeFundsRequestsCron()).toBe(FAILED_EXIT_CODE)
+    expect(mockWatchCustomers).toHaveBeenCalledTimes(1)
     expect(mockFlushAlerts).toHaveBeenCalledTimes(1)
     expect(mockCloseMongo).toHaveBeenCalledTimes(1)
   })
 
-  it("exits non-zero when the watcher throws, still flushing alerts and closing mongo", async () => {
+  it("exits 0 when Bridge does not permit funds requests for the key", async () => {
+    // Production answers 401 not_allowed on /funds_requests and Bridge will
+    // not grant it: that is not a failed run.
+    mockWatch.mockResolvedValue(
+      summary({ fetched: 0, newRequests: 0, notPermitted: true }),
+    )
+
+    expect(await runBridgeFundsRequestsCron()).toBe(OK_EXIT_CODE)
+    expect(mockWatchCustomers).toHaveBeenCalledTimes(1)
+  })
+
+  it("exits non-zero when the funds watcher throws, and still runs the customer watch", async () => {
     mockWatch.mockRejectedValue(new Error("boom"))
 
     expect(await runBridgeFundsRequestsCron()).toBe(FAILED_EXIT_CODE)
+    expect(mockWatchCustomers).toHaveBeenCalledTimes(1)
     expect(mockFlushAlerts).toHaveBeenCalledTimes(1)
     expect(mockCloseMongo).toHaveBeenCalledTimes(1)
+  })
+
+  it("exits non-zero when the customer watch could not run, after the funds watch ran", async () => {
+    mockWatchCustomers.mockResolvedValue(customerSummary({ pollFailed: true }))
+
+    expect(await runBridgeFundsRequestsCron()).toBe(FAILED_EXIT_CODE)
+    expect(mockWatch).toHaveBeenCalledTimes(1)
+    expect(mockFlushAlerts).toHaveBeenCalledTimes(1)
+  })
+
+  it("exits non-zero when the customer watch throws", async () => {
+    mockWatchCustomers.mockRejectedValue(new Error("boom"))
+
+    expect(await runBridgeFundsRequestsCron()).toBe(FAILED_EXIT_CODE)
+    expect(mockWatch).toHaveBeenCalledTimes(1)
+    expect(mockCloseMongo).toHaveBeenCalledTimes(1)
+  })
+
+  it("exits 0 when a customer change is left to retry", async () => {
+    mockWatchCustomers.mockResolvedValue(customerSummary({ changes: 1, failures: 1 }))
+
+    expect(await runBridgeFundsRequestsCron()).toBe(OK_EXIT_CODE)
   })
 
   it("exits non-zero without watching when mongo cannot connect", async () => {
@@ -102,6 +158,7 @@ describe("runBridgeFundsRequestsCron", () => {
 
     expect(await runBridgeFundsRequestsCron()).toBe(FAILED_EXIT_CODE)
     expect(mockWatch).not.toHaveBeenCalled()
+    expect(mockWatchCustomers).not.toHaveBeenCalled()
   })
 })
 

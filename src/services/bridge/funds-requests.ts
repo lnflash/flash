@@ -21,19 +21,19 @@
 
 import { updateAccountStatus } from "@app/accounts/update-account-status"
 import { AccountStatus } from "@domain/accounts"
-import { CouldNotFindError } from "@domain/errors"
-import { toBridgeCustomerId } from "@domain/primitives/bridge"
 import { alertBridge, generateDedupKey } from "@services/alerts"
 import { recordBridgeDepositRecall } from "@services/frappe/BridgeTransferRequestWriter"
 import { baseLogger } from "@services/logger"
-import { AccountsRepository } from "@services/mongoose/accounts"
 import {
   recordFundsRequestSeen,
   updateFundsRequestProgress,
 } from "@services/mongoose/bridge-funds-request"
 
+import { AccountLookup, findAccountByBridgeCustomerId } from "./account-lookup"
 import BridgeApiClient, { FundsRequest } from "./client"
 import { RECALL_NOTE_PREFIX } from "./deposit-states"
+import { isBridgeNotAllowedError } from "./errors"
+import { paginateNewestFirst } from "./paginate"
 
 const logger = baseLogger.child({ module: "bridge-funds-requests" })
 
@@ -65,6 +65,10 @@ export type FundsRequestWatchSummary = {
   erpnextRecorded: number
   failures: number
   pollFailed: boolean
+  // Bridge refused GET /funds_requests for this API key (401 not_allowed), so
+  // recalls were not watched this run. Not a failure: Bridge has declined to
+  // grant the permission. If it ever does, the next run polls as normal.
+  notPermitted: boolean
 }
 
 export const fundsRequestLockComment = (fr: Pick<FundsRequest, "id" | "deposit_id">) =>
@@ -85,52 +89,21 @@ const fetchRecentFundsRequests = async (now: Date): Promise<FundsRequest[] | Err
   const since = new Date(
     now.getTime() - FUNDS_REQUEST_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
   )
-  const all: FundsRequest[] = []
-  let startingAfter: string | undefined
-
-  try {
-    for (let page = 0; page < MAX_PAGES; page++) {
-      const response = await BridgeApiClient.listFundsRequests({
-        limit: PAGE_SIZE,
+  return paginateNewestFirst({
+    fetchPage: ({ limit, startingAfter }) =>
+      BridgeApiClient.listFundsRequests({
+        limit,
         startingAfter,
         noticeDateStartingOn: toNoticeDate(since),
-      })
-      all.push(...response.data)
-
-      const last = response.data[response.data.length - 1]
-      if (response.data.length < PAGE_SIZE || !last?.id) return all
-      startingAfter = last.id
-    }
-    logger.warn(
-      { pages: MAX_PAGES, fetched: all.length },
-      "Bridge funds request poll hit its page cap; older requests not read this run",
-    )
-    return all
-  } catch (error) {
-    return error instanceof Error ? error : new Error(String(error))
-  }
-}
-
-type AccountLookup =
-  | { kind: "found"; account: Account }
-  | { kind: "not_found" }
-  | { kind: "lookup_failed"; error: Error }
-
-const findAccount = async (customerId?: string): Promise<AccountLookup> => {
-  if (!customerId) return { kind: "not_found" }
-  try {
-    const account = await AccountsRepository().findByBridgeCustomerId(
-      toBridgeCustomerId(customerId),
-    )
-    if (account instanceof CouldNotFindError) return { kind: "not_found" }
-    if (account instanceof Error) return { kind: "lookup_failed", error: account }
-    return { kind: "found", account }
-  } catch (error) {
-    return {
-      kind: "lookup_failed",
-      error: error instanceof Error ? error : new Error(String(error)),
-    }
-  }
+      }),
+    pageSize: PAGE_SIZE,
+    maxPages: MAX_PAGES,
+    onPageCap: (fetched) =>
+      logger.warn(
+        { pages: MAX_PAGES, fetched },
+        "Bridge funds request poll hit its page cap; older requests not read this run",
+      ),
+  })
 }
 
 // Idempotent: an account already locked (or closed, which is stricter) is left
@@ -287,7 +260,9 @@ const handleFundsRequest = async (
   if (inserted) summary.newRequests++
 
   const lookup =
-    alertPending || lockPending ? await findAccount(fr.customer_id) : undefined
+    alertPending || lockPending
+      ? await findAccountByBridgeCustomerId(fr.customer_id)
+      : undefined
   const accountId =
     lookup?.kind === "found" ? (lookup.account.id as string) : record.accountId
 
@@ -382,13 +357,21 @@ export const watchBridgeFundsRequests = async ({
     erpnextRecorded: 0,
     failures: 0,
     pollFailed: false,
+    notPermitted: false,
   }
 
   const fundsRequests = await fetchRecentFundsRequests(now)
+  if (isBridgeNotAllowedError(fundsRequests)) {
+    logger.warn(
+      { status: fundsRequests.statusCode, code: fundsRequests.code },
+      "Bridge funds requests not permitted for this API key; recall watch skipped",
+    )
+    return { ...summary, notPermitted: true }
+  }
   if (fundsRequests instanceof Error) {
     // Bridge outages (5xx, timeouts) already page from the client. This one is
-    // for the rest, e.g. an API key without access to funds requests: recalls
-    // go unseen until it is fixed.
+    // for the rest (other 4xx, a revoked key): recalls go unseen until it is
+    // fixed. A key that simply lacks the permission is handled above.
     logger.error({ error: fundsRequests }, "Bridge funds request poll failed")
     alertBridge({
       dedupKey: generateDedupKey.bridgeFundsRequestPollFailed(),

@@ -26,6 +26,16 @@ export const generateDedupKey = {
     `bridge-funds-request:${fundsRequestId}`,
   // Static: the poll itself failing is one outage, not one per run.
   bridgeFundsRequestPollFailed: () => "bridge-funds-request:poll-failed",
+  // Per customer AND new status: a customer paused then offboarded is two
+  // incidents, and a critical must never fold into an earlier warning.
+  bridgeCustomerStatus: (customerId: string, status: string) =>
+    `bridge-customer-status:${customerId}:${status}`,
+  // Static: the customer list poll failing is one outage, not one per run.
+  bridgeCustomerStatusPollFailed: () => "bridge-customer-status:poll-failed",
+  // Per deposit event: a virtual account deposit under manual review, or the
+  // virtual account deactivated.
+  bridgeVirtualAccountEvent: (eventId: string, type: string) =>
+    `bridge-webhook:virtual-account:${type}:${eventId}`,
   bridgeWebhookTransfer: (transferId: string, event: string) =>
     `bridge-webhook:transfer:${transferId}:${event}`,
   ibexCryptoReceive: (txHash: string) => `ibex:crypto-receive:${txHash.toLowerCase()}`,

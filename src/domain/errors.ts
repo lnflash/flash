@@ -69,6 +69,8 @@ export class CouldNotFindAccountFromNpubError extends CouldNotFindError {}
 // "account not found" because `$unset` on a document without the field is a
 // no-op that still matches, so the write alone cannot tell the two apart.
 export class NoNpubToReleaseError extends CouldNotFindError {}
+// The account has no cash-out hold, so there is nothing to release (ENG-889).
+export class NoCashoutHoldToReleaseError extends CouldNotFindError {}
 export class CouldNotFindAccountFromPhoneError extends CouldNotFindError {}
 export class CouldNotFindMerchantFromUsernameError extends CouldNotFindError {}
 export class CouldNotFindMerchantFromIdError extends CouldNotFindError {}

@@ -178,6 +178,10 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
       message = `Account ${error.message} has no npub linked`
       return new NotFoundError({ message, logger: baseLogger })
 
+    case "NoCashoutHoldToReleaseError":
+      message = `Account ${error.message} has no cash-out hold`
+      return new NotFoundError({ message, logger: baseLogger })
+
     case "CouldNotFindMerchantFromUsernameError":
       message = `Merchant does not exist for username ${error.message}`
       return new NotFoundError({ message, logger: baseLogger })
@@ -642,6 +646,13 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         message: "Offer not available. Try again.",
         logger: baseLogger,
       })
+    // ENG-889: shown to the account holder, so it never says why.
+    case "AccountCashoutHeldError":
+      return bridgeGqlError({
+        code: "CASHOUT_UNAVAILABLE",
+        message: "Cash out is unavailable for this account. Please contact support.",
+      })
+
     case "OfferAlreadyExecuted":
       // Mostly a retry after a lost response, so the first execution may have
       // paid, and the client has no cashout id to check (ENG-716). The copy

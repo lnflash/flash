@@ -70,6 +70,8 @@ export interface Customer {
     | "awaiting_ubo"
     | "incomplete"
     | "not_started"
+    // New deposits are returned to the sender automatically.
+    | "deposits_restricted"
   has_accepted_terms_of_service?: string
   created_at: string
   updated_at: string
@@ -396,6 +398,17 @@ export interface ListFundsRequestsResponse {
   data: FundsRequest[]
 }
 
+export interface ListCustomersParams {
+  limit?: number // 1..100, Bridge default 10
+  // Customer id; returns the page of OLDER customers (list is newest first)
+  startingAfter?: string
+}
+
+export interface ListCustomersResponse {
+  count: number
+  data: Customer[]
+}
+
 // ============ Bridge Client ============
 
 export class BridgeClient {
@@ -504,6 +517,24 @@ export class BridgeClient {
 
   async getCustomer(customerId: BridgeCustomerId): Promise<Customer> {
     return this.request<Customer>("GET", `/customers/${customerId}`)
+  }
+
+  // One page, newest first by creation time. Like funds requests there is no
+  // has_more: a page shorter than `limit` is the last one, and `startingAfter`
+  // (the last id seen) fetches the next.
+  // https://apidocs.bridge.xyz/api-reference/customers/get-all-customers
+  async listCustomers(params: ListCustomersParams = {}): Promise<ListCustomersResponse> {
+    const queryParams = new URLSearchParams()
+    if (params.limit) queryParams.append("limit", params.limit.toString())
+    if (params.startingAfter) queryParams.append("starting_after", params.startingAfter)
+    const suffix = queryParams.toString() ? `?${queryParams.toString()}` : ""
+
+    const response = await this.request<Partial<ListCustomersResponse>>(
+      "GET",
+      `/customers${suffix}`,
+    )
+    const data = Array.isArray(response?.data) ? response.data : []
+    return { count: response?.count ?? data.length, data }
   }
 
   // ============ KYC ============

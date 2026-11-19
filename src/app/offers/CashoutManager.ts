@@ -7,6 +7,7 @@ import Ibex from "@services/ibex/client"
 import { UnexpectedIbexResponse } from "@services/ibex/errors"
 import { getBankOwnerIbexAccount } from "@services/ledger/caching"
 
+import { AccountCashoutHeldError } from "@domain/accounts"
 import { RepositoryError } from "@domain/errors"
 import { notifyOpsEvent, toDisplayAmount } from "@services/alerts/ops-events"
 import { EmailService } from "@services/email"
@@ -25,6 +26,33 @@ const config = {
   ...Cashout.OfferConfig,
 }
 
+// ENG-889: the cash-out hold gate for executeCashout. Returns the refusal, or
+// undefined when the account may cash out. Fails closed on a read error.
+const refuseIfCashoutHeld = async ({
+  accountId,
+  displayAmount,
+  offerId,
+}: {
+  accountId: AccountId
+  displayAmount: ReturnType<typeof toDisplayAmount>
+  offerId: OfferId
+}): Promise<Error | undefined> => {
+  const account = await AccountsRepository().findById(accountId)
+  if (account instanceof Error) return account
+  if (!account.cashoutHold) return undefined
+  notifyOpsEvent({
+    flow: "cashout",
+    phase: "refused",
+    status: "failed",
+    accountId,
+    amount: displayAmount,
+    step: "cashout-hold",
+    error: "AccountCashoutHeldError",
+    meta: { offerId },
+  })
+  return new AccountCashoutHeldError()
+}
+
 const CashoutManager = {
   createOffer: async (
     walletId: WalletId,
@@ -41,6 +69,8 @@ const CashoutManager = {
       return new ValidationError("Wallet does not belong to account")
     const account = await AccountsRepository().findById(wallet.accountId)
     if (account instanceof RepositoryError) return new ValidationError(account)
+    // A cash-out hold (ENG-889) refuses before any invoice or offer exists.
+    if (account.cashoutHold) return new AccountCashoutHeldError()
     if (!account.erpParty) return new Error("Could not find erpParty for account")
 
     // Source (user) and destination (Flash bank-owner) wallets are resolved from the
@@ -156,6 +186,16 @@ const CashoutManager = {
       return new ValidationError("Offer is not good for provided wallet.")
 
     const displayAmount = toDisplayAmount(offer.details.payment.amount)
+
+    // A hold placed after the offer was made (ENG-889) still refuses it. Read
+    // fresh from the account, not from the offer, and checked before the offer
+    // is consumed, so a released hold leaves the offer usable until it expires.
+    // An unreadable account refuses the payout (fail closed). Checked here so a
+    // held account is refused before any work, and again just before the offer
+    // is consumed (below).
+    const held = await refuseIfCashoutHeld({ accountId, displayAmount, offerId: id })
+    if (held) return held
+
     notifyOpsEvent({
       flow: "cashout",
       phase: "initiated",
@@ -188,6 +228,15 @@ const CashoutManager = {
       })
       return validOffer
     }
+
+    // The risk read can take seconds: a hold placed during it (by the hourly
+    // Bridge customer status watch, or by ops) must still stop this payout.
+    const heldNow = await refuseIfCashoutHeld({
+      accountId,
+      displayAmount,
+      offerId: id,
+    })
+    if (heldNow) return heldNow
 
     // Single-use gate (ENG-695): exactly one execution per offer gets past it.
     // It sits after validation, so an offer that fails a transient check (an

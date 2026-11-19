@@ -1,6 +1,8 @@
 // Ops alerting for Bridge integration signals (ENG-361).
 
-export type AlertSeverity = "critical" | "warning"
+// info: inform only, for good news ops still want to see (e.g. a Bridge
+// customer back to active). Never pages.
+export type AlertSeverity = "critical" | "warning" | "info"
 
 export type AlertSource =
   | "bridge-webhook"
@@ -14,6 +16,8 @@ export type AlertSource =
   | "fygaro-checkout"
   // The cron watcher that polls Bridge funds requests (wire recalls).
   | "bridge-funds-request"
+  // The cron watcher that polls Bridge customer statuses (ENG-889).
+  | "bridge-customer-status"
 
 export interface BridgeAlert {
   dedupKey: string

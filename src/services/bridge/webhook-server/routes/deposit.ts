@@ -24,6 +24,7 @@ import {
 import { alertBridge, generateDedupKey } from "@services/alerts"
 import { alertIbexReconciliationFailed } from "@services/alerts/ibex-bridge-movement"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
+import { findAccountByBridgeCustomerId } from "@services/bridge/account-lookup"
 
 type DepositEventObject = {
   id: string
@@ -101,6 +102,18 @@ export const depositHandler = async (req: Request, res: Response) => {
   }
 
   if (!obj.amount || !customerId) {
+    // A virtual account deactivation is not a deposit and may carry no
+    // amount; ops still need to hear about it. Bridge does not retry a 200, so
+    // this alerts once per delivery.
+    if (state && isVirtualAccountAlert(state)) {
+      await alertVirtualAccountEvent({
+        eventId: event_id,
+        obj,
+        state,
+        customerId,
+        currency,
+      })
+    }
     baseLogger.warn(
       {
         event_id,
@@ -239,6 +252,14 @@ export const depositHandler = async (req: Request, res: Response) => {
         BRIDGE_DEPOSIT_TERMINAL_FAILURE_STATES.has(state))
     ) {
       alertDepositNotDelivered({ eventId: event_id, obj, state, customerId, currency })
+    } else if (state && isVirtualAccountAlert(state)) {
+      await alertVirtualAccountEvent({
+        eventId: event_id,
+        obj,
+        state,
+        customerId,
+        currency,
+      })
     } else {
       notifyOpsEvent({
         flow: "deposit",
@@ -343,6 +364,104 @@ const alertDepositNotDelivered = ({
       depositId,
       ...(obj.refund?.code ? { refundCode: String(obj.refund.code) } : {}),
       ...(originatorName ? { originator: originatorName } : {}),
+    },
+  })
+}
+
+// Virtual account events ops are told about (ENG-889), and what each means.
+// Neither changes how the deposit row is written.
+// https://apidocs.bridge.xyz/platform/orchestration/virtual_accounts/virtual-account-events
+const VIRTUAL_ACCOUNT_ALERTS: Readonly<
+  Record<string, { title: string; detail: string }>
+> = {
+  in_review: {
+    title: "Bridge deposit under manual review",
+    detail:
+      "Bridge is reviewing this deposit by hand. It is not delivered until the review ends.",
+  },
+  deactivation: {
+    title: "Bridge virtual account deactivated",
+    detail:
+      "Bridge deactivated this customer's virtual account. Deposits to it are no longer accepted.",
+  },
+}
+
+const isVirtualAccountAlert = (state: string): boolean =>
+  Object.prototype.hasOwnProperty.call(VIRTUAL_ACCOUNT_ALERTS, state)
+
+type MappedAccount = { accountId?: string; username?: string; lookup: string }
+
+// Display only: a lookup that fails is reported in the alert, never thrown.
+const mappedAccount = async (customerId?: string): Promise<MappedAccount> => {
+  if (!customerId) return { lookup: "no_customer_id" }
+  const lookup = await findAccountByBridgeCustomerId(customerId)
+  switch (lookup.kind) {
+    case "found":
+      return {
+        accountId: lookup.account.id,
+        username: lookup.account.username,
+        lookup: "found",
+      }
+    case "not_found":
+      return { lookup: "not_found" }
+    default:
+      return { lookup: "failed" }
+  }
+}
+
+const alertVirtualAccountEvent = async ({
+  eventId,
+  obj,
+  state,
+  customerId,
+  currency,
+}: {
+  eventId: string
+  obj: DepositEventObject
+  state: string
+  customerId?: string
+  currency: string
+}) => {
+  const copy = VIRTUAL_ACCOUNT_ALERTS[state]
+  const account = await mappedAccount(customerId)
+  const depositId = obj.deposit_id ?? obj.payment_route?.deposit_id
+  const virtualAccountId = obj.virtual_account_id ?? obj.payment_route?.virtual_account_id
+  // Deactivation events carry "0.0" or no amount: only show a real one.
+  const amount = obj.amount && Number(obj.amount) !== 0 ? String(obj.amount) : undefined
+  const who = account.username ?? customerId ?? "unknown customer"
+
+  alertBridge({
+    dedupKey: generateDedupKey.bridgeVirtualAccountEvent(eventId, state),
+    source: "bridge-webhook",
+    severity: "warning",
+    title: `${copy.title}: ${amount ? `${amount} ${currency.toUpperCase()}, ` : ""}${who}`,
+    detail: copy.detail,
+    context: {
+      event_id: eventId,
+      type: state,
+      customer_id: customerId,
+      account_id: account.accountId,
+      username: account.username,
+      account_lookup: account.lookup,
+      virtual_account_id: virtualAccountId,
+      deposit_id: depositId,
+      amount,
+      currency: amount ? currency : undefined,
+      payment_rail: obj.source?.payment_rail,
+    },
+  })
+
+  notifyOpsEvent({
+    flow: "deposit",
+    phase: state.replace(/_/g, "-"),
+    status: state === "deactivation" ? "failed" : "pending",
+    accountId: account.accountId,
+    step: state,
+    ...(amount ? { amount: { value: amount, currency } } : {}),
+    meta: {
+      ...(customerId ? { customerId } : {}),
+      ...(depositId ? { depositId } : {}),
+      ...(virtualAccountId ? { virtualAccountId } : {}),
     },
   })
 }

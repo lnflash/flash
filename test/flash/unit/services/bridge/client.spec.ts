@@ -8,6 +8,7 @@ jest.mock("@config", () => ({
 }))
 
 import { BridgeClient, listAllEvents, BridgeWebhookEvent } from "@services/bridge/client"
+import { BridgeApiError, isBridgeNotAllowedError } from "@services/bridge/errors"
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -345,5 +346,107 @@ describe("BridgeClient.listFundsRequests", () => {
     await expect(new BridgeClient().listFundsRequests()).rejects.toThrow(
       "Bridge API error: 403 Forbidden",
     )
+  })
+})
+
+// ENG-889: the customer status watch lists every Bridge customer.
+describe("BridgeClient.listCustomers", () => {
+  const originalFetch = global.fetch
+  const customer = {
+    id: "cust_1",
+    type: "individual",
+    status: "deposits_restricted",
+    created_at: "2026-11-01T00:00:00.000Z",
+    updated_at: "2026-11-19T00:00:00.000Z",
+  }
+
+  beforeEach(() => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ count: 1, data: [customer] }),
+    } as Response)
+  })
+
+  afterEach(() => {
+    global.fetch = originalFetch
+  })
+
+  it("GETs /customers with limit and starting_after and no Idempotency-Key", async () => {
+    const result = await new BridgeClient().listCustomers({
+      limit: 100,
+      startingAfter: "cust_0",
+    })
+
+    expect(result).toEqual({ count: 1, data: [customer] })
+    const [url, init] = (global.fetch as jest.Mock).mock.calls[0]
+    const parsed = new URL(url)
+    expect(parsed.pathname).toBe("/v0/customers")
+    expect(Object.fromEntries(parsed.searchParams)).toEqual({
+      limit: "100",
+      starting_after: "cust_0",
+    })
+    expect(init.method).toBe("GET")
+    expect(init.headers["Idempotency-Key"]).toBeUndefined()
+  })
+
+  it("treats a body without data as an empty page", async () => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({}),
+    } as Response)
+
+    await expect(new BridgeClient().listCustomers()).resolves.toEqual({
+      count: 0,
+      data: [],
+    })
+  })
+})
+
+// ENG-889: production answers GET /funds_requests with 401 not_allowed; the
+// recall watch must tell that apart from other failures.
+describe("BridgeApiError code", () => {
+  const originalFetch = global.fetch
+
+  afterEach(() => {
+    global.fetch = originalFetch
+  })
+
+  const failWith = (status: number, body: unknown) => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status,
+      statusText: "Unauthorized",
+      json: async () => body,
+    } as Response)
+  }
+
+  it("carries the status and Bridge's error code", async () => {
+    failWith(401, {
+      code: "not_allowed",
+      message: "Insufficient permissions for this endpoint",
+    })
+
+    const error = await new BridgeClient().listFundsRequests().catch((e) => e)
+
+    expect(error).toBeInstanceOf(BridgeApiError)
+    expect(error.statusCode).toBe(401)
+    expect(error.code).toBe("not_allowed")
+    expect(isBridgeNotAllowedError(error)).toBe(true)
+  })
+
+  it("is not 'not allowed' for another 401 code or another status", () => {
+    expect(
+      isBridgeNotAllowedError(new BridgeApiError("x", 401, { code: "unauthorized" })),
+    ).toBe(false)
+    expect(
+      isBridgeNotAllowedError(new BridgeApiError("x", 403, { code: "not_allowed" })),
+    ).toBe(false)
+    expect(isBridgeNotAllowedError(new BridgeApiError("x", 401, null))).toBe(false)
+    expect(isBridgeNotAllowedError(new Error("not_allowed"))).toBe(false)
+  })
+
+  it("leaves code undefined when the body has none", () => {
+    expect(new BridgeApiError("x", 500, "Bad Gateway").code).toBeUndefined()
+    expect(new BridgeApiError("x", 500, { code: 7 }).code).toBeUndefined()
   })
 })

@@ -57,6 +57,9 @@ import { BridgeApiError } from "@services/bridge/errors"
 
 const NOW = new Date("2026-11-19T12:00:00.000Z")
 
+// The module logger the watcher writes to (the mock's child()).
+const mockLogger = jest.requireMock("@services/logger").baseLogger.child()
+
 const fraudRequest = {
   id: "fr_fraud",
   deposit_id: "deposit_wire_5000",
@@ -139,6 +142,66 @@ describe("watchBridgeFundsRequests: polling", () => {
         severity: "warning",
         detail: "Bridge API error: 403 Forbidden",
       }),
+    )
+  })
+  it("skips the watch without failing or alerting when Bridge says the key is not allowed", async () => {
+    // Production, 2026-11: the key gets 200 on /customers but this on
+    // /funds_requests, and Bridge will not grant the permission.
+    mockListFundsRequests.mockRejectedValue(
+      new BridgeApiError("Bridge API error: 401 Unauthorized", 401, {
+        code: "not_allowed",
+        message: "Insufficient permissions for this endpoint",
+      }),
+    )
+
+    const summary = await watchBridgeFundsRequests({ now: NOW })
+
+    expect(summary).toEqual(
+      expect.objectContaining({ notPermitted: true, pollFailed: false, fetched: 0 }),
+    )
+    expect(alertBridge).not.toHaveBeenCalled()
+    expect(mockRecordSeen).not.toHaveBeenCalled()
+    expect(mockLogger.warn).toHaveBeenCalledTimes(1)
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      { status: 401, code: "not_allowed" },
+      "Bridge funds requests not permitted for this API key; recall watch skipped",
+    )
+  })
+
+  it("still fails the poll on a 401 with another code", async () => {
+    mockListFundsRequests.mockRejectedValue(
+      new BridgeApiError("Bridge API error: 401 Unauthorized", 401, {
+        code: "invalid_api_key",
+      }),
+    )
+
+    const summary = await watchBridgeFundsRequests({ now: NOW })
+
+    expect(summary).toEqual(
+      expect.objectContaining({ pollFailed: true, notPermitted: false }),
+    )
+    expect(alertBridge).toHaveBeenCalledWith(
+      expect.objectContaining({ dedupKey: "bridge-funds-request:poll-failed" }),
+    )
+  })
+
+  it("still fails the poll on a 5xx or a network error", async () => {
+    mockListFundsRequests.mockRejectedValueOnce(
+      new BridgeApiError("Bridge API error: 502 Bad Gateway", 502, null),
+    )
+    expect((await watchBridgeFundsRequests({ now: NOW })).pollFailed).toBe(true)
+
+    mockListFundsRequests.mockRejectedValueOnce(new TypeError("fetch failed"))
+    expect((await watchBridgeFundsRequests({ now: NOW })).pollFailed).toBe(true)
+  })
+
+  it("polls as normal once Bridge allows the endpoint", async () => {
+    mockListFundsRequests.mockResolvedValue(page([]))
+
+    const summary = await watchBridgeFundsRequests({ now: NOW })
+
+    expect(summary).toEqual(
+      expect.objectContaining({ notPermitted: false, pollFailed: false }),
     )
   })
 })

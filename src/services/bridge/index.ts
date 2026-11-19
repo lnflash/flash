@@ -19,6 +19,7 @@ import {
 import { baseLogger } from "@services/logger"
 import { IpFetcher } from "@services/ipfetcher"
 
+import { AccountCashoutHeldError } from "@domain/accounts"
 import { CacheServiceError } from "@domain/cache"
 import { RepositoryError } from "@domain/errors"
 import { isPrivateIp } from "@domain/accounts-ips"
@@ -320,6 +321,19 @@ const requireApprovedBridgeCustomer = async ({
   account: Account
   operation: string
 }): Promise<BridgeCustomerId | Error> => {
+  // A cash-out hold (ENG-889) also stops the USDT-to-bank offramp. Bridge's
+  // own status refuses while the customer is restricted or offboarded, but the
+  // hold outlives that: ops may still be reviewing after Bridge sets the
+  // customer active again, and nothing but ops releases the hold. `account` is
+  // read fresh by checkAccountLevel on every call.
+  if (account.cashoutHold) {
+    baseLogger.warn(
+      { accountId: account.id, operation, holdSource: account.cashoutHold.source },
+      "Bridge withdrawal refused: cash-out hold on the account",
+    )
+    return new AccountCashoutHeldError()
+  }
+
   if (!account.bridgeCustomerId) {
     return new BridgeCustomerNotFoundError(
       "Account has no Bridge customer ID. Complete KYC first.",

@@ -26,6 +26,7 @@ jest.mock("@services/logger", () => ({
   baseLogger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }))
 
+import { AccountCashoutHeldError } from "@domain/accounts"
 import { OfferAlreadyExecuted, OfferNotFound } from "@domain/cache"
 import { ErrorLevel } from "@domain/shared"
 import { InternalServerError } from "@graphql/error"
@@ -79,6 +80,25 @@ describe("initiateCashout resolver", () => {
           code: "OFFER_ALREADY_EXECUTED",
           message:
             "This cashout offer was already submitted and can't be reused. Check your transactions before starting a new cashout.",
+        }),
+      ],
+      id: null,
+    })
+    expect(mockRecordException).not.toHaveBeenCalled()
+  })
+
+  // ENG-889: a cash-out hold reaches the user as a plain refusal that does not
+  // say why, not as a server error.
+  it("returns CASHOUT_UNAVAILABLE and no id when cash-outs are held", async () => {
+    mockExecuteCashout.mockResolvedValue(new AccountCashoutHeldError())
+
+    const result = await initiateCashout()
+
+    expect(result).toEqual({
+      errors: [
+        expect.objectContaining({
+          code: "CASHOUT_UNAVAILABLE",
+          message: "Cash out is unavailable for this account. Please contact support.",
         }),
       ],
       id: null,
