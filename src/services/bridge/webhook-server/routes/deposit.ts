@@ -16,6 +16,11 @@ import { baseLogger } from "@services/logger"
 import { createBridgeDeposit } from "@services/mongoose/bridge-deposit-log"
 import { reconcileByTxHash } from "@services/bridge/reconciliation"
 import { writeBridgeDepositRequest } from "@services/frappe/BridgeTransferRequestWriter"
+import {
+  BRIDGE_DEPOSIT_REFUND_STATES,
+  BRIDGE_DEPOSIT_TERMINAL_FAILURE_STATES,
+  bridgeDepositFailureReason,
+} from "@services/bridge/deposit-states"
 import { alertBridge, generateDedupKey } from "@services/alerts"
 import { alertIbexReconciliationFailed } from "@services/alerts/ibex-bridge-movement"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
@@ -56,6 +61,20 @@ type DepositEventObject = {
     transfer_id?: string
     deposit_id?: string
     virtual_account_id?: string
+  }
+  // Refund activity (refund_in_flight / refunded / refund_failed)
+  refund?: {
+    code?: string
+    reason?: string
+    refunded_at?: string
+    refund_reference_id?: string
+    risk_rejection_reason?: string
+  }
+  source?: {
+    payment_rail?: string
+    originator_name?: string
+    sender_name?: string
+    bank_name?: string
   }
 }
 
@@ -214,13 +233,21 @@ export const depositHandler = async (req: Request, res: Response) => {
       return res.status(200).json({ status: "already_processed" })
     }
 
-    notifyOpsEvent({
-      flow: "deposit",
-      phase: "succeeded",
-      status: "success",
-      amount: { value: String(obj.amount), currency },
-      meta: { customerId, transferId: obj.id },
-    })
+    if (
+      state &&
+      (BRIDGE_DEPOSIT_REFUND_STATES.has(state) ||
+        BRIDGE_DEPOSIT_TERMINAL_FAILURE_STATES.has(state))
+    ) {
+      alertDepositNotDelivered({ eventId: event_id, obj, state, customerId, currency })
+    } else {
+      notifyOpsEvent({
+        flow: "deposit",
+        phase: "succeeded",
+        status: "success",
+        amount: { value: String(obj.amount), currency },
+        meta: { customerId, transferId: obj.id },
+      })
+    }
 
     return res.status(200).json({ status: "success" })
   } catch (error) {
@@ -251,4 +278,71 @@ export const depositHandler = async (req: Request, res: Response) => {
 const asOptionalString = (value: unknown): string | undefined => {
   if (value === undefined || value === null) return undefined
   return String(value)
+}
+
+// Bridge is returning, has returned, or could not deliver this deposit. Sent
+// once per event (after the idempotency lock), so ops learn that money they
+// may have been told is arriving will not reach the customer. A failed refund
+// pages: the funds are stuck at Bridge until the sender's bank account is
+// reachable. Every other case informs.
+const alertDepositNotDelivered = ({
+  eventId,
+  obj,
+  state,
+  customerId,
+  currency,
+}: {
+  eventId: string
+  obj: DepositEventObject
+  state: string
+  customerId: string
+  currency: string
+}) => {
+  const depositId = obj.deposit_id ?? obj.payment_route?.deposit_id ?? obj.id
+  const reason = bridgeDepositFailureReason({ state, refund: obj.refund })
+  const originatorName = obj.source?.originator_name ?? obj.source?.sender_name
+  const amountText = `${obj.amount} ${currency.toUpperCase()}`
+
+  alertBridge({
+    dedupKey: generateDedupKey.bridgeDepositNotDelivered(depositId, state),
+    source: "bridge-webhook",
+    severity: state === "refund_failed" ? "critical" : "warning",
+    title:
+      state === "refund_in_flight"
+        ? `Bridge deposit being refunded: ${amountText}`
+        : state === "refunded"
+          ? `Bridge deposit refunded: ${amountText}`
+          : `Bridge deposit not delivered (${state}): ${amountText}`,
+    detail: reason,
+    context: {
+      event_id: eventId,
+      state,
+      customer_id: customerId,
+      deposit_id: depositId,
+      amount: obj.amount,
+      currency,
+      refund_code: obj.refund?.code,
+      refund_reason: obj.refund?.reason,
+      risk_rejection_reason: obj.refund?.risk_rejection_reason,
+      refund_reference_id: obj.refund?.refund_reference_id,
+      originator_name: originatorName,
+      originator_bank: obj.source?.bank_name,
+      payment_rail: obj.source?.payment_rail,
+    },
+  })
+
+  notifyOpsEvent({
+    flow: "deposit",
+    phase: state.replace(/_/g, "-"),
+    status: state === "refund_in_flight" ? "pending" : "failed",
+    step: state,
+    error: reason,
+    amount: { value: String(obj.amount), currency },
+    meta: {
+      customerId,
+      depositId,
+      ...(obj.refund?.code ? { refundCode: String(obj.refund.code) } : {}),
+      ...(originatorName ? { originator: originatorName } : {}),
+    },
+  })
 }

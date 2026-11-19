@@ -363,6 +363,39 @@ type WebhookEventsApiResponse = {
   cursor?: string
 }
 
+// A sender-bank recall of a fiat deposit. Bridge sends no webhook for these;
+// they must be polled. https://apidocs.bridge.xyz/api-reference/funds-requests/get-all-funds-requests
+export interface FundsRequest {
+  id: string
+  deposit_id?: string
+  customer_id?: string
+  amount?: string
+  currency?: string
+  payment_rail?: string
+  fraud?: boolean
+  notice_date?: string // YYYY-MM-DD
+  imad?: string
+  trace_number?: string
+  bank_transaction_id?: string
+  created_at?: string
+  deposit_created_at?: string
+}
+
+export interface ListFundsRequestsParams {
+  limit?: number // 1..100, Bridge default 10
+  // Funds request id; returns the page of OLDER requests (list is newest first)
+  startingAfter?: string
+  customerId?: string
+  fraud?: boolean
+  noticeDateStartingOn?: string // YYYY-MM-DD, inclusive
+  noticeDateEndingOn?: string // YYYY-MM-DD, inclusive
+}
+
+export interface ListFundsRequestsResponse {
+  count: number
+  data: FundsRequest[]
+}
+
 // ============ Bridge Client ============
 
 export class BridgeClient {
@@ -619,6 +652,34 @@ export class BridgeClient {
 
   async deleteTransfer(transferId: BridgeTransferId): Promise<Transfer> {
     return this.request<Transfer>("DELETE", `/transfers/${transferId}`)
+  }
+
+  // ============ Funds Requests ============
+
+  // One page, newest first. There is no has_more: a page shorter than `limit`
+  // is the last one, and `startingAfter` (the last id seen) fetches the next.
+  async listFundsRequests(
+    params: ListFundsRequestsParams = {},
+  ): Promise<ListFundsRequestsResponse> {
+    const queryParams = new URLSearchParams()
+    if (params.limit) queryParams.append("limit", params.limit.toString())
+    if (params.startingAfter) queryParams.append("starting_after", params.startingAfter)
+    if (params.customerId) queryParams.append("customer_id", params.customerId)
+    if (params.fraud !== undefined) queryParams.append("fraud", String(params.fraud))
+    if (params.noticeDateStartingOn) {
+      queryParams.append("notice_date_starting_on", params.noticeDateStartingOn)
+    }
+    if (params.noticeDateEndingOn) {
+      queryParams.append("notice_date_ending_on", params.noticeDateEndingOn)
+    }
+    const suffix = queryParams.toString() ? `?${queryParams.toString()}` : ""
+
+    const response = await this.request<Partial<ListFundsRequestsResponse>>(
+      "GET",
+      `/funds_requests${suffix}`,
+    )
+    const data = Array.isArray(response?.data) ? response.data : []
+    return { count: response?.count ?? data.length, data }
   }
 
   // ============ List Events ============

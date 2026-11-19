@@ -8,11 +8,22 @@ import { BridgeAlert } from "./index.types"
 export * from "./index.types"
 export { generateDedupKey } from "./dedup-key"
 
+// Deliveries not yet settled. A short-lived process (the cron Job) awaits
+// flushAlerts() before it exits, so a page fired near the end of a run is not
+// cut off in flight. Every sender has its own request timeout, so the flush is
+// bounded.
+const inflight = new Set<Promise<void>>()
+
+export const flushAlerts = async (): Promise<void> => {
+  await Promise.allSettled([...inflight])
+}
+
 /**
  * Fire-and-forget fan-out of a Bridge alert to the configured destinations
  * (ENG-361). Returns immediately; delivery is best-effort: each sender catches
  * its own errors and no-ops when its credential/URL is unset, so it never throws
- * or rejects into the caller (no need to await or handle it).
+ * or rejects into the caller (no need to await or handle it). A process about
+ * to exit awaits flushAlerts() first.
  *
  * Routing:
  *   - critical: page on-call (PagerDuty) + inform (Slack/Mattermost, Discord)
@@ -42,5 +53,7 @@ export const alertBridge = (alert: BridgeAlert): void => {
     }
   }
 
-  deliver().catch(() => undefined)
+  const delivery = deliver().catch(() => undefined)
+  inflight.add(delivery)
+  delivery.finally(() => inflight.delete(delivery))
 }

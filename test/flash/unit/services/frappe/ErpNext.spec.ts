@@ -351,6 +351,146 @@ describe("ErpNext.upsertBridgeTransferRequest", () => {
     })
   })
 
+  // ENG-889: a refunded deposit is Failed; Bridge retries of its earlier
+  // events (funds_received, payment_submitted) must not bring it back.
+  it.each([
+    BridgeTransferRequestStatus.FiatReceived,
+    BridgeTransferRequestStatus.Settled,
+    BridgeTransferRequestStatus.Completed,
+  ])("keeps a Failed Topup row Failed against an incoming %s", async (incoming) => {
+    mockedAxios.get.mockResolvedValue({
+      data: {
+        data: [
+          {
+            name: "BTR-1",
+            status: BridgeTransferRequestStatus.Failed,
+            source_systems_seen: "bridge_deposit",
+            failure_reason: "Refunded by Bridge: R03 Risk Rejection",
+          },
+        ],
+      },
+    })
+    mockedAxios.put.mockResolvedValue({ data: { data: { name: "BTR-1" } } })
+
+    const retry = new BridgeTransferRequest({
+      requestId: "deposit_1",
+      transactionType: BridgeTransferRequestTransactionType.Topup,
+      status: incoming,
+      amount: "5000.0",
+      currency: "usd",
+      sourceSystemsSeen: ["bridge_deposit"],
+    })
+    await client.upsertBridgeTransferRequest(retry)
+
+    const body = mockedAxios.put.mock.calls[0][1]
+    expect(body.status).toBe(BridgeTransferRequestStatus.Failed)
+    // The retry carries no reason, so the stored one is not sent over.
+    expect(JSON.parse(JSON.stringify(body))).not.toHaveProperty("failure_reason")
+  })
+
+  it("lets a refund move a Fiat Received Topup row to Failed", async () => {
+    mockedAxios.get.mockResolvedValue({
+      data: {
+        data: [{ name: "BTR-1", status: BridgeTransferRequestStatus.FiatReceived }],
+      },
+    })
+    mockedAxios.put.mockResolvedValue({ data: { data: { name: "BTR-1" } } })
+
+    await client.upsertBridgeTransferRequest(
+      new BridgeTransferRequest({
+        requestId: "deposit_1",
+        transactionType: BridgeTransferRequestTransactionType.Topup,
+        status: BridgeTransferRequestStatus.Failed,
+        amount: "5000.0",
+        currency: "usd",
+        failureReason: "Refunded by Bridge: R03 Risk Rejection",
+      }),
+    )
+
+    expect(mockedAxios.put).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        status: BridgeTransferRequestStatus.Failed,
+        failure_reason: "Refunded by Bridge: R03 Risk Rejection",
+      }),
+      expect.any(Object),
+    )
+  })
+
+  describe("failure_reason on Topup rows (ENG-889)", () => {
+    const recallNote =
+      "Recalled by sender's bank: Bridge funds request fr_1, fraud, notice 2026-11-18"
+
+    const refundedEvent = new BridgeTransferRequest({
+      requestId: "deposit_1",
+      transactionType: BridgeTransferRequestTransactionType.Topup,
+      status: BridgeTransferRequestStatus.Failed,
+      amount: "5000.0",
+      currency: "usd",
+      failureReason: "Refunded by Bridge: R03 Risk Rejection",
+    })
+
+    const existingRow = (status: string, failureReason: string) => {
+      mockedAxios.get.mockResolvedValue({
+        data: { data: [{ name: "BTR-1", status, failure_reason: failureReason }] },
+      })
+      mockedAxios.put.mockResolvedValue({ data: { data: { name: "BTR-1" } } })
+    }
+
+    it("keeps a recall note when a refund rewrites the reason", async () => {
+      // The daily watcher notes the recall once and never again, so a refund
+      // that replaced the whole reason would erase it for good.
+      existingRow(
+        BridgeTransferRequestStatus.FiatReceived,
+        `Refund in progress at Bridge: R03 Risk Rejection; ${recallNote}`,
+      )
+
+      await client.upsertBridgeTransferRequest(refundedEvent)
+
+      const body = mockedAxios.put.mock.calls[0][1]
+      expect(body.status).toBe(BridgeTransferRequestStatus.Failed)
+      expect(body.failure_reason).toBe(
+        `Refunded by Bridge: R03 Risk Rejection; ${recallNote}`,
+      )
+    })
+
+    it("does not repeat a recall note on a re-delivered refund", async () => {
+      existingRow(
+        BridgeTransferRequestStatus.Failed,
+        `Refunded by Bridge: R03 Risk Rejection; ${recallNote}`,
+      )
+
+      await client.upsertBridgeTransferRequest(refundedEvent)
+
+      expect(mockedAxios.put.mock.calls[0][1].failure_reason).toBe(
+        `Refunded by Bridge: R03 Risk Rejection; ${recallNote}`,
+      )
+    })
+
+    it("sends no reason when an older event lands on a row that is further on", async () => {
+      // refund_in_flight retried by Bridge after refunded already failed the row.
+      existingRow(
+        BridgeTransferRequestStatus.Failed,
+        "Refunded by Bridge: R03 Risk Rejection",
+      )
+
+      await client.upsertBridgeTransferRequest(
+        new BridgeTransferRequest({
+          requestId: "deposit_1",
+          transactionType: BridgeTransferRequestTransactionType.Topup,
+          status: BridgeTransferRequestStatus.FiatReceived,
+          amount: "5000.0",
+          currency: "usd",
+          failureReason: "Refund in progress at Bridge: R03 Risk Rejection",
+        }),
+      )
+
+      const body = JSON.parse(JSON.stringify(mockedAxios.put.mock.calls[0][1]))
+      expect(body.status).toBe(BridgeTransferRequestStatus.Failed)
+      expect(body).not.toHaveProperty("failure_reason")
+    })
+  })
+
   it("keeps last-write-wins semantics for Cashout rows", async () => {
     mockedAxios.get.mockResolvedValue({
       data: {
@@ -435,6 +575,15 @@ describe("ErpNext.findBridgeTransferRequest", () => {
     expect(JSON.parse(getParams.fields)).toContain("final_amount")
   })
 
+  it("asks for failure_reason, so a recall note appends instead of overwriting", async () => {
+    mockedAxios.get.mockResolvedValue({ data: { data: [{ name: "BTR-1" }] } })
+
+    await client.findBridgeTransferRequest("deposit_1")
+
+    const getParams = mockedAxios.get.mock.calls[0][1].params
+    expect(JSON.parse(getParams.fields)).toContain("failure_reason")
+  })
+
   it("returns undefined when no row exists", async () => {
     mockedAxios.get.mockResolvedValue({ data: { data: [] } })
 
@@ -516,6 +665,38 @@ describe("ErpNext.completeBridgeTopupByTxHash", () => {
     expect(mockedAxios.put).not.toHaveBeenCalled()
   })
 
+  it("keeps a Failed (refunded) deposit row Failed but stamps the credited account", async () => {
+    mockedAxios.get.mockResolvedValue({
+      data: {
+        data: [
+          {
+            name: "BTR-1",
+            status: BridgeTransferRequestStatus.Failed,
+            source_systems_seen: "bridge_deposit",
+          },
+        ],
+      },
+    })
+    mockedAxios.put.mockResolvedValue({ data: { data: { name: "BTR-1" } } })
+
+    const result = await client.completeBridgeTopupByTxHash({
+      txHash: "tx_123",
+      accountId: "acct_123",
+      walletId: "wallet_123",
+    })
+
+    expect(result).toBe("kept_failed")
+    const body = mockedAxios.put.mock.calls[0][1]
+    expect(body).not.toHaveProperty("status")
+    expect(body).toEqual(
+      expect.objectContaining({
+        account_id: "acct_123",
+        wallet_id: "wallet_123",
+        source_systems_seen: "bridge_deposit,ibex_crypto_receive",
+      }),
+    )
+  })
+
   it("returns an error when the promotion write fails", async () => {
     mockedAxios.get.mockResolvedValue({
       data: {
@@ -525,6 +706,114 @@ describe("ErpNext.completeBridgeTopupByTxHash", () => {
     mockedAxios.put.mockRejectedValue(new Error("erpnext down"))
 
     const result = await client.completeBridgeTopupByTxHash({ txHash: "tx_123" })
+
+    expect(result).toBeInstanceOf(Error)
+  })
+})
+
+describe("ErpNext.appendBridgeTransferRequestFailureReason", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+  })
+
+  const note = "Recalled by sender's bank: Bridge funds request fr_1, fraud"
+
+  it("writes the note, merges provenance and leaves status alone", async () => {
+    mockedAxios.get.mockResolvedValue({
+      data: {
+        data: [
+          {
+            name: "BTR-1",
+            status: BridgeTransferRequestStatus.Completed,
+            source_systems_seen: "bridge_deposit,ibex_crypto_receive",
+          },
+        ],
+      },
+    })
+    mockedAxios.put.mockResolvedValue({ data: { data: { name: "BTR-1" } } })
+
+    const result = await client.appendBridgeTransferRequestFailureReason({
+      requestId: "deposit_1",
+      note,
+      sourceSystem: "bridge_funds_request",
+    })
+
+    expect(result).toBe("updated")
+    const getParams = mockedAxios.get.mock.calls[0][1].params
+    expect(JSON.parse(getParams.filters)).toEqual([
+      ["Bridge Transfer Request", "request_id", "=", "deposit_1"],
+    ])
+    const [url, body] = mockedAxios.put.mock.calls[0]
+    expect(url).toBe("https://erp.example/api/resource/Bridge%20Transfer%20Request/BTR-1")
+    expect(body).toEqual({
+      failure_reason: note,
+      source_systems_seen: "bridge_deposit,ibex_crypto_receive,bridge_funds_request",
+      last_seen_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/),
+    })
+  })
+
+  it("appends to a reason the row already carries", async () => {
+    mockedAxios.get.mockResolvedValue({
+      data: {
+        data: [
+          {
+            name: "BTR-1",
+            status: BridgeTransferRequestStatus.Failed,
+            failure_reason: "Refunded by Bridge: R03 Risk Rejection",
+          },
+        ],
+      },
+    })
+    mockedAxios.put.mockResolvedValue({ data: { data: { name: "BTR-1" } } })
+
+    await client.appendBridgeTransferRequestFailureReason({
+      requestId: "deposit_1",
+      note,
+      sourceSystem: "bridge_funds_request",
+    })
+
+    expect(mockedAxios.put.mock.calls[0][1].failure_reason).toBe(
+      `Refunded by Bridge: R03 Risk Rejection; ${note}`,
+    )
+  })
+
+  it("does not append the same note twice", async () => {
+    mockedAxios.get.mockResolvedValue({
+      data: { data: [{ name: "BTR-1", failure_reason: `earlier; ${note}` }] },
+    })
+
+    const result = await client.appendBridgeTransferRequestFailureReason({
+      requestId: "deposit_1",
+      note,
+      sourceSystem: "bridge_funds_request",
+    })
+
+    expect(result).toBe("already_recorded")
+    expect(mockedAxios.put).not.toHaveBeenCalled()
+  })
+
+  it("returns not_found when the deposit has no row", async () => {
+    mockedAxios.get.mockResolvedValue({ data: { data: [] } })
+
+    const result = await client.appendBridgeTransferRequestFailureReason({
+      requestId: "deposit_1",
+      note,
+      sourceSystem: "bridge_funds_request",
+    })
+
+    expect(result).toBe("not_found")
+    expect(mockedAxios.put).not.toHaveBeenCalled()
+  })
+
+  it("returns an error when the write fails", async () => {
+    mockedAxios.get.mockResolvedValue({ data: { data: [{ name: "BTR-1" }] } })
+    mockedAxios.put.mockRejectedValue(new Error("erpnext down"))
+
+    const result = await client.appendBridgeTransferRequestFailureReason({
+      requestId: "deposit_1",
+      note,
+      sourceSystem: "bridge_funds_request",
+    })
 
     expect(result).toBeInstanceOf(Error)
   })

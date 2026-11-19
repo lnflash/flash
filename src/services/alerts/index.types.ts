@@ -12,6 +12,8 @@ export type AlertSource =
   // that runs after the card is captured. Different blast radius: a fault here
   // refuses everyone before they pay, rather than stranding one payment.
   | "fygaro-checkout"
+  // The cron watcher that polls Bridge funds requests (wire recalls).
+  | "bridge-funds-request"
 
 export interface BridgeAlert {
   dedupKey: string

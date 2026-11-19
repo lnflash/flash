@@ -216,6 +216,21 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
             detail: promoteResult.message,
             context: { accountId: account.id, walletId: usdtWallet.id, address },
           })
+        } else if (promoteResult === "kept_failed") {
+          // Bridge reported this deposit as refunded or failed, yet the USDT
+          // arrived and was credited. The row keeps Failed; ops must reconcile.
+          baseLogger.error(
+            { tx_hash, accountId: account.id, walletId: usdtWallet.id },
+            "Crypto receive credited a Bridge deposit whose audit row is Failed",
+          )
+          alertIbexCryptoReceiveFailure({
+            txHash: String(tx_hash),
+            code: "credited_failed_bridge_deposit",
+            title: "USDT credited for a Bridge deposit marked Failed (refunded)",
+            detail:
+              "The ERPNext row stays Failed. Check with Bridge whether the sender was refunded as well as the customer credited.",
+            context: { accountId: account.id, walletId: usdtWallet.id, address },
+          })
         } else {
           baseLogger.info(
             { tx_hash, promoteResult },

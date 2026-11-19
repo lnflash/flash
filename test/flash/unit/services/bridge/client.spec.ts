@@ -260,3 +260,90 @@ describe("BridgeClient Plaid exchange idempotency", () => {
     expect(init.headers["Idempotency-Key"]).not.toHaveLength(0)
   })
 })
+
+// ENG-889: Bridge sends no webhook for wire recalls, so they are polled.
+describe("BridgeClient.listFundsRequests", () => {
+  const originalFetch = global.fetch
+  const fundsRequest = {
+    id: "fr_1",
+    deposit_id: "deposit_1",
+    customer_id: "cust_1",
+    amount: "5000.0",
+    currency: "usd",
+    payment_rail: "wire",
+    fraud: true,
+    notice_date: "2026-11-18",
+    created_at: "2026-11-18T10:00:00.000Z",
+  }
+
+  beforeEach(() => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ count: 1, data: [fundsRequest] }),
+    } as Response)
+  })
+
+  afterEach(() => {
+    global.fetch = originalFetch
+  })
+
+  it("GETs /funds_requests with Bridge's query names and no Idempotency-Key", async () => {
+    const client = new BridgeClient()
+
+    const result = await client.listFundsRequests({
+      limit: 100,
+      startingAfter: "fr_0",
+      customerId: "cust_1",
+      fraud: true,
+      noticeDateStartingOn: "2026-10-20",
+      noticeDateEndingOn: "2026-11-19",
+    })
+
+    expect(result).toEqual({ count: 1, data: [fundsRequest] })
+    const [url, init] = (global.fetch as jest.Mock).mock.calls[0]
+    const parsed = new URL(url)
+    expect(parsed.pathname).toBe("/v0/funds_requests")
+    expect(Object.fromEntries(parsed.searchParams)).toEqual({
+      limit: "100",
+      starting_after: "fr_0",
+      customer_id: "cust_1",
+      fraud: "true",
+      notice_date_starting_on: "2026-10-20",
+      notice_date_ending_on: "2026-11-19",
+    })
+    expect(init.method).toBe("GET")
+    expect(init.headers["Idempotency-Key"]).toBeUndefined()
+  })
+
+  it("sends no query string when called without filters", async () => {
+    await new BridgeClient().listFundsRequests()
+
+    const [url] = (global.fetch as jest.Mock).mock.calls[0]
+    expect(url).toBe("https://api.sandbox.bridge.xyz/v0/funds_requests")
+  })
+
+  it("treats a body without data as an empty page", async () => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({}),
+    } as Response)
+
+    await expect(new BridgeClient().listFundsRequests()).resolves.toEqual({
+      count: 0,
+      data: [],
+    })
+  })
+
+  it("throws BridgeApiError on a 4xx", async () => {
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: false,
+      status: 403,
+      statusText: "Forbidden",
+      json: async () => ({ message: "no access" }),
+    } as Response)
+
+    await expect(new BridgeClient().listFundsRequests()).rejects.toThrow(
+      "Bridge API error: 403 Forbidden",
+    )
+  })
+})

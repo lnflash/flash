@@ -363,7 +363,9 @@ export const AccountsRepository = (): IAccountsRepository => {
   ): Promise<Account | RepositoryError> => {
     try {
       const result = await Account.findOne({ bridgeCustomerId: { $eq: customerId } })
-      if (!result) return new RepositoryError("Account not found for Bridge customer ID")
+      if (!result) {
+        return new CouldNotFindAccountError("Account not found for Bridge customer ID")
+      }
       return translateToAccount(result)
     } catch (error) {
       return parseRepositoryError(error)

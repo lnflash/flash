@@ -6,6 +6,17 @@ jest.mock("@services/frappe/ErpNext", () => ({
   sumFygaroCompletedNetCentsSince: jest.fn(),
   listUncreditedFygaroTopups: jest.fn(),
   countAgedOutUncreditedFygaroTopups: jest.fn(),
+  appendBridgeTransferRequestFailureReason: jest.fn(),
+}))
+
+const mockFindByBridgeCustomerId = jest.fn()
+jest.mock("@services/mongoose/accounts", () => ({
+  AccountsRepository: () => ({ findByBridgeCustomerId: mockFindByBridgeCustomerId }),
+}))
+
+const mockListByAccountId = jest.fn()
+jest.mock("@services/mongoose/wallets", () => ({
+  WalletsRepository: () => ({ listByAccountId: mockListByAccountId }),
 }))
 
 jest.mock("@services/logger", () => ({
@@ -18,6 +29,7 @@ import {
   countAgedOutUncreditedFygaroTopups,
   listUncreditedFygaroTopupsLastDays,
   markFygaroTopupNotCredited,
+  recordBridgeDepositRecall,
   sumFygaroCreditedNetCentsLastDays,
   promoteBridgeDepositForCryptoReceive,
   readFygaroTopupCompletion,
@@ -29,6 +41,7 @@ import {
   writeFygaroTopupRequest,
   writeIbexCryptoReceiveRequest,
 } from "@services/frappe/BridgeTransferRequestWriter"
+import { bridgeDepositFailureReason } from "@services/bridge/deposit-states"
 import { FygaroTopupHistoryQueryError } from "@services/frappe/errors"
 import { BridgeTransferRequestStatus } from "@services/frappe/models/BridgeTransferRequest"
 
@@ -39,6 +52,7 @@ const sumSince = ErpNext.sumFygaroTopupGrossCentsSince as jest.Mock
 const sumNetSince = ErpNext.sumFygaroCompletedNetCentsSince as jest.Mock
 const listUncredited = ErpNext.listUncreditedFygaroTopups as jest.Mock
 const countAgedOut = ErpNext.countAgedOutUncreditedFygaroTopups as jest.Mock
+const appendReason = ErpNext.appendBridgeTransferRequestFailureReason as jest.Mock
 const lastRequestInput = () => upsert.mock.calls[0][0].input
 
 describe("BridgeTransferRequestWriter", () => {
@@ -46,6 +60,10 @@ describe("BridgeTransferRequestWriter", () => {
     jest.clearAllMocks()
     upsert.mockResolvedValue(true)
     findRow.mockResolvedValue(undefined)
+    // Default: no Flash account for the Bridge customer, so rows stay
+    // unattributed unless a test says otherwise.
+    mockFindByBridgeCustomerId.mockResolvedValue(new Error("not found"))
+    mockListByAccountId.mockResolvedValue([])
   })
 
   it("writes Bridge deposit events as topup audit requests", async () => {
@@ -671,5 +689,331 @@ describe("BridgeTransferRequestWriter", () => {
         failureReason: "ACH returned",
       }),
     )
+  })
+})
+
+// ENG-889: the 2026-11-13 production refund, trimmed to the fields that matter.
+const REFUNDED_VA_EVENT = {
+  id: "va_event_refunded",
+  type: "refunded",
+  amount: "5000.0",
+  currency: "usd",
+  on_behalf_of: undefined as unknown as string,
+  customer_id: "cust_wire",
+  deposit_id: "deposit_wire_5000",
+  virtual_account_id: "va_wire",
+  refund: {
+    code: "R03",
+    amount: "5000.0",
+    reason: "Risk Rejection",
+    refunded_at: "2026-11-14T15:00:00.000Z",
+    refund_reference_id: "rref_123",
+    risk_rejection_reason: "Third Party Payment",
+  },
+}
+
+describe("writeBridgeDepositRequest: refunds and failures (ENG-889)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    upsert.mockResolvedValue(true)
+    findRow.mockResolvedValue(undefined)
+    mockFindByBridgeCustomerId.mockResolvedValue(new Error("not found"))
+    mockListByAccountId.mockResolvedValue([])
+  })
+
+  it("writes a refunded virtual-account deposit as Failed with the refund as failure_reason", async () => {
+    await writeBridgeDepositRequest({
+      eventId: "wh_refunded",
+      eventObject: REFUNDED_VA_EVENT,
+      rawPayload: { event_id: "wh_refunded" },
+    })
+
+    expect(lastRequestInput()).toEqual(
+      expect.objectContaining({
+        requestId: "deposit_wire_5000",
+        status: BridgeTransferRequestStatus.Failed,
+        sourceEventType: "deposit.refunded",
+        failureReason:
+          "Refunded by Bridge: R03 Risk Rejection (Third Party Payment), ref rref_123",
+      }),
+    )
+  })
+
+  it("writes refund_failed as Failed and says the funds are held at Bridge", async () => {
+    await writeBridgeDepositRequest({
+      eventId: "wh_refund_failed",
+      eventObject: { ...REFUNDED_VA_EVENT, type: "refund_failed" },
+      rawPayload: {},
+    })
+
+    expect(lastRequestInput()).toEqual(
+      expect.objectContaining({
+        status: BridgeTransferRequestStatus.Failed,
+        failureReason: expect.stringMatching(
+          /^Bridge refund failed, funds held at Bridge: R03 Risk Rejection/,
+        ),
+      }),
+    )
+  })
+
+  it("keeps refund_in_flight at Fiat Received (transient) but records the pending refund", async () => {
+    await writeBridgeDepositRequest({
+      eventId: "wh_in_flight",
+      eventObject: { ...REFUNDED_VA_EVENT, type: "refund_in_flight" },
+      rawPayload: {},
+    })
+
+    expect(lastRequestInput()).toEqual(
+      expect.objectContaining({
+        status: BridgeTransferRequestStatus.FiatReceived,
+        failureReason: expect.stringMatching(/^Refund in progress at Bridge: R03/),
+      }),
+    )
+  })
+
+  it.each(["funds_received", "in_review", "payment_submitted", "funds_scheduled"])(
+    "keeps transient state %s at Fiat Received with no failure_reason on the wire",
+    async (type) => {
+      await writeBridgeDepositRequest({
+        eventId: `wh_${type}`,
+        eventObject: { ...REFUNDED_VA_EVENT, type, refund: undefined },
+        rawPayload: {},
+      })
+
+      expect(lastRequestInput()).toEqual(
+        expect.objectContaining({
+          status: BridgeTransferRequestStatus.FiatReceived,
+          failureReason: undefined,
+        }),
+      )
+      // Omitted, not null: a retry of an early event must not wipe a refund
+      // reason already on the row.
+      const wire = JSON.parse(JSON.stringify(upsert.mock.calls[0][0].toErpnext()))
+      expect(wire).not.toHaveProperty("failure_reason")
+    },
+  )
+
+  it.each(["returned", "undeliverable", "missing_return_policy", "error", "canceled"])(
+    "maps transfer-shaped terminal state %s to Failed",
+    async (state) => {
+      await writeBridgeDepositRequest({
+        eventId: `wh_${state}`,
+        eventObject: {
+          id: "tr_dep",
+          state,
+          amount: "10.00",
+          currency: "usd",
+          on_behalf_of: "cust_123",
+        },
+        rawPayload: {},
+      })
+
+      expect(lastRequestInput()).toEqual(
+        expect.objectContaining({
+          status: BridgeTransferRequestStatus.Failed,
+          failureReason: `Bridge deposit ${state}`,
+        }),
+      )
+    },
+  )
+
+  it("never promotes a refunded deposit to Completed from a settle row", async () => {
+    findRow.mockResolvedValue({
+      name: "BTR-9",
+      status: BridgeTransferRequestStatus.Settled,
+      account_id: "acct_123",
+      wallet_id: "wallet_123",
+    })
+
+    await writeBridgeDepositRequest({
+      eventId: "wh_refunded_hash",
+      eventObject: {
+        ...REFUNDED_VA_EVENT,
+        receipt: { destination_tx_hash: "tx_prelim" },
+      },
+      rawPayload: {},
+    })
+
+    expect(findRow).not.toHaveBeenCalled()
+    expect(lastRequestInput()).toEqual(
+      expect.objectContaining({ status: BridgeTransferRequestStatus.Failed }),
+    )
+  })
+
+  it("builds failure reasons from partial refund blocks", () => {
+    expect(bridgeDepositFailureReason({ state: "refunded" })).toBe("Refunded by Bridge")
+    expect(
+      bridgeDepositFailureReason({
+        state: "refunded",
+        refund: { code: "610", reason: "Wire Rejected: Unmatched" },
+      }),
+    ).toBe("Refunded by Bridge: 610 Wire Rejected: Unmatched")
+    expect(
+      bridgeDepositFailureReason({
+        state: "refunded",
+        refund: { refund_reference_id: "rref_9" },
+      }),
+    ).toBe("Refunded by Bridge: ref rref_9")
+    expect(bridgeDepositFailureReason({ state: "payment_processed" })).toBeUndefined()
+  })
+})
+
+describe("writeBridgeDepositRequest: account attribution (ENG-889)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    upsert.mockResolvedValue(true)
+    findRow.mockResolvedValue(undefined)
+  })
+
+  const fundsReceived = {
+    id: "va_event_received",
+    type: "funds_received",
+    amount: "500.0",
+    currency: "usd",
+    on_behalf_of: undefined as unknown as string,
+    customer_id: "cust_wire",
+    deposit_id: "deposit_wire_500",
+    virtual_account_id: "va_wire",
+  }
+
+  it("stamps the account and its USDT wallet resolved from the Bridge customer id", async () => {
+    mockFindByBridgeCustomerId.mockResolvedValue({ id: "acct_wire" })
+    mockListByAccountId.mockResolvedValue([
+      { id: "wallet_usd", currency: "USD" },
+      { id: "wallet_usdt", currency: "USDT" },
+    ])
+
+    await writeBridgeDepositRequest({
+      eventId: "wh_received",
+      eventObject: fundsReceived,
+      rawPayload: {},
+    })
+
+    expect(mockFindByBridgeCustomerId).toHaveBeenCalledWith("cust_wire")
+    expect(mockListByAccountId).toHaveBeenCalledWith("acct_wire")
+    expect(lastRequestInput()).toEqual(
+      expect.objectContaining({
+        accountId: "acct_wire",
+        walletId: "wallet_usdt",
+        // Attribution is display only: it never promotes the row.
+        status: BridgeTransferRequestStatus.FiatReceived,
+      }),
+    )
+  })
+
+  it("stamps attribution on a refunded deposit too", async () => {
+    mockFindByBridgeCustomerId.mockResolvedValue({ id: "acct_wire" })
+    mockListByAccountId.mockResolvedValue([{ id: "wallet_usdt", currency: "USDT" }])
+
+    await writeBridgeDepositRequest({
+      eventId: "wh_refunded",
+      eventObject: REFUNDED_VA_EVENT,
+      rawPayload: {},
+    })
+
+    expect(lastRequestInput()).toEqual(
+      expect.objectContaining({
+        accountId: "acct_wire",
+        walletId: "wallet_usdt",
+        status: BridgeTransferRequestStatus.Failed,
+      }),
+    )
+  })
+
+  it("leaves the fields empty and still writes the row when the account lookup fails", async () => {
+    mockFindByBridgeCustomerId.mockResolvedValue(new Error("mongo down"))
+
+    const result = await writeBridgeDepositRequest({
+      eventId: "wh_received",
+      eventObject: fundsReceived,
+      rawPayload: {},
+    })
+
+    expect(result).toBe(true)
+    expect(lastRequestInput()).toEqual(
+      expect.objectContaining({ accountId: undefined, walletId: undefined }),
+    )
+    expect(baseLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ customerId: "cust_wire" }),
+      "No Flash account resolved for Bridge deposit customer; row left unattributed",
+    )
+  })
+
+  it("survives a lookup that throws", async () => {
+    mockFindByBridgeCustomerId.mockRejectedValue(new Error("boom"))
+
+    const result = await writeBridgeDepositRequest({
+      eventId: "wh_received",
+      eventObject: fundsReceived,
+      rawPayload: {},
+    })
+
+    expect(result).toBe(true)
+    expect(lastRequestInput()).toEqual(
+      expect.objectContaining({ accountId: undefined, walletId: undefined }),
+    )
+  })
+
+  it("stamps the account alone when the wallet list fails", async () => {
+    mockFindByBridgeCustomerId.mockResolvedValue({ id: "acct_wire" })
+    mockListByAccountId.mockResolvedValue(new Error("mongo down"))
+
+    await writeBridgeDepositRequest({
+      eventId: "wh_received",
+      eventObject: fundsReceived,
+      rawPayload: {},
+    })
+
+    expect(lastRequestInput()).toEqual(
+      expect.objectContaining({ accountId: "acct_wire", walletId: undefined }),
+    )
+  })
+
+  it("prefers the settle row's credited account over the customer lookup", async () => {
+    findRow.mockResolvedValue({
+      name: "BTR-9",
+      status: BridgeTransferRequestStatus.Settled,
+      account_id: "acct_settled",
+      wallet_id: "wallet_settled",
+    })
+
+    await writeBridgeDepositRequest({
+      eventId: "wh_processed",
+      eventObject: {
+        ...fundsReceived,
+        type: "payment_processed",
+        receipt: { destination_tx_hash: "tx_500" },
+      },
+      rawPayload: {},
+    })
+
+    expect(mockFindByBridgeCustomerId).not.toHaveBeenCalled()
+    expect(lastRequestInput()).toEqual(
+      expect.objectContaining({
+        status: BridgeTransferRequestStatus.Completed,
+        accountId: "acct_settled",
+        walletId: "wallet_settled",
+      }),
+    )
+  })
+})
+
+describe("recordBridgeDepositRecall (ENG-889)", () => {
+  beforeEach(() => jest.clearAllMocks())
+
+  it("appends the recall note to the deposit row keyed by Bridge deposit id", async () => {
+    appendReason.mockResolvedValue("updated")
+
+    const result = await recordBridgeDepositRecall({
+      depositId: "deposit_wire_5000",
+      note: "Recalled by sender's bank: Bridge funds request fr_1, fraud",
+    })
+
+    expect(result).toBe("updated")
+    expect(appendReason).toHaveBeenCalledWith({
+      requestId: "deposit_wire_5000",
+      note: "Recalled by sender's bank: Bridge funds request fr_1, fraud",
+      sourceSystem: "bridge_funds_request",
+    })
   })
 })
