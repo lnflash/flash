@@ -5,17 +5,20 @@
 const find = jest.fn()
 const bulkWrite = jest.fn()
 const updateOne = jest.fn()
+const deleteOne = jest.fn()
 
 jest.mock("@services/mongoose/schema", () => ({
   BridgeCustomerStatus: {
     find: (...args: unknown[]) => find(...args),
     bulkWrite: (...args: unknown[]) => bulkWrite(...args),
     updateOne: (...args: unknown[]) => updateOne(...args),
+    deleteOne: (...args: unknown[]) => deleteOne(...args),
   },
 }))
 
 import {
   BASELINE_COMPLETE_MARKER_ID,
+  clearBaselineMarker,
   loadCustomerStatuses,
   recordCustomerStatusChange,
   seedCustomerStatuses,
@@ -25,6 +28,7 @@ beforeEach(() => {
   find.mockReset()
   bulkWrite.mockReset()
   updateOne.mockReset()
+  deleteOne.mockReset()
 })
 
 describe("loadCustomerStatuses", () => {
@@ -189,5 +193,26 @@ describe("recordCustomerStatusChange", () => {
     expect(
       await recordCustomerStatusChange({ customerId: "c", from: "active", to: "paused" }),
     ).toBeInstanceOf(Error)
+  })
+})
+
+// ENG-889: the repair for a baseline recorded from an empty list.
+describe("clearBaselineMarker", () => {
+  it("deletes only the marker document", async () => {
+    deleteOne.mockResolvedValue({ deletedCount: 1 })
+
+    expect(await clearBaselineMarker()).toBe(true)
+    expect(deleteOne).toHaveBeenCalledWith({
+      customerId: { $eq: BASELINE_COMPLETE_MARKER_ID },
+    })
+  })
+
+  it("returns the error when the delete fails", async () => {
+    deleteOne.mockRejectedValue(new Error("mongo down"))
+
+    const result = await clearBaselineMarker()
+
+    expect(result).toBeInstanceOf(Error)
+    expect((result as Error).message).toBe("mongo down")
   })
 })

@@ -20,6 +20,20 @@ export class BridgeApiError extends BridgeError {
   }
 }
 
+// A 2xx whose body could not be read or parsed. The data is unknown, so the
+// call failed: reading it as empty once recorded a 0 customer baseline
+// (ENG-889). A timeout during the body read is a BridgeTimeoutError instead.
+export class BridgeUnreadableResponseError extends BridgeApiError {
+  constructor(statusCode: number, cause?: unknown) {
+    super(
+      `Bridge API returned an unreadable ${statusCode} response body${
+        cause instanceof Error ? `: ${cause.message}` : ""
+      }`,
+      statusCode,
+    )
+  }
+}
+
 const bridgeErrorCode = (response: unknown): string | undefined => {
   if (typeof response !== "object" || response === null) return undefined
   const code = (response as Record<string, unknown>).code
@@ -33,6 +47,14 @@ export const isBridgeNotAllowedError = (error: unknown): error is BridgeApiError
   error instanceof BridgeApiError &&
   error.statusCode === 401 &&
   error.code === "not_allowed"
+
+// A response that parsed but does not have the shape the endpoint documents,
+// e.g. a list page without a `data` array.
+export class BridgeUnexpectedResponseError extends BridgeError {
+  constructor(message: string = "Bridge API returned an unexpected response") {
+    super(message)
+  }
+}
 
 export class BridgeRateLimitError extends BridgeError {
   constructor(message: string = "Rate limit exceeded, please try again later") {

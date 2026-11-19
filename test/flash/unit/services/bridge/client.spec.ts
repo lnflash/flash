@@ -1,5 +1,8 @@
 // AC1: listAllEvents surfaces orphan events for ops triage tooling
 
+import http from "http"
+import { AddressInfo } from "net"
+
 jest.mock("@config", () => ({
   BridgeConfig: {
     apiKey: "test-api-key",
@@ -7,8 +10,24 @@ jest.mock("@config", () => ({
   },
 }))
 
+jest.mock("@services/alerts", () => ({
+  alertBridge: jest.fn(),
+  generateDedupKey: jest.requireActual("@services/alerts/dedup-key").generateDedupKey,
+}))
+
 import { BridgeClient, listAllEvents, BridgeWebhookEvent } from "@services/bridge/client"
-import { BridgeApiError, isBridgeNotAllowedError } from "@services/bridge/errors"
+import { alertBridge } from "@services/alerts"
+import {
+  BridgeApiError,
+  BridgeTimeoutError,
+  BridgeUnexpectedResponseError,
+  BridgeUnreadableResponseError,
+  isBridgeNotAllowedError,
+} from "@services/bridge/errors"
+
+// A real fetch Response carrying `body` as JSON.
+const jsonResponse = (body: unknown, init: ResponseInit = {}): Response =>
+  new Response(JSON.stringify(body), { status: 200, ...init })
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -188,9 +207,8 @@ describe("BridgeClient transfer deletion", () => {
   const originalFetch = global.fetch
 
   beforeEach(() => {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
+    global.fetch = jest.fn().mockImplementation(async () =>
+      jsonResponse({
         id: "tr_123",
         amount: "2.5",
         currency: "usd",
@@ -200,7 +218,7 @@ describe("BridgeClient transfer deletion", () => {
         created_at: "2026-06-17T00:00:00Z",
         updated_at: "2026-06-17T00:00:00Z",
       }),
-    } as Response)
+    )
   })
 
   afterEach(() => {
@@ -222,10 +240,9 @@ describe("BridgeClient Plaid exchange idempotency", () => {
   const originalFetch = global.fetch
 
   beforeEach(() => {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ message: "ok" }),
-    } as Response)
+    global.fetch = jest
+      .fn()
+      .mockImplementation(async () => jsonResponse({ message: "ok" }))
   })
 
   afterEach(() => {
@@ -247,10 +264,9 @@ describe("BridgeClient Plaid exchange idempotency", () => {
   })
 
   it("still auto-generates an Idempotency-Key for plaid link-token requests", async () => {
-    ;(global.fetch as jest.Mock).mockResolvedValue({
-      ok: true,
-      json: async () => ({ link_token: "lt_abc", expires_at: "later" }),
-    } as Response)
+    ;(global.fetch as jest.Mock).mockImplementation(async () =>
+      jsonResponse({ link_token: "lt_abc", expires_at: "later" }),
+    )
     const client = new BridgeClient()
 
     await client.createPlaidLinkRequest("cust_1" as never)
@@ -278,10 +294,9 @@ describe("BridgeClient.listFundsRequests", () => {
   }
 
   beforeEach(() => {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ count: 1, data: [fundsRequest] }),
-    } as Response)
+    global.fetch = jest
+      .fn()
+      .mockImplementation(async () => jsonResponse({ count: 1, data: [fundsRequest] }))
   })
 
   afterEach(() => {
@@ -323,11 +338,10 @@ describe("BridgeClient.listFundsRequests", () => {
     expect(url).toBe("https://api.sandbox.bridge.xyz/v0/funds_requests")
   })
 
-  it("treats a body without data as an empty page", async () => {
-    ;(global.fetch as jest.Mock).mockResolvedValue({
-      ok: true,
-      json: async () => ({}),
-    } as Response)
+  it("returns an empty page when data is an empty array", async () => {
+    ;(global.fetch as jest.Mock).mockImplementation(async () =>
+      jsonResponse({ count: 0, data: [] }),
+    )
 
     await expect(new BridgeClient().listFundsRequests()).resolves.toEqual({
       count: 0,
@@ -335,13 +349,23 @@ describe("BridgeClient.listFundsRequests", () => {
     })
   })
 
+  it.each([
+    ["a body without data", {}],
+    ["data that is not an array", { count: 3, data: { id: "fr_1" } }],
+    ["a null data", { data: null }],
+    ["a null body", null],
+  ])("rejects %s instead of reading it as an empty page", async (_, body) => {
+    ;(global.fetch as jest.Mock).mockImplementation(async () => jsonResponse(body))
+
+    await expect(new BridgeClient().listFundsRequests()).rejects.toBeInstanceOf(
+      BridgeUnexpectedResponseError,
+    )
+  })
+
   it("throws BridgeApiError on a 4xx", async () => {
-    ;(global.fetch as jest.Mock).mockResolvedValue({
-      ok: false,
-      status: 403,
-      statusText: "Forbidden",
-      json: async () => ({ message: "no access" }),
-    } as Response)
+    ;(global.fetch as jest.Mock).mockImplementation(async () =>
+      jsonResponse({ message: "no access" }, { status: 403, statusText: "Forbidden" }),
+    )
 
     await expect(new BridgeClient().listFundsRequests()).rejects.toThrow(
       "Bridge API error: 403 Forbidden",
@@ -361,10 +385,9 @@ describe("BridgeClient.listCustomers", () => {
   }
 
   beforeEach(() => {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ count: 1, data: [customer] }),
-    } as Response)
+    global.fetch = jest
+      .fn()
+      .mockImplementation(async () => jsonResponse({ count: 1, data: [customer] }))
   })
 
   afterEach(() => {
@@ -389,16 +412,30 @@ describe("BridgeClient.listCustomers", () => {
     expect(init.headers["Idempotency-Key"]).toBeUndefined()
   })
 
-  it("treats a body without data as an empty page", async () => {
-    ;(global.fetch as jest.Mock).mockResolvedValue({
-      ok: true,
-      json: async () => ({}),
-    } as Response)
+  it("returns an empty page when data is an empty array", async () => {
+    ;(global.fetch as jest.Mock).mockImplementation(async () =>
+      jsonResponse({ count: 0, data: [] }),
+    )
 
     await expect(new BridgeClient().listCustomers()).resolves.toEqual({
       count: 0,
       data: [],
     })
+  })
+
+  it.each([
+    ["a body without data", {}],
+    ["data that is not an array", { count: 3, data: "cust_1" }],
+    ["a null data", { data: null }],
+    ["an empty body", undefined],
+  ])("rejects %s instead of reading it as an empty page", async (_, body) => {
+    ;(global.fetch as jest.Mock).mockImplementation(async () =>
+      body === undefined ? new Response("", { status: 200 }) : jsonResponse(body),
+    )
+
+    await expect(new BridgeClient().listCustomers()).rejects.toBeInstanceOf(
+      BridgeUnexpectedResponseError,
+    )
   })
 })
 
@@ -412,12 +449,11 @@ describe("BridgeApiError code", () => {
   })
 
   const failWith = (status: number, body: unknown) => {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: false,
-      status,
-      statusText: "Unauthorized",
-      json: async () => body,
-    } as Response)
+    global.fetch = jest
+      .fn()
+      .mockImplementation(async () =>
+        jsonResponse(body, { status: status, statusText: "Unauthorized" }),
+      )
   }
 
   it("carries the status and Bridge's error code", async () => {
@@ -448,5 +484,143 @@ describe("BridgeApiError code", () => {
   it("leaves code undefined when the body has none", () => {
     expect(new BridgeApiError("x", 500, "Bad Gateway").code).toBeUndefined()
     expect(new BridgeApiError("x", 500, { code: 7 }).code).toBeUndefined()
+  })
+})
+
+// ENG-889: the request timeout also covers reading the body. On the first
+// production run a 100 customer page's body read was aborted, the client
+// returned null with status 200, and the watch recorded a 0 customer baseline.
+describe("BridgeClient.request: success bodies", () => {
+  const originalFetch = global.fetch
+  const { BridgeConfig } = jest.requireMock("@config")
+
+  beforeEach(() => {
+    ;(alertBridge as jest.Mock).mockClear()
+  })
+
+  afterEach(() => {
+    global.fetch = originalFetch
+    delete BridgeConfig.timeoutMs
+  })
+
+  // A real server that sends 200 and the start of a page, then stalls past
+  // the timeout before finishing the body.
+  const stallingServer = async (): Promise<{ url: string; close: () => void }> => {
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.write('{"count":100,"data":[')
+      const timer = setTimeout(() => res.end("]}"), 2_000)
+      res.on("close", () => clearTimeout(timer))
+    })
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+    const { port } = server.address() as AddressInfo
+    return {
+      url: `http://127.0.0.1:${port}/v0`,
+      close: () => {
+        server.closeAllConnections()
+        server.close()
+      },
+    }
+  }
+
+  it("throws a timeout, not an empty page, when the body read is aborted", async () => {
+    const server = await stallingServer()
+    const originalBaseUrl = BridgeConfig.baseUrl
+    BridgeConfig.baseUrl = server.url
+    BridgeConfig.timeoutMs = 100
+    try {
+      const error = await new BridgeClient().listCustomers({ limit: 100 }).catch((e) => e)
+
+      expect(error).toBeInstanceOf(BridgeTimeoutError)
+      expect(alertBridge).toHaveBeenCalledWith(
+        expect.objectContaining({ dedupKey: "bridge-api:timeout", severity: "critical" }),
+      )
+    } finally {
+      BridgeConfig.baseUrl = originalBaseUrl
+      server.close()
+    }
+  })
+
+  it("throws a timeout when the body read rejects with an AbortError", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () =>
+        Promise.reject(new DOMException("This operation was aborted", "AbortError")),
+    } as unknown as Response)
+
+    await expect(
+      new BridgeClient().getCustomer("cust_1" as never),
+    ).rejects.toBeInstanceOf(BridgeTimeoutError)
+  })
+
+  it("throws an unreadable-response error with the status on a body that is not JSON", async () => {
+    global.fetch = jest
+      .fn()
+      .mockImplementation(
+        async () => new Response('{"count":100,"data":[{"id"', { status: 200 }),
+      )
+
+    const error = await new BridgeClient().getCustomer("cust_1" as never).catch((e) => e)
+
+    expect(error).toBeInstanceOf(BridgeUnreadableResponseError)
+    expect(error).toBeInstanceOf(BridgeApiError)
+    expect(error.statusCode).toBe(200)
+    expect(alertBridge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dedupKey: "bridge-api:unreadable-body",
+        severity: "critical",
+      }),
+    )
+  })
+
+  it("throws an unreadable-response error when the connection drops mid-body", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => Promise.reject(new TypeError("terminated")),
+    } as unknown as Response)
+
+    const error = await new BridgeClient().getTransfer("tr_1" as never).catch((e) => e)
+
+    expect(error).toBeInstanceOf(BridgeUnreadableResponseError)
+    expect(error.message).toContain("terminated")
+  })
+
+  it("returns null for a 204 with no body", async () => {
+    global.fetch = jest
+      .fn()
+      .mockImplementation(async () => new Response(null, { status: 204 }))
+
+    await expect(new BridgeClient().deleteTransfer("tr_1" as never)).resolves.toBeNull()
+    expect(alertBridge).not.toHaveBeenCalled()
+  })
+
+  it("returns null for a success with an empty body", async () => {
+    global.fetch = jest
+      .fn()
+      .mockImplementation(async () => new Response("", { status: 200 }))
+
+    await expect(
+      new BridgeClient().deleteExternalAccount("cust_1" as never, "ea_1" as never),
+    ).resolves.toBeNull()
+    expect(alertBridge).not.toHaveBeenCalled()
+  })
+
+  it("keeps a 4xx whose body is not JSON a BridgeApiError with no body", async () => {
+    global.fetch = jest.fn().mockImplementation(
+      async () =>
+        new Response("<html>Not Found</html>", {
+          status: 404,
+          statusText: "Not Found",
+        }),
+    )
+
+    const error = await new BridgeClient().getCustomer("cust_1" as never).catch((e) => e)
+
+    expect(error).toBeInstanceOf(BridgeApiError)
+    expect(error).not.toBeInstanceOf(BridgeUnreadableResponseError)
+    expect(error.statusCode).toBe(404)
+    expect(error.response).toBeNull()
   })
 })

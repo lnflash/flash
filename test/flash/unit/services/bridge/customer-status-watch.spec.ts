@@ -6,6 +6,7 @@ const mockListCustomers = jest.fn()
 const mockLoadStatuses = jest.fn()
 const mockSeedStatuses = jest.fn()
 const mockRecordChange = jest.fn()
+const mockClearMarker = jest.fn()
 const mockFindByBridgeCustomerId = jest.fn()
 const mockPlaceCashoutHold = jest.fn()
 
@@ -20,6 +21,7 @@ jest.mock("@services/mongoose/bridge-customer-status", () => ({
   loadCustomerStatuses: (...args: unknown[]) => mockLoadStatuses(...args),
   seedCustomerStatuses: (...args: unknown[]) => mockSeedStatuses(...args),
   recordCustomerStatusChange: (...args: unknown[]) => mockRecordChange(...args),
+  clearBaselineMarker: (...args: unknown[]) => mockClearMarker(...args),
 }))
 
 jest.mock("@services/mongoose/accounts", () => ({
@@ -55,6 +57,7 @@ import { alertBridge } from "@services/alerts"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
 import {
   CASHOUT_HOLD_SOURCE,
+  PAGE_SIZE,
   watchBridgeCustomerStatuses,
 } from "@services/bridge/customer-status-watch"
 import { BridgeApiError } from "@services/bridge/errors"
@@ -92,13 +95,17 @@ beforeEach(() => {
   mockLoadStatuses.mockResolvedValue(stored([["cust_other", "active"]]))
   mockSeedStatuses.mockResolvedValue(true)
   mockRecordChange.mockResolvedValue({ applied: true })
+  mockClearMarker.mockResolvedValue(true)
   mockFindByBridgeCustomerId.mockResolvedValue({ ...account })
   mockPlaceCashoutHold.mockResolvedValue({ placed: true, account })
 })
 
 describe("watchBridgeCustomerStatuses: polling", () => {
-  it("lists customers 100 at a time and follows the cursor while pages are full", async () => {
-    const full = Array.from({ length: 100 }, (_, i) => customer(`cust_${i}`, "active"))
+  // A 100 customer page took 8.6 s in production against a 10 s timeout that
+  // covers the body read; 25 finish in a quarter of it.
+  it("lists customers 25 at a time and follows the cursor while pages are full", async () => {
+    expect(PAGE_SIZE).toBe(25)
+    const full = Array.from({ length: 25 }, (_, i) => customer(`cust_${i}`, "active"))
     mockListCustomers
       .mockResolvedValueOnce(page(full))
       .mockResolvedValueOnce(page([customer("cust_last", "active")]))
@@ -107,14 +114,14 @@ describe("watchBridgeCustomerStatuses: polling", () => {
 
     expect(mockListCustomers).toHaveBeenCalledTimes(2)
     expect(mockListCustomers.mock.calls[0][0]).toEqual({
-      limit: 100,
+      limit: 25,
       startingAfter: undefined,
     })
     expect(mockListCustomers.mock.calls[1][0]).toEqual({
-      limit: 100,
-      startingAfter: "cust_99",
+      limit: 25,
+      startingAfter: "cust_24",
     })
-    expect(summary.fetched).toBe(101)
+    expect(summary.fetched).toBe(26)
   })
 
   it("alerts and fails the step when Bridge cannot be read", async () => {
@@ -515,5 +522,220 @@ describe("watchBridgeCustomerStatuses: transitions", () => {
     )
     expect(summary.failures).toBe(1)
     expect(summary.changes).toBe(2)
+  })
+})
+
+// ENG-889: the first production run read an aborted page as empty and recorded
+// a 0 customer baseline. An empty or short list is a failed poll, and a marker
+// with no customer stored is repaired by seeding again.
+describe("watchBridgeCustomerStatuses: short lists", () => {
+  const pollFailedAlert = expect.objectContaining({
+    dedupKey: "bridge-customer-status:poll-failed",
+    severity: "warning",
+  })
+
+  it("never records a baseline from 0 customers", async () => {
+    mockLoadStatuses.mockResolvedValue(stored([], false))
+    mockListCustomers.mockResolvedValue(page([]))
+
+    const summary = await watchBridgeCustomerStatuses()
+
+    expect(summary).toEqual(
+      expect.objectContaining({ fetched: 0, pollFailed: true, seeded: false }),
+    )
+    expect(mockSeedStatuses).not.toHaveBeenCalled()
+    expect(mockClearMarker).not.toHaveBeenCalled()
+    expect(alertCalls()).toEqual([pollFailedAlert])
+    expect(notifyOpsEvent).not.toHaveBeenCalled()
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ fetched: 0 }),
+      "Bridge listed no customers; the run did nothing",
+    )
+  })
+
+  it("does not finish a partial seed from a list shorter than half of it", async () => {
+    mockLoadStatuses.mockResolvedValue(
+      stored(
+        [
+          ["cust_a", "active"],
+          ["cust_b", "active"],
+          ["cust_c", "active"],
+        ],
+        false,
+      ),
+    )
+    mockListCustomers.mockResolvedValue(page([customer("cust_a", "active")]))
+
+    const summary = await watchBridgeCustomerStatuses()
+
+    expect(summary.pollFailed).toBe(true)
+    expect(mockSeedStatuses).not.toHaveBeenCalled()
+  })
+
+  it("compares nothing when Bridge lists 0 customers", async () => {
+    mockLoadStatuses.mockResolvedValue(
+      stored([
+        ["cust_1", "active"],
+        ["cust_2", "paused"],
+      ]),
+    )
+    mockListCustomers.mockResolvedValue(page([]))
+
+    const summary = await watchBridgeCustomerStatuses()
+
+    expect(summary).toEqual(
+      expect.objectContaining({ pollFailed: true, changes: 0, alerts: 0 }),
+    )
+    expect(mockRecordChange).not.toHaveBeenCalled()
+    expect(alertCalls()).toEqual([pollFailedAlert])
+  })
+
+  it("compares nothing when Bridge lists fewer than half the stored customers", async () => {
+    mockLoadStatuses.mockResolvedValue(
+      stored([
+        ["cust_1", "active"],
+        ["cust_2", "active"],
+        ["cust_3", "active"],
+        ["cust_4", "active"],
+        ["cust_5", "active"],
+      ]),
+    )
+    // 2 of 5, one of them newly offboarded: nothing is acted on.
+    mockListCustomers.mockResolvedValue(
+      page([
+        customer("cust_1", "offboarded"),
+        customer("cust_new", "deposits_restricted"),
+      ]),
+    )
+
+    const summary = await watchBridgeCustomerStatuses()
+
+    expect(summary).toEqual(
+      expect.objectContaining({
+        fetched: 2,
+        pollFailed: true,
+        changes: 0,
+        alerts: 0,
+        holdsPlaced: 0,
+      }),
+    )
+    expect(mockFindByBridgeCustomerId).not.toHaveBeenCalled()
+    expect(mockPlaceCashoutHold).not.toHaveBeenCalled()
+    expect(mockRecordChange).not.toHaveBeenCalled()
+    expect(alertCalls()).toEqual([pollFailedAlert])
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      { fetched: 2, stored: 5 },
+      "Bridge listed 2 customers but 5 are stored; the run did nothing",
+    )
+  })
+
+  it("compares a list of exactly half the stored customers", async () => {
+    mockLoadStatuses.mockResolvedValue(
+      stored([
+        ["cust_1", "active"],
+        ["cust_2", "active"],
+        ["cust_3", "active"],
+        ["cust_4", "active"],
+      ]),
+    )
+    mockListCustomers.mockResolvedValue(
+      page([customer("cust_1", "paused"), customer("cust_2", "active")]),
+    )
+
+    const summary = await watchBridgeCustomerStatuses()
+
+    expect(summary).toEqual(
+      expect.objectContaining({ pollFailed: false, changes: 1, alerts: 1 }),
+    )
+  })
+
+  describe("a baseline marker with no customer stored", () => {
+    beforeEach(() => {
+      mockLoadStatuses.mockResolvedValue(stored([], true))
+      mockListCustomers.mockResolvedValue(
+        page([
+          customer("cust_a", "active"),
+          customer("cust_b", "deposits_restricted"),
+          customer("cust_c", "offboarded"),
+        ]),
+      )
+    })
+
+    it("drops the marker and seeds again without alerting or holding", async () => {
+      const summary = await watchBridgeCustomerStatuses()
+
+      expect(mockClearMarker).toHaveBeenCalledTimes(1)
+      expect(mockClearMarker.mock.invocationCallOrder[0]).toBeLessThan(
+        mockSeedStatuses.mock.invocationCallOrder[0],
+      )
+      expect(mockSeedStatuses).toHaveBeenCalledWith([
+        { customerId: "cust_a", status: "active" },
+        { customerId: "cust_b", status: "deposits_restricted" },
+        { customerId: "cust_c", status: "offboarded" },
+      ])
+      expect(alertBridge).not.toHaveBeenCalled()
+      expect(mockFindByBridgeCustomerId).not.toHaveBeenCalled()
+      expect(mockPlaceCashoutHold).not.toHaveBeenCalled()
+      expect(mockRecordChange).not.toHaveBeenCalled()
+      expect(summary).toEqual(
+        expect.objectContaining({
+          seeded: true,
+          baselineRepaired: true,
+          pollFailed: false,
+          changes: 0,
+          alerts: 0,
+          holdsPlaced: 0,
+          baselineRisky: { deposits_restricted: 1, offboarded: 1 },
+        }),
+      )
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        { fetched: 3 },
+        "Bridge customer status baseline had no customers; dropped it and seeding again",
+      )
+    })
+
+    it("fails the step and seeds nothing when the marker cannot be dropped", async () => {
+      mockClearMarker.mockResolvedValue(new Error("mongo down"))
+
+      const summary = await watchBridgeCustomerStatuses()
+
+      expect(summary.pollFailed).toBe(true)
+      expect(mockSeedStatuses).not.toHaveBeenCalled()
+      expect(mockRecordChange).not.toHaveBeenCalled()
+      expect(mockPlaceCashoutHold).not.toHaveBeenCalled()
+    })
+
+    it("leaves the marker alone while Bridge still lists 0 customers", async () => {
+      mockListCustomers.mockResolvedValue(page([]))
+
+      const summary = await watchBridgeCustomerStatuses()
+
+      expect(summary.pollFailed).toBe(true)
+      expect(mockClearMarker).not.toHaveBeenCalled()
+      expect(mockSeedStatuses).not.toHaveBeenCalled()
+    })
+
+    it("compares normally on the run after the repair", async () => {
+      await watchBridgeCustomerStatuses()
+      mockLoadStatuses.mockResolvedValue(
+        stored([
+          ["cust_a", "active"],
+          ["cust_b", "deposits_restricted"],
+          ["cust_c", "offboarded"],
+        ]),
+      )
+      jest.clearAllMocks()
+      mockRecordChange.mockResolvedValue({ applied: true })
+
+      const summary = await watchBridgeCustomerStatuses()
+
+      expect(mockClearMarker).not.toHaveBeenCalled()
+      expect(mockSeedStatuses).not.toHaveBeenCalled()
+      expect(alertBridge).not.toHaveBeenCalled()
+      expect(mockPlaceCashoutHold).not.toHaveBeenCalled()
+      expect(summary).toEqual(
+        expect.objectContaining({ seeded: false, pollFailed: false, changes: 0 }),
+      )
+    })
   })
 })

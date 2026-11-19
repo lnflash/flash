@@ -100,6 +100,21 @@ export const seedCustomerStatuses = async (
   }
 }
 
+// Drops the baseline marker, so the next run seeds again. The watch calls it
+// when the marker is present but no customer is stored: a baseline recorded
+// from an empty list (production, 2026-11-19, ENG-889) would otherwise read
+// every real customer as new and alert on, and hold, each restricted one.
+export const clearBaselineMarker = async (): Promise<true | Error> => {
+  try {
+    await BridgeCustomerStatus.deleteOne({
+      customerId: { $eq: BASELINE_COMPLETE_MARKER_ID },
+    })
+    return true
+  } catch (error) {
+    return toError(error)
+  }
+}
+
 // Records a status change seen by this run. `from` is the status this run read
 // from the store (undefined for a customer never seen before), and the write
 // only lands if the store still holds it, so two overlapping runs cannot leave
