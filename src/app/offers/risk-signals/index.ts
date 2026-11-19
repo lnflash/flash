@@ -8,6 +8,7 @@ import { toBridgeCustomerId } from "@domain/primitives/bridge"
 import BridgeApiClient from "@services/bridge/client"
 import ErpNext from "@services/frappe/ErpNext"
 import { baseLogger } from "@services/logger"
+import { AccountsRepository } from "@services/mongoose"
 
 import {
   CashoutRiskSignals,
@@ -36,7 +37,7 @@ const bridgeKycName = async (bridgeCustomerId: string): Promise<string | undefin
     return name || undefined
   } catch (error) {
     baseLogger.warn(
-      { error, bridgeCustomerId },
+      { err: error, bridgeCustomerId },
       "Cash-out risk signals: Bridge customer name lookup failed; comparing with the ERPNext name only",
     )
     return undefined
@@ -60,7 +61,7 @@ const depositSignals = async (
   })
   if (rows instanceof Error) {
     baseLogger.warn(
-      { error: rows, accountId: account.id },
+      { err: rows, accountId: account.id },
       "Cash-out risk signals: Bridge deposit lookup failed",
     )
     return { available: false }
@@ -89,6 +90,33 @@ const gather = async (account: RiskAccount, now: Date): Promise<CashoutRiskSigna
   }
 }
 
+// Runs a read under the never-throw guard and the timeout: any error, thrown
+// or returned, and a read slower than `timeoutMs` become { available: false }.
+const guarded = async (
+  read: () => Promise<CashoutRiskSignals>,
+  accountId: AccountId | undefined,
+  timeoutMs: number,
+): Promise<CashoutRiskSignals> => {
+  let timer: NodeJS.Timeout | undefined
+  try {
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`Risk signal lookup timed out after ${timeoutMs} ms`)),
+        timeoutMs,
+      )
+    })
+    return await Promise.race([read(), timeout])
+  } catch (error) {
+    baseLogger.warn(
+      { err: error, accountId },
+      "Cash-out risk signals unavailable; the cash-out goes ahead without them",
+    )
+    return { available: false }
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 export const getCashoutRiskSignals = async ({
   account,
   now = new Date(),
@@ -97,24 +125,35 @@ export const getCashoutRiskSignals = async ({
   account: RiskAccount | undefined
   now?: Date
   timeoutMs?: number
-}): Promise<CashoutRiskSignals> => {
-  let timer: NodeJS.Timeout | undefined
-  try {
-    if (!account) throw new Error("No account on the cash-out offer")
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(
-        () => reject(new Error(`Risk signal lookup timed out after ${timeoutMs} ms`)),
-        timeoutMs,
-      )
-    })
-    return await Promise.race([gather(account, now), timeout])
-  } catch (error) {
-    baseLogger.warn(
-      { error, accountId: account?.id },
-      "Cash-out risk signals unavailable; the cash-out goes ahead without them",
-    )
-    return { available: false }
-  } finally {
-    if (timer) clearTimeout(timer)
-  }
-}
+}): Promise<CashoutRiskSignals> =>
+  guarded(
+    async () => {
+      if (!account) throw new Error("No account on the cash-out offer")
+      return gather(account, now)
+    },
+    account?.id,
+    timeoutMs,
+  )
+
+// The same read, starting from the account id: the account lookup itself runs
+// under the guard and the timeout, so a failed or slow lookup is an
+// "unavailable" signal like any other.
+export const getCashoutRiskSignalsForAccountId = async ({
+  accountId,
+  now = new Date(),
+  timeoutMs = RISK_SIGNALS_TIMEOUT_MS,
+}: {
+  accountId: AccountId
+  now?: Date
+  timeoutMs?: number
+}): Promise<CashoutRiskSignals> =>
+  guarded(
+    async () => {
+      const account = await AccountsRepository().findById(accountId)
+      if (account instanceof Error) throw account
+      if (!account) throw new Error("Cash-out account not found")
+      return gather(account, now)
+    },
+    accountId,
+    timeoutMs,
+  )

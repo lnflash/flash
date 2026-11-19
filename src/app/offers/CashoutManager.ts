@@ -15,7 +15,7 @@ import { getFlashFeeDiscountPercent } from "@services/frappe/fee-discounts"
 import { BankAccountQueryError, ExchangeRateQueryError } from "@services/frappe/errors"
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 
-import { getCashoutRiskSignals } from "./risk-signals"
+import { getCashoutRiskSignalsForAccountId } from "./risk-signals"
 import PersistedOffer from "./storage/PersistedOffer"
 import Storage from "./storage/Redis"
 import { CashoutDetails } from "./types"
@@ -165,6 +165,15 @@ const CashoutManager = {
       meta: { offerId: id },
     })
 
+    // Risk signals for the staff member who pays this out (ENG-889). Flag
+    // only: the read never throws, is capped by a timeout, and an unreadable
+    // signal becomes an "unavailable" line, never a refusal. It runs before
+    // validation so the invoice expiry check sees the time after the read: an
+    // offer that expires during the read is refused unburned, rather than
+    // consumed and drafted against an invoice IBEX can no longer pay. The
+    // caller's account is the settlement wallet's account (checked above).
+    const riskSignals = await getCashoutRiskSignalsForAccountId({ accountId })
+
     const validOffer = await ValidOffer.from(offer.details)
     if (validOffer instanceof Error) {
       notifyOpsEvent({
@@ -201,11 +210,6 @@ const CashoutManager = {
       })
       return consumed
     }
-
-    // Risk signals for the staff member who pays this out (ENG-889). Flag
-    // only: getCashoutRiskSignals never throws, is capped by a timeout, and an
-    // unreadable signal becomes an "unavailable" line, never a refusal.
-    const riskSignals = await getCashoutRiskSignals({ account: validOffer.account })
 
     const executedOffer = await validOffer.execute({ riskSignals })
     if (executedOffer instanceof Error) return executedOffer

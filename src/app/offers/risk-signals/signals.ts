@@ -4,6 +4,8 @@
 // end up in the internal Cashout Initiated email and on the ERPNext Cashout
 // record for the staff member who pays the cash-out by hand.
 
+import { BridgeTransferRequestStatus } from "@services/frappe/models/BridgeTransferRequest"
+
 export const NEW_ACCOUNT_DAYS = 30
 export const DEPOSIT_WINDOW_HOURS = 72
 
@@ -54,7 +56,7 @@ export const nameTokens = (name: string | undefined | null): string[] => {
   if (typeof name !== "string") return []
   return name
     .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .split(" ")
@@ -148,8 +150,11 @@ const asText = (value: unknown): string | undefined => {
 }
 
 // The deposit webhook stores the whole Bridge event as raw_payload_json; a
-// virtual account deposit carries the wire's originator under
-// event_object.source. Bad or missing JSON yields no source fields.
+// virtual account deposit carries the sender under event_object.source.
+// Bridge names the sender `originator_name` on a wire and `sender_name` on
+// ACH, FedNow, RTP and SEPA; only a wire carries `bank_name`, so ACH, FedNow
+// and RTP fall back to the sending bank's routing number. Bad or missing JSON
+// yields no source fields.
 export const parseDepositSource = (
   rawPayloadJson: unknown,
 ): { originatorName?: string; bankName?: string; paymentRail?: string } => {
@@ -167,9 +172,11 @@ export const parseDepositSource = (
   const source = (eventObject as { source?: unknown }).source
   if (!source || typeof source !== "object") return {}
   const s = source as Record<string, unknown>
+  const routingNumber = asText(s.sender_bank_routing_number)
   return {
-    originatorName: asText(s.originator_name),
-    bankName: asText(s.bank_name),
+    originatorName: asText(s.originator_name) ?? asText(s.sender_name),
+    bankName:
+      asText(s.bank_name) ?? (routingNumber ? `routing ${routingNumber}` : undefined),
     paymentRail: asText(s.payment_rail),
   }
 }
@@ -203,7 +210,9 @@ export const buildDepositSignals = ({
     .filter((d) => inDepositWindow(d.seenAt, now))
     .sort((x, y) => (y.seenAt?.getTime() ?? 0) - (x.seenAt?.getTime() ?? 0))
 
-  const lastCredit = recent.find((d) => d.status === "Completed" && d.seenAt)
+  const lastCredit = recent.find(
+    (d) => d.status === BridgeTransferRequestStatus.Completed && d.seenAt,
+  )
   const minutesSinceLastCredit = lastCredit?.seenAt
     ? Math.max(0, Math.floor((now.getTime() - lastCredit.seenAt.getTime()) / MINUTE_MS))
     : undefined

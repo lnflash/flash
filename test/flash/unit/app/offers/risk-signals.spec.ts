@@ -1,5 +1,6 @@
 const mockListRecentBridgeDepositRows = jest.fn()
 const mockGetCustomer = jest.fn()
+const mockFindAccountById = jest.fn()
 
 jest.mock("@services/logger", () => ({
   baseLogger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
@@ -18,6 +19,12 @@ jest.mock("@services/bridge/client", () => ({
   default: { getCustomer: (...args: unknown[]) => mockGetCustomer(...args) },
 }))
 
+jest.mock("@services/mongoose", () => ({
+  AccountsRepository: jest.fn(() => ({
+    findById: (...args: unknown[]) => mockFindAccountById(...args),
+  })),
+}))
+
 import {
   DEPOSIT_SIGNALS_UNAVAILABLE_LINE,
   RISK_REMARKS_HEADER,
@@ -27,6 +34,7 @@ import {
   formatRiskLines,
   formatRiskRemarks,
   getCashoutRiskSignals,
+  getCashoutRiskSignalsForAccountId,
   hasRiskWarning,
   inDepositWindow,
   isNameMismatch,
@@ -36,6 +44,7 @@ import {
   toRecentBridgeDeposit,
   uniqueNames,
 } from "@app/offers/risk-signals"
+import { RepositoryError } from "@domain/errors"
 import { BridgeDepositHistoryQueryError } from "@services/frappe/errors"
 import { baseLogger } from "@services/logger"
 
@@ -196,6 +205,88 @@ describe("cash-out risk signals: Bridge payload parsing", () => {
       bankName: "Example Bank",
       paymentRail: "wire",
     })
+  })
+
+  // Bridge names the sender originator_name on a wire only; ACH, FedNow, RTP
+  // and SEPA deposits carry it as sender_name.
+  const achPayload = JSON.stringify({
+    event_object: {
+      source: {
+        payment_rail: "ach_push",
+        sender_name: "JOHN Q PUBLIC",
+        sender_bank_routing_number: "021000021",
+      },
+    },
+  })
+
+  it("reads the sender of an ACH deposit from sender_name", () => {
+    expect(parseDepositSource(achPayload)).toEqual({
+      originatorName: "JOHN Q PUBLIC",
+      bankName: "routing 021000021",
+      paymentRail: "ach_push",
+    })
+    expect(
+      parseDepositSource(
+        JSON.stringify({
+          event_object: {
+            source: { payment_rail: "ach_push", sender_name: "JOHN Q PUBLIC" },
+          },
+        }),
+      ),
+    ).toEqual({ originatorName: "JOHN Q PUBLIC", paymentRail: "ach_push" })
+  })
+
+  it("prefers a wire's originator_name and bank_name when both are present", () => {
+    expect(
+      parseDepositSource(
+        JSON.stringify({
+          event_object: {
+            source: {
+              payment_rail: "wire",
+              originator_name: "TAEDO BIGGS",
+              sender_name: "SOMEONE ELSE",
+              bank_name: "Example Bank",
+              sender_bank_routing_number: "021000021",
+            },
+          },
+        }),
+      ),
+    ).toEqual({
+      originatorName: "TAEDO BIGGS",
+      bankName: "Example Bank",
+      paymentRail: "wire",
+    })
+  })
+
+  it("flags an ACH deposit from someone other than the holder", () => {
+    const deposit = toRecentBridgeDeposit({
+      request_id: "dep-ach",
+      status: "Completed",
+      amount: "500.0",
+      currency: "usd",
+      last_seen_at: frappeUtc(minutesAgo(1)),
+      raw_payload_json: achPayload,
+    })
+    const deposits = buildDepositSignals({
+      deposits: [deposit],
+      holderNames: ["Taedo Biggs"],
+      now: NOW,
+    })
+    if (!deposits.available) throw new Error("expected")
+    expect(deposits.mismatched).toEqual([deposit])
+
+    const lines = formatRiskLines({
+      available: true,
+      accountAgeDays: 2,
+      newAccount: true,
+      deposits,
+    })
+    expect(lines[0]).toBe(
+      'WARNING: deposit sender name does not match the account holder. Sender "JOHN Q PUBLIC", holder "Taedo Biggs".',
+    )
+    expect(lines).toContain(
+      `- 500.0 USD, Completed, ${frappeUtc(minutesAgo(1)).slice(0, 16)} UTC, sender "JOHN Q PUBLIC", ach_push, routing 021000021`,
+    )
   })
 
   it("yields no source fields from bad or missing JSON", () => {
@@ -413,7 +504,11 @@ describe("getCashoutRiskSignals", () => {
       deposits: { available: false },
     })
     expect(formatRiskLines(signals)).toContain(DEPOSIT_SIGNALS_UNAVAILABLE_LINE)
-    expect(baseLogger.warn).toHaveBeenCalled()
+    // pino serializes an Error only under `err`; under any other key it logs {}.
+    expect(baseLogger.warn).toHaveBeenCalledWith(
+      { err: expect.any(BridgeDepositHistoryQueryError), accountId: "acct-1" },
+      expect.any(String),
+    )
   })
 
   it("resolves unavailable, never rejects, when a lookup throws", async () => {
@@ -423,7 +518,13 @@ describe("getCashoutRiskSignals", () => {
 
     expect(signals).toEqual({ available: false })
     expect(formatRiskLines(signals)).toEqual([RISK_SIGNALS_UNAVAILABLE_LINE])
-    expect(baseLogger.warn).toHaveBeenCalled()
+    expect(baseLogger.warn).toHaveBeenCalledWith(
+      {
+        err: expect.objectContaining({ message: "socket hang up" }),
+        accountId: "acct-1",
+      },
+      expect.any(String),
+    )
   })
 
   it("resolves unavailable when the lookup is too slow", async () => {
@@ -432,12 +533,103 @@ describe("getCashoutRiskSignals", () => {
     const signals = await getCashoutRiskSignals({ account, now: NOW, timeoutMs: 10 })
 
     expect(signals).toEqual({ available: false })
+    expect(baseLogger.warn).toHaveBeenCalledWith(
+      {
+        err: expect.objectContaining({
+          message: "Risk signal lookup timed out after 10 ms",
+        }),
+        accountId: "acct-1",
+      },
+      expect.any(String),
+    )
+  })
+
+  it("logs the Bridge KYC lookup error under err", async () => {
+    mockListRecentBridgeDepositRows.mockResolvedValue([
+      bridgeRow({ seenAt: minutesAgo(1), originatorName: "JOHN Q PUBLIC" }),
+    ])
+    mockGetCustomer.mockRejectedValue(new Error("bridge down"))
+
+    await getCashoutRiskSignals({ account, now: NOW })
+
+    expect(baseLogger.warn).toHaveBeenCalledWith(
+      {
+        err: expect.objectContaining({ message: "bridge down" }),
+        bridgeCustomerId: "cust-1",
+      },
+      expect.any(String),
+    )
   })
 
   it("resolves unavailable with no account", async () => {
     expect(await getCashoutRiskSignals({ account: undefined, now: NOW })).toEqual({
       available: false,
     })
+  })
+})
+
+describe("getCashoutRiskSignalsForAccountId", () => {
+  const account = {
+    id: "acct-1" as AccountId,
+    createdAt: daysAgo(2),
+    erpParty: "Taedo Biggs",
+    bridgeCustomerId: "cust-1" as BridgeCustomerId,
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+  })
+
+  it("loads the account and reads its signals", async () => {
+    mockFindAccountById.mockResolvedValue(account)
+    mockListRecentBridgeDepositRows.mockResolvedValue([])
+
+    const signals = await getCashoutRiskSignalsForAccountId({
+      accountId: "acct-1" as AccountId,
+      now: NOW,
+    })
+
+    expect(mockFindAccountById).toHaveBeenCalledWith("acct-1")
+    expect(signals).toMatchObject({
+      available: true,
+      accountAgeDays: 2,
+      newAccount: true,
+    })
+  })
+
+  it("resolves unavailable when the account lookup returns an error", async () => {
+    mockFindAccountById.mockResolvedValue(new RepositoryError("mongo down"))
+
+    const signals = await getCashoutRiskSignalsForAccountId({
+      accountId: "acct-1" as AccountId,
+      now: NOW,
+    })
+
+    expect(signals).toEqual({ available: false })
+    expect(mockListRecentBridgeDepositRows).not.toHaveBeenCalled()
+    expect(baseLogger.warn).toHaveBeenCalledWith(
+      { err: expect.any(RepositoryError), accountId: "acct-1" },
+      expect.any(String),
+    )
+  })
+
+  it("resolves unavailable when the account lookup throws or hangs", async () => {
+    mockFindAccountById.mockRejectedValue(new Error("socket hang up"))
+    expect(
+      await getCashoutRiskSignalsForAccountId({
+        accountId: "acct-1" as AccountId,
+        now: NOW,
+      }),
+    ).toEqual({ available: false })
+
+    mockFindAccountById.mockReturnValue(new Promise(() => undefined))
+    expect(
+      await getCashoutRiskSignalsForAccountId({
+        accountId: "acct-1" as AccountId,
+        now: NOW,
+        timeoutMs: 10,
+      }),
+    ).toEqual({ available: false })
   })
 })
 

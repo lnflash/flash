@@ -93,7 +93,8 @@ import {
   RISK_SIGNALS_UNAVAILABLE_LINE,
   DEPOSIT_SIGNALS_UNAVAILABLE_LINE,
 } from "@app/offers/risk-signals"
-import { USDAmount } from "@domain/shared"
+import { CashoutValidator } from "@app/offers/Validator"
+import { USDAmount, ValidationError } from "@domain/shared"
 import { BridgeDepositHistoryQueryError } from "@services/frappe/errors"
 
 const offerId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" as OfferId
@@ -170,6 +171,67 @@ describe("CashoutManager.executeCashout with risk signals (ENG-889)", () => {
 
     const initiated = mockSendCashoutInitiatedEmail.mock.calls[0][0] as InitiatedCashout
     expect(initiated.riskSignals).toMatchObject({ available: true, newAccount: true })
+  })
+
+  describe("an offer that expires during the risk read", () => {
+    const start = new Date("2026-11-19T15:00:00Z")
+    const expiresAt = new Date(start.getTime() + 2_000)
+
+    beforeEach(() => {
+      jest.useFakeTimers({ now: start })
+      const offer = makeOfferDetails()
+      mockStorageGet.mockResolvedValue({
+        details: {
+          ...offer.details,
+          payment: {
+            ...offer.details.payment,
+            invoice: { ...offer.details.payment.invoice, expiresAt },
+          },
+        },
+      })
+      // The validator's expiry check, as Validator.isBeforeExpiry runs it.
+      ;(CashoutValidator as jest.Mock).mockImplementationOnce(async (inputs) =>
+        new Date() > inputs.payment.invoice.expiresAt
+          ? [new ValidationError("Offer has expired")]
+          : inputs,
+      )
+      // The deposit read takes 3 s, past the invoice expiry.
+      mockListRecentBridgeDepositRows.mockImplementation(async () => {
+        jest.setSystemTime(new Date(start.getTime() + 3_000))
+        return []
+      })
+    })
+
+    afterEach(() => {
+      jest.useRealTimers()
+    })
+
+    it("refuses it unburned: the expiry check runs after the read", async () => {
+      const result = await CashoutManager.executeCashout(offerId, walletId, accountId)
+
+      expect(mockListRecentBridgeDepositRows).toHaveBeenCalledTimes(1)
+      expect(result).toBeInstanceOf(ValidationError)
+      expect((result as ValidationError).errors?.[0]?.message).toBe("Offer has expired")
+      expect(mockStorageConsume).not.toHaveBeenCalled()
+      expect(mockDraftCashout).not.toHaveBeenCalled()
+      expect(mockPayInvoice).not.toHaveBeenCalled()
+    })
+  })
+
+  it("pays out when the account lookup for the risk read fails", async () => {
+    mockFindAccountById.mockReset()
+    // The risk read's lookup fails; ValidOffer.from's lookup succeeds.
+    mockFindAccountById
+      .mockRejectedValueOnce(new Error("mongo blip"))
+      .mockResolvedValue({ id: accountId, erpParty: "Taedo Biggs" })
+
+    const result = await CashoutManager.executeCashout(offerId, walletId, accountId)
+
+    expect(result).toBeInstanceOf(InitiatedCashout)
+    expect(mockPayInvoice).toHaveBeenCalledTimes(1)
+    expect(mockDraftCashout.mock.calls[0][1].remarks).toContain(
+      RISK_SIGNALS_UNAVAILABLE_LINE,
+    )
   })
 
   it("pays out when the deposit lookup throws", async () => {
