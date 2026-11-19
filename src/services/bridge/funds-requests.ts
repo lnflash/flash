@@ -3,7 +3,8 @@
  *
  * When a sender's bank recalls a fiat deposit, Bridge records a "funds
  * request" tied to the deposit and sends NO webhook, so this watcher polls
- * GET /v0/funds_requests from the cron Job. For every funds request it has not
+ * GET /v0/funds_requests from an hourly cron Job
+ * (src/servers/bridge-funds-requests-cron.ts). For every funds request it has not
  * handled before it:
  *   - pages ops (critical),
  *   - notes the recall on the deposit's ERPNext Bridge Transfer Request row,
@@ -317,7 +318,8 @@ const handleFundsRequest = async (
 
   // Page before the progress write that records it, so a crash in between
   // repeats the page (PagerDuty folds it into the same incident by dedup key)
-  // instead of losing it. cron.ts flushes in-flight alerts before it exits.
+  // instead of losing it. The cron entrypoint flushes in-flight alerts before it
+  // exits.
   let alertedAt: Date | undefined
   if (alertPending) {
     alertNewFundsRequest({ fr, accountId, erpnextOutcome, lockOutcome })
