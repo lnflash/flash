@@ -71,8 +71,12 @@ const customer = (id: string, status: string) => ({
 
 const page = (data: unknown[]) => ({ count: data.length, data })
 
-const stored = (entries: [string, string][]) =>
-  new Map(entries.map(([customerId, status]) => [customerId, { customerId, status }]))
+const stored = (entries: [string, string][], baselineComplete = true) => ({
+  statuses: new Map(
+    entries.map(([customerId, status]) => [customerId, { customerId, status }]),
+  ),
+  baselineComplete,
+})
 
 const account = {
   id: "acct_1",
@@ -144,7 +148,7 @@ describe("watchBridgeCustomerStatuses: polling", () => {
 
 describe("watchBridgeCustomerStatuses: first run", () => {
   beforeEach(() => {
-    mockLoadStatuses.mockResolvedValue(new Map())
+    mockLoadStatuses.mockResolvedValue(stored([], false))
     mockListCustomers.mockResolvedValue(
       page([
         customer("cust_a", "active"),
@@ -217,6 +221,45 @@ describe("watchBridgeCustomerStatuses: first run", () => {
 
     expect(summary.pollFailed).toBe(true)
     expect(notifyOpsEvent).not.toHaveBeenCalled()
+  })
+
+  // A seed whose second batch failed leaves part of the store written and no
+  // baseline marker. The next run must finish the seed, not read every customer
+  // the seed missed as a change from "unseen".
+  it("finishes a seed that failed part way without alerting or holding", async () => {
+    mockSeedStatuses.mockResolvedValueOnce(new Error("primary stepped down"))
+    const first = await watchBridgeCustomerStatuses()
+    expect(first.pollFailed).toBe(true)
+
+    // Batch 1 landed: cust_a and cust_b are stored, the rest are not.
+    mockLoadStatuses.mockResolvedValue(
+      stored(
+        [
+          ["cust_a", "active"],
+          ["cust_b", "paused"],
+        ],
+        false,
+      ),
+    )
+    const second = await watchBridgeCustomerStatuses()
+
+    expect(mockSeedStatuses).toHaveBeenCalledTimes(2)
+    expect(mockSeedStatuses.mock.calls[1][0]).toHaveLength(6)
+    expect(second).toEqual(
+      expect.objectContaining({ seeded: true, pollFailed: false, changes: 0, alerts: 0 }),
+    )
+    expect(alertBridge).not.toHaveBeenCalled()
+    expect(mockPlaceCashoutHold).not.toHaveBeenCalled()
+    expect(mockRecordChange).not.toHaveBeenCalled()
+  })
+
+  it("compares against the store once the baseline marker is written", async () => {
+    mockLoadStatuses.mockResolvedValue(stored([["cust_a", "active"]], true))
+
+    const summary = await watchBridgeCustomerStatuses()
+
+    expect(mockSeedStatuses).not.toHaveBeenCalled()
+    expect(summary.seeded).toBe(false)
   })
 })
 

@@ -17,11 +17,22 @@ const SEED_BATCH = 500
 const toError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error))
 
-// Every stored status, keyed by Bridge customer id. One small document per
-// customer, so the whole set is read once per run.
-export const loadCustomerStatuses = async (): Promise<
-  Map<string, BridgeCustomerStatusRecord> | Error
-> => {
+// Written once the first run's seed has fully landed. "First run" is decided by
+// this marker, never by an empty collection: a seed that wrote some batches and
+// then failed leaves a non-empty store, and reading that as a completed
+// baseline would alert on (and hold) every customer the seed never reached.
+// Stored in the same collection under an id Bridge never issues.
+export const BASELINE_COMPLETE_MARKER_ID = "__baseline_complete__"
+
+export type StoredCustomerStatuses = {
+  statuses: Map<string, BridgeCustomerStatusRecord>
+  // False until a seed has written every customer and then the marker.
+  baselineComplete: boolean
+}
+
+// Every stored status, keyed by Bridge customer id, without the marker. One
+// small document per customer, so the whole set is read once per run.
+export const loadCustomerStatuses = async (): Promise<StoredCustomerStatuses | Error> => {
   try {
     const records = (await BridgeCustomerStatus.find(
       {},
@@ -29,14 +40,22 @@ export const loadCustomerStatuses = async (): Promise<
     )
       .lean()
       .exec()) as unknown as BridgeCustomerStatusRecord[]
-    return new Map(records.map((record) => [record.customerId, record]))
+    let baselineComplete = false
+    const statuses = new Map<string, BridgeCustomerStatusRecord>()
+    for (const record of records) {
+      if (record.customerId === BASELINE_COMPLETE_MARKER_ID) baselineComplete = true
+      else statuses.set(record.customerId, record)
+    }
+    return { statuses, baselineComplete }
   } catch (error) {
     return toError(error)
   }
 }
 
 // The first run's baseline. Insert-if-absent, so a seed that races another run
-// (or is retried) never overwrites a status already recorded.
+// (or is retried after a partial failure) never overwrites a status already
+// recorded. The marker is written only after every batch has landed, so `true`
+// means the baseline is complete.
 export const seedCustomerStatuses = async (
   customers: { customerId: string; status: string }[],
 ): Promise<true | Error> => {
@@ -62,6 +81,19 @@ export const seedCustomerStatuses = async (
         { ordered: false },
       )
     }
+    await BridgeCustomerStatus.updateOne(
+      { customerId: { $eq: BASELINE_COMPLETE_MARKER_ID } },
+      {
+        $setOnInsert: {
+          customerId: BASELINE_COMPLETE_MARKER_ID,
+          status: "baseline",
+          firstSeenAt: now,
+          statusChangedAt: now,
+          updatedAt: now,
+        },
+      },
+      { upsert: true },
+    )
     return true
   } catch (error) {
     return toError(error)

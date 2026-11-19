@@ -383,6 +383,32 @@ describe("CashoutManager authorization", () => {
       )
     })
 
+    // The risk read can take seconds (ENG-889 review): a hold placed while it
+    // runs must still stop the payout, and the offer must survive for a retry
+    // once the hold is released.
+    it("refuses a hold placed after the first check, before consuming the offer", async () => {
+      mockFindAccountById
+        .mockResolvedValueOnce({ ...heldAccount, cashoutHold: undefined })
+        .mockResolvedValue(heldAccount)
+
+      const result = await CashoutManager.executeCashout(
+        offerId,
+        walletId,
+        callerAccountId,
+      )
+
+      expect(result).toBeInstanceOf(AccountCashoutHeldError)
+      expect(mockStorageConsume).not.toHaveBeenCalled()
+      const lastAccountRead =
+        mockFindAccountById.mock.invocationCallOrder[
+          mockFindAccountById.mock.invocationCallOrder.length - 1
+        ]
+      expect(mockValidOfferFrom.mock.invocationCallOrder[0]).toBeLessThan(lastAccountRead)
+      expect(notifyOpsEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ phase: "refused", step: "cashout-hold" }),
+      )
+    })
+
     it("refuses to execute when the account cannot be read (fail closed)", async () => {
       mockFindAccountById.mockResolvedValue(new UnknownRepositoryError("down"))
 

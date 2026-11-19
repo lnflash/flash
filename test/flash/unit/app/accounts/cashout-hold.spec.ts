@@ -20,7 +20,11 @@ jest.mock("@services/logger", () => ({
   baseLogger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }))
 
-import { placeCashoutHold, releaseCashoutHold } from "@app/accounts/cashout-hold"
+import {
+  placeCashoutHold,
+  placeCashoutHoldByAdmin,
+  releaseCashoutHold,
+} from "@app/accounts/cashout-hold"
 import { InvalidAccountIdError } from "@domain/accounts"
 import { NoCashoutHoldToReleaseError } from "@domain/errors"
 import { baseLogger } from "@services/logger"
@@ -51,6 +55,68 @@ describe("placeCashoutHold", () => {
       source: previousHold.source,
       setAt: expect.any(Date),
     })
+  })
+})
+
+describe("placeCashoutHoldByAdmin", () => {
+  it("places an admin hold attributed to the caller, logs it and tells the ops feed", async () => {
+    mockPlace.mockResolvedValue({ placed: true, account: { id: ACCOUNT_ID } })
+
+    const result = await placeCashoutHoldByAdmin({
+      id: ACCOUNT_ID,
+      reason: "baseline: already offboarded",
+      placedByUserId: "ops-user" as UserId,
+    })
+
+    expect(result).toEqual({ placed: true, account: { id: ACCOUNT_ID } })
+    expect(mockPlace).toHaveBeenCalledWith(ACCOUNT_ID, {
+      reason: "baseline: already offboarded",
+      source: "admin",
+      setAt: expect.any(Date),
+      setByUserId: "ops-user",
+    })
+    expect(baseLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: ACCOUNT_ID, placedByUserId: "ops-user" }),
+      "admin placed cash-out hold",
+    )
+    expect(mockNotifyOpsEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        flow: "cashout",
+        phase: "hold-placed",
+        accountId: ACCOUNT_ID,
+        userId: "ops-user",
+      }),
+    )
+  })
+
+  it("keeps an existing hold and does not tell the ops feed", async () => {
+    mockPlace.mockResolvedValue({
+      placed: false,
+      account: { id: ACCOUNT_ID, cashoutHold: previousHold },
+    })
+
+    const result = await placeCashoutHoldByAdmin({
+      id: ACCOUNT_ID,
+      reason: "review",
+      placedByUserId: "ops-user" as UserId,
+    })
+
+    expect(result).toEqual({
+      placed: false,
+      account: { id: ACCOUNT_ID, cashoutHold: previousHold },
+    })
+    expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+  })
+
+  it("refuses a malformed account id without touching the store", async () => {
+    const result = await placeCashoutHoldByAdmin({
+      id: "not-an-id",
+      reason: "review",
+      placedByUserId: "ops-user" as UserId,
+    })
+
+    expect(result).toBeInstanceOf(InvalidAccountIdError)
+    expect(mockPlace).not.toHaveBeenCalled()
   })
 })
 

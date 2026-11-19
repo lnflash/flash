@@ -36,6 +36,15 @@ enum AccountLevel {
   ZERO
 }
 
+input AccountPlaceCashoutHoldInput {
+  accountId: ID!
+
+  """
+  Why cash-outs are held. Kept on the hold and in the account's hold history; never shown to the account holder.
+  """
+  reason: String!
+}
+
 input AccountReleaseCashoutHoldInput {
   accountId: ID!
 
@@ -106,7 +115,7 @@ type AuditedAccount {
   capabilities: AccountCapabilities!
 
   """
-  Set while cash-outs are held for this account. Release with accountReleaseCashoutHold.
+  Set while cash-outs are held for this account. Place with accountPlaceCashoutHold, release with accountReleaseCashoutHold.
   """
   cashoutHold: CashoutHold
 
@@ -305,7 +314,9 @@ type CashoutHold {
   setAt: Timestamp!
   setByUserId: ID
 
-  """What placed the hold, e.g. "bridge-customer-status"."""
+  """
+  What placed the hold: "bridge-customer-status" (the watcher) or "admin" (accountPlaceCashoutHold, with setByUserId).
+  """
   source: String!
 }
 
@@ -479,6 +490,7 @@ type MerchantPayload {
 
 type Mutation {
   accountAssignNpub(input: AccountAssignNpubInput!): AccountAssignNpubPayload!
+  accountPlaceCashoutHold(input: AccountPlaceCashoutHoldInput!): AccountDetailPayload!
   accountReleaseCashoutHold(input: AccountReleaseCashoutHoldInput!): AccountDetailPayload!
   accountReleaseNpub(input: AccountReleaseNpubInput!): AccountReleaseNpubPayload!
   accountUpdateLevel(input: AccountUpdateLevelInput!): AccountDetailPayload!

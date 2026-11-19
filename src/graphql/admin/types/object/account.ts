@@ -97,7 +97,7 @@ const Account: GraphQLObjectType<Account> = GT.Object<Account>({
     cashoutHold: {
       type: CashoutHold,
       description:
-        "Set while cash-outs are held for this account. Release with accountReleaseCashoutHold.",
+        "Set while cash-outs are held for this account. Place with accountPlaceCashoutHold, release with accountReleaseCashoutHold.",
     },
   }),
 })

@@ -159,6 +159,7 @@ import { WalletsRepository } from "@services/mongoose/wallets"
 import { getBalanceForWallet } from "@app/wallets/get-balance-for-wallet"
 import IbexClient from "@services/ibex/client"
 import { RepositoryError } from "@domain/errors"
+import { AccountCashoutHeldError } from "@domain/accounts"
 import { sendBridgeWithdrawalNotificationBestEffort } from "@app/bridge/send-withdrawal-notification"
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -187,6 +188,13 @@ const mockAccount = {
   bridgeEthereumAddress: ETHEREUM_ADDRESS,
   bridgeKycStatus: "approved",
   kratosUserId: "kratos-001",
+}
+
+// ENG-889: placed when Bridge restricted or offboarded the customer.
+const HOLD = {
+  reason: "Bridge customer cust-001 went from active to deposits_restricted",
+  source: "bridge-customer-status",
+  setAt: new Date("2026-11-19T00:00:00Z"),
 }
 
 const makeRow = (id: string, overrides: Record<string, unknown> = {}) => ({
@@ -884,6 +892,25 @@ describe("requestWithdrawal", () => {
     expect(BridgeClient.listExternalAccounts).not.toHaveBeenCalled()
   })
 
+  // ENG-889: a hold outlives Bridge's own status. Bridge may set the customer
+  // active again while ops are still reviewing; the offramp must stay shut.
+  it("refuses a withdrawal request under a cash-out hold even when Bridge says active", async () => {
+    ;(AccountsRepository as jest.Mock).mockReturnValue({
+      findById: jest.fn().mockResolvedValue({ ...mockAccount, cashoutHold: HOLD }),
+    })
+    ;(BridgeClient.getCustomer as jest.Mock).mockResolvedValue({ status: "active" })
+
+    const result = await BridgeService.requestWithdrawal(
+      ACCOUNT_ID,
+      AMOUNT,
+      EXTERNAL_ACCOUNT_ID,
+    )
+
+    expect(result).toBeInstanceOf(AccountCashoutHeldError)
+    expect(BridgeAccountsRepo.createWithdrawal).not.toHaveBeenCalled()
+    expect(BridgeClient.createTransfer).not.toHaveBeenCalled()
+  })
+
   it("returns an error when account has no Ethereum address", async () => {
     ;(AccountsRepository as jest.Mock).mockReturnValue({
       findById: jest.fn().mockResolvedValue({
@@ -1338,6 +1365,18 @@ describe("initiateWithdrawal — takes withdrawalId (step 2A)", () => {
       "@services/bridge/errors",
     )
     expect(result).toBeInstanceOf(BridgeWithdrawalAlreadyInitiatedError)
+    expect(BridgeClient.createTransfer).not.toHaveBeenCalled()
+  })
+
+  it("refuses to initiate under a cash-out hold even when Bridge says active (ENG-889)", async () => {
+    ;(AccountsRepository as jest.Mock).mockReturnValue({
+      findById: jest.fn().mockResolvedValue({ ...mockAccount, cashoutHold: HOLD }),
+    })
+    ;(BridgeClient.getCustomer as jest.Mock).mockResolvedValue({ status: "active" })
+
+    const result = await BridgeService.initiateWithdrawal(ACCOUNT_ID, WITHDRAWAL_ID)
+
+    expect(result).toBeInstanceOf(AccountCashoutHeldError)
     expect(BridgeClient.createTransfer).not.toHaveBeenCalled()
   })
 

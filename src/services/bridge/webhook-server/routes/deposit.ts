@@ -24,9 +24,7 @@ import {
 import { alertBridge, generateDedupKey } from "@services/alerts"
 import { alertIbexReconciliationFailed } from "@services/alerts/ibex-bridge-movement"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
-import { AccountsRepository } from "@services/mongoose/accounts"
-import { CouldNotFindError } from "@domain/errors"
-import { toBridgeCustomerId } from "@domain/primitives/bridge"
+import { findAccountByBridgeCustomerId } from "@services/bridge/account-lookup"
 
 type DepositEventObject = {
   id: string
@@ -396,16 +394,18 @@ type MappedAccount = { accountId?: string; username?: string; lookup: string }
 // Display only: a lookup that fails is reported in the alert, never thrown.
 const mappedAccount = async (customerId?: string): Promise<MappedAccount> => {
   if (!customerId) return { lookup: "no_customer_id" }
-  try {
-    const account = await AccountsRepository().findByBridgeCustomerId(
-      toBridgeCustomerId(customerId),
-    )
-    if (account instanceof Error) {
-      return { lookup: account instanceof CouldNotFindError ? "not_found" : "failed" }
-    }
-    return { accountId: account.id, username: account.username, lookup: "found" }
-  } catch {
-    return { lookup: "failed" }
+  const lookup = await findAccountByBridgeCustomerId(customerId)
+  switch (lookup.kind) {
+    case "found":
+      return {
+        accountId: lookup.account.id,
+        username: lookup.account.username,
+        lookup: "found",
+      }
+    case "not_found":
+      return { lookup: "not_found" }
+    default:
+      return { lookup: "failed" }
   }
 }
 

@@ -968,8 +968,9 @@ export const BridgeFundsRequest = mongoose.model(
 
 // ENG-889: the last Bridge customer status the hourly watcher saw, one record
 // per Bridge customer. A change against this record is what the watcher alerts
-// on (and, into deposits_restricted or offboarded, holds cash-outs for). The
-// first run fills it without alerting.
+// on (and, into deposits_restricted or offboarded, holds cash-outs for). Runs
+// fill it without alerting until a full seed has written the baseline marker
+// (customerId "__baseline_complete__", see bridge-customer-status.ts).
 const BridgeCustomerStatusSchema = new Schema({
   customerId: { type: String, required: true, unique: true },
   status: { type: String, required: true },

@@ -15,6 +15,7 @@ jest.mock("@services/mongoose/schema", () => ({
 }))
 
 import {
+  BASELINE_COMPLETE_MARKER_ID,
   loadCustomerStatuses,
   recordCustomerStatusChange,
   seedCustomerStatuses,
@@ -39,11 +40,30 @@ describe("loadCustomerStatuses", () => {
     })
 
     const result = await loadCustomerStatuses()
+    if (result instanceof Error) throw result
 
-    expect(result).toBeInstanceOf(Map)
-    expect((result as Map<string, { status: string }>).get("cust_2")?.status).toBe(
-      "paused",
-    )
+    expect(result.statuses).toBeInstanceOf(Map)
+    expect(result.statuses.get("cust_2")?.status).toBe("paused")
+    expect(result.baselineComplete).toBe(false)
+  })
+
+  it("reports the baseline marker and leaves it out of the statuses", async () => {
+    find.mockReturnValue({
+      lean: () => ({
+        exec: () =>
+          Promise.resolve([
+            { customerId: "cust_1", status: "active" },
+            { customerId: BASELINE_COMPLETE_MARKER_ID, status: "baseline" },
+          ]),
+      }),
+    })
+
+    const result = await loadCustomerStatuses()
+    if (result instanceof Error) throw result
+
+    expect(result.baselineComplete).toBe(true)
+    expect(result.statuses.size).toBe(1)
+    expect(result.statuses.has(BASELINE_COMPLETE_MARKER_ID)).toBe(false)
   })
 
   it("returns a Mongo fault as an error", async () => {
@@ -80,6 +100,15 @@ describe("seedCustomerStatuses", () => {
         upsert: true,
       },
     })
+    // The marker is written once, after every batch.
+    expect(updateOne).toHaveBeenCalledTimes(1)
+    expect(updateOne.mock.calls[0][0]).toEqual({
+      customerId: { $eq: BASELINE_COMPLETE_MARKER_ID },
+    })
+    expect(updateOne.mock.calls[0][2]).toEqual({ upsert: true })
+    expect(bulkWrite.mock.invocationCallOrder[1]).toBeLessThan(
+      updateOne.mock.invocationCallOrder[0],
+    )
   })
 
   it("returns a Mongo fault as an error", async () => {
@@ -88,6 +117,17 @@ describe("seedCustomerStatuses", () => {
     expect(
       await seedCustomerStatuses([{ customerId: "c", status: "active" }]),
     ).toBeInstanceOf(Error)
+  })
+
+  it("writes no baseline marker when a later batch fails", async () => {
+    bulkWrite.mockResolvedValueOnce({}).mockRejectedValueOnce(new Error("step down"))
+    const customers = Array.from({ length: 501 }, (_, i) => ({
+      customerId: `cust_${i}`,
+      status: "active",
+    }))
+
+    expect(await seedCustomerStatuses(customers)).toBeInstanceOf(Error)
+    expect(updateOne).not.toHaveBeenCalled()
   })
 })
 

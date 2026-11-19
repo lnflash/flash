@@ -13,9 +13,11 @@
  *   - from one of those back to active: informs ops. A hold stays until ops
  *     release it (admin accountReleaseCashoutHold).
  *
- * The first run (an empty store) records every status without alerting, and
- * reports once how many customers are already in a risky status, so ops know
- * the baseline. After that, a customer seen for the first time counts as a
+ * Until a baseline has been fully recorded (the store's baseline marker), a run
+ * records every status without alerting, and reports how many customers are
+ * already in a risky status, so ops know the baseline. A seed that failed part
+ * way is simply run again: it is insert-if-absent, so nothing already recorded
+ * is overwritten, and no customer the failed seed missed is alerted or held. After that, a customer seen for the first time counts as a
  * change from nothing: one that appears already restricted is alerted (and
  * held) like any other.
  *
@@ -27,11 +29,9 @@
 
 import { placeCashoutHold } from "@app/accounts/cashout-hold"
 import { CouldNotFindError } from "@domain/errors"
-import { toBridgeCustomerId } from "@domain/primitives/bridge"
 import { AlertSeverity, alertBridge, generateDedupKey } from "@services/alerts"
 import { OpsStatus, notifyOpsEvent } from "@services/alerts/ops-events"
 import { baseLogger } from "@services/logger"
-import { AccountsRepository } from "@services/mongoose/accounts"
 import {
   BridgeCustomerStatusRecord,
   loadCustomerStatuses,
@@ -39,7 +39,9 @@ import {
   seedCustomerStatuses,
 } from "@services/mongoose/bridge-customer-status"
 
+import { AccountLookup, findAccountByBridgeCustomerId } from "./account-lookup"
 import BridgeApiClient, { Customer } from "./client"
+import { paginateNewestFirst } from "./paginate"
 
 const logger = baseLogger.child({ module: "bridge-customer-status-watch" })
 
@@ -91,51 +93,18 @@ const STATUS_MEANING: Record<string, string> = {
   active: "Bridge reports the customer active again.",
 }
 
-const fetchAllCustomers = async (): Promise<Customer[] | Error> => {
-  const all: Customer[] = []
-  let startingAfter: string | undefined
-  try {
-    for (let page = 0; page < MAX_PAGES; page++) {
-      const response = await BridgeApiClient.listCustomers({
-        limit: PAGE_SIZE,
-        startingAfter,
-      })
-      all.push(...response.data)
-
-      const last = response.data[response.data.length - 1]
-      if (response.data.length < PAGE_SIZE || !last?.id) return all
-      startingAfter = last.id
-    }
-    logger.warn(
-      { pages: MAX_PAGES, fetched: all.length },
-      "Bridge customer list hit its page cap; the oldest customers were not read this run",
-    )
-    return all
-  } catch (error) {
-    return error instanceof Error ? error : new Error(String(error))
-  }
-}
-
-type AccountLookup =
-  | { kind: "found"; account: Account }
-  | { kind: "not_found" }
-  | { kind: "lookup_failed"; error: Error }
-
-const findAccount = async (customerId: string): Promise<AccountLookup> => {
-  try {
-    const account = await AccountsRepository().findByBridgeCustomerId(
-      toBridgeCustomerId(customerId),
-    )
-    if (account instanceof CouldNotFindError) return { kind: "not_found" }
-    if (account instanceof Error) return { kind: "lookup_failed", error: account }
-    return { kind: "found", account }
-  } catch (error) {
-    return {
-      kind: "lookup_failed",
-      error: error instanceof Error ? error : new Error(String(error)),
-    }
-  }
-}
+const fetchAllCustomers = async (): Promise<Customer[] | Error> =>
+  paginateNewestFirst({
+    fetchPage: ({ limit, startingAfter }) =>
+      BridgeApiClient.listCustomers({ limit, startingAfter }),
+    pageSize: PAGE_SIZE,
+    maxPages: MAX_PAGES,
+    onPageCap: (fetched) =>
+      logger.warn(
+        { pages: MAX_PAGES, fetched },
+        "Bridge customer list hit its page cap; the oldest customers were not read this run",
+      ),
+  })
 
 // "placed" / "already_held" / "account_not_found" are final; "lookup_failed"
 // and "hold_failed" are retried by the next run.
@@ -290,7 +259,7 @@ const handleChange = async (
   let lookup: AccountLookup | undefined
   let holdOutcome: HoldOutcome | undefined
   if (intoRisky || backToActive) {
-    lookup = await findAccount(customerId)
+    lookup = await findAccountByBridgeCustomerId(customerId)
     if (CASHOUT_HOLD_STATUSES.has(to)) {
       holdOutcome = await holdCashouts(lookup, customerId, from, to)
       if (holdOutcome === "placed") summary.holdsPlaced++
@@ -425,10 +394,10 @@ export const watchBridgeCustomerStatuses =
       return { ...summary, pollFailed: true }
     }
 
-    if (stored.size === 0) return seedBaseline(current, summary)
+    if (!stored.baselineComplete) return seedBaseline(current, summary)
 
     for (const { customerId, status } of current) {
-      const record = stored.get(customerId)
+      const record = stored.statuses.get(customerId)
       if (record?.status === status) continue
       summary.changes++
       try {

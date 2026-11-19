@@ -9,7 +9,8 @@ const CashoutHold = GT.Object<AccountCashoutHold>({
     reason: { type: GT.NonNull(GT.String) },
     source: {
       type: GT.NonNull(GT.String),
-      description: 'What placed the hold, e.g. "bridge-customer-status".',
+      description:
+        'What placed the hold: "bridge-customer-status" (the watcher) or "admin" (accountPlaceCashoutHold, with setByUserId).',
     },
     setAt: { type: GT.NonNull(Timestamp) },
     setByUserId: { type: GT.ID },
