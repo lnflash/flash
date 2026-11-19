@@ -20,6 +20,7 @@ import {
   BankAccountValidationError,
   BankAccountValidationReason,
   BanksQueryError,
+  BridgeDepositHistoryQueryError,
   BridgeTransferRequestUpsertError,
   CashoutDraftError,
   CashoutSubmitError,
@@ -203,6 +204,18 @@ const dropSourceSystem = (
   return kept.length ? kept.join(",") : undefined
 }
 
+// A Bridge deposit audit row as the cash-out risk signals read it (ENG-889).
+// Frappe returns null for unset fields and numbers or numeric strings for
+// amounts.
+export type BridgeDepositRiskRow = {
+  request_id?: string | null
+  status?: string | null
+  amount?: number | string | null
+  currency?: string | null
+  last_seen_at?: string | null
+  raw_payload_json?: string | null
+}
+
 export type BridgeTransferRequestDoc = {
   name: string
   status?: string
@@ -323,7 +336,10 @@ export class ErpNext {
     }
   }
 
-  async draftCashout(offer: ValidOffer): Promise<CashoutId | CashoutDraftError> {
+  async draftCashout(
+    offer: ValidOffer,
+    { remarks }: { remarks?: string } = {},
+  ): Promise<CashoutId | CashoutDraftError> {
     const party = offer.account.erpParty
     if (!party) return new CashoutDraftError("Account missing erpParty field")
     const { payment, payout } = offer.details
@@ -349,6 +365,9 @@ export class ErpNext {
             ? Number(payout.exchangeRate.asDollars())
             : undefined,
           flash_fee: Number(payout.serviceFee.asDollars()),
+          // Risk signals for the staff member who pays this out by hand
+          // (ENG-889). Flag only: nothing here gates the cash-out.
+          remarks: remarks || undefined,
         },
         { headers: this.headers },
       )
@@ -1040,6 +1059,78 @@ export class ErpNext {
         attributes: { "erpnext.exception": responseData?.exception },
       })
       return new ExchangeRateQueryError(err)
+    }
+  }
+
+  // Bridge deposit audit rows (Bridge Transfer Request, Topup) for one Bridge
+  // customer seen since `since`, newest first. Read by the cash-out risk
+  // signals (ENG-889), which want the wire's originator name: only the raw
+  // webhook payload stored on these rows carries it. Keyed on
+  // bridge_customer_id because the deposit writer always sets it, while
+  // account_id is stamped only once the IBEX credit lands. `last_seen_at` is
+  // written in UTC by toFrappeDatetime, unlike `creation`.
+  async listRecentBridgeDepositRows({
+    bridgeCustomerId,
+    since,
+  }: {
+    bridgeCustomerId: string
+    since: Date
+  }): Promise<BridgeDepositRiskRow[] | BridgeDepositHistoryQueryError> {
+    try {
+      const filters = JSON.stringify([
+        [BridgeTransferRequest.doctype, "provider", "=", "Bridge"],
+        [
+          BridgeTransferRequest.doctype,
+          "transaction_type",
+          "=",
+          BridgeTransferRequestTransactionType.Topup,
+        ],
+        [BridgeTransferRequest.doctype, "bridge_customer_id", "=", bridgeCustomerId],
+        // The `ibex:<txHash>` settle rows carry no Bridge payload.
+        [BridgeTransferRequest.doctype, "request_id", "not like", "ibex:%"],
+        [
+          BridgeTransferRequest.doctype,
+          "last_seen_at",
+          ">=",
+          toFrappeDatetime(since.toISOString()),
+        ],
+      ])
+      const fields = JSON.stringify([
+        "request_id",
+        "status",
+        "amount",
+        "currency",
+        "last_seen_at",
+        "raw_payload_json",
+      ])
+      const resp = await axios.get(
+        `${this.url}/api/resource/${encodeURIComponent(BridgeTransferRequest.doctype)}`,
+        {
+          params: {
+            filters,
+            fields,
+            order_by: "last_seen_at desc",
+            limit_page_length: 50,
+          },
+          headers: this.headers,
+        },
+      )
+      const rows = resp.data?.data
+      if (!Array.isArray(rows)) {
+        return new BridgeDepositHistoryQueryError("No data in Bridge deposit response")
+      }
+      return rows as BridgeDepositRiskRow[]
+    } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error(
+        { err, responseData, bridgeCustomerId },
+        "Error querying recent Bridge deposits from ERPNext",
+      )
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
+      return new BridgeDepositHistoryQueryError(err)
     }
   }
 

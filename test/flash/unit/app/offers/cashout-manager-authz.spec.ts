@@ -26,6 +26,13 @@ jest.mock("@app/cash-wallet-cutover/cashout-routing", () => ({
   resolveCashoutWalletSelection: (...args: unknown[]) => mockResolveSelection(...args),
 }))
 
+// CashoutManager reads the Bridge KYC name for its risk signals (ENG-889);
+// the real client reads Bridge config at import.
+jest.mock("@services/bridge/client", () => ({
+  __esModule: true,
+  default: {},
+}))
+
 jest.mock("@services/ibex/client", () => ({
   __esModule: true,
   default: { addInvoice: (...args: unknown[]) => mockAddInvoice(...args) },

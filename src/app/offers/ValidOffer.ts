@@ -13,6 +13,7 @@ import { FailedIbexPayment, IbexError } from "@services/ibex/errors"
 import { paymentSendStatusOrPending } from "@services/ibex/payment-status"
 import { Cashout } from "@config"
 
+import { CashoutRiskSignals, formatRiskRemarks } from "./risk-signals/signals"
 import { CashoutDetails, ValidationInputs } from "./types"
 import { CashoutValidator } from "./Validator"
 import Offer from "./Offer"
@@ -57,8 +58,14 @@ class ValidOffer extends Offer {
     })
   }
 
-  async execute(): Promise<InitiatedCashout | Error> {
-    const cashoutId = await ErpNext.draftCashout(this)
+  // `riskSignals` are flag only (ENG-889): they ride on the ERPNext draft and
+  // the internal notice, and never change whether the cash-out goes ahead.
+  async execute({ riskSignals }: { riskSignals?: CashoutRiskSignals } = {}): Promise<
+    InitiatedCashout | Error
+  > {
+    const cashoutId = await ErpNext.draftCashout(this, {
+      remarks: riskSignals ? formatRiskRemarks(riskSignals) : undefined,
+    })
     if (cashoutId instanceof CashoutDraftError) {
       this.notifyStepFailed("draftCashout", cashoutId)
       return cashoutId
@@ -121,7 +128,7 @@ class ValidOffer extends Offer {
     }
     const erpSubmitted = !(submitted instanceof CashoutSubmitError)
 
-    return new InitiatedCashout(this, cashoutId, erpSubmitted)
+    return new InitiatedCashout(this, cashoutId, erpSubmitted, riskSignals)
   }
 }
 
@@ -135,10 +142,18 @@ export class InitiatedCashout {
   // intervention pending). Informational for callers/ops — GraphQL output is
   // unchanged.
   readonly erpSubmitted: boolean
+  // Shown on the internal Cashout Initiated notice (ENG-889).
+  readonly riskSignals?: CashoutRiskSignals
 
-  constructor(offer: ValidOffer, cashoutId: CashoutId, erpSubmitted = true) {
+  constructor(
+    offer: ValidOffer,
+    cashoutId: CashoutId,
+    erpSubmitted = true,
+    riskSignals?: CashoutRiskSignals,
+  ) {
     this.offer = offer
     this.cashoutId = cashoutId
     this.erpSubmitted = erpSubmitted
+    this.riskSignals = riskSignals
   }
 }
