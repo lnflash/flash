@@ -24,6 +24,13 @@
  * A change whose cash-out hold could not be placed (account lookup or write
  * failed) is not recorded, so the next run sees it again and retries.
  *
+ * A short list is a failed read, never a fact. Bridge cannot drop most of its
+ * customers between two runs, so a run that lists no customers, or fewer than
+ * half of those stored, fails without seeding or comparing anything. The first
+ * production run recorded its baseline from an empty list (a page whose body
+ * read timed out was taken as empty); a marker with no customer stored is that
+ * baseline, and the next run drops the marker and seeds again without alerting.
+ *
  * https://apidocs.bridge.xyz/platform/customers/customers/api
  */
 
@@ -34,6 +41,7 @@ import { OpsStatus, notifyOpsEvent } from "@services/alerts/ops-events"
 import { baseLogger } from "@services/logger"
 import {
   BridgeCustomerStatusRecord,
+  clearBaselineMarker,
   loadCustomerStatuses,
   recordCustomerStatusChange,
   seedCustomerStatuses,
@@ -45,9 +53,13 @@ import { paginateNewestFirst } from "./paginate"
 
 const logger = baseLogger.child({ module: "bridge-customer-status-watch" })
 
-const PAGE_SIZE = 100
+// Production sent a 100 customer page in 8.6 s (about 86 ms per customer)
+// against a 10 s request timeout that also covers reading the body, so a full
+// page could time out part way. At that rate 25 customers take about 2.2 s
+// (2.6 s counting the 0.7 s a one customer page took), a quarter of the timeout.
+export const PAGE_SIZE = 25
 // 50,000 customers. Past it the run works on the customers it read and says so.
-const MAX_PAGES = 500
+const MAX_PAGES = 2_000
 
 export const CASHOUT_HOLD_SOURCE = "bridge-customer-status"
 
@@ -73,14 +85,17 @@ export type CustomerStatusWatchSummary = {
   fetched: number
   // True on the run that recorded the baseline.
   seeded: boolean
+  // True when this run found a baseline marker with no customer stored, and
+  // dropped it to seed again.
+  baselineRepaired: boolean
   // Baseline run only: customers already in each risky status.
   baselineRisky: Record<string, number>
   changes: number
   alerts: number
   holdsPlaced: number
   failures: number
-  // Bridge could not be read, or the store could not be read or seeded. The
-  // run did nothing, so the Job fails.
+  // Bridge could not be read or listed too few customers, or the store could
+  // not be read or seeded. The run did nothing, so the Job fails.
   pollFailed: boolean
 }
 
@@ -355,11 +370,36 @@ const seedBaseline = async (
   return { ...summary, seeded: true, baselineRisky }
 }
 
+const alertPollFailed = (detail: string) =>
+  alertBridge({
+    dedupKey: generateDedupKey.bridgeCustomerStatusPollFailed(),
+    source: "bridge-customer-status",
+    severity: "warning",
+    title:
+      "Bridge customer list poll failed: customer status changes are not being watched",
+    detail,
+  })
+
+// A list too short to be true. Nothing is seeded or compared.
+const refuseShortList = (
+  summary: CustomerStatusWatchSummary,
+  stored: number,
+): CustomerStatusWatchSummary => {
+  const detail =
+    summary.fetched === 0
+      ? "Bridge listed no customers; the run did nothing"
+      : `Bridge listed ${summary.fetched} customers but ${stored} are stored; the run did nothing`
+  logger.warn({ fetched: summary.fetched, stored }, detail)
+  alertPollFailed(detail)
+  return { ...summary, pollFailed: true }
+}
+
 export const watchBridgeCustomerStatuses =
   async (): Promise<CustomerStatusWatchSummary> => {
     const summary: CustomerStatusWatchSummary = {
       fetched: 0,
       seeded: false,
+      baselineRepaired: false,
       baselineRisky: {},
       changes: 0,
       alerts: 0,
@@ -372,14 +412,7 @@ export const watchBridgeCustomerStatuses =
     if (customers instanceof Error) {
       // Bridge outages (5xx, timeouts) already page from the client.
       logger.error({ error: customers }, "Bridge customer list poll failed")
-      alertBridge({
-        dedupKey: generateDedupKey.bridgeCustomerStatusPollFailed(),
-        source: "bridge-customer-status",
-        severity: "warning",
-        title:
-          "Bridge customer list poll failed: customer status changes are not being watched",
-        detail: customers.message,
-      })
+      alertPollFailed(customers.message)
       return { ...summary, pollFailed: true }
     }
 
@@ -392,6 +425,28 @@ export const watchBridgeCustomerStatuses =
     if (stored instanceof Error) {
       logger.error({ error: stored }, "Failed to read stored Bridge customer statuses")
       return { ...summary, pollFailed: true }
+    }
+
+    // Never a baseline from nothing, and never a comparison against a list
+    // that lost most of the customers already stored.
+    if (current.length === 0 || current.length < stored.statuses.size / 2) {
+      return refuseShortList(summary, stored.statuses.size)
+    }
+
+    if (stored.baselineComplete && stored.statuses.size === 0) {
+      const cleared = await clearBaselineMarker()
+      if (cleared instanceof Error) {
+        logger.error(
+          { error: cleared },
+          "Failed to drop the empty Bridge customer status baseline",
+        )
+        return { ...summary, pollFailed: true }
+      }
+      logger.warn(
+        { fetched: current.length },
+        "Bridge customer status baseline had no customers; dropped it and seeding again",
+      )
+      return seedBaseline(current, { ...summary, baselineRepaired: true })
     }
 
     if (!stored.baselineComplete) return seedBaseline(current, summary)

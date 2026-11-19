@@ -54,6 +54,7 @@ const summary = (overrides: Record<string, unknown> = {}) => ({
 const customerSummary = (overrides: Record<string, unknown> = {}) => ({
   fetched: 3,
   seeded: false,
+  baselineRepaired: false,
   baselineRisky: {},
   changes: 0,
   alerts: 0,
@@ -137,6 +138,24 @@ describe("runBridgeFundsRequestsCron", () => {
     expect(await runBridgeFundsRequestsCron()).toBe(FAILED_EXIT_CODE)
     expect(mockWatch).toHaveBeenCalledTimes(1)
     expect(mockFlushAlerts).toHaveBeenCalledTimes(1)
+  })
+
+  // ENG-889: an empty or short customer list is a failed poll, so the Job fails
+  // and shows in k8s rather than recording a baseline from nothing.
+  it("exits non-zero when the customer watch refused an empty customer list", async () => {
+    mockWatchCustomers.mockResolvedValue(
+      customerSummary({ fetched: 0, pollFailed: true }),
+    )
+
+    expect(await runBridgeFundsRequestsCron()).toBe(FAILED_EXIT_CODE)
+  })
+
+  it("exits 0 on a run that dropped an empty baseline and seeded again", async () => {
+    mockWatchCustomers.mockResolvedValue(
+      customerSummary({ seeded: true, baselineRepaired: true }),
+    )
+
+    expect(await runBridgeFundsRequestsCron()).toBe(OK_EXIT_CODE)
   })
 
   it("exits non-zero when the customer watch throws", async () => {

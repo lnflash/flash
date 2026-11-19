@@ -13,7 +13,7 @@
  *  - recordCustomerStatusChange only applies against the status the run read,
  *    and the first-seen upsert inserts once;
  *  - the seed's baseline marker is written and read back, and kept out of the
- *    statuses.
+ *    statuses, and clearBaselineMarker drops only the marker.
  */
 import crypto from "crypto"
 
@@ -26,6 +26,7 @@ import {
 import { AccountsRepository } from "@services/mongoose"
 import {
   BASELINE_COMPLETE_MARKER_ID,
+  clearBaselineMarker,
   loadCustomerStatuses,
   recordCustomerStatusChange,
   seedCustomerStatuses,
@@ -237,5 +238,25 @@ describe("Bridge customer status persistence", () => {
     expect(loaded.baselineComplete).toBe(true)
     expect(loaded.statuses.has(BASELINE_COMPLETE_MARKER_ID)).toBe(false)
     expect(loaded.statuses.get(fresh)?.status).toBe("offboarded")
+  })
+
+  it("drops only the baseline marker, so the next run seeds again", async () => {
+    const customerId = newCustomerId()
+    expect(await seedCustomerStatuses([{ customerId, status: "active" }])).toBe(true)
+
+    expect(await clearBaselineMarker()).toBe(true)
+
+    expect(
+      await BridgeCustomerStatus.countDocuments({
+        customerId: BASELINE_COMPLETE_MARKER_ID,
+      }),
+    ).toBe(0)
+    expect((await storedStatus(customerId))?.status).toBe("active")
+    const loaded = await loadCustomerStatuses()
+    if (loaded instanceof Error) throw loaded
+    expect(loaded.baselineComplete).toBe(false)
+
+    // Nothing left to drop is not an error.
+    expect(await clearBaselineMarker()).toBe(true)
   })
 })

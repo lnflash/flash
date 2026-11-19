@@ -11,6 +11,7 @@ export const generateDedupKey = {
   bridgeApi5xx: () => "bridge-api:5xx",
   bridgeApiTimeout: () => "bridge-api:timeout",
   bridgeApiNetwork: () => "bridge-api:network",
+  bridgeApiUnreadableBody: () => "bridge-api:unreadable-body",
   erpnextDepositAudit: (transferId: string) => `erpnext-audit:deposit:${transferId}`,
   erpnextTransferCompletedAudit: (transferId: string) =>
     `erpnext-audit:transfer-complete:${transferId}`,

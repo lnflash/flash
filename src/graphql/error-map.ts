@@ -828,6 +828,19 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         message,
       })
 
+    // Fixed message: error.message carries the JSON parse or undici text.
+    case "BridgeUnreadableResponseError":
+      return bridgeGqlError({
+        code: "BRIDGE_API_ERROR",
+        message: "Bridge returned an unreadable response, please try again",
+      })
+
+    case "BridgeUnexpectedResponseError":
+      return bridgeGqlError({
+        code: "BRIDGE_ERROR",
+        message: "Bridge returned an unexpected response",
+      })
+
     case "BridgePlaidNotAvailableError":
       message = error.message || "Plaid bank account linking is not available"
       return bridgeGqlError({

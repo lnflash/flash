@@ -15,7 +15,30 @@ import {
 } from "@domain/primitives/bridge"
 import { alertBridge, generateDedupKey } from "@services/alerts"
 
-import { BridgeApiError, BridgeTimeoutError } from "./errors"
+import {
+  BridgeApiError,
+  BridgeError,
+  BridgeTimeoutError,
+  BridgeUnexpectedResponseError,
+  BridgeUnreadableResponseError,
+} from "./errors"
+
+// The JSON body of a response, or null when it has none (a 204, or a success
+// with no bytes). Throws when the body cannot be read (the request was aborted
+// or the connection dropped) or is not JSON.
+const readJsonBody = async (response: Response): Promise<unknown> => {
+  if (response.status === 204) return null
+  const text = await response.text()
+  if (text.trim() === "") return null
+  return JSON.parse(text)
+}
+
+// By name, not class: fetch rejects with a DOMException, which is not an
+// instance of every realm's Error (e.g. under jest).
+const isAbortError = (err: unknown): boolean =>
+  typeof err === "object" &&
+  err !== null &&
+  (err as { name?: unknown }).name === "AbortError"
 
 // ============ Request/Response Types ============
 
@@ -409,6 +432,13 @@ export interface ListCustomersResponse {
   data: Customer[]
 }
 
+// A list page's `data`. A page without an array is a failed read, never an
+// empty page: callers page until a short page, so an empty one ends the list.
+const listData = <T>(response: { data?: unknown } | null, endpoint: string): T[] => {
+  if (Array.isArray(response?.data)) return response.data as T[]
+  throw new BridgeUnexpectedResponseError(`${endpoint} returned no data array`)
+}
+
 // ============ Bridge Client ============
 
 export class BridgeClient {
@@ -447,6 +477,16 @@ export class BridgeClient {
     const timeoutMs = BridgeConfig.timeoutMs ?? 15_000
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+    const timedOut = (): BridgeTimeoutError => {
+      alertBridge({
+        dedupKey: generateDedupKey.bridgeApiTimeout(),
+        source: "bridge-api",
+        severity: "critical",
+        title: `Bridge API timeout on ${method} ${path}`,
+        context: { method, path, timeoutMs },
+      })
+      return new BridgeTimeoutError()
+    }
 
     try {
       const response = await fetch(url, {
@@ -456,9 +496,10 @@ export class BridgeClient {
         signal: controller.signal,
       })
 
-      const responseData = await response.json().catch(() => null)
-
       if (!response.ok) {
+        // An error body is context only: when it cannot be read, the error
+        // still carries the status.
+        const errorBody = await readJsonBody(response).catch(() => null)
         // Only 5xx indicates a Bridge-side outage; 4xx are normal API rejections.
         if (response.status >= 500) {
           alertBridge({
@@ -473,33 +514,43 @@ export class BridgeClient {
         throw new BridgeApiError(
           `Bridge API error: ${response.status} ${response.statusText}`,
           response.status,
-          responseData,
+          errorBody,
         )
       }
 
-      return responseData as T
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
+      // The timeout also covers reading the body, so it can abort part way
+      // through a large page. A success whose body cannot be read is a failed
+      // request, never an empty result: returning null here once let a 0
+      // customer page pass as a complete list (ENG-889).
+      let data: unknown
+      try {
+        data = await readJsonBody(response)
+      } catch (err) {
+        if (controller.signal.aborted || isAbortError(err)) throw timedOut()
         alertBridge({
-          dedupKey: generateDedupKey.bridgeApiTimeout(),
+          dedupKey: generateDedupKey.bridgeApiUnreadableBody(),
           source: "bridge-api",
           severity: "critical",
-          title: `Bridge API timeout on ${method} ${path}`,
-          context: { method, path, timeoutMs },
-        })
-        throw new BridgeTimeoutError()
-      }
-      // Network/connectivity failures (5xx already alerted above).
-      if (!(err instanceof BridgeApiError)) {
-        alertBridge({
-          dedupKey: generateDedupKey.bridgeApiNetwork(),
-          source: "bridge-api",
-          severity: "critical",
-          title: `Bridge API request failed on ${method} ${path}`,
+          title: `Bridge API returned an unreadable ${response.status} body on ${method} ${path}`,
           detail: err instanceof Error ? err.message : String(err),
-          context: { method, path },
+          context: { method, path, status: response.status },
         })
+        throw new BridgeUnreadableResponseError(response.status, err)
       }
+      return data as T
+    } catch (err) {
+      if (err instanceof BridgeError) throw err
+      if (isAbortError(err)) throw timedOut()
+      // Network/connectivity failures (5xx and unreadable bodies already
+      // alerted above).
+      alertBridge({
+        dedupKey: generateDedupKey.bridgeApiNetwork(),
+        source: "bridge-api",
+        severity: "critical",
+        title: `Bridge API request failed on ${method} ${path}`,
+        detail: err instanceof Error ? err.message : String(err),
+        context: { method, path },
+      })
       throw err
     } finally {
       clearTimeout(timeoutId)
@@ -529,11 +580,11 @@ export class BridgeClient {
     if (params.startingAfter) queryParams.append("starting_after", params.startingAfter)
     const suffix = queryParams.toString() ? `?${queryParams.toString()}` : ""
 
-    const response = await this.request<Partial<ListCustomersResponse>>(
+    const response = await this.request<Partial<ListCustomersResponse> | null>(
       "GET",
       `/customers${suffix}`,
     )
-    const data = Array.isArray(response?.data) ? response.data : []
+    const data = listData<Customer>(response, "GET /customers")
     return { count: response?.count ?? data.length, data }
   }
 
@@ -705,11 +756,11 @@ export class BridgeClient {
     }
     const suffix = queryParams.toString() ? `?${queryParams.toString()}` : ""
 
-    const response = await this.request<Partial<ListFundsRequestsResponse>>(
+    const response = await this.request<Partial<ListFundsRequestsResponse> | null>(
       "GET",
       `/funds_requests${suffix}`,
     )
-    const data = Array.isArray(response?.data) ? response.data : []
+    const data = listData<FundsRequest>(response, "GET /funds_requests")
     return { count: response?.count ?? data.length, data }
   }
 
