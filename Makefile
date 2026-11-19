@@ -37,6 +37,10 @@ start-cron: start-deps
 	. ./.env && yarn tsnd --files -r tsconfig-paths/register -r src/services/tracing.ts \
 		src/servers/cron.ts | yarn pino-pretty -c -l
 
+start-bridge-funds-requests-cron: start-deps
+	. ./.env && yarn tsnd --files -r tsconfig-paths/register -r src/services/tracing.ts \
+		src/servers/bridge-funds-requests-cron.ts | yarn pino-pretty -c -l
+
 start-ws:
 	. ./.env && yarn tsnd --respawn --files -r tsconfig-paths/register -r src/services/tracing.ts \
 		src/servers/ws-server.ts --configPath ./dev/config/base-config.yaml $(CONFIG_PATH)/dev-overrides.yaml | yarn pino-pretty -c -l
