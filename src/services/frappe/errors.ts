@@ -63,6 +63,8 @@ export class BankAccountValidationError extends ErpNextError {
 // The account has no ERPNext customer yet, i.e. the upgrade is not complete.
 export class BankAccountUpgradeRequiredError extends ErpNextError {}
 export class ExchangeRateQueryError extends ErpNextError {}
+// Reading recent Bridge deposit rows for the cash-out risk signals (ENG-889).
+export class BridgeDepositHistoryQueryError extends ErpNextError {}
 export class BridgeTransferRequestUpsertError extends ErpNextError {}
 export class FygaroSettingsQueryError extends ErpNextError {}
 export class ReferralSettingsQueryError extends ErpNextError {}

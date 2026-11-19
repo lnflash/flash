@@ -7,6 +7,32 @@ type CashoutBodyArgs = CashoutDetails & {
   cashoutId: string
   erpNextLink: string
   formattedDate: string
+  // Cash-out risk signals (ENG-889), already formatted as plain lines.
+  riskLines?: string[]
+}
+
+const escapeHtml = (value: string): string =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+
+const riskHtml = (lines: string[]): string => {
+  if (lines.length === 0) return ""
+  const items = lines
+    .map((line) => {
+      const warn = line.startsWith("WARNING") || line.includes("unavailable")
+      const style = warn ? "color: #b00020; font-weight: 600;" : "color: #333333;"
+      return `<li style="padding: 4px 0; ${style}">${escapeHtml(line)}</li>`
+    })
+    .join("")
+  return `
+          <div style="margin-top: 30px;">
+            <h3 style="margin: 0 0 15px; color: #0066cc; font-size: 16px;">Risk Signals (flag only)</h3>
+            <ul style="margin: 0; padding-left: 20px; font-size: 14px;">${items}</ul>
+          </div>`
 }
 
 export const CashoutBody = (args: CashoutBodyArgs) => {
@@ -19,6 +45,16 @@ export const CashoutBody = (args: CashoutBodyArgs) => {
       : null
 
   const feeDetails = serviceFeeString ? `Service fee: $${serviceFeeString} USD` : ""
+
+  const riskLines = args.riskLines ?? []
+  const riskText =
+    riskLines.length > 0
+      ? `Risk Signals (flag only):
+      -------------------
+      ${riskLines.join("\n      ")}
+
+      `
+      : ""
 
   return {
     html: `
@@ -88,7 +124,7 @@ export const CashoutBody = (args: CashoutBodyArgs) => {
                 <td style="padding: 8px 5px; font-size: 13px; font-family: monospace;">${args.payment.userAcct}</td>
               </tr>
             </table>
-          </div>
+          </div>${riskHtml(riskLines)}
         </div>
         
         <!-- Footer -->
@@ -118,7 +154,7 @@ export const CashoutBody = (args: CashoutBodyArgs) => {
       Username: ${args.username}
       Wallet ID: ${args.payment.userAcct}
 
-      ----------------------
+      ${riskText}----------------------
       This is an automated notification from Flash. Please do not reply to this email.
       © ${new Date().getFullYear()} Flash. All rights reserved.
     `,
