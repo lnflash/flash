@@ -896,6 +896,43 @@ export const BridgeReconciliationOrphan = mongoose.model(
   BridgeReconciliationOrphanSchema,
 )
 
+// ENG-889: Bridge funds requests (sender-bank recalls) already handled by the
+// cron watcher. Bridge sends no webhook for these, so the watcher polls and
+// this collection is how a restart knows which ones it has alerted on. The
+// per-step timestamps let a run retry only the steps that failed before.
+const BridgeFundsRequestSchema = new Schema({
+  fundsRequestId: { type: String, required: true, unique: true },
+  depositId: { type: String },
+  customerId: { type: String },
+  amount: { type: String },
+  currency: { type: String },
+  paymentRail: { type: String },
+  fraud: { type: Boolean, required: true, default: false },
+  noticeDate: { type: String },
+  raw: { type: Schema.Types.Mixed },
+  firstSeenAt: { type: Date, default: Date.now },
+  accountId: { type: String },
+  // ERPNext deposit row noted ("updated" / "already_recorded"), or why not yet.
+  erpnextOutcome: { type: String },
+  erpnextRecordedAt: { type: Date },
+  // Fraud recalls only: "locked" / "already_locked" / "account_closed" /
+  // "account_not_found" end the step; "lookup_failed" / "lock_failed" retry.
+  lockOutcome: { type: String },
+  lockDoneAt: { type: Date },
+  // When ops were paged for this request. Set after the page is sent, so a run
+  // that dies before paging leaves it empty and the next run pages.
+  alertedAt: { type: Date },
+  updatedAt: { type: Date, default: Date.now },
+})
+
+BridgeFundsRequestSchema.index({ customerId: 1, firstSeenAt: -1 })
+BridgeFundsRequestSchema.index({ depositId: 1 })
+
+export const BridgeFundsRequest = mongoose.model(
+  "BridgeFundsRequest",
+  BridgeFundsRequestSchema,
+)
+
 // ENG-653: Flash-native payment splits. One rule = "pay `percent` of every
 // trigger-eligible receive on `walletId` to `destinationWalletId`".
 const PaymentSplitRuleSchema = new Schema({

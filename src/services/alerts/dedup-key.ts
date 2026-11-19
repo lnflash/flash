@@ -17,6 +17,15 @@ export const generateDedupKey = {
   erpnextTransferFailedAudit: (transferId: string) =>
     `erpnext-audit:transfer-failed:${transferId}`,
   bridgeWebhookDeposit: (eventId: string) => `bridge-webhook:deposit:${eventId}`,
+  // Per deposit AND state: refund_in_flight then refunded are two messages, and
+  // a refund_failed critical must never fold into the earlier warning.
+  bridgeDepositNotDelivered: (depositId: string, state: string) =>
+    `bridge-webhook:deposit-not-delivered:${depositId}:${state}`,
+  // One per funds request id: each recall is its own incident.
+  bridgeFundsRequest: (fundsRequestId: string) =>
+    `bridge-funds-request:${fundsRequestId}`,
+  // Static: the poll itself failing is one outage, not one per run.
+  bridgeFundsRequestPollFailed: () => "bridge-funds-request:poll-failed",
   bridgeWebhookTransfer: (transferId: string, event: string) =>
     `bridge-webhook:transfer:${transferId}:${event}`,
   ibexCryptoReceive: (txHash: string) => `ibex:crypto-receive:${txHash.toLowerCase()}`,

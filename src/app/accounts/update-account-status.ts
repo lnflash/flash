@@ -9,7 +9,9 @@ export const updateAccountStatus = async ({
 }: {
   id: string
   status: string
-  updatedByUserId: UserId
+  // Absent for system changes (e.g. the Bridge fraud-recall lock); the comment
+  // then names what made the change.
+  updatedByUserId?: UserId
   comment?: string
 }): Promise<Account | ApplicationError> => {
   const accountsRepo = AccountsRepository()
