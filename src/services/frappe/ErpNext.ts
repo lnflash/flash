@@ -214,6 +214,9 @@ export type BridgeTransferRequestDoc = {
   // path has no fee breakdown of its own, and a confirmation that knows less
   // than the original leaves the app showing a credited top-up with no amount.
   final_amount?: number | string
+  // Read so a recall note can be appended to, not written over, a reason the
+  // row already carries (a refund, an earlier recall).
+  failure_reason?: string | null
 }
 
 // A captured-but-uncredited Fygaro top-up row as the stranded-credit sweep
@@ -1594,7 +1597,11 @@ export class ErpNext {
     accountId?: string
     walletId?: string
   }): Promise<
-    "completed" | "already_completed" | "not_found" | BridgeTransferRequestUpsertError
+    | "completed"
+    | "already_completed"
+    | "kept_failed"
+    | "not_found"
+    | BridgeTransferRequestUpsertError
   > {
     try {
       const filters = JSON.stringify([
@@ -1622,6 +1629,27 @@ export class ErpNext {
         return "already_completed"
       }
 
+      // Failed outranks Completed (BRIDGE_TRANSFER_STATUS_RANK): a deposit
+      // Bridge refunded stays Failed. The credit did happen, so the row still
+      // gets the credited account and wallet, and the caller is told so it can
+      // raise the mismatch.
+      if (doc.status === BridgeTransferRequestStatus.Failed) {
+        await axios.put(
+          `${this.url}/api/resource/${encodeURIComponent(BridgeTransferRequest.doctype)}/${encodeURIComponent(doc.name)}`,
+          {
+            account_id: accountId,
+            wallet_id: walletId,
+            source_systems_seen: mergeSourceSystemsSeen(
+              doc.source_systems_seen,
+              "ibex_crypto_receive",
+            ),
+            last_seen_at: toFrappeDatetime(),
+          },
+          { headers: this.headers },
+        )
+        return "kept_failed"
+      }
+
       await axios.put(
         `${this.url}/api/resource/${encodeURIComponent(BridgeTransferRequest.doctype)}/${encodeURIComponent(doc.name)}`,
         {
@@ -1642,6 +1670,56 @@ export class ErpNext {
       baseLogger.error(
         { err, responseData, txHash },
         "Error promoting Bridge Transfer Request to Completed in ERPNext",
+      )
+      recordExceptionInCurrentSpan({
+        error: err,
+        attributes: { "erpnext.exception": responseData?.exception },
+      })
+      return new BridgeTransferRequestUpsertError(err)
+    }
+  }
+
+  // Append an ops note to an existing row's failure_reason without touching its
+  // status or any other field. Used for Bridge funds requests (wire recalls),
+  // which arrive by polling long after the deposit row was written. Idempotent:
+  // a note already present in the reason is not appended twice.
+  async appendBridgeTransferRequestFailureReason({
+    requestId,
+    note,
+    sourceSystem,
+  }: {
+    requestId: string
+    note: string
+    sourceSystem: string
+  }): Promise<
+    "updated" | "already_recorded" | "not_found" | BridgeTransferRequestUpsertError
+  > {
+    const existing = await this.findBridgeTransferRequest(requestId)
+    if (existing instanceof BridgeTransferRequestUpsertError) return existing
+    if (!existing) return "not_found"
+
+    const current = existing.failure_reason?.trim() ?? ""
+    if (current.includes(note)) return "already_recorded"
+
+    try {
+      await axios.put(
+        `${this.url}/api/resource/${encodeURIComponent(BridgeTransferRequest.doctype)}/${encodeURIComponent(existing.name)}`,
+        {
+          failure_reason: current ? `${current}; ${note}` : note,
+          source_systems_seen: mergeSourceSystemsSeen(
+            existing.source_systems_seen,
+            sourceSystem,
+          ),
+          last_seen_at: toFrappeDatetime(),
+        },
+        { headers: this.headers },
+      )
+      return "updated"
+    } catch (err) {
+      const responseData = isAxiosError(err) ? err.response?.data : undefined
+      baseLogger.error(
+        { err, responseData, requestId },
+        "Error appending failure reason to Bridge Transfer Request in ERPNext",
       )
       recordExceptionInCurrentSpan({
         error: err,
@@ -1949,6 +2027,7 @@ export class ErpNext {
         // lets the already-credited guard re-stamp the customer's status with
         // the net that actually reached the wallet.
         "final_amount",
+        "failure_reason",
       ])
       const resp = await axios.get(
         `${this.url}/api/resource/${encodeURIComponent(BridgeTransferRequest.doctype)}`,

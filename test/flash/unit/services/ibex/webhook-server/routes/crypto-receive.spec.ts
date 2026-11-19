@@ -251,6 +251,35 @@ describe("cryptoReceiveHandler", () => {
     expect(alertIbexCryptoReceiveFailure).not.toHaveBeenCalled()
   })
 
+  // ENG-889: a refunded deposit's row is Failed and stays Failed, but USDT
+  // reaching the customer for it is a mismatch ops must see.
+  it("alerts but still succeeds when the deposit row is Failed (refunded)", async () => {
+    ;(promoteBridgeDepositForCryptoReceive as jest.Mock).mockResolvedValue("kept_failed")
+    const res = makeResponse()
+
+    await cryptoReceiveHandler(
+      {
+        body: {
+          tx_hash: TX_HASH,
+          address: ADDRESS,
+          amount: "12.345678",
+          currency: "USDT",
+          network: "ethereum",
+        },
+      } as never,
+      res as never,
+    )
+
+    expect(res.status).toHaveBeenCalledWith(200)
+    expect(res.json).toHaveBeenCalledWith({ status: "success" })
+    expect(alertIbexCryptoReceiveFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        txHash: TX_HASH,
+        code: "credited_failed_bridge_deposit",
+      }),
+    )
+  })
+
   it("alerts but still succeeds when the deposit-row promotion fails", async () => {
     ;(promoteBridgeDepositForCryptoReceive as jest.Mock).mockResolvedValue(
       new Error("erpnext down"),

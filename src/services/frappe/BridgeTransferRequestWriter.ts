@@ -3,6 +3,15 @@ import ErpNext, {
   type UncreditedFygaroTopupRow,
 } from "@services/frappe/ErpNext"
 import { baseLogger } from "@services/logger"
+import { AccountsRepository } from "@services/mongoose/accounts"
+import { WalletsRepository } from "@services/mongoose/wallets"
+import { toBridgeCustomerId } from "@domain/primitives/bridge"
+import { WalletCurrency } from "@domain/shared"
+import {
+  BRIDGE_DEPOSIT_TERMINAL_FAILURE_STATES,
+  BridgeDepositRefund,
+  bridgeDepositFailureReason,
+} from "@services/bridge/deposit-states"
 import {
   BridgeTransferRequestUpsertError,
   FygaroTopupHistoryQueryError,
@@ -43,6 +52,8 @@ type BridgeDepositEventObject = {
     destination_tx_hash?: string
   }
   developer_fee?: unknown
+  // Present on refund_in_flight / refunded / refund_failed activity
+  refund?: BridgeDepositRefund
 }
 
 const asOptionalString = (value: unknown): string | undefined => {
@@ -82,6 +93,48 @@ const findSettledIbexReceive = async (
   return { accountId: doc.account_id, walletId: doc.wallet_id }
 }
 
+// Display attribution for a deposit row: the Flash account that owns this
+// Bridge customer, and the USDT wallet its virtual account delivers into (the
+// VA's destination is the IBEX receive address of that wallet, see
+// createVirtualAccount in services/bridge; the IBEX crypto-receive handler
+// credits the account's USDT wallet by the same rule). Read-only and
+// best-effort: a lookup failure logs and returns undefined so the audit write
+// never fails on it, and it never feeds status promotion.
+const findDepositAttribution = async (
+  customerId: string | undefined,
+): Promise<{ accountId: string; walletId?: string } | undefined> => {
+  if (!customerId) return undefined
+  try {
+    const account = await AccountsRepository().findByBridgeCustomerId(
+      toBridgeCustomerId(customerId),
+    )
+    if (account instanceof Error) {
+      baseLogger.warn(
+        { customerId, error: account },
+        "No Flash account resolved for Bridge deposit customer; row left unattributed",
+      )
+      return undefined
+    }
+
+    const wallets = await WalletsRepository().listByAccountId(account.id)
+    if (wallets instanceof Error) {
+      baseLogger.warn(
+        { customerId, accountId: account.id, error: wallets },
+        "Failed to list wallets for Bridge deposit attribution; stamping account only",
+      )
+      return { accountId: account.id }
+    }
+    const usdtWallet = wallets.find((w) => w.currency === WalletCurrency.Usdt)
+    return { accountId: account.id, walletId: usdtWallet?.id }
+  } catch (error) {
+    baseLogger.warn(
+      { customerId, error },
+      "Bridge deposit attribution lookup threw; row left unattributed",
+    )
+    return undefined
+  }
+}
+
 export const writeBridgeDepositRequest = async ({
   eventId,
   eventObject,
@@ -118,20 +171,35 @@ export const writeBridgeDepositRequest = async ({
     return true
   }
 
+  const isTerminalFailure = BRIDGE_DEPOSIT_TERMINAL_FAILURE_STATES.has(state)
   const destinationTxHash = receipt?.destination_tx_hash
-  const settledReceive = destinationTxHash
-    ? await findSettledIbexReceive(destinationTxHash)
-    : undefined
+  // A deposit Bridge refunded or failed never completes, whatever an IBEX row
+  // says, so skip the settle-row check for it.
+  const settledReceive =
+    destinationTxHash && !isTerminalFailure
+      ? await findSettledIbexReceive(destinationTxHash)
+      : undefined
+  // The settle row names the wallet that was actually credited; prefer it.
+  const attribution = settledReceive?.accountId
+    ? settledReceive
+    : await findDepositAttribution(customerId)
+
+  // Failed ranks highest in the ERPNext upsert guard
+  // (BRIDGE_TRANSFER_STATUS_RANK), so a later retry of an earlier event can
+  // never move a refunded row back to Fiat Received.
+  const status = isTerminalFailure
+    ? BridgeTransferRequestStatus.Failed
+    : settledReceive
+      ? BridgeTransferRequestStatus.Completed
+      : BridgeTransferRequestStatus.FiatReceived
 
   return upsert(
     new BridgeTransferRequest({
       requestId: stableRequestId,
       transactionType: BridgeTransferRequestTransactionType.Topup,
-      status: settledReceive
-        ? BridgeTransferRequestStatus.Completed
-        : BridgeTransferRequestStatus.FiatReceived,
-      accountId: settledReceive?.accountId,
-      walletId: settledReceive?.walletId,
+      status,
+      accountId: attribution?.accountId,
+      walletId: attribution?.walletId,
       amount: String(eventObject.amount),
       currency: String(currency),
       developerFee:
@@ -149,6 +217,7 @@ export const writeBridgeDepositRequest = async ({
       sourceSystemsSeen: settledReceive
         ? ["bridge_deposit", "ibex_crypto_receive"]
         : ["bridge_deposit"],
+      failureReason: bridgeDepositFailureReason({ state, refund: eventObject.refund }),
       rawPayload,
     }),
   )
@@ -166,12 +235,41 @@ export const promoteBridgeDepositForCryptoReceive = async ({
   accountId: AccountId
   walletId: WalletId
 }): Promise<
-  "completed" | "already_completed" | "not_found" | BridgeTransferRequestUpsertError
+  | "completed"
+  | "already_completed"
+  | "kept_failed"
+  | "not_found"
+  | BridgeTransferRequestUpsertError
 > => {
   if (!ErpNext?.completeBridgeTopupByTxHash) {
     return new BridgeTransferRequestUpsertError("ERPNext client is not configured")
   }
   return ErpNext.completeBridgeTopupByTxHash({ txHash, accountId, walletId })
+}
+
+// Note a Bridge funds request (a sender-bank recall) on the deposit's row,
+// keyed by Bridge deposit id (the deposit writer's request_id). Status is left
+// alone on purpose: a recall is a claim against a deposit, not a movement of
+// money. If Bridge returns the funds before delivery, the refund webhooks move
+// the row to Failed; if the USDT was already delivered, the row's Completed is
+// still true and the reason tells ops a recall is open against it.
+export const recordBridgeDepositRecall = async ({
+  depositId,
+  note,
+}: {
+  depositId: string
+  note: string
+}): Promise<
+  "updated" | "already_recorded" | "not_found" | BridgeTransferRequestUpsertError
+> => {
+  if (!ErpNext?.appendBridgeTransferRequestFailureReason) {
+    return new BridgeTransferRequestUpsertError("ERPNext client is not configured")
+  }
+  return ErpNext.appendBridgeTransferRequestFailureReason({
+    requestId: depositId,
+    note,
+    sourceSystem: "bridge_funds_request",
+  })
 }
 
 export const writeIbexCryptoReceiveRequest = async ({

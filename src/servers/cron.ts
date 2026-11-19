@@ -29,6 +29,7 @@ import {
   reconcileBridgeAndIbexDeposits,
   reconcileBridgeAndIbexWithdrawals,
 } from "@services/bridge/reconciliation"
+import { watchBridgeFundsRequests } from "@services/bridge/funds-requests"
 import { checkFygaroTreasuryFloat } from "@services/fygaro/float-monitor"
 import { reconcileSplits } from "@app/payment-splits"
 
@@ -93,6 +94,16 @@ const reconcileBridgeWithdrawalsJob = async () => {
     windowMs: RECONCILE_WINDOW_MS,
   })
   if (result instanceof Error) throw result
+}
+
+// ENG-889: Bridge sends no webhook when a sender's bank recalls a deposit, so
+// poll its funds requests. Never throws: a poll failure alerts ops itself, and
+// per-request step failures are retried on the next run.
+const watchBridgeFundsRequestsJob = async () => {
+  if (!BridgeConfig.enabled) return
+
+  const summary = await watchBridgeFundsRequests()
+  logger.info({ summary }, "bridge funds request watch finished")
 }
 
 // ENG-653 payment splits. Execution, retries and the stale sweep run every
@@ -166,6 +177,7 @@ const main = async () => {
     ...(cronConfig.swapEnabled ? [swapOutJob] : []),
     reconcileBridgeDepositsJob,
     reconcileBridgeWithdrawalsJob,
+    watchBridgeFundsRequestsJob,
     reconcileSplitPaymentsJob,
     checkFygaroFloatJob,
     evidenceRetentionJob,
