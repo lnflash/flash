@@ -19,6 +19,8 @@ import {
   BridgeRateLimitError,
   BridgeTimeoutError,
   BridgeTransferFailedError,
+  BridgeUnexpectedResponseError,
+  BridgeUnreadableResponseError,
   BridgeWebhookValidationError,
   BridgeWithdrawalNetAmountTooLowError,
   mapBridgeHttpError,
@@ -49,6 +51,8 @@ describe("error-map: Bridge errors", () => {
     [new BridgeWebhookValidationError(), "BRIDGE_WEBHOOK_VALIDATION"],
     [new BridgeKycTierCeilingExceededError(), "BRIDGE_KYC_TIER_CEILING_EXCEEDED"],
     [new BridgeApiError("Bridge API error", 500), "BRIDGE_API_ERROR"],
+    [new BridgeUnreadableResponseError(200), "BRIDGE_API_ERROR"],
+    [new BridgeUnexpectedResponseError(), "BRIDGE_ERROR"],
     [new BridgeError("Bridge unavailable"), "BRIDGE_ERROR"],
   ]
 
@@ -66,6 +70,20 @@ describe("error-map: Bridge errors", () => {
     expect(result.code).toBe(expectedCode)
     expect(result.code).not.toBe("INVALID_INPUT")
     expect(result.message).toBeTruthy()
+  })
+
+  it("does not pass the body read or parse failure text on to the app", () => {
+    const error = new BridgeUnreadableResponseError(
+      200,
+      new SyntaxError("Unexpected end of JSON input"),
+    )
+    const result = mapAndParseErrorForGqlResponse(error)
+
+    expect(result.code).toBe("BRIDGE_API_ERROR")
+    expect(result.message).toBe(
+      "Bridge returned an unreadable response, please try again",
+    )
+    expect(result.message).not.toContain("JSON")
   })
 
   it("keeps the KYC gate messages verbatim for the app to show", () => {
