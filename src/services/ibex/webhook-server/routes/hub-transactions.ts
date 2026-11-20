@@ -1,7 +1,10 @@
 import express, { Request, Response } from "express"
 import rateLimitMiddleware from "express-rate-limit"
 
-import { recordIbexCreditSignal } from "@app/bridge/match-ibex-deposits"
+import {
+  IBEX_CRYPTO_RECEIVE_TYPE_ID,
+  recordIbexCreditSignal,
+} from "@app/bridge/match-ibex-deposits"
 import { baseLogger } from "@services/logger"
 import { ibexWebhookPaths } from "@services/ibex/webhook-config"
 
@@ -24,8 +27,6 @@ const webhookRateLimit = rateLimitMiddleware({
 // The signature covers the exact bytes IBEX sent, so this route reads the raw
 // body; the server mounts it before its JSON parser.
 const rawBody = express.raw({ type: () => true, limit: "256kb" })
-
-const IBEX_CRYPTO_RECEIVE_TYPE_ID = 9
 
 /**
  * IBEX Hub's organization webhook, event "Transactions" (ENG-891). It is the

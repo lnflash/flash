@@ -21,7 +21,7 @@ const CREDIT_LEAD_MS = 15 * 60 * 1000
 // run after deploy, IBEX outage) records it silently.
 export const NOTIFY_WITHIN_MS = 24 * 60 * 60 * 1000
 
-const IBEX_CRYPTO_RECEIVE_TYPE_ID = 9
+export const IBEX_CRYPTO_RECEIVE_TYPE_ID = 9
 const TRANSACTIONS_PAGE_SIZE = 50
 // Stops a runaway read; a USDT wallet has far fewer credits in a week.
 const MAX_PAGES = 20

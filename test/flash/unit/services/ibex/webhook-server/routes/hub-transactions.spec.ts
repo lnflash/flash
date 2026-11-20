@@ -9,6 +9,7 @@ jest.mock("@services/ibex/webhook-server/middleware", () => ({
   verifyIbexHubSignature: jest.fn((_req, _res, next) => next()),
 }))
 jest.mock("@app/bridge/match-ibex-deposits", () => ({
+  IBEX_CRYPTO_RECEIVE_TYPE_ID: 9,
   recordIbexCreditSignal: (...args: unknown[]) => mockRecordSignal(...args),
 }))
 jest.mock("@services/logger", () => ({

@@ -29,6 +29,7 @@ jest.mock("@config", () => ({
   },
 }))
 jest.mock("@app/bridge/match-ibex-deposits", () => ({
+  IBEX_CRYPTO_RECEIVE_TYPE_ID: 9,
   recordIbexCreditSignal: (...args: unknown[]) => mockRecordSignal(...args),
 }))
 jest.mock("@services/logger", () => ({
@@ -65,11 +66,11 @@ beforeEach(() => {
 const BODY =
   '{ "event": "Transactions",\n  "transaction": { "id": "877be576", "transactionTypeId": 9, "status": "completed" } }'
 
-const deliver = async (signer = keys.privateKey, body = BODY) => {
+const deliver = async (signer = keys.privateKey, body = BODY, target = url) => {
   const id = "msg_0b5e2a51"
   const timestamp = String(Math.floor(Date.now() / 1000))
   const signature = sign(null, Buffer.from(`${id}.${timestamp}.${body}`), signer)
-  return fetch(url, {
+  return fetch(target, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -123,6 +124,41 @@ describe("POST /hub/transactions", () => {
     await settle()
 
     expect(res.status).toBe(200)
+    expect(mockRecordSignal).not.toHaveBeenCalled()
+  })
+})
+
+describe("POST /hub/transactions with the hub IP allowlist set", () => {
+  let listedServer: Server
+  let listedUrl: string
+
+  beforeAll(async () => {
+    // A fresh copy of the route and its middleware, loaded with the hub list
+    // set: both parse the config once, when they load.
+    mockHubConfig.allowedIps = ["203.0.113.4"]
+    let router: express.Router | undefined
+    jest.isolateModules(() => {
+      router = jest.requireActual<
+        typeof import("@services/ibex/webhook-server/routes/hub-transactions")
+      >("@services/ibex/webhook-server/routes/hub-transactions").router
+    })
+    mockHubConfig.allowedIps = []
+    const app = express()
+    app.set("trust proxy", 1)
+    app.use(router as express.Router)
+    app.use(express.json())
+    listedServer = app.listen(0)
+    await new Promise((resolve) => listedServer.once("listening", resolve))
+    listedUrl = `http://127.0.0.1:${(listedServer.address() as AddressInfo).port}/hub/transactions`
+  })
+
+  afterAll(() => new Promise((resolve) => listedServer.close(resolve)))
+
+  it("refuses a signed delivery from an unlisted address with 403", async () => {
+    const res = await deliver(keys.privateKey, BODY, listedUrl)
+    await settle()
+
+    expect(res.status).toBe(403)
     expect(mockRecordSignal).not.toHaveBeenCalled()
   })
 })
