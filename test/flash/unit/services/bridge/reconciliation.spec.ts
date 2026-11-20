@@ -17,6 +17,7 @@ jest.mock("@services/mongoose/schema", () => ({
 
 jest.mock("@services/mongoose/bridge-accounts", () => ({
   updateWithdrawalStatus: jest.fn(),
+  markSendFailedTransferCancelled: jest.fn(),
 }))
 
 jest.mock("@services/bridge/client", () => ({
@@ -606,6 +607,10 @@ describe("reconcileBridgeAndIbexWithdrawals", () => {
     expect(BridgeApiClient.deleteTransfer).toHaveBeenCalledWith("tr_withdrawal_002")
     expect(result.cancelledSendFailedTransfers).toBe(1)
     expect(upsertBridgeReconciliationOrphan).not.toHaveBeenCalled()
+    // ENG-891: recorded, so the hourly check never deletes it again.
+    expect(BridgeAccountsRepo.markSendFailedTransferCancelled).toHaveBeenCalledWith(
+      "tr_withdrawal_002",
+    )
   })
 
   it("self-heals a sent withdrawal when Bridge already reports payment_processed", async () => {
@@ -656,5 +661,202 @@ describe("reconcileBridgeAndIbexWithdrawals", () => {
         transferId: "tr_withdrawal_001",
       }),
     )
+  })
+
+  // ENG-891: the check runs hourly over 30 days instead of daily over 15
+  // minutes, so it must not repeat a delete or an alert.
+  describe("hourly use", () => {
+    const HOUR = 60 * 60 * 1000
+
+    beforeEach(() => {
+      ;(
+        BridgeAccountsRepo.markSendFailedTransferCancelled as jest.Mock
+      ).mockResolvedValue(true)
+      ;(BridgeApiClient.deleteTransfer as jest.Mock).mockResolvedValue({ id: "tr" })
+    })
+
+    it("reads only in-flight withdrawals whose transfer is not yet cancelled", async () => {
+      ;(BridgeWithdrawal.find as jest.Mock).mockReturnValue(makeWithdrawalFind([]))
+
+      await reconcileBridgeAndIbexWithdrawals({ windowMs: 30 * 24 * HOUR })
+
+      expect(BridgeWithdrawal.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: { $in: ["usdt_sent", "send_failed"] },
+          bridgeTransferId: { $exists: true },
+          bridgeTransferCancelledAt: { $exists: false },
+        }),
+      )
+    })
+
+    it("counts a transfer Bridge already shows canceled as cancelled, without an orphan", async () => {
+      ;(BridgeWithdrawal.find as jest.Mock).mockReturnValue(
+        makeWithdrawalFind([BRIDGE_WITHDRAWAL_SEND_FAILED]),
+      )
+      ;(BridgeApiClient.deleteTransfer as jest.Mock).mockRejectedValue(
+        new Error("Bridge 400: transfer cannot be deleted"),
+      )
+      ;(BridgeApiClient.getTransfer as jest.Mock).mockResolvedValue({
+        id: "tr_withdrawal_002",
+        state: "canceled",
+      })
+
+      const result = await reconcileBridgeAndIbexWithdrawals()
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          cancelledSendFailedTransfers: 1,
+          bridgeTransferWithoutIbexSend: 0,
+        }),
+      )
+      expect(BridgeAccountsRepo.markSendFailedTransferCancelled).toHaveBeenCalledWith(
+        "tr_withdrawal_002",
+      )
+      expect(upsertBridgeReconciliationOrphan).not.toHaveBeenCalled()
+      expect(alertIbexReconciliationOrphan).not.toHaveBeenCalled()
+    })
+
+    it("files an orphan when the delete fails and Bridge still holds the transfer open", async () => {
+      ;(BridgeWithdrawal.find as jest.Mock).mockReturnValue(
+        makeWithdrawalFind([BRIDGE_WITHDRAWAL_SEND_FAILED]),
+      )
+      ;(BridgeApiClient.deleteTransfer as jest.Mock).mockRejectedValue(
+        new Error("Bridge 500"),
+      )
+      ;(BridgeApiClient.getTransfer as jest.Mock).mockResolvedValue({
+        id: "tr_withdrawal_002",
+        state: "awaiting_funds",
+      })
+
+      const result = await reconcileBridgeAndIbexWithdrawals()
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          cancelledSendFailedTransfers: 0,
+          bridgeTransferWithoutIbexSend: 1,
+        }),
+      )
+      expect(BridgeAccountsRepo.markSendFailedTransferCancelled).not.toHaveBeenCalled()
+      expect(upsertBridgeReconciliationOrphan).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orphanKey: "withdrawal-send-failed:tr_withdrawal_002",
+          triageContext: expect.objectContaining({ deleteTransferError: "Bridge 500" }),
+        }),
+      )
+      expect(alertIbexReconciliationOrphan).toHaveBeenCalledTimes(1)
+    })
+
+    it("does not alert again for a withdrawal orphan already on file", async () => {
+      ;(upsertBridgeReconciliationOrphan as jest.Mock).mockResolvedValue({
+        id: "orphan_001",
+        created: false,
+      })
+      ;(BridgeWithdrawal.find as jest.Mock).mockReturnValue(
+        makeWithdrawalFind([BRIDGE_WITHDRAWAL_SEND_FAILED, BRIDGE_WITHDRAWAL_USDT_SENT]),
+      )
+      ;(BridgeApiClient.deleteTransfer as jest.Mock).mockRejectedValue(
+        new Error("Bridge 500"),
+      )
+      ;(BridgeApiClient.getTransfer as jest.Mock)
+        .mockResolvedValueOnce({ id: "tr_withdrawal_002", state: "awaiting_funds" })
+        .mockResolvedValueOnce({ id: "tr_withdrawal_001", state: "error" })
+
+      const result = await reconcileBridgeAndIbexWithdrawals()
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          bridgeTransferWithoutIbexSend: 1,
+          ibexSendWithoutBridgeSettlement: 1,
+        }),
+      )
+      expect(upsertBridgeReconciliationOrphan).toHaveBeenCalledTimes(2)
+      expect(alertIbexReconciliationOrphan).not.toHaveBeenCalled()
+    })
+
+    it("flags, once, USDT IBEX sent that Bridge has not paid out after stuckAfterMs", async () => {
+      const sentTwoDaysAgo = {
+        ...BRIDGE_WITHDRAWAL_USDT_SENT,
+        updatedAt: new Date(Date.now() - 48 * HOUR),
+      }
+      ;(BridgeWithdrawal.find as jest.Mock).mockReturnValue(
+        makeWithdrawalFind([sentTwoDaysAgo]),
+      )
+      ;(BridgeApiClient.getTransfer as jest.Mock).mockResolvedValue({
+        id: "tr_withdrawal_001",
+        state: "payment_submitted",
+        on_behalf_of: "cust_001",
+      })
+
+      const result = await reconcileBridgeAndIbexWithdrawals({
+        windowMs: 30 * 24 * HOUR,
+        stuckAfterMs: 24 * HOUR,
+      })
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          stuckAwaitingBridge: 1,
+          ibexSendWithoutBridgeSettlement: 0,
+        }),
+      )
+      expect(upsertBridgeReconciliationOrphan).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orphanKey: "withdrawal-ibex-sent-stuck:tr_withdrawal_001",
+          orphanType: "ibex_send_without_bridge_settlement",
+          triageContext: expect.objectContaining({ bridgeState: "payment_submitted" }),
+        }),
+      )
+      expect(alertIbexReconciliationOrphan).toHaveBeenCalledWith(
+        expect.objectContaining({
+          reason: expect.stringContaining("still payment_submitted after 48h"),
+        }),
+      )
+    })
+
+    it("leaves a withdrawal Bridge is still working on alone when it is young or no threshold is set", async () => {
+      const sentAnHourAgo = {
+        ...BRIDGE_WITHDRAWAL_USDT_SENT,
+        updatedAt: new Date(Date.now() - HOUR),
+      }
+      const sentLongAgo = {
+        ...BRIDGE_WITHDRAWAL_USDT_SENT,
+        bridgeTransferId: "tr_old",
+        updatedAt: new Date(Date.now() - 72 * HOUR),
+      }
+      ;(BridgeApiClient.getTransfer as jest.Mock).mockResolvedValue({
+        id: "tr",
+        state: "awaiting_funds",
+      })
+      ;(BridgeWithdrawal.find as jest.Mock).mockReturnValue(
+        makeWithdrawalFind([sentAnHourAgo]),
+      )
+      await reconcileBridgeAndIbexWithdrawals({ stuckAfterMs: 24 * HOUR })
+      ;(BridgeWithdrawal.find as jest.Mock).mockReturnValue(
+        makeWithdrawalFind([sentLongAgo]),
+      )
+      const noThreshold = await reconcileBridgeAndIbexWithdrawals()
+
+      expect(noThreshold).toEqual(expect.objectContaining({ stuckAwaitingBridge: 0 }))
+      expect(upsertBridgeReconciliationOrphan).not.toHaveBeenCalled()
+    })
+
+    it("counts a failure for one withdrawal and goes on to the next", async () => {
+      const second = { ...BRIDGE_WITHDRAWAL_USDT_SENT, bridgeTransferId: "tr_second" }
+      ;(BridgeWithdrawal.find as jest.Mock).mockReturnValue(
+        makeWithdrawalFind([BRIDGE_WITHDRAWAL_USDT_SENT, second]),
+      )
+      ;(BridgeApiClient.getTransfer as jest.Mock)
+        .mockRejectedValueOnce(new Error("Bridge timeout"))
+        .mockResolvedValueOnce({ id: "tr_second", state: "payment_processed" })
+
+      const result = await reconcileBridgeAndIbexWithdrawals()
+
+      expect(result).toEqual(
+        expect.objectContaining({ failures: 1, finalizedCompletedTransfers: 1 }),
+      )
+      expect(BridgeAccountsRepo.updateWithdrawalStatus).toHaveBeenCalledWith(
+        "tr_second",
+        "completed",
+      )
+    })
   })
 })

@@ -13,7 +13,7 @@ import {
 import * as BridgeAccountsRepo from "@services/mongoose/bridge-accounts"
 import { PubSubService } from "@services/pubsub"
 import { PubSubDefaultTriggers } from "@domain/pubsub"
-import { toBridgeTransferId } from "@domain/primitives/bridge"
+import { toBridgeTransferId, type BridgeTransferId } from "@domain/primitives/bridge"
 
 import BridgeApiClient from "./client"
 
@@ -261,10 +261,32 @@ export const reconcileBridgeAndIbexDeposits = async ({
   }
 }
 
+/**
+ * Safety net for Bridge withdrawals in flight (status usdt_sent or
+ * send_failed). The Bridge transfer webhook moves usdt_sent to completed or
+ * failed; this catches what it missed. Runs hourly from
+ * bridge-funds-requests-cron.ts over a window long enough to keep every
+ * in-flight withdrawal in view (ENG-891: it used to run daily over 15 minutes
+ * and saw nothing).
+ *
+ *  - send_failed: IBEX never sent the USDT, so the Bridge transfer is deleted,
+ *    once. A transfer Bridge already reports gone counts as deleted. Either
+ *    way bridgeTransferCancelledAt stops later runs from trying again.
+ *  - usdt_sent and Bridge says payment_processed: finalize as completed.
+ *  - usdt_sent and Bridge failed terminally: orphan + alert.
+ *  - usdt_sent, Bridge still working, sent more than stuckAfterMs ago:
+ *    orphan + alert, since the user's USDT left IBEX and was not paid out.
+ *
+ * Every orphan alerts once. One withdrawal's failure (a Bridge call that
+ * throws) is counted and does not stop the others.
+ */
 export const reconcileBridgeAndIbexWithdrawals = async ({
   windowMs = FIFTEEN_MIN_MS,
+  stuckAfterMs,
 }: {
   windowMs?: number
+  // Unset: a withdrawal Bridge is still working on is never flagged.
+  stuckAfterMs?: number
 } = {}): Promise<
   | {
       scannedWithdrawals: number
@@ -272,6 +294,8 @@ export const reconcileBridgeAndIbexWithdrawals = async ({
       finalizedCompletedTransfers: number
       ibexSendWithoutBridgeSettlement: number
       bridgeTransferWithoutIbexSend: number
+      stuckAwaitingBridge: number
+      failures: number
     }
   | Error
 > => {
@@ -283,6 +307,7 @@ export const reconcileBridgeAndIbexWithdrawals = async ({
       updatedAt: { $gte: since, $lte: now },
       status: { $in: ["usdt_sent", "send_failed"] },
       bridgeTransferId: { $exists: true },
+      bridgeTransferCancelledAt: { $exists: false },
     })
       .lean()
       .exec()) as BridgeWithdrawalLike[]
@@ -291,20 +316,25 @@ export const reconcileBridgeAndIbexWithdrawals = async ({
     let finalizedCompletedTransfers = 0
     let ibexSendWithoutBridgeSettlement = 0
     let bridgeTransferWithoutIbexSend = 0
+    let stuckAwaitingBridge = 0
+    let failures = 0
 
     for (const withdrawal of withdrawals) {
       const transferId = withdrawal.bridgeTransferId
       if (!transferId) continue
       const bridgeTransferId = toBridgeTransferId(transferId)
 
-      if (withdrawal.status === "send_failed") {
-        try {
-          await BridgeApiClient.deleteTransfer(bridgeTransferId)
-          cancelledSendFailedTransfers++
-        } catch (error) {
+      try {
+        if (withdrawal.status === "send_failed") {
+          const cancelled = await cancelSendFailedTransfer(bridgeTransferId)
+          if (cancelled === true) {
+            cancelledSendFailedTransfers++
+            continue
+          }
+
           bridgeTransferWithoutIbexSend++
           const reason = "Bridge transfer exists but IBEX crypto send failed"
-          await upsertBridgeReconciliationOrphan({
+          const orphan = await upsertBridgeReconciliationOrphan({
             orphanKey: toOrphanKey("withdrawal-send-failed", transferId),
             orphanType: "bridge_transfer_without_ibex_send",
             transferId,
@@ -317,65 +347,87 @@ export const reconcileBridgeAndIbexWithdrawals = async ({
               accountId: withdrawal.accountId,
               bridgeDepositAddress: withdrawal.bridgeDepositAddress,
               failureReason: withdrawal.failureReason,
-              deleteTransferError: error instanceof Error ? error.message : String(error),
+              deleteTransferError: cancelled.message,
             },
           })
+          if (isNewOrphan(orphan)) {
+            alertIbexReconciliationOrphan({
+              orphanType: "bridge_transfer_without_ibex_send",
+              transferId,
+              reason,
+              context: {
+                account_id: withdrawal.accountId,
+                amount: withdrawal.amount,
+                currency: withdrawal.currency,
+              },
+            })
+          }
+          continue
+        }
+
+        const transfer = await BridgeApiClient.getTransfer(bridgeTransferId)
+        if (transfer.state === "payment_processed") {
+          const finalized = await BridgeAccountsRepo.updateWithdrawalStatus(
+            bridgeTransferId,
+            "completed",
+          )
+          if (!(finalized instanceof Error)) finalizedCompletedTransfers++
+          continue
+        }
+
+        const terminal = WITHDRAWAL_TERMINAL_FAILURE_STATES.has(transfer.state)
+        const sentAt = new Date(withdrawal.updatedAt).getTime()
+        const stuck =
+          !terminal && stuckAfterMs !== undefined && now.getTime() - sentAt > stuckAfterMs
+        if (!terminal && !stuck) continue
+
+        if (terminal) ibexSendWithoutBridgeSettlement++
+        else stuckAwaitingBridge++
+        const reason = terminal
+          ? `IBEX crypto send succeeded but Bridge transfer is ${transfer.state}`
+          : `IBEX crypto send succeeded but Bridge transfer is still ${transfer.state} after ${Math.round(
+              (now.getTime() - sentAt) / 3_600_000,
+            )}h`
+        const orphan = await upsertBridgeReconciliationOrphan({
+          orphanKey: toOrphanKey(
+            terminal ? "withdrawal-ibex-sent" : "withdrawal-ibex-sent-stuck",
+            transferId,
+          ),
+          orphanType: "ibex_send_without_bridge_settlement",
+          transferId,
+          customerId: transfer.on_behalf_of,
+          amount: withdrawal.amount,
+          currency: withdrawal.currency,
+          triageContext: {
+            reason,
+            windowStart: since.toISOString(),
+            windowEnd: now.toISOString(),
+            accountId: withdrawal.accountId,
+            ibexPayoutId: withdrawal.ibexPayoutId,
+            bridgeState: transfer.state,
+          },
+        })
+        if (isNewOrphan(orphan)) {
           alertIbexReconciliationOrphan({
-            orphanType: "bridge_transfer_without_ibex_send",
+            orphanType: "ibex_send_without_bridge_settlement",
             transferId,
             reason,
             context: {
               account_id: withdrawal.accountId,
+              ibex_payout_id: withdrawal.ibexPayoutId,
+              bridge_state: transfer.state,
               amount: withdrawal.amount,
               currency: withdrawal.currency,
             },
           })
         }
-        continue
-      }
-
-      const transfer = await BridgeApiClient.getTransfer(bridgeTransferId)
-      if (transfer.state === "payment_processed") {
-        const finalized = await BridgeAccountsRepo.updateWithdrawalStatus(
-          bridgeTransferId,
-          "completed",
+      } catch (error) {
+        failures++
+        baseLogger.error(
+          { error, transferId, status: withdrawal.status },
+          "Bridge withdrawal reconciliation failed for one withdrawal",
         )
-        if (!(finalized instanceof Error)) finalizedCompletedTransfers++
-        continue
       }
-
-      if (!WITHDRAWAL_TERMINAL_FAILURE_STATES.has(transfer.state)) continue
-
-      ibexSendWithoutBridgeSettlement++
-      const reason = `IBEX crypto send succeeded but Bridge transfer is ${transfer.state}`
-      await upsertBridgeReconciliationOrphan({
-        orphanKey: toOrphanKey("withdrawal-ibex-sent", transferId),
-        orphanType: "ibex_send_without_bridge_settlement",
-        transferId,
-        customerId: transfer.on_behalf_of,
-        amount: withdrawal.amount,
-        currency: withdrawal.currency,
-        triageContext: {
-          reason,
-          windowStart: since.toISOString(),
-          windowEnd: now.toISOString(),
-          accountId: withdrawal.accountId,
-          ibexPayoutId: withdrawal.ibexPayoutId,
-          bridgeState: transfer.state,
-        },
-      })
-      alertIbexReconciliationOrphan({
-        orphanType: "ibex_send_without_bridge_settlement",
-        transferId,
-        reason,
-        context: {
-          account_id: withdrawal.accountId,
-          ibex_payout_id: withdrawal.ibexPayoutId,
-          bridge_state: transfer.state,
-          amount: withdrawal.amount,
-          currency: withdrawal.currency,
-        },
-      })
     }
 
     const summary = {
@@ -384,6 +436,8 @@ export const reconcileBridgeAndIbexWithdrawals = async ({
       finalizedCompletedTransfers,
       ibexSendWithoutBridgeSettlement,
       bridgeTransferWithoutIbexSend,
+      stuckAwaitingBridge,
+      failures,
     }
 
     baseLogger.info(summary, "Bridge withdrawal reconciliation completed")
@@ -391,6 +445,38 @@ export const reconcileBridgeAndIbexWithdrawals = async ({
   } catch (error) {
     return error instanceof Error ? error : new Error(String(error))
   }
+}
+
+// Deletes the Bridge transfer of a withdrawal whose IBEX send failed, and
+// records that it is gone. A failed delete of a transfer Bridge already shows
+// as canceled (or otherwise finished without paying out) also counts as gone,
+// so a repeat run never alerts on a transfer it deleted earlier.
+const cancelSendFailedTransfer = async (
+  bridgeTransferId: BridgeTransferId,
+): Promise<true | Error> => {
+  let deleteError: Error | undefined
+  try {
+    await BridgeApiClient.deleteTransfer(bridgeTransferId)
+  } catch (error) {
+    deleteError = error instanceof Error ? error : new Error(String(error))
+    const transfer = await BridgeApiClient.getTransfer(bridgeTransferId).catch(
+      () => undefined,
+    )
+    if (!transfer || !WITHDRAWAL_TERMINAL_FAILURE_STATES.has(transfer.state)) {
+      return deleteError
+    }
+  }
+
+  const marked =
+    await BridgeAccountsRepo.markSendFailedTransferCancelled(bridgeTransferId)
+  if (marked instanceof Error) {
+    // The transfer is gone; the next run deletes again and lands here.
+    baseLogger.warn(
+      { error: marked, bridgeTransferId, deleteError },
+      "Could not record a cancelled Bridge withdrawal transfer",
+    )
+  }
+  return true
 }
 
 type ReconcileByTxHashResult = {

@@ -485,6 +485,23 @@ export const updateWithdrawalStatus = async (
   }
 }
 
+// The Bridge transfer of a send_failed withdrawal is deleted (or already gone),
+// so the hourly withdrawal check stops trying to delete it (ENG-891). The
+// withdrawal keeps send_failed: the user was told it failed when IBEX did.
+export const markSendFailedTransferCancelled = async (
+  bridgeTransferId: BridgeTransferId,
+): Promise<true | RepositoryError> => {
+  try {
+    await BridgeWithdrawal.updateOne(
+      { bridgeTransferId: { $eq: bridgeTransferId }, status: "send_failed" },
+      { $set: { bridgeTransferCancelledAt: new Date() } },
+    )
+    return true
+  } catch (error) {
+    return new RepositoryError(String(error))
+  }
+}
+
 export const findWithdrawalByBridgeTransferId = async (transferId: BridgeTransferId) => {
   try {
     const record = await BridgeWithdrawal.findOne({
