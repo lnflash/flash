@@ -99,7 +99,7 @@ export const resolveWithdrawalOrphans = async (
 // A receive's Bridge deposit can predate the check's window: the hourly
 // matcher records a deposit up to a week old and stamps the receive with the
 // time it ran. Look the deposit up by hash before calling the receive an orphan.
-const findBridgeDepositByTxHash = (txHash: string) =>
+export const findBridgeDepositByTxHash = (txHash: string) =>
   BridgeDeposits.findOne({
     destinationTxHash: { $eq: txHash.toLowerCase() },
     state: "payment_processed",

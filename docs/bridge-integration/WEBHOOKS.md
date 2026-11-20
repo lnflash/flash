@@ -42,7 +42,7 @@ Sent when a user's KYC application is rejected.
 
 #### `deposit.completed`
 Sent when a USD deposit to a virtual account is successfully converted to USDT and sent to the user's on-chain address.
--   **Action**: This event is primarily for tracking. The actual crediting of the user's wallet is handled by the IBEX webhook when the USDT arrives.
+-   **Action**: This event is primarily for tracking. IBEX credits the user's USDT wallet itself when the USDT arrives. Flash records that credit (ERPNext settle row, user notification) when IBEX Hub's organization webhook reports it (`POST /hub/transactions`, ENG-891), and the hourly deposit matcher records any credit the webhook missed.
 
 ### Transfer Events
 

@@ -46,6 +46,28 @@ export const isIpInAllowlist = (
   })
 }
 
+const rejectUnlessAllowlisted = (
+  ranges: ParsedRange[],
+  sender: string,
+  req: Request,
+  resp: Response,
+  next: NextFunction,
+) => {
+  // req.ip, not request-ip: with `trust proxy` set on the server, Express
+  // resolves the proxy-appended (rightmost untrusted) X-Forwarded-For entry.
+  // request-ip prefers the LEFTMOST entry, which any caller can forge to an
+  // allowlisted IP and walk through this gate.
+  const clientIp = req.ip ?? req.socket?.remoteAddress
+  if (!isIpInAllowlist(clientIp, ranges)) {
+    logger.warn(
+      { clientIp, path: req.path },
+      `Rejected ${sender} webhook request from non-allowlisted IP`,
+    )
+    return resp.status(403).end("Forbidden")
+  }
+  next()
+}
+
 /**
  * Reject Ibex webhook requests whose source IP is not on the configured
  * allowlist (Ibex publishes the IPs its webhooks originate from). This is
@@ -61,18 +83,18 @@ export const isIpInAllowlist = (
  */
 export const validateIbexIp = (req: Request, resp: Response, next: NextFunction) => {
   if (!ibexWebhookIpAllowlistEnabled) return next()
+  rejectUnlessAllowlisted(allowlist, "Ibex", req, resp, next)
+}
 
-  // req.ip, not request-ip: with `trust proxy` set on the server, Express
-  // resolves the proxy-appended (rightmost untrusted) X-Forwarded-For entry.
-  // request-ip prefers the LEFTMOST entry, which any caller can forge to an
-  // allowlisted IP and walk through this gate.
-  const clientIp = req.ip ?? req.socket?.remoteAddress
-  if (!isIpInAllowlist(clientIp)) {
-    logger.warn(
-      { clientIp, path: req.path },
-      "Rejected Ibex webhook request from non-allowlisted IP",
-    )
-    return resp.status(403).end("Forbidden")
-  }
-  next()
+// IBEX Hub delivers the organization webhook (ENG-891) from its own published
+// addresses, a different list from the legacy per-object webhooks above.
+const hubAllowlist: ParsedRange[] = parseAllowlist(
+  IbexConfig.webhook.hub?.allowedIps ?? [],
+)
+
+// Same rule for the IBEX Hub webhook route. Fails open when the list is empty;
+// that route's Ed25519 signature check is never skipped.
+export const validateIbexHubIp = (req: Request, resp: Response, next: NextFunction) => {
+  if (hubAllowlist.length === 0) return next()
+  rejectUnlessAllowlisted(hubAllowlist, "IBEX Hub", req, resp, next)
 }

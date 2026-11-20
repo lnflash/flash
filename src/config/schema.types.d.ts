@@ -35,6 +35,11 @@ type WebhookServer = {
   // delivering with the secret they were created with.
   previousSecrets?: string[]
   allowedIps?: string[]
+  // The organization-level IBEX Hub webhook (ENG-891).
+  hub: {
+    publicKey: string
+    allowedIps: string[]
+  }
 }
 
 type IbexConfig = {

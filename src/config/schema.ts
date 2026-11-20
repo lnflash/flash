@@ -863,6 +863,26 @@ export const configSchema = {
               items: { type: "string" },
               default: [],
             },
+            // The organization-level IBEX Hub webhook (ENG-891), registered
+            // once by hand (POST /webhooks, events ["Transactions"]) with the
+            // URL <uri>/hub/transactions. Its deliveries carry no shared
+            // secret; each is Ed25519-signed with a key unique to the webhook.
+            hub: {
+              type: "object",
+              properties: {
+                // Base64 of the raw 32-byte Ed25519 key that Create Webhook
+                // returned. Empty: the route answers 503 to every delivery.
+                publicKey: { type: "string", default: "" },
+                // IBEX Hub's published delivery IPs for this environment.
+                // Empty disables the check; the signature is still required.
+                allowedIps: {
+                  type: "array",
+                  items: { type: "string" },
+                  default: [],
+                },
+              },
+              default: {},
+            },
           },
         },
       },
