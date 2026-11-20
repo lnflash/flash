@@ -1,21 +1,10 @@
 import express, { Request, Response } from "express"
 import rateLimitMiddleware from "express-rate-limit"
-import { AccountsRepository } from "@services/mongoose/accounts"
-import { createIbexCryptoReceive } from "@services/mongoose/ibex-crypto-receive-log"
-import { listWalletsByAccountId } from "@app/wallets"
-import { sendBridgeDepositNotificationBestEffort } from "@app/bridge/send-deposit-notification"
-import { WalletCurrency, USDTAmount } from "@domain/shared"
+import {
+  recordIbexCryptoReceive,
+  type CryptoReceiveErrorCode,
+} from "@app/bridge/record-crypto-receive"
 import { baseLogger } from "@services/logger"
-import { LockService } from "@services/lock"
-import { reconcileByTxHash } from "@services/bridge/reconciliation"
-import {
-  alertIbexCryptoReceiveFailure,
-  alertIbexReconciliationFailed,
-} from "@services/alerts/ibex-bridge-movement"
-import {
-  promoteBridgeDepositForCryptoReceive,
-  writeIbexCryptoReceiveRequest,
-} from "@services/frappe/BridgeTransferRequestWriter"
 import { ibexWebhookPaths } from "@services/ibex/webhook-config"
 
 import { authenticate, logRequest, validateIbexIp } from "../middleware"
@@ -38,9 +27,14 @@ const webhookRateLimit = rateLimitMiddleware({
   validate: { xForwardedForHeader: false },
 })
 
-interface CryptoReceiveResult {
-  status: "success" | "error"
-  code?: string
+const statusByErrorCode: Record<CryptoReceiveErrorCode, number> = {
+  account_not_found: 404,
+  wallet_list_failed: 500,
+  usdt_wallet_not_found: 404,
+  invalid_amount: 400,
+  persist_failed: 500,
+  erpnext_audit_failed: 500,
+  internal_error: 500,
 }
 
 const cryptoReceiveHandler = async (req: Request, res: Response) => {
@@ -62,225 +56,31 @@ const cryptoReceiveHandler = async (req: Request, res: Response) => {
     return res.status(400).json({ error: "Invalid payload" })
   }
 
-  const lockResult = await LockService().lockOnChainTxHash(
-    tx_hash as OnChainTxHash,
-    async () => {
-      try {
-        const account = await AccountsRepository().findByBridgeEthereumAddress(address)
-        if (account instanceof Error) {
-          baseLogger.error({ address, tx_hash }, "Account not found for Ethereum address")
-          alertIbexCryptoReceiveFailure({
-            txHash: String(tx_hash),
-            code: "account_not_found",
-            title: "IBEX crypto receive: account not found for Bridge Ethereum address",
-            context: { address },
-          })
-          return { status: "error", code: "account_not_found" } as CryptoReceiveResult
-        }
+  const result = await recordIbexCryptoReceive({
+    txHash: String(tx_hash),
+    address: String(address),
+    amount,
+    currency: normalizedCurrency,
+    network: normalizedNetwork,
+    rawPayload: req.body,
+  })
 
-        const ibexLog = await createIbexCryptoReceive({
-          txHash: String(tx_hash),
-          address: String(address),
-          amount: String(amount),
-          currency: normalizedCurrency,
-          network: normalizedNetwork,
-          accountId: account.id,
-        })
-        if (ibexLog instanceof Error) {
-          baseLogger.error(
-            { error: ibexLog, tx_hash },
-            "Failed to persist IBEX crypto receive log",
-          )
-          alertIbexCryptoReceiveFailure({
-            txHash: String(tx_hash),
-            code: "persist_failed",
-            title: "IBEX crypto receive log persistence failed",
-            detail: ibexLog.message,
-            context: { address },
-          })
-          return { status: "error", code: "internal_error" } as CryptoReceiveResult
-        }
-
-        reconcileByTxHash({ txHash: String(tx_hash) }).catch((err) => {
-          baseLogger.error({ err, tx_hash }, "Real-time reconciliation failed")
-          alertIbexReconciliationFailed({
-            txHash: String(tx_hash),
-            detail: err instanceof Error ? err.message : String(err),
-          })
-        })
-
-        const wallets = await listWalletsByAccountId(account.id)
-        if (wallets instanceof Error) {
-          baseLogger.error(
-            { accountId: account.id, error: wallets },
-            "Failed to list wallets",
-          )
-          alertIbexCryptoReceiveFailure({
-            txHash: String(tx_hash),
-            code: "wallet_list_failed",
-            title: "IBEX crypto receive: wallet list failed",
-            detail: wallets.message,
-            context: { accountId: account.id, address },
-          })
-          return { status: "error", code: "wallet_list_failed" } as CryptoReceiveResult
-        }
-
-        const usdtWallet = wallets.find((w) => w.currency === WalletCurrency.Usdt)
-        if (!usdtWallet) {
-          baseLogger.error({ accountId: account.id }, "USDT wallet not found")
-          alertIbexCryptoReceiveFailure({
-            txHash: String(tx_hash),
-            code: "usdt_wallet_not_found",
-            title: "IBEX crypto receive: USDT wallet not found",
-            context: { accountId: account.id, address },
-          })
-          return { status: "error", code: "usdt_wallet_not_found" } as CryptoReceiveResult
-        }
-
-        const usdtAmount = USDTAmount.fromNumber(amount)
-        if (usdtAmount instanceof Error) {
-          baseLogger.error({ amount, error: usdtAmount }, "Invalid USDT amount")
-          alertIbexCryptoReceiveFailure({
-            txHash: String(tx_hash),
-            code: "invalid_amount",
-            title: "IBEX crypto receive: invalid USDT amount",
-            detail: usdtAmount.message,
-            context: { accountId: account.id, address, amount },
-          })
-          return { status: "error", code: "invalid_amount" } as CryptoReceiveResult
-        }
-
-        baseLogger.info(
-          {
-            accountId: account.id,
-            walletId: usdtWallet.id,
-            amount: usdtAmount.asNumber(),
-            tx_hash,
-            address,
-          },
-          "USDT deposit received",
-        )
-
-        const auditResult = await writeIbexCryptoReceiveRequest({
-          txHash: String(tx_hash),
-          address: String(address),
-          amount: String(amount),
-          currency: normalizedCurrency,
-          network: normalizedNetwork.charAt(0).toUpperCase() + normalizedNetwork.slice(1),
-          accountId: account.id,
-          walletId: usdtWallet.id,
-          rawPayload: req.body,
-        })
-        if (auditResult instanceof Error) {
-          baseLogger.error(
-            {
-              error: auditResult,
-              tx_hash,
-              accountId: account.id,
-              walletId: usdtWallet.id,
-            },
-            "Failed to persist IBEX crypto receive ERPNext audit row",
-          )
-          alertIbexCryptoReceiveFailure({
-            txHash: String(tx_hash),
-            code: "erpnext_audit_failed",
-            title: "IBEX crypto receive ERPNext audit write failed",
-            detail: auditResult.message,
-            context: {
-              accountId: account.id,
-              walletId: usdtWallet.id,
-              address,
-            },
-          })
-          return { status: "error", code: "erpnext_audit_failed" } as CryptoReceiveResult
-        }
-
-        // Best-effort: the funds are already credited and the settle row is
-        // written, so a promotion failure must not fail the webhook. The
-        // deposit writer's reverse check (and Bridge webhook retries) will
-        // converge the row on a later event.
-        const promoteResult = await promoteBridgeDepositForCryptoReceive({
-          txHash: String(tx_hash),
-          accountId: account.id,
-          walletId: usdtWallet.id,
-        })
-        if (promoteResult instanceof Error) {
-          baseLogger.error(
-            { error: promoteResult, tx_hash, accountId: account.id },
-            "Failed to promote Bridge deposit audit row to Completed",
-          )
-          alertIbexCryptoReceiveFailure({
-            txHash: String(tx_hash),
-            code: "erpnext_promote_failed",
-            title: "Bridge deposit audit row promotion failed",
-            detail: promoteResult.message,
-            context: { accountId: account.id, walletId: usdtWallet.id, address },
-          })
-        } else if (promoteResult === "kept_failed") {
-          // Bridge reported this deposit as refunded or failed, yet the USDT
-          // arrived and was credited. The row keeps Failed; ops must reconcile.
-          baseLogger.error(
-            { tx_hash, accountId: account.id, walletId: usdtWallet.id },
-            "Crypto receive credited a Bridge deposit whose audit row is Failed",
-          )
-          alertIbexCryptoReceiveFailure({
-            txHash: String(tx_hash),
-            code: "credited_failed_bridge_deposit",
-            title: "USDT credited for a Bridge deposit marked Failed (refunded)",
-            detail:
-              "The ERPNext row stays Failed. Check with Bridge whether the sender was refunded as well as the customer credited.",
-            context: { accountId: account.id, walletId: usdtWallet.id, address },
-          })
-        } else {
-          baseLogger.info(
-            { tx_hash, promoteResult },
-            "Bridge deposit audit row promotion result",
-          )
-        }
-
-        await sendBridgeDepositNotificationBestEffort({
-          accountId: account.id,
-          amount: String(usdtAmount.asNumber()),
-          currency: normalizedCurrency,
-        })
-
-        return { status: "success" } as CryptoReceiveResult
-      } catch (error) {
-        baseLogger.error({ error, tx_hash }, "Error processing crypto receive webhook")
-        alertIbexCryptoReceiveFailure({
-          txHash: String(tx_hash),
-          code: "internal_error",
-          title: "IBEX crypto receive webhook processing error",
-          detail: error instanceof Error ? error.message : String(error),
-        })
-        return { status: "error", code: "internal_error" } as CryptoReceiveResult
-      }
-    },
-  )
-
-  if (lockResult instanceof Error) {
+  if (result instanceof Error) {
     baseLogger.warn(
-      { tx_hash, error: lockResult },
+      { tx_hash, error: result },
       "Lock acquisition failed or duplicate webhook",
     )
     return res.status(200).json({ status: "already_processed" })
   }
 
-  if (lockResult.status === "success") {
+  if (result.status === "success") {
     return res.status(200).json({ status: "success" })
   }
-
-  const statusMap: Record<string, number> = {
-    account_not_found: 404,
-    wallet_list_failed: 500,
-    usdt_wallet_not_found: 404,
-    invalid_amount: 400,
-    erpnext_audit_failed: 500,
-    internal_error: 500,
+  if (result.status === "already_processed") {
+    return res.status(200).json({ status: "already_processed" })
   }
 
-  const statusCode = statusMap[lockResult.code || ""] || 500
-  return res.status(statusCode).json({ error: lockResult.code })
+  return res.status(statusByErrorCode[result.code] || 500).json({ error: result.code })
 }
 
 router.post(

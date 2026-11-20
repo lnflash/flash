@@ -453,6 +453,28 @@ const getCryptoReceiveBalance = async (
   }
 }
 
+// The on-chain tx hash of a crypto transaction (ENG-891). IBEX returns it as
+// `networkId` on GET /v2/transaction/{id}/details, which ibex-client does not
+// wrap. Undefined when IBEX has none for the transaction.
+const getTransactionNetworkId = async (
+  transactionId: string,
+): Promise<string | undefined | IbexError> => {
+  try {
+    const token = await getIbexToken()
+    if (token instanceof IbexError) return token
+    const data = await ibexGet<{ networkId?: string | null }>(
+      token,
+      `/v2/transaction/${encodeURIComponent(transactionId)}/details`,
+    )
+    if (data instanceof IbexError) return data
+    return typeof data.networkId === "string" && data.networkId
+      ? data.networkId
+      : undefined
+  } catch (err) {
+    return new IbexError(err instanceof Error ? err : new Error(String(err)))
+  }
+}
+
 const getCryptoReceiveOptions = async (): Promise<CryptoReceiveOption[] | IbexError> =>
   Ibex.getCryptoReceiveOptions().then(errorHandler)
 
@@ -533,6 +555,7 @@ export default wrapAsyncFunctionsToRunInSpan({
   fns: {
     getAccountTransactions,
     getTransactionDetails,
+    getTransactionNetworkId,
     createAccount,
     getAccountDetails,
     getRawAccountDetails,

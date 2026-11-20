@@ -135,7 +135,10 @@ beforeEach(() => {
   jest.clearAllMocks()
   ;(PubSubService as jest.Mock).mockReturnValue({ publish: mockPublish })
   ;(resolveOrphansByTxHash as jest.Mock).mockResolvedValue({ resolvedCount: 0 })
-  ;(upsertBridgeReconciliationOrphan as jest.Mock).mockResolvedValue({ id: "orphan_001" })
+  ;(upsertBridgeReconciliationOrphan as jest.Mock).mockResolvedValue({
+    id: "orphan_001",
+    created: true,
+  })
   ;(BridgeApiClient.deleteTransfer as jest.Mock).mockResolvedValue({ id: "tr_deleted" })
   ;(BridgeApiClient.getTransfer as jest.Mock).mockResolvedValue({
     id: "tr_withdrawal_001",
@@ -350,6 +353,11 @@ describe("reconcileBridgeAndIbexDeposits", () => {
     lean: () => ({ exec: () => Promise.resolve(deposits) }),
   })
 
+  beforeEach(() => {
+    // No deposit outside the window unless a test says so.
+    ;(BridgeDeposits.findOne as jest.Mock).mockReturnValue(makeLeanQuery(null))
+  })
+
   describe("all deposits matched", () => {
     it("returns zero orphans when every Bridge deposit has a matching IBEX receive", async () => {
       ;(BridgeDeposits.find as jest.Mock).mockReturnValue(
@@ -465,6 +473,106 @@ describe("reconcileBridgeAndIbexDeposits", () => {
       expect(result.bridgeWithoutIbex).toBe(1)
       expect(result.ibexWithoutBridge).toBe(1)
       expect(upsertBridgeReconciliationOrphan).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  // ENG-891: the check runs hourly over a week, so it alerts once per orphan
+  // and leaves a young deposit to the matcher.
+  describe("hourly use", () => {
+    it("alerts on a new orphan", async () => {
+      ;(BridgeDeposits.find as jest.Mock).mockReturnValue(
+        makeBridgeFind([BRIDGE_DEPOSIT]),
+      )
+      ;(findIbexCryptoReceivesSince as jest.Mock).mockResolvedValue([])
+
+      await reconcileBridgeAndIbexDeposits()
+
+      expect(alertIbexReconciliationOrphan).toHaveBeenCalledWith(
+        expect.objectContaining({ orphanType: "bridge_without_ibex", txHash: NORM_HASH }),
+      )
+    })
+
+    it("does not alert again for an orphan already on file", async () => {
+      ;(upsertBridgeReconciliationOrphan as jest.Mock).mockResolvedValue({
+        id: "orphan_001",
+        created: false,
+      })
+      const noHash = {
+        ...BRIDGE_DEPOSIT,
+        transferId: "tr_nohash",
+        destinationTxHash: undefined,
+      }
+      ;(BridgeDeposits.find as jest.Mock).mockReturnValue(
+        makeBridgeFind([BRIDGE_DEPOSIT, noHash]),
+      )
+      ;(findIbexCryptoReceivesSince as jest.Mock).mockResolvedValue([
+        { ...IBEX_RECEIVE, txHash: "0xorphan_ibex" },
+      ])
+
+      const result = await reconcileBridgeAndIbexDeposits()
+
+      expect(upsertBridgeReconciliationOrphan).toHaveBeenCalledTimes(3)
+      expect(alertIbexReconciliationOrphan).not.toHaveBeenCalled()
+      expect(result).toEqual(
+        expect.objectContaining({ bridgeWithoutIbex: 2, ibexWithoutBridge: 1 }),
+      )
+    })
+
+    it("does not flag a receive whose Bridge deposit is older than the window", async () => {
+      // The matcher recorded a six-day-old deposit; the receive is stamped now.
+      ;(BridgeDeposits.find as jest.Mock).mockReturnValue(makeBridgeFind([]))
+      ;(BridgeDeposits.findOne as jest.Mock).mockReturnValue(
+        makeLeanQuery(BRIDGE_DEPOSIT),
+      )
+      ;(findIbexCryptoReceivesSince as jest.Mock).mockResolvedValue([IBEX_RECEIVE])
+
+      const result = await reconcileBridgeAndIbexDeposits()
+
+      expect(result).toEqual(expect.objectContaining({ ibexWithoutBridge: 0 }))
+      expect(BridgeDeposits.findOne).toHaveBeenCalledWith({
+        destinationTxHash: { $eq: NORM_HASH },
+        state: "payment_processed",
+      })
+      expect(upsertBridgeReconciliationOrphan).not.toHaveBeenCalled()
+    })
+
+    it("still alerts when the orphan could not be stored", async () => {
+      ;(upsertBridgeReconciliationOrphan as jest.Mock).mockResolvedValue(
+        new Error("mongo"),
+      )
+      ;(BridgeDeposits.find as jest.Mock).mockReturnValue(
+        makeBridgeFind([BRIDGE_DEPOSIT]),
+      )
+      ;(findIbexCryptoReceivesSince as jest.Mock).mockResolvedValue([])
+
+      await reconcileBridgeAndIbexDeposits()
+
+      expect(alertIbexReconciliationOrphan).toHaveBeenCalledTimes(1)
+    })
+
+    it("leaves a deposit younger than minAgeMs alone, and still pairs its IBEX receive", async () => {
+      const young = { ...BRIDGE_DEPOSIT, createdAt: new Date() }
+      const youngUnmatched = {
+        ...BRIDGE_DEPOSIT,
+        transferId: "tr_young",
+        destinationTxHash: "0xyoung",
+        createdAt: new Date(),
+      }
+      ;(BridgeDeposits.find as jest.Mock).mockReturnValue(
+        makeBridgeFind([young, youngUnmatched]),
+      )
+      ;(findIbexCryptoReceivesSince as jest.Mock).mockResolvedValue([IBEX_RECEIVE])
+
+      const result = await reconcileBridgeAndIbexDeposits({
+        windowMs: 7 * 24 * 60 * 60 * 1000,
+        minAgeMs: 6 * 60 * 60 * 1000,
+      })
+
+      expect(result).toEqual(
+        expect.objectContaining({ bridgeWithoutIbex: 0, ibexWithoutBridge: 0 }),
+      )
+      expect(upsertBridgeReconciliationOrphan).not.toHaveBeenCalled()
+      expect(alertIbexReconciliationOrphan).not.toHaveBeenCalled()
     })
   })
 

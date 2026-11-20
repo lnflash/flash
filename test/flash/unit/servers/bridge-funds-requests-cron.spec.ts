@@ -2,6 +2,7 @@ import fs from "fs"
 import path from "path"
 
 import {
+  DEPOSIT_ORPHAN_AFTER_MS,
   FAILED_EXIT_CODE,
   OK_EXIT_CODE,
   runBridgeFundsRequestsCron,
@@ -9,10 +10,13 @@ import {
 
 // ENG-889: the hourly Bridge Job runs the funds request (recall) watcher, which
 // used to run once a day inside cron.ts, then the customer status watch.
+// ENG-891: then the Bridge deposit to IBEX credit match and the deposit check.
 
 const mockBridgeConfig = { enabled: true }
 const mockWatch = jest.fn()
 const mockWatchCustomers = jest.fn()
+const mockMatchDeposits = jest.fn()
+const mockReconcileDeposits = jest.fn()
 const mockSetupMongo = jest.fn()
 const mockCloseMongo = jest.fn()
 const mockFlushAlerts = jest.fn()
@@ -30,6 +34,15 @@ jest.mock("@services/bridge/funds-requests", () => ({
 
 jest.mock("@services/bridge/customer-status-watch", () => ({
   watchBridgeCustomerStatuses: (...args: unknown[]) => mockWatchCustomers(...args),
+}))
+
+jest.mock("@app/bridge/match-ibex-deposits", () => ({
+  MATCH_LOOKBACK_MS: 7 * 24 * 60 * 60 * 1000,
+  matchBridgeDepositsToIbex: (...args: unknown[]) => mockMatchDeposits(...args),
+}))
+
+jest.mock("@services/bridge/reconciliation", () => ({
+  reconcileBridgeAndIbexDeposits: (...args: unknown[]) => mockReconcileDeposits(...args),
 }))
 
 jest.mock("@services/mongodb", () => ({
@@ -64,6 +77,15 @@ const customerSummary = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 })
 
+const matchSummary = (overrides: Record<string, unknown> = {}) => ({
+  pending: 1,
+  matched: 1,
+  alreadyProcessed: 0,
+  unmatched: 0,
+  failures: 0,
+  ...overrides,
+})
+
 beforeEach(() => {
   jest.clearAllMocks()
   mockBridgeConfig.enabled = true
@@ -72,6 +94,13 @@ beforeEach(() => {
   mockFlushAlerts.mockResolvedValue(undefined)
   mockWatch.mockResolvedValue(summary())
   mockWatchCustomers.mockResolvedValue(customerSummary())
+  mockMatchDeposits.mockResolvedValue(matchSummary())
+  mockReconcileDeposits.mockResolvedValue({
+    scannedBridge: 1,
+    scannedIbex: 1,
+    bridgeWithoutIbex: 0,
+    ibexWithoutBridge: 0,
+  })
 })
 
 describe("runBridgeFundsRequestsCron", () => {
@@ -86,13 +115,16 @@ describe("runBridgeFundsRequestsCron", () => {
     expect(await runBridgeFundsRequestsCron()).toBe(OK_EXIT_CODE)
     expect(mockWatch).not.toHaveBeenCalled()
     expect(mockWatchCustomers).not.toHaveBeenCalled()
+    expect(mockMatchDeposits).not.toHaveBeenCalled()
     expect(mockSetupMongo).not.toHaveBeenCalled()
   })
 
-  it("runs both watches once, flushes alerts, closes mongo and exits 0", async () => {
+  it("runs every step once, flushes alerts, closes mongo and exits 0", async () => {
     expect(await runBridgeFundsRequestsCron()).toBe(OK_EXIT_CODE)
     expect(mockWatch).toHaveBeenCalledTimes(1)
     expect(mockWatchCustomers).toHaveBeenCalledTimes(1)
+    expect(mockMatchDeposits).toHaveBeenCalledTimes(1)
+    expect(mockReconcileDeposits).toHaveBeenCalledTimes(1)
     expect(mockFlushAlerts).toHaveBeenCalledTimes(1)
     expect(mockCloseMongo).toHaveBeenCalledTimes(1)
   })
@@ -172,6 +204,56 @@ describe("runBridgeFundsRequestsCron", () => {
     expect(await runBridgeFundsRequestsCron()).toBe(OK_EXIT_CODE)
   })
 
+  it("checks deposits over the match lookback, leaving young ones to the matcher", async () => {
+    await runBridgeFundsRequestsCron()
+
+    expect(mockReconcileDeposits).toHaveBeenCalledWith({
+      windowMs: 7 * 24 * 60 * 60 * 1000,
+      minAgeMs: DEPOSIT_ORPHAN_AFTER_MS,
+    })
+    expect(DEPOSIT_ORPHAN_AFTER_MS).toBe(6 * 60 * 60 * 1000)
+    expect(mockMatchDeposits.mock.invocationCallOrder[0]).toBeLessThan(
+      mockReconcileDeposits.mock.invocationCallOrder[0],
+    )
+  })
+
+  it("exits 0 when a deposit is left to retry, since the next run retries it", async () => {
+    mockMatchDeposits.mockResolvedValue(matchSummary({ matched: 0, failures: 1 }))
+
+    expect(await runBridgeFundsRequestsCron()).toBe(OK_EXIT_CODE)
+    expect(mockReconcileDeposits).toHaveBeenCalledTimes(1)
+  })
+
+  it("exits non-zero when the deposit match could not read deposits", async () => {
+    mockMatchDeposits.mockResolvedValue(new Error("no mongo"))
+
+    expect(await runBridgeFundsRequestsCron()).toBe(FAILED_EXIT_CODE)
+    expect(mockReconcileDeposits).not.toHaveBeenCalled()
+  })
+
+  it("exits non-zero when the deposit check fails", async () => {
+    mockReconcileDeposits.mockResolvedValue(new Error("boom"))
+
+    expect(await runBridgeFundsRequestsCron()).toBe(FAILED_EXIT_CODE)
+  })
+
+  it("runs the deposit step even when both watches fail", async () => {
+    mockWatch.mockRejectedValue(new Error("boom"))
+    mockWatchCustomers.mockRejectedValue(new Error("boom"))
+
+    expect(await runBridgeFundsRequestsCron()).toBe(FAILED_EXIT_CODE)
+    expect(mockMatchDeposits).toHaveBeenCalledTimes(1)
+  })
+
+  it("exits non-zero when the deposit match throws, after the watches ran", async () => {
+    mockMatchDeposits.mockRejectedValue(new Error("boom"))
+
+    expect(await runBridgeFundsRequestsCron()).toBe(FAILED_EXIT_CODE)
+    expect(mockWatch).toHaveBeenCalledTimes(1)
+    expect(mockWatchCustomers).toHaveBeenCalledTimes(1)
+    expect(mockCloseMongo).toHaveBeenCalledTimes(1)
+  })
+
   it("exits non-zero without watching when mongo cannot connect", async () => {
     mockSetupMongo.mockRejectedValue(new Error("no mongo"))
 
@@ -195,5 +277,19 @@ describe("daily cron", () => {
       .join("\n")
 
     expect(code).not.toContain("watchBridgeFundsRequests")
+  })
+
+  // ENG-891: it ran daily at 02:00 with a 15 minute window and saw nothing.
+  it("no longer runs the Bridge deposit check", () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, "..", "..", "..", "..", "src", "servers", "cron.ts"),
+      "utf8",
+    )
+    const code = source
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("//"))
+      .join("\n")
+
+    expect(code).not.toContain("reconcileBridgeAndIbexDeposits")
   })
 })

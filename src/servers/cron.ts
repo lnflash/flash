@@ -26,10 +26,7 @@ import { flushAlerts } from "@services/alerts"
 import { baseLogger } from "@services/logger"
 import { setupMongoConnection } from "@services/mongodb"
 import { activateLndHealthCheck, checkAllLndHealth } from "@services/lnd/health"
-import {
-  reconcileBridgeAndIbexDeposits,
-  reconcileBridgeAndIbexWithdrawals,
-} from "@services/bridge/reconciliation"
+import { reconcileBridgeAndIbexWithdrawals } from "@services/bridge/reconciliation"
 import { checkFygaroTreasuryFloat } from "@services/fygaro/float-monitor"
 import { reconcileSplits } from "@app/payment-splits"
 
@@ -79,13 +76,6 @@ const swapOutJob = async () => {
 // Window covers 15 min of events — real-time webhook reconciliation handles everything
 // else immediately. This batch pass is only a safety net for missed/delayed webhooks.
 const RECONCILE_WINDOW_MS = 15 * 60 * 1000
-
-const reconcileBridgeDepositsJob = async () => {
-  if (!BridgeConfig.enabled) return
-
-  const result = await reconcileBridgeAndIbexDeposits({ windowMs: RECONCILE_WINDOW_MS })
-  if (result instanceof Error) throw result
-}
 
 const reconcileBridgeWithdrawalsJob = async () => {
   if (!BridgeConfig.enabled) return
@@ -165,10 +155,10 @@ const main = async () => {
       : []),
     ...(cronConfig.rebalanceEnabled ? [rebalance] : []),
     ...(cronConfig.swapEnabled ? [swapOutJob] : []),
-    reconcileBridgeDepositsJob,
     reconcileBridgeWithdrawalsJob,
-    // The Bridge funds request (recall) watcher is not here: it runs hourly
-    // from its own Job, src/servers/bridge-funds-requests-cron.ts (ENG-889).
+    // The Bridge funds request (recall) watcher and the Bridge deposit to IBEX
+    // match and check are not here: they run hourly from their own Job,
+    // src/servers/bridge-funds-requests-cron.ts (ENG-889, ENG-891).
     reconcileSplitPaymentsJob,
     checkFygaroFloatJob,
     evidenceRetentionJob,
