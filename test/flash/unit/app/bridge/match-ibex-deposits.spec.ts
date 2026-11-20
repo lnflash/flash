@@ -324,6 +324,74 @@ describe("matchBridgeDepositsToIbex", () => {
     expect(summary).toEqual(expect.objectContaining({ matched: 1 }))
   })
 
+  it("counts a failure and records nothing when the matched credit has no amount", async () => {
+    mockGetAccountTransactions.mockResolvedValue([credit({ amount: undefined })])
+
+    const summary = await matchBridgeDepositsToIbex({ now: NOW })
+
+    expect(summary).toEqual(expect.objectContaining({ matched: 0, failures: 1 }))
+    expect(mockRecord).not.toHaveBeenCalled()
+  })
+
+  it("counts a failure and records nothing when the matched credit's amount is zero", async () => {
+    mockGetAccountTransactions.mockResolvedValue([credit({ amount: 0 })])
+
+    const summary = await matchBridgeDepositsToIbex({ now: NOW })
+
+    expect(summary).toEqual(expect.objectContaining({ matched: 0, failures: 1 }))
+    expect(mockRecord).not.toHaveBeenCalled()
+  })
+
+  it("leaves a deposit unmatched when the account has no Bridge deposit address", async () => {
+    mockLookup.mockResolvedValue({
+      kind: "found",
+      account: { ...ACCOUNT, bridgeEthereumAddress: undefined },
+    })
+
+    const summary = await matchBridgeDepositsToIbex({ now: NOW })
+
+    expect(summary).toEqual(expect.objectContaining({ unmatched: 1, failures: 0 }))
+    expect(mockListWallets).not.toHaveBeenCalled()
+    expect(mockGetAccountTransactions).not.toHaveBeenCalled()
+    expect(mockGetNetworkId).not.toHaveBeenCalled()
+    expect(mockRecord).not.toHaveBeenCalled()
+  })
+
+  it("leaves a deposit unmatched when the account has no USDT wallet", async () => {
+    mockListWallets.mockResolvedValue([
+      { id: "ibex-usd-1", currency: WalletCurrency.Usd },
+    ])
+
+    const summary = await matchBridgeDepositsToIbex({ now: NOW })
+
+    expect(summary).toEqual(expect.objectContaining({ unmatched: 1, failures: 0 }))
+    expect(mockGetAccountTransactions).not.toHaveBeenCalled()
+    expect(mockRecord).not.toHaveBeenCalled()
+  })
+
+  it("stops after one page when a full page already reaches past the deposit", async () => {
+    // Deposit created 2h ago, so credits are read from 2h15m ago. The page's
+    // oldest row settled 3h ago, before that, so no further page is needed.
+    const fullPage = [
+      credit(),
+      ...Array.from({ length: 48 }, (_, i) =>
+        credit({ id: `other-${i}`, transactionTypeId: 1 }),
+      ),
+      credit({
+        id: "older",
+        transactionTypeId: 1,
+        settledAt: new Date(NOW.getTime() - 3 * HOUR).toISOString(),
+      }),
+    ]
+    expect(fullPage).toHaveLength(50)
+    mockGetAccountTransactions.mockResolvedValue(fullPage)
+
+    const summary = await matchBridgeDepositsToIbex({ now: NOW })
+
+    expect(mockGetAccountTransactions).toHaveBeenCalledTimes(1)
+    expect(summary).toEqual(expect.objectContaining({ matched: 1 }))
+  })
+
   it("returns an error when the deposits cannot be read", async () => {
     mockFind.mockImplementation(() => {
       throw new Error("mongo down")

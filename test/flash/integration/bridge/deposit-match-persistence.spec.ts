@@ -120,4 +120,35 @@ describe("Bridge reconciliation orphan upsert", () => {
     expect(second.id).toBe(first.id)
     expect(await BridgeReconciliationOrphan.countDocuments({ orphanKey })).toBe(1)
   })
+
+  it("keeps the first detectedAt when the same orphan is upserted again", async () => {
+    const txHash = randomHash()
+    const orphanKey = `bridge:${txHash}`
+    keys.push(orphanKey)
+    const data = {
+      orphanKey,
+      orphanType: "bridge_without_ibex" as const,
+      txHash,
+      transferId: "deposit-2",
+      triageContext: { reason: "first" },
+    }
+
+    const first = await upsertBridgeReconciliationOrphan(data)
+    expect(first).toEqual(expect.objectContaining({ created: true }))
+    const stored = await BridgeReconciliationOrphan.findOne({ orphanKey }).lean()
+    const firstDetectedAt = stored?.detectedAt as Date
+    expect(firstDetectedAt).toBeInstanceOf(Date)
+
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const second = await upsertBridgeReconciliationOrphan({
+      ...data,
+      triageContext: { reason: "second" },
+    })
+    expect(second).toEqual(expect.objectContaining({ created: false }))
+
+    const after = await BridgeReconciliationOrphan.findOne({ orphanKey }).lean()
+    expect((after?.detectedAt as Date).getTime()).toBe(firstDetectedAt.getTime())
+    expect(after?.triageContext).toEqual({ reason: "second" })
+    expect(after?.status).toBe("unmatched")
+  })
 })

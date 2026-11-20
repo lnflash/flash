@@ -258,11 +258,26 @@ const matchCustomerDeposits = async ({
       continue
     }
 
+    // A credit without a positive amount would be recorded as a settled
+    // zero and marked processed, so it would never be corrected; retry it.
+    if (typeof credit.amount !== "number" || !(credit.amount > 0)) {
+      logger.error(
+        {
+          txHash: deposit.destinationTxHash,
+          ibexTransactionId: credit.id,
+          amount: credit.amount,
+        },
+        "matched IBEX credit has no usable amount",
+      )
+      summary.failures++
+      continue
+    }
+
     const settledAt = settledTime(credit)
     const result = await recordIbexCryptoReceive({
       txHash: deposit.destinationTxHash,
       address,
-      amount: credit.amount ?? 0,
+      amount: credit.amount,
       ibexTransactionId: credit.id,
       notifyUser:
         !Number.isNaN(settledAt) && now.getTime() - settledAt <= NOTIFY_WITHIN_MS,

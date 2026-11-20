@@ -19,15 +19,24 @@ export const upsertBridgeReconciliationOrphan = async (data: {
   triageContext: Record<string, unknown>
 }): Promise<{ id: string; created: boolean } | Error> => {
   try {
-    // `created` lets an hourly caller alert once per orphan, not every run.
-    const existed = await BridgeReconciliationOrphan.exists({ orphanKey: data.orphanKey })
-    const orphan = await BridgeReconciliationOrphan.findOneAndUpdate(
+    // One atomic upsert. `created` lets an hourly caller alert once per
+    // orphan, not every run, and detectedAt is set only on insert so an orphan
+    // still open days later keeps the time it was first seen.
+    const res = await BridgeReconciliationOrphan.findOneAndUpdate(
       { orphanKey: data.orphanKey },
-      { ...data, status: "unmatched", detectedAt: new Date() },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
+      {
+        $set: { ...data, status: "unmatched" },
+        $setOnInsert: { detectedAt: new Date() },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true, includeResultMetadata: true },
     )
+    if (!res.value)
+      return new Error(`orphan upsert returned no document: ${data.orphanKey}`)
 
-    return { id: orphan._id.toString(), created: !existed }
+    return {
+      id: res.value._id.toString(),
+      created: !res.lastErrorObject?.updatedExisting,
+    }
   } catch (error) {
     return error instanceof Error ? error : new Error(String(error))
   }
