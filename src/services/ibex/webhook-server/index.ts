@@ -8,7 +8,7 @@ import {
   IBEX_WEBHOOK_SECRET_NAME,
   warnIfIbexWebhookRotationSecretsUnusable,
 } from "./middleware/authenticate"
-import { onPay, onReceive, cryptoReceive } from "./routes"
+import { onPay, onReceive, hubTransactions } from "./routes"
 
 const start = () => {
   // Fail the rollout, don't log and limp. A weak secret here 503s every
@@ -31,12 +31,15 @@ const start = () => {
   // entries a client forges into X-Forwarded-For stay untrusted.
   app.set("trust proxy", 1)
 
+  // Before the JSON parser: IBEX Hub signs the raw body, so that route parses
+  // its own after checking the signature.
+  app.use(hubTransactions.router)
+
   app.use(express.json())
 
   app.get("/health", (_: Request, resp: Response) => resp.send("Ibex server is running"))
   app.use(onReceive.router)
   app.use(onPay.router)
-  app.use(cryptoReceive.router)
 
   app.listen(IbexConfig.webhook.port, () =>
     logger.info(

@@ -4,6 +4,7 @@ import { recordIbexCryptoReceive } from "@app/bridge/record-crypto-receive"
 import { listWalletsByAccountId } from "@app/wallets"
 
 import { findAccountByBridgeCustomerId } from "@services/bridge/account-lookup"
+import { findBridgeDepositByTxHash } from "@services/bridge/reconciliation"
 import Ibex from "@services/ibex/client"
 import { baseLogger } from "@services/logger"
 import { findProcessedIbexCryptoReceiveTxHashes } from "@services/mongoose/ibex-crypto-receive-log"
@@ -20,7 +21,7 @@ const CREDIT_LEAD_MS = 15 * 60 * 1000
 // run after deploy, IBEX outage) records it silently.
 export const NOTIFY_WITHIN_MS = 24 * 60 * 60 * 1000
 
-const IBEX_CRYPTO_RECEIVE_TYPE_ID = 9
+export const IBEX_CRYPTO_RECEIVE_TYPE_ID = 9
 const TRANSACTIONS_PAGE_SIZE = 50
 // Stops a runaway read; a USDT wallet has far fewer credits in a week.
 const MAX_PAGES = 20
@@ -31,6 +32,9 @@ type IbexAccountTransaction = {
   settledAt?: string | null
   amount?: number
   transactionTypeId?: number
+  // The IBEX account, which is the Flash wallet id.
+  accountId?: string
+  status?: string
 }
 
 type PendingDeposit = {
@@ -128,7 +132,7 @@ const loadPendingDeposits = async (
  * yet processed: read the customer's USDT wallet's IBEX crypto receives
  * (type 9) since the deposit, fetch each one's on-chain tx hash, and on an
  * exact hash match record the receive through recordIbexCryptoReceive, the
- * same path as the IBEX webhook. No amount or time matching: the tx hash is
+ * same path as the IBEX Hub webhook. No amount or time matching: the tx hash is
  * the join key.
  *
  * Never throws. Per-deposit problems are counted and retried by the next run;
@@ -312,5 +316,147 @@ const matchCustomerDeposits = async ({
       )
       summary.matched++
     }
+  }
+}
+
+export type IbexCreditSignalResult =
+  // the credit was recorded against its Bridge deposit
+  | "recorded"
+  | "already_processed"
+  // not a completed crypto receive: nothing to do
+  | "ignored"
+  // no Bridge deposit carries the credit's tx hash yet (Bridge's event can land
+  // after IBEX's), or the credit is not a Bridge deposit; the hourly matcher
+  // picks up the first case
+  | "no_bridge_deposit"
+  // the deposit and the credit do not line up; logged for ops
+  | "mismatch"
+  // a read or the recording failed; the hourly matcher retries
+  | "failed"
+
+/**
+ * Records one IBEX credit as soon as IBEX Hub reports it (ENG-891). The
+ * organization webhook only says that transaction `ibexTransactionId`
+ * changed; per IBEX's guidance the body is not trusted, so the transaction
+ * and its tx hash are read back from IBEX, and the credit is recorded only
+ * when a payment_processed Bridge deposit has that tx hash and the credit
+ * landed on that customer's USDT wallet. The same join and the same
+ * recordIbexCryptoReceive as the hourly matcher, which stays the backstop for
+ * any delivery IBEX drops (at most once) or that arrives before Bridge's event.
+ *
+ * Never throws.
+ */
+export const recordIbexCreditSignal = async ({
+  ibexTransactionId,
+  webhookId,
+  now = new Date(),
+}: {
+  ibexTransactionId: string
+  webhookId?: string
+  now?: Date
+}): Promise<IbexCreditSignalResult> => {
+  const log = logger.child({ ibexTransactionId, webhookId })
+  try {
+    const credit = (await Ibex.getTransactionDetails(
+      ibexTransactionId as IbexTransactionId,
+    )) as IbexAccountTransaction | Error
+    if (credit instanceof Error) {
+      log.warn({ error: credit }, "IBEX transaction read failed")
+      return "failed"
+    }
+    if (
+      credit.transactionTypeId !== IBEX_CRYPTO_RECEIVE_TYPE_ID ||
+      credit.status !== "completed"
+    ) {
+      return "ignored"
+    }
+
+    const networkId = await Ibex.getTransactionNetworkId(ibexTransactionId)
+    if (networkId instanceof Error) {
+      log.warn({ error: networkId }, "IBEX transaction details read failed")
+      return "failed"
+    }
+    if (!networkId) {
+      log.warn("completed IBEX crypto receive has no tx hash")
+      return "failed"
+    }
+
+    const deposit = (await findBridgeDepositByTxHash(networkId)) as PendingDeposit | null
+    if (!deposit) {
+      log.info(
+        { txHash: networkId },
+        "no Bridge deposit has this IBEX credit's tx hash yet",
+      )
+      return "no_bridge_deposit"
+    }
+
+    const lookup = await findAccountByBridgeCustomerId(deposit.customerId)
+    if (lookup.kind === "lookup_failed") {
+      log.error({ error: lookup.error }, "account lookup failed")
+      return "failed"
+    }
+    if (lookup.kind === "not_found" || !lookup.account.bridgeEthereumAddress) {
+      log.warn(
+        { txHash: networkId, found: lookup.kind === "found" },
+        "no account with a Bridge deposit address for this deposit's customer",
+      )
+      return "mismatch"
+    }
+    const { account } = lookup
+    const address = account.bridgeEthereumAddress as string
+
+    const wallets = await listWalletsByAccountId(account.id)
+    if (wallets instanceof Error) {
+      log.error({ error: wallets, accountId: account.id }, "wallet list failed")
+      return "failed"
+    }
+    const usdtWallet = wallets.find((w) => w.currency === WalletCurrency.Usdt)
+    if (!usdtWallet || usdtWallet.id !== credit.accountId) {
+      log.error(
+        { txHash: networkId, accountId: account.id, creditAccountId: credit.accountId },
+        "IBEX credit did not land on the Bridge deposit's USDT wallet",
+      )
+      return "mismatch"
+    }
+
+    // As in the matcher: a zero would be recorded and marked processed for good.
+    if (typeof credit.amount !== "number" || !(credit.amount > 0)) {
+      log.error({ amount: credit.amount }, "IBEX credit has no usable amount")
+      return "failed"
+    }
+
+    const settledAt = settledTime(credit)
+    const result = await recordIbexCryptoReceive({
+      txHash: deposit.destinationTxHash,
+      address,
+      amount: credit.amount,
+      ibexTransactionId,
+      notifyUser:
+        !Number.isNaN(settledAt) && now.getTime() - settledAt <= NOTIFY_WITHIN_MS,
+      rawPayload: {
+        source: "ibex_hub_webhook",
+        webhookId,
+        ibexTransactionId,
+        bridgeTransferId: deposit.transferId,
+        settledAt: credit.settledAt ?? credit.createdAt,
+      },
+    })
+    if (result instanceof Error || result.status === "error") {
+      log.error(
+        { result: result instanceof Error ? result.message : result },
+        "recording a reported IBEX credit failed",
+      )
+      return "failed"
+    }
+    if (result.status === "already_processed") return "already_processed"
+
+    log.info(
+      { txHash: deposit.destinationTxHash, accountId: account.id },
+      "recorded a Bridge deposit as IBEX reported its credit",
+    )
+    return "recorded"
+  } catch (error) {
+    log.error({ error }, "recording a reported IBEX credit threw")
+    return "failed"
   }
 }

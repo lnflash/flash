@@ -14,8 +14,8 @@ export const ibexWebhookPaths = {
     verify: "/pay/lnurl/verify/:paymentHash",
     onchain: "/pay/onchain",
   },
-  cryptoReceive: {
-    cryptoReceive: "/crypto/receive",
+  hub: {
+    transactions: "/hub/transactions",
   },
 } as const
 
@@ -35,8 +35,8 @@ export const ibexWebhookEndpoints = {
     verify: endpoint(ibexWebhookPaths.onPay.verify),
     onchain: endpoint(ibexWebhookPaths.onPay.onchain),
   },
-  cryptoReceive: {
-    cryptoReceive: endpoint(ibexWebhookPaths.cryptoReceive.cryptoReceive),
+  hub: {
+    transactions: endpoint(ibexWebhookPaths.hub.transactions),
   },
 } as const
 

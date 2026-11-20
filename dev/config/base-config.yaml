@@ -21,6 +21,11 @@ ibex:
     # Ibex's published source IPs / CIDRs for webhook delivery. Populate in
     # production overrides to enforce the allowlist; empty disables it (ISL-112).
     allowedIps: []
+    # The organization-level IBEX Hub webhook (ENG-891). publicKey is what
+    # Create Webhook returned; empty answers every delivery with 503.
+    hub:
+      publicKey: ""
+      allowedIps: []
 
 fygaro:
   enabled: false # flags-off baseline; enable per environment via config overrides

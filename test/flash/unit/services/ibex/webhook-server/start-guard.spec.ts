@@ -27,7 +27,7 @@ jest.mock("@services/logger", () => {
 jest.mock("@services/ibex/webhook-server/routes", () => ({
   onReceive: { router: "on-receive-router" },
   onPay: { router: "on-pay-router" },
-  cryptoReceive: { router: "crypto-receive-router" },
+  hubTransactions: { router: "hub-transactions-router" },
 }))
 jest.mock("express", () => {
   const app = {
@@ -51,7 +51,7 @@ import {
   restoreDevUnsafeModeFlags,
 } from "test/flash/helpers/dev-context-env"
 
-const app = jest.requireMock("express").app as { listen: jest.Mock }
+const app = jest.requireMock("express").app as { listen: jest.Mock; use: jest.Mock }
 const { IbexConfig } = jest.requireMock("@config")
 const { baseLogger } = jest.requireMock("@services/logger")
 
@@ -80,6 +80,18 @@ describe("ibex webhook server start()", () => {
 
     expect(app.listen).toHaveBeenCalledTimes(1)
     expect(app.listen.mock.calls[0][0]).toBe(4008)
+  })
+
+  // IBEX Hub signs the raw body (ENG-891); the JSON parser must not read it
+  // first.
+  it("mounts the IBEX Hub route before the JSON parser", () => {
+    WebhookServer.start()
+
+    const mounted = app.use.mock.calls.map((call) => call[0])
+    expect(mounted.indexOf("hub-transactions-router")).toBeGreaterThanOrEqual(0)
+    expect(mounted.indexOf("hub-transactions-router")).toBeLessThan(
+      mounted.indexOf("json-middleware"),
+    )
   })
 
   // Unset / short / known-public: each one would otherwise boot green and drop
