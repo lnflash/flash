@@ -6,6 +6,8 @@ import {
   FAILED_EXIT_CODE,
   OK_EXIT_CODE,
   runBridgeFundsRequestsCron,
+  WITHDRAWAL_LOOKBACK_MS,
+  WITHDRAWAL_STUCK_AFTER_MS,
 } from "@servers/bridge-funds-requests-cron"
 
 // ENG-889: the hourly Bridge Job runs the funds request (recall) watcher, which
@@ -17,6 +19,7 @@ const mockWatch = jest.fn()
 const mockWatchCustomers = jest.fn()
 const mockMatchDeposits = jest.fn()
 const mockReconcileDeposits = jest.fn()
+const mockReconcileWithdrawals = jest.fn()
 const mockSetupMongo = jest.fn()
 const mockCloseMongo = jest.fn()
 const mockFlushAlerts = jest.fn()
@@ -43,6 +46,8 @@ jest.mock("@app/bridge/match-ibex-deposits", () => ({
 
 jest.mock("@services/bridge/reconciliation", () => ({
   reconcileBridgeAndIbexDeposits: (...args: unknown[]) => mockReconcileDeposits(...args),
+  reconcileBridgeAndIbexWithdrawals: (...args: unknown[]) =>
+    mockReconcileWithdrawals(...args),
 }))
 
 jest.mock("@services/mongodb", () => ({
@@ -77,6 +82,17 @@ const customerSummary = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 })
 
+const withdrawalSummary = (overrides: Record<string, unknown> = {}) => ({
+  scannedWithdrawals: 1,
+  cancelledSendFailedTransfers: 0,
+  finalizedCompletedTransfers: 1,
+  ibexSendWithoutBridgeSettlement: 0,
+  bridgeTransferWithoutIbexSend: 0,
+  stuckAwaitingBridge: 0,
+  failures: 0,
+  ...overrides,
+})
+
 const matchSummary = (overrides: Record<string, unknown> = {}) => ({
   pending: 1,
   matched: 1,
@@ -101,6 +117,7 @@ beforeEach(() => {
     bridgeWithoutIbex: 0,
     ibexWithoutBridge: 0,
   })
+  mockReconcileWithdrawals.mockResolvedValue(withdrawalSummary())
 })
 
 describe("runBridgeFundsRequestsCron", () => {
@@ -125,6 +142,7 @@ describe("runBridgeFundsRequestsCron", () => {
     expect(mockWatchCustomers).toHaveBeenCalledTimes(1)
     expect(mockMatchDeposits).toHaveBeenCalledTimes(1)
     expect(mockReconcileDeposits).toHaveBeenCalledTimes(1)
+    expect(mockReconcileWithdrawals).toHaveBeenCalledTimes(1)
     expect(mockFlushAlerts).toHaveBeenCalledTimes(1)
     expect(mockCloseMongo).toHaveBeenCalledTimes(1)
   })
@@ -254,6 +272,37 @@ describe("runBridgeFundsRequestsCron", () => {
     expect(mockCloseMongo).toHaveBeenCalledTimes(1)
   })
 
+  it("checks withdrawals over the lookback, flagging ones stuck a day", async () => {
+    await runBridgeFundsRequestsCron()
+
+    expect(mockReconcileWithdrawals).toHaveBeenCalledWith({
+      windowMs: WITHDRAWAL_LOOKBACK_MS,
+      stuckAfterMs: WITHDRAWAL_STUCK_AFTER_MS,
+    })
+    expect(WITHDRAWAL_LOOKBACK_MS).toBe(30 * 24 * 60 * 60 * 1000)
+    expect(WITHDRAWAL_STUCK_AFTER_MS).toBe(24 * 60 * 60 * 1000)
+  })
+
+  it("exits 0 when one withdrawal is left to retry", async () => {
+    mockReconcileWithdrawals.mockResolvedValue(withdrawalSummary({ failures: 1 }))
+
+    expect(await runBridgeFundsRequestsCron()).toBe(OK_EXIT_CODE)
+  })
+
+  it("exits non-zero when the withdrawal check could not run, after the other steps ran", async () => {
+    mockReconcileWithdrawals.mockResolvedValue(new Error("no mongo"))
+
+    expect(await runBridgeFundsRequestsCron()).toBe(FAILED_EXIT_CODE)
+    expect(mockMatchDeposits).toHaveBeenCalledTimes(1)
+  })
+
+  it("runs the withdrawal check even when the deposit step throws", async () => {
+    mockMatchDeposits.mockRejectedValue(new Error("boom"))
+
+    expect(await runBridgeFundsRequestsCron()).toBe(FAILED_EXIT_CODE)
+    expect(mockReconcileWithdrawals).toHaveBeenCalledTimes(1)
+  })
+
   it("exits non-zero without watching when mongo cannot connect", async () => {
     mockSetupMongo.mockRejectedValue(new Error("no mongo"))
 
@@ -291,5 +340,19 @@ describe("daily cron", () => {
       .join("\n")
 
     expect(code).not.toContain("reconcileBridgeAndIbexDeposits")
+  })
+
+  // ENG-891: same daily 15 minute window as the deposit check.
+  it("no longer runs the Bridge withdrawal check", () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, "..", "..", "..", "..", "src", "servers", "cron.ts"),
+      "utf8",
+    )
+    const code = source
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("//"))
+      .join("\n")
+
+    expect(code).not.toContain("reconcileBridgeAndIbexWithdrawals")
   })
 })

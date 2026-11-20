@@ -20,6 +20,10 @@ jest.mock("@services/frappe/BridgeTransferRequestWriter", () => ({
   writeBridgeCashoutFailed: jest.fn(),
 }))
 
+jest.mock("@services/bridge/reconciliation", () => ({
+  resolveWithdrawalOrphans: jest.fn(),
+}))
+
 import { Request, Response } from "express"
 import { LockService } from "@services/lock"
 import * as BridgeAccountsRepo from "@services/mongoose/bridge-accounts"
@@ -28,6 +32,7 @@ import {
   writeBridgeCashoutCompleted,
   writeBridgeCashoutFailed,
 } from "@services/frappe/BridgeTransferRequestWriter"
+import { resolveWithdrawalOrphans } from "@services/bridge/reconciliation"
 import { transferHandler } from "@services/bridge/webhook-server/routes/transfer"
 
 const makeRes = () => {
@@ -51,6 +56,7 @@ beforeEach(() => {
   ;(LockService as jest.Mock).mockReturnValue({ lockIdempotencyKey: lockFn })
   ;(writeBridgeCashoutCompleted as jest.Mock).mockResolvedValue(true)
   ;(writeBridgeCashoutFailed as jest.Mock).mockResolvedValue(true)
+  ;(resolveWithdrawalOrphans as jest.Mock).mockResolvedValue(undefined)
 })
 
 describe("transferHandler", () => {
@@ -292,5 +298,68 @@ describe("transferHandler", () => {
       status: "already_terminal",
     })
     expect(lockFn).not.toHaveBeenCalled()
+  })
+
+  // ENG-891 review: the hourly withdrawal check files a stuck orphan for a
+  // withdrawal Bridge has not paid out after a day. A withdrawal the webhook
+  // settles never comes back through the check, so the webhook resolves it.
+  describe("stuck withdrawal orphan", () => {
+    it("is resolved when the transfer completes", async () => {
+      const res = makeRes()
+      await transferHandler(
+        makeReq({
+          event_type: "transfer.completed",
+          event_object: { id: "tr-abc", state: "payment_processed" },
+        }),
+        res,
+      )
+
+      expect(resolveWithdrawalOrphans).toHaveBeenCalledWith("tr-abc", [
+        "withdrawal-ibex-sent-stuck",
+      ])
+      expect(res.status as jest.Mock).toHaveBeenCalledWith(200)
+    })
+
+    it("is resolved when the transfer fails", async () => {
+      updateFn.mockResolvedValue({
+        ...WITHDRAWAL_RECORD,
+        status: "failed",
+        accountId: "acct-1",
+        amount: "25.00",
+        currency: "usdt",
+      })
+
+      const res = makeRes()
+      await transferHandler(
+        makeReq({
+          event_type: "transfer.failed",
+          event_object: { id: "tr-abc", state: "returned" },
+        }),
+        res,
+      )
+
+      expect(resolveWithdrawalOrphans).toHaveBeenCalledWith("tr-abc", [
+        "withdrawal-ibex-sent-stuck",
+      ])
+      expect(res.status as jest.Mock).toHaveBeenCalledWith(200)
+    })
+
+    it("is left open when the ERPNext row was not written", async () => {
+      ;(writeBridgeCashoutCompleted as jest.Mock).mockResolvedValue(
+        new Error("erpnext timeout"),
+      )
+
+      const res = makeRes()
+      await transferHandler(
+        makeReq({
+          event_type: "transfer.completed",
+          event_object: { id: "tr-abc", state: "payment_processed" },
+        }),
+        res,
+      )
+
+      expect(resolveWithdrawalOrphans).not.toHaveBeenCalled()
+      expect(res.status as jest.Mock).toHaveBeenCalledWith(500)
+    })
   })
 })

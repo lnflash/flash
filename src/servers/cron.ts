@@ -1,11 +1,6 @@
 import { OnChain, Lightning, Wallets, Payments, Swap, Accounts } from "@app"
 
-import {
-  BridgeConfig,
-  getCronConfig,
-  PaymentSplitsConfig,
-  TWO_MONTHS_IN_MS,
-} from "@config"
+import { getCronConfig, PaymentSplitsConfig, TWO_MONTHS_IN_MS } from "@config"
 
 import { ErrorLevel } from "@domain/shared"
 import { OperationInterruptedError } from "@domain/errors"
@@ -26,7 +21,6 @@ import { flushAlerts } from "@services/alerts"
 import { baseLogger } from "@services/logger"
 import { setupMongoConnection } from "@services/mongodb"
 import { activateLndHealthCheck, checkAllLndHealth } from "@services/lnd/health"
-import { reconcileBridgeAndIbexWithdrawals } from "@services/bridge/reconciliation"
 import { checkFygaroTreasuryFloat } from "@services/fygaro/float-monitor"
 import { reconcileSplits } from "@app/payment-splits"
 
@@ -71,19 +65,6 @@ const deleteLndPaymentsBefore2Months = async () => {
 const swapOutJob = async () => {
   const swapResult = await Swap.swapOut()
   if (swapResult instanceof Error) throw swapResult
-}
-
-// Window covers 15 min of events — real-time webhook reconciliation handles everything
-// else immediately. This batch pass is only a safety net for missed/delayed webhooks.
-const RECONCILE_WINDOW_MS = 15 * 60 * 1000
-
-const reconcileBridgeWithdrawalsJob = async () => {
-  if (!BridgeConfig.enabled) return
-
-  const result = await reconcileBridgeAndIbexWithdrawals({
-    windowMs: RECONCILE_WINDOW_MS,
-  })
-  if (result instanceof Error) throw result
 }
 
 // ENG-653 payment splits. Execution, retries and the stale sweep run every
@@ -155,10 +136,10 @@ const main = async () => {
       : []),
     ...(cronConfig.rebalanceEnabled ? [rebalance] : []),
     ...(cronConfig.swapEnabled ? [swapOutJob] : []),
-    reconcileBridgeWithdrawalsJob,
-    // The Bridge funds request (recall) watcher and the Bridge deposit to IBEX
-    // match and check are not here: they run hourly from their own Job,
-    // src/servers/bridge-funds-requests-cron.ts (ENG-889, ENG-891).
+    // The Bridge funds request (recall) watcher, the Bridge deposit to IBEX
+    // match and check, and the Bridge withdrawal check are not here: they run
+    // hourly from their own Job, src/servers/bridge-funds-requests-cron.ts
+    // (ENG-889, ENG-891).
     reconcileSplitPaymentsJob,
     checkFygaroFloatJob,
     evidenceRetentionJob,

@@ -34,6 +34,7 @@ jest.mock("@services/mongoose/bridge-deposit-log", () => ({
 
 jest.mock("@services/bridge/reconciliation", () => ({
   reconcileByTxHash: jest.fn().mockResolvedValue({ status: "matched" }),
+  resolveWithdrawalOrphans: jest.fn().mockResolvedValue(undefined),
 }))
 
 jest.mock("@services/frappe/BridgeTransferRequestWriter", () => ({

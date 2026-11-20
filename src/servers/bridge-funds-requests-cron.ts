@@ -1,5 +1,5 @@
 /**
- * Hourly Bridge watch Job (ENG-889, ENG-891). Three steps, each run whatever
+ * Hourly Bridge watch Job (ENG-889, ENG-891). Four steps, each run whatever
  * the others did:
  *
  *  1. Funds requests (recalls). Bridge sends no webhook when a sender's bank
@@ -18,13 +18,18 @@
  *     check files and alerts, once, a deposit still unmatched after
  *     DEPOSIT_ORPHAN_AFTER_MS. It used to run daily with a 15 minute window,
  *     so it saw almost nothing.
+ *  4. Withdrawals (ENG-891). reconcileBridgeAndIbexWithdrawals deletes the
+ *     Bridge transfer of a withdrawal whose IBEX send failed, finalizes one
+ *     Bridge paid out, and alerts, once, on one Bridge failed or has not paid
+ *     out WITHDRAWAL_STUCK_AFTER_MS after IBEX sent the USDT. It used to run
+ *     daily over a 15 minute window, the same blind spot as deposits.
  *
  * Runs from its own hourly k8s CronJob (charts:
  * bridge-funds-requests-cronjob.yaml, which points at this file's built path,
  * so the name stays), with the same `-c /var/yaml/custom.yaml` config as the
  * daily one.
  *
- * Exit codes: 0 when both steps ran (or Bridge is off), FAILED_EXIT_CODE when a
+ * Exit codes: 0 when every step ran (or Bridge is off), FAILED_EXIT_CODE when a
  * step could not do its work (Bridge poll or store failed, or the step threw).
  * A failed action on one item (ERPNext down, a lock or hold that did not take)
  * is retried by the next run by design, so it is logged but does not fail the
@@ -44,7 +49,10 @@ import {
 
 import { watchBridgeCustomerStatuses } from "@services/bridge/customer-status-watch"
 import { watchBridgeFundsRequests } from "@services/bridge/funds-requests"
-import { reconcileBridgeAndIbexDeposits } from "@services/bridge/reconciliation"
+import {
+  reconcileBridgeAndIbexDeposits,
+  reconcileBridgeAndIbexWithdrawals,
+} from "@services/bridge/reconciliation"
 import { baseLogger } from "@services/logger"
 import { setupMongoConnection } from "@services/mongodb"
 import {
@@ -136,11 +144,37 @@ const depositMatchStep = async (): Promise<boolean> => {
   return false
 }
 
+// Covers every withdrawal still in flight; there are a handful at a time.
+export const WITHDRAWAL_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000
+// Bridge pays out minutes after the USDT arrives; a day without it is stuck.
+export const WITHDRAWAL_STUCK_AFTER_MS = 24 * 60 * 60 * 1000
+
+const withdrawalStep = async (): Promise<boolean> => {
+  const summary = await reconcileBridgeAndIbexWithdrawals({
+    windowMs: WITHDRAWAL_LOOKBACK_MS,
+    stuckAfterMs: WITHDRAWAL_STUCK_AFTER_MS,
+  })
+  if (summary instanceof Error) {
+    logger.error({ error: summary }, "bridge withdrawal check could not run")
+    return true
+  }
+  if (summary.failures > 0) {
+    logger.warn(
+      { summary },
+      "bridge withdrawal check finished; withdrawals left to retry",
+    )
+  } else {
+    logger.info({ summary }, "bridge withdrawal check finished")
+  }
+  return false
+}
+
 const watchBridgeHourlyJob = async (): Promise<number> => {
   const fundsFailed = await runStep("funds-requests", fundsRequestsStep)
   const customersFailed = await runStep("customer-statuses", customerStatusStep)
   const depositsFailed = await runStep("deposits", depositMatchStep)
-  return fundsFailed || customersFailed || depositsFailed
+  const withdrawalsFailed = await runStep("withdrawals", withdrawalStep)
+  return fundsFailed || customersFailed || depositsFailed || withdrawalsFailed
     ? FAILED_EXIT_CODE
     : OK_EXIT_CODE
 }

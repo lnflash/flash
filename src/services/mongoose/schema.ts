@@ -71,6 +71,8 @@ interface IBridgeWithdrawalRecord {
   subtotalAmount?: string
   finalAmount?: string
   failureReason?: string
+  // Set once the Bridge transfer of a send_failed withdrawal is gone (ENG-891).
+  bridgeTransferCancelledAt?: Date
   externalAccountId: string
   createdAt: Date
   updatedAt: Date
@@ -835,6 +837,7 @@ const BridgeWithdrawalSchema = new Schema<IBridgeWithdrawalRecord>({
   subtotalAmount: { type: String },
   finalAmount: { type: String },
   failureReason: { type: String, maxlength: 512 },
+  bridgeTransferCancelledAt: { type: Date },
   externalAccountId: { type: String, required: true },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
