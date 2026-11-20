@@ -390,8 +390,9 @@ export type IbexCreditSignalResult =
   // not a completed crypto receive: nothing to do
   | "ignored"
   // no Bridge deposit carries the credit's tx hash yet (Bridge's event can land
-  // after IBEX's), or the credit is not a Bridge deposit; the hourly matcher
-  // picks up the first case
+  // after IBEX's), or the credit is not a Bridge deposit; in the first case the
+  // Bridge deposit route records it when Bridge's event lands
+  // (matchBridgeDepositNow), with the hourly matcher as backstop
   | "no_bridge_deposit"
   // the deposit and the credit do not line up; logged for ops
   | "mismatch"

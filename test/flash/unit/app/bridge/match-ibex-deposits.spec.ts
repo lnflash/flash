@@ -621,12 +621,24 @@ describe("matchBridgeDepositNow", () => {
     expect(mockRecord).not.toHaveBeenCalled()
   })
 
-  it("reads credits from a little before Bridge's event", async () => {
-    await now()
+  it("matches credits settled up to 15 minutes before Bridge's event, not earlier", async () => {
+    const settledMinutesBefore = (minutes: number) => {
+      const at = new Date(NOW.getTime() - minutes * 60_000).toISOString()
+      mockGetAccountTransactions.mockResolvedValue([
+        credit({ createdAt: at, settledAt: at }),
+      ])
+    }
 
+    settledMinutesBefore(14)
+    expect(await now()).toBe("recorded")
     expect(mockGetAccountTransactions).toHaveBeenCalledWith(
       expect.objectContaining({ account_id: USDT_WALLET.id, sort: "settledAt" }),
     )
+
+    mockRecord.mockClear()
+    settledMinutesBefore(16)
+    expect(await now()).toBe("no_ibex_credit")
+    expect(mockRecord).not.toHaveBeenCalled()
   })
 
   it.each([
