@@ -319,6 +319,70 @@ const matchCustomerDeposits = async ({
   }
 }
 
+export type BridgeDepositMatchResult =
+  // the deposit's IBEX credit was found and recorded
+  | "recorded"
+  | "already_processed"
+  // no IBEX credit with the deposit's tx hash yet: IBEX Hub's webhook records
+  // it when the credit lands, the hourly matcher if that delivery is lost
+  | "no_ibex_credit"
+  // a read or the recording failed; the hourly matcher retries
+  | "failed"
+
+/**
+ * Records one Bridge virtual-account deposit the moment Bridge reports it
+ * payment_processed (ENG-891), by the same per-customer read and tx hash join
+ * as the hourly matcher. IBEX usually credits the USDT a minute or two before
+ * Bridge's event lands, so the credit is often already there; when it is not,
+ * IBEX Hub's webhook records the deposit once it is.
+ *
+ * Never throws.
+ */
+export const matchBridgeDepositNow = async ({
+  transferId,
+  customerId,
+  destinationTxHash,
+  now = new Date(),
+}: {
+  transferId: string
+  customerId: string
+  destinationTxHash: string
+  now?: Date
+}): Promise<BridgeDepositMatchResult> => {
+  const log = logger.child({ transferId, txHash: destinationTxHash })
+  try {
+    const processed = await findProcessedIbexCryptoReceiveTxHashes([
+      destinationTxHash.toLowerCase(),
+    ])
+    if (processed instanceof Error) {
+      log.warn({ error: processed }, "processed check failed")
+      return "failed"
+    }
+    if (processed.has(destinationTxHash.toLowerCase())) return "already_processed"
+
+    const summary: IbexDepositMatchSummary = {
+      pending: 1,
+      matched: 0,
+      alreadyProcessed: 0,
+      unmatched: 0,
+      failures: 0,
+    }
+    await matchCustomerDeposits({
+      customerId,
+      deposits: [{ transferId, customerId, destinationTxHash, createdAt: now }],
+      now,
+      summary,
+    })
+    if (summary.matched > 0) return "recorded"
+    if (summary.alreadyProcessed > 0) return "already_processed"
+    if (summary.failures > 0) return "failed"
+    return "no_ibex_credit"
+  } catch (error) {
+    log.error({ error }, "matching a reported Bridge deposit threw")
+    return "failed"
+  }
+}
+
 export type IbexCreditSignalResult =
   // the credit was recorded against its Bridge deposit
   | "recorded"

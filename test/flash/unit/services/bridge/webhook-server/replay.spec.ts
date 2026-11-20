@@ -1,6 +1,10 @@
 // AC1: Orphan event surfaces in ops tooling with triage context
 // AC2: Replay CLI re-runs a stuck handler against a chosen transfer-id
 
+jest.mock("@app/bridge/match-ibex-deposits", () => ({
+  matchBridgeDepositNow: jest.fn().mockResolvedValue("no_ibex_credit"),
+}))
+
 jest.mock("@config", () => ({
   ...jest.requireActual("@config"),
   BridgeConfig: {

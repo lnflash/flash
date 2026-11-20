@@ -7,6 +7,10 @@ const mockWriteDepositRequest = jest.fn()
 const mockLockIdempotencyKey = jest.fn()
 const mockFindByBridgeCustomerId = jest.fn()
 
+jest.mock("@app/bridge/match-ibex-deposits", () => ({
+  matchBridgeDepositNow: jest.fn().mockResolvedValue("no_ibex_credit"),
+}))
+
 jest.mock("@services/alerts/ops-events", () => ({
   notifyOpsEvent: jest.fn(),
 }))

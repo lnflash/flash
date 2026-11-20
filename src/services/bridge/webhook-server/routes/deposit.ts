@@ -7,7 +7,10 @@
  *   - bridge_wallet.activity    — on-chain/off-chain bridge wallet movements
  *
  * Both represent money arriving that needs to be logged for reconciliation.
- * The actual balance crediting happens when IBEX sends its crypto.received webhook.
+ * IBEX credits the user's USDT wallet itself; Flash records that credit
+ * (recordIbexCryptoReceive) when IBEX Hub reports it, when a virtual-account
+ * deposit reaches payment_processed here, or at the hourly matcher, whichever
+ * finds the credit first (ENG-891).
  */
 
 import { Request, Response } from "express"
@@ -25,6 +28,7 @@ import { alertBridge, generateDedupKey } from "@services/alerts"
 import { alertIbexReconciliationFailed } from "@services/alerts/ibex-bridge-movement"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
 import { findAccountByBridgeCustomerId } from "@services/bridge/account-lookup"
+import { matchBridgeDepositNow } from "@app/bridge/match-ibex-deposits"
 
 type DepositEventObject = {
   id: string
@@ -244,6 +248,33 @@ export const depositHandler = async (req: Request, res: Response) => {
     if (auditLockResult instanceof Error) {
       baseLogger.info({ event_id, id: obj.id, state }, "Duplicate Bridge deposit webhook")
       return res.status(200).json({ status: "already_processed" })
+    }
+
+    // A virtual-account deposit Bridge has delivered on chain (ENG-891): record
+    // its IBEX credit now if IBEX already made it. Not through
+    // reconcileByTxHash, which would file a false "no IBEX receive" orphan
+    // whenever Bridge's event beats IBEX's credit; recording the credit runs
+    // that reconcile itself. Not awaited, so the IBEX reads never hold
+    // Bridge's response.
+    const destinationTxHash = rxReceipt?.destination_tx_hash ?? obj.destination?.tx_hash
+    if (
+      event_category === "virtual_account.activity" &&
+      state === "payment_processed" &&
+      destinationTxHash
+    ) {
+      matchBridgeDepositNow({ transferId: obj.id, customerId, destinationTxHash })
+        .then((result) =>
+          baseLogger.info(
+            { event_id, id: obj.id, txHash: destinationTxHash, result },
+            "Real-time Bridge deposit to IBEX credit match",
+          ),
+        )
+        .catch((error) =>
+          baseLogger.error(
+            { error, event_id, id: obj.id },
+            "Real-time Bridge deposit to IBEX credit match threw",
+          ),
+        )
     }
 
     if (

@@ -5,6 +5,10 @@ const mockUpdateWithdrawalStatus = jest.fn()
 const mockWriteCashoutCompleted = jest.fn()
 const mockWriteCashoutFailed = jest.fn()
 
+jest.mock("@app/bridge/match-ibex-deposits", () => ({
+  matchBridgeDepositNow: jest.fn().mockResolvedValue("no_ibex_credit"),
+}))
+
 jest.mock("@services/alerts/ops-events", () => ({
   notifyOpsEvent: jest.fn().mockResolvedValue(undefined),
 }))
