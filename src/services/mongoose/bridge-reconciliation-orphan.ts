@@ -17,15 +17,17 @@ export const upsertBridgeReconciliationOrphan = async (data: {
   amount?: string
   currency?: string
   triageContext: Record<string, unknown>
-}): Promise<{ id: string } | Error> => {
+}): Promise<{ id: string; created: boolean } | Error> => {
   try {
+    // `created` lets an hourly caller alert once per orphan, not every run.
+    const existed = await BridgeReconciliationOrphan.exists({ orphanKey: data.orphanKey })
     const orphan = await BridgeReconciliationOrphan.findOneAndUpdate(
       { orphanKey: data.orphanKey },
       { ...data, status: "unmatched", detectedAt: new Date() },
       { upsert: true, new: true, setDefaultsOnInsert: true },
     )
 
-    return { id: orphan._id.toString() }
+    return { id: orphan._id.toString(), created: !existed }
   } catch (error) {
     return error instanceof Error ? error : new Error(String(error))
   }

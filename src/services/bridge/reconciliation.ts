@@ -67,10 +67,31 @@ type BridgeWithdrawalLike = {
 
 const toOrphanKey = (prefix: string, value: string) => `${prefix}:${value.toLowerCase()}`
 
+// A receive's Bridge deposit can predate the check's window: the hourly
+// matcher records a deposit up to a week old and stamps the receive with the
+// time it ran. Look the deposit up by hash before calling the receive an orphan.
+const findBridgeDepositByTxHash = (txHash: string) =>
+  BridgeDeposits.findOne({
+    destinationTxHash: { $eq: txHash.toLowerCase() },
+    state: "payment_processed",
+  })
+    .collation({ locale: "en", strength: 2 })
+    .lean()
+    .exec()
+
+// Alert once per orphan; the deposit check runs hourly. A failed upsert still
+// alerts, since nothing else records the orphan.
+const isNewOrphan = (orphan: { created: boolean } | Error): boolean =>
+  orphan instanceof Error || orphan.created
+
 export const reconcileBridgeAndIbexDeposits = async ({
   windowMs = FIFTEEN_MIN_MS,
+  minAgeMs = 0,
 }: {
   windowMs?: number
+  // A Bridge deposit younger than this is not yet an orphan: the hourly
+  // matcher (ENG-891) may still find its IBEX credit.
+  minAgeMs?: number
 } = {}): Promise<
   | {
       scannedBridge: number
@@ -110,10 +131,11 @@ export const reconcileBridgeAndIbexDeposits = async ({
     let ibexWithoutBridge = 0
 
     for (const deposit of bridgeDeposits) {
+      if (now.getTime() - new Date(deposit.createdAt).getTime() < minAgeMs) continue
       if (!deposit.destinationTxHash) {
         bridgeWithoutIbex++
         const reason = "Bridge payment_processed has no destinationTxHash"
-        await upsertBridgeReconciliationOrphan({
+        const orphan = await upsertBridgeReconciliationOrphan({
           orphanKey: toOrphanKey("bridge-no-tx", deposit.transferId),
           orphanType: "bridge_without_ibex",
           transferId: deposit.transferId,
@@ -129,17 +151,19 @@ export const reconcileBridgeAndIbexDeposits = async ({
             createdAt: deposit.createdAt.toISOString(),
           },
         })
-        alertIbexReconciliationOrphan({
-          orphanType: "bridge_without_ibex",
-          transferId: deposit.transferId,
-          reason,
-          context: {
-            bridge_event_id: deposit.eventId,
-            customer_id: deposit.customerId,
-            amount: deposit.amount,
-            currency: deposit.currency,
-          },
-        })
+        if (isNewOrphan(orphan)) {
+          alertIbexReconciliationOrphan({
+            orphanType: "bridge_without_ibex",
+            transferId: deposit.transferId,
+            reason,
+            context: {
+              bridge_event_id: deposit.eventId,
+              customer_id: deposit.customerId,
+              amount: deposit.amount,
+              currency: deposit.currency,
+            },
+          })
+        }
         continue
       }
 
@@ -149,7 +173,7 @@ export const reconcileBridgeAndIbexDeposits = async ({
       bridgeWithoutIbex++
       const reason =
         "No IBEX crypto.receive found for Bridge destinationTxHash within window"
-      await upsertBridgeReconciliationOrphan({
+      const orphan = await upsertBridgeReconciliationOrphan({
         orphanKey: toOrphanKey("bridge", deposit.destinationTxHash),
         orphanType: "bridge_without_ibex",
         transferId: deposit.transferId,
@@ -166,28 +190,32 @@ export const reconcileBridgeAndIbexDeposits = async ({
           createdAt: deposit.createdAt.toISOString(),
         },
       })
-      alertIbexReconciliationOrphan({
-        orphanType: "bridge_without_ibex",
-        txHash: deposit.destinationTxHash,
-        transferId: deposit.transferId,
-        reason,
-        context: {
-          bridge_event_id: deposit.eventId,
-          customer_id: deposit.customerId,
-          amount: deposit.amount,
-          currency: deposit.currency,
-        },
-      })
+      if (isNewOrphan(orphan)) {
+        alertIbexReconciliationOrphan({
+          orphanType: "bridge_without_ibex",
+          txHash: deposit.destinationTxHash,
+          transferId: deposit.transferId,
+          reason,
+          context: {
+            bridge_event_id: deposit.eventId,
+            customer_id: deposit.customerId,
+            amount: deposit.amount,
+            currency: deposit.currency,
+          },
+        })
+      }
     }
 
     for (const receive of ibexReceives) {
-      const matchedBridge = bridgeByTxHash.get(receive.txHash.toLowerCase())
+      const matchedBridge =
+        bridgeByTxHash.get(receive.txHash.toLowerCase()) ??
+        (await findBridgeDepositByTxHash(receive.txHash))
       if (matchedBridge) continue
 
       ibexWithoutBridge++
       const reason =
         "No Bridge deposit payment_processed found for IBEX tx hash within window"
-      await upsertBridgeReconciliationOrphan({
+      const orphan = await upsertBridgeReconciliationOrphan({
         orphanKey: toOrphanKey("ibex", receive.txHash),
         orphanType: "ibex_without_bridge",
         txHash: receive.txHash,
@@ -203,18 +231,20 @@ export const reconcileBridgeAndIbexDeposits = async ({
           receivedAt: receive.receivedAt.toISOString(),
         },
       })
-      alertIbexReconciliationOrphan({
-        orphanType: "ibex_without_bridge",
-        txHash: receive.txHash,
-        reason,
-        context: {
-          amount: receive.amount,
-          currency: receive.currency,
-          address: receive.address,
-          network: receive.network,
-          account_id: receive.accountId,
-        },
-      })
+      if (isNewOrphan(orphan)) {
+        alertIbexReconciliationOrphan({
+          orphanType: "ibex_without_bridge",
+          txHash: receive.txHash,
+          reason,
+          context: {
+            amount: receive.amount,
+            currency: receive.currency,
+            address: receive.address,
+            network: receive.network,
+            account_id: receive.accountId,
+          },
+        })
+      }
     }
 
     const summary = {

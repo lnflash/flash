@@ -880,6 +880,11 @@ const IbexCryptoReceiveSchema = new Schema({
   network: { type: String, required: true },
   accountId: { type: String },
   receivedAt: { type: Date, default: Date.now },
+  // The IBEX transaction that credited this receive, when known (ENG-891).
+  ibexTransactionId: { type: String },
+  // Set once every step of recordIbexCryptoReceive succeeded; a receive
+  // without it is retried by the next delivery or matcher run.
+  processedAt: { type: Date },
 })
 
 IbexCryptoReceiveSchema.index({ receivedAt: -1 })

@@ -10,6 +10,8 @@ jest.mock("@services/mongoose/accounts", () => ({
 
 jest.mock("@services/mongoose/ibex-crypto-receive-log", () => ({
   createIbexCryptoReceive: jest.fn(),
+  isIbexCryptoReceiveProcessed: jest.fn(),
+  markIbexCryptoReceiveProcessed: jest.fn(),
 }))
 
 jest.mock("@app/wallets", () => ({
@@ -53,7 +55,13 @@ import {
   router,
 } from "@services/ibex/webhook-server/routes/crypto-receive"
 import { AccountsRepository } from "@services/mongoose/accounts"
-import { createIbexCryptoReceive } from "@services/mongoose/ibex-crypto-receive-log"
+import {
+  createIbexCryptoReceive,
+  isIbexCryptoReceiveProcessed,
+  markIbexCryptoReceiveProcessed,
+} from "@services/mongoose/ibex-crypto-receive-log"
+import { sendBridgeDepositNotificationBestEffort } from "@app/bridge/send-deposit-notification"
+import { recordIbexCryptoReceive } from "@app/bridge/record-crypto-receive"
 import { listWalletsByAccountId } from "@app/wallets"
 import { LockService } from "@services/lock"
 import { WalletCurrency } from "@domain/shared"
@@ -86,6 +94,8 @@ describe("cryptoReceiveHandler", () => {
       findByBridgeEthereumAddress: jest.fn().mockResolvedValue({ id: ACCOUNT_ID }),
     })
     ;(createIbexCryptoReceive as jest.Mock).mockResolvedValue({ id: "log-001" })
+    ;(isIbexCryptoReceiveProcessed as jest.Mock).mockResolvedValue(false)
+    ;(markIbexCryptoReceiveProcessed as jest.Mock).mockResolvedValue(true)
     ;(listWalletsByAccountId as jest.Mock).mockResolvedValue([
       { id: WALLET_ID, currency: WalletCurrency.Usdt },
     ])
@@ -331,6 +341,9 @@ describe("cryptoReceiveHandler", () => {
 
     expect(res.status).toHaveBeenCalledWith(500)
     expect(res.json).toHaveBeenCalledWith({ error: "erpnext_audit_failed" })
+    // Left unprocessed, so a repeat delivery or the matcher retries it.
+    expect(markIbexCryptoReceiveProcessed).not.toHaveBeenCalled()
+    expect(sendBridgeDepositNotificationBestEffort).not.toHaveBeenCalled()
     expect(alertIbexCryptoReceiveFailure).toHaveBeenCalledWith(
       expect.objectContaining({
         txHash: TX_HASH,
@@ -360,5 +373,105 @@ describe("cryptoReceiveHandler", () => {
     expect(createIbexCryptoReceive).not.toHaveBeenCalled()
     expect(res.status).toHaveBeenCalledWith(400)
     expect(res.json).toHaveBeenCalledWith({ error: "Invalid payload" })
+  })
+
+  // ENG-891: one path for the webhook and the hourly matcher.
+  const validBody = {
+    tx_hash: TX_HASH,
+    address: ADDRESS,
+    amount: "12.345678",
+    currency: "USDT",
+    network: "ethereum",
+  }
+
+  it("marks the receive processed after notifying the user", async () => {
+    const res = makeResponse()
+
+    await cryptoReceiveHandler({ body: validBody } as never, res as never)
+
+    expect(sendBridgeDepositNotificationBestEffort).toHaveBeenCalledWith({
+      accountId: ACCOUNT_ID,
+      amount: "12.345678",
+      currency: "USDT",
+    })
+    expect(markIbexCryptoReceiveProcessed).toHaveBeenCalledWith(TX_HASH)
+    expect(
+      (sendBridgeDepositNotificationBestEffort as jest.Mock).mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      (markIbexCryptoReceiveProcessed as jest.Mock).mock.invocationCallOrder[0],
+    )
+  })
+
+  it("skips a receive already processed: no second row, promotion or notification", async () => {
+    ;(isIbexCryptoReceiveProcessed as jest.Mock).mockResolvedValue(true)
+    const res = makeResponse()
+
+    await cryptoReceiveHandler({ body: validBody } as never, res as never)
+
+    expect(createIbexCryptoReceive).not.toHaveBeenCalled()
+    expect(writeIbexCryptoReceiveRequest).not.toHaveBeenCalled()
+    expect(promoteBridgeDepositForCryptoReceive).not.toHaveBeenCalled()
+    expect(sendBridgeDepositNotificationBestEffort).not.toHaveBeenCalled()
+    expect(res.status).toHaveBeenCalledWith(200)
+    expect(res.json).toHaveBeenCalledWith({ status: "already_processed" })
+  })
+
+  it("processes anyway when the processed check cannot read the store", async () => {
+    ;(isIbexCryptoReceiveProcessed as jest.Mock).mockResolvedValue(new Error("mongo"))
+    const res = makeResponse()
+
+    await cryptoReceiveHandler({ body: validBody } as never, res as never)
+
+    expect(writeIbexCryptoReceiveRequest).toHaveBeenCalled()
+    expect(res.json).toHaveBeenCalledWith({ status: "success" })
+  })
+
+  it("still succeeds when marking processed fails", async () => {
+    ;(markIbexCryptoReceiveProcessed as jest.Mock).mockResolvedValue(new Error("mongo"))
+    const res = makeResponse()
+
+    await cryptoReceiveHandler({ body: validBody } as never, res as never)
+
+    expect(res.json).toHaveBeenCalledWith({ status: "success" })
+  })
+
+  it("returns 500 with persist_failed when the receive log cannot be written", async () => {
+    ;(createIbexCryptoReceive as jest.Mock).mockResolvedValue(new Error("mongo"))
+    const res = makeResponse()
+
+    await cryptoReceiveHandler({ body: validBody } as never, res as never)
+
+    expect(res.status).toHaveBeenCalledWith(500)
+    expect(res.json).toHaveBeenCalledWith({ error: "persist_failed" })
+    expect(writeIbexCryptoReceiveRequest).not.toHaveBeenCalled()
+  })
+
+  it("records a matched credit without notifying when notifyUser is false", async () => {
+    const result = await recordIbexCryptoReceive({
+      txHash: TX_HASH,
+      address: ADDRESS,
+      amount: 489.51,
+      ibexTransactionId: "ibex-tx-001",
+      notifyUser: false,
+      rawPayload: { source: "ibex_deposit_matcher" },
+    })
+
+    expect(result).toEqual({ status: "success" })
+    expect(createIbexCryptoReceive).toHaveBeenCalledWith(
+      expect.objectContaining({
+        txHash: TX_HASH,
+        amount: "489.51",
+        currency: "USDT",
+        network: "ethereum",
+        ibexTransactionId: "ibex-tx-001",
+      }),
+    )
+    expect(promoteBridgeDepositForCryptoReceive).toHaveBeenCalledWith({
+      txHash: TX_HASH,
+      accountId: ACCOUNT_ID,
+      walletId: WALLET_ID,
+    })
+    expect(sendBridgeDepositNotificationBestEffort).not.toHaveBeenCalled()
+    expect(markIbexCryptoReceiveProcessed).toHaveBeenCalledWith(TX_HASH)
   })
 })
