@@ -60,6 +60,25 @@ export const resolveOrphansByTxHash = async (
   }
 }
 
+// Resolves the open orphans with these keys. A withdrawal's orphans are keyed
+// by transfer id, not tx hash, and an orphan Bridge or a later run settled
+// (a stuck withdrawal Bridge paid out, a transfer a later run deleted) must
+// leave the unmatched list (ENG-891).
+export const resolveOrphansByKey = async (
+  keys: string[],
+): Promise<{ resolvedCount: number } | Error> => {
+  if (keys.length === 0) return { resolvedCount: 0 }
+  try {
+    const result = await BridgeReconciliationOrphan.updateMany(
+      { orphanKey: { $in: keys }, status: "unmatched" },
+      { $set: { status: "resolved", resolvedAt: new Date() } },
+    )
+    return { resolvedCount: result.modifiedCount }
+  } catch (error) {
+    return error instanceof Error ? error : new Error(String(error))
+  }
+}
+
 export const findOrphans = async ({
   status,
   orphanType,

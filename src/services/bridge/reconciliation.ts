@@ -1,8 +1,12 @@
+import { sendBridgeWithdrawalNotificationBestEffort } from "@app/bridge/send-withdrawal-notification"
 import { alertIbexReconciliationOrphan } from "@services/alerts/ibex-bridge-movement"
+import { notifyOpsEvent } from "@services/alerts/ops-events"
+import { writeBridgeCashoutCompleted } from "@services/frappe/BridgeTransferRequestWriter"
 import { baseLogger } from "@services/logger"
 import { findIbexCryptoReceivesSince } from "@services/mongoose/ibex-crypto-receive-log"
 import {
   upsertBridgeReconciliationOrphan,
+  resolveOrphansByKey,
   resolveOrphansByTxHash,
 } from "@services/mongoose/bridge-reconciliation-orphan"
 import {
@@ -66,6 +70,31 @@ type BridgeWithdrawalLike = {
 }
 
 const toOrphanKey = (prefix: string, value: string) => `${prefix}:${value.toLowerCase()}`
+
+const WITHDRAWAL_ORPHAN_PREFIXES = [
+  "withdrawal-send-failed",
+  "withdrawal-ibex-sent",
+  "withdrawal-ibex-sent-stuck",
+] as const
+type WithdrawalOrphanPrefix = (typeof WITHDRAWAL_ORPHAN_PREFIXES)[number]
+
+// Resolves a withdrawal's open orphans once what they reported is settled, so
+// the admin unmatched list shows only withdrawals that still need a person
+// (ENG-891). Best effort: a failed resolve is logged and never fails the
+// caller, and the next settle of the same transfer tries again.
+export const resolveWithdrawalOrphans = async (
+  transferId: string,
+  prefixes: WithdrawalOrphanPrefix[],
+): Promise<void> => {
+  const keys = prefixes.map((prefix) => toOrphanKey(prefix, transferId))
+  const resolved = await resolveOrphansByKey(keys)
+  if (resolved instanceof Error) {
+    baseLogger.warn(
+      { error: resolved, transferId, keys },
+      "Could not resolve Bridge withdrawal reconciliation orphans",
+    )
+  }
+}
 
 // A receive's Bridge deposit can predate the check's window: the hourly
 // matcher records a deposit up to a week old and stamps the receive with the
@@ -272,8 +301,13 @@ export const reconcileBridgeAndIbexDeposits = async ({
  *  - send_failed: IBEX never sent the USDT, so the Bridge transfer is deleted,
  *    once. A transfer Bridge already reports gone counts as deleted. Either
  *    way bridgeTransferCancelledAt stops later runs from trying again.
- *  - usdt_sent and Bridge says payment_processed: finalize as completed.
- *  - usdt_sent and Bridge failed terminally: orphan + alert.
+ *  - usdt_sent and Bridge says payment_processed (its webhook was missed):
+ *    write the ERPNext Completed row, then mark the withdrawal completed,
+ *    resolve its stuck orphan and tell the user and ops, as the webhook would.
+ *    The row goes first: when either write fails the withdrawal stays
+ *    usdt_sent and the next run tries again.
+ *  - usdt_sent and Bridge failed terminally: orphan + alert (it replaces the
+ *    stuck orphan, which is resolved).
  *  - usdt_sent, Bridge still working, sent more than stuckAfterMs ago:
  *    orphan + alert, since the user's USDT left IBEX and was not paid out.
  *
@@ -329,6 +363,8 @@ export const reconcileBridgeAndIbexWithdrawals = async ({
           const cancelled = await cancelSendFailedTransfer(bridgeTransferId)
           if (cancelled === true) {
             cancelledSendFailedTransfers++
+            // An earlier run's delete may have failed and filed an orphan.
+            await resolveWithdrawalOrphans(transferId, ["withdrawal-send-failed"])
             continue
           }
 
@@ -367,11 +403,52 @@ export const reconcileBridgeAndIbexWithdrawals = async ({
 
         const transfer = await BridgeApiClient.getTransfer(bridgeTransferId)
         if (transfer.state === "payment_processed") {
+          const audit = await writeBridgeCashoutCompleted({
+            transferId,
+            amount: withdrawal.amount,
+            currency: withdrawal.currency,
+            accountId: withdrawal.accountId,
+            sourceEventType: "bridge.withdrawal.reconciled",
+            rawPayload: transfer,
+          })
+          if (audit instanceof Error) {
+            failures++
+            baseLogger.error(
+              { error: audit, transferId },
+              "Could not write the ERPNext Completed row of a withdrawal Bridge paid out; the next run retries",
+            )
+            continue
+          }
+
           const finalized = await BridgeAccountsRepo.updateWithdrawalStatus(
             bridgeTransferId,
             "completed",
           )
-          if (!(finalized instanceof Error)) finalizedCompletedTransfers++
+          if (finalized instanceof Error) {
+            failures++
+            baseLogger.error(
+              { error: finalized, transferId },
+              "Could not mark a withdrawal Bridge paid out as completed; the next run retries",
+            )
+            continue
+          }
+
+          finalizedCompletedTransfers++
+          await resolveWithdrawalOrphans(transferId, ["withdrawal-ibex-sent-stuck"])
+          notifyOpsEvent({
+            flow: "transfer",
+            phase: "succeeded",
+            status: "success",
+            accountId: withdrawal.accountId,
+            amount: { value: withdrawal.amount, currency: withdrawal.currency },
+            meta: { transferId, source: "withdrawal-check" },
+          })
+          await sendBridgeWithdrawalNotificationBestEffort({
+            accountId: withdrawal.accountId,
+            amount: withdrawal.amount,
+            currency: withdrawal.currency,
+            outcome: "completed",
+          })
           continue
         }
 
@@ -407,6 +484,9 @@ export const reconcileBridgeAndIbexWithdrawals = async ({
             bridgeState: transfer.state,
           },
         })
+        if (terminal) {
+          await resolveWithdrawalOrphans(transferId, ["withdrawal-ibex-sent-stuck"])
+        }
         if (isNewOrphan(orphan)) {
           alertIbexReconciliationOrphan({
             orphanType: "ibex_send_without_bridge_settlement",

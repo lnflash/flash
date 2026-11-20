@@ -21,15 +21,15 @@
  *  4. Withdrawals (ENG-891). reconcileBridgeAndIbexWithdrawals deletes the
  *     Bridge transfer of a withdrawal whose IBEX send failed, finalizes one
  *     Bridge paid out, and alerts, once, on one Bridge failed or has not paid
- *     out WITHDRAWAL_STUCK_AFTER_MS after IBEX sent the USDT. Same daily 15
- *     minute window before.
+ *     out WITHDRAWAL_STUCK_AFTER_MS after IBEX sent the USDT. It used to run
+ *     daily over a 15 minute window, the same blind spot as deposits.
  *
  * Runs from its own hourly k8s CronJob (charts:
  * bridge-funds-requests-cronjob.yaml, which points at this file's built path,
  * so the name stays), with the same `-c /var/yaml/custom.yaml` config as the
  * daily one.
  *
- * Exit codes: 0 when both steps ran (or Bridge is off), FAILED_EXIT_CODE when a
+ * Exit codes: 0 when every step ran (or Bridge is off), FAILED_EXIT_CODE when a
  * step could not do its work (Bridge poll or store failed, or the step threw).
  * A failed action on one item (ERPNext down, a lock or hold that did not take)
  * is retried by the next run by design, so it is logged but does not fail the

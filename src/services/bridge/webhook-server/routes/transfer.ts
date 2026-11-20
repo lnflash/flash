@@ -14,6 +14,7 @@ import {
   writeBridgeCashoutFailed,
 } from "@services/frappe/BridgeTransferRequestWriter"
 import { alertBridge, generateDedupKey } from "@services/alerts"
+import { resolveWithdrawalOrphans } from "@services/bridge/reconciliation"
 import { notifyOpsEvent } from "@services/alerts/ops-events"
 
 const TERMINAL_FAILURE_STATES = new Set([
@@ -154,6 +155,10 @@ export const transferHandler = async (req: Request, res: Response) => {
         return res.status(500).json({ error: "Failed to persist ERPNext audit row" })
       }
 
+      // The hourly withdrawal check may have flagged it as stuck; it is not
+      // now, and a completed withdrawal never comes back through the check.
+      await resolveWithdrawalOrphans(transfer_id, ["withdrawal-ibex-sent-stuck"])
+
       const lockStatus = await markProcessed(transfer_id, event, state)
       if (lockStatus === "already_processed") {
         return res.status(200).json({ status: "already_processed" })
@@ -248,6 +253,10 @@ export const transferHandler = async (req: Request, res: Response) => {
         })
         return res.status(500).json({ error: "Failed to persist ERPNext audit row" })
       }
+
+      // A failed withdrawal is no longer waiting on Bridge, and it never comes
+      // back through the hourly check that may have flagged it as stuck.
+      await resolveWithdrawalOrphans(transfer_id, ["withdrawal-ibex-sent-stuck"])
 
       const lockStatus = await markProcessed(transfer_id, event, state)
       if (lockStatus === "already_processed") {
