@@ -41,7 +41,8 @@ export type CryptoReceiveErrorCode =
  * row to Completed, real-time reconciliation and the user's deposit
  * notification. IBEX has already credited the user; nothing here moves money.
  *
- * One path for every caller: the IBEX Hub webhook and the hourly matcher
+ * One path for every caller: the IBEX Hub webhook, the Bridge deposit route
+ * (payment_processed, via matchBridgeDepositNow) and the hourly matcher
  * (match-ibex-deposits.ts). Locked on the tx hash. A receive is marked
  * processed only after every step succeeded, and a processed receive is
  * skipped, so a repeat delivery or run never notifies the user twice while a

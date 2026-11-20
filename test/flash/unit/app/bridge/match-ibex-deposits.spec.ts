@@ -3,6 +3,7 @@ import { WalletCurrency } from "@domain/shared"
 import {
   matchBridgeDepositsToIbex,
   NOTIFY_WITHIN_MS,
+  matchBridgeDepositNow,
   recordIbexCreditSignal,
 } from "@app/bridge/match-ibex-deposits"
 
@@ -557,5 +558,114 @@ describe("recordIbexCreditSignal", () => {
     expect(mockRecord).toHaveBeenCalledWith(
       expect.objectContaining({ notifyUser: false }),
     )
+  })
+})
+
+// Bridge reports a virtual-account deposit payment_processed: its IBEX credit,
+// usually settled a minute or two earlier, is recorded right then.
+describe("matchBridgeDepositNow", () => {
+  const reportedAt = new Date(NOW.getTime())
+  const now = () =>
+    matchBridgeDepositNow({
+      transferId: "va_act_1",
+      customerId: "customer-1",
+      destinationTxHash: HASH,
+      now: reportedAt,
+    })
+
+  beforeEach(() => {
+    // Settled two minutes before Bridge's event.
+    mockGetAccountTransactions.mockResolvedValue([
+      credit({
+        createdAt: new Date(NOW.getTime() - 2 * 60_000).toISOString(),
+        settledAt: new Date(NOW.getTime() - 2 * 60_000).toISOString(),
+      }),
+    ])
+  })
+
+  it("records the credit already on the customer's USDT wallet", async () => {
+    expect(await now()).toBe("recorded")
+
+    expect(mockFindProcessed).toHaveBeenCalledWith([HASH])
+    expect(mockLookup).toHaveBeenCalledWith("customer-1")
+    expect(mockRecord).toHaveBeenCalledWith(
+      expect.objectContaining({
+        txHash: HASH,
+        address: ADDRESS,
+        amount: 489.51,
+        ibexTransactionId: "ibex-tx-1",
+        notifyUser: true,
+        rawPayload: expect.objectContaining({ bridgeTransferId: "va_act_1" }),
+      }),
+    )
+  })
+
+  it("matches a tx hash whatever its letter case", async () => {
+    mockGetNetworkId.mockResolvedValue(HASH.toUpperCase().replace("0X", "0x"))
+
+    expect(await now()).toBe("recorded")
+  })
+
+  it("skips a deposit already recorded, without calling IBEX", async () => {
+    mockFindProcessed.mockResolvedValue(new Set([HASH]))
+
+    expect(await now()).toBe("already_processed")
+    expect(mockGetAccountTransactions).not.toHaveBeenCalled()
+    expect(mockRecord).not.toHaveBeenCalled()
+  })
+
+  it("leaves it to the IBEX Hub webhook when IBEX has not credited yet", async () => {
+    mockGetAccountTransactions.mockResolvedValue([])
+
+    expect(await now()).toBe("no_ibex_credit")
+    expect(mockRecord).not.toHaveBeenCalled()
+  })
+
+  it("matches credits settled up to 15 minutes before Bridge's event, not earlier", async () => {
+    const settledMinutesBefore = (minutes: number) => {
+      const at = new Date(NOW.getTime() - minutes * 60_000).toISOString()
+      mockGetAccountTransactions.mockResolvedValue([
+        credit({ createdAt: at, settledAt: at }),
+      ])
+    }
+
+    settledMinutesBefore(14)
+    expect(await now()).toBe("recorded")
+    expect(mockGetAccountTransactions).toHaveBeenCalledWith(
+      expect.objectContaining({ account_id: USDT_WALLET.id, sort: "settledAt" }),
+    )
+
+    mockRecord.mockClear()
+    settledMinutesBefore(16)
+    expect(await now()).toBe("no_ibex_credit")
+    expect(mockRecord).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["the processed check", () => mockFindProcessed.mockResolvedValue(new Error("db"))],
+    [
+      "the credit read",
+      () => mockGetAccountTransactions.mockResolvedValue(new Error("ibex")),
+    ],
+    [
+      "the account lookup",
+      () =>
+        mockLookup.mockResolvedValue({ kind: "lookup_failed", error: new Error("db") }),
+    ],
+    ["the recording", () => mockRecord.mockResolvedValue({ status: "error", code: "x" })],
+    ["a throw", () => mockFindProcessed.mockRejectedValue(new Error("mongo"))],
+  ])(
+    "reports a failure, for the hourly matcher to retry, on %s",
+    async (_label, given) => {
+      given()
+
+      expect(await now()).toBe("failed")
+    },
+  )
+
+  it("reports a receive recorded meanwhile as already processed", async () => {
+    mockRecord.mockResolvedValue({ status: "already_processed" })
+
+    expect(await now()).toBe("already_processed")
   })
 })

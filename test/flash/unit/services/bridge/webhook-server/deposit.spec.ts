@@ -1,5 +1,9 @@
 // AC3: Bridge fee value persisted on every deposit row
 
+jest.mock("@app/bridge/match-ibex-deposits", () => ({
+  matchBridgeDepositNow: jest.fn().mockResolvedValue("no_ibex_credit"),
+}))
+
 jest.mock("@services/lock", () => ({
   LockService: jest.fn(),
 }))
@@ -25,6 +29,8 @@ import { LockService } from "@services/lock"
 import * as DepositLog from "@services/mongoose/bridge-deposit-log"
 import { writeBridgeDepositRequest } from "@services/frappe/BridgeTransferRequestWriter"
 import { depositHandler } from "@services/bridge/webhook-server/routes/deposit"
+import { matchBridgeDepositNow } from "@app/bridge/match-ibex-deposits"
+import { reconcileByTxHash } from "@services/bridge/reconciliation"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -307,5 +313,109 @@ describe("depositHandler — fee persistence (AC3)", () => {
       error: "Failed to persist ERPNext audit row",
     })
     expect(lockFn).not.toHaveBeenCalled()
+  })
+})
+
+// ENG-891: a virtual-account deposit Bridge reports payment_processed is
+// matched to its IBEX credit at once, not at the next hourly run.
+describe("depositHandler — real-time match of a virtual-account deposit", () => {
+  const VA_HASH = "0xd8c9e8938489dac2da8632dfae42d3cc8065fa1174a517470d71863574bf346a"
+  const vaBody = (overrides: Record<string, unknown> = {}) => ({
+    api_version: "v0",
+    event_id: "wh_va_1",
+    event_category: "virtual_account.activity",
+    event_type: "virtual_account.activity.created",
+    event_object_id: "va_act_1",
+    event_object: {
+      id: "va_act_1",
+      type: "payment_processed",
+      amount: "490.00",
+      currency: "usd",
+      customer_id: "cust_alice",
+      virtual_account_id: "va_1",
+      deposit_id: "dep_1",
+      receipt: {
+        initial_amount: "490.00",
+        developer_fee: "0.49",
+        subtotal_amount: "489.51",
+        final_amount: "489.51",
+        destination_tx_hash: VA_HASH,
+      },
+      ...overrides,
+    },
+  })
+
+  beforeEach(() => {
+    ;(DepositLog.createBridgeDeposit as jest.Mock).mockResolvedValue({ id: "row-1" })
+    ;(matchBridgeDepositNow as jest.Mock).mockResolvedValue("recorded")
+  })
+
+  it("matches the deposit to its IBEX credit by tx hash", async () => {
+    const res = makeRes()
+    await depositHandler(makeReq(vaBody()), res)
+
+    expect(res.status).toHaveBeenCalledWith(200)
+    expect(matchBridgeDepositNow).toHaveBeenCalledTimes(1)
+    expect(matchBridgeDepositNow).toHaveBeenCalledWith({
+      transferId: "va_act_1",
+      customerId: "cust_alice",
+      destinationTxHash: VA_HASH,
+    })
+  })
+
+  it("does not file a reconciliation orphan for it", async () => {
+    await depositHandler(makeReq(vaBody()), makeRes())
+
+    expect(reconcileByTxHash).not.toHaveBeenCalled()
+  })
+
+  it("answers Bridge without waiting for the match", async () => {
+    ;(matchBridgeDepositNow as jest.Mock).mockReturnValue(new Promise(() => undefined))
+    const res = makeRes()
+
+    await depositHandler(makeReq(vaBody()), res)
+
+    expect(res.status).toHaveBeenCalledWith(200)
+  })
+
+  it("still answers 200 when the match rejects", async () => {
+    ;(matchBridgeDepositNow as jest.Mock).mockRejectedValue(new Error("boom"))
+    const res = makeRes()
+
+    await depositHandler(makeReq(vaBody()), res)
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(res.status).toHaveBeenCalledWith(200)
+  })
+
+  it.each([
+    ["funds_received", { type: "funds_received" }],
+    ["payment_submitted", { type: "payment_submitted" }],
+    ["no tx hash", { receipt: { final_amount: "489.51" } }],
+  ])("does not match a virtual-account event with %s", async (_label, overrides) => {
+    await depositHandler(makeReq(vaBody(overrides)), makeRes())
+
+    expect(matchBridgeDepositNow).not.toHaveBeenCalled()
+  })
+
+  it("does not match a transfer event, which keeps its own reconcile", async () => {
+    await depositHandler(
+      makeReq({
+        ...VALID_BODY,
+        event_object: { ...VALID_EVENT_OBJECT, state: "payment_processed" },
+      }),
+      makeRes(),
+    )
+
+    expect(matchBridgeDepositNow).not.toHaveBeenCalled()
+    expect(reconcileByTxHash).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not match a redelivered event", async () => {
+    mockLockService(false)
+
+    await depositHandler(makeReq(vaBody()), makeRes())
+
+    expect(matchBridgeDepositNow).not.toHaveBeenCalled()
   })
 })
