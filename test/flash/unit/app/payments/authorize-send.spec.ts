@@ -73,6 +73,13 @@ const mockSendGuardMode = jest.fn<SendGuardMode, []>(() => "enforce")
 const mockAccountLimitsOverride = jest.fn<IAccountLimits | null, [AccountLevel]>(
   () => null,
 )
+// The abuse auto-lock has its own spec; here only "was a strike recorded".
+const mockRecordAbuseStrike = jest.fn().mockResolvedValue("counted")
+jest.mock("@app/accounts/record-abuse-strike", () => ({
+  AbuseStrikeReasons: { invalidSendAmount: "invalid-send-amount" },
+  recordAbuseStrike: (args: unknown) => mockRecordAbuseStrike(args),
+}))
+
 jest.mock("@config", () => ({
   ...jest.requireActual("@config"),
   getSendGuardMode: () => mockSendGuardMode(),
@@ -323,6 +330,39 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
         expect(lastOpsEvent()?.step).toBe(SendRejectionReasons.invalidAmount)
       },
     )
+
+    it("counts an invalid amount as an abuse strike against the sender", async () => {
+      await send({ amount: { currency: "USD", cents: -100 } })
+
+      expect(mockRecordAbuseStrike).toHaveBeenCalledTimes(1)
+      expect(mockRecordAbuseStrike).toHaveBeenCalledWith({
+        accountId: ACCOUNT_ID,
+        reason: "invalid-send-amount",
+      })
+    })
+
+    it("counts an invalid amount as a strike even when the attempt budget is spent", async () => {
+      mockConsumeLimiter.mockResolvedValue(new PaymentSendRateLimiterExceededError())
+
+      await send({ amount: { currency: "USD", cents: -100 } })
+
+      expect(mockRecordAbuseStrike).toHaveBeenCalledTimes(1)
+    })
+
+    it("does not count a rate-limited send of a valid amount as a strike", async () => {
+      mockConsumeLimiter.mockResolvedValue(new PaymentSendRateLimiterExceededError())
+
+      await send()
+
+      expect(mockRecordAbuseStrike).not.toHaveBeenCalled()
+    })
+
+    it("does not count an over-limit or an accepted send as a strike", async () => {
+      await send({ amount: { currency: "USD", cents: L0.intraLedgerLimit + 1 } })
+      await send()
+
+      expect(mockRecordAbuseStrike).not.toHaveBeenCalled()
+    })
 
     it("accepts fractional USD cents (USDT settles in micros)", async () => {
       expect(await send({ amount: { currency: "USD", cents: 12.5 } })).toBe(true)

@@ -222,6 +222,9 @@ type YamlSchema = {
     onChainAddressCreateAttempt: RateLimitInput
     paymentSendAttempt: RateLimitInput
     paymentSendDailyAttempt: RateLimitInput
+    // Optional for the same reason as sendGuard below: older deployment yamls
+    // do not carry it and the schema default fills it in.
+    abuseStrike?: RateLimitInput
   }
   accounts: {
     initialStatus: string
@@ -245,6 +248,10 @@ type YamlSchema = {
   // yaml written before this key existed simply doesn't have it; the schema
   // default fills it in and getSendGuardMode() coerces anything unexpected.
   sendGuard?: {
+    mode?: SendGuardMode
+  }
+  // Abuse auto-lock operator switch — see `abuseAutoLock` in src/config/schema.ts.
+  abuseAutoLock?: {
     mode?: SendGuardMode
   }
   spamLimits: {

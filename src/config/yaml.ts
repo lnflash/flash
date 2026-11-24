@@ -270,6 +270,27 @@ export const getSendGuardMode = (): SendGuardMode => {
   return mode === "off" || mode === "enforce" || mode === "log-only" ? mode : "log-only"
 }
 
+/**
+ * Abuse auto-lock switch (src/app/accounts/record-abuse-strike.ts). Anything
+ * unrecognised degrades to `log-only`: a typo in a values file must never turn
+ * into accounts being locked.
+ */
+export const getAbuseAutoLockMode = (): SendGuardMode => {
+  const mode = yamlConfig.abuseAutoLock?.mode
+  return mode === "off" || mode === "enforce" || mode === "log-only" ? mode : "log-only"
+}
+
+// Fallback mirrors the schema default, for a deployment yaml that overrides the
+// whole rateLimits block without this key.
+export const getAbuseStrikeLimits = () =>
+  getRateLimits(
+    yamlConfig.rateLimits.abuseStrike ?? {
+      points: 1,
+      duration: 3600,
+      blockDuration: 3600,
+    },
+  )
+
 // ENG-573 send guard attempt budgets (see src/app/payments/authorize-send.ts).
 export const getPaymentSendAttemptLimits = () =>
   getRateLimits(yamlConfig.rateLimits.paymentSendAttempt)
