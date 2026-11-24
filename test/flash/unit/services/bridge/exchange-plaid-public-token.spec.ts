@@ -106,6 +106,7 @@ const mockAccount = (overrides: Record<string, unknown> = {}) => {
     findById: jest.fn().mockResolvedValue({
       id: ACCOUNT_ID,
       level: 1,
+      status: "active",
       bridgeCustomerId: "cust_1",
       ...overrides,
     }),

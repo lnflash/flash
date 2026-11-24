@@ -138,6 +138,7 @@ const CREATED_AT = new Date("2026-06-05T00:00:00.000Z")
 const mockAccount = {
   id: ACCOUNT_ID,
   level: 2,
+  status: "active",
   bridgeCustomerId: CUSTOMER_ID,
   bridgeEthereumAddress: ETHEREUM_ADDRESS,
   bridgeKycStatus: "approved",

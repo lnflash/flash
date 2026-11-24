@@ -72,6 +72,7 @@ jest.mock("@services/mongoose/bridge-accounts", () => ({
 jest.mock("@services/bridge/client", () => ({
   __esModule: true,
   default: {
+    createKycLink: jest.fn(),
     createVirtualAccount: jest.fn(),
     createExternalAccount: jest.fn(),
     deleteExternalAccount: jest.fn(),
@@ -158,8 +159,13 @@ import { AccountsRepository } from "@services/mongoose/accounts"
 import { WalletsRepository } from "@services/mongoose/wallets"
 import { getBalanceForWallet } from "@app/wallets/get-balance-for-wallet"
 import IbexClient from "@services/ibex/client"
-import { RepositoryError } from "@domain/errors"
+import { CouldNotFindError, InactiveAccountError, RepositoryError } from "@domain/errors"
 import { AccountCashoutHeldError } from "@domain/accounts"
+import { IdentityRepository } from "@services/kratos"
+import {
+  BridgeKycEmailInUseError,
+  BridgeKycEmailNotVerifiedError,
+} from "@services/bridge/errors"
 import { sendBridgeWithdrawalNotificationBestEffort } from "@app/bridge/send-withdrawal-notification"
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -184,6 +190,7 @@ const STALE_EXTERNAL_ACCOUNT_ID = "stale-ext-account-001"
 const mockAccount = {
   id: ACCOUNT_ID,
   level: 2,
+  status: "active",
   bridgeCustomerId: CUSTOMER_ID,
   bridgeEthereumAddress: ETHEREUM_ADDRESS,
   bridgeKycStatus: "approved",
@@ -397,6 +404,182 @@ describe("deriveWithdrawalIdempotencyKey", () => {
 /**
  * Linear ENG-296 — ETH-USDT Cash Wallet + Bridge virtual account
  */
+describe("initiateKyc — whose email, whose customer", () => {
+  const OWN_EMAIL = "owner@example.com"
+  const NEW_CUSTOMER = "cust-new"
+  const EXISTING_CUSTOMER = "cust-existing"
+  const kycAccount = {
+    ...mockAccount,
+    bridgeCustomerId: undefined,
+    bridgeKycStatus: undefined,
+    username: "alice",
+  }
+  const links = (customer_id: string) => ({
+    kyc_link: `https://bridge.example/kyc/${customer_id}`,
+    tos_link: `https://bridge.example/tos/${customer_id}`,
+    customer_id,
+  })
+  const existingLinkError = () =>
+    Object.assign(new Error("kyc link exists"), {
+      statusCode: 400,
+      response: { existing_kyc_link: links(EXISTING_CUSTOMER) },
+    })
+
+  let updateBridgeFields: jest.Mock
+  let findByBridgeCustomerId: jest.Mock
+  const createKycLink = BridgeClient.createKycLink as jest.Mock
+
+  const setIdentity = (identity: { email?: string; emailVerified?: boolean }) =>
+    (IdentityRepository as jest.Mock).mockReturnValue({
+      getIdentity: jest.fn().mockResolvedValue(identity),
+    })
+
+  const start = (email?: string) =>
+    BridgeService.initiateKyc({
+      accountId: ACCOUNT_ID as AccountId,
+      email,
+      full_name: "Alice A",
+    })
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    updateBridgeFields = jest.fn().mockResolvedValue(kycAccount)
+    findByBridgeCustomerId = jest.fn().mockResolvedValue(new CouldNotFindError())
+    ;(AccountsRepository as jest.Mock).mockReturnValue({
+      findById: jest.fn().mockResolvedValue(kycAccount),
+      updateBridgeFields,
+      findByBridgeCustomerId,
+    })
+    setIdentity({ email: OWN_EMAIL, emailVerified: true })
+    createKycLink.mockResolvedValue(links(NEW_CUSTOMER))
+  })
+
+  it("sends the account's own verified email to Bridge, never the typed one", async () => {
+    const result = expectSuccess(await start("victim@example.com"))
+
+    expect(createKycLink).toHaveBeenCalledWith(
+      expect.objectContaining({ email: OWN_EMAIL }),
+    )
+    expect(result.customerId).toBe(NEW_CUSTOMER)
+    expect(updateBridgeFields).toHaveBeenCalledWith(ACCOUNT_ID, {
+      bridgeCustomerId: NEW_CUSTOMER,
+      bridgeKycStatus: "open",
+    })
+  })
+
+  it.each([
+    ["no email on the identity", {}],
+    ["an unverified email", { email: "victim@example.com", emailVerified: false }],
+  ])(
+    "refuses with %s, without calling Bridge, even when an email is typed",
+    async (_, identity) => {
+      setIdentity(identity)
+
+      const result = await start("victim@example.com")
+
+      expect(result).toBeInstanceOf(BridgeKycEmailNotVerifiedError)
+      expect(createKycLink).not.toHaveBeenCalled()
+      expect(updateBridgeFields).not.toHaveBeenCalled()
+    },
+  )
+
+  describe("Bridge already has a customer for the email", () => {
+    beforeEach(() => createKycLink.mockRejectedValue(existingLinkError()))
+
+    it("refuses and returns no link when another active account holds that customer", async () => {
+      findByBridgeCustomerId.mockResolvedValue({ id: "other-account", status: "active" })
+
+      const result = await start()
+
+      expect(result).toBeInstanceOf(BridgeKycEmailInUseError)
+      expect(findByBridgeCustomerId).toHaveBeenCalledWith(EXISTING_CUSTOMER)
+      expect(updateBridgeFields).not.toHaveBeenCalled()
+    })
+
+    it("refuses when the other holder is locked: only a closed account frees the customer", async () => {
+      findByBridgeCustomerId.mockResolvedValue({ id: "other-account", status: "locked" })
+
+      expect(await start()).toBeInstanceOf(BridgeKycEmailInUseError)
+      expect(updateBridgeFields).not.toHaveBeenCalled()
+    })
+
+    it("adopts the customer when nobody holds it", async () => {
+      const result = expectSuccess(await start())
+
+      expect(result.customerId).toBe(EXISTING_CUSTOMER)
+      expect(updateBridgeFields).toHaveBeenCalledWith(ACCOUNT_ID, {
+        bridgeCustomerId: EXISTING_CUSTOMER,
+        bridgeKycStatus: "not_started",
+      })
+    })
+
+    it("adopts the customer when its only holder is a closed account (same person signing up again)", async () => {
+      findByBridgeCustomerId.mockResolvedValue({ id: "old-account", status: "closed" })
+
+      expectSuccess(await start())
+      expect(updateBridgeFields).toHaveBeenCalledTimes(1)
+    })
+
+    it("adopts the customer when this account already holds it", async () => {
+      findByBridgeCustomerId.mockResolvedValue({ id: ACCOUNT_ID, status: "active" })
+
+      expectSuccess(await start())
+      expect(updateBridgeFields).toHaveBeenCalledTimes(1)
+    })
+
+    it("does not write when the holder lookup fails", async () => {
+      findByBridgeCustomerId.mockResolvedValue(new RepositoryError("down"))
+
+      expect(await start()).toBeInstanceOf(RepositoryError)
+      expect(updateBridgeFields).not.toHaveBeenCalled()
+    })
+  })
+
+  it("refuses a freshly created link too, if another account already holds that customer", async () => {
+    findByBridgeCustomerId.mockResolvedValue({ id: "other-account", status: "active" })
+
+    expect(await start()).toBeInstanceOf(BridgeKycEmailInUseError)
+    expect(updateBridgeFields).not.toHaveBeenCalled()
+  })
+})
+
+describe("Bridge operations on an account that is not active", () => {
+  const locked = { ...mockAccount, status: "locked" }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    ;(AccountsRepository as jest.Mock).mockReturnValue({
+      findById: jest.fn().mockResolvedValue(locked),
+      updateBridgeFields: jest.fn(),
+    })
+  })
+
+  it.each([
+    [
+      "initiateKyc",
+      () =>
+        BridgeService.initiateKyc({ accountId: ACCOUNT_ID as AccountId, full_name: "A" }),
+    ],
+    ["getKycStatus", () => BridgeService.getKycStatus(ACCOUNT_ID as AccountId)],
+    [
+      "createVirtualAccount",
+      () => BridgeService.createVirtualAccount(ACCOUNT_ID as AccountId),
+    ],
+    [
+      "getExternalAccounts",
+      () => BridgeService.getExternalAccounts(ACCOUNT_ID as AccountId),
+    ],
+    ["getWithdrawals", () => BridgeService.getWithdrawals(ACCOUNT_ID as AccountId)],
+  ])("%s is refused for a locked account and never reaches Bridge", async (_, call) => {
+    const result = await call()
+
+    expect(result).toBeInstanceOf(InactiveAccountError)
+    expect(BridgeClient.createKycLink).not.toHaveBeenCalled()
+    expect(BridgeClient.getCustomer).not.toHaveBeenCalled()
+    expect(BridgeClient.createVirtualAccount).not.toHaveBeenCalled()
+  })
+})
+
 describe("createVirtualAccount — ETH-USDT Cash Wallet provisioning (ENG-296)", () => {
   beforeEach(() => {
     jest.clearAllMocks()
