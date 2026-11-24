@@ -23,7 +23,7 @@ import {
 } from "@services/kratos"
 
 import { notifyOpsEvent } from "@services/alerts/ops-events"
-import { WalletsRepository } from "@services/mongoose"
+import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import {
   addAttributesToCurrentSpan,
   recordExceptionInCurrentSpan,
@@ -37,10 +37,13 @@ import { IPMetadataAuthorizer } from "@domain/accounts-ips/ip-metadata-authorize
 import { getAccountsOnboardConfig } from "@config"
 
 import {
+  CouldNotFindError,
+  InactiveAccountError,
   UnauthorizedIPForOnboardingError,
   MissingIPMetadataError,
   InvalidIpMetadataError,
 } from "@domain/errors"
+import { AccountStatus } from "@domain/accounts/primitives"
 import {
   InvalidPhoneForOnboardingError,
   InvalidPhoneMetadataForOnboardingError,
@@ -56,6 +59,44 @@ import {
   rewardFailedLoginAttemptPerIpLimits,
   rewardFailedLoginAttemptPerLoginIdentifierLimits,
 } from "./ratelimits"
+
+/**
+ * A locked account does not get a new session. Called on every login path for
+ * an identity that already exists, BEFORE the session is created, so a lock
+ * holds across logins and revoking a locked account's sessions is final.
+ *
+ * Only `locked` is refused. An identity with no account yet (signup in flight)
+ * passes, and so do the other statuses: what they may do is decided per
+ * operation, as before.
+ */
+const refuseLockedAccount = async (
+  kratosUserId: UserId,
+): Promise<true | ApplicationError> => {
+  const account = await AccountsRepository().findByUserId(kratosUserId)
+  if (account instanceof CouldNotFindError) return true
+  if (account instanceof Error) return account
+  if (account.status === AccountStatus.Locked) {
+    addAttributesToCurrentSpan({ "login.refusedLockedAccount": true })
+    // The REST login routes send an unmapped error's message to the caller, so
+    // this one carries a sentence, not the account id.
+    return new InactiveAccountError("Account is inactive.")
+  }
+  return true
+}
+
+/**
+ * Same check for the login paths that know the identifier (email, device
+ * username) but not yet the identity id. An identifier Kratos does not know is
+ * a new user and passes.
+ */
+const refuseLockedAccountForIdentifier = async (
+  identifier: string,
+): Promise<true | ApplicationError> => {
+  const userId = await IdentityRepository().getUserIdFromIdentifier(identifier)
+  if (userId instanceof IdentifierNotFoundError) return true
+  if (userId instanceof Error) return userId
+  return refuseLockedAccount(userId)
+}
 
 export const loginWithPhoneToken = async ({
   phone,
@@ -109,6 +150,9 @@ export const loginWithPhoneToken = async ({
   }
 
   if (userId instanceof Error) return userId
+
+  const notLocked = await refuseLockedAccount(userId)
+  if (notLocked instanceof Error) return notLocked
 
   const kratosResult = await authService.loginToken({ phone })
   if (kratosResult instanceof Error) return kratosResult
@@ -168,6 +212,9 @@ export const loginWithPhoneCookie = async ({
 
   if (userId instanceof Error) return userId
 
+  const notLocked = await refuseLockedAccount(userId)
+  if (notLocked instanceof Error) return notLocked
+
   const kratosResult = await authService.loginCookie({ phone })
   if (kratosResult instanceof Error) return kratosResult
   return kratosResult
@@ -207,6 +254,9 @@ export const loginWithEmailToken = async ({
 
   await rewardFailedLoginAttemptPerIpLimits(ip)
 
+  const notLocked = await refuseLockedAccountForIdentifier(email)
+  if (notLocked instanceof Error) return notLocked
+
   const res = await authServiceEmail.loginToken({ email })
   if (res instanceof Error) return res
   return { authToken: res.authToken, totpRequired }
@@ -245,6 +295,9 @@ export const loginWithEmailCookie = async ({
   if (isEmailVerified === false) return new EmailUnverifiedError()
 
   await rewardFailedLoginAttemptPerIpLimits(ip)
+
+  const notLocked = await refuseLockedAccountForIdentifier(email)
+  if (notLocked instanceof Error) return notLocked
 
   const kratosResult = await authServiceEmail.loginCookie({ email })
   if (kratosResult instanceof Error) return kratosResult
@@ -419,6 +472,9 @@ export const loginWithDevice = async ({
       return new UnauthorizedIPForOnboardingError(authorizedIPMetadata)
     }
   }
+
+  const notLocked = await refuseLockedAccountForIdentifier(username)
+  if (notLocked instanceof Error) return notLocked
 
   const authService = AuthWithUsernamePasswordDeviceIdService()
   const res = await authService.createIdentityWithSession({
