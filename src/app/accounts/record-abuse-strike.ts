@@ -52,7 +52,12 @@ export type AbuseStrikeReason =
 export const AUTO_LOCK_COMMENT_PREFIX = "auto-lock:"
 
 export type AbuseStrikeOutcome =
-  "off" | "counted" | "would-lock" | "locked" | "already-inactive" | "failed"
+  | "off"
+  | "counted"
+  | "would-lock"
+  | "locked"
+  | "already-inactive"
+  | "failed"
 
 const fault = (error: Error, accountId: AccountId, step: string): "failed" => {
   recordExceptionInCurrentSpan({
