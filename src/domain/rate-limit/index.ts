@@ -55,6 +55,7 @@ export const RateLimitPrefix = {
   bankAccountManage: "bank_account_manage",
   paymentSend: "payment_send",
   paymentSendDaily: "payment_send_daily",
+  abuseStrike: "abuse_strike",
   usernameSearch: "username_search",
 } as const
 

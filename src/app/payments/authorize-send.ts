@@ -1,5 +1,6 @@
 import { getAccountLimits, getSendGuardMode } from "@config"
 
+import { AbuseStrikeReasons, recordAbuseStrike } from "@app/accounts/record-abuse-strike"
 import { usdFromBtcMidPriceFn } from "@app/prices/mid-price"
 
 import { effectiveAccountLevel } from "@domain/accounts"
@@ -658,6 +659,21 @@ export const authorizeSend = async (
     return outcome
   })
   if (outcome === true) return true
+
+  // An invalid amount is something the apps cannot send, so it also counts
+  // towards the abuse auto-lock, including one hidden behind a spent or
+  // unavailable attempt budget (`alwaysEnforced`). Not awaited:
+  // `recordAbuseStrike` never rejects, and its Redis and Mongo work must not
+  // sit in front of this response.
+  if (
+    outcome.reason === SendRejectionReasons.invalidAmount ||
+    outcome.alwaysEnforced === true
+  ) {
+    recordAbuseStrike({
+      accountId: args.senderAccount.id,
+      reason: AbuseStrikeReasons.invalidSendAmount,
+    })
+  }
 
   return isRejectionEnforced({ mode, rejection: outcome }) ? outcome.error : true
 }
