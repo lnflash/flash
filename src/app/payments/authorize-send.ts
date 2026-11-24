@@ -153,7 +153,7 @@ type SendRejection = {
   reason: SendRejectionReason
   cents?: number
   // Refused in every mode but `off`, whatever the reason says. Set when an
-  // exhausted or unavailable attempt budget pre-empted the amount check on a
+  // exhausted or unavailable attempt budget ran ahead of the amount check on a
   // send whose amount was invalid: the reported reason stays the budget's (so
   // the coalesced feed entry bounds a looping caller), but the send must not go
   // through in log-only any more than a bare `invalid-amount` would.
@@ -452,7 +452,7 @@ const runInGuardSpan = async <T>(entryPoint: string, fn: () => Promise<T>): Prom
  * Whether a rejection actually stops the send. `enforce` stops all of them;
  * `log-only` stops only `invalid-amount`, the one reason that cannot be a real
  * payment and so has nothing for the rollout to measure, and a budget
- * rejection that pre-empted an invalid amount (`alwaysEnforced`). Both the
+ * rejection that ran ahead of an invalid amount (`alwaysEnforced`). Both the
  * verdict and the ops-feed wording read this, so the feed never says
  * `would-reject` about a send that was in fact refused.
  */
