@@ -73,6 +73,13 @@ const mockSendGuardMode = jest.fn<SendGuardMode, []>(() => "enforce")
 const mockAccountLimitsOverride = jest.fn<IAccountLimits | null, [AccountLevel]>(
   () => null,
 )
+// The abuse auto-lock has its own spec; here only "was a strike recorded".
+const mockRecordAbuseStrike = jest.fn().mockResolvedValue("counted")
+jest.mock("@app/accounts/record-abuse-strike", () => ({
+  AbuseStrikeReasons: { invalidSendAmount: "invalid-send-amount" },
+  recordAbuseStrike: (args: unknown) => mockRecordAbuseStrike(args),
+}))
+
 jest.mock("@config", () => ({
   ...jest.requireActual("@config"),
   getSendGuardMode: () => mockSendGuardMode(),
@@ -323,6 +330,39 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
         expect(lastOpsEvent()?.step).toBe(SendRejectionReasons.invalidAmount)
       },
     )
+
+    it("counts an invalid amount as an abuse strike against the sender", async () => {
+      await send({ amount: { currency: "USD", cents: -100 } })
+
+      expect(mockRecordAbuseStrike).toHaveBeenCalledTimes(1)
+      expect(mockRecordAbuseStrike).toHaveBeenCalledWith({
+        accountId: ACCOUNT_ID,
+        reason: "invalid-send-amount",
+      })
+    })
+
+    it("counts an invalid amount as a strike even when the attempt budget is spent", async () => {
+      mockConsumeLimiter.mockResolvedValue(new PaymentSendRateLimiterExceededError())
+
+      await send({ amount: { currency: "USD", cents: -100 } })
+
+      expect(mockRecordAbuseStrike).toHaveBeenCalledTimes(1)
+    })
+
+    it("does not count a rate-limited send of a valid amount as a strike", async () => {
+      mockConsumeLimiter.mockResolvedValue(new PaymentSendRateLimiterExceededError())
+
+      await send()
+
+      expect(mockRecordAbuseStrike).not.toHaveBeenCalled()
+    })
+
+    it("does not count an over-limit or an accepted send as a strike", async () => {
+      await send({ amount: { currency: "USD", cents: L0.intraLedgerLimit + 1 } })
+      await send()
+
+      expect(mockRecordAbuseStrike).not.toHaveBeenCalled()
+    })
 
     it("accepts fractional USD cents (USDT settles in micros)", async () => {
       expect(await send({ amount: { currency: "USD", cents: 12.5 } })).toBe(true)
@@ -893,6 +933,92 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
           step: SendRejectionReasons.overDailyLimit,
           error: "IntraledgerLimitsExceededError",
           meta: { level: "0", mode: "log-only" },
+        })
+      })
+
+      it.each([
+        { currency: "USD", cents: -100 } as const,
+        { currency: "USD", cents: 0 } as const,
+        { currency: "BTC", sats: -1 } as const,
+        { currency: "BTC", sats: 1.5 } as const,
+      ])(
+        "still refuses an invalid amount %p, and the feed says rejected",
+        async (amount) => {
+          const result = await send({ amount })
+
+          expect(result).toBeInstanceOf(InvalidSendAmountError)
+          expect(lastOpsEvent()).toMatchObject({
+            phase: "rejected",
+            status: "failed",
+            step: SendRejectionReasons.invalidAmount,
+            meta: { mode: "log-only" },
+          })
+        },
+      )
+
+      // The attempt budget runs before the amount check, so a spent or failing
+      // budget used to return first and log-only waved the send through: ten
+      // refused `-1.00` sends spent the 10/min budget and the eleventh reached
+      // IBEX. The budget's reason is kept (it is the coalesced one, so a
+      // looping prober cannot flood the ops queue), but the send is refused.
+      it("still refuses an invalid amount when the attempt budget is spent", async () => {
+        mockConsumeLimiter.mockResolvedValue(new PaymentSendRateLimiterExceededError())
+
+        const result = await send({ amount: { currency: "USD", cents: -100 } })
+
+        expect(result).toBeInstanceOf(PaymentSendRateLimiterExceededError)
+        expect(lastOpsEvent()).toMatchObject({
+          phase: "rejected",
+          status: "failed",
+          step: SendRejectionReasons.rateLimited,
+          meta: { mode: "log-only" },
+        })
+
+        // A looping prober stays inside the coalesced ceiling: the next refusal
+        // in the window is refused too, but posts no further event.
+        mockNotifyOpsEvent.mockClear()
+        expect(await send({ amount: { currency: "USD", cents: -100 } })).toBeInstanceOf(
+          PaymentSendRateLimiterExceededError,
+        )
+        expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+      })
+
+      it("still refuses an invalid amount when the attempt budget is unavailable, without paging", async () => {
+        mockConsumeLimiter.mockResolvedValue(
+          new UnknownRateLimitServiceError("redis down"),
+        )
+
+        const result = await send({
+          amount: { currency: "BTC", sats: -1 },
+          kind: "lightning",
+        })
+
+        expect(result).toBeInstanceOf(SendLimitsUnavailableError)
+        expect(lastOpsEvent()).toMatchObject({
+          phase: "rejected",
+          status: "failed",
+          step: SendRejectionReasons.limitsUnavailable,
+          meta: { mode: "log-only" },
+        })
+        // Log-only: a malformed send refused during a Redis outage is not the
+        // guard blocking real sends, so it records at Warn, never Critical.
+        expect(mockRecordExceptionInCurrentSpan).toHaveBeenCalledWith(
+          expect.objectContaining({ level: ErrorLevel.Warn }),
+        )
+        expect(mockRecordExceptionInCurrentSpan).not.toHaveBeenCalledWith(
+          expect.objectContaining({ level: ErrorLevel.Critical }),
+        )
+      })
+
+      it("lets a valid amount through when the attempt budget is unavailable", async () => {
+        mockConsumeLimiter.mockResolvedValue(
+          new UnknownRateLimitServiceError("redis down"),
+        )
+
+        expect(await send()).toBe(true)
+        expect(lastOpsEvent()).toMatchObject({
+          phase: "would-reject",
+          step: SendRejectionReasons.limitsUnavailable,
         })
       })
 

@@ -391,6 +391,14 @@ export const configSchema = {
           ...rateLimitConfigSchema,
           default: { points: 200, duration: 86400, blockDuration: 86400 },
         },
+        // Abuse auto-lock (src/app/accounts/record-abuse-strike.ts): how many
+        // strikes an account may collect inside `duration` before it is locked.
+        // `points` is the number TOLERATED, so 1 locks on the second strike.
+        // `blockDuration` matches `duration` for the reason given above.
+        abuseStrike: {
+          ...rateLimitConfigSchema,
+          default: { points: 1, duration: 3600, blockDuration: 3600 },
+        },
       },
       required: [
         "requestCodePerLoginIdentifier",
@@ -576,6 +584,24 @@ export const configSchema = {
     // log-only: a typo in a values file must not turn the guard into a
     // fail-closed wall in front of every send.
     sendGuard: {
+      type: "object",
+      properties: {
+        mode: {
+          type: "string",
+          enum: ["off", "log-only", "enforce"],
+          default: "log-only",
+        },
+      },
+      additionalProperties: false,
+      default: { mode: "log-only" },
+    },
+    // Abuse auto-lock operator switch, same three values and the same
+    // fail-open coercion as sendGuard (getAbuseAutoLockMode()).
+    //   off       — strikes are not counted.
+    //   log-only  — DEFAULT. Strikes are counted and crossing the threshold
+    //               posts a `would-auto-lock` ops event; nothing is locked.
+    //   enforce   — the account is locked and its API keys are revoked.
+    abuseAutoLock: {
       type: "object",
       properties: {
         mode: {

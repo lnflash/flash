@@ -61,8 +61,19 @@ The checks:
 | mode       | behaviour                                                                                              |
 | ---------- | ------------------------------------------------------------------------------------------------------ |
 | `off`      | Returns immediately. No Redis, no price lookup, no ops event, no span attribute. Pre-ENG-573 behaviour **for the guard**, but not for the level-0 default: an account with no `level` field is still capped at the level-0 limits, unconditionally, by Galoy's own checker. See [What `off` does not cover](#what-off-does-not-cover). |
-| `log-only` | All checks run, every would-be rejection posts a `transfer / would-reject` ops event, the send proceeds. Includes `lnInvoicePaymentSend`'s bolt11 decode gate: an undecodable or no-amount invoice is reported and still handed to IBEX, exactly as before ENG-573. |
+| `log-only` | All checks run except one: every would-be rejection posts a `transfer / would-reject` ops event and the send proceeds, **except `invalid-amount`, which is refused (see below)**. Includes `lnInvoicePaymentSend`'s bolt11 decode gate: an undecodable or no-amount invoice is reported and still handed to IBEX, exactly as before ENG-573. |
 | `enforce`  | Rejections are real.                                                                                     |
+
+One check is real in `log-only` as well as in `enforce`: **`invalid-amount`**. A
+zero, negative, non-finite or fractional-sat amount is never a payment, so there
+is no real traffic to measure before refusing it, and letting it through left
+the provider as the only thing that refused a `-1.00` send (prod probes of
+2026-11-14 and 2026-11-24). Its ops event reads `transfer / rejected`, with
+`mode: log-only` in the meta. `off` turns it off with everything else. An
+exhausted or unavailable attempt budget does not let an invalid amount through:
+such a send is refused and reported under the budget's reason (`rate-limited` or
+`limits-unavailable`) as `rejected`, so the coalesced feed entry still bounds a
+looping caller.
 
 Anything unrecognised degrades to `log-only`. The failure mode of this switch
 must be "the guard does not block", never "every send is refused".

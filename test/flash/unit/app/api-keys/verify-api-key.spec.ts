@@ -7,7 +7,11 @@ import {
   generateApiKey,
   toApiKeyId,
 } from "@domain/api-keys"
-import { CouldNotFindError, UnknownRepositoryError } from "@domain/errors"
+import {
+  CouldNotFindError,
+  InactiveAccountError,
+  UnknownRepositoryError,
+} from "@domain/errors"
 import { AccountsRepository } from "@services/mongoose"
 import { ApiKeysRepository } from "@services/mongoose/api-keys"
 
@@ -73,7 +77,9 @@ describe("verifyApiKey", () => {
       revoke: jest.fn(),
       revokeAll: jest.fn(),
     })
-    findById = jest.fn().mockResolvedValue({ id: accountId, kratosUserId })
+    findById = jest
+      .fn()
+      .mockResolvedValue({ id: accountId, kratosUserId, status: "active" })
     mockedAccountsRepository.mockReturnValue({
       findById,
     } as unknown as ReturnType<typeof AccountsRepository>)
@@ -88,6 +94,19 @@ describe("verifyApiKey", () => {
     expect(result.kratosUserId).toBe(kratosUserId)
     expect(result.apiKey.keyId).toBe(generated.keyId)
   })
+
+  it.each(["locked", "closed", "pending", "new"])(
+    "rejects a valid key whose account is %s, and does not record a use",
+    async (status) => {
+      findByKeyId.mockResolvedValue(storedApiKey({ lastUsedAt: null }))
+      findById.mockResolvedValue({ id: accountId, kratosUserId, status })
+
+      const result = await verifyApiKey({ rawKey: generated.fullKey })
+
+      expect(result).toBeInstanceOf(InactiveAccountError)
+      expect(updateLastUsedAt).not.toHaveBeenCalled()
+    },
+  )
 
   it("updates lastUsedAt when stale and skips it when fresh", async () => {
     findByKeyId.mockResolvedValue(
