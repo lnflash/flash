@@ -6,6 +6,8 @@ import {
   ApiKeyIpNotAllowedError,
   ApiKeySecretMismatchError,
 } from "@domain/api-keys"
+import { AccountStatus } from "@domain/accounts/primitives"
+import { InactiveAccountError } from "@domain/errors"
 import { DomainError } from "@domain/shared"
 import { AccountsRepository } from "@services/mongoose"
 import { ApiKeysRepository } from "@services/mongoose/api-keys"
@@ -57,6 +59,14 @@ export const verifyApiKey = async ({
   const account = await AccountsRepository().findById(apiKey.accountId)
   if (account instanceof Error) {
     return account
+  }
+
+  // A key is only as good as its account. Locking or closing an account must
+  // stop its keys on the very next request: before this check a locked
+  // account's keys went on authenticating until each was revoked by hand
+  // (prod, 2026-11-24).
+  if (account.status !== AccountStatus.Active) {
+    return new InactiveAccountError(account.id)
   }
 
   if (

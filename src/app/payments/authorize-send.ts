@@ -78,6 +78,13 @@ import {
  *             distribution, then flip to enforce.
  *   enforce   rejections are real.
  *
+ * ONE check is real in `log-only` too: `invalid-amount` (see
+ * `isRejectionEnforced`). A zero, negative, non-finite or fractional-sat amount
+ * is never a payment, so there is no real traffic to measure before refusing
+ * it, and passing it on made the provider the only thing between a `-1.00` send
+ * and the ledger (prod probes of 2026-11-14 and 2026-11-24). `off` still turns
+ * it off with everything else.
+ *
  * Fails closed *when enforcing*: no limit configured for the level, no BTC→USD
  * price for a sats amount, or a rate-limit store fault all reject the send with
  * `SendLimitsUnavailableError`. Those are infrastructure faults, not user error
@@ -415,6 +422,21 @@ const runInGuardSpan = async <T>(entryPoint: string, fn: () => Promise<T>): Prom
     fn,
   )
 
+/**
+ * Whether a rejection actually stops the send. `enforce` stops all of them;
+ * `log-only` stops only `invalid-amount`, the one reason that cannot be a real
+ * payment and so has nothing for the rollout to measure. Both the verdict and
+ * the ops-feed wording read this, so the feed never says `would-reject` about a
+ * send that was in fact refused.
+ */
+const isRejectionEnforced = ({
+  mode,
+  reason,
+}: {
+  mode: SendGuardMode
+  reason: SendRejectionReason
+}): boolean => mode === "enforce" || reason === SendRejectionReasons.invalidAmount
+
 const report = ({
   rejection,
   mode,
@@ -429,7 +451,7 @@ const report = ({
   kind: SendKind
 }): void => {
   const { error, reason, cents } = rejection
-  const enforcing = mode === "enforce"
+  const enforcing = isRejectionEnforced({ mode, reason })
   const level = effectiveAccountLevel(senderAccount.level)
 
   // The census the rollout is read from. Unconditional and unthrottled, unlike
@@ -574,7 +596,7 @@ export const gateSend = async ({
     return rejection
   })
 
-  return mode === "enforce" ? rejection.error : true
+  return isRejectionEnforced({ mode, reason: rejection.reason }) ? rejection.error : true
 }
 
 export const authorizeSend = async (
@@ -605,5 +627,5 @@ export const authorizeSend = async (
   })
   if (outcome === true) return true
 
-  return mode === "enforce" ? outcome.error : true
+  return isRejectionEnforced({ mode, reason: outcome.reason }) ? outcome.error : true
 }

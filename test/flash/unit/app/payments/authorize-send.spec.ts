@@ -896,6 +896,26 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
         })
       })
 
+      it.each([
+        { currency: "USD", cents: -100 } as const,
+        { currency: "USD", cents: 0 } as const,
+        { currency: "BTC", sats: -1 } as const,
+        { currency: "BTC", sats: 1.5 } as const,
+      ])(
+        "still refuses an invalid amount %p, and the feed says rejected",
+        async (amount) => {
+          const result = await send({ amount })
+
+          expect(result).toBeInstanceOf(InvalidSendAmountError)
+          expect(lastOpsEvent()).toMatchObject({
+            phase: "rejected",
+            status: "failed",
+            step: SendRejectionReasons.invalidAmount,
+            meta: { mode: "log-only" },
+          })
+        },
+      )
+
       it("does not block on a fail-closed condition either — it only reports it", async () => {
         mockUsdFromBtcMidPriceFn.mockResolvedValue(new DealerPriceServiceError("offline"))
 

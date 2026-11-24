@@ -64,6 +64,13 @@ The checks:
 | `log-only` | All checks run, every would-be rejection posts a `transfer / would-reject` ops event, the send proceeds. Includes `lnInvoicePaymentSend`'s bolt11 decode gate: an undecodable or no-amount invoice is reported and still handed to IBEX, exactly as before ENG-573. |
 | `enforce`  | Rejections are real.                                                                                     |
 
+One check is real in `log-only` as well as in `enforce`: **`invalid-amount`**. A
+zero, negative, non-finite or fractional-sat amount is never a payment, so there
+is no real traffic to measure before refusing it, and letting it through left
+the provider as the only thing that refused a `-1.00` send (prod probes of
+2026-11-14 and 2026-11-24). Its ops event reads `transfer / rejected`, with
+`mode: log-only` in the meta. `off` turns it off with everything else.
+
 Anything unrecognised degrades to `log-only`. The failure mode of this switch
 must be "the guard does not block", never "every send is refused".
 
