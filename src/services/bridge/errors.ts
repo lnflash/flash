@@ -124,6 +124,17 @@ export class BridgeKycEmailNotVerifiedError extends BridgeError {
   }
 }
 
+// The email already has a Bridge customer that this account may not take
+// over: it is held by another Flash account. Deliberately says nothing about
+// who holds it, and carries no KYC link.
+export class BridgeKycEmailInUseError extends BridgeError {
+  constructor(
+    message: string = "This email is already used for identity verification on another account. Contact support.",
+  ) {
+    super(message)
+  }
+}
+
 export class BridgeKycCountryNotSupportedError extends BridgeError {
   readonly countryCode: string
   readonly countryName: string | undefined

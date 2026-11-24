@@ -19,9 +19,10 @@ import {
 import { baseLogger } from "@services/logger"
 import { IpFetcher } from "@services/ipfetcher"
 
-import { AccountCashoutHeldError } from "@domain/accounts"
+import { AccountCashoutHeldError, AccountValidator } from "@domain/accounts"
+import { AccountStatus } from "@domain/accounts/primitives"
 import { CacheServiceError } from "@domain/cache"
-import { RepositoryError } from "@domain/errors"
+import { CouldNotFindError, RepositoryError } from "@domain/errors"
 import { isPrivateIp } from "@domain/accounts-ips"
 import { IpFetcherServiceError } from "@domain/ipfetcher"
 import {
@@ -49,6 +50,8 @@ import {
   BridgeKycPendingError,
   BridgeKycRejectedError,
   BridgeKycOffboardedError,
+  BridgeKycEmailInUseError,
+  BridgeKycEmailNotVerifiedError,
   BridgeCustomerNotFoundError,
   BridgeWithdrawalNotFoundError,
   BridgeWithdrawalAlreadyInitiatedError,
@@ -299,9 +302,20 @@ const checkBridgeEnabled = (): true | BridgeDisabledError => {
 
 const checkAccountLevel = async (
   accountId: AccountId,
-): Promise<Account | BridgeAccountLevelError | RepositoryError> => {
+): Promise<Account | BridgeAccountLevelError | RepositoryError | ValidationError> => {
   const account = await AccountsRepository().findById(accountId)
   if (account instanceof Error) return account
+
+  // Every user-facing Bridge operation comes through here, so this is where a
+  // locked or closed account is stopped.
+  const isActive = AccountValidator(account).isActive()
+  if (isActive instanceof Error) {
+    baseLogger.warn(
+      { accountId, status: account.status },
+      "Bridge operation refused: account is not active",
+    )
+    return isActive
+  }
   if (account.level < 1) {
     const err = new BridgeAccountLevelError()
     baseLogger.warn(
@@ -357,21 +371,54 @@ const requireApprovedBridgeCustomer = async ({
   return customerId
 }
 
+/**
+ * A Bridge customer belongs to one Flash account. Before `customerId` is
+ * written onto `accountId`, make sure no OTHER live account already holds it.
+ *
+ * A closed account does not count: a user who closed their account and signed
+ * up again with the same verified email gets their customer back.
+ *
+ * `findByBridgeCustomerId` returns one match. That is enough here: the write
+ * this guards is the only way a customer id gets onto an account, so with the
+ * guard in place there is at most one live holder.
+ */
+const customerHeldByAnotherAccount = async ({
+  accountId,
+  customerId,
+}: {
+  accountId: AccountId
+  customerId: BridgeCustomerId
+}): Promise<boolean | RepositoryError> => {
+  const holder = await AccountsRepository().findByBridgeCustomerId(customerId)
+  if (holder instanceof CouldNotFindError) return false
+  if (holder instanceof Error) return holder
+  if (holder.id === accountId) return false
+  return holder.status !== AccountStatus.Closed
+}
+
 // ============ Service Methods ============
 
 /**
  * Initiates KYC process for an account
  * - Creates Bridge customer if not exists
  * - Returns KYC and TOS links
+ *
+ * The email sent to Bridge is ALWAYS the account's own verified email; an
+ * email supplied by the caller is not used. Bridge keys a customer on email,
+ * so the email decides which customer an account ends up with. Two rules:
+ *   1. no verified email on the identity, no KYC link;
+ *   2. a customer id is never written onto an account while another live
+ *      account holds it, and in that case no link is returned either.
  */
 const initiateKyc = async ({
   accountId,
-  email,
   type,
   full_name,
 }: {
   accountId: AccountId
-  email: string
+  // Accepted and ignored. Still declared so existing callers compile and the
+  // GraphQL input keeps its shape for released app versions.
+  email?: string
   type?: "individual" | "business"
   full_name: string
 }): Promise<InitiateKycResult | Error> => {
@@ -391,12 +438,34 @@ const initiateKyc = async ({
 
   if (identity instanceof Error) return identity
 
+  if (!identity.email || identity.emailVerified !== true) {
+    baseLogger.warn(
+      { accountId, operation: "initiateKyc" },
+      "Bridge KYC refused: no verified email on the identity",
+    )
+    return new BridgeKycEmailNotVerifiedError()
+  }
   const useremail = identity.email
+
+  const refuseIfHeldElsewhere = async (
+    customerId: BridgeCustomerId,
+  ): Promise<true | Error> => {
+    const held = await customerHeldByAnotherAccount({ accountId, customerId })
+    if (held instanceof Error) return held
+    if (held) {
+      baseLogger.warn(
+        { accountId, customerId, operation: "initiateKyc" },
+        "Bridge KYC refused: customer is held by another account",
+      )
+      return new BridgeKycEmailInUseError()
+    }
+    return true
+  }
 
   try {
     // Create KYC link
     const kycLink = await BridgeApiClient.createKycLink({
-      email: useremail || email,
+      email: useremail,
       type: type || "individual",
       full_name: full_name || account.username,
     })
@@ -409,6 +478,9 @@ const initiateKyc = async ({
 
     // link the customer Id to the bridge account
     const customerId = toBridgeCustomerId(kycLink.customer_id)
+
+    const free = await refuseIfHeldElsewhere(customerId)
+    if (free instanceof Error) return free
 
     const updateResult = await AccountsRepository().updateBridgeFields(accountId, {
       bridgeCustomerId: customerId,
@@ -438,6 +510,10 @@ const initiateKyc = async ({
       const customerId = toBridgeCustomerId(
         bridgeError.response.existing_kyc_link.customer_id,
       )
+
+      const free = await refuseIfHeldElsewhere(customerId)
+      if (free instanceof Error) return free
+
       await AccountsRepository().updateBridgeFields(accountId, {
         bridgeCustomerId: customerId,
         bridgeKycStatus: "not_started",

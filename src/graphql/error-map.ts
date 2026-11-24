@@ -702,6 +702,15 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         message,
       })
 
+    case "BridgeKycEmailInUseError":
+      message =
+        error.message ||
+        "This email is already used for identity verification on another account. Contact support."
+      return bridgeGqlError({
+        code: "BRIDGE_KYC_EMAIL_IN_USE",
+        message,
+      })
+
     case "BridgeKycCountryNotSupportedError":
       message =
         error.message || "US virtual accounts aren't available in your country yet."
