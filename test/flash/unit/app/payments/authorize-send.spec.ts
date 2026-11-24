@@ -916,6 +916,72 @@ describe("authorizeSend (ENG-573 Phase 0 send guard)", () => {
         },
       )
 
+      // The attempt budget runs before the amount check, so a spent or failing
+      // budget used to return first and log-only waved the send through: ten
+      // refused `-1.00` sends spent the 10/min budget and the eleventh reached
+      // IBEX. The budget's reason is kept (it is the coalesced one, so a
+      // looping prober cannot flood the ops queue), but the send is refused.
+      it("still refuses an invalid amount when the attempt budget is spent", async () => {
+        mockConsumeLimiter.mockResolvedValue(new PaymentSendRateLimiterExceededError())
+
+        const result = await send({ amount: { currency: "USD", cents: -100 } })
+
+        expect(result).toBeInstanceOf(PaymentSendRateLimiterExceededError)
+        expect(lastOpsEvent()).toMatchObject({
+          phase: "rejected",
+          status: "failed",
+          step: SendRejectionReasons.rateLimited,
+          meta: { mode: "log-only" },
+        })
+
+        // A looping prober stays inside the coalesced ceiling: the next refusal
+        // in the window is refused too, but posts no further event.
+        mockNotifyOpsEvent.mockClear()
+        expect(await send({ amount: { currency: "USD", cents: -100 } })).toBeInstanceOf(
+          PaymentSendRateLimiterExceededError,
+        )
+        expect(mockNotifyOpsEvent).not.toHaveBeenCalled()
+      })
+
+      it("still refuses an invalid amount when the attempt budget is unavailable, without paging", async () => {
+        mockConsumeLimiter.mockResolvedValue(
+          new UnknownRateLimitServiceError("redis down"),
+        )
+
+        const result = await send({
+          amount: { currency: "BTC", sats: -1 },
+          kind: "lightning",
+        })
+
+        expect(result).toBeInstanceOf(SendLimitsUnavailableError)
+        expect(lastOpsEvent()).toMatchObject({
+          phase: "rejected",
+          status: "failed",
+          step: SendRejectionReasons.limitsUnavailable,
+          meta: { mode: "log-only" },
+        })
+        // Log-only: a malformed send refused during a Redis outage is not the
+        // guard blocking real sends, so it records at Warn, never Critical.
+        expect(mockRecordExceptionInCurrentSpan).toHaveBeenCalledWith(
+          expect.objectContaining({ level: ErrorLevel.Warn }),
+        )
+        expect(mockRecordExceptionInCurrentSpan).not.toHaveBeenCalledWith(
+          expect.objectContaining({ level: ErrorLevel.Critical }),
+        )
+      })
+
+      it("lets a valid amount through when the attempt budget is unavailable", async () => {
+        mockConsumeLimiter.mockResolvedValue(
+          new UnknownRateLimitServiceError("redis down"),
+        )
+
+        expect(await send()).toBe(true)
+        expect(lastOpsEvent()).toMatchObject({
+          phase: "would-reject",
+          step: SendRejectionReasons.limitsUnavailable,
+        })
+      })
+
       it("does not block on a fail-closed condition either — it only reports it", async () => {
         mockUsdFromBtcMidPriceFn.mockResolvedValue(new DealerPriceServiceError("offline"))
 

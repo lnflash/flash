@@ -6,8 +6,7 @@ import {
   ApiKeyIpNotAllowedError,
   ApiKeySecretMismatchError,
 } from "@domain/api-keys"
-import { AccountStatus } from "@domain/accounts/primitives"
-import { InactiveAccountError } from "@domain/errors"
+import { AccountValidator } from "@domain/accounts"
 import { DomainError } from "@domain/shared"
 import { AccountsRepository } from "@services/mongoose"
 import { ApiKeysRepository } from "@services/mongoose/api-keys"
@@ -65,9 +64,8 @@ export const verifyApiKey = async ({
   // stop its keys on the very next request: before this check a locked
   // account's keys went on authenticating until each was revoked by hand
   // (prod, 2026-11-24).
-  if (account.status !== AccountStatus.Active) {
-    return new InactiveAccountError(account.id)
-  }
+  const isActive = AccountValidator(account).isActive()
+  if (isActive instanceof Error) return isActive
 
   if (
     !apiKey.lastUsedAt ||

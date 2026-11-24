@@ -152,6 +152,12 @@ type SendRejection = {
   error: ApplicationError
   reason: SendRejectionReason
   cents?: number
+  // Refused in every mode but `off`, whatever the reason says. Set when an
+  // exhausted or unavailable attempt budget pre-empted the amount check on a
+  // send whose amount was invalid: the reported reason stays the budget's (so
+  // the coalesced feed entry bounds a looping caller), but the send must not go
+  // through in log-only any more than a bare `invalid-amount` would.
+  alwaysEnforced?: true
 }
 
 const usdDisplay = (cents: number) => ({
@@ -272,24 +278,35 @@ const toPositiveNumber = (
   return value
 }
 
+/**
+ * The amount sanity check on its own, synchronous and independent of the
+ * attempt budget, so `evaluateSend` can still apply it when the budget check
+ * returned first. Returns the `invalid-amount` rejection, or `true`.
+ */
+const checkAmountSanity = (amount: SendAmountInput): true | SendRejection => {
+  const value =
+    amount.currency === "USD"
+      ? toPositiveNumber(amount.cents, { integer: false })
+      : toPositiveNumber(amount.sats, { integer: true })
+  if (value instanceof Error) {
+    return { error: value, reason: SendRejectionReasons.invalidAmount }
+  }
+  return true
+}
+
 const usdCentsFromSendAmount = async (
   amount: SendAmountInput,
 ): Promise<{ cents: number } | SendRejection> => {
-  if (amount.currency === "USD") {
-    const cents = toPositiveNumber(amount.cents, { integer: false })
-    if (cents instanceof Error) {
-      return { error: cents, reason: SendRejectionReasons.invalidAmount }
-    }
-    return { cents }
-  }
+  const sanity = checkAmountSanity(amount)
+  if (sanity !== true) return sanity
 
-  const sats = toPositiveNumber(amount.sats, { integer: true })
-  if (sats instanceof Error) {
-    return { error: sats, reason: SendRejectionReasons.invalidAmount }
+  // Sanity passed, so both conversions below are finite and positive.
+  if (amount.currency === "USD") {
+    return { cents: Number(amount.cents) }
   }
 
   const usd = await usdFromBtcMidPriceFn({
-    amount: BigInt(sats),
+    amount: BigInt(amount.sats),
     currency: WalletCurrency.Btc,
   })
   if (usd instanceof Error) {
@@ -349,7 +366,16 @@ const evaluateSend = async ({
 }: AuthorizeSendArgs): Promise<true | SendRejection> => {
   // 1. attempt budget — every attempt costs a point, rejected ones included
   const budget = await consumeAttemptBudget(senderAccount)
-  if (budget !== true) return budget
+  // A spent or failing budget returns before check 2, but it must not let an
+  // invalid amount through in log-only: a prober would spend the 10/min budget
+  // on refused `-1.00` sends and have the eleventh skip the amount check. The
+  // budget's reason is kept, so the feed entry stays coalesced and a looping
+  // client cannot flood the ops queue with uncoalesced `invalid-amount` embeds.
+  if (budget !== true) {
+    return checkAmountSanity(amount) === true
+      ? budget
+      : { ...budget, alwaysEnforced: true }
+  }
 
   // 2. amount sanity + normalisation to USD cents
   const normalised = await usdCentsFromSendAmount(amount)
@@ -425,17 +451,21 @@ const runInGuardSpan = async <T>(entryPoint: string, fn: () => Promise<T>): Prom
 /**
  * Whether a rejection actually stops the send. `enforce` stops all of them;
  * `log-only` stops only `invalid-amount`, the one reason that cannot be a real
- * payment and so has nothing for the rollout to measure. Both the verdict and
- * the ops-feed wording read this, so the feed never says `would-reject` about a
- * send that was in fact refused.
+ * payment and so has nothing for the rollout to measure, and a budget
+ * rejection that pre-empted an invalid amount (`alwaysEnforced`). Both the
+ * verdict and the ops-feed wording read this, so the feed never says
+ * `would-reject` about a send that was in fact refused.
  */
 const isRejectionEnforced = ({
   mode,
-  reason,
+  rejection,
 }: {
   mode: SendGuardMode
-  reason: SendRejectionReason
-}): boolean => mode === "enforce" || reason === SendRejectionReasons.invalidAmount
+  rejection: SendRejection
+}): boolean =>
+  mode === "enforce" ||
+  rejection.reason === SendRejectionReasons.invalidAmount ||
+  rejection.alwaysEnforced === true
 
 const report = ({
   rejection,
@@ -451,7 +481,7 @@ const report = ({
   kind: SendKind
 }): void => {
   const { error, reason, cents } = rejection
-  const enforcing = isRejectionEnforced({ mode, reason })
+  const enforcing = isRejectionEnforced({ mode, rejection })
   const level = effectiveAccountLevel(senderAccount.level)
 
   // The census the rollout is read from. Unconditional and unthrottled, unlike
@@ -519,11 +549,13 @@ const report = ({
   // Not a user doing something wrong: Redis or the price feed is down, and when
   // enforcing that stops every amount-bearing send on every rail. Record it so
   // on-call sees "the guard is blocking sends" instead of a wave of
-  // unexplained payment failures.
+  // unexplained payment failures. The level is keyed on the mode, not on
+  // `enforcing`: in log-only a malformed send refused during a Redis outage
+  // (`alwaysEnforced`) is not the guard blocking real sends, and must not page.
   if (reason === SendRejectionReasons.limitsUnavailable) {
     recordExceptionInCurrentSpan({
       error,
-      level: enforcing ? ErrorLevel.Critical : ErrorLevel.Warn,
+      level: mode === "enforce" ? ErrorLevel.Critical : ErrorLevel.Warn,
       fallbackMsg: "ENG-573 send guard could not evaluate a send",
       attributes: {
         "sendGuard.mode": mode,
@@ -596,7 +628,7 @@ export const gateSend = async ({
     return rejection
   })
 
-  return isRejectionEnforced({ mode, reason: rejection.reason }) ? rejection.error : true
+  return isRejectionEnforced({ mode, rejection }) ? rejection.error : true
 }
 
 export const authorizeSend = async (
@@ -627,5 +659,5 @@ export const authorizeSend = async (
   })
   if (outcome === true) return true
 
-  return isRejectionEnforced({ mode, reason: outcome.reason }) ? outcome.error : true
+  return isRejectionEnforced({ mode, rejection: outcome }) ? outcome.error : true
 }
