@@ -15,11 +15,7 @@ import { ErrorLevel } from "@domain/shared"
 import { CouldNotFindWalletFromIdError } from "@domain/errors"
 import { InputValidationError } from "@graphql/error"
 import OnChainUsdTxFeeQuery from "@graphql/public/root/query/on-chain-usd-tx-fee-query"
-import {
-  IbexAmountBelowMinimum,
-  IbexError,
-  UnexpectedIbexResponse,
-} from "@services/ibex/errors"
+import { IbexAmountBelowMinimum, IbexError } from "@services/ibex/errors"
 
 const walletId = "11111111-1111-4111-8111-111111111111" as WalletId
 const address = "bc1qm59zrvx4hjfdr76vuety9xl4kdzn7l5fu65f3x" as OnChainAddress
@@ -70,19 +66,32 @@ describe("onChainUsdTxFee", () => {
     expect(await run()).toEqual({ amount: 0 })
   })
 
-  it("answers with the wallet error, without asking IBEX", async () => {
+  it("throws the mapped wallet error, without asking IBEX", async () => {
     const failure = new CouldNotFindWalletFromIdError(walletId)
     mockUsdWalletAmountFromWalletId.mockResolvedValueOnce(failure)
 
-    expect(await run()).toBe(failure)
+    const rejection = run()
+    await expect(rejection).rejects.toMatchObject({
+      extensions: { code: "UNEXPECTED_CLIENT_ERROR" },
+    })
+    await expect(rejection).rejects.not.toBe(failure)
     expect(mockEstimateOnchainFee).not.toHaveBeenCalled()
   })
 
-  it("answers with the IBEX error when IBEX cannot estimate", async () => {
-    const failure = new IbexError(new Error("503"))
+  it("throws a generic IBEX error, without the vendor text or a stack, when IBEX cannot estimate", async () => {
+    const wrapped = new Error("IBEX response (503): upstream unavailable")
+    const failure = new IbexError(wrapped)
     mockEstimateOnchainFee.mockResolvedValueOnce(failure)
 
-    expect(await run()).toBe(failure)
+    const rejection = run()
+    await expect(rejection).rejects.toMatchObject({
+      message: "An error occurred. Contact support if error persists.",
+      extensions: { code: "IBEX_ERROR" },
+    })
+    const error = (await rejection.catch((e: unknown) => e)) as Error
+    expect(error.message).not.toContain("IBEX")
+    expect(error.message).not.toContain(wrapped.stack as string)
+    expect(error.message).not.toContain(failure.message)
   })
 
   it("names the minimum when IBEX refuses to estimate a small amount", async () => {
@@ -93,21 +102,22 @@ describe("onChainUsdTxFee", () => {
     )
     mockEstimateOnchainFee.mockResolvedValueOnce(failure)
 
-    const result = await run({ amount: 300 })
-
-    expect(result).toBe(failure)
-    expect((result as Error).message).toBe(
-      "This amount is below the minimum of 5,500 sats. Enter a larger amount.",
-    )
+    await expect(run({ amount: 300 })).rejects.toMatchObject({
+      message: "This amount is below the minimum of 5,500 sats. Enter a larger amount.",
+      extensions: { code: "INVALID_INPUT" },
+    })
   })
 
   it.each([
     ["no fee", {}],
     ["a fee that is not a number", { fee: "0.36" }],
-  ])("answers with an unexpected-response error when IBEX sends %s", async (_, resp) => {
+  ])("throws the generic IBEX error when IBEX sends %s", async (_, resp) => {
     mockEstimateOnchainFee.mockResolvedValueOnce(resp)
 
-    expect(await run()).toBeInstanceOf(UnexpectedIbexResponse)
+    await expect(run()).rejects.toMatchObject({
+      message: "An error occurred. Contact support if error persists.",
+      extensions: { code: "IBEX_ERROR" },
+    })
   })
 
   it.each(["walletId", "address", "amount", "speed"])(
