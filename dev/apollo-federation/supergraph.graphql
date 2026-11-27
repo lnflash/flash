@@ -2236,6 +2236,7 @@ type Mutation
   onChainPaymentSendAll(input: OnChainPaymentSendAllInput!): PaymentSendPayload!
   onChainUsdPaymentSend(input: OnChainUsdPaymentSendInput!): PaymentSendPayload!
   onChainUsdPaymentSendAsBtcDenominated(input: OnChainUsdPaymentSendAsBtcDenominatedInput!): PaymentSendPayload!
+  posOnChainCheckoutCreate(input: PosOnChainCheckoutCreateInput!): PosOnChainCheckoutPayload!
   quizCompleted(input: QuizCompletedInput!): QuizCompletedPayload!
   redeemInvite(input: RedeemInviteInput!): RedeemInvitePayload!
 
@@ -2515,6 +2516,57 @@ enum PhoneCodeChannelType
   WHATSAPP @join__enumValue(graph: PUBLIC)
 }
 
+type PosOnChainCheckout
+  @join__type(graph: PUBLIC)
+{
+  address: String!
+  confirmedSats: SatAmount!
+  id: String!
+  network: PosOnChainNetwork!
+  receivedSats: SatAmount!
+  recipientWalletId: WalletId!
+  sats: SatAmount!
+  status: PosOnChainPaymentStatus!
+}
+
+input PosOnChainCheckoutCreateInput
+  @join__type(graph: PUBLIC)
+{
+  recipientWalletId: WalletId!
+  requestId: String!
+  sats: SatAmount!
+}
+
+type PosOnChainCheckoutError
+  @join__type(graph: PUBLIC)
+{
+  message: String!
+}
+
+type PosOnChainCheckoutPayload
+  @join__type(graph: PUBLIC)
+{
+  checkout: PosOnChainCheckout
+  errors: [PosOnChainCheckoutError!]!
+}
+
+enum PosOnChainNetwork
+  @join__type(graph: PUBLIC)
+{
+  MAINNET @join__enumValue(graph: PUBLIC)
+  REGTEST @join__enumValue(graph: PUBLIC)
+  SIGNET @join__enumValue(graph: PUBLIC)
+  TESTNET @join__enumValue(graph: PUBLIC)
+}
+
+enum PosOnChainPaymentStatus
+  @join__type(graph: PUBLIC)
+{
+  AWAITING_PAYMENT @join__enumValue(graph: PUBLIC)
+  CONFIRMED @join__enumValue(graph: PUBLIC)
+  PENDING @join__enumValue(graph: PUBLIC)
+}
+
 """
 Price amount expressed in base/offset. To calculate, use: `base / 10^offset`
 """
@@ -2660,6 +2712,8 @@ type Query
   onChainTxFee(address: OnChainAddress!, amount: SatAmount!, speed: PayoutSpeed = FAST, walletId: WalletId!): OnChainTxFee!
   onChainUsdTxFee(address: OnChainAddress!, amount: FractionalCentAmount!, speed: PayoutSpeed = FAST, walletId: WalletId!): OnChainUsdTxFee!
   onChainUsdTxFeeAsBtcDenominated(address: OnChainAddress!, amount: SatAmount!, speed: PayoutSpeed = FAST, walletId: WalletId!): OnChainUsdTxFee!
+  posOnChainCheckoutStatus(id: String!): PosOnChainCheckoutPayload!
+  posOnChainCheckoutSupported(recipientWalletId: WalletId): Boolean!
   quizQuestions: [QuizQuestion] @deprecated(reason: "TODO: remove. we don't need a non authenticated version of this query. the users can only do the query while authenticated")
 
   """Returns 1 Sat and 1 Usd Cent price for the given currency"""

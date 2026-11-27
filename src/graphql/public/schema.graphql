@@ -1854,6 +1854,7 @@ type Mutation {
   onChainPaymentSendAll(input: OnChainPaymentSendAllInput!): PaymentSendPayload!
   onChainUsdPaymentSend(input: OnChainUsdPaymentSendInput!): PaymentSendPayload!
   onChainUsdPaymentSendAsBtcDenominated(input: OnChainUsdPaymentSendAsBtcDenominatedInput!): PaymentSendPayload!
+  posOnChainCheckoutCreate(input: PosOnChainCheckoutCreateInput!): PosOnChainCheckoutPayload!
   quizCompleted(input: QuizCompletedInput!): QuizCompletedPayload!
   redeemInvite(input: RedeemInviteInput!): RedeemInvitePayload!
 
@@ -2066,6 +2067,45 @@ enum PhoneCodeChannelType {
   WHATSAPP
 }
 
+type PosOnChainCheckout {
+  address: String!
+  confirmedSats: SatAmount!
+  id: String!
+  network: PosOnChainNetwork!
+  receivedSats: SatAmount!
+  recipientWalletId: WalletId!
+  sats: SatAmount!
+  status: PosOnChainPaymentStatus!
+}
+
+input PosOnChainCheckoutCreateInput {
+  recipientWalletId: WalletId!
+  requestId: String!
+  sats: SatAmount!
+}
+
+type PosOnChainCheckoutError {
+  message: String!
+}
+
+type PosOnChainCheckoutPayload {
+  checkout: PosOnChainCheckout
+  errors: [PosOnChainCheckoutError!]!
+}
+
+enum PosOnChainNetwork {
+  MAINNET
+  REGTEST
+  SIGNET
+  TESTNET
+}
+
+enum PosOnChainPaymentStatus {
+  AWAITING_PAYMENT
+  CONFIRMED
+  PENDING
+}
+
 """
 Price amount expressed in base/offset. To calculate, use: `base / 10^offset`
 """
@@ -2186,6 +2226,8 @@ type Query {
   onChainTxFee(address: OnChainAddress!, amount: SatAmount!, speed: PayoutSpeed = FAST, walletId: WalletId!): OnChainTxFee!
   onChainUsdTxFee(address: OnChainAddress!, amount: FractionalCentAmount!, speed: PayoutSpeed = FAST, walletId: WalletId!): OnChainUsdTxFee!
   onChainUsdTxFeeAsBtcDenominated(address: OnChainAddress!, amount: SatAmount!, speed: PayoutSpeed = FAST, walletId: WalletId!): OnChainUsdTxFee!
+  posOnChainCheckoutStatus(id: String!): PosOnChainCheckoutPayload!
+  posOnChainCheckoutSupported(recipientWalletId: WalletId): Boolean!
   quizQuestions: [QuizQuestion] @deprecated(reason: "TODO: remove. we don't need a non authenticated version of this query. the users can only do the query while authenticated")
 
   """Returns 1 Sat and 1 Usd Cent price for the given currency"""

@@ -36,8 +36,12 @@ import CashoutRateQuery from "./root/query/cashout-rate"
 import MyReferralsQuery from "./root/query/my-referrals"
 import SearchUsernamesQuery from "./root/query/search-usernames"
 
+import { posOnChain } from "./pos-on-chain"
+
 export const queryFields = {
   unauthed: {
+    posOnChainCheckoutSupported: posOnChain.supported,
+    posOnChainCheckoutStatus: posOnChain.status,
     globals: GlobalsQuery,
     usernameAvailable: UsernameAvailableQuery,
     userDefaultWalletId: AccountDefaultWalletIdQuery, // FIXME: migrate to AccountDefaultWalletId

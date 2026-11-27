@@ -12,6 +12,11 @@ import {
   getOnChainAddressCreateAttemptLimits,
   getPaymentSendAttemptLimits,
   getPaymentSendDailyAttemptLimits,
+  getPosOnChainAddressCreateAttemptLimits,
+  getPosOnChainAddressCreatePerIpAttemptLimits,
+  getPosOnChainCreatePerIpLimits,
+  getPosOnChainStatusPerIpLimits,
+  getPosOnChainSupportedPerIpLimits,
   getRequestCodeBlockedCountryPerIpLimits,
   getRequestCodePerIpLimits,
   getRequestCodePerLoginIdentifierLimits,
@@ -31,6 +36,9 @@ import {
   InvoiceCreateRateLimiterExceededError,
   OnChainAddressCreateRateLimiterExceededError,
   PaymentSendRateLimiterExceededError,
+  PosOnChainAddressCreatePerIpRateLimiterExceededError,
+  PosOnChainAddressCreateRateLimiterExceededError,
+  PosOnChainCheckoutIpRateLimiterExceededError,
   UserLoginIpRateLimiterExceededError,
   UserLoginIdentifierRateLimiterExceededError,
   UserCodeAttemptIpRateLimiterExceededError,
@@ -57,6 +65,11 @@ export const RateLimitPrefix = {
   paymentSendDaily: "payment_send_daily",
   abuseStrike: "abuse_strike",
   usernameSearch: "username_search",
+  posOnChainAddressCreate: "pos_onchain_address_create",
+  posOnChainAddressCreatePerIp: "pos_onchain_address_create_ip",
+  posOnChainSupportedPerIp: "pos_onchain_supported_ip",
+  posOnChainCreatePerIp: "pos_onchain_create_ip",
+  posOnChainStatusPerIp: "pos_onchain_status_ip",
 } as const
 
 export const RateLimitConfig: { [key: string]: RateLimitConfig } = {
@@ -108,6 +121,35 @@ export const RateLimitConfig: { [key: string]: RateLimitConfig } = {
     key: RateLimitPrefix.onChainAddressCreate,
     limits: getOnChainAddressCreateAttemptLimits(),
     error: OnChainAddressCreateRateLimiterExceededError,
+  },
+  // Public POS on-chain checkout: address allocation per merchant account,
+  // and per caller IP per merchant (keyed `${ip}:${accountId}`), consumed in
+  // that order by src/services/pos-on-chain/flash.ts.
+  posOnChainAddressCreate: {
+    key: RateLimitPrefix.posOnChainAddressCreate,
+    limits: getPosOnChainAddressCreateAttemptLimits(),
+    error: PosOnChainAddressCreateRateLimiterExceededError,
+  },
+  posOnChainAddressCreatePerIp: {
+    key: RateLimitPrefix.posOnChainAddressCreatePerIp,
+    limits: getPosOnChainAddressCreatePerIpAttemptLimits(),
+    error: PosOnChainAddressCreatePerIpRateLimiterExceededError,
+  },
+  // Per-IP request budgets for the three public checkout operations.
+  posOnChainSupportedPerIp: {
+    key: RateLimitPrefix.posOnChainSupportedPerIp,
+    limits: getPosOnChainSupportedPerIpLimits(),
+    error: PosOnChainCheckoutIpRateLimiterExceededError,
+  },
+  posOnChainCreatePerIp: {
+    key: RateLimitPrefix.posOnChainCreatePerIp,
+    limits: getPosOnChainCreatePerIpLimits(),
+    error: PosOnChainCheckoutIpRateLimiterExceededError,
+  },
+  posOnChainStatusPerIp: {
+    key: RateLimitPrefix.posOnChainStatusPerIp,
+    limits: getPosOnChainStatusPerIpLimits(),
+    error: PosOnChainCheckoutIpRateLimiterExceededError,
   },
   inviteCreate: {
     key: RateLimitPrefix.inviteCreate,

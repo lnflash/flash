@@ -19,6 +19,10 @@ export class UserLoginIdentifierRateLimiterExceededError extends RateLimiterExce
 export class InvoiceCreateRateLimiterExceededError extends RateLimiterExceededError {}
 export class InvoiceCreateForRecipientRateLimiterExceededError extends RateLimiterExceededError {}
 export class OnChainAddressCreateRateLimiterExceededError extends RateLimiterExceededError {}
+// Public POS on-chain checkout (src/services/pos-on-chain).
+export class PosOnChainAddressCreateRateLimiterExceededError extends RateLimiterExceededError {}
+export class PosOnChainAddressCreatePerIpRateLimiterExceededError extends RateLimiterExceededError {}
+export class PosOnChainCheckoutIpRateLimiterExceededError extends RateLimiterExceededError {}
 export class InviteCreateRateLimiterExceededError extends RateLimiterExceededError {}
 export class InviteTargetRateLimiterExceededError extends RateLimiterExceededError {}
 export class FygaroCheckoutCreateRateLimiterExceededError extends RateLimiterExceededError {}

@@ -87,9 +87,12 @@ import BankAccountUpdateMutation from "./root/mutation/bank-account-update"
 import BankAccountSetDefaultMutation from "./root/mutation/bank-account-set-default"
 import BankAccountDeleteMutation from "./root/mutation/bank-account-delete"
 
+import { posOnChain } from "./pos-on-chain"
+
 // TODO: // const fields: { [key: string]: GraphQLFieldConfig<any, GraphQLPublicContext> }
 export const mutationFields = {
   unauthed: {
+    posOnChainCheckoutCreate: posOnChain.create,
     captchaCreateChallenge: CaptchaCreateChallengeMutation,
     captchaRequestAuthCode: CaptchaRequestAuthCodeMutation,
     userLogin: UserLoginMutation,
