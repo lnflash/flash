@@ -35,15 +35,17 @@ import { posOnChainStore } from "./store"
  * POS_ONCHAIN_ESPLORA is one Esplora-compatible API base, or several separated
  * by commas. They are asked in the order given; a later one is used only while
  * an earlier one is failing (see `firstAvailable`). Every entry must be https
- * (http is accepted for localhost only), and one bad entry turns checkout off
- * rather than silently running on fewer indexers than the operator listed.
+ * (http is accepted for localhost only), and one bad or repeated entry turns
+ * checkout off rather than silently running on fewer indexers than the operator
+ * listed. Entries that differ only in host case or a trailing slash are repeats.
  */
-const indexerOrigins = (): string[] | null => {
+const indexerOrigins = (): { origin: string; key: string }[] | null => {
   const origins = (process.env.POS_ONCHAIN_ESPLORA || "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean)
-  if (!origins.length || new Set(origins).size !== origins.length) return null
+  if (!origins.length) return null
+  const entries: { origin: string; key: string }[] = []
   for (const origin of origins) {
     let url: URL
     try {
@@ -59,8 +61,14 @@ const indexerOrigins = (): string[] | null => {
       )
     )
       return null
+    // One key per indexer: scheme, host (lowercased by URL) and port, plus the
+    // path without trailing slashes. It names the indexer's cool-down and its
+    // failure log, and catches a repeat spelled differently. No credentials.
+    const key = url.origin + url.pathname.replace(/\/+$/, "")
+    if (entries.some((e) => e.key === key)) return null
+    entries.push({ origin, key })
   }
-  return origins
+  return entries
 }
 
 const minimumLevel = (): AccountLevel | undefined => {
@@ -111,8 +119,8 @@ export function flashCheckout() {
       )
     },
     totals: firstAvailable(
-      origins.map((origin) => ({
-        name: new URL(origin).host,
+      origins.map(({ origin, key }) => ({
+        name: key,
         read: esploraTotals(origin, genesis),
       })),
       (indexer, error) =>

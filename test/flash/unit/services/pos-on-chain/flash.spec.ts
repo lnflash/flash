@@ -7,7 +7,12 @@ import { OnChainAddressCreateRateLimiterExceededError } from "@domain/rate-limit
 import { resolveCashWalletPresentationForAccount } from "@app/cash-wallet-cutover/presentation-for-account"
 import { createOnChainAddress } from "@app/wallets/create-on-chain-address"
 import { consumeLimiter } from "@services/rate-limit"
+import { baseLogger } from "@services/logger"
 import { flashCheckout } from "@services/pos-on-chain/flash"
+import {
+  __resetIndexerCoolDownForTest,
+  esploraTotals,
+} from "@services/pos-on-chain/indexer"
 
 const mockFindWallet = jest.fn()
 const mockFindAccount = jest.fn()
@@ -24,10 +29,10 @@ jest.mock("@app/wallets/create-on-chain-address", () => ({
 jest.mock("@services/rate-limit", () => ({ consumeLimiter: jest.fn() }))
 jest.mock("@services/pos-on-chain/indexer", () => ({
   ...jest.requireActual("@services/pos-on-chain/indexer"),
-  esploraTotals: () => async () => ({
-    receivedSats: 0,
-    confirmedSats: 0,
-    fundedOutputs: 0,
+  // Origin-aware, so the spec sees which indexer flash.ts built and asked.
+  esploraTotals: jest.fn((origin: string) => async () => {
+    if (origin.includes("down")) throw new Error("down")
+    return { receivedSats: 0, confirmedSats: 0, fundedOutputs: 0 }
   }),
 }))
 // An in-memory stand-in: this spec is about flash.ts, the Mongo store has its own.
@@ -78,6 +83,8 @@ const allocate = createOnChainAddress as jest.Mock
 
 beforeEach(() => {
   Object.assign(process.env, env)
+  __resetIndexerCoolDownForTest()
+  ;(esploraTotals as jest.Mock).mockClear()
   mockFindWallet
     .mockReset()
     .mockResolvedValue({ id: walletId, accountId, currency: "USD" })
@@ -149,10 +156,19 @@ describe("flashCheckout configuration", () => {
     ["one entry is plain http", "https://mempool.example/api,http://esplora.example"],
     ["one entry is not a URL", "https://mempool.example/api,not a url"],
     ["the same indexer is listed twice", "https://a.example/api,https://a.example/api"],
+    [
+      "the same indexer is listed twice with a different host case and a trailing slash",
+      "https://a.example/api,https://A.example/api/",
+    ],
     ["the list is only commas", " , ,"],
   ])("is disabled when %s", (_, value) => {
     process.env.POS_ONCHAIN_ESPLORA = value
     expect(flashCheckout()).toBeNull()
+  })
+
+  it("accepts two indexers on one host with different paths", () => {
+    process.env.POS_ONCHAIN_ESPLORA = "https://idx.example/a,https://idx.example/b"
+    expect(flashCheckout()).not.toBeNull()
   })
 
   it("accepts MAINNET only with the mainnet genesis", () => {
@@ -336,5 +352,38 @@ describe("flashCheckout address allocation", () => {
     expect(consume.mock.calls[0][0].rateLimitConfig).toBe(
       RateLimitConfig.posOnChainAddressCreatePerIp,
     )
+  })
+})
+
+describe("flashCheckout indexer failover", () => {
+  let warn: jest.SpyInstance
+  beforeEach(() => {
+    warn = jest.spyOn(baseLogger, "warn").mockImplementation(() => undefined)
+  })
+  afterEach(() => warn.mockRestore())
+
+  it("builds a reader per indexer in order, and a sale succeeds on the second while the first is down", async () => {
+    process.env.POS_ONCHAIN_ESPLORA = "https://down.example/api,https://up.example/api"
+    expect((await flashCheckout()!.create(sale(++n), ip)).address).toBe(address)
+    expect((esploraTotals as jest.Mock).mock.calls).toEqual([
+      ["https://down.example/api", signetGenesis],
+      ["https://up.example/api", signetGenesis],
+    ])
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0][0]).toEqual({
+      indexer: "https://down.example/api",
+      error: "down",
+    })
+  })
+
+  it("keeps a failing indexer cooling down when another on the same host answers", async () => {
+    process.env.POS_ONCHAIN_ESPLORA = "https://idx.example/down,https://idx.example/up"
+    await flashCheckout()!.create(sale(++n), ip)
+    await flashCheckout()!.create(sale(++n), ip)
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0][0]).toEqual({
+      indexer: "https://idx.example/down",
+      error: "down",
+    })
   })
 })
