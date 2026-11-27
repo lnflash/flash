@@ -23,6 +23,7 @@ jest.mock("@app/wallets/create-on-chain-address", () => ({
 }))
 jest.mock("@services/rate-limit", () => ({ consumeLimiter: jest.fn() }))
 jest.mock("@services/pos-on-chain/indexer", () => ({
+  ...jest.requireActual("@services/pos-on-chain/indexer"),
   esploraTotals: () => async () => ({
     receivedSats: 0,
     confirmedSats: 0,
@@ -137,6 +138,22 @@ describe("flashCheckout configuration", () => {
       expect(flashCheckout()).toBeNull()
     },
   )
+
+  it("accepts several indexers separated by commas, with spaces and a trailing comma", () => {
+    process.env.POS_ONCHAIN_ESPLORA =
+      "https://mempool.example/api , https://esplora.example/api,"
+    expect(flashCheckout()).not.toBeNull()
+  })
+
+  it.each([
+    ["one entry is plain http", "https://mempool.example/api,http://esplora.example"],
+    ["one entry is not a URL", "https://mempool.example/api,not a url"],
+    ["the same indexer is listed twice", "https://a.example/api,https://a.example/api"],
+    ["the list is only commas", " , ,"],
+  ])("is disabled when %s", (_, value) => {
+    process.env.POS_ONCHAIN_ESPLORA = value
+    expect(flashCheckout()).toBeNull()
+  })
 
   it("accepts MAINNET only with the mainnet genesis", () => {
     Object.assign(process.env, {

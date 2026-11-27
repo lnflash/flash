@@ -124,3 +124,49 @@ export function esploraTotals(origin: string, genesis: string) {
     return totals
   }
 }
+
+export type TotalsReader = (address: string) => Promise<Totals>
+export type NamedReader = { name: string; read: TotalsReader }
+
+// How long an indexer that just failed is passed over. Without it every read
+// during an outage waits out the first indexer's timeout before trying the next.
+export const INDEXER_COOL_DOWN_MS = 30_000
+const coolingUntil = new Map<string, number>()
+export const __resetIndexerCoolDownForTest = () => coolingUntil.clear()
+
+/**
+ * Reads from the first indexer that answers.
+ *
+ * Each read uses ONE indexer from start to finish: an indexer's own tip check
+ * brackets its answer, and mixing two indexers inside a read would defeat it.
+ * An indexer that throws (unreachable, throttled, wrong chain, tip moved) is
+ * passed over for `INDEXER_COOL_DOWN_MS` and the next one is asked. If every
+ * indexer is cooling down they are all tried anyway, in order, so an outage of
+ * all of them never turns into a refusal that outlives it. When all fail, the
+ * last error is thrown and the checkout reports a temporary failure.
+ *
+ * An indexer that ANSWERS is believed, including when it says an address has
+ * no history. Only list indexers you would trust on their own.
+ */
+export function firstAvailable(
+  readers: NamedReader[],
+  onFailure: (name: string, error: unknown) => void = () => undefined,
+  now: () => number = Date.now,
+): TotalsReader {
+  return async (address) => {
+    const ready = readers.filter((r) => (coolingUntil.get(r.name) ?? 0) <= now())
+    let last: unknown = new Error("No checkout index is configured")
+    for (const reader of ready.length ? ready : readers) {
+      try {
+        const totals = await reader.read(address)
+        coolingUntil.delete(reader.name)
+        return totals
+      } catch (error) {
+        last = error
+        coolingUntil.set(reader.name, now() + INDEXER_COOL_DOWN_MS)
+        onFailure(reader.name, error)
+      }
+    }
+    throw last
+  }
+}
