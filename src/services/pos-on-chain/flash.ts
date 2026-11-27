@@ -23,9 +23,10 @@ import { posOnChainStore } from "./store"
  *                               each checkout issues a permanent custody
  *                               address.
  *   POS_ONCHAIN_RECEIVE_WALLETS comma-separated wallet ids that qualify
- *                               whatever their account's level. For trying the
- *                               checkout on known wallets before the rule is
- *                               switched on, and for forcing one on.
+ *                               whatever their account's level (an inactive
+ *                               account still does not qualify). For trying
+ *                               the checkout on known wallets before the rule
+ *                               is switched on, and for forcing one on.
  *
  * With neither set, or with the indexer settings missing or wrong, checkout is
  * off for everyone.
@@ -69,18 +70,21 @@ export function flashCheckout() {
     network,
     store: posOnChainStore,
     async enabled(recipient) {
-      if (wallets.has(recipient)) return true
-      if (minLevel === undefined) return false
+      // A listed wallet bypasses the level, never the account status.
+      const listed = wallets.has(recipient)
+      if (!listed && minLevel === undefined) return false
       const id = checkedToWalletId(recipient)
       if (id instanceof Error) return false
       const wallet = await WalletsRepository().findById(id)
       if (wallet instanceof Error) return false
-      if (wallet.currency !== "USD" && wallet.currency !== "USDT") return false
+      // A listed BTC wallet still reaches limitNew's clearer custodial message.
+      if (!listed && wallet.currency !== "USD" && wallet.currency !== "USDT") return false
       const account = await AccountsRepository().findById(wallet.accountId)
       if (account instanceof Error) return false
+      if (account.status !== AccountStatus.Active) return false
       return (
-        account.status === AccountStatus.Active &&
-        effectiveAccountLevel(account.level) >= minLevel
+        listed ||
+        (minLevel !== undefined && effectiveAccountLevel(account.level) >= minLevel)
       )
     },
     totals: esploraTotals(origin, genesis),

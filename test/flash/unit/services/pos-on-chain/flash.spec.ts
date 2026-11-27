@@ -155,11 +155,31 @@ describe("flashCheckout eligibility", () => {
       POS_ONCHAIN_MIN_LEVEL: level,
     })
 
-  it("with only a wallet list, a listed wallet qualifies and no other does, without any lookup", async () => {
+  it("with only a wallet list, a listed wallet qualifies and no other does", async () => {
     expect(await supports()).toBe(true)
     expect(await supports(randomUUID())).toBe(false)
-    expect(mockFindWallet).not.toHaveBeenCalled()
-    expect(mockFindAccount).not.toHaveBeenCalled()
+  })
+
+  it.each(["locked", "closed", "pending", "new"])(
+    "with only a wallet list, a listed wallet on a %s account does not qualify, and create refuses it before any limiter or allocation",
+    async (status) => {
+      mockFindAccount.mockResolvedValue({ id: accountId, status, level: 2 })
+      expect(await supports()).toBe(false)
+      await expect(flashCheckout()!.create(sale(++n), ip)).rejects.toThrow(
+        /unavailable for this wallet/,
+      )
+      expect(consume).not.toHaveBeenCalled()
+      expect(allocate).not.toHaveBeenCalled()
+    },
+  )
+
+  it("a listed wallet whose sale was already published gets no address on the retry once its account is locked", async () => {
+    const again = sale(++n)
+    expect((await flashCheckout()!.create(again, ip)).address).toBe(address)
+    mockFindAccount.mockResolvedValue({ id: accountId, status: "locked", level: 1 })
+    await expect(flashCheckout()!.create(again, ip)).rejects.toThrow(
+      /unavailable for this wallet/,
+    )
   })
 
   it.each([
