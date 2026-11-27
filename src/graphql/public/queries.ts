@@ -1,3 +1,4 @@
+import { posOnChain } from "./pos-on-chain"
 import { GT } from "@graphql/index"
 import CashWalletCutoverQuery from "@graphql/shared/root/query/cash-wallet-cutover"
 
@@ -38,6 +39,8 @@ import SearchUsernamesQuery from "./root/query/search-usernames"
 
 export const queryFields = {
   unauthed: {
+    posOnChainCheckoutSupported: posOnChain.supported,
+    posOnChainCheckoutStatus: posOnChain.status,
     globals: GlobalsQuery,
     usernameAvailable: UsernameAvailableQuery,
     userDefaultWalletId: AccountDefaultWalletIdQuery, // FIXME: migrate to AccountDefaultWalletId

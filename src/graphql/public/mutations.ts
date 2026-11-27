@@ -1,3 +1,4 @@
+import { posOnChain } from "./pos-on-chain"
 import { GT } from "@graphql/index"
 
 import DeviceNotificationTokenCreateMutation from "@graphql/public/root/mutation/device-notification-token-create"
@@ -90,6 +91,7 @@ import BankAccountDeleteMutation from "./root/mutation/bank-account-delete"
 // TODO: // const fields: { [key: string]: GraphQLFieldConfig<any, GraphQLPublicContext> }
 export const mutationFields = {
   unauthed: {
+    posOnChainCheckoutCreate: posOnChain.create,
     captchaCreateChallenge: CaptchaCreateChallengeMutation,
     captchaRequestAuthCode: CaptchaRequestAuthCodeMutation,
     userLogin: UserLoginMutation,
