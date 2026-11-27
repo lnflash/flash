@@ -12,7 +12,8 @@ import OnChainUsdTxFee from "@graphql/public/types/object/onchain-usd-tx-fee"
 // FLASH FORK: import ibex dependencies
 import Ibex from "@services/ibex/client"
 
-import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
+import { IbexError } from "@services/ibex/errors"
+import { onChainFeeCentsFromIbex } from "@services/ibex/on-chain-fee"
 
 const OnChainUsdTxFeeQuery = GT.Field<null, GraphQLPublicContextAuth>({
   type: GT.NonNull(OnChainUsdTxFee),
@@ -48,10 +49,13 @@ const OnChainUsdTxFeeQuery = GT.Field<null, GraphQLPublicContextAuth>({
     const resp = await Ibex.estimateOnchainFee(send, address)
 
     if (resp instanceof IbexError) return resp
-    if (resp.fee === undefined) return new UnexpectedIbexResponse("Missing fee field")
+
+    // IBEX names the fee in dollars; this field is cents.
+    const feeCents = onChainFeeCentsFromIbex(resp)
+    if (feeCents instanceof Error) return feeCents
 
     return {
-      amount: resp.fee,
+      amount: feeCents,
     }
   },
 })

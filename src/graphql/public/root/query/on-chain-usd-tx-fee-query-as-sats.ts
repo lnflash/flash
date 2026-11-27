@@ -15,7 +15,8 @@ import OnChainUsdTxFee from "@graphql/public/types/object/onchain-usd-tx-fee"
 
 // FLASH FORK: the fee comes from IBEX, as it does for onChainUsdTxFee.
 import Ibex from "@services/ibex/client"
-import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
+import { IbexError } from "@services/ibex/errors"
+import { onChainFeeCentsFromIbex } from "@services/ibex/on-chain-fee"
 
 // The fee for paying a sat-denominated on-chain request from the Cash wallet.
 // The sats are priced in dollars first (see usdCentsToDeliverSats), because
@@ -52,12 +53,13 @@ const OnChainUsdTxFeeAsBtcDenominatedQuery = GT.Field<null, GraphQLPublicContext
 
     const resp = await Ibex.estimateOnchainFee(send, address)
     if (resp instanceof IbexError) throw mapError(resp)
-    if (resp.fee === undefined) {
-      throw mapError(new UnexpectedIbexResponse("Missing fee field"))
-    }
+
+    // IBEX names the fee in dollars; this field is cents.
+    const feeCents = onChainFeeCentsFromIbex(resp)
+    if (feeCents instanceof Error) throw mapError(feeCents)
 
     return {
-      amount: resp.fee,
+      amount: feeCents,
     }
   },
 })

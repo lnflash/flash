@@ -44,10 +44,11 @@ describe("onChainUsdTxFeeAsBtcDenominated", () => {
     jest.clearAllMocks()
     mockUsdCentsToDeliverSats.mockResolvedValue({ cents: 362, marginBps: 50 })
     mockUsdWalletAmountFromWalletId.mockResolvedValue(usdAmount)
-    mockEstimateOnchainFee.mockResolvedValue({ fee: 41 })
+    // IBEX names the fee in dollars: 41 cents arrives as 0.41.
+    mockEstimateOnchainFee.mockResolvedValue({ fee: 0.41, feeSat: 686 })
   })
 
-  it("returns the IBEX fee for the dollar amount the send will use", async () => {
+  it("returns the IBEX fee, in cents, for the dollar amount the send will use", async () => {
     expect(await run()).toEqual({ amount: 41 })
 
     expect(mockUsdCentsToDeliverSats).toHaveBeenCalledWith(6_000)
@@ -93,6 +94,21 @@ describe("onChainUsdTxFeeAsBtcDenominated", () => {
       message: "This amount is below the minimum of 5,500 sats. Enter a larger amount.",
       extensions: { code: "INVALID_INPUT" },
     })
+  })
+
+  it("does not hand IBEX's dollar figure to a field that is read as cents", async () => {
+    mockEstimateOnchainFee.mockResolvedValueOnce({ fee: 0.409916881285, feeSat: 686 })
+
+    const { amount } = await run()
+
+    expect(amount).toBeCloseTo(40.9916881285, 6)
+    expect(amount).not.toBeCloseTo(0.409916881285, 6)
+  })
+
+  it("fails when IBEX answers with a fee that is not a number", async () => {
+    mockEstimateOnchainFee.mockResolvedValueOnce({ fee: "0.41" })
+
+    await expect(run()).rejects.toBeInstanceOf(Error)
   })
 
   it("fails when IBEX answers without a fee", async () => {
