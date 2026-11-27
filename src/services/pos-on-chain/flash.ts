@@ -8,8 +8,9 @@ import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import { resolveCashWalletPresentationForAccount } from "@app/cash-wallet-cutover/presentation-for-account"
 import { DEFAULT_CASH_WALLET_CLIENT_CAPABILITIES } from "@app/cash-wallet-cutover/client-capability"
 import { consumeLimiter } from "@services/rate-limit"
+import { baseLogger } from "@services/logger"
 
-import { esploraTotals } from "./indexer"
+import { esploraTotals, firstAvailable } from "./indexer"
 import { posOnChainStore } from "./store"
 
 /**
@@ -30,7 +31,46 @@ import { posOnChainStore } from "./store"
  *
  * With neither set, or with the indexer settings missing or wrong, checkout is
  * off for everyone.
+ *
+ * POS_ONCHAIN_ESPLORA is one Esplora-compatible API base, or several separated
+ * by commas. They are asked in the order given; a later one is used only while
+ * an earlier one is failing (see `firstAvailable`). Every entry must be https
+ * (http is accepted for localhost only), and one bad or repeated entry turns
+ * checkout off rather than silently running on fewer indexers than the operator
+ * listed. Entries that differ only in host case or a trailing slash are repeats.
  */
+const indexerOrigins = (): { origin: string; key: string }[] | null => {
+  const origins = (process.env.POS_ONCHAIN_ESPLORA || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+  if (!origins.length) return null
+  const entries: { origin: string; key: string }[] = []
+  for (const origin of origins) {
+    let url: URL
+    try {
+      url = new URL(origin)
+    } catch {
+      return null
+    }
+    if (
+      url.protocol !== "https:" &&
+      !(
+        url.protocol === "http:" &&
+        ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
+      )
+    )
+      return null
+    // One key per indexer: scheme, host (lowercased by URL) and port, plus the
+    // path without trailing slashes. It names the indexer's cool-down and its
+    // failure log, and catches a repeat spelled differently. No credentials.
+    const key = url.origin + url.pathname.replace(/\/+$/, "")
+    if (entries.some((e) => e.key === key)) return null
+    entries.push({ origin, key })
+  }
+  return entries
+}
+
 const minimumLevel = (): AccountLevel | undefined => {
   const raw = (process.env.POS_ONCHAIN_MIN_LEVEL || "").trim()
   return /^[123]$/.test(raw) ? (Number(raw) as AccountLevel) : undefined
@@ -39,7 +79,7 @@ const minimumLevel = (): AccountLevel | undefined => {
 export function flashCheckout() {
   const minLevel = minimumLevel()
   const network = process.env.POS_ONCHAIN_NETWORK as Network
-  const origin = process.env.POS_ONCHAIN_ESPLORA
+  const origins = indexerOrigins()
   const genesis = process.env.POS_ONCHAIN_GENESIS
   const wallets = new Set(
     (process.env.POS_ONCHAIN_RECEIVE_WALLETS || "")
@@ -49,21 +89,12 @@ export function flashCheckout() {
   )
   if (
     (!wallets.size && minLevel === undefined) ||
-    !origin ||
+    !origins ||
     !genesis ||
     !/^[0-9a-f]{64}$/.test(genesis) ||
     (network === "MAINNET" &&
       genesis !== "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f") ||
     !["MAINNET", "TESTNET", "SIGNET", "REGTEST"].includes(network)
-  )
-    return null
-  const url = new URL(origin)
-  if (
-    url.protocol !== "https:" &&
-    !(
-      url.protocol === "http:" &&
-      ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
-    )
   )
     return null
   return checkoutService({
@@ -87,7 +118,17 @@ export function flashCheckout() {
         (minLevel !== undefined && effectiveAccountLevel(account.level) >= minLevel)
       )
     },
-    totals: esploraTotals(origin, genesis),
+    totals: firstAvailable(
+      origins.map(({ origin, key }) => ({
+        name: key,
+        read: esploraTotals(origin, genesis),
+      })),
+      (indexer, error) =>
+        baseLogger.warn(
+          { indexer, error: error instanceof Error ? error.message : String(error) },
+          "POS on-chain checkout: indexer failed, trying the next one",
+        ),
+    ),
     async limitNew(recipient, ip) {
       const id = checkedToWalletId(recipient)
       if (id instanceof Error) throw new CheckoutError("Unknown receiving wallet.")
