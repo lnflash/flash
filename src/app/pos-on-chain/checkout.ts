@@ -31,7 +31,9 @@ export type Store = {
 }
 export type Dependencies = {
   network: Network
-  enabled(walletId: string): boolean
+  // Asked on every create, retries included, so a merchant who stops being
+  // eligible stops getting addresses at once.
+  enabled(walletId: string): boolean | Promise<boolean>
   store: Store
   limitNew(walletId: string, ip: string): Promise<void>
   newAddress(walletId: string): Promise<string>
@@ -96,7 +98,7 @@ export function checkoutService(d: Dependencies) {
   }
 
   return {
-    supports: (walletId?: string) => (walletId ? d.enabled(walletId) : false),
+    supports: async (walletId?: string) => (walletId ? d.enabled(walletId) : false),
     async create(input: Request, ip: string) {
       const { recipientWalletId, requestId, sats } = input
       if (
@@ -106,7 +108,7 @@ export function checkoutService(d: Dependencies) {
         sats > maximumSats
       )
         throw new CheckoutError("Enter at least 546 sats and a valid sale reference.")
-      if (!d.enabled(recipientWalletId))
+      if (!(await d.enabled(recipientWalletId)))
         throw new CheckoutError("On-chain checkout is unavailable for this wallet.")
       // The opaque receipt capability is reproducible after a lost response. Mongo stores only its digest.
       const id = hash("flash-pos-chain-v1/" + recipientWalletId + "/" + requestId)

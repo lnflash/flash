@@ -1,5 +1,7 @@
 import { checkoutService, CheckoutError, Network } from "@app/pos-on-chain/checkout"
 import { createOnChainAddress } from "@app/wallets/create-on-chain-address"
+import { effectiveAccountLevel } from "@domain/accounts"
+import { AccountStatus } from "@domain/accounts/primitives"
 import { checkedToWalletId } from "@domain/wallets"
 import { RateLimitConfig } from "@domain/rate-limit"
 import { AccountsRepository, WalletsRepository } from "@services/mongoose"
@@ -10,7 +12,32 @@ import { consumeLimiter } from "@services/rate-limit"
 import { esploraTotals } from "./indexer"
 import { posOnChainStore } from "./store"
 
+/**
+ * Who may receive through POS on-chain checkout. Either is enough:
+ *
+ *   POS_ONCHAIN_MIN_LEVEL       "1", "2" or "3". Every ACTIVE account at or
+ *                               above that level qualifies through its cash
+ *                               (USD or USDT) wallet. Nobody maintains a list.
+ *                               Level 0 is not accepted here on purpose: a
+ *                               device account costs nothing to create, and
+ *                               each checkout issues a permanent custody
+ *                               address.
+ *   POS_ONCHAIN_RECEIVE_WALLETS comma-separated wallet ids that qualify
+ *                               whatever their account's level (an inactive
+ *                               account still does not qualify). For trying
+ *                               the checkout on known wallets before the rule
+ *                               is switched on, and for forcing one on.
+ *
+ * With neither set, or with the indexer settings missing or wrong, checkout is
+ * off for everyone.
+ */
+const minimumLevel = (): AccountLevel | undefined => {
+  const raw = (process.env.POS_ONCHAIN_MIN_LEVEL || "").trim()
+  return /^[123]$/.test(raw) ? (Number(raw) as AccountLevel) : undefined
+}
+
 export function flashCheckout() {
+  const minLevel = minimumLevel()
   const network = process.env.POS_ONCHAIN_NETWORK as Network
   const origin = process.env.POS_ONCHAIN_ESPLORA
   const genesis = process.env.POS_ONCHAIN_GENESIS
@@ -21,7 +48,7 @@ export function flashCheckout() {
       .filter(Boolean),
   )
   if (
-    !wallets.size ||
+    (!wallets.size && minLevel === undefined) ||
     !origin ||
     !genesis ||
     !/^[0-9a-f]{64}$/.test(genesis) ||
@@ -42,7 +69,24 @@ export function flashCheckout() {
   return checkoutService({
     network,
     store: posOnChainStore,
-    enabled: (wallet) => wallets.has(wallet),
+    async enabled(recipient) {
+      // A listed wallet bypasses the level, never the account status.
+      const listed = wallets.has(recipient)
+      if (!listed && minLevel === undefined) return false
+      const id = checkedToWalletId(recipient)
+      if (id instanceof Error) return false
+      const wallet = await WalletsRepository().findById(id)
+      if (wallet instanceof Error) return false
+      // A listed BTC wallet still reaches limitNew's clearer custodial message.
+      if (!listed && wallet.currency !== "USD" && wallet.currency !== "USDT") return false
+      const account = await AccountsRepository().findById(wallet.accountId)
+      if (account instanceof Error) return false
+      if (account.status !== AccountStatus.Active) return false
+      return (
+        listed ||
+        (minLevel !== undefined && effectiveAccountLevel(account.level) >= minLevel)
+      )
+    },
     totals: esploraTotals(origin, genesis),
     async limitNew(recipient, ip) {
       const id = checkedToWalletId(recipient)

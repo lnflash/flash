@@ -80,10 +80,15 @@ beforeEach(() => {
   mockFindWallet
     .mockReset()
     .mockResolvedValue({ id: walletId, accountId, currency: "USD" })
-  mockFindAccount.mockReset().mockResolvedValue({ id: accountId })
+  mockFindAccount
+    .mockReset()
+    .mockResolvedValue({ id: accountId, status: "active", level: 1 })
   presentation.mockReset().mockResolvedValue({ defaultWalletId: walletId })
   allocate.mockReset().mockResolvedValue(address)
   consume.mockReset().mockResolvedValue(true)
+})
+afterEach(() => {
+  delete process.env.POS_ONCHAIN_MIN_LEVEL
 })
 afterAll(() => {
   for (const k of Object.keys(env)) delete process.env[k]
@@ -114,12 +119,147 @@ describe("flashCheckout configuration", () => {
     expect(flashCheckout()).toBeNull()
   })
 
+  it("is enabled by a minimum level alone, with no wallet list", () => {
+    Object.assign(process.env, {
+      POS_ONCHAIN_RECEIVE_WALLETS: "",
+      POS_ONCHAIN_MIN_LEVEL: "1",
+    })
+    expect(flashCheckout()).not.toBeNull()
+  })
+
+  it.each(["0", "4", "one", "-1", "1.5", ""])(
+    "ignores the minimum level %p, so an empty wallet list still means off",
+    (level) => {
+      Object.assign(process.env, {
+        POS_ONCHAIN_RECEIVE_WALLETS: "",
+        POS_ONCHAIN_MIN_LEVEL: level,
+      })
+      expect(flashCheckout()).toBeNull()
+    },
+  )
+
   it("accepts MAINNET only with the mainnet genesis", () => {
     Object.assign(process.env, {
       POS_ONCHAIN_NETWORK: "MAINNET",
       POS_ONCHAIN_GENESIS: mainnetGenesis,
     })
     expect(flashCheckout()).not.toBeNull()
+  })
+})
+
+describe("flashCheckout eligibility", () => {
+  const supports = (id: string = walletId) => flashCheckout()!.supports(id)
+  const ruleOnly = (level: string) =>
+    Object.assign(process.env, {
+      POS_ONCHAIN_RECEIVE_WALLETS: "",
+      POS_ONCHAIN_MIN_LEVEL: level,
+    })
+
+  it("with only a wallet list, a listed wallet qualifies and no other does", async () => {
+    expect(await supports()).toBe(true)
+    expect(await supports(randomUUID())).toBe(false)
+  })
+
+  it.each(["locked", "closed", "pending", "new"])(
+    "with only a wallet list, a listed wallet on a %s account does not qualify, and create refuses it before any limiter or allocation",
+    async (status) => {
+      mockFindAccount.mockResolvedValue({ id: accountId, status, level: 2 })
+      expect(await supports()).toBe(false)
+      await expect(flashCheckout()!.create(sale(++n), ip)).rejects.toThrow(
+        /unavailable for this wallet/,
+      )
+      expect(consume).not.toHaveBeenCalled()
+      expect(allocate).not.toHaveBeenCalled()
+    },
+  )
+
+  it("a listed wallet whose sale was already published gets no address on the retry once its account is locked", async () => {
+    const again = sale(++n)
+    expect((await flashCheckout()!.create(again, ip)).address).toBe(address)
+    mockFindAccount.mockResolvedValue({ id: accountId, status: "locked", level: 1 })
+    await expect(flashCheckout()!.create(again, ip)).rejects.toThrow(
+      /unavailable for this wallet/,
+    )
+  })
+
+  it.each([
+    ["1", 1, true],
+    ["1", 2, true],
+    ["2", 1, false],
+    ["2", 2, true],
+    ["1", 0, false],
+    ["1", undefined, false],
+  ])(
+    "minimum level %s: an active account at level %p qualifies = %p",
+    async (min, level, expected) => {
+      ruleOnly(min)
+      mockFindAccount.mockResolvedValue({ id: accountId, status: "active", level })
+      expect(await supports()).toBe(expected)
+    },
+  )
+
+  it.each(["locked", "closed", "pending", "new"])(
+    "a %s account does not qualify by level",
+    async (status) => {
+      ruleOnly("1")
+      mockFindAccount.mockResolvedValue({ id: accountId, status, level: 2 })
+      expect(await supports()).toBe(false)
+    },
+  )
+
+  it("a BTC wallet does not qualify by level", async () => {
+    ruleOnly("1")
+    mockFindWallet.mockResolvedValue({ id: walletId, accountId, currency: "BTC" })
+    expect(await supports()).toBe(false)
+    expect(mockFindAccount).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["a malformed wallet id", () => undefined, "not-a-wallet-id"],
+    [
+      "an unknown wallet",
+      () => mockFindWallet.mockResolvedValue(new Error("not found")),
+      undefined,
+    ],
+    [
+      "an unknown account",
+      () => mockFindAccount.mockResolvedValue(new Error("not found")),
+      undefined,
+    ],
+  ])("%s does not qualify, and does not throw", async (_, arrange, id) => {
+    ruleOnly("1")
+    arrange()
+    expect(await supports(id)).toBe(false)
+  })
+
+  it("a listed wallet qualifies whatever its account's level, with the rule on", async () => {
+    process.env.POS_ONCHAIN_MIN_LEVEL = "2"
+    mockFindAccount.mockResolvedValue({ id: accountId, status: "active", level: 0 })
+    expect(await supports()).toBe(true)
+  })
+
+  it("create refuses a wallet that does not qualify, before any limiter or allocation", async () => {
+    ruleOnly("2")
+    await expect(flashCheckout()!.create(sale(++n), ip)).rejects.toThrow(
+      /unavailable for this wallet/,
+    )
+    expect(consume).not.toHaveBeenCalled()
+    expect(allocate).not.toHaveBeenCalled()
+  })
+
+  it("create issues an address to a wallet that qualifies by level alone", async () => {
+    ruleOnly("1")
+    expect((await flashCheckout()!.create(sale(++n), ip)).address).toBe(address)
+  })
+
+  it("a merchant who is locked between two attempts at the same sale gets no address on the retry", async () => {
+    ruleOnly("1")
+    const again = sale(++n)
+    await flashCheckout()!.create(again, ip)
+    mockFindAccount.mockResolvedValue({ id: accountId, status: "locked", level: 1 })
+    await expect(flashCheckout()!.create(again, ip)).rejects.toThrow(
+      /unavailable for this wallet/,
+    )
   })
 })
 
