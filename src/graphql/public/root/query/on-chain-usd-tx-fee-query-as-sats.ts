@@ -1,6 +1,7 @@
 import { PayoutSpeed as DomainPayoutSpeed } from "@domain/bitcoin/onchain"
 
-import { Wallets } from "@app"
+import { usdCentsToDeliverSats } from "@app/payments/usd-cents-for-sats"
+import { usdWalletAmountFromWalletId } from "@app/wallets"
 
 import { GT } from "@graphql/index"
 import { mapError } from "@graphql/error-map"
@@ -12,8 +13,15 @@ import WalletId from "@graphql/shared/types/scalar/wallet-id"
 
 import OnChainUsdTxFee from "@graphql/public/types/object/onchain-usd-tx-fee"
 
-import { normalizePaymentAmount } from "../../../shared/root/mutation"
+// FLASH FORK: the fee comes from IBEX, as it does for onChainUsdTxFee.
+import Ibex from "@services/ibex/client"
+import { IbexError, UnexpectedIbexResponse } from "@services/ibex/errors"
 
+// The fee for paying a sat-denominated on-chain request from the Cash wallet.
+// The sats are priced in dollars first (see usdCentsToDeliverSats), because
+// IBEX only estimates and sends in the wallet's own currency; the estimate is
+// then the same call onChainUsdTxFee makes. The amount it is estimated for is
+// the one onChainUsdPaymentSendAsBtcDenominated will actually send.
 const OnChainUsdTxFeeAsBtcDenominatedQuery = GT.Field<null, GraphQLPublicContextAuth>({
   type: GT.NonNull(OnChainUsdTxFee),
   args: {
@@ -31,18 +39,25 @@ const OnChainUsdTxFeeAsBtcDenominatedQuery = GT.Field<null, GraphQLPublicContext
     for (const input of [walletId, address, amount, speed]) {
       if (input instanceof Error) throw input
     }
+    if (!domainAccount) throw new Error("Authentication required")
 
-    const fee = await Wallets.getOnChainFeeForUsdWalletAndBtcAmount({
+    const converted = await usdCentsToDeliverSats(amount)
+    if (converted instanceof Error) throw mapError(converted)
+
+    const send = await usdWalletAmountFromWalletId({
       walletId,
-      account: domainAccount as Account,
-      amount,
-      address,
-      speed,
+      amount: converted.cents.toString(),
     })
-    if (fee instanceof Error) throw mapError(fee)
+    if (send instanceof Error) throw mapError(send)
+
+    const resp = await Ibex.estimateOnchainFee(send, address)
+    if (resp instanceof IbexError) throw mapError(resp)
+    if (resp.fee === undefined) {
+      throw mapError(new UnexpectedIbexResponse("Missing fee field"))
+    }
 
     return {
-      amount: normalizePaymentAmount(fee).amount,
+      amount: resp.fee,
     }
   },
 })

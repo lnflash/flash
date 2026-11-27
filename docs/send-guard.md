@@ -172,11 +172,13 @@ per-transaction cap, and nothing in the `would-reject` sample or the
   would rate-limit itself). They opt out **by name** via
   `SEND_GUARD_NOT_APPLICABLE` (`src/app/payments/send-guard-optout.ts`), which is
   also the grep that answers "what still sends without the guard".
-- **The two stubbed on-chain resolvers.** `onchain-payment-send.ts` and
-  `onchain-usd-payment-send-as-sats.ts` return `UnsupportedCurrencyError` with
-  their send bodies commented out one line below. Nothing sends today; whoever
-  re-enables them gets a compile error from the required `authorize` hook rather
-  than an unguarded rail.
+- **The stubbed on-chain resolver.** `onchain-payment-send.ts` returns
+  `UnsupportedCurrencyError` with its send body commented out one line below.
+  Nothing sends through it today; whoever re-enables it gets a compile error
+  from the required `authorize` hook rather than an unguarded rail.
+  (`onchain-usd-payment-send-as-sats.ts` was the second such stub. It is live
+  now and calls `authorizeSend` with the sat amount before it prices or sends
+  anything; see `src/app/payments/usd-cents-for-sats.ts` for the conversion.)
 
 ## Why it ships in log-only
 
@@ -276,10 +278,12 @@ there, not a hunt through the call sites. The price of putting it there is that
    writing to whatever span happens to be active, and that is load-bearing for
    this step: the ambient span differs by call path, on the six rails that take
    an `idempotencyKey` the guard runs inside
-   `services.lock.lockPaymentIdempotencyKey`, and without a key, or on either
-   on-chain rail, inside the GraphQL resolver span, so a query scoped to one of
-   those names would have counted a fraction of the traffic, and the fraction
-   that went missing is the newer mobile clients that send idempotency keys.
+   `services.lock.lockPaymentIdempotencyKey`, and without a key, or on any of the
+   three on-chain rails (`onChainUsdPaymentSend`,
+   `onChainUsdPaymentSendAsBtcDenominated`, `onChainPaymentSendAll`), inside the
+   GraphQL resolver span, so a query scoped to one of those names would have
+   counted a fraction of the traffic, and the fraction that went missing is the
+   newer mobile clients that send idempotency keys.
    Both entry points share the name; `code.function` on the span says whether it
    was `authorizeSend` or the `gateSend` decode gate.
 

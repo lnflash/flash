@@ -51,6 +51,17 @@ export const usdFromBtcMidPriceFn = async (
     },
   )
 
+/**
+ * US cents per sat at the mid price, unrounded. For a caller that has to choose
+ * the rounding direction itself: `usdFromBtcMidPriceFn` rounds to the nearest
+ * cent, which can land below what the sats are worth.
+ */
+export const usdCentsPerSatMidPrice = async (): Promise<number | PriceServiceError> => {
+  const midPriceRatio = await getMidPriceRatio(usdHedgeEnabled)
+  if (midPriceRatio instanceof Error) return midPriceRatio
+  return midPriceRatio.usdPerSat()
+}
+
 export const btcFromUsdMidPriceFn = async (
   amount: UsdPaymentAmount,
 ): Promise<BtcPaymentAmount | DealerPriceServiceError> =>

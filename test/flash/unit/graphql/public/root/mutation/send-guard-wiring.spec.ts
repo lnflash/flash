@@ -252,10 +252,11 @@ describe("ENG-573 send guard wiring", () => {
 
 // `authorize` used to be optional on the arg types that carry it, which meant a
 // send path that simply forgot the hook compiled, passed its tests and shipped
-// unguarded. Not hypothetical: `onchain-payment-send.ts` and
-// `onchain-usd-payment-send-as-sats.ts` are stubbed resolvers with their full
-// send bodies sitting commented out one line below, so whoever re-enables them
-// gets no compile error and no failing test from an omission.
+// unguarded. Not hypothetical: `onchain-payment-send.ts` is a stubbed resolver
+// with its full send body sitting commented out one line below, so whoever
+// re-enables it gets no compile error and no failing test from an omission.
+// (`onchain-usd-payment-send-as-sats.ts` was a second such stub until it was
+// re-enabled; its own spec pins that the guard runs first.)
 //
 // `yarn tsc-check` covers test/**, so the @ts-expect-error annotations below
 // ARE the test: make `authorize` optional again and each one becomes an
@@ -323,11 +324,12 @@ describe("ENG-573: the unguarded-rail inventory in docs/send-guard.md", () => {
   // [rail, the RESOLVER that would do the wiring, the identifier the doc must name]
   //
   // The second element has to be the resolver, not the service that moves the
-  // money: every one of the eight guarded rails calls `authorizeSend` from its
+  // money: every one of the nine guarded rails calls `authorizeSend` from its
   // GraphQL resolver (intraledger-payment-send.ts, lnurl-payment-send.ts,
-  // onchain-payment-send-all.ts, …), never from `@app` or `@services`. Pointed
-  // at a service file this assertion is true forever and the stated invariant
-  // above — wire a rail in and this fails — does not hold.
+  // onchain-payment-send-all.ts, onchain-usd-payment-send-as-sats.ts, …), never
+  // from `@app` or `@services`. Pointed at a service file this assertion is true
+  // forever and the stated invariant above — wire a rail in and this fails — does
+  // not hold.
   const unguarded: [string, string, string][] = [
     [
       "cashout",

@@ -740,6 +740,16 @@ export const configSchema = {
         scanDepth: { type: "integer" }, // TODO: improve naming
         scanDepthOutgoing: { type: "integer" },
         scanDepthChannelUpdate: { type: "integer" },
+        // Extra sent on top of the mid-price conversion when a Cash wallet pays
+        // an on-chain request that names a sat amount, in basis points (50 =
+        // 0.5%). See src/app/payments/usd-cents-for-sats.ts. Not in `required`:
+        // deployments override this whole block without the key.
+        btcDenominatedSendMarginBps: {
+          type: "integer",
+          minimum: 0,
+          maximum: 1000,
+          default: 50,
+        },
       },
       required: [
         "dustThreshold",
