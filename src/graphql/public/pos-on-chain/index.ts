@@ -1,4 +1,4 @@
-import { RateLimiterRedis } from "rate-limiter-flexible"
+import { RateLimiterRedis, RateLimiterRes } from "rate-limiter-flexible"
 import { redis } from "@services/redis"
 import { CheckoutError } from "@app/pos-on-chain/checkout"
 import { flashCheckout } from "@services/pos-on-chain/flash"
@@ -11,11 +11,18 @@ const makeLimit = (kind: string, points: number) =>
     points,
     duration: 60,
   })
-const limits = { create: makeLimit("create", 60), status: makeLimit("status", 240) }
+const limits = {
+  supported: makeLimit("supported", 60),
+  create: makeLimit("create", 60),
+  status: makeLimit("status", 240),
+}
 export const posOnChain = posOnChainFields(flashCheckout, async (ip, operation) => {
   try {
     await limits[operation].consume(ip)
-  } catch {
-    throw new CheckoutError("Checkout is busy. Retry this sale shortly.")
+  } catch (err) {
+    if (err instanceof RateLimiterRes) {
+      throw new CheckoutError("Too many checkout requests. Try again shortly.")
+    }
+    throw new CheckoutError("Checkout is temporarily unavailable. Try again shortly.")
   }
 })

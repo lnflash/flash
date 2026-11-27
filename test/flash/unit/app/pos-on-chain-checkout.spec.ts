@@ -53,6 +53,7 @@ it("recovers the same QR after a lost response, without allocating another recei
   const result = await service.create(request)
   expect(await service.create(request)).toEqual(result)
   expect(await service.status(result.id)).toEqual(result)
+  expect(deps.limitNew).toHaveBeenCalledTimes(1)
   expect(deps.newAddress).toHaveBeenCalledTimes(1)
   expect(deps.newAddress).toHaveBeenCalledWith(request.recipientWalletId)
   expect(rows.has(result.id)).toBe(false)
@@ -150,4 +151,13 @@ it("counts actual outputs when an explorer omits funded sums and rejects a trunc
   })
   expect(() => historyTotals(address, [mined], 1, 1)).toThrow(/Incomplete/)
   expect(() => historyTotals(address, [mined, mined], 2, 0)).toThrow(/Invalid/)
+})
+
+it("stops address issuance when the merchant allocation limit is reached", async () => {
+  const { service, deps, rows } = setup()
+  ;(deps.limitNew as jest.Mock).mockRejectedValue(new Error("Merchant allocation limit"))
+  await expect(service.create(request)).rejects.toThrow("Merchant allocation limit")
+  expect(deps.limitNew).toHaveBeenCalledWith(request.recipientWalletId)
+  expect(deps.newAddress).not.toHaveBeenCalled()
+  expect(rows.size).toBe(0)
 })

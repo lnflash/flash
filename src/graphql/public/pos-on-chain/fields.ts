@@ -46,20 +46,26 @@ const input = GT.Input({
   }),
 })
 
+type Operation = "supported" | "create" | "status"
+
 export function posOnChainFields(
   getService: () => ReturnType<typeof checkoutService> | null,
-  limitRequest: (
-    ip: string,
-    operation: "create" | "status",
-  ) => Promise<void> = async () => {},
+  limitRequest: (ip: string, operation: Operation) => Promise<void>,
 ) {
+  async function limitedService(ctx: GraphQLPublicContext, operation: Operation) {
+    await limitRequest(ctx?.ip || "unknown", operation)
+    return getService()
+  }
+
   async function run(
+    ctx: GraphQLPublicContext,
+    operation: "create" | "status",
     action: (
       svc: ReturnType<typeof checkoutService>,
     ) => ReturnType<ReturnType<typeof checkoutService>["status"]>,
   ) {
     try {
-      const svc = getService()
+      const svc = await limitedService(ctx, operation)
       if (!svc) throw new CheckoutError("On-chain checkout is unavailable.")
       return { checkout: await action(svc), errors: [] }
     } catch (err) {
@@ -80,27 +86,23 @@ export function posOnChainFields(
     supported: GT.Field({
       type: GT.NonNull(GT.Boolean),
       args: { recipientWalletId: { type: GT.String } },
-      resolve: (_, args) => getService()?.supports(args.recipientWalletId) ?? false,
+      resolve: async (_, args, ctx: GraphQLPublicContext) =>
+        (await limitedService(ctx, "supported"))?.supports(args.recipientWalletId) ??
+        false,
     }),
     create: GT.Field({
       type: payload,
       extensions: { complexity: 120 },
       args: { input: { type: GT.NonNull(input) } },
       resolve: (_, args, ctx: GraphQLPublicContext) =>
-        run(async (svc) => {
-          await limitRequest(ctx?.ip || "unknown", "create")
-          return svc.create(args.input)
-        }),
+        run(ctx, "create", (svc) => svc.create(args.input)),
     }),
     status: GT.Field({
       type: payload,
       extensions: { complexity: 100 },
       args: { id: { type: string } },
       resolve: (_, args, ctx: GraphQLPublicContext) =>
-        run(async (svc) => {
-          await limitRequest(ctx?.ip || "unknown", "status")
-          return svc.status(args.id)
-        }),
+        run(ctx, "status", (svc) => svc.status(args.id)),
     }),
   }
 }
