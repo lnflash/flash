@@ -278,10 +278,12 @@ there, not a hunt through the call sites. The price of putting it there is that
    writing to whatever span happens to be active, and that is load-bearing for
    this step: the ambient span differs by call path, on the six rails that take
    an `idempotencyKey` the guard runs inside
-   `services.lock.lockPaymentIdempotencyKey`, and without a key, or on either
-   on-chain rail, inside the GraphQL resolver span, so a query scoped to one of
-   those names would have counted a fraction of the traffic, and the fraction
-   that went missing is the newer mobile clients that send idempotency keys.
+   `services.lock.lockPaymentIdempotencyKey`, and without a key, or on any of the
+   three on-chain rails (`onChainUsdPaymentSend`,
+   `onChainUsdPaymentSendAsBtcDenominated`, `onChainPaymentSendAll`), inside the
+   GraphQL resolver span, so a query scoped to one of those names would have
+   counted a fraction of the traffic, and the fraction that went missing is the
+   newer mobile clients that send idempotency keys.
    Both entry points share the name; `code.function` on the span says whether it
    was `authorizeSend` or the `gateSend` decode gate.
 
