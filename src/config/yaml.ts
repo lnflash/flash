@@ -423,6 +423,16 @@ export const getFygaroTopupAllowanceAttemptLimits = () => ({
   blockDuration: toSeconds(60), // 1 minute
 })
 
+// Fallback mirrors the schema default, and anything out of range falls back to
+// it too: a mistyped margin must not become a 50% overpayment or a negative one.
+export const DEFAULT_BTC_DENOMINATED_SEND_MARGIN_BPS = 50
+export const getOnChainBtcDenominatedSendMarginBps = (): number => {
+  const bps = yamlConfig.onChainWallet.btcDenominatedSendMarginBps
+  return typeof bps === "number" && Number.isInteger(bps) && bps >= 0 && bps <= 1000
+    ? bps
+    : DEFAULT_BTC_DENOMINATED_SEND_MARGIN_BPS
+}
+
 export const getOnChainWalletConfig = () => ({
   dustThreshold: yamlConfig.onChainWallet.dustThreshold,
 })

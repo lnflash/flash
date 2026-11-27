@@ -172,11 +172,13 @@ per-transaction cap, and nothing in the `would-reject` sample or the
   would rate-limit itself). They opt out **by name** via
   `SEND_GUARD_NOT_APPLICABLE` (`src/app/payments/send-guard-optout.ts`), which is
   also the grep that answers "what still sends without the guard".
-- **The two stubbed on-chain resolvers.** `onchain-payment-send.ts` and
-  `onchain-usd-payment-send-as-sats.ts` return `UnsupportedCurrencyError` with
-  their send bodies commented out one line below. Nothing sends today; whoever
-  re-enables them gets a compile error from the required `authorize` hook rather
-  than an unguarded rail.
+- **The stubbed on-chain resolver.** `onchain-payment-send.ts` returns
+  `UnsupportedCurrencyError` with its send body commented out one line below.
+  Nothing sends through it today; whoever re-enables it gets a compile error
+  from the required `authorize` hook rather than an unguarded rail.
+  (`onchain-usd-payment-send-as-sats.ts` was the second such stub. It is live
+  now and calls `authorizeSend` with the sat amount before it prices or sends
+  anything; see `src/app/payments/usd-cents-for-sats.ts` for the conversion.)
 
 ## Why it ships in log-only
 

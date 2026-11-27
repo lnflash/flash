@@ -252,10 +252,11 @@ describe("ENG-573 send guard wiring", () => {
 
 // `authorize` used to be optional on the arg types that carry it, which meant a
 // send path that simply forgot the hook compiled, passed its tests and shipped
-// unguarded. Not hypothetical: `onchain-payment-send.ts` and
-// `onchain-usd-payment-send-as-sats.ts` are stubbed resolvers with their full
-// send bodies sitting commented out one line below, so whoever re-enables them
-// gets no compile error and no failing test from an omission.
+// unguarded. Not hypothetical: `onchain-payment-send.ts` is a stubbed resolver
+// with its full send body sitting commented out one line below, so whoever
+// re-enables it gets no compile error and no failing test from an omission.
+// (`onchain-usd-payment-send-as-sats.ts` was a second such stub until it was
+// re-enabled; its own spec pins that the guard runs first.)
 //
 // `yarn tsc-check` covers test/**, so the @ts-expect-error annotations below
 // ARE the test: make `authorize` optional again and each one becomes an

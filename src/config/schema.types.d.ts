@@ -290,6 +290,7 @@ type YamlSchema = {
     scanDepth: number
     scanDepthOutgoing: number
     scanDepthChannelUpdate: number
+    btcDenominatedSendMarginBps?: number
   }
   swap: {
     loopOutWhenHotWalletLessThan: number
