@@ -45,6 +45,8 @@ import {
   WithdrawalLimitsExceededError,
 } from "@domain/errors"
 import { InputValidationError } from "@graphql/error"
+import { ErrorLevel } from "@domain/shared"
+import { IbexAmountBelowMinimum } from "@services/ibex/errors"
 import OnChainUsdPaymentSendAsBtcDenominatedMutation from "@graphql/public/root/mutation/onchain-usd-payment-send-as-sats"
 
 type MutationResult = { status?: string; errors: { message: string }[] }
@@ -201,6 +203,26 @@ describe("onChainUsdPaymentSendAsBtcDenominated", () => {
 
     expect(result.status).toBe("failed")
     expect(result.errors).toHaveLength(1)
+  })
+
+  it("tells the payer the minimum when IBEX refuses a small amount", async () => {
+    mockPayOnChainByWalletId.mockResolvedValueOnce(
+      new IbexAmountBelowMinimum(
+        new Error("Bad Request"),
+        ErrorLevel.Info,
+        "minimum amount is 5500 Satoshi",
+      ),
+    )
+
+    const result = await run({ amount: 5_000 })
+
+    expect(result.status).toBe("failed")
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        message: "This amount is below the minimum of 5,500 sats. Enter a larger amount.",
+        code: "INVALID_INPUT",
+      }),
+    ])
   })
 
   it("passes a pending payout through as pending", async () => {

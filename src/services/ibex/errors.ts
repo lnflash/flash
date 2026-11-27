@@ -48,6 +48,41 @@ export class InsufficientIbexBalance extends IbexError {
 export class CompletedInvoice extends IbexError {}
 
 /**
+ * IBEX refused a send or a fee estimate because the amount is under its
+ * minimum. Seen on the on-chain endpoints as
+ * `400 {"error":"minimum amount is 5500 Satoshi"}`.
+ *
+ * This is the payer's input, not a fault, so the level defaults to Info. The
+ * minimum is IBEX's to set and to change: it is read out of the response and
+ * never hard-coded here.
+ */
+export class IbexAmountBelowMinimum extends IbexError {
+  // Full vendor detail, preserved verbatim for logs/spans.
+  readonly detail?: string
+  readonly minimumSats?: number
+
+  constructor(err: Error, level: ErrorLevel = ErrorLevel.Info, detail?: string) {
+    super(err, level)
+    this.detail = detail
+    const sats = minimumSatsFromIbexText(detail ?? err.message)
+    this.minimumSats = sats
+    // error-map forwards `message` to the GraphQL client verbatim, so it is
+    // written for the payer and never carries the wrapped error's stack.
+    this.message =
+      sats === undefined
+        ? "This amount is below the minimum for this payment. Enter a larger amount."
+        : `This amount is below the minimum of ${sats.toLocaleString("en-US")} sats. Enter a larger amount.`
+  }
+}
+
+const minimumSatsFromIbexText = (text: string): number | undefined => {
+  const match = text.match(/minimum amount is\s+(\d[\d,]*)\s*sat/i)
+  if (!match) return undefined
+  const sats = Number(match[1].replace(/,/g, ""))
+  return Number.isSafeInteger(sats) && sats > 0 ? sats : undefined
+}
+
+/**
  * IBEX accepted the request but the response carries no recognisable payment
  * status, so we cannot say whether funds moved. Distinct from the generic
  * UnexpectedIbexResponse so this condition — money may or may not have left a
@@ -132,10 +167,15 @@ export const ibexErrorDetail = (e: unknown): string | undefined => {
 // helper — never add a needle anywhere else.
 const classifyIbexErrorText = (
   text: string,
-): typeof InsufficientIbexBalance | typeof CompletedInvoice | undefined => {
+):
+  | typeof InsufficientIbexBalance
+  | typeof CompletedInvoice
+  | typeof IbexAmountBelowMinimum
+  | undefined => {
   const haystack = text.toLowerCase()
   if (haystack.includes("insufficient balance")) return InsufficientIbexBalance
   if (haystack.includes("payment already prepared")) return CompletedInvoice
+  if (haystack.includes("minimum amount is")) return IbexAmountBelowMinimum
   return undefined
 }
 
@@ -154,6 +194,8 @@ export const errorHandler = <T>(
     if (classified === InsufficientIbexBalance)
       return new InsufficientIbexBalance(e, ErrorLevel.Info, detail)
     if (classified === CompletedInvoice) return new CompletedInvoice(e, ErrorLevel.Info)
+    if (classified === IbexAmountBelowMinimum)
+      return new IbexAmountBelowMinimum(e, ErrorLevel.Info, detail)
     // Unclassified path: an unrecognized IBEX 400 must still log what IBEX
     // actually said. ibex-client >= 3.3.0's ApiError already appends
     // "IBEX response (<code>): <detail>" to its own message, so only carry

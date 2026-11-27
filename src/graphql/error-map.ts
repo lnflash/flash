@@ -515,6 +515,7 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
 
     case "AmountLessThanFeeError":
     case "LessThanDustThresholdError":
+    case "IbexAmountBelowMinimum":
       message = error.message
       return new ValidationInternalError({ message, logger: baseLogger })
 
