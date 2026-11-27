@@ -6,7 +6,11 @@ import {
   BridgeWithdrawalAlreadyInitiatedError,
   BridgeDepositInstructionsMissingError,
 } from "@services/bridge/errors"
-import { IbexError, InsufficientIbexBalance } from "@services/ibex/errors"
+import {
+  IbexAmountBelowMinimum,
+  IbexError,
+  InsufficientIbexBalance,
+} from "@services/ibex/errors"
 import { PhoneCountryNotAllowedError } from "@domain/users/errors"
 import {
   PhoneAlreadyRegisteredError,
@@ -159,6 +163,23 @@ describe("error-map", () => {
       // never the internal IBEX account UUID
       expect(result.message).not.toContain("account:")
       expect(result.message).not.toContain("39c6e986-979b-40ab-9e7b-df18a9277a84")
+    })
+
+    it("tells the payer the minimum when IBEX refuses a small amount", () => {
+      const input = new IbexAmountBelowMinimum(
+        new Error("Bad Request"),
+        ErrorLevel.Info,
+        "minimum amount is 5500 Satoshi",
+      )
+      const result = mapAndParseErrorForGqlResponse(input)
+
+      expect(result).toMatchObject({
+        code: "INVALID_INPUT",
+        message: "This amount is below the minimum of 5,500 sats. Enter a larger amount.",
+      })
+      // not the catch-all the app showed before
+      expect(result.message).not.toMatch(/error occurred|contact support/i)
+      expect(result.message).not.toContain("  at ")
     })
 
     it("maps InsufficientIbexBalance without detail to a clean fallback message", () => {

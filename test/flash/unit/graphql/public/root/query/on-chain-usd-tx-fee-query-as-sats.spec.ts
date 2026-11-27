@@ -20,7 +20,8 @@ import { PriceNotAvailableError } from "@domain/price"
 import { CouldNotFindWalletFromIdError } from "@domain/errors"
 import { InputValidationError } from "@graphql/error"
 import OnChainUsdTxFeeAsBtcDenominatedQuery from "@graphql/public/root/query/on-chain-usd-tx-fee-query-as-sats"
-import { IbexError } from "@services/ibex/errors"
+import { ErrorLevel } from "@domain/shared"
+import { IbexAmountBelowMinimum, IbexError } from "@services/ibex/errors"
 
 const walletId = "11111111-1111-4111-8111-111111111111" as WalletId
 const address = "bc1qm59zrvx4hjfdr76vuety9xl4kdzn7l5fu65f3x" as OnChainAddress
@@ -77,6 +78,21 @@ describe("onChainUsdTxFeeAsBtcDenominated", () => {
     mockEstimateOnchainFee.mockResolvedValueOnce(new IbexError(new Error("503")))
 
     await expect(run()).rejects.toBeInstanceOf(Error)
+  })
+
+  it("names the minimum when IBEX refuses to estimate a small amount", async () => {
+    mockEstimateOnchainFee.mockResolvedValueOnce(
+      new IbexAmountBelowMinimum(
+        new Error("Bad Request"),
+        ErrorLevel.Info,
+        "minimum amount is 5500 Satoshi",
+      ),
+    )
+
+    await expect(run({ amount: 5_000 })).rejects.toMatchObject({
+      message: "This amount is below the minimum of 5,500 sats. Enter a larger amount.",
+      extensions: { code: "INVALID_INPUT" },
+    })
   })
 
   it("fails when IBEX answers without a fee", async () => {

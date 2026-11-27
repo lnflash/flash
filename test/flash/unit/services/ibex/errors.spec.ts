@@ -6,6 +6,7 @@ import {
   errorHandler,
   FailedIbexPayment,
   IbexError,
+  IbexAmountBelowMinimum,
   ibexErrorDetail,
   InsufficientIbexBalance,
   UnconfirmedIbexPayment,
@@ -330,5 +331,101 @@ describe("FailedIbexPayment", () => {
     // error-map keys on `name`; a class whose name is not in the switch falls
     // through to the unknown-error path.
     expect(failure.name).toBe("FailedIbexPayment")
+  })
+})
+
+describe("an amount under IBEX's minimum", () => {
+  // The body IBEX returned on 2026-11-27 to an on-chain fee estimate and to an
+  // on-chain send of 5,000 sats.
+  const belowMinimum = "minimum amount is 5500 Satoshi"
+
+  it("classifies the real 400 body and reads the minimum out of it", () => {
+    const apiErr = new ApiError(fetchErrorShaped(400, { error: belowMinimum }))
+
+    const result = errorHandler(apiErr)
+
+    expect(result).toBeInstanceOf(IbexAmountBelowMinimum)
+    const err = result as IbexAmountBelowMinimum
+    expect(err.httpCode).toBe(400)
+    expect(err.minimumSats).toBe(5500)
+    expect(err.detail).toBe(belowMinimum)
+    expect(err.message).toBe(
+      "This amount is below the minimum of 5,500 sats. Enter a larger amount.",
+    )
+  })
+
+  it("is the payer's input, not a fault: Info, never Critical", () => {
+    const result = errorHandler(
+      new ApiError(fetchErrorShaped(400, { error: belowMinimum })),
+    ) as IbexAmountBelowMinimum
+
+    expect(result.level).toBe(ErrorLevel.Info)
+  })
+
+  it("is still an IbexError, so every `instanceof IbexError` caller returns it", () => {
+    const result = errorHandler(
+      new ApiError(fetchErrorShaped(400, { error: belowMinimum })),
+    )
+
+    expect(result).toBeInstanceOf(IbexError)
+  })
+
+  it("follows whatever minimum IBEX names, not a number kept here", () => {
+    const result = errorHandler(
+      new ApiError(fetchErrorShaped(400, { error: "minimum amount is 12,000 Satoshi" })),
+    ) as IbexAmountBelowMinimum
+
+    expect(result.minimumSats).toBe(12000)
+    expect(result.message).toBe(
+      "This amount is below the minimum of 12,000 sats. Enter a larger amount.",
+    )
+  })
+
+  it("classifies case-insensitively and from a plain-text body", () => {
+    const result = errorHandler(
+      new ApiError(fetchErrorShaped(400, "Minimum Amount Is 5500 satoshi")),
+    ) as IbexAmountBelowMinimum
+
+    expect(result).toBeInstanceOf(IbexAmountBelowMinimum)
+    expect(result.minimumSats).toBe(5500)
+  })
+
+  it("classifies when the text is only in the wrapped message", () => {
+    const result = errorHandler(
+      new ApiError(new Error(`IBEX /send failed: 400 — {"error":"${belowMinimum}"}`)),
+    ) as IbexAmountBelowMinimum
+
+    expect(result).toBeInstanceOf(IbexAmountBelowMinimum)
+    expect(result.minimumSats).toBe(5500)
+    expect(result.message).not.toContain("  at ")
+    expect(result.message).not.toContain("IBEX")
+  })
+
+  it.each([
+    ["no number", "minimum amount is not met"],
+    ["zero", "minimum amount is 0 Satoshi"],
+    [
+      "a number too large to be a sat amount",
+      "minimum amount is 99999999999999999999 Satoshi",
+    ],
+  ])("falls back to a message without a number when IBEX gives %s", (_, body) => {
+    const result = errorHandler(
+      new ApiError(fetchErrorShaped(400, { error: body })),
+    ) as IbexAmountBelowMinimum
+
+    expect(result).toBeInstanceOf(IbexAmountBelowMinimum)
+    expect(result.minimumSats).toBeUndefined()
+    expect(result.message).toBe(
+      "This amount is below the minimum for this payment. Enter a larger amount.",
+    )
+  })
+
+  it("does not take an insufficient-balance answer for a minimum", () => {
+    const result = errorHandler(
+      new ApiError(fetchErrorShaped(400, { error: insufficientDetail })),
+    )
+
+    expect(result).toBeInstanceOf(InsufficientIbexBalance)
+    expect(result).not.toBeInstanceOf(IbexAmountBelowMinimum)
   })
 })
