@@ -26,6 +26,11 @@ jest.mock("@config", () => {
     getFygaroCheckoutCreateAttemptLimits: jest.fn(() => limits),
     getFygaroTopupAllowanceAttemptLimits: jest.fn(() => limits),
     getOnChainAddressCreateAttemptLimits: jest.fn(() => limits),
+    getPosOnChainAddressCreateAttemptLimits: jest.fn(() => limits),
+    getPosOnChainAddressCreatePerIpAttemptLimits: jest.fn(() => limits),
+    getPosOnChainSupportedPerIpLimits: jest.fn(() => limits),
+    getPosOnChainCreatePerIpLimits: jest.fn(() => limits),
+    getPosOnChainStatusPerIpLimits: jest.fn(() => limits),
     getRequestCodePerIpLimits: jest.fn(() => limits),
     getRequestCodePerLoginIdentifierLimits: jest.fn(() => limits),
     // Mirrors the real getter exactly; test/flash/unit/config/rate-limits.spec.ts

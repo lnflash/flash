@@ -50,3 +50,53 @@ it("charges each availability field even when the client IP is unknown", async (
     ["unknown", "supported"],
   ])
 })
+
+describe("create arguments", () => {
+  const walletId = "6c4b4a0b-5d3c-4c2a-9f6e-0d8c1b2a3e4f"
+  const createCheckout = jest.fn()
+  const run = (input: string) =>
+    graphql({
+      schema,
+      source: `mutation { create(input: {${input}}) { checkout { address sats } errors { message } } }`,
+      contextValue: { ip: "192.0.2.15" },
+    })
+
+  beforeEach(() => {
+    consume.mockResolvedValue(undefined)
+    createCheckout.mockReset()
+    getService.mockReturnValue({
+      create: createCheckout,
+    } as unknown as ReturnType<typeof checkoutService>)
+  })
+
+  it("refuses an invalid wallet id with the scalar's message, after charging the IP", async () => {
+    const result = await run(`recipientWalletId:"merchant", requestId:"ref", sats:800`)
+    expect(result.data?.create).toEqual({
+      checkout: null,
+      errors: [{ message: "Invalid value for WalletId" }],
+    })
+    expect(consume).toHaveBeenCalledWith("192.0.2.15", "create")
+    expect(createCheckout).not.toHaveBeenCalled()
+  })
+
+  it("refuses a fractional sat amount at the schema", async () => {
+    const result = await run(
+      `recipientWalletId:"${walletId}", requestId:"ref", sats:800.5`,
+    )
+    expect(JSON.stringify(result)).toContain("Invalid type for SatAmount")
+    expect(createCheckout).not.toHaveBeenCalled()
+  })
+
+  it("passes the caller's IP to the service for its per-merchant budget", async () => {
+    createCheckout.mockResolvedValue({ address: "tb1qexample", sats: 800 })
+    const result = await run(`recipientWalletId:"${walletId}", requestId:"ref", sats:800`)
+    expect(result.data?.create).toEqual({
+      checkout: { address: "tb1qexample", sats: 800 },
+      errors: [],
+    })
+    expect(createCheckout).toHaveBeenCalledWith(
+      { recipientWalletId: walletId, requestId: "ref", sats: 800 },
+      "192.0.2.15",
+    )
+  })
+})

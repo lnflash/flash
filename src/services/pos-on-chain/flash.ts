@@ -6,6 +6,7 @@ import { AccountsRepository, WalletsRepository } from "@services/mongoose"
 import { resolveCashWalletPresentationForAccount } from "@app/cash-wallet-cutover/presentation-for-account"
 import { DEFAULT_CASH_WALLET_CLIENT_CAPABILITIES } from "@app/cash-wallet-cutover/client-capability"
 import { consumeLimiter } from "@services/rate-limit"
+
 import { esploraTotals } from "./indexer"
 import { posOnChainStore } from "./store"
 
@@ -43,7 +44,7 @@ export function flashCheckout() {
     store: posOnChainStore,
     enabled: (wallet) => wallets.has(wallet),
     totals: esploraTotals(origin, genesis),
-    async limitNew(recipient) {
+    async limitNew(recipient, ip) {
       const id = checkedToWalletId(recipient)
       if (id instanceof Error) throw new CheckoutError("Unknown receiving wallet.")
       const wallet = await WalletsRepository().findById(id)
@@ -63,14 +64,21 @@ export function flashCheckout() {
         throw new CheckoutError(
           "Your receiving wallet changed. Reconnect your Flash account before starting a sale.",
         )
-      const result = await consumeLimiter({
-        rateLimitConfig: RateLimitConfig.onChainAddressCreate,
-        keyToConsume: wallet.accountId,
-      })
-      if (result instanceof Error)
-        throw new CheckoutError(
-          "Address allocation is temporarily unavailable. Retry this sale later.",
-        )
+      // The POS's own buckets: a merchant's wallet id is public, so the merchant
+      // bucket must not block, and one caller IP must not be able to spend it all.
+      for (const [rateLimitConfig, keyToConsume] of [
+        [RateLimitConfig.posOnChainAddressCreatePerIp, `${ip}:${wallet.accountId}`],
+        [RateLimitConfig.posOnChainAddressCreate, wallet.accountId],
+      ] as const) {
+        const result = await consumeLimiter({
+          rateLimitConfig,
+          keyToConsume: keyToConsume as AccountId,
+        })
+        if (result instanceof Error)
+          throw new CheckoutError(
+            "Address allocation is temporarily unavailable. Retry this sale later.",
+          )
+      }
     },
     async newAddress(recipient) {
       const id = checkedToWalletId(recipient)

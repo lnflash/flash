@@ -1,4 +1,3 @@
-import { posOnChain } from "./pos-on-chain"
 import { GT } from "@graphql/index"
 import CashWalletCutoverQuery from "@graphql/shared/root/query/cash-wallet-cutover"
 
@@ -36,6 +35,8 @@ import InvitePreviewQuery from "./root/query/invite-preview"
 import CashoutRateQuery from "./root/query/cashout-rate"
 import MyReferralsQuery from "./root/query/my-referrals"
 import SearchUsernamesQuery from "./root/query/search-usernames"
+
+import { posOnChain } from "./pos-on-chain"
 
 export const queryFields = {
   unauthed: {

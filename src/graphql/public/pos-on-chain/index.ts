@@ -1,28 +1,28 @@
-import { RateLimiterRedis, RateLimiterRes } from "rate-limiter-flexible"
-import { redis } from "@services/redis"
 import { CheckoutError } from "@app/pos-on-chain/checkout"
+import { RateLimitConfig } from "@domain/rate-limit"
+import { RateLimiterExceededError } from "@domain/rate-limit/errors"
 import { flashCheckout } from "@services/pos-on-chain/flash"
+import { consumeLimiter } from "@services/rate-limit"
+
 import { posOnChainFields } from "./fields"
 
-const makeLimit = (kind: string, points: number) =>
-  new RateLimiterRedis({
-    storeClient: redis,
-    keyPrefix: "pos_onchain_" + kind,
-    points,
-    duration: 60,
-  })
 const limits = {
-  supported: makeLimit("supported", 60),
-  create: makeLimit("create", 60),
-  status: makeLimit("status", 240),
+  supported: RateLimitConfig.posOnChainSupportedPerIp,
+  create: RateLimitConfig.posOnChainCreatePerIp,
+  status: RateLimitConfig.posOnChainStatusPerIp,
 }
-export const posOnChain = posOnChainFields(flashCheckout, async (ip, operation) => {
-  try {
-    await limits[operation].consume(ip)
-  } catch (err) {
-    if (err instanceof RateLimiterRes) {
-      throw new CheckoutError("Too many checkout requests. Try again shortly.")
-    }
+
+export async function limitPosOnChainRequest(ip: string, operation: keyof typeof limits) {
+  const result = await consumeLimiter({
+    rateLimitConfig: limits[operation],
+    keyToConsume: ip as IpAddress,
+  })
+  // consumeLimiter returns the config's exceeded error for a breach and a
+  // RateLimitServiceError for a store fault; only the first is the caller's fault.
+  if (result instanceof RateLimiterExceededError)
+    throw new CheckoutError("Too many checkout requests. Try again shortly.")
+  if (result instanceof Error)
     throw new CheckoutError("Checkout is temporarily unavailable. Try again shortly.")
-  }
-})
+}
+
+export const posOnChain = posOnChainFields(flashCheckout, limitPosOnChainRequest)

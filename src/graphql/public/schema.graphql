@@ -2069,19 +2069,19 @@ enum PhoneCodeChannelType {
 
 type PosOnChainCheckout {
   address: String!
-  confirmedSats: Float!
+  confirmedSats: SatAmount!
   id: String!
   network: PosOnChainNetwork!
-  receivedSats: Float!
-  recipientWalletId: String!
-  sats: Float!
+  receivedSats: SatAmount!
+  recipientWalletId: WalletId!
+  sats: SatAmount!
   status: PosOnChainPaymentStatus!
 }
 
 input PosOnChainCheckoutCreateInput {
-  recipientWalletId: String!
+  recipientWalletId: WalletId!
   requestId: String!
-  sats: Float!
+  sats: SatAmount!
 }
 
 type PosOnChainCheckoutError {
@@ -2227,7 +2227,7 @@ type Query {
   onChainUsdTxFee(address: OnChainAddress!, amount: FractionalCentAmount!, speed: PayoutSpeed = FAST, walletId: WalletId!): OnChainUsdTxFee!
   onChainUsdTxFeeAsBtcDenominated(address: OnChainAddress!, amount: SatAmount!, speed: PayoutSpeed = FAST, walletId: WalletId!): OnChainUsdTxFee!
   posOnChainCheckoutStatus(id: String!): PosOnChainCheckoutPayload!
-  posOnChainCheckoutSupported(recipientWalletId: String): Boolean!
+  posOnChainCheckoutSupported(recipientWalletId: WalletId): Boolean!
   quizQuestions: [QuizQuestion] @deprecated(reason: "TODO: remove. we don't need a non authenticated version of this query. the users can only do the query while authenticated")
 
   """Returns 1 Sat and 1 Usd Cent price for the given currency"""

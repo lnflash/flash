@@ -1,5 +1,5 @@
 import mongoose from "mongoose"
-import type { Row, Store } from "@app/pos-on-chain/checkout"
+import { ReusedAddressError, Row, Store } from "@app/pos-on-chain/checkout"
 
 // An address is never reallocated, including after its received outputs are spent.
 type Doc = Row & { lease?: string; until?: Date }
@@ -10,6 +10,7 @@ const schema = new mongoose.Schema<Doc>(
     sats: { type: Number, required: true },
     network: { type: String, required: true },
     address: String,
+    candidate: String,
     lease: String,
     until: Date,
   },
@@ -20,6 +21,8 @@ schema.index(
   { unique: true, partialFilterExpression: { address: { $type: "string" } } },
 )
 const Checkout = mongoose.model<Doc>("PosOnChainCheckoutRecord", schema)
+// Exported for the integration spec's cleanup.
+export { Checkout as PosOnChainCheckoutRecord }
 const duplicate = (err: unknown) => (err as { code?: number })?.code === 11000
 let ready: Promise<unknown> | undefined
 function ensureIndex() {
@@ -54,12 +57,31 @@ export const posOnChainStore: Store = {
     )
     return r.modifiedCount === 1
   },
-  async publish(key, lease, address) {
+  async stage(key, lease, address) {
     const r = await Checkout.updateOne(
-      { _id: key, lease, address: { $exists: false } },
-      { $set: { address }, $unset: { lease: 1, until: 1 } },
+      { _id: key, lease, address: { $exists: false }, candidate: { $exists: false } },
+      { $set: { candidate: address } },
     )
     return r.modifiedCount === 1
+  },
+  async discard(key, lease) {
+    await Checkout.updateOne(
+      { _id: key, lease, address: { $exists: false } },
+      { $unset: { candidate: 1 } },
+    )
+  },
+  async publish(key, lease, address) {
+    try {
+      const r = await Checkout.updateOne(
+        { _id: key, lease, address: { $exists: false } },
+        { $set: { address }, $unset: { lease: 1, until: 1, candidate: 1 } },
+      )
+      return r.modifiedCount === 1
+    } catch (err) {
+      // The partial unique index on {address, network}: another sale holds it.
+      if (duplicate(err)) throw new ReusedAddressError()
+      throw err
+    }
   },
   async release(key, lease) {
     await Checkout.updateOne({ _id: key, lease }, { $unset: { lease: 1, until: 1 } })

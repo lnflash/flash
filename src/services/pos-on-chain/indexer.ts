@@ -76,6 +76,11 @@ export function historyTotals(
   return { receivedSats, confirmedSats, fundedOutputs }
 }
 
+// A chain check that passed once holds for the process: flashCheckout() builds a
+// new esploraTotals per request, and repeating it would add an indexer request
+// to every status poll.
+const verified = new Set<string>()
+
 export function esploraTotals(origin: string, genesis: string) {
   const api = axios.create({
     baseURL: origin.replace(/\/$/, "") + "/",
@@ -84,10 +89,15 @@ export function esploraTotals(origin: string, genesis: string) {
     maxContentLength: 8 * 1024 * 1024,
   })
   return async (address: string) => {
-    const { data: networkHash } = await api.get("block-height/0")
-    if (networkHash !== genesis) throw new Error("Checkout index is on a different chain")
+    const chain = origin + "/" + genesis
+    if (!verified.has(chain)) {
+      // Hashes are plain text; never let axios try to parse one as JSON.
+      const { data } = await api.get("block-height/0", { responseType: "text" })
+      if (data !== genesis) throw new Error("Checkout index is on a different chain")
+      verified.add(chain)
+    }
     const tip = async () => {
-      const { data } = await api.get("blocks/tip/hash")
+      const { data } = await api.get("blocks/tip/hash", { responseType: "text" })
       if (typeof data !== "string" || !/^[a-f0-9]{64}$/.test(data))
         throw new Error("Invalid index tip")
       return data

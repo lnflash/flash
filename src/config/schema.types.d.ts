@@ -225,6 +225,12 @@ type YamlSchema = {
     // Optional for the same reason as sendGuard below: older deployment yamls
     // do not carry it and the schema default fills it in.
     abuseStrike?: RateLimitInput
+    // Optional for the same reason: the schema default fills them in.
+    posOnChainAddressCreateAttempt?: RateLimitInput
+    posOnChainAddressCreatePerIpAttempt?: RateLimitInput
+    posOnChainSupportedPerIp?: RateLimitInput
+    posOnChainCreatePerIp?: RateLimitInput
+    posOnChainStatusPerIp?: RateLimitInput
   }
   accounts: {
     initialStatus: string

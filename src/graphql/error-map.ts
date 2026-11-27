@@ -353,6 +353,12 @@ export const mapError = (error: ApplicationError): CustomApolloError => {
         "Too many onchain addresses creation, please wait for a while and try again."
       return new TooManyRequestError({ message, logger: baseLogger })
 
+    case "PosOnChainAddressCreateRateLimiterExceededError":
+    case "PosOnChainAddressCreatePerIpRateLimiterExceededError":
+    case "PosOnChainCheckoutIpRateLimiterExceededError":
+      message = "Too many checkout requests, please wait for a while and try again."
+      return new TooManyRequestError({ message, logger: baseLogger })
+
     case "BankAccountManageRateLimiterExceededError":
       message = "Too many bank account changes, please wait for a while and try again."
       return new TooManyRequestError({ message, logger: baseLogger })

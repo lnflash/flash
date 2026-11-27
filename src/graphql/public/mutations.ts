@@ -1,4 +1,3 @@
-import { posOnChain } from "./pos-on-chain"
 import { GT } from "@graphql/index"
 
 import DeviceNotificationTokenCreateMutation from "@graphql/public/root/mutation/device-notification-token-create"
@@ -87,6 +86,8 @@ import BankAccountAddMutation from "./root/mutation/bank-account-add"
 import BankAccountUpdateMutation from "./root/mutation/bank-account-update"
 import BankAccountSetDefaultMutation from "./root/mutation/bank-account-set-default"
 import BankAccountDeleteMutation from "./root/mutation/bank-account-delete"
+
+import { posOnChain } from "./pos-on-chain"
 
 // TODO: // const fields: { [key: string]: GraphQLFieldConfig<any, GraphQLPublicContext> }
 export const mutationFields = {

@@ -291,6 +291,53 @@ export const getAbuseStrikeLimits = () =>
     },
   )
 
+// Public POS on-chain checkout. Fallbacks mirror the schema defaults, for a
+// deployment yaml that overrides the whole rateLimits block without these keys.
+export const getPosOnChainAddressCreateAttemptLimits = () =>
+  getRateLimits(
+    yamlConfig.rateLimits.posOnChainAddressCreateAttempt ?? {
+      points: 60,
+      duration: 3600,
+      blockDuration: 0,
+    },
+  )
+
+export const getPosOnChainAddressCreatePerIpAttemptLimits = () =>
+  getRateLimits(
+    yamlConfig.rateLimits.posOnChainAddressCreatePerIpAttempt ?? {
+      points: 10,
+      duration: 3600,
+      blockDuration: 0,
+    },
+  )
+
+export const getPosOnChainSupportedPerIpLimits = () =>
+  getRateLimits(
+    yamlConfig.rateLimits.posOnChainSupportedPerIp ?? {
+      points: 60,
+      duration: 60,
+      blockDuration: 0,
+    },
+  )
+
+export const getPosOnChainCreatePerIpLimits = () =>
+  getRateLimits(
+    yamlConfig.rateLimits.posOnChainCreatePerIp ?? {
+      points: 60,
+      duration: 60,
+      blockDuration: 0,
+    },
+  )
+
+export const getPosOnChainStatusPerIpLimits = () =>
+  getRateLimits(
+    yamlConfig.rateLimits.posOnChainStatusPerIp ?? {
+      points: 240,
+      duration: 60,
+      blockDuration: 0,
+    },
+  )
+
 // ENG-573 send guard attempt budgets (see src/app/payments/authorize-send.ts).
 export const getPaymentSendAttemptLimits = () =>
   getRateLimits(yamlConfig.rateLimits.paymentSendAttempt)

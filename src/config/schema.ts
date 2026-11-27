@@ -399,6 +399,34 @@ export const configSchema = {
           ...rateLimitConfigSchema,
           default: { points: 1, duration: 3600, blockDuration: 3600 },
         },
+        // Public POS on-chain checkout (src/services/pos-on-chain). Property
+        // defaults for the reason given on paymentSendAttempt. The merchant
+        // bucket is the POS's own, not onChainAddressCreateAttempt: a merchant's
+        // wallet id is public, and a 4h block on a shared bucket would let any
+        // caller stop that till taking on-chain sales. No blockDuration on any
+        // of them for the same reason.
+        posOnChainAddressCreateAttempt: {
+          ...rateLimitConfigSchema,
+          default: { points: 60, duration: 3600, blockDuration: 0 },
+        },
+        // Per caller IP per merchant, consumed before the merchant bucket, so
+        // one IP cannot spend a merchant's whole allocation.
+        posOnChainAddressCreatePerIpAttempt: {
+          ...rateLimitConfigSchema,
+          default: { points: 10, duration: 3600, blockDuration: 0 },
+        },
+        posOnChainSupportedPerIp: {
+          ...rateLimitConfigSchema,
+          default: { points: 60, duration: 60, blockDuration: 0 },
+        },
+        posOnChainCreatePerIp: {
+          ...rateLimitConfigSchema,
+          default: { points: 60, duration: 60, blockDuration: 0 },
+        },
+        posOnChainStatusPerIp: {
+          ...rateLimitConfigSchema,
+          default: { points: 240, duration: 60, blockDuration: 0 },
+        },
       },
       required: [
         "requestCodePerLoginIdentifier",
