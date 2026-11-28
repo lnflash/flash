@@ -1,8 +1,8 @@
-import { createPublicKey, verify, KeyObject } from "crypto"
+import { verify, KeyObject } from "crypto"
 
 import { Request, Response, NextFunction } from "express"
 
-import { IbexConfig } from "@config"
+import { hubPublicKey, parseHubPublicKey } from "@services/ibex/hub-public-key"
 import { baseLogger as logger } from "@services/logger"
 
 // IBEX Hub signs each organization-webhook delivery (ENG-891) with an Ed25519
@@ -13,9 +13,6 @@ import { baseLogger as logger } from "@services/logger"
 // IBEX's replay window: a delivery signed more than 5 minutes away from now
 // is refused.
 export const HUB_SIGNATURE_TOLERANCE_SECONDS = 5 * 60
-
-// DER prefix that wraps a raw 32-byte Ed25519 public key as SPKI.
-const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex")
 
 export type HubSignatureCheck =
   | { ok: true }
@@ -28,22 +25,6 @@ export type HubSignatureCheck =
         | "no_signature"
         | "bad_signature"
     }
-
-// The webhook's public key, or undefined when the config value is not a raw
-// 32-byte Ed25519 key in base64.
-export const parseHubPublicKey = (publicKeyB64: string): KeyObject | undefined => {
-  const raw = Buffer.from(publicKeyB64.trim(), "base64")
-  if (raw.length !== 32) return undefined
-  try {
-    return createPublicKey({
-      key: Buffer.concat([ED25519_SPKI_PREFIX, raw]),
-      format: "der",
-      type: "spki",
-    })
-  } catch {
-    return undefined
-  }
-}
 
 export const checkHubSignature = ({
   webhookId,
@@ -86,9 +67,6 @@ export const checkHubSignature = ({
   })
   return valid ? { ok: true } : { ok: false, reason: "bad_signature" }
 }
-
-// Parsed once at module load from config.
-const hubPublicKey = parseHubPublicKey(IbexConfig.webhook.hub?.publicKey ?? "")
 
 /**
  * Lets through only IBEX Hub deliveries signed by the configured webhook key.
@@ -136,3 +114,5 @@ export const verifyIbexHubSignature = (
   }
   next()
 }
+
+export { parseHubPublicKey }

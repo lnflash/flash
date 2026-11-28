@@ -37,11 +37,14 @@ import MyReferralsQuery from "./root/query/my-referrals"
 import SearchUsernamesQuery from "./root/query/search-usernames"
 
 import { posOnChain } from "./pos-on-chain"
+import { posUsdt } from "./pos-usdt"
 
 export const queryFields = {
   unauthed: {
     posOnChainCheckoutSupported: posOnChain.supported,
     posOnChainCheckoutStatus: posOnChain.status,
+    posUsdtCheckoutSupported: posUsdt.supported,
+    posUsdtCheckoutStatus: posUsdt.status,
     globals: GlobalsQuery,
     usernameAvailable: UsernameAvailableQuery,
     userDefaultWalletId: AccountDefaultWalletIdQuery, // FIXME: migrate to AccountDefaultWalletId
