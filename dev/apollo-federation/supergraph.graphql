@@ -2237,6 +2237,8 @@ type Mutation
   onChainUsdPaymentSend(input: OnChainUsdPaymentSendInput!): PaymentSendPayload!
   onChainUsdPaymentSendAsBtcDenominated(input: OnChainUsdPaymentSendAsBtcDenominatedInput!): PaymentSendPayload!
   posOnChainCheckoutCreate(input: PosOnChainCheckoutCreateInput!): PosOnChainCheckoutPayload!
+  posUsdtCheckoutCreate(input: PosUsdtCheckoutCreateInput!): PosUsdtCheckoutPayload!
+  posUsdtLiveUpdateConsent(input: PosUsdtLiveUpdateConsentInput!): PosUsdtLiveUpdateConsentPayload!
   quizCompleted(input: QuizCompletedInput!): QuizCompletedPayload!
   redeemInvite(input: RedeemInviteInput!): RedeemInvitePayload!
 
@@ -2567,6 +2569,83 @@ enum PosOnChainPaymentStatus
   PENDING @join__enumValue(graph: PUBLIC)
 }
 
+type PosUsdtCheckout
+  @join__type(graph: PUBLIC)
+{
+  address: String!
+  amountMinor: Int!
+  id: String!
+  network: PosUsdtNetwork!
+  recipientWalletId: WalletId!
+  status: PosUsdtPaymentStatus!
+}
+
+input PosUsdtCheckoutCreateInput
+  @join__type(graph: PUBLIC)
+{
+  amountMinor: Int!
+  recipientWalletId: WalletId!
+  requestId: String!
+}
+
+type PosUsdtCheckoutError
+  @join__type(graph: PUBLIC)
+{
+  message: String!
+}
+
+type PosUsdtCheckoutPayload
+  @join__type(graph: PUBLIC)
+{
+  checkout: PosUsdtCheckout
+  errors: [PosUsdtCheckoutError!]!
+}
+
+enum PosUsdtLiveUpdateAction
+  @join__type(graph: PUBLIC)
+{
+  ENROLL @join__enumValue(graph: PUBLIC)
+  WITHDRAW @join__enumValue(graph: PUBLIC)
+}
+
+input PosUsdtLiveUpdateConsentInput
+  @join__type(graph: PUBLIC)
+{
+  action: PosUsdtLiveUpdateAction!
+  activityId: String!
+  pushToken: String
+  receiptId: String!
+  saleKey: String!
+  tokenSequence: Int!
+}
+
+type PosUsdtLiveUpdateConsentPayload
+  @join__type(graph: PUBLIC)
+{
+  accepted: Boolean!
+  errors: [PosUsdtLiveUpdateError!]!
+}
+
+type PosUsdtLiveUpdateError
+  @join__type(graph: PUBLIC)
+{
+  message: String!
+}
+
+enum PosUsdtNetwork
+  @join__type(graph: PUBLIC)
+{
+  ETHEREUM @join__enumValue(graph: PUBLIC)
+}
+
+enum PosUsdtPaymentStatus
+  @join__type(graph: PUBLIC)
+{
+  AWAITING_PAYMENT @join__enumValue(graph: PUBLIC)
+  DETECTED @join__enumValue(graph: PUBLIC)
+  PAID @join__enumValue(graph: PUBLIC)
+}
+
 """
 Price amount expressed in base/offset. To calculate, use: `base / 10^offset`
 """
@@ -2714,6 +2793,8 @@ type Query
   onChainUsdTxFeeAsBtcDenominated(address: OnChainAddress!, amount: SatAmount!, speed: PayoutSpeed = FAST, walletId: WalletId!): OnChainUsdTxFee!
   posOnChainCheckoutStatus(id: String!): PosOnChainCheckoutPayload!
   posOnChainCheckoutSupported(recipientWalletId: WalletId): Boolean!
+  posUsdtCheckoutStatus(id: String!): PosUsdtCheckoutPayload!
+  posUsdtCheckoutSupported(recipientWalletId: WalletId!): Boolean!
   quizQuestions: [QuizQuestion] @deprecated(reason: "TODO: remove. we don't need a non authenticated version of this query. the users can only do the query while authenticated")
 
   """Returns 1 Sat and 1 Usd Cent price for the given currency"""

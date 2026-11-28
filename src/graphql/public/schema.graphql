@@ -1855,6 +1855,8 @@ type Mutation {
   onChainUsdPaymentSend(input: OnChainUsdPaymentSendInput!): PaymentSendPayload!
   onChainUsdPaymentSendAsBtcDenominated(input: OnChainUsdPaymentSendAsBtcDenominatedInput!): PaymentSendPayload!
   posOnChainCheckoutCreate(input: PosOnChainCheckoutCreateInput!): PosOnChainCheckoutPayload!
+  posUsdtCheckoutCreate(input: PosUsdtCheckoutCreateInput!): PosUsdtCheckoutPayload!
+  posUsdtLiveUpdateConsent(input: PosUsdtLiveUpdateConsentInput!): PosUsdtLiveUpdateConsentPayload!
   quizCompleted(input: QuizCompletedInput!): QuizCompletedPayload!
   redeemInvite(input: RedeemInviteInput!): RedeemInvitePayload!
 
@@ -2106,6 +2108,63 @@ enum PosOnChainPaymentStatus {
   PENDING
 }
 
+type PosUsdtCheckout {
+  address: String!
+  amountMinor: Int!
+  id: String!
+  network: PosUsdtNetwork!
+  recipientWalletId: WalletId!
+  status: PosUsdtPaymentStatus!
+}
+
+input PosUsdtCheckoutCreateInput {
+  amountMinor: Int!
+  recipientWalletId: WalletId!
+  requestId: String!
+}
+
+type PosUsdtCheckoutError {
+  message: String!
+}
+
+type PosUsdtCheckoutPayload {
+  checkout: PosUsdtCheckout
+  errors: [PosUsdtCheckoutError!]!
+}
+
+enum PosUsdtLiveUpdateAction {
+  ENROLL
+  WITHDRAW
+}
+
+input PosUsdtLiveUpdateConsentInput {
+  action: PosUsdtLiveUpdateAction!
+  activityId: String!
+  pushToken: String
+  receiptId: String!
+  saleKey: String!
+  tokenSequence: Int!
+}
+
+type PosUsdtLiveUpdateConsentPayload {
+  accepted: Boolean!
+  errors: [PosUsdtLiveUpdateError!]!
+}
+
+type PosUsdtLiveUpdateError {
+  message: String!
+}
+
+enum PosUsdtNetwork {
+  ETHEREUM
+}
+
+enum PosUsdtPaymentStatus {
+  AWAITING_PAYMENT
+  DETECTED
+  PAID
+}
+
 """
 Price amount expressed in base/offset. To calculate, use: `base / 10^offset`
 """
@@ -2228,6 +2287,8 @@ type Query {
   onChainUsdTxFeeAsBtcDenominated(address: OnChainAddress!, amount: SatAmount!, speed: PayoutSpeed = FAST, walletId: WalletId!): OnChainUsdTxFee!
   posOnChainCheckoutStatus(id: String!): PosOnChainCheckoutPayload!
   posOnChainCheckoutSupported(recipientWalletId: WalletId): Boolean!
+  posUsdtCheckoutStatus(id: String!): PosUsdtCheckoutPayload!
+  posUsdtCheckoutSupported(recipientWalletId: WalletId!): Boolean!
   quizQuestions: [QuizQuestion] @deprecated(reason: "TODO: remove. we don't need a non authenticated version of this query. the users can only do the query while authenticated")
 
   """Returns 1 Sat and 1 Usd Cent price for the given currency"""

@@ -70,6 +70,13 @@ export const RateLimitPrefix = {
   posOnChainSupportedPerIp: "pos_onchain_supported_ip",
   posOnChainCreatePerIp: "pos_onchain_create_ip",
   posOnChainStatusPerIp: "pos_onchain_status_ip",
+  posUsdtAddressCreate: "pos_usdt_address_create",
+  posUsdtAddressCreatePerIp: "pos_usdt_address_create_ip",
+  posUsdtSupportedPerIp: "pos_usdt_supported_ip",
+  posUsdtCreatePerIp: "pos_usdt_create_ip",
+  posUsdtStatusPerIp: "pos_usdt_status_ip",
+  posUsdtLiveConsentPerIp: "pos_usdt_live_consent_ip",
+  posUsdtLiveConsentPerReceipt: "pos_usdt_live_consent_receipt",
 } as const
 
 export const RateLimitConfig: { [key: string]: RateLimitConfig } = {
@@ -149,6 +156,46 @@ export const RateLimitConfig: { [key: string]: RateLimitConfig } = {
   posOnChainStatusPerIp: {
     key: RateLimitPrefix.posOnChainStatusPerIp,
     limits: getPosOnChainStatusPerIpLimits(),
+    error: PosOnChainCheckoutIpRateLimiterExceededError,
+  },
+  // Public POS USDT checkout (src/services/pos-usdt-checkout): its own buckets
+  // so it cannot spend the bitcoin checkout's, under the same configured limits.
+  posUsdtAddressCreate: {
+    key: RateLimitPrefix.posUsdtAddressCreate,
+    limits: getPosOnChainAddressCreateAttemptLimits(),
+    error: PosOnChainAddressCreateRateLimiterExceededError,
+  },
+  posUsdtAddressCreatePerIp: {
+    key: RateLimitPrefix.posUsdtAddressCreatePerIp,
+    limits: getPosOnChainAddressCreatePerIpAttemptLimits(),
+    error: PosOnChainAddressCreatePerIpRateLimiterExceededError,
+  },
+  posUsdtSupportedPerIp: {
+    key: RateLimitPrefix.posUsdtSupportedPerIp,
+    limits: getPosOnChainSupportedPerIpLimits(),
+    error: PosOnChainCheckoutIpRateLimiterExceededError,
+  },
+  posUsdtCreatePerIp: {
+    key: RateLimitPrefix.posUsdtCreatePerIp,
+    limits: getPosOnChainCreatePerIpLimits(),
+    error: PosOnChainCheckoutIpRateLimiterExceededError,
+  },
+  posUsdtStatusPerIp: {
+    key: RateLimitPrefix.posUsdtStatusPerIp,
+    limits: getPosOnChainStatusPerIpLimits(),
+    error: PosOnChainCheckoutIpRateLimiterExceededError,
+  },
+  // POS USDT Live Activity opt-in (src/app/pos-usdt-checkout/live-updates.ts).
+  // Per caller IP first, then per receipt (keyed by the checkout key, never
+  // the receipt id). A device enrolls once and rotates its token rarely.
+  posUsdtLiveConsentPerIp: {
+    key: RateLimitPrefix.posUsdtLiveConsentPerIp,
+    limits: { points: 30, duration: toSeconds(60), blockDuration: toSeconds(60) },
+    error: PosOnChainCheckoutIpRateLimiterExceededError,
+  },
+  posUsdtLiveConsentPerReceipt: {
+    key: RateLimitPrefix.posUsdtLiveConsentPerReceipt,
+    limits: { points: 12, duration: toSeconds(600), blockDuration: toSeconds(600) },
     error: PosOnChainCheckoutIpRateLimiterExceededError,
   },
   inviteCreate: {
